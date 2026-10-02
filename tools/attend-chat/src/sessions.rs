@@ -14,8 +14,6 @@
 //!
 //! This is read-only. Session files are owned by Claude Code.
 
-use std::fs;
-use std::path::PathBuf;
 
 /// Minimal view of a claude session file — only the fields the TUI
 /// needs to produce an `Identity`. We purposely don't carry `pid`
@@ -32,63 +30,34 @@ pub struct DiscoveredSession {
     pub session_id: String,
 }
 
-/// Enumerate sessions from the default location (`$HOME/.claude/sessions/`).
+/// Enumerate sessions from the default location (`~/.claude/sessions/`).
 pub fn discover() -> Vec<DiscoveredSession> {
-    let Ok(home) = std::env::var("HOME") else {
-        return Vec::new();
-    };
-    let dir = PathBuf::from(home).join(".claude").join("sessions");
-    discover_in(&dir)
+    discover_in(&claude_sessions::ClaudeDir::user().sessions_dir())
 }
 
 /// Enumerate sessions from an arbitrary directory. Exists so tests
 /// can drive the walk against a scratch dir without touching
-/// `$HOME`.
+/// `$HOME`. Records are read by `claude_sessions`; one without a cwd
+/// is skipped.
 pub fn discover_in(dir: &std::path::Path) -> Vec<DiscoveredSession> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("json") {
-            continue;
-        }
-        let Ok(content) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let Some(cwd) = extract_json_string(&content, "cwd") else {
-            continue;
-        };
-        // Identity root, not live cwd (#394): a session mid-worktree
-        // must seed the chip registry at the tray it actually scans,
-        // or @-completion routes a DM to a tray nobody reads.
-        let cwd = attend_session::normalize_origin(&cwd);
-        let Some(session_id) = extract_json_string(&content, "sessionId") else {
-            continue;
-        };
-        out.push(DiscoveredSession { cwd, session_id });
-    }
-    out
-}
-
-/// Quick-and-dirty JSON string extractor. Byte-identical to
-/// `sensor-peers/src/lib.rs::extract_json_string`; duplicated here
-/// so attend-chat doesn't depend on sensor-peers for two fields of
-/// a stable Claude Code file. If either copy changes (e.g., to
-/// handle escape sequences), update both.
-fn extract_json_string(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\":\"", key);
-    let start = json.find(&pattern)? + pattern.len();
-    let rest = &json[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+    claude_sessions::read_session_records(dir)
+        .into_iter()
+        .filter_map(|r| {
+            // Identity root, not live cwd (#394): a session mid-worktree
+            // must seed the chip registry at the tray it actually scans,
+            // or @-completion routes a DM to a tray nobody reads.
+            let cwd = attend_session::normalize_origin(&r.cwd?);
+            Some(DiscoveredSession { cwd, session_id: r.session_id })
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::io::Write;
+    use std::path::PathBuf;
 
     fn tempdir_like() -> PathBuf {
         let p = std::env::temp_dir().join(format!(

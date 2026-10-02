@@ -260,6 +260,7 @@ dependencies = [
  "attend-state",
  "clap",
  "clap-markdown",
+ "claude-sessions",
  "sensor-context",
  "sensor-disclosure",
  "sensor-git",
@@ -283,6 +284,7 @@ dependencies = [
  "attend-instances",
  "attend-session",
  "attend-state",
+ "claude-sessions",
  "iocraft",
  "notify",
  "smol",
@@ -319,12 +321,16 @@ dependencies = [
 name = "attend-instances"
 version = "0.1.0"
 dependencies = [
+ "claude-sessions",
  "libc",
 ]
 
 [[package]]
 name = "attend-session"
 version = "0.1.0"
+dependencies = [
+ "claude-sessions",
+]
 
 [[package]]
 name = "attend-state"
@@ -462,6 +468,9 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 [[package]]
 name = "claude-sessions"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "colorchoice"
@@ -1680,6 +1689,7 @@ version = "0.6.0"
 dependencies = [
  "attend-identity-view",
  "attend-session",
+ "claude-sessions",
  "sensor-trait",
  "serde_json",
  "ways-core",
@@ -2299,6 +2309,7 @@ dependencies = [
  "agent-theme",
  "anyhow",
  "clap",
+ "claude-sessions",
  "crossterm",
  "glob",
  "pulldown-cmark",
@@ -2356,6 +2367,7 @@ name = "ways-core"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "claude-sessions",
  "pulldown-cmark",
  "sensor-trait",
  "serde",

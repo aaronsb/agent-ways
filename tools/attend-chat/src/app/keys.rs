@@ -16,7 +16,7 @@ use crate::legend::{
 };
 use crate::sessions::discover as discover_sessions;
 use crate::signal::{
-    compose_self_echo, compose_status_block, cwd_dir, encode_cwd, signals_base, write_broadcast,
+    compose_self_echo, compose_status_block, cwd_dir, own_tray_names, signals_base, write_broadcast,
     write_signal, Signal,
 };
 use crate::tabs::{self, Tab};
@@ -640,10 +640,10 @@ fn sender_watches(dest: &std::path::Path) -> bool {
     let own_cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let own_encoded = encode_cwd(&own_cwd);
+    let own_trays = own_tray_names(&own_cwd);
     // `accept_path` classifies by the first path component (the inbox dir
     // name); hand it a probe file inside `dest` so it judges that dir.
-    accept_path(&base, &own_encoded, &dest.join("probe.signal"))
+    accept_path(&base, &own_trays, &dest.join("probe.signal"))
 }
 
 /// Render the addressed recipients back as their `@name` / `#group`

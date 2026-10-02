@@ -1,6 +1,6 @@
 //! `attend status` — show running instances, signal counts, and focus.
 
-use crate::util::{count_signals, encode_project, get_groups, signals_base};
+use crate::util::{count_signals, get_groups, own_tray_names, signals_base};
 
 pub(crate) fn cmd_status() {
     // Check if attend run is already active
@@ -34,9 +34,8 @@ pub(crate) fn cmd_status() {
     // Gather all data before building a single unified table
     let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
-    let own_dir = base.join(encode_project(&cwd));
     let broadcast_dir = base.join("_broadcast");
-    let own_count = count_signals(&own_dir);
+    let own_count: usize = own_tray_names(&cwd).iter().map(|n| count_signals(&base.join(n))).sum();
     let broadcast_count = count_signals(&broadcast_dir);
 
     let r = get_groups();

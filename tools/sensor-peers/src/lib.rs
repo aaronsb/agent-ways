@@ -2,7 +2,7 @@ pub mod last_inbound;
 mod signal_id;
 
 use signal_id::signal_id_from_filename;
-use sensor_trait::{extract_json_u64, Focus, Sensor};
+use sensor_trait::{Focus, Sensor};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
@@ -26,10 +26,8 @@ pub type ExtraScanDirsFn = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
 pub struct PeerSensor {
     /// Our own PID, so we can exclude self
     own_pid: u32,
-    /// Sessions dir
-    sessions_dir: PathBuf,
-    /// Projects dir (for transcripts)
-    projects_dir: PathBuf,
+    /// Claude Code's config dir: session records and transcripts.
+    claude: claude_sessions::ClaudeDir,
     /// Previous snapshot: session_id → summary
     prior: HashMap<String, PeerSummary>,
     /// Signal files we've already seen (by filename)
@@ -132,13 +130,11 @@ struct PendingMsg {
 
 impl PeerSensor {
     pub fn new() -> Self {
-        let home = home_dir();
         let own_pid = std::process::id();
         let own_session_id = find_own_session_id(own_pid);
         Self {
             own_pid,
-            sessions_dir: home.join(".claude").join("sessions"),
-            projects_dir: home.join(".claude").join("projects"),
+            claude: claude_sessions::ClaudeDir::user(),
             prior: HashMap::new(),
             seen_signals: HashSet::new(),
             reply_hint_shown: false,
@@ -251,12 +247,12 @@ impl PeerSensor {
         let mut pending: Vec<PendingMsg> = Vec::new();
         let base = signals_base();
 
-        // Directories to scan: own project + broadcast + joined channels
-        let own_encoded = encode_cwd(&focus.working_dir);
-        let mut scan_dirs = vec![
-            base.join(&own_encoded),
-            base.join("_broadcast"),
-        ];
+        // Directories to scan: own project + broadcast + joined channels.
+        // The own tray is named by Claude Code's project slug; for one release
+        // the tray named under attend's old rule is read too (ADR-504).
+        let own_trays = own_tray_names(&focus.working_dir);
+        let mut scan_dirs: Vec<PathBuf> = own_trays.iter().map(|n| base.join(n)).collect();
+        scan_dirs.push(base.join("_broadcast"));
 
         // Focus group directories (ADR-118 — named signal namespaces)
         scan_dirs.extend(self.current_extra_scan_dirs());
@@ -334,7 +330,7 @@ impl PeerSensor {
                     let dir_name = dir.file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("");
-                    let base_magnitude: f64 = if dir_name == own_encoded {
+                    let base_magnitude: f64 = if own_trays.iter().any(|n| n == dir_name) {
                         7.0 // directed to us — someone used --to
                     } else if dir_name == "_broadcast" {
                         4.0 // broadcast — important but not targeted
@@ -353,7 +349,7 @@ impl PeerSensor {
                     let boost = self.peer_engagement_boost(&from_owned);
                     let magnitude = base_magnitude * boost;
 
-                    let kind = if dir_name == own_encoded {
+                    let kind = if own_trays.iter().any(|n| n == dir_name) {
                         MsgKind::Directed
                     } else if dir_name == "_broadcast" {
                         MsgKind::Open
@@ -458,26 +454,8 @@ impl PeerSensor {
     fn discover_peers(&self) -> HashMap<String, PeerSummary> {
         let mut peers = HashMap::new();
 
-        let entries = match fs::read_dir(&self.sessions_dir) {
-            Ok(e) => e,
-            Err(_) => return peers,
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-
-            let content = match fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-            let sf = match parse_session_file(&content) {
-                Some(sf) => sf,
-                None => continue,
-            };
+        for record in self.claude.session_records() {
+            let Some(sf) = session_file(record) else { continue };
 
             // Skip our own parent claude process.
             // attend's parent is claude, so check the ancestry.
@@ -518,63 +496,20 @@ impl PeerSensor {
     }
 
     fn read_transcript_summary(&self, cwd: &str, session_id: &str) -> Option<(f64, String)> {
-        let encoded = encode_cwd(cwd);
-        let path = self.projects_dir.join(&encoded).join(format!("{session_id}.jsonl"));
+        let path = self.claude.find_transcript(Some(cwd), session_id)?;
 
-        if !path.exists() {
-            return None;
-        }
+        // Only the last 8 KB: recent usage is all this needs, and a long
+        // transcript runs to megabytes.
+        let content = fs::read(&path).ok()?;
+        let tail = &content[content.len().saturating_sub(8192)..];
+        let tail = String::from_utf8_lossy(tail);
 
-        // Read last few KB for recent usage data — don't parse the whole file
-        let metadata = fs::metadata(&path).ok()?;
-        let file_len = metadata.len();
-        let read_from = file_len.saturating_sub(8192);
-
-        let content = fs::read_to_string(&path).ok()?;
-        let mut model = String::from("-");
-        let mut last_input: u64 = 0;
-        let mut last_cache_read: u64 = 0;
-        let mut last_cache_create: u64 = 0;
-
-        // Only parse lines from near the end.
-        // Find the nearest char boundary to avoid panicking on multi-byte UTF-8.
-        let mut start_byte = if read_from > 0 { read_from as usize } else { 0 };
-        if start_byte < content.len() {
-            while start_byte < content.len() && !content.is_char_boundary(start_byte) {
-                start_byte += 1;
-            }
-        }
-        let tail = if start_byte < content.len() { &content[start_byte..] } else { &content };
-
-        for line in tail.lines() {
-            // Quick check before parsing full JSON
-            if !line.contains("\"assistant\"") {
-                continue;
-            }
-            // Minimal JSON parsing — extract just the fields we need.
-            // Skip sentinel turns (`<synthetic>` interrupts / API errors,
-            // empty) so `model` keeps the last *real* model rather than
-            // being overwritten to a placeholder — otherwise a peer whose
-            // newest turn is synthetic resolves to the default window and
-            // its fill is grossly overstated (ADR-166). This mirrors the
-            // walk-back `ways-cli::session::model_from_transcript` does.
-            if let Some(m) = extract_json_string(line, "model") {
-                if !ways_core::context_window::is_sentinel(&m) {
-                    model = m;
-                }
-            }
-            if let Some(inp) = extract_json_u64(line, "input_tokens") {
-                last_input = inp;
-            }
-            if let Some(cr) = extract_json_u64(line, "cache_read_input_tokens") {
-                last_cache_read = cr;
-            }
-            if let Some(cc) = extract_json_u64(line, "cache_creation_input_tokens") {
-                last_cache_create = cc;
-            }
-        }
-
-        let context_tokens = last_input + last_cache_read + last_cache_create;
+        // Sentinel turns (`<synthetic>`) are skipped by `last_model`, so a
+        // peer whose newest turn is synthetic keeps its real model (ADR-166).
+        let model = claude_sessions::usage::last_model(&tail)
+            .filter(|m| !ways_core::context_window::is_sentinel(m))
+            .unwrap_or_else(|| "-".to_string());
+        let context_tokens = claude_sessions::usage::last_context_tokens(&tail).unwrap_or(0);
         // The window comes from the one resolver (ADR-166) — this sensor used to
         // carry its own substring rules, which disagreed with the gauge's about
         // sonnet-4.
@@ -604,11 +539,10 @@ impl PeerSensor {
     }
 
     fn infer_status(&self, cwd: &str, session_id: &str) -> PeerStatus {
-        let encoded = encode_cwd(cwd);
-        let path = self.projects_dir.join(&encoded).join(format!("{session_id}.jsonl"));
-
-        let mtime = fs::metadata(&path)
-            .ok()
+        let mtime = self
+            .claude
+            .find_transcript(Some(cwd), session_id)
+            .and_then(|path| fs::metadata(path).ok())
             .and_then(|m| m.modified().ok());
 
         match mtime {
@@ -788,27 +722,12 @@ fn signals_base() -> PathBuf {
     home_dir().join(".cache").join("attend").join("signals")
 }
 
-/// Encode a cwd path to match Claude Code's project directory naming.
-/// Same encoding as abtop uses: '/', '_', '.' → '-'
-/// On Windows, backslash and colon (drive separator) are also replaced.
-fn encode_cwd(cwd: &str) -> String {
-    cwd.chars()
-        .map(|c| match c {
-            '/' | '_' | '.' | '\\' | ':' => '-',
-            _ => c,
-        })
-        .collect()
-}
-
-/// Parse a session JSON file. Only extracts pid, cwd, session_id.
-/// Avoids pulling in serde_json — these files are small and stable.
-fn parse_session_file(content: &str) -> Option<SessionFile> {
-    let pid = extract_json_u64(content, "pid")? as u32;
-    // Identity root, not live cwd (#394) — keeps peer-presence labels
-    // in agreement with the normalized identity everywhere else.
-    let cwd = attend_session::normalize_origin(&extract_json_string(content, "cwd")?);
-    let session_id = extract_json_string(content, "sessionId")?;
-    Some(SessionFile { pid, cwd, session_id })
+/// The fields this sensor keeps from a session record. Records without a
+/// cwd are skipped. The cwd is the identity root, not the live cwd (#394), so
+/// peer-presence labels agree with the normalized identity everywhere else.
+fn session_file(record: claude_sessions::SessionRecord) -> Option<SessionFile> {
+    let cwd = attend_session::normalize_origin(&record.cwd?);
+    Some(SessionFile { pid: record.pid, cwd, session_id: record.session_id })
 }
 
 /// Check if a PID is alive and running a claude process.
@@ -862,14 +781,17 @@ fn is_own_session(session_pid: u32, own_pid: u32) -> bool {
     attend_session::pid_has_ancestor(own_pid, session_pid)
 }
 
-/// Quick-and-dirty JSON string extraction without serde.
-/// Finds "key":"value" patterns. Good enough for Claude Code's stable format.
-fn extract_json_string(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\":\"", key);
-    let start = json.find(&pattern)? + pattern.len();
-    let rest = &json[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+/// The names of this project's own signal tray: Claude Code's project slug,
+/// then the name attend gave it before, when that differs. The old name is
+/// read for one release (ADR-504).
+fn own_tray_names(cwd: &str) -> Vec<String> {
+    let current = claude_sessions::project_slug(cwd);
+    let legacy = claude_sessions::legacy_attend_name(cwd);
+    if legacy == current {
+        vec![current]
+    } else {
+        vec![current, legacy]
+    }
 }
 
 /// Find the Claude session ID for the current process.
@@ -1112,6 +1034,52 @@ pub(crate) fn parse_signal(content: &str) -> Option<(&str, &str, &str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_claude(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("sensor-peers-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&p);
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn transcript_summary_finds_a_project_with_a_space() {
+        // Claude Code names `/srv/my proj` `-srv-my-proj`; the sensor's own
+        // encoder kept the space and read nothing for such a peer.
+        let root = temp_claude("space");
+        let dir = root.join("projects/-srv-my-proj");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("sid-1.jsonl"),
+            r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000,"cache_read_input_tokens":99000,"cache_creation_input_tokens":0}}}"#,
+        )
+        .unwrap();
+        let mut sensor = PeerSensor::new();
+        sensor.claude = claude_sessions::ClaudeDir::at(&root);
+        let (pct, model) = sensor.read_transcript_summary("/srv/my proj", "sid-1").unwrap();
+        assert_eq!(model, "claude-opus-4-8");
+        assert!(pct > 0.0);
+        assert!(!matches!(sensor.infer_status("/srv/my proj", "sid-1"), PeerStatus::Unknown));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn pretty_printed_session_record_is_read() {
+        // The sensor's own extractor required `"key":"value"` with no space.
+        let content = "{\n  \"pid\": 42,\n  \"sessionId\": \"s\",\n  \"cwd\": \"/p/.claude/worktrees/w\"\n}";
+        let record = claude_sessions::parse_session_record(content, std::path::Path::new("42.json")).unwrap();
+        let sf = session_file(record).unwrap();
+        assert_eq!((sf.pid, sf.cwd.as_str(), sf.session_id.as_str()), (42, "/p", "s"));
+    }
+
+    #[test]
+    fn own_tray_names_include_the_legacy_name_once() {
+        assert_eq!(own_tray_names("/a/b_c"), vec!["-a-b-c".to_string()]);
+        assert_eq!(
+            own_tray_names("/a/b c"),
+            vec!["-a-b-c".to_string(), "-a-b c".to_string()]
+        );
+    }
 
     #[test]
     fn short_message_single_chunk() {

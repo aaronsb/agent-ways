@@ -31,22 +31,29 @@ pub(crate) fn keepwarm_dir() -> std::path::PathBuf {
 /// encoded-cwd subdir exists here; message-tray lifetime is bound to it
 /// (ADR-136) rather than to a wall-clock age.
 pub(crate) fn projects_base() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    std::path::PathBuf::from(home).join(".claude").join("projects")
+    claude_sessions::ClaudeDir::user().projects_dir()
 }
 
-/// Encode a project path the same way Claude Code does: '/', '_', '.' →
-/// '-' (and, on Windows, '\' and ':'). Kept in lockstep with
-/// sensor-peers' `encode_cwd` so tray creation and the project-liveness
-/// lookup that reaps trays can never disagree on a path's encoded name
-/// (ADR-136 Decision 3).
+/// The name of a project's signal tray: Claude Code's project slug
+/// (`claude_sessions::project_slug`), so tray creation and the
+/// project-liveness lookup that reaps trays can never disagree on a path's
+/// encoded name (ADR-136 Decision 3).
 pub(crate) fn encode_project(path: &str) -> String {
-    path.chars()
-        .map(|c| match c {
-            '/' | '_' | '.' | '\\' | ':' => '-',
-            _ => c,
-        })
-        .collect()
+    claude_sessions::project_slug(path)
+}
+
+/// The names of a project's own tray to read: [`encode_project`], then the
+/// name attend gave it before adopting Claude Code's slug, when that
+/// differs. The old name is read for one release (ADR-504); sends go to
+/// the new one only.
+pub(crate) fn own_tray_names(path: &str) -> Vec<String> {
+    let current = encode_project(path);
+    let legacy = claude_sessions::legacy_attend_name(path);
+    if legacy == current {
+        vec![current]
+    } else {
+        vec![current, legacy]
+    }
 }
 
 /// Delegate to the canonical identity derivation (issue #378). No

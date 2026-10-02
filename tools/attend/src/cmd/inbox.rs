@@ -6,19 +6,16 @@
 
 use attend_identity_view::render_sender_label;
 use attend_instances::SnapshotCache;
-use crate::util::{encode_project, get_groups, own_session_id, signals_base};
+use crate::util::{get_groups, own_session_id, own_tray_names, signals_base};
 
 pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
 
 pub(crate) fn cmd_inbox_read(msg_id: &str) {
     let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
-    let own_encoded = encode_project(&cwd);
     let r = get_groups();
-    let mut scan_dirs = vec![
-        base.join(&own_encoded),
-        base.join("_broadcast"),
-    ];
+    let mut scan_dirs: Vec<_> = own_tray_names(&cwd).iter().map(|n| base.join(n)).collect();
+    scan_dirs.push(base.join("_broadcast"));
     for name in r.joined_group_names() {
         scan_dirs.push(r.group_dir(&name));
     }
@@ -71,12 +68,10 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
     let own_session_id = own_session_id().unwrap_or_default();
 
     // Scan same dirs as the peer sensor: own project + broadcast + focus group
-    let own_encoded = encode_project(&cwd);
+    let own_trays = own_tray_names(&cwd);
     let r = get_groups();
-    let mut scan_dirs = vec![
-        base.join(&own_encoded),
-        base.join("_broadcast"),
-    ];
+    let mut scan_dirs: Vec<_> = own_trays.iter().map(|n| base.join(n)).collect();
+    scan_dirs.push(base.join("_broadcast"));
     // Add focus group dirs
     for name in r.joined_group_names() {
         scan_dirs.push(r.group_dir(&name));
@@ -109,7 +104,7 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
             .to_string();
         let scope = if dir_name == "_broadcast" {
             "#open"
-        } else if dir_name == own_encoded {
+        } else if own_trays.contains(&dir_name) {
             "project"
         } else {
             "channel"
@@ -452,12 +447,12 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 
     let base = signals_base();
     let cwd = crate::util::own_origin_cwd();
-    let own_encoded = encode_project(&cwd);
     let r = get_groups();
-    let mut scan_dirs = vec![
-        (base.join(&own_encoded), "project".to_string()),
-        (base.join("_broadcast"), "#open".to_string()),
-    ];
+    let mut scan_dirs: Vec<_> = own_tray_names(&cwd)
+        .iter()
+        .map(|n| (base.join(n), "project".to_string()))
+        .collect();
+    scan_dirs.push((base.join("_broadcast"), "#open".to_string()));
     for name in r.joined_group_names() {
         // "@group" reads naturally as the channel name.
         let label = format!("@{name}");

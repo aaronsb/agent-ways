@@ -29,6 +29,7 @@ agent-identity = { path = "../agent-identity" }
 agent-theme = { path = "../agent-theme" }
 sensor-trait = { path = "../sensor-trait" }
 ways-core = { path = "../ways-core" }
+claude-sessions = { path = "../claude-sessions" }
 # Profiles and key locations only; the provider HTTP clients stay in ways-agent.
 ways-agent-core = { path = "../ways-agent-core" }
 pulldown-cmark = { version = "0.13", default-features = false, optional = true }

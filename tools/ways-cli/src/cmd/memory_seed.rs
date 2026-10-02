@@ -84,9 +84,7 @@ pub fn apply(project_dir: &str) -> Result<()> {
 }
 
 fn project_memory_dir(project_dir: &str) -> PathBuf {
-    ways_core::paths::transcripts_root()
-        .join(ways_core::paths::project_slug(project_dir))
-        .join("memory")
+    ways_core::paths::claude_dir().project_dir(project_dir).join("memory")
 }
 
 fn write_seed(path: &Path, user_context: Option<&str>) -> Result<()> {

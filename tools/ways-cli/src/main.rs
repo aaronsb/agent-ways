@@ -336,7 +336,7 @@ enum Commands {
     /// hooks from hardcoding a path that drifts from `paths::events_log()`.
     EventsLogPath,
     /// Print the directory name Claude Code gives a project under its projects
-    /// dir (`ways_core::paths::project_slug`). Defaults to `CLAUDE_PROJECT_DIR`,
+    /// dir (`claude_sessions::project_slug`). Defaults to `CLAUDE_PROJECT_DIR`,
     /// else the working directory. Lets shell macros read per-project state
     /// without re-deriving the rule.
     ProjectSlug {
@@ -1009,7 +1009,7 @@ fn run() -> Result<()> {
                 .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|p| !p.is_empty()))
                 .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
                 .unwrap_or_default();
-            println!("{}", ways_core::paths::project_slug(&project));
+            println!("{}", claude_sessions::project_slug(&project));
             Ok(())
         }
         Commands::ResponseTopicsPath { session } => {

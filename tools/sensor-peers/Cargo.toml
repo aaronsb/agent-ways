@@ -8,6 +8,7 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 attend-identity-view = { path = "../attend-identity-view" }
 attend-session = { path = "../attend-session" }
+claude-sessions = { path = "../claude-sessions" }
 sensor-trait = { path = "../sensor-trait" }
 ways-core = { path = "../ways-core" }
 serde_json = "1"

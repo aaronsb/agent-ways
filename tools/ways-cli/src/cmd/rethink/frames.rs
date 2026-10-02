@@ -195,13 +195,10 @@ fn build_frames(
 }
 
 fn build_token_timeline(project: &str, session_id: &str) -> Vec<(String, u64)> {
-    let transcript_path = ways_core::paths::transcripts_root()
-        .join(ways_core::paths::project_slug(project))
-        .join(format!("{session_id}.jsonl"));
-
-    let content = match std::fs::read_to_string(&transcript_path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
+    let transcript = ways_core::paths::claude_dir().find_transcript(Some(project), session_id);
+    let content = match transcript.map(std::fs::read_to_string) {
+        Some(Ok(c)) => c,
+        _ => return Vec::new(),
     };
 
     let mut timeline: Vec<(String, u64)> = Vec::new();
@@ -220,10 +217,7 @@ fn build_token_timeline(project: &str, session_id: &str) -> Vec<(String, u64)> {
                 .to_string();
 
             if let Some(usage) = val.get("message").and_then(|m| m.get("usage")) {
-                let cache_read = usage["cache_read_input_tokens"].as_u64().unwrap_or(0);
-                let cache_create = usage["cache_creation_input_tokens"].as_u64().unwrap_or(0);
-                let input = usage["input_tokens"].as_u64().unwrap_or(0);
-                let total_k = (cache_read + cache_create + input) / 1000;
+                let total_k = claude_sessions::usage::usage_total(usage) / 1000;
                 if !ts.is_empty() {
                     timeline.push((ts, total_k));
                 }

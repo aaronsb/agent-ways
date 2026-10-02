@@ -213,35 +213,18 @@ pub fn get_token_position(session_id: &str) -> u64 {
     let transcript = crate::cmd::show::firing_transcript()
         .map(PathBuf::from)
         .filter(|t| t.file_stem().is_some_and(|s| s == session_id) && t.is_file())
-        .or_else(|| ways_core::transcript::find_transcript(&project_dir, session_id));
+        .or_else(|| ways_core::paths::claude_dir().find_transcript(Some(&project_dir), session_id));
     let transcript = match transcript {
         Some(t) => t,
         None => return 0,
     };
 
-    let content = match std::fs::read_to_string(&transcript) {
-        Ok(c) => c,
-        Err(_) => return 0,
-    };
-
-    let mut max_tokens: u64 = 0;
-    for line in content.lines().rev() {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if val.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-                if let Some(usage) = val.get("message").and_then(|m| m.get("usage")) {
-                    let cache_read = usage["cache_read_input_tokens"].as_u64().unwrap_or(0);
-                    let cache_create = usage["cache_creation_input_tokens"].as_u64().unwrap_or(0);
-                    let input = usage["input_tokens"].as_u64().unwrap_or(0);
-                    let total = cache_read + cache_create + input;
-                    if total > max_tokens {
-                        max_tokens = total;
-                    }
-                    break;
-                }
-            }
-        }
-    }
-    max_tokens
+    // The newest turn that reports usage; a zero-usage synthetic turn does not
+    // reset the position.
+    std::fs::read_to_string(&transcript)
+        .ok()
+        .and_then(|c| claude_sessions::usage::last_context_tokens(&c))
+        .unwrap_or(0)
 }
 
 /// Read the token position when a way was last shown.
@@ -263,9 +246,10 @@ pub fn stamp_way_tokens(way_id: &str, session_id: &str, position: u64) {
 
 /// Detect context window for a specific session by project path and session ID.
 pub fn detect_context_window_for(project: &str, session_id: &str) -> u64 {
-    let transcript = ways_core::paths::transcripts_root()
-        .join(ways_core::paths::project_slug(project))
-        .join(format!("{session_id}.jsonl"));
+    // No transcript reads as empty: no model, so the default window.
+    let transcript = ways_core::paths::claude_dir()
+        .find_transcript(Some(project), session_id)
+        .unwrap_or_default();
     context_window_from_transcript(&transcript)
 }
 
@@ -302,24 +286,7 @@ fn context_window_from_transcript(transcript: &std::path::Path) -> u64 {
 /// the session is running, and treating the sentinel as the model would resolve a
 /// live 1M session to the 200K default.
 fn model_from_transcript(content: &str) -> Option<String> {
-    for line in content.lines().rev() {
-        // An unparseable line is skipped, not fatal — transcripts carry many
-        // shapes, and only assistant turns name a model.
-        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if val.get("type").and_then(|t| t.as_str()) == Some("assistant") {
-            if let Some(model) = val
-                .get("message")
-                .and_then(|m| m.get("model"))
-                .and_then(|m| m.as_str())
-                .filter(|m| !ways_core::context_window::is_sentinel(m))
-            {
-                return Some(model.to_string());
-            }
-        }
-    }
-    None
+    claude_sessions::usage::last_model(content)
 }
 
 #[cfg(test)]

@@ -31,8 +31,8 @@ fn main() {
     let own_cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let own_encoded = signal::encode_cwd(&own_cwd);
-    if let Err(e) = watcher::spawn_watcher(base.clone(), own_encoded, tx) {
+    let own_trays = signal::own_tray_names(&own_cwd);
+    if let Err(e) = watcher::spawn_watcher(base.clone(), own_trays, tx) {
         eprintln!("attend-chat: failed to start signal watcher: {}", e);
         eprintln!("  signals base: {}", base.display());
         eprintln!("  (no point opening the TUI — nothing would stream in.)");

@@ -27,3 +27,4 @@ attend-identity-view = { path = "../attend-identity-view" }
 attend-state = { path = "../attend-state" }
 attend-instances = { path = "../attend-instances" }
 attend-session = { path = "../attend-session" }
+claude-sessions = { path = "../claude-sessions" }

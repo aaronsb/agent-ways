@@ -17,7 +17,7 @@
 
 use std::path::Path;
 
-use crate::util::{encode_project, projects_base, signals_base};
+use crate::util::{projects_base, signals_base};
 
 /// Statistics from a cleanup sweep.
 #[derive(Default, Debug)]
@@ -101,7 +101,7 @@ pub(crate) fn run_cleanup(base: &Path, dry_run: bool, nuke_all: bool) -> Cleanup
                 std::fs::read_to_string(&path)
                     .ok()
                     .and_then(|c| sender_cwd(&c).map(str::to_string))
-                    .map(|cwd| !project_live(&projects, &encode_project(&cwd)))
+                    .map(|cwd| claude_sessions::find_project_dir_in(&projects, &cwd).is_none())
                     .unwrap_or(false)
             } else {
                 tray_dead

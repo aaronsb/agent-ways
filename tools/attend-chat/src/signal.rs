@@ -51,16 +51,23 @@ pub fn broadcast_dir() -> PathBuf {
 }
 
 /// Encode a cwd path into the signal directory name the peer sensor
-/// scans. Must stay byte-identical to `attend::util::encode_project`
-/// (same `/`, `_`, `.` → `-` transform). See the mirror note on
-/// `write_broadcast` — same contract, different layer.
+/// scans: Claude Code's project slug, the rule `attend::util::encode_project`
+/// and the sensor share through `claude_sessions::project_slug`.
 pub fn encode_cwd(path: &str) -> String {
-    path.chars()
-        .map(|c| match c {
-            '/' | '_' | '.' => '-',
-            _ => c,
-        })
-        .collect()
+    claude_sessions::project_slug(path)
+}
+
+/// The names of this cwd's own tray the watcher reads: [`encode_cwd`],
+/// then the name attend used before adopting Claude Code's slug, when that
+/// differs. The old name is read for one release (ADR-504).
+pub fn own_tray_names(path: &str) -> Vec<String> {
+    let current = encode_cwd(path);
+    let legacy = claude_sessions::legacy_attend_name(path);
+    if legacy == current || path.is_empty() {
+        vec![current]
+    } else {
+        vec![current, legacy]
+    }
 }
 
 /// Directory that delivers signals to the claude session rooted at
@@ -490,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn encode_cwd_matches_attend_convention() {
+    fn encode_cwd_is_claude_codes_project_slug() {
         // Same transform as attend::util::encode_project — `/`, `_`,
         // `.` collapse to `-`. This is the path the peer sensor
         // scans when looking for messages directed at a specific
@@ -498,6 +505,9 @@ mod tests {
         assert_eq!(encode_cwd("/home/aaron/.claude"), "-home-aaron--claude");
         assert_eq!(encode_cwd("/tmp/foo_bar"), "-tmp-foo-bar");
         assert_eq!(encode_cwd(""), "");
+        assert_eq!(encode_cwd("/tmp/a b"), "-tmp-a-b");
+        assert_eq!(own_tray_names("/tmp/a b"), vec!["-tmp-a-b".to_string(), "-tmp-a b".to_string()]);
+        assert_eq!(own_tray_names("/tmp/foo_bar"), vec!["-tmp-foo-bar".to_string()]);
     }
 
     #[test]

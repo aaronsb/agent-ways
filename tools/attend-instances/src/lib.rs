@@ -112,9 +112,29 @@ impl Registry {
         Self { base_dir }
     }
 
-    /// Path to the registry file for a cwd.
+    /// Path to the registry file for a cwd, named by Claude Code's
+    /// project slug.
     pub fn path_for(&self, cwd: &str) -> PathBuf {
-        self.base_dir.join(format!("{}.yaml", encode_cwd(cwd)))
+        self.base_dir.join(format!("{}.yaml", claude_sessions::project_slug(cwd)))
+    }
+
+    /// The file a read for `cwd` takes: [`Registry::path_for`], or, when
+    /// that does not exist yet, the file named under attend's old rule.
+    /// The old name is read for one release (ADR-504); a register writes
+    /// the new file and evicts the session from the old one.
+    fn read_path_for(&self, cwd: &str) -> PathBuf {
+        let path = self.path_for(cwd);
+        if path.exists() {
+            return path;
+        }
+        let legacy = self
+            .base_dir
+            .join(format!("{}.yaml", claude_sessions::legacy_attend_name(cwd)));
+        if legacy.exists() {
+            legacy
+        } else {
+            path
+        }
     }
 
     /// Path to the sentinel lockfile for a cwd. The data file gets
@@ -126,14 +146,14 @@ impl Registry {
     /// the life of the registry, so flock() against it serializes
     /// concurrent registers correctly across processes and threads.
     fn lock_path(&self, cwd: &str) -> PathBuf {
-        self.base_dir.join(format!("{}.yaml.lock", encode_cwd(cwd)))
+        self.base_dir.join(format!("{}.yaml.lock", claude_sessions::project_slug(cwd)))
     }
 
     /// Look up the instance assigned to `session_id` in `cwd`. Read
     /// only — no allocation, no GC, no write. Returns `None` when
     /// the registry file is absent or the session has no entry.
     pub fn lookup(&self, cwd: &str, session_id: &str) -> Option<String> {
-        let path = self.path_for(cwd);
+        let path = self.read_path_for(cwd);
         let content = fs::read_to_string(&path).ok()?;
         let map = parse_registry(&content);
         map.get(session_id).map(|e| e.instance.clone())
@@ -324,7 +344,7 @@ impl Registry {
     /// legend), not for hot per-render lookups (`lookup` is cheaper
     /// since it short-circuits as soon as it finds the row).
     pub fn snapshot(&self, cwd: &str) -> BTreeMap<String, InstanceEntry> {
-        let path = self.path_for(cwd);
+        let path = self.read_path_for(cwd);
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => return BTreeMap::new(),
@@ -412,19 +432,6 @@ fn next_free_instance(taken: &std::collections::HashSet<&str>) -> String {
         }
         n += 1;
     }
-}
-
-/// Encode a cwd path the same way `sensor-peers` and Claude Code
-/// encode project directories — `/`, `_`, `.` → `-`. Mirrored here
-/// so `attend-instances` does not need to depend on `sensor-peers`
-/// for one helper.
-fn encode_cwd(cwd: &str) -> String {
-    cwd.chars()
-        .map(|c| match c {
-            '/' | '_' | '.' => '-',
-            _ => c,
-        })
-        .collect()
 }
 
 fn home_dir() -> PathBuf {
@@ -771,13 +778,33 @@ sess-a:
     }
 
     #[test]
-    fn encode_cwd_matches_signals_layout() {
-        // Must match the encoding used elsewhere (sensor-peers,
-        // Claude Code project dirs) so tooling can correlate by
-        // cwd without re-implementing the helper.
-        assert_eq!(encode_cwd("/home/aaron/.claude"), "-home-aaron--claude");
-        assert_eq!(encode_cwd("/home/aaron/temp"), "-home-aaron-temp");
-        assert_eq!(encode_cwd("simple"), "simple");
+    fn registry_files_are_named_by_the_project_slug() {
+        with_registry(|reg| {
+            assert!(reg.path_for("/home/aaron/.claude").ends_with("-home-aaron--claude.yaml"));
+            assert!(reg.path_for("/srv/a b").ends_with("-srv-a-b.yaml"));
+        });
+    }
+
+    #[test]
+    fn a_registry_under_the_old_name_is_read_then_migrated() {
+        with_registry(|reg| {
+            // Written by attend before it adopted the slug: the space kept.
+            fs::create_dir_all(&reg.base_dir).unwrap();
+            let legacy = reg.base_dir.join("-srv-a b.yaml");
+            write_registry(
+                &legacy,
+                &BTreeMap::from([(
+                    "sess-a".to_string(),
+                    InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: now_secs() },
+                )]),
+            )
+            .unwrap();
+            assert_eq!(reg.lookup("/srv/a b", "sess-a").as_deref(), Some("beta"));
+            // A register writes the new file and evicts the old entry.
+            reg.register("/srv/a b", "sess-a").unwrap();
+            assert!(reg.path_for("/srv/a b").exists());
+            assert!(!fs::read_to_string(&legacy).unwrap().contains("sess-a"));
+        });
     }
 
     #[test]

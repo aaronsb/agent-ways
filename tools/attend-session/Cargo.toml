@@ -8,3 +8,6 @@ license = "AGPL-3.0-or-later"
 [lib]
 name = "attend_session"
 path = "src/lib.rs"
+
+[dependencies]
+claude-sessions = { path = "../claude-sessions" }
