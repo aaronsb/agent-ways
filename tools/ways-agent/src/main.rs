@@ -74,7 +74,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum KeyAction {
-    /// Store a key. Reads --from-file, else stdin when piped, else a hidden prompt.
+    /// Store a key. Reads --from-file, else stdin when piped, else a prompt that shows a dot per character.
     Add {
         #[arg(long)]
         provider: String,
