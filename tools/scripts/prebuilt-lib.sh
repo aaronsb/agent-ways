@@ -93,9 +93,14 @@ binary_version() {
 
 # Install the pre-built binary of COMPONENT from a GitHub Release.
 #
-#   prebuilt_install COMPONENT RELEASE_TAG OUTPUT_DIR REPO BUILD_HINT
+#   prebuilt_install COMPONENT RELEASE_TAG OUTPUT_DIR REPO BUILD_HINT [CHECK]
 #
 # RELEASE_TAG is a tag, or `latest` for the newest `<COMPONENT>-v*` release.
+# A running binary already at OUTPUT_DIR/<COMPONENT> is kept when it is at the
+# named tag's version, when it is at or ahead of the latest release's, or when
+# the release cannot be resolved. Otherwise it is replaced (#772).
+# CHECK, when given, is a command run on the downloaded binary before it is
+# installed; a failure refuses the install and leaves the old binary in place.
 # The release carries `<COMPONENT>-<platform>` and, usually, `checksums.txt`.
 # The binary lands at OUTPUT_DIR/<COMPONENT>, beside its platform-named copy.
 # BUILD_HINT is the build-from-source command printed when the download fails.
@@ -117,13 +122,11 @@ binary_version() {
 #
 # The body runs in a subshell so the cleanup trap stays local to the call.
 prebuilt_install() (
-  comp="$1" tag="$2" out_dir="$3" repo="$4" hint="$5"
+  comp="$1" tag="$2" out_dir="$3" repo="$4" hint="$5" check="${6:-}"
   platform="$(detect_platform)"
   bin_name="${comp}-${platform}"
   out_file="${out_dir}/${comp}"
 
-  # A working binary is kept when its version is the release's, or when the
-  # release cannot be resolved. One at another version is replaced (#772).
   installed=""
   if [[ -x "$out_file" ]] && "$out_file" --version >/dev/null 2>&1; then
     installed=$(binary_version "$out_file")
@@ -161,7 +164,10 @@ prebuilt_install() (
       echo "  ${hint}" >&2
       exit 1
     fi
-    [[ "$installed" == "${tag#"${comp}-v"}" ]] && keep_installed
+    # At or ahead of the latest release: a newer binary is never replaced by
+    # an older release.
+    latest="${tag#"${comp}-v"}"
+    [[ -n "$installed" && "$(printf '%s\n%s\n' "$latest" "$installed" | sort -V | tail -1)" == "$installed" ]] && keep_installed
   fi
   [[ -n "$installed" ]] && echo "Replacing ${comp} ${installed} with ${tag}" >&2
 
@@ -227,6 +233,11 @@ prebuilt_install() (
     echo "WARNING: binary downloaded but won't execute on this platform" >&2
     echo "Build from source instead:" >&2
     echo "  ${hint}" >&2
+    exit 1
+  fi
+
+  if [[ -n "$check" ]] && ! "$check" "$stage/$bin_name"; then
+    echo "  Build from source instead: ${hint}" >&2
     exit 1
   fi
 

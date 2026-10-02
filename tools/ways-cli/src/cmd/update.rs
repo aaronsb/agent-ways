@@ -62,10 +62,11 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         println!("ways update would, in {}:", app.display());
         println!("  1. scripts/update.sh          — git pull (autostash-safe)");
         println!("     (binary steps 2-4 run only if the pull changed their source, or a suite");
-        println!("      binary's --version differs from its Cargo.toml)");
-        println!("  2. refresh ways               — if cargo source changed or ways is stale: download pre-built (guarded), else build");
+        println!("      binary's --version is older than its Cargo.toml)");
+        println!("  2. refresh ways               — if cargo source changed: download pre-built (guarded), else build");
         println!("  3. refresh way-embed          — if tools/way-embed changed: download pre-built, else build (optional)");
-        println!("  4. refresh ways-audit/ways-mcp/ways-agent/attend/attend-chat — each if cargo source changed or it is stale: download pre-built, else build");
+        println!("  4. refresh the rest of tools/suite-bins — if cargo source changed: download pre-built, else build;");
+        println!("     a stale binary whose source did not change: latest release in place, else build");
         println!("  5. make relink                — install any suite binary still missing, symlink the suite onto PATH");
         println!("  6. {} corpus + reconcile      — regenerate corpus, reproject ~/.claude", ways_bin.display());
         println!("(dry-run — nothing executed)");
@@ -78,7 +79,8 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     //    that is pure churn: the pre-built binaries lag the source, so "refreshing"
     //    downloads a binary that is behind, discards it under the ADR-150 guard, and
     //    rebuilds from source — producing a binary identical to the one installed.
-    //    Gate each build group on whether its own source moved in this pull.
+    //    Gate each build group on whether its own source moved in this pull, and
+    //    each suite binary also on whether it is older than its Cargo.toml.
     let head_before = git_head(&app);
     eprintln!("==> pull ({})", app.display());
     run_step(Command::new("bash").arg("scripts/update.sh").current_dir(&app), "git pull")?;
@@ -101,12 +103,9 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
 
     // The diff misses a binary the source moved past before this pull, as when an
     // earlier update ran before the release assets existed (#772). A suite binary
-    // whose --version differs from its Cargo.toml at HEAD is refreshed regardless.
-    let stale = stale_suite_binaries(&app);
-    for s in &stale {
-        eprintln!("==> {} is {}, source is {}: refreshing it", s.name, s.installed, s.source);
-    }
-    let needs_refresh = |name: &str| cargo_changed || stale.iter().any(|s| s.name == name);
+    // older than its Cargo.toml at HEAD is refreshed whether or not the pull
+    // touched it.
+    let stale = if cargo_changed { Vec::new() } else { stale_suite_binaries(&app) };
 
     // Content-only update: nothing that feeds a binary changed. Skip the whole
     // download/build/relink dance and just reproject the pulled content (core.md,
@@ -136,8 +135,8 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     //    (built from source instead, or the previous binary kept) so the updater
     //    can never move backward. A failed refresh reverts and CONTINUES (we still
     //    reproject the pulled source) rather than aborting mid-update. Skipped when
-    //    the cargo suite's source didn't move and ways is not stale.
-    let ways_refreshed = if needs_refresh("ways") {
+    //    the cargo suite's source didn't move; a stale ways is refreshed in step 4.
+    let mut ways_refreshed = if cargo_changed {
         eprintln!("==> refresh ways (pre-built first, downgrade-guarded)");
         match refresh_ways(&app, has_toolchain) {
             Ok(()) => true,
@@ -147,7 +146,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
             }
         }
     } else {
-        true // ways source unchanged and its version matches Cargo.toml
+        true // ways source unchanged
     };
 
     // 3. Matcher — way-embed. Use its own force-refresh target: `rebuild-binary`
@@ -173,19 +172,20 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // its own cache path) are refreshed above; everything else flows through the
     // same `refresh_component` path so the whole collection updates uniformly —
     // no separate lifecycle for any one tool.
-    for comp in suite_bins(&app).iter().filter(|n| *n != "ways" && needs_refresh(n)) {
-        eprintln!("==> refresh {comp} (pre-built first)");
-        if let Err(e) = refresh_component(&app, comp, &[comp.as_str()], &app) {
-            eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
+    if cargo_changed {
+        for comp in suite_bins(&app).iter().filter(|n| *n != "ways") {
+            eprintln!("==> refresh {comp} (pre-built first)");
+            if let Err(e) = refresh_component(&app, comp, &[comp.as_str()], &app) {
+                eprintln!("  ⚠ {comp} not refreshed ({e}); it keeps its current version.");
+            }
         }
     }
-    // A refresh can land the latest release and still trail the source, when the
-    // version bump merged before its release was published.
-    for s in stale_suite_binaries(&app) {
-        eprintln!(
-            "  ⚠ {} is still {}, source is {}: its release may not be published yet; the next update retries.",
-            s.name, s.installed, s.source
-        );
+    for s in &stale {
+        eprintln!("==> {} is {}, source is {}: refreshing it", s.name, s.installed, s.source);
+        if let Err(e) = refresh_stale(&app, s, has_toolchain) {
+            eprintln!("  ⚠ {e}");
+            ways_refreshed &= s.name != "ways";
+        }
     }
 
     // Ensure every suite binary is installed and linked onto PATH. Refreshing only
@@ -334,9 +334,10 @@ struct Stale {
     source: String,
 }
 
-/// Every installed suite binary whose `--version` differs from the version in
+/// Every installed suite binary whose `--version` is older than the version in
 /// the `Cargo.toml` under `tools/` whose package bears its name. A binary that
-/// is missing, does not run, or reports no version is left to `make relink`.
+/// is missing, does not run, or reports no version is left to `make relink`;
+/// one ahead of its source is left alone.
 fn stale_suite_binaries(app: &Path) -> Vec<Stale> {
     let sources = source_versions(app);
     suite_bins(app)
@@ -344,7 +345,7 @@ fn stale_suite_binaries(app: &Path) -> Vec<Stale> {
         .filter_map(|name| {
             let installed = installed_version(&app.join("bin").join(exe(&name)))?;
             let source = sources.iter().find(|(n, _)| *n == name)?.1.clone();
-            (installed != source).then_some(Stale { name, installed, source })
+            version_older(&installed, &source).then_some(Stale { name, installed, source })
         })
         .collect()
 }
@@ -363,6 +364,23 @@ fn source_versions(app: &Path) -> Vec<(String, String)> {
 fn installed_version(bin: &Path) -> Option<String> {
     let out = Command::new(bin).arg("--version").output().ok().filter(|o| o.status.success())?;
     String::from_utf8_lossy(&out.stdout).split_whitespace().nth(1).map(str::to_string)
+}
+
+/// Whether version `a` is older than `b`: numeric `X.Y.Z` cores compared in
+/// order, and at an equal core a pre-release (`1.2.0-rc1`) is older than the
+/// release. Versions that do not parse are older when they differ.
+fn version_older(a: &str, b: &str) -> bool {
+    fn parse(v: &str) -> Option<(Vec<u64>, bool)> {
+        let (core, pre) = match v.split_once('-') {
+            Some((c, _)) => (c, true),
+            None => (v, false),
+        };
+        Some((core.split('.').map(|n| n.parse().ok()).collect::<Option<_>>()?, pre))
+    }
+    match (parse(a), parse(b)) {
+        (Some((ac, ap)), Some((bc, bp))) => ac < bc || (ac == bc && ap && !bp),
+        _ => a != b,
+    }
 }
 
 /// A string field under `[package]` in a Cargo.toml, such as `name` or `version`.
@@ -571,6 +589,32 @@ fn refresh_component(app: &Path, name: &str, make_args: &[&str], make_dir: &Path
         }
         bail!("`make {}` did not produce a working {name} binary — reverted", make_args.join(" "));
     }
+}
+
+/// Refresh a stale suite binary whose source this pull did not change. The
+/// binary stays in place while `download-prebuilt.sh` checks the latest release
+/// (one API call; replaced only by a newer release), so a release that lags its
+/// version bump is not downloaded again on every update. A binary still older
+/// than its source is then built, when cargo is present, with the
+/// rename-revert protection of `refresh_component`.
+fn refresh_stale(app: &Path, stale: &Stale, has_toolchain: bool) -> Result<()> {
+    let name = stale.name.as_str();
+    let _ = Command::new("bash")
+        .args(["tools/scripts/download-prebuilt.sh", name])
+        .current_dir(app)
+        .stdout(std::process::Stdio::null())
+        .status();
+    let Some(now) = stale_suite_binaries(app).into_iter().find(|s| s.name == name) else {
+        return Ok(());
+    };
+    if !has_toolchain {
+        bail!(
+            "{name} is {}, source is {}: no release of {} yet and no toolchain to build it; the next update checks again",
+            now.installed, now.source, now.source
+        );
+    }
+    eprintln!("     no {name} {} release yet; building from source", now.source);
+    refresh_component(app, name, &[&format!("{name}-rebuild")], app)
 }
 
 /// How a candidate binary's build compares to the pulled source (ADR-150).
@@ -874,6 +918,17 @@ mod tests {
     }
 
     #[test]
+    fn version_older_orders_by_numeric_core_then_pre_release() {
+        assert!(version_older("0.4.0", "0.5.1"));
+        assert!(version_older("0.9.0", "0.10.0"), "numeric, not string, order");
+        assert!(version_older("1.2.0-rc1", "1.2.0"));
+        assert!(!version_older("0.5.1", "0.5.1"));
+        assert!(!version_older("0.6.0", "0.5.1"), "a binary ahead of its source is not stale");
+        assert!(version_older("garbage", "0.5.1"));
+        assert!(!version_older("garbage", "garbage"));
+    }
+
+    #[test]
     fn package_field_reads_the_package_table_only() {
         let manifest = "[workspace]\nversion = \"9.9.9\"\n\n[package]\nname = \"attend\"\nversion = \"0.15.1\"\n\n[dependencies]\nversion = \"1\"\n";
         assert_eq!(package_field(manifest, "version").as_deref(), Some("0.15.1"));
@@ -906,9 +961,11 @@ mod tests {
         bin("ways-agent", "ways-agent 0.4.0");
         crate_at("attend", "attend", "0.15.1");
         bin("attend", "attend 0.15.1 (47d7a97)");
+        crate_at("attend-chat", "attend-chat", "0.6.2");
+        bin("attend-chat", "attend-chat 0.7.0-dev"); // ahead of its source: left alone
         crate_at("ways-audit", "ways-audit", "1.0.1"); // no binary: left to relink
         bin("unlisted", "unlisted 0.0.1"); // not in suite-bins: ignored
-        std::fs::write(app.join("tools/suite-bins"), "# comment\nways\nways-audit\nways-agent\nattend\n").unwrap();
+        std::fs::write(app.join("tools/suite-bins"), "# comment\nways\nways-audit\nways-agent\nattend\nattend-chat\n").unwrap();
 
         assert_eq!(
             stale_suite_binaries(&app),

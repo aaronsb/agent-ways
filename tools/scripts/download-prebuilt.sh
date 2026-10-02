@@ -61,30 +61,26 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# prebuilt_install keeps a running binary at the release's version as it is.
-# The capability gate below applies only to a binary it downloaded, which
-# reports a different version from the one there before.
-before=""
-[[ -x "$OUTPUT_DIR/$COMPONENT" ]] && before="$("$OUTPUT_DIR/$COMPONENT" --version 2>/dev/null)"
-
-installed="$(prebuilt_install "$COMPONENT" "$RELEASE_TAG" "$OUTPUT_DIR" "$GH_REPO" "$BUILD_HINT")"
-
-if [[ "$COMPONENT" == "way-embed" && ( -z "$before" || "$before" != "$("$installed" --version 2>/dev/null)" ) ]]; then
-  # Capability gate: the late-interaction matcher (ADR-160) requires `match --batch`,
-  # added in #319. A release binary cut before that runs fine (`--version` passes)
-  # but lacks --batch, and the matcher then silently degrades to the single-vector
-  # fail-safe on every scan. The version string does not distinguish them (both
-  # report 0.1.0), so probe the contract directly. The binary exits 1 either way
-  # (a supporting one wants --corpus and --model; an old one rejects the flag), so
-  # only the text decides: a supporting binary names `--batch` in its usage line,
-  # an old one prints `unknown option`.
-  probe="$("$installed" match --batch </dev/null 2>&1 || true)"
+# Capability gate for way-embed, run on the downloaded binary before it is
+# installed: the late-interaction matcher (ADR-160) requires `match --batch`,
+# added in #319. A release binary cut before that runs fine (`--version` passes)
+# but lacks --batch, and the matcher then silently degrades to the single-vector
+# fail-safe on every scan. The version string does not distinguish them (both
+# report 0.1.0), so probe the contract directly. The binary exits 1 either way
+# (a supporting one wants --corpus and --model; an old one rejects the flag), so
+# only the text decides: a supporting binary names `--batch` in its usage line,
+# an old one prints `unknown option`.
+way_embed_has_batch() {
+  local probe
+  probe="$("$1" match --batch </dev/null 2>&1 || true)"
   if [[ "$probe" == *"unknown option"* ]] || [[ "$probe" != *"--batch"* ]]; then
     echo "Downloaded way-embed predates the required 'match --batch' primitive (ADR-160, #319)." >&2
-    echo "Building from source instead." >&2
-    rm -f "$installed" "$OUTPUT_DIR/way-embed-$(detect_platform)"
-    exit 1
+    return 1
   fi
-fi
+}
+
+check=""
+[[ "$COMPONENT" == "way-embed" ]] && check=way_embed_has_batch
+installed="$(prebuilt_install "$COMPONENT" "$RELEASE_TAG" "$OUTPUT_DIR" "$GH_REPO" "$BUILD_HINT" "$check")"
 
 echo "$installed"

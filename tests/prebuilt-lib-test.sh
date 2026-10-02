@@ -108,6 +108,19 @@ JSON
   printf '#!/bin/sh\necho "ways 1.2.0 (old)"\n' > "$out/ways"
   got=$(FAKE_GH_FAIL=api prebuilt_install ways latest "$out" "$REPO" "make ways" 2>/dev/null)
   check "an unreachable API keeps the working binary" "0:ways 1.2.0 (old)" "$?:$("$out/ways" --version)"
+  # A binary ahead of the latest release is kept; a named tag is installed as named.
+  printf '#!/bin/sh\necho "ways 1.11.0 (dev)"\n' > "$out/ways"
+  got=$(prebuilt_install ways latest "$out" "$REPO" "make ways" 2>/dev/null)
+  check "a binary ahead of the latest release is kept" "ways 1.11.0 (dev)" "$("$out/ways" --version)"
+  got=$(prebuilt_install ways ways-v1.10.0 "$out" "$REPO" "make ways" 2>/dev/null)
+  check "a named tag replaces a binary at another version" "ways 1.10.0" "$("$out/ways" --version)"
+
+  # CHECK runs on the download before install; a failure keeps the old binary.
+  printf '#!/bin/sh\necho "ways 1.2.0 (old)"\n' > "$out/ways"
+  refuse() { [[ -x "$1" ]] && return 1; }
+  prebuilt_install ways latest "$out" "$REPO" "make ways" refuse >/dev/null 2>&1
+  check "a failed CHECK refuses the install and keeps the old binary" "1:ways 1.2.0 (old)" "$?:$("$out/ways" --version)"
+  check "and leaves no staging dir" "no" "$(yn compgen -G "$out/.ways.*")"
 
   # Mismatch: the binary changes after its checksum was published.
   release_of ways-v1.9.0 ways "ways 1.9.0"

@@ -84,9 +84,10 @@ cp "$FAKE/files/way-embed-v1.0.0/way-embed-$platform" "$cache/way-embed"
 got=$(bash "$DL" way-embed 2>/dev/null)
 check "an older way-embed is replaced by the latest release" "0:way-embed 2.0.0" "$?:$("$got" --version 2>/dev/null)"
 
-# A replacement that fails the gate is refused, as a fresh download is.
+# A replacement that fails the gate is refused, and the working binary stays.
 cp "$FAKE/files/way-embed-v2.0.0/way-embed-$platform" "$cache/way-embed"
 WAY_EMBED_RELEASE=way-embed-v1.0.0 bash "$DL" way-embed >/dev/null 2>&1
-check "a replacement without match --batch is refused" "1:no" "$?:$(yn test -e "$cache/way-embed")"
+check "a replacement without match --batch is refused, keeping the working binary" "1:way-embed 2.0.0" \
+  "$?:$("$cache/way-embed" --version 2>/dev/null)"
 
 exit $fail
