@@ -4,7 +4,15 @@
 //! theme, the terminal's depth and `NO_COLOR`; a literal does none of that.
 //!
 //! The second test plants a literal in a fixture tree and requires the scan
-//! to report it, so a scan that silently matches nothing cannot pass.
+//! to report it, and the first requires the real scan to have visited more
+//! than 100 files including a known one, so a scan that silently matches or
+//! reads nothing cannot pass.
+//!
+//! Known gaps: the scan matches one literal per needle, so an escape built
+//! from pieces gets past it: `"\x1b"` followed by `"["`, a `'\x1b'` char with
+//! `[` pushed after it, `char::from(27)`, or the 8-bit CSI `\u{9b}`. The
+//! `'\x1b'` chars in the tree today are ANSI parsers that measure or strip
+//! escapes (compositor, table, markdown), which is legitimate.
 
 use std::path::{Path, PathBuf};
 
@@ -38,26 +46,26 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Every raw SGR literal under `root`, as `file:line: text`. A line whose
-/// code starts with `//` is a comment and not a literal.
-fn scan(root: &Path) -> Vec<String> {
+/// Every raw SGR literal under `root`, as `file:line: text`, and every file
+/// scanned. A line whose code starts with `//` is a comment and not a literal.
+fn scan(root: &Path) -> (Vec<String>, Vec<PathBuf>) {
     let mut files = Vec::new();
     walk(root, root, &mut files);
     let mut found = Vec::new();
-    for f in files {
-        let Ok(text) = std::fs::read_to_string(&f) else { continue };
+    for f in &files {
+        let Ok(text) = std::fs::read_to_string(f) else { continue };
         for (i, line) in text.lines().enumerate() {
             if line.trim_start().starts_with("//") {
                 continue;
             }
             let lower = line.to_ascii_lowercase();
             if NEEDLES.iter().any(|n| lower.contains(n)) {
-                let rel = f.strip_prefix(root).unwrap_or(&f);
+                let rel = f.strip_prefix(root).unwrap_or(f);
                 found.push(format!("{}:{}: {}", rel.display(), i + 1, line.trim()));
             }
         }
     }
-    found
+    (found, files)
 }
 
 fn tools_root() -> PathBuf {
@@ -66,7 +74,10 @@ fn tools_root() -> PathBuf {
 
 #[test]
 fn no_raw_sgr_literals_outside_agent_theme() {
-    let found = scan(&tools_root());
+    let (found, files) = scan(&tools_root());
+    assert!(files.len() > 100, "scanned only {} files under {}", files.len(), tools_root().display());
+    let known = Path::new("ways-cli").join("src").join("cmd").join("render.rs");
+    assert!(files.iter().any(|f| f.ends_with(&known)), "the scan never visited {}", known.display());
     assert!(
         found.is_empty(),
         "{} raw SGR literal(s); draw colour through agent_theme (paint, sgr, Style, Role) instead:\n  {}",
@@ -95,8 +106,9 @@ fn a_planted_literal_is_reported() {
     write("some-crate/target/debug/build.rs", &planted);
     write("some-crate/src/notes.txt", &planted);
 
-    let found = scan(&root);
+    let (found, files) = scan(&root);
     let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(files.len(), 3, "the excluded trees and the .txt file are not read: {files:#?}");
     assert_eq!(found.len(), 2, "{found:#?}");
     assert!(found[0].starts_with(&format!("other{}src{}main.rs:1:", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR)), "{found:#?}");
     assert!(found[1].starts_with(&format!("some-crate{}src{}lib.rs:2:", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR)), "{found:#?}");
