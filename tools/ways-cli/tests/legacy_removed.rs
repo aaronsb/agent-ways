@@ -67,9 +67,12 @@ fn old_events_log_and_cache_are_not_read() {
     };
 
     let log = run(&["events-log-path"]);
-    assert_eq!(log.trim(), home.join(".local/state/agent-ways/events.jsonl").to_string_lossy());
+    // Compare as paths: Windows prints backslashes where join("a/b") keeps a slash.
+    let want = home.join(".local").join("state").join("agent-ways").join("events.jsonl");
+    assert_eq!(std::path::PathBuf::from(log.trim()), want, "events log path");
     let status = run(&["status"]);
     let model_line = status.lines().find(|l| l.starts_with("Model:")).expect("a Model: line");
+    let model_line = model_line.replace('\\', "/");
     assert!(model_line.contains(".cache/agent-ways/user/"), "{model_line}");
     assert!(model_line.contains("MISSING"), "the old dir's model must not count: {model_line}");
 
