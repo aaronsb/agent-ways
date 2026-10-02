@@ -481,6 +481,10 @@ impl App {
     }
 
     fn begin_apply(&mut self, tab: usize) {
+        if self.reading.is_some() {
+            self.msg = "a check is running".into();
+            return;
+        }
         // A file changed since it was read: read it again first, and when a
         // pending edit moved or went, stay in review so the change is seen
         // before anything is written. The adapter also refuses a write whose

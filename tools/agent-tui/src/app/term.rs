@@ -286,7 +286,11 @@ impl App {
                     self.stop_run("stopped: the terminal hung up");
                     return Ok(self.session(Some(HANGUP)));
                 }
-                Ok(Some(Event::Key(k))) if k.kind == KeyEventKind::Press && !self.key(k) => return Ok(self.session(None)),
+                Ok(Some(Event::Key(k))) if k.kind == KeyEventKind::Press && !self.key(k) => {
+                    // A check still running ends with the screen.
+                    self.stop_run("stopped: the screen closed");
+                    return Ok(self.session(None));
+                }
                 Ok(Some(Event::Mouse(m))) => self.mouse(m),
                 Ok(_) => {}
             }

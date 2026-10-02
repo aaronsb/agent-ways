@@ -363,6 +363,95 @@ impl Adapter for Slow {
         self.reloads.set(self.reloads.get() + 1);
         None
     }
+    fn stamp(&self) -> Option<u64> {
+        Some(1)
+    }
+}
+
+/// One tab whose group has a reading `check` (action 0) and a queued
+/// `rotate` (action 1), on an adapter whose commands run until stopped.
+fn checking() -> (App, Slow) {
+    let slow = Slow::default();
+    let actions = vec![Action::new("check", "probe check").reads(), Action::new("rotate", "probe rotate")];
+    let roots = vec![Node::group("keys", "", vec![Node::leaf("anthropic", "", Setting::new(Kind::Text, "present", "computed"))]).with_actions(actions)];
+    (App::new("t", roots).adapter(slow.clone()), slow)
+}
+
+#[test]
+fn a_check_in_flight_keeps_the_screen_live_and_queues_nothing() {
+    let (mut app, slow) = checking();
+    app.pick(vec![0], 0);
+    for _ in 0..5 {
+        app.tick();
+    }
+    assert!(app.applying(), "the check is running, so the loop ticks it");
+    assert_eq!(app.pending(), 0, "nothing was queued");
+    assert_eq!(app.message(), "check: running…");
+    assert_eq!(slow.reloads.get(), 0);
+}
+
+#[test]
+fn a_second_check_while_one_runs_is_refused() {
+    let (mut app, _) = checking();
+    app.pick(vec![0], 0);
+    app.pick(vec![0], 0);
+    assert_eq!(app.message(), "a check is running");
+    assert!(app.applying());
+}
+
+#[test]
+fn an_apply_waits_for_a_running_check() {
+    let (mut app, slow) = checking();
+    app.pick(vec![0], 1);
+    assert_eq!(app.pending(), 1);
+    app.pick(vec![0], 0);
+    press(&mut app, &[KeyCode::Char('w'), KeyCode::Char('a')]);
+    assert_eq!(app.message(), "a check is running");
+    assert!(matches!(app.mode, Mode::Review { run: None, .. }), "no run started");
+    assert!(!slow.stopped.get() && app.pending() == 1);
+}
+
+#[test]
+fn stopping_the_run_stops_a_running_check() {
+    let (mut app, slow) = checking();
+    app.pick(vec![0], 0);
+    app.stop_run("stopped by a signal");
+    assert!(slow.stopped.get() && !app.applying());
+}
+
+#[test]
+fn ctrl_c_during_a_check_with_nothing_pending_quits() {
+    let (mut app, _) = checking();
+    app.pick(vec![0], 0);
+    assert!(!app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), "the session ends");
+    assert!(!matches!(app.mode, Mode::Guard { .. }), "nothing pending, so no guard");
+}
+
+#[test]
+fn a_check_ending_under_an_open_menu_marks_the_tree_unread() {
+    let (mut app, slow) = checking();
+    app.pick(vec![0], 0);
+    press(&mut app, &[KeyCode::Char('?')]);
+    assert!(matches!(app.mode, Mode::Help { .. }));
+    slow.stopped.set(true);
+    app.tick();
+    assert!(!app.applying());
+    assert_eq!(app.message(), "check: killed");
+    assert_eq!(slow.reloads.get(), 0, "nothing is read under the open overlay");
+    assert_eq!(app.stamp, None, "the next watch reads the tree");
+    press(&mut app, &[KeyCode::Esc]);
+    app.watch();
+    assert_eq!(slow.reloads.get(), 1);
+}
+
+#[test]
+fn a_check_ending_in_browse_reads_the_tree_again() {
+    let (mut app, slow) = checking();
+    app.pick(vec![0], 0);
+    slow.stopped.set(true);
+    app.tick();
+    assert_eq!(slow.reloads.get(), 1);
+    assert_eq!(app.message(), "check: killed");
 }
 
 #[test]

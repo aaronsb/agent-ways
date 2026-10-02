@@ -655,16 +655,22 @@ impl App {
     }
 
     /// Poll the reading action, if one runs: when it ends, say how, and read
-    /// the tree again, since what it found may show there.
+    /// the tree again, since what it found may show there. A tree is read
+    /// again only when nothing is open over it; otherwise the stamp is
+    /// cleared so the next watch reads it.
     pub(crate) fn tick_reading(&mut self) {
         let Some((label, job)) = &mut self.reading else { return };
         let Some(outcome) = job.poll() else { return };
-        self.msg = match outcome {
+        let said = match outcome {
             Ok(()) => format!("{label}: ok"),
             Err(e) => format!("{label}: {e}"),
         };
         self.reading = None;
-        let said = std::mem::take(&mut self.msg);
+        if !matches!(self.mode, Mode::Browse | Mode::Review { run: None, .. }) {
+            self.msg = said;
+            self.stamp = None;
+            return;
+        }
         let r = self.reload();
         self.msg = if r.is_clean() { said } else { format!("{said} · {}", r.message()) };
     }
