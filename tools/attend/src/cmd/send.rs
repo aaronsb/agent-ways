@@ -4,25 +4,37 @@
 use crate::cmd::inbox::is_valid_signal_id;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 
-/// The message is a trailing, hyphen-tolerant argument, so clap hands a
-/// removed flag (`--broadcast`, `--focus`) over as message text instead of
-/// rejecting it, and the send would go out with the flag in its body. Name the
-/// removed flag so the caller errors instead.
-fn removed_flag(message: &[String]) -> Option<(&'static str, &'static str)> {
+/// The message is a trailing, hyphen-tolerant argument, so clap hands any
+/// unknown flag (a removed `--broadcast` or `--focus`, or a typo such as
+/// `--chanel`) over as message text, and the send would go out with the flag in
+/// its body. A leading token shaped like a long flag is refused unless the raw
+/// arguments carried an explicit `--` (the escape hatch for a message that
+/// really starts with one).
+fn flag_like_refusal(message: &[String], raw_args: &[String]) -> Option<String> {
     let first = message.first()?.as_str();
-    if first == "--broadcast" {
-        Some(("--broadcast", "a send with no routing flag already reaches everyone"))
-    } else if first == "--focus" || first.starts_with("--focus=") {
-        Some(("--focus", "use --channel"))
-    } else {
-        None
+    let name = first.split('=').next().unwrap_or(first);
+    let flag_like = name.len() > 2
+        && name.starts_with("--")
+        && name[2..].starts_with(|c: char| c.is_ascii_lowercase())
+        && name[2..].chars().all(|c| c.is_ascii_lowercase() || c == '-');
+    if !flag_like || raw_args.iter().any(|a| a == "--") {
+        return None;
     }
+    let hint = match name {
+        "--broadcast" => " It was removed: a send with no routing flag already reaches everyone.",
+        "--focus" => " It was removed: use --channel.",
+        _ => "",
+    };
+    Some(format!(
+        "`{name}` is not a flag this command accepts.{hint} To send it as text, put `--` before the message."
+    ))
 }
 
-/// Exit 2 when `message` leads with a removed flag.
-pub(crate) fn reject_removed_flags(verb: &str, message: &[String]) {
-    if let Some((flag, hint)) = removed_flag(message) {
-        eprintln!("attend {verb}: `{flag}` was removed ({hint}).");
+/// Exit 2 when `message` leads with a flag-shaped token and no `--` escape.
+pub(crate) fn reject_flag_like(verb: &str, message: &[String]) {
+    let raw: Vec<String> = std::env::args().collect();
+    if let Some(why) = flag_like_refusal(message, &raw) {
+        eprintln!("attend {verb}: {why}");
         std::process::exit(2);
     }
 }
@@ -425,24 +437,36 @@ fn find_closest_peer<'a>(target: &str, peers: &[&'a str]) -> Option<&'a str> {
 
 #[cfg(test)]
 mod removed_flag_tests {
-    use super::removed_flag;
+    use super::flag_like_refusal;
 
-    fn msg(words: &[&str]) -> Vec<String> {
+    fn v(words: &[&str]) -> Vec<String> {
         words.iter().map(|w| w.to_string()).collect()
     }
 
     #[test]
-    fn removed_flags_are_named() {
-        assert_eq!(removed_flag(&msg(&["--broadcast", "hello"])).map(|f| f.0), Some("--broadcast"));
-        assert_eq!(removed_flag(&msg(&["--focus", "deploy", "hello"])).map(|f| f.0), Some("--focus"));
-        assert_eq!(removed_flag(&msg(&["--focus=deploy", "hello"])).map(|f| f.0), Some("--focus"));
+    fn flag_shaped_leading_tokens_are_refused() {
+        let raw = v(&["attend", "send"]);
+        for first in ["--broadcast", "--focus", "--focus=x", "--chanel", "--to-all"] {
+            assert!(flag_like_refusal(&v(&[first, "hello"]), &raw).is_some(), "{first}");
+        }
+        assert!(flag_like_refusal(&v(&["--broadcast", "hi"]), &raw).unwrap().contains("removed"));
+        assert!(flag_like_refusal(&v(&["--focus", "x"]), &raw).unwrap().contains("--channel"));
+    }
+
+    #[test]
+    fn explicit_double_dash_escapes() {
+        let raw = v(&["attend", "send", "--", "--broadcast", "is", "gone"]);
+        assert!(flag_like_refusal(&v(&["--broadcast", "is", "gone"]), &raw).is_none());
     }
 
     #[test]
     fn ordinary_messages_pass() {
-        assert!(removed_flag(&msg(&["hello", "--broadcast"])).is_none());
-        assert!(removed_flag(&msg(&["--dashed", "text"])).is_none());
-        assert!(removed_flag(&[]).is_none());
+        let raw = v(&["attend", "send"]);
+        assert!(flag_like_refusal(&v(&["hello", "--broadcast"]), &raw).is_none());
+        assert!(flag_like_refusal(&v(&["--"]), &raw).is_none());
+        assert!(flag_like_refusal(&v(&["--2x", "text"]), &raw).is_none());
+        assert!(flag_like_refusal(&v(&["-5", "degrees"]), &raw).is_none());
+        assert!(flag_like_refusal(&[], &raw).is_none());
     }
 }
 

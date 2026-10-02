@@ -22,6 +22,8 @@ This document contains the help content for the `attend` command-line program.
 * [`attend leave`↴](#attend-leave)
 * [`attend channels`↴](#attend-channels)
 * [`attend channels list`↴](#attend-channels-list)
+* [`attend channels pin`↴](#attend-channels-pin)
+* [`attend channels unpin`↴](#attend-channels-unpin)
 * [`attend channels create`↴](#attend-channels-create)
 * [`attend channels describe`↴](#attend-channels-describe)
 * [`attend dissolve`↴](#attend-dissolve)
@@ -263,13 +265,19 @@ Leave a channel
 
 Channel lifecycle (default: list all, joined ones marked)
 
-**Usage:** `attend channels [COMMAND]`
+**Usage:** `attend channels [OPTIONS] [COMMAND]`
 
 ###### **Subcommands:**
 
 * `list` — List all channels with joined marks (default)
+* `pin` — Pin a channel so it persists when empty
+* `unpin` — Unpin a channel; it is removed if empty
 * `create` — Create a channel without joining it (pinned so it persists empty)
 * `describe` — Set or replace a channel's single-line description
+
+###### **Options:**
+
+* `--joined` — List only the channels this session has joined (read-only: no cleanup)
 
 
 
@@ -278,6 +286,30 @@ Channel lifecycle (default: list all, joined ones marked)
 List all channels with joined marks (default)
 
 **Usage:** `attend channels list`
+
+
+
+## `attend channels pin`
+
+Pin a channel so it persists when empty
+
+**Usage:** `attend channels pin <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Channel name (with or without the # prefix)
+
+
+
+## `attend channels unpin`
+
+Unpin a channel; it is removed if empty
+
+**Usage:** `attend channels unpin <NAME>`
+
+###### **Arguments:**
+
+* `<NAME>` — Channel name (with or without the # prefix)
 
 
 

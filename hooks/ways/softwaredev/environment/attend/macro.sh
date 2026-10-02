@@ -44,8 +44,8 @@ else
   echo "**Status**: attend is not running — start with \`/attend\` or \`Monitor: attend run\`"
 fi
 
-# Show channels
-CHANNELS_OUTPUT=$(attend channels 2>/dev/null)
+# Show this session's channels (read-only view: no state cleanup on a way fire)
+CHANNELS_OUTPUT=$(attend channels --joined 2>/dev/null)
 if [[ -n "$CHANNELS_OUTPUT" ]]; then
   echo "**Channels**:"
   echo "$CHANNELS_OUTPUT"

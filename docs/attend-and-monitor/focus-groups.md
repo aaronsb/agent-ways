@@ -123,7 +123,7 @@ For ad-hoc conversations, broadcast is sufficient. For structured scopes, use gr
 
 The `attend chat` TUI (ADR-120, documented in [`tui.md`](tui.md)) puts focus groups in the left sidebar as a clickable filter. Each joined group is listed with an unread indicator; clicking filters the message stream to only that group. The sidebar is how a human gets a visual handle on the otherwise-invisible scope topology.
 
-Importantly, clicking a group in the sidebar is a TUI-local filter — it doesn't change the session's actual group membership. To join or leave a group you still run `attend focus on` / `off` from a terminal (or, in future, via a TUI command). This separation means "looking at a group" and "being in a group" are distinct actions.
+Importantly, clicking a group in the sidebar is a TUI-local filter — it doesn't change the session's actual group membership. To join or leave a group you still run `attend join` / `leave` from a terminal (or, in future, via a TUI command). This separation means "looking at a group" and "being in a group" are distinct actions.
 
 ## Related
 

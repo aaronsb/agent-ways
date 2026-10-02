@@ -20,6 +20,23 @@ use crate::groups::Groups;
 #[derive(Debug, Clone)]
 pub struct Scene {
     pub channels: Vec<String>,
+    // transition: removed by #717 (ADR-506)
+    /// The scene was written with the old `rooms:` key. It is an error, not an
+    /// alias: activating it would otherwise leave every channel and join none.
+    pub legacy_rooms: bool,
+}
+
+impl Scene {
+    fn new(channels: Vec<String>) -> Self {
+        Scene { channels, legacy_rooms: false }
+    }
+
+    // transition: removed by #717 (ADR-506)
+    /// The error naming the old key, when this scene uses it.
+    pub fn legacy_rooms_error(&self, name: &str) -> Option<String> {
+        self.legacy_rooms
+            .then(|| format!("scenes.yaml: scene '{name}': `rooms:` was renamed `channels:`"))
+    }
 }
 
 /// Load scenes from config file. Returns built-in defaults merged with user config.
@@ -28,7 +45,7 @@ pub fn load_scenes() -> HashMap<String, Scene> {
 
     // Built-in defaults. `open` used to live here; it's now the
     // `#open` base channel (ADR-124) — implicit for every peer.
-    scenes.insert("private".to_string(), Scene { channels: Vec::new() });
+    scenes.insert("private".to_string(), Scene::new(Vec::new()));
 
     // User config overlay
     let path = scenes_config_path();
@@ -43,11 +60,20 @@ pub fn load_scenes() -> HashMap<String, Scene> {
 
 /// Activate a scene — reconfigure channel membership to match the preset.
 pub fn activate(scene_name: &str, groups: &Groups) -> Result<String, String> {
-    let scenes = load_scenes();
+    activate_in(&load_scenes(), scene_name, groups)
+}
+
+fn activate_in(scenes: &HashMap<String, Scene>, scene_name: &str, groups: &Groups) -> Result<String, String> {
     let scene = scenes
         .get(scene_name)
         .ok_or_else(|| format!("unknown scene '{scene_name}' — try: {}",
             scenes.keys().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")))?;
+
+    // transition: removed by #717 (ADR-506)
+    // Refuse before touching membership.
+    if let Some(e) = scene.legacy_rooms_error(scene_name) {
+        return Err(e);
+    }
 
     // Leave all current named channels
     for (name, _) in groups.my_groups() {
@@ -87,6 +113,7 @@ fn parse_scenes_yaml(content: &str) -> HashMap<String, Scene> {
     let mut scenes = HashMap::new();
     let mut current_name: Option<String> = None;
     let mut current_channels: Vec<String> = Vec::new();
+    let mut current_legacy = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -99,10 +126,11 @@ fn parse_scenes_yaml(content: &str) -> HashMap<String, Scene> {
         // Top-level: scene name
         if indent == 0 && trimmed.ends_with(':') {
             if let Some(ref name) = current_name {
-                scenes.insert(name.clone(), Scene { channels: current_channels.clone() });
+                scenes.insert(name.clone(), Scene { channels: current_channels.clone(), legacy_rooms: current_legacy });
             }
             current_name = Some(trimmed.trim_end_matches(':').to_string());
             current_channels = Vec::new();
+            current_legacy = false;
             continue;
         }
 
@@ -111,6 +139,10 @@ fn parse_scenes_yaml(content: &str) -> HashMap<String, Scene> {
             if let Some((key, value)) = trimmed.split_once(':') {
                 let key = key.trim();
                 let value = value.trim();
+                if key == "rooms" {
+                    // transition: removed by #717 (ADR-506)
+                    current_legacy = true;
+                }
                 if key == "channels" {
                     // Inline array: channels: [deploy, infra]
                     if value.starts_with('[') && value.ends_with(']') {
@@ -138,7 +170,7 @@ fn parse_scenes_yaml(content: &str) -> HashMap<String, Scene> {
 
     // Save last scene
     if let Some(ref name) = current_name {
-        scenes.insert(name.clone(), Scene { channels: current_channels });
+        scenes.insert(name.clone(), Scene { channels: current_channels, legacy_rooms: current_legacy });
     }
 
     scenes
@@ -165,6 +197,32 @@ custom:
         assert!(scenes["private"].channels.is_empty());
         assert_eq!(scenes["workroom"].channels, vec!["deploy", "infra"]);
         assert_eq!(scenes["custom"].channels, vec!["alpha", "beta"]);
+    }
+
+    // transition: removed by #717 (ADR-506)
+    #[test]
+    fn rooms_key_is_an_error_and_leaves_membership_alone() {
+        let yaml = "workroom:\n  rooms: [deploy, infra]\nok:\n  channels: [deploy]\n";
+        let mut scenes = parse_scenes_yaml(yaml);
+        assert!(scenes["workroom"].legacy_rooms);
+        assert!(!scenes["ok"].legacy_rooms);
+        scenes.insert("private".to_string(), Scene::new(Vec::new()));
+
+        let base = std::env::temp_dir().join(format!("attend-scenes-rooms-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        let groups = Groups::new(&base, "member-1");
+        groups.join("keepme", false).unwrap();
+        let before = groups.my_groups();
+        assert_eq!(before.len(), 1);
+
+        let err = activate_in(&scenes, "workroom", &groups).expect_err("rooms: must error");
+        assert!(err.contains("`rooms:` was renamed `channels:`"), "{err}");
+        assert_eq!(groups.my_groups(), before, "membership must be unchanged");
+
+        // A well-formed scene still activates.
+        assert!(activate_in(&scenes, "ok", &groups).is_ok());
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

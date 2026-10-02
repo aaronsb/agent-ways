@@ -88,6 +88,34 @@ pub(crate) fn cmd_describe(name: &str, description: &str) {
     }
 }
 
+pub(crate) fn cmd_pin(name: &str) {
+    let name = name.trim_start_matches('#');
+    get_groups().pin(name);
+    println!("[attend] pinned #{name}");
+}
+
+pub(crate) fn cmd_unpin(name: &str) {
+    let name = name.trim_start_matches('#');
+    get_groups().unpin(name);
+    println!("[attend] unpinned #{name}");
+}
+
+/// Joined channels only. Read-only, so a hook macro can call it on every fire
+/// without `cmd_channels`'s `cleanup_stale` rewriting shared state.
+pub(crate) fn cmd_joined() {
+    let my = get_groups().my_groups();
+    if my.is_empty() {
+        println!("channels: project only");
+    } else {
+        let mut t = agent_fmt::Table::new(&["Channel", "Pinned"]);
+        for (name, pinned) in &my {
+            let label = format!("#{name}");
+            t.add(vec![&label, if *pinned { "yes" } else { "no" }]);
+        }
+        t.print();
+    }
+}
+
 /// All channels with membership marks — the agent-side mirror of the
 /// TUI's `/channels`.
 pub(crate) fn cmd_channels() {

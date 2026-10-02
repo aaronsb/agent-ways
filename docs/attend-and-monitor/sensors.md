@@ -108,7 +108,7 @@ This creates emergent auto-grouping: active conversation partners climb above th
 
 ### Focus group provider
 
-As of the awareness-stabilization bundle (issue #15), the list of focus-group directories to scan is refreshed on every poll via a closure provider, not snapshotted at startup. This means mid-session `attend focus on <name>` takes effect immediately without restarting the sensor loop.
+As of the awareness-stabilization bundle (issue #15), the list of focus-group directories to scan is refreshed on every poll via a closure provider, not snapshotted at startup. This means mid-session `attend join <name>` takes effect immediately without restarting the sensor loop.
 
 ## `sensor-processes` — build and dev tools
 

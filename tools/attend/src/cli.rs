@@ -153,6 +153,10 @@ pub(crate) enum Commands {
 
     /// Channel lifecycle (default: list all, joined ones marked)
     Channels {
+        /// List only the channels this session has joined (read-only: no cleanup)
+        #[arg(long)]
+        joined: bool,
+
         #[command(subcommand)]
         sub: Option<ChannelsCmd>,
     },
@@ -225,6 +229,18 @@ pub enum KeepwarmCmd {
 pub(crate) enum ChannelsCmd {
     /// List all channels with joined marks (default)
     List,
+
+    /// Pin a channel so it persists when empty
+    Pin {
+        /// Channel name (with or without the # prefix)
+        name: String,
+    },
+
+    /// Unpin a channel; it is removed if empty
+    Unpin {
+        /// Channel name (with or without the # prefix)
+        name: String,
+    },
 
     /// Create a channel without joining it (pinned so it persists empty)
     Create {

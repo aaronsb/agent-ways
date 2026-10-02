@@ -22,7 +22,7 @@ The common thread across every Monitor use case is **sporadic unpredictable stat
 
 Attend is not exclusively for AI agents. A human can launch it too, and both consumers share the same signal bus. The peer layer underneath is workspace awareness (Dourish & Bellotti's CSCW term) applied to coding agents — knowing who else is working, where, and what they said — served to humans and agents through one protocol.
 
-**Agent mode — `attend run`:** An AI agent session invokes attend through Monitor. The sensor loop emits notifications into the conversation. The agent responds to what it sees, sends peer messages back through `attend send`, and participates in focus groups through `attend focus`. See [`loop.md`](loop.md) for the sensor loop substrate.
+**Agent mode — `attend run`:** An AI agent session invokes attend through Monitor. The sensor loop emits notifications into the conversation. The agent responds to what it sees, sends peer messages back through `attend send`, and participates in channels through `attend join`. See [`loop.md`](loop.md) for the sensor loop substrate.
 
 **Human mode — `attend chat`:** A human launches attend in an interactive TUI mode. The same signals the agent sees stream into a scrollable message view. The TUI is also a first-class conversation interface — the human addresses enrolled Claude agents (`@infra ship it`, `@api please rebase first`) through the same peer-messaging infrastructure, sees replies in real time, and steers a whole multi-agent session from one surface. See [`tui.md`](tui.md).
 

@@ -40,11 +40,11 @@ Signal files live under `~/.cache/attend/signals/` in a flat two-level hierarchy
 ├── _broadcast/                               # broadcast scope
 │   ├── claude-abc123-1743280000.signal
 │   └── aaron-1743280042.signal
-├── _groups.yaml                              # focus group state (ADR-118)
+├── _groups.yaml                              # channel state (ADR-118)
 ├── _last_banner                              # startup banner fingerprint dedup
-├── @deploy/                                  # named focus group
+├── @deploy/                                  # named channel
 │   └── claude-abc123-1743280100.signal
-├── @infra/                                   # another focus group
+├── @infra/                                   # another channel
 │   └── aaron-1743280200.signal
 ├── -home-aaron-Projects-api-service/         # encoded cwd (project scope)
 │   ├── claude-def456-1743280000.signal
@@ -57,14 +57,14 @@ Signal files live under `~/.cache/attend/signals/` in a flat two-level hierarchy
 
 Three kinds of subdirectories:
 
-1. **`_broadcast/`** — the reserved broadcast dir. Every agent with attend running sees signals here regardless of their project or focus group membership.
-2. **`@<name>/`** — focus group directories (ADR-118). Only sessions that have joined that group (via `attend join <name>`) receive signals from here.
+1. **`_broadcast/`** — the reserved broadcast dir. Every agent with attend running sees signals here regardless of their project or channel membership.
+2. **`@<name>/`** — channel directories (ADR-118). Only sessions that have joined that group (via `attend join <name>`) receive signals from here.
 3. **`-<encoded-cwd>/`** — project-scope directories. The cwd encoding replaces `/`, `_`, and `.` with `-` to produce a filesystem-safe name. A session working in `/home/aaron/Projects/api-service` writes to and reads from `-home-aaron-Projects-api-service/`.
 
 **Reserved names:**
 
 - Anything starting with `_` (e.g., `_broadcast`, `_groups.yaml`, `_last_banner`) is a system file or dir, never interpreted as a project dir. Cleanup never removes these directories or non-`.signal` files; it can remove individual `.signal` files inside `_broadcast/` (see Phase 5).
-- Anything starting with `@` is a focus group dir. The whole directory is removed when the group is dissolved, or when a leave, kick, unpin, or dead-member prune leaves it with no members and unpinned (see "Group directories" under the lifecycle).
+- Anything starting with `@` is a channel dir. The whole directory is removed when the group is dissolved, or when a leave, kick, unpin, or dead-member prune leaves it with no members and unpinned (see "Group directories" under the lifecycle).
 
 ## Filename convention
 
@@ -123,7 +123,7 @@ flowchart LR
     class Delete store
 ```
 
-**Phase 1 — creation.** The sender (an agent via `attend send`, or a human via `attend chat`) constructs the `from|project|cwd|message` line — or `from|project|cwd|re:signal-id|message` if `--re <signal-id>` was passed to mark the send as a threaded reply — and writes it atomically to the right scope directory. Routing flags pick the directory: `--channel <name>` (deprecated alias `--focus`) → `@<name>/`, `--to <path>` → the encoded path, and no flag (or `--broadcast`) → `_broadcast/`. The threading flag composes with any routing flag.
+**Phase 1 — creation.** The sender (an agent via `attend send`, or a human via `attend chat`) constructs the `from|project|cwd|message` line — or `from|project|cwd|re:signal-id|message` if `--re <signal-id>` was passed to mark the send as a threaded reply — and writes it atomically to the right scope directory. Routing flags pick the directory: `--channel <name>` → `@<name>/`, `--to <path>` → the encoded path, and no flag → `_broadcast/`. The threading flag composes with any routing flag.
 
 **Phase 2 — scanning.** Every peer sensor poll (default 30 seconds), `sensor-peers` walks its scan directories: its own project scope, `_broadcast`, and every `@group` the session has joined. A file whose path is not in the session's seen-set is read, parsed, and added to the seen-set. On a session's first scan with no restored checkpoint, every existing file is added to the seen-set without being shown, so a fresh start does not replay the backlog. A session that restarts restores its seen-set from its checkpoint and surfaces only the files that arrived while it was down.
 
@@ -163,7 +163,7 @@ The signal directory layout is stable and designed to be read by external tools.
 - Respect the mtime ordering — creation timestamps in filenames aren't always the same as the file's effective age after atomic rename.
 - Don't delete files you didn't write. Auto-cleanup handles retention.
 
-Reading from `_broadcast/` gives you cross-agent visibility. Reading from `@<name>/` gives you a focus-group tap. Reading from an encoded cwd gives you per-project history.
+Reading from `_broadcast/` gives you cross-agent visibility. Reading from `@<name>/` gives you a channel tap. Reading from an encoded cwd gives you per-project history.
 
 ## Related
 

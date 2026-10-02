@@ -73,11 +73,11 @@ fn main() {
         Commands::Sensors => cmd::sensors::cmd_sensors(),
         Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status)),
         Commands::Send { to, channel, re, message } => {
-            cmd::send::reject_removed_flags("send", &message);
+            cmd::send::reject_flag_like("send", &message);
             cmd::send::cmd_send(to, channel, re, message);
         }
         Commands::Reply { to, channel, message } => {
-            cmd::send::reject_removed_flags("reply", &message);
+            cmd::send::reject_flag_like("reply", &message);
             cmd::send::cmd_reply(to, channel, message);
         }
         Commands::Chat { passthrough } => exec_chat(passthrough),
@@ -86,8 +86,11 @@ fn main() {
         // primary because an unquoted `#` starts a shell comment.
         Commands::Join { name, pin } => cmd::channels::cmd_join(name.trim_start_matches('#'), pin),
         Commands::Leave { name } => cmd::channels::cmd_leave(name.trim_start_matches('#')),
-        Commands::Channels { sub } => match sub {
+        Commands::Channels { joined: true, sub: None } => cmd::channels::cmd_joined(),
+        Commands::Channels { sub, .. } => match sub {
             None | Some(cli::ChannelsCmd::List) => cmd::channels::cmd_channels(),
+            Some(cli::ChannelsCmd::Pin { name }) => cmd::channels::cmd_pin(&name),
+            Some(cli::ChannelsCmd::Unpin { name }) => cmd::channels::cmd_unpin(&name),
             Some(cli::ChannelsCmd::Create { name, description }) => {
                 cmd::channels::cmd_create(name.trim_start_matches('#'), &description.join(" "));
             }

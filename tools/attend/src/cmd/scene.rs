@@ -19,6 +19,18 @@ pub(crate) fn cmd_scenes() {
     let mut names: Vec<&String> = all.keys().collect();
     names.sort();
 
+    // transition: removed by #717 (ADR-506)
+    let legacy: Vec<String> = names
+        .iter()
+        .filter_map(|n| all[*n].legacy_rooms_error(n))
+        .collect();
+    if !legacy.is_empty() {
+        for e in legacy {
+            eprintln!("[attend] scenes: {e}");
+        }
+        std::process::exit(1);
+    }
+
     let mut t = agent_fmt::Table::new(&["Scene", "Channels"]);
     for name in &names {
         let scene = &all[*name];

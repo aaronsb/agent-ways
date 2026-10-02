@@ -112,7 +112,7 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
         } else if dir_name == own_encoded {
             "project"
         } else {
-            "focus"
+            "channel"
         };
 
         for entry in dir_entries.flatten() {
