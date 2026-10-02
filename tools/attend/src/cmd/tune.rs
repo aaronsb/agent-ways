@@ -160,15 +160,7 @@ pub(crate) fn cmd_tune(apply: bool) {
     // burst_threshold and step_multiplier are the operator's: tune derives
     // the other three from them and writes only those three.
     let current = config::Config::from_layers(&[config::user_layer()]);
-    let burst_threshold = current.engagement.burst_threshold as f64;
-    let step_multiplier = current.engagement.step_multiplier;
-    let peak_multiplier = 1.0 + step_multiplier; // peak at exactly burst_threshold
-
-    let burst_window_s = (u2u_p90 * burst_threshold).clamp(300.0, 3600.0) as u64;
-    let abs_refractory_s = a2u_median.clamp(15.0, 300.0) as u64;
-    let burst_window_min = burst_window_s as f64 / 60.0;
-    // Four decimals, as the derived block prints it.
-    let decay_per_minute = ((peak_multiplier - 1.0) / (2.0 * burst_window_min) * 1e4).round() / 1e4;
+    let d = derive(&current.engagement, a2u_median, u2u_p90);
 
     println!();
     println!("=== attend tune — session survey ===");
@@ -183,17 +175,11 @@ pub(crate) fn cmd_tune(apply: bool) {
     println!();
     println!("=== derived engagement config ===");
     println!("engagement:");
-    println!("  burst_threshold: {}     # yours, unchanged", burst_threshold as usize);
-    println!("  step_multiplier: {}     # yours, unchanged", step_multiplier);
-    println!("  absolute_refractory: {}     # median think time", abs_refractory_s);
-    println!(
-        "  decay_per_minute: {:.4}     # peak decays over ~2× burst-window equivalent",
-        decay_per_minute
-    );
-    println!(
-        "  peer_activity_window: {}    # sized from u2u p90 × burst_threshold",
-        burst_window_s
-    );
+    println!("  burst_threshold: {}     # yours, unchanged", current.engagement.burst_threshold);
+    println!("  step_multiplier: {}     # yours, unchanged", current.engagement.step_multiplier);
+    println!("  absolute_refractory: {}     # median think time", d.absolute_refractory);
+    println!("  decay_per_minute: {:.4}     # peak decays over ~2× burst-window equivalent", d.decay_per_minute);
+    println!("  peer_activity_window: {}    # sized from u2u p90 × burst_threshold", d.peer_activity_window);
     println!();
 
     if !apply {
@@ -202,19 +188,48 @@ pub(crate) fn cmd_tune(apply: bool) {
     }
     let path = config::user_path();
     // Through the settings writer: locked, atomic, and only these three keys
-    // change, so comments and every other value stay (ADR-503 §6).
-    let values = [
-        ("attend.engagement.absolute_refractory", serde_yaml::Value::from(abs_refractory_s)),
-        ("attend.engagement.decay_per_minute", serde_yaml::Value::from(decay_per_minute)),
-        ("attend.engagement.peer_activity_window", serde_yaml::Value::from(burst_window_s)),
-    ];
-    match config::write(&path, &values) {
+    // change, so comments and every other value stay (ADR-503 §6). The two
+    // inputs are read again under the lock, so a concurrent edit to them is
+    // never derived from stale.
+    let written = config::update(&path, |held| {
+        let d = derive(&held.engagement, a2u_median, u2u_p90);
+        vec![
+            ("attend.engagement.absolute_refractory".into(), serde_yaml::Value::from(d.absolute_refractory)),
+            ("attend.engagement.decay_per_minute".into(), serde_yaml::Value::from(d.decay_per_minute)),
+            ("attend.engagement.peer_activity_window".into(), serde_yaml::Value::from(d.peer_activity_window)),
+        ]
+    });
+    match written {
         Ok(true) => println!("[tune] wrote the engagement values to {}", path.display()),
         Ok(false) => println!("[tune] {} already holds these values", path.display()),
         Err(e) => {
             eprintln!("[tune] {e}");
             std::process::exit(agent_settings::exit::WRITE_FAILED);
         }
+    }
+}
+
+/// The three engagement values tune derives.
+struct Derived {
+    absolute_refractory: u64,
+    decay_per_minute: f64,
+    peer_activity_window: u64,
+}
+
+/// Derive the three values from the operator's burst_threshold and
+/// step_multiplier and the session survey. decay_per_minute is clamped to
+/// its range, so a large step_multiplier writes the fastest decay instead
+/// of a value the schema refuses.
+fn derive(e: &config::EngagementConfig, a2u_median: f64, u2u_p90: f64) -> Derived {
+    let peak_multiplier = 1.0 + e.step_multiplier; // peak at exactly burst_threshold
+    let burst_window_s = (u2u_p90 * e.burst_threshold as f64).clamp(300.0, 3600.0) as u64;
+    let burst_window_min = burst_window_s as f64 / 60.0;
+    // Four decimals, as the derived block prints it.
+    let decay = ((peak_multiplier - 1.0) / (2.0 * burst_window_min) * 1e4).round() / 1e4;
+    Derived {
+        absolute_refractory: a2u_median.clamp(15.0, 300.0) as u64,
+        decay_per_minute: decay.clamp(0.0, 1.0),
+        peer_activity_window: burst_window_s,
     }
 }
 

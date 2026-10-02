@@ -81,7 +81,9 @@ pub fn display(v: Option<&Value>, kind: Kind) -> String {
         (Some(Value::Sequence(items)), Kind::List) => {
             format!("[{}]", items.iter().map(|i| plain(Some(i))).collect::<Vec<_>>().join(", "))
         }
-        (None, Kind::List) => "[]".into(),
+        // No list and no default: the reader keeps its own built-in list
+        // (attend's processes watch), which an empty list would replace.
+        (None, Kind::List) => "(built-in)".into(),
         _ => plain(v),
     }
 }

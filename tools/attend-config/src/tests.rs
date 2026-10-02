@@ -139,6 +139,40 @@ fn old_sensor_prefixes_and_retired_keys_are_findings() {
 }
 
 #[test]
+fn an_old_minus_entry_closes_the_files_sensors_and_reads_nothing_else_there() {
+    // `-processes:` was the way to switch a sensor off in a project. The
+    // schema cannot name it, so the project's sensors section fails closed:
+    // every built-in and every sensor the file names reads off.
+    let user = layer(LayerScope::User, "sensors:\n  mine:\n    script: ./m.sh\n");
+    let project = layer(LayerScope::Project, "sensors:\n  -processes:\n  git:\n    interval: 90\n  disk:\n    script: ./d.sh\n    enabled: true\n");
+    assert!(project.findings.iter().all(|f| f.closed), "{:?}", messages(&project));
+    let c = Config::from_layers(&[user, project]);
+    for b in BUILTINS {
+        assert!(!c.sensors[*b].enabled, "{b} is off");
+    }
+    assert!(!c.sensors["disk"].enabled, "a sensor the file names is off too");
+    assert_eq!(c.sensors["git"].interval, Duration::from_secs(30), "nothing else in the section is read");
+    assert!(c.sensors["mine"].enabled, "a sensor of the user file alone is not named here, and runs");
+}
+
+#[test]
+fn a_file_that_does_not_parse_switches_every_built_in_sensor_off() {
+    let l = layer(LayerScope::Project, "sensors:\n  processes:\n    enabled: false\ngovernor: [\n");
+    assert!(l.findings[0].is_parse_failure());
+    let c = Config::from_layers(&[l]);
+    for b in BUILTINS {
+        assert!(!c.sensors[*b].enabled, "{b} is off");
+    }
+}
+
+#[test]
+fn max_per_window_zero_is_a_mute() {
+    let l = layer(LayerScope::User, "governor:\n  max_per_window: 0\n");
+    assert!(l.findings.is_empty(), "{:?}", messages(&l));
+    assert_eq!(Config::from_layers(&[l]).governor.max_per_window, 0);
+}
+
+#[test]
 fn attend_keeps_no_theme_key() {
     assert!(SCHEMA.keys.iter().all(|k| !k.name.contains("theme")), "the one theme is ways' theme.active");
     assert!(SCHEMA.keys.iter().all(|k| k.name.starts_with("attend.")) && SCHEMA.sections.iter().all(|s| s.name.starts_with("attend.")));

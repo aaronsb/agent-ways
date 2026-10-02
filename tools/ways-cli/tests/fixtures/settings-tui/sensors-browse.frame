@@ -11,7 +11,7 @@ agent-tui frame 100x30
 |│     threshold                 2.0                   ││                                           │|
 |│     decay_threshold           5                     ││                                           │|
 |│     requires                  [Bash(ps:*)]          ││                                           │|
-|│     watch                     []                    ││                                           │|
+|│     watch                     (built-in)            ││                                           │|
 |│ ▸ disclosure                                        ││                                           │|
 |│ ▸ keepwarm                                          ││                                           │|
 |│                                                     ││                                           │|

@@ -59,24 +59,34 @@ pub fn init(path: &Path) -> Result<bool, WriteError> {
 
 /// Write `values`, each a key's dotted name and its value, into the attend
 /// file at `path` in one locked, atomic edit that changes only those keys.
-/// A missing or empty file starts with [`HEADER`]. Each value is
-/// checked against the schema first; a value it refuses writes nothing.
-/// Returns whether the file changed.
+/// See [`update`].
 pub fn write(path: &Path, values: &[(&str, Value)]) -> Result<bool, String> {
-    let mut edits = Vec::new();
-    for (name, v) in values {
-        let spec = SCHEMA.keys.iter().find(|k| k.name == *name && !k.is_pattern()).ok_or_else(|| format!("{name} is not an attend key"))?;
-        spec.check_value(v).map_err(|m| format!("{name}: {m}; nothing written"))?;
-        edits.push((spec.path.iter().map(|s| s.to_string()).collect::<Vec<_>>(), v.clone()));
-    }
-    writer::edit_file(path, Some(HEADER), |d| {
-        for (k, v) in &edits {
-            d.set(k, v)?;
+    update(path, |_| values.iter().map(|(n, v)| (n.to_string(), v.clone())).collect())
+}
+
+/// Read the attend file at `path` and write what `f` makes of it, in one
+/// locked, atomic edit that changes only the keys `f` names. `f` sees the
+/// file as it is under the lock, read as a user file over the defaults, so a
+/// value derived from another key never comes from a stale read. A missing
+/// or empty file starts with [`HEADER`]. Each value is checked against the
+/// schema; a value it refuses, or a key it does not name, writes nothing.
+/// Returns whether the file changed.
+pub fn update(path: &Path, f: impl FnOnce(&Config) -> Vec<(String, Value)>) -> Result<bool, String> {
+    let (outcome, changed) = writer::edit_file(path, Some(HEADER), |d| {
+        let held = Layer::from_text(&SCHEMA, "user", FILE, LayerScope::User, Some(path), &d.text());
+        for (name, v) in f(&Config::from_layers(&[held])) {
+            let Some(spec) = SCHEMA.keys.iter().find(|k| k.name == name && !k.is_pattern()) else {
+                return Ok(Err(format!("{name} is not an attend key; nothing written")));
+            };
+            if let Err(m) = spec.check_value(&v) {
+                return Ok(Err(format!("{name}: {m}; nothing written")));
+            }
+            d.set(&spec.path.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &v)?;
         }
-        Ok(())
+        Ok(Ok(()))
     })
-    .map(|((), changed)| changed)
-    .map_err(|e| format!("{e}; nothing written"))
+    .map_err(|e| format!("{e}; nothing written"))?;
+    outcome.map(|()| changed)
 }
 
 /// The file `attend config init` writes: every section at its defaults,

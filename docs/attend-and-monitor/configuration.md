@@ -36,7 +36,7 @@ attend config lint      # the findings in attend's two files; exit 3 with any
 
 Every write goes through the one settings writer: it takes a lock beside the file, changes only the keys it sets, keeps every comment and the order of the rest, and renames a temporary file into place. `attend tune --apply` and `ways settings set` leave the same bytes.
 
-A value of the wrong type or out of range is a finding, never clamped. A section with a finding is ignored in that file, so its keys resolve from the layers beneath, ending at the defaults; each sensor falls back alone. A switch fails closed: a sensor or `cleanup` whose `enabled` holds anything but `true` in an entry with a finding reads as off. A file that does not parse sets nothing, and `cleanup` is off until its syntax is fixed by hand. Each finding is one line on stderr of `attend run` and `attend config show`, naming the file, line and section.
+A value of the wrong type or out of range is a finding, never clamped. A section with a finding is ignored in that file, so its keys resolve from the layers beneath, ending at the defaults; each sensor falls back alone. A switch fails closed: a sensor or `cleanup` whose `enabled` holds anything but `true` in an entry with a finding reads as off. A sensor name the schema refuses (such as the retired `-processes:`) closes that file's `sensors:`: every built-in and every sensor the file names reads off until the name is edited by hand, and `ways settings fix` will not guess at it. A file that does not parse sets nothing; `cleanup` and every built-in sensor are off in its scope until its syntax is fixed by hand. Each finding is one line on stderr of `attend run` and `attend config show`, naming the file, line and section.
 
 `attend config init` creates the user-scope file with fully commented defaults, and never overwrites one that exists.
 
@@ -102,7 +102,7 @@ sensors:
 Global rate limiting for disclosures. Even if every sensor is ready to fire, the governor caps how many actually reach the conversation.
 
 - **`base_cooldown`** (seconds, default 15): minimum time between any two consecutive disclosures. A burst of sensors all ready at the same time will have their disclosures serialized with at least this gap.
-- **`max_per_window`** (count, default 3): maximum disclosures allowed within the rolling `rate_window`. Additional ready sensors are held; their magnitudes stay in the accumulator.
+- **`max_per_window`** (count, default 3): maximum disclosures allowed within the rolling `rate_window`. Additional ready sensors are held; their magnitudes stay in the accumulator. 0 holds every disclosure, which mutes attend without stopping it.
 - **`rate_window`** (seconds, default 120): length of the rolling window for `max_per_window`.
 
 With defaults: at most 3 disclosures per 2 minutes, with at least 15 seconds between each.

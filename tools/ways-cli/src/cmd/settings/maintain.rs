@@ -78,6 +78,10 @@ fn sections_for(reg: &Registry, arg: &str) -> Vec<(&'static agent_settings::Sche
 /// - an unknown key, a non-text key, or a value of the wrong shape is
 ///   removed.
 ///
+/// An entry's name the section refuses is not repaired: it closes its
+/// section, and only a hand edit can say what it meant. fix writes nothing
+/// to that file and exits 5.
+///
 /// A top-level key no section owns is not removed: it may be a typo to
 /// correct by hand. `fix ""` reports it and exits 3.
 ///
@@ -109,9 +113,15 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
         let names: Vec<&str> = list.iter().map(|(_, s)| s.name).collect();
         let file = list[0].1.file;
         let schema = list[0].0;
-        agent_settings::writer::edit_file(path, None, |d| {
+        let refused = agent_settings::writer::edit_file(path, None, |d| {
             let raw = d.value().clone();
             let checked = agent_settings::load::check(schema, file, scope, &raw, Some(&names));
+            // A name the section refuses closes it, and may be an off-switch
+            // the schema cannot read: only a hand edit can say what it meant.
+            if checked.has_refused_name() {
+                let text = d.text();
+                return Ok(checked.findings(None, Some(path), &text).into_iter().filter(|f| f.closed).collect::<Vec<_>>());
+            }
             for (sec, key) in checked.failing() {
                 if sec.is_none() {
                     continue; // a top-level key no section owns; not this fix
@@ -144,9 +154,17 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
                     }
                 }
             }
-            Ok(())
+            Ok(Vec::new())
         })
-        .map_err(write_failed)?;
+        .map_err(write_failed)?
+        .0;
+        if let Some(f) = refused.first() {
+            let hint = f.message.split_once("; ").map_or("rename it, or delete it", |(_, h)| h);
+            return Err(fail(
+                exit::WRITE_FAILED,
+                format!("{f}; fix cannot repair an entry's name, so nothing was written. Edit the file by hand: {hint}. Until then the section fails closed in that file"),
+            ));
+        }
         // Check again: what fix could not repair is reported, with its command.
         let text = std::fs::read_to_string(path).unwrap_or_default();
         if let Ok(doc) = agent_settings::load::parse_text(&text, Some(path)) {

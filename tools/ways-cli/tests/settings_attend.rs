@@ -124,10 +124,19 @@ fn lint_names_attend_s_findings_and_fix_repairs_them() {
     let (_, err, code) = fx.run(&["settings", "fix", "attend.governor"]);
     assert_eq!(code, 0, "{err}");
     assert_eq!(fx.read(&fx.user()), "# mine\ngovernor:\n  base_cooldown: 15   # oops\n  rate_window: 60\n", "the user file takes the canonical value");
+    // `-processes:` may be an off-switch: fix will not guess, and writes nothing.
+    let before = fx.read(&fx.project());
     let (_, err, code) = fx.run(&["settings", "fix", "attend.sensors", "--project", "."]);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(fx.read(&fx.project()), "sensors:\n  git:\n    interval: 30\n", "the project file loses the entry that names nothing");
+    assert_eq!(code, 5, "{err}");
+    assert!(err.contains("fix cannot repair an entry's name") && err.contains("`processes: {enabled: false}`"), "{err}");
+    assert_eq!(fx.read(&fx.project()), before, "the line stays until it is edited by hand");
+    // Until then the project's sensors read off.
+    assert_eq!(fx.run(&["settings", "get", "attend.sensors.processes.enabled"]).0, "false\n");
+    assert_eq!(fx.run(&["settings", "get", "attend.sensors.git.enabled"]).0, "false\n");
+    // The hand edit the message names clears it.
+    fx.write(&fx.project(), "sensors:\n  processes:\n    enabled: false\n  git:\n    interval: 30\n");
     assert_eq!(fx.run(&["settings", "lint"]).2, 0);
+    assert_eq!(fx.run(&["settings", "get", "attend.sensors.git.enabled"]).0, "true\n");
 }
 
 #[test]

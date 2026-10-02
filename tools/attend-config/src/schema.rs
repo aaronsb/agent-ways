@@ -133,10 +133,10 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "attend.governor.max_per_window",
         path: &["governor", "max_per_window"],
-        kind: COUNT,
+        kind: Kind::Int { min: 0, max: u32::MAX as i64 },
         default: DefaultValue::Yaml("3"),
-        doc: "Disclosures allowed within one rate window.",
-        long: "Sensors ready past the cap are held; their magnitudes stay in the accumulator.",
+        doc: "Disclosures allowed within one rate window; 0 mutes attend.",
+        long: "Sensors ready past the cap are held; their magnitudes stay in the accumulator. 0 holds every disclosure, which silences attend without stopping it.",
         ..BASE
     },
     KeySpec {

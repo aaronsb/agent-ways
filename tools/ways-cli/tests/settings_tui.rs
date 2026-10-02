@@ -203,6 +203,19 @@ fn an_attend_change_applied_in_the_screens_writes_the_bytes_set_writes() {
 }
 
 #[test]
+fn an_unset_watch_list_shows_the_built_in_one_is_in_effect() {
+    let fx = Fx::new();
+    // processes, opened: its watch list is unset, so the sensor's own applies.
+    let f = glyphs(&fx.snap("sensors", "down down down right", "100x30", "16"));
+    let row = f.lines().find(|l| l.contains(" watch ")).unwrap_or_default();
+    assert!(row.contains("(built-in)") && !row.contains("[]"), "{f}");
+    // An explicit empty list replaces it, and shows as one.
+    fx.file(".config/attend/config.yaml", "sensors:\n  processes:\n    watch: []\n");
+    let f = glyphs(&fx.snap("sensors", "down down down right", "100x30", "16"));
+    assert!(f.lines().any(|l| l.contains(" watch ") && l.contains("[]")), "{f}");
+}
+
+#[test]
 fn a_finding_in_an_attend_file_marks_its_row_on_attend_s_tab() {
     let fx = Fx::new();
     fx.file(".config/attend/config.yaml", "engagement:\n  burst_window: 900\n");

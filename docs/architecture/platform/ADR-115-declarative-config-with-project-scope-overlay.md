@@ -145,3 +145,11 @@ This is consistent with the existing XDG separation documented in project memory
 - **attend config implementation**: `tools/attend/src/config.rs`
 - **attend ADR**: [ADR-113](../attend/ADR-113-attend-active-awareness-module.md) — config section documents attend's implementation
 - **XDG separation**: project memory `xdg-separation.md`
+
+## Note, 2026-10-02: the `+name:` and `-name:` grammar is retired
+
+Appended after acceptance; nothing above is changed. attend's settings moved onto the typed registry (ADR-503, #698), and the hand-written parser this record describes is gone, so the "zero dependency" and "minimal parser" consequences above no longer hold: the files are YAML, read and checked through `attend-config`'s schema.
+
+The overlay's `+name:` (add a sensor) and `-name:` (switch one off) prefixes are retired with no compatibility reader (ADR-506). A sensor of your own is any name with a `script`, and `name: {enabled: false}` switches a sensor off in a project. The layering itself (user file, then the project's `.claude/attend.yaml`, over the defaults) is unchanged.
+
+An old prefixed entry is a finding that closes its file's `sensors:` section: every built-in sensor and every sensor that file names reads off, and nothing else in the section is read, until the name is edited by hand. `ways settings fix` refuses to repair a name. This was the coordinator's decision in the review of PR #733: a `-name:` entry may be an off-switch the schema cannot read, so it fails closed, following the "whole file fails closed" rule in the ADR-503 addendum. The release notes in `docs/migration-1.0.md` say how to move each form by hand.

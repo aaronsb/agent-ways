@@ -141,6 +141,56 @@ fn tune_apply_waits_for_the_settings_lock() {
 }
 
 #[test]
+fn tune_apply_derives_from_the_file_as_it_is_under_the_lock() {
+    let fx = Fx::new();
+    fx.sessions();
+    fx.write(&fx.user(), "engagement:\n  burst_threshold: 3\n");
+    let held = agent_settings::writer::Lock::acquire(&fx.user()).unwrap();
+    let mut child = fx.cmd(&["tune", "--apply"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    // An edit lands while tune waits for the lock; tune must use it.
+    fx.write(&fx.user(), "engagement:\n  burst_threshold: 5\n");
+    drop(held);
+    assert!(child.wait().unwrap().success());
+    let after = std::fs::read_to_string(fx.user()).unwrap();
+    assert!(after.contains("peer_activity_window: 600"), "derived from burst_threshold 5, not the 3 read before the lock:\n{after}");
+}
+
+#[test]
+fn tune_apply_clamps_a_derived_decay_to_its_range() {
+    let fx = Fx::new();
+    fx.sessions();
+    fx.write(&fx.user(), "engagement:\n  burst_threshold: 1\n  step_multiplier: 100\n");
+    let out = fx.run(&["tune", "--apply"]);
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(std::fs::read_to_string(fx.user()).unwrap().contains("decay_per_minute: 1.0"));
+}
+
+#[test]
+fn an_old_minus_entry_switches_the_project_s_sensors_off() {
+    let fx = Fx::new();
+    fx.write(&fx.home.join("proj/.claude/attend.yaml"), "sensors:\n  -processes:\n");
+    let o = text(&fx.run(&["config", "show"]).stdout);
+    assert!(o.contains("attend.sensors.processes.enabled=false\n") && o.contains("attend.sensors.git.enabled=false\n"), "{o}");
+}
+
+#[test]
+fn a_project_file_that_does_not_parse_switches_its_sensors_off() {
+    let fx = Fx::new();
+    fx.write(&fx.home.join("proj/.claude/attend.yaml"), "sensors:\n  processes:\n    enabled: false\ngovernor: [\n");
+    let o = text(&fx.run(&["config", "show"]).stdout);
+    assert!(o.contains("attend.sensors.processes.enabled=false\n") && o.contains("attend.sensors.peers.enabled=false\n"), "{o}");
+}
+
+#[test]
+fn max_per_window_zero_mutes() {
+    let fx = Fx::new();
+    fx.write(&fx.user(), "governor:\n  max_per_window: 0\n");
+    let out = fx.run(&["config", "show"]);
+    assert!(text(&out.stdout).contains("attend.governor.max_per_window=0\n"), "{}", text(&out.stderr));
+}
+
+#[test]
 fn tune_apply_on_no_file_writes_only_the_derived_values() {
     let fx = Fx::new();
     fx.sessions();
