@@ -297,6 +297,9 @@ enum SessionCommand {
         /// session in scope without --session)
         #[arg(long, conflicts_with_all = ["speed", "keys", "snap", "depth"])]
         json: bool,
+        /// With --json, also the ways the relevance judge kept out
+        #[arg(long, requires = "json")]
+        matched: bool,
         /// Feed these keys to the screens, headless (tokens as `ways settings --keys`)
         #[arg(long, hide = true, num_args = 1..)]
         keys: Vec<String>,
@@ -1063,9 +1066,9 @@ fn run() -> Result<()> {
         },
         Commands::Session { action } => match action {
             SessionCommand::Ways { session, sort, json, matched } => cmd::list::run(session.as_deref(), &sort, json, matched),
-            SessionCommand::Replay { session, project, all, speed, json, keys, snap, depth } => {
+            SessionCommand::Replay { session, project, all, speed, json, matched, keys, snap, depth } => {
                 let open = cmd::introspect::Open { keys, snap, depth };
-                cmd::introspect::replay(session.as_deref(), project.as_deref(), all, speed, json, &open)
+                cmd::introspect::replay(session.as_deref(), project.as_deref(), all, speed, json, matched, &open)
             }
             SessionCommand::List { project, all, json } => {
                 cmd::introspect::list(project.as_deref(), all, json)

@@ -30,7 +30,6 @@ pub(crate) enum Outcome {
 impl Outcome {
     /// The name `session replay --json` gives the outcome; its frames take
     /// it in the CLI's change for #742.
-    #[allow(dead_code)]
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Outcome::Injected => "injected",

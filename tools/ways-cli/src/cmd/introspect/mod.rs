@@ -125,9 +125,9 @@ fn need_terminal(open: &Open, mode: &str) -> Result<()> {
 /// `ways session replay` — a session's way firings frame by frame. With
 /// no `--session`, the picker lists the sessions in scope. `--json` prints
 /// the timeline instead.
-pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Option<u64>, json: bool, open: &Open) -> Result<()> {
+pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Option<u64>, json: bool, matched: bool, open: &Open) -> Result<()> {
     if json {
-        return dump::replay_json(session, project, all);
+        return dump::replay_json(session, project, all, matched);
     }
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {

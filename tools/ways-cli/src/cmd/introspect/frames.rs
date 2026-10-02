@@ -18,19 +18,10 @@ use super::model::{ActiveWay, Frame, Outcome, WayEvent};
 /// Refire thresholds reflect each way's *current* curve — this is a replay,
 /// so a curve edited since the recorded session shows today's value. That's the
 /// best we can do without snapshotting frontmatter into events.jsonl.
+///
+/// A frame holds the injected ways, and with `matched` the ways the relevance
+/// judge blocked too (#742). Each way carries its [`Outcome`].
 pub(crate) fn reconstruct_frames(
-    events: &[WayEvent],
-    project_name: &str,
-    session_id: &str,
-    context_window: u64,
-) -> Vec<Frame> {
-    reconstruct_frames_for(events, project_name, session_id, context_window, false)
-}
-
-/// [`reconstruct_frames`] in one view: the injected ways only, or with
-/// `matched` the judge-blocked candidates too (#742). Each way carries its
-/// [`Outcome`] either way.
-pub(crate) fn reconstruct_frames_for(
     events: &[WayEvent],
     project_name: &str,
     session_id: &str,

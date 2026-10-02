@@ -95,6 +95,7 @@ ways tune stats --json
 - `replay --json` writes the reconstructed timeline as a single JSON document instead, for agents, scripts and CI, where no terminal is needed.
 - `live` follows the session that is writing events now, on the same screen, and stays on the newest frame until you move back; space or End resumes following.
 - `list` prints the session table; `--json` gives it as data.
+- `ways`, `fires`, `dump` and `replay --json` show what reached the session; `--matched` adds the ways the relevance judge kept out, each with its P(yes) against the threshold.
 - `dump` writes the session's introspection model as JSON: turns, fired ways, their criteria, the keyed transcript join and matched spans.
 - `fires` lists the semantic fires of a session with their scores, lowest first.
 
