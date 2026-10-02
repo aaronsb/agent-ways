@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| 1 ways    2 matching    3 gate    4 install    5 theme               |
+| 1 ways    2 matching    3 gate    4 install    5 theme                         |
 |┌ ways settings — ~/proj ──────────────────┐┌detail────────────────────────────┐|
 |│   semantic_fire_probability 0.5          ││matching.keyword_floor_probability│|
 |│▌  keyword_floor_probability 0.15         ││                                  │|
@@ -23,23 +23,13 @@ agent-tui frame 80x25
 |│                                          ││                                  │|
 |│                                          ││                                  │|
 |└──────────────────────────────────────────┘└──────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  ? keys · Tab 1-9 tabs · / filter|
+| browse  0 changed │ 0 queued │ mouse on (m)  ? keys · Tab 1-9 tabs · / filters |
 styles
-  0   0-0   Blue - -
-  0   1-8   White Blue -
-  0   9-9   Blue - -
-  0  12-12  Cyan - -
-  0  13-24  Black Cyan BOLD
-  0  25-25  Cyan - -
-  0  28-28  Blue - -
-  0  29-36  White Blue -
-  0  37-37  Blue - -
-  0  40-40  Blue - -
-  0  41-51  White Blue -
-  0  52-52  Blue - -
-  0  55-55  Blue - -
-  0  56-64  White Blue -
-  0  65-65  Blue - -
+  0   0-7   White Blue -
+  0  10-21  Black Cyan BOLD
+  0  24-31  White Blue -
+  0  34-44  White Blue -
+  0  47-55  White Blue -
   1   0-0   - - DIM
   1   1-24  Blue - BOLD|DIM
   1  25-44  - - DIM
@@ -114,11 +104,9 @@ styles
  22  43-44  - - DIM
  22  79-79  - - DIM
  23   0-79  - - DIM
- 24   0-0   Cyan - -
- 24   1-8   Black Cyan BOLD
- 24   9-9   Cyan - -
- 24  11-19  - - DIM|ITALIC
- 24  20-22  - - DIM
- 24  23-30  - - DIM|ITALIC
- 24  31-33  - - DIM
- 24  34-45  - - DIM|ITALIC
+ 24   0-7   Black Cyan BOLD
+ 24   9-17  - - DIM|ITALIC
+ 24  18-20  - - DIM
+ 24  21-28  - - DIM|ITALIC
+ 24  29-31  - - DIM
+ 24  32-43  - - DIM|ITALIC

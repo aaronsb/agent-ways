@@ -1,5 +1,5 @@
 agent-tui frame 100x30
-| 1 ways    2 matching    3 gate    4 install    5 theme  ●1                              |
+| 1 ways    2 matching    3 gate    4 install    5 theme  ●1                                         |
 |┌ edit mine ● (copy of nord, unwritten) ──────────────┐┌slot───────────────────────────────────────┐|
 |│▌ bg              #2e3440                            ││bg     #2e3440                             │|
 |│  fg              #d8dee9                            ││body         #d8dee9 moved to read         │|
@@ -13,12 +13,12 @@ agent-tui frame 100x30
 |│  alt       ┌quit with unsaved changes───────────────────────────────────────────────┐ion         │|
 |│  kind      │                                                                        │dy          │|
 |│  background│ 1 unsaved in 1 tabs                                                    │            │|
-|│            │   theme       ●1  edits to mine                                        │  apply   │|
+|│            │   theme       ●1  edits to mine                                        │y           │|
 |│            │                                                                        │            │|
-|│            │  › Back (Esc)      Review theme (r)      Quit and discard all (D) │            │|
+|│            │  › Back (Esc)      Review theme (r)      Quit and discard all (D)      │            │|
 |│            └────────────────────────────────────────────────────────────────────────┘            │|
 |│                                                     ││                                           │|
-|│                                                     ││    Save ^S   unsaved                    │|
+|│                                                     ││    Save ^S   unsaved                      │|
 |│                                                     ││writes    ~/.config/agent-ways/themes/mine.│|
 |│                                                     ││          theme                            │|
 |│                                                     ││                                           │|
@@ -28,25 +28,14 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| quit   Esc back · r review · D quit and discard all                                              |
+| quit   Esc back · r review · D quit and discard all                                                |
 styles
-  0   0-0   Blue - -
-  0   1-8   White Blue -
-  0   9-9   Blue - -
-  0  12-12  Blue - -
-  0  13-24  White Blue -
-  0  25-25  Blue - -
-  0  28-28  Blue - -
-  0  29-36  White Blue -
-  0  37-37  Blue - -
-  0  40-40  Blue - -
-  0  41-51  White Blue -
-  0  52-52  Blue - -
-  0  55-55  Cyan - -
-  0  56-64  Black Cyan BOLD
-  0  65-65  Cyan Yellow -
-  0  66-69  Black Yellow BOLD
-  0  70-70  Yellow - -
+  0   0-7   White Blue -
+  0  10-21  White Blue -
+  0  24-31  White Blue -
+  0  34-44  White Blue -
+  0  47-55  Black Cyan BOLD
+  0  56-59  Black Yellow BOLD
   1   0-0   - - DIM
   1   1-39  Blue - BOLD|DIM
   1  40-55  - - DIM
@@ -129,9 +118,7 @@ styles
  14  29-30  Yellow - BOLD
  14  31-45  - - DIM|ITALIC
  14  86-86  Blue - -
- 14  88-88  Green - -
- 14  89-95  Black Green BOLD
- 14  96-96  Green - -
+ 14  87-88  Black Green BOLD
  14  99-99  - - DIM
  15   0-0   - - DIM
  15  13-13  Blue - -
@@ -139,14 +126,9 @@ styles
  15  99-99  - - DIM
  16   0-0   - - DIM
  16  13-13  Blue - -
- 16  15-15  Blue - -
- 16  16-29  White Blue BOLD
- 16  30-30  Blue - -
- 16  33-33  Cyan - -
- 16  34-53  Black Cyan -
- 16  54-54  Cyan - -
- 16  57-57  Red - -
- 16  58-85  White Red -
+ 16  15-28  White Blue BOLD
+ 16  31-50  Black Cyan -
+ 16  53-80  White Red -
  16  86-86  Blue - -
  16  99-99  - - DIM
  17   0-0   - - DIM
@@ -157,10 +139,8 @@ styles
  18  99-99  - - DIM
  19   0-0   - - DIM
  19  54-55  - - DIM
- 19  57-57  Green - -
- 19  58-68  Black Green -
- 19  69-69  Green - -
- 19  72-78  Yellow - BOLD
+ 19  57-67  Black Green -
+ 19  70-76  Yellow - BOLD
  19  99-99  - - DIM
  20   0-0   - - DIM
  20  54-99  - - DIM
@@ -187,7 +167,5 @@ styles
  27  54-55  - - DIM
  27  99-99  - - DIM
  28   0-99  - - DIM
- 29   0-0   Yellow - -
- 29   1-6   Black Yellow BOLD
- 29   7-7   Yellow - -
- 29   8-53  - - DIM|ITALIC
+ 29   0-5   Black Yellow BOLD
+ 29   6-51  - - DIM|ITALIC

@@ -1,5 +1,5 @@
 agent-tui frame 100x30
-| 1 ways    2 matching    3 gate    4 install    5 theme                                   |
+| 1 ways    2 matching    3 gate    4 install    5 theme                                             |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
 |│▌  engine                                            ││gate.engine                                │|
 |│   mode                        enforce               ││                                           │|
@@ -28,23 +28,13 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| edit  anthropic▏  Enter set · Esc cancel  ? keys · Tab 1-9 tabs · / filters all tabs             |
+| edit  anthropic▏  Enter set · Esc cancel  ? keys · Tab 1-9 tabs · / filters all tabs               |
 styles
-  0   0-0   Blue - -
-  0   1-8   White Blue -
-  0   9-9   Blue - -
-  0  12-12  Blue - -
-  0  13-24  White Blue -
-  0  25-25  Blue - -
-  0  28-28  Cyan - -
-  0  29-36  Black Cyan BOLD
-  0  37-37  Cyan - -
-  0  40-40  Blue - -
-  0  41-51  White Blue -
-  0  52-52  Blue - -
-  0  55-55  Blue - -
-  0  56-64  White Blue -
-  0  65-65  Blue - -
+  0   0-7   White Blue -
+  0  10-21  White Blue -
+  0  24-31  Black Cyan BOLD
+  0  34-44  White Blue -
+  0  47-55  White Blue -
   1   0-0   - - DIM
   1   1-24  Blue - BOLD|DIM
   1  25-55  - - DIM
@@ -134,7 +124,5 @@ styles
  27  54-55  - - DIM
  27  99-99  - - DIM
  28   0-99  - - DIM
- 29   0-0   Cyan - -
- 29   1-6   Black Cyan BOLD
- 29   7-7   Cyan - -
- 29  20-42  - - DIM|ITALIC
+ 29   0-5   Black Cyan BOLD
+ 29  18-40  - - DIM|ITALIC

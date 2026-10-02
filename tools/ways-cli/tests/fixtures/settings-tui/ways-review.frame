@@ -1,5 +1,5 @@
 agent-tui frame 100x30
-| 1 ways  ●2 ↺    2 matching    3 gate    4 install    5 theme                            |
+| 1 ways  ●2 ↺    2 matching    3 gate    4 install    5 theme                                       |
 |┌ ways settings — ~/proj — review ────────────────────┐┌detail─────────────────────────────────────┐|
 |│▌    enabled               true → false              ││ways.enabled                               │|
 |│   ▾ project               ●1                        ││                                           │|
@@ -28,25 +28,14 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| review  a apply ways │ X discard ways │ Esc back  read-only in review; Esc to edit               |
+| review  a apply ways │ X discard ways │ Esc back  read-only in review; Esc to edit                 |
 styles
-  0   0-0   Cyan - -
-  0   1-8   Black Cyan BOLD
-  0   9-9   Cyan Yellow -
-  0  10-15  Black Yellow BOLD
-  0  16-16  Yellow - -
-  0  19-19  DarkGray - -
-  0  20-31  White DarkGray DIM
-  0  32-32  DarkGray - -
-  0  35-35  DarkGray - -
-  0  36-43  White DarkGray DIM
-  0  44-44  DarkGray - -
-  0  47-47  DarkGray - -
-  0  48-58  White DarkGray DIM
-  0  59-59  DarkGray - -
-  0  62-62  DarkGray - -
-  0  63-71  White DarkGray DIM
-  0  72-72  DarkGray - -
+  0   0-7   Black Cyan BOLD
+  0   8-13  Black Yellow BOLD
+  0  16-27  White DarkGray DIM
+  0  30-37  White DarkGray DIM
+  0  40-50  White DarkGray DIM
+  0  53-61  White DarkGray DIM
   1   0-0   - - DIM
   1   1-33  Blue - BOLD|DIM
   1  34-55  - - DIM
@@ -146,8 +135,6 @@ styles
  27  54-55  - - DIM
  27  99-99  - - DIM
  28   0-99  - - DIM
- 29   0-0   LightRed - -
- 29   1-8   Black LightRed BOLD
- 29   9-9   LightRed - -
- 29  23-25  - - DIM
- 29  40-42  - - DIM
+ 29   0-7   Black LightRed BOLD
+ 29  21-23  - - DIM
+ 29  38-40  - - DIM

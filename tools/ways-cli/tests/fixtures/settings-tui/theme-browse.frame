@@ -1,5 +1,5 @@
 agent-tui frame 100x30
-| 1 ways    2 matching    3 gate    4 install    5 theme                                   |
+| 1 ways    2 matching    3 gate    4 install    5 theme                                             |
 |┌ themes ─────────────────────────────────────────────┐┌theme──────────────────────────────────────┐|
 |│ ● terminal         dark                             ││Nord                                       │|
 |│   agent-ways       dark                             ││nord · dark · background terminal          │|
@@ -28,23 +28,13 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| theme   ↑↓ preview · Enter use · a actions · e edit · Esc back  ? keys · Tab 1-9 tabs · / filters|
+| theme   ↑↓ preview · Enter use · a actions · e edit · Esc back  ? keys · Tab 1-9 tabs · / filters a|
 styles
-  0   0-0   Blue - -
-  0   1-8   White Blue -
-  0   9-9   Blue - -
-  0  12-12  Blue - -
-  0  13-24  White Blue -
-  0  25-25  Blue - -
-  0  28-28  Blue - -
-  0  29-36  White Blue -
-  0  37-37  Blue - -
-  0  40-40  Blue - -
-  0  41-51  White Blue -
-  0  52-52  Blue - -
-  0  55-55  Cyan - -
-  0  56-64  Black Cyan BOLD
-  0  65-65  Cyan - -
+  0   0-7   White Blue -
+  0  10-21  White Blue -
+  0  24-31  White Blue -
+  0  34-44  White Blue -
+  0  47-55  Black Cyan BOLD
   1   0-0   - - DIM
   1   1-8   Blue - BOLD|DIM
   1   9-55  - - DIM
@@ -224,7 +214,5 @@ styles
  27  54-55  - - DIM
  27  99-99  - - DIM
  28   0-99  - - DIM
- 29   0-0   Cyan - -
- 29   1-7   Black Cyan BOLD
- 29   8-8   Cyan - -
- 29   9-64  - - DIM|ITALIC
+ 29   0-6   Black Cyan BOLD
+ 29   7-62  - - DIM|ITALIC

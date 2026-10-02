@@ -1,5 +1,5 @@
 agent-tui frame 100x30
-| 1 ways    2 matching    3 gate    4 install    5 theme                                   |
+| 1 ways    2 matching    3 gate    4 install    5 theme                                             |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
 |│▌  enabled                     true                  ││ways.enabled                               │|
 |│   language                    auto                  ││                                           │|
@@ -28,23 +28,13 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  nord is the active theme                            |
+| browse  0 changed │ 0 queued │ mouse on (m)  nord is the active theme                              |
 styles
-  0   0-0   #c99fc1 - -
-  0   1-8   #2e3440 #c99fc1 BOLD
-  0   9-9   #c99fc1 - -
-  0  12-12  #bfa2c3 - -
-  0  13-24  #2e3440 #bfa2c3 -
-  0  25-25  #bfa2c3 - -
-  0  28-28  #bfa2c3 - -
-  0  29-36  #2e3440 #bfa2c3 -
-  0  37-37  #bfa2c3 - -
-  0  40-40  #bfa2c3 - -
-  0  41-51  #2e3440 #bfa2c3 -
-  0  52-52  #bfa2c3 - -
-  0  55-55  #bfa2c3 - -
-  0  56-64  #2e3440 #bfa2c3 -
-  0  65-65  #bfa2c3 - -
+  0   0-7   #2e3440 #c99fc1 BOLD
+  0  10-21  #2e3440 #bfa2c3 -
+  0  24-31  #2e3440 #bfa2c3 -
+  0  34-44  #2e3440 #bfa2c3 -
+  0  47-55  #2e3440 #bfa2c3 -
   1   0-0   #434c5e - -
   1   1-24  #bfa2c3 - BOLD
   1  25-55  #434c5e - -
@@ -138,11 +128,9 @@ styles
  27  54-55  #434c5e - -
  27  99-99  #434c5e - -
  28   0-99  #434c5e - -
- 29   0-0   #c99fc1 - -
- 29   1-8   #2e3440 #c99fc1 BOLD
- 29   9-9   #c99fc1 - -
- 29  11-19  #7c8baa - ITALIC
- 29  20-22  #434c5e - -
- 29  23-30  #7c8baa - ITALIC
- 29  31-33  #434c5e - -
- 29  34-45  #7c8baa - ITALIC
+ 29   0-7   #2e3440 #c99fc1 BOLD
+ 29   9-17  #7c8baa - ITALIC
+ 29  18-20  #434c5e - -
+ 29  21-28  #7c8baa - ITALIC
+ 29  29-31  #434c5e - -
+ 29  32-43  #7c8baa - ITALIC

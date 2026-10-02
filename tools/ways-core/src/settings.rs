@@ -255,10 +255,10 @@ const KEYS: &[KeySpec] = &[
         section: "theme",
         path: &["theme", "shape"],
         kind: Kind::Choice(&["round", "plain", "flame", "arrow", "slant", "pixel"]),
-        default: DefaultValue::Yaml("round"),
+        default: DefaultValue::Yaml("plain"),
         scope: Scope::User,
         doc: "The lozenge caps of tabs and the bottom bar.",
-        long: "Every shape but plain draws Nerd Font glyphs; plain lets the coloured segments abut, for a terminal font without them.",
+        long: "plain, the default, lets the coloured segments abut and works on any terminal font. Every other shape draws Nerd Font glyphs.",
         ..BASE
     },
     KeySpec {

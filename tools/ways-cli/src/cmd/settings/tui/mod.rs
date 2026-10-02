@@ -321,7 +321,7 @@ pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Fail
     let layers = ways.layers();
     let roots = ways.build(&layers);
     let active = ways.value("theme.active", &layers).and_then(|v| v.as_str().map(str::to_string));
-    let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::ROUND);
+    let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::PLAIN);
     let themes = Themes::new(ways.ctx.themes.clone(), depth, active).home(ways.ctx.home.clone());
     let title = format!(" ways settings — {} ", tilde(&ways.ctx.project, &ways.ctx.home));
     let mut names: Vec<&str> = TABS.to_vec();
