@@ -327,7 +327,7 @@ fn install_line() -> String {
     }
     let names: Vec<String> = enabled
         .iter()
-        .map(|t| format!("{} [{}]", t.path, crate::cmd::config_cmd::target_state(t)))
+        .map(|t| format!("{} [{}]", t.path, crate::cmd::target::state(t)))
         .collect();
     format!(
         "active, {} of {} target{} enabled: {}{}",
@@ -349,7 +349,7 @@ fn install_json() -> serde_json::Value {
             "path": t.path,
             "enabled": t.enabled,
             "observe": t.observes(),
-            "state": crate::cmd::config_cmd::target_state(t),
+            "state": crate::cmd::target::state(t),
             "mcp_command": crate::cmd::mcp_register::status(&t.dir(), &crate::paths::projection_root()),
         })).collect::<Vec<_>>(),
     })

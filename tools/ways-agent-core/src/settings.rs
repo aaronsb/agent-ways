@@ -49,7 +49,7 @@ const KEYS: &[KeySpec] = &[
         path: &["engine"],
         instances: &[],
         doc: "The profile the gate uses.",
-        long: "Unset: the first shipped profile whose provider has a key (anthropic, then openrouter). `ways agent use <profile>` sets it and checks the model.",
+        long: "Unset: the first shipped profile whose provider has a key (anthropic, then openrouter). `ways agent key check` checks the key against the profile's model.",
         ..BASE
     },
     KeySpec {

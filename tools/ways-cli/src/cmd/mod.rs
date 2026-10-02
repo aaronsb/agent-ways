@@ -1,9 +1,7 @@
 pub mod agent;
 pub mod banner;
-pub mod config_cmd;
 pub mod context;
 pub mod corpus;
-pub mod disable;
 pub mod graph;
 pub mod hook;
 pub mod init;
@@ -29,6 +27,7 @@ pub mod show;
 pub mod stats;
 pub mod status;
 pub mod suggest;
+pub mod target;
 pub mod template;
 pub mod tree;
 pub mod tune;

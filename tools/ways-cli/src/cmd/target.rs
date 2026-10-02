@@ -1,117 +1,22 @@
-//! `ways config` (ADR-184, ADR-185): the resolved configuration, and the
-//! projection targets that decide where agent-ways is active.
+//! `ways target` (ADR-184, ADR-185, ADR-507): the projection targets, the
+//! Claude Code config directories agent-ways is active in.
 //!
 //! Output follows ADR-185: tables for people, one JSON document under
-//! `--json`, a debug rendering never. `show --json` is the stored file;
-//! `show --json --effective` is the resolved state with defaults applied.
+//! `--json`, a debug rendering never.
 
 use crate::cmd::reconcile::{self, Plan};
 use crate::config::{Config, Target};
 use crate::paths;
 use agent_fmt::{Align, Table};
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::path::PathBuf;
 
 /// Exit code for a plan that would refuse or remove something the operator
 /// owns (ADR-185 item 5): distinguishable from a failure.
 pub const EXIT_BLOCKED: i32 = 3;
 
-/// The stored user config as JSON, or an empty object when the file is absent.
-fn stored_json() -> Result<serde_json::Value> {
-    let path = paths::user_config();
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    if text.trim().is_empty() {
-        return Ok(serde_json::Value::Object(Default::default()));
-    }
-    serde_yaml::from_str::<serde_json::Value>(&text).with_context(|| format!("parsing {}", path.display()))
-}
-
-/// The resolved config as JSON. Built by hand because `Config` is assembled
-/// from layers and carries no serde derive.
-fn effective_json(cfg: &Config) -> serde_json::Value {
-    serde_json::json!({
-        "language": cfg.language,
-        "default_scope": cfg.default_scope,
-        "enabled": cfg.enabled,
-        "disabled_domains": cfg.disabled_domains,
-        "disabled_ways": cfg.disabled_ways(),
-        "parent_threshold_multiplier": cfg.parent_threshold_multiplier,
-        "parent_boost_floor": cfg.parent_boost_floor,
-        "semantic_fire_probability": cfg.semantic_fire_probability,
-        "keyword_floor_probability": cfg.keyword_floor_probability,
-        "near_miss_margin": cfg.near_miss_margin,
-        "refire_presets": cfg.refire_presets,
-        "secret_path_deny": cfg.secret_path_deny,
-        "targets": cfg.targets(),
-        "targets_explicit": cfg.targets_explicit(),
-        "target_config": cfg.target_config,
-        "current_config_dir": paths::current_config_dir(),
-    })
-}
-
-pub fn show(json: bool, effective: bool) -> Result<()> {
-    // Loads fresh from disk rather than config::global(): a diagnostic verb
-    // reflects the files as they are now.
-    let cfg = Config::load(&crate::util::project_dir());
-    if json {
-        let doc = if effective { effective_json(&cfg) } else { stored_json()? };
-        println!("{}", serde_json::to_string_pretty(&doc)?);
-        return Ok(());
-    }
-    let mut t = Table::new(&["Setting", "Value"]);
-    t.align(0, Align::Left);
-    t.no_auto_fit();
-    let mut presets: Vec<(&String, &f64)> = cfg.refire_presets.iter().collect();
-    presets.sort_by(|a, b| a.0.cmp(b.0));
-    let rows: Vec<(String, String)> = vec![
-        ("language".into(), cfg.language.clone()),
-        ("default_scope".into(), cfg.default_scope.clone()),
-        ("enabled".into(), cfg.enabled.to_string()),
-        ("disabled_domains".into(), list_or_none(&cfg.disabled_domains)),
-        ("disabled_ways".into(), list_or_none(cfg.disabled_ways())),
-        ("parent_threshold_multiplier".into(), cfg.parent_threshold_multiplier.to_string()),
-        ("parent_boost_floor".into(), cfg.parent_boost_floor.to_string()),
-        ("semantic_fire_probability".into(), cfg.semantic_fire_probability.to_string()),
-        ("keyword_floor_probability".into(), cfg.keyword_floor_probability.to_string()),
-        ("near_miss_margin".into(), cfg.near_miss_margin.to_string()),
-        (
-            "refire_presets".into(),
-            presets.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(", "),
-        ),
-        ("secret_path_deny".into(), cfg.secret_path_deny.to_string()),
-        (
-            "targets".into(),
-            format!(
-                "{}{}",
-                cfg.targets().iter().map(|t| t.path.clone()).collect::<Vec<_>>().join(", "),
-                if cfg.targets_explicit() { "" } else { " (implicit)" }
-            ),
-        ),
-    ];
-    for (k, v) in rows {
-        t.add_owned(vec![k, v]);
-    }
-    t.print();
-    eprintln!("stored: {}", paths::user_config().display());
-    match &cfg.target_config {
-        Some(p) => eprintln!("target:  {} (layered for {})", p.display(), paths::current_config_dir().display()),
-        None => eprintln!("target:  no target config for {}", paths::current_config_dir().display()),
-    }
-    Ok(())
-}
-
-fn list_or_none(v: &[String]) -> String {
-    if v.is_empty() {
-        "(none)".to_string()
-    } else {
-        v.join(", ")
-    }
-}
-
-// ── Targets ─────────────────────────────────────────────────────
-
 /// The converged state of one target, read from its directory.
-pub fn target_state(t: &Target) -> String {
+pub fn state(t: &Target) -> String {
     let plan = match reconcile::plan_target(&t.dir()) {
         Ok(p) => p,
         Err(e) => return format!("unreadable ({e})"),
@@ -136,7 +41,7 @@ pub fn target_state(t: &Target) -> String {
     }
 }
 
-pub fn targets(json: bool) -> Result<()> {
+pub fn list(json: bool) -> Result<()> {
     let cfg = Config::load(&crate::util::project_dir());
     let list = cfg.targets();
     if json {
@@ -150,7 +55,7 @@ pub fn targets(json: bool) -> Result<()> {
                     "observe": t.observes(),
                     "config": t.config_path(),
                     "config_present": t.config_path().is_file(),
-                    "state": target_state(t),
+                    "state": state(t),
                 })
             })
             .collect();
@@ -178,7 +83,7 @@ pub fn targets(json: bool) -> Result<()> {
             target.path.clone(),
             target.enabled.to_string(),
             target.observes().to_string(),
-            target_state(target),
+            state(target),
             if cfg_path.is_file() { cfg_path.display().to_string() } else { "(user config)".to_string() },
         ]);
     }
@@ -267,13 +172,13 @@ pub fn print_plan(plan: &Plan, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn target_plan(dir: &str, json: bool) -> Result<()> {
+pub fn plan(dir: &str, json: bool) -> Result<()> {
     let (_, canonical) = resolve_dir(dir)?;
     let plan = reconcile::plan_target(&canonical)?;
     print_plan(&plan, json)
 }
 
-pub fn target_add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
+pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
     let (stored, canonical) = resolve_dir(dir)?;
     let plan = reconcile::plan_target(&canonical)?;
     print_plan(&plan, json)?;
@@ -343,15 +248,15 @@ fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
     reconcile::run_for_targets(&[target], false, false, false)
 }
 
-pub fn target_enable(dir: &str) -> Result<()> {
+pub fn enable(dir: &str) -> Result<()> {
     set_enabled(dir, true)
 }
 
-pub fn target_disable(dir: &str) -> Result<()> {
+pub fn disable(dir: &str) -> Result<()> {
     set_enabled(dir, false)
 }
 
-pub fn target_remove(dir: &str) -> Result<()> {
+pub fn remove(dir: &str) -> Result<()> {
     let implicit = Config::load(&crate::util::project_dir()).targets();
     let mut removed: Option<Target> = None;
     // Withdraw first, then forget: a removed target is a withdrawn one. The

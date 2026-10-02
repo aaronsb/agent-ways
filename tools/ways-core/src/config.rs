@@ -418,58 +418,6 @@ impl Config {
             }
         }
     }
-
-    /// Initialize user config at the canonical XDG path.
-    pub fn init_user_config() -> PathBuf {
-        let path = crate::paths::user_config();
-        if path.exists() {
-            return path;
-        }
-        let content = "# ways configuration
-# User scope: $XDG_CONFIG_HOME/agent-ways/config.yaml
-# Project scope: {project}/.claude/ways.yaml (layered on top)
-
-# language: en          # Output language (en, ja, auto)
-# default_scope: agent  # Default scope for ways without explicit scope
-# disabled_domains: []  # Domains to disable everywhere (e.g., [ea, itops])
-# secret_path_deny: true # Project the secret-path permissions.deny baseline
-#                        # (~/.ssh, ~/.aws, .env, …) into settings.json — ADR-152.
-#                        # Set false to opt out entirely (secure by default).
-
-# Projection targets (ADR-184): the Claude Code config directories agent-ways
-# is active in. Absent: the default ~/.claude, enabled. Edit with
-# `ways config target add|enable|disable|remove <dir>`.
-# targets:
-#   - path: ~/.claude
-#     enabled: true
-#     observe: true        # include in transcript-derived reports (default: enabled)
-#     config: ~/.config/agent-ways/targets/<key>/config.yaml   # this target's own
-#                          # settings, same keys as this file, layered over it for
-#                          # sessions under that config directory (default location)
-
-# enabled: false          # In {project}/.claude/ways.yaml: switch ways off for that
-#                         # project; hooks inject nothing there (ADR-184).
-
-# Per-way enable/disable (ADR-131) is project scope only — set it in
-# {project}/.claude/ways.yaml using either form:
-#   ways:
-#     itops/incident: false          # shorthand
-#     meta/introspection:            # long-form
-#       enabled: false
-# Or run `ways disable <name>` / `ways enable <name>` from the project root.
-";
-        // Creates the file only when none exists (ADR-503 §6).
-        let _ = agent_settings::writer::create_new(&path, content);
-        path
-    }
-
-    /// Show the config file paths.
-    pub fn config_path() -> String {
-        format!(
-            "user:    {}\nproject: $PROJECT/.claude/ways.yaml",
-            crate::paths::user_config().display(),
-        )
-    }
 }
 
 fn home_dir() -> PathBuf {

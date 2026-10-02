@@ -30,7 +30,68 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Context window usage — accurate token counts from transcript
+    /// Engine health: binary, model, corpus, project
+    Status {
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read and change settings; the screens on a terminal (ADR-503)
+    ///
+    /// Read and change settings through their files (ADR-503); alone on a
+    /// terminal, the settings screens. Exit codes: 0 done, 2 usage or unknown
+    /// key, 3 rejected, 4 overridden, 5 write failed
+    #[command(disable_help_subcommand = true, args_conflicts_with_subcommands = true)]
+    Settings {
+        /// Open the screens on this tab: ways, matching, gate, install or theme
+        tab: Option<String>,
+        /// The project whose .claude/ways.yaml the screens read and write
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Test only: feed this key script to the screens, headless; repeatable. It cannot type into a masked entry
+        #[arg(long, hide = true, action = clap::ArgAction::Append, allow_hyphen_values = true)]
+        keys: Vec<String>,
+        /// Print the frame at WIDTHxHEIGHT, headless, in the test kit's frame format
+        #[arg(long, hide = true)]
+        snap: Option<String>,
+        /// The colour depth to draw at: truecolor, 256, 16 or none
+        #[arg(long, hide = true)]
+        depth: Option<String>,
+        #[command(subcommand)]
+        action: Option<SettingsCommand>,
+    },
+    /// Claude Code config directories agent-ways is active in (ADR-184)
+    #[command(arg_required_else_help = true)]
+    Target {
+        #[command(subcommand)]
+        action: TargetCommand,
+    },
+    /// The ways agent: keys, models and the daemon (ADR-502)
+    ///
+    /// Runs `ways-agent`; `ways agent --help` lists its commands. The engine,
+    /// model and mode are settings: `ways settings list gate` (ADR-507).
+    #[command(disable_help_flag = true)]
+    Agent {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Claude Code's projects and their session history (ADR-504)
+    ///
+    /// Claude Code's projects: list, search, show, stats, cleanup, hygiene and
+    /// relocate (ADR-504). With no subcommand, lists them.
+    Projects {
+        #[command(subcommand)]
+        command: Option<cmd::projects::ProjectsCommand>,
+    },
+    /// This session and past ones: fired ways, replay, reset
+    #[command(arg_required_else_help = true)]
+    Session {
+        #[command(subcommand)]
+        action: SessionCommand,
+    },
+    /// Context-window usage for a session
+    ///
+    /// Token counts read from the session's transcript.
     Context {
         /// Project directory (default: detect from cwd or CLAUDE_PROJECT_DIR)
         #[arg(long)]
@@ -42,48 +103,27 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Validate way frontmatter against the schema
-    Lint {
-        /// Path to scan (default: project ways if in project, else global)
-        path: Option<String>,
-        /// Show the frontmatter schema reference
-        #[arg(long)]
-        schema: bool,
-        /// Exit non-zero on errors (for CI)
-        #[arg(long)]
-        check: bool,
-        /// Auto-fix what can be fixed, in the file or directory given as `path`
-        ///
-        /// Scope comes from `path`, not from this flag. Without a path, `--fix`
-        /// refuses to run rather than rewriting the whole corpus by surprise;
-        /// pass `--all` to ask for that deliberately.
-        #[arg(long)]
-        fix: bool,
-        /// Allow `--fix` to write across the entire resolved corpus
-        #[arg(long)]
-        all: bool,
-        /// Scan global ways (ignore CLAUDE_PROJECT_DIR)
-        #[arg(long)]
-        global: bool,
+    /// Write and check ways
+    #[command(arg_required_else_help = true)]
+    Author {
+        #[command(subcommand)]
+        action: AuthorCommand,
     },
-    /// Detect (or repair) hard-wrapped markdown prose
+    /// Measure matching against telemetry and locales
+    #[command(arg_required_else_help = true)]
+    Tune {
+        #[command(subcommand)]
+        action: TuneCommand,
+    },
+    /// Set up .claude/ways/ in a project (ADR-128)
     ///
-    /// Exits 0 when clean and 1 when wrapped prose is found, matching lint
-    /// convention. Reads stdin when no path is given.
-    Reflow {
-        /// Markdown file to inspect (default: read stdin)
-        path: Option<String>,
-        /// Rewrite the file, backing the original up first
+    /// Writes the project's .claude/ways/ structure and the MEMORY.md seed.
+    Init {
+        /// Project directory (default: CLAUDE_PROJECT_DIR or cwd)
         #[arg(long)]
-        fix: bool,
-        /// Emit findings as JSON
-        #[arg(long)]
-        json: bool,
-        /// Suppress human-readable output (exit code only)
-        #[arg(long)]
-        quiet: bool,
+        project: Option<String>,
     },
-    /// Generate the ways corpus for matching engines
+    /// Rebuild the matching corpus
     Corpus {
         /// Ways root directory (default: ~/.claude/hooks/ways, or $XDG_DATA_HOME/agent-ways/hooks/ways before the projection exists)
         #[arg(long)]
@@ -108,137 +148,27 @@ enum Commands {
         #[arg(long)]
         if_stale: bool,
     },
-    /// Diagnose how a query matches ways under the live late-interaction matcher
-    /// (ADR-160): peak · share · body-confirm · fired, per candidate — the tool for
-    /// authoring a way against how it actually fires.
-    Match {
-        /// The query string to match
-        query: String,
-        /// Project directory (for project-local ways; default: current)
+    /// Update agent-ways: pull, refresh binaries, rebuild, reproject
+    ///
+    /// Update the agent-ways install — pull, refresh binaries (pre-built first),
+    /// regenerate corpus, reproject
+    Update {
+        /// Show what would run without executing it
         #[arg(long)]
-        project: Option<String>,
+        dry_run: bool,
+        /// Pin the install to a specific branch, tag, or commit and build the
+        /// whole suite from source, instead of pulling the latest release.
+        /// Leaves the release channel until `ways update --ref main`.
+        #[arg(long = "ref", value_name = "REF")]
+        git_ref: Option<String>,
     },
-    /// Score way-vs-way cosine similarity
-    Siblings {
-        /// Way ID to compare (or "all" for full matrix)
-        id: String,
-        /// Minimum similarity threshold to display
-        #[arg(long, default_value = "0.3")]
-        threshold: f64,
-        /// Path to corpus JSONL
-        #[arg(long)]
-        corpus: Option<String>,
-        /// Path to GGUF model file
-        #[arg(long)]
-        model: Option<String>,
-    },
-    /// Export ways as a JSONL graph (nodes + edges)
-    Graph {
-        /// Ways root directory (default: ~/.claude/hooks/ways)
-        #[arg(long)]
-        ways_dir: Option<String>,
-        /// Output file (default: stdout)
-        #[arg(long, short)]
-        output: Option<String>,
-    },
-    /// Analyze progressive disclosure tree structure
-    Tree {
-        /// Way path or short name (e.g., "supplychain" or full path)
-        path: String,
-        /// Show Jaccard similarity between siblings
-        #[arg(long)]
-        jaccard: bool,
-    },
-    /// Display a way, check, or core guidance (session-aware)
-    Show {
-        #[command(subcommand)]
-        what: ShowCommand,
-    },
-    /// Analyze a way file and suggest vocabulary improvements
-    Suggest {
-        /// Path to a way file
-        file: String,
-        /// Minimum term frequency for suggestions
-        #[arg(long, default_value = "2")]
-        min_freq: u32,
-    },
-    /// Initialize project .claude/ways/ structure and MEMORY.md seed (ADR-128)
-    Init {
-        /// Project directory (default: CLAUDE_PROJECT_DIR or cwd)
-        #[arg(long)]
-        project: Option<String>,
-    },
-    /// Scaffold a new way file (frontmatter and a body template). Ways are authored English-only; locale stubs come from ways-localize (ADR-139)
-    Template {
-        /// Way path relative to ways root (e.g., "softwaredev/code/newway")
-        path: String,
-        /// Description — what this way covers, in natural language
-        #[arg(long, short)]
-        description: String,
-        /// Vocabulary — space-separated domain keywords users would say
-        #[arg(long, short = 'V')]
-        vocabulary: Option<String>,
-        /// Scope: agent, subagent, teammate (comma-separated)
-        #[arg(long, default_value = "agent")]
-        scope: String,
-        /// Create in global ways (~/.claude/hooks/ways/) instead of project-local
-        #[arg(long)]
-        global: bool,
-    },
-    /// Language coverage report — models, stubs, and per-way embed routing
-    Language {
-        /// Filter to ways supporting this language (code or name)
-        #[arg(long)]
-        filter: Option<String>,
-        /// Show full per-way coverage detail (default shows uncovered summary)
-        #[arg(long)]
-        audit: bool,
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-    },
-    /// Usage statistics from event log
-    Stats {
-        /// Last N days only
-        #[arg(long)]
-        days: Option<u32>,
-        /// Filter to specific project path (default: CLAUDE_PROJECT_DIR)
-        #[arg(long)]
-        project: Option<String>,
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-        /// Show stats across all projects (ignore CLAUDE_PROJECT_DIR)
-        #[arg(long)]
-        global: bool,
-    },
-    /// List ways triggered in the current session with epoch and disclosure state
-    List {
-        /// Session ID (if omitted, auto-detects current session)
-        #[arg(long)]
-        session: Option<String>,
-        /// Sort order: epoch (default, conversation order), name, distance
-        #[arg(long, default_value = "epoch")]
-        sort: String,
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-    },
-    /// Print the projection manifest — the desired state of ~/.claude derived
-    /// from `git ls-files` over the projection allowlist (ADR-144). The
-    /// reconciler converges ~/.claude toward this.
-    Manifest {
-        /// Source checkout to derive from (default: $XDG_DATA/agent-ways)
-        #[arg(long)]
-        source: Option<String>,
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-    },
-    /// Converge ~/.claude toward the projection manifest (ADR-144). Symlink
-    /// mode (default) links each projection root into the source checkout, so a
-    /// `git pull` in $XDG_DATA is live with no further step. Idempotent;
-    /// silent when already up to date.
+    /// Repair the projection into each target (ADR-144)
+    ///
+    /// Converges every enabled target toward the projection manifest and
+    /// withdraws from every disabled one (ADR-144, ADR-184). Symlink mode
+    /// (default) links each projection root into the source checkout, so a
+    /// `git pull` in $XDG_DATA is live with no further step. Idempotent; silent
+    /// when already up to date.
     Reconcile {
         /// Source checkout (default: $XDG_DATA/agent-ways)
         #[arg(long)]
@@ -261,177 +191,8 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
-    /// Introspect a session: which ways fired, on which turn, and why
-    /// (ADR-153/154). Replay or follow it live on screen, list sessions, or
-    /// dump them as JSON.
-    Introspect {
-        #[command(subcommand)]
-        mode: IntrospectCommand,
-    },
-    /// Engine health dashboard — binary, model, corpus, project status
-    Status {
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-    },
-    /// Scan ways and output matched content (replaces hook scan loops)
-    Scan {
-        #[command(subcommand)]
-        mode: ScanCommand,
-    },
-    /// Reset session state when ways stop firing or fire incorrectly.
+    /// Remove agent-ways; without --yes, print the plan only
     ///
-    /// Clears markers, epoch counters, and check fire counts from /tmp.
-    /// Use when: a way should fire but doesn't (stale marker), checks
-    /// fire too aggressively (inflated epoch), or after debugging the
-    /// way tree. Default is dry run — add --confirm to actually delete.
-    Reset {
-        /// Target a specific session ID
-        #[arg(long)]
-        session: Option<String>,
-        /// Clear all sessions (not just the current one)
-        #[arg(long)]
-        all: bool,
-        /// Actually delete (default is dry run that shows what would be cleared)
-        #[arg(long)]
-        confirm: bool,
-    },
-    /// Serve one Claude Code hook: read its JSON payload on stdin and print
-    /// what the hook returns (ADR-504 §11). The scripts under hooks/ways call
-    /// this and nothing else.
-    Hook {
-        #[arg(value_enum)]
-        event: cmd::hook::HookEvent,
-    },
-    /// Print the per-user sessions root directory, for scripts the binary does
-    /// not run (macros and postchecks get it as WAYS_SESSIONS_ROOT).
-    SessionsRoot,
-    /// Print the canonical events-log path (`paths::events_log()`), which
-    /// every telemetry writer and reader resolves.
-    EventsLogPath,
-    /// Print the directory name Claude Code gives a project under its projects
-    /// dir (`claude_sessions::project_slug`). Defaults to `CLAUDE_PROJECT_DIR`,
-    /// else the working directory. Lets shell macros read per-project state
-    /// without re-deriving the rule.
-    ProjectSlug {
-        /// Project path
-        path: Option<String>,
-    },
-    /// Claude Code's projects: list, search, show, stats, cleanup, hygiene and
-    /// relocate (ADR-504). With no subcommand, lists them.
-    Projects {
-        #[command(subcommand)]
-        command: Option<cmd::projects::ProjectsCommand>,
-    },
-    /// The ways agent: API keys, the judge's engine and mode (ADR-196, ADR-502).
-    /// Runs `ways-agent`; `ways agent --help` lists its commands.
-    #[command(disable_help_flag = true)]
-    Agent {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
-    /// Read and change settings through their files (ADR-503); alone on a terminal, the settings screens. Exit codes: 0 done, 2 usage or unknown key, 3 rejected, 4 overridden, 5 write failed
-    #[command(disable_help_subcommand = true, args_conflicts_with_subcommands = true)]
-    Settings {
-        /// Open the screens on this tab: ways, matching, gate, install or theme
-        tab: Option<String>,
-        /// The project whose .claude/ways.yaml the screens read and write
-        #[arg(long)]
-        project: Option<PathBuf>,
-        /// Test only: feed this key script to the screens, headless; repeatable. It cannot type into a masked entry
-        #[arg(long, hide = true, action = clap::ArgAction::Append, allow_hyphen_values = true)]
-        keys: Vec<String>,
-        /// Print the frame at WIDTHxHEIGHT, headless, in the test kit's frame format
-        #[arg(long, hide = true)]
-        snap: Option<String>,
-        /// The colour depth to draw at: truecolor, 256, 16 or none
-        #[arg(long, hide = true)]
-        depth: Option<String>,
-        #[command(subcommand)]
-        action: Option<SettingsCommand>,
-    },
-    /// Manage configuration (init/show/path)
-    Config {
-        #[command(subcommand)]
-        action: ConfigCommand,
-    },
-    /// Disable a way in this project (ADR-131 — writes .claude/ways.yaml)
-    Disable {
-        /// Way ID to disable (e.g., "itops/incident"). Omit when using --list.
-        #[arg(required_unless_present = "list", conflicts_with = "list")]
-        name: Option<String>,
-        /// List currently disabled ways in this project
-        #[arg(long, conflicts_with = "name")]
-        list: bool,
-        /// With --list, emit bare names one-per-line (machine-readable, no decoration)
-        #[arg(long, requires = "list")]
-        names_only: bool,
-    },
-    /// Re-enable a way previously disabled in this project (ADR-131)
-    Enable {
-        /// Way ID to enable (e.g., "itops/incident")
-        name: String,
-    },
-    /// Audit locale alias fidelity + discrimination (ADR-125 — flags stubs to re-author)
-    Tune {
-        /// Ways root directory (default: ~/.claude/hooks/ways)
-        #[arg(long)]
-        ways_dir: Option<String>,
-        /// Filter to ways matching this substring (e.g., "security", "ea/")
-        #[arg(long)]
-        way: Option<String>,
-        /// Audit only this language code (default: the active localized language)
-        #[arg(long)]
-        lang: Option<String>,
-        /// Minimum cross-lingual cosine to accept for fidelity (default: 0.60)
-        #[arg(long, default_value = "0.60")]
-        fidelity_threshold: f64,
-        /// Minimum discrimination gap (min_peer − top_confuser.score);
-        /// entries below this are flagged as being outranked by another way.
-        /// Default 0.03 — small positive margin required.
-        #[arg(long, default_value = "0.03")]
-        discrimination_threshold: f64,
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-    },
-    /// Audit fire relevance — flag ways landing in off-domain sessions (ADR-134 Decision 3)
-    TunePrecision {
-        /// Minimum sessions a way must have fired in before it's flagged
-        #[arg(long, default_value = "5")]
-        min_sessions: usize,
-        /// Off-class rate at or above which a way is flagged (0.0–1.0)
-        #[arg(long, default_value = "0.5")]
-        flag_threshold: f64,
-        /// Filter to events whose project path contains this substring
-        #[arg(long)]
-        project: Option<String>,
-        /// Filter to ways whose id contains this substring
-        #[arg(long)]
-        way: Option<String>,
-        /// Machine-readable JSON output
-        #[arg(long)]
-        json: bool,
-    },
-    /// Permission audit — diff requires: fields against settings.json grants (ADR-116)
-    Permissions {
-        #[command(subcommand)]
-        action: PermissionsCommand,
-        /// Scan global ways (ignore project-local)
-        #[arg(long, global = true)]
-        global: bool,
-    },
-    /// Update the agent-ways install — pull, refresh binaries (pre-built first), regenerate corpus, reproject
-    Update {
-        /// Show what would run without executing it
-        #[arg(long)]
-        dry_run: bool,
-        /// Pin the install to a specific branch, tag, or commit and build the
-        /// whole suite from source, instead of pulling the latest release.
-        /// Leaves the release channel until `ways update --ref main`.
-        #[arg(long = "ref", value_name = "REF")]
-        git_ref: Option<String>,
-    },
     /// Remove agent-ways: withdraw from every target, stop the agent, unlink the
     /// commands and delete the app. Your config and state stay unless --purge.
     /// Prints the plan and changes nothing without --yes.
@@ -443,12 +204,74 @@ enum Commands {
         #[arg(long)]
         purge: bool,
     },
+    /// Serve one Claude Code hook: read its JSON payload on stdin and print
+    /// what the hook returns (ADR-504 §11). The scripts under hooks/ways call
+    /// this and nothing else.
+    #[command(hide = true)]
+    Hook {
+        #[arg(value_enum)]
+        event: cmd::hook::HookEvent,
+    },
+    /// Display a way, check, or core guidance (session-aware)
+    #[command(hide = true)]
+    Show {
+        #[command(subcommand)]
+        what: ShowCommand,
+    },
+    /// Scan ways and output matched content (replaces hook scan loops)
+    #[command(hide = true)]
+    Scan {
+        #[command(subcommand)]
+        mode: ScanCommand,
+    },
+    /// Print the projection manifest — the desired state of ~/.claude derived
+    /// from `git ls-files` over the projection allowlist (ADR-144). The
+    /// reconciler converges ~/.claude toward this.
+    #[command(hide = true)]
+    Manifest {
+        /// Source checkout to derive from (default: $XDG_DATA/agent-ways)
+        #[arg(long)]
+        source: Option<String>,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the directory name Claude Code gives a project under its projects
+    /// dir (`claude_sessions::project_slug`). Defaults to `CLAUDE_PROJECT_DIR`,
+    /// else the working directory. Lets shell macros read per-project state
+    /// without re-deriving the rule.
+    #[command(hide = true)]
+    ProjectSlug {
+        /// Project path
+        path: Option<String>,
+    },
+    /// Print the per-user sessions root directory, for scripts the binary does
+    /// not run (macros and postchecks get it as WAYS_SESSIONS_ROOT).
+    #[command(hide = true)]
+    SessionsRoot,
+    /// Print the canonical events-log path (`paths::events_log()`), which
+    /// every telemetry writer and reader resolves.
+    #[command(hide = true)]
+    EventsLogPath,
 }
 
 #[derive(Subcommand)]
-enum IntrospectCommand {
-    /// Replay a session's way firings frame by frame on screen, or print the
-    /// timeline as JSON with `--json`.
+enum SessionCommand {
+    /// Ways fired in this session, with epoch and disclosure state
+    Ways {
+        /// Session ID (if omitted, auto-detects current session)
+        #[arg(long)]
+        session: Option<String>,
+        /// Sort order: epoch (default, conversation order), name, distance
+        #[arg(long, default_value = "epoch")]
+        sort: String,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replay a session's way firings frame by frame
+    ///
+    /// On screen, or the timeline as JSON with `--json`.
     Replay {
         /// Session ID to replay directly (default: pick interactively)
         #[arg(long)]
@@ -477,7 +300,9 @@ enum IntrospectCommand {
         #[arg(long, hide = true)]
         depth: Option<String>,
     },
-    /// List candidate sessions in scope (table, or `--json` for an agent).
+    /// List the sessions in scope
+    ///
+    /// A table, or `--json` for an agent.
     List {
         /// Scope to this project path (default: current project)
         #[arg(long)]
@@ -489,8 +314,9 @@ enum IntrospectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Dump a session's reconstructed introspection as JSON (agent-facing):
-    /// turns, fired ways, their criteria, keyed transcript join, and matched
+    /// Dump a session's introspection as JSON, for an agent
+    ///
+    /// Turns, fired ways, their criteria, keyed transcript join, and matched
     /// spans. Defaults to the most recent session in the current project.
     Dump {
         /// Session ID to dump (default: most recent in scope)
@@ -503,9 +329,10 @@ enum IntrospectCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Live-monitor the current session's way firings, following the newest frame
-    /// as ways fire (the replay TUI, refreshing on a tick). Defaults to the most
-    /// recent session in the current project.
+    /// Follow the current session's way firings as they happen
+    ///
+    /// The replay screens, following the newest frame on a tick. Defaults to
+    /// the most recent session in the current project.
     Live {
         /// Session ID to monitor (default: most recent in the current project)
         #[arg(long)]
@@ -523,10 +350,11 @@ enum IntrospectCommand {
         #[arg(long, hide = true)]
         depth: Option<String>,
     },
-    /// List semantic way fires as `score · surface · way`, read straight from
-    /// events.jsonl (no introspection model) — the read-side precision instrument:
-    /// eyeball whether each fire matched the surface it fired on. Defaults to the
-    /// most recent session in the current project, borderline (lowest-score) first.
+    /// List semantic fires as score, surface and way
+    ///
+    /// Read straight from events.jsonl, with no introspection model: check
+    /// whether each fire matched the surface it fired on. Defaults to the most
+    /// recent session in the current project, lowest score first.
     Fires {
         /// Session ID to read (default: most recent in scope)
         #[arg(long)]
@@ -543,6 +371,222 @@ enum IntrospectCommand {
         /// Cap the number of rows shown (default: all)
         #[arg(long)]
         limit: Option<usize>,
+    },
+    /// Clear session markers when ways stop firing or fire wrongly
+    ///
+    /// Reset session state when ways stop firing or fire incorrectly. Clears
+    /// markers, epoch counters, and check fire counts from /tmp. Use when: a way
+    /// should fire but doesn't (stale marker), checks fire too aggressively
+    /// (inflated epoch), or after debugging the way tree. Default is dry run —
+    /// add --confirm to actually delete.
+    Reset {
+        /// Target a specific session ID
+        #[arg(long)]
+        session: Option<String>,
+        /// Clear all sessions (not just the current one)
+        #[arg(long)]
+        all: bool,
+        /// Actually delete (default is dry run that shows what would be cleared)
+        #[arg(long)]
+        confirm: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuthorCommand {
+    /// Validate way frontmatter against the schema
+    Lint {
+        /// Path to scan (default: project ways if in project, else global)
+        path: Option<String>,
+        /// Show the frontmatter schema reference
+        #[arg(long)]
+        schema: bool,
+        /// Exit non-zero on errors (for CI)
+        #[arg(long)]
+        check: bool,
+        /// Auto-fix what can be fixed, in the file or directory given as `path`
+        ///
+        /// Scope comes from `path`, not from this flag. Without a path, `--fix`
+        /// refuses to run rather than rewriting the whole corpus by surprise;
+        /// pass `--all` to ask for that deliberately.
+        #[arg(long)]
+        fix: bool,
+        /// Allow `--fix` to write across the entire resolved corpus
+        #[arg(long)]
+        all: bool,
+        /// Scan global ways (ignore CLAUDE_PROJECT_DIR)
+        #[arg(long)]
+        global: bool,
+    },
+    /// Scaffold a new way file (ADR-139)
+    ///
+    /// Writes frontmatter and a body template. Ways are authored English-only;
+    /// locale stubs come from ways-localize.
+    Template {
+        /// Way path relative to ways root (e.g., "softwaredev/code/newway")
+        path: String,
+        /// Description — what this way covers, in natural language
+        #[arg(long, short)]
+        description: String,
+        /// Vocabulary — space-separated domain keywords users would say
+        #[arg(long, short = 'V')]
+        vocabulary: Option<String>,
+        /// Scope: agent, subagent, teammate (comma-separated)
+        #[arg(long, default_value = "agent")]
+        scope: String,
+        /// Create in global ways (~/.claude/hooks/ways/) instead of project-local
+        #[arg(long)]
+        global: bool,
+    },
+    /// Show how a query matches ways under the live matcher (ADR-160)
+    ///
+    /// Diagnose how a query matches ways under the live late-interaction matcher
+    /// (ADR-160): peak · share · body-confirm · fired, per candidate — the tool
+    /// for authoring a way against how it actually fires.
+    Match {
+        /// The query string to match
+        query: String,
+        /// Project directory (for project-local ways; default: current)
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Analyze a progressive-disclosure tree
+    Tree {
+        /// Way path or short name (e.g., "supplychain" or full path)
+        path: String,
+        /// Show Jaccard similarity between siblings
+        #[arg(long)]
+        jaccard: bool,
+    },
+    /// Score way-against-way cosine similarity
+    Siblings {
+        /// Way ID to compare (or "all" for full matrix)
+        id: String,
+        /// Minimum similarity threshold to display
+        #[arg(long, default_value = "0.3")]
+        threshold: f64,
+        /// Path to corpus JSONL
+        #[arg(long)]
+        corpus: Option<String>,
+        /// Path to GGUF model file
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Suggest vocabulary for a way file
+    Suggest {
+        /// Path to a way file
+        file: String,
+        /// Minimum term frequency for suggestions
+        #[arg(long, default_value = "2")]
+        min_freq: u32,
+    },
+    /// Export ways as a JSONL graph of nodes and edges
+    Graph {
+        /// Ways root directory (default: ~/.claude/hooks/ways)
+        #[arg(long)]
+        ways_dir: Option<String>,
+        /// Output file (default: stdout)
+        #[arg(long, short)]
+        output: Option<String>,
+    },
+    /// Detect or repair hard-wrapped markdown prose
+    ///
+    /// Exits 0 when clean and 1 when wrapped prose is found, matching lint
+    /// convention. Reads stdin when no path is given.
+    Reflow {
+        /// Markdown file to inspect (default: read stdin)
+        path: Option<String>,
+        /// Rewrite the file, backing the original up first
+        #[arg(long)]
+        fix: bool,
+        /// Emit findings as JSON
+        #[arg(long)]
+        json: bool,
+        /// Suppress human-readable output (exit code only)
+        #[arg(long)]
+        quiet: bool,
+    },
+    /// Diff ways' requires: against settings.json grants (ADR-116)
+    Permissions {
+        /// Scan global ways (ignore project-local)
+        #[arg(long)]
+        global: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TuneCommand {
+    /// Audit locale alias fidelity and discrimination (ADR-125)
+    ///
+    /// Flags locale stubs to re-author.
+    Locale {
+        /// Ways root directory (default: ~/.claude/hooks/ways)
+        #[arg(long)]
+        ways_dir: Option<String>,
+        /// Filter to ways matching this substring (e.g., "security", "ea/")
+        #[arg(long)]
+        way: Option<String>,
+        /// Audit only this language code (default: the active localized language)
+        #[arg(long)]
+        lang: Option<String>,
+        /// Minimum cross-lingual cosine to accept for fidelity (default: 0.60)
+        #[arg(long, default_value = "0.60")]
+        fidelity_threshold: f64,
+        /// Minimum discrimination gap (min_peer − top_confuser.score);
+        /// entries below this are flagged as being outranked by another way.
+        /// Default 0.03 — small positive margin required.
+        #[arg(long, default_value = "0.03")]
+        discrimination_threshold: f64,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Flag ways firing in off-domain sessions (ADR-134)
+    ///
+    /// Audits fire relevance (ADR-134 Decision 3).
+    Precision {
+        /// Minimum sessions a way must have fired in before it's flagged
+        #[arg(long, default_value = "5")]
+        min_sessions: usize,
+        /// Off-class rate at or above which a way is flagged (0.0–1.0)
+        #[arg(long, default_value = "0.5")]
+        flag_threshold: f64,
+        /// Filter to events whose project path contains this substring
+        #[arg(long)]
+        project: Option<String>,
+        /// Filter to ways whose id contains this substring
+        #[arg(long)]
+        way: Option<String>,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    /// Usage statistics from the event log
+    Stats {
+        /// Last N days only
+        #[arg(long)]
+        days: Option<u32>,
+        /// Filter to specific project path (default: CLAUDE_PROJECT_DIR)
+        #[arg(long)]
+        project: Option<String>,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+        /// Show stats across all projects (ignore CLAUDE_PROJECT_DIR)
+        #[arg(long)]
+        global: bool,
+    },
+    /// Language coverage: models, stubs and per-way routing
+    Language {
+        /// Filter to ways supporting this language (code or name)
+        #[arg(long)]
+        filter: Option<String>,
+        /// Show full per-way coverage detail (default shows uncovered summary)
+        #[arg(long)]
+        audit: bool,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -788,41 +832,24 @@ enum SettingsCommand {
 }
 
 #[derive(Subcommand)]
-enum ConfigCommand {
-    /// Initialize user config at XDG path
-    Init,
-    /// Show the configuration (ADR-185: a table; --json the stored file; --json --effective the resolved state)
-    Show {
-        #[arg(long)]
-        json: bool,
-        /// With --json: the resolved configuration with defaults applied, rather than the stored file
-        #[arg(long)]
-        effective: bool,
-    },
-    /// Show config file paths
-    Path,
-    /// List projection targets: the Claude Code config directories agent-ways is active in (ADR-184)
-    Targets {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Manage one projection target (ADR-184)
-    Target {
-        #[command(subcommand)]
-        action: TargetCommand,
-    },
-}
-
-#[derive(Subcommand)]
 enum TargetCommand {
-    /// Preview what activating a config directory would link, merge, refuse, or remove
+    /// List the targets and their converged state
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview what activating a config directory would change
+    ///
+    /// Every root it would link, merge, refuse or remove. Nothing is touched.
     Plan {
         /// Claude Code config directory (e.g. ~/.claude, or what CLAUDE_CONFIG_DIR names)
         dir: String,
         #[arg(long)]
         json: bool,
     },
-    /// Activate a config directory: record it as a target, then reconcile into it. Stops on a blocked plan unless --force
+    /// Record a config directory as a target and reconcile into it
+    ///
+    /// Stops on a blocked plan unless --force.
     Add {
         dir: String,
         /// Move real paths at projection roots aside and proceed past a blocked plan
@@ -836,16 +863,10 @@ enum TargetCommand {
     },
     /// Re-enable a recorded target and reconcile into it
     Enable { dir: String },
-    /// Disable a recorded target: withdraw our links and hooks, keep the record
+    /// Withdraw our links and hooks from a target, keeping its record
     Disable { dir: String },
     /// Withdraw from a target and drop its record
     Remove { dir: String },
-}
-
-#[derive(Subcommand)]
-enum PermissionsCommand {
-    /// Audit requires: fields against settings.json grants
-    Audit,
 }
 
 fn main() -> Result<()> {
@@ -875,70 +896,28 @@ fn main() -> Result<()> {
 }
 
 fn run() -> Result<()> {
-    // Show banner + help when invoked with no args or "help"
-    let args: Vec<String> = std::env::args().collect();
-    let bare = args.len() == 1;
-    let help = args.len() == 2 && (args[1] == "help" || args[1] == "--help" || args[1] == "-h");
-    if bare || help {
-        cmd::banner::run()?;
-        if bare {
-            use clap::CommandFactory;
-            Cli::command().print_help()?;
-            println!();
-            return Ok(());
-        }
-    }
-
+    // A bare `ways` prints help, with the banner only on a terminal
+    // (ADR-507 §7). `--help` and `help` are clap's and carry no banner.
     let cli = Cli::parse();
-
-    let command = match cli.command {
-        Some(cmd) => cmd,
-        None => return Ok(()), // already handled above
+    let Some(command) = cli.command else {
+        use clap::CommandFactory;
+        use std::io::IsTerminal;
+        if std::io::stdout().is_terminal() {
+            cmd::banner::run()?;
+        }
+        Cli::command().print_help()?;
+        println!();
+        return Ok(());
     };
 
     match command {
         Commands::Context { project, session, json } => cmd::context::run(project.as_deref(), session.as_deref(), json),
-        Commands::Lint { path, schema, check, fix, all, global } => cmd::lint::run(path, schema, check, fix, all, global),
-        Commands::Reflow { path, fix, json, quiet } => cmd::reflow::run(path, fix, json, quiet),
         Commands::Corpus { ways_dir, output, quiet, verbose, if_stale } => cmd::corpus::run(ways_dir, output, quiet, verbose, if_stale),
-        Commands::Match { query, project } => cmd::match_cmd::run_late(query, project.as_deref()),
-        Commands::Siblings { id, threshold, corpus, model } => {
-            cmd::siblings::run(id, threshold, corpus, model)
-        }
-        Commands::Graph { ways_dir, output } => cmd::graph::run(ways_dir, output),
-        Commands::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
         Commands::Init { project } => cmd::init::run(project.as_deref()),
-        Commands::Template { path, description, vocabulary, scope, global } => {
-            cmd::template::run(path, description, vocabulary, scope, global)
-        }
-        Commands::Language { filter, audit, json } => cmd::language::run(filter.as_deref(), audit, json),
-        Commands::Stats { days, project, json, global } => {
-            cmd::stats::run(days, project.as_deref(), json, global)
-        }
-        Commands::List { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
         Commands::Reconcile { source, dest, mode, dry_run, quiet, force } => {
             cmd::reconcile::run(source, dest, mode, dry_run, quiet, force)
         }
-        Commands::Introspect { mode } => match mode {
-            IntrospectCommand::Replay { session, project, all, speed, json, keys, snap, depth } => {
-                let open = cmd::introspect::Open { keys, snap, depth };
-                cmd::introspect::replay(session.as_deref(), project.as_deref(), all, speed, json, &open)
-            }
-            IntrospectCommand::List { project, all, json } => {
-                cmd::introspect::list(project.as_deref(), all, json)
-            }
-            IntrospectCommand::Dump { session, project, all } => {
-                cmd::introspect::dump(session.as_deref(), project.as_deref(), all)
-            }
-            IntrospectCommand::Live { session, project, keys, snap, depth } => {
-                let open = cmd::introspect::Open { keys, snap, depth };
-                cmd::introspect::live(session.as_deref(), project.as_deref(), &open)
-            }
-            IntrospectCommand::Fires { session, project, all, max_score, limit } => {
-                cmd::introspect::fires(session.as_deref(), project.as_deref(), all, max_score, limit)
-            }
-        },
         Commands::Status { json } => cmd::status::run(json),
         Commands::Scan { mode } => match mode {
             // ADR-184 item 6: a project (or user config) with `enabled: false`
@@ -1040,47 +1019,58 @@ fn run() -> Result<()> {
                 Some(SettingsCommand::Fix { section, project }) => st::fix(&section, project.as_deref()),
             })
         }
-        Commands::Config { action } => match action {
-            ConfigCommand::Init => {
-                let path = config::Config::init_user_config();
-                println!("wrote config to {}", path.display());
-                Ok(())
-            }
-            ConfigCommand::Show { json, effective } => cmd::config_cmd::show(json, effective),
-            ConfigCommand::Path => {
-                println!("{}", config::Config::config_path());
-                Ok(())
-            }
-            ConfigCommand::Targets { json } => cmd::config_cmd::targets(json),
-            ConfigCommand::Target { action } => match action {
-                TargetCommand::Plan { dir, json } => cmd::config_cmd::target_plan(&dir, json),
-                TargetCommand::Add { dir, force, dry_run, json } => {
-                    cmd::config_cmd::target_add(&dir, force, dry_run, json)
-                }
-                TargetCommand::Enable { dir } => cmd::config_cmd::target_enable(&dir),
-                TargetCommand::Disable { dir } => cmd::config_cmd::target_disable(&dir),
-                TargetCommand::Remove { dir } => cmd::config_cmd::target_remove(&dir),
-            },
+        Commands::Target { action } => match action {
+            TargetCommand::List { json } => cmd::target::list(json),
+            TargetCommand::Plan { dir, json } => cmd::target::plan(&dir, json),
+            TargetCommand::Add { dir, force, dry_run, json } => cmd::target::add(&dir, force, dry_run, json),
+            TargetCommand::Enable { dir } => cmd::target::enable(&dir),
+            TargetCommand::Disable { dir } => cmd::target::disable(&dir),
+            TargetCommand::Remove { dir } => cmd::target::remove(&dir),
         },
-        Commands::Disable { name, list, names_only } => {
-            if list {
-                cmd::disable::list(names_only)
-            } else {
-                // clap guarantees name is Some here via required_unless_present
-                cmd::disable::disable(&name.expect("clap enforces name when --list absent"))
+        Commands::Session { action } => match action {
+            SessionCommand::Ways { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
+            SessionCommand::Replay { session, project, all, speed, json, keys, snap, depth } => {
+                let open = cmd::introspect::Open { keys, snap, depth };
+                cmd::introspect::replay(session.as_deref(), project.as_deref(), all, speed, json, &open)
             }
-        }
-        Commands::Enable { name } => cmd::disable::enable(&name),
-        Commands::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),
-        Commands::Tune { ways_dir, way, lang, fidelity_threshold, discrimination_threshold, json } => {
-            cmd::tune::run(ways_dir, way, lang, fidelity_threshold, discrimination_threshold, json)
-        }
-        Commands::TunePrecision { min_sessions, flag_threshold, project, way, json } => {
-            cmd::tune_precision::run(min_sessions, flag_threshold, project, way, json)
-        }
-        Commands::Reset { session, all, confirm } => {
-            cmd::reset::run(session.as_deref(), all, confirm)
-        }
+            SessionCommand::List { project, all, json } => {
+                cmd::introspect::list(project.as_deref(), all, json)
+            }
+            SessionCommand::Dump { session, project, all } => {
+                cmd::introspect::dump(session.as_deref(), project.as_deref(), all)
+            }
+            SessionCommand::Live { session, project, keys, snap, depth } => {
+                let open = cmd::introspect::Open { keys, snap, depth };
+                cmd::introspect::live(session.as_deref(), project.as_deref(), &open)
+            }
+            SessionCommand::Fires { session, project, all, max_score, limit } => {
+                cmd::introspect::fires(session.as_deref(), project.as_deref(), all, max_score, limit)
+            }
+            SessionCommand::Reset { session, all, confirm } => cmd::reset::run(session.as_deref(), all, confirm),
+        },
+        Commands::Author { action } => match action {
+            AuthorCommand::Lint { path, schema, check, fix, all, global } => cmd::lint::run(path, schema, check, fix, all, global),
+            AuthorCommand::Template { path, description, vocabulary, scope, global } => {
+                cmd::template::run(path, description, vocabulary, scope, global)
+            }
+            AuthorCommand::Match { query, project } => cmd::match_cmd::run_late(query, project.as_deref()),
+            AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
+            AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
+            AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),
+            AuthorCommand::Graph { ways_dir, output } => cmd::graph::run(ways_dir, output),
+            AuthorCommand::Reflow { path, fix, json, quiet } => cmd::reflow::run(path, fix, json, quiet),
+            AuthorCommand::Permissions { global } => cmd::permissions::audit(global),
+        },
+        Commands::Tune { action } => match action {
+            TuneCommand::Locale { ways_dir, way, lang, fidelity_threshold, discrimination_threshold, json } => {
+                cmd::tune::run(ways_dir, way, lang, fidelity_threshold, discrimination_threshold, json)
+            }
+            TuneCommand::Precision { min_sessions, flag_threshold, project, way, json } => {
+                cmd::tune_precision::run(min_sessions, flag_threshold, project, way, json)
+            }
+            TuneCommand::Stats { days, project, json, global } => cmd::stats::run(days, project.as_deref(), json, global),
+            TuneCommand::Language { filter, audit, json } => cmd::language::run(filter.as_deref(), audit, json),
+        },
         Commands::SessionsRoot => {
             println!("{}", session::sessions_root());
             Ok(())
@@ -1096,11 +1086,6 @@ fn run() -> Result<()> {
             Ok(())
         }
         Commands::Hook { event } => cmd::hook::run(event),
-        Commands::Permissions { action, global } => {
-            match action {
-                PermissionsCommand::Audit => cmd::permissions::audit(global),
-            }
-        }
         Commands::Agent { args } => cmd::agent::run(&args),
         Commands::Update { dry_run, git_ref } => cmd::update::run(dry_run, git_ref),
         Commands::Uninstall { yes, purge } => cmd::uninstall::run(yes, purge),
