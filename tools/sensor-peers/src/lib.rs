@@ -250,146 +250,149 @@ impl PeerSensor {
             .clone()
             .unwrap_or_else(|| "---none---".to_string());
 
-        // Cold-start backlog baseline: on the first scan of a session
-        // that restored no checkpoint (no seen-set), mark every existing
-        // message seen WITHOUT emitting, so a fresh join doesn't dump the
-        // whole durable backlog into one turn. A warm restart skips this
-        // (the checkpoint restored the seen-set), so down-gap messages
-        // still surface as unseen. Detail is always available via
-        // `attend inbox`.
+        // Cold start: the first scan of a session that restored no
+        // checkpoint (no seen-set) applies `attend_state::cold_start`, the
+        // rule the Stop-hook drain applies too. Addressed mail is delivered
+        // whatever its age; old `#open` and channel backlog is marked seen
+        // without being shown and counted in one note, so a fresh enrollment
+        // is neither flooded nor silently emptied. A warm restart skips this
+        // (the checkpoint restored the seen-set), so down-gap messages still
+        // surface as unseen. Detail is always available via `attend inbox`.
         let baselining = !self.message_baseline_done && !self.checkpoint_loaded;
         self.message_baseline_done = true;
 
-        for dir in &scan_dirs {
-            let entries = match fs::read_dir(&dir.path) {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-
+        // Unseen signals from others, in scan order.
+        struct Found {
+            room: usize,
+            key: String,
+            signal_id: String,
+            content: String,
+            age: Duration,
+        }
+        let mut found: Vec<Found> = Vec::new();
+        for (room, dir) in scan_dirs.iter().enumerate() {
+            let Ok(entries) = fs::read_dir(&dir.path) else { continue };
             for entry in entries.flatten() {
                 let path = entry.path();
                 let filename = match path.file_name().and_then(|f| f.to_str()) {
                     Some(f) if f.ends_with(".signal") => f.to_string(),
                     _ => continue,
                 };
-
                 // Skip already-seen. The key is the filename, a unique
                 // signal id, so a signal moved between trays stays seen.
                 let key = attend_state::seen_key(&filename);
                 if self.seen_signals.contains(&key) {
                     continue;
                 }
-
-                // Cold-start baseline: record the existing backlog as seen
-                // and emit nothing, so a fresh join is not flooded. (See
-                // `baselining` above; warm restarts skip this.)
-                if baselining {
+                // Read and parse: `from|project|cwd|message` (legacy) or
+                // `from|project|cwd|re:id|message` (threaded, ADR-120).
+                let Ok(content) = fs::read_to_string(&path) else { continue };
+                let Some(sig) = agent_identity::parse_signal(content.trim()) else {
+                    self.seen_signals.insert(key);
+                    continue;
+                };
+                // Skip our own signals — check the from field, not filename.
+                // from is "claude:session-id" or "external:user@terminal"
+                if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
                     self.seen_signals.insert(key);
                     continue;
                 }
-
-                // Read and parse: `from|project|cwd|message` (legacy) or
-                // `from|project|cwd|re:id|message` (threaded, ADR-120).
-                let content = match fs::read_to_string(&path) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-                let content = content.trim();
-
-                // The message lane bypasses the event-lane noise stack
-                // (ADR-136 Decision 1): no salience gate, no refractory, no
-                // governor. An authored message is not observation noise, so
-                // it is never aged-out or suppressed by wall-clock decay —
-                // only deduped (the seen-set) and, on a cold start, baselined
-                // (see below). Decay stays where it belongs: the event lane
-                // (git / process / peer-presence).
+                let age = fs::metadata(&path)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.elapsed().ok())
+                    .unwrap_or_default();
                 // The signal's id is its filename stem, the value `re:<id>`
                 // replies reference (ADR-120).
                 let signal_id = filename.strip_suffix(".signal").unwrap_or(&filename).to_string();
-
-                if let Some(agent_identity::ParsedSignal { from, cwd: source_cwd, message, .. }) =
-                    agent_identity::parse_signal(content)
-                {
-                    // Skip our own signals — check the from field, not filename.
-                    // from is "claude:session-id" or "external:user@terminal"
-                    if let Some((_kind, identity)) = from.split_once(':') {
-                        if identity == own_session_id {
-                            self.seen_signals.insert(key);
-                            continue;
-                        }
-                    }
-
-                    // Directed messages (in own project dir) get highest priority.
-                    // Broadcast and focus group messages are important but less urgent.
-                    let (base_magnitude, kind): (f64, MsgKind) = match dir.room {
-                        Room::Project => (7.0, MsgKind::Directed), // someone used --to
-                        Room::Open => (4.0, MsgKind::Open),        // important but not targeted
-                        Room::Channel(_) => (5.0, MsgKind::Group), // relevant peer
-                    };
-
-                    // Boost by peer engagement: repeated messages from the
-                    // same peer within a window increase magnitude, so active
-                    // conversation partners break through elevated refractory
-                    // thresholds while uninvolved broadcasts stay at baseline
-                    // (and get suppressed when the peer sensor is refractory).
-                    // This is the "auto-grouping" mechanism — conversation
-                    // emerges from observed traffic rather than explicit config.
-                    let from_owned = from.to_string();
-                    let boost = self.peer_engagement_boost(&from_owned);
-                    let magnitude = base_magnitude * boost;
-
-                    let age_secs = fs::metadata(&path)
-                        .ok()
-                        .and_then(|m| m.modified().ok())
-                        .and_then(|t| t.elapsed().ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    // Defer emission: collect now, decide individual-vs-digest
-                    // after the whole poll is scanned (see below).
-                    pending.push(PendingMsg {
-                        magnitude,
-                        from: from.to_string(),
-                        cwd: source_cwd.to_string(),
-                        body: message.to_string(),
-                        kind,
-                        age_secs,
-                    });
-
-                    // Track most-recent inbound for `attend reply`. We
-                    // record here (after the gate passes and we've
-                    // decided to emit an observation) so `attend reply`
-                    // targets what the operator actually saw, not what
-                    // was silently suppressed. The own-session-id keys
-                    // the file so concurrent attend processes don't
-                    // collide.
-                    //
-                    // Filter: skip signals originating from the same
-                    // working directory as this observer. The own-session
-                    // skip above only catches the *current* claude session
-                    // id; a previous incarnation of the same agent (different
-                    // session uuid, same cwd) would otherwise pass through
-                    // and pollute last_inbound, causing `attend reply` to
-                    // auto-thread to the agent's own past self. Same-cwd
-                    // matching is a reliable proxy because Claude Code runs
-                    // one agent per project at a time.
-                    if let Some(ref sid) = self.own_session_id {
-                        if source_cwd != focus.working_dir {
-                            last_inbound::record(sid, &signal_id);
-                        }
-                    }
-                }
-
-                self.seen_signals.insert(key);
-
-                // Authored messages are durable: reading one marks it seen
-                // (dedup), but the file is NEVER deleted here. Destroying a
-                // signal that another peer — or this same session after a
-                // restart — has not read yet was the cross-peer shred behind
-                // ADR-136 Bug 2 (a passing colleague shredding an unread fax).
-                // Message lifetime is bound by project liveness in the cleanup
-                // sweep (a tray dies when its project is gone), not by a
-                // per-read wall-clock timer.
+                found.push(Found { room, key, signal_id, content, age });
             }
+        }
+
+        let plan = baselining.then(|| {
+            let pending: Vec<_> = found.iter().map(|f| (&scan_dirs[f.room].room, f.age)).collect();
+            attend_state::cold_start::plan(&pending)
+        });
+
+        for (i, f) in found.into_iter().enumerate() {
+            // Authored messages are durable: reading one marks it seen
+            // (dedup), but the file is NEVER deleted here. Destroying a
+            // signal that another peer — or this same session after a
+            // restart — has not read yet was the cross-peer shred behind
+            // ADR-136 Bug 2 (a passing colleague shredding an unread fax).
+            // Message lifetime is bound by project liveness in the cleanup
+            // sweep (a tray dies when its project is gone), not by a
+            // per-read wall-clock timer.
+            self.seen_signals.insert(f.key);
+            if plan.as_ref().is_some_and(|p| !p.deliver[i]) {
+                continue;
+            }
+            let Some(agent_identity::ParsedSignal { from, cwd: source_cwd, message, .. }) =
+                agent_identity::parse_signal(f.content.trim())
+            else {
+                continue;
+            };
+
+            // The message lane bypasses the event-lane noise stack
+            // (ADR-136 Decision 1): no salience gate, no refractory, no
+            // governor. An authored message is not observation noise, so
+            // it is never aged-out or suppressed by wall-clock decay —
+            // only deduped (the seen-set) and, on a cold start, put
+            // through the cold-start rule above. Decay stays where it
+            // belongs: the event lane (git / process / peer-presence).
+            //
+            // Directed messages (in own project dir) get highest priority.
+            // Broadcast and focus group messages are important but less urgent.
+            let (base_magnitude, kind): (f64, MsgKind) = match scan_dirs[f.room].room {
+                Room::Project => (7.0, MsgKind::Directed), // someone used --to
+                Room::Open => (4.0, MsgKind::Open),        // important but not targeted
+                Room::Channel(_) => (5.0, MsgKind::Group), // relevant peer
+            };
+
+            // Boost by peer engagement: repeated messages from the
+            // same peer within a window increase magnitude, so active
+            // conversation partners break through elevated refractory
+            // thresholds while uninvolved broadcasts stay at baseline
+            // (and get suppressed when the peer sensor is refractory).
+            // This is the "auto-grouping" mechanism — conversation
+            // emerges from observed traffic rather than explicit config.
+            let boost = self.peer_engagement_boost(from);
+            let magnitude = base_magnitude * boost;
+
+            // Defer emission: collect now, decide individual-vs-digest
+            // after the whole poll is scanned (see below).
+            pending.push(PendingMsg {
+                magnitude,
+                from: from.to_string(),
+                cwd: source_cwd.to_string(),
+                body: message.to_string(),
+                kind,
+                age_secs: f.age.as_secs(),
+            });
+
+            // Track most-recent inbound for `attend reply`. We record
+            // here (after deciding to emit an observation) so `attend
+            // reply` targets what the operator actually saw, not what was
+            // held back. The own-session-id keys the file so concurrent
+            // attend processes don't collide.
+            //
+            // Filter: skip signals originating from the same working
+            // directory as this observer. The own-session skip above only
+            // catches the *current* claude session id; a previous
+            // incarnation of the same agent (different session uuid, same
+            // cwd) would otherwise pollute last_inbound, causing `attend
+            // reply` to auto-thread to the agent's own past self.
+            if let Some(ref sid) = self.own_session_id {
+                if source_cwd != focus.working_dir {
+                    last_inbound::record(sid, &f.signal_id);
+                }
+            }
+        }
+
+        // The cold start's count of what it held back goes out once, with
+        // this first delivery, at `#open`'s magnitude.
+        if let Some(note) = plan.and_then(|p| p.note()) {
+            observations.push((4.0, note));
         }
 
         // Coalesce or emit. Below the threshold, every message emits

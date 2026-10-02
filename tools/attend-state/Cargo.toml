@@ -6,4 +6,5 @@ description = "Shared per-session sensor state — the seen-set wire format and 
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+attend-groups = { path = "../attend-groups" }
 attend-presence = { path = "../attend-presence" }

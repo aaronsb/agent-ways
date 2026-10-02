@@ -23,6 +23,8 @@
 //! session, no persistence" — an unresolved `pid-<pid>` fallback must
 //! never write, or it would alias sessions and corrupt the shared set).
 
+pub mod cold_start;
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
