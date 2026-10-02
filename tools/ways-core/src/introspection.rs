@@ -126,6 +126,40 @@ pub struct FiredWay {
     /// What hit — `None` until fire-time enrichment (increment 3).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub match_detail: Option<MatchDetail>,
+    /// The relevance judge's verdict on this way, from its `way_judged`
+    /// event (ADR-196). A way the judge blocked is a withheld row with
+    /// `suppressed: judge`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub judge: Option<JudgeVerdict>,
+}
+
+/// What the relevance judge decided about one way in one turn.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct JudgeVerdict {
+    /// `pass`, `block` (enforce, below threshold) or `would_block` (shadow).
+    pub verdict: String,
+    pub p_yes: f64,
+    pub threshold: f64,
+    pub mode: String,
+    pub engine: String,
+    pub model: String,
+    /// The judge call's latency.
+    pub judge_ms: u64,
+}
+
+impl JudgeVerdict {
+    fn from_value(v: &Value) -> Option<Self> {
+        let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+        Some(JudgeVerdict {
+            verdict: v["verdict"].as_str().filter(|s| !s.is_empty())?.to_string(),
+            p_yes: str_or_num_f64(&v["p_yes"])?,
+            threshold: str_or_num_f64(&v["threshold"]).unwrap_or(0.0),
+            mode: s("mode"),
+            engine: s("engine"),
+            model: s("model"),
+            judge_ms: str_or_num_u64(&v["judge_ms"]).unwrap_or(0),
+        })
+    }
 }
 
 impl FiredWay {
@@ -165,9 +199,13 @@ pub struct IntrospectionSummary {
     #[serde(skip_serializing_if = "u64_is_zero")]
     pub gated_candidates: u64,
     /// Matched ways withheld by the refire curve or the hook context cap
-    /// (`way_suppressed`). Counted separately, like `gated_candidates`.
+    /// (`way_suppressed`), and those the relevance judge blocked. Counted
+    /// separately, like `gated_candidates`.
     #[serde(skip_serializing_if = "u64_is_zero")]
     pub suppressed_candidates: u64,
+    /// Of `suppressed_candidates`, the ways the relevance judge blocked.
+    #[serde(skip_serializing_if = "u64_is_zero")]
+    pub judge_blocked: u64,
     /// Turns whose join was upgraded to `Keyed` by a transcript foreign key
     /// (ADR-153 §3). `0` until [`SessionIntrospection::join_transcript`] runs.
     pub keyed_turns: usize,
@@ -227,6 +265,7 @@ impl SessionIntrospection {
             })
             .filter_map(FireRow::from_value)
             .collect();
+        attach_verdicts(&mut fires, events, session_id);
         fires.sort_by(|a, b| a.ts.cmp(&b.ts));
 
         let mut turns: Vec<Turn> = Vec::new();
@@ -261,6 +300,7 @@ impl SessionIntrospection {
         let total_fires = count(FiredWay::injected);
         let gated_candidates = count(|w| w.gated);
         let suppressed_candidates = count(|w| w.suppressed.is_some());
+        let judge_blocked = count(|w| w.suppressed.as_deref() == Some("judge"));
         let distinct: HashSet<&str> = turns
             .iter()
             .flat_map(|t| t.fired_ways.iter().filter(|w| w.injected()).map(|w| w.way_id.as_str()))
@@ -271,6 +311,7 @@ impl SessionIntrospection {
             total_fires,
             gated_candidates,
             suppressed_candidates,
+            judge_blocked,
             keyed_turns: 0, // set by join_transcript once a transcript is joined
         };
 
@@ -281,6 +322,18 @@ impl SessionIntrospection {
             summary,
             turns,
         }
+    }
+
+    /// The model without the rows of ways the relevance judge blocked, and
+    /// without the turns that held only those: what reached the session.
+    /// The summary keeps its counts, so it still says how many were blocked.
+    pub fn injected_only(mut self) -> Self {
+        for t in &mut self.turns {
+            t.fired_ways.retain(|w| w.suppressed.as_deref() != Some("judge"));
+        }
+        self.turns.retain(|t| !t.fired_ways.is_empty());
+        self.summary.turns = self.turns.len();
+        self
     }
 
     /// Convenience: build for a session from the live event log (the increment-1
@@ -375,6 +428,7 @@ fn build_turn(cluster: &[&FireRow], epoch: u64, criteria: &CriteriaMap) -> Turn 
                     matched_span: Some(span),
                     confidence: JoinConfidence::Keyed,
                 }),
+                judge: f.judge.clone(),
             }
         })
         .collect();
@@ -403,6 +457,7 @@ struct FireRow {
     gated: bool,
     /// The `reason` of a `way_suppressed` event: a matched way withheld.
     suppressed: Option<String>,
+    judge: Option<JudgeVerdict>,
 }
 
 impl FireRow {
@@ -427,7 +482,68 @@ impl FireRow {
             matched_span: v["matched_span"].as_str().map(|s| s.to_string()),
             gated,
             suppressed,
+            judge: None,
         })
+    }
+}
+
+/// A way the relevance judge kept out of a session: when, and the verdict.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct JudgeBlock {
+    pub way: String,
+    pub ts: String,
+    pub verdict: JudgeVerdict,
+}
+
+/// The ways the relevance judge blocked in `session_id`, oldest first, from
+/// the event log's text.
+pub fn judge_blocks(events_text: &str, session_id: &str) -> Vec<JudgeBlock> {
+    events_text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|e| e["session"].as_str() == Some(session_id) && e["event"].as_str() == Some("way_judged"))
+        .filter_map(|e| {
+            let verdict = JudgeVerdict::from_value(&e).filter(|v| v.verdict == "block")?;
+            Some(JudgeBlock { way: e["way"].as_str()?.to_string(), ts: e["ts"].as_str().unwrap_or("").to_string(), verdict })
+        })
+        .collect()
+}
+
+/// The gate logs `way_judged` just before the fire it allows, in the same
+/// hook run. A pass or a shadow would-block joins the fire of the same way
+/// within the turn's 3 s; a block becomes a withheld row of its own, since
+/// no fire follows it.
+fn attach_verdicts(fires: &mut Vec<FireRow>, events: &[Value], session_id: &str) {
+    let judged = events
+        .iter()
+        .filter(|e| e["session"].as_str() == Some(session_id) && e["event"].as_str() == Some("way_judged"));
+    for e in judged {
+        let (Some(way), Some(verdict)) = (e["way"].as_str().filter(|w| !w.is_empty()), JudgeVerdict::from_value(e)) else { continue };
+        let ts = e["ts"].as_str().unwrap_or("").to_string();
+        let Some(at) = parse_utc_iso(&ts) else { continue };
+        if verdict.verdict == "block" {
+            fires.push(FireRow {
+                ts,
+                way: way.to_string(),
+                trigger: "judge".into(),
+                fire_score: None,
+                token_position: str_or_num_u64(&e["token_position"]).unwrap_or(0),
+                matched_span: None,
+                gated: false,
+                suppressed: Some("judge".into()),
+                judge: Some(verdict),
+            });
+            continue;
+        }
+        let near = fires
+            .iter_mut()
+            .filter(|f| f.way == way && f.judge.is_none() && f.suppressed.is_none() && !f.gated)
+            .filter_map(|f| Some((parse_utc_iso(&f.ts)?.abs_diff(at), f)))
+            .filter(|(d, _)| *d <= 3)
+            .min_by_key(|(d, _)| *d);
+        if let Some((_, f)) = near {
+            f.judge = Some(verdict);
+        }
     }
 }
 
@@ -820,6 +936,49 @@ scope: subagent
         s2.join_transcript(&same);
         assert_eq!(s2.turns[0].join_confidence, JoinConfidence::Keyed);
         assert_eq!(s2.turns[0].transcript_uuid.as_deref(), Some("user-A"));
+    }
+
+    #[test]
+    fn judge_verdicts_join_their_fires_and_a_block_is_a_withheld_row() {
+        let judged = |ts: &str, way: &str, verdict: &str, p: &str| {
+            json!({"event":"way_judged","session":"s1","ts":ts,"way":way,"p_yes":p,"threshold":"0.30","verdict":verdict,"mode":"enforce","engine":"anthropic","model":"claude-haiku-4-5","judge_ms":"700"})
+        };
+        let events = vec![
+            judged("2026-01-01T00:00:00Z", "d/a", "pass", "0.910"),
+            judged("2026-01-01T00:00:00Z", "d/b", "block", "0.050"),
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:01Z","way":"d/a","trigger":"semantic:embedding:en"}),
+        ];
+        let m = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        assert_eq!(m.turns.len(), 1);
+        let ways = &m.turns[0].fired_ways;
+        let a = ways.iter().find(|w| w.way_id == "d/a").unwrap();
+        assert!(a.injected());
+        let v = a.judge.as_ref().unwrap();
+        assert_eq!((v.verdict.as_str(), v.p_yes, v.threshold, v.judge_ms), ("pass", 0.91, 0.3, 700));
+        let b = ways.iter().find(|w| w.way_id == "d/b").unwrap();
+        assert!(!b.injected() && b.suppressed.as_deref() == Some("judge") && b.trigger_channel == "judge");
+        assert_eq!((m.summary.total_fires, m.summary.suppressed_candidates, m.summary.judge_blocked), (1, 1, 1));
+    }
+
+    #[test]
+    fn injected_only_drops_judge_blocked_rows_and_turns_that_held_only_them() {
+        let judged = |ts: &str, way: &str, verdict: &str| {
+            json!({"event":"way_judged","session":"s1","ts":ts,"way":way,"p_yes":"0.05","threshold":"0.30","verdict":verdict,"mode":"enforce","engine":"e","model":"m","judge_ms":"1"})
+        };
+        let events = vec![
+            json!({"event":"way_fired","session":"s1","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"keyword"}),
+            judged("2026-01-01T00:00:00Z", "d/b", "block"),
+            judged("2026-01-01T00:01:00Z", "d/c", "block"),
+        ];
+        let text: String = events.iter().map(|e| format!("{e}\n")).collect();
+        let m = SessionIntrospection::build(&events, "s1", "/p", 200, &CriteriaMap::new());
+        assert_eq!(m.turns.len(), 2);
+        let m = m.injected_only();
+        assert_eq!(m.turns.len(), 1);
+        assert_eq!(m.turns[0].fired_ways.iter().map(|w| w.way_id.as_str()).collect::<Vec<_>>(), ["d/a"]);
+        assert_eq!(m.summary.judge_blocked, 2, "the summary still counts what was kept out");
+        let blocks = judge_blocks(&text, "s1");
+        assert_eq!(blocks.iter().map(|b| b.way.as_str()).collect::<Vec<_>>(), ["d/b", "d/c"]);
     }
 
     #[test]

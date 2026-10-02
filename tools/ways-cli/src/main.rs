@@ -268,6 +268,9 @@ enum SessionCommand {
         /// Machine-readable JSON output
         #[arg(long)]
         json: bool,
+        /// Also list the ways the relevance judge kept out
+        #[arg(long)]
+        matched: bool,
     },
     /// Replay a session's way firings frame by frame
     ///
@@ -328,6 +331,9 @@ enum SessionCommand {
         /// Pick the session across every project, not just the current one
         #[arg(long)]
         all: bool,
+        /// Also list the ways the relevance judge kept out
+        #[arg(long)]
+        matched: bool,
     },
     /// Follow the current session's way firings as they happen
     ///
@@ -371,6 +377,9 @@ enum SessionCommand {
         /// Cap the number of rows shown (default: all)
         #[arg(long)]
         limit: Option<usize>,
+        /// Also list the ways the relevance judge kept out
+        #[arg(long)]
+        matched: bool,
     },
     /// Clear session markers when ways stop firing or fire wrongly
     ///
@@ -1036,7 +1045,7 @@ fn run() -> Result<()> {
             TargetCommand::Remove { dir } => cmd::target::remove(&dir),
         },
         Commands::Session { action } => match action {
-            SessionCommand::Ways { session, sort, json } => cmd::list::run(session.as_deref(), &sort, json),
+            SessionCommand::Ways { session, sort, json, matched } => cmd::list::run(session.as_deref(), &sort, json, matched),
             SessionCommand::Replay { session, project, all, speed, json, keys, snap, depth } => {
                 let open = cmd::introspect::Open { keys, snap, depth };
                 cmd::introspect::replay(session.as_deref(), project.as_deref(), all, speed, json, &open)
@@ -1044,15 +1053,15 @@ fn run() -> Result<()> {
             SessionCommand::List { project, all, json } => {
                 cmd::introspect::list(project.as_deref(), all, json)
             }
-            SessionCommand::Dump { session, project, all } => {
-                cmd::introspect::dump(session.as_deref(), project.as_deref(), all)
+            SessionCommand::Dump { session, project, all, matched } => {
+                cmd::introspect::dump(session.as_deref(), project.as_deref(), all, matched)
             }
             SessionCommand::Live { session, project, keys, snap, depth } => {
                 let open = cmd::introspect::Open { keys, snap, depth };
                 cmd::introspect::live(session.as_deref(), project.as_deref(), &open)
             }
-            SessionCommand::Fires { session, project, all, max_score, limit } => {
-                cmd::introspect::fires(session.as_deref(), project.as_deref(), all, max_score, limit)
+            SessionCommand::Fires { session, project, all, max_score, limit, matched } => {
+                cmd::introspect::fires(session.as_deref(), project.as_deref(), all, max_score, limit, matched)
             }
             SessionCommand::Reset { session, all, confirm } => cmd::reset::run(session.as_deref(), all, confirm),
         },

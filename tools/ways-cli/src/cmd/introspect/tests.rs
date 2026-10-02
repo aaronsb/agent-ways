@@ -85,6 +85,7 @@ fn fired(way: &str, channel: &str, path: Option<&str>, span: Option<&str>, score
         way_path: path.map(str::to_string),
         criteria: MatchCriteria { vocabulary: Some("test tdd unit golden fixture assert".into()), ..Default::default() },
         match_detail: span.map(|s| MatchDetail { matched_span: Some(s.into()), confidence: JoinConfidence::Keyed }),
+        judge: None,
     }
 }
 

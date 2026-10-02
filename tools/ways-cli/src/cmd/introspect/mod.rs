@@ -242,7 +242,7 @@ pub fn list(project: Option<&str>, all: bool, json: bool) -> Result<()> {
 /// Scoping mirrors `replay`: default the current project, `--project` for a
 /// specific one, `--all` across every project (which only affects session
 /// picking). With no `--session`, the most recent session in scope is dumped.
-pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<()> {
+pub fn dump(session: Option<&str>, project: Option<&str>, all: bool, matched: bool) -> Result<()> {
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
         println!("{{\"error\":\"no events recorded yet\"}}");
@@ -285,6 +285,8 @@ pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<(
         &project_path,
         window_k,
     );
+    // What reached the session, unless asked for every matched candidate.
+    let model = if matched { model } else { model.injected_only() };
     println!("{}", serde_json::to_string_pretty(&model)?);
     Ok(())
 }
@@ -302,6 +304,7 @@ pub fn fires(
     all: bool,
     max_score: Option<f64>,
     limit: Option<usize>,
+    matched: bool,
 ) -> Result<()> {
     let content = ways_core::firing::load_events_text();
     if content.trim().is_empty() {
@@ -366,6 +369,9 @@ pub fn fires(
             "No semantic fires for session {} (keyword/state fires carry no score/surface).",
             short_id(&session_id)
         );
+        if matched {
+            print_judge_blocks(&ways_core::introspection::judge_blocks(&content, &session_id));
+        }
         return Ok(());
     }
 
@@ -389,5 +395,21 @@ pub fn fires(
     if shown < total {
         println!("  … {} more (raise --limit)", total - shown);
     }
+    if matched {
+        print_judge_blocks(&ways_core::introspection::judge_blocks(&content, &session_id));
+    }
     Ok(())
+}
+
+/// The ways the relevance judge kept out, each with its P(yes) against the
+/// threshold: `--matched` adds them to a listing of what fired.
+pub(crate) fn print_judge_blocks(blocks: &[ways_core::introspection::JudgeBlock]) {
+    if blocks.is_empty() {
+        println!("No way was kept out by the relevance judge.");
+        return;
+    }
+    println!("{} kept out by the relevance judge:", blocks.len());
+    for b in blocks {
+        println!("  P(yes) {:.2} < {:.2}  {}", b.verdict.p_yes, b.verdict.threshold, b.way);
+    }
 }

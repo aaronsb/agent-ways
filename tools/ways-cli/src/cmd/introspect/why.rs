@@ -8,7 +8,7 @@ use agent_tui::markdown;
 use agent_tui::ratatui::style::{Modifier, Style};
 use agent_tui::ratatui::text::{Line, Span};
 use agent_tui::theme;
-use ways_core::introspection::{MatchCriteria, SessionIntrospection};
+use ways_core::introspection::{JudgeVerdict, MatchCriteria, SessionIntrospection};
 
 use crate::cmd::render;
 
@@ -20,6 +20,9 @@ pub(crate) struct WhyEntry {
     fire_score: Option<f64>,
     criteria: MatchCriteria,
     matched_spans: Vec<String>,
+    /// The relevance judge's verdicts on this way's fires on the channel,
+    /// in order, distinct.
+    verdicts: Vec<JudgeVerdict>,
 }
 
 /// Index key: `(way_id, trigger_channel)`. A single way commonly fires on several
@@ -47,7 +50,13 @@ pub(crate) fn build_why_index(model: &SessionIntrospection) -> WhyIndex {
                 fire_score: fw.fire_score,
                 criteria: fw.criteria.clone(),
                 matched_spans: Vec::new(),
+                verdicts: Vec::new(),
             });
+            if let Some(v) = &fw.judge {
+                if !e.verdicts.contains(v) {
+                    e.verdicts.push(v.clone());
+                }
+            }
             if let Some(span) = fw.match_detail.as_ref().and_then(|m| m.matched_span.clone()) {
                 if !e.matched_spans.contains(&span) {
                     e.matched_spans.push(span);
@@ -56,6 +65,23 @@ pub(crate) fn build_why_index(model: &SessionIntrospection) -> WhyIndex {
         }
     }
     idx
+}
+
+/// One verdict: the outcome, P(yes) against the threshold, and the call
+/// that gave it.
+fn verdict_line(v: &JudgeVerdict) -> Line<'static> {
+    let (word, cmp) = match v.verdict.as_str() {
+        "pass" => ("pass", "≥"),
+        "block" => ("blocked", "<"),
+        "would_block" => ("would block", "<"),
+        other => (other, "vs"),
+    };
+    let style = if v.verdict == "pass" { Style::new() } else { theme::warn() };
+    Line::from(vec![
+        Span::styled(format!("  {word:<12}"), style),
+        Span::raw(format!("P(yes) {:.2} {cmp} {:.2}", v.p_yes, v.threshold)),
+        Span::styled(format!("  {} · {} {} · {} ms", v.mode, v.engine, v.model, v.judge_ms), theme::muted()),
+    ])
 }
 
 /// Read a way file's body: everything after a leading `---`/`---` frontmatter
@@ -117,9 +143,19 @@ pub(crate) fn detail_lines(way_id: &str, entry: Option<&WhyEntry>, body: Option<
         out.push(Line::styled("  (none recorded)", theme::muted()));
     }
 
+    if !e.verdicts.is_empty() {
+        out.push(Line::raw(""));
+        out.push(Line::styled("Judge", bold()));
+        for v in &e.verdicts {
+            out.push(verdict_line(v));
+        }
+    }
+
     out.push(Line::raw(""));
     out.push(Line::styled("Matched", bold()));
-    if e.matched_spans.is_empty() {
+    if e.trigger_channel == "judge" {
+        out.push(Line::styled("  matched, then kept out by the relevance judge: nothing was injected", theme::muted()));
+    } else if e.matched_spans.is_empty() {
         let note = if e.trigger_channel.starts_with("semantic") {
             "  semantic fire — matched by embedding; no recoverable term"
         } else {
@@ -162,6 +198,7 @@ mod tests {
                 matched_span: Some(s.into()),
                 confidence: JoinConfidence::Keyed,
             }),
+            judge: None,
         }
     }
 

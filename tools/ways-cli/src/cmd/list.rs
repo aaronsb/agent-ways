@@ -42,7 +42,7 @@ impl WayRow for FiredWay {
     fn refire_threshold_k(&self) -> u64 { self.refire_threshold_k }
 }
 
-pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
+pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> Result<()> {
     // Auto-detect session if not provided
     let session_id = match session {
         Some(s) => s.to_string(),
@@ -111,8 +111,13 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
         _ => ways.sort_by_key(|w| w.epoch_at_fire), // epoch = conversation order
     }
 
+    let blocks = if matched {
+        ways_core::introspection::judge_blocks(&ways_core::firing::load_events_text(), &session_id)
+    } else {
+        Vec::new()
+    };
     if json_out {
-        print_json(&ways, current_epoch, current_tokens_k, context_window_k);
+        print_json(&ways, current_epoch, current_tokens_k, context_window_k, matched.then_some(&blocks[..]));
         return Ok(());
     }
 
@@ -158,6 +163,9 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool) -> Result<()> {
 
     let _ = writeln!(out);
     print!("{out}");
+    if matched {
+        crate::cmd::introspect::print_judge_blocks(&blocks);
+    }
     Ok(())
 }
 
@@ -344,7 +352,8 @@ fn latest_session_for_project(project: &str) -> Option<String> {
 }
 
 
-fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, context_window_k: u64) {
+/// `blocks` is set with `--matched`: the ways the relevance judge kept out.
+fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, context_window_k: u64, blocks: Option<&[ways_core::introspection::JudgeBlock]>) {
     let entries: Vec<serde_json::Value> = ways
         .iter()
         .map(|w| {
@@ -376,6 +385,10 @@ fn print_json(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, cont
         "ways_fired": entries.len(),
         "ways": entries,
     });
+    let mut output = output;
+    if let Some(b) = blocks {
+        output["judge_blocked"] = serde_json::to_value(b).unwrap_or_default();
+    }
 
     println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
 }
