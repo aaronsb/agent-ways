@@ -554,7 +554,7 @@ pub fn apply_to_files(
     }
 
     // Atomic write (temp + rename) so a crash never leaves a half-written file.
-    write_json_atomic(dest_settings, &merged.settings)?;
+    save_json(dest_settings, &merged.settings)?;
 
     // Self-audit: the user's view must be identical before and after. Strip OUR
     // contribution from both sides — but from `live` use the union of the prior
@@ -580,7 +580,7 @@ pub fn apply_to_files(
     if let Some(parent) = base_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    write_json_atomic(base_path, &merged.base.to_value())?;
+    save_json(base_path, &merged.base.to_value())?;
 
     Ok(format!(
         "merged settings.json (hooks + {} ways permissions); backup at {}",
@@ -608,7 +608,7 @@ pub fn withdraw_from_files(source_settings: &Path, dest_settings: &Path, base_pa
         std::fs::copy(dest_settings, &backup)
             .with_context(|| format!("backing up {}", dest_settings.display()))?;
     }
-    write_json_atomic(dest_settings, &merged.settings)?;
+    save_json(dest_settings, &merged.settings)?;
 
     // Self-audit with the notion of ours that withdrawal used: the shipped
     // hooks (raw and quoted) on both sides, the base's permissions on the
@@ -644,7 +644,7 @@ pub fn withdraw_from_files(source_settings: &Path, dest_settings: &Path, base_pa
     if let Some(parent) = base_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    write_json_atomic(base_path, &merged.base.to_value())?;
+    save_json(base_path, &merged.base.to_value())?;
     let survivors = surviving_ours_not_shipped(&after, &shipped_hooks);
     let note = if survivors.is_empty() {
         String::new()
@@ -691,18 +691,39 @@ pub(crate) fn read_json_or_empty(p: &Path) -> Result<Value> {
     }
 }
 
-pub(crate) fn write_json_atomic(p: &Path, v: &Value) -> Result<()> {
-    let tmp = p.with_extension(format!("json.tmp.{}", std::process::id()));
+/// Write `v` as pretty JSON to `p` through the shared atomic writer. A `p`
+/// that is a symlink (a dotfiles-managed settings.json) is followed, so the
+/// link stays a link and the file it names is replaced.
+pub(crate) fn save_json(p: &Path, v: &Value) -> Result<()> {
     let body = serde_json::to_string_pretty(v)?;
-    std::fs::write(&tmp, body).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, p).with_context(|| format!("renaming into {}", p.display()))?;
-    Ok(())
+    let target = agent_settings::writer::resolve(p);
+    agent_settings::writer::write_atomic(&target, body).with_context(|| format!("writing {}", target.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The old writer renamed its temp file over the path itself, so a
+    /// settings.json that was a link into a dotfiles checkout became a plain
+    /// file and the checkout stopped seeing the change.
+    #[cfg(unix)]
+    #[test]
+    fn save_json_follows_a_linked_settings_file() {
+        let d = std::env::temp_dir().join(format!("ways-save-json-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let real = d.join("dotfiles-settings.json");
+        std::fs::write(&real, "{}").unwrap();
+        let link = d.join("settings.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        save_json(&link, &json!({"a": 1})).unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "link kept");
+        let back: Value = serde_json::from_str(&std::fs::read_to_string(&real).unwrap()).unwrap();
+        assert_eq!(back, json!({"a": 1}));
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     fn ours_hooks() -> Value {
         json!({

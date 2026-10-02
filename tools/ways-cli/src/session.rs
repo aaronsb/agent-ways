@@ -489,10 +489,6 @@ pub fn log_event(fields: &[(&str, &str)]) {
     }
 }
 
-/// Monotonic suffix so repeated compactions in one process never collide on the
-/// temp name (paired with the pid for cross-process uniqueness).
-static COMPACT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 /// Rewrite `path` in place to retain only its most recent `keep_bytes`, cut at a
 /// line boundary so the first retained line is whole. The new contents are
 /// written to a per-process, per-attempt temp, synced, then atomically renamed
@@ -515,22 +511,9 @@ fn compact_log_tail(path: &std::path::Path, keep_bytes: u64) -> std::io::Result<
         None => data.len(), // single huge line / no boundary: drop it all
     };
 
-    // Unique temp: pid (cross-process) + sequence (intra-process) so two
+    // The shared writer's temp is unique per process and call, so two
     // concurrent compactions never write the same file and publish a torn tail.
-    let seq = COMPACT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = path.with_extension(format!("jsonl.compact.{}.{seq}.tmp", std::process::id()));
-    let write_then_rename = || -> std::io::Result<()> {
-        use std::io::Write;
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(&data[start..])?;
-        f.sync_all()?; // durable before publish — no zero/partial file on crash
-        std::fs::rename(&tmp, path)
-    };
-    let res = write_then_rename();
-    if res.is_err() {
-        let _ = std::fs::remove_file(&tmp); // never leave a stray temp behind
-    }
-    res
+    agent_settings::writer::write_atomic(path, &data[start..])
 }
 
 // ── Domain disable check ────────────────────────────────────────

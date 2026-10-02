@@ -139,28 +139,22 @@ pub fn way_fire_outcome(
 /// can both read FirstFire and both deliver the way inside its refire window.
 /// Holders re-check the outcome under the lock and record before releasing.
 ///
-/// The lock is `std::fs::File::lock` (flock on Unix, LockFileEx on Windows) on
-/// a sentinel `<way>.lock` beside the state file. The sentinel is never
-/// renamed or removed, so every process locks the same inode. The OS drops
-/// the lock when the holder exits, so a crashed hook cannot wedge a way.
+/// The lock is the shared settings lock (`agent_settings::writer::Lock`) on
+/// `<way>.lock` beside the state file: an OS file lock, so the OS drops it
+/// when the holder exits and a crashed hook cannot wedge a way.
 pub struct EngagementLock {
-    _file: std::fs::File,
+    _lock: agent_settings::writer::Lock,
 }
 
 /// Take the lock for `way_id`, blocking until it is free. `None` when the
 /// sentinel cannot be opened or locked: the caller proceeds unlocked, which is
 /// the behaviour before the lock existed, rather than dropping the way.
 pub fn lock_engagement(way_id: &str, session_id: &str) -> Option<EngagementLock> {
-    let path = engagement_path(way_id, session_id).with_extension("lock");
-    ensure_parent(&path);
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .ok()?;
-    file.lock().ok()?;
-    Some(EngagementLock { _file: file })
+    // The lock names `<target>.lock`; the target is the state path without
+    // its extension, so the lock file keeps the name it has always had and a
+    // binary from before this change still excludes this one.
+    let target = engagement_path(way_id, session_id).with_extension("");
+    agent_settings::writer::Lock::acquire(&target).ok().map(|l| EngagementLock { _lock: l })
 }
 
 /// Whether a refire suppression for this fire window has not been logged

@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 agent-fmt = { path = "../agent-fmt" }
+agent-settings = { path = "../agent-settings" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"

@@ -2452,6 +2452,7 @@ name = "ways-agent"
 version = "0.2.0"
 dependencies = [
  "agent-fmt",
+ "agent-settings",
  "anyhow",
  "clap",
  "libc",

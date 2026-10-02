@@ -39,17 +39,14 @@ pub fn serve(options: Options) -> Result<()> {
     let sock = protocol::socket_path();
     let dir = sock.parent().context("socket path has no parent")?.to_path_buf();
     protocol::secure_dir(&dir).map_err(anyhow::Error::msg)?;
-    let lock_path = sock.with_extension("lock");
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&lock_path)
-        .with_context(|| format!("opening {}", lock_path.display()))?;
-    // SAFETY: flock on a file descriptor we own; LOCK_NB returns at once.
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    // The lock names `<target>.lock`: the socket path without its extension,
+    // so the lock file is the `<sock stem>.lock` an older agent also takes.
+    let lock_target = sock.with_extension("");
+    let Some(lock) = agent_settings::writer::Lock::try_acquire(&lock_target)
+        .with_context(|| format!("locking {}", agent_settings::writer::lock_path(&lock_target).display()))?
+    else {
         return Ok(());
-    }
+    };
     // Holding the lock, a socket left behind is stale. Anything else at the
     // path is not ours to delete.
     match std::fs::symlink_metadata(&sock) {

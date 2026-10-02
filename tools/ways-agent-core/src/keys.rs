@@ -289,10 +289,7 @@ pub fn record_check(provider: Provider, record: &CheckRecord) {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Ok(text) = serde_json::to_string(record) {
-        let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
-        if std::fs::write(&tmp, text).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
-        }
+        let _ = agent_settings::writer::write_atomic(&path, text);
     }
 }
 
