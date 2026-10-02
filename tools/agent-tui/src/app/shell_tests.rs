@@ -11,7 +11,7 @@ use std::rc::Rc;
 use super::*;
 use crate::adapter::Write;
 use crate::testkit::{finish_apply, press, render, text, type_str};
-use crate::tree::{Action, Setting, Store};
+use crate::tree::{Action, Kind, Node, Setting, Store};
 
 /// An adapter whose every hook a test can see and steer.
 #[derive(Default, Clone)]
@@ -28,6 +28,8 @@ struct Probe {
     /// Each view switch's pending keys; a set refusal refuses the switch.
     seen_pending: Rc<RefCell<Vec<Vec<String>>>>,
     refuse: Rc<RefCell<Option<String>>>,
+    /// The commands run, in order.
+    ran: Rc<RefCell<Vec<String>>>,
 }
 
 impl Adapter for Probe {
@@ -43,6 +45,10 @@ impl Adapter for Probe {
         Ok(())
     }
     fn run(&mut self, q: &Queued) -> Result<(), String> {
+        self.ran.borrow_mut().push(q.command.clone());
+        if q.command.contains("rejected") {
+            return Err("the key was refused".into());
+        }
         if let Some(s) = &q.stdin {
             self.stdin.borrow_mut().push(s.reveal().to_string());
         }
@@ -89,6 +95,27 @@ fn tree() -> Vec<Node> {
 fn probe() -> (App, Probe) {
     let p = Probe::default();
     (App::new("t", tree()).adapter(p.clone()), p)
+}
+
+/// An action that only reads runs at once: nothing is queued, there is no
+/// review, the bottom bar says how it ended, and the tree is read again. An
+/// action that changes things is still queued.
+#[test]
+fn a_reading_action_runs_at_once_without_the_queue() {
+    let p = Probe::default();
+    let actions = vec![Action::new("check", "probe check").reads(), Action::new("check rejected", "probe check rejected").reads(), Action::new("rotate", "probe rotate")];
+    let roots = vec![Node::group("keys", "", vec![Node::leaf("anthropic", "", Setting::new(Kind::Text, "present", "computed"))]).with_actions(actions)];
+    let mut app = App::new("t", roots).adapter(p.clone());
+    app.pick(vec![0], 0);
+    assert_eq!(*p.ran.borrow(), ["probe check"]);
+    assert_eq!(app.queue.len(), 0, "nothing to review or apply");
+    assert_eq!(app.msg, "check: ok");
+    assert_eq!(p.reloads.get(), 1, "what it found may show in the tree");
+    app.pick(vec![0], 1);
+    assert_eq!(app.msg, "check rejected: the key was refused");
+    app.pick(vec![0], 2);
+    assert_eq!(app.queue.len(), 1, "a changing action is still queued");
+    assert_eq!(p.ran.borrow().len(), 2);
 }
 
 #[test]
@@ -299,7 +326,7 @@ fn the_masked_entry_shows_dots_while_a_secret_is_typed() {
 fn a_long_secret_shows_its_dots_up_to_a_cap_then_its_length() {
     assert_eq!(super::render::mask(0), "");
     assert_eq!(super::render::mask(3), "•••");
-    assert_eq!(super::render::mask(100), format!("{}… 100", "•".repeat(48)));
+    assert_eq!(super::render::mask(100), format!("{}… 100", "•".repeat(24)));
 }
 
 /// A job that runs until stopped.

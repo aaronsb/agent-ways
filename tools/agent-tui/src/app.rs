@@ -229,6 +229,8 @@ pub struct App {
     pub themes: Themes,
     /// The slider channel a mouse drag holds.
     drag: Option<usize>,
+    /// A reading action running outside the queue: its label and job.
+    reading: Option<(String, Box<dyn crate::adapter::Job>)>,
 }
 
 impl App {
@@ -255,6 +257,7 @@ impl App {
             hits: Hits::default(),
             adapter: Box::new(Unwired),
             stamp: None,
+            reading: None,
             themes: Themes::new(None, agent_theme::ColorDepth::TrueColor, None),
             drag: None,
         }
@@ -334,9 +337,9 @@ impl App {
         summary(&self.roots, &self.queue)
     }
 
-    /// Whether an apply is running.
+    /// Whether an apply, or a reading action, is running.
     pub fn applying(&self) -> bool {
-        matches!(self.mode, Mode::Review { run: Some(_), .. })
+        matches!(self.mode, Mode::Review { run: Some(_), .. }) || self.reading.is_some()
     }
 
     /// Value changes plus queued actions, in every tab.
@@ -351,6 +354,7 @@ impl App {
     /// One tick of a running apply. A finished run is closed out on the tick
     /// after its last state, so the last glyph is seen.
     pub fn tick(&mut self) {
+        self.tick_reading();
         let Mode::Review { run: Some(run), .. } = &mut self.mode else { return };
         if run.finished() {
             return self.finish_run();
@@ -413,6 +417,10 @@ impl App {
     /// Stop a running apply where it is: the command in flight ends, its
     /// step is marked failed with `why`, and the run is closed out.
     pub fn stop_run(&mut self, why: &str) {
+        if let Some((_, mut job)) = self.reading.take() {
+            job.stop();
+            let _ = job.poll();
+        }
         if let Mode::Review { run: Some(run), .. } = &mut self.mode {
             run.stop(why);
             self.finish_run();

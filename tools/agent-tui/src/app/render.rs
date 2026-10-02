@@ -80,7 +80,7 @@ pub(super) fn modal_rect(area: Rect, w: u16, h: u16) -> Rect {
 
 /// The most dots the masked entry draws; past it a count follows, so the
 /// hint beside the entry stays on screen for a long key.
-const MASK_DOTS: usize = 48;
+const MASK_DOTS: usize = 24;
 
 /// One dot per character typed, so each keystroke shows; the characters
 /// never reach the screen.
