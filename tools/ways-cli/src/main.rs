@@ -354,6 +354,14 @@ enum Commands {
     /// hooks from hardcoding a path that drifts from `paths::events_log()` after
     /// the ADR-142 XDG migration (ADR-153 §1).
     EventsLogPath,
+    /// Print the directory name Claude Code gives a project under its projects
+    /// dir (`ways_core::paths::project_slug`). Defaults to `CLAUDE_PROJECT_DIR`,
+    /// else the working directory. Lets shell macros read per-project state
+    /// without re-deriving the rule.
+    ProjectSlug {
+        /// Project path
+        path: Option<String>,
+    },
     /// The ways agent: API keys, the judge's engine and mode (ADR-196, ADR-502).
     /// Runs `ways-agent`; `ways agent --help` lists its commands.
     #[command(disable_help_flag = true)]
@@ -1020,6 +1028,14 @@ fn run() -> Result<()> {
         }
         Commands::EventsLogPath => {
             println!("{}", paths::events_log().display());
+            Ok(())
+        }
+        Commands::ProjectSlug { path } => {
+            let project = path
+                .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|p| !p.is_empty()))
+                .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()))
+                .unwrap_or_default();
+            println!("{}", ways_core::paths::project_slug(&project));
             Ok(())
         }
         Commands::ResponseTopicsPath { session } => {
