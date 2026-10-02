@@ -53,17 +53,24 @@ seed_sessions
 echo '{"cwd":"/srv/p"}' | bash "$HOOKS/clear-markers.sh"
 check "clear-markers without a session id keeps every session" "2" "$(find "$SESSIONS" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
 
-# A session id that is not a plain name never reaches rm.
+# A session id that climbs out of the sessions root never reaches rm: the
+# directory beside the root survives.
 seed_sessions
-echo '{"session_id":".."}' | bash "$HOOKS/clear-markers.sh"
-check "clear-markers ignores a session id of .." "present" "$([[ -d $SESSIONS ]] && echo present || echo absent)"
+mkdir -p "$XDG_RUNTIME_DIR/victim"
+echo '{"session_id":"../victim"}' | bash "$HOOKS/clear-markers.sh"
+check "clear-markers ignores a session id that escapes the root" "present" "$([[ -d $XDG_RUNTIME_DIR/victim ]] && echo present || echo absent)"
 
 # The memory macro reads MEMORY.md from the dir Claude Code names the project
 # by: every non-alphanumeric character becomes '-'.
 mkdir -p "$HOME/.claude/projects/-srv-mcp--prod-x-y/memory"
 printf 'one\ntwo\n' > "$HOME/.claude/projects/-srv-mcp--prod-x-y/memory/MEMORY.md"
-out=$(PATH="/usr/bin:/bin" CLAUDE_PROJECT_DIR="/srv/mcp/_prod/x.y" bash "$HOOKS/meta/memory/macro.sh")
+out=$(PATH="$HOME/.claude/bin:/usr/bin:/bin" CLAUDE_PROJECT_DIR="/srv/mcp/_prod/x.y" bash "$HOOKS/meta/memory/macro.sh")
 check "memory macro finds an underscore project's MEMORY.md" "**MEMORY.md has 2 lines.**" "${out%% Review*}"
+
+# `ways project-slug` is the rule the macro reads; non-ASCII takes UTF-16 units.
+check "ways project-slug maps a path" "-srv-mcp--prod-x-y" "$("$WAYS_TEST_BIN" project-slug /srv/mcp/_prod/x.y)"
+check "ways project-slug counts UTF-16 units" "-x---" "$("$WAYS_TEST_BIN" project-slug /x/🦀)"
+check "ways project-slug defaults to CLAUDE_PROJECT_DIR" "-srv-p" "$(CLAUDE_PROJECT_DIR=/srv/p "$WAYS_TEST_BIN" project-slug)"
 
 # inject-subagent.sh emits each stashed way, from the user root
 # ($XDG_CONFIG_HOME/agent-ways/ways, ADR-143) as from the core root, with
@@ -75,6 +82,9 @@ way() {  # root id scope body
 }
 way "$XDG_CONFIG_HOME/agent-ways/ways" userdom/mine "subagent" "# User way body"
 way "$HOME/.claude/hooks/ways" coredom/shipped "agent, subagent" "# Core way body"
+# A way with a check file that sorts before it: the way body is what injects.
+way "$HOME/.claude/hooks/ways" coredom/checked "subagent" "# Checked way body"
+printf -- '---\ndescription: test check\n---\n# Check text\n' > "$HOME/.claude/hooks/ways/coredom/checked/checked.check.md"
 printf -- '---\ndescription: test way\nscope: subagent\nrefire: 0.15\nmacro: append\n---\n# Macro way body\n' \
     > "$(mkdir -p "$HOME/.claude/hooks/ways/coredom/withmacro" && echo "$HOME/.claude/hooks/ways/coredom/withmacro")/withmacro.md"
 printf '#!/bin/bash\necho macro-output\n' > "$HOME/.claude/hooks/ways/coredom/withmacro/macro.sh"
@@ -82,18 +92,18 @@ chmod +x "$HOME/.claude/hooks/ways/coredom/withmacro/macro.sh"
 
 inject() {  # session -> additionalContext
     mkdir -p "$SESSIONS/$1/subagent-stash"
-    echo '{"ways":["userdom/mine","coredom/shipped","coredom/withmacro"],"channels":["prompt","prompt","prompt"]}' \
+    echo '{"ways":["userdom/mine","coredom/shipped","coredom/withmacro","coredom/checked"],"channels":["prompt","prompt","prompt","prompt"]}' \
         > "$SESSIONS/$1/subagent-stash/001.json"
     echo "{\"session_id\":\"$1\",\"agent_id\":\"agent-1\",\"cwd\":\"$WORK/project\"}" \
         | bash "$HOOKS/inject-subagent.sh" | jq -r '.hookSpecificOutput.additionalContext // empty'
 }
 rm -rf "$SESSIONS"
 ctx=$(inject sess-sub)
-expected=$'# User way body\n\n# Core way body\n\n# Macro way body\nmacro-output'
+expected=$'# User way body\n\n# Core way body\n\n# Macro way body\nmacro-output\n\n# Checked way body'
 check "inject-subagent injects user, core and macro ways" "$expected" "$ctx"
 # A second subagent in the same session gets the same ways again.
 check "inject-subagent ignores the parent's refire state" "$expected" "$(inject sess-sub)"
-check "inject-subagent logs each injection" "6" \
+check "inject-subagent logs each injection" "8" \
     "$(jq -r 'select(.event=="way_fired" and .scope=="subagent") | .way' "$XDG_STATE_HOME/agent-ways/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
 
 exit $fail

@@ -1124,6 +1124,23 @@ fn scenario_18_token_position_finds_an_underscore_project() {
 
     assert_eq!(fired_token_positions(&session, project, &home, &state), vec![40_000]);
 
+    // The scan above falls back to every project dir on a slug miss, so it
+    // cannot pin the slug. `ways context --project` reads the slug's dir alone.
+    let out = Command::new(ways_bin())
+        .args(["context", "--project", project, "--json"])
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("XDG_STATE_HOME", &state)
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env_remove("CLAUDE_SESSION_ID")
+        .env_remove("CLAUDE_PROJECT_DIR")
+        .output()
+        .expect("Failed to run ways context");
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|_| panic!("ways context printed no JSON: {}", String::from_utf8_lossy(&out.stderr)));
+    assert_eq!(json["tokens_used"], 40_000, "context read the project's own dir: {json}");
+
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&base);
 }
