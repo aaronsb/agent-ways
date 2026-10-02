@@ -372,3 +372,32 @@ fn tabs_open_where_asked_and_name_themselves() {
     assert_eq!((app.tab(), app.tab_names()), (1, vec!["matching".to_string(), "theme".to_string()]));
     assert_eq!(App::new("t", tree()).on_tab(9).tab(), 0, "a tab past the last is ignored");
 }
+
+#[test]
+fn a_section_is_no_part_of_its_rows_keys_and_a_reload_keeps_its_state() {
+    let sectioned = || {
+        let mut t = tree();
+        let rows = std::mem::take(&mut t[0].children);
+        t[0].children = vec![Node::section("settings", "", ("", "value"), rows)];
+        t
+    };
+    let p = Probe::default();
+    let mut app = App::new("t", sectioned()).adapter(p.clone());
+    // The rows under the section keep the keys they had without it.
+    assert_eq!(tree::key(&app.roots, &[0, 0, 0]), "matching.tau");
+    assert_eq!(tree::key(&app.roots, &[0, 0]), "matching#settings");
+    assert_eq!(tree::label(&app.roots, &[0, 0]), "matching · settings");
+    assert_eq!(tree::path_of(&app.roots, "matching.floor"), Some(vec![0, 0, 1]));
+    // Edit tau (first row under the section), close the section, reload.
+    press(&mut app, &[KeyCode::Down, KeyCode::Char('e')]);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    type_str(&mut app, "0.4");
+    press(&mut app, &[KeyCode::Enter]);
+    assert_eq!(tree::changes(&app.roots)[0].0, "matching.tau", "a change's key carries no section");
+    app.roots[0].children[0].open = false;
+    *p.fresh.borrow_mut() = Some(sectioned());
+    let r = app.reload();
+    assert!(r.is_clean(), "{}", r.message());
+    assert_eq!(app.roots[0].children[0].children[0].setting.as_ref().unwrap().value, "0.4", "the pending edit is kept");
+    assert!(!app.roots[0].children[0].open, "the section's open state is kept");
+}

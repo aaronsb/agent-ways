@@ -190,6 +190,10 @@ pub fn summary(roots: &[Node], queue: &Queue) -> String {
     out
 }
 
+/// The status bar's message before anything else is said: the keys that
+/// find the rest. A row's actions take its place.
+pub(crate) const HINT: &str = "? keys · Tab 1-9 tabs · / filters all tabs";
+
 pub struct App {
     pub roots: Vec<Node>,
     pub(crate) queue: Queue,
@@ -239,7 +243,7 @@ impl App {
             cursor: 0,
             mode: Mode::Browse,
             filter: String::new(),
-            msg: "? keys · Tab 1-9 tabs · / filters all tabs".into(),
+            msg: HINT.into(),
             show_changes: false,
             list: ListState::default(),
             rcursor: vec![0; roots_len],
@@ -545,7 +549,7 @@ impl App {
         self.tab = path[0];
         self.cursor = self.rows().iter().position(|r| r.path == path).unwrap_or(0);
         self.saved[self.tab] = self.cursor;
-        self.msg = tree::key(&self.roots, path);
+        self.msg = tree::label(&self.roots, path);
     }
 
     /// A flow ended: queue what it finished with, on the tab that launched it,

@@ -68,7 +68,7 @@ const SECTIONS: &[SectionSpec] = &[
         top: &["targets"],
         per_entry: true, entry: None,
         repair: Some("`ways target add|enable|disable|remove <dir>`"),
-        columns: None,
+        columns: Some(("target", "state")),
         doc: "Where agent-ways is active. Changed by `ways target`, which reconciles.",
     },
     SectionSpec {

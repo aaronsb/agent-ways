@@ -364,7 +364,7 @@ impl Ways {
                 .with_actions(vec![activate()]),
             );
         }
-        let mut g = Node::group("targets", format!("{}\n\n{}", b.spec.doc, b.spec.long), rows).columns(("target", "state")).with_actions(vec![
+        let mut g = Node::group("targets", format!("{}\n\n{}", b.spec.doc, b.spec.long), rows).with_actions(vec![
             activate(),
             Action::new("add", "ways target add {}")
                 .arg(Arg::Text("directory".into()))

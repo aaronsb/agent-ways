@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m) │ s set up  ? keys · Tab 1-9 tabs · / filters all tabs |
+| browse  0 changed │ 0 queued │ mouse on (m) │ s set up                                             |
 styles
   0   0-7   Black Cyan BOLD
   0  10-21  White Blue -

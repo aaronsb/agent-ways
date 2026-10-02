@@ -261,8 +261,9 @@ pub fn action_keys(actions: &[Action]) -> Vec<Option<char>> {
     actions
         .iter()
         .map(|a| {
-            if a.key.is_some() {
-                return a.key;
+            // A reserved key would name a key that does something else.
+            if let Some(k) = a.key {
+                return (!RESERVED_KEYS.contains(k)).then_some(k);
             }
             let letters: Vec<char> = a.label.chars().filter(char::is_ascii_alphabetic).map(|c| c.to_ascii_lowercase()).collect();
             let k = letters
@@ -284,10 +285,10 @@ pub fn key_conflicts(actions: &[Action]) -> Vec<String> {
     let keys = action_keys(actions);
     let mut out = Vec::new();
     for (i, (a, k)) in actions.iter().zip(&keys).enumerate() {
-        match k {
-            None => out.push(format!("{}: no key left", a.label)),
-            Some(k) if a.key.is_some() && RESERVED_KEYS.contains(*k) => out.push(format!("{}: {k} is reserved", a.label)),
-            Some(k) if keys[..i].contains(&Some(*k)) => out.push(format!("{}: {k} is bound twice", a.label)),
+        match (k, a.key) {
+            (None, Some(own)) => out.push(format!("{}: {own} is reserved", a.label)),
+            (None, None) => out.push(format!("{}: no key left", a.label)),
+            (Some(k), _) if keys[..i].contains(&Some(*k)) => out.push(format!("{}: {k} is bound twice", a.label)),
             _ => {}
         }
     }
@@ -536,6 +537,22 @@ pub fn key(roots: &[Node], path: &[usize]) -> String {
         n = &n.children[i];
     }
     own_key(&under, n)
+}
+
+/// Queued actions under the node at `path`. A section holds those of the
+/// rows it gathers, whose keys do not carry its name.
+pub fn queued_under(roots: &[Node], path: &[usize], queue: &Queue) -> usize {
+    let n = get(roots, path);
+    if !n.section {
+        return queue.under(&key(roots, path));
+    }
+    (0..n.children.len())
+        .map(|i| {
+            let mut p = path.to_vec();
+            p.push(i);
+            queued_under(roots, &p, queue)
+        })
+        .sum()
 }
 
 /// The node at `path` as the panes name it: its key, with a section named

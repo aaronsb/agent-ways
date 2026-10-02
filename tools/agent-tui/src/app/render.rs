@@ -69,12 +69,12 @@ pub(super) fn elide(text: &str, room: usize) -> String {
     format!("{}…{}", text.chars().take(head).collect::<String>(), text.chars().skip(n - tail).collect::<String>())
 }
 
-/// A modal of `w` by `h` centred in `area`. One as tall as the area takes its
-/// whole width too: narrower, it would leave the start of the tree's title
-/// showing beside its top-left corner.
+/// A modal of `w` by `h` centred in `area`. One whose top edge lands on the
+/// area's first row takes its whole width too: narrower, it would leave the
+/// start of the tree's title showing beside its top-left corner.
 pub(super) fn modal_rect(area: Rect, w: u16, h: u16) -> Rect {
     let h = h.min(area.height);
-    let w = if h == area.height { area.width } else { w.min(area.width) };
+    let w = if (area.height - h) / 2 == 0 { area.width } else { w.min(area.width) };
     Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
 }
 
@@ -257,7 +257,7 @@ impl App {
                 if n.finding.is_some() {
                     spans.push(Span::styled(" !", theme::finding()));
                 }
-                let c = n.changes() + self.queue.under(&tree::key(&self.roots, &r.path));
+                let c = n.changes() + tree::queued_under(&self.roots, &r.path, &self.queue);
                 if c > 0 && !n.children.is_empty() {
                     spans.push(Span::styled(format!("  ●{c}"), theme::warn()));
                 }
@@ -562,11 +562,16 @@ impl App {
                 } else {
                     spans.push(hint(if self.mouse { "mouse on (m)" } else { "mouse off (m)" }));
                 }
-                if let Some(here) = self.footer_actions() {
+                // A row's actions take the place of the opening hint; a
+                // message said since comes first, so it is never cut off.
+                let here = self.footer_actions();
+                if self.msg != crate::app::HINT || here.is_none() {
+                    spans.push(msg);
+                }
+                if let Some(here) = here {
                     spans.push(theme::sep());
                     spans.extend(here);
                 }
-                spans.push(msg);
             }
         }
         // The call to action sits at the right end; the rest yields to it.
@@ -661,6 +666,11 @@ impl App {
     fn draw_help(&mut self, f: &mut Frame, area: Rect, scroll: u16) {
         let tab = self.tab_names().get(self.tab).cloned().unwrap_or_default();
         let mut lines: Vec<Line> = KEYS.iter().map(|l| Line::raw(*l)).collect();
+        if let Some(here) = self.footer_actions() {
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("actions here", Style::new().add_modifier(Modifier::BOLD)));
+            lines.push(Line::from(here));
+        }
         if let Some(text) = self.adapter.help(&tab) {
             lines.push(Line::raw(""));
             lines.push(Line::styled(format!("help: {tab}"), Style::new().add_modifier(Modifier::BOLD)));

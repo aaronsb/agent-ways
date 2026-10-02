@@ -114,7 +114,7 @@ impl App {
                     KeyCode::Enter => self.pick(path, sel),
                     KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::Menu { path, sel: sel.saturating_sub(1) },
                     KeyCode::Down | KeyCode::Char('j') => self.mode = Mode::Menu { path, sel: (sel + 1).min(len - 1) },
-                    KeyCode::Char(c) => match self.action_for_key(&path, c) {
+                    KeyCode::Char(c) if !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => match self.action_for_key(&path, c) {
                         Some(i) => self.pick(path, i),
                         None => self.mode = Mode::Menu { path, sel },
                     },
@@ -364,7 +364,7 @@ impl App {
             KeyCode::Char('m') => self.toggle_mouse(),
             KeyCode::Char('/') => self.mode = Mode::Filter,
             KeyCode::Char('?') => self.mode = Mode::Help { scroll: 0 },
-            KeyCode::Char(c) => {
+            KeyCode::Char(c) if !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
                 let target = self.actions_at(&path);
                 if let Some(i) = self.action_for_key(&target, c) {
                     self.pick(target, i);

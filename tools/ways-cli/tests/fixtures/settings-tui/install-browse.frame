@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m) │ t activate · A add · p plan  ? keys · Tab 1-9 tabs · |
+| browse  0 changed │ 0 queued │ mouse on (m) │ t activate · A add · p plan                          |
 styles
   0   0-7   White Blue -
   0  10-21  White Blue -
