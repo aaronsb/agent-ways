@@ -3,7 +3,7 @@ agent-tui frame 100x30
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
 |│   engine                                            ││gate.profiles.anthropic                    │|
 |│   mode                        enforce               ││                                           │|
-|│ ▾ profiles                                          ││8 entries, 0 changed                       │|
+|│ ▾ profiles                                          ││10 entries, 0 changed                      │|
 |│▌  ▾ anthropic                                       ││                                           │|
 |│       provider                anthropic             ││                                           │|
 |│       model                   claude-haiku-4-5      ││                                           │|
@@ -13,10 +13,10 @@ agent-tui frame 100x30
 |│       max_turn_chars          1200                  ││                                           │|
 |│       concurrency             8                     ││                                           │|
 |│       max_candidates          8                     ││                                           │|
+|│       price_in_per_mtok       1.0                   ││                                           │|
+|│       price_out_per_mtok      5.0                   ││                                           │|
 |│   ▸ openrouter                                      ││                                           │|
 |│ ▸ keys                                              ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -51,7 +51,7 @@ styles
   3  99-99  - - DIM
   4   0-0   - - DIM
   4   2-11  - - BOLD
-  4  54-75  - - DIM
+  4  54-76  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
   5   1-1   Cyan - BOLD|REVERSED
@@ -83,17 +83,17 @@ styles
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14   2-15  - - BOLD
  14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15   2-7   - - BOLD
  15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
+ 16   2-15  - - BOLD
  16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
+ 17   2-7   - - BOLD
  17  54-55  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM

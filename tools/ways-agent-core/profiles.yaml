@@ -8,6 +8,10 @@
 # second addendum), so a request carries at most max_candidates, in the
 # matcher's order, and keeps under the deadline.
 #
+# The anthropic profile carries Haiku 4.5's list prices, in USD per million
+# tokens, for pricing judge calls (#741). OpenRouter reports each call's cost,
+# so its profile needs none.
+#
 # The user layer, $XDG_CONFIG_HOME/agent-ways/agent.yaml, overrides any field
 # of any profile and survives updates. `ways settings set gate.…` writes it.
 
@@ -20,6 +24,8 @@ anthropic:
   max_turn_chars: 1200
   concurrency: 8
   max_candidates: 8
+  price_in_per_mtok: 1.0
+  price_out_per_mtok: 5.0
 
 openrouter:
   provider: openrouter

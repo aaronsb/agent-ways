@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::cost::JudgeCall;
 use crate::judge::{Candidate, Turn};
 use crate::profile::{Mode, Provider};
 
@@ -66,7 +67,13 @@ pub struct ReplyEnvelope {
 pub enum Reply {
     Judged(Judged),
     /// The gate did not judge; the hook keeps the matcher's decision.
-    Fallback { reason: String, latency_ms: u64 },
+    /// `call` is set when a provider call was made, since it may be billed.
+    Fallback {
+        reason: String,
+        latency_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call: Option<Box<JudgeCall>>,
+    },
     Status(Status),
     Ok,
     Error { message: String },
@@ -81,6 +88,10 @@ pub struct Judged {
     pub threshold: f64,
     pub verdicts: Vec<Verdict>,
     pub latency_ms: u64,
+    /// The provider call behind the verdicts. An agent older than #741
+    /// sends none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<JudgeCall>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -216,7 +227,7 @@ mod tests {
 
         let reply = ReplyEnvelope {
             agent: AgentId { version: "0.1.0".into(), core: "0.1.0".into(), exe: "/x/ways-agent".into() },
-            reply: Reply::Fallback { reason: "no_key".into(), latency_ms: 0 },
+            reply: Reply::Fallback { reason: "no_key".into(), latency_ms: 0, call: None },
         };
         let line = serde_json::to_string(&reply).unwrap();
         assert!(line.contains("\"kind\":\"fallback\"") && line.contains("\"exe\":\"/x/ways-agent\""));

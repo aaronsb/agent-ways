@@ -10,10 +10,13 @@
 //! the rest pass unjudged, except a way whose ancestor the judge blocked, which
 //! is blocked with it. Every verdict, cap and fallback is logged to
 //! `events.jsonl`, and any failure fails open: the matcher's decision stands.
+//! Each provider call is logged once more as `judge_call`, with its tokens
+//! and cost, so spend is counted per call, not per way (#741).
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use ways_agent_core::cost::JudgeCall;
 use ways_agent_core::judge::{way_text, Candidate, Role, Turn};
 use ways_agent_core::profile::{self, Mode, Settings};
 use ways_agent_core::protocol::{JudgeRequest, Judged, Reply, Request};
@@ -137,6 +140,9 @@ fn run(
     let elapsed_ms = begun.elapsed().as_millis().to_string();
     match reply {
         Ok(Reply::Judged(j)) => {
+            // An agent older than #741 reports no call; the call was still made.
+            let call = j.call.clone().unwrap_or_else(|| JudgeCall::priced(&j.engine, &settings.profile, j.verdicts.len(), None));
+            log_call(&call, None, log);
             let mut blocked = decide(&j, log, &elapsed_ms);
             // A way's guidance presumes its parent's: an unjudged way under a
             // blocked ancestor goes with it.
@@ -148,10 +154,22 @@ fn run(
             blocked.extend(orphaned);
             blocked
         }
-        Ok(Reply::Fallback { reason, .. }) => fallback(&reason, judged.len(), log, &elapsed_ms),
+        Ok(Reply::Fallback { reason, call, .. }) => {
+            if let Some(call) = call {
+                log_call(&call, Some(&reason), log);
+            }
+            fallback(&reason, judged.len(), log, &elapsed_ms)
+        }
         Ok(Reply::Error { message }) => fallback(&format!("agent_error: {message}"), judged.len(), log, &elapsed_ms),
         Ok(other) => fallback(&format!("unexpected_reply: {other:?}"), judged.len(), log, &elapsed_ms),
-        Err(reason) => fallback(&reason, judged.len(), log, &elapsed_ms),
+        Err(reason) => {
+            // The hook stopped reading while the agent may still have been
+            // waiting on the provider: count a call of unknown cost.
+            if reason == "deadline" {
+                log_call(&JudgeCall::priced(&settings.engine, &settings.profile, judged.len(), None), Some(&reason), log);
+            }
+            fallback(&reason, judged.len(), log, &elapsed_ms)
+        }
     }
 }
 
@@ -199,6 +217,38 @@ fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> HashSet<String>
         ]);
     }
     blocked
+}
+
+/// Logs one provider call: `outcome` is `judged`, or `fallback` with the
+/// fallback's reason. Token and cost fields are left out when unknown, so a
+/// report never reads an unknown cost as zero.
+fn log_call(call: &JudgeCall, fallback_reason: Option<&str>, log: &LogContext<'_>) {
+    let candidates = call.candidates.to_string();
+    let mut fields: Vec<(&str, String)> = vec![
+        ("event", "judge_call".into()),
+        ("outcome", if fallback_reason.is_some() { "fallback" } else { "judged" }.into()),
+        ("engine", call.engine.clone()),
+        ("provider", call.provider.as_str().into()),
+        ("model", call.model.clone()),
+        ("candidates", candidates),
+        ("cost_source", call.cost_source.as_str().into()),
+    ];
+    if let Some(reason) = fallback_reason {
+        fields.push(("reason", reason.into()));
+    }
+    if let Some(u) = &call.usage {
+        fields.push(("input_tokens", u.input_tokens.to_string()));
+        fields.push(("output_tokens", u.output_tokens.to_string()));
+        fields.push(("cache_read_tokens", u.cache_read_tokens.to_string()));
+        fields.push(("cache_write_tokens", u.cache_write_tokens.to_string()));
+    }
+    if let Some(cost) = call.cost_usd {
+        fields.push(("cost_usd", format!("{cost:.8}")));
+    }
+    let tail = [("hook", log.hook_event), ("scope", log.scope), ("project", log.project_dir), ("session", log.session_id)];
+    let mut line: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    line.extend(tail);
+    (log.sink)(&line);
 }
 
 /// Logs a fallback; nothing is blocked.
@@ -250,6 +300,7 @@ mod tests {
             threshold: 0.3,
             verdicts: verdicts.iter().map(|(id, p)| Verdict { id: id.to_string(), p_yes: *p }).collect(),
             latency_ms: 800,
+            call: None,
         })
     }
 
@@ -277,10 +328,74 @@ mod tests {
         assert_eq!(seen, vec!["softwaredev/code/security/secrets", "data/migrations"]);
         assert_eq!(blocked, HashSet::from(["data/migrations".to_string()]));
         let events = events.borrow();
-        assert_eq!(events.len(), 2);
-        assert_eq!(field(&events[0], "verdict"), "pass");
-        assert_eq!(field(&events[1], "verdict"), "block");
-        assert_eq!(field(&events[1], "p_yes"), "0.050");
+        let verdicts: Vec<_> = events.iter().filter(|e| field(e, "event") == "way_judged").collect();
+        assert_eq!(verdicts.len(), 2);
+        assert_eq!(field(verdicts[0], "verdict"), "pass");
+        assert_eq!(field(verdicts[1], "verdict"), "block");
+        assert_eq!(field(verdicts[1], "p_yes"), "0.050");
+    }
+
+    fn calls_in(events: &[Vec<(String, String)>]) -> Vec<Vec<(String, String)>> {
+        events.iter().filter(|e| field(e, "event") == "judge_call").cloned().collect()
+    }
+
+    fn calls(events: &Events) -> Vec<Vec<(String, String)>> {
+        calls_in(&events.borrow())
+    }
+
+    #[test]
+    fn a_judged_request_logs_one_priced_call() {
+        use ways_agent_core::cost::Usage;
+        let events = Events::default();
+        let sink = recorder(&events);
+        let s = settings(Mode::Enforce);
+        run(&pending(), "q", None, &s, &log(&sink), |_, _| {
+            let Reply::Judged(mut j) = judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.9), ("data/migrations", 0.9)]) else { unreachable!() };
+            let usage = Usage { input_tokens: 1000, output_tokens: 100, ..Default::default() };
+            j.call = Some(JudgeCall::priced("anthropic", &s.profile, 2, Some(usage)));
+            Ok(Reply::Judged(j))
+        });
+        let calls = calls(&events);
+        assert_eq!(calls.len(), 1);
+        let c = &calls[0];
+        assert_eq!((field(c, "outcome"), field(c, "candidates"), field(c, "cost_source")), ("judged", "2", "price_table"));
+        assert_eq!((field(c, "input_tokens"), field(c, "output_tokens")), ("1000", "100"));
+        assert_eq!(field(c, "cost_usd"), "0.00150000");
+        assert_eq!(field(c, "session"), "test-gate");
+    }
+
+    #[test]
+    fn a_call_without_usage_is_logged_as_unknown_never_zero() {
+        let s = settings(Mode::Enforce);
+        let unpriced = JudgeCall::priced("anthropic", &s.profile, 2, None);
+        let cases: Vec<(Result<Reply, String>, &str, &str)> = vec![
+            // An agent older than #741 sends no call with its verdicts.
+            (Ok(judged(Mode::Enforce, &[])), "judged", ""),
+            (Ok(Reply::Fallback { reason: "deadline".into(), latency_ms: 2000, call: Some(Box::new(unpriced)) }), "fallback", "deadline"),
+            // The hook gave up reading; the agent may still have called.
+            (Err("deadline".into()), "fallback", "deadline"),
+        ];
+        for (reply, outcome, reason) in cases {
+            let events = Events::default();
+            let sink = recorder(&events);
+            run(&pending(), "q", None, &s, &log(&sink), |_, _| reply);
+            let calls = calls(&events);
+            assert_eq!(calls.len(), 1, "{outcome} {reason}");
+            let c = &calls[0];
+            assert_eq!((field(c, "outcome"), field(c, "reason"), field(c, "cost_source")), (outcome, reason, "unknown"));
+            assert!(c.iter().all(|(k, _)| k != "cost_usd" && k != "input_tokens"));
+        }
+    }
+
+    #[test]
+    fn no_call_is_logged_when_none_was_made() {
+        let s = settings(Mode::Enforce);
+        for reply in [Err("agent_absent".to_string()), Ok(Reply::Fallback { reason: "no_key".into(), latency_ms: 0, call: None })] {
+            let events = Events::default();
+            let sink = recorder(&events);
+            run(&pending(), "q", None, &s, &log(&sink), |_, _| reply);
+            assert!(calls(&events).is_empty());
+        }
     }
 
     #[test]
@@ -291,7 +406,8 @@ mod tests {
             Ok(judged(Mode::Shadow, &[("softwaredev/code/security/secrets", 0.1), ("data/migrations", 0.05)]))
         });
         assert!(blocked.is_empty());
-        assert!(events.borrow().iter().all(|e| field(e, "verdict") == "would_block"));
+        let events = events.borrow();
+        assert!(events.iter().filter(|e| field(e, "event") == "way_judged").all(|e| field(e, "verdict") == "would_block"));
     }
 
     #[test]
@@ -300,7 +416,7 @@ mod tests {
         let replies: Vec<(Result<Reply, String>, &str)> = vec![
             (Err("agent_absent".into()), "agent_absent"),
             (Err("deadline".into()), "deadline"),
-            (Ok(Reply::Fallback { reason: "no_key".into(), latency_ms: 0 }), "no_key"),
+            (Ok(Reply::Fallback { reason: "no_key".into(), latency_ms: 0, call: None }), "no_key"),
             (Ok(Reply::Error { message: "protocol 2 not served".into() }), "agent_error: protocol 2 not served"),
         ];
         for (reply, reason) in replies {
@@ -309,9 +425,9 @@ mod tests {
             let blocked = run(&pending(), "q", None, &s, &log(&sink), |_, _| reply);
             assert!(blocked.is_empty());
             let events = events.borrow();
-            assert_eq!(field(&events[0], "event"), "gate_fallback");
-            assert_eq!(field(&events[0], "reason"), reason);
-            assert_eq!(field(&events[0], "candidates"), "2");
+            let fallback = events.iter().find(|e| field(e, "event") == "gate_fallback").unwrap();
+            assert_eq!(field(fallback, "reason"), reason);
+            assert_eq!(field(fallback, "candidates"), "2");
         }
     }
 
@@ -378,8 +494,9 @@ mod tests {
             run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| Err("deadline".into()));
         assert!(blocked.is_empty());
         let events = events.borrow();
-        assert_eq!(field(&events[1], "event"), "gate_fallback");
-        assert_eq!(field(&events[1], "candidates"), "8");
+        let fallback = events.iter().find(|e| field(e, "event") == "gate_fallback").unwrap();
+        assert_eq!(field(fallback, "candidates"), "8");
+        assert_eq!(calls_in(&events)[0].iter().find(|(k, _)| k == "candidates").unwrap().1, "8");
     }
 
     #[test]

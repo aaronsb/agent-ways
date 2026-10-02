@@ -19,6 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{bail, Context, Result};
 
+use crate::cost::JudgeCall;
 use crate::judge::{self, Candidate};
 use crate::profile::{self, Mode, Provider, Settings};
 use crate::protocol::{self, Envelope, JudgeRequest, Judged, Reply, Request, Status, Verdict};
@@ -141,7 +142,7 @@ fn handle(stream: UnixStream, state: &State) -> bool {
         ),
         Ok(env) => match env.request {
             Request::Judge(_) if state.draining.load(Ordering::SeqCst) => {
-                (Reply::Fallback { reason: "agent_stopping".into(), latency_ms: 0 }, false)
+                (Reply::Fallback { reason: "agent_stopping".into(), latency_ms: 0, call: None }, false)
             }
             Request::Judge(req) => (state.judge(req), false),
             Request::Status => (Reply::Status(state.status()), false),
@@ -298,15 +299,22 @@ impl State {
                 judged.latency_ms = latency_ms;
                 Reply::Judged(judged)
             }
-            Err(reason) => {
+            Err((reason, call)) => {
                 let key = reason.split(':').next().unwrap_or("other").to_string();
                 *stats.fallbacks.entry(key).or_default() += 1;
-                Reply::Fallback { reason, latency_ms }
+                Reply::Fallback { reason, latency_ms, call }
             }
         }
     }
 
-    fn judge_inner(&self, req: &JudgeRequest, begun: Instant) -> Result<Judged, String> {
+    /// Judges the request. A failure carries the provider call when one was
+    /// made, so the hook can count it.
+    fn judge_inner(&self, req: &JudgeRequest, begun: Instant) -> Result<Judged, (String, Option<Box<JudgeCall>>)> {
+        self.prepare(req, begun).map_err(|reason| (reason, None))?.call(self)
+    }
+
+    /// Everything before the provider call: settings, key, slot, deadline.
+    fn prepare<'r>(&'r self, req: &'r JudgeRequest, begun: Instant) -> Result<Prepared<'r>, String> {
         if req.candidates.is_empty() {
             return Err("no_candidates".to_string());
         }
@@ -328,21 +336,7 @@ impl State {
         }
         let turns = judge::render_turns(&req.turns, p.turns, p.max_turn_chars);
         let prompt = judge::render_prompt(&turns, &req.candidates);
-        let p_yes = net::judge(&self.http, p.provider, &key, &p.model, &prompt, req.candidates.len(), remaining)?;
-        Ok(Judged {
-            engine: settings.engine.clone(),
-            provider: p.provider,
-            model: p.model.clone(),
-            mode: settings.mode,
-            threshold: p.threshold,
-            verdicts: req
-                .candidates
-                .iter()
-                .zip(p_yes)
-                .map(|(Candidate { id, .. }, p_yes)| Verdict { id: id.clone(), p_yes })
-                .collect(),
-            latency_ms: 0,
-        })
+        Ok(Prepared { req, settings, key, prompt, remaining, _slot })
     }
 
     /// A working key is the operator's approval to gate (ADR-196 §6): judge
@@ -422,6 +416,44 @@ impl State {
             latency_p50_ms: pct(0.5),
             latency_p95_ms: pct(0.95),
         }
+    }
+}
+
+/// A judge request ready for its provider call, holding its slot.
+struct Prepared<'r> {
+    req: &'r JudgeRequest,
+    settings: Settings,
+    key: String,
+    prompt: String,
+    remaining: Duration,
+    _slot: Slot<'r>,
+}
+
+impl Prepared<'_> {
+    /// Makes the provider call. Every outcome past this point was a call the
+    /// provider may bill, so each carries a [`JudgeCall`].
+    fn call(self, state: &State) -> Result<Judged, (String, Option<Box<JudgeCall>>)> {
+        let p = &self.settings.profile;
+        let n = self.req.candidates.len();
+        let priced = |usage| JudgeCall::priced(&self.settings.engine, p, n, usage);
+        let (p_yes, usage) = net::judge(&state.http, p.provider, &self.key, &p.model, &self.prompt, n, self.remaining)
+            .map_err(|f| (f.reason, Some(Box::new(priced(f.usage)))))?;
+        Ok(Judged {
+            engine: self.settings.engine.clone(),
+            provider: p.provider,
+            model: p.model.clone(),
+            mode: self.settings.mode,
+            threshold: p.threshold,
+            verdicts: self
+                .req
+                .candidates
+                .iter()
+                .zip(p_yes)
+                .map(|(Candidate { id, .. }, p_yes)| Verdict { id: id.clone(), p_yes })
+                .collect(),
+            latency_ms: 0,
+            call: Some(priced(usage)),
+        })
     }
 }
 

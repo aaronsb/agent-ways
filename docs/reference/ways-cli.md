@@ -117,6 +117,23 @@ ways session fires --session <id> --max-score 0.6   # the borderline semantic fi
 
 ---
 
+### `ways agent cost`
+
+**When:** Finding out what the relevance judge has cost, for one session or over a period.
+
+**Run from:** Anywhere. It reads the events log, which every project shares.
+
+**Tells you:** The judge's provider calls with their tokens and cost in USD, as a total and one row per day (`--by month`, `session` or `project` for the other groupings). The hook logs each call as one `judge_call` event in `events.jsonl`, beside the `way_judged` events the call produced. OpenRouter reports each call's cost. An Anthropic call is priced from tokens times the profile's `price_in_per_mtok` and `price_out_per_mtok`, which ship with Claude Haiku 4.5's list prices. A call that returned no usage, such as one that hit its deadline, or one whose profile has no prices, is counted as unknown cost. Those calls are listed apart and never summed as zero. `--json` prints the total and all four groupings.
+
+```
+ways agent cost                          # spend per day
+ways agent cost --by session --since 2026-10-01
+ways agent cost --session <id> --json
+ways settings set gate.profiles.anthropic.price_in_per_mtok 1.0
+```
+
+---
+
 ## Testing & Debugging
 
 Use these to check whether a way fires and why.
