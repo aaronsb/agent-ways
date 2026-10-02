@@ -1,0 +1,166 @@
+agent-tui frame 120x40
+| introspect    timeline    why fired                                                                                    |
+|Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
+|epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ● LIVE paused                                              |
+|━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
+|┌ ways at epoch 3 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
+|│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
+|│▌softwaredev/delivery/commits                                                1      2  keyword        ●  ● now        │|
+|│   ✓ check (1 fires, decay=0.50)                                                                                      │|
+|│ softwaredev/docs/adr                                                        2      1  file           ◆  ◐ 85%        │|
+|│ softwaredev/code/testing                                                    3      0  embed:en       ■  ─            │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
+|┌ context ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐|
+|│██████████████████████████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 66% (132K / 200K)│|
+|│● 1 re-disclose now  ◐ 1 approaching  ○ 1 distant  │ 30–80K intervals                                                 │|
+|│························◆·························································■·············· forecast 132K → 179K│|
+|│+ ↻ softwaredev/code/testing, ⊘ itops/incident (gate 0.050)                                                           │|
+|└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
+| paused   ↑↓ select  ⏎ why  ←→ frame  space follow  tab why  q quit                                                     |
+styles
+  0   0-11  White Blue -
+  0  14-23  Black Cyan BOLD
+  0  26-36  White DarkGray DIM
+  1   0-7   - - BOLD
+  1  44-59  - - DIM
+  2   0-58  - - DIM
+  2  59-73  Yellow - BOLD
+  3   0-75  Cyan - -
+  3  76-76  Cyan - BOLD
+  3  77-115 - - DIM
+  3 116-119 - - BOLD
+  4   0-0   - - DIM
+  4   1-17  Blue - BOLD|DIM
+  4  18-119 - - DIM
+  5   0-0   - - DIM
+  5   1-118 - - BOLD
+  5 119-119 - - DIM
+  6   0-0   - - DIM
+  6   1-1   Cyan - BOLD|REVERSED
+  6   2-80  - - BOLD|REVERSED
+  6  81-85  Red - BOLD|REVERSED
+  6  86-102 - - BOLD|REVERSED
+  6 103-103 #5ac8fa - BOLD|REVERSED
+  6 104-105 - - BOLD|REVERSED
+  6 106-110 Green - BOLD|REVERSED
+  6 111-118 - - BOLD|REVERSED
+  6 119-119 - - DIM
+  7   0-0   - - DIM
+  7   1-1   - - BOLD|REVERSED
+  7   2-71  - - BOLD|DIM|REVERSED
+  7  72-118 - - BOLD|REVERSED
+  7 119-119 - - DIM
+  8   0-0   - - DIM
+  8  81-85  Yellow - BOLD
+  8 103-103 #7dd87d - -
+  8 106-110 Yellow - BOLD
+  8 119-119 - - DIM
+  9   0-0   - - DIM
+  9   1-80  Cyan - BOLD
+  9  81-85  Green - BOLD
+  9  86-102 Cyan - BOLD
+  9 103-103 #ff6b6b - BOLD
+  9 104-105 Cyan - BOLD
+  9 106-106 Cyan - BOLD|DIM
+  9 107-118 Cyan - BOLD
+  9 119-119 - - DIM
+ 10   0-0   - - DIM
+ 10 119-119 - - DIM
+ 11   0-0   - - DIM
+ 11 119-119 - - DIM
+ 12   0-0   - - DIM
+ 12 119-119 - - DIM
+ 13   0-0   - - DIM
+ 13 119-119 - - DIM
+ 14   0-0   - - DIM
+ 14 119-119 - - DIM
+ 15   0-0   - - DIM
+ 15 119-119 - - DIM
+ 16   0-0   - - DIM
+ 16 119-119 - - DIM
+ 17   0-0   - - DIM
+ 17 119-119 - - DIM
+ 18   0-0   - - DIM
+ 18 119-119 - - DIM
+ 19   0-0   - - DIM
+ 19 119-119 - - DIM
+ 20   0-0   - - DIM
+ 20 119-119 - - DIM
+ 21   0-0   - - DIM
+ 21 119-119 - - DIM
+ 22   0-0   - - DIM
+ 22 119-119 - - DIM
+ 23   0-0   - - DIM
+ 23 119-119 - - DIM
+ 24   0-0   - - DIM
+ 24 119-119 - - DIM
+ 25   0-0   - - DIM
+ 25 119-119 - - DIM
+ 26   0-0   - - DIM
+ 26 119-119 - - DIM
+ 27   0-0   - - DIM
+ 27 119-119 - - DIM
+ 28   0-0   - - DIM
+ 28 119-119 - - DIM
+ 29   0-0   - - DIM
+ 29 119-119 - - DIM
+ 30   0-0   - - DIM
+ 30 119-119 - - DIM
+ 31   0-0   - - DIM
+ 31 119-119 - - DIM
+ 32   0-119 - - DIM
+ 33   0-0   - - DIM
+ 33   1-9   Blue - BOLD|DIM
+ 33  10-119 - - DIM
+ 34   0-0   - - DIM
+ 34   1-100 Yellow - BOLD
+ 34 119-119 - - DIM
+ 35   0-0   - - DIM
+ 35   1-19  Green - -
+ 35  22-36  Yellow - BOLD
+ 35  39-69  - - DIM
+ 35 119-119 - - DIM
+ 36   0-24  - - DIM
+ 36  25-25  #7dd87d - -
+ 36  26-82  - - DIM
+ 36  83-83  #ff6b6b - -
+ 36  84-119 - - DIM
+ 37   0-0   - - DIM
+ 37   1-59  Green - BOLD
+ 37 119-119 - - DIM
+ 38   0-119 - - DIM
+ 39   0-7   Black Yellow BOLD
+ 39  10-11  Cyan - BOLD
+ 39  12-18  - - DIM|ITALIC
+ 39  21-21  Cyan - BOLD
+ 39  22-25  - - DIM|ITALIC
+ 39  28-29  Cyan - BOLD
+ 39  30-35  - - DIM|ITALIC
+ 39  38-42  Cyan - BOLD
+ 39  43-49  - - DIM|ITALIC
+ 39  52-54  Cyan - BOLD
+ 39  55-58  - - DIM|ITALIC
+ 39  61-61  Cyan - BOLD
+ 39  62-66  - - DIM|ITALIC

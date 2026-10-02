@@ -229,7 +229,7 @@ fn load_engagement_for_tick(
 /// Resolve a way's re-fire threshold in thousands of tokens by reading
 /// its frontmatter, resolving its refire spec against the session's
 /// context window (ADR-126), and asking `Curve::refire_delta(REFIRE_FLOOR)`.
-/// Used by `ways list` / `ways rethink` to render per-way bar positions.
+/// Used by `ways list` and `ways introspect` to render per-way bar positions.
 ///
 /// Callers pass the session's current context window (typically from
 /// `cmd::context::get_context(...).tokens_total`) so the `refire:` fraction

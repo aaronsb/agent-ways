@@ -261,32 +261,9 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
-    /// Replay a session's way-firing history as an interactive animation
-    Rethink {
-        /// Session ID to replay directly (skip picker)
-        #[arg(long)]
-        session: Option<String>,
-        /// Filter to sessions from this project path
-        #[arg(long)]
-        project: Option<String>,
-        /// Replay across every project, not just the current one (default is the
-        /// current project; detection failure is an error, never a silent
-        /// globalize)
-        #[arg(long)]
-        all: bool,
-        /// Initial frame speed in milliseconds (default: 1000)
-        #[arg(long)]
-        speed: Option<u64>,
-        /// List sessions (non-interactive)
-        #[arg(long)]
-        list: bool,
-        /// Dump the reconstructed timeline as JSON instead of animating it
-        /// (non-interactive; includes a session summary and near-miss events)
-        #[arg(long)]
-        json: bool,
-    },
-    /// Introspect a session over the SessionIntrospection model: which ways
-    /// fired, on which turn, and why (ADR-153/154). Currently: the `dump` mode.
+    /// Introspect a session: which ways fired, on which turn, and why
+    /// (ADR-153/154). Replay or follow it live on screen, list sessions, or
+    /// dump them as JSON.
     Introspect {
         #[command(subcommand)]
         mode: IntrospectCommand,
@@ -470,7 +447,8 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum IntrospectCommand {
-    /// Interactively replay a session's way firings (the animated TUI).
+    /// Replay a session's way firings frame by frame on screen, or print the
+    /// timeline as JSON with `--json`.
     Replay {
         /// Session ID to replay directly (default: pick interactively)
         #[arg(long)]
@@ -484,6 +462,20 @@ enum IntrospectCommand {
         /// Initial frame speed in milliseconds (default: 1000)
         #[arg(long)]
         speed: Option<u64>,
+        /// Print the reconstructed timeline as JSON, with a session summary,
+        /// the relevance gate's work and the near-miss events (the most recent
+        /// session in scope without --session)
+        #[arg(long, conflicts_with_all = ["speed", "keys", "snap", "depth"])]
+        json: bool,
+        /// Feed these keys to the screens, headless (tokens as `ways settings --keys`)
+        #[arg(long, hide = true, num_args = 1..)]
+        keys: Vec<String>,
+        /// Print the screens at WIDTHxHEIGHT in the test kit's frame format, headless
+        #[arg(long, hide = true)]
+        snap: Option<String>,
+        /// Colour depth to draw at: truecolor, 256, 16 or none
+        #[arg(long, hide = true)]
+        depth: Option<String>,
     },
     /// List candidate sessions in scope (table, or `--json` for an agent).
     List {
@@ -521,6 +513,15 @@ enum IntrospectCommand {
         /// Scope to this project path (default: current project)
         #[arg(long)]
         project: Option<String>,
+        /// Feed these keys to the screens, headless (tokens as `ways settings --keys`)
+        #[arg(long, hide = true, num_args = 1..)]
+        keys: Vec<String>,
+        /// Print the screens at WIDTHxHEIGHT in the test kit's frame format, headless
+        #[arg(long, hide = true)]
+        snap: Option<String>,
+        /// Colour depth to draw at: truecolor, 256, 16 or none
+        #[arg(long, hide = true)]
+        depth: Option<String>,
     },
     /// List semantic way fires as `score · surface · way`, read straight from
     /// events.jsonl (no introspection model) — the read-side precision instrument:
@@ -919,23 +920,10 @@ fn run() -> Result<()> {
         Commands::Reconcile { source, dest, mode, dry_run, quiet, force } => {
             cmd::reconcile::run(source, dest, mode, dry_run, quiet, force)
         }
-        Commands::Rethink { session, project, all, speed, list, json } => {
-            eprintln!(
-                "note: `ways rethink` is deprecated — use `ways introspect replay` \
-                 (or `introspect list` / `introspect dump`). It still works for now."
-            );
-            match (list, json) {
-                // `--list --json`: machine-listable session enumeration (ADR-154 §4).
-                (true, true) => cmd::rethink_dump::run_list_json(project.as_deref(), all),
-                // `--json`: dump one session's reconstructed timeline.
-                (false, true) => cmd::rethink_dump::run_json(session.as_deref(), project.as_deref(), all),
-                // interactive replay, or `--list` text.
-                _ => cmd::rethink::run(session.as_deref(), project.as_deref(), speed, list, all),
-            }
-        }
         Commands::Introspect { mode } => match mode {
-            IntrospectCommand::Replay { session, project, all, speed } => {
-                cmd::introspect::replay(session.as_deref(), project.as_deref(), all, speed)
+            IntrospectCommand::Replay { session, project, all, speed, json, keys, snap, depth } => {
+                let open = cmd::introspect::Open { keys, snap, depth };
+                cmd::introspect::replay(session.as_deref(), project.as_deref(), all, speed, json, &open)
             }
             IntrospectCommand::List { project, all, json } => {
                 cmd::introspect::list(project.as_deref(), all, json)
@@ -943,8 +931,9 @@ fn run() -> Result<()> {
             IntrospectCommand::Dump { session, project, all } => {
                 cmd::introspect::dump(session.as_deref(), project.as_deref(), all)
             }
-            IntrospectCommand::Live { session, project } => {
-                cmd::introspect::live(session.as_deref(), project.as_deref())
+            IntrospectCommand::Live { session, project, keys, snap, depth } => {
+                let open = cmd::introspect::Open { keys, snap, depth };
+                cmd::introspect::live(session.as_deref(), project.as_deref(), &open)
             }
             IntrospectCommand::Fires { session, project, all, max_score, limit } => {
                 cmd::introspect::fires(session.as_deref(), project.as_deref(), all, max_score, limit)

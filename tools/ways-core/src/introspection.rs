@@ -19,7 +19,7 @@
 //! keyword/command/file channels, and only once enrichment records it.
 //!
 //! This model is the *analytical* substrate (why a way fired: criteria, matched
-//! span, transcript key). The `rethink` **replay** pipeline (still in `ways-cli`)
+//! span, transcript key). The **replay** pipeline (`ways introspect replay`, in `ways-cli`)
 //! stays a distinct *animation* projection — `build_frames` folds the full event
 //! stream into cumulative "what's active at epoch N" frames. The two are **not**
 //! unified into one clustering (decided 2026-07-03, ADR-153 module note / ADR-154
@@ -27,7 +27,7 @@
 //! meet — the why-fired drill-down looks up a frame's focused way in this model
 //! **by `way_id`**, which needs no epoch alignment.
 //!
-//! **The clustering shares the `≤3s` gap *rule* with `rethink::build_frames`, but
+//! **The clustering shares the `≤3s` gap *rule* with the replay's `build_frames`, but
 //! is deliberately not identical to it** — and, per the boundary above, is not
 //! meant to be. Deliberate differences: this model clusters the *fire* stream only
 //! (a [`Turn`] is defined by the ways that fired, not by the `session_start` /
@@ -205,7 +205,7 @@ impl SessionIntrospection {
     ///
     /// The turn↔fire join is HEURISTIC — every [`Turn`] is labelled as such —
     /// until enrichment (ADR-153 §3) supplies a transcript uuid. Fires are grouped
-    /// into turns by the same `≤3s` timestamp-gap *rule* `rethink::build_frames`
+    /// into turns by the same `≤3s` timestamp-gap *rule* the replay's `build_frames`
     /// uses (over the fire stream only — see the module note; the two are
     /// reconciled at increment 4, not assumed identical). A way absent from
     /// `criteria` still appears, with empty criteria — unknown, not invented.

@@ -21,6 +21,21 @@ fn embed_subcommand_is_rejected() {
     assert!(err.contains("unrecognized subcommand"), "stderr: {err}");
 }
 
+/// `ways rethink`, with its `--list` and `--json`, was a deprecated alias of
+/// `ways introspect replay`, `list` and `dump`. It is gone, with no alias
+/// kept (ADR-504 §13, ADR-506): each form is an unknown command.
+#[test]
+fn rethink_is_an_unknown_command() {
+    for args in [&["rethink"][..], &["rethink", "--list"], &["rethink", "--json"], &["rethink", "--list", "--json"]] {
+        let out = ways(args);
+        assert!(!out.status.success(), "`ways {}` must be rejected", args.join(" "));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("unrecognized subcommand 'rethink'"), "ways {}: {err}", args.join(" "));
+    }
+    let help = String::from_utf8_lossy(&ways(&["--help"]).stdout).to_string();
+    assert!(!help.contains("rethink"), "--help names no rethink:\n{help}");
+}
+
 #[test]
 fn match_cosine_flag_is_rejected() {
     let out = ways(&["match", "--cosine", "some query"]);

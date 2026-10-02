@@ -29,7 +29,7 @@ flowchart TB
 
     List["<b>ways list</b><br/>this session, now"]
     Stats["<b>ways stats</b><br/>across all sessions"]
-    Json["<b>ways rethink --json</b><br/>one whole session, in full"]
+    Json["<b>ways introspect replay --json</b><br/>one whole session, in full"]
 
     Log --> List
     Log --> Stats
@@ -64,18 +64,18 @@ for tuning down) and the dead vocabulary that never fires at all (candidates for
 re-authoring or removal). Scope it with `--days N`, `--global`, or run it inside a
 project to scope to that project.
 
-**`ways rethink --json` — one whole session, in full.** This is the deep lens, and
-the one built for programmatic reading. Where the interactive `ways rethink`
-*animates* a session's timeline in a TUI, `--json` dumps the entire reconstructed
-timeline as a single document — no terminal required, so it runs in scripts and
-headless contexts where the animation can't. It is also the **only** view that
-surfaces near-misses; the animation omits them.
+**`ways introspect replay --json` — one whole session, in full.** This is the deep
+lens, and the one built for programmatic reading. Where `ways introspect replay`
+plays a session's timeline frame by frame on screen, `--json` dumps the entire
+reconstructed timeline as a single document — no terminal required, so it runs in
+scripts and headless contexts where the screen can't. It is also the **only** view
+that surfaces near-misses; the screen omits them.
 
 ## What the dump contains
 
 ```
-ways rethink --json                   # most recent session in scope
-ways rethink --session <id> --json    # a specific session
+ways introspect replay --json                   # most recent session in scope
+ways introspect replay --session <id> --json    # a specific session
 ```
 
 The output is one JSON object with four parts:
@@ -98,23 +98,23 @@ answers:
 
 ```bash
 # The shape of the session at a glance
-ways rethink --session <id> --json | jq '.summary'
+ways introspect replay --session <id> --json | jq '.summary'
 
 # How was this session steered? (trigger mix)
-ways rethink --session <id> --json | jq '.summary.trigger_breakdown'
+ways introspect replay --session <id> --json | jq '.summary.trigger_breakdown'
 
 # What fired turn by turn — just the changes, not the running totals
-ways rethink --session <id> --json \
+ways introspect replay --session <id> --json \
   | jq '.frames[] | select(.new_events|length>0) | {epoch, token_position_k, new_events}'
 
 # Which ways almost fired most often? (tuning candidates)
-ways rethink --session <id> --json \
+ways introspect replay --session <id> --json \
   | jq '.near_misses | group_by(.way)
         | map({way: .[0].way, near_misses: length})
         | sort_by(-.near_misses)'
 
 # The closest misses — smallest margin first (threshold-too-high candidates)
-ways rethink --session <id> --json \
+ways introspect replay --session <id> --json \
   | jq '[.near_misses[]] | sort_by(.margin) | .[:10]'
 ```
 

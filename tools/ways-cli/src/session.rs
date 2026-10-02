@@ -269,8 +269,8 @@ pub fn detect_context_window_for(project: &str, session_id: &str) -> u64 {
 /// the one resolver (ADR-166).
 ///
 /// Uses `resolve_for_foreign_session`, **not** the env-honoring `resolve`: every
-/// caller here (`detect_context_window_for`) is a replay tool — `rethink`,
-/// `introspect`, `rethink_dump` — re-evaluating a *recorded* session identified by
+/// caller here (`detect_context_window_for`) is a replay tool — `introspect`
+/// replay, live and dump — re-evaluating a *recorded* session identified by
 /// project + id, not the operator's live session. The window of a recorded session
 /// is a property of the model it ran, so the operator's `CLAUDE_CONTEXT_WINDOW`
 /// (which states *their current* session's window) must not rescale it — the same
