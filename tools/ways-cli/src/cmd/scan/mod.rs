@@ -428,13 +428,7 @@ fn scan_prompt_surface(
         if blocked.contains(&hit.id) {
             continue;
         }
-        if *needs_parent && !has_shown_ancestor(&hit.id, &shown) {
-            // Without its parent this way would not have fired; when the
-            // judge blocked that parent, the block is logged for this way
-            // too, so the session's record counts it as kept out.
-            if pending.iter().any(|p| p.id == hit.id) {
-                blocked.with_ancestor(&hit.id, &gate_log);
-            }
+        if *needs_parent && withheld_for_parent(&hit.id, &shown, &pending, &mut blocked, &gate_log) {
             continue;
         }
         let out = capture_show_way(
@@ -1129,6 +1123,27 @@ fn ancestors(id: &str) -> impl Iterator<Item = &str> {
     })
 }
 
+/// A way that fired on its parent's boost is withheld when the parent is not
+/// shown. Without the parent it would not have fired; when the judge blocked
+/// that parent, the block is logged for this way too (if the gate had it
+/// pending), so the session's record counts it as kept out. `false` when a
+/// shown ancestor lets it through.
+fn withheld_for_parent(
+    id: &str,
+    shown: &HashSet<String>,
+    pending: &[gate::Pending<'_>],
+    blocked: &mut gate::Blocked,
+    gate_log: &gate::LogContext<'_>,
+) -> bool {
+    if has_shown_ancestor(id, shown) {
+        return false;
+    }
+    if pending.iter().any(|p| p.id == id) {
+        blocked.with_ancestor(id, gate_log);
+    }
+    true
+}
+
 fn has_shown_ancestor(id: &str, shown: &HashSet<String>) -> bool {
     ancestors(id).any(|a| shown.contains(a))
 }
@@ -1693,5 +1708,40 @@ mod queued_tests {
         assert!(super::has_shown_ancestor("a/b/c", &shown));
         assert!(!super::has_shown_ancestor("a", &shown), "a way is not its own ancestor");
         assert!(!super::has_shown_ancestor("ab/c", &shown), "a text prefix is not an ancestor");
+    }
+
+    /// The `needs_parent` call site: the judge blocks the parent, the child
+    /// was pending (strict, so never judged), and it is withheld with exactly
+    /// one ancestor block and no per-call figures. A child the gate never
+    /// had pending logs nothing.
+    #[test]
+    fn needs_parent_child_of_a_blocked_parent_logs_one_ancestor_block() {
+        use std::cell::RefCell;
+        let events: RefCell<Vec<Vec<(String, String)>>> = RefCell::default();
+        let sink = |f: &[(&str, &str)]| {
+            events.borrow_mut().push(f.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect())
+        };
+        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let mut blocked = gate::test_blocked("p", &lc);
+        let pending = vec![
+            gate::Pending { id: "p", description: "", pattern_strict: false },
+            gate::Pending { id: "p/c", description: "", pattern_strict: true },
+        ];
+        let shown = HashSet::new();
+        assert!(withheld_for_parent("p/c", &shown, &pending, &mut blocked, &lc));
+        assert!(withheld_for_parent("p/c", &shown, &pending, &mut blocked, &lc), "withheld again, logged once");
+        assert!(withheld_for_parent("p/held", &shown, &pending, &mut blocked, &lc), "not pending: withheld, unlogged");
+        let shown_p: HashSet<String> = ["p".to_string()].into_iter().collect();
+        assert!(!withheld_for_parent("p/c", &shown_p, &pending, &mut blocked, &lc), "shown parent lets it through");
+
+        let events = events.borrow();
+        let get = |e: &Vec<(String, String)>, k: &str| e.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap_or_default();
+        let child: Vec<_> = events.iter().filter(|e| get(e, "event") == "way_judged" && get(e, "way") == "p/c").collect();
+        assert_eq!(child.len(), 1);
+        assert_eq!((get(child[0], "verdict"), get(child[0], "reason"), get(child[0], "ancestor")), ("block".into(), "ancestor".into(), "p".into()));
+        for k in ["judge_ms", "gate_ms", "candidates"] {
+            assert_eq!(get(child[0], k), "", "{k}");
+        }
+        assert!(events.iter().all(|e| get(e, "way") != "p/held"));
     }
 }
