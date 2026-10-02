@@ -505,6 +505,24 @@ fn the_header_gives_the_judges_spend_and_dollar_toggles_tokens_and_cost() {
     let mut quiet = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
     let t = text(&render(&mut quiet, 80, 25));
     assert!(!t.contains("judge ") && !t.contains("$ cost"), "no calls, no spend: {t}");
+    // `$` before the first call leaves the figure in tokens once one comes.
     press(&mut quiet, &[KeyCode::Char('$')]);
-    assert_eq!(text(&render(&mut quiet, 80, 25)), t, "$ does nothing without spend");
+    let r = quiet.replay.as_mut().unwrap();
+    assert!(!r.cost, "$ does nothing without spend");
+    r.spend = session_spend(&log, SESSION);
+    assert!(text(&render(&mut quiet, 80, 25)).contains("judge ×2 · 1.2K tokens"));
+}
+
+/// A heavy spend at 80 columns keeps its whole figure: the session id is
+/// shortened before the figure is cut.
+#[test]
+fn a_heavy_spend_fits_at_80_columns() {
+    let mut r = replay(false);
+    r.spend = Some(ways_agent_core::spend::Group { calls: 1234, known_calls: 1222, unknown_calls: 12, cost_usd: Some(12.3456), input_tokens: 4_100_000, ..Default::default() });
+    r.cost = true;
+    let mut s = Introspect::showing(r, terminal(), Shape::PLAIN);
+    let t = text(&render(&mut s, 80, 25));
+    assert!(t.contains("Session 8f3a2c1d-5e6  judge ×1234 · $12.3456 + 12 unknown"), "{t}");
+    let mut wide = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    assert!(text(&render(&mut wide, 80, 25)).contains(SESSION), "without spend the full id stays");
 }

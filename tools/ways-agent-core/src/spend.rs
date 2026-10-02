@@ -163,10 +163,12 @@ impl Group {
 
     /// The group's tokens, short: `950`, `12.3K`, `4.1M`.
     pub fn tokens_short(&self) -> String {
+        // The unit is chosen where its one decimal no longer rounds up into
+        // the next: 999,950 is `1.0M`, never `1000.0K`.
         let n = self.tokens();
         match n {
             0..1_000 => n.to_string(),
-            1_000..1_000_000 => format!("{:.1}K", n as f64 / 1e3),
+            1_000..999_950 => format!("{:.1}K", n as f64 / 1e3),
             _ => format!("{:.1}M", n as f64 / 1e6),
         }
     }
@@ -208,7 +210,6 @@ fn describe(g: &Group) -> String {
     format!("{}, {cost}, tokens {} in / {} out", n(g.calls), g.input_tokens, g.output_tokens)
 }
 
-/// `since` is where the log begins, stated once on the total line.
 /// The report as text. `log_from` is the date of the earliest judge call the
 /// log still holds, given when it bounds the query: the log is compacted, so
 /// calls before it are gone.
@@ -254,6 +255,8 @@ not json
         assert_eq!(g(999, Some(0.0123), 0).tokens_short(), "999");
         assert_eq!(g(12_345, None, 0).tokens_short(), "12.3K");
         assert_eq!(g(4_100_000, None, 0).tokens_short(), "4.1M");
+        assert_eq!(g(999_949, None, 0).tokens_short(), "999.9K");
+        assert_eq!(g(999_950, None, 0).tokens_short(), "1.0M");
         assert_eq!(g(0, Some(0.0123), 0).cost_short(), "$0.0123");
         assert_eq!(g(0, Some(0.0123), 2).cost_short(), "$0.0123 + 2 unknown");
         assert_eq!(g(0, None, 3).cost_short(), "cost unknown");

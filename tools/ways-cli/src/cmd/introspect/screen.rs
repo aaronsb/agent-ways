@@ -58,7 +58,7 @@ pub(crate) struct Replay {
     /// What the judge spent on this session, while it made a call.
     pub(crate) spend: Option<Group>,
     /// Whether the header gives the spend as cost; tokens otherwise.
-    cost: bool,
+    pub(crate) cost: bool,
     /// The selected way of the frame shown, in both views.
     sel: usize,
     /// The why-fired detail's scroll, and its page from the last frame.
@@ -615,15 +615,18 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
         metrics.retain(|(p, _)| *p != drop);
     }
     let metrics: Vec<Span<'static>> = metrics.into_iter().map(|(_, s)| s).collect();
-    let mut title = vec![
-        Span::styled("Session ", Style::new().add_modifier(Modifier::BOLD)),
-        Span::raw(r.session_id.clone()),
-    ];
-    // The spend goes before the project, so a narrow line cuts the path.
-    if let Some(g) = &r.spend {
+    // The spend goes before the project, so a narrow line cuts the path;
+    // when the spend itself would not fit, the session id is shortened.
+    let spend = r.spend.as_ref().map(|g| {
         let amount = if r.cost { g.cost_short() } else { format!("{} tokens", g.tokens_short()) };
-        title.push(Span::styled(format!("  judge ×{} · {amount}", g.calls), theme::accent()));
+        Span::styled(format!("  judge ×{} · {amount}", g.calls), theme::accent())
+    });
+    let mut id = r.session_id.clone();
+    if "Session ".len() + id.chars().count() + spend.as_ref().map_or(0, Span::width) > width as usize {
+        id = super::short_id(&id);
     }
+    let mut title = vec![Span::styled("Session ", Style::new().add_modifier(Modifier::BOLD)), Span::raw(id)];
+    title.extend(spend);
     title.push(Span::styled(format!("  {}", r.project), theme::muted()));
     vec![
         Line::from(title),
