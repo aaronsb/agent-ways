@@ -57,11 +57,20 @@ const LIVE_SESSION_WINDOW: u64 = 120;
 /// A path starting with `/` is normalized on `/` as text, on every platform,
 /// because that is how Claude Code records it. Any other absolute path (a
 /// Windows `C:\x`) is normalized by its components. A relative path is
-/// joined to the working directory first.
-fn norm_path(p: &str, home: &str) -> String {
+/// joined to the working directory first; an unreadable working
+/// directory is an error, never a silent empty base.
+///
+/// `~/` expands to the home dir; on Windows `~\` does too. On Unix `~\x`
+/// is an ordinary relative name.
+fn norm_path(p: &str, home: &str) -> Result<String> {
+    let tilde_rest = p
+        .strip_prefix("~/")
+        .or_else(|| if cfg!(windows) { p.strip_prefix("~\\") } else { None });
     let expanded = if p == "~" {
         home.to_string()
-    } else if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
+    } else if let Some(rest) = tilde_rest {
+        // A leading separator in the rest would make the join absolute.
+        let rest = rest.trim_start_matches(['/', '\\']);
         // A `/`-rooted home joins on `/`, so the text normalization below
         // sees one separator; a drive-rooted home joins natively.
         if home.starts_with('/') {
@@ -75,7 +84,9 @@ fn norm_path(p: &str, home: &str) -> String {
     let abs = if expanded.starts_with('/') || Path::new(&expanded).is_absolute() {
         expanded
     } else {
-        std::env::current_dir().unwrap_or_default().join(&expanded).to_string_lossy().into_owned()
+        let cwd = std::env::current_dir()
+            .map_err(|e| anyhow::anyhow!("cannot resolve {p}: the working directory is unreadable ({e})"))?;
+        cwd.join(&expanded).to_string_lossy().into_owned()
     };
     if abs.starts_with('/') {
         let mut parts: Vec<&str> = Vec::new();
@@ -88,7 +99,7 @@ fn norm_path(p: &str, home: &str) -> String {
                 s => parts.push(s),
             }
         }
-        return format!("/{}", parts.join("/"));
+        return Ok(format!("/{}", parts.join("/")));
     }
     let mut out = PathBuf::new();
     for c in Path::new(&abs).components() {
@@ -101,7 +112,7 @@ fn norm_path(p: &str, home: &str) -> String {
             other => out.push(other.as_os_str()),
         }
     }
-    out.to_string_lossy().into_owned()
+    Ok(out.to_string_lossy().into_owned())
 }
 
 /// Confirm this relocation landed, and account for anything left behind in
@@ -264,22 +275,28 @@ fn pid_alive(pid: u32) -> bool {
 }
 
 /// Is the process `pid` running? A handle with query rights opens for a
-/// live or recently exited process; the exit code tells them apart.
+/// live or recently exited process; the exit code tells them apart. When
+/// in doubt it answers yes: a false "alive" costs a `--force`, a false
+/// "dead" lets a rewrite race a live session.
 #[cfg(windows)]
 fn pid_alive(pid: u32) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_INVALID_PARAMETER, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
     // SAFETY: the handle is checked before use and closed exactly once;
     // `code` outlives the call that writes it.
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
-            return false;
+            // No such pid is ERROR_INVALID_PARAMETER. Anything else (access
+            // denied to another user's or an elevated process) means it
+            // exists: report it alive, so the guard errs toward refusing.
+            return GetLastError() != ERROR_INVALID_PARAMETER;
         }
         let mut code: u32 = 0;
         let ok = GetExitCodeProcess(handle, &mut code) != 0;
         CloseHandle(handle);
-        ok && code == STILL_ACTIVE as u32
+        // An unreadable exit code is not evidence of exit.
+        !ok || code == STILL_ACTIVE as u32
     }
 }
 
@@ -306,8 +323,8 @@ struct Plan {
 
 /// Work out and print the plan. `Ok(None)` is a refusal already printed.
 fn plan(env: &Env, args: &RelocateArgs, out: &mut dyn Write) -> Result<Option<Plan>> {
-    let old = norm_path(&args.old_path, &env.home);
-    let new = norm_path(&args.new_path, &env.home);
+    let old = norm_path(&args.old_path, &env.home)?;
+    let new = norm_path(&args.new_path, &env.home)?;
     if old == new {
         writeln!(out, "  error old and new paths are identical: {old}")?;
         return Ok(None);
@@ -404,7 +421,7 @@ fn plan(env: &Env, args: &RelocateArgs, out: &mut dyn Write) -> Result<Option<Pl
         .iter()
         .filter(|r| {
             r.cwd.as_deref().is_some_and(|c| {
-                c == old || c.strip_prefix(old.as_str()).is_some_and(|rest| rest.starts_with(['/', '\\']))
+                c == old || c.strip_prefix(old.as_str()).is_some_and(super::rewrite::starts_component)
             })
         })
         .count();
@@ -685,17 +702,27 @@ mod tests {
 
     #[test]
     fn norm_path_expands_and_normalizes() {
-        assert_eq!(norm_path("~/a/./b/../c/", "/home/u"), "/home/u/a/c");
-        assert_eq!(norm_path("~", "/home/u"), "/home/u");
-        assert_eq!(norm_path("/", "/home/u"), "/");
-        assert_eq!(norm_path("/x//y/", "/home/u"), "/x/y");
+        let n = |p: &str| norm_path(p, "/home/u").unwrap();
+        assert_eq!(n("~/a/./b/../c/"), "/home/u/a/c");
+        assert_eq!(n("~"), "/home/u");
+        assert_eq!(n("~//x"), "/home/u/x");
+        assert_eq!(n("/"), "/");
+        assert_eq!(n("/x//y/"), "/x/y");
     }
 
     #[test]
     #[cfg(windows)]
     fn norm_path_keeps_a_drive_path() {
-        assert_eq!(norm_path(r"C:\a\.\b\..\c\", r"C:\Users\u"), r"C:\a\c");
-        assert_eq!(norm_path(r"~\x", r"C:\Users\u"), r"C:\Users\u\x");
+        assert_eq!(norm_path(r"C:\a\.\b\..\c\", r"C:\Users\u").unwrap(), r"C:\a\c");
+        assert_eq!(norm_path(r"~\x", r"C:\Users\u").unwrap(), r"C:\Users\u\x");
+        assert_eq!(norm_path(r"~\\x", r"C:\Users\u").unwrap(), r"C:\Users\u\x");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn tilde_backslash_is_a_relative_name_on_unix() {
+        let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
+        assert_eq!(norm_path("~\\x", "/home/u").unwrap(), format!("{cwd}/~\\x"));
     }
 
     #[test]

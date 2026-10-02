@@ -22,17 +22,24 @@ pub(super) const STATE_ONLY_TYPES: &[&str] =
     &["last-prompt", "ai-title", "mode", "permission-mode", "bridge-session", "agent-name"];
 
 /// `value` remapped from `old` to `new` when it is `old` or lies under it.
+/// True when `rest`, what follows an old path in a value, starts a path
+/// component under it: `/`, or on Windows also `\`. On Unix a `\` is an
+/// ordinary file-name character, so `/a/b\c` is not under `/a/b`.
+pub(super) fn starts_component(rest: &str) -> bool {
+    rest.starts_with('/') || (cfg!(windows) && rest.starts_with('\\'))
+}
+
 pub(super) fn remap(value: Option<&Value>, old: &str, new: &str) -> Option<String> {
     let v = value?.as_str()?;
     if v == old {
         Some(new.to_string())
     } else {
-        v.strip_prefix(old).filter(|r| r.starts_with(['/', '\\'])).map(|r| format!("{new}{r}"))
+        v.strip_prefix(old).filter(|r| starts_component(r)).map(|r| format!("{new}{r}"))
     }
 }
 
 pub(super) fn path_matches(value: &Value, old: &str) -> bool {
-    value.as_str().is_some_and(|v| v == old || v.strip_prefix(old).is_some_and(|r| r.starts_with(['/', '\\'])))
+    value.as_str().is_some_and(|v| v == old || v.strip_prefix(old).is_some_and(starts_component))
 }
 
 /// Does `field` hold a path at or under `old` anywhere below the top level?
@@ -337,6 +344,15 @@ pub(super) fn remove_if_unchanged(path: &Path, st: (u64, std::time::SystemTime))
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn a_backslash_is_not_a_separator_on_unix() {
+        let v = Value::String("/a/b\\c".to_string());
+        assert_eq!(remap(Some(&v), "/a/b", "/n"), None);
+        assert!(!path_matches(&v, "/a/b"));
+        assert!(!starts_component("\\c"));
+    }
 
     #[test]
     fn remap_only_at_or_under_old() {
