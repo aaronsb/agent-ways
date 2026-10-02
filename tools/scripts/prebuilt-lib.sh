@@ -98,32 +98,40 @@ sha256_of() {
 # says why on stderr, leaves no unverified binary behind, and returns 1, so the
 # caller falls back to a source build.
 #
-# Checksums: when the release lists checksums.txt, the binary must match its
-# line there, and a checksums.txt that is listed but cannot be fetched refuses
-# the install rather than skipping the check. A release without checksums.txt
-# installs with a warning.
-prebuilt_install() {
-  local comp="$1" tag="$2" out_dir="$3" repo="$4" hint="$5"
-  local platform bin_name out_file platform_file assets sums expected actual
+# Checksums: when the release lists checksums.txt, the binary must have a line
+# there and match it. A checksums.txt that is listed but cannot be fetched, or
+# that has no line for the binary, refuses the install rather than skipping
+# the check. A release without checksums.txt installs with a warning.
+#
+# Each call downloads into its own staging dir under OUTPUT_DIR, removed on
+# exit, so parallel calls into one OUTPUT_DIR (`make -j setup`) never share a
+# checksums.txt. The binary is installed by renaming a checked copy over
+# OUTPUT_DIR/<COMPONENT>, which replaces an old file or a dangling symlink in
+# one step and never leaves a partial binary at that path.
+#
+# The body runs in a subshell so the cleanup trap stays local to the call.
+prebuilt_install() (
+  comp="$1" tag="$2" out_dir="$3" repo="$4" hint="$5"
   platform="$(detect_platform)"
   bin_name="${comp}-${platform}"
   out_file="${out_dir}/${comp}"
-  platform_file="${out_dir}/${bin_name}"
 
   if [[ -x "$out_file" ]] && "$out_file" --version >/dev/null 2>&1; then
     echo "${comp} already installed and working: $out_file" >&2
     "$out_file" --version >&2
     echo "$out_file"
-    return 0
+    exit 0
   fi
 
   if ! command -v gh >/dev/null 2>&1; then
     echo "error: gh CLI not found — build from source instead:" >&2
     echo "  ${hint}" >&2
-    return 1
+    exit 1
   fi
 
-  mkdir -p "$out_dir"
+  mkdir -p "$out_dir" || exit 1
+  stage=$(mktemp -d "${out_dir}/.${comp}.XXXXXX") || exit 1
+  trap 'rm -rf "$stage"' EXIT
 
   if [[ "$tag" == "latest" ]]; then
     # A failed API call (retries exhausted) is an honest error; an empty
@@ -131,12 +139,12 @@ prebuilt_install() {
     if ! tag=$(latest_tag_for_prefix "$repo" "${comp}-v"); then
       echo "error: could not reach GitHub Releases after retries (network/gh/auth?)." >&2
       echo "  Falling back to build-from-source: ${hint}" >&2
-      return 1
+      exit 1
     fi
     if [[ -z "$tag" ]]; then
       echo "No ${comp} release found. Build from source:" >&2
       echo "  ${hint}" >&2
-      return 1
+      exit 1
     fi
   fi
 
@@ -146,7 +154,7 @@ prebuilt_install() {
   if ! assets=$(retry gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name'); then
     echo "error: could not read assets of ${tag} after retries (network/gh/auth?)." >&2
     echo "  Falling back to build-from-source: ${hint}" >&2
-    return 1
+    exit 1
   fi
   if ! grep -qx -- "$bin_name" <<<"$assets"; then
     echo "No pre-built binary for ${platform} in release ${tag}." >&2
@@ -155,59 +163,58 @@ prebuilt_install() {
     echo "" >&2
     echo "Build from source instead:" >&2
     echo "  ${hint}" >&2
-    return 1
+    exit 1
   fi
 
   echo "Downloading ${bin_name}..." >&2
   if ! retry gh release download "$tag" --repo "$repo" --pattern "$bin_name" \
-      --dir "$out_dir" --clobber; then
+      --dir "$stage" --clobber; then
     echo "error: download of ${bin_name} failed after retries — building from source instead." >&2
     echo "  ${hint}" >&2
-    return 1
+    exit 1
   fi
 
-  sums="${out_dir}/checksums.txt"
   if grep -qx 'checksums.txt' <<<"$assets"; then
     if ! retry gh release download "$tag" --repo "$repo" --pattern checksums.txt \
-        --dir "$out_dir" --clobber; then
+        --dir "$stage" --clobber; then
       echo "error: checksums.txt is in ${tag} but its download failed after retries —" >&2
       echo "  refusing to install ${bin_name} unverified. Build from source: ${hint}" >&2
-      rm -f "$platform_file"
-      return 1
+      exit 1
     fi
     # Match the file-name column exactly: `sha256sum` writes `<hash>  <name>`,
     # or `<hash> *<name>` in binary mode.
-    expected=$(awk -v f="$bin_name" '$2 == f || $2 == "*" f { print $1; exit }' "$sums")
-    if [[ -n "$expected" ]]; then
-      actual=$(sha256_of "$platform_file")
-      if [[ "$actual" != "$expected" ]]; then
-        echo "CHECKSUM MISMATCH for ${bin_name}" >&2
-        echo "  Expected: ${expected}" >&2
-        echo "  Got:      ${actual}" >&2
-        rm -f "$platform_file" "$sums"
-        return 1
-      fi
-      echo "Checksum verified: ${actual:0:12}..." >&2
+    expected=$(awk -v f="$bin_name" '$2 == f || $2 == "*" f { print $1; exit }' "$stage/checksums.txt")
+    if [[ -z "$expected" ]]; then
+      echo "error: checksums.txt in ${tag} has no line for ${bin_name} —" >&2
+      echo "  refusing to install it unverified. Build from source: ${hint}" >&2
+      exit 1
     fi
-    rm -f "$sums"
+    actual=$(sha256_of "$stage/$bin_name")
+    if [[ "$actual" != "$expected" ]]; then
+      echo "CHECKSUM MISMATCH for ${bin_name}" >&2
+      echo "  Expected: ${expected}" >&2
+      echo "  Got:      ${actual}" >&2
+      exit 1
+    fi
+    echo "Checksum verified: ${actual:0:12}..." >&2
   else
     echo "WARNING: no checksums.txt in ${tag} — skipping verification" >&2
   fi
 
-  chmod +x "$platform_file"
-  cp "$platform_file" "$out_file"
-  chmod +x "$out_file"
-
-  if "$out_file" --version >/dev/null 2>&1; then
-    echo "Installed: $out_file ($("$out_file" --version))" >&2
-    ls -lh "$out_file" >&2
-  else
+  chmod +x "$stage/$bin_name"
+  if ! "$stage/$bin_name" --version >/dev/null 2>&1; then
     echo "WARNING: binary downloaded but won't execute on this platform" >&2
     echo "Build from source instead:" >&2
     echo "  ${hint}" >&2
-    rm -f "$out_file" "$platform_file"
-    return 1
+    exit 1
   fi
 
+  # Same filesystem as the target, so each mv is a rename.
+  cp "$stage/$bin_name" "$stage/$comp" || exit 1
+  mv -f "$stage/$bin_name" "${out_dir}/${bin_name}" || exit 1
+  mv -f "$stage/$comp" "$out_file" || exit 1
+
+  echo "Installed: $out_file ($("$out_file" --version))" >&2
+  ls -lh "$out_file" >&2
   echo "$out_file"
-}
+)

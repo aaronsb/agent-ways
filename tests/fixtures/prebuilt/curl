@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# A fake `curl` that records the call and fails: the prebuilt downloads use gh only.
+echo "curl $*" >> "$FAKE/calls"
+exit 1
