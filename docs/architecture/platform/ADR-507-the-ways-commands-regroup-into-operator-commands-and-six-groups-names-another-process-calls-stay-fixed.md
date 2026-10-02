@@ -18,13 +18,17 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "1. as long as this doesnt interfere with installer projection - the term I use because I don't want to actually affect the claude code installation, and in order to support multiple claude code installations, we would project into multiple directories (for instance, if default is in ~/.claude/ and another claude code install is in ~/Projects/clientname/.claude/... 2. retire. 3. yes. 4. yes to all 5. retire. 6. keep hidden 7. yes to both"
+    via: "chat, 2026-10-02, answering the seven open questions on PR #731"
 observable:
   - 'see: ways --help lists 14 commands, one line each, none wider than 80 columns, and no banner'
   - 'see: ways hook, show, scan, manifest, project-slug, sessions-root and events-log-path run but are absent from ways --help and from shell completion'
   - 'run: a test parses every `ways …` call site in hooks/, settings.json, scripts/, skills/, commands/, the Makefiles, .github/ and the Rust spawns against the CLI, and fails on one the CLI rejects'
   - 'run: after the change, grep finds no caller, skill, way or doc naming an old command name from the mapping table'
   - 'run: hook latency for ways hook prompt, command and file stays within the budget of ADR-504 §11 against the commit before the change'
-status: proposed
+status: accepted
 date: 2026-10-02
 deciders:
   - aaronsb
@@ -90,6 +94,8 @@ Installed hooks, skills and ways are projected from the same checkout as the bin
 5. **A failed binary refresh** keeps the previous binary under the pulled hooks until the next successful update. The updater says so.
 
 In cases 1 to 3 an old caller reaches a new binary. An alias in the new binary would cover them. In cases 4 and 5 a new caller reaches an old binary, and no alias covers that, because the alias would have to be in the binary that is not yet installed. Only an unchanged name covers every case.
+
+A second target adds no case. Every target ADR-184 records links to the same checkout and calls the same binary, and `reconcile` converges every enabled target in one run, so the five cases hold for each target at the same moment. A target's hook table names only `init` and `corpus`; everything else it runs goes through the projected hook scripts.
 
 ## Decision
 
