@@ -12,10 +12,9 @@ WAYS_DIR="${HOME}/.claude/hooks/ways"
 # Skills front-load instructions into early context (ROPE position 0-N).
 # Too many degrades retrieval and instruction-following.
 
+# `ways` exports the enabled plugin ids, one per line.
 skill_count=0
-if command -v claude >/dev/null 2>&1; then
-  skill_count=$(claude plugin list 2>/dev/null | grep -c '✔ enabled' || echo 0)
-fi
+[[ -n "${WAYS_ENABLED_PLUGINS:-}" ]] && skill_count=$(grep -c . <<< "$WAYS_ENABLED_PLUGINS")
 
 if [[ "$skill_count" -gt 12 ]]; then
   echo "Skills loaded: ${skill_count} — **HIGH context cost.** Tell the user: \"You have ${skill_count} skills loaded. Each adds instructions to early context, degrading response quality. Run \`claude plugin list\` and disable unused ones. Aim for ≤5.\""
@@ -111,7 +110,7 @@ echo "Project-local ways: \`\$PROJECT/.claude/ways/{domain}/{way}/{way}.md\` ove
 # AGENTS.md front-loads all instructions at once. Ways decompose guidance
 # into targeted fragments that surface on a spaced cadence when relevant.
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 
 if [[ -n "$PROJECT_DIR" && "$PROJECT_DIR" != "$HOME" && -d "$PROJECT_DIR" \
       && ! -f "$PROJECT_DIR/.claude/no-agents-migration" ]]; then

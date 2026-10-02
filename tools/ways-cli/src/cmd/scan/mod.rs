@@ -585,8 +585,10 @@ pub fn task(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
+        // Published whole: SubagentStart may claim the stash the moment it
+        // appears, and the writer's temporary name does not end in `.json`.
         let stash_file = format!("{stash_dir}/{timestamp}.json");
-        std::fs::write(&stash_file, stash.to_string())?;
+        agent_settings::writer::write_atomic(std::path::Path::new(&stash_file), stash.to_string())?;
     }
 
     Ok(())
@@ -1244,7 +1246,7 @@ fn regex_span(pattern: &str, text: &str) -> Option<String> {
 /// Callers keep `context` within [`crate::cmd::show::HOOK_CONTEXT_CAP`] via a
 /// [`ContextBudget`]; over that cap Claude Code replaces the string with a
 /// file path and a 2,000-character preview.
-pub(super) fn emit_hook_context(hook_event: &str, context: &str) {
+pub(crate) fn emit_hook_context(hook_event: &str, context: &str) {
     let payload = serde_json::json!({
         "hookSpecificOutput": {
             "hookEventName": hook_event,

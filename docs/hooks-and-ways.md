@@ -22,9 +22,11 @@ Claude Code hook events drive the system. Each fires shell scripts that scan for
 
 ## What Each Script Does
 
+Each script under `hooks/ways/` is a thin adapter: it runs `ways hook <event>`, which reads Claude Code's JSON payload on stdin, makes every decision, and prints what the hook returns (ADR-504 §11). The scripts exit 0 whatever the binary returns, because a guidance hook never blocks a prompt or a tool.
+
 ### Session Lifecycle
 
-- **`clear-markers.sh`** - Clears session markers from `{SESSIONS_ROOT}/{session_id}/`. Resets session state so ways can fire fresh. Scoped to the current session only.
+- **`clear-markers.sh`** (`ways hook session-start`) - Clears this session's state under `{SESSIONS_ROOT}/{session_id}/`, as `ways reset --session <id> --confirm` does, and logs the session start. Scoped to the current session only: an id that is not a plain session id clears nothing.
 - **`ways init`** - If the project has a `.claude/` or `.git/` directory, writes `$PROJECT/.claude/.gitignore` and `$PROJECT/.claude/ways/_template.md` when they are missing, then seeds `MEMORY.md` (ADR-128). A fresh repo therefore gets these two files as untracked files. `.claude/.gitignore` keeps developer-local files (`settings.local.json`, `memory/`, `plans/` and similar) out of git, and `_template.md` is a starting point for writing a project way; its empty frontmatter means it never fires. Projects may commit or ignore either file. `ways init` does not overwrite them once they exist.
 - **`ways corpus --if-stale --quiet`** - Regenerates the embedding corpus if way files have changed since last build.
 - **`check-config-updates.sh`** - Checks if the config is behind upstream. Checks the app source in `$XDG_DATA_HOME/agent-ways` against `aaronsb/agent-ways`; legacy layouts are not checked. The network call (`git fetch`) is rate-limited to once per hour; update notices fire every session when behind. See the [Updating](#updating) section of the README for scenario details and how to control this behavior.
@@ -33,7 +35,7 @@ Claude Code hook events drive the system. Each fires shell scripts that scan for
 
 These scripts fire on **PreToolUse** — before the tool executes, not after. This is a critical design choice: guidance must arrive while Claude can still act on it. A commit format reminder after the commit is too late. Security guidance after the file edit is too late. The "Pre" in PreToolUse means Claude sees the way content and can adjust its behavior before the action happens.
 
-- **`check-prompt.sh`** - Thin dispatcher to `ways scan prompt`. Passes the user prompt (plus response topics from the previous turn) and session ID. The `ways` binary handles all matching: file walking, frontmatter extraction, pattern + semantic matching, scope/precondition gating, parent threshold lowering, session markers, macro dispatch, and content output.
+- **`check-prompt.sh`** (`ways hook prompt`) - Matches the user prompt, embedding it with Claude's previous response that the Stop hook recorded. The `ways` binary handles all matching: file walking, frontmatter extraction, pattern + semantic matching, scope/precondition gating, parent threshold lowering, session markers, macro dispatch, and content output.
 - **`check-bash-pre.sh`** - Scans ways for `commands:` patterns. Tests the command about to run. Also checks `pattern:` against the command description.
 - **`check-file-pre.sh`** - Scans ways for `files:` patterns. Tests the file path about to be edited.
 - **`check-state.sh`** - Evaluates `trigger:` fields (context-threshold, file-exists, session-start). See [State Triggers](#state-triggers).
@@ -42,13 +44,13 @@ All trigger evaluation scripts respect the `scope:` frontmatter field - ways wit
 
 ### Subagent Injection
 
-- **`check-task-pre.sh`** - PreToolUse:Task hook (Phase 1). Reads the Task tool's `prompt` parameter, runs inline matching for `scope: subagent` ways. Writes matched way paths to `{SESSIONS_ROOT}/{session_id}/subagent-stash/`. Never blocks Task creation.
-- **`inject-subagent.sh`** - SubagentStart hook (Phase 2). Reads the oldest stash file, claims it atomically, emits way content as JSON `hookSpecificOutput.additionalContext`. Bypasses markers entirely - subagents get fresh context regardless of what the parent triggered.
+- **`check-task-pre.sh`** (`ways hook task`) - PreToolUse:Task hook (Phase 1). Reads the Task tool's `prompt` parameter, runs inline matching for `scope: subagent` ways. A Task naming an agent with its own definition (project, user or plugin) is skipped. Writes matched way paths to `{SESSIONS_ROOT}/{session_id}/subagent-stash/`. Never blocks Task creation.
+- **`inject-subagent.sh`** (`ways hook subagent-start`) - SubagentStart hook (Phase 2). Reads the oldest stash file, claims it atomically, emits way content as JSON `hookSpecificOutput.additionalContext`. Bypasses markers entirely - subagents get fresh context regardless of what the parent triggered. A macro rendered here runs with `WAYS_SCOPE=subagent` (see [Macros](hooks-and-ways/macros.md)).
 
 ### State Management
 
 - **`mark-tasks-active.sh`** - Creates `{SESSIONS_ROOT}/{session_id}/tasks-active`. Silences the context-threshold nag.
-- **`check-response.sh`** - Extracts technical keywords from Claude's last response, writes to `/tmp/claude-response-topics-{session_id}`. These topics feed back into `check-prompt.sh` on the next turn, so ways can trigger based on what Claude discussed (not just what the user asked).
+- **`check-response.sh`** (`ways hook stop`) - Records Claude's last response, raw and cut to 2,000 bytes, in `{SESSIONS_ROOT}/{session_id}/response-context.json`. The next `check-prompt.sh` embeds it with the prompt (never keyword-matches it), so ways can trigger on what Claude discussed, not just what the user asked (ADR-155 §3). A turn that ends without text clears the record.
 
 ### Way Display
 
@@ -424,9 +426,9 @@ sequenceDiagram
     rect rgba(230, 81, 0, 0.12)
         Note over U,Ctx: Claude finishes responding
         CC->>CR: Stop
-        CR->>CR: extract keywords from response
-        CR->>CR: write /tmp/claude-response-topics-*
-        Note right of CR: Topics feed into next check-prompt.sh
+        CR->>CR: read the last response from the transcript
+        CR->>CR: write {SESSIONS_ROOT}/{session}/response-context.json
+        Note right of CR: Embedded with the next prompt
     end
 ```
 

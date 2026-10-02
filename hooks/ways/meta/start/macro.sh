@@ -5,7 +5,7 @@
 
 command -v ways >/dev/null 2>&1 || exit 0
 
-gauge=$(ways context 2>/dev/null) || exit 0
+gauge=$(ways context ${CLAUDE_SESSION_ID:+--session "$CLAUDE_SESSION_ID"} 2>/dev/null) || exit 0
 [ -z "$gauge" ] && exit 0
 
 echo "## Context gauge at start"

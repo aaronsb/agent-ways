@@ -4,10 +4,8 @@
 # Research is mostly greenfield (no official Anthropic skills),
 # but some knowledge-work plugins are relevant.
 
-installed=""
-if command -v claude >/dev/null 2>&1; then
-  installed=$(claude plugin list 2>/dev/null | grep '✔ enabled' || true)
-fi
+# `ways` exports the enabled plugin ids, one per line (name@marketplace).
+installed="${WAYS_ENABLED_PLUGINS:-}"
 
 echo ""
 echo "## Skills for Research"

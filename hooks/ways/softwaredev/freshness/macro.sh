@@ -15,7 +15,7 @@
 # manifest, generated client vs schema). Add those as further functions here
 # rather than as new ways.
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 
 # ── Documentation history vs HEAD ──────────────────────────────
 

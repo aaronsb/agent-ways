@@ -6,6 +6,7 @@ pub mod context;
 pub mod corpus;
 pub mod disable;
 pub mod graph;
+pub mod hook;
 pub mod init;
 pub mod introspect;
 pub mod language;

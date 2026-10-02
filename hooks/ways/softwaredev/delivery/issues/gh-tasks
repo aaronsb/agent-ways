@@ -153,10 +153,13 @@ team_list_id() {
 store_dir() { printf '%s/tasks/%s' "$CONFIG_DIR" "$(list_id)"; }
 
 # Per-session bridge state lives beside the other hook state, under the
-# sessions root shared with the ways binary (sessions-root.sh is the one
-# rule). Never inside the task store: Claude Code parses every *.json there.
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/sessions-root.sh"
-state_dir() { printf '%s/%s/gh-tasks' "$SESSIONS_ROOT" "$SESSION"; }
+# sessions root the ways binary owns (`ways sessions-root` is the one rule).
+# Never inside the task store: Claude Code parses every *.json there.
+SESSIONS_ROOT=$("$(command -v ways || echo "$HOME/.claude/bin/ways")" sessions-root 2>/dev/null)
+state_dir() {
+  [[ -n "$SESSIONS_ROOT" ]] || die "cannot resolve the sessions root: \`ways sessions-root\` is unavailable"
+  printf '%s/%s/gh-tasks' "$SESSIONS_ROOT" "$SESSION"
+}
 
 # ── locks (proper-lockfile compatible) ───────────────────────────
 

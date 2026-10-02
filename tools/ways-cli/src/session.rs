@@ -21,23 +21,17 @@ pub use engagement::{
 // ── Session directory ──────────────────────────────────────────
 
 /// `$XDG_RUNTIME_DIR/claude-sessions`, or `None` when the variable is unset or
-/// empty: the `[[ -n "${XDG_RUNTIME_DIR:-}" ]]` test of `sessions-root.sh`.
-/// Not the absolute-path guard of `paths::xdg_dir`, which the shell twin does
-/// not apply (a Windows `C:\…` value would split the two).
+/// empty. Not the absolute-path guard of `paths::xdg_dir`: a Windows `C:\…`
+/// value is a usable runtime dir here.
 fn runtime_sessions_root(xdg: Option<String>) -> Option<String> {
     xdg.filter(|x| !x.is_empty()).map(|x| format!("{x}/claude-sessions"))
 }
 
-/// Per-user sessions root.
-///
-/// Resolution order — **must stay identical to `hooks/ways/sessions-root.sh`**.
-/// The binary and the shell hooks both compute this independently; if they
-/// disagree they read and write session state in different directories and
-/// coordination silently breaks:
+/// Per-user sessions root. The one copy of the rule: the binary exports it to
+/// every macro and postcheck it runs as `WAYS_SESSIONS_ROOT`, and other
+/// scripts read it from `ways sessions-root`. Resolution order:
 ///   1. `$XDG_RUNTIME_DIR/claude-sessions`            (Linux/systemd — already per-user)
-///   2. Windows: `%LOCALAPPDATA%/claude-ways/sessions`  (per-user; LOCALAPPDATA is
-///      exported in both native Windows and Git Bash, so the `.exe` and the shell
-///      hooks resolve the identical path)
+///   2. Windows: `%LOCALAPPDATA%/claude-ways/sessions`  (per-user)
 ///   3. `/tmp/.claude-sessions-{uid}`                 (other Unix)
 pub fn sessions_root() -> String {
     // 1. XDG_RUNTIME_DIR (already per-user, no UID needed) — wins on any platform.
@@ -45,7 +39,7 @@ pub fn sessions_root() -> String {
         return root;
     }
 
-    // 2. Windows: per-user LOCALAPPDATA base (matches sessions-root.sh).
+    // 2. Windows: per-user LOCALAPPDATA base.
     #[cfg(windows)]
     {
         format!("{}/claude-ways/sessions", win_user_base())
@@ -70,8 +64,7 @@ pub fn sessions_root() -> String {
 }
 
 /// Per-user base directory for transient session state on Windows: `%LOCALAPPDATA%`,
-/// falling back to the system temp dir if it is somehow unset. Centralized so
-/// `sessions_root()` and `response_topics_path()` cannot drift on Windows.
+/// falling back to the system temp dir if it is somehow unset.
 #[cfg(windows)]
 fn win_user_base() -> String {
     std::env::var("LOCALAPPDATA")
@@ -81,8 +74,21 @@ fn win_user_base() -> String {
 }
 
 /// Root directory for a session's state.
-fn session_dir(session_id: &str) -> PathBuf {
+pub fn session_dir(session_id: &str) -> PathBuf {
     PathBuf::from(format!("{}/{session_id}", sessions_root()))
+}
+
+/// Whether `session_id` names one directory directly under the sessions root:
+/// no separator, no leading dot, not empty. Every path that removes a
+/// session's state checks it first, so an id from a hook payload or the
+/// command line never reaches the root itself or a directory beside it.
+pub fn is_plain_session_id(session_id: &str) -> bool {
+    let ok = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    let mut chars = session_id.chars();
+    match chars.next() {
+        Some(c) if ok(c) => chars.all(|c| ok(c) || c == '.'),
+        _ => false,
+    }
 }
 
 /// Path to the per-session queued-message scan mark (ADR-161). Stores the newest
@@ -111,28 +117,11 @@ pub fn write_queued_scan_mark(session_id: &str, ts: &str) {
     let _ = std::fs::write(path, ts);
 }
 
-/// Path to the per-session response-topics state file written by the Stop
-/// hook (`check-response.sh`) and consumed on the next turn by
-/// `check-prompt.sh` to enrich prompt matching with topics from Claude's
-/// last reply. Lives outside `sessions_root()` because it predates that
-/// hierarchy. Canonical here so reset, the writer, and the consumer all
-/// resolve through one source of truth and cannot drift.
-pub fn response_topics_path(session_id: &str) -> PathBuf {
-    // The shell hooks never hardcode this — they read it back from
-    // `ways response-topics-path`, so only the binary's view must be correct
-    // per platform. On Windows, `/tmp` is not a real path for the native `.exe`,
-    // so anchor to the per-user LOCALAPPDATA base (which always exists).
-    #[cfg(windows)]
-    {
-        PathBuf::from(format!(
-            "{}/claude-response-topics-{session_id}",
-            win_user_base()
-        ))
-    }
-    #[cfg(not(windows))]
-    {
-        PathBuf::from(format!("/tmp/claude-response-topics-{session_id}"))
-    }
+/// The Stop hook's record of Claude's last response, read by the next
+/// UserPromptSubmit for the embed lane (ADR-155 §3). Session state like the
+/// rest, so `ways reset` and the SessionStart clear remove it with the session.
+pub fn response_context_path(session_id: &str) -> PathBuf {
+    session_dir(session_id).join("response-context.json")
 }
 
 /// Ensure a path's parent directories exist.
@@ -726,10 +715,20 @@ fn read_u64_path(path: &Path) -> u64 {
 mod token_position_tests {
     use super::*;
 
-    /// An empty XDG_RUNTIME_DIR is unset, as in sessions-root.sh. The binary
-    /// used to resolve it to `/claude-sessions` while the hooks used /tmp.
     #[test]
-    fn empty_runtime_dir_is_unset_like_the_shell_twin() {
+    fn plain_session_ids_stay_under_the_root() {
+        for ok in ["sess-a", "abcdef12-0000-0000-0000-000000000000", "a.b", "_x"] {
+            assert!(is_plain_session_id(ok), "{ok}");
+        }
+        for bad in ["", ".", "..", "../victim", "a/b", ".hidden", "a\\b", "x y"] {
+            assert!(!is_plain_session_id(bad), "{bad}");
+        }
+    }
+
+    /// An empty XDG_RUNTIME_DIR is unset: it once resolved to
+    /// `/claude-sessions`.
+    #[test]
+    fn empty_runtime_dir_is_unset() {
         assert_eq!(runtime_sessions_root(None), None);
         assert_eq!(runtime_sessions_root(Some(String::new())), None);
         assert_eq!(runtime_sessions_root(Some("/run/user/1".into())).as_deref(), Some("/run/user/1/claude-sessions"));

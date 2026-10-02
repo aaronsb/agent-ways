@@ -11,13 +11,11 @@
 #
 # ADR-123's amendment (2026-07-29) permits the state writes below: a postcheck
 # may record session-scoped findings for its own way's macro.sh to read, because
-# check-post.sh discards postcheck stdout and macro.sh gets no stdin. The
+# the post-tool scan discards postcheck stdout and macro.sh gets no stdin. The
 # constraints there are honored — session scope, own way, bounded, and never an
 # input to this predicate. The exit code is a pure function of the observed
 # post-state; .seen only suppresses *re-disclosure*, never detection.
 set -euo pipefail
-
-source "$(dirname "$0")/../../../sessions-root.sh"
 
 INPUT=$(cat)
 
@@ -38,7 +36,7 @@ case "$tool" in Write | Edit | MultiEdit) ;; *) exit 1 ;; esac
 WAYS_BIN="${HOME}/.claude/bin/ways"
 [[ -x "$WAYS_BIN" ]] || exit 1
 
-STATE_DIR="${SESSIONS_ROOT}/${session}/markdown-reflow"
+STATE_DIR="${WAYS_SESSIONS_ROOT:?}/${session}/markdown-reflow"
 SEEN="${STATE_DIR}/seen"
 PENDING="${STATE_DIR}/pending"
 

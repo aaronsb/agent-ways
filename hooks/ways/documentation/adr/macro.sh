@@ -14,7 +14,7 @@
 #
 # ADR_UNIVERSAL_TOOL overrides the installed template's path (tests).
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 UNIVERSAL="${ADR_UNIVERSAL_TOOL:-${HOME}/.claude/hooks/ways/documentation/adr/adr-tool}"
 
 # Capture is shape-restricted: a stamp that isn't a plain version string is
@@ -179,13 +179,8 @@ if [[ -f "$PROJECT_DIR/.claude/no-adr-tooling" ]]; then
 fi
 
 # State 2: Installed — check common locations
-ADR_SCRIPT=""
-for path in "docs/scripts/adr" "scripts/adr" "tools/adr"; do
-  if [[ -x "$PROJECT_DIR/$path" ]]; then
-    ADR_SCRIPT="$path"
-    break
-  fi
-done
+# `ways` exports the project's ADR tool path when it has one.
+ADR_SCRIPT="${WAYS_ADR_TOOL:-}"
 
 if [[ -n "$ADR_SCRIPT" ]]; then
   local_ver=$(tool_version "$PROJECT_DIR/$ADR_SCRIPT")

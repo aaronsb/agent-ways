@@ -1,30 +1,42 @@
 //! Reset session state — clear markers, epochs, and check fire counts.
 //!
-//! Unjams stale session state without restarting Claude Code.
-//!
-//! Clears both the per-session directory under `sessions_root()` and any
-//! known side files written by hooks to fixed `/tmp` paths (e.g. the
-//! response-topics file written by the Stop hook and consumed by
-//! `check-prompt.sh` to enrich prompt matching).
+//! Unjams stale session state without restarting Claude Code. Every piece of
+//! a session's state lives under `sessions_root()/{session_id}/`, so clearing
+//! a session is removing that one directory. The SessionStart hook
+//! (`ways hook session-start`) clears through [`clear_session`] as well.
 
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::session;
 use agent_theme::{pair, paint, Role, Style};
 
-/// Return paths to off-root, per-session state files that hooks write
-/// outside `sessions_root()`. Reset must clear these alongside the main
-/// session directory or matching can be biased by stale topic context
-/// after a reset. Each path resolves through its canonical helper so
-/// reset and the writing/reading hooks can never drift.
-fn session_side_files(sid: &str) -> Vec<PathBuf> {
-    vec![session::response_topics_path(sid)]
+/// Remove one session's state directory. Returns the number of files it held,
+/// `None` when the id is not a plain session id ([`session::is_plain_session_id`])
+/// or the session has no state. An id that would climb out of the sessions
+/// root, or name the root itself, removes nothing.
+pub fn clear_session(session_id: &str) -> Option<usize> {
+    let dir = session_state(session_id)?;
+    let count = count_files(&dir);
+    let _ = std::fs::remove_dir_all(&dir);
+    Some(count)
 }
 
+/// The session's state directory when the id is plain and the directory exists.
+fn session_state(session_id: &str) -> Option<std::path::PathBuf> {
+    if !session::is_plain_session_id(session_id) {
+        return None;
+    }
+    let dir = session::session_dir(session_id);
+    dir.is_dir().then_some(dir)
+}
 
 pub fn run(session: Option<&str>, all: bool, confirm: bool) -> Result<()> {
     let dry_run = !confirm;
+
+    if let Some(sid) = session.filter(|s| !session::is_plain_session_id(s)) {
+        anyhow::bail!("not a session id: {sid:?}");
+    }
 
     let sessions = if all {
         session::list_sessions()
@@ -58,44 +70,19 @@ pub fn run(session: Option<&str>, all: bool, confirm: bool) -> Result<()> {
     let mut total = 0;
 
     for sid in &sessions {
-        let dir = format!("{}/{sid}", session::sessions_root());
-        let path = std::path::Path::new(&dir);
-        let side_files: Vec<PathBuf> = session_side_files(sid)
-            .into_iter()
-            .filter(|p| p.exists())
-            .collect();
-
-        let has_main = path.is_dir();
-        if !has_main && side_files.is_empty() {
-            continue;
-        }
-
-        let main_count = if has_main { count_files(path) } else { 0 };
-        let count = main_count + side_files.len();
         let short_id = &sid[..sid.len().min(12)];
-
         if dry_run {
-            println!("Session {short_id}... ({count} state files)");
-            if has_main {
-                let ways = session::list_fired_ways(sid);
-                if !ways.is_empty() {
-                    println!("  ways: {}", ways.len());
-                }
-                let epoch = session::get_epoch(sid);
-                if epoch > 0 {
-                    println!("  epoch: {epoch}");
-                }
+            let Some(dir) = session_state(sid) else { continue };
+            println!("Session {short_id}... ({} state files)", count_files(&dir));
+            let ways = session::list_fired_ways(sid);
+            if !ways.is_empty() {
+                println!("  ways: {}", ways.len());
             }
-            if !side_files.is_empty() {
-                println!("  side files: {}", side_files.len());
+            let epoch = session::get_epoch(sid);
+            if epoch > 0 {
+                println!("  epoch: {epoch}");
             }
-        } else {
-            if has_main {
-                let _ = std::fs::remove_dir_all(path);
-            }
-            for f in &side_files {
-                let _ = std::fs::remove_file(f);
-            }
+        } else if let Some(count) = clear_session(sid) {
             println!("Session {short_id}...: cleared ({count} state files)");
             total += count;
         }
@@ -123,7 +110,7 @@ pub fn run(session: Option<&str>, all: bool, confirm: bool) -> Result<()> {
     Ok(())
 }
 
-fn count_files(dir: &std::path::Path) -> usize {
+fn count_files(dir: &Path) -> usize {
     walkdir::WalkDir::new(dir)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -135,13 +122,9 @@ fn find_newest_session(sessions: &[String]) -> String {
     let mut newest = (std::time::UNIX_EPOCH, sessions[0].clone());
 
     for sid in sessions {
-        let dir = format!("{}/{sid}", session::sessions_root());
-        let path = std::path::Path::new(&dir);
-        if let Ok(meta) = std::fs::metadata(path) {
-            if let Ok(mtime) = meta.modified() {
-                if mtime > newest.0 {
-                    newest = (mtime, sid.clone());
-                }
+        if let Ok(mtime) = std::fs::metadata(session::session_dir(sid)).and_then(|m| m.modified()) {
+            if mtime > newest.0 {
+                newest = (mtime, sid.clone());
             }
         }
     }

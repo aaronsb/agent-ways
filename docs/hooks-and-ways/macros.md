@@ -13,6 +13,22 @@ macro: append    # macro output appears after static content
 
 The macro script lives alongside the way file as `macro.sh` in the same directory.
 
+## What a Macro Receives
+
+A macro gets no stdin and no arguments. The `ways` binary runs it with bash and exports what it may need about the session:
+
+| Variable | Value |
+|----------|-------|
+| `CLAUDE_SESSION_ID` | The session the way fires for. Inside a subagent this is the parent's id, since subagent hooks report it |
+| `CLAUDE_PROJECT_DIR` | The resolved project directory, never empty |
+| `WAYS_SESSIONS_ROOT` | The per-user root of session state (`{root}/{session}/…`) |
+| `WAYS_SCOPE` | `agent`, `teammate` or `subagent`: who the way is rendered for. A macro that consumes session state skips `subagent`, or it would take the parent's |
+| `WAYS_CONTEXT_USED`, `WAYS_CONTEXT_REMAINING`, `WAYS_CONTEXT_PCT_REMAINING` | The context budget, read from the session's transcript |
+| `WAYS_ENABLED_PLUGINS` | Enabled plugin ids (`name@marketplace`), one per line, from the `enabledPlugins` maps in Claude Code's settings files |
+| `WAYS_ADR_TOOL`, `WAYS_DOC_TOOL` | The project-relative path of the first executable `docs/scripts/`, `scripts/` or `tools/` `adr` (`doc`), when there is one |
+
+The last three rows cost a transcript read, a settings read or a few stats, so the binary computes each only for a macro whose source names the variable. A variable with no value is unset. A `postcheck.sh` gets `CLAUDE_SESSION_ID`, `CLAUDE_PROJECT_DIR` and `WAYS_SESSIONS_ROOT`, with the hook payload on stdin.
+
 ## Why Macros Exist
 
 Some guidance depends on project state that can't be known at authoring time:

@@ -2,7 +2,7 @@
 # Dynamic context for Makefile way
 # Detects Makefile in project, shows available targets, warns about bare-make safety.
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 
 # Find Makefile (GNU make search order)
 MAKEFILE=""

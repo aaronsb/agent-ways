@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
 # Inject context budget into the task list checkpoint
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
-
-if command -v ways &>/dev/null; then
-  JSON=$(ways context --json 2>/dev/null)
-  if [[ -n "$JSON" ]]; then
-    REMAINING=$(echo "$JSON" | jq -r '.tokens_remaining')
-    PCT=$(echo "$JSON" | jq -r '.pct_remaining')
-    echo "**Context budget: ~${REMAINING} tokens remaining (${PCT}% of window).**"
-    echo ""
-  fi
+# `ways` exports the WAYS_CONTEXT_* budget to a macro that names it.
+if [[ -n "${WAYS_CONTEXT_REMAINING:-}" ]]; then
+  echo "**Context budget: ~${WAYS_CONTEXT_REMAINING} tokens remaining (${WAYS_CONTEXT_PCT_REMAINING}% of window).**"
+  echo ""
 fi

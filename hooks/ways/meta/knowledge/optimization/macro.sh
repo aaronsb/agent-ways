@@ -42,8 +42,8 @@ for wayfile in $(find -L "${HOME}/.claude/hooks/ways" -name "*.md" ! -name "*.ch
 done
 
 # Check project-local ways too
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
-if [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR/.claude/ways" ]]; then
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
+if [[ -d "$PROJECT_DIR/.claude/ways" ]]; then
   echo ""
   echo "### Project-local ways"
   for wayfile in $(find -L "$PROJECT_DIR/.claude/ways" -name "*.md" ! -name "*.check.md" -print 2>/dev/null | while IFS= read -r f; do head -1 "$f" 2>/dev/null | grep -q '^---$' && echo "$f"; done | sort); do
