@@ -62,8 +62,10 @@ impl Blocked {
 
     /// Block `id` with its nearest blocked ancestor, logging a `way_judged`
     /// block that carries the ancestor's verdict, `reason: ancestor` and the
-    /// ancestor the judge judged. `false` when no ancestor of `id` is
-    /// blocked, or `id` already is.
+    /// ancestor the judge judged. The judge never saw `id`, so the line holds
+    /// no per-call figures (`judge_ms`, `gate_ms`, `candidates`), and a reader
+    /// counting the judge's own verdicts skips `reason: ancestor`. `false`
+    /// when no ancestor of `id` is blocked, or `id` already is.
     pub(super) fn with_ancestor(&mut self, id: &str, log: &LogContext<'_>) -> bool {
         if self.contains(id) {
             return false;
@@ -74,7 +76,8 @@ impl Blocked {
             .filter(|(b, _)| super::order::is_proper_ancestor(b, id))
             .max_by_key(|(b, _)| b.len())
             .map(|(b, f)| {
-                let mut f = f.clone();
+                let mut f: Vec<(String, String)> =
+                    f.iter().filter(|(k, _)| !matches!(k.as_str(), "judge_ms" | "gate_ms" | "candidates")).cloned().collect();
                 if !f.iter().any(|(k, _)| k == "reason") {
                     f.push(("reason".into(), "ancestor".into()));
                     f.push(("ancestor".into(), b.clone()));
@@ -565,6 +568,7 @@ mod tests {
         let events = events.borrow();
         assert_eq!(events.len(), 3);
         assert_eq!((field(&events[2], "way"), field(&events[2], "ancestor"), field(&events[2], "reason")), ("p/c/d", "p", "ancestor"));
+        assert!(events[1..].iter().all(|e| field(e, "judge_ms").is_empty() && field(e, "candidates").is_empty()), "no per-call figures on an ancestor block");
     }
 
     #[test]

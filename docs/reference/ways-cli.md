@@ -96,7 +96,7 @@ ways tune stats --json
 - `live` follows the session that is writing events now, on the same screen, and stays on the newest frame until you move back; space or End resumes following.
 - `list` prints the session table; `--json` gives it as data.
 - `ways`, `fires`, `dump` and `replay --json` show what reached the session; `--matched` adds the ways the relevance judge kept out, each with its P(yes) against the threshold. `ways` lists the current compaction window, but its `--matched` list (`judge_blocks` in `--json`) covers the whole session.
-- `dump` writes the session's introspection model as JSON: turns, fired ways, their criteria, the keyed transcript join and matched spans. A re-disclosure is a row with `redisclosed: true` and can carry the judge's verdict; `summary.redisclosures` counts it, and `total_fires` does not. Turns are numbered as `--matched` numbers them, so the default dump skips the number of a turn that held only blocked ways.
+- `dump` writes the session's introspection model as JSON: turns, fired ways, their criteria, the keyed transcript join and matched spans. A re-disclosure is a row with `redisclosed: true` and can carry the judge's verdict; `summary.redisclosures` counts it, and `total_fires` does not. A turn can hold only re-disclosures. Turns are numbered as `--matched` numbers them, so the default dump skips the number of a turn that held only blocked ways.
 - `fires` lists the semantic fires of a session with their scores, lowest first.
 
 ```
