@@ -31,7 +31,7 @@ Check that `attend` is installed:
 command -v attend
 ```
 
-If not found, tell the user to run `make attend` or `make install` from the agent-ways repo. Stop here.
+If not found, tell the user to run `ways update` (or `make attend link` from the agent-ways app dir). Stop here.
 
 ## Step 2: Launch via Monitor
 
@@ -88,7 +88,7 @@ Always wrap the message in double quotes to prevent shell metacharacter expansio
 
 ### Channels
 
-Named channels for shared signal routing (ADR-173). Channels are dynamic — join and leave as needed. `attend focus …` still works as a deprecated alias for every verb below.
+Named channels for shared signal routing (ADR-173). Channels are dynamic — join and leave as needed.
 
 ```bash
 attend channels                      # list all channels, joined ones marked

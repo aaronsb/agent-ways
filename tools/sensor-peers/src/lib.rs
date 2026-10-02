@@ -233,7 +233,7 @@ impl PeerSensor {
     /// Return the set of live Claude session IDs currently visible to
     /// the peer sensor. Callers cross-reference this against
     /// `_groups.yaml` member lists when they need a liveness-checked
-    /// view (focus-group routing in `attend send --focus`, etc.) — the
+    /// view (focus-group routing in `attend send --channel`, etc.) — the
     /// yaml count alone trusts `Groups::session_alive`, which is a
     /// best-effort placeholder that returns `true` for everyone.
     pub fn live_session_ids(&self) -> std::collections::HashSet<String> {
@@ -241,7 +241,7 @@ impl PeerSensor {
     }
 
     /// Read signal files from peers. Scans own project dir, broadcast dir,
-    /// focus list, and joined rooms. Returns observations for new signals.
+    /// joined channels. Returns observations for new signals.
     fn read_signals(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         let mut observations = Vec::new();
         // Unseen messages this poll are collected here, then either emitted
@@ -252,7 +252,7 @@ impl PeerSensor {
         let mut pending: Vec<PendingMsg> = Vec::new();
         let base = signals_base();
 
-        // Directories to scan: own project + broadcast + focus group + rooms
+        // Directories to scan: own project + broadcast + joined channels
         let own_encoded = encode_cwd(&focus.working_dir);
         let mut scan_dirs = vec![
             base.join(&own_encoded),

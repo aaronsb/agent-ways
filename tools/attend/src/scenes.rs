@@ -1,10 +1,10 @@
 //! Scene management for attend (ADR-118).
 //!
-//! A scene is a named preset that configures focus group membership.
+//! A scene is a named preset that configures channel membership.
 //! Scenes live in `~/.config/attend/scenes.yaml`.
 //!
 //! Built-in defaults:
-//!   private — leave all focus groups (project scope only)
+//!   private — leave all channels (project scope only)
 //!
 //! `open` used to be a scene preset that joined an `@open/` group;
 //! ADR-124 folded it into the `#open` base channel (which everyone
@@ -19,7 +19,7 @@ use crate::groups::Groups;
 /// A scene definition.
 #[derive(Debug, Clone)]
 pub struct Scene {
-    pub rooms: Vec<String>,
+    pub channels: Vec<String>,
 }
 
 /// Load scenes from config file. Returns built-in defaults merged with user config.
@@ -28,7 +28,7 @@ pub fn load_scenes() -> HashMap<String, Scene> {
 
     // Built-in defaults. `open` used to live here; it's now the
     // `#open` base channel (ADR-124) — implicit for every peer.
-    scenes.insert("private".to_string(), Scene { rooms: Vec::new() });
+    scenes.insert("private".to_string(), Scene { channels: Vec::new() });
 
     // User config overlay
     let path = scenes_config_path();
@@ -41,7 +41,7 @@ pub fn load_scenes() -> HashMap<String, Scene> {
     scenes
 }
 
-/// Activate a scene — reconfigure focus group membership to match the preset.
+/// Activate a scene — reconfigure channel membership to match the preset.
 pub fn activate(scene_name: &str, groups: &Groups) -> Result<String, String> {
     let scenes = load_scenes();
     let scene = scenes
@@ -49,20 +49,20 @@ pub fn activate(scene_name: &str, groups: &Groups) -> Result<String, String> {
         .ok_or_else(|| format!("unknown scene '{scene_name}' — try: {}",
             scenes.keys().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")))?;
 
-    // Leave all current named rooms
+    // Leave all current named channels
     for (name, _) in groups.my_groups() {
         groups.leave(&name).ok();
     }
 
-    // Join the scene's rooms
-    for room_name in &scene.rooms {
-        groups.join(room_name, false)?;
+    // Join the scene's channels
+    for channel_name in &scene.channels {
+        groups.join(channel_name, false)?;
     }
 
-    if scene.rooms.is_empty() {
+    if scene.channels.is_empty() {
         Ok("project scope only".to_string())
     } else {
-        Ok(format!("joined: {}", scene.rooms.join(", ")))
+        Ok(format!("joined: {}", scene.channels.join(", ")))
     }
 }
 
@@ -79,14 +79,14 @@ fn scenes_config_path() -> PathBuf {
 /// Parse scenes.yaml. Format:
 /// ```yaml
 /// private:
-///   rooms: []
+///   channels: []
 /// workroom:
-///   rooms: [deploy, infra]
+///   channels: [deploy, infra]
 /// ```
 fn parse_scenes_yaml(content: &str) -> HashMap<String, Scene> {
     let mut scenes = HashMap::new();
     let mut current_name: Option<String> = None;
-    let mut current_rooms: Vec<String> = Vec::new();
+    let mut current_channels: Vec<String> = Vec::new();
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -99,29 +99,29 @@ fn parse_scenes_yaml(content: &str) -> HashMap<String, Scene> {
         // Top-level: scene name
         if indent == 0 && trimmed.ends_with(':') {
             if let Some(ref name) = current_name {
-                scenes.insert(name.clone(), Scene { rooms: current_rooms.clone() });
+                scenes.insert(name.clone(), Scene { channels: current_channels.clone() });
             }
             current_name = Some(trimmed.trim_end_matches(':').to_string());
-            current_rooms = Vec::new();
+            current_channels = Vec::new();
             continue;
         }
 
-        // Second-level: rooms key with inline array or list items
+        // Second-level: channels key with inline array or list items
         if indent == 2 {
             if let Some((key, value)) = trimmed.split_once(':') {
                 let key = key.trim();
                 let value = value.trim();
-                if key == "rooms" {
-                    // Inline array: rooms: [deploy, infra]
+                if key == "channels" {
+                    // Inline array: channels: [deploy, infra]
                     if value.starts_with('[') && value.ends_with(']') {
                         let inner = &value[1..value.len() - 1];
-                        current_rooms = inner
+                        current_channels = inner
                             .split(',')
                             .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
                             .filter(|s| !s.is_empty())
                             .collect();
                     } else if value == "[]" {
-                        current_rooms = Vec::new();
+                        current_channels = Vec::new();
                     }
                     // else: list items follow at indent 4
                 }
@@ -130,15 +130,15 @@ fn parse_scenes_yaml(content: &str) -> HashMap<String, Scene> {
 
         // Third-level: list items
         if indent == 4 {
-            if let Some(room) = trimmed.strip_prefix("- ") {
-                current_rooms.push(room.trim_matches('"').trim_matches('\'').to_string());
+            if let Some(channel) = trimmed.strip_prefix("- ") {
+                current_channels.push(channel.trim_matches('"').trim_matches('\'').to_string());
             }
         }
     }
 
     // Save last scene
     if let Some(ref name) = current_name {
-        scenes.insert(name.clone(), Scene { rooms: current_rooms });
+        scenes.insert(name.clone(), Scene { channels: current_channels });
     }
 
     scenes
@@ -152,26 +152,26 @@ mod tests {
     fn test_parse_scenes() {
         let yaml = r#"
 private:
-  rooms: []
+  channels: []
 workroom:
-  rooms: [deploy, infra]
+  channels: [deploy, infra]
 custom:
-  rooms:
+  channels:
     - alpha
     - beta
 "#;
         let scenes = parse_scenes_yaml(yaml);
         assert_eq!(scenes.len(), 3);
-        assert!(scenes["private"].rooms.is_empty());
-        assert_eq!(scenes["workroom"].rooms, vec!["deploy", "infra"]);
-        assert_eq!(scenes["custom"].rooms, vec!["alpha", "beta"]);
+        assert!(scenes["private"].channels.is_empty());
+        assert_eq!(scenes["workroom"].channels, vec!["deploy", "infra"]);
+        assert_eq!(scenes["custom"].channels, vec!["alpha", "beta"]);
     }
 
     #[test]
     fn test_builtins() {
         let scenes = load_scenes();
         assert!(scenes.contains_key("private"));
-        assert!(scenes["private"].rooms.is_empty());
+        assert!(scenes["private"].channels.is_empty());
         // `open` is no longer a built-in scene (ADR-124 §2). The
         // equivalent — everyone in #open — is now the implicit base.
         assert!(!scenes.contains_key("open"));

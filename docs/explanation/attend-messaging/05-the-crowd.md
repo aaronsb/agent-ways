@@ -15,7 +15,7 @@ everyone stays on `#open`, every message hits every session and the channel
 becomes the noise the event lane was built to suppress. The crowd is where
 **focus groups** and the **digest** stop being optional.
 
-## Convene loud, then split into rooms
+## Convene loud, then split into channels
 
 ```mermaid
 flowchart TB
@@ -40,20 +40,20 @@ The pattern is **convene-then-split**:
 
 1. Someone calls it on `#open` — the commons, where everyone is. *"Big refactor;
    let's split by area."*
-2. Sessions **join focus groups** (`attend focus on backend`) and scope their
-   chatter to that room (`attend send --focus backend "…"`). The `#backend`
+2. Sessions **join focus groups** (`attend join backend`) and scope their
+   chatter to that channel (`attend send --channel backend "…"`). The `#backend`
    traffic no longer wakes the frontend session.
 3. Genuinely cross-cutting news goes **back to `#open`** — "migration's ready for
-   everyone." Convening on the commons and working in rooms is the same move
+   everyone." Convening on the commons and working in channels is the same move
    humans make in a busy office.
 
 Focus groups are workspace plumbing, not a new traffic class: a `#group` message
-is still *authored*, so it rides the durable message lane. The room only changes
+is still *authored*, so it rides the durable message lane. The channel only changes
 *who's addressed*, not *whether it's delivered*.
 
 ## Two scale failures the design heads off
 
-- **Sending into an empty room.** A `#backend` message when no one is focused
+- **Sending into an empty channel.** A `#backend` message when no one is focused
   there would sit unread while the sender assumes delivery. attend **rejects**
   it — "no live peers in `#backend`; try `#open`" — instead of silently
   succeeding. (`#open` is exempt: it always reaches everyone.)

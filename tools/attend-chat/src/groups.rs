@@ -164,7 +164,7 @@ pub fn resolve_group_dir_in(base: &Path, name: &str) -> Option<PathBuf> {
 /// members (ADR-170) heartbeat their username while a chat is open,
 /// so they count the same way.
 ///
-/// Mirrors the discipline `attend send --focus` enforces in
+/// Mirrors the discipline `attend send --channel` enforces in
 /// `tools/attend/src/cmd/send.rs` — closes the same silent-routing
 /// trap (PR #75) on the attend-chat `#groupname` send path. A
 /// signal written to a group with no live listeners would sit in

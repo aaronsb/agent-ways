@@ -272,7 +272,7 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
 /// real heartbeat sidecar.
 ///
 /// The live-member guard is chat-side policy the CLI's
-/// `attend focus dissolve` doesn't have: from the TUI this is a
+/// `attend dissolve` doesn't have: from the TUI this is a
 /// channel-hygiene action, and yanking a group out from under peers
 /// actively working in it shouldn't be one Enter away. A group whose
 /// members are all heartbeat-stale — or an orphan `@dir` the yaml
@@ -666,7 +666,7 @@ fn recipient_labels(recipients: &[Addressed<'_>]) -> Vec<String> {
 /// the same dir are deduped so a message is delivered once per inbox.
 ///
 /// The empty-group rejection (ADR-129 follow-up) mirrors
-/// `attend send --focus` discipline: a `#groupname` send to a group
+/// `attend send --channel` discipline: a `#groupname` send to a group
 /// with zero live members would land in `@<name>/` and sit unread while
 /// the chat reports "sent". The base channel (`#open`) bypasses the
 /// check — it rides `_broadcast/`, scanned regardless of membership.

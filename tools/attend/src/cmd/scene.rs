@@ -1,4 +1,4 @@
-//! `attend scene` / `attend scenes` — named focus-group presets.
+//! `attend scene` / `attend scenes` — named channel presets.
 
 use crate::scenes;
 use crate::util::get_groups;
@@ -19,13 +19,13 @@ pub(crate) fn cmd_scenes() {
     let mut names: Vec<&String> = all.keys().collect();
     names.sort();
 
-    let mut t = agent_fmt::Table::new(&["Scene", "Focus groups"]);
+    let mut t = agent_fmt::Table::new(&["Scene", "Channels"]);
     for name in &names {
         let scene = &all[*name];
-        let groups_str = if scene.rooms.is_empty() {
+        let groups_str = if scene.channels.is_empty() {
             "(none — project only)".to_string()
         } else {
-            scene.rooms.join(", ")
+            scene.channels.join(", ")
         };
         t.add(vec![name.as_str(), &groups_str]);
     }

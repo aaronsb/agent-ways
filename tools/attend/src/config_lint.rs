@@ -1,8 +1,8 @@
 //! `attend config lint` — schema-driven validation of attend config
 //! files (user scope + project scope).
 //!
-//! Pattern matches ways lint deliberately: the same UNKNOWN/DEPRECATED
-//! warning categories, the same `x-*` escape hatch, the same `--fix`
+//! Pattern matches ways lint deliberately: the same UNKNOWN
+//! warning category, the same `x-*` escape hatch, the same `--fix`
 //! semantics that surgically remove offending lines without perturbing
 //! YAML formatting.
 //!
@@ -28,18 +28,6 @@ const ENGAGEMENT_KEYS: &[&str] = &[
     "decay_per_minute",
     "peer_activity_window",
 ];
-
-/// Engagement keys that are still parsed for back-compat but have no
-/// runtime effect under ADR-123. Currently empty — `burst_window` was
-/// the only entry, and ADR-123 phase 2 (issue #50) removed it from the
-/// parser entirely, so `attend run` now hard-rejects the legacy key at
-/// load time via `config::detect_legacy_burst_window`. The linter still
-/// flags a leftover `burst_window:` line as UNKNOWN (same as any foreign
-/// key) and `--fix` removes it surgically, which is the supported
-/// migration path. This array stays declared so the classification
-/// pipeline keeps the DEPRECATED category wired up for the next time a
-/// soft deprecation is needed.
-const ENGAGEMENT_DEPRECATED: &[(&str, &str)] = &[];
 
 /// Valid keys under `cleanup:`. `retention` was removed with the switch to
 /// project-liveness reaping (issue #141) — a leftover `retention:` is now
@@ -127,7 +115,6 @@ fn is_reserved_field(name: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KeyClass {
     Known,
-    Deprecated(&'static str),
     Unknown,
 }
 
@@ -144,11 +131,7 @@ fn classify_section_key(section: &str, key: &str) -> KeyClass {
             }
         }
         "engagement" => {
-            if let Some((_, reason)) =
-                ENGAGEMENT_DEPRECATED.iter().find(|(k, _)| *k == key)
-            {
-                KeyClass::Deprecated(reason)
-            } else if ENGAGEMENT_KEYS.contains(&key) {
+            if ENGAGEMENT_KEYS.contains(&key) {
                 KeyClass::Known
             } else {
                 KeyClass::Unknown
@@ -256,12 +239,6 @@ fn lint_one_file(path: &Path, fix: bool, ctx: &mut LintContext) {
                     let key = key.trim();
                     match classify_sensor_property(key) {
                         KeyClass::Known => {}
-                        KeyClass::Deprecated(reason) => {
-                            report_deprecated(rel, lineno, key, reason, fix, ctx);
-                            if fix {
-                                removable_lines.push(lineno);
-                            }
-                        }
                         KeyClass::Unknown => {
                             report_unknown(rel, lineno, &format!("sensors.{current_sensor}.{key}"), fix, ctx);
                             if fix {
@@ -285,19 +262,6 @@ fn lint_one_file(path: &Path, fix: bool, ctx: &mut LintContext) {
                 let key = key.trim();
                 match classify_section_key(&current_section, key) {
                     KeyClass::Known => {}
-                    KeyClass::Deprecated(reason) => {
-                        report_deprecated(
-                            rel,
-                            lineno,
-                            &format!("{current_section}.{key}"),
-                            reason,
-                            fix,
-                            ctx,
-                        );
-                        if fix {
-                            removable_lines.push(lineno);
-                        }
-                    }
                     KeyClass::Unknown => {
                         report_unknown(
                             rel,
@@ -345,29 +309,6 @@ fn report_unknown(rel: &str, lineno: usize, key: &str, fix: bool, ctx: &mut Lint
     } else {
         eprintln!(
             "  UNKNOWN: {rel} (line {}) — unknown key '{key}'",
-            lineno + 1
-        );
-        ctx.warnings += 1;
-    }
-}
-
-fn report_deprecated(
-    rel: &str,
-    lineno: usize,
-    key: &str,
-    reason: &str,
-    fix: bool,
-    ctx: &mut LintContext,
-) {
-    if fix {
-        eprintln!(
-            "  FIXED: {rel} (line {}) — removed deprecated key '{key}' ({reason})",
-            lineno + 1
-        );
-        ctx.fixes += 1;
-    } else {
-        eprintln!(
-            "  DEPRECATED: {rel} (line {}) — '{key}': {reason} (run --fix to remove)",
             lineno + 1
         );
         ctx.warnings += 1;

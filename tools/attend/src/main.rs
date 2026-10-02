@@ -29,7 +29,7 @@ mod util;
 use attend_state as state;
 
 use clap::Parser;
-use cli::{Cli, Commands, ConfigCmd, FocusCmd, KeepwarmCmd, PermissionsCmd};
+use cli::{Cli, Commands, ConfigCmd, KeepwarmCmd, PermissionsCmd};
 use sensors::Focus;
 
 fn main() {
@@ -72,11 +72,13 @@ fn main() {
         Commands::Whoami { machine, display } => cmd::whoami::cmd_whoami(machine, display),
         Commands::Sensors => cmd::sensors::cmd_sensors(),
         Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status)),
-        Commands::Send { broadcast, to, focus, re, message } => {
-            cmd::send::cmd_send(broadcast, to, focus, re, message);
+        Commands::Send { to, channel, re, message } => {
+            cmd::send::reject_removed_flags("send", &message);
+            cmd::send::cmd_send(to, channel, re, message);
         }
-        Commands::Reply { broadcast, to, focus, message } => {
-            cmd::send::cmd_reply(broadcast, to, focus, message);
+        Commands::Reply { to, channel, message } => {
+            cmd::send::reject_removed_flags("reply", &message);
+            cmd::send::cmd_reply(to, channel, message);
         }
         Commands::Chat { passthrough } => exec_chat(passthrough),
         // Chat-idiom primary verbs (ADR-173). The `#` prefix is
@@ -96,7 +98,6 @@ fn main() {
         Commands::Dissolve { name } => {
             cmd::channels::cmd_dissolve(name.trim_start_matches('#'));
         }
-        Commands::Focus { sub } => dispatch_focus(sub.unwrap_or(FocusCmd::List)),
         Commands::Scene { name } => cmd::scene::cmd_scene(&name),
         Commands::Scenes => cmd::scene::cmd_scenes(),
         Commands::Tune { apply } => cmd::tune::cmd_tune(apply),
@@ -131,7 +132,7 @@ fn exec_chat(passthrough: Vec<String>) -> ! {
             .args(&passthrough)
             .exec();
         eprintln!("attend chat: failed to launch attend-chat: {}", err);
-        eprintln!("  (is `attend-chat` on PATH? run `make install` from the repo root)");
+        eprintln!("  (is `attend-chat` on PATH? run `ways update` to install it)");
         std::process::exit(1);
     }
     #[cfg(not(unix))]
@@ -143,30 +144,10 @@ fn exec_chat(passthrough: Vec<String>) -> ! {
             Ok(status) => std::process::exit(status.code().unwrap_or(0)),
             Err(err) => {
                 eprintln!("attend chat: failed to launch attend-chat: {}", err);
-                eprintln!("  (is `attend-chat` on PATH? run `make install` from the repo root)");
+                eprintln!("  (is `attend-chat` on PATH? run `ways update` to install it)");
                 std::process::exit(1);
             }
         }
-    }
-}
-
-/// Deprecated alias path (ADR-173): every `focus` spelling keeps
-/// working under CLI-is-contract, dispatching onto the channel
-/// handlers with a one-line note steering toward the primary verbs.
-fn dispatch_focus(sub: FocusCmd) {
-    eprintln!(
-        "(note: `attend focus` is deprecated — use join/leave/channels/dissolve, \
-         or `scene private` to leave all; ADR-173)"
-    );
-    match sub {
-        FocusCmd::On { name, pin } => cmd::channels::cmd_join(&name, pin),
-        FocusCmd::Off { name } => cmd::channels::cmd_leave(&name),
-        FocusCmd::Clear => cmd::channels::cmd_leave_all(),
-        FocusCmd::Pin { name } => cmd::channels::cmd_pin(&name),
-        FocusCmd::Unpin { name } => cmd::channels::cmd_unpin(&name),
-        FocusCmd::Dissolve { name } => cmd::channels::cmd_dissolve(&name),
-        FocusCmd::All => cmd::channels::cmd_channels(),
-        FocusCmd::List => cmd::channels::cmd_joined(),
     }
 }
 

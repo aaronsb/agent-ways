@@ -109,13 +109,3 @@ impl<'a> Banner<'a> {
         println!();
     }
 }
-
-/// Format a help section with consistent styling.
-/// Each entry is (command_name, description).
-pub fn print_commands(heading: &str, commands: &[(&str, &str)]) {
-    println!("{}", paint(Style::new().bold(), format!("{heading}:")));
-    let max_name = commands.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
-    for (name, desc) in commands {
-        println!("  {}  {}", paint(Style::new().bold(), format!("{name:<max_name$}")), paint(Role::Muted, desc));
-    }
-}

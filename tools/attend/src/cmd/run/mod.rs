@@ -47,7 +47,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // Load config: user scope → project scope overlay
     let cfg = config::Config::load(&focus.working_dir);
 
-    // Initialize rooms for signal routing (ADR-118)
+    // Initialize channels for signal routing (ADR-118)
     let session_id = ident.session_id.clone();
 
     // Duplicate-attend guard (ADR-129). Acquire an exclusive flock on
@@ -134,16 +134,6 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     let _ = &my_instance; // consumed by render layer once the suffix is wired in
 
     let group_mgr = groups::Groups::new(&signals_base(), &session_id);
-
-    // ADR-124 one-shot: fold any lingering `@open/` group into the
-    // `_broadcast/` base. Idempotent — a no-op once there's nothing
-    // left to move, which is the common case after the first
-    // post-upgrade startup.
-    if let Some(moved) = groups::migrate_legacy_open_group(&signals_base(), &group_mgr) {
-        emit::log(&format!(
-            "migrated legacy @open/ → _broadcast/ ({moved} signal(s) moved)"
-        ));
-    }
 
     // Self-documenting startup
     let my_groups = group_mgr.my_groups();

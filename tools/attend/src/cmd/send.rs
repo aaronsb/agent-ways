@@ -4,10 +4,32 @@
 use crate::cmd::inbox::is_valid_signal_id;
 use crate::util::{encode_project, get_groups, own_session_id, signals_base};
 
+/// The message is a trailing, hyphen-tolerant argument, so clap hands a
+/// removed flag (`--broadcast`, `--focus`) over as message text instead of
+/// rejecting it, and the send would go out with the flag in its body. Name the
+/// removed flag so the caller errors instead.
+fn removed_flag(message: &[String]) -> Option<(&'static str, &'static str)> {
+    let first = message.first()?.as_str();
+    if first == "--broadcast" {
+        Some(("--broadcast", "a send with no routing flag already reaches everyone"))
+    } else if first == "--focus" || first.starts_with("--focus=") {
+        Some(("--focus", "use --channel"))
+    } else {
+        None
+    }
+}
+
+/// Exit 2 when `message` leads with a removed flag.
+pub(crate) fn reject_removed_flags(verb: &str, message: &[String]) {
+    if let Some((flag, hint)) = removed_flag(message) {
+        eprintln!("attend {verb}: `{flag}` was removed ({hint}).");
+        std::process::exit(2);
+    }
+}
+
 pub(crate) fn cmd_send(
-    broadcast: bool,
     target_dir: Option<String>,
-    target_focus: Option<String>,
+    target_channel: Option<String>,
     reply_to: Option<String>,
     message_parts: Vec<String>,
 ) {
@@ -85,14 +107,14 @@ pub(crate) fn cmd_send(
 
     let r = get_groups();
 
-    // Validate --focus name against live `_groups.yaml` membership. A
+    // Validate --channel name against live `_groups.yaml` membership. A
     // signal written to a group nobody is *currently* listening on sits
     // unread in `@<name>/` until cleanup sweeps it; the sender only sees
     // "signal written" and assumes delivery. Mirror --to's liveness
     // discipline: `_groups.yaml` membership is intersected with
     // `PeerSensor::live_session_ids` so a peer that joined-and-died
     // does not let the validation pass on a phantom member.
-    if let Some(ref name) = target_focus {
+    if let Some(ref name) = target_channel {
         let members = r.members(name);
         let self_id = own_session_id();
         #[cfg(feature = "sensor-peers")]
@@ -154,18 +176,16 @@ pub(crate) fn cmd_send(
     // Default is broadcast — simplest possible routing: every send reaches
     // every peer. Escape hatches remain for humans and scripts:
     //   --to <path>: specific project only
-    //   --focus <name>: specific focus group only
-    //   --broadcast: explicit (same as default)
-    let dest_dirs: Vec<std::path::PathBuf> = if let Some(ref focus_name) = target_focus {
-        vec![r.group_dir(focus_name)]
+    //   --channel <name>: specific channel only
+    let dest_dirs: Vec<std::path::PathBuf> = if let Some(ref channel_name) = target_channel {
+        vec![r.group_dir(channel_name)]
     } else if let Some(ref path) = target_dir {
         let resolved = std::fs::canonicalize(path)
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| path.clone());
         vec![base.join(encode_project(&resolved))]
     } else {
-        // Default (and --broadcast): reach everyone via the broadcast dir.
-        let _ = broadcast; // flag now redundant, kept for compat
+        // Default: reach everyone via the broadcast dir.
         vec![base.join("_broadcast")]
     };
 
@@ -193,8 +213,8 @@ pub(crate) fn cmd_send(
         None => format!("{}|{}|{}|{}\n", from, project, cwd, message),
     };
 
-    let scope = if target_focus.is_some() {
-        "focus"
+    let scope = if target_channel.is_some() {
+        "channel"
     } else if target_dir.is_some() {
         "directed"
     } else {
@@ -269,13 +289,12 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
 /// uuid out of the agent's context window. A caller never sees the
 /// id, never has to hunt for it in `attend inbox`, and never reaches
 /// into `~/.cache/attend/signals/` to find it. Delegating to
-/// `cmd_send` preserves every existing `send` flag (`--focus`,
-/// `--to`, `--broadcast`) without duplication.
+/// `cmd_send` preserves every existing `send` flag (`--channel`,
+/// `--to`) without duplication.
 #[cfg(feature = "sensor-peers")]
 pub(crate) fn cmd_reply(
-    broadcast: bool,
     target_dir: Option<String>,
-    target_focus: Option<String>,
+    target_channel: Option<String>,
     message: Vec<String>,
 ) {
     let session_id =
@@ -308,16 +327,15 @@ pub(crate) fn cmd_reply(
         ReplyTarget::Threaded(id) => Some(id),
     };
     // Inject the resolved signal id as `reply_to` and delegate to cmd_send.
-    // All other routing flags (--focus, --to, --broadcast) flow through
+    // All other routing flags (--channel, --to) flow through
     // untouched.
-    cmd_send(broadcast, target_dir, target_focus, reply_to, message);
+    cmd_send(target_dir, target_channel, reply_to, message);
 }
 
 #[cfg(not(feature = "sensor-peers"))]
 pub(crate) fn cmd_reply(
-    _broadcast: bool,
     _target_dir: Option<String>,
-    _target_focus: Option<String>,
+    _target_channel: Option<String>,
     _message: Vec<String>,
 ) {
     eprintln!("attend reply: sensor-peers feature is not compiled in this build");
@@ -403,6 +421,29 @@ fn find_closest_peer<'a>(target: &str, peers: &[&'a str]) -> Option<&'a str> {
     }
 
     best.map(|(p, _)| p)
+}
+
+#[cfg(test)]
+mod removed_flag_tests {
+    use super::removed_flag;
+
+    fn msg(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn removed_flags_are_named() {
+        assert_eq!(removed_flag(&msg(&["--broadcast", "hello"])).map(|f| f.0), Some("--broadcast"));
+        assert_eq!(removed_flag(&msg(&["--focus", "deploy", "hello"])).map(|f| f.0), Some("--focus"));
+        assert_eq!(removed_flag(&msg(&["--focus=deploy", "hello"])).map(|f| f.0), Some("--focus"));
+    }
+
+    #[test]
+    fn ordinary_messages_pass() {
+        assert!(removed_flag(&msg(&["hello", "--broadcast"])).is_none());
+        assert!(removed_flag(&msg(&["--dashed", "text"])).is_none());
+        assert!(removed_flag(&[]).is_none());
+    }
 }
 
 #[cfg(all(test, feature = "sensor-peers"))]

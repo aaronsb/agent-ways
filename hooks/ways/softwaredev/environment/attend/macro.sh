@@ -4,7 +4,7 @@
 
 # Not installed — nothing to add
 if ! command -v attend &>/dev/null; then
-  echo "**Note**: attend is not installed. Run \`make attend\` or \`make install\` to build it."
+  echo "**Note**: attend is not installed. Run \`ways update\` to install it."
   exit 0
 fi
 
@@ -44,10 +44,11 @@ else
   echo "**Status**: attend is not running — start with \`/attend\` or \`Monitor: attend run\`"
 fi
 
-# Show focus state
-FOCUS_OUTPUT=$(attend focus list 2>/dev/null)
-if [[ -n "$FOCUS_OUTPUT" ]]; then
-  echo "**Focus**: $FOCUS_OUTPUT"
+# Show channels
+CHANNELS_OUTPUT=$(attend channels 2>/dev/null)
+if [[ -n "$CHANNELS_OUTPUT" ]]; then
+  echo "**Channels**:"
+  echo "$CHANNELS_OUTPUT"
 fi
 
 # Show peer count

@@ -6,7 +6,7 @@ The operating premise: *humans wear the same clothes as an AI agent* as far as a
 
 ## Why it exists
 
-Attend's signal layer solves a coordination problem for multi-agent sessions. The human coordinator used to have no first-person view of that layer — they could fire `attend send --broadcast` blindly from a bare terminal, or snapshot `attend inbox`, or alt-tab between four Claude sessions one at a time. None of those let the human *participate* in the signal topology. Routing errors (agents sending `--to /home/aaron/.claude` when they meant `--broadcast`) were a symptom of an invisible abstraction. Coordination across more than two agents was essentially guesswork.
+Attend's signal layer solves a coordination problem for multi-agent sessions. The human coordinator used to have no first-person view of that layer — they could fire `attend send` blindly from a bare terminal, or snapshot `attend inbox`, or alt-tab between four Claude sessions one at a time. None of those let the human *participate* in the signal topology. Routing errors (agents sending `--to /home/aaron/.claude` when they meant a broadcast) were a symptom of an invisible abstraction. Coordination across more than two agents was essentially guesswork.
 
 `attend chat` solves this by giving the human a first-class seat at the signal bus. The same broadcast an agent sees, the human sees. The same `@focus-group` addressing an agent uses, the human uses. The human is not watching attend from outside — they *are* one of the endpoints.
 
@@ -18,9 +18,7 @@ Two secondary consequences fall out of this:
 ## Invocation
 
 ```bash
-attend chat                           # open the TUI in the current project's focus
-attend chat --focus @infra            # open pre-scoped to a specific focus group
-attend chat --broadcast               # open with broadcast as the default filter
+attend chat                           # open the TUI in the current project's scope
 ```
 
 Like `attend run`, `attend chat` is a long-lived process. Unlike `attend run`, it expects to live in a foreground terminal where the human can see and type. You can run both at the same time — they share the same signals base on disk, so `attend chat` in one terminal and `attend run` in a Claude session is the intended multi-endpoint configuration.

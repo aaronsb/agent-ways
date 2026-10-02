@@ -115,7 +115,7 @@ pub fn App(props: &AppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>>
             // open, keep `heartbeat/<username>` fresh so this human
             // counts as a live focus-group member — to our own
             // `live_peer_count`, to attend's `cleanup_stale`, and to
-            // agent-side `send --focus` validation. Touched before
+            // agent-side `send --channel` validation. Touched before
             // the first sleep so presence starts at launch, not one
             // tick later. Best-effort like every heartbeat write.
             let _ = attend_heartbeat::touch(&crate::signal::human_member_id());
