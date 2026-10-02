@@ -210,10 +210,26 @@ pub fn epoch_distance(way_id: &str, session_id: &str) -> u64 {
 pub fn get_token_position(session_id: &str) -> u64 {
     let project_dir = std::env::var("CLAUDE_PROJECT_DIR")
         .unwrap_or_else(|_| std::env::var("PWD").unwrap_or_else(|_| ".".to_string()));
-    let transcript = crate::cmd::show::firing_transcript()
+    token_position_in(
+        &ways_core::paths::claude_dir(),
+        crate::cmd::show::firing_transcript(),
+        &project_dir,
+        session_id,
+    )
+}
+
+/// [`get_token_position`] against an explicit config dir and hook
+/// transcript, for tests.
+fn token_position_in(
+    claude: &claude_sessions::ClaudeDir,
+    hook_transcript: Option<&str>,
+    project_dir: &str,
+    session_id: &str,
+) -> u64 {
+    let transcript = hook_transcript
         .map(PathBuf::from)
         .filter(|t| t.file_stem().is_some_and(|s| s == session_id) && t.is_file())
-        .or_else(|| ways_core::paths::claude_dir().find_transcript(Some(&project_dir), session_id));
+        .or_else(|| claude.find_transcript(Some(project_dir), session_id));
     let transcript = match transcript {
         Some(t) => t,
         None => return 0,
@@ -737,6 +753,28 @@ use crate::util::home_dir;
 // load_engagement_for_tick, FirstFire → ReFire → Suppressed) live in
 // `session::engagement`'s own test module — they moved with the code
 // they cover (issue #52).
+
+#[cfg(test)]
+mod token_position_tests {
+    use super::*;
+
+    #[test]
+    fn non_ascii_project_paths_find_their_transcript() {
+        let root = std::env::temp_dir().join(format!("ways-tokpos-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let claude = claude_sessions::ClaudeDir::at(root.join(".claude"));
+        let line = r#"{"type":"assistant","message":{"usage":{"input_tokens":1,"cache_read_input_tokens":41999,"cache_creation_input_tokens":0}}}"#;
+        let synthetic = r#"{"type":"assistant","message":{"model":"<synthetic>","usage":{"input_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
+        // Claude Code's names for these paths: `-srv----x` and `-srv----crab`.
+        for (project, dir, sid) in [("/srv/项目 x", "-srv----x", "cjk"), ("/srv/🦀/crab", "-srv----crab", "crab")] {
+            let d = root.join(".claude/projects").join(dir);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(format!("{sid}.jsonl")), format!("{line}\n{synthetic}\n")).unwrap();
+            assert_eq!(token_position_in(&claude, None, project, sid), 42000, "{project}");
+        }
+        std::fs::remove_dir_all(&root).ok();
+    }
+}
 
 #[cfg(test)]
 mod compaction_tests {

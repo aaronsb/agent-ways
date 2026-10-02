@@ -536,7 +536,7 @@ ways permissions audit --global
 
 **Run from:** Anywhere. It reads Claude Code's `~/.claude/projects`, never your project directories.
 
-**Tells you:** Depends on subcommand. `cleanup` and `hygiene` list what they would remove and ask before removing it; `--dry-run` only lists. `relocate` prints a plan and changes nothing unless given `--execute`.
+**Tells you:** Depends on subcommand. `cleanup` and `hygiene` list what they would remove, ask first, and move it to a `.trash-<stamp>` dir under `~/.claude/projects` rather than deleting it; `--dry-run` only lists. `relocate` prints a plan and changes nothing unless given `--execute`. It refuses while a session is running in the project, and a rerun after a failed step resumes from where it stopped.
 
 | Subcommand | What it shows or does |
 |------------|-----------------------|
@@ -544,8 +544,8 @@ ways permissions audit --global
 | `search <query>` | Projects whose path, session summaries or first prompts match; `--deep` also searches transcript text |
 | `show <fragment>` | One project: dates, branch, transcripts, memory, recent sessions |
 | `stats` | Totals and the projects using the most disk and holding the most sessions |
-| `cleanup` | Removes project entries with no sessions and no transcripts |
-| `hygiene` | Orphaned and large transcripts, empty session dirs |
+| `cleanup` | Moves project entries with no sessions and no transcripts to a `.trash-<stamp>` dir; skips entries modified in the last 5 minutes |
+| `hygiene` | Large transcripts, and empty session dirs, which it moves to a `.trash-<stamp>` dir |
 | `relocate OLD NEW` | Moves the history of sessions started in OLD to NEW: the project dir, transcript `cwd`s, `sessions-index.json`, the `~/.claude.json` key and `history.jsonl`. `--merge` combines with an existing project, `--keep-transcript-cwd` leaves transcripts untouched, `--force` proceeds past a live-session warning |
 
 ```

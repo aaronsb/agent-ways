@@ -3,14 +3,16 @@
 //!
 //! Reading goes through `claude-sessions`. `cleanup`, `hygiene` and
 //! `relocate` are the only writers into `~/.claude/projects`: `cleanup` and
-//! `hygiene` ask before removing anything and take `--dry-run`; `relocate`
-//! previews unless given `--execute`.
+//! `hygiene` ask before removing anything, move what they remove into a
+//! `.trash-<stamp>` dir, and take `--dry-run`; `relocate` previews unless
+//! given `--execute`.
 //!
 //! Output is plain text. Colour waits for agent-theme's ANSI output (#694).
 
+mod fsio;
 mod relocate;
+mod rewrite;
 
-use std::collections::BTreeSet;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -50,7 +52,7 @@ pub enum ProjectsCommand {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Orphaned transcripts, large transcripts and empty session dirs (asks before removing)
+    /// Large transcripts and empty session dirs (asks before moving dirs to a trash dir)
     Hygiene {
         /// Report only, remove nothing
         #[arg(long)]
@@ -643,13 +645,22 @@ fn cleanup(
         return Ok(());
     }
 
+    // Removed entries go to a trash dir, so a mistaken `y` is undone by
+    // moving them back.
+    let trash = fsio::trash_dir(&projects);
     let mut removed = 0;
     for p in &empty {
         let dir = projects.join(&p.dirname);
+        // Claude Code creates a project's dir as a session starts, before
+        // its first transcript: a dir touched this recently may be one.
+        if recently_modified(&dir, env.now) {
+            writeln!(out, "  skipped {} (modified in the last {} minutes)", p.path, RECENT_SECS / 60)?;
+            continue;
+        }
         // Only a directory with no file at any depth is removed.
         match holds_files(&dir) {
-            0 => match std::fs::remove_dir_all(&dir) {
-                Ok(()) => {
+            0 => match fsio::move_to_trash(&dir, &trash, Path::new(&p.dirname)) {
+                Ok(_) => {
                     removed += 1;
                     writeln!(out, "  removed {}", p.path)?;
                 }
@@ -659,7 +670,20 @@ fn cleanup(
         }
     }
     writeln!(out, "\n  Removed {removed} directories.")?;
+    if removed > 0 {
+        writeln!(out, "  They are in {}; move them back to restore.", trash.display())?;
+    }
     Ok(())
+}
+
+/// A project dir modified this recently may belong to a starting session.
+const RECENT_SECS: u64 = 300;
+
+fn recently_modified(dir: &Path, now: u64) -> bool {
+    std::fs::metadata(dir)
+        .and_then(|m| m.modified())
+        .map(|t| now.saturating_sub(t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)) < RECENT_SECS)
+        .unwrap_or(false)
 }
 
 /// One finding of `hygiene`.
@@ -670,6 +694,10 @@ struct Issue {
     path: PathBuf,
 }
 
+/// Large transcripts and empty session dirs. Transcripts missing from
+/// `sessions-index.json` are not reported: Claude Code stopped writing that
+/// index, so every current transcript is missing from it. Empty dirs are
+/// moved to a trash dir after confirmation; transcripts are never touched.
 fn hygiene(
     env: &Env,
     dry_run: bool,
@@ -678,20 +706,13 @@ fn hygiene(
 ) -> Result<()> {
     let projects = scan_all(env);
     let total_disk: u64 = projects.iter().map(|p| p.transcript_bytes).sum();
-    let (mut orphans, mut large, mut empty_dirs) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut large, mut empty_dirs) = (Vec::new(), Vec::new());
 
     for p in &projects {
         let dir = env.projects().join(&p.dirname);
-        let indexed: BTreeSet<&str> =
-            p.entries.iter().map(|e| str_field(e, "sessionId")).filter(|s| !s.is_empty()).collect();
         for t in claude_sessions::transcripts_in(&dir) {
             let size = std::fs::metadata(&t).map(|m| m.len()).unwrap_or(0);
-            let stem = t.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
             let file = t.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            // A transcript missing from a non-empty index is an orphan.
-            if !indexed.is_empty() && !indexed.contains(stem.as_str()) {
-                orphans.push(Issue { project: p.path.clone(), file: file.clone(), size, path: t.clone() });
-            }
             if size > 10_000_000 {
                 large.push(Issue { project: p.path.clone(), file, size, path: t });
             }
@@ -702,13 +723,13 @@ fn hygiene(
                 && sub.file_name() != "memory"
                 && std::fs::read_dir(&path).map(|mut r| r.next().is_none()).unwrap_or(false)
             {
-                let file = sub.file_name().to_string_lossy().into_owned();
+                let file = format!("{}/{}", p.dirname, sub.file_name().to_string_lossy());
                 empty_dirs.push(Issue { project: p.path.clone(), file, size: 0, path });
             }
         }
     }
 
-    if orphans.is_empty() && large.is_empty() && empty_dirs.is_empty() {
+    if large.is_empty() && empty_dirs.is_empty() {
         writeln!(out, "\nAll clean! No hygiene issues found across {} projects.\n", projects.len())?;
         return Ok(());
     }
@@ -723,30 +744,10 @@ fn hygiene(
         writeln!(out, "  Large transcripts (>10MB): {}  ({} total)", large.len(), fmt_bytes(total))?;
         for i in large.iter().take(10) {
             writeln!(out, "    {:>6}  {}", fmt_bytes(i.size), i.project)?;
-            writeln!(out, "           {}", i.file)?;
+            writeln!(out, "           {}", i.path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default())?;
         }
         if large.len() > 10 {
             writeln!(out, "    … +{} more", large.len() - 10)?;
-        }
-        writeln!(out)?;
-    }
-
-    let orphan_total: u64 = orphans.iter().map(|i| i.size).sum();
-    if !orphans.is_empty() {
-        writeln!(
-            out,
-            "  Orphaned transcripts (not in sessions-index): {}  ({})",
-            orphans.len(),
-            fmt_bytes(orphan_total)
-        )?;
-        let mut by_project: std::collections::BTreeMap<&str, (usize, u64)> = Default::default();
-        for i in &orphans {
-            let e = by_project.entry(i.project.as_str()).or_default();
-            e.0 += 1;
-            e.1 += i.size;
-        }
-        for (project, (n, size)) in by_project {
-            writeln!(out, "    {project}  ({n} files, {})", fmt_bytes(size))?;
         }
         writeln!(out)?;
     }
@@ -755,39 +756,23 @@ fn hygiene(
     }
 
     if dry_run {
-        writeln!(out, "  Reclaimable from orphans: {}", fmt_bytes(orphan_total))?;
         writeln!(out, "  (pass without --dry-run to clean up)")?;
         return Ok(());
     }
 
     out.flush()?;
-    if !orphans.is_empty()
-        && confirm(&format!(
-            "  Remove {} orphaned transcripts from {}/ ({})? [y/N] ",
-            orphans.len(),
-            env.tilde(&env.projects().to_string_lossy()),
-            fmt_bytes(orphan_total)
-        ))
+    if !empty_dirs.is_empty()
+        && confirm(&format!("  Move {} empty session directories to the trash? [y/N] ", empty_dirs.len()))
     {
-        let (mut removed, mut freed) = (0, 0);
-        for i in &orphans {
-            match std::fs::remove_file(&i.path) {
-                Ok(()) => {
-                    removed += 1;
-                    freed += i.size;
-                }
+        let trash = fsio::trash_dir(&env.projects());
+        let mut moved = 0;
+        for i in &empty_dirs {
+            match fsio::move_to_trash(&i.path, &trash, Path::new(&i.file)) {
+                Ok(_) => moved += 1,
                 Err(e) => writeln!(out, "  error {}: {e}", i.path.display())?,
             }
         }
-        writeln!(out, "  Removed {removed} files, freed {}", fmt_bytes(freed))?;
-    }
-    if !empty_dirs.is_empty()
-        && confirm(&format!("  Remove {} empty session directories? [y/N] ", empty_dirs.len()))
-    {
-        for i in &empty_dirs {
-            let _ = std::fs::remove_dir(&i.path);
-        }
-        writeln!(out, "  Cleaned up {} directories", empty_dirs.len())?;
+        writeln!(out, "  Moved {moved} directories to {}; move them back to restore.", trash.display())?;
     }
     writeln!(out)?;
     Ok(())

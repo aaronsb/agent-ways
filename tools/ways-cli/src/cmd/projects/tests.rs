@@ -211,35 +211,72 @@ fn cleanup_dry_run_and_decline_remove_nothing() {
 }
 
 #[test]
-fn cleanup_removes_only_dirs_with_no_files() {
-    let f = populated("cleanup");
+fn cleanup_moves_only_dirs_with_no_files_to_the_trash() {
+    let mut f = populated("cleanup");
+    // An hour from now: the fixture dirs are not "just created".
+    f.env.now = super::epoch_now() + 3_600;
     // Empty by the listing's measure, but holding a file: kept.
     f.write(".claude/projects/-srv-busy/subagents/agent-1.meta.json", "{}");
     let (_, out) = f.run_answering(ProjectsCommand::Cleanup { dry_run: false }, true);
     assert!(out.contains("Removed 1 directories."), "{out}");
     assert!(out.contains("skipped") && out.contains("(has 1 files)"), "{out}");
     assert!(!f.projects().join("-srv-gone").exists());
+    let trash = trash_dirs(&f);
+    assert_eq!(trash.len(), 1, "{out}");
+    assert!(trash[0].join("-srv-gone/subagents").is_dir(), "the removed dir is restorable");
+    assert!(out.contains("move them back to restore"), "{out}");
     assert!(f.projects().join("-srv-busy").exists());
     assert!(f.projects().join("-srv-app-one").exists());
 }
 
 #[test]
-fn hygiene_finds_orphans_and_empty_dirs() {
+fn cleanup_skips_a_dir_a_session_just_created() {
+    // Claude Code creates the dir as a session starts, before the first
+    // transcript; the fixture's dirs were made moments ago.
+    let mut f = populated("cleanup-recent");
+    f.env.now = super::epoch_now();
+    let (_, out) = f.run_answering(ProjectsCommand::Cleanup { dry_run: false }, true);
+    assert!(out.contains("modified in the last 5 minutes"), "{out}");
+    assert!(f.projects().join("-srv-gone").exists());
+}
+
+fn trash_dirs(f: &Fixture) -> Vec<PathBuf> {
+    std::fs::read_dir(f.projects())
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".trash-"))
+        .map(|e| e.path())
+        .collect()
+}
+
+#[test]
+fn hygiene_never_flags_a_transcript_newer_than_a_stale_index() {
+    // Claude Code stopped writing sessions-index.json: every current
+    // transcript is missing from an old index. The orphan rule offered to
+    // delete them all.
+    let f = populated("hygiene-stale");
+    f.transcript("/srv/legacy", "current", "/srv/legacy", NOW);
+    let (_, out) = f.run(ProjectsCommand::Hygiene { dry_run: true });
+    assert!(!out.contains("Orphan"), "{out}");
+    let (_, out) = f.run_answering(ProjectsCommand::Hygiene { dry_run: false }, true);
+    assert!(f.projects().join("-srv-legacy/current.jsonl").exists(), "{out}");
+    assert!(f.projects().join("-srv-legacy/L1.jsonl").exists());
+}
+
+#[test]
+fn hygiene_moves_empty_session_dirs_to_the_trash() {
     let f = populated("hygiene");
-    f.transcript("/srv/legacy", "orphan", "/srv/legacy", NOW);
     std::fs::create_dir_all(f.projects().join("-srv-app-one/s1")).unwrap();
     let (_, out) = f.run(ProjectsCommand::Hygiene { dry_run: true });
-    assert!(out.contains("Orphaned transcripts (not in sessions-index): 1"), "{out}");
     assert!(out.contains("Empty session dirs: 2"), "{out}");
     assert!(out.contains("pass without --dry-run"), "{out}");
-    assert!(f.projects().join("-srv-legacy/orphan.jsonl").exists());
+    assert!(f.projects().join("-srv-app-one/s1").exists());
 
     let (_, out) = f.run_answering(ProjectsCommand::Hygiene { dry_run: false }, true);
-    assert!(out.contains("Removed 1 files"), "{out}");
-    assert!(!f.projects().join("-srv-legacy/orphan.jsonl").exists());
-    // L1 is in the index and stays.
-    assert!(f.projects().join("-srv-legacy/L1.jsonl").exists());
+    assert!(out.contains("Moved 2 directories"), "{out}");
     assert!(!f.projects().join("-srv-app-one/s1").exists());
+    let trash = trash_dirs(&f);
+    assert!(trash[0].join("-srv-app-one/s1").is_dir(), "{out}");
 }
 
 #[test]
@@ -347,6 +384,68 @@ fn relocate_merge_unions_the_index() {
     assert_eq!(str_field(&idx["entries"][1], "projectPath"), "");
     assert!(new_dir.join("L1.jsonl").exists());
     assert!(!f.projects().join("-srv-legacy").exists());
+}
+
+#[test]
+fn relocate_refuses_a_running_session_in_the_project() {
+    // An idle session (transcript older than 120 s) still appends; its
+    // session record shows a live process with its cwd in the project.
+    let f = populated("reloc-running");
+    f.write(
+        ".claude/sessions/1.json",
+        &format!(r#"{{"pid":{},"sessionId":"s1","cwd":"/srv/app_one"}}"#, std::process::id()),
+    );
+    let target = f.base.join("work/t");
+    let mut args = relocate_args("/srv/app_one", &target.to_string_lossy());
+    let (ok, out) = f.run(ProjectsCommand::Relocate(relocate_args("/srv/app_one", &target.to_string_lossy())));
+    assert!(ok && out.contains("running Claude Code session(s) have their working directory"), "{out}");
+    assert!(out.contains("rewrites ~/.claude.json from memory"), "{out}");
+    args.execute = true;
+    let (ok, out) = f.run(ProjectsCommand::Relocate(args));
+    assert!(!ok && out.contains("Refusing to rewrite transcripts"), "{out}");
+    assert!(f.projects().join("-srv-app-one").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn relocate_resumes_after_a_failed_step() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = populated("reloc-resume");
+    let target = f.base.join("work/resumed").to_string_lossy().into_owned();
+    f.write(".claude/history.jsonl", "{\"display\":\"hi\",\"project\":\"/srv/app_one\"}\n");
+    let claude = f.home().join(".claude");
+    // The history backup cannot be written: that step fails after the move.
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let mut args = relocate_args("/srv/app_one", &target);
+    args.execute = true;
+    let (ok, out) = f.run(ProjectsCommand::Relocate(args));
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!ok && out.contains("Relocation incomplete"), "{out}");
+    assert!(!f.projects().join("-srv-app-one").exists());
+
+    let mut args = relocate_args("/srv/app_one", &target);
+    args.execute = true;
+    let (ok, out) = f.run(ProjectsCommand::Relocate(args));
+    assert!(ok && out.contains("resuming the remaining steps"), "{out}");
+    let hist = std::fs::read_to_string(f.env.claude.history_file()).unwrap();
+    assert!(hist.contains(&format!("\"project\":\"{target}\"")), "{hist}");
+}
+
+#[test]
+fn relocate_refuses_an_unverified_long_prefix_match() {
+    // `<base>/projA` and `<base>/projB` share their first 200 slug
+    // characters. Only B's directory exists; relocating A must not take it.
+    let f = populated("reloc-prefix");
+    let base = format!("/{}", "a".repeat(220));
+    let (a, b) = (format!("{base}/projA"), format!("{base}/projB"));
+    let name_b = claude_sessions::project_slug(&b);
+    f.write(&format!(".claude/projects/{name_b}/s.jsonl"), &format!("{{\"cwd\":\"{b}\"}}\n"));
+    let target = f.base.join("work/x").to_string_lossy().into_owned();
+    let mut args = relocate_args(&a, &target);
+    args.execute = true;
+    let (ok, out) = f.run(ProjectsCommand::Relocate(args));
+    assert!(!ok && out.contains("ambiguous: 1 directories share"), "{out}");
+    assert!(f.projects().join(&name_b).exists());
 }
 
 #[test]
