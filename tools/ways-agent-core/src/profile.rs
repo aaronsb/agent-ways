@@ -211,12 +211,6 @@ pub fn user_layer_path() -> PathBuf {
     ways_core::paths::config_root().join("agent.yaml")
 }
 
-/// The text a new `agent.yaml` starts with.
-const HEADER: &str = "# The ways agent's user layer (ADR-196 §5). Fields here override the\n\
-# shipped engine profiles and survive updates. `ways agent config`\n\
-# shows the resolved settings. `ways agent use`, `mode` and `ways settings`\n\
-# change only the keys they set; comments here stay.\n";
-
 impl UserLayer {
     /// Reads the layer through the settings schema. A missing or empty file is
     /// an empty layer. A section that fails the schema, or a file that does
@@ -271,54 +265,6 @@ impl UserLayer {
         let layer = serde_yaml::from_value(serde_yaml::Value::Mapping(checked.accepted))
             .with_context(|| format!("parsing {}", path.map(|p| p.display().to_string()).unwrap_or_default()))?;
         Ok((layer, findings))
-    }
-
-    /// Writes the engine, the mode and every profile this layer holds, each
-    /// through the settings writer. See [`UserLayer::save_fields`].
-    pub fn save(&self, path: &Path) -> Result<()> {
-        let mut fields = vec!["engine".to_string(), "mode".to_string()];
-        fields.extend(self.profiles.keys().map(|n| format!("profiles.{n}")));
-        let refs: Vec<&str> = fields.iter().map(String::as_str).collect();
-        self.save_fields(path, &refs)
-    }
-
-    /// Writes only the named fields (`engine`, `mode`, `profiles.<name>`) of
-    /// this layer to `path`. See [`UserLayer::save_keys`].
-    pub fn save_fields(&self, path: &Path, fields: &[&str]) -> Result<()> {
-        let keys: Vec<Vec<&str>> = fields
-            .iter()
-            .map(|f| match f.split_once('.') {
-                Some((a, b)) => vec![a, b],
-                None => vec![*f],
-            })
-            .collect();
-        let refs: Vec<&[&str]> = keys.iter().map(Vec::as_slice).collect();
-        self.save_keys(path, &refs)
-    }
-
-    /// Writes only the given key paths of this layer to `path`, such as
-    /// `["profiles", "anthropic", "model"]`, under the settings writer's
-    /// lock, by temp file and rename (ADR-503 §6). Every other key and every
-    /// comment in the file stays. A key this layer leaves unset, or an empty
-    /// mapping, is removed from the file, with any parent it leaves empty.
-    pub fn save_keys(&self, path: &Path, keys: &[&[&str]]) -> Result<()> {
-        let value = serde_yaml::to_value(self)?;
-        agent_settings::writer::edit_file(path, Some(HEADER), |doc| {
-            for k in keys {
-                let key: Vec<String> = k.iter().map(|s| s.to_string()).collect();
-                let desired = agent_settings::yaml_edit::value_at(&value, &key)
-                    .filter(|v| !v.as_mapping().is_some_and(|m| m.is_empty()));
-                match desired {
-                    Some(v) => doc.set(&key, v)?,
-                    None => {
-                        doc.unset(&key)?;
-                    }
-                }
-            }
-            Ok(())
-        })
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-        Ok(())
     }
 }
 
@@ -532,73 +478,6 @@ mod tests {
         let (user, findings) = UserLayer::parse("mode: [\n", None).unwrap();
         assert_eq!(user, UserLayer { mode: Some(Mode::Off), ..Default::default() });
         assert!(findings[0].message.contains("does not parse"));
-    }
-
-    #[test]
-    fn saving_keeps_comments_and_keys_it_does_not_set() {
-        let dir = std::env::temp_dir().join(format!("ways-agent-profile-keep-{}", std::process::id()));
-        let path = dir.join("agent.yaml");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(&path, "# mine\nengine: anthropic  # chosen by hand\nprofiles:\n  anthropic:\n    threshold: 0.4  # tuned\n").unwrap();
-        let mut user = UserLayer::load(&path).unwrap();
-        user.mode = Some(Mode::Shadow);
-        user.save_fields(&path, &["mode"]).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "# mine\nengine: anthropic  # chosen by hand\nprofiles:\n  anthropic:\n    threshold: 0.4  # tuned\nmode: shadow\n"
-        );
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn the_layer_round_trips_and_drops_empty_patches() {
-        let dir = std::env::temp_dir().join(format!("ways-agent-profile-{}", std::process::id()));
-        let path = dir.join("agent.yaml");
-        let mut layer = UserLayer { mode: Some(Mode::Off), ..Default::default() };
-        layer.profiles.insert("anthropic".into(), ProfilePatch::default());
-        layer.save(&path).unwrap();
-        let back = UserLayer::load(&path).unwrap();
-        assert_eq!(back.mode, Some(Mode::Off));
-        assert!(back.profiles.is_empty());
-        assert_eq!(UserLayer::load(&dir.join("missing.yaml")).unwrap(), UserLayer::default());
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn concurrent_saves_each_land_whole() {
-        // Two writers sharing one temp name rename it out from under each
-        // other: the loser's rename finds no file.
-        let dir = std::env::temp_dir().join(format!("ways-agent-profile-race-{}", std::process::id()));
-        let path = dir.join("agent.yaml");
-        let writers: Vec<_> = (0..8)
-            .map(|i| {
-                let path = path.clone();
-                std::thread::spawn(move || {
-                    let mode = if i % 2 == 0 { Mode::Off } else { Mode::Shadow };
-                    let layer = UserLayer { mode: Some(mode), ..Default::default() };
-                    (0..50).map(|_| layer.save(&path)).collect::<Result<Vec<_>>>()
-                })
-            })
-            .collect();
-        for w in writers {
-            w.join().unwrap().unwrap();
-        }
-        assert!(UserLayer::load(&path).unwrap().mode.is_some());
-        let leftovers = std::fs::read_dir(&dir).unwrap().count();
-        assert_eq!(leftovers, 1, "only agent.yaml remains");
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn a_failed_save_leaves_no_temp_file() {
-        // A directory at the target makes the rename fail after the write.
-        let dir = std::env::temp_dir().join(format!("ways-agent-profile-fail-{}", std::process::id()));
-        let path = dir.join("agent.yaml");
-        std::fs::create_dir_all(path.join("occupied")).unwrap();
-        assert!(UserLayer::default().save(&path).is_err());
-        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
-        assert_eq!(names, vec![std::ffi::OsString::from("agent.yaml")]);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn gate_with(text: &str) -> Result<Option<Settings>> {

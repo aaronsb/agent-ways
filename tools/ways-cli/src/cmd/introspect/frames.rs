@@ -13,7 +13,7 @@ use super::model::{ActiveWay, Frame, WayEvent};
 
 /// Reconstruct the full replay frame timeline for a session. Loads the token
 /// timeline, pre-resolves per-way refire thresholds, and clusters events into
-/// epoch frames. Shared by the replay screens and `introspect replay --json`.
+/// epoch frames. Shared by the replay screens and `session replay --json`.
 ///
 /// Refire thresholds reflect each way's *current* curve — this is a replay,
 /// so a curve edited since the recorded session shows today's value. That's the
@@ -79,7 +79,7 @@ pub(super) fn build_frames(
         // A `session_start` after the session's origin is a compaction boundary: the
         // real markers were cleared there, so reset the accumulated window state and
         // restart epoch numbering. The latest window then reflects only what fired
-        // since the last compaction — the same grain `ways list` shows.
+        // since the last compaction — the same grain `ways session ways` shows.
         let boundary = !frames.is_empty()
             && cluster.iter().any(|ev| ev.event == "session_start");
         if boundary {

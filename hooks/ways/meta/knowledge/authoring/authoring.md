@@ -34,7 +34,7 @@ If you still want regex-only, that's your choice, but expect poor recall on natu
 - `commands:` — regex matched against bash commands
 - `trigger:` — state-based (context-threshold, file-exists, session-start)
 
-**All values must be single-line.** Do not use YAML folded (`>`) or literal (`|`) scalars — the trigger pipeline parsers only read the first line, silently returning `>` as the value. Use `ways lint` to catch this.
+**All values must be single-line.** Do not use YAML folded (`>`) or literal (`|`) scalars — the trigger pipeline parsers only read the first line, silently returning `>` as the value. Use `ways author lint` to catch this.
 
 For state-based triggers:
 ```markdown
@@ -46,20 +46,20 @@ threshold: 90             # percentage (0-100)
 
 ### Frontmatter Fields
 
-The full field reference (pattern, semantic, state-based, `when:` preconditions, `macro:`, `scope:`) is in knowledge/authoring/frontmatter(meta). `ways lint` validates every field against `frontmatter-schema.yaml`.
+The full field reference (pattern, semantic, state-based, `when:` preconditions, `macro:`, `scope:`) is in knowledge/authoring/frontmatter(meta). `ways author lint` validates every field against `frontmatter-schema.yaml`.
 
 ## Creating a New Way
 
-Use `ways template` to scaffold the way file in one step:
+Use `ways author template` to scaffold the way file in one step:
 
 ```bash
 # Project-local (default)
-ways template softwaredev/code/newway \
+ways author template softwaredev/code/newway \
   --description "what this way covers" \
   --vocabulary "domain keywords users would say"
 
 # Global
-ways template meta/newway \
+ways author template meta/newway \
   --description "what this way covers" \
   --global
 ```
@@ -67,7 +67,7 @@ ways template meta/newway \
 This creates:
 - `{wayname}/{wayname}.md` — frontmatter + body template with guidance placeholders
 
-Ways are authored **English-only** (ADR-139): localization is adopter-run, not authored per-way — there is no translation step here. Then: run `ways corpus` and `ways lint`.
+Ways are authored **English-only** (ADR-139): localization is adopter-run, not authored per-way — there is no translation step here. Then: run `ways corpus` and `ways author lint`.
 
 **Manual creation** also works: create `{domain}/{wayname}/{wayname}.md` with frontmatter + guidance. No config files to update. Project ways override global ways with the same path. Ways can nest arbitrarily: `{domain}/{parent}/{child}/{child}.md`.
 
@@ -82,17 +82,17 @@ For state transitions and process flows, prefer Cypher-style notation over ASCII
 
 ## Progressive Disclosure Trees
 
-When a way covers multiple distinct concerns (>80 lines, >2 sub-topics, language/tool-specific variants), decompose it into a tree of parent and child ways (ADR-105). A way whose delivered body is over the 10,000-character hook context cap must be split: `ways lint` reports it as an error. The parent boost, vocabulary isolation, token budgets, and anti-rationalization tables are in knowledge/authoring/trees(meta).
+When a way covers multiple distinct concerns (>80 lines, >2 sub-topics, language/tool-specific variants), decompose it into a tree of parent and child ways (ADR-105). A way whose delivered body is over the 10,000-character hook context cap must be split: `ways author lint` reports it as an error. The parent boost, vocabulary isolation, token budgets, and anti-rationalization tables are in knowledge/authoring/trees(meta).
 
 ## Testing Your Way
 
 Use the `ways` CLI and `/ways-tests` to validate matching quality. **Use the built-in tools — do not write ad-hoc scripts** for scoring, Jaccard, or vocabulary analysis.
 
 - `ways corpus` — rebuild the corpus after editing `description` or `vocabulary`, so scores reflect the edit
-- `ways match "sample prompt"` — the live late-interaction matcher (ADR-160): peak, share, body-confirm, and whether each candidate would fire
-- `ways lint <path>` — validate frontmatter and the delivered-size cap
-- `ways suggest <way-file>` — analyze vocabulary gaps
-- `ways siblings <way-id>` — way-vs-way cosine similarity, to find confusers
+- `ways author match "sample prompt"` — the live late-interaction matcher (ADR-160): peak, share, body-confirm, and whether each candidate would fire
+- `ways author lint <path>` — validate frontmatter and the delivered-size cap
+- `ways author suggest <way-file>` — analyze vocabulary gaps
+- `ways author siblings <way-id>` — way-vs-way cosine similarity, to find confusers
 - `/ways-tests score <way> "sample prompt"`, `/ways-tests score-all "sample prompt"` — the skill's scoring views
 
 For vocabulary tuning workflows, see the optimization sub-way (triggers on vocabulary/optimization discussion).

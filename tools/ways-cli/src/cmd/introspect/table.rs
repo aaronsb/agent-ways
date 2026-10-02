@@ -1,8 +1,8 @@
 //! The replay's ways table and its context lines on agent-tui: the columns
-//! `ways list` prints (Way, Epoch, Dist, Trigger, the pin, Re-disclosure)
+//! `ways session ways` prints (Way, Epoch, Dist, Trigger, the pin, Re-disclosure)
 //! as ratatui rows, and the token gauge, forecast and re-disclosure zones
 //! below them. The values and their colours come from `cmd::render`, the
-//! same as `ways list`; only the drawing differs.
+//! same as `ways session ways`; only the drawing differs.
 
 use agent_tui::ratatui::layout::{Alignment, Constraint};
 use agent_tui::ratatui::style::{Modifier, Style};

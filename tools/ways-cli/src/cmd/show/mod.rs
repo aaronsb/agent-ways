@@ -40,7 +40,7 @@ pub fn context_chars(s: &str) -> usize {
 
 /// The static text `way_scored` injects for a way: the body after the
 /// frontmatter. Macro output is added at fire time and is not part of it.
-/// `ways lint` measures this against [`HOOK_CONTEXT_CAP`], so the show path and
+/// `ways author lint` measures this against [`HOOK_CONTEXT_CAP`], so the show path and
 /// the size rule read one definition of a way's delivered body.
 pub fn static_way_body(content: &str) -> String {
     body_text(content)
@@ -596,7 +596,7 @@ pub fn way_scored(
         ("session", session_id.to_string()),
         ("token_position", token_pos.to_string()),
         // The model id the invoking agent was running at fire time, read from
-        // the transcript the hook named. Written on every fire so `ways stats`
+        // the transcript the hook named. Written on every fire so `ways tune stats`
         // can split fires and re-disclosures by model. The literal `unknown`
         // records that no model was resolved: no `--transcript` given (dry run,
         // task lane, hook predating the flag), the path not readable, or no
@@ -612,7 +612,7 @@ pub fn way_scored(
         ),
         // Which agent the fire was delivered to. Subagent hooks report the
         // parent's session id, so without this a parallel fan-out reads as one
-        // session on the read side; `ways stats` keys hook invocations on it.
+        // session on the read side; `ways tune stats` keys hook invocations on it.
         ("agent_id", agent_id),
     ];
     // ADR-134 task D: the calibrated probability that fired this way, feeding the

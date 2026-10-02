@@ -9,8 +9,7 @@
 # matcher's order, and keeps under the deadline.
 #
 # The user layer, $XDG_CONFIG_HOME/agent-ways/agent.yaml, overrides any field
-# of any profile and survives updates. `ways agent use` and `ways agent mode`
-# write it.
+# of any profile and survives updates. `ways settings set gate.…` writes it.
 
 anthropic:
   provider: anthropic

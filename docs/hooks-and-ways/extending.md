@@ -19,7 +19,7 @@ No configuration files to update. No registration step. The discovery scripts sc
 | A broad concept users describe variously | `description:` + `vocabulary:` (embedding semantic matching) |
 | A session condition, not content | `trigger:` with `context-threshold`, `file-exists`, or `session-start` |
 
-Matching is additive-OR — the semantic and keyword lanes are independent, and a way can carry both a `pattern:` and `description:` + `vocabulary:`. The semantic lane fires when the calibrated relevance probability `g(s)` clears `τ_s` (`semantic_fire_probability`, 0.5); the keyword lane is **floor-gated** — a `pattern:` hit fires only when `g(s)` also clears the lower floor `τ_k` (`keyword_floor_probability`, 0.15), so a bare keyword can't drag in an unrelated prompt. The keyword lane fails open (fires unconditionally) when there's no calibrated signal, and `pattern_strict: true` bypasses the gate by design. See [engine-reference.md](engine-reference.md) for the exact fire rule. Semantic matching uses embeddings; `ways match` shows how a prompt matches, and it is a subcommand of the unified `ways` binary.
+Matching is additive-OR — the semantic and keyword lanes are independent, and a way can carry both a `pattern:` and `description:` + `vocabulary:`. The semantic lane fires when the calibrated relevance probability `g(s)` clears `τ_s` (`semantic_fire_probability`, 0.5); the keyword lane is **floor-gated** — a `pattern:` hit fires only when `g(s)` also clears the lower floor `τ_k` (`keyword_floor_probability`, 0.15), so a bare keyword can't drag in an unrelated prompt. The keyword lane fails open (fires unconditionally) when there's no calibrated signal, and `pattern_strict: true` bypasses the gate by design. See [engine-reference.md](engine-reference.md) for the exact fire rule. Semantic matching uses embeddings; `ways author match` shows how a prompt matches, and it is a subcommand of the unified `ways` binary.
 
 ### Writing effective guidance
 
@@ -58,7 +58,7 @@ Use `/ways-tests` to validate matching quality without trial-and-error:
 
 For semantic ways, `/ways-tests suggest` analyzes the way body text and recommends vocabulary additions. Not all suggestions should be added — body terms like "code" or "use" don't discriminate between ways. Add terms that are *domain-specific* words users would say.
 
-To verify the live system, include the way's keywords in a prompt and check that it fires (appears in system-reminder). Run `ways list` to see which ways have fired in the current session.
+To verify the live system, include the way's keywords in a prompt and check that it fires (appears in system-reminder). Run `ways session ways` to see which ways have fired in the current session.
 
 ## Progressive Disclosure with Sub-Ways
 
@@ -77,9 +77,9 @@ If you just ask "what are ways?" you get the 60-line overview. The authoring spe
 
 **Design principle**: Parent ways provide orientation. Child ways provide depth. Each child has its own trigger — pattern, semantic, file, or command — so it only loads when that specific sub-topic is active.
 
-**Macros for live state**: A sub-way with `macro: prepend` can run a script that injects current state. The optimization way does this — its macro runs `ways suggest` across all semantic ways and includes the results. The agent gets both the workflow guidance and the data it needs, without constructing any ad-hoc code.
+**Macros for live state**: A sub-way with `macro: prepend` can run a script that injects current state. The optimization way does this — its macro runs `ways author suggest` across all semantic ways and includes the results. The agent gets both the workflow guidance and the data it needs, without constructing any ad-hoc code.
 
-This pattern is self-improving: the tools that analyze the system (`ways suggest`, `/ways-tests`) are themselves documented in ways that fire when you use them. You optimize ways by talking about optimizing ways.
+This pattern is self-improving: the tools that analyze the system (`ways author suggest`, `/ways-tests`) are themselves documented in ways that fire when you use them. You optimize ways by talking about optimizing ways.
 
 ## Project-Local Ways
 
@@ -111,12 +111,12 @@ Project-local macros require explicit trust. Add the project path to `~/.claude/
 
 ### Disabling a single way for one project (ADR-131)
 
-Use `ways disable` from inside the project:
+Use `ways settings set` from inside the project:
 
 ```
-ways disable itops/incident
-ways disable --list           # see what's disabled in this project
-ways enable itops/incident
+ways settings set ways.project.itops/incident false
+ways settings list ways.project           # see what's disabled in this project
+ways settings unset ways.project.itops/incident
 ```
 
 That writes `{project}/.claude/ways.yaml`:

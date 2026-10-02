@@ -119,7 +119,7 @@ pub fn write_queued_scan_mark(session_id: &str, ts: &str) {
 
 /// The Stop hook's record of Claude's last response, read by the next
 /// UserPromptSubmit for the embed lane (ADR-155 §3). Session state like the
-/// rest, so `ways reset` and the SessionStart clear remove it with the session.
+/// rest, so `ways session reset` and the SessionStart clear remove it with the session.
 pub fn response_context_path(session_id: &str) -> PathBuf {
     session_dir(session_id).join("response-context.json")
 }

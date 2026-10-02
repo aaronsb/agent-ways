@@ -1,6 +1,6 @@
 //! The replay as JSON, and the session lists agents pick from.
 //!
-//! `introspect replay` draws a session's frames on the screen; `replay
+//! `session replay` draws a session's frames on the screen; `replay
 //! --json` writes the same reconstructed timeline, with a session summary,
 //! the relevance gate's work and the near-miss events the screen omits, as
 //! one JSON document on stdout, for agents and scripts. It needs no
@@ -133,7 +133,7 @@ pub fn replay_json(session: Option<&str>, project: Option<&str>, all: bool) -> R
     Ok(())
 }
 
-/// `ways introspect list --json`: enumerate candidate sessions in scope as
+/// `ways session list --json`: enumerate candidate sessions in scope as
 /// structured data, so an agent can pick one before dumping it (ADR-154 §4).
 /// Newest first. `scope` is null when `--all` was passed.
 pub fn run_list_json(project: Option<&str>, all: bool) -> Result<()> {

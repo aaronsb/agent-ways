@@ -207,13 +207,13 @@ assert "permissions merged" jq -e '.permissions.allow | index("Bash(ways:*)") !=
 section "target recorded (ADR-184)"
 assert "user config exists" test -f "$CONFIG"
 assert "targets key written" grep -q '^targets:' "$CONFIG"
-TARGETS=$(ways config targets --json 2>/dev/null)
+TARGETS=$(ways target list --json 2>/dev/null)
 assert_eq "targets are explicit" "true" "$(jq -r .explicit <<<"$TARGETS")"
 assert_eq "one target" "1" "$(jq -r '.targets | length' <<<"$TARGETS")"
 assert_eq "target is ~/.claude" "$DEST" "$(jq -r '.targets[0].dir' <<<"$TARGETS")"
 assert_eq "target enabled" "true" "$(jq -r '.targets[0].enabled' <<<"$TARGETS")"
 assert_eq "target active" "active" "$(jq -r '.targets[0].state' <<<"$TARGETS")"
-assert "ways config targets renders" ways config targets
+assert "ways target list renders" ways target list
 
 # --- 6. ways status --------------------------------------------------------
 

@@ -5,7 +5,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 
-/// Run `ways permissions audit`.
+/// Run `ways author permissions`.
 pub fn audit(global: bool) -> Result<()> {
     let ways_dir = crate::paths::projected_ways_root();
     let settings_path = crate::paths::settings_json();

@@ -1,4 +1,4 @@
-//! `ways lint` — schema-driven validation of way frontmatter,
+//! `ways author lint` — schema-driven validation of way frontmatter,
 //! check files, locale stubs, and provenance sidecars.
 //!
 //! This module is split along natural seams:
@@ -58,8 +58,8 @@ pub fn run(
     if fix && path.is_none() && !all {
         eprintln!("`--fix` needs a target.");
         eprintln!();
-        eprintln!("  Give it a file or directory:   ways lint <path> --fix");
-        eprintln!("  Or ask for the whole corpus:   ways lint --fix --all");
+        eprintln!("  Give it a file or directory:   ways author lint <path> --fix");
+        eprintln!("  Or ask for the whole corpus:   ways author lint --fix --all");
         eprintln!();
         eprintln!("Refusing rather than rewriting every way in the corpus by default.");
         // Exit 2, not 1: this command already spends 1 on "lint found errors"
@@ -90,9 +90,9 @@ pub fn run(
         (home_ways_dir.clone(), false, None)
     };
 
-    // Schema resolution — `ways lint` stays self-sufficient, with no coupling to
+    // Schema resolution — `ways author lint` stays self-sufficient, with no coupling to
     // make/install. Prefer the schema that ships alongside the corpus being
-    // linted, so `ways lint <repo>/hooks/ways` validates against that repo's own
+    // linted, so `ways author lint <repo>/hooks/ways` validates against that repo's own
     // schema with no ~/.claude projection required (make absent ≠ lint broken);
     // fall back to the installed global schema for the projected / --global case.
     let local_schema = scan_dir.join("frontmatter-schema.yaml");

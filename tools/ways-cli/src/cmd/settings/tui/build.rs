@@ -317,7 +317,7 @@ impl Ways {
                     .filter_map(|t| {
                         let path = t.get("path")?.as_str()?.to_string();
                         let on = t.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-                        let cmd = |verb: &str| format!("ways config target {verb} {}", quote(&path));
+                        let cmd = |verb: &str| format!("ways target {verb} {}", quote(&path));
                         let toggle = if on {
                             Action::new("disable", cmd("disable")).confirm().doc("Stops projecting into this directory and withdraws what was projected.").touches(path.clone())
                         } else {
@@ -349,12 +349,12 @@ impl Ways {
         }
         let mut g = Node::group("targets", format!("{}\n\n{}", b.spec.doc, b.spec.long), rows).with_actions(vec![
             activate(),
-            Action::new("add", "ways config target add {}")
+            Action::new("add", "ways target add {}")
                 .arg(Arg::Text("directory".into()))
                 .confirm()
                 .doc("Records the directory as a target and projects agent-ways into it.")
                 .touches("the directory given"),
-            Action::new("plan", "ways config target plan {}").arg(Arg::Text("directory".into())).doc("Previews what adding the directory would write. Writes nothing."),
+            Action::new("plan", "ways target plan {}").arg(Arg::Text("directory".into())).doc("Previews what adding the directory would write. Writes nothing."),
         ]);
         g.open = none;
         if let Some(f) = finding_for(layers, b.spec.file, b.spec.section, &b.path()) {

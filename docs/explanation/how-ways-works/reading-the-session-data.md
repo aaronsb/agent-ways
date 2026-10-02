@@ -27,9 +27,9 @@ the full command reference, see [the ways CLI reference](../../reference/ways-cl
 flowchart TB
     Log[("$XDG_STATE/agent-ways/events.jsonl<br/>append-only firing record")]
 
-    List["<b>ways list</b><br/>this session, now"]
-    Stats["<b>ways stats</b><br/>across all sessions"]
-    Json["<b>ways introspect replay --json</b><br/>one whole session, in full"]
+    List["<b>ways session ways</b><br/>this session, now"]
+    Stats["<b>ways tune stats</b><br/>across all sessions"]
+    Json["<b>ways session replay --json</b><br/>one whole session, in full"]
 
     Log --> List
     Log --> Stats
@@ -51,21 +51,21 @@ flowchart TB
     class Q1,Q2,Q3 q
 ```
 
-**`ways list` — what fired this session, right now.** Run after a turn to see the
+**`ways session ways` — what fired this session, right now.** Run after a turn to see the
 table of ways that have fired so far: epoch, match distance, trigger type,
 re-disclosure eligibility, and which agent received each. This is the live view —
 the immediate "did the way I expected actually fire?" check. Add `--json` for the
 machine-readable form.
 
-**`ways stats` — which ways earn their keep.** Aggregates fires across sessions
+**`ways tune stats` — which ways earn their keep.** Aggregates fires across sessions
 into a ranked frequency chart with a trigger-type breakdown. This is the lens for
 *the corpus*, not a session: it surfaces the ways that fire constantly (candidates
 for tuning down) and the dead vocabulary that never fires at all (candidates for
 re-authoring or removal). Scope it with `--days N`, `--global`, or run it inside a
 project to scope to that project.
 
-**`ways introspect replay --json` — one whole session, in full.** This is the deep
-lens, and the one built for programmatic reading. Where `ways introspect replay`
+**`ways session replay --json` — one whole session, in full.** This is the deep
+lens, and the one built for programmatic reading. Where `ways session replay`
 plays a session's timeline frame by frame on screen, `--json` dumps the entire
 reconstructed timeline as a single document — no terminal required, so it runs in
 scripts and headless contexts where the screen can't. It is also the **only** view
@@ -74,8 +74,8 @@ that surfaces near-misses; the screen omits them.
 ## What the dump contains
 
 ```
-ways introspect replay --json                   # most recent session in scope
-ways introspect replay --session <id> --json    # a specific session
+ways session replay --json                   # most recent session in scope
+ways session replay --session <id> --json    # a specific session
 ```
 
 The output is one JSON object with four parts:
@@ -98,23 +98,23 @@ answers:
 
 ```bash
 # The shape of the session at a glance
-ways introspect replay --session <id> --json | jq '.summary'
+ways session replay --session <id> --json | jq '.summary'
 
 # How was this session steered? (trigger mix)
-ways introspect replay --session <id> --json | jq '.summary.trigger_breakdown'
+ways session replay --session <id> --json | jq '.summary.trigger_breakdown'
 
 # What fired turn by turn — just the changes, not the running totals
-ways introspect replay --session <id> --json \
+ways session replay --session <id> --json \
   | jq '.frames[] | select(.new_events|length>0) | {epoch, token_position_k, new_events}'
 
 # Which ways almost fired most often? (tuning candidates)
-ways introspect replay --session <id> --json \
+ways session replay --session <id> --json \
   | jq '.near_misses | group_by(.way)
         | map({way: .[0].way, near_misses: length})
         | sort_by(-.near_misses)'
 
 # The closest misses — smallest margin first (threshold-too-high candidates)
-ways introspect replay --session <id> --json \
+ways session replay --session <id> --json \
   | jq '[.near_misses[]] | sort_by(.margin) | .[:10]'
 ```
 
@@ -135,7 +135,7 @@ A few readings that turn raw fields into judgement:
   the turn landed just short of the global semantic bar `τ_s`. There is no per-way
   threshold to lower — firing is global `τ_s` / `τ_k` on the calibrated `g(s)`
   ([the engine reference](../../hooks-and-ways/engine-reference.md)) — so the remedy
-  is to strengthen the way's vocabulary or pattern and re-measure. `ways tune-precision`
+  is to strengthen the way's vocabulary or pattern and re-measure. `ways tune precision`
   (a precision flag, [[ADR-134]]) reads the event log to audit *where* a way
   fires, not relevance thresholds.
 - **`context_window_k`** anchors every token figure. The same way re-discloses far
@@ -148,7 +148,7 @@ The event log is the *telemetry* layer — fine-grained, per-fire, recent (it
 tail-compacts past ~32 MiB, so it forgets its oldest tail). It records *what fired*,
 not *what was understood*. What was understood is kept in the repository's own
 artifacts — ADRs, ways, issues, commit messages — and `ways init` seeds Claude
-Code's auto-memory to route project knowledge there ([[ADR-128]]). `ways introspect`
+Code's auto-memory to route project knowledge there ([[ADR-128]]). `ways session`
 joins the event log to the session transcripts to show which ways fired on which
 turn ([[ADR-153]], [[ADR-154]]). This cluster is about the event log — for the
 repo artifacts and the rest of the architecture, read

@@ -15,9 +15,9 @@ refire: 0.15
 suggest → interpret → apply → test → verify
 ```
 
-1. **Survey**: the Current Way Health table prepended above covers every semantic way. For one way's detail, run `ways suggest <way-file>`.
+1. **Survey**: the Current Way Health table prepended above covers every semantic way. For one way's detail, run `ways author suggest <way-file>`.
 2. **Interpret**: Gaps vs intentional unused (see below)
-3. **Apply**: edit the `vocabulary:` line by hand, since `ways suggest` only reports. Then run `ways corpus` and review the edit in the diff.
+3. **Apply**: edit the `vocabulary:` line by hand, since `ways author suggest` only reports. Then run `ways corpus` and review the edit in the diff.
 4. **Test**: `/ways-tests score-all "<sample prompt>"` to verify discrimination
 5. **Verify**: `make test-sim` for regression
 
@@ -67,7 +67,7 @@ Recall and precision are shaped by the **content** of a way's vocabulary and pat
 
 When a way mis-fires, the fix is **measure → edit vocabulary/pattern → re-measure**, never "move a threshold." Measure through `tools/scripts/probe-measure.py`, which scores candidate probes against the calibrated `g(s)`. For a keyword that is a common word and would otherwise trip the pattern-hygiene lint, list it in `pattern_keep` (ADR-155 §5): the keep is a *measured* exemption — the keyword is load-bearing and its off-sense noise stays floor-gated by `τ_k`.
 
-### Locale alias audit with `ways tune`
+### Locale alias audit with `ways tune locale`
 
 The tuner does NOT write thresholds (ADR-125). It measures per-locale embedding health so authors know which stubs to re-author:
 
@@ -75,11 +75,11 @@ The tuner does NOT write thresholds (ADR-125). It measures per-locale embedding 
 - **Discrimination** — `min_peer − top_confuser.score`. Negative means some other way's alias outranks this locale's own peers.
 
 ```bash
-ways tune                                    # full audit
-ways tune --way delivery/commits             # single way
-ways tune --fidelity-threshold 0.55          # looser fidelity gate
-ways tune --discrimination-threshold 0.05    # require +0.05 margin
-ways tune --json                             # machine-readable
+ways tune locale                                    # full audit
+ways tune locale --way delivery/commits             # single way
+ways tune locale --fidelity-threshold 0.55          # looser fidelity gate
+ways tune locale --discrimination-threshold 0.05    # require +0.05 margin
+ways tune locale --json                             # machine-readable
 ```
 
 The audit names the **top confuser** — which other way's alias is winning against this one in embedding space. Low discrimination means revising the stub vocabulary (or sometimes the confuser's vocabulary if it's hoovering up too much neighborhood). See `knowledge/optimization/tuning(meta)` for failure-mode categories and fix strategies.

@@ -14,7 +14,7 @@ The switch is the resolved `Config.language`:
 | Mode | When | What runs |
 |------|------|-----------|
 | **English** (default) | `language` is `en` / `auto` / unset | English corpus + English (384-dim) matching only. The 127MB multilingual model is **never downloaded or loaded**. No locale tuning. The intl pipeline is dormant — zero cost. |
-| **Localized** | `language` is a specific non-English code (e.g. `es`) | The multilingual corpus is built with the English root as anchor, the 768-dim multilingual lane runs as a *second* lane, and `ways tune --lang` audits the localization. |
+| **Localized** | `language` is a specific non-English code (e.g. `es`) | The multilingual corpus is built with the English root as anchor, the 768-dim multilingual lane runs as a *second* lane, and `ways tune locale --lang` audits the localization. |
 
 Both modes match by the same rule — embed the prompt, take cosine against the way's
 alias, map it through the per-model logistic `g(s)`, and fire on the global `τ_s` / `τ_k`
@@ -49,7 +49,7 @@ It interviews for the language, gets consent (the model download + all-ways pass
 heavy), flips the switch, fetches the multilingual model on demand
 (`make -C tools/way-embed model-multilingual`), translates every way's
 `description`+`vocabulary` against the English root, rebuilds the corpus, runs
-`ways tune --lang <code>` until clean, and sets Claude Code's own language. See the
+`ways tune locale --lang <code>` until clean, and sets Claude Code's own language. See the
 skill (`skills/ways-localize/`) and scenario `01.011.E`.
 
 ## The embedding models
@@ -95,15 +95,15 @@ can override a stub by existing as `security.es.md`. New/edited ways are authore
 
 ## Tuning — the acceptance gate
 
-`ways tune` is the localized-mode acceptance gate. Fidelity is **alignment to the
+`ways tune locale` is the localized-mode acceptance gate. Fidelity is **alignment to the
 English root**; discrimination is non-collision with other ways. It is never invoked in
 English mode.
 
 ```bash
-ways tune                    # audit the active localized language
-ways tune --lang es          # scope to one language
-ways tune --way security     # scope to one way
-ways tune --json
+ways tune locale                    # audit the active localized language
+ways tune locale --lang es          # scope to one language
+ways tune locale --way security     # scope to one way
+ways tune locale --json
 ```
 
 Re-author flagged stubs and re-run until clean. See the
@@ -119,8 +119,8 @@ changes.
 ## Checking status
 
 ```bash
-ways language          # resolved language, model availability, per-way locale coverage
-ways language --json   # machine-readable (resolved_language, models, locales_found)
+ways tune language          # resolved language, model availability, per-way locale coverage
+ways tune language --json   # machine-readable (resolved_language, models, locales_found)
 ```
 
 ## Architecture

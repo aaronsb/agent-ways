@@ -1,9 +1,0 @@
-# overlay
-language: en
-
-ways:
-  # keep me
-  meta/introspection: false
-
-  itops/incident: false
-parent_boost_floor: 0.40

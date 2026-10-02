@@ -1,4 +1,4 @@
-//! `ways introspect` — the user/agent-facing surface over a session's way
+//! `ways session` — the user/agent-facing surface over a session's way
 //! firings (ADR-154). Modes: `replay` and `live`, timeline screens on
 //! agent-tui (ADR-504 §1, §9), with `replay --json` as the replay's CLI form;
 //! `list`, the session table or `--json`; `dump`, the `SessionIntrospection`
@@ -117,12 +117,12 @@ fn show(mut screen: Introspect, open: &Open) -> Result<()> {
 
 fn need_terminal(open: &Open, mode: &str) -> Result<()> {
     if !open.headless() && !(std::io::stdout().is_terminal() && std::io::stdin().is_terminal()) {
-        bail!("`ways introspect {mode}` needs a terminal; `ways introspect replay --json` prints a session's timeline");
+        bail!("`ways session {mode}` needs a terminal; `ways session replay --json` prints a session's timeline");
     }
     Ok(())
 }
 
-/// `ways introspect replay` — a session's way firings frame by frame. With
+/// `ways session replay` — a session's way firings frame by frame. With
 /// no `--session`, the picker lists the sessions in scope. `--json` prints
 /// the timeline instead.
 pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Option<u64>, json: bool, open: &Open) -> Result<()> {
@@ -166,7 +166,7 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
     show(screen, open)
 }
 
-/// `ways introspect live` — monitor the current session's way firings, following
+/// `ways session live` — monitor the current session's way firings, following
 /// the newest frame as ways fire. The "current" session is the most recent one in
 /// scope (the one actively writing events); `--session` overrides it. Scoping
 /// mirrors `replay`: defaults to the current project, `--project` for a specific
@@ -220,7 +220,7 @@ pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result
     }
 }
 
-/// `ways introspect list` — enumerate candidate sessions in scope, as a table or
+/// `ways session list` — enumerate candidate sessions in scope, as a table or
 /// (`--json`) machine-listable data for an agent to pick from before dumping.
 pub fn list(project: Option<&str>, all: bool, json: bool) -> Result<()> {
     if json {
@@ -235,7 +235,7 @@ pub fn list(project: Option<&str>, all: bool, json: bool) -> Result<()> {
     sessions::list_sessions(&content, scope.as_deref())
 }
 
-/// `ways introspect dump` — emit a session's reconstructed introspection (turns,
+/// `ways session dump` — emit a session's reconstructed introspection (turns,
 /// fired ways, criteria, keyed transcript join, matched spans) as JSON, so an
 /// agent can investigate *which ways fired, on which turn, and why* without a TUI.
 ///
@@ -289,7 +289,7 @@ pub fn dump(session: Option<&str>, project: Option<&str>, all: bool) -> Result<(
     Ok(())
 }
 
-/// `ways introspect fires` — the read-side precision instrument (task #2 of the
+/// `ways session fires` — the read-side precision instrument (task #2 of the
 /// ADR-160 calibration work). Reads `way_fired`/`way_redisclosed` events straight
 /// from events.jsonl — no `SessionIntrospection` reconstruction, no re-embedding —
 /// and prints each *semantic* fire as `score · surface · way`, borderline (lowest

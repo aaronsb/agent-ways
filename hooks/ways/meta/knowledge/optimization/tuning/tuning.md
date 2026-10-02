@@ -1,5 +1,5 @@
 ---
-description: locale alias tuning — root-anchored fidelity and discrimination audit, the ways tune acceptance gate for adopter-run localization
+description: locale alias tuning — root-anchored fidelity and discrimination audit, the ways tune locale acceptance gate for adopter-run localization
 vocabulary: tune tuning audit fidelity discrimination confuser anchor root gap margin re-author stub locale lang acceptance gate localized
 scope: agent
 refire: 0.15
@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Locale Alias Audit
 
-`ways tune` is the **acceptance gate** for adopter-run localization (ADR-139). It runs only in **localized mode** (a non-English `output_language`); in English mode there is nothing to audit and it returns clean. It measures embedding health against the multilingual model and does not write thresholds — there are no per-way thresholds to write; firing is global (τ_s / τ_k on the calibrated g(s), ADR-156 — see engine-reference.md), and stub quality is fixed by re-authoring, not by moving gates.
+`ways tune locale` is the **acceptance gate** for adopter-run localization (ADR-139). It runs only in **localized mode** (a non-English `output_language`); in English mode there is nothing to audit and it returns clean. It measures embedding health against the multilingual model and does not write thresholds — there are no per-way thresholds to write; firing is global (τ_s / τ_k on the calibrated g(s), ADR-156 — see engine-reference.md), and stub quality is fixed by re-authoring, not by moving gates.
 
 English is the **source of truth.** Each way's English frontmatter is embedded into the multilingual corpus as the per-way **anchor**, and every localized alias is scored *against the root* — not against sibling translations. A cluster of mutually-agreeing bad translations cannot self-certify; each stands or falls by its alignment to English.
 
@@ -22,14 +22,14 @@ The tool runs each locale's `description + vocabulary` as a query against the mu
 ## Workflow
 
 ```bash
-ways tune                       # audit the active localized language
-ways tune --lang es             # scope to one language
-ways tune --way delivery/commits
-ways tune --fidelity-threshold 0.55 --discrimination-threshold 0.05
-ways tune --json
+ways tune locale                       # audit the active localized language
+ways tune locale --lang es             # scope to one language
+ways tune locale --way delivery/commits
+ways tune locale --fidelity-threshold 0.55 --discrimination-threshold 0.05
+ways tune locale --json
 ```
 
-`ways tune` is the loop the **ways-localize** skill drives: translate → corpus → tune → re-author flagged stubs → repeat until clean. "Clean" (no flagged entries) is the *evidence* a localization is done — not an assertion.
+`ways tune locale` is the loop the **ways-localize** skill drives: translate → corpus → tune → re-author flagged stubs → repeat until clean. "Clean" (no flagged entries) is the *evidence* a localization is done — not an assertion.
 
 ## Two failure modes
 

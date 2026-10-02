@@ -8,7 +8,7 @@ The `ways` binary is the command-line interface for the ways knowledge guidance 
 
 Use these to see what's happening in a session.
 
-### `ways list`
+### `ways session ways`
 
 **When:** After a Claude conversation turn, to verify which ways fired and in what order.
 
@@ -17,10 +17,10 @@ Use these to see what's happening in a session.
 **Tells you:** A table of every way that fired this session: epoch (turn number), match distance, trigger type (keyword / semantic / state / file / bash), re-disclosure eligibility, and which agent received it.
 
 ```
-ways list
-ways list --session <id>      # target a specific session
-ways list --sort name          # sort alphabetically instead of by epoch
-ways list --json               # machine-readable output
+ways session ways
+ways session ways --session <id>      # target a specific session
+ways session ways --sort name          # sort alphabetically instead of by epoch
+ways session ways --json               # machine-readable output
 ```
 
 ---
@@ -59,7 +59,7 @@ ways context --json
 
 ---
 
-### `ways stats`
+### `ways tune stats`
 
 **When:** Reviewing which ways are actually being used across sessions; identifying ways that never fire (dead vocabulary); understanding how triggers break down.
 
@@ -68,11 +68,11 @@ ways context --json
 **Tells you:** Top ways ranked by fire frequency with ASCII bar charts, trigger-type breakdown (keyword / semantic / state / file / bash / check-pull), a per-model breakdown, ways per hook invocation, check fire summary, and session count. Add `--days N` to narrow the time window.
 
 ```
-ways stats
-ways stats --days 7
-ways stats --global
-ways stats --project <dir>   # filter to one project path
-ways stats --json
+ways tune stats
+ways tune stats --days 7
+ways tune stats --global
+ways tune stats --project <dir>   # filter to one project path
+ways tune stats --json
 ```
 
 **By model:** fires and re-disclosures split by the model id stamped on each event at fire time (the `model` field, read from the transcript the invoking hook named). A second table shows the same top ten ways with one column per model. Two buckets are not model ids. `unknown` means no model was resolved for the fire: the scan ran without `--transcript` (a dry run, the task/SubagentStart lane, or a hook predating the flag), the named transcript could not be read, or it had no assistant turn yet. The model is never taken from a session-id or project lookup, since for a subagent those resolve the parent's or a sibling's transcript. `(unstamped)` means the row predates the field. This is identification only: no way is gated or presented differently by model.
@@ -83,7 +83,7 @@ ways stats --json
 
 ---
 
-### `ways introspect`
+### `ways session`
 
 **When:** After a session where guidance seemed off, to replay exactly what fired, when, and why. Also useful for onboarding: walk through a past session to see the system in action, or follow the current one as ways fire.
 
@@ -99,18 +99,18 @@ ways stats --json
 - `fires` lists the semantic fires of a session with their scores, lowest first.
 
 ```
-ways introspect replay                                 # picker of this project's sessions
-ways introspect replay --session <id>                  # one session
-ways introspect replay --project <dir>                  # sessions from another project
-ways introspect replay --all                           # sessions across every project
-ways introspect replay --speed 500                     # faster playback (ms per frame)
-ways introspect replay --json                          # most recent session as JSON
-ways introspect replay --session <id> --json           # a specific session as JSON
-ways introspect live                                   # follow the active session
-ways introspect list                                   # session table
-ways introspect list --json                            # session list as data
-ways introspect dump --session <id>                    # introspection model as JSON
-ways introspect fires --session <id> --max-score 0.6   # the borderline semantic fires
+ways session replay                                 # picker of this project's sessions
+ways session replay --session <id>                  # one session
+ways session replay --project <dir>                  # sessions from another project
+ways session replay --all                           # sessions across every project
+ways session replay --speed 500                     # faster playback (ms per frame)
+ways session replay --json                          # most recent session as JSON
+ways session replay --session <id> --json           # a specific session as JSON
+ways session live                                   # follow the active session
+ways session list                                   # session table
+ways session list --json                            # session list as data
+ways session dump --session <id>                    # introspection model as JSON
+ways session fires --session <id> --max-score 0.6   # the borderline semantic fires
 ```
 
 **`replay --json` output:** a single object with `session`, `project`, `context_window_k`, a `summary` (epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, trigger breakdown, top ways, and the relevance gate's work), the full `frames` timeline (each with epoch, timestamp, token position, active ways, and what newly fired that turn), and `near_misses` (ways whose calibrated probability came within `near_miss_margin` of the semantic firing threshold but didn't fire — each with its EN/multilingual relevance probabilities (`prob_en` / `prob_multi`), the global semantic threshold `tau_s`, and the `margin` below it). The screen omits near-misses. Slice large sessions with `jq` — a multi-day session can run to thousands of frames.
@@ -140,7 +140,7 @@ ways scan prompt --query "git commit" --session dummy --project ~/my-project
 
 ---
 
-### `ways match`
+### `ways author match`
 
 **When:** A way isn't firing and you want to see why; understanding why the wrong way is winning; checking whether a vocabulary change moved the needle. This is the authoring tool: it shows how a query matches under the live matcher.
 
@@ -161,8 +161,8 @@ When the query is too sparse to chunk, or the embedding engine cannot run late i
 On the fallback path the cosines are mapped through the calibrated logistic `g(s)` and fire when `g(s) ≥ τ_s`. See `../hooks-and-ways/engine-reference.md`.
 
 ```
-ways match "how do I test if a way is working"
-ways match "git commit message format" --project ~/my-project
+ways author match "how do I test if a way is working"
+ways author match "git commit message format" --project ~/my-project
 ```
 
 ---
@@ -182,7 +182,7 @@ ways show way softwaredev/code/testing --session dummy
 
 ---
 
-### `ways reset`
+### `ways session reset`
 
 **When:** A way should fire but hasn't (stale session marker); checks are firing too aggressively (inflated epoch counter); after editing a way mid-session and wanting a clean re-run.
 
@@ -191,10 +191,10 @@ ways show way softwaredev/code/testing --session dummy
 **Tells you:** Dry run by default — prints what state files would be cleared without deleting anything. Add `--confirm` to actually delete.
 
 ```
-ways reset                    # dry run — shows what would be cleared
-ways reset --confirm          # actually clear current session state
-ways reset --session <id>     # target a specific session
-ways reset --all --confirm    # clear all sessions
+ways session reset                    # dry run — shows what would be cleared
+ways session reset --confirm          # actually clear current session state
+ways session reset --session <id>     # target a specific session
+ways session reset --all --confirm    # clear all sessions
 ```
 
 ---
@@ -203,7 +203,7 @@ ways reset --all --confirm    # clear all sessions
 
 Use these when creating or maintaining ways.
 
-### `ways template`
+### `ways author template`
 
 **When:** Creating a new way from scratch. Using the template ensures correct frontmatter structure, valid YAML, and locale stub files.
 
@@ -212,13 +212,13 @@ Use these when creating or maintaining ways.
 **Tells you:** Scaffolds the way file at the given path with a frontmatter template, body placeholder, and locale stubs. `-d` (description) is required; `-V` sets the vocabulary; `--scope` sets `agent`, `subagent`, or `teammate` (comma-separated, default `agent`).
 
 ```
-ways template softwaredev/myteam/workflow -d "team deployment workflow and release process"
-ways template itops/alerts -d "alerting runbooks" -V "alert pager oncall runbook" --global
+ways author template softwaredev/myteam/workflow -d "team deployment workflow and release process"
+ways author template itops/alerts -d "alerting runbooks" -V "alert pager oncall runbook" --global
 ```
 
 ---
 
-### `ways lint`
+### `ways author lint`
 
 **When:** After editing a way's frontmatter; before committing; in CI pipelines.
 
@@ -229,19 +229,19 @@ ways template itops/alerts -d "alerting runbooks" -V "alert pager oncall runbook
 `--fix` auto-corrects what is fixable, and **takes its scope from `path`, not from the flag** — the same way `eslint --fix` does. Without a path it refuses rather than rewriting every way in the resolved corpus; pass `--all` when that is what you actually want. Each correction is disclosed on its own `FIXED:` line, and fixes are writes, so review them with `git diff`.
 
 ```
-ways lint                                          # scan project ways
-ways lint ~/.claude/hooks/ways/meta/knowledge/knowledge.md  # single file
-ways lint <path> --fix                             # auto-correct within that path
-ways lint --fix --all                              # auto-correct the whole resolved corpus
-ways lint --check                                  # CI mode — non-zero exit on errors
-ways lint --schema                                 # show the frontmatter schema
+ways author lint                                          # scan project ways
+ways author lint ~/.claude/hooks/ways/meta/knowledge/knowledge.md  # single file
+ways author lint <path> --fix                             # auto-correct within that path
+ways author lint --fix --all                              # auto-correct the whole resolved corpus
+ways author lint --check                                  # CI mode — non-zero exit on errors
+ways author lint --schema                                 # show the frontmatter schema
 ```
 
 Exit codes: `0` clean, `1` errors found (with `--check`), `2` the invocation was wrong — kept distinct so a caller can tell "the corpus has problems" from "you used the flag wrong".
 
 ---
 
-### `ways suggest`
+### `ways author suggest`
 
 **When:** A way exists but match scores are low for queries you expect it to catch. The vocabulary in frontmatter doesn't align with how users actually phrase things.
 
@@ -250,8 +250,8 @@ Exit codes: `0` clean, `1` errors found (with `--check`), `2` the invocation was
 **Tells you:** Ranked list of vocabulary terms to add to the `vocabulary:` or `aliases:` frontmatter fields, based on term frequency analysis of the way body.
 
 ```
-ways suggest ~/.claude/hooks/ways/meta/knowledge/knowledge.md
-ways suggest .claude/ways/myteam/deploy/deploy.md
+ways author suggest ~/.claude/hooks/ways/meta/knowledge/knowledge.md
+ways author suggest .claude/ways/myteam/deploy/deploy.md
 ```
 
 ---
@@ -275,7 +275,7 @@ ways init --project ~/my-other-project
 
 Use these after ways are working to improve match quality and re-disclosure cadence.
 
-### `ways tune`
+### `ways tune locale`
 
 **When:** After authoring locale stubs for multilingual support; auditing whether translations actually match the English content semantically.
 
@@ -284,15 +284,15 @@ Use these after ways are working to improve match quality and re-disclosure cade
 **Tells you:** Fidelity score (cross-lingual cosine similarity) and discrimination gap per way — how well the locale alias matches its English counterpart and how distinctly it scores against other ways. Flags entries below threshold as needing re-authoring.
 
 ```
-ways tune
-ways tune --way "meta/knowledge"
-ways tune --lang es                   # audit one language (default: the active one)
-ways tune --fidelity-threshold 0.7    # stricter fidelity requirement
+ways tune locale
+ways tune locale --way "meta/knowledge"
+ways tune locale --lang es                   # audit one language (default: the active one)
+ways tune locale --fidelity-threshold 0.7    # stricter fidelity requirement
 ```
 
 ---
 
-### `ways tune-precision`
+### `ways tune precision`
 
 **When:** Auditing whether ways are landing in irrelevant sessions — e.g., a `softwaredev` way firing during a writing session. Requires session history.
 
@@ -301,14 +301,14 @@ ways tune --fidelity-threshold 0.7    # stricter fidelity requirement
 **Tells you:** Off-domain fire rate per way. Ways at or above the flag threshold (default 50%) are marked for vocabulary tightening.
 
 ```
-ways tune-precision
-ways tune-precision --flag-threshold 0.3   # stricter — flag at 30% off-domain
-ways tune-precision --way "itops"
+ways tune precision
+ways tune precision --flag-threshold 0.3   # stricter — flag at 30% off-domain
+ways tune precision --way "itops"
 ```
 
 ---
 
-### `ways siblings`
+### `ways author siblings`
 
 **When:** Checking if two ways are semantically too similar (risk of both firing for the same query, or one shadowing the other); validating that a new way is distinct enough from existing ones.
 
@@ -317,9 +317,9 @@ ways tune-precision --way "itops"
 **Tells you:** Cosine similarity score between the target way and all other ways above the threshold. High similarity (>0.7) suggests vocabulary overlap that may need resolution.
 
 ```
-ways siblings meta/knowledge
-ways siblings softwaredev/code/testing
-ways siblings all --threshold 0.5   # only show high-similarity pairs
+ways author siblings meta/knowledge
+ways author siblings softwaredev/code/testing
+ways author siblings all --threshold 0.5   # only show high-similarity pairs
 ```
 
 ---
@@ -328,7 +328,7 @@ ways siblings all --threshold 0.5   # only show high-similarity pairs
 
 Use these for structural and coverage insight across the ways corpus.
 
-### `ways tree`
+### `ways author tree`
 
 **When:** Understanding how a domain's progressive disclosure tree is structured; checking threshold and token-size settings across a subtree before editing.
 
@@ -337,9 +337,9 @@ Use these for structural and coverage insight across the ways corpus.
 **Tells you:** Hierarchical table showing depth, type (way / check), disclosure threshold, vocabulary count, and token size for each node in the subtree. Add `--jaccard` to see vocabulary overlap between siblings.
 
 ```
-ways tree softwaredev
-ways tree meta/knowledge
-ways tree softwaredev --jaccard
+ways author tree softwaredev
+ways author tree meta/knowledge
+ways author tree softwaredev --jaccard
 ```
 
 ---
@@ -384,7 +384,7 @@ longest) → the two calibration lanes → manifest write.
 
 ---
 
-### `ways graph`
+### `ways author graph`
 
 **When:** Visualizing the full ways knowledge graph in an external tool; generating data for dashboards or dependency analysis.
 
@@ -393,13 +393,13 @@ longest) → the two calibration lanes → manifest write.
 **Tells you:** JSONL output (stdout by default) with node records (id, description, type) and edge records (parent → child relationships).
 
 ```
-ways graph
-ways graph -o ways-graph.jsonl     # write to file
+ways author graph
+ways author graph -o ways-graph.jsonl     # write to file
 ```
 
 ---
 
-### `ways language`
+### `ways tune language`
 
 **When:** Before deploying to multilingual teams; checking which ways have locale stubs for a given language; auditing coverage gaps.
 
@@ -408,9 +408,9 @@ ways graph -o ways-graph.jsonl     # write to file
 **Tells you:** Active language and model availability, corpus breakdown (EN vs. multilingual), language coverage across 17+ languages, and which ways are English-only vs. multilingual-routed.
 
 ```
-ways language
-ways language --filter fr          # French coverage
-ways language --audit              # full per-way detail
+ways tune language
+ways tune language --filter fr          # French coverage
+ways tune language --audit              # full per-way detail
 ```
 
 ---
@@ -452,55 +452,32 @@ ways reconcile --quiet               # suppress the summary line
 
 ---
 
-### `ways disable`
+### `ways settings`
 
-**When:** A global way keeps firing in a project where it isn't relevant (e.g., `itops/incident` showing up in a writing project).
+**When:** Reading or changing any setting: the matching thresholds, the language, the relevance gate's engine, model and mode, or a way switched off in one project ([ADR-503](../architecture/platform/ADR-503-settings-are-files-described-by-one-typed-registry-the-cli-and-the-tui-are-two-ways-in.md)).
 
-**Run from:** The project root directory — writes the exclusion to `.claude/ways.yaml` in that project.
+**Run from:** Anywhere. Keys under `ways.project` write the project's `.claude/ways.yaml`; the project is `CLAUDE_PROJECT_DIR`, else the working directory, or `--project <dir>`.
 
-**Tells you:** Confirmation the way is added to the project's disabled list. `--list` shows currently disabled ways without making changes.
+**Tells you:** `list` prints `key=value` lines in effect; `list --json` prints a fragment keyed by the file each key lives in, and `--effective` adds the defaults. `set` and `unset` print nothing on success. Alone on a terminal, `ways settings` opens the settings screens.
 
 ```
-ways disable itops/incident
-ways disable --list                 # see what's currently disabled
-ways disable --list --names-only    # machine-readable list
+ways settings list                                   # every key in effect
+ways settings list gate --effective                  # the relevance gate as resolved
+ways settings list --json                            # each key under the file it lives in
+ways settings set ways.project.itops/incident false  # silence a way in this project
+ways settings unset ways.project.itops/incident      # back on
+ways settings list ways.project                      # what this project has switched off
+ways settings set gate.engine openrouter
+ways settings set gate.profiles.anthropic.model claude-haiku-4-5
+ways settings set gate.mode shadow
+ways settings emit                                   # the canonical file, with comments
 ```
+
+`ways agent key check` checks a stored key against the model the gate is set to use.
 
 ---
 
-### `ways enable`
-
-**When:** Re-enabling a way that was previously disabled in the project.
-
-**Run from:** The project root directory.
-
-**Tells you:** Confirmation the way is removed from the disabled list.
-
-```
-ways enable itops/incident
-```
-
----
-
-### `ways config show`
-
-**When:** Diagnosing unexpected matching behavior — thresholds too high/low, wrong language, unexpected disabled collections.
-
-**Run from:** Anywhere.
-
-**Tells you:** The resolved configuration as a table: language, scope, the project switch, disabled collections, matching thresholds, refire presets, and the targets. `--json` prints the stored user file as one document; `--json --effective` prints the resolved state with defaults applied ([ADR-185](../architecture/platform/ADR-185-cli-output-contract-structured-output-for-people-json-for-machines.md)). Only the stored form is meant to be written back.
-
-```
-ways config show
-ways config show --json            # the stored file
-ways config show --json --effective
-ways config path                   # where the config file lives
-ways config init                   # create config at XDG path if missing
-```
-
----
-
-### `ways config targets`
+### `ways target list`
 
 **When:** Finding out where agent-ways is active on this machine, or activating and deactivating it for a Claude Code config directory ([ADR-184](../architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)).
 
@@ -508,25 +485,25 @@ ways config init                   # create config at XDG path if missing
 
 **Tells you:** Each target with its enabled and observe flags, its converged state (`active`, `pending`, `partial`, `refused`, `stale`, or `withdrawn`), and its own config file when one exists. With no `targets` key in the user config the list is the implicit default, `~/.claude`.
 
-Each target can carry its own configuration: a `config.yaml` at `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml` (or the path in the entry's `config:` field) with the same keys as the user config, layered over it for sessions under that target's config directory. `ways config show` names the layer it applied.
+Each target can carry its own configuration: a `config.yaml` at `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml` (or the path in the entry's `config:` field) with the same keys as the user config, layered over it for sessions under that target's config directory. `ways settings list` names the layer it applied.
 
 `target plan` previews activation without touching anything: every projection root as `linked`, `link`, `relink`, or `refused`, and the settings merge as what is kept of yours, what is added, what of a prior install is replaced, and what would be removed. `target add` prints that plan and stops with exit code 3 when a real path sits at a root or an entry of yours would go; `--force` moves real paths aside and proceeds. `disable` withdraws and keeps the record; `remove` withdraws and drops it.
 
 ```
-ways config targets
-ways config target plan ~/.claude-work
-ways config target add ~/.claude-work            # record, then reconcile into it
-ways config target add ~/.claude-work --dry-run  # the plan only
-ways config target disable ~/.claude-work        # withdraw our links and hooks
-ways config target enable ~/.claude-work
-ways config target remove ~/.claude-work
+ways target list
+ways target plan ~/.claude-work
+ways target add ~/.claude-work            # record, then reconcile into it
+ways target add ~/.claude-work --dry-run  # the plan only
+ways target disable ~/.claude-work        # withdraw our links and hooks
+ways target enable ~/.claude-work
+ways target remove ~/.claude-work
 ```
 
 A project can switch ways off for itself with `enabled: false` in its `.claude/ways.yaml`; every scan lane then injects nothing there.
 
 ---
 
-### `ways permissions audit`
+### `ways author permissions`
 
 **When:** After adding `requires:` fields to way frontmatter; verifying Claude has the permissions those ways depend on.
 
@@ -535,8 +512,8 @@ A project can switch ways off for itself with `enabled: false` in its `.claude/w
 **Tells you:** Per-way permission requirements vs. granted status — green for granted, red for denied. Use this to catch permission gaps before deploying a way to a team.
 
 ```
-ways permissions audit
-ways permissions audit --global
+ways author permissions
+ways author permissions --global
 ```
 
 ---
@@ -604,9 +581,15 @@ out-of-scope classifier (ADR-201). Assembly is not assessment.
 
 ---
 
+## Renamed commands
+
+The old names, and what replaced each, are in [ways-cli-renames.md](ways-cli-renames.md).
+
+---
+
 ## Plumbing
 
-These are used internally by hook scripts. You rarely need to call them directly, but they're useful when writing custom hooks or debugging the hook pipeline.
+These are used internally by hook scripts. They are hidden from `ways --help` and from shell completion, and their names stay fixed because processes that do not reload with the binary call them ([ADR-507](../architecture/platform/ADR-507-the-ways-commands-regroup-into-operator-commands-and-six-groups-names-another-process-calls-stay-fixed.md)). You rarely need to call them directly, but they're useful when writing custom hooks or debugging the hook pipeline.
 
 | Command | Used by |
 |---------|---------|
@@ -616,3 +599,7 @@ These are used internally by hook scripts. You rarely need to call them directly
 | `ways scan task` | `SubagentStart` hook — injects ways into teammate/subagent sessions |
 | `ways hook <event>` | Every script under `hooks/ways/` — reads the hook's JSON payload on stdin and prints what the hook returns. Events: `prompt`, `state`, `command`, `file`, `task`, `post-tool`, `queued`, `stop`, `subagent-start`, `session-start`, `tasks-active` |
 | `ways sessions-root` | Scripts the binary does not run (`gh-tasks`); macros and postchecks get it as `WAYS_SESSIONS_ROOT` |
+| `ways project-slug [path]` | Macros that read per-project state (`meta/memory/macro.sh`) |
+| `ways events-log-path` | Scripts outside the binary that read telemetry |
+| `ways show way\|check\|core\|attend` | Agents told by attend to run `ways show attend <signal>`; authors checking a way's delivered text |
+| `ways manifest` | Debugging `reconcile`: the projection manifest it converges toward |

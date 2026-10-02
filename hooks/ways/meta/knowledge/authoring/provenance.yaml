@@ -11,7 +11,7 @@ controls:
       A way authored or edited in the session followed the documented format — a
       {domain}/{wayname}/{wayname}.md file with valid single-line frontmatter
       fields (description/vocabulary or pattern/files/commands, plus refire on a
-      fire-bearing way) — and was validated with ways lint (corpus rebuilt) rather
+      fire-bearing way) — and was validated with ways author lint (corpus rebuilt) rather
       than hand-shaped ad hoc.
 verified: 2026-02-05
 rationale: >

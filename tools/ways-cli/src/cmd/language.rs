@@ -118,7 +118,7 @@ pub fn run(filter_lang: Option<&str>, audit: bool, json_output: bool) -> Result<
             }
             t.print();
         } else if !audit {
-            println!("Run `ways language --audit` for per-way detail.");
+            println!("Run `ways tune language --audit` for per-way detail.");
         }
 
         // Warnings

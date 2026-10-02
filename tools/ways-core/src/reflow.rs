@@ -6,7 +6,7 @@
 //! module finds mechanically wrapped prose and flattens it.
 //!
 //! Three callers share these functions, which is why they live here rather
-//! than in a binary: the `ways lint` rule (in-process, no spawn per file),
+//! than in a binary: the `ways author lint` rule (in-process, no spawn per file),
 //! the way's `postcheck.sh` predicate (via the thin binary, on freshly
 //! written text), and explicit remediation.
 //!

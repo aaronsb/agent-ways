@@ -1,13 +1,7 @@
-//! `ways settings` (ADR-503) and the commands that became its aliases.
+//! `ways settings` (ADR-503).
 //!
 //! Each test runs the built binary with HOME and every XDG directory in a
-//! fixture of its own. The alias goldens under `fixtures/settings-aliases`
-//! were captured from the commit before `ways settings` (cda1042b) by running
-//! the same sequence; the fixture root here has the same length as the one
-//! that capture used, so `config show`'s padded table compares byte for byte.
-//! `show-empty.out` and `show-user.out` were re-captured on main at 02e0fab2,
-//! where `config show` honours `NO_COLOR` (#694); they equal the first capture
-//! with its ANSI codes removed.
+//! fixture of its own.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -137,18 +131,6 @@ impl Drop for Fx {
     }
 }
 
-fn golden(name: &str) -> (String, String, i32) {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/settings-aliases");
-    // A Windows checkout may give the golden files CRLF; the output is LF.
-    let read = |ext: &str| std::fs::read_to_string(dir.join(format!("{name}.{ext}"))).unwrap().replace("\r\n", "\n");
-    (read("out"), read("err"), read("code").trim().parse().unwrap())
-}
-
-fn golden_file(name: &str) -> String {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/settings-aliases");
-    std::fs::read_to_string(dir.join(format!("{name}.file"))).unwrap().replace("\r\n", "\n")
-}
-
 fn parsed(text: &str) -> serde_yaml::Value {
     match serde_yaml::from_str(text).unwrap() {
         serde_yaml::Value::Null => serde_yaml::Value::Mapping(Default::default()),
@@ -156,69 +138,25 @@ fn parsed(text: &str) -> serde_yaml::Value {
     }
 }
 
-/// The file an alias leaves holds the same settings as before, and every
-/// comment the earlier writer kept.
-fn same_file(path: &Path, name: &str) {
-    let want = golden_file(name);
-    let got = std::fs::read_to_string(path).unwrap_or_else(|_| "<absent>\n".into());
-    if want == "<absent>\n" {
-        assert_eq!(got, want, "{name}");
-        return;
-    }
-    assert_eq!(parsed(&got), parsed(&want), "{name}: {got}");
-    for line in want.lines().filter(|l| l.trim_start().starts_with('#')) {
-        assert!(got.contains(line), "{name}: lost comment {line:?} in {got}");
-    }
-}
-
-// ── aliases ────────────────────────────────────────────────────
+// ── per-project way switches ───────────────────────────────
 
 #[test]
-fn config_show_prints_and_exits_as_before() {
-    let f = Fx::new();
-    assert_eq!(f.run(&["config", "show"]), golden("show-empty"));
-    assert_eq!(f.run(&["config", "show", "--json"]), golden("show-empty-json"));
-    f.write(&f.user(), "# my config\nlanguage: es\nsemantic_fire_probability: 0.4  # tuned\nrefire_presets:\n  normal: 0.2\n");
-    assert_eq!(f.run(&["config", "show"]), golden("show-user"));
-    assert_eq!(f.run(&["config", "show", "--json"]), golden("show-user-json"));
-    // refire_presets is a HashMap, so its key order varies run to run, before
-    // and after; the document is compared parsed.
-    let (out, err, code) = f.run(&["config", "show", "--json", "--effective"]);
-    let (g_out, g_err, g_code) = golden("show-user-eff");
-    let j = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
-    assert_eq!((j(&out), err, code), (j(&g_out), g_err, g_code));
-}
-
-#[test]
-fn disable_and_enable_print_exit_and_write_as_before() {
+fn a_project_switch_round_trips_through_settings_and_keeps_comments() {
     let f = Fx::new();
     let ov = f.overlay();
-    assert_eq!(f.run(&["disable", "itops/incident"]), golden("disable-new"));
-    same_file(&ov, "disable-new");
-    f.write(&ov, "# overlay\nlanguage: en\n\nways:\n  # keep me\n  meta/introspection: false\n\nparent_boost_floor: 0.40\n");
-    assert_eq!(f.run(&["disable", "itops/incident"]), golden("disable-existing"));
-    same_file(&ov, "disable-existing");
-    assert_eq!(f.run(&["enable", "itops/incident"]), golden("enable-one"));
-    same_file(&ov, "enable-one");
-    assert_eq!(f.run(&["enable", "itops/incident"]), golden("enable-again"));
-    assert_eq!(f.run(&["enable", "meta/introspection"]), golden("enable-last"));
-    same_file(&ov, "enable-last");
-    std::fs::remove_file(&ov).unwrap();
-    assert_eq!(f.run(&["enable", "itops/incident"]), golden("enable-nofile"));
-    assert_eq!(f.run(&["disable", "Bad Name"]), golden("disable-bad"));
-    assert_eq!(f.run(&["disable", "--list"]), golden("disable-list"));
-}
-
-#[test]
-fn disable_and_settings_set_write_the_same_key() {
-    let f = Fx::new();
-    assert_eq!(f.run(&["settings", "set", "ways.project.itops/incident", "false"]).2, 0);
-    let by_settings = std::fs::read_to_string(f.overlay()).unwrap();
-    std::fs::remove_file(f.overlay()).unwrap();
-    assert_eq!(f.run(&["disable", "itops/incident"]).2, 0);
-    assert_eq!(std::fs::read_to_string(f.overlay()).unwrap(), by_settings);
+    f.write(&ov, "# overlay\nlanguage: en\n\nways:\n  # keep me\n  meta/introspection: false\n");
+    assert_eq!(f.run(&["settings", "set", "ways.project.itops/incident", "false"]), (String::new(), String::new(), 0));
+    let text = std::fs::read_to_string(&ov).unwrap();
+    assert!(text.starts_with("# overlay\n") && text.contains("  # keep me\n"), "{text}");
     assert_eq!(f.run(&["settings", "get", "ways.project.itops/incident"]).0, "false\n");
-    assert_eq!(f.run(&["disable", "--list", "--names-only"]).0, "itops/incident\n");
+    assert_eq!(
+        f.run(&["settings", "list", "ways.project"]).0,
+        "ways.project.meta/introspection=false\nways.project.itops/incident=false\n"
+    );
+    assert_eq!(f.run(&["settings", "unset", "ways.project.itops/incident"]).2, 0);
+    assert_eq!(f.run(&["settings", "unset", "ways.project.meta/introspection"]).2, 0);
+    assert_eq!(f.run(&["settings", "list", "ways.project"]).0, "");
+    assert!(std::fs::read_to_string(&ov).unwrap().starts_with("# overlay\nlanguage: en\n"));
 }
 
 // ── property mode: exit codes ──────────────────────────────────
@@ -309,7 +247,7 @@ fn a_malformed_section_falls_back_to_canonical_and_the_rest_load() {
     assert_eq!(code, 3);
     assert_eq!(out, "<ROOT>/xdg/config/agent-ways/config.yaml:4: [matching] parent_boost_floor: 9 is outside 0..1\n");
     // The command that loads it says so on stderr, and names the repair.
-    let (_, err, _) = f.run(&["config", "show"]);
+    let (_, err, _) = f.run(&["settings", "list"]);
     assert!(err.contains("config.yaml:4: [matching]") && err.contains("ways settings fix matching"), "{err}");
     // Loading never rewrote the file; fix does, on request, for that section only.
     assert!(std::fs::read_to_string(f.user()).unwrap().contains("parent_boost_floor: 9"));
@@ -458,11 +396,11 @@ fn fix_never_drops_the_targets_list() {
     f.write(&f.user(), src);
     let (_, err, code) = f.run(&["settings", "fix", "install"]);
     assert_eq!(code, 3, "{err}");
-    assert!(err.contains("`ways config target add|enable|disable|remove <dir>` repairs it"), "{err}");
+    assert!(err.contains("`ways target add|enable|disable|remove <dir>` repairs it"), "{err}");
     assert_eq!(std::fs::read_to_string(f.user()).unwrap(), src);
     // The load diagnostic names that command too, not fix.
     let (_, err, _) = f.run(&["settings", "get", "install.targets"]);
-    assert!(err.contains("ways config target") && !err.contains("settings fix install"), "{err}");
+    assert!(err.contains("ways target") && !err.contains("settings fix install"), "{err}");
 }
 
 #[test]
@@ -546,7 +484,10 @@ fn a_bad_value_never_switches_back_on_what_was_turned_off() {
     // One bad toggle keeps the other disabled ways disabled.
     f.write(&f.overlay(), "ways:\n  itops/incident: false\n  meta/introspection: no\n  ea/x: false\n");
     // A bad toggle fails closed: it reads as disabled too.
-    assert_eq!(f.run(&["disable", "--list", "--names-only"]).0, "itops/incident\nmeta/introspection\nea/x\n");
+    assert_eq!(
+        f.run(&["settings", "list", "ways.project"]).0,
+        "ways.project.itops/incident=false\nways.project.meta/introspection=false\nways.project.ea/x=false\n"
+    );
     // fix writes the bad toggle's closed reading, so it stays off.
     assert_eq!(f.run(&["settings", "fix", "ways.project", "--project", f.root.join("proj").to_str().unwrap()]).2, 0);
     assert_eq!(
@@ -590,7 +531,7 @@ fn get_reports_a_fallback_on_stderr_and_keeps_stdout_the_value() {
 fn an_unknown_top_level_key_is_reported_at_load() {
     let f = Fx::new();
     f.write(&f.user(), "langauge: es\n");
-    let (_, err, _) = f.run(&["config", "show"]);
+    let (_, err, _) = f.run(&["settings", "list"]);
     assert_eq!(err.lines().filter(|l| l.contains("langauge")).count(), 1, "{err}");
     assert!(err.contains("unknown key"), "{err}");
 }
@@ -680,8 +621,8 @@ fn an_unparseable_user_file_projects_nowhere() {
         assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n", "{text:?}");
         assert_eq!(f.run(&["settings", "get", "install.targets"]).0, "[]\n", "{text:?}");
         assert_eq!(f.run(&["settings", "get", "install.secret_path_deny"]).0, "true\n", "{text:?}");
-        let (out, _, _) = f.run(&["config", "show"]);
-        assert!(!out.contains("(implicit)"), "{text:?}: {out}");
+        let (_, err, _) = f.run(&["target", "list"]);
+        assert!(!err.contains("implicit:"), "{text:?}: {err}");
         hooks_say_the_file_is_closed(&f, "<ROOT>/xdg/config/agent-ways/config.yaml", text);
         let (out, _, _) = f.run(&["status"]);
         assert!(out.contains("whole file fails closed"), "status shows it: {out}");

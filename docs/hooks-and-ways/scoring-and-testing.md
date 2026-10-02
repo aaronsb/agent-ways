@@ -15,7 +15,7 @@ When Claude creates or modifies a way, the `meta/knowledge` way has already fire
 
 So when Claude finishes writing a way and moves to testing it, that behavior isn't a separate QA step bolted on after the fact. It's the system telling Claude to validate itself, using tools the system provides, against criteria the system defines. The loop looks like this:
 
-```
+```text
 ways tell Claude how ways work
   → Claude creates a new way
     → ways (+ skills + memory) tell Claude to score it
@@ -67,7 +67,7 @@ The `ways` binary includes embedding-based semantic scoring as a built-in subcom
 
 ```bash
 # Score a prompt against all ways (query is positional; there is no --threshold flag)
-ways match "what's new in claude code recently"
+ways author match "what's new in claude code recently"
 
 # Output: the live late-interaction matcher (ADR-160) per candidate: peak chunk
 # cosine, summed share, body-confirm, and whether it fired. When the prompt is too
@@ -230,14 +230,14 @@ The `/ways-tests crowding` command distinguishes these cases. When it reports tw
 | `/ways-tests score-all "prompt"` | Rank all ways against a prompt |
 | `/ways-tests suggest <way>` | Analyze vocabulary gaps (body terms missing from vocabulary) |
 | `/ways-tests crowding "prompt"` | Detect vocabulary overlap across all ways |
-| `ways lint` | Validate way frontmatter (`--check` for CI) |
-| `ways tune` | Audit locale alias fidelity + discrimination (per-way, across all languages) |
-| `ways tune --way <path>` | Filter the audit to a single way or subtree |
-| `ways tune-precision` | Heuristic relevance audit: flag ways firing into off-domain sessions (`--min-sessions`, `--flag-threshold`, `--project`, `--way`, `--json`) — ADR-134 Decision 3 |
-| `ways tree <path> --jaccard` | Compute vocabulary overlap (Jaccard) between sibling ways |
-| `ways siblings <id>` | Way-vs-way embedding cosine (`all` for the full matrix) |
+| `ways author lint` | Validate way frontmatter (`--check` for CI) |
+| `ways tune locale` | Audit locale alias fidelity + discrimination (per-way, across all languages) |
+| `ways tune locale --way <path>` | Filter the audit to a single way or subtree |
+| `ways tune precision` | Heuristic relevance audit: flag ways firing into off-domain sessions (`--min-sessions`, `--flag-threshold`, `--project`, `--way`, `--json`) — ADR-134 Decision 3 |
+| `ways author tree <path> --jaccard` | Compute vocabulary overlap (Jaccard) between sibling ways |
+| `ways author siblings <id>` | Way-vs-way embedding cosine (`all` for the full matrix) |
 
-See the [ways-tests skill](/skills/ways-tests/SKILL.md) for the testing skill and [Locale Alias Audit](../../hooks/ways/meta/knowledge/optimization/tuning/tuning.md) (the `knowledge/optimization/tuning` way) for the `ways tune` workflow in depth.
+See the [ways-tests skill](/skills/ways-tests/SKILL.md) for the testing skill and [Locale Alias Audit](../../hooks/ways/meta/knowledge/optimization/tuning/tuning.md) (the `knowledge/optimization/tuning` way) for the `ways tune locale` workflow in depth.
 
 ## Empirical Signals: Tuning From What Actually Fired
 
@@ -247,6 +247,6 @@ The worked example above tunes a way against prompts you write by hand. But once
 - **Fire scores.** A `way_fired` event carries `fire_score`: the calibrated probability `g(s)` that cleared `τ_s`, recorded on first-fires only (not redisclosures, and `None`/absent for deterministic keyword fires) — `show/mod.rs`. This is the fire-score population that `tune-precision` reads and that feeds the **deferred** ADR-134 auto-tune; the `g(s)` calibration itself is fit at corpus-generation from the committed `calibration_probes.jsonl`, **not** from this stream.
 - **Gated keywords.** When a `pattern:` hit is vetoed because `g(s)` sat below `τ_k` on every model lane (ADR-155), the matcher logs a `way_keyword_gated` event carrying the `matched_span` — the per-alternation evidence that calibrates `keyword_floor_probability` and drives the pattern-hygiene rework before any tightening.
 
-`ways tune-precision` reads the fire stream and reports, per way, an off-class irrelevance rate — how often its fires landed in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain. It distinguishes **mis-targeted** (a narrow way repeatedly firing into the same wrong kind of session — remedy: narrow the vocabulary or change the trigger channel; there is no per-way threshold to raise) from **cross-cutting** (a way that fires broadly by design, e.g. `meta/todos` — remedy: scope by trigger, *never* auto-narrow vocabulary). Like `ways tune`'s fidelity audit, these are diagnostic flags, not verdicts.
+`ways tune precision` reads the fire stream and reports, per way, an off-class irrelevance rate — how often its fires landed in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain. It distinguishes **mis-targeted** (a narrow way repeatedly firing into the same wrong kind of session — remedy: narrow the vocabulary or change the trigger channel; there is no per-way threshold to raise) from **cross-cutting** (a way that fires broadly by design, e.g. `meta/todos` — remedy: scope by trigger, *never* auto-narrow vocabulary). Like `ways tune locale`'s fidelity audit, these are diagnostic flags, not verdicts.
 
 A practitioner note: `events.jsonl` growth is bounded. `log_event` tail-compacts the file when it exceeds ~32 MiB, retaining the most recent ~24 MiB at a line boundary via atomic temp+rename — lossy on the oldest events, but readers always see a complete file (`session.rs`).

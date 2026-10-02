@@ -2,7 +2,7 @@
 //!
 //! This is the per-way `EngagementState` persistence layer plus the
 //! `FirstFire → ReFire → Suppressed` classification used by
-//! `ways run`, `ways show`, and friends. Extracted from `session.rs`
+//! `ways show` and the scan lanes. Extracted from `session.rs`
 //! in issue #52 when session.rs crossed the 800-line priority
 //! threshold during the PR #49 code-review response — the cluster is
 //! a clean ADR-123 unit and carries its own tests, so it splits
@@ -229,7 +229,7 @@ fn load_engagement_for_tick(
 /// Resolve a way's re-fire threshold in thousands of tokens by reading
 /// its frontmatter, resolving its refire spec against the session's
 /// context window (ADR-126), and asking `Curve::refire_delta(REFIRE_FLOOR)`.
-/// Used by `ways list` and `ways introspect` to render per-way bar positions.
+/// Used by `ways session ways` and `ways session` to render per-way bar positions.
 ///
 /// Callers pass the session's current context window (typically from
 /// `cmd::context::get_context(...).tokens_total`) so the `refire:` fraction

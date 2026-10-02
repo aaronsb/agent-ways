@@ -23,10 +23,10 @@ This supersedes the pre-1.0 world where `~/.claude` *was* the git clone. That "i
 
 Installation and activation are separate states. The projection lands in each **target**, a Claude Code config directory recorded under `targets:` in the user config. `ways reconcile` converges every enabled target and withdraws from every disabled one: our symlinks unlinked, our hooks block and permissions removed through the merge base that wrote them, nothing else touched. With no `targets` key the one target is `~/.claude`, enabled.
 
-- `ways config targets` lists targets and their converged state; `ways status` says it on its first line.
-- `ways config target plan <dir>` previews activation: every root as linked, link, relink, or refused, and the settings merge as kept, added, replaced, removed. Nothing is touched.
-- `ways config target add <dir>` prints the plan and stops (exit 3) when a real path sits at a root or an entry of the user's would go. `--force` moves real paths aside.
-- `ways config target disable <dir>` and `remove <dir>` withdraw.
+- `ways target list` lists targets and their converged state; `ways status` says it on its first line.
+- `ways target plan <dir>` previews activation: every root as linked, link, relink, or refused, and the settings merge as kept, added, replaced, removed. Nothing is touched.
+- `ways target add <dir>` prints the plan and stops (exit 3) when a real path sits at a root or an entry of the user's would go. `--force` moves real paths aside.
+- `ways target disable <dir>` and `remove <dir>` withdraw.
 - A project switches ways off for itself with `enabled: false` in `.claude/ways.yaml`.
 
 When a user asks whether agent-ways will touch something they own, the answer is the plan. Run it and read it back to them before `add`. The installer still activates the default target on its own in this release; the handoff to the targets bootstrap is the next increment of ADR-184.

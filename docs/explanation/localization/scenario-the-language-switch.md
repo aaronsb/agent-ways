@@ -35,7 +35,7 @@ sequenceDiagram
     rect rgba(45,125,154,0.12)
     L->>W: flip output_language → es
     L->>L: fetch multilingual model · translate every way vs English root
-    L->>L: pack stubs · rebuild multi corpus (English anchor) · ways tune until clean
+    L->>L: pack stubs · rebuild multi corpus (English anchor) · ways tune locale until clean
     end
     rect rgba(45,142,94,0.12)
     Note over Op,W: next session CC=es, output_language=es → match → nudge silent
@@ -58,7 +58,7 @@ sequenceDiagram
 - **On consent, `ways-localize` does the work and flips the flag.** It sets
   `output_language → es`, fetches the multilingual model, translates each way's
   `description`+`vocabulary` against the **English root**, packs the stubs, rebuilds the
-  multi corpus with the English anchor, and runs `ways tune` until the Spanish layer is
+  multi corpus with the English anchor, and runs `ways tune locale` until the Spanish layer is
   clean — aligned to the root, no collisions (see [[01.013.E]]).
 - **The flag flip is what satisfies the nudge.** Next session, `output_language` is `es`,
   matching CC, so the mismatch is gone and the nudge stays silent — *self-silencing via

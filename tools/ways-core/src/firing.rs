@@ -27,7 +27,7 @@ pub fn load_events() -> Vec<Value> {
 
 /// Raw text of the events log.
 ///
-/// The line-oriented timeline reconstruction of `ways introspect` works over raw
+/// The line-oriented timeline reconstruction of `ways session` works over raw
 /// JSONL lines rather than parsed values, so it needs the text, not
 /// [`load_events`]'s `Vec<Value>`.
 pub fn load_events_text() -> String {

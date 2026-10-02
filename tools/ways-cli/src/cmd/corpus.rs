@@ -148,7 +148,7 @@ pub fn run(
     // Current project first, straight from CLAUDE_PROJECT_DIR. This is the
     // Windows-safe path: no lossy decode of the ~/.claude/projects/ dir name.
     // The namespace key is derived from the REAL project root via
-    // encode_project_key, so it matches exactly what `ways scan --project`
+    // encode_project_key, so it matches exactly what `ways scan <lane> --project`
     // computes for the same directory (the fix for Bug B).
     if let Some(cpd) = crate::util::env_project_dir() {
         vlog(&format!("current project (CLAUDE_PROJECT_DIR): {cpd}"));
@@ -210,7 +210,7 @@ pub fn run(
             }
 
             // Key off the resolved REAL path, not the lossy encoded dir name, so
-            // it matches `ways scan --project <that project>`.
+            // it matches `ways scan <lane> --project <that project>`.
             let key = crate::util::encode_project_key(Path::new(&project_path));
             project_total += embed_one_project(
                 &ways_path,
@@ -657,7 +657,7 @@ fn scan_ways_dir(
             // it silently, the way it always has been.
             Ok(None) => continue,
             // Frontmatter present but unparseable (e.g. an unquoted value containing
-            // ": ") would vanish from matching with no signal. `ways lint` is the hard
+            // ": ") would vanish from matching with no signal. `ways author lint` is the hard
             // gate (it now runs this same parse), but warn here too so a runtime
             // rebuild still surfaces it. See ADR-125.
             Err(e) => {
@@ -670,7 +670,7 @@ fn scan_ways_dir(
         // ADR-126: surface malformed refire specs at corpus time. Corpus is a
         // frequently-invoked gate (CI, local rebuilds), so typos caught here
         // don't have to wait for a session to misfire. Warnings are
-        // stderr-only — `ways lint` is the hard gate and escalates.
+        // stderr-only — `ways author lint` is the hard gate and escalates.
         if let Some(spec) = &fm.refire {
             if let Err(msg) = spec.validate(presets) {
                 let rel = path.strip_prefix(dir).unwrap_or(path);

@@ -46,7 +46,7 @@ The reasoning above depends on a renderer that reflows paragraphs. Where there i
 
 ## Repairing a wrapped file
 
-`ways reflow <file>` reports hard-wrapped paragraphs and exits non-zero when it finds any; `--fix` flattens them, backs the original up first, and prints the backup path.
+`ways author reflow <file>` reports hard-wrapped paragraphs and exits non-zero when it finds any; `--fix` flattens them, backs the original up first, and prints the backup path.
 
 It repairs the *enclosing paragraph* of each detection and leaves everything else byte-identical, so it won't flatten authored one-clause-per-line prose elsewhere in the file.
 

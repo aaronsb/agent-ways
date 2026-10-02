@@ -38,7 +38,7 @@ fi
 # Ways lint (frontmatter validation)
 WAYS_BIN="$REPO_ROOT/bin/ways"
 if [[ -x "$WAYS_BIN" ]]; then
-  run_suite "Ways Frontmatter Lint" "$WAYS_BIN" lint --global --check
+  run_suite "Ways Frontmatter Lint" "$WAYS_BIN" author lint --global --check
 else
   echo ""
   echo "=== Ways Frontmatter Lint ==="
@@ -79,9 +79,9 @@ run_suite "gh-tasks Bridge Tests" bash "$REPO_ROOT/tests/gh-tasks-test.sh"
 
 run_suite "Doc-Graph Link Integrity" bash "$REPO_ROOT/scripts/doc-graph.sh" --stats
 
-# Governance provenance lint
-if [[ -x "$WAYS_BIN" ]]; then
-  run_suite "Governance Provenance Lint" "$WAYS_BIN" governance lint
+# Governance provenance lint (the ways-audit binary since ADR-151)
+if [[ -x "$REPO_ROOT/bin/ways-audit" ]]; then
+  run_suite "Governance Provenance Lint" "$REPO_ROOT/bin/ways-audit" lint
 fi
 
 # Guard hook verdicts (ADR-181)

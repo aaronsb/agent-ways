@@ -5,7 +5,7 @@
 # hard-wrapped — fire the way." Exit 1 = no match, which is the default and the
 # right outcome on anything unfamiliar.
 #
-# Note the inversion: this file's exit 0 means "fire", while `ways reflow`
+# Note the inversion: this file's exit 0 means "fire", while `ways author reflow`
 # follows lint convention where exit 0 means "clean". One flag can't serve both
 # conventions, so the inversion lives here, in the wrapper that exists anyway.
 #
@@ -55,11 +55,11 @@ CONTENT=$(printf '%s' "$INPUT" \
 
 # Lint convention: 0 = clean, 1 = wrapped prose found, 2 = error. Check for
 # exactly 1 — anything else is the binary failing (an install predating
-# `ways reflow` exits 2 on the unknown subcommand, an unreadable input also
+# `ways author reflow` exits 2 on the unknown subcommand, an unreadable input also
 # exits 2), and an error must read as "no finding" rather than firing the way on
 # every markdown write.
 set +e
-FINDINGS=$(printf '%s' "$CONTENT" | "$WAYS_BIN" reflow --json 2>/dev/null)
+FINDINGS=$(printf '%s' "$CONTENT" | "$WAYS_BIN" author reflow --json 2>/dev/null)
 verdict=$?
 set -e
 (( verdict == 1 )) || exit 1

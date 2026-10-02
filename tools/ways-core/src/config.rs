@@ -109,7 +109,7 @@ pub struct Config {
     /// (absence means the way fires normally). See ADR-131.
     ///
     /// Field is `pub(crate)` (not `pub`) to keep the only legitimate writer
-    /// — `apply_project_ways_overlay` — inside this module. Readers access
+    /// — `apply_project_ways_overlay_value` — inside this module. Readers access
     /// via `disabled_ways()`. This makes the "project scope only" invariant
     /// structural rather than conventional: a future contributor who adds
     /// per-way knobs to user-scope `apply_yaml` would have to also touch
@@ -143,7 +143,7 @@ pub struct Config {
     /// `way_nearmiss` telemetry event when at least one model's score landed
     /// within this much *below* its effective threshold (`thr - margin <=
     /// score < thr`). Purely a logging knob — it never changes firing. The
-    /// tuning passes (`ways tune --cadence/--precision`) consume the stream.
+    /// tuning passes of ADR-134 consume the stream.
     /// Default 0.05: a narrow band that captures genuine near-fires without
     /// flooding the log with deep misses.
     pub near_miss_margin: f64,
@@ -385,19 +385,6 @@ impl Config {
     /// Anything that evaluates to enabled=false is collected into `disabled_ways`.
     /// Unknown sub-keys on the long-form (threshold overrides, etc.) are ignored
     /// — reserved for future use per ADR-131.
-    /// Public alias used by `cmd::disable` to verify writer/reader round-trips
-    /// without exposing the parser as a stable API surface. Keeping the
-    /// internal name pinned makes future refactors trivial.
-    pub fn apply_project_ways_overlay_public(&mut self, content: &str) {
-        self.apply_project_ways_overlay(content);
-    }
-
-    fn apply_project_ways_overlay(&mut self, content: &str) {
-        if let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(content) {
-            self.apply_project_ways_overlay_value(&doc);
-        }
-    }
-
     fn apply_project_ways_overlay_value(&mut self, doc: &serde_yaml::Value) {
         let Some(ways) = doc.get("ways").and_then(|v| v.as_mapping()) else {
             return;
@@ -417,58 +404,6 @@ impl Config {
                 self.disabled_ways.push(name.to_string());
             }
         }
-    }
-
-    /// Initialize user config at the canonical XDG path.
-    pub fn init_user_config() -> PathBuf {
-        let path = crate::paths::user_config();
-        if path.exists() {
-            return path;
-        }
-        let content = "# ways configuration
-# User scope: $XDG_CONFIG_HOME/agent-ways/config.yaml
-# Project scope: {project}/.claude/ways.yaml (layered on top)
-
-# language: en          # Output language (en, ja, auto)
-# default_scope: agent  # Default scope for ways without explicit scope
-# disabled_domains: []  # Domains to disable everywhere (e.g., [ea, itops])
-# secret_path_deny: true # Project the secret-path permissions.deny baseline
-#                        # (~/.ssh, ~/.aws, .env, …) into settings.json — ADR-152.
-#                        # Set false to opt out entirely (secure by default).
-
-# Projection targets (ADR-184): the Claude Code config directories agent-ways
-# is active in. Absent: the default ~/.claude, enabled. Edit with
-# `ways config target add|enable|disable|remove <dir>`.
-# targets:
-#   - path: ~/.claude
-#     enabled: true
-#     observe: true        # include in transcript-derived reports (default: enabled)
-#     config: ~/.config/agent-ways/targets/<key>/config.yaml   # this target's own
-#                          # settings, same keys as this file, layered over it for
-#                          # sessions under that config directory (default location)
-
-# enabled: false          # In {project}/.claude/ways.yaml: switch ways off for that
-#                         # project; hooks inject nothing there (ADR-184).
-
-# Per-way enable/disable (ADR-131) is project scope only — set it in
-# {project}/.claude/ways.yaml using either form:
-#   ways:
-#     itops/incident: false          # shorthand
-#     meta/introspection:            # long-form
-#       enabled: false
-# Or run `ways disable <name>` / `ways enable <name>` from the project root.
-";
-        // Creates the file only when none exists (ADR-503 §6).
-        let _ = agent_settings::writer::create_new(&path, content);
-        path
-    }
-
-    /// Show the config file paths.
-    pub fn config_path() -> String {
-        format!(
-            "user:    {}\nproject: $PROJECT/.claude/ways.yaml",
-            crate::paths::user_config().display(),
-        )
     }
 }
 
@@ -526,6 +461,13 @@ fn targets_value(list: &[Target]) -> serde_yaml::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl Config {
+        fn apply_project_ways_overlay(&mut self, content: &str) {
+            let doc = serde_yaml::from_str::<serde_yaml::Value>(content).expect("test overlay parses");
+            self.apply_project_ways_overlay_value(&doc);
+        }
+    }
 
     #[test]
     fn default_values() {
@@ -801,7 +743,7 @@ mod tests {
         assert!(body.contains("language: es\r\n# note\r\n"), "{body:?}");
         assert!(body.contains("targets:\r\n  - path: /c\r\n"), "{body:?}");
         assert!(!body.contains("\n\n") || body.contains("\r\n\r\n"), "no bare LF: {body:?}");
-        // The comments-only template `ways config init` writes is accepted.
+        // A file holding only comments is accepted.
         std::fs::write(&path, "# only comments\n# targets:\n#   - path: ~/.claude\n").unwrap();
         Config::write_targets_to(&path, &[]).unwrap();
         let body = std::fs::read_to_string(&path).unwrap();

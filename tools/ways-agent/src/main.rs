@@ -1,8 +1,9 @@
 //! `ways-agent`: the ways agent's command line. `ways agent …` runs it.
 //!
 //! It runs the agent (`serve`, started on demand by hooks) and carries its
-//! controls: the API key lifecycle, the model picker, the engine and mode
-//! settings, and the agent's status (ADR-196 §5, ADR-502 §6-7).
+//! controls: the API key lifecycle, the model list and the agent's status
+//! (ADR-196 §5, ADR-502 §6-7). The engine, model and mode are settings, set
+//! with `ways settings set gate.…` (ADR-507).
 
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
@@ -12,7 +13,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use ways_agent::keys;
 use ways_agent::net;
-use ways_agent::profile::{self, Mode, Provider, UserLayer};
+use ways_agent::profile::{self, Provider, UserLayer};
 
 #[derive(Parser)]
 #[command(name = "ways-agent", version, about = "The ways agent: relevance judging and key custody for agent-ways")]
@@ -37,19 +38,8 @@ enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// Choose the engine profile, and optionally its model.
-    Use {
-        /// A profile name: anthropic, openrouter, or one defined in the user layer.
-        profile: String,
-        /// The model the profile calls. Default: the profile's tuned model.
-        #[arg(long)]
-        model: Option<String>,
-    },
-    /// Set what the gate does: enforce (block), shadow (log only) or off.
-    Mode { mode: String },
-    /// Show the resolved settings and where each comes from.
-    Config,
     /// Run the agent in the foreground. Hooks start it on demand.
+    #[command(hide = true)]
     Serve {
         /// Exit after this many minutes without a request.
         #[arg(long, default_value_t = 30)]
@@ -126,9 +116,6 @@ fn run(cli: Cli) -> Result<ExitCode> {
             KeyAction::Status => key_status(),
         },
         Command::Models { provider, all } => models(provider.as_deref(), all),
-        Command::Use { profile, model } => use_profile(&profile, model),
-        Command::Mode { mode } => set_mode(Mode::parse(&mode)?),
-        Command::Config => show_config(),
         Command::Serve { idle_minutes } => serve(idle_minutes),
         Command::Status => agent_status(false),
         Command::Load => {
@@ -413,7 +400,7 @@ fn models(provider: Option<&str>, all: bool) -> Result<ExitCode> {
         };
         println!("  {:<44} {}{price}{note}", m.id, m.name);
     }
-    println!("choose one with `ways agent use {provider} --model <id>`");
+    println!("choose one with `ways settings set gate.profiles.<profile>.model <id>`");
     Ok(ExitCode::SUCCESS)
 }
 
@@ -427,117 +414,6 @@ fn cost_note(m: &net::ModelInfo, base: Option<&net::ModelInfo>) -> String {
     } else {
         "  (untuned)".to_string()
     }
-}
-
-fn use_profile(name: &str, model: Option<String>) -> Result<ExitCode> {
-    let path = profile::user_layer_path();
-    let (mut user, findings) = UserLayer::load_with_findings(&path)?;
-    // The profile being edited, or the engine, fell back: what was loaded is
-    // not what the file says, so writing from it could lose hand edits.
-    let profile_unit = format!("gate.profiles.{name}");
-    if let Some(f) = findings.iter().find(|f| f.fallback && matches!(f.unit.as_deref(), Some(u) if u == "gate" || u == "gate.profiles" || u == profile_unit)) {
-        bail!("{f}; the engine was not changed. `ways settings lint` lists the findings");
-    }
-    for f in &findings {
-        eprintln!("{}", f.diagnostic("ways"));
-    }
-    user.engine = Some(name.to_string());
-    // Without --model a shipped profile returns to its tuned model; a profile
-    // the user defined keeps the model it names.
-    let shipped_model = profile::shipped().get(name).map(|p| p.model.clone());
-    match (&shipped_model, model) {
-        (Some(tuned), m) => {
-            let patch = user.profiles.entry(name.to_string()).or_default();
-            if m.is_none() {
-                // Back to the shipped profile: its provider and its model.
-                patch.provider = None;
-            }
-            patch.model = m.filter(|m| m != tuned);
-        }
-        (None, Some(m)) => user.profiles.entry(name.to_string()).or_default().model = Some(m),
-        (None, None) => {}
-    }
-    let resolved = profile::resolve(&user, |_| true)?.context("an engine is named, so it resolves")?;
-    let p = &resolved.profile;
-    // Check before writing: a model the provider does not serve is not saved.
-    let key = keys::read(p.provider)?;
-    let result = key.as_ref().map(|(key, _)| net::check(p.provider, key, &p.model));
-    if let (Some((_, source)), Some(r)) = (&key, &result) {
-        keys::record_check(p.provider, &keys::CheckRecord::now(r.record_word(), &p.model, source));
-    }
-    if let Some(net::Check::ModelUnavailable(model)) = &result {
-        bail!("{} does not offer model {model}; the engine was not changed", p.provider);
-    }
-    // Only the keys `use` sets: the engine, and the profile's provider and
-    // model. The profile's other fields stay as the file has them.
-    user.save_keys(&path, &[&["engine"], &["profiles", name, "provider"], &["profiles", name, "model"]])?;
-    println!("engine: {name} ({} {}), mode {}", p.provider, p.model, resolved.mode.as_str());
-    if !p.provider.is_recommended(&p.model) {
-        println!(
-            "note: threshold {} was tuned for {}. {} scores on its own scale, and slower or \
-             costlier models make every gated prompt wait longer.",
-            p.threshold,
-            p.provider.recommended_model(),
-            p.model
-        );
-    }
-    match result {
-        None => println!("no {} key yet; run `ways agent key add --provider {}`", p.provider, p.provider),
-        Some(result) => {
-            println!("check: {result}");
-            if !result.is_valid() {
-                return Ok(ExitCode::FAILURE);
-            }
-        }
-    }
-    Ok(ExitCode::SUCCESS)
-}
-
-fn set_mode(mode: Mode) -> Result<ExitCode> {
-    let path = profile::user_layer_path();
-    let mut user = UserLayer::load(&path)?;
-    user.mode = (mode != Mode::default()).then_some(mode);
-    user.save_fields(&path, &["mode"])?;
-    let note = match mode {
-        Mode::Enforce => "ways judged irrelevant are not injected",
-        Mode::Shadow => "every candidate is judged and logged; the matcher still decides",
-        Mode::Off => "nothing is judged",
-    };
-    println!("mode {}: {note}", mode.as_str());
-    Ok(ExitCode::SUCCESS)
-}
-
-fn show_config() -> Result<ExitCode> {
-    let path = profile::user_layer_path();
-    let (_, findings) = UserLayer::load_with_findings(&path)?;
-    if let Some(f) = profile::fails_closed(&findings) {
-        println!("user layer: {}", path.display());
-        println!("gate: off ({f}; the gate fails closed until it is fixed)");
-        println!("`ways settings lint` lists the findings");
-        return Ok(ExitCode::SUCCESS);
-    }
-    let (user, settings) = current_settings()?;
-    println!("user layer: {}", profile::user_layer_path().display());
-    let Some(s) = settings else {
-        println!("gate: off (no engine named and no key found)");
-        println!("start it with `ways agent key add --provider anthropic`");
-        return Ok(ExitCode::SUCCESS);
-    };
-    let p = &s.profile;
-    let chosen = if user.engine.is_some() { "set in the user layer" } else { "the first profile with a key" };
-    println!("engine: {} ({chosen})", s.engine);
-    println!("  provider {}  model {}", p.provider, p.model);
-    println!("  mode {}  threshold {}  deadline {} ms", s.mode.as_str(), p.threshold, p.timeout_ms);
-    println!("  context: last {} turn(s), {} chars each  concurrency {}", p.turns, p.max_turn_chars, p.concurrency);
-    println!("  candidates: at most {} judged per request; the rest pass unjudged", p.max_candidates);
-    match keys::read(p.provider)? {
-        Some((key, source)) => {
-            println!("  key {} from {source}, {}", keys::tail(&key), check_note(p.provider, &source, &p.model));
-            warn_exposure(&source);
-        }
-        None => println!("  no {} key: the gate fails open until one is added", p.provider),
-    }
-    Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(test)]

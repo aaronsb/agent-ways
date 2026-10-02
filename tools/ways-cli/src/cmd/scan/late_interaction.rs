@@ -90,7 +90,7 @@ impl Verdicts {
     }
 }
 
-// ── Authoring diagnostic (task #5 — the late-interaction `ways match`) ──
+// ── Authoring diagnostic (task #5 — the late-interaction `ways author match`) ──
 // The gates a way must clear to fire, exposed so the diagnostic can annotate
 // each candidate's outcome the way an author needs to read it.
 pub(crate) const DIAG_SHARE_GATE: f64 = SHARE_GATE;

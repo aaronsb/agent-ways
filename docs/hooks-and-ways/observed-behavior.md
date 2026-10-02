@@ -54,7 +54,7 @@ The mechanism in short form: **task hierarchy preservation under redirection.** 
 
 ### What the observation does not test
 
-1. **Parameter calibration.** The observation says "ways helped"; it says nothing about whether the specific curve shapes, half-lives, or firing thresholds in the current implementation are optimal. Those are still empirical questions for [`ways tune`](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) to answer.
+1. **Parameter calibration.** The observation says "ways helped"; it says nothing about whether the specific curve shapes, half-lives, or firing thresholds in the current implementation are optimal. Those are still empirical questions for the calibration work of [ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) to answer.
 
 2. **Which ways were load-bearing.** The full stack was active on Machine B. This observation cannot discriminate between "quality.md was load-bearing" and "github.md was load-bearing" and "it was all of them together." Ablation by individual way would be needed for that.
 
@@ -88,8 +88,8 @@ This re-observation has an intentionally *different shape* from 2026-03-17. Ther
 
 - **Zero redirections required across the whole session.** "I never had to steer anything." Every operator interaction was a permission grant; none was a task-level correction.
 - **Continuance mindset, not just in-task cohesion.** "Claude around 2.1.108, with no harness or configuration at all, seems to still perform well but simply perform the task and wrap up, or not really have a particular plan in mind for continuance." The contrast being drawn: vanilla Claude completes the task in front of it; ways-Claude maintains a forward-looking plan that survives detours. This is a specific behavioral claim beyond "the supertask held."
-- **`ways list` shows semantic sparsity, not scattergun firing.** The ways that triggered are the ways the operator would expect to trigger given the actions being taken. Bar positions cluster at epochs that match the actual work phases, not random across the session.
-- **`ways rethink` (now `ways introspect replay`) replay shows leading-edge compaction.** Watching the animation, the firing positions track the attention cursor as it moves forward, compressing behind. This is cursor-following as a visible phenomenon, not inferred from the math.
+- **`ways session ways` shows semantic sparsity, not scattergun firing.** The ways that triggered are the ways the operator would expect to trigger given the actions being taken. Bar positions cluster at epochs that match the actual work phases, not random across the session.
+- **`ways rethink` (now `ways session replay`) replay shows leading-edge compaction.** Watching the animation, the firing positions track the attention cursor as it moves forward, compressing behind. This is cursor-following as a visible phenomenon, not inferred from the math.
 - **TaskList was invoked via progressive disclosure, not by pre-programmed habit.** A task-tracking way fired on turn 1 from the continuance-prompt content. The task list that then structured the whole session came from the firing, not from generic assistant instinct. The mechanism is visible in the causal chain.
 
 #### Session-internal (Claude-side)
@@ -104,9 +104,9 @@ This re-observation has an intentionally *different shape* from 2026-03-17. Ther
   - Test-math errors in tune_curves percentile/median assertions — fixed.
   - A load-bearing semantic bug in tune_curves's event filter (`way_fired`-only instead of `way_fired`+`way_redisclosed`) — caught by dry-running against the real log before committing, then fixed.
   - Quality way firing reactively at epoch 83 on tune_curves.rs itself as it crossed 500 lines — which led to the `--days` scope trim. This is the Phase D reactive-firing path working on the session that was writing it.
-- **Phase D reactive firing verified live.** `ways list` shows `softwaredev/code/quality` fired at epoch 83 via the `postcheck` trigger. No predictive path could have caught that — the file was above threshold because of an Edit that had just happened. This is exactly the case ADR-123 §5 was written to handle, and it's working.
-- **Check-firing decay verified live.** `softwaredev/environment` shows `11 fires, decay=0.08, (suppressed)` in the `ways list` output. The engine correctly stopped firing the check path after 11 fires because `1/(11+1) = 0.083 < REFIRE_FLOOR = 0.5`. The outward gate is doing its job.
-- **Leading-edge compaction visible in the table.** The firing distribution clusters at epoch 1 (continuance-prompt seeded ways) and epochs 83–92 (current work), with middle epochs showing re-fire readiness rather than first-fires. That's the same pattern the operator observed in the `rethink` TUI animation (now `ways introspect replay`) — the engine is re-injecting old guidance specifically at the moment new work touches the same semantic territory.
+- **Phase D reactive firing verified live.** `ways session ways` shows `softwaredev/code/quality` fired at epoch 83 via the `postcheck` trigger. No predictive path could have caught that — the file was above threshold because of an Edit that had just happened. This is exactly the case ADR-123 §5 was written to handle, and it's working.
+- **Check-firing decay verified live.** `softwaredev/environment` shows `11 fires, decay=0.08, (suppressed)` in the `ways session ways` output. The engine correctly stopped firing the check path after 11 fires because `1/(11+1) = 0.083 < REFIRE_FLOOR = 0.5`. The outward gate is doing its job.
+- **Leading-edge compaction visible in the table.** The firing distribution clusters at epoch 1 (continuance-prompt seeded ways) and epochs 83–92 (current work), with middle epochs showing re-fire readiness rather than first-fires. That's the same pattern the operator observed in the `rethink` TUI animation (now `ways session replay`) — the engine is re-injecting old guidance specifically at the moment new work touches the same semantic territory.
 
 ### What this tests (and what it doesn't)
 

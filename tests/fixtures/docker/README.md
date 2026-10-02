@@ -35,7 +35,7 @@ The release-asset downloads go through `gh`, so the wrapper exports `GH_TOKEN` f
 
 1. The installer runs unattended, exits 1 on the real `skills/` directory, and leaves the skill, `settings.json`, and the hooks directory as they were. `way-embed` arrived as a release download; the image cannot build it.
 2. `ways reconcile --force` moves the directory to a timestamped sibling with the skill intact, links the projection roots, and merges `settings.json` with every user hook kept by identity and the `model` key kept.
-3. The target is recorded in the user config. `ways config targets --json` and `ways status --json` report one enabled target, active, with the embedding engine up.
+3. The target is recorded in the user config. `ways target list --json` and `ways status --json` report one enabled target, active, with the embedding engine up.
 4. `ways reconcile --dry-run` twice prints identical output and reports up to date. A bare reconcile changes nothing.
 5. The second config directory hashes the same as its seed.
 6. `attend status` and `claude --version` exit 0. The version is the pinned one unless `latest` was requested.

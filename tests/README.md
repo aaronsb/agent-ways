@@ -128,7 +128,7 @@ The `/ways-tests` skill and `ways` CLI provide targeted testing without writing 
 /ways-tests lint --all
 
 # Sibling vocabulary overlap
-ways siblings softwaredev/code/supplychain/depscan/node
+ways author siblings softwaredev/code/supplychain/depscan/node
 ```
 
 ## Documentation Tests

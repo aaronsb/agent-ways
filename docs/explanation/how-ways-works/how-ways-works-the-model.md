@@ -196,5 +196,5 @@ at what score, against what threshold — is frozen at the moment it happened.
   and the ADRs it cites.
 - **The same model in a real long session:** [[01.018.E]] walks a 97-hour,
   78-way session and shows each of the four behaviours in its actual numbers.
-- **Pulling the record yourself:** [[01.019.E]] covers `ways list`, `ways stats`,
-  and `ways introspect replay --json` — what each shows and what the data means.
+- **Pulling the record yourself:** [[01.019.E]] covers `ways session ways`, `ways tune stats`,
+  and `ways session replay --json` — what each shows and what the data means.

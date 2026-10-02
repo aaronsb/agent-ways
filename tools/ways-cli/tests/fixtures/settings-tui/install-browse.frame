@@ -7,7 +7,7 @@ agent-tui frame 100x30
 |│                                                     ││agent-ways is active in.                   │|
 |│                                                     ││                                           │|
 |│                                                     ││Changed by actions, since each change      │|
-|│                                                     ││reconciles: `ways config target            │|
+|│                                                     ││reconciles: `ways target                   │|
 |│                                                     ││add|enable|disable|remove <dir>` (ADR-184).│|
 |│                                                     ││Absent means the default ~/.claude,        │|
 |│                                                     ││enabled.                                   │|
@@ -19,9 +19,9 @@ agent-tui frame 100x30
 |│                                                     ││    guided: pick Claude config directories,│|
 |│                                                     ││preview the plan                           │|
 |│                                                     ││  add (asks first)                         │|
-|│                                                     ││    ways config target add '<arg>'         │|
+|│                                                     ││    ways target add '<arg>'                │|
 |│                                                     ││  plan                                     │|
-|│                                                     ││    ways config target plan '<arg>'        │|
+|│                                                     ││    ways target plan '<arg>'               │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -101,13 +101,13 @@ styles
  19  54-55  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20  54-89  - - DIM
+ 20  54-82  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
  21  54-55  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
- 22  54-90  - - DIM
+ 22  54-83  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
  23  54-55  - - DIM

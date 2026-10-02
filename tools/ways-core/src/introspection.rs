@@ -19,7 +19,7 @@
 //! keyword/command/file channels, and only once enrichment records it.
 //!
 //! This model is the *analytical* substrate (why a way fired: criteria, matched
-//! span, transcript key). The **replay** pipeline (`ways introspect replay`, in `ways-cli`)
+//! span, transcript key). The **replay** pipeline (`ways session replay`, in `ways-cli`)
 //! stays a distinct *animation* projection — `build_frames` folds the full event
 //! stream into cumulative "what's active at epoch N" frames. The two are **not**
 //! unified into one clustering (decided 2026-07-03, ADR-153 module note / ADR-154

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Macro: prepend way vocabulary health summary when optimization way fires
-# Runs ways suggest on all semantic ways and outputs a compact summary
+# Runs ways author suggest on all semantic ways and outputs a compact summary
 
 if ! command -v ways &>/dev/null; then
   echo "**ways binary not found** — build with: \`make setup\` in the agent-ways app dir (see docs/install-guide.md)"
@@ -31,7 +31,7 @@ for wayfile in $(find -L "${HOME}/.claude/hooks/ways" -name "*.md" ! -name "*.ch
   fi
 
   if [[ "$match_type" == "embed" ]]; then
-    stderr=$(ways suggest "$wayfile" 2>&1 >/dev/null)
+    stderr=$(ways author suggest "$wayfile" 2>&1 >/dev/null)
     gaps=$(echo "$stderr" | sed -n 's/suggest: \([0-9]*\) gaps.*/\1/p')
     covered=$(echo "$stderr" | sed -n 's/.*, \([0-9]*\) covered.*/\1/p')
     unused=$(echo "$stderr" | sed -n 's/.*, \([0-9]*\) unused/\1/p')

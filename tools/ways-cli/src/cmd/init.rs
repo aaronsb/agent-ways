@@ -24,7 +24,7 @@ const TEMPLATE_CONTENT: &str = "---
 # Way Template
 
 Starting point for authoring a new way. When the scaffolder
-(`ways template <path> --description \"...\" --vocabulary \"...\"`) doesn't fit,
+(`ways author template <path> --description \"...\" --vocabulary \"...\"`) doesn't fit,
 copy this file to `.claude/ways/{domain}/{wayname}/{wayname}.md` and edit.
 
 ## Canonical Frontmatter
@@ -76,8 +76,8 @@ Numeric form pins the cadence to today's model. Preset form tracks the project's
 
 ## Testing
 
-- `ways lint <way>` — validate frontmatter against the schema
-- `ways suggest <way>` — find vocabulary gaps
+- `ways author lint <way>` — validate frontmatter against the schema
+- `ways author suggest <way>` — find vocabulary gaps
 ";
 
 pub fn run(project: Option<&str>) -> Result<()> {

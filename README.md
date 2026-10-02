@@ -45,11 +45,11 @@ sequenceDiagram
 
 **Why this works:** System prompt adherence decays as a power law over conversation turns — instructions at position zero lose influence as context grows. This is the forgetting curve (Ebbinghaus) operating over token distance instead of days, and the countermeasure is the one human learning already uses: spaced repetition. Ways inject small, relevant guidance near the attention cursor at the moment it matters and re-disclose it as its influence fades, maintaining steady-state adherence instead of a damped sawtooth. It's [progressive disclosure](docs/hooks-and-ways/context-decay.md) applied to the model itself.
 
-### Session replay with `ways introspect replay`
+### Session replay with `ways session replay`
 
-`ways introspect replay` replays a completed session's way-firing history as an interactive TUI animation. Each frame shows a way firing at a specific point in the conversation — you can see how guidance clusters near the active attention cursor and packs into the context window like a compression pattern.
+`ways session replay` replays a completed session's way-firing history as an interactive TUI animation. Each frame shows a way firing at a specific point in the conversation — you can see how guidance clusters near the active attention cursor and packs into the context window like a compression pattern.
 
-[<img src="docs/images/ways-introspect.gif" alt="ways introspect replay — each frame shows a way firing, guidance clusters near the attention cursor and packs like a compression pattern as context fills" width="800" />](docs/images/ways-introspect.mp4)
+[<img src="docs/images/ways-introspect.gif" alt="ways session replay — each frame shows a way firing, guidance clusters near the attention cursor and packs like a compression pattern as context fills" width="800" />](docs/images/ways-introspect.mp4)
 
 <sub>The preview above is downscaled. [Download the full-resolution recording](docs/images/ways-introspect.mp4) (2.5MB MP4) to read the way names and re-disclosure percentages.</sub>
 
@@ -119,9 +119,9 @@ To remove it, `ways uninstall` lists what it would do: withdraw from `~/.claude`
 
 Matching has two channels: regex patterns for known keywords/commands/files, and [sentence-embedding](docs/architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) semantic scoring (all-MiniLM-L6-v2). See [matching.md](docs/hooks-and-ways/matching.md) for the full strategy.
 
-`ways list` shows the live session state — which ways fired, when (epoch), how far back (distance), what triggered them, tree relationships, check decay curves, and a re-disclosure forecast showing when distant ways will re-fire as context fills:
+`ways session ways` shows the live session state — which ways fired, when (epoch), how far back (distance), what triggered them, tree relationships, check decay curves, and a re-disclosure forecast showing when distant ways will re-fire as context fills:
 
-<img src="docs/images/ways-list-session.png" alt="ways list showing live session state — epoch when each way fired, distance in context, colored pins for attention proximity, tree disclosure, and a forecast of when distant ways will re-fire" width="100%" />
+<img src="docs/images/ways-list-session.png" alt="ways session ways showing live session state — epoch when each way fired, distance in context, colored pins for attention proximity, tree disclosure, and a forecast of when distant ways will re-fire" width="100%" />
 
 For the complete system guide — trigger flow, state machines, the pipeline from principle to implementation — see **[docs/hooks-and-ways/README.md](docs/hooks-and-ways/README.md)**.
 
@@ -174,19 +174,19 @@ After creating or tuning a way, verify it matches what you expect — and doesn'
 /ways-tests score-all "write some unit tests for this module"
 
 # Validate frontmatter
-ways lint --global
+ways author lint --global
 
 # Vocabulary gap analysis
-ways suggest ~/.claude/hooks/ways/softwaredev/code/security/security.md
+ways author suggest ~/.claude/hooks/ways/softwaredev/code/security/security.md
 
 # How a prompt matches under the live matcher (ADR-160)
-ways match "pin lockfile versions"
+ways author match "pin lockfile versions"
 
 # Sibling vocabulary overlap (Jaccard)
-ways tree softwaredev/code/supplychain/depscan --jaccard
+ways author tree softwaredev/code/supplychain/depscan --jaccard
 
 # Way-vs-way embedding similarity
-ways siblings softwaredev/code/supplychain/depscan/node
+ways author siblings softwaredev/code/supplychain/depscan/node
 
 # Session simulation tests (Rust integration tests)
 make test-sim

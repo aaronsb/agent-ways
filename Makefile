@@ -260,9 +260,9 @@ lint:
 test-smoke: ways
 	@echo "Smoke testing ways binary..."
 	@$(WAYS_BIN) --version
-	@$(WAYS_BIN) lint --check --global && echo "  lint: PASS"
-	@$(WAYS_BIN) match "write a unit test" >/dev/null && echo "  match: PASS"
-	@$(WAYS_BIN) graph --output /dev/null && echo "  graph: PASS"
+	@$(WAYS_BIN) author lint --check --global && echo "  lint: PASS"
+	@$(WAYS_BIN) author match "write a unit test" >/dev/null && echo "  match: PASS"
+	@$(WAYS_BIN) author graph --output /dev/null && echo "  graph: PASS"
 	@echo "Smoke tests passed."
 
 test-adr:
@@ -309,7 +309,7 @@ test-sim: ways
 
 test-lang: ways
 	@echo "Validating active language coverage..."
-	@$(WAYS_BIN) language --json | python3 -c "\
+	@$(WAYS_BIN) tune language --json | python3 -c "\
 	import json,sys; d=json.load(sys.stdin); \
 	active=d['locales_found']; \
 	print(f'  Active locales in corpus: {len(active)}'); \

@@ -275,8 +275,8 @@ impl State {
         *self.slots.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Settings re-read per request, so `ways agent use`, `mode` and key
-    /// changes apply without a restart.
+    /// Settings re-read per request, so `ways settings` and key changes
+    /// apply without a restart.
     /// A broken agent.yaml or a bad `mode` fails closed: the gate is off.
     fn settings() -> Result<Option<Settings>> {
         profile::gate_settings(&profile::user_layer_path(), |p| keys::locate(p).is_some())

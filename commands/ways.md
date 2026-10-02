@@ -67,9 +67,9 @@ Ask what's wrong:
 - "The guidance isn't helpful" → review the content, apply voice/framing principles
 - "I want to change what it covers" → may need vocabulary tuning, scope change, or split into sub-ways
 
-Use the `ways` binary for live diagnostics. `ways match` runs the live late-interaction matcher (ADR-160) over global and project-local ways and shows, per candidate, the peak, share, body-confirm and whether it fired:
+Use the `ways` binary for live diagnostics. `ways author match` runs the live late-interaction matcher (ADR-160) over global and project-local ways and shows, per candidate, the peak, share, body-confirm and whether it fired:
 ```bash
-ways match "$prompt"
+ways author match "$prompt"
 ```
 
 ## Scaffold
@@ -153,7 +153,7 @@ After creating or revising a way:
 
 1. **Lint**: Check frontmatter is valid
    ```bash
-   ways lint "$CLAUDE_PROJECT_DIR/.claude/ways/{domain}/{wayname}"
+   ways author lint "$CLAUDE_PROJECT_DIR/.claude/ways/{domain}/{wayname}"
    ```
 
 2. **Rebuild the corpus** so scores reflect the new `description`/`vocabulary`
@@ -163,10 +163,10 @@ After creating or revising a way:
 
 3. **Score** (for semantic ways): Test against sample prompts from the conversation
    ```bash
-   ways match "sample prompt"
+   ways author match "sample prompt"
    ```
 
-4. **Cross-check**: `ways match` ranks every way, global and project-local, against the prompt. Read the rows above and below the new way to verify no cross-firing. For structural overlap independent of any prompt, run `ways siblings <way-id>`.
+4. **Cross-check**: `ways author match` ranks every way, global and project-local, against the prompt. Read the rows above and below the new way to verify no cross-firing. For structural overlap independent of any prompt, run `ways author siblings <way-id>`.
 
 5. Show results and explain: fired or not, which gate it fell short of (`< gate` or `< confirm`), and any overlaps with other ways
 
