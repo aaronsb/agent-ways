@@ -30,7 +30,7 @@ impl std::fmt::Display for EditError {
             EditError::Parse { line: Some(l), message } => write!(f, "line {l}: {message}"),
             EditError::Parse { line: None, message } => f.write_str(message),
             EditError::NotMapping => f.write_str("the document is not a mapping"),
-            EditError::RoundTrip(m) => write!(f, "the edit did not round-trip ({m}); nothing written"),
+            EditError::RoundTrip(m) => write!(f, "the edit did not round-trip ({m})"),
         }
     }
 }

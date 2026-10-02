@@ -1,7 +1,10 @@
 //! The one settings writer (ADR-503 §6), generalised from the `ways-core`
 //! targets writer: a lock file beside the target, the edit made on the text by
-//! [`crate::yaml_edit`] and verified, and a temporary file renamed into place.
-//! Keys the edit does not name, comments and order stay as they were.
+//! [`crate::yaml_edit`] and verified, and a temporary file synced and renamed
+//! into place. Keys the edit does not name, comments and order stay as they
+//! were. A settings path that is a symlink (a dotfiles checkout) is followed:
+//! the lock, the temporary file and the rename are beside the real file, so
+//! the link stays a link, and the file keeps its permissions.
 
 use crate::yaml_edit::{Doc, EditError};
 use std::fs::{File, OpenOptions};
@@ -92,11 +95,35 @@ impl Drop for Lock {
     }
 }
 
+/// The file a settings path names: symlinks followed, a dangling one to the
+/// path it points at. A path that is not a link is returned as it is.
+pub fn resolve(path: &Path) -> PathBuf {
+    let mut cur = path.to_path_buf();
+    for _ in 0..40 {
+        match std::fs::symlink_metadata(&cur) {
+            Ok(m) if m.file_type().is_symlink() => match std::fs::read_link(&cur) {
+                Ok(next) => {
+                    cur = if next.is_absolute() {
+                        next
+                    } else {
+                        cur.parent().map(|d| d.join(&next)).unwrap_or(next)
+                    };
+                }
+                Err(_) => return cur,
+            },
+            _ => return cur,
+        }
+    }
+    cur
+}
+
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Write `body` to `path` through a temporary file in the same directory and
-/// a rename, so a reader never sees half a file. The temporary name is unique
-/// to the process and the call; it is removed when the write fails.
+/// a rename, so a reader never sees half a file. The temporary file takes the
+/// permissions of the file it replaces and is synced to disk before the
+/// rename. Its name is unique to the process and the call; it is removed when
+/// the write fails. `path` is written as given: callers resolve links first.
 pub fn write_atomic(path: &Path, body: &str) -> io::Result<()> {
     let dir = match path.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
@@ -105,7 +132,23 @@ pub fn write_atomic(path: &Path, body: &str) -> io::Result<()> {
     std::fs::create_dir_all(&dir)?;
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let tmp = dir.join(format!(".{name}.{}.{}.tmp", std::process::id(), TMP_SEQ.fetch_add(1, Ordering::Relaxed)));
-    let result = std::fs::write(&tmp, body).and_then(|_| std::fs::rename(&tmp, path));
+    let perms = std::fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| m.permissions());
+    let result = (|| {
+        let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        if let Some(p) = perms {
+            f.set_permissions(p)?;
+        }
+        io::Write::write_all(&mut f, body.as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)?;
+        // The rename is durable once the directory is.
+        #[cfg(unix)]
+        if let Ok(d) = File::open(&dir) {
+            let _ = d.sync_all();
+        }
+        Ok(())
+    })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -121,6 +164,7 @@ pub fn edit_file<T>(
     header: Option<&str>,
     f: impl FnOnce(&mut Doc) -> Result<T, EditError>,
 ) -> Result<(T, bool), WriteError> {
+    let path = &resolve(path);
     let _lock = Lock::acquire(path).map_err(|e| WriteError::Lock(path.to_path_buf(), e))?;
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
@@ -142,6 +186,7 @@ pub fn edit_file<T>(
 /// Create `path` with `body` only when no file is there (`config init`).
 /// Returns false when one already exists.
 pub fn create_new(path: &Path, body: &str) -> Result<bool, WriteError> {
+    let path = &resolve(path);
     let _lock = Lock::acquire(path).map_err(|e| WriteError::Lock(path.to_path_buf(), e))?;
     if path.exists() {
         return Ok(false);
@@ -254,5 +299,36 @@ mod tests {
         assert!(!create_new(&path, "# b\n").unwrap());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# a\n");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_0600_file_is_edited_through_the_link_and_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp("link");
+        let dots = dir.join("dotfiles");
+        let conf = dir.join("config");
+        std::fs::create_dir_all(&dots).unwrap();
+        std::fs::create_dir_all(&conf).unwrap();
+        let real = dots.join("config.yaml");
+        std::fs::write(&real, "# mine\nlanguage: es\n").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = conf.join("config.yaml");
+        std::os::unix::fs::symlink("../dotfiles/config.yaml", &link).unwrap();
+        edit_file(&link, None, |d| d.set(&key("near_miss_margin"), &serde_yaml::from_str("0.1").unwrap())).unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "the link stays a link");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "# mine\nlanguage: es\nnear_miss_margin: 0.1\n");
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o600);
+        let beside_link: Vec<_> = std::fs::read_dir(&conf).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(beside_link, vec![std::ffi::OsString::from("config.yaml")], "no lock or temp file beside the link");
+        let beside_real: Vec<_> = std::fs::read_dir(&dots).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(beside_real, vec![std::ffi::OsString::from("config.yaml")]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_round_trip_refusal_says_nothing_written_once() {
+        let e = WriteError::Edit(PathBuf::from("/x.yaml"), EditError::RoundTrip("why".into()));
+        assert_eq!(e.to_string().matches("nothing written").count(), 0, "callers add it once: {e}");
     }
 }

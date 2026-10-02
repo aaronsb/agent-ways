@@ -1,23 +1,28 @@
 //! Per-section checking and layered loading (ADR-503 §3-5).
 //!
-//! A file is parsed once. Each top-level key belongs to a section; a section
-//! any of whose values fails the schema is dropped from that file's layer, so
-//! its keys resolve from the layers beneath, which end at canonical. Every
-//! other section loads as written. A diagnostic names the file, line and
-//! section, and is built only when something fails.
+//! A file is parsed once. Each top-level key belongs to a section, and the
+//! section is the fallback unit, except in a per-entry section, where each
+//! entry of its mapping is. A unit any of whose values fails the schema is
+//! dropped from that file's layer, so its keys resolve from the layers
+//! beneath, which end at canonical. Every other unit loads as written. A
+//! diagnostic names the file, line and section, and is built only when
+//! something fails. A top-level key no section owns is reported and changes
+//! nothing else.
 
 use crate::schema::{KeySpec, LayerScope, Schema};
 use crate::yaml_edit::{self, Doc};
 use serde_yaml::{Mapping, Value};
 use std::path::{Path, PathBuf};
 
-/// One problem in one file. `fallback` is set when it made a section load as
-/// canonical.
+/// One problem in one file. `fallback` is set when it dropped a unit (a
+/// section, or one entry of a per-entry section) from the file's layer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Finding {
     pub file: Option<PathBuf>,
     pub line: Option<usize>,
     pub section: Option<String>,
+    /// The unit that fell back: the section, or `<section>.<entry>`.
+    pub unit: Option<String>,
     pub key: Option<String>,
     pub message: String,
     pub fallback: bool,
@@ -41,23 +46,29 @@ impl std::fmt::Display for Finding {
 }
 
 impl Finding {
-    /// The one-line stderr form: the finding, the fallback, and the repair.
+    /// The one-line stderr form: the finding, what it dropped, and the repair.
     pub fn diagnostic(&self, tool: &str) -> String {
-        match (&self.section, self.fallback) {
-            (Some(s), true) => format!(
-                "[{tool}] settings: {self}; section {s} falls back to canonical. \
-                 `ways settings lint` lists the findings, `ways settings fix {s}` rewrites it"
+        match (&self.section, &self.unit, self.fallback) {
+            (Some(s), Some(u), true) if u != s => format!(
+                "[{tool}] settings: {self}; entry {u} is ignored, so it resolves from the layers beneath. \
+                 `ways settings lint` lists the findings, `ways settings fix {s}` drops the bad entries"
+            ),
+            (Some(s), _, true) => format!(
+                "[{tool}] settings: {self}; section {s} is ignored in this file, so its keys resolve from the \
+                 layers beneath, ending at canonical. `ways settings lint` lists the findings, \
+                 `ways settings fix {s}` rewrites it"
             ),
             _ => format!("[{tool}] settings: {self}"),
         }
     }
 }
 
-/// A section check failure: the section, and the key path and message of
-/// each value that failed.
+/// A check failure: the section and unit it dropped, and the key path and
+/// message of the value that failed.
 #[derive(Debug, Clone)]
 struct Failure {
     section: Option<&'static str>,
+    unit: Option<String>,
     path: Vec<String>,
     message: String,
 }
@@ -65,10 +76,10 @@ struct Failure {
 /// The outcome of checking one parsed file.
 #[derive(Debug, Clone, Default)]
 pub struct Checked {
-    /// The top-level keys of every section that passed.
+    /// The top-level keys of every unit that passed.
     pub accepted: Mapping,
-    /// Sections that fell back.
-    pub failed: Vec<&'static str>,
+    /// Units that fell back: section names, or `<section>.<entry>`.
+    pub failed: Vec<String>,
     failures: Vec<Failure>,
 }
 
@@ -82,21 +93,22 @@ impl Checked {
         let doc = Doc::parse(text).ok();
         self.failures
             .iter()
-            .map(|f| Finding {
-                file: file.map(Path::to_path_buf),
-                line: doc.as_ref().and_then(|d| d.line_of(&f.path)),
-                section: f.section.map(str::to_string),
-                key: (!f.path.is_empty()).then(|| f.path.join(".")),
-                message: f.message.clone(),
-                fallback: f.section.is_some_and(|s| self.failed.contains(&s)),
-            })
-            .map(|mut f| {
+            .map(|f| {
+                let mut message = f.message.clone();
                 if f.section.is_none() {
                     if let Some(n) = schema_name {
-                        f.message = format!("{} ({n})", f.message);
+                        message = format!("{message} ({n})");
                     }
                 }
-                f
+                Finding {
+                    file: file.map(Path::to_path_buf),
+                    line: doc.as_ref().and_then(|d| d.line_of(&f.path)),
+                    section: f.section.map(str::to_string),
+                    unit: f.unit.clone(),
+                    key: (!f.path.is_empty()).then(|| f.path.join(".")),
+                    message,
+                    fallback: f.unit.as_ref().is_some_and(|u| self.failed.contains(u)),
+                }
             })
             .collect()
     }
@@ -104,25 +116,27 @@ impl Checked {
 
 /// Parse a settings file's text. A parse failure is one finding on the line
 /// the parser names; every section of the file then falls back.
-pub fn parse_text(text: &str, file: Option<&Path>) -> Result<Value, Finding> {
+pub fn parse_text(text: &str, file: Option<&Path>) -> Result<Value, Box<Finding>> {
     yaml_edit::parse(text).map_err(|e| {
         let (line, message) = match e {
             yaml_edit::EditError::Parse { line, message } => (line, format!("does not parse: {message}")),
             other => (None, other.to_string()),
         };
-        Finding {
+        Box::new(Finding {
             file: file.map(Path::to_path_buf),
             line,
             section: None,
+            unit: None,
             key: None,
-            message: format!("{message}; every section of the file falls back to canonical"),
+            message: format!("{message}; every section of the file resolves from the layers beneath"),
             fallback: true,
-        }
+        })
     })
 }
 
 /// Check a parsed file of kind `file` at `scope` against `schema`. With
 /// `only`, the sections not named are skipped: not checked and not loaded.
+/// A top-level key no section owns is reported either way.
 pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: Option<&[&str]>) -> Checked {
     trace_sections(schema, file, only);
     let mut out = Checked::default();
@@ -131,38 +145,66 @@ pub fn check(schema: &Schema, file: &str, scope: LayerScope, doc: &Value, only: 
     let retired = schema.file(file).map(|f| f.retired).unwrap_or(&[]);
     for (k, v) in root {
         let Some(top) = k.as_str() else {
-            out.failures.push(Failure { section: None, path: vec![], message: format!("a top-level key is not text: {}", crate::schema::show(k)) });
+            out.failures.push(Failure { section: None, unit: None, path: vec![], message: format!("a top-level key is not text: {}", crate::schema::show(k)) });
             continue;
         };
         let Some(sec) = schema.section_of_top(file, top) else {
-            if only.is_none() {
-                let message = match retired.iter().find(|(r, _)| *r == top) {
-                    Some((_, m)) => (*m).to_string(),
-                    None => "unknown key".to_string(),
-                };
-                out.failures.push(Failure { section: None, path: vec![top.to_string()], message });
-            }
+            let message = match retired.iter().find(|(r, _)| *r == top) {
+                Some((_, m)) => (*m).to_string(),
+                None => "unknown key; it is ignored".to_string(),
+            };
+            out.failures.push(Failure { section: None, unit: None, path: vec![top.to_string()], message });
             continue;
         };
         if only.is_some_and(|o| !o.contains(&sec.name)) {
             continue;
         }
-        let mut errs = Vec::new();
-        check_tree(&keys, scope, &mut vec![top.to_string()], v, &mut errs);
-        if !errs.is_empty() && !out.failed.contains(&sec.name) {
-            out.failed.push(sec.name);
-        }
-        out.failures.extend(errs.into_iter().map(|(path, message)| Failure { section: Some(sec.name), path, message }));
-    }
-    for (k, v) in root {
-        let Some(top) = k.as_str() else { continue };
-        if let Some(sec) = schema.section_of_top(file, top) {
-            if !out.failed.contains(&sec.name) && only.is_none_or(|o| o.contains(&sec.name)) {
-                out.accepted.insert(k.clone(), v.clone());
+        let mut accepted = v.clone();
+        match (sec.per_entry, v) {
+            (true, Value::Mapping(m)) => {
+                let kept = accepted.as_mapping_mut().expect("a mapping");
+                for (ek, ev) in m {
+                    let mut errs = Vec::new();
+                    let Some(entry) = ek.as_str() else {
+                        errs.push((vec![top.to_string()], format!("a key is not text: {}", crate::schema::show(ek))));
+                        out.fail(sec.name, Some(format!("{}.{}", sec.name, crate::schema::show(ek))), errs);
+                        kept.remove(ek);
+                        continue;
+                    };
+                    check_tree(&keys, scope, &mut vec![top.to_string(), entry.to_string()], ev, &mut errs);
+                    if !errs.is_empty() {
+                        out.fail(sec.name, Some(format!("{}.{entry}", sec.name)), errs);
+                        kept.remove(ek);
+                    }
+                }
+            }
+            _ => {
+                let mut errs = Vec::new();
+                check_tree(&keys, scope, &mut vec![top.to_string()], v, &mut errs);
+                if !errs.is_empty() {
+                    out.fail(sec.name, Some(sec.name.to_string()), errs);
+                }
             }
         }
+        out.accepted.insert(k.clone(), accepted);
     }
+    // A whole-section failure drops every top-level key the section owns.
+    let failed = out.failed.clone();
+    out.accepted.retain(|k, _| {
+        k.as_str().and_then(|t| schema.section_of_top(file, t)).is_none_or(|sec| !failed.iter().any(|u| u == sec.name))
+    });
     out
+}
+
+impl Checked {
+    fn fail(&mut self, section: &'static str, unit: Option<String>, errs: Vec<(Vec<String>, String)>) {
+        if let Some(u) = &unit {
+            if !self.failed.contains(u) {
+                self.failed.push(u.clone());
+            }
+        }
+        self.failures.extend(errs.into_iter().map(|(path, message)| Failure { section: Some(section), unit: unit.clone(), path, message }));
+    }
 }
 
 fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &Value, errs: &mut Vec<(Vec<String>, String)>) {
@@ -200,20 +242,21 @@ fn check_tree(keys: &[&KeySpec], scope: LayerScope, path: &mut Vec<String>, v: &
 
 // ── trace ──────────────────────────────────────────────────────
 
-/// `WAYS_SETTINGS_TRACE=1` prints each section load to stderr, so a test can
-/// see what a hook path loads (ADR-503 §5). Read once per process.
+/// `WAYS_SETTINGS_TRACE=1` prints each load to stderr, so a test can see
+/// what a hook path loads (ADR-503 §5). Read once per process.
 fn tracing() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("WAYS_SETTINGS_TRACE").is_some_and(|v| !v.is_empty()))
 }
 
+/// `load-sections <component>:<file> [names]` for a load that names its
+/// sections, `load-all <component>:<file>` for one that takes the whole file.
 fn trace_sections(schema: &Schema, file: &str, only: Option<&[&str]>) {
     if tracing() {
-        let names: Vec<&str> = match only {
-            Some(o) => o.to_vec(),
-            None => schema.sections.iter().filter(|s| s.file == file).map(|s| s.name).collect(),
-        };
-        eprintln!("settings-trace: load {}:{file} [{}]", schema.component, names.join(","));
+        match only {
+            Some(o) => eprintln!("settings-trace: load-sections {}:{file} [{}]", schema.component, o.join(",")),
+            None => eprintln!("settings-trace: load-all {}:{file}", schema.component),
+        }
     }
 }
 
@@ -259,7 +302,7 @@ impl Layer {
                 let f = if c.is_clean() { Vec::new() } else { c.findings(None, path, text) };
                 (c.accepted, f)
             }
-            Err(f) => (Mapping::new(), vec![f]),
+            Err(f) => (Mapping::new(), vec![*f]),
         };
         Layer { name: name.into(), file, scope, path: path.map(Path::to_path_buf), accepted, findings, present: true }
     }
@@ -350,9 +393,9 @@ mod tests {
     use crate::schema::*;
 
     const SECTIONS: &[SectionSpec] = &[
-        SectionSpec { name: "general", file: "cfg", top: &["language"], doc: "" },
-        SectionSpec { name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
-        SectionSpec { name: "toggles", file: "cfg", top: &["ways"], doc: "" },
+        SectionSpec { per_entry: false, name: "general", file: "cfg", top: &["language"], doc: "" },
+        SectionSpec { per_entry: false, name: "matching", file: "cfg", top: &["prob", "presets"], doc: "" },
+        SectionSpec { per_entry: true, name: "toggles", file: "cfg", top: &["ways"], doc: "" },
     ];
     const BASE: KeySpec = KeySpec {
         name: "general.language",
@@ -406,7 +449,7 @@ mod tests {
     #[test]
     fn a_project_only_key_in_the_user_file_is_a_finding() {
         let l = layer("user", LayerScope::User, "ways:\n  a/b: false\n");
-        assert!(l.get(&["ways".into()]).is_none());
+        assert!(l.get(&["ways".into(), "a/b".into()]).is_none());
         let p = layer("project", LayerScope::Project, "ways:\n  a/b: {enabled: false}\n");
         assert!(p.findings.is_empty());
     }
@@ -443,5 +486,34 @@ mod tests {
         assert!(c.is_clean(), "the broken general section is not read");
         assert!(c.accepted.get("language").is_none());
         assert!(c.accepted.get("prob").is_some());
+    }
+
+    #[test]
+    fn a_per_entry_section_drops_only_the_bad_entry() {
+        let p = layer("project", LayerScope::Project, "ways:\n  a/b: false\n  c/d: maybe\n  e/f: {enabled: false}\n");
+        assert_eq!(p.get(&["ways".into(), "a/b".into()]), Some(&Value::Bool(false)));
+        assert_eq!(p.get(&["ways".into(), "e/f".into(), "enabled".into()]), Some(&Value::Bool(false)));
+        assert_eq!(p.get(&["ways".into(), "c/d".into()]), None);
+        let f = &p.findings[0];
+        assert_eq!((f.unit.as_deref(), f.fallback, f.line), (Some("toggles.c/d"), true, Some(3)));
+        assert!(f.diagnostic("t").contains("entry toggles.c/d is ignored"), "{}", f.diagnostic("t"));
+    }
+
+    #[test]
+    fn an_unknown_top_level_key_is_reported_on_a_sectioned_load() {
+        let doc: Value = serde_yaml::from_str("mdoe: off\nprob: 0.2\n").unwrap();
+        let c = check(&SCHEMA, "cfg", LayerScope::User, &doc, Some(&["matching"]));
+        let f = c.findings(None, None, "mdoe: off\nprob: 0.2\n");
+        assert_eq!(f.len(), 1);
+        assert_eq!((f[0].key.as_deref(), f[0].fallback, f[0].line), (Some("mdoe"), false, Some(1)));
+        assert!(c.accepted.get("prob").is_some());
+    }
+
+    #[test]
+    fn the_fallback_diagnostic_says_the_keys_fall_through() {
+        let l = layer("user", LayerScope::User, "prob: 3\n");
+        let d = l.findings[0].diagnostic("t");
+        assert!(d.contains("resolve from the layers beneath, ending at canonical"), "{d}");
+        assert!(!d.contains("falls back to canonical"), "{d}");
     }
 }

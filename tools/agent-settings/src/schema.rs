@@ -335,6 +335,11 @@ pub struct SectionSpec {
     pub file: &'static str,
     /// Top-level keys of the file this section owns.
     pub top: &'static [&'static str],
+    /// The fallback unit is each entry of the section's mapping, not the
+    /// section: a bad entry is dropped and its siblings load. For a
+    /// collection of switches, where losing all of them would turn back on
+    /// everything the operator turned off.
+    pub per_entry: bool,
     pub doc: &'static str,
 }
 
