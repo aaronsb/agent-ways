@@ -17,7 +17,7 @@ use agent_tui::theme::{self, Ground, Palette, Seg, Shape};
 use agent_tui::timeline::{key_bar, Playback, Scrubber};
 use ways_core::introspection::SessionIntrospection;
 
-use super::model::Frame;
+use super::model::{ActiveWay, Frame, Outcome};
 use super::sessions::SessionInfo;
 use super::table;
 use super::why::{self, WhyIndex};
@@ -48,6 +48,9 @@ pub(crate) struct Replay {
     pub(crate) frames: Vec<Frame>,
     pub(crate) play: Playback,
     view: View,
+    /// Which ways the frames show: the injected ones, or with `matched`
+    /// every matched candidate, the judge-blocked ones too (#742).
+    matched: bool,
     /// The selected way of the frame shown, in both views.
     sel: usize,
     /// The why-fired detail's scroll, and its page from the last frame.
@@ -77,6 +80,7 @@ impl Replay {
             frames,
             play,
             view: View::Timeline,
+            matched: false,
             sel: 0,
             scroll: 0,
             page: 10,
@@ -106,7 +110,7 @@ impl Replay {
             return Err(format!("no events for session {short}"));
         }
         let window = crate::session::detect_context_window_for(&project, session_id);
-        let frames = super::frames::reconstruct_frames(&events, &project, session_id, window);
+        let frames = super::frames::reconstruct_all(&events, &project, session_id, window);
         if frames.is_empty() {
             return Err(format!("no frames to replay in session {short}"));
         }
@@ -123,19 +127,33 @@ impl Replay {
         &self.frames[self.play.pos()]
     }
 
+    /// The frame shown, its ways filtered by the view.
+    fn shown(&self) -> Frame {
+        self.frame().shown(self.matched)
+    }
+
+    /// Widen the view to every matched candidate, or narrow it back to the
+    /// injected ways, the cursor kept on its way where it can be.
+    fn toggle_matched(&mut self) {
+        let anchor = self.anchor();
+        self.matched = !self.matched;
+        self.sel = anchor.map_or(0, |(id, epoch)| reselect_by_anchor(&self.shown(), &id, epoch));
+        self.scroll = 0;
+    }
+
     /// Frame indexes where a compaction window starts.
     fn window_starts(&self) -> Vec<usize> {
         self.frames.windows(2).enumerate().filter(|(_, p)| p[0].window != p[1].window).map(|(i, _)| i + 1).collect()
     }
 
     fn ways_len(&self) -> usize {
-        self.frame().ways.len()
+        self.shown().ways.len()
     }
 
     /// The selected way's id and the epoch it fired at, carried across a
     /// frame change so the cursor stays on the same way.
     fn anchor(&self) -> Option<(String, u64)> {
-        self.frame().ways.get(self.sel.min(self.ways_len().saturating_sub(1))).map(|w| (w.id.clone(), w.epoch_fired))
+        self.shown().ways.get(self.sel.min(self.ways_len().saturating_sub(1))).map(|w| (w.id.clone(), w.epoch_fired))
     }
 
     /// Move along the timeline with `go`, keeping the selection on the
@@ -145,7 +163,7 @@ impl Replay {
         let anchor = self.anchor();
         go(&mut self.play);
         self.sel = match anchor {
-            Some((id, epoch)) => reselect_by_anchor(self.frame(), &id, epoch),
+            Some((id, epoch)) => reselect_by_anchor(&self.shown(), &id, epoch),
             None => 0,
         };
         self.follow_newest();
@@ -226,6 +244,7 @@ impl Replay {
             (View::Timeline, KeyCode::Home | KeyCode::Char('g')) => self.travel(Playback::home),
             (View::Timeline, KeyCode::End | KeyCode::Char('G')) => self.travel(Playback::end),
             (View::Timeline, KeyCode::Char(' ')) => self.travel(Playback::toggle),
+            (_, KeyCode::Char('f')) => self.toggle_matched(),
             (View::Timeline, KeyCode::Char('+') | KeyCode::Char('=')) => self.play.faster(),
             (View::Timeline, KeyCode::Char('-') | KeyCode::Char('_')) => self.play.slower(),
             _ => {}
@@ -271,7 +290,7 @@ impl Replay {
         self.window_k = self.window_k.max(detected);
         let content = ways_core::firing::load_events_text();
         let events = super::frames::load_session_events(&content, &self.session_id);
-        let frames = super::frames::reconstruct_frames(&events, &self.project, &self.session_id, self.window_k * 1000);
+        let frames = super::frames::reconstruct_all(&events, &self.project, &self.session_id, self.window_k * 1000);
         if frames.is_empty() {
             return;
         }
@@ -284,7 +303,7 @@ impl Replay {
         let anchor = self.anchor();
         self.frames = frames;
         self.play.resize(self.frames.len());
-        self.sel = anchor.map_or(0, |(id, epoch)| reselect_by_anchor(self.frame(), &id, epoch));
+        self.sel = anchor.map_or(0, |(id, epoch)| reselect_by_anchor(&self.shown(), &id, epoch));
         self.follow_newest();
         // The why index is read again in place: the reader keeps its scroll.
         // Out of the view it is dropped and read when the view opens.
@@ -526,32 +545,50 @@ fn friendly_ts(ts: &str) -> String {
 }
 
 /// The two header lines: the session and its project, then where the
-/// frame shown sits, and for a live session whether it follows.
-fn header(r: &Replay) -> Vec<Line<'static>> {
+/// frame shown sits, which ways the table holds, and for a live session
+/// whether it follows. When the line is wider than `width`, the timestamp
+/// goes first, then the count of ways judged out.
+fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
     let fr = r.frame();
     let windows = r.frames.last().map_or(1, |l| l.window);
-    let mut metrics = vec![Span::styled(
-        format!(
-            "epoch {} · {}K ctx · {} ways · window {}/{} · {}",
-            fr.epoch,
-            r.window_k,
-            fr.ways.len(),
-            fr.window,
-            windows,
-            friendly_ts(&fr.timestamp)
+    // Each span with the order it is dropped in for width; 0 stays.
+    let mut metrics: Vec<(u8, Span<'static>)> = vec![
+        (
+            0,
+            Span::styled(
+                format!("epoch {} · {}K ctx · {} ways · window {}/{}", fr.epoch, r.window_k, fr.shown(r.matched).ways.len(), fr.window, windows),
+                theme::muted(),
+            ),
         ),
-        theme::muted(),
-    )];
-    if r.play.is_live() {
-        if r.play.following() {
-            metrics.push(Span::styled("  ● LIVE", theme::ok().add_modifier(Modifier::BOLD)));
-            if let Some(then) = agent_fmt::when::parse_utc_iso(&fr.timestamp) {
-                metrics.push(Span::styled(format!(" · {}", agent_fmt::when::ago(r.now.saturating_sub(then))), theme::muted()));
-            }
-        } else {
-            metrics.push(Span::styled("  ● LIVE paused", theme::warn().add_modifier(Modifier::BOLD)));
+        (1, Span::styled(format!(" · {}", friendly_ts(&fr.timestamp)), theme::muted())),
+    ];
+    // The filter, named as the follow state is: which ways the table holds.
+    if r.matched {
+        metrics.push((0, Span::styled("  ◆ matched", theme::accent().add_modifier(Modifier::BOLD))));
+    } else {
+        metrics.push((0, Span::styled("  ◇ injected", theme::accent())));
+        let blocked = fr.blocked();
+        if blocked > 0 {
+            metrics.push((2, Span::styled(format!(" · {blocked} judged out"), theme::muted())));
         }
     }
+    if r.play.is_live() {
+        if r.play.following() {
+            metrics.push((0, Span::styled("  ● LIVE", theme::ok().add_modifier(Modifier::BOLD))));
+            if let Some(then) = agent_fmt::when::parse_utc_iso(&fr.timestamp) {
+                metrics.push((0, Span::styled(format!(" · {}", agent_fmt::when::ago(r.now.saturating_sub(then))), theme::muted())));
+            }
+        } else {
+            metrics.push((0, Span::styled("  ● LIVE paused", theme::warn().add_modifier(Modifier::BOLD))));
+        }
+    }
+    for drop in [1u8, 2] {
+        if metrics.iter().map(|(_, s)| s.width()).sum::<usize>() <= width as usize {
+            break;
+        }
+        metrics.retain(|(p, _)| *p != drop);
+    }
+    let metrics: Vec<Span<'static>> = metrics.into_iter().map(|(_, s)| s).collect();
     vec![
         Line::from(vec![
             Span::styled("Session ", Style::new().add_modifier(Modifier::BOLD)),
@@ -568,7 +605,7 @@ fn draw_replay(f: &mut Draw, r: &mut Replay, shape: Shape) {
     let n = r.ways_len();
     r.sel = r.sel.min(n.saturating_sub(1));
     f.render_widget(Paragraph::new(tabs(shape, &[("timeline", r.view == View::Timeline), ("why fired", r.view == View::Why)])), bar);
-    f.render_widget(Paragraph::new(header(r)), head);
+    f.render_widget(Paragraph::new(header(r, head.width)), head);
     let marks = r.window_starts();
     f.render_widget(Scrubber { len: r.play.len(), pos: r.play.pos(), marks: &marks }, scrub);
     match r.view {
@@ -595,17 +632,21 @@ fn draw_replay(f: &mut Draw, r: &mut Replay, shape: Shape) {
             keys.push(("space", if r.play.playing() { "pause" } else { "play" }));
             keys.push(("+-", speed));
         }
-        keys.push(("tab", "why"));
+        // Tab opens the why view too; `⏎ why` already names it, and the
+        // bar has no room at 80 columns to say it twice.
     } else {
         keys.push(("esc", "timeline"));
     }
+    keys.push(("f", if r.matched { "injected" } else { "matched" }));
     keys.push(("q", "quit"));
     f.render_widget(Paragraph::new(key_bar(shape, mode, ground, &keys, Vec::new(), status.width)), status);
 }
 
 fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
     let inner_w = area.width.saturating_sub(2) as usize;
-    let fr = &r.frames[r.play.pos()];
+    let all = &r.frames[r.play.pos()];
+    // The gauge, zones and forecast count what was injected, in either view.
+    let fr = &all.shown(false);
     let mut ctx = table::context(fr, r.window_k, inner_w);
     // Keep what fits with at least six rows for the table: the forecast
     // goes first, then the zones, then the gauge.
@@ -618,10 +659,19 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
     let ctx_h = if ctx.is_empty() { 0 } else { ctx.len() as u16 + 2 };
     let [ways, context] = Layout::vertical([Constraint::Min(3), Constraint::Length(ctx_h)]).areas(area);
     let title = format!(" ways at epoch {} ", fr.epoch);
-    if fr.ways.is_empty() {
+    let shown = all.shown(r.matched);
+    if shown.ways.is_empty() {
         f.render_widget(Paragraph::new(Line::styled("no ways fired yet", theme::muted())).block(pane(title)), ways);
     } else {
-        let t = Table::new(table::rows(fr, r.window_k, inner_w), table::WIDTHS)
+        // The injected rows with their outcome marks, then, in the matched
+        // view, the rows the judge blocked: the order `Frame::ways` keeps.
+        let mut marked = fr.clone();
+        for w in &mut marked.ways {
+            w.id = format!("{}{}", w.outcome.mark(), w.id);
+        }
+        let mut rows = table::rows(&marked, r.window_k, inner_w);
+        rows.extend(shown.ways.iter().filter(|w| w.outcome == Outcome::Blocked).map(|w| blocked_row(w, shown.epoch)));
+        let t = Table::new(rows, table::WIDTHS)
             .header(table::header())
             .column_spacing(2)
             .block(pane(title))
@@ -640,22 +690,40 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
     }
 }
 
+/// A candidate the judge blocked, in the table's columns: judged in this
+/// frame, its P(yes) where the trigger goes, and nothing to re-disclose,
+/// for it injected nothing.
+fn blocked_row(w: &ActiveWay, epoch: u64) -> Row<'static> {
+    let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
+    Row::new(vec![
+        Cell::from(format!("{}{}", w.outcome.mark(), w.id)),
+        right(w.epoch_fired.to_string()),
+        right(epoch.saturating_sub(w.epoch_fired).to_string()),
+        Cell::from(format!("{} {}", w.trigger, w.p_yes)),
+        Cell::from(" "),
+        Cell::from("not injected"),
+    ])
+    .style(theme::muted())
+}
+
 fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
     let left_w = (area.width / 3).clamp(16, 40).min(area.width.saturating_sub(14));
     let [left, right] = Layout::horizontal([Constraint::Length(left_w), Constraint::Min(10)]).areas(area);
-    let fr = &r.frames[r.play.pos()];
+    let fr = &r.frames[r.play.pos()].shown(r.matched);
     let ew = fr.ways.iter().map(|w| w.epoch_fired).max().unwrap_or(0).to_string().len();
     let facet = |id: &str, trigger: &str| r.why.as_ref().and_then(|ix| ix.get(&(id.to_string(), trigger.to_string())));
     let items: Vec<ListItem> = fr
         .ways
         .iter()
         .map(|w| {
-            // A filled bullet marks a way the model has a record of on this channel.
+            // A filled bullet marks a way the model has a record of on this
+            // channel; a judge-blocked way's channel is `judge`.
             let bullet = if facet(&w.id, &w.trigger).is_some() { "•" } else { "·" };
+            let id = format!("{}{}", w.outcome.mark(), w.id);
             ListItem::new(Line::from(vec![
                 Span::raw(format!("{bullet} ")),
                 Span::styled(format!("e{:>ew$} ", w.epoch_fired), theme::muted()),
-                Span::raw(w.id.clone()),
+                if w.outcome == Outcome::Blocked { Span::styled(id, theme::muted()) } else { Span::raw(id) },
             ]))
         })
         .collect();

@@ -1,7 +1,7 @@
 agent-tui frame 120x40
 | introspect    timeline    why fired                                                                                    |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
-|epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55                                                             |
+|epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ◇ injected · 1 judged out                                  |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
 |┌ ways · epoch ────────────────────────┐┌ why it fired ────────────────────────────────────────────────────────────────┐|
 |│ • e1 softwaredev/delivery/commits    ││softwaredev/code/testing                                                      │|
@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                      ││                                                                              │|
 |│                                      ││                                                                              │|
 |└──────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────┘|
-| why   ↑↓ way  j/k read  ←→ frame  esc timeline  q quit                                                                 |
+| why   ↑↓ way  j/k read  ←→ frame  esc timeline  f matched  q quit                                                      |
 styles
   0   0-11  White Blue -
   0  14-23  White DarkGray DIM
@@ -46,6 +46,8 @@ styles
   1   0-7   - - BOLD
   1  44-59  - - DIM
   2   0-58  - - DIM
+  2  59-70  Cyan - -
+  2  71-85  - - DIM
   3   0-75  Cyan - -
   3  76-76  Cyan - BOLD
   3  77-115 - - DIM
@@ -186,4 +188,6 @@ styles
  39  35-37  Cyan - BOLD
  39  38-46  - - DIM|ITALIC
  39  49-49  Cyan - BOLD
- 39  50-54  - - DIM|ITALIC
+ 39  50-57  - - DIM|ITALIC
+ 39  60-60  Cyan - BOLD
+ 39  61-65  - - DIM|ITALIC

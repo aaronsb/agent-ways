@@ -269,7 +269,7 @@ fn the_selection_stays_on_its_way_across_frames() {
 #[test]
 fn anchor_keeps_the_same_way_or_the_nearest_earlier_one() {
     let r = replay(false);
-    let f = &r.frames[2];
+    let f = &r.frames[2].shown(false);
     let ids: Vec<&str> = f.ways.iter().map(|w| w.id.as_str()).collect();
     assert_eq!(ids, ["softwaredev/delivery/commits", "softwaredev/docs/adr", "softwaredev/code/testing"]);
     assert_eq!(reselect_by_anchor(f, "softwaredev/docs/adr", 2), 1, "still active: the same way");
@@ -338,4 +338,81 @@ fn the_why_reader_scrolls_within_its_document() {
     assert!(end.contains("golden"), "the end of the body is reached: {end}");
     press(&mut s, &[KeyCode::Char('g')]);
     assert!(text(&render(&mut s, 80, 25)).contains("Trigger"), "and the top again");
+}
+
+/// One frame the relevance judge saw: it passed testing, would have kept
+/// commits out in shadow mode, and blocked incident; a frame later adr fires.
+fn judged_replay() -> Replay {
+    let judged = |way: &str, verdict: &str| WayEvent { verdict: verdict.into(), ..ev("2026-07-03T16:52:01Z", "way_judged", way, "") };
+    let events = vec![
+        ev("2026-07-03T16:52:00Z", "session_start", "", ""),
+        judged("softwaredev/code/testing", "pass"),
+        judged("softwaredev/delivery/commits", "would_block"),
+        judged("itops/incident", "block"),
+        ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/code/testing", "semantic:embedding:en"),
+        ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/delivery/commits", "keyword"),
+        ev("2026-07-03T16:53:00Z", "way_fired", "softwaredev/docs/adr", "file"),
+    ];
+    let tokens: Vec<(String, u64)> = [("2026-07-03T16:52:00Z", 18), ("2026-07-03T16:53:00Z", 64)].iter().map(|(t, k)| (t.to_string(), *k)).collect();
+    let refire: HashMap<String, u64> =
+        [("softwaredev/code/testing", 40), ("softwaredev/delivery/commits", 30), ("softwaredev/docs/adr", 80)].iter().map(|(w, k)| (w.to_string(), *k)).collect();
+    let frames = build_frames(&events, &tokens, &refire, 50);
+    let mut r = Replay::new(SESSION.into(), PROJECT.into(), 200, frames, Playback::replay(2));
+    let mut m = model();
+    m.turns[0].fired_ways.push(FiredWay { gated: true, ..fired("itops/incident", "judge", None, None, Some(0.05)) });
+    r.why = Some(build_why_index(&m));
+    r
+}
+
+/// The selected row of a 120x40 render.
+fn selected(s: &mut Introspect) -> String {
+    text(&render(s, 120, 40)).lines().find(|l| l.contains('▌')).unwrap_or("").to_string()
+}
+
+/// Injected by default, the shadow would-block marked; `f` widens the
+/// table to every matched candidate, the judge-blocked row added, and back.
+#[test]
+fn f_toggles_the_table_between_injected_and_matched_ways() {
+    let mut s = Introspect::showing(judged_replay(), terminal(), Shape::PLAIN);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("◌ softwaredev/delivery/commits"), "{t}");
+    assert!(t.contains("softwaredev/code/testing"));
+    assert!(!t.contains("itops/incident"), "a blocked way is not injected: {t}");
+    assert!(t.contains("◇ injected · 1 judged out") && t.contains("f matched"), "{t}");
+
+    press(&mut s, &[KeyCode::Char('f')]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("⊘ itops/incident") && t.contains("judge 0.050") && t.contains("not injected"), "{t}");
+    assert!(t.contains("◆ matched") && t.contains("f injected"), "{t}");
+    assert!(t.contains("3 ways"), "{t}");
+
+    press(&mut s, &[KeyCode::Char('f')]);
+    assert!(!text(&render(&mut s, 120, 40)).contains("itops/incident"), "back to injected");
+}
+
+/// A blocked row is selectable and opens the why page by its id, on the
+/// `judge` channel the model files it under.
+#[test]
+fn a_blocked_row_opens_its_why_page() {
+    let mut s = Introspect::showing(judged_replay(), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('f'), KeyCode::Down, KeyCode::Down]);
+    assert!(selected(&mut s).contains("⊘ itops/incident"), "{}", selected(&mut s));
+    press(&mut s, &[KeyCode::Enter]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("• e1 ⊘ itops/incident"), "the why index has the row: {t}");
+    assert!(!t.contains("no fire record in the model"), "{t}");
+    // Narrowing the view drops the row; the cursor stays in range.
+    press(&mut s, &[KeyCode::Char('f')]);
+    assert!(!text(&render(&mut s, 120, 40)).contains("itops/incident"));
+}
+
+#[test]
+fn judged_golden_frames() {
+    let mut g = goldens();
+    let mut i = Introspect::showing(judged_replay(), terminal(), Shape::PLAIN);
+    check(&mut g, "judged-injected", &mut i);
+    let mut m = Introspect::showing(judged_replay(), terminal(), Shape::PLAIN);
+    press(&mut m, &[KeyCode::Char('f')]);
+    check(&mut g, "judged-matched", &mut m);
+    g.finish();
 }

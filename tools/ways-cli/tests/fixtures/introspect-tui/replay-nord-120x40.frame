@@ -1,7 +1,7 @@
 agent-tui frame 120x40
 | introspect    timeline    why fired                                                                              |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
-|epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55                                                             |
+|epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ◇ injected · 1 judged out                                  |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
@@ -36,9 +36,9 @@ agent-tui frame 120x40
 |│██████████████████████████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 66% (132K / 200K)│|
 |│● 1 re-disclose now  ◐ 1 approaching  ○ 1 distant  │ 30–80K intervals                                                 │|
 |│························◆·························································■·············· forecast 132K → 179K│|
-|│+ ↻ softwaredev/code/testing, ⊘ itops/incident (gate 0.050)                                                           │|
+|│+ ↻ softwaredev/code/testing                                                                                          │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| playing   ↑↓ select  ⏎ why  ←→ frame  space pause  +- 1.0s  tab why  q quit                                          |
+| playing   ↑↓ select  ⏎ why  ←→ frame  space pause  +- 1.0s  f matched  q quit                                        |
 styles
   0   0-0   #bfa2c3 - -
   0   1-12  #2e3440 #bfa2c3 -
@@ -52,6 +52,8 @@ styles
   1   0-7   - - BOLD
   1  44-59  #7c8baa - -
   2   0-58  #7c8baa - -
+  2  59-70  #c99fc1 - -
+  2  71-85  #7c8baa - -
   3   0-75  #c99fc1 - -
   3  76-76  #c99fc1 - BOLD
   3  77-114 #434c5e - -
@@ -149,7 +151,7 @@ styles
  36  84-118 #7c8baa - -
  36 119-119 #434c5e - -
  37   0-0   #434c5e - -
- 37   1-59  #a3be8c - BOLD
+ 37   1-28  #a3be8c - BOLD
  37 119-119 #434c5e - -
  38   0-119 #434c5e - -
  39   0-0   #a3be8c - -
@@ -165,7 +167,7 @@ styles
  39  46-51  #7c8baa - ITALIC
  39  54-55  #c99fc1 - BOLD
  39  56-60  #7c8baa - ITALIC
- 39  63-65  #c99fc1 - BOLD
- 39  66-69  #7c8baa - ITALIC
- 39  72-72  #c99fc1 - BOLD
- 39  73-77  #7c8baa - ITALIC
+ 39  63-63  #c99fc1 - BOLD
+ 39  64-71  #7c8baa - ITALIC
+ 39  74-74  #c99fc1 - BOLD
+ 39  75-79  #7c8baa - ITALIC
