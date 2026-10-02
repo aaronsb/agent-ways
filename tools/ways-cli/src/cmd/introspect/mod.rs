@@ -37,6 +37,7 @@ use agent_tui::theme::{Palette, Shape};
 
 use crate::session;
 pub(crate) use model::Frame;
+pub(crate) use screen::pane;
 use picker::Picker;
 use screen::{Introspect, Replay};
 
@@ -60,12 +61,12 @@ pub struct Open {
 }
 
 impl Open {
-    fn headless(&self) -> bool {
+    pub(crate) fn headless(&self) -> bool {
         !self.keys.is_empty() || self.snap.is_some()
     }
 }
 
-fn depth_of(s: Option<&str>) -> Result<ColorDepth> {
+pub(crate) fn depth_of(s: Option<&str>) -> Result<ColorDepth> {
     Ok(match s {
         None => ColorDepth::detect(),
         Some("truecolor") => ColorDepth::TrueColor,
@@ -78,7 +79,7 @@ fn depth_of(s: Option<&str>) -> Result<ColorDepth> {
 
 /// The palette and lozenge shape the settings choose (`theme.active`,
 /// `theme.shape`, ADR-504 note of 2026-10-01), at `depth`.
-fn look(depth: ColorDepth) -> (Palette, Shape) {
+pub(crate) fn look(depth: ColorDepth) -> (Palette, Shape) {
     let project = std::path::PathBuf::from(crate::util::project_dir());
     let layers = ways_core::settings::layers(&project);
     let value = |path: &[&str]| -> Option<String> {
@@ -93,8 +94,8 @@ fn look(depth: ColorDepth) -> (Palette, Shape) {
     (Palette { painter }, shape)
 }
 
-/// Show the screens: on the terminal until they close, or headless.
-fn show(mut screen: Introspect, open: &Open) -> Result<()> {
+/// Show a screen: on the terminal until it closes, or headless.
+pub(crate) fn show(mut screen: impl agent_tui::screen::Screen, open: &Open) -> Result<()> {
     if !open.headless() {
         if let Some(sig) = agent_tui::screen::run_screen(&mut screen)? {
             // The terminal is restored; end as the signal would have.

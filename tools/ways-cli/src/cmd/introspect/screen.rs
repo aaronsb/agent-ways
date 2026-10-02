@@ -571,7 +571,7 @@ impl Screen for Introspect {
 }
 
 /// A bordered pane in the theme, as the settings screens draw theirs.
-pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
+pub(crate) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
     Block::default().borders(Borders::ALL).border_style(theme::rule()).title(title).title_style(theme::title())
 }
 

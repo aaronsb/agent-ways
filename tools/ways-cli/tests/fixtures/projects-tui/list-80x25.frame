@@ -1,0 +1,86 @@
+agent-tui frame 80x25
+| projects                                                                       |
+|┌ ways projects list ──────────────────────────────────────────────────────────┐|
+|│ Project                                        Sessions   Size    Last Memory│|
+|│ /srv/app_one                                         2t   212B   today      ●│|
+|│▌/srv/legacy                                           2   104B     1mo      ·│|
+|│ -srv-gone                                             –      –       –      ·│|
+|└──────────────────────────────────────────────────────────────────────────────┘|
+|┌ ways projects show /srv/legacy ──────────────────────────────────────────────┐|
+|│file:///srv/legacy                                                            │|
+|│  Dir: -srv-legacy                                                            │|
+|│                                                                              │|
+|│  First session: 2026-07-01                                                   │|
+|│  Last active:  2026-08-20 (1mo)                                              │|
+|│  Last branch:  feat/parser                                                   │|
+|│                                                                              │|
+|│  Sessions:     2                                                             │|
+|│  Transcripts:  1  (104B)                                                     │|
+|│  Memory:       no                                                            │|
+|│                                                                              │|
+|│  Last summary: Port the parser                                               │|
+|│                                                                              │|
+|│  Recent first prompts:                                                       │|
+|│    › port the parser to rust                                                 │|
+|└──────────────────────────────────────────────────────────────────────────────┘|
+| projects   ↑↓ select  / filter  q quit                                      2/3|
+styles
+  0   0-9   White Blue -
+  1   0-0   - - DIM
+  1   1-20  Blue - BOLD|DIM
+  1  21-79  - - DIM
+  2   0-0   - - DIM
+  2   1-78  - - BOLD
+  2  79-79  - - DIM
+  3   0-0   - - DIM
+  3  79-79  - - DIM
+  4   0-0   - - DIM
+  4   1-1   Cyan - BOLD|REVERSED
+  4   2-78  - - BOLD|REVERSED
+  4  79-79  - - DIM
+  5   0-0   - - DIM
+  5  79-79  - - DIM
+  6   0-79  - - DIM
+  7   0-0   - - DIM
+  7   1-32  Blue - BOLD|DIM
+  7  33-79  - - DIM
+  8   0-0   - - DIM
+  8   1-18  Cyan - -
+  8  79-79  - - DIM
+  9   0-0   - - DIM
+  9  79-79  - - DIM
+ 10   0-0   - - DIM
+ 10  79-79  - - DIM
+ 11   0-0   - - DIM
+ 11  79-79  - - DIM
+ 12   0-0   - - DIM
+ 12  79-79  - - DIM
+ 13   0-0   - - DIM
+ 13  79-79  - - DIM
+ 14   0-0   - - DIM
+ 14  79-79  - - DIM
+ 15   0-0   - - DIM
+ 15  79-79  - - DIM
+ 16   0-0   - - DIM
+ 16  79-79  - - DIM
+ 17   0-0   - - DIM
+ 17  79-79  - - DIM
+ 18   0-0   - - DIM
+ 18  79-79  - - DIM
+ 19   0-0   - - DIM
+ 19  79-79  - - DIM
+ 20   0-0   - - DIM
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
+ 21  79-79  - - DIM
+ 22   0-0   - - DIM
+ 22  79-79  - - DIM
+ 23   0-79  - - DIM
+ 24   0-9   Black Cyan BOLD
+ 24  12-13  Cyan - BOLD
+ 24  14-20  - - DIM|ITALIC
+ 24  23-23  Cyan - BOLD
+ 24  24-30  - - DIM|ITALIC
+ 24  33-33  Cyan - BOLD
+ 24  34-38  - - DIM|ITALIC
+ 24  77-79  - - DIM

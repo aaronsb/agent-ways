@@ -523,3 +523,99 @@ fn fmt_bytes_and_age_match_claude_projects() {
     assert_eq!(age(NOW, Some(NOW - 800 * 86_400)), "2y");
     assert_eq!(age(NOW, None), "");
 }
+
+// ── The screen ──────────────────────────────────────────────────
+
+use super::screen::Projects;
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use agent_tui::screen::Screen;
+use agent_tui::testkit::{render_screen, text, Goldens};
+use agent_tui::theme::{Palette, Shape};
+
+fn screen(f: &Fixture) -> Projects {
+    Projects::new(&f.env, Palette::terminal(agent_theme::ColorDepth::TrueColor), Shape::PLAIN)
+}
+
+fn press(s: &mut Projects, keys: &[KeyCode]) -> bool {
+    keys.iter().all(|k| s.key(KeyEvent::new(*k, KeyModifiers::NONE)))
+}
+
+fn type_in(s: &mut Projects, t: &str) -> bool {
+    press(s, &t.chars().map(KeyCode::Char).collect::<Vec<_>>())
+}
+
+fn shows(s: &mut Projects) -> String {
+    text(&render_screen(s, 120, 40))
+}
+
+#[test]
+fn screen_golden_frames() {
+    let mut g = Goldens::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/projects-tui"));
+    let f = populated("screen-golden");
+    let check = |g: &mut Goldens, name: &str, s: &mut Projects| {
+        for (w, h) in [(80, 25), (120, 40)] {
+            g.check(&format!("{name}-{w}x{h}"), &render_screen(s, w, h));
+        }
+    };
+    // The project with an index selected: its sessions in the detail.
+    let mut s = screen(&f);
+    press(&mut s, &[KeyCode::Down]);
+    check(&mut g, "list", &mut s);
+    // A filter being typed.
+    let mut s = screen(&f);
+    press(&mut s, &[KeyCode::Char('/')]);
+    type_in(&mut s, "parser");
+    check(&mut g, "filter", &mut s);
+    g.finish();
+}
+
+#[test]
+fn screen_selects_and_shows_the_selected_project() {
+    let f = populated("screen-select");
+    let mut s = screen(&f);
+    let out = shows(&mut s);
+    assert!(out.contains(" ways projects list "), "{out}");
+    assert!(out.contains(" ways projects show /srv/app_one "), "{out}");
+    assert!(out.contains("Memory:       yes (1 files)"), "{out}");
+    assert!(press(&mut s, &[KeyCode::Down]));
+    let out = shows(&mut s);
+    assert!(out.contains(" ways projects show /srv/legacy "), "{out}");
+    assert!(out.contains("Last summary: Port the parser"), "{out}");
+    assert!(out.contains("2/3"), "{out}");
+    // The selection stops at the last row.
+    assert!(press(&mut s, &[KeyCode::Down, KeyCode::Down, KeyCode::Down]));
+    assert!(shows(&mut s).contains("3/3"));
+}
+
+#[test]
+fn screen_filters_as_search_matches_and_esc_clears() {
+    let f = populated("screen-filter");
+    let mut s = screen(&f);
+    assert!(press(&mut s, &[KeyCode::Char('/')]));
+    // While the filter is typed, q is a letter.
+    assert!(type_in(&mut s, "port the q"));
+    assert!(shows(&mut s).contains("No matching projects found."));
+    assert!(press(&mut s, &[KeyCode::Backspace, KeyCode::Backspace]));
+    // A session summary matches, as `search` matches it.
+    let out = shows(&mut s);
+    assert!(out.contains(" ways projects search port the ") && out.contains("1/1"), "{out}");
+    assert!(out.contains(" ways projects show /srv/legacy "), "{out}");
+    // Enter keeps the filter; Esc then clears it, the selection kept.
+    assert!(press(&mut s, &[KeyCode::Enter, KeyCode::Esc]));
+    let out = shows(&mut s);
+    assert!(out.contains(" ways projects list ") && out.contains("2/3"), "{out}");
+    // Esc while typing clears too.
+    assert!(press(&mut s, &[KeyCode::Char('/')]) && type_in(&mut s, "gone"));
+    assert!(shows(&mut s).contains("1/1"));
+    assert!(press(&mut s, &[KeyCode::Esc]));
+    assert!(shows(&mut s).contains("/3"));
+}
+
+#[test]
+fn screen_q_and_esc_quit() {
+    let f = populated("screen-quit");
+    assert!(!press(&mut screen(&f), &[KeyCode::Char('q')]));
+    assert!(!press(&mut screen(&f), &[KeyCode::Esc]), "Esc with no filter ends the screen");
+    let mut s = screen(&f);
+    assert!(!s.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+}
