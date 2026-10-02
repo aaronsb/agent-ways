@@ -106,4 +106,27 @@ check "inject-subagent ignores the parent's refire state" "$expected" "$(inject 
 check "inject-subagent logs each injection" "8" \
     "$(jq -r 'select(.event=="way_fired" and .scope=="subagent") | .way' "$XDG_STATE_HOME/agent-ways/events.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
 
+# The code-quality macro runs on every fire of its way, SubagentStart
+# included. Its process count must not grow with the repo (#705): one spawn
+# of `file` and of `wc` per tracked file cost 3.5 s on a 1,600-file repo.
+# Shims on PATH count those spawns over a 300-file repo.
+REPO="$WORK/quality-repo" SHIMS="$WORK/shims" SPAWNS="$WORK/spawns.log"
+mkdir -p "$REPO" "$SHIMS"
+for tool in file wc; do
+    printf '#!/bin/sh\necho %s >> "%s"\nexec %s "$@"\n' "$tool" "$SPAWNS" "$(command -v $tool)" > "$SHIMS/$tool"
+    chmod +x "$SHIMS/$tool"
+done
+for i in $(seq 1 300); do printf 'a\nb\nc\n' > "$REPO/short$i.rs"; done
+seq 1 600 > "$REPO/long.rs"
+seq 1 900 > "$REPO/has space.rs"
+seq 1 900 > "$REPO/notes.md"                                   # excluded by scan_exclude
+{ printf '\211PNG\r\n\032\n\0\0\0\rIHDR'; seq 1 600; } > "$REPO/blob.png"  # binary
+{ seq 1 500; printf 'tail'; } > "$REPO/edge.rs"                # 500 lines to wc
+git -C "$REPO" init -q && git -C "$REPO" add -A
+out=$(cd "$REPO" && PATH="$SHIMS:$PATH" bash "$HOOKS/softwaredev/code/quality/macro.sh")
+check "quality macro spawns file once" "1" "$(grep -c '^file$' "$SPAWNS")"
+check "quality macro spawns wc once" "1" "$(grep -c '^wc$' "$SPAWNS")"
+check "quality macro lists only long text files" \
+    $'  900  has space.rs\n  600  long.rs' "$(grep -E '^ +[0-9]+  ' <<< "$out")"
+
 exit $fail

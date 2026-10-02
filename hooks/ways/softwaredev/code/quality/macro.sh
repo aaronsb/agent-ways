@@ -21,13 +21,37 @@ EXCLUDE_PATTERN="${EXCLUDE_PATTERN:-$DEFAULT_EXCLUDE}"
 THRESHOLD=500
 PRIORITY_THRESHOLD=800
 
-# Collect files over threshold
-results=$(git ls-files 2>/dev/null | grep -Ev "$EXCLUDE_PATTERN" | while read -r f; do
-  [[ -f "$f" && -r "$f" ]] || continue
+# Collect files over threshold. The spawn count stays fixed whatever the
+# repo size: one `git grep -c` counts the lines of every tracked file, and
+# `file` and `wc` then run once each over the few files past the threshold.
+# Spawning `file`, `grep` and `wc` per tracked file cost about 2,700 execs
+# and 3.5 s on a 1,600-file repo, paid on each fire and each SubagentStart
+# (#705). `git grep -c` counts an unterminated last line where `wc -l` does
+# not, so it never drops a file `wc` would keep; `wc` gives the exact count.
+tracked=$(git ls-files 2>/dev/null | grep -Ev "$EXCLUDE_PATTERN")
+[[ -z "$tracked" ]] && exit 0
+
+candidates=()
+while IFS=$'\t' read -r f n; do
+  ((n > THRESHOLD)) && [[ -f "$f" && -r "$f" ]] && candidates+=("$f")
+done < <(printf '%s\n' "$tracked" | tr '\n' '\0' \
+  | GIT_LITERAL_PATHSPECS=1 xargs -0 git -c grep.fullName=false \
+      grep --no-color -c --null -e '' -- 2>/dev/null \
+  | tr '\0' '\t')
+((${#candidates[@]})) || exit 0
+
+# `file -b` and `wc -l` both report in argument order, one line per file.
+mimes=()
+while IFS= read -r m; do mimes+=("$m"); done \
+  < <(file -b --mime -- "${candidates[@]}" 2>/dev/null)
+counts=()
+while read -r n _; do counts+=("$n"); done \
+  < <(wc -l -- "${candidates[@]}" 2>/dev/null)
+
+results=$(for i in "${!candidates[@]}"; do
   # Skip binary files
-  file --mime "$f" 2>/dev/null | grep -q 'text/' || continue
-  lines=$(wc -l < "$f" 2>/dev/null)
-  ((lines > THRESHOLD)) && printf "%5d  %s\n" "$lines" "$f"
+  [[ "${mimes[$i]}" == *text/* ]] || continue
+  ((counts[i] > THRESHOLD)) && printf "%5d  %s\n" "${counts[$i]}" "${candidates[$i]}"
 done | sort -rn)
 
 [[ -z "$results" ]] && exit 0
