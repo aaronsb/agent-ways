@@ -12,9 +12,10 @@ use std::path::{Path, PathBuf};
 pub const FILE: &str = "config";
 
 /// The sections the hook commands read (ADR-503 §5). `config::global()`
-/// serves the hooks and `reconcile` alike, so every ways section is read on
-/// the hook path. The list is explicit so a hook names each section it loads,
-/// through `load-sections`, never a whole-file `load-all`.
+/// serves the hooks and `reconcile` alike, so every ways section but
+/// `theme` is read on the hook path; no hook reads a theme (ADR-504 §11).
+/// The list is explicit so a hook names each section it loads, through
+/// `load-sections`, never a whole-file `load-all`.
 pub const HOOK_SECTIONS: &[&str] =
     &["ways", "ways.switch", "ways.domains", "matching", "install.targets", "install.secret_path_deny", "ways.project"];
 
@@ -78,6 +79,14 @@ const SECTIONS: &[SectionSpec] = &[
         top: &["ways"],
         per_entry: true, repair: None,
         doc: "Per-way switches for one project (ADR-131), in its .claude/ways.yaml. Each entry falls back alone.",
+    },
+    // Not in HOOK_SECTIONS: no hook path reads a theme (ADR-504 §11).
+    SectionSpec {
+        name: "theme",
+        file: FILE,
+        top: &["theme"],
+        per_entry: false, repair: None,
+        doc: "The look of the interactive screens: the active theme and the lozenge shape (ADR-504).",
     },
 ];
 
@@ -231,6 +240,28 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
+        name: "theme.active",
+        section: "theme",
+        path: &["theme", "active"],
+        default: DefaultValue::Yaml("terminal"),
+        scope: Scope::User,
+        check: Some(check_theme_name),
+        doc: "The theme the interactive screens draw with.",
+        long: "A bundled theme or one in $XDG_CONFIG_HOME/agent-ways/themes (ADR-504 §5). terminal is the terminal's own 16 colours; another theme is used where the terminal shows 256 colours or more, and terminal in its place below that. The theme tab of `ways settings` previews and sets it.",
+        ..BASE
+    },
+    KeySpec {
+        name: "theme.shape",
+        section: "theme",
+        path: &["theme", "shape"],
+        kind: Kind::Choice(&["round", "plain", "flame", "arrow", "slant", "pixel"]),
+        default: DefaultValue::Yaml("round"),
+        scope: Scope::User,
+        doc: "The lozenge caps of tabs and the bottom bar.",
+        long: "Every shape but plain draws Nerd Font glyphs; plain lets the coloured segments abut, for a terminal font without them.",
+        ..BASE
+    },
+    KeySpec {
         name: "install.secret_path_deny",
         section: "install.secret_path_deny",
         fail_closed: Some(closed_deny),
@@ -317,6 +348,14 @@ fn closed_targets(v: &Value) -> Option<Value> {
     m.insert("path".into(), path.into());
     m.insert("enabled".into(), Value::Bool(false));
     Some(Value::Sequence(vec![Value::Mapping(m)]))
+}
+
+/// A theme name as a theme file names itself: `[a-z0-9-]+`.
+fn check_theme_name(v: &Value) -> Result<(), String> {
+    match v.as_str() {
+        Some(n) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') => Ok(()),
+        _ => Err("a theme name is lowercase letters, digits and -".into()),
+    }
 }
 
 fn check_targets(v: &Value) -> Result<(), String> {

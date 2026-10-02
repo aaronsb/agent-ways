@@ -265,34 +265,39 @@ impl Painter {
         Painter { depth, roles: Some(Roles::derive(theme)), fill: theme.background == Background::Fill, plain: false }
     }
 
-    /// The user's active theme (ADR-504 §5) at the environment's depth,
-    /// chosen by [`Painter::select`]; plain when output is not a terminal,
-    /// as [`Painter::detect`]. A warning from [`Painter::active_in`] goes to
-    /// stderr. This reads the theme directory, so hook paths never call it
-    /// (§11).
-    pub fn active() -> Painter {
+    /// The theme named `name`, the active choice its caller read from the
+    /// settings registry (`theme.active`, ADR-503), at the environment's
+    /// depth, chosen by [`Painter::select`]; plain when output is not a
+    /// terminal, as [`Painter::detect`]. A warning from [`Painter::named_in`]
+    /// goes to stderr. This reads the theme directory, so hook paths never
+    /// call it (ADR-504 §11).
+    pub fn named(name: Option<&str>) -> Painter {
         if !styled_output() {
             return Painter::plain();
         }
         let depth = ColorDepth::detect();
         let Some(dir) = crate::bundled::user_dir() else { return Painter::terminal(depth) };
-        let (p, warning) = Painter::active_in(&dir, depth);
+        let (p, warning) = Painter::named_in(name, &dir, depth);
         if let Some(w) = warning {
             eprintln!("agent-ways theme: {w}");
         }
         p
     }
 
-    /// The active theme named in `dir` at `depth`, and a warning when the
-    /// choice could not be honoured as written: the named theme does not
-    /// exist, or a user file meant to override it failed to load.
-    pub fn active_in(dir: &std::path::Path, depth: ColorDepth) -> (Painter, Option<String>) {
-        let Some(name) = crate::bundled::active_name(dir) else { return (Painter::terminal(depth), None) };
+    /// The theme `name` from the bundled themes and the user themes in
+    /// `dir`, at `depth`, and a warning when the choice could not be
+    /// honoured as written: the named theme does not exist, or a user file
+    /// meant to override it failed to load. No name, or the default's
+    /// ([`crate::TERMINAL`]), is the terminal palette.
+    pub fn named_in(name: Option<&str>, dir: &std::path::Path, depth: ColorDepth) -> (Painter, Option<String>) {
+        let Some(name) = name.map(str::trim).filter(|n| !n.is_empty() && *n != crate::bundled::TERMINAL) else {
+            return (Painter::terminal(depth), None);
+        };
         let set = crate::bundled::ThemeSet::load(Some(dir));
         let rejected = set.rejected.iter().find(|(file, _)| {
-            std::path::Path::new(file).file_stem().and_then(|s| s.to_str()) == Some(name.as_str())
+            std::path::Path::new(file).file_stem().and_then(|s| s.to_str()) == Some(name)
         });
-        let warning = match (set.get(&name), rejected) {
+        let warning = match (set.get(name), rejected) {
             (None, None) => Some(format!("theme `{name}` not found; using the default")),
             (found, Some((file, errs))) => {
                 let first = errs.first().map(|e| e.to_string()).unwrap_or_default();
@@ -301,7 +306,7 @@ impl Painter {
             }
             (Some(_), None) => None,
         };
-        (Painter::select(set.get(&name), depth), warning)
+        (Painter::select(set.get(name), depth), warning)
     }
 
     pub fn depth(&self) -> ColorDepth {
