@@ -69,20 +69,16 @@ pub(crate) fn macro_env(source: &str, run: &MacroRun, facts: &dyn MacroFacts) ->
         ("WAYS_SESSIONS_ROOT", Some(crate::session::sessions_root())),
         ("WAYS_SCOPE", Some(run.scope.to_string())),
     ];
-    if source.contains("WAYS_CONTEXT_") {
-        let ctx = facts.context(run);
-        env.push(("WAYS_CONTEXT_USED", ctx.map(|c| c.0.to_string())));
-        env.push(("WAYS_CONTEXT_REMAINING", ctx.map(|c| c.1.to_string())));
-        env.push(("WAYS_CONTEXT_PCT_REMAINING", ctx.map(|c| c.2.to_string())));
-    }
-    if source.contains("WAYS_ENABLED_PLUGINS") {
-        let plugins = facts.enabled_plugins(run);
-        env.push(("WAYS_ENABLED_PLUGINS", (!plugins.is_empty()).then(|| plugins.join("\n"))));
-    }
+    // Each on-demand name is pushed whether computed or not: a name the macro
+    // does not mention is removed, never inherited from the hook's process.
+    let ctx = source.contains("WAYS_CONTEXT_").then(|| facts.context(run)).flatten();
+    env.push(("WAYS_CONTEXT_USED", ctx.map(|c| c.0.to_string())));
+    env.push(("WAYS_CONTEXT_REMAINING", ctx.map(|c| c.1.to_string())));
+    env.push(("WAYS_CONTEXT_PCT_REMAINING", ctx.map(|c| c.2.to_string())));
+    let plugins = if source.contains("WAYS_ENABLED_PLUGINS") { facts.enabled_plugins(run) } else { Vec::new() };
+    env.push(("WAYS_ENABLED_PLUGINS", (!plugins.is_empty()).then(|| plugins.join("\n"))));
     for (var, tool) in [("WAYS_ADR_TOOL", "adr"), ("WAYS_DOC_TOOL", "doc")] {
-        if source.contains(var) {
-            env.push((var, facts.project_tool(run, tool)));
-        }
+        env.push((var, source.contains(var).then(|| facts.project_tool(run, tool)).flatten()));
     }
     env
 }
@@ -262,6 +258,18 @@ mod tests {
         assert_eq!(value(&env, "WAYS_SCOPE"), Some("subagent"));
         assert_eq!(value(&env, "WAYS_SESSIONS_ROOT").map(str::to_string), Some(crate::session::sessions_root()));
         assert!(fake.reads.borrow().is_empty(), "nothing named, nothing read");
+        // Every on-demand name is removed, so the hook's own environment
+        // (a parent that exported WAYS_CONTEXT_USED, say) cannot leak in.
+        for name in [
+            "WAYS_CONTEXT_USED",
+            "WAYS_CONTEXT_REMAINING",
+            "WAYS_CONTEXT_PCT_REMAINING",
+            "WAYS_ENABLED_PLUGINS",
+            "WAYS_ADR_TOOL",
+            "WAYS_DOC_TOOL",
+        ] {
+            assert!(env.iter().any(|(n, v)| *n == name && v.is_none()), "{name} is not removed");
+        }
     }
 
     #[test]

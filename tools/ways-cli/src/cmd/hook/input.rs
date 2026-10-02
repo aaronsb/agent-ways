@@ -84,7 +84,8 @@ impl HookInput {
     pub fn common(&self, env_project: Option<String>) -> Common {
         Common {
             session: self.text("/session_id"),
-            agent_id: self.text("/agent_id"),
+            // Names marker files, so held to the session id's rule.
+            agent_id: self.text("/agent_id").filter(|a| crate::session::is_plain_session_id(a)),
             project: env_project.filter(|p| !p.is_empty()).or_else(|| self.text("/cwd")),
             transcript: self.text("/transcript_path"),
         }
@@ -174,6 +175,9 @@ mod tests {
         assert_eq!(input.common(Some("/srv/env".into())).project.as_deref(), Some("/srv/env"));
         assert_eq!(input.common(Some(String::new())).project.as_deref(), Some("/srv/cwd"));
         assert_eq!(HookInput::parse("not json").common(None), Common::default());
+        // The agent id names marker files: one that is not plain is absent.
+        let odd = HookInput::parse(r#"{"session_id":"s1","agent_id":"/../"}"#);
+        assert_eq!(odd.common(None).agent_id, None);
     }
 
     #[test]

@@ -66,11 +66,8 @@ pub fn inject(session_id: &str, project_dir: &str) -> anyhow::Result<String> {
     }
     let scope = if stash.is_teammate { "teammate" } else { "subagent" };
     let mut context = String::new();
-    for (i, way) in stash.ways.iter().enumerate().filter(|(_, w)| !w.is_empty()) {
-        let out = show::subagent_way(way, session_id, scope)?;
-        if out.is_empty() {
-            continue;
-        }
+    for (i, out) in render_ways(&stash.ways, |way| show::subagent_way(way, session_id, scope)) {
+        let way = &stash.ways[i];
         context.push_str(&out);
         context.push_str("\n\n");
         let trigger = stash.channels.get(i).map_or("prompt", String::as_str);
@@ -92,9 +89,33 @@ pub fn inject(session_id: &str, project_dir: &str) -> anyhow::Result<String> {
     Ok(context.trim_end().to_string())
 }
 
+/// Each stashed way rendered, by stash index; ways that render empty are left
+/// out.
+fn render_ways(ways: &[String], render: impl Fn(&str) -> anyhow::Result<String>) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    for (i, way) in ways.iter().enumerate().filter(|(_, w)| !w.is_empty()) {
+        // One way that fails to render is skipped; the rest still inject.
+        let Ok(text) = render(way) else { continue };
+        if !text.is_empty() {
+            out.push((i, text));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_way_that_fails_to_render_does_not_stop_the_rest() {
+        let ways = vec!["aa/broken".to_string(), String::new(), "zz/ok".to_string()];
+        let got = render_ways(&ways, |w| match w {
+            "aa/broken" => Err(anyhow::anyhow!("unreadable")),
+            other => Ok(format!("# {other}")),
+        });
+        assert_eq!(got, vec![(2, "# zz/ok".to_string())]);
+    }
 
     #[test]
     fn defined_agents_are_found_in_each_place_and_odd_names_never_looked_up() {

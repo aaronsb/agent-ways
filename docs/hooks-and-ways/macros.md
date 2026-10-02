@@ -27,7 +27,7 @@ A macro gets no stdin and no arguments. The `ways` binary runs it with bash and 
 | `WAYS_ENABLED_PLUGINS` | Enabled plugin ids (`name@marketplace`), one per line, from the `enabledPlugins` maps in Claude Code's settings files |
 | `WAYS_ADR_TOOL`, `WAYS_DOC_TOOL` | The project-relative path of the first executable `docs/scripts/`, `scripts/` or `tools/` `adr` (`doc`), when there is one |
 
-The last three rows cost a transcript read, a settings read or a few stats, so the binary computes each only for a macro whose source names the variable. A variable with no value is unset. A `postcheck.sh` gets `CLAUDE_SESSION_ID`, `CLAUDE_PROJECT_DIR` and `WAYS_SESSIONS_ROOT`, with the hook payload on stdin. A project-local postcheck runs under the same trust rule as a project-local macro (below).
+The last three rows cost a transcript read, a settings read or a few stats, so the binary computes each only for a macro whose source names the variable. A value is set only when the macro's own source names it: every other name in those rows is removed from the macro's environment, so a value exported by the shell that ran the hook never leaks in. A named variable with no value is unset too. A `postcheck.sh` gets `CLAUDE_SESSION_ID`, `CLAUDE_PROJECT_DIR` and `WAYS_SESSIONS_ROOT`, with the hook payload on stdin. A project-local postcheck runs under the same trust rule as a project-local macro (below).
 
 ## Why Macros Exist
 

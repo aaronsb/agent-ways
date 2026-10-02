@@ -296,6 +296,29 @@ check "post-tool finds postchecks under a symlinked core root" "yes" "$(grep -q 
 rm "$CORE" && mv "$WORK/core-real" "$CORE"
 rm -rf "$CORE/postdom" "$PROJ/.claude/ways/postdom"
 
+# One broken way does not stop the scan: aa/broken has no `refire:` (an
+# error on the fire path), and zz/ok after it still fires.
+mkdir -p "$CORE/aa/broken"
+printf -- '---\ndescription: broken way\nscope: agent\n---\n# Broken body\n' > "$CORE/aa/broken/broken.md"
+postcheck "$CORE/aa/broken" "exit 0"
+way "$CORE" zz/ok agent "# Ok body"
+postcheck "$CORE/zz/ok" "exit 0"
+out=$(post sess-post-5 PostToolUse)
+check "post-tool fires zz/ok past a broken way" "yes" "$(grep -q 'Ok body' <<< "$out" && echo yes || echo no)"
+rm -rf "$CORE/aa" "$CORE/zz"
+
+# A hung postcheck does not hang the hook: the scan gives every postcheck one
+# deadline, and the fast one's way still fires.
+way "$CORE" hangdom/slow agent "# Slow body"
+postcheck "$CORE/hangdom/slow" "sleep 8; exit 0"
+way "$CORE" hangdom/fast agent "# Fast body"
+postcheck "$CORE/hangdom/fast" "exit 0"
+secs=$( { time ( post sess-post-6 PostToolUse > "$WORK/hang.json" ); } 2>&1 )
+check "post-tool returns under 4 s beside a hung postcheck (took ${secs} s)" "yes" "$(under "$secs" 4)"
+check "post-tool still fires the fast postcheck's way" "yes" "$(grep -q 'Fast body' "$WORK/hang.json" && echo yes || echo no)"
+check "post-tool drops the hung postcheck's way" "no" "$(grep -q 'Slow body' "$WORK/hang.json" && echo yes || echo no)"
+rm -rf "$CORE/hangdom"
+
 # A project-local postcheck is project code, gated like a project macro: it
 # runs only for a project listed in ~/.claude/trusted-project-macros.
 way "$PROJ/.claude/ways" projdom/local agent "# Project local body"

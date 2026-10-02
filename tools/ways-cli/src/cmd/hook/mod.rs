@@ -74,7 +74,7 @@ pub fn run(event: HookEvent) -> Result<()> {
             // As in the scan lanes: fired ways read the model and the refire
             // window from the invoking agent's transcript.
             crate::cmd::show::set_firing_transcript(transcript);
-            emit(&hook_event, &post_tool::scan(&raw, &session, &project_dir)?);
+            emit(&hook_event, &post_tool::scan(&raw, &session, &project_dir));
             Ok(())
         }
         Request::Queued { session, transcript } => {

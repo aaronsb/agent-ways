@@ -270,3 +270,7 @@ A dry-run spike (`tools/spikes/settings-tui` on `spike/settings-tui`) built the 
 The operator, on the review of PR #711: "the default theme should be something that works on a conventional 16 color terminal, then any other theme can be chosen (with the 16 color theme as a fallback if the terminal isn't 256 or true color)".
 
 The default theme is the 16-colour terminal palette: the status roles are the terminal's own ANSI colours, muted text is dim and selection is reverse video. Any other theme can be chosen. A chosen theme is used only where the detected depth is 256 or truecolor; on a 16-colour terminal the whole default theme is used in its place, not the chosen theme reduced to 16 colours. Without colour, behaviour is as §4 and §6 state. `agent_theme::Painter::select` holds the rule.
+
+## Note (2026-10-02): the hooks call `ways hook <event>`
+
+§11's list of the commands hooks run is out of date. Since #702 (PR #730) every script under `hooks/ways/` is an adapter that runs `ways hook <event>`, which reads the hook's JSON payload on stdin. The events are `prompt`, `state`, `command`, `file`, `task`, `post-tool`, `queued`, `stop`, `subagent-start`, `session-start` and `tasks-active`; they reach the same scan and show code §11 names. The postcheck loop §11 left in `check-post.sh` as a follow-up now lives in the binary as the post-tool scan. `ways show way --budget-used` and `--subagent`, and `ways response-topics-path`, which only hooks called, are removed. `attend inbox --drain` on Stop is unchanged.
