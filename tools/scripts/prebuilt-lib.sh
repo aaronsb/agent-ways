@@ -92,7 +92,8 @@ binary_version() {
 }
 
 # Whether version A is at or ahead of B: numeric X.Y.Z cores compared in
-# order, and at an equal core a pre-release (1.2.0-rc1) is behind the release.
+# order, and at an equal core a pre-release (1.2.0-rc1) is behind the release
+# while two pre-releases are level.
 # A version that does not parse is at least B only when it equals B. The same
 # order as `version_older` in tools/ways-cli/src/cmd/update.rs.
 version_at_least() {
@@ -101,7 +102,7 @@ version_at_least() {
   ac="${a%%-*}" bc="${b%%-*}"
   [[ "$ac" =~ ^[0-9]+(\.[0-9]+)*$ && "$bc" =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 1
   if [[ "$ac" == "$bc" ]]; then
-    [[ "$a" != *-* ]]  # equal cores: A is behind only when it is a pre-release
+    [[ "$a" != *-* || "$b" == *-* ]]  # equal cores: A is behind only as a pre-release of a release
     return
   fi
   [[ "$(printf '%s\n%s\n' "$ac" "$bc" | sort -V | tail -1)" == "$ac" ]]
@@ -159,7 +160,7 @@ prebuilt_install() (
   fi
 
   if ! command -v gh >/dev/null 2>&1; then
-    [[ -n "$installed" ]] && keep_installed
+    [[ -n "$installed" ]] && echo "gh CLI not found; cannot check for a newer ${comp}." >&2 && keep_installed
     echo "error: gh CLI not found — build from source instead:" >&2
     echo "  ${hint}" >&2
     exit 1
@@ -169,7 +170,7 @@ prebuilt_install() (
     # A failed API call (retries exhausted) is an honest error; an empty
     # answer means the API was reached and no release matches.
     if ! tag=$(latest_tag_for_prefix "$repo" "${comp}-v"); then
-      [[ -n "$installed" ]] && keep_installed
+      [[ -n "$installed" ]] && echo "Could not reach GitHub Releases; cannot check for a newer ${comp}." >&2 && keep_installed
       echo "error: could not reach GitHub Releases after retries (network/gh/auth?)." >&2
       echo "  Falling back to build-from-source: ${hint}" >&2
       exit 1

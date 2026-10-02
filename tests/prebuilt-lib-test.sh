@@ -189,6 +189,7 @@ JSON
   ge() { if version_at_least "$1" "$2"; then echo yes; else echo no; fi; }
   check "version_at_least orders numeric cores" "yes:no:yes" "$(ge 0.10.0 0.9.0):$(ge 0.9.0 0.10.0):$(ge 1.2.0 1.2.0)"
   check "a pre-release is behind its release" "no:yes" "$(ge 1.2.0-rc1 1.2.0):$(ge 1.2.0 1.2.0-rc1)"
+  check "two pre-releases of one core are level" "yes:yes" "$(ge 1.2.0-rc2 1.2.0-rc1):$(ge 1.2.0-rc1 1.2.0-rc2)"
   check "an unparseable version is behind any other" "no:yes" "$(ge unknown 1.0.0):$(ge unknown unknown)"
 
   check "curl is never called" "no" "$(yn grep -q '^curl' "$FAKE/calls")"

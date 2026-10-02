@@ -607,9 +607,9 @@ fn refresh_stale(app: &Path, stale: &Stale, has_toolchain: bool) -> Result<()> {
     let Some(now) = stale_suite_binaries(app).into_iter().find(|s| s.name == name) else {
         return Ok(());
     };
-    // The download script says why it failed on stderr; a success that left the
-    // binary behind means the latest release trails the source.
-    let why = if fetched { format!("no {name} {} release yet", now.source) } else { "the release download failed".to_string() };
+    // The download script says on stderr why it failed, or why it kept the
+    // binary without checking (no gh, GitHub unreachable).
+    let why = if fetched { format!("no {name} {} release reachable", now.source) } else { "the release download failed".to_string() };
     if !has_toolchain {
         bail!(
             "{name} is {}, source is {}: {why}, and no toolchain to build it; the next update checks again",
@@ -1076,8 +1076,17 @@ mod tests {
         // No toolchain: it stays at the latest release and says why.
         let app = stale_app("0.5.0");
         let err = refresh_stale(&app, &stale(&app), false).unwrap_err().to_string();
-        assert!(err.contains("no ways-agent 0.5.1 release yet"), "got: {err}");
+        assert!(err.contains("no ways-agent 0.5.1 release reachable"), "got: {err}");
         assert_eq!(calls(&app), "download\n");
+        let _ = std::fs::remove_dir_all(&app);
+
+        // A failed download says so, and the build still runs.
+        let app = stale_app("0.5.0");
+        std::fs::write(app.join("tools/scripts/download-prebuilt.sh"), "#!/bin/sh\necho download >> calls\nexit 1\n").unwrap();
+        let err = refresh_stale(&app, &stale(&app), false).unwrap_err().to_string();
+        assert!(err.contains("the release download failed"), "got: {err}");
+        refresh_stale(&app, &stale(&app), true).unwrap();
+        assert_eq!(calls(&app), "download\ndownload\nrebuild\n");
         let _ = std::fs::remove_dir_all(&app);
     }
 
