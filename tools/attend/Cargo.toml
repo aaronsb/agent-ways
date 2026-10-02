@@ -41,3 +41,7 @@ sensor-peers = { path = "../sensor-peers", optional = true }
 sensor-processes = { path = "../sensor-processes", optional = true }
 sensor-disclosure = { path = "../sensor-disclosure", optional = true }
 sensor-keepwarm = { path = "../sensor-keepwarm", optional = true }
+
+[dev-dependencies]
+# The message-lifecycle test consults `/purge`'s live-consumer seen-sets.
+attend-chat = { path = "../attend-chat" }

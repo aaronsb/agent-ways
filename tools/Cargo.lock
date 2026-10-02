@@ -273,6 +273,7 @@ dependencies = [
  "agent-fmt",
  "agent-identity",
  "agent-theme",
+ "attend-chat",
  "attend-groups",
  "attend-heartbeat",
  "attend-identity-view",
