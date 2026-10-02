@@ -13,6 +13,7 @@ use agent_tui::theme;
 use ways_agent_core::spend::{self, By, Call, Group};
 
 use super::screen::pane;
+use crate::cmd::tune_precision::{self, Flag, WayPrecision};
 
 /// The judge's spend over the sessions in scope, by day or by month,
 /// newest first, in the shape of `npx ccusage`.
@@ -138,5 +139,115 @@ impl Spend {
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
         f.render_stateful_widget(t, body, &mut self.table);
+    }
+}
+
+/// How precisely each way fires over the scope, as `ways tune precision`
+/// audits it: the share of its sessions that were off its domain, flagged
+/// ways first, with the remedy for the selected one.
+pub(crate) struct Precision {
+    rows: Vec<WayPrecision>,
+    project: Option<String>,
+    scope: String,
+    sel: usize,
+    table: TableState,
+}
+
+impl Precision {
+    /// The audit of the event log's `content` for `project`, or every
+    /// project with `None`, at the CLI's default gates.
+    pub(crate) fn new(content: &str, project: Option<&str>, scope: String) -> Precision {
+        let mut p = Precision { rows: Vec::new(), project: project.map(str::to_string), scope, sel: 0, table: TableState::default() };
+        p.reload(content);
+        p
+    }
+
+    pub(crate) fn reload(&mut self, content: &str) {
+        self.rows = tune_precision::report(content, tune_precision::MIN_SESSIONS, tune_precision::FLAG_THRESHOLD, self.project.as_deref(), None);
+    }
+
+    pub(crate) fn key(&mut self, k: KeyCode) {
+        let last = self.rows.len().saturating_sub(1);
+        self.sel = match k {
+            KeyCode::Up | KeyCode::Char('k') => self.sel.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => (self.sel + 1).min(last),
+            KeyCode::PageUp => self.sel.saturating_sub(10),
+            KeyCode::PageDown => (self.sel + 10).min(last),
+            KeyCode::Home | KeyCode::Char('g') => 0,
+            KeyCode::End | KeyCode::Char('G') => last,
+            _ => self.sel,
+        };
+    }
+
+    pub(crate) fn draw(&mut self, f: &mut Draw, area: Rect) {
+        let [head, body, remedy] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(area);
+        let flagged = self.rows.iter().filter(|r| !matches!(r.flag, Flag::Ok | Flag::LowN)).count();
+        let line = vec![
+            Span::styled("Fire precision", Style::new().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(
+                    " · {flagged} flagged · off-class ≥ {:.0}% over ≥ {} sessions · `ways tune precision --json` for an agent",
+                    tune_precision::FLAG_THRESHOLD * 100.0,
+                    tune_precision::MIN_SESSIONS
+                ),
+                theme::muted(),
+            ),
+        ];
+        f.render_widget(Paragraph::new(Line::from(line)), head);
+        let title = format!(" {} ways fired in {} ", self.rows.len(), self.scope);
+        if self.rows.is_empty() {
+            f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title)), body);
+            return;
+        }
+        let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
+        let header = Row::new(vec![
+            Cell::from("Way"),
+            Cell::from("Flag"),
+            right("Sessions".into()),
+            right("Off".into()),
+            right("Irrel".into()),
+            right("Spread".into()),
+            Cell::from("Top off trigger"),
+        ])
+        .style(Style::new().add_modifier(Modifier::BOLD));
+        let rows: Vec<Row> = self
+            .rows
+            .iter()
+            .map(|r| {
+                let flag = match r.flag {
+                    Flag::MisTargeted | Flag::CrossCutting => Span::styled(r.flag.label(), theme::warn()),
+                    _ => Span::styled(r.flag.label(), theme::muted()),
+                };
+                Row::new(vec![
+                    Cell::from(r.way.clone()),
+                    Cell::from(flag),
+                    right(r.sessions.to_string()),
+                    right(r.off_class.to_string()),
+                    right(format!("{:.2}", r.irrelevance)),
+                    right(r.spread.to_string()),
+                    Cell::from(r.top_off_trigger.clone()),
+                ])
+            })
+            .collect();
+        let widths = [
+            Constraint::Min(20),
+            Constraint::Length(13),
+            Constraint::Length(8),
+            Constraint::Length(4),
+            Constraint::Length(5),
+            Constraint::Length(6),
+            Constraint::Length(15),
+        ];
+        self.sel = self.sel.min(self.rows.len() - 1);
+        self.table.select(Some(self.sel));
+        let t = Table::new(rows, widths)
+            .header(header)
+            .column_spacing(1)
+            .block(pane(title))
+            .row_highlight_style(theme::selected())
+            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()));
+        f.render_stateful_widget(t, body, &mut self.table);
+        let r = &self.rows[self.sel];
+        f.render_widget(Paragraph::new(Line::from(vec![Span::styled(format!("{}: ", r.way), theme::muted()), Span::raw(r.flag.remedy())])), remedy);
     }
 }

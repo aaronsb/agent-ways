@@ -565,10 +565,10 @@ enum TuneCommand {
     /// Audits fire relevance (ADR-134 Decision 3).
     Precision {
         /// Minimum sessions a way must have fired in before it's flagged
-        #[arg(long, default_value = "5")]
+        #[arg(long, default_value_t = cmd::tune_precision::MIN_SESSIONS)]
         min_sessions: usize,
         /// Off-class rate at or above which a way is flagged (0.0–1.0)
-        #[arg(long, default_value = "0.5")]
+        #[arg(long, default_value_t = cmd::tune_precision::FLAG_THRESHOLD)]
         flag_threshold: f64,
         /// Filter to events whose project path contains this substring
         #[arg(long)]

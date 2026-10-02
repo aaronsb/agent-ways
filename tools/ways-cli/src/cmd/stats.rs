@@ -234,7 +234,7 @@ pub(crate) struct StatsReport {
     pub(crate) by_scope: Vec<(String, u32)>,
     pub(crate) by_model: Vec<(String, ModelTally)>,
     /// Per way, fires split by model.
-    pub(crate) by_way_model: HashMap<String, HashMap<String, u32>>,
+    pub(crate) by_way_model: BTreeMap<String, BTreeMap<String, u32>>,
     pub(crate) ways_per_invocation: Vec<(String, InvocationLoad)>,
     pub(crate) check_fires: u32,
     pub(crate) by_check: Vec<(String, u32)>,

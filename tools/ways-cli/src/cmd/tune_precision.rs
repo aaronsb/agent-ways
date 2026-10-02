@@ -103,6 +103,13 @@ impl Flag {
     }
 }
 
+/// The sessions a way must have fired in before it is flagged, unless
+/// `--min-sessions` says otherwise; the session screen's tab uses it too.
+pub(crate) const MIN_SESSIONS: usize = 5;
+/// The off-class rate at or above which a way is flagged, unless
+/// `--flag-threshold` says otherwise.
+pub(crate) const FLAG_THRESHOLD: f64 = 0.5;
+
 pub(crate) struct WayPrecision {
     pub(crate) way: String,
     pub(crate) sessions: usize,
@@ -117,7 +124,6 @@ pub(crate) struct WayPrecision {
 /// session TUI) rather than printing. `content` is the events-log text.
 /// `project` filters the fires loaded; `way` filters only the results, since a
 /// session's activity class needs every way that fired in it.
-#[allow(dead_code)] // consumed by the TUI tab, not yet wired
 pub(crate) fn report(
     content: &str,
     min_sessions: usize,
