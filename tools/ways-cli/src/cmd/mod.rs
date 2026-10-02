@@ -15,6 +15,7 @@ pub mod match_cmd;
 pub mod memory_seed;
 pub mod permissions;
 pub mod projects;
+pub mod screen_host;
 pub mod mcp_register;
 pub mod reconcile;
 pub mod reflow;

@@ -12,7 +12,7 @@ use agent_tui::ratatui::Frame as Draw;
 use agent_tui::theme;
 use ways_agent_core::spend::{self, By, Call, Group};
 
-use super::screen::pane;
+use crate::cmd::screen_host::pane;
 use crate::cmd::stats::{self, StatsReport};
 use crate::cmd::tune_precision::{self, Flag, WayPrecision};
 

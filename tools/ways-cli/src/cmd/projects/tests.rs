@@ -164,21 +164,21 @@ fn list_on_an_empty_projects_dir() {
 #[test]
 fn search_scores_paths_and_summaries() {
     let f = populated("search");
-    let (_, out) = f.run(ProjectsCommand::Search { query: "parser".into(), deep: false });
+    let (_, out) = f.run(ProjectsCommand::Search { query: "parser".into(), deep: false, json: false });
     assert!(out.contains("Search: parser  (1 matches)"), "{out}");
     assert!(out.contains("file:///srv/legacy") && out.contains("› Port the parser"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Search { query: "app_one".into(), deep: false });
+    let (_, out) = f.run(ProjectsCommand::Search { query: "app_one".into(), deep: false, json: false });
     assert!(out.contains("file:///srv/app_one") && out.contains("2t · today"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Search { query: "hello".into(), deep: false });
+    let (_, out) = f.run(ProjectsCommand::Search { query: "hello".into(), deep: false, json: false });
     assert!(out.contains("try --deep"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Search { query: "HELLO from".into(), deep: true });
+    let (_, out) = f.run(ProjectsCommand::Search { query: "HELLO from".into(), deep: true, json: false });
     assert!(out.contains("Deep search") && out.contains("file:///srv/app_one"), "{out}");
 }
 
 #[test]
 fn show_prints_index_sessions() {
     let f = populated("show");
-    let (_, out) = f.run(ProjectsCommand::Show { project: "legacy".into() });
+    let (_, out) = f.run(ProjectsCommand::Show { project: "legacy".into(), json: false });
     assert!(out.contains("Dir: -srv-legacy"), "{out}");
     assert!(out.contains("First session: 2026-07-01"), "{out}");
     assert!(out.contains("Last active:  2026-08-20 (1mo)"), "{out}");
@@ -186,9 +186,9 @@ fn show_prints_index_sessions() {
     assert!(out.contains("Sessions:     2"), "{out}");
     assert!(out.contains("Memory:       no"), "{out}");
     assert!(out.contains("2026-07-02    3 msgs  main                 ⑂"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Show { project: "app".into() });
+    let (_, out) = f.run(ProjectsCommand::Show { project: "app".into(), json: false });
     assert!(out.contains("Memory:       yes (1 files)"), "{out}");
-    let (_, out) = f.run(ProjectsCommand::Show { project: "nothing".into() });
+    let (_, out) = f.run(ProjectsCommand::Show { project: "nothing".into(), json: false });
     assert_eq!(out, "No project matching 'nothing'\n");
 }
 
@@ -522,4 +522,191 @@ fn fmt_bytes_and_age_match_claude_projects() {
     assert_eq!(age(NOW, Some(NOW - 90 * 86_400)), "3mo");
     assert_eq!(age(NOW, Some(NOW - 800 * 86_400)), "2y");
     assert_eq!(age(NOW, None), "");
+}
+
+// ── The screen ──────────────────────────────────────────────────
+
+use super::screen::Projects;
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use agent_tui::screen::Screen;
+use agent_tui::testkit::{render_screen, text, Goldens};
+use agent_tui::theme::{Palette, Shape};
+
+fn screen(f: &Fixture) -> Projects {
+    Projects::new(&f.env, Palette::terminal(agent_theme::ColorDepth::TrueColor), Shape::PLAIN)
+}
+
+fn press(s: &mut Projects, keys: &[KeyCode]) -> bool {
+    keys.iter().all(|k| s.key(KeyEvent::new(*k, KeyModifiers::NONE)))
+}
+
+fn type_in(s: &mut Projects, t: &str) -> bool {
+    press(s, &t.chars().map(KeyCode::Char).collect::<Vec<_>>())
+}
+
+fn shows(s: &mut Projects) -> String {
+    text(&render_screen(s, 120, 40))
+}
+
+#[test]
+fn screen_golden_frames() {
+    let mut g = Goldens::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/projects-tui"));
+    let f = populated("screen-golden");
+    let check = |g: &mut Goldens, name: &str, s: &mut Projects| {
+        for (w, h) in [(80, 25), (120, 40)] {
+            g.check(&format!("{name}-{w}x{h}"), &render_screen(s, w, h));
+        }
+    };
+    // The project with an index selected: the head of its detail (the rest scrolls).
+    let mut s = screen(&f);
+    press(&mut s, &[KeyCode::Down]);
+    check(&mut g, "list", &mut s);
+    // A filter being typed.
+    let mut s = screen(&f);
+    press(&mut s, &[KeyCode::Char('/')]);
+    type_in(&mut s, "parser");
+    check(&mut g, "filter", &mut s);
+    g.finish();
+}
+
+#[test]
+fn screen_selects_and_shows_the_selected_project() {
+    let f = populated("screen-select");
+    let mut s = screen(&f);
+    let out = shows(&mut s);
+    assert!(out.contains(" ways projects list "), "{out}");
+    assert!(out.contains(" ways projects show /srv/app_one "), "{out}");
+    assert!(out.contains("Memory:       yes (1 files)"), "{out}");
+    assert!(press(&mut s, &[KeyCode::Down]));
+    let out = shows(&mut s);
+    assert!(out.contains(" ways projects show /srv/legacy "), "{out}");
+    assert!(out.contains("Last summary: Port the parser"), "{out}");
+    assert!(out.contains("2/3"), "{out}");
+    // The selection stops at the last row.
+    assert!(press(&mut s, &[KeyCode::Down, KeyCode::Down, KeyCode::Down]));
+    assert!(shows(&mut s).contains("3/3"));
+}
+
+#[test]
+fn screen_filters_as_search_matches_and_esc_clears() {
+    let f = populated("screen-filter");
+    let mut s = screen(&f);
+    assert!(press(&mut s, &[KeyCode::Char('/')]));
+    // While the filter is typed, q is a letter.
+    assert!(type_in(&mut s, "port the q"));
+    assert!(shows(&mut s).contains("No matching projects found."));
+    assert!(press(&mut s, &[KeyCode::Backspace, KeyCode::Backspace]));
+    // A session summary matches, as `search` matches it.
+    let out = shows(&mut s);
+    assert!(out.contains(" ways projects search 'port the' --json ") && out.contains("1/1"), "{out}");
+    assert!(out.contains(" ways projects show /srv/legacy --json "), "{out}");
+    // Enter keeps the filter; Esc then clears it, the selection kept.
+    assert!(press(&mut s, &[KeyCode::Enter, KeyCode::Esc]));
+    let out = shows(&mut s);
+    assert!(out.contains(" ways projects list ") && out.contains("2/3"), "{out}");
+    // Esc while typing clears too.
+    assert!(press(&mut s, &[KeyCode::Char('/')]) && type_in(&mut s, "gone"));
+    assert!(shows(&mut s).contains("1/1"));
+    assert!(press(&mut s, &[KeyCode::Esc]));
+    assert!(shows(&mut s).contains("/3"));
+}
+
+#[test]
+fn screen_q_and_esc_quit() {
+    let f = populated("screen-quit");
+    assert!(!press(&mut screen(&f), &[KeyCode::Char('q')]));
+    assert!(!press(&mut screen(&f), &[KeyCode::Esc]), "Esc with no filter ends the screen");
+    let mut s = screen(&f);
+    assert!(!s.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+}
+
+/// `list --json` gives each project as data, most recently active first.
+#[test]
+fn list_json_gives_the_projects_as_data() {
+    let f = populated("list-json");
+    let (_, out) = f.run(ProjectsCommand::List(ListArgs { json: true, ..ListArgs::default() }));
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let paths: Vec<&str> = v.as_array().unwrap().iter().map(|p| p["path"].as_str().unwrap()).collect();
+    assert_eq!(paths[..2], ["/srv/app_one", "/srv/legacy"], "{out}");
+    let app = &v[0];
+    assert_eq!((app["transcripts"].as_u64(), app["memory_files"].as_u64()), (Some(2), Some(1)), "{app}");
+}
+
+/// `show` takes the exact path first, then the project the query names,
+/// then the first path containing it; `--json` adds the indexed sessions.
+#[test]
+fn show_takes_an_exact_path_before_a_newer_one_containing_it() {
+    let f = populated("show-exact");
+    f.transcript("/srv/app", "a1", "/srv/app", NOW - 30 * 86_400);
+    let path = |q: &str| {
+        let (_, out) = f.run(ProjectsCommand::Show { project: q.into(), json: true });
+        serde_json::from_str::<serde_json::Value>(&out).unwrap()["path"].as_str().map(str::to_string)
+    };
+    assert_eq!(path("/srv/app").as_deref(), Some("/srv/app"), "exact, though /srv/app_one is newer");
+    assert_eq!(path("app").as_deref(), Some("/srv/app"), "by name, though /srv/app_one is newer and contains it");
+    assert_eq!(path("app_o").as_deref(), Some("/srv/app_one"), "by containment");
+    assert_eq!(path("nothing-here"), None);
+    let (_, out) = f.run(ProjectsCommand::Show { project: "legacy".into(), json: true });
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["last_active"], "2026-08-20T10:00:00Z", "the index's own time, not its day at midnight");
+    assert_eq!(v["session_list"][0]["summary"], "Port the parser");
+    assert_eq!(v["session_list"][1]["sidechain"], true);
+}
+
+/// `search --json` lists every match, best first, with its score and
+/// snippets.
+#[test]
+fn search_json_lists_the_matches_with_their_scores() {
+    let f = populated("search-json");
+    let (_, out) = f.run(ProjectsCommand::Search { query: "parser".into(), deep: false, json: true });
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v[0]["path"], "/srv/legacy", "{out}");
+    assert!(v[0]["score"].as_u64().unwrap() > 0 && !v[0]["snippets"].as_array().unwrap().is_empty(), "{out}");
+}
+
+/// A project under the home directory is shown as `~/…`; the path a shell
+/// expands from that, or one typed in full, finds it. `--json` gives the
+/// absolute path beside the shown one, full timestamps, and `null` for a
+/// value the project lacks.
+#[test]
+fn show_finds_a_home_project_by_its_expanded_path() {
+    let f = populated("show-home");
+    let abs = format!("{}/work/app", f.env.home);
+    f.transcript(&abs, "h1", &abs, NOW - 600);
+    let (_, out) = f.run(ProjectsCommand::Show { project: abs.clone(), json: true });
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["path"], "~/work/app", "{out}");
+    assert_eq!(v["absolute_path"], abs.as_str());
+    assert_eq!(v["last_branch"], serde_json::Value::Null, "absent is null, not \"\"");
+    assert!(v["last_active"].as_str().is_some_and(|t| t.ends_with('Z') && t.contains('T')), "a full timestamp: {}", v["last_active"]);
+    let (_, text) = f.run(ProjectsCommand::Show { project: "~/work/app".into(), json: false });
+    assert!(text.contains("Dir: ") && !text.contains("No project matching"), "found by its ~ form: {text}");
+}
+
+/// With no projects at all the screen says so, and the detail names no
+/// command it cannot run.
+#[test]
+fn an_empty_projects_screen_says_there_are_none() {
+    let f = Fixture::new("screen-empty");
+    let mut s = screen(&f);
+    let out = shows(&mut s);
+    assert!(out.contains("No projects found.") && !out.contains("No matching"), "{out}");
+    assert!(out.contains(" show ") && !out.contains("show --json"), "{out}");
+}
+
+/// J and K scroll a detail longer than its pane; a new selection starts it
+/// from the top.
+#[test]
+fn the_detail_scrolls_and_a_new_selection_starts_at_its_top() {
+    let f = populated("screen-scroll");
+    let mut s = screen(&f);
+    press(&mut s, &[KeyCode::Down]);
+    let small = |s: &mut Projects| text(&agent_tui::testkit::render_screen(s, 80, 25));
+    let top = small(&mut s);
+    assert!(top.contains("more ↓") && !top.contains("Initial setup"), "{top}");
+    press(&mut s, &[KeyCode::Char('J'); 40].as_slice());
+    let end = small(&mut s);
+    assert!(end.contains("Initial setup") && !end.contains("more ↓"), "{end}");
+    press(&mut s, &[KeyCode::Up, KeyCode::Down]);
+    assert_eq!(small(&mut s), top, "back at the top");
 }

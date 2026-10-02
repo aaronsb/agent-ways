@@ -8,10 +8,12 @@
 //! given `--execute`.
 //!
 //! Output is plain text. Colour waits for agent-theme's ANSI output (#694).
+//! [`screen`] shows `list` and `show` together on a terminal (#748).
 
 mod fsio;
 mod relocate;
 mod rewrite;
+pub(crate) mod screen;
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -37,12 +39,18 @@ pub enum ProjectsCommand {
         /// Also search transcript content (slower)
         #[arg(long)]
         deep: bool,
+        /// Machine-readable JSON output: every match, best first
+        #[arg(long)]
+        json: bool,
     },
     /// Show one project in detail
     #[command(visible_alias = "info")]
     Show {
         /// Project path or name fragment
         project: String,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
     },
     /// Aggregate statistics
     Stats,
@@ -77,6 +85,9 @@ pub struct ListArgs {
     /// Show clickable file:// URLs
     #[arg(long)]
     urls: bool,
+    /// Machine-readable JSON output
+    #[arg(long, conflicts_with = "urls")]
+    json: bool,
 }
 
 /// Where the commands read and write: Claude Code's config dir and
@@ -101,6 +112,14 @@ impl Env {
 
     fn projects(&self) -> PathBuf {
         self.claude.projects_dir()
+    }
+
+    /// `path` with a leading `~` spelled out as the home directory.
+    fn untilde(&self, path: &str) -> String {
+        match path.strip_prefix('~') {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("{}{rest}", self.home),
+            _ => path.to_string(),
+        }
     }
 
     /// `path` with the home directory shown as `~`.
@@ -144,8 +163,8 @@ pub fn dispatch(
 ) -> Result<bool> {
     match command.unwrap_or(ProjectsCommand::List(ListArgs::default())) {
         ProjectsCommand::List(args) => list(env, &args, out)?,
-        ProjectsCommand::Search { query, deep } => search(env, &query, deep, out)?,
-        ProjectsCommand::Show { project } => show(env, &project, out)?,
+        ProjectsCommand::Search { query, deep, json } => search(env, &query, deep, json, out)?,
+        ProjectsCommand::Show { project, json } => show(env, &project, json, out)?,
         ProjectsCommand::Stats => stats(env, out)?,
         ProjectsCommand::Cleanup { dry_run } => cleanup(env, dry_run, out, confirm)?,
         ProjectsCommand::Hygiene { dry_run } => hygiene(env, dry_run, out, confirm)?,
@@ -173,11 +192,55 @@ struct Project {
     recent_prompts: Vec<String>,
     /// The index entries, newest first.
     entries: Vec<Value>,
+    /// Whether the project has a `sessions-index.json`.
+    indexed: bool,
+    /// The index's own `created` and `modified` times for the oldest and
+    /// newest session, as it wrote them; `first_active` and `last_active`
+    /// keep only their day.
+    index_times: (Option<String>, Option<String>),
 }
 
 impl Project {
     fn is_empty(&self) -> bool {
         self.sessions == 0 && self.transcripts == 0
+    }
+
+    /// The project as `list --json` gives it; `show --json` adds its
+    /// sessions with `sessions` set. A value the project lacks is `null`.
+    fn json(&self, env: &Env, sessions: bool) -> Value {
+        // The index's times as it wrote them; else a transcript's mtime.
+        let time = |raw: &Option<String>, e: Option<u64>| raw.clone().or(e.map(agent_fmt::when::utc_iso));
+        let text = |s: &str| (!s.is_empty()).then(|| s.to_string());
+        let mut v = serde_json::json!({
+            "path": self.path,
+            "absolute_path": env.untilde(&self.path),
+            "dir": self.dirname,
+            "sessions": self.sessions,
+            "transcripts": self.transcripts,
+            "transcript_bytes": self.transcript_bytes,
+            "memory_files": self.memory_files,
+            "first_active": time(&self.index_times.0, self.first_active),
+            "last_active": time(&self.index_times.1, self.last_active),
+            "last_branch": text(&self.last_branch),
+            "last_summary": text(&self.last_summary),
+            "recent_prompts": self.recent_prompts,
+        });
+        if sessions {
+            v["session_list"] = self
+                .entries
+                .iter()
+                .map(|e| {
+                    serde_json::json!({
+                        "modified": text(str_field(e, "modified")),
+                        "messages": e.get("messageCount"),
+                        "branch": text(str_field(e, "gitBranch")),
+                        "sidechain": e.get("isSidechain").and_then(Value::as_bool).unwrap_or(false),
+                        "summary": text(str_field(e, "summary")),
+                    })
+                })
+                .collect();
+        }
+        v
     }
 }
 
@@ -236,11 +299,15 @@ fn scan_project(env: &Env, dir: &Path) -> Project {
         last_branch: String::new(),
         recent_prompts: Vec::new(),
         entries: Vec::new(),
+        indexed: dir.join("sessions-index.json").exists(),
+        index_times: (None, None),
     };
 
     if let (Some(latest), Some(oldest)) = (entries.first(), entries.last()) {
         p.last_active = date_epoch(str_field(latest, "modified"));
         p.first_active = date_epoch(str_field(oldest, "created"));
+        let raw = |e: &Value, k: &str| Some(str_field(e, k).to_string()).filter(|s| !s.is_empty());
+        p.index_times = (raw(oldest, "created"), raw(latest, "modified"));
         p.last_summary = str_field(latest, "summary").to_string();
         p.last_branch = str_field(latest, "gitBranch").to_string();
         p.recent_prompts = entries
@@ -332,6 +399,27 @@ fn pad_left(s: &str, w: usize) -> String {
     format!("{s:>w$}")
 }
 
+/// `path` cut from the left to `w` characters, `…` marking the cut.
+fn ellipsize_left(path: &str, w: usize) -> String {
+    let n = path.chars().count();
+    if n > w {
+        format!("…{}", path.chars().skip(n - (w - 1)).collect::<String>())
+    } else {
+        path.to_string()
+    }
+}
+
+/// The `list` cells after the path: sessions, size, last active, memory.
+fn list_cells(env: &Env, p: &Project) -> [String; 4] {
+    let size = if p.transcript_bytes > 0 { fmt_bytes(p.transcript_bytes) } else { "–".to_string() };
+    let last = match age(env.now, p.last_active) {
+        a if a.is_empty() => "–".to_string(),
+        a => a,
+    };
+    let mem = if p.memory_files > 0 { "●" } else { "·" };
+    [session_cell(p), size, last, mem.to_string()]
+}
+
 /// The session column: index sessions, else transcripts as `Nt`, else `–`.
 fn session_cell(p: &Project) -> String {
     if p.sessions > 0 {
@@ -360,6 +448,11 @@ fn list(env: &Env, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
             }
         })
         .collect();
+    if args.json {
+        let all: Vec<Value> = projects.iter().map(|p| p.json(env, false)).collect();
+        writeln!(out, "{}", serde_json::to_string_pretty(&all)?)?;
+        return Ok(());
+    }
     if projects.is_empty() {
         writeln!(out, "No matching projects found.")?;
         return Ok(());
@@ -371,29 +464,13 @@ fn list(env: &Env, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
     writeln!(out, "  {} {} {} {} {}", "─".repeat(path_w), "─".repeat(8), "─".repeat(6), "─".repeat(7), "─".repeat(6))?;
 
     for p in &projects {
-        let size = if p.transcript_bytes > 0 { fmt_bytes(p.transcript_bytes) } else { "–".to_string() };
-        let last = match age(env.now, p.last_active) {
-            a if a.is_empty() => "–".to_string(),
-            a => a,
-        };
-        let mem = if p.memory_files > 0 { "●" } else { "·" };
-        let cells = format!(
-            "{} {} {} {}",
-            pad_left(&session_cell(p), 8),
-            pad_left(&size, 6),
-            pad_left(&last, 7),
-            pad_left(mem, 6)
-        );
+        let [sess, size, last, mem] = list_cells(env, p);
+        let cells = format!("{} {} {} {}", pad_left(&sess, 8), pad_left(&size, 6), pad_left(&last, 7), pad_left(&mem, 6));
         if args.urls {
             writeln!(out, "  {}", file_url(env, &p.path))?;
             writeln!(out, "    {cells}")?;
         } else {
-            let n = p.path.chars().count();
-            let path = if n > path_w {
-                format!("…{}", p.path.chars().skip(n - (path_w - 1)).collect::<String>())
-            } else {
-                p.path.clone()
-            };
+            let path = ellipsize_left(&p.path, path_w);
             let pad = path_w.saturating_sub(path.chars().count());
             writeln!(out, "  {path}{} {cells}", " ".repeat(pad))?;
         }
@@ -402,43 +479,14 @@ fn list(env: &Env, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
-fn search(env: &Env, query: &str, deep: bool, out: &mut dyn Write) -> Result<()> {
+fn search(env: &Env, query: &str, deep: bool, json: bool, out: &mut dyn Write) -> Result<()> {
     let q = query.to_lowercase();
     let mut matches: Vec<(u32, Project, Vec<String>)> = Vec::new();
 
     for p in scan_all(env) {
-        let mut score = 0u32;
-        let mut snippets: Vec<String> = Vec::new();
-        let path_l = p.path.to_lowercase();
-        if path_l.contains(&q) || p.dirname.to_lowercase().contains(&q) {
-            score += 10;
-        }
-        for word in q.split_whitespace() {
-            if path_l.contains(word) {
-                score += 5;
-            }
-        }
-
-        let dir = env.projects().join(&p.dirname);
-        if dir.join("sessions-index.json").exists() {
-            for e in &p.entries {
-                let summary = str_field(e, "summary");
-                let first = str_field(e, "firstPrompt");
-                if summary.to_lowercase().contains(&q) {
-                    score += 5;
-                    snippets.push(take_chars(summary, 80));
-                } else if first.to_lowercase().contains(&q) {
-                    score += 3;
-                    snippets.push(take_chars(first, 80));
-                }
-            }
-        } else if let Some(prompt) = p.recent_prompts.iter().find(|pr| pr.to_lowercase().contains(&q)) {
-            score += 2;
-            snippets.push(take_chars(prompt, 80));
-        }
-
+        let (mut score, mut snippets) = shallow_match(&p, &q);
         if deep && score == 0 {
-            let (hits, snippet) = deep_search(&dir, &q);
+            let (hits, snippet) = deep_search(&env.projects().join(&p.dirname), &q);
             score += hits.min(5);
             snippets.extend(snippet);
         }
@@ -449,6 +497,19 @@ fn search(env: &Env, query: &str, deep: bool, out: &mut dyn Write) -> Result<()>
 
     // Stable: equal scores keep the most-recent-first order.
     matches.sort_by_key(|m| std::cmp::Reverse(m.0));
+    if json {
+        let all: Vec<Value> = matches
+            .iter()
+            .map(|(score, p, snippets)| {
+                let mut v = p.json(env, false);
+                v["score"] = (*score).into();
+                v["snippets"] = snippets.clone().into();
+                v
+            })
+            .collect();
+        writeln!(out, "{}", serde_json::to_string_pretty(&all)?)?;
+        return Ok(());
+    }
     if matches.is_empty() {
         let hint = if deep { "" } else { " (try --deep to search transcript content)" };
         writeln!(out, "No projects matching '{query}'{hint}")?;
@@ -471,6 +532,39 @@ fn search(env: &Env, query: &str, deep: bool, out: &mut dyn Write) -> Result<()>
     }
     writeln!(out)?;
     Ok(())
+}
+
+/// How well `p` matches `q` (lowercased) on its path, session summaries
+/// and first prompts, and the snippets that matched. Zero is no match.
+fn shallow_match(p: &Project, q: &str) -> (u32, Vec<String>) {
+    let mut score = 0u32;
+    let mut snippets: Vec<String> = Vec::new();
+    let path_l = p.path.to_lowercase();
+    if path_l.contains(q) || p.dirname.to_lowercase().contains(q) {
+        score += 10;
+    }
+    for word in q.split_whitespace() {
+        if path_l.contains(word) {
+            score += 5;
+        }
+    }
+    if p.indexed {
+        for e in &p.entries {
+            let summary = str_field(e, "summary");
+            let first = str_field(e, "firstPrompt");
+            if summary.to_lowercase().contains(q) {
+                score += 5;
+                snippets.push(take_chars(summary, 80));
+            } else if first.to_lowercase().contains(q) {
+                score += 3;
+                snippets.push(take_chars(first, 80));
+            }
+        }
+    } else if let Some(prompt) = p.recent_prompts.iter().find(|pr| pr.to_lowercase().contains(q)) {
+        score += 2;
+        snippets.push(take_chars(prompt, 80));
+    }
+    (score, snippets)
 }
 
 /// Case-insensitive search of every file under a project directory: the
@@ -509,17 +603,35 @@ fn deep_search(dir: &Path, q: &str) -> (u32, Option<String>) {
     (hits, snippet)
 }
 
-fn show(env: &Env, query: &str, out: &mut dyn Write) -> Result<()> {
-    let q = query.to_lowercase();
-    let Some(p) = scan_all(env)
-        .into_iter()
-        .find(|p| p.path.to_lowercase().contains(&q) || p.dirname.to_lowercase().contains(&q))
-    else {
+fn show(env: &Env, query: &str, json: bool, out: &mut dyn Write) -> Result<()> {
+    // The query's best match, most recently active first at each step: the
+    // project whose path or directory is the query, then the one it names
+    // (its last path component), then the first whose path contains it. A
+    // path under the home directory is compared in the `~` form projects
+    // are shown in, so the one a shell expanded matches.
+    let q = env.tilde(query).to_lowercase();
+    let all = scan_all(env);
+    let name = |p: &Project| p.path.rsplit(['/', '\\']).next().unwrap_or("").to_lowercase();
+    let found = all
+        .iter()
+        .find(|p| p.path.to_lowercase() == q || p.dirname.to_lowercase() == q)
+        .or_else(|| all.iter().find(|p| name(p) == q))
+        .or_else(|| all.iter().find(|p| p.path.to_lowercase().contains(&q) || p.dirname.to_lowercase().contains(&q)));
+    if json {
+        writeln!(out, "{}", serde_json::to_string_pretty(&found.map(|p| p.json(env, true)))?)?;
+        return Ok(());
+    }
+    let Some(p) = found else {
         writeln!(out, "No project matching '{query}'")?;
         return Ok(());
     };
+    out.write_all(b"\n")?;
+    show_project(env, p, out)
+}
 
-    writeln!(out, "\n{}", file_url(env, &p.path))?;
+/// What `show` prints for one project, after its leading blank line.
+fn show_project(env: &Env, p: &Project, out: &mut dyn Write) -> Result<()> {
+    writeln!(out, "{}", file_url(env, &p.path))?;
     writeln!(out, "  Dir: {}\n", p.dirname)?;
     if let Some(first) = p.first_active {
         writeln!(out, "  First session: {}", fmt_date(first))?;

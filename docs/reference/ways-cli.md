@@ -126,6 +126,8 @@ ways session fires --session <id> --max-score 0.6   # the borderline semantic fi
 
 **Run from:** Anywhere. It reads the events log, which every project shares.
 
+**Bare:** `ways agent` with no arguments, on a terminal, opens the settings screens on their gate tab; in a pipe it prints `ways-agent`'s help.
+
 **Tells you:** The judge's provider calls with their tokens and cost in USD, as a total and one row per day (`--by month`, `session` or `project` for the other groupings). `--project <path>` keeps one project's calls, matched as `ways session` matches a project. The events log keeps its newest 24 MiB, so older calls drop out; the text ends with the date of the earliest judge call the log still holds when that date bounds the query. The hook logs each call as one `judge_call` event in `events.jsonl`, beside the `way_judged` events the call produced. OpenRouter reports each call's cost, and a request a provider refuses with a 4xx costs nothing. An Anthropic call is priced from its tokens at the profile's `price_in_per_mtok` and `price_out_per_mtok`, which apply as a pair, or, when those are unset, at Claude Haiku 4.5's list price for that model. A call that returned no usage, such as one that hit its deadline, or one with no price for its model, has unknown cost: it is counted apart and never summed as zero. `--json` prints the total, all four groupings and `covers_since`, with `cost_usd` null for a group whose calls all have unknown cost.
 
 ```
@@ -505,6 +507,8 @@ ways settings emit                                   # the canonical file, with 
 
 **Run from:** Anywhere.
 
+**Bare:** `ways target` with no verb, on a terminal, opens the settings screens on their install tab; in a pipe it prints its help and exits 2.
+
 **Tells you:** Each target with its enabled and observe flags, its converged state (`active`, `pending`, `partial`, `refused`, `stale`, or `withdrawn`), and its own config file when one exists. With no `targets` key in the user config the list is the implicit default, `~/.claude`.
 
 Each target can carry its own configuration: a `config.yaml` at `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml` (or the path in the entry's `config:` field) with the same keys as the user config, layered over it for sessions under that target's config directory. `ways settings list` names the layer it applied.
@@ -546,13 +550,17 @@ ways author permissions --global
 
 **Run from:** Anywhere. It reads Claude Code's `~/.claude/projects`, never your project directories.
 
+**Bare:** on a terminal, `ways projects` opens the projects screen: the projects as `list` shows them, the selected one as `show` prints it (`J`/`K` scroll it), and `/` to filter as `search` matches. In a pipe it runs `list`.
+
+The `--json` forms give each project's `path` as shown (`~/…`) and its `absolute_path`, times as UTC ISO timestamps (the session index's own, else the newest transcript's), and `null` for a value the project lacks.
+
 **Tells you:** Depends on subcommand. `cleanup` and `hygiene` list what they would remove, ask first, and move it to a `.trash-<stamp>` dir under `~/.claude/projects` rather than deleting it; `--dry-run` only lists. `relocate` prints a plan and changes nothing unless given `--execute`. It refuses while a session is running in the project, and a rerun after a failed step resumes from where it stopped.
 
 | Subcommand | What it shows or does |
 |------------|-----------------------|
-| `list` (default) | Projects, most recently active first; `--active`, `--memory`, `--stale` filter, `--urls` prints `file://` links |
-| `search <query>` | Projects whose path, session summaries or first prompts match; `--deep` also searches transcript text |
-| `show <fragment>` | One project: dates, branch, transcripts, memory, recent sessions |
+| `list` (default) | Projects, most recently active first; `--active`, `--memory`, `--stale` filter, `--urls` prints `file://` links, `--json` prints them as data |
+| `search <query>` | Projects whose path, session summaries or first prompts match; `--deep` also searches transcript text; `--json` prints every match, best first, with its score |
+| `show <fragment>` | One project: dates, branch, transcripts, memory, recent sessions. The fragment matches an exact path first (`~/…` or the full path), then a project's name (its last path component), then the first path containing it; `--json` prints the project with its indexed sessions, or `null` |
 | `stats` | Totals and the projects using the most disk and holding the most sessions |
 | `cleanup` | Moves project entries with no sessions and no transcripts to a `.trash-<stamp>` dir; skips entries modified in the last 5 minutes |
 | `hygiene` | Large transcripts, and empty session dirs, which it moves to a `.trash-<stamp>` dir |

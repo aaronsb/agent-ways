@@ -10,7 +10,7 @@ use agent_tui::ratatui::Frame as Draw;
 use agent_tui::theme::{self, Ground, Shape};
 use agent_tui::timeline::key_bar;
 
-use super::screen::pane;
+use crate::cmd::screen_host::pane;
 use super::sessions::SessionInfo;
 
 /// The sessions to pick from, newest first.

@@ -239,3 +239,7 @@ A screen is a view, for a person. An agent authors, refactors and tunes ways thr
 ## Note (2026-10-02): `session` is the first group that opens its screen bare
 
 Since #738, `ways session` is the first group the note above covers: bare on a terminal (stdin and stdout), it opens the session screen on its sessions tab. Its usage line reads `[COMMAND]`, so the call-site check lists it among the groups a script must still give a verb. `target` and `agent` follow in #748; `projects` keeps `list` in a pipe.
+
+## Note (2026-10-02): `target`, `agent` and `projects` open their screens bare
+
+On a terminal, a bare `ways target` opens the settings screens on their install tab, and a bare `ways agent` on their gate tab, where the settings and actions those groups change already live (#748). In a pipe `target` prints its help and exits 2, and `agent` passes on to `ways-agent`, which prints its own. `target` joins `session` in the call-site check's list of groups a script must still give a verb. A bare `ways projects` opens the projects screen on a terminal; `list`, `search` and `show` gained `--json`, the commands its borders name.
