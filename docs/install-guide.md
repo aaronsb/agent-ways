@@ -53,6 +53,8 @@ ways update
 
 `ways update` pulls, refreshes the binaries (pre-built first, source build as fallback), regenerates the corpus, relinks, and reprojects `~/.claude` — use it rather than `make setup`, which skips binaries that already exist and would leave you on the old build.
 
+**The relevance judge.** Without a provider key that passes its check, ways runs degraded: the relevance gate is off and every matched way is injected ([ADR-196](architecture/ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md)). The installer and `ways update` end by checking each stored key at no cost. When none passes, they say so and, on a terminal, offer to add an Anthropic or OpenRouter key; the installer reads that answer from `/dev/tty`, so it works under `curl … | bash`. Off a terminal they print the fix instead. Only the key file counts: the agent hooks start never reads `$ANTHROPIC_API_KEY` or `$OPENROUTER_API_KEY`. `ways --help` repeats the warning until the judge works or you set `gate.mode: off`. With `gate.mode: shadow` the judge runs, logs its verdicts and blocks nothing.
+
 **A legacy pre-1.0 in-place clone** (`~/.claude` *is* the agent-ways git repo — it has its own `.git/` and ships `~/.claude/tools/`, `~/.claude/docs/`) — do **not** `git pull` it. Migrate it to the 1.0 model with the gated, backup-first migrator:
 
 The migrator was removed in 1.9.0 (ADR-179) and lives at the `ways-v1.8.3` tag. Build it in a scratch clone and run it against your install:

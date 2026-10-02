@@ -383,33 +383,59 @@ fn mcp_registration(dir: &std::path::Path) -> String {
     }
 }
 
-/// The relevance gate's settings (ADR-196), read without touching the key:
-/// `ways` only checks where a key would come from.
-fn gate_settings() -> Result<Option<(ways_agent_core::profile::Settings, Option<ways_agent_core::keys::Source>)>> {
+/// The relevance gate's settings (ADR-196), read without touching the key.
+/// Hooks gate only on the key file (ADR-502 §6), so that is the key reported.
+fn gate_settings() -> Result<Option<(ways_agent_core::profile::Settings, Option<std::path::PathBuf>)>> {
     use ways_agent_core::{keys, profile};
     let user = profile::UserLayer::load(&profile::user_layer_path())?;
-    let settings = profile::resolve(&user, |p| keys::locate(p).is_some())?;
+    let settings = profile::resolve(&user, |p| keys::locate_file(p).is_some())?;
     Ok(settings.map(|s| {
-        let source = keys::locate(s.profile.provider);
-        (s, source)
+        let file = keys::locate_file(s.profile.provider);
+        (s, file)
     }))
 }
 
+/// The key file's last check, when it still describes the file and model.
+fn file_check(
+    provider: ways_agent_core::profile::Provider,
+    file: &Path,
+    model: &str,
+) -> Option<ways_agent_core::keys::CheckRecord> {
+    let source = ways_agent_core::keys::Source::File(file.to_path_buf());
+    ways_agent_core::keys::last_check(provider).filter(|r| r.describes(&source, model))
+}
+
+/// The variable holding a key that hooks never see: set, with no key file.
+fn env_only(provider: ways_agent_core::profile::Provider) -> Option<&'static str> {
+    use ways_agent_core::keys;
+    (keys::env_set(provider) && keys::locate_file(provider).is_none()).then(|| provider.key_env())
+}
+
+/// What the gate line says of the engine's key file.
+fn key_phrase(file: Option<&Path>, check: Option<&str>, env_only: Option<&str>) -> String {
+    match (file, check) {
+        (Some(path), Some("valid")) => format!("key from {}, checked valid", path.display()),
+        (Some(path), Some(result)) => format!("key from {}, last check {result}: fails open", path.display()),
+        (Some(path), None) => format!("key from {}, not checked yet: the agent checks it on first use", path.display()),
+        (None, _) => match env_only {
+            Some(var) => format!("key only in ${var}; hooks read the key file: fails open"),
+            None => "no key: fails open".to_string(),
+        },
+    }
+}
+
 fn gate_line() -> String {
+    use ways_agent_core::profile::Provider;
     match gate_settings() {
         Err(e) => format!("config error: {e:#}"),
-        Ok(None) => "off — no key (`ways agent key add --provider anthropic`)".to_string(),
-        Ok(Some((s, source))) => {
-            let key = match source {
-                Some(src) => match ways_agent_core::keys::last_check(s.profile.provider) {
-                    Some(r) if r.describes(&src, &s.profile.model) && r.result == "valid" => {
-                        format!("key from {src}, checked valid")
-                    }
-                    Some(r) if r.describes(&src, &s.profile.model) => format!("key from {src}, last check {}: fails open", r.result),
-                    _ => format!("key from {src}, not checked yet: the agent checks it on first use"),
-                },
-                None => "no key: fails open".to_string(),
-            };
+        Ok(None) => match Provider::ALL.into_iter().find_map(|p| env_only(p).map(|v| (p, v))) {
+            Some((p, var)) => format!("off — key only in ${var}; hooks read the key file (`ways agent key add --provider {p}`)"),
+            None => "off — no key (`ways agent key add --provider anthropic`)".to_string(),
+        },
+        Ok(Some((s, file))) => {
+            let p = s.profile.provider;
+            let check = file.as_deref().and_then(|f| file_check(p, f, &s.profile.model));
+            let key = key_phrase(file.as_deref(), check.as_ref().map(|r| r.result.as_str()), env_only(p));
             format!(
                 "{} — {} {} at threshold {}, {key}",
                 s.mode.as_str(),
@@ -424,19 +450,36 @@ fn gate_line() -> String {
 fn gate_json() -> serde_json::Value {
     match gate_settings() {
         Err(e) => json!({ "error": format!("{e:#}") }),
-        Ok(None) => json!({ "mode": "off", "reason": "no key" }),
-        Ok(Some((s, source))) => json!({
+        Ok(None) => json!({
+            "mode": "off",
+            "reason": "no key",
+            "key_only_in_env": ways_agent_core::profile::Provider::ALL.into_iter().find_map(env_only),
+        }),
+        Ok(Some((s, file))) => json!({
             "mode": s.mode.as_str(),
             "engine": s.engine,
             "provider": s.profile.provider.as_str(),
             "model": s.profile.model,
             "threshold": s.profile.threshold,
-            "key_check": source.as_ref().and_then(|src| {
-                ways_agent_core::keys::last_check(s.profile.provider)
-                    .filter(|r| r.describes(src, &s.profile.model))
-                    .map(|r| r.result)
-            }),
-            "key_source": source.map(|src| src.to_string()),
+            "key_check": file.as_deref().and_then(|f| file_check(s.profile.provider, f, &s.profile.model)).map(|r| r.result),
+            "key_source": file.map(|f| f.display().to_string()),
+            "key_only_in_env": env_only(s.profile.provider),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::key_phrase;
+    use std::path::Path;
+
+    #[test]
+    fn a_key_only_in_the_variable_is_named_and_never_reported_checked() {
+        let line = key_phrase(None, None, Some("ANTHROPIC_API_KEY"));
+        assert_eq!(line, "key only in $ANTHROPIC_API_KEY; hooks read the key file: fails open");
+        assert_eq!(key_phrase(None, None, None), "no key: fails open");
+        let file = Path::new("/k/anthropic");
+        assert_eq!(key_phrase(Some(file), Some("valid"), None), "key from /k/anthropic, checked valid");
+        assert!(key_phrase(Some(file), Some("invalid"), None).ends_with("last check invalid: fails open"));
     }
 }

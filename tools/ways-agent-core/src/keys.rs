@@ -42,11 +42,28 @@ pub fn locate(provider: Provider) -> Option<Source> {
 }
 
 fn locate_in(provider: Provider, dir: &Path) -> Option<Source> {
-    if std::env::var(provider.key_env()).is_ok_and(|v| !v.trim().is_empty()) {
+    if env_set(provider) {
         return Some(Source::Env(provider.key_env()));
     }
+    locate_file_in(provider, dir).map(Source::File)
+}
+
+/// True when the provider's key variable is set. It overrides the file for
+/// `ways agent` commands and a hand-started agent; hooks use the file.
+pub fn env_set(provider: Provider) -> bool {
+    std::env::var(provider.key_env()).is_ok_and(|v| !v.trim().is_empty())
+}
+
+/// The provider's key file, ignoring the environment. The hook gate and the
+/// agent a hook starts read only this file (ADR-502 §6): that agent takes no
+/// key variable, so a key only in the environment never reaches it.
+pub fn locate_file(provider: Provider) -> Option<PathBuf> {
+    locate_file_in(provider, &keys_dir())
+}
+
+fn locate_file_in(provider: Provider, dir: &Path) -> Option<PathBuf> {
     let path = dir.join(provider.as_str());
-    path.is_file().then_some(Source::File(path))
+    path.is_file().then_some(path)
 }
 
 /// Reads the key. Only the agent and `key check` call this.
@@ -275,8 +292,12 @@ fn stamp(source: &Source) -> Option<(u64, u64)> {
     Some((mtime, meta.len()))
 }
 
+fn checks_dir() -> PathBuf {
+    ways_core::paths::state_root().join("agent")
+}
+
 fn check_path(provider: Provider) -> PathBuf {
-    ways_core::paths::state_root().join("agent").join(format!("key-check-{}.json", provider.as_str()))
+    checks_dir().join(format!("key-check-{}.json", provider.as_str()))
 }
 
 /// Records a check. Best effort: a failure to record only means the next use
@@ -293,12 +314,77 @@ pub fn record_check(provider: Provider, record: &CheckRecord) {
 
 /// The last recorded check of this provider's key, if any.
 pub fn last_check(provider: Provider) -> Option<CheckRecord> {
-    serde_json::from_str(&std::fs::read_to_string(check_path(provider)).ok()?).ok()
+    last_check_in(&checks_dir(), provider)
+}
+
+fn last_check_in(dir: &Path, provider: Provider) -> Option<CheckRecord> {
+    let path = dir.join(format!("key-check-{}.json", provider.as_str()));
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
 
 /// Forgets the recorded check, as when the key is removed.
 pub fn clear_check(provider: Provider) {
     let _ = std::fs::remove_file(check_path(provider));
+}
+
+/// Whether the relevance judge can gate, from stored state alone: the user
+/// layer, the key file, and its last recorded check. No network, and no key
+/// variable, since the agent hooks start never sees one.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Readiness {
+    /// The engine's key file passed its last check; the gate runs in this mode
+    /// (enforce or shadow).
+    Ready(Provider, crate::profile::Mode),
+    /// The operator set `gate.mode: off`.
+    Off,
+    /// No key file: for the named engine's provider, or for any provider when
+    /// no engine is named.
+    NoKey(Option<Provider>),
+    /// The engine's key file has no check that describes it, or its last
+    /// check found this result.
+    Unverified(Provider, Option<String>),
+    /// agent.yaml fails closed or names no usable engine.
+    Config(String),
+}
+
+impl Readiness {
+    /// True when the judge gates or the operator turned it off: nothing to fix.
+    pub fn settled(&self) -> bool {
+        matches!(self, Readiness::Ready(..) | Readiness::Off)
+    }
+}
+
+/// The judge's readiness, judged as the agent's key gate judges a record.
+pub fn judge_ready() -> Readiness {
+    judge_ready_in(&crate::profile::user_layer_path(), &keys_dir(), &checks_dir())
+}
+
+fn judge_ready_in(layer: &Path, keys: &Path, checks: &Path) -> Readiness {
+    use crate::profile::{fails_closed, resolve, Mode, UserLayer};
+    let user = match UserLayer::load_with_findings(layer) {
+        Ok((user, findings)) => match fails_closed(&findings) {
+            Some(f) => return Readiness::Config(f.to_string()),
+            None => user,
+        },
+        Err(e) => return Readiness::Config(format!("{e:#}")),
+    };
+    if user.mode == Some(Mode::Off) {
+        return Readiness::Off;
+    }
+    let settings = match resolve(&user, |p| locate_file_in(p, keys).is_some()) {
+        Ok(Some(s)) => s,
+        Ok(None) => return Readiness::NoKey(None),
+        Err(e) => return Readiness::Config(format!("{e:#}")),
+    };
+    let provider = settings.profile.provider;
+    let Some(path) = locate_file_in(provider, keys) else { return Readiness::NoKey(Some(provider)) };
+    // A verdict on the key stands until the key or model changes (the agent's
+    // `verified`), so a valid record that still describes the file is enough.
+    let source = Source::File(path);
+    match last_check_in(checks, provider).filter(|r| r.describes(&source, &settings.profile.model)) {
+        Some(r) if r.result == "valid" => Readiness::Ready(provider, settings.mode),
+        r => Readiness::Unverified(provider, r.map(|r| r.result)),
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -395,6 +481,54 @@ mod tests {
             assert_eq!(locate_in(Provider::Openrouter, &dir), Some(Source::File(path)));
         }
         std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn judge_ready_reads_the_layer_the_key_file_and_its_check() {
+        use crate::profile::Mode;
+        let base = scratch("ready");
+        let (layer, keys, checks) = (base.join("agent.yaml"), base.join("keys"), base.join("state"));
+        let ready = || judge_ready_in(&layer, &keys, &checks);
+        assert_eq!(ready(), Readiness::NoKey(None));
+        assert!(!ready().settled());
+
+        // A key only in the environment never reaches the agent a hook starts.
+        // No other test reads this variable's value.
+        let saved = std::env::var_os(Provider::Anthropic.key_env());
+        std::env::set_var(Provider::Anthropic.key_env(), "sk-ant-from-the-environment-only");
+        let with_env = ready();
+        match saved {
+            Some(v) => std::env::set_var(Provider::Anthropic.key_env(), v),
+            None => std::env::remove_var(Provider::Anthropic.key_env()),
+        }
+        assert_eq!(with_env, Readiness::NoKey(None));
+
+        let source = Source::File(store_in(&keys, Provider::Openrouter, "sk-or-v1-abcdefghijklmnop").unwrap());
+        assert_eq!(ready(), Readiness::Unverified(Provider::Openrouter, None));
+
+        std::fs::create_dir_all(&checks).unwrap();
+        let record = |result: &str, model: &str| {
+            let text = serde_json::to_string(&CheckRecord::now(result, model, &source)).unwrap();
+            std::fs::write(checks.join("key-check-openrouter.json"), text).unwrap();
+        };
+        let model = Provider::Openrouter.recommended_model();
+        record("invalid", model);
+        assert_eq!(ready(), Readiness::Unverified(Provider::Openrouter, Some("invalid".into())));
+        record("valid", "anthropic/another-model");
+        assert_eq!(ready(), Readiness::Unverified(Provider::Openrouter, None), "a check of another model is stale");
+        record("valid", model);
+        assert_eq!(ready(), Readiness::Ready(Provider::Openrouter, Mode::Enforce));
+        assert!(ready().settled());
+        std::fs::write(&layer, "mode: shadow\n").unwrap();
+        assert_eq!(ready(), Readiness::Ready(Provider::Openrouter, Mode::Shadow));
+
+        std::fs::write(&layer, "engine: anthropic\n").unwrap();
+        assert_eq!(ready(), Readiness::NoKey(Some(Provider::Anthropic)));
+        std::fs::write(&layer, "mode: off\n").unwrap();
+        assert_eq!(ready(), Readiness::Off);
+        std::fs::write(&layer, "engine: [unclosed\n").unwrap();
+        assert!(matches!(ready(), Readiness::Config(_)), "{:?}", ready());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     fn locate_env(p: Provider) -> Option<Source> {
