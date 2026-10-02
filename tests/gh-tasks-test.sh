@@ -106,6 +106,9 @@ assert_eq "a mirrored task is owned by the head agent" "$(jq -r .owner "$STORE/g
 jq 'del(.owner)' "$STORE/gh-12.json" >"$TMP/x" && mv "$TMP/x" "$STORE/gh-12.json"
 "$GH_TASKS" pull 2>/dev/null
 assert_eq "a re-pull gives an unowned mirror back to the head agent" "$(jq -r .owner "$STORE/gh-12.json")" "team-lead"
+jq '.owner = ""' "$STORE/gh-12.json" >"$TMP/x" && mv "$TMP/x" "$STORE/gh-12.json"
+"$GH_TASKS" pull 2>/dev/null
+assert_eq "an empty owner counts as none" "$(jq -r .owner "$STORE/gh-12.json")" "team-lead"
 jq '.status="in_progress" | .activeForm="Adding widget" | .owner="me"' "$STORE/gh-12.json" >"$TMP/x" && mv "$TMP/x" "$STORE/gh-12.json"
 "$GH_TASKS" pull 2>/dev/null
 assert_eq "session in_progress survives pull" "$(jq -r .status "$STORE/gh-12.json")" "in_progress"
@@ -266,6 +269,7 @@ WORK="$TMP/work"; mkdir -p "$WORK"; WORK_P="$(cd "$WORK" && pwd -P)"
   task_file "$prev" 1 pending
   task_file "$prev" 2 completed
   task_file "$prev" 3 in_progress some-agent
+  task_file "$prev" 4 pending team-lead
   jq '.blockedBy = ["2", "1"]' "$prev/3.json" >"$prev/3.tmp" && mv "$prev/3.tmp" "$prev/3.json"
   jq '.blocks = ["3"]' "$prev/2.json" >"$prev/2.tmp" && mv "$prev/2.tmp" "$prev/2.json"
   jq -n '{id:"gh-5", subject:"[gh#5] mirrored", description:"d", status:"in_progress", blocks:[], blockedBy:[], metadata:{github_issue:5}}' >"$prev/gh-5.json"
@@ -277,12 +281,13 @@ WORK="$TMP/work"; mkdir -p "$WORK"; WORK_P="$(cd "$WORK" && pwd -P)"
   assert_eq "dir follows the recorded id" "$("$GH_TASKS" dir)" "$new"
   assert_eq "open task carried" "$(jq -r .status "$new/1.json")" "pending"
   assert_eq "in-progress task carried, owner dropped" "$(jq -c '[.status, .owner]' "$new/3.json")" '["in_progress",null]'
+  assert_eq "the head agent's own task stays with it" "$(jq -r .owner "$new/4.json")" "team-lead"
   assert_eq "completed task left behind" "$([[ -e "$new/2.json" ]] && echo present || echo absent)" "absent"
   assert_eq "edge to a task not carried is dropped, edge to a carried one kept" "$(jq -c .blockedBy "$new/3.json")" '["1"]'
   assert_eq "mirrored task carried with its status" "$(jq -r .status "$new/gh-5.json")" "in_progress"
   assert_eq "mirrored task carried to the head agent" "$(jq -r .owner "$new/gh-5.json")" "team-lead"
   out="$("$GH_TASKS" whisper 2>/dev/null)"
-  assert_has "whisper names the carry once" "$out" "carried forward from session-prev0001: 3 task"
+  assert_has "whisper names the carry once" "$out" "carried forward from session-prev0001: 4 task"
   "$GH_TASKS" attach resume 2>/dev/null
   assert_empty "second attach carries nothing" "$("$GH_TASKS" whisper 2>/dev/null)"
   assert_eq "second attach keeps the id" "$(cat "$st/list_id")" "session-newproc"
@@ -298,6 +303,8 @@ WORK="$TMP/work"; mkdir -p "$WORK"; WORK_P="$(cd "$WORK" && pwd -P)"
   ( export CLAUDE_CODE_SESSION_ID="11111111-eeee-bbbb-cccc-dddddddddddd"
     "$GH_TASKS" attach clear 2>/dev/null
     assert_eq "a cleared session adopts its process's list" "$("$GH_TASKS" dir)" "$new"
+    # Only the first cleared session can answer the second clear.
+    rm -f "$XDG_RUNTIME_DIR/claude-sessions/11111111-aaaa-bbbb-cccc-dddddddddddd/gh-tasks/process"
     export CLAUDE_CODE_SESSION_ID="11111111-ffff-bbbb-cccc-dddddddddddd"
     "$GH_TASKS" attach clear 2>/dev/null
     assert_eq "a second clear adopts it from the first" "$("$GH_TASKS" dir)" "$new"
@@ -354,6 +361,42 @@ WORK="$TMP/work"; mkdir -p "$WORK"; WORK_P="$(cd "$WORK" && pwd -P)"
     assert_eq "an explicit list id is recorded" "$(cat "$st/list_id")" "team-sprint"
     assert_eq "nothing is carried into an explicit list" "$([[ -e "$CLAUDE_CONFIG_DIR/tasks/team-sprint/1.json" ]] && echo present || echo absent)" "absent"
   )
+) 2>&1 | tee "$TMP/sub.out"; PASS=$((PASS + $(grep -c PASS "$TMP/sub.out" || true))); FAIL=$((FAIL + $(grep -c FAIL "$TMP/sub.out" || true)))
+
+# ── 12. clear after an unrecorded fallback ─────────────────────
+# No fresh team: startup records only the process. A later clear resolves
+# the list through the first session's id, as that session did.
+WORK2="$TMP/work2"; mkdir -p "$WORK2"
+( cd "$WORK2"
+  export CLAUDE_CODE_SESSION_ID="66666666-aaaa-bbbb-cccc-dddddddddddd" GH_TASKS_PROCESS="7373 fallback"
+  team_file session-66666666 "$CLAUDE_CODE_SESSION_ID"
+  "$GH_TASKS" attach startup 2>/dev/null
+  st="$XDG_RUNTIME_DIR/claude-sessions/$CLAUDE_CODE_SESSION_ID/gh-tasks"
+  assert_eq "the fallback records the process" "$(cat "$st/process")" "7373 fallback"
+  assert_eq "the fallback records no list id" "$([[ -e "$st/list_id" ]] && echo present || echo absent)" "absent"
+  export CLAUDE_CODE_SESSION_ID="66666666-eeee-bbbb-cccc-dddddddddddd"
+  "$GH_TASKS" attach clear 2>/dev/null
+  assert_eq "a clear after the fallback finds the team list" "$("$GH_TASKS" dir)" "$CLAUDE_CONFIG_DIR/tasks/session-66666666"
+) 2>&1 | tee "$TMP/sub.out"; PASS=$((PASS + $(grep -c PASS "$TMP/sub.out" || true))); FAIL=$((FAIL + $(grep -c FAIL "$TMP/sub.out" || true)))
+
+# ── 13. the process key from a real claude ancestor ────────────
+# A bash named like the claude binary, with a space and a parenthesis in its
+# comm, stands in for the process; /proc gives pid and starttime.
+if [[ -r /proc/self/stat ]]; then
+  ln -s "$(command -v bash)" "$TMP/claude) x"
+  out="$(GH_TASKS_PROCESS= "$TMP/claude) x" -c 'echo "$$ $(sed "s/.*) //" /proc/$$/stat | cut -d" " -f20)"; "$1" status | sed -n "s/^process: *//p"; true' _ "$GH_TASKS")"
+  assert_eq "the key is the claude pid and starttime" "$(sed -n 2p <<<"$out")" "$(sed -n 1p <<<"$out")"
+else
+  echo "  SKIP: process key from /proc (no /proc)"
+fi
+
+# ── 14. the hook attaches only for a known source ──────────────
+( export CLAUDE_CODE_SESSION_ID="77777777-aaaa-bbbb-cccc-dddddddddddd"
+  jq -n --arg s "$CLAUDE_CODE_SESSION_ID" --arg c "$HOOK_CWD" '{session_id:$s, cwd:$c}' | "$HOOK" session-start >/dev/null
+  st="$XDG_RUNTIME_DIR/claude-sessions/$CLAUDE_CODE_SESSION_ID/gh-tasks"
+  assert_eq "an empty source runs no attach" "$([[ -e "$st/process" ]] && echo present || echo absent)" "absent"
+  jq -n --arg s "$CLAUDE_CODE_SESSION_ID" --arg c "$HOOK_CWD" '{session_id:$s, cwd:$c, source:"startup"}' | "$HOOK" session-start >/dev/null
+  assert_eq "a startup source attaches" "$([[ -e "$st/process" ]] && echo present || echo absent)" "present"
 ) 2>&1 | tee "$TMP/sub.out"; PASS=$((PASS + $(grep -c PASS "$TMP/sub.out" || true))); FAIL=$((FAIL + $(grep -c FAIL "$TMP/sub.out" || true)))
 
 # ── 10. identity ───────────────────────────────────────────────

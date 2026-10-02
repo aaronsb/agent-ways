@@ -37,7 +37,7 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
 case "$MODE" in
   session-start)
-    "$GH_TASKS" --session "$SESSION_ID" attach "${SOURCE:-startup}" 2>/dev/null
+    [[ -n "$SOURCE" ]] && "$GH_TASKS" --session "$SESSION_ID" attach "$SOURCE" 2>/dev/null
     "$GH_TASKS" --session "$SESSION_ID" --force pull 2>/dev/null
     OUT=$("$GH_TASKS" --session "$SESSION_ID" whisper --full 2>/dev/null)
     ;;
