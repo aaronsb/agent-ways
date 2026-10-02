@@ -1,7 +1,10 @@
-//! The introspect screens on agent-tui (ADR-504 §1, §9): the session
-//! picker, and a session's timeline, replayed or live, with its why-fired
-//! view. One [`Introspect`] holds them all, so the process runs one screen
-//! session: Enter in the picker opens a session, Esc goes back to it.
+//! The introspect screens on agent-tui (ADR-504 §1, §9), as the tabs of
+//! one screen (#738): the session picker; a session's timeline, replayed
+//! or live, with its why-fired view; the session's semantic fires; and the
+//! judge's spend over the sessions in scope. One [`Introspect`] holds them
+//! all, so the process runs one screen session. A digit picks a tab, Enter
+//! in the picker opens a session on the timeline, and Esc goes back to the
+//! picker.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -19,9 +22,11 @@ use ways_agent_core::spend::{self, Group};
 use ways_core::introspection::SessionIntrospection;
 
 use super::model::{ActiveWay, Frame, Outcome};
+use super::report::Spend;
 use super::sessions::SessionInfo;
 use super::table;
 use super::why::{self, WhyIndex};
+use super::SemanticFire;
 
 /// How often a live timeline reads the event log again (ADR-154 §3); the
 /// stat check keeps an unchanged log cheap.
@@ -59,6 +64,11 @@ pub(crate) struct Replay {
     pub(crate) spend: Option<Group>,
     /// Whether the header gives the spend as cost; tokens otherwise.
     pub(crate) cost: bool,
+    /// The session's semantic fires, lowest score first, and the one
+    /// selected on the fires tab.
+    pub(crate) fires: Vec<SemanticFire>,
+    fires_sel: usize,
+    fires_table: TableState,
     /// The selected way of the frame shown, in both views.
     sel: usize,
     /// The why-fired detail's scroll, and its page from the last frame.
@@ -92,6 +102,9 @@ impl Replay {
             judged: false,
             spend: None,
             cost: false,
+            fires: Vec::new(),
+            fires_sel: 0,
+            fires_table: TableState::default(),
             sel: 0,
             scroll: 0,
             page: 10,
@@ -130,6 +143,7 @@ impl Replay {
         r.from_log = true;
         r.judged = super::frames::has_verdicts(&events);
         r.spend = session_spend(content, session_id);
+        r.fires = super::semantic_fires(content, session_id);
         if live {
             r.sig = events_signature();
         }
@@ -266,6 +280,20 @@ impl Replay {
         Step::Stay
     }
 
+    /// A key on the fires tab: move the selection.
+    fn fires_key(&mut self, k: KeyCode) {
+        let last = self.fires.len().saturating_sub(1);
+        self.fires_sel = match k {
+            KeyCode::Up | KeyCode::Char('k') => self.fires_sel.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => (self.fires_sel + 1).min(last),
+            KeyCode::PageUp => self.fires_sel.saturating_sub(10),
+            KeyCode::PageDown => (self.fires_sel + 10).min(last),
+            KeyCode::Home | KeyCode::Char('g') => 0,
+            KeyCode::End | KeyCode::Char('G') => last,
+            _ => self.fires_sel,
+        };
+    }
+
     fn tick_every(&self) -> Option<Duration> {
         if self.play.is_live() {
             Some(LIVE_REFRESH)
@@ -310,6 +338,7 @@ impl Replay {
         }
         self.judged = super::frames::has_verdicts(&events);
         self.spend = session_spend(&content, &self.session_id);
+        self.fires = super::semantic_fires(&content, &self.session_id);
         self.take_frames(frames);
     }
 
@@ -403,23 +432,69 @@ impl Picker {
 /// Opens a session the picker chose.
 pub(crate) type Opener = Box<dyn Fn(&str) -> Result<Replay, String>>;
 
-/// The introspect screens: the picker, a session, or both.
+/// The tabs of the screen, in the order a digit picks them.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Tab {
+    Sessions,
+    Timeline,
+    Fires,
+    Spend,
+}
+
+impl Tab {
+    fn name(self) -> &'static str {
+        match self {
+            Tab::Sessions => "sessions",
+            Tab::Timeline => "timeline",
+            Tab::Fires => "fires",
+            Tab::Spend => "spend",
+        }
+    }
+}
+
+/// The introspect screens: the picker when there is one, the session it
+/// opened, and the spend over the scope.
 pub(crate) struct Introspect {
     palette: Palette,
     shape: Shape,
+    pub(crate) tab: Tab,
     picker: Option<Picker>,
     pub(crate) replay: Option<Replay>,
+    pub(crate) spend: Spend,
     open: Opener,
     msg: String,
 }
 
 impl Introspect {
-    pub(crate) fn picking(picker: Picker, open: Opener, palette: Palette, shape: Shape) -> Introspect {
-        Introspect { palette, shape, picker: Some(picker), replay: None, open, msg: String::new() }
+    pub(crate) fn picking(picker: Picker, open: Opener, spend: Spend, palette: Palette, shape: Shape) -> Introspect {
+        Introspect { palette, shape, tab: Tab::Sessions, picker: Some(picker), replay: None, spend, open, msg: String::new() }
     }
 
-    pub(crate) fn showing(replay: Replay, palette: Palette, shape: Shape) -> Introspect {
-        Introspect { palette, shape, picker: None, replay: Some(replay), open: Box::new(|_| Err("no picker".into())), msg: String::new() }
+    pub(crate) fn showing(replay: Replay, spend: Spend, palette: Palette, shape: Shape) -> Introspect {
+        let open = Box::new(|_: &str| Err("no picker".into()));
+        Introspect { palette, shape, tab: Tab::Timeline, picker: None, replay: Some(replay), spend, open, msg: String::new() }
+    }
+
+    /// The tabs shown: the sessions tab only with a picker.
+    fn tabs(&self) -> Vec<Tab> {
+        let all = [Tab::Sessions, Tab::Timeline, Tab::Fires, Tab::Spend];
+        all.into_iter().filter(|t| *t != Tab::Sessions || self.picker.is_some()).collect()
+    }
+
+    /// The tab line, each tab named with the digit that picks it.
+    fn bar(&self) -> Line<'static> {
+        let views: Vec<(String, bool)> = self.tabs().iter().enumerate().map(|(i, t)| (format!("{} {}", i + 1, t.name()), *t == self.tab)).collect();
+        tabs(self.shape, &views)
+    }
+
+    /// Esc on a tab: back to the picker, or out when there is none.
+    fn back(&mut self) -> bool {
+        if self.picker.is_some() && self.tab != Tab::Sessions {
+            self.tab = Tab::Sessions;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -429,11 +504,31 @@ impl Screen for Introspect {
     }
 
     fn draw(&mut self, f: &mut Draw) {
-        let shape = self.shape;
-        match (&mut self.replay, &mut self.picker) {
-            (Some(r), _) => draw_replay(f, r, shape),
-            (None, Some(p)) => draw_picker(f, p, shape, &self.msg),
-            (None, None) => {}
+        let (shape, bar) = (self.shape, self.bar());
+        match self.tab {
+            Tab::Timeline if self.replay.is_some() => draw_replay(f, self.replay.as_mut().unwrap(), bar, shape),
+            Tab::Sessions => {
+                if let Some(p) = &mut self.picker {
+                    draw_picker(f, p, bar, shape, &self.msg);
+                }
+            }
+            Tab::Fires if self.replay.is_some() => draw_fires(f, self.replay.as_mut().unwrap(), bar, shape),
+            Tab::Spend => {
+                let [top, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
+                f.render_widget(Paragraph::new(bar), top);
+                self.spend.draw(f, body);
+                let mut keys = self.spend.keys();
+                keys.push(("q", "quit"));
+                f.render_widget(Paragraph::new(key_bar(shape, "spend", Ground::Accent, &keys, Vec::new(), status.width)), status);
+            }
+            // A session tab before a session is open.
+            _ => {
+                let [top, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
+                f.render_widget(Paragraph::new(bar), top);
+                let hint = Line::styled("no session open: pick one on the sessions tab", theme::muted());
+                f.render_widget(Paragraph::new(hint).block(pane(format!(" {} ", self.tab.name()))), body);
+                f.render_widget(Paragraph::new(key_bar(shape, self.tab.name(), Ground::Accent, &[("q", "quit")], Vec::new(), status.width)), status);
+            }
         }
     }
 
@@ -441,34 +536,53 @@ impl Screen for Introspect {
         if k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
             return false;
         }
-        if let Some(r) = &mut self.replay {
-            return match r.key(k) {
+        if let KeyCode::Char(d @ '1'..='9') = k.code {
+            if let Some(t) = self.tabs().get(d as usize - '1' as usize) {
+                self.tab = *t;
+            }
+            return true;
+        }
+        match self.tab {
+            Tab::Timeline if self.replay.is_some() => match self.replay.as_mut().unwrap().key(k) {
                 Step::Stay => true,
                 Step::Quit => false,
-                Step::Back if self.picker.is_some() => {
-                    self.replay = None;
+                Step::Back => self.back(),
+            },
+            Tab::Sessions => {
+                let Some(p) = &mut self.picker else { return false };
+                match k.code {
+                    KeyCode::Esc | KeyCode::Char('q') => return false,
+                    KeyCode::Enter => {
+                        if let Some(s) = p.sessions.get(p.sel) {
+                            match (self.open)(&s.id) {
+                                Ok(r) => {
+                                    self.replay = Some(r);
+                                    self.tab = Tab::Timeline;
+                                    self.msg.clear();
+                                }
+                                Err(e) => self.msg = e,
+                            }
+                        }
+                    }
+                    c => p.key(c),
+                }
+                true
+            }
+            tab => match k.code {
+                KeyCode::Char('q') => false,
+                KeyCode::Esc => self.back(),
+                c if tab == Tab::Spend => {
+                    self.spend.key(c);
                     true
                 }
-                Step::Back => false,
-            };
-        }
-        let Some(p) = &mut self.picker else { return false };
-        match k.code {
-            KeyCode::Esc | KeyCode::Char('q') => return false,
-            KeyCode::Enter => {
-                if let Some(s) = p.sessions.get(p.sel) {
-                    match (self.open)(&s.id) {
-                        Ok(r) => {
-                            self.replay = Some(r);
-                            self.msg.clear();
-                        }
-                        Err(e) => self.msg = e,
+                c => {
+                    if let Some(r) = &mut self.replay {
+                        r.fires_key(c);
                     }
+                    true
                 }
-            }
-            c => p.key(c),
+            },
         }
-        true
     }
 
     fn tick_every(&self) -> Option<Duration> {
@@ -483,12 +597,12 @@ impl Screen for Introspect {
 }
 
 /// A bordered pane in the theme, as the settings screens draw theirs.
-fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
+pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
     Block::default().borders(Borders::ALL).border_style(theme::rule()).title(title).title_style(theme::title())
 }
 
 /// The tab line: the application, then each view, the shown one in the accent.
-fn tabs(shape: Shape, views: &[(&str, bool)]) -> Line<'static> {
+fn tabs(shape: Shape, views: &[(String, bool)]) -> Line<'static> {
     let mut spans = shape.lozenge(&[Seg::on(" introspect ", Ground::AccentDim)]);
     for (name, on) in views {
         spans.push(Span::raw("  "));
@@ -498,9 +612,9 @@ fn tabs(shape: Shape, views: &[(&str, bool)]) -> Line<'static> {
     Line::from(spans)
 }
 
-fn draw_picker(f: &mut Draw, p: &mut Picker, shape: Shape, msg: &str) {
+fn draw_picker(f: &mut Draw, p: &mut Picker, tab_line: Line<'static>, shape: Shape, msg: &str) {
     let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
-    f.render_widget(Paragraph::new(tabs(shape, &[("sessions", true)])), bar);
+    f.render_widget(Paragraph::new(tab_line), bar);
     // The count first: a long scope is cut at its end, never the count.
     let title = format!(" {} sessions in {} ", p.sessions.len(), p.scope);
     if p.sessions.is_empty() {
@@ -634,12 +748,12 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
     ]
 }
 
-fn draw_replay(f: &mut Draw, r: &mut Replay, shape: Shape) {
+fn draw_replay(f: &mut Draw, r: &mut Replay, tab_line: Line<'static>, shape: Shape) {
     let [bar, head, scrub, body, status] =
         Layout::vertical([Constraint::Length(1), Constraint::Length(2), Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
     let n = r.ways_len();
     r.sel = r.sel.min(n.saturating_sub(1));
-    f.render_widget(Paragraph::new(tabs(shape, &[("timeline", r.view == View::Timeline), ("why fired", r.view == View::Why)])), bar);
+    f.render_widget(Paragraph::new(tab_line), bar);
     f.render_widget(Paragraph::new(header(r, head.width)), head);
     let marks = r.window_starts();
     f.render_widget(Scrubber { len: r.play.len(), pos: r.play.pos(), marks: &marks }, scrub);
@@ -794,4 +908,54 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
     }
     f.render_stateful_widget(list, left, &mut r.list);
     f.render_widget(Paragraph::new(lines).scroll((r.scroll as u16, 0)).block(pane(Line::from(title))), right);
+}
+
+/// The fires tab: each semantic fire of the session as score, way and the
+/// text it matched, the borderline fires first, as `ways session fires`
+/// lists them.
+fn draw_fires(f: &mut Draw, r: &mut Replay, tab_line: Line<'static>, shape: Shape) {
+    let [bar, head, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
+    f.render_widget(Paragraph::new(tab_line), bar);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Session ", Style::new().add_modifier(Modifier::BOLD)),
+            Span::raw(super::short_id(&r.session_id)),
+            Span::styled("  lowest score first · ↻ a re-disclosure", theme::muted()),
+        ])),
+        head,
+    );
+    let title = format!(" {} semantic fires ", r.fires.len());
+    if r.fires.is_empty() {
+        let none = Line::styled("no semantic fires: keyword and state fires carry no score or surface", theme::muted());
+        f.render_widget(Paragraph::new(none).block(pane(title)), body);
+    } else {
+        let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
+        let header = Row::new(vec![right("Score".into()), Cell::from(""), Cell::from("Way"), Cell::from("Surface")]).style(Style::new().add_modifier(Modifier::BOLD));
+        let rows: Vec<Row> = r
+            .fires
+            .iter()
+            .map(|x| {
+                Row::new(vec![
+                    right(format!("{:.3}", x.score)),
+                    Cell::from(if x.redisclosed { "↻" } else { " " }),
+                    Cell::from(x.way.clone()),
+                    Cell::from(Span::styled(x.surface.clone(), theme::muted())),
+                ])
+            })
+            .collect();
+        let widths = [Constraint::Length(5), Constraint::Length(1), Constraint::Percentage(40), Constraint::Min(10)];
+        r.fires_sel = r.fires_sel.min(r.fires.len() - 1);
+        r.fires_table.select(Some(r.fires_sel));
+        let t = Table::new(rows, widths)
+            .header(header)
+            .column_spacing(1)
+            .block(pane(title))
+            .row_highlight_style(theme::selected())
+            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
+            .highlight_spacing(HighlightSpacing::Always);
+        f.render_stateful_widget(t, body, &mut r.fires_table);
+    }
+    let right = vec![Span::styled(format!("{}/{}", (r.fires_sel + 1).min(r.fires.len()), r.fires.len()), theme::muted())];
+    let keys = [("↑↓", "select"), ("esc", "back"), ("q", "quit")];
+    f.render_widget(Paragraph::new(key_bar(shape, "fires", Ground::Accent, &keys, right, status.width)), status);
 }

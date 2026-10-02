@@ -1,11 +1,17 @@
 agent-tui frame 120x40
 | introspect    1 timeline    2 fires    3 spend                                                                         |
-|Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
-|epoch 1 · 200K ctx · 1 ways · window 2/2 · 2026-07-03 17:52  ◇ injected  ● LIVE · 6s ago                                |
-|━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 4/4|
-|┌ ways at epoch 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│▌softwaredev/delivery/commits                                                1      0  keyword        ●  ─            │|
+|Judge spend by day · the log holds calls from 2026-06-30                                                                |
+|┌ 3 judge calls in /home/dev/proj ─────────────────────────────────────────────────────────────────────────────────────┐|
+|│ Day        Calls     Input   Output     Cache Tokens                Cost                                             │|
+|│▌2026-07-03     2      2500      250         0   2.8K $0.0220 + 1 unknown                                             │|
+|│ 2026-07-01     1      1000      100         0   1.1K             $0.0110                                             │|
+|│ total          3      3500      350         0   3.9K $0.0330 + 1 unknown                                             │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -32,41 +38,28 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-|┌ context ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│███████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 15% (31K / 200K)│|
-|│○ 1 distant  │ 30K interval                                                                                           │|
-|│··································································································● forecast 31K → 61K│|
-|│+ ⎯ compaction · window 2 ⎯, ↻ softwaredev/delivery/commits                                                           │|
-|└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| live   ↑↓ select  ⏎ why  ←→ frame  space pause  f matched  q quit                                                      |
+| spend   ↑↓ select  m by month  q quit                                                                                  |
 styles
   0   0-11  White Blue -
-  0  14-25  Black Cyan BOLD
+  0  14-25  White DarkGray DIM
   0  28-36  White DarkGray DIM
-  0  39-47  White DarkGray DIM
-  1   0-7   - - BOLD
-  1  44-59  - - DIM
-  2   0-58  - - DIM
-  2  59-70  Cyan - -
-  2  71-78  Green - BOLD
-  2  79-87  - - DIM
-  3   0-114 Cyan - -
-  3 115-115 Cyan - BOLD
-  3 116-119 - - BOLD
+  0  39-47  Black Cyan BOLD
+  1   0-17  - - BOLD
+  1  18-55  - - DIM
+  2   0-0   - - DIM
+  2   1-33  Blue - BOLD|DIM
+  2  34-119 - - DIM
+  3   0-0   - - DIM
+  3   1-118 - - BOLD
+  3 119-119 - - DIM
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
-  4  18-119 - - DIM
+  4   1-1   Cyan - BOLD|REVERSED
+  4   2-118 - - BOLD|REVERSED
+  4 119-119 - - DIM
   5   0-0   - - DIM
-  5   1-118 - - BOLD
   5 119-119 - - DIM
   6   0-0   - - DIM
-  6   1-80  Cyan - BOLD|REVERSED
-  6  81-85  Green - BOLD|REVERSED
-  6  86-102 Cyan - BOLD|REVERSED
-  6 103-103 #5ac8fa - BOLD|REVERSED
-  6 104-105 Cyan - BOLD|REVERSED
-  6 106-106 Cyan - BOLD|DIM|REVERSED
-  6 107-118 Cyan - BOLD|REVERSED
+  6   1-118 - - BOLD
   6 119-119 - - DIM
   7   0-0   - - DIM
   7 119-119 - - DIM
@@ -118,32 +111,23 @@ styles
  30 119-119 - - DIM
  31   0-0   - - DIM
  31 119-119 - - DIM
- 32   0-119 - - DIM
+ 32   0-0   - - DIM
+ 32 119-119 - - DIM
  33   0-0   - - DIM
- 33   1-9   Blue - BOLD|DIM
- 33  10-119 - - DIM
+ 33 119-119 - - DIM
  34   0-0   - - DIM
- 34   1-101 Green - -
  34 119-119 - - DIM
- 35   0-27  - - DIM
+ 35   0-0   - - DIM
  35 119-119 - - DIM
- 36   0-98  - - DIM
- 36  99-99  #5ac8fa - -
- 36 100-119 - - DIM
+ 36   0-0   - - DIM
+ 36 119-119 - - DIM
  37   0-0   - - DIM
- 37   1-59  Green - BOLD
  37 119-119 - - DIM
  38   0-119 - - DIM
- 39   0-5   Black Green BOLD
- 39   8-9   Cyan - BOLD
- 39  10-16  - - DIM|ITALIC
- 39  19-19  Cyan - BOLD
- 39  20-23  - - DIM|ITALIC
- 39  26-27  Cyan - BOLD
- 39  28-33  - - DIM|ITALIC
- 39  36-40  Cyan - BOLD
- 39  41-46  - - DIM|ITALIC
- 39  49-49  Cyan - BOLD
- 39  50-57  - - DIM|ITALIC
- 39  60-60  Cyan - BOLD
- 39  61-65  - - DIM|ITALIC
+ 39   0-6   Black Cyan BOLD
+ 39   9-10  Cyan - BOLD
+ 39  11-17  - - DIM|ITALIC
+ 39  20-20  Cyan - BOLD
+ 39  21-29  - - DIM|ITALIC
+ 39  32-32  Cyan - BOLD
+ 39  33-37  - - DIM|ITALIC

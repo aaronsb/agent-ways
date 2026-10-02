@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| introspect    timeline    why fired                                                                              |
+| introspect    1 timeline    2 fires    3 spend                                                                 |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
 |epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ◇ injected · 1 judged out                                  |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
@@ -44,11 +44,14 @@ styles
   0   1-12  #2e3440 #bfa2c3 -
   0  13-13  #bfa2c3 - -
   0  16-16  #c99fc1 - -
-  0  17-26  #2e3440 #c99fc1 BOLD
-  0  27-27  #c99fc1 - -
-  0  30-30  #3f3f4e - -
-  0  31-41  #7c8baa #3f3f4e -
+  0  17-28  #2e3440 #c99fc1 BOLD
+  0  29-29  #c99fc1 - -
+  0  32-32  #3f3f4e - -
+  0  33-41  #7c8baa #3f3f4e -
   0  42-42  #3f3f4e - -
+  0  45-45  #3f3f4e - -
+  0  46-54  #7c8baa #3f3f4e -
+  0  55-55  #3f3f4e - -
   1   0-7   - - BOLD
   1  44-59  #7c8baa - -
   2   0-58  #7c8baa - -

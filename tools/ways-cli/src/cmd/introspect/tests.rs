@@ -20,6 +20,7 @@ use ways_core::introspection::{CriteriaMap, FiredWay, IntrospectionSummary, Join
 
 use super::frames::{build_frames, has_verdicts};
 use super::model::WayEvent;
+use super::report::Spend;
 use super::screen::{reselect_by_anchor, session_spend, Introspect, Picker, Replay};
 use super::sessions::{gather_sessions, SessionInfo};
 use super::why::build_why_index;
@@ -147,7 +148,17 @@ fn nord() -> Palette {
 
 fn picker(palette: Palette) -> Introspect {
     let open = Box::new(|id: &str| if id == SESSION { Ok(replay(false)) } else { Err(format!("no events for session {}", &id[..12])) });
-    Introspect::picking(Picker::new(sessions(), PROJECT.into()), open, palette, Shape::PLAIN)
+    Introspect::picking(Picker::new(sessions(), PROJECT.into()), open, no_spend(), palette, Shape::PLAIN)
+}
+
+/// A spend tab with no judge calls.
+fn no_spend() -> Spend {
+    Spend::new(Vec::new(), None, PROJECT.into())
+}
+
+/// The screen opened on one session, as `--session` and `live` open it.
+fn showing(r: Replay, palette: Palette, shape: Shape) -> Introspect {
+    Introspect::showing(r, no_spend(), palette, shape)
 }
 
 fn press(s: &mut Introspect, keys: &[KeyCode]) -> bool {
@@ -176,22 +187,22 @@ fn golden_frames() {
     check(&mut g, "picker", &mut p);
 
     // A replay three frames in, the second way selected.
-    let mut r = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut r = showing(replay(false), terminal(), Shape::PLAIN);
     press(&mut r, &[KeyCode::Right, KeyCode::Right, KeyCode::Down]);
     check(&mut g, "replay", &mut r);
 
     // The same frame in a theme, playing.
-    let mut t = Introspect::showing(replay(false), nord(), Shape::ROUND);
+    let mut t = showing(replay(false), nord(), Shape::ROUND);
     press(&mut t, &[KeyCode::Right, KeyCode::Right, KeyCode::Char(' ')]);
     check(&mut g, "replay-nord", &mut t);
 
     // Why the first way fired: its trigger, criteria and body as markdown.
-    let mut w = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut w = showing(replay(false), terminal(), Shape::PLAIN);
     press(&mut w, &[KeyCode::Right, KeyCode::Right, KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
     check(&mut g, "why", &mut w);
 
     // Live, following the newest frame, which fired five seconds ago.
-    let mut l = Introspect::showing(replay(true), terminal(), Shape::PLAIN);
+    let mut l = showing(replay(true), terminal(), Shape::PLAIN);
     check(&mut g, "live", &mut l);
     // Looking back stops the follow.
     press(&mut l, &[KeyCode::Left]);
@@ -215,10 +226,10 @@ fn enter_opens_a_session_esc_comes_back_and_q_quits() {
     assert!(text(&render(&mut s, 120, 40)).contains("no events for session 1b2c3d4e-000"));
     assert!(!press(&mut s, &[KeyCode::Char('q')]), "q ends the session");
     // Ctrl-C ends it from anywhere.
-    let mut r = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut r = showing(replay(false), terminal(), Shape::PLAIN);
     assert!(!r.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
     // A replay opened directly ends on Esc: there is no picker to go back to.
-    let mut d = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut d = showing(replay(false), terminal(), Shape::PLAIN);
     assert!(!press(&mut d, &[KeyCode::Esc]));
 }
 
@@ -227,7 +238,7 @@ fn enter_opens_a_session_esc_comes_back_and_q_quits() {
 fn a_long_scope_keeps_the_session_count_in_view() {
     let open = Box::new(|_: &str| Err("none".to_string()));
     let scope = format!("/var/folders/{}/proj", "x".repeat(120));
-    let mut s = Introspect::picking(Picker::new(sessions(), scope), open, terminal(), Shape::PLAIN);
+    let mut s = Introspect::picking(Picker::new(sessions(), scope), open, no_spend(), terminal(), Shape::PLAIN);
     assert!(text(&render(&mut s, 80, 10)).contains("3 sessions in /var/folders/"));
 }
 
@@ -243,7 +254,7 @@ fn esc_leaves_the_why_view_for_the_timeline_before_it_leaves_the_session() {
 
 #[test]
 fn playing_moves_a_frame_per_tick_and_stops_at_the_last() {
-    let mut s = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut s = showing(replay(false), terminal(), Shape::PLAIN);
     assert_eq!(s.tick_every(), None, "paused, nothing to tick");
     press(&mut s, &[KeyCode::Char(' ')]);
     assert_eq!(s.tick_every(), Some(std::time::Duration::from_millis(1000)));
@@ -260,7 +271,7 @@ fn playing_moves_a_frame_per_tick_and_stops_at_the_last() {
 
 #[test]
 fn the_selection_stays_on_its_way_across_frames() {
-    let mut s = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut s = showing(replay(false), terminal(), Shape::PLAIN);
     // Frame 2 holds testing and commits (epoch 1, in id order) and adr
     // (epoch 2); select adr, then go back a frame, where adr has not fired:
     // the cursor takes commits, the last way that fired before it.
@@ -309,7 +320,7 @@ fn a_live_cursor_follows_the_newest_way_until_the_reader_looks_back() {
     // Frame 2 lists commits, adr, testing: testing is the newest row.
     let mut live = replay(true);
     live.take_frames(first(2));
-    let mut s = Introspect::showing(live, terminal(), Shape::PLAIN);
+    let mut s = showing(live, terminal(), Shape::PLAIN);
     s.replay.as_mut().unwrap().take_frames(first(3));
     assert!(sel(&mut s).contains("softwaredev/code/testing"), "follows the newest: {}", sel(&mut s));
     press(&mut s, &[KeyCode::Up]);
@@ -326,7 +337,7 @@ fn a_live_cursor_follows_the_newest_way_until_the_reader_looks_back() {
 /// reader keeps its place and its index rather than going back to the top.
 #[test]
 fn a_live_refresh_keeps_the_why_reader_where_it_was() {
-    let mut s = Introspect::showing(replay(true), terminal(), Shape::PLAIN);
+    let mut s = showing(replay(true), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Left, KeyCode::Down, KeyCode::Down, KeyCode::Tab]);
     press(&mut s, &[KeyCode::Char('j'); 5]);
     let before = frame(&render(&mut s, 80, 25));
@@ -339,7 +350,7 @@ fn a_live_refresh_keeps_the_why_reader_where_it_was() {
 
 #[test]
 fn the_why_reader_scrolls_within_its_document() {
-    let mut s = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut s = showing(replay(false), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Right, KeyCode::Right, KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
     let top = frame(&render(&mut s, 80, 25));
     assert!(top.contains("1–"), "a long document shows its range: {top}");
@@ -393,7 +404,7 @@ fn selected(s: &mut Introspect) -> String {
 /// table to every matched candidate, the judge-blocked row added, and back.
 #[test]
 fn f_toggles_the_table_between_injected_and_matched_ways() {
-    let mut s = Introspect::showing(judged_replay(), terminal(), Shape::PLAIN);
+    let mut s = showing(judged_replay(), terminal(), Shape::PLAIN);
     let t = text(&render(&mut s, 120, 40));
     assert!(t.contains("◌ softwaredev/delivery/commits"), "{t}");
     assert!(t.contains("softwaredev/code/testing"));
@@ -414,7 +425,7 @@ fn f_toggles_the_table_between_injected_and_matched_ways() {
 /// `judge` channel the model files it under.
 #[test]
 fn a_blocked_row_opens_its_why_page() {
-    let mut s = Introspect::showing(judged_replay(), terminal(), Shape::PLAIN);
+    let mut s = showing(judged_replay(), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('f'), KeyCode::Down, KeyCode::Down]);
     assert!(selected(&mut s).contains("⊘ itops/incident"), "{}", selected(&mut s));
     press(&mut s, &[KeyCode::Enter]);
@@ -431,11 +442,11 @@ fn a_blocked_row_opens_its_why_page() {
 #[test]
 fn a_session_without_the_judge_keeps_its_timestamp_at_80_columns() {
     let events: Vec<WayEvent> = session_events().into_iter().filter(|e| e.event != "way_judged").collect();
-    let mut s = Introspect::showing(replay_of(events, false), terminal(), Shape::PLAIN);
+    let mut s = showing(replay_of(events, false), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Right, KeyCode::Right]);
     let t = text(&render(&mut s, 80, 25));
     assert!(t.contains("window 1/2 · 2026-07-03 16:55") && !t.contains("◇ injected"), "{t}");
-    let mut j = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut j = showing(replay(false), terminal(), Shape::PLAIN);
     press(&mut j, &[KeyCode::Right, KeyCode::Right]);
     assert!(text(&render(&mut j, 80, 25)).contains("◇ injected · 1 judged out"));
 }
@@ -444,7 +455,7 @@ fn a_session_without_the_judge_keeps_its_timestamp_at_80_columns() {
 /// model the events build.
 #[test]
 fn the_why_page_shows_the_judges_verdicts() {
-    let mut s = Introspect::showing(judged_replay(), terminal(), Shape::PLAIN);
+    let mut s = showing(judged_replay(), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('f'), KeyCode::Down, KeyCode::Enter]);
     let t = text(&render(&mut s, 120, 40));
     assert!(t.contains("would block") && t.contains("P(yes) 0.05 < 0.30"), "{t}");
@@ -456,9 +467,9 @@ fn the_why_page_shows_the_judges_verdicts() {
 #[test]
 fn judged_golden_frames() {
     let mut g = goldens();
-    let mut i = Introspect::showing(judged_replay(), terminal(), Shape::PLAIN);
+    let mut i = showing(judged_replay(), terminal(), Shape::PLAIN);
     check(&mut g, "judged-injected", &mut i);
-    let mut m = Introspect::showing(judged_replay(), terminal(), Shape::PLAIN);
+    let mut m = showing(judged_replay(), terminal(), Shape::PLAIN);
     press(&mut m, &[KeyCode::Char('f')]);
     check(&mut g, "judged-matched", &mut m);
     g.finish();
@@ -475,7 +486,7 @@ fn a_row_blocked_with_its_ancestor_names_it() {
     let frames = build_frames(&events, &[], &HashMap::new(), 50);
     let mut r = Replay::new(SESSION.into(), PROJECT.into(), 200, frames, Playback::replay(1));
     r.judged = true;
-    let mut s = Introspect::showing(r, terminal(), Shape::PLAIN);
+    let mut s = showing(r, terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('f')]);
     let t = text(&render(&mut s, 120, 40));
     assert!(t.contains("⊘ itops/incident/sev1 (with itops/incident)"), "{t}");
@@ -494,7 +505,7 @@ fn the_header_gives_the_judges_spend_and_dollar_toggles_tokens_and_cost() {
     .join("\n");
     let mut r = replay(false);
     r.spend = session_spend(&log, SESSION);
-    let mut s = Introspect::showing(r, terminal(), Shape::PLAIN);
+    let mut s = showing(r, terminal(), Shape::PLAIN);
     let t = text(&render(&mut s, 80, 25));
     assert!(t.contains("judge ×2 · 1.2K tokens") && t.contains("$ cost"), "{t}");
     press(&mut s, &[KeyCode::Char('$')]);
@@ -502,7 +513,7 @@ fn the_header_gives_the_judges_spend_and_dollar_toggles_tokens_and_cost() {
     assert!(t.contains("judge ×2 · $0.0200 + 1 unknown") && t.contains("$ tokens"), "{t}");
 
     assert!(session_spend(&log, "absent").is_none());
-    let mut quiet = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut quiet = showing(replay(false), terminal(), Shape::PLAIN);
     let t = text(&render(&mut quiet, 80, 25));
     assert!(!t.contains("judge ") && !t.contains("$ cost"), "no calls, no spend: {t}");
     // `$` before the first call leaves the figure in tokens once one comes.
@@ -520,9 +531,126 @@ fn a_heavy_spend_fits_at_80_columns() {
     let mut r = replay(false);
     r.spend = Some(ways_agent_core::spend::Group { calls: 1234, known_calls: 1222, unknown_calls: 12, cost_usd: Some(12.3456), input_tokens: 4_100_000, ..Default::default() });
     r.cost = true;
-    let mut s = Introspect::showing(r, terminal(), Shape::PLAIN);
+    let mut s = showing(r, terminal(), Shape::PLAIN);
     let t = text(&render(&mut s, 80, 25));
     assert!(t.contains("Session 8f3a2c1d-5e6  judge ×1234 · $12.3456 + 12 unknown"), "{t}");
-    let mut wide = Introspect::showing(replay(false), terminal(), Shape::PLAIN);
+    let mut wide = showing(replay(false), terminal(), Shape::PLAIN);
     assert!(text(&render(&mut wide, 80, 25)).contains(SESSION), "without spend the full id stays");
+}
+
+/// Judge calls in two projects over three days and two months; one of
+/// unknown cost.
+fn spend_calls() -> Vec<ways_agent_core::spend::Call> {
+    let call = |ts: &str, project: &str, input: u64, cost: Option<f64>| ways_agent_core::spend::Call {
+        ts: ts.into(),
+        session: SESSION.into(),
+        project: project.into(),
+        cost_usd: cost,
+        input_tokens: input,
+        output_tokens: input / 10,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+    };
+    vec![
+        call("2026-06-30T09:00:00Z", "/elsewhere", 9000, Some(0.9)),
+        call("2026-07-01T10:00:00Z", PROJECT, 1000, Some(0.0110)),
+        call("2026-07-03T16:52:00Z", PROJECT, 2000, Some(0.0220)),
+        call("2026-07-03T16:53:00Z", PROJECT, 500, None),
+    ]
+}
+
+/// The tabs are picked by digit, each named with its digit; the session
+/// tabs before a session opens say how to open one; Esc goes back to the
+/// picker from every tab.
+#[test]
+fn digits_pick_the_tabs_and_esc_goes_back_to_the_picker() {
+    let mut s = picker(terminal());
+    let t = text(&render(&mut s, 80, 25));
+    assert!(t.contains("1 sessions") && t.contains("2 timeline") && t.contains("3 fires") && t.contains("4 spend"), "{t}");
+    press(&mut s, &[KeyCode::Char('2')]);
+    assert!(text(&render(&mut s, 80, 25)).contains("no session open: pick one on the sessions tab"));
+    press(&mut s, &[KeyCode::Char('1'), KeyCode::Enter]);
+    assert!(text(&render(&mut s, 80, 25)).contains(&format!("Session {SESSION}")), "Enter opens the timeline");
+    press(&mut s, &[KeyCode::Char('3')]);
+    assert!(text(&render(&mut s, 80, 25)).contains("0 semantic fires"));
+    press(&mut s, &[KeyCode::Char('4')]);
+    assert!(text(&render(&mut s, 80, 25)).contains("Judge spend by day"));
+    press(&mut s, &[KeyCode::Char('9')]);
+    assert!(text(&render(&mut s, 80, 25)).contains("Judge spend by day"), "a digit past the tabs does nothing");
+    press(&mut s, &[KeyCode::Esc]);
+    assert!(text(&render(&mut s, 80, 25)).contains("3 sessions in"), "back on the picker");
+    // Back on the timeline, the session is where it was left.
+    press(&mut s, &[KeyCode::Char('2')]);
+    assert!(text(&render(&mut s, 80, 25)).contains(&format!("Session {SESSION}")));
+}
+
+/// Opened on one session there is no sessions tab: the digits start at the
+/// timeline, and Esc ends the screen from any tab.
+#[test]
+fn without_a_picker_the_tabs_start_at_the_timeline() {
+    let mut s = showing(replay(false), terminal(), Shape::PLAIN);
+    let t = text(&render(&mut s, 80, 25));
+    assert!(t.contains("1 timeline") && t.contains("3 spend") && !t.contains("sessions"), "{t}");
+    press(&mut s, &[KeyCode::Char('2')]);
+    assert!(text(&render(&mut s, 80, 25)).contains("semantic fires"));
+    assert!(!press(&mut s, &[KeyCode::Esc]), "Esc ends the screen");
+}
+
+/// The fires tab lists the session's semantic fires, lowest score first,
+/// re-disclosures marked, and only this session's.
+#[test]
+fn the_fires_tab_lists_the_sessions_semantic_fires() {
+    let log = [
+        serde_json::json!({"event": "way_fired", "session": SESSION, "way": "softwaredev/code/testing", "trigger": "semantic:embedding:en", "fire_score": "0.612", "surface": "add a unit test"}),
+        serde_json::json!({"event": "way_redisclosed", "session": SESSION, "way": "softwaredev/docs/adr", "trigger": "semantic:embedding:en", "fire_score": "0.405"}),
+        serde_json::json!({"event": "way_fired", "session": SESSION, "way": "softwaredev/delivery/commits", "trigger": "keyword"}),
+        serde_json::json!({"event": "way_fired", "session": "other", "way": "itops/incident", "trigger": "semantic:embedding:en", "fire_score": "0.300"}),
+    ]
+    .map(|v| v.to_string())
+    .join("\n");
+    let mut r = replay(false);
+    r.fires = super::semantic_fires(&log, SESSION);
+    let mut s = showing(r, terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('2')]);
+    let t = text(&render(&mut s, 80, 25));
+    assert!(t.contains("2 semantic fires"), "{t}");
+    let adr = t.find("0.405 ↻ softwaredev/docs/adr").expect("the re-disclosure, its surface a placeholder");
+    let testing = t.find("0.612   softwaredev/code/testing").expect("the first fire");
+    assert!(adr < testing, "lowest score first: {t}");
+    assert!(t.contains("add a unit test") && !t.contains("itops/incident"), "{t}");
+}
+
+/// The spend tab: the scope's calls by day, newest first, with a total; `m`
+/// groups them by month. Another project's call is left out, and the log's
+/// start is taken before the filter.
+#[test]
+fn the_spend_tab_groups_the_scopes_judge_calls_by_day_or_month() {
+    let spend = Spend::new(spend_calls(), Some(PROJECT), PROJECT.into());
+    let mut s = Introspect::showing(replay(false), spend, terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('3')]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("3 judge calls in /home/dev/proj") && t.contains("the log holds calls from 2026-06-30"), "{t}");
+    let jul3 = t.find("2026-07-03").expect("newest day");
+    let jul1 = t.find("2026-07-01").expect("older day");
+    assert!(jul3 < jul1, "newest first: {t}");
+    assert!(t.contains("$0.0220 + 1 unknown") && t.contains("$0.0330 + 1 unknown") && t.matches("2026-06-30").count() == 1, "another project's day is left out: {t}");
+    press(&mut s, &[KeyCode::Char('m')]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("Judge spend by month") && t.contains("2026-07 ") && !t.contains("2026-07-01"), "{t}");
+}
+
+#[test]
+fn tab_golden_frames() {
+    let mut g = goldens();
+    let mut f = showing(judged_replay(), terminal(), Shape::PLAIN);
+    f.replay.as_mut().unwrap().fires = vec![
+        super::SemanticFire { score: 0.405, way: "softwaredev/docs/adr".into(), surface: "record the decision".into(), redisclosed: true },
+        super::SemanticFire { score: 0.612, way: "softwaredev/code/testing".into(), surface: "add a unit test for the parser".into(), redisclosed: false },
+    ];
+    press(&mut f, &[KeyCode::Char('2'), KeyCode::Down]);
+    check(&mut g, "fires", &mut f);
+    let mut s = Introspect::showing(replay(false), Spend::new(spend_calls(), Some(PROJECT), PROJECT.into()), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('3')]);
+    check(&mut g, "spend", &mut s);
+    g.finish();
 }
