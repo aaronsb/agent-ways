@@ -42,6 +42,7 @@ fn roots(fx: &Fixture) -> Vec<Node> {
         project: fx.root.join("work/current"),
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
+        user_ways: fx.root.join(".config/agent-ways/ways"),
         themes: None,
         xdg_config: fx.root.join(".config"),
         claude_config_dir: None,
@@ -354,7 +355,9 @@ fn the_tabs_are_the_registry_roots_with_a_toggle_per_corpus_way() {
     assert_eq!(r[4].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["governor", "engagement", "cleanup"]);
     assert_eq!(r[5].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), attend_config::BUILTINS);
     let project = r[0].children.iter().find(|n| n.name == "project").expect("the per-way toggles");
-    let one = &project.children.iter().find(|n| n.name == "a").unwrap().children[0];
+    let shipped = project.children.iter().find(|n| n.name == "shipped").expect("shipped ways in their own section");
+    assert!(shipped.section, "a scope section is no part of the keys");
+    let one = &shipped.children.iter().find(|n| n.name == "a").unwrap().children[0];
     assert_eq!(one.name, "one");
     let s = one.setting.as_ref().expect("a way is a toggle");
     assert_eq!((s.value.as_str(), s.store.as_ref().map(|st| st.key.as_str())), ("true", Some("ways.project.a/one")));
@@ -364,6 +367,48 @@ fn the_tabs_are_the_registry_roots_with_a_toggle_per_corpus_way() {
     assert!(r.iter().all(|t| t.children.iter().all(|n| n.name != "theme")), "the theme keys belong to the theme tab");
     // The theme section is declared once, in agent-theme, and its shapes are the screens' own.
     assert_eq!(agent_theme::settings::SHAPES, agent_tui::theme::Shape::NAMES);
+}
+
+fn section<'a>(project: &'a Node, name: &str) -> &'a Node {
+    project.children.iter().find(|n| n.name == name).unwrap_or_else(|| panic!("no {name} section"))
+}
+
+#[test]
+fn the_ways_tab_lists_every_scope_each_way_once_where_it_wins() {
+    let fx = Fixture::home();
+    let way = |root: &str, id: &str, extra: &str| {
+        let name = id.rsplit('/').next().unwrap();
+        fx.file(&format!("{root}/{id}/{name}.md"), &format!("---\ndescription: {name} from {root}\n{extra}---\n"));
+    };
+    way("corpus", "a/one", "");
+    way("corpus", "b/three", "");
+    way(".config/agent-ways/ways", "b/three", "vocabulary: mine\n");
+    way("work/current/.claude/ways", "api/dual", "pattern: \\bapi\\b\nmacro: prepend\n");
+    fx.file("work/current/.claude/ways/api/dual/macro.sh", "#!/bin/sh\n# says what the API is\ncurl -s localhost/api\n");
+    let r = roots(&fx);
+    let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
+    let names: Vec<&str> = project.children.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["this project", "your ways", "shipped"], "scopes in precedence order");
+    let mine = &section(project, "your ways").children[0].children[0];
+    assert_eq!(mine.name, "three");
+    assert!(section(project, "shipped").children.iter().all(|d| d.name != "b"), "a user way shadows the shipped one");
+    assert!(mine.about.contains("three from .config/agent-ways/ways") && mine.about.contains("vocabulary mine"), "{}", mine.about);
+    let dual = &section(project, "this project").children[0].children[0];
+    let st = dual.setting.as_ref().unwrap().store.as_ref().unwrap();
+    assert_eq!(st.key, "ways.project.api/dual", "a project way's switch has the same key as any other");
+    assert!(dual.about.contains("pattern    \\bapi\\b") && dual.about.contains("macro      prepend") && dual.about.contains("curl -s localhost/api"), "{}", dual.about);
+    assert!(!dual.about.contains("says what"), "the macro's comments are not what it runs");
+    assert_eq!(section(project, "this project").about, "1 way, 0 switched off here.");
+}
+
+#[test]
+fn a_project_without_ways_says_how_to_add_them() {
+    let fx = Fixture::home();
+    fx.file("corpus/a/one/one.md", "---\ndescription: one\n---\n");
+    let r = roots(&fx);
+    let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
+    let none = &section(project, "this project").children[0];
+    assert_eq!(none.setting.as_ref().unwrap().value, "none · ways init");
 }
 
 // ── the adapter's write, under the real paths ──────────────────

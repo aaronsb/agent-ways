@@ -34,3 +34,4 @@ pub mod tune;
 pub mod tune_precision;
 pub mod uninstall;
 pub mod update;
+pub(crate) mod ways_roots;

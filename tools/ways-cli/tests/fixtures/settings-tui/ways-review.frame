@@ -4,9 +4,9 @@ agent-tui frame 100x30
 |│▌  ▾ settings              ●1                        ││ways · settings                            │|
 |│       enabled             true → false              ││                                           │|
 |│   ▾ project               ●1                        ││The tab's own keys.                        │|
-|│     ▾ itops               ●1                        ││                                           │|
-|│         incident          true → false              ││1 change under this group                  │|
-|│                                                     ││                                           │|
+|│     ▾ shipped             ●1                        ││                                           │|
+|│       ▾ itops             ●1                        ││1 change under this group                  │|
+|│           incident        true → false              ││                                           │|
 |│                                                     ││file it writes                             │|
 |│                                                     ││  ~/.config/agent-ways/config.yaml         │|
 |│                                                     ││                                           │|
@@ -62,16 +62,18 @@ styles
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5   4-12  - - BOLD
+  5   4-14  - - BOLD
   5  28-29  Yellow - -
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
-  6  28-31  - - DIM|CROSSED_OUT
-  6  35-39  Green - BOLD
+  6   4-14  - - BOLD
+  6  28-29  Yellow - -
   6  54-80  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
+  7  28-31  - - DIM|CROSSED_OUT
+  7  35-39  Green - BOLD
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM

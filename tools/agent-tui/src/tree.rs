@@ -141,19 +141,28 @@ pub struct Node {
     /// A section that only gathers rows under a header: its name is no part
     /// of its children's keys ([`key`]).
     pub section: bool,
+    /// What the row stands for, beyond its setting: shown below the
+    /// controls in the detail pane, under `about_title`.
+    pub about: String,
+    pub about_title: String,
 }
 
 impl Node {
     pub fn group(name: impl Into<String>, doc: impl Into<String>, children: Vec<Node>) -> Self {
-        Node { name: name.into(), doc: doc.into(), finding: None, setting: None, children, open: false, actions: vec![], columns: None, section: false }
+        Node { name: name.into(), doc: doc.into(), finding: None, setting: None, children, open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new() }
     }
     pub fn leaf(name: impl Into<String>, doc: impl Into<String>, setting: Setting) -> Self {
-        Node { name: name.into(), doc: doc.into(), finding: None, setting: Some(setting), children: vec![], open: false, actions: vec![], columns: None, section: false }
+        Node { name: name.into(), doc: doc.into(), finding: None, setting: Some(setting), children: vec![], open: false, actions: vec![], columns: None, section: false, about: String::new(), about_title: String::new() }
     }
     /// Rows gathered under a header that names their columns, keyed as if
     /// they sat in the parent.
     pub fn section(name: impl Into<String>, doc: impl Into<String>, columns: (&str, &str), children: Vec<Node>) -> Self {
         Node { section: true, ..Node::group(name, doc, children).columns(columns) }.opened()
+    }
+    pub fn about(mut self, title: impl Into<String>, text: impl Into<String>) -> Self {
+        self.about_title = title.into();
+        self.about = text.into();
+        self
     }
     pub fn columns(mut self, (name, value): (&str, &str)) -> Self {
         self.columns = Some((name.to_string(), value.to_string()));
