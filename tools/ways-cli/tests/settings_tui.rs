@@ -116,6 +116,9 @@ impl Fx {
         let (out, err, code) = self.run(&args);
         assert_eq!(code, 0, "ways settings {tab} --keys {keys}: {err}");
         assert!(out.starts_with("agent-tui frame "), "not a frame: {out}{err}");
+        // A reading action starts a real command and its frame depends on
+        // when that ends: no shot may pick one.
+        assert!(!out.contains("running…"), "ways settings {tab} --keys {keys} started a reading action:\n{out}");
         out
     }
 
@@ -439,7 +442,6 @@ fn golden_frames() {
         ("matching-review", "matching", "down e ctrl-u text:0.4 enter down down down down e ctrl-u text:0.2 enter w", "100x30"),
         ("gate-browse", "gate", "down down down right down right", "100x30"),
         ("gate-edit", "gate", "down e text:anthropic", "100x30"),
-        ("gate-review", "gate", "down down enter / text:keys.anthropic enter end enter a down enter w", "100x30"),
         ("install-browse", "install", "", "100x30"),
         ("install-edit", "install", "down down down e", "100x30"),
         ("install-review", "install", "down down down enter a down enter y w", "100x30"),
@@ -457,6 +459,13 @@ fn golden_frames() {
     for (name, tab, keys, size) in shots {
         g.check_text(name, &fx.snap(tab, keys, size, "16"));
     }
+    // A stored anthropic key, so its menu has rotate and remove: remove is
+    // queued and confirmed. Its check only reads, runs at once and is never
+    // queued, so no shot picks it: it would start a real command.
+    let keyed = Fx::new();
+    keyed.file(".config/agent-ways/config.yaml", "# by hand\nnear_miss_margin: 0.1\n");
+    keyed.file(".config/agent-ways/keys/anthropic", "sk-ant-golden-frame-fixture");
+    g.check_text("gate-review", &keyed.snap("gate", "down down enter / text:keys.anthropic enter end enter a down enter y w", "100x30", "16"));
     // A chosen theme at truecolor: its roles, and the editor's swatches.
     g.check_text("theme-nord-truecolor", &fx.snap("theme", "down down enter 1", "100x30", "truecolor"));
     // A project way with a macro: its switch above, what it is below.

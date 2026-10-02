@@ -4,7 +4,7 @@ agent-tui frame 100x30
 |│▌  ▾ settings              ●1                        ││gate · settings                            │|
 |│       mode                enforce → shadow          ││                                           │|
 |│   ▾ queued  ●1                                      ││The tab's own keys.                        │|
-|│       1. $ ways agent…ey check --provider anthropic ││                                           │|
+|│       1. $ ways agen…remove --provider anthropic  ▲ ││                                           │|
 |│                                                     ││1 change under this group                  │|
 |│                                                     ││                                           │|
 |│                                                     ││file it writes                             │|
@@ -62,7 +62,8 @@ styles
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5  13-52  LightRed - -
+  5  13-49  LightRed - -
+  5  50-52  Yellow - BOLD
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM

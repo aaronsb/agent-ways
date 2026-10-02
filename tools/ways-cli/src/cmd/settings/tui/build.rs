@@ -500,7 +500,7 @@ impl Ways {
         if present {
             out.push(Action::new("remove", key("remove")).confirm().doc(format!("Deletes the stored {p} key; the gate cannot use that provider until a key is set again.")));
         }
-        out.push(Action::new("check", key("check")).reads().doc(format!("Asks {p} whether the stored key is accepted. Writes nothing.")));
+        out.push(Action::new("check", key("check")).reads().doc(format!("Asks {p} whether the stored key is accepted. Stores only when the key was last checked.")));
         out
     }
 
