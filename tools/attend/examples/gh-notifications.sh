@@ -63,7 +63,7 @@
 # Add to ~/.config/attend/config.yaml (or a project-scope overlay):
 #
 #   sensors:
-#     +gh-notifications:
+#     gh-notifications:
 #       script: ~/.claude/tools/attend/examples/gh-notifications.sh
 #       enabled: true
 #       interval: 180      # 3 min at rest — inbox is minute-scale

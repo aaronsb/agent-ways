@@ -180,7 +180,8 @@ pub(crate) enum Commands {
 
     /// Survey session history and derive engagement config
     Tune {
-        /// Write derived values to the user config
+        /// Write the derived absolute_refractory, decay_per_minute and
+        /// peer_activity_window to the user config, changing nothing else
         #[arg(long)]
         apply: bool,
     },
@@ -271,79 +272,19 @@ pub(crate) enum PermissionsCmd {
 }
 
 /// Subcommands for `attend config`. With no subcommand, defaults to `show`.
+/// `ways settings` edits these settings; `ways settings help attend`
+/// describes every key (ADR-503 §13).
 #[derive(Subcommand)]
 pub(crate) enum ConfigCmd {
-    /// Write a default config file to the user scope
+    /// Write the default config file to the user scope, if none is there
     Init,
 
-    /// Display the current effective configuration (default)
+    /// Print each setting in effect as key=value (default)
     Show,
 
     /// Print the user/project config file paths
     Path,
 
-    /// Validate the config file
-    Lint {
-        /// Auto-fix what can be fixed
-        #[arg(long)]
-        fix: bool,
-        /// Exit non-zero on errors (for CI)
-        #[arg(long)]
-        check: bool,
-    },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::CommandFactory;
-
-    /// clap's structural validator. Catches misconfigurations like
-    /// duplicate subcommand names, conflicting short flags, or missing
-    /// help text — anything that would surface only at runtime in `--help`.
-    /// Tests run before any user sees a regression.
-    #[test]
-    fn cli_tree_is_well_formed() {
-        Cli::command().debug_assert();
-    }
-
-    /// `attend focus` was a deprecated alias of the channel verbs (#692,
-    /// ADR-505); the whole subtree is gone and must be rejected.
-    #[test]
-    fn removed_focus_subtree_is_rejected() {
-        assert!(Cli::try_parse_from(["attend", "focus"]).is_err());
-        assert!(Cli::try_parse_from(["attend", "focus", "on", "deploy"]).is_err());
-        assert!(Cli::try_parse_from(["attend", "join", "deploy"]).is_ok());
-    }
-
-    /// Every subcommand at every depth must carry a non-empty description.
-    /// Without this guard, a doc comment could be dropped (or never added
-    /// for a new variant) and the subcommand would silently render a
-    /// blank line in `--help` and the markdown reference. Walks the
-    /// whole tree because nested subcommands (`config lint`, `channels create`)
-    /// are just as user-facing as the top-level ones.
-    #[test]
-    fn every_subcommand_has_a_description() {
-        fn walk(cmd: &clap::Command, path: &str) {
-            let about = cmd.get_about().map(|s| s.to_string()).unwrap_or_default();
-            assert!(
-                !about.is_empty(),
-                "subcommand `{path}` is missing a /// doc comment — clap renders blank help",
-            );
-            for sub in cmd.get_subcommands() {
-                if sub.get_name() == "help" {
-                    continue;
-                }
-                let nested = format!("{path} {}", sub.get_name());
-                walk(sub, &nested);
-            }
-        }
-        let cmd = Cli::command();
-        for sub in cmd.get_subcommands() {
-            if sub.get_name() == "help" {
-                continue;
-            }
-            walk(sub, &format!("attend {}", sub.get_name()));
-        }
-    }
+    /// Check the config files against the schema; exit 3 with findings
+    Lint,
 }

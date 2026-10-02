@@ -8,3 +8,8 @@ license = "AGPL-3.0-or-later"
 [lib]
 name = "attend_config"
 path = "src/lib.rs"
+
+[dependencies]
+agent-settings = { path = "../agent-settings" }
+claude-sessions = { path = "../claude-sessions" }
+serde_yaml = "0.9"

@@ -19,6 +19,10 @@ sensor-keepwarm = ["dep:sensor-keepwarm"]
 agent-fmt = { path = "../agent-fmt" }
 agent-identity = { path = "../agent-identity" }
 agent-theme = { path = "../agent-theme" }
+# attend's settings: the schema, the typed config and the writer (ADR-503).
+agent-settings = { path = "../agent-settings" }
+attend-config = { path = "../attend-config" }
+serde_yaml = "0.9"
 attend-groups = { path = "../attend-groups" }
 attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }
