@@ -2603,6 +2603,7 @@ dependencies = [
  "agent-identity",
  "agent-settings",
  "agent-theme",
+ "agent-tui",
  "anyhow",
  "clap",
  "claude-sessions",

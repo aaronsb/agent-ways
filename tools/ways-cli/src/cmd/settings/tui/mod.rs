@@ -13,8 +13,6 @@ pub mod flows;
 #[cfg(test)]
 mod tests;
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::cell::RefCell;
 use std::io::{IsTerminal, Read, Write as _};
 use std::path::{Path, PathBuf};
@@ -54,7 +52,7 @@ pub struct Ctx {
 impl Ctx {
     pub fn from_env(project: Option<&Path>) -> Ctx {
         let home = claude_sessions::home_dir();
-        let xdg_config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(".config"));
+        let xdg_config = ways_core::paths::xdg_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
         Ctx {
             project: project_dir(project),
             corpus: ways_core::paths::core_ways_root(),
@@ -283,23 +281,28 @@ impl Adapter for Ways {
     /// The size and time of each file the tree was read from, and the names
     /// in the keys directory: metadata only, nothing parsed.
     fn stamp(&self) -> Option<u64> {
-        let mut h = DefaultHasher::new();
         if self.watched.borrow().is_empty() {
             let _ = self.layers();
         }
+        let mut seen = Vec::new();
         for p in self.watched.borrow().iter() {
-            p.hash(&mut h);
+            seen.extend_from_slice(p.to_string_lossy().as_bytes());
+            seen.push(0);
             if let Ok(m) = std::fs::metadata(p) {
-                m.len().hash(&mut h);
-                m.modified().ok().hash(&mut h);
+                seen.extend_from_slice(&m.len().to_le_bytes());
+                let at = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+                seen.extend_from_slice(&at.to_le_bytes());
             }
             if p.is_dir() {
                 let mut names: Vec<String> = std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
                 names.sort();
-                names.hash(&mut h);
+                for n in names {
+                    seen.extend_from_slice(n.as_bytes());
+                    seen.push(0);
+                }
             }
         }
-        Some(h.finish())
+        Some(agent_identity::identity::fnv1a_64(&seen))
     }
 
     fn flow(&self, name: &str) -> Option<Flow> {
