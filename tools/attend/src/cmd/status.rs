@@ -62,6 +62,7 @@ pub(crate) fn cmd_status() {
     // ── Signals section
     t.add(vec!["signals", "project", &format!("{own_count} pending")]);
     t.add(vec!["", "#open", &format!("{broadcast_count} pending")]);
+    t.add(vec!["", "cache", &attend_presence::cache::dir().to_string_lossy()]);
 
     // ── Separator
     t.add(vec!["", "", ""]);
