@@ -19,9 +19,16 @@ fn home(tag: &str) -> PathBuf {
 /// failing if it has not exited within ten seconds.
 fn run(tag: &str, args: &[&str]) -> Output {
     let h = home(tag);
+    let out = run_in(&h, args);
+    let _ = std::fs::remove_dir_all(&h);
+    out
+}
+
+/// [`run`] in the fixture home `h`, which is left for the caller to look in.
+fn run_in(h: &std::path::Path, args: &[&str]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_attend-chat"))
         .args(args)
-        .env("HOME", &h)
+        .env("HOME", h)
         .env("XDG_CONFIG_HOME", h.join("config"))
         .env("XDG_CACHE_HOME", h.join("cache"))
         .env("XDG_STATE_HOME", h.join("state"))
@@ -40,9 +47,7 @@ fn run(tag: &str, args: &[&str]) -> Output {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    let out = child.wait_with_output().expect("its output");
-    let _ = std::fs::remove_dir_all(&h);
-    out
+    child.wait_with_output().expect("its output")
 }
 
 #[test]
@@ -62,6 +67,35 @@ fn a_snapshot_prints_one_frame_and_the_process_ends() {
     assert!(frame.starts_with("agent-tui frame 80x25\n"), "{frame}");
     assert!(frame.contains("> /help "), "the keys went through the real handler: {frame}");
     assert!(!frame.contains('\u{1b}'), "a frame is text, not escapes");
+}
+
+#[test]
+fn a_snapshot_is_a_dry_run_that_sends_and_changes_nothing() {
+    let h = home("dry");
+    let out = run_in(&h, &["--snap", "80x25", "--depth", "none", "--keys", "text:/join space text:deploy enter"]);
+    let frame = String::from_utf8_lossy(&out.stdout);
+    assert!(frame.contains("dry run: /join not run"), "{frame}");
+    let out = run_in(&h, &["--snap", "80x25", "--depth", "none", "--keys", "text:hello enter"]);
+    let frame = String::from_utf8_lossy(&out.stdout);
+    assert!(frame.contains("dry run: not sent to #open"), "{frame}");
+    let signals = h.join("cache/attend/signals");
+    let sent = walk(&signals).into_iter().filter(|p| p.extension().is_some_and(|e| e == "signal")).count();
+    assert_eq!(sent, 0, "nothing reached the bus");
+    assert!(!signals.join("_groups.yaml").exists() && !signals.join("@deploy").exists(), "no channel was joined");
+    let _ = std::fs::remove_dir_all(&h);
+}
+
+fn walk(d: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
 }
 
 #[test]

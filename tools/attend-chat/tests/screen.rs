@@ -351,3 +351,82 @@ fn the_watcher_feeds_the_screen_on_tick() {
     assert_eq!(c.signals().len(), 1);
     assert!(testkit::text(&testkit::render_screen(&mut c, 80, 25)).contains("arrived"));
 }
+
+#[test]
+fn an_unchanged_screen_is_copied_not_drawn_again() {
+    let mut c = chat();
+    for _ in 0..50 {
+        testkit::render_screen(&mut c, 80, 25);
+    }
+    assert_eq!(c.draws(), 1, "fifty idle frames draw once");
+    let copied = testkit::frame(&testkit::render_screen(&mut c, 80, 25));
+    typed(&mut c, "x");
+    testkit::render_screen(&mut c, 80, 25);
+    assert_eq!(c.draws(), 2, "a key draws afresh");
+    testkit::render_screen(&mut c, 100, 25);
+    assert_eq!(c.draws(), 3, "a resize draws afresh");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut c = Chat::new(Some(rx), Palette::default(), Shape::PLAIN).heartbeat(false);
+    testkit::render_screen(&mut c, 80, 25);
+    c.tick();
+    testkit::render_screen(&mut c, 80, 25);
+    let before = c.draws();
+    tx.send(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, "new")).unwrap();
+    c.tick();
+    testkit::render_screen(&mut c, 80, 25);
+    assert_eq!(c.draws(), before + 1, "a new message draws afresh");
+    // The copy is the frame itself.
+    let mut c = chat();
+    let first = testkit::frame(&testkit::render_screen(&mut c, 80, 25));
+    assert_eq!(testkit::frame(&testkit::render_screen(&mut c, 80, 25)), first);
+    assert!(!copied.is_empty());
+}
+
+#[test]
+fn an_idle_refresh_of_an_unchanged_world_draws_nothing_new() {
+    let mut c = chat();
+    testkit::render_screen(&mut c, 80, 25);
+    for _ in 0..3 {
+        c.refresh();
+        testkit::render_screen(&mut c, 80, 25);
+    }
+    assert_eq!(c.draws(), 1, "the peers and channels read the same: no re-layout, no redraw");
+}
+
+#[test]
+fn a_failed_command_leaves_the_view_paged_back_and_a_success_returns() {
+    let mut c = chat();
+    testkit::render_screen(&mut c, 80, 16);
+    press(&mut c, key(KeyCode::PageUp));
+    testkit::render_screen(&mut c, 80, 16);
+    let back = c.scroll();
+    assert!(back > 0);
+    typed(&mut c, "/bogus");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.scroll(), back, "an error does not move the view");
+    for _ in 0..6 {
+        press(&mut c, key(KeyCode::Backspace));
+    }
+    typed(&mut c, "/help");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.scroll(), 0, "a success shows the newest");
+}
+
+#[test]
+fn a_huge_message_reaches_its_tail() {
+    let mut c = chat_at(ColorDepth::Ansi16, None);
+    let body: String = (0..70_000).map(|i| format!("row {i}\n")).collect();
+    c.push(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, body.trim_end()));
+    let text = testkit::text(&testkit::render_screen(&mut c, 80, 25));
+    assert!(text.contains("row 69999"), "{text}");
+}
+
+#[test]
+fn the_compose_box_wraps_by_word() {
+    let mut c = chat();
+    typed(&mut c, &"word ".repeat(20));
+    let text = testkit::text(&testkit::render_screen(&mut c, 40, 25));
+    let compose: Vec<&str> = text.lines().filter(|l| l.starts_with("│ >") || l.starts_with("│  ")).collect();
+    assert!(compose.len() >= 2, "{text}");
+    assert!(compose.iter().all(|l| !l.contains("wor ") && !l.contains(" ord")), "no word is split: {compose:?}");
+}

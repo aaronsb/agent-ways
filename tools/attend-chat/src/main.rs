@@ -22,7 +22,8 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
   The colours follow the agent-ways theme (`ways settings theme`).
 
   --snap WxH     print one frame at W by H in agent-tui's frame format, headless
-  --keys KEYS    keys for --snap, space separated (`text:hi enter tab esc alt-1` …)
+  --keys KEYS    keys for --snap, space separated (`text:hi enter tab esc alt-1` …);
+                 a dry run: Enter sends nothing to the bus and runs no slash command
   --depth DEPTH  colour depth: truecolor, 256, 16 or none; the terminal's by default
 ";
 
@@ -126,8 +127,9 @@ fn main() {
 
     if let Some((w, h)) = args.snap {
         // Headless: the backlog the watcher read at start, the keys, one
-        // frame. No heartbeat: a snapshot is no presence.
-        let mut chat = chat.heartbeat(false);
+        // frame. No heartbeat: a snapshot is no presence. A dry run: Enter
+        // sends nothing and runs no slash command.
+        let mut chat = chat.heartbeat(false).dry_run(true);
         chat.tick();
         testkit::drive(&mut chat, &keys(&args.keys));
         let frame = testkit::frame(&testkit::render_screen(&mut chat, w, h));

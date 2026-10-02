@@ -177,7 +177,7 @@ fn draw_feed(chat: &mut Chat, f: &mut Frame, area: Rect, fg: &Tab) {
     f.render_widget(block, area);
     chat.feed_rows = inner.height;
     let entries = chat.entries.as_deref().unwrap_or_default();
-    f.render_stateful_widget(Feed::new(entries).label_width(CHIP_WIDTH).border(theme::rule()), inner, &mut chat.feed);
+    f.render_stateful_widget(Feed::new(entries).label_width(CHIP_WIDTH).border(theme::rule()).generation(chat.generation), inner, &mut chat.feed);
 }
 
 /// The compose box: `> ` then the buffer with its cursor, a row of

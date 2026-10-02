@@ -312,9 +312,14 @@ mod tests {
         // `set_var` is !Send on some platforms but this test is
         // single-threaded; Cargo isolates by default.
         std::env::set_var("HOME", &home);
+        // The attend cache follows XDG_CACHE_HOME first: point it into the
+        // temp home too, or a runner's own setting sends the write to the
+        // real cache.
+        std::env::set_var("XDG_CACHE_HOME", home.join(".cache"));
 
         let filename = write_broadcast("round-trip body").unwrap();
         let path = broadcast_dir().join(&filename);
+        assert!(path.starts_with(&home), "the write stays in the temp home: {}", path.display());
         let sig = parse_file(&path).expect("written signal must parse");
         assert_eq!(sig.message, "round-trip body");
         assert!(sig.from.starts_with("external:"));

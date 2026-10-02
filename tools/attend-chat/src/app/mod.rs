@@ -98,6 +98,21 @@ pub struct Chat {
     /// headless frame, which is no presence.
     heartbeat: bool,
     refreshed: Option<Instant>,
+    /// Bumped whenever the feed's entries are rebuilt, so the feed keeps
+    /// its layout between frames until they change.
+    generation: u64,
+    /// The last frame drawn and whether anything has changed since: a key,
+    /// new messages, a refresh, a status message. An unchanged screen is
+    /// copied, not drawn again; idle costs nothing per frame.
+    last_frame: Option<agent_tui::ratatui::buffer::Buffer>,
+    dirty: bool,
+    /// Whether the status line was in its assert window when last drawn;
+    /// the frame after the window closes is drawn afresh.
+    drawn_fresh: bool,
+    /// A dry run (`--snap`): Enter sends nothing and runs no command.
+    dry_run: bool,
+    /// Frames drawn afresh, for tests of the skip.
+    draws: usize,
 }
 
 impl Chat {
@@ -121,6 +136,12 @@ impl Chat {
             entries: None,
             heartbeat: true,
             refreshed: None,
+            generation: 0,
+            last_frame: None,
+            dirty: true,
+            drawn_fresh: false,
+            dry_run: false,
+            draws: 0,
         }
     }
 
@@ -136,11 +157,38 @@ impl Chat {
         self
     }
 
+    /// A dry run: Enter sends nothing to the bus and runs no slash
+    /// command; the status line says what it would have done. For a
+    /// headless frame (`--snap`), which must never post or change state.
+    pub fn dry_run(mut self, on: bool) -> Chat {
+        self.dry_run = on;
+        self
+    }
+
     /// A status message, as a command's result shows it.
     pub fn say(&mut self, s: impl Into<String>, error: bool) {
         self.status = s.into();
         self.status_set_at = Some(Instant::now());
         self.status_is_error = error;
+        self.dirty = true;
+    }
+
+    /// How far the feed is paged back, in rows from the bottom.
+    pub fn scroll(&self) -> usize {
+        self.feed.scroll
+    }
+
+    /// How many frames were drawn afresh rather than copied.
+    pub fn draws(&self) -> usize {
+        self.draws
+    }
+
+    /// The feed's entries are out of date: rebuild them, and their layout,
+    /// on the next frame.
+    fn invalidate(&mut self) {
+        self.entries = None;
+        self.generation += 1;
+        self.dirty = true;
     }
 
     pub fn input(&self) -> &Input {
@@ -168,7 +216,7 @@ impl Chat {
             let drop_n = self.signals.len() - MAX_SIGNALS;
             self.signals.drain(0..drop_n);
         }
-        self.entries = None;
+        self.invalidate();
     }
 
     /// Take every signal the watcher has sent. True when any arrived.
@@ -189,7 +237,7 @@ impl Chat {
     /// Read the peers and channels again on the next frame.
     fn stale(&mut self) {
         self.world = None;
-        self.entries = None;
+        self.invalidate();
     }
 
     fn world(&mut self) -> &World {
@@ -218,11 +266,14 @@ impl Chat {
         if t != self.foreground {
             self.foreground = t;
             self.feed = FeedState::default();
-            self.entries = None;
+            self.invalidate();
         }
     }
 
     fn enter(&mut self) {
+        if self.dry_run {
+            return self.enter_dry();
+        }
         // Normalize against the live strip (PR #395 finding 6): after a
         // peer dissolves the foregrounded channel, Enter agrees with the
         // destination flag, which has degraded to #open.
@@ -232,10 +283,12 @@ impl Chat {
             EnterAction::ClearWithStatus(s) => {
                 self.say(s, false);
                 self.input.clear();
+                self.show_newest();
             }
             EnterAction::ClearWithStatusAndEcho { status, echo } => {
                 self.say(status, false);
                 self.input.clear();
+                self.show_newest();
                 // A directed send lands in the recipient's inbox, which
                 // this chat does not watch: echo it into the transcript.
                 self.push(echo);
@@ -254,10 +307,34 @@ impl Chat {
                 self.signals.clear();
                 self.say("transcript cleared", false);
                 self.input.clear();
+                self.show_newest();
             }
         }
-        self.feed = FeedState::default();
         self.stale();
+    }
+
+    /// Enter in a dry run: say what would happen, change nothing.
+    fn enter_dry(&mut self) {
+        let text = self.input.text().trim_end().to_string();
+        if text.is_empty() {
+            return;
+        }
+        let what = match crate::slash::parse(&text) {
+            Some((cmd, _)) => format!("dry run: /{cmd} not run"),
+            None => {
+                let scope = tabs::send_scope(&self.normal_tab());
+                let to = destination_label(&text, &scope).unwrap_or(format!("#{scope}"));
+                format!("dry run: not sent to {to}")
+            }
+        };
+        self.say(what, false);
+        self.input.clear();
+    }
+
+    /// Back to the newest messages: after a success, so the sent message
+    /// is in view. A failure leaves the view where it was.
+    fn show_newest(&mut self) {
+        self.feed.scroll = 0;
     }
 
     fn tab_key(&mut self) {
@@ -282,11 +359,25 @@ impl Chat {
 
 impl Screen for Chat {
     fn draw(&mut self, f: &mut Frame) {
+        let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
+        if !self.dirty && fresh == self.drawn_fresh {
+            if let Some(last) = &self.last_frame {
+                if last.area == f.area() {
+                    f.buffer_mut().content.clone_from_slice(&last.content);
+                    return;
+                }
+            }
+        }
         view::draw(self, f);
+        self.draws += 1;
+        self.dirty = false;
+        self.drawn_fresh = fresh;
+        self.last_frame = Some(f.buffer_mut().clone());
     }
 
     /// The one key handler. Esc and Ctrl-C end the chat.
     fn key(&mut self, k: KeyEvent) -> bool {
+        self.dirty = true;
         let m = k.modifiers;
         match k.code {
             KeyCode::Esc => return false,
@@ -320,9 +411,38 @@ impl Screen for Chat {
             if self.heartbeat {
                 let _ = attend_presence::heartbeat::touch(&crate::signal::human_member_id());
             }
-            self.stale();
+            self.refresh();
             self.refreshed = Some(Instant::now());
         }
+    }
+}
+
+impl Chat {
+    /// Read the peers and channels again, and rebuild the feed only when
+    /// what it shows of them changed: an idle refresh of an unchanged
+    /// world costs a read, not a re-layout of every message.
+    pub fn refresh(&mut self) {
+        let before = self.world.as_ref().map(World::fingerprint);
+        self.world = None;
+        let after = self.world().fingerprint();
+        if before.as_ref() != Some(&after) {
+            self.invalidate();
+        }
+    }
+}
+
+impl World {
+    /// What the frame shows of the world: the channels with their members
+    /// and descriptions, and the identities with their instance names.
+    fn fingerprint(&self) -> String {
+        let mut out = String::new();
+        for g in &self.groups {
+            out += &format!("#{}|{:?}|{:?}\n", g.group.name, g.membership.members, g.membership.description);
+        }
+        for k in &self.known {
+            out += &format!("@{}|{}|{}\n", k.nickname, k.cwd, k.is_claude);
+        }
+        out
     }
 }
 
