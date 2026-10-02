@@ -1,8 +1,9 @@
 //! Agent legend strip — the `@Name @Name ...` row below the input.
 //!
 //! Two jobs:
-//! - **Display**: render every known identity as its own styled chip
-//!   so the user can see who's addressable and in what color.
+//! - **Display**: every known identity is its own styled chip so the
+//!   user can see who's addressable and in what color (drawn in
+//!   `crate::view`).
 //! - **Completion**: given a partial `@xxx` at the end of the input
 //!   buffer, return the best-matching nickname so Tab can complete
 //!   to a full `@Nickname `.
@@ -11,10 +12,7 @@
 //! navigation. Keeps the surface small and keeps the visible color
 //! table doing double duty as the autocomplete cue.
 
-use agent_theme::ColorDepth;
-use iocraft::prelude::*;
-
-use crate::chip::{color_for, KnownIdentity};
+use crate::chip::KnownIdentity;
 use crate::groups::KnownGroup;
 
 /// Which sigil-kind of mention we're matching. A single grammar
@@ -211,125 +209,16 @@ pub fn parse_addressed(msg: &str) -> Vec<Addressed<'_>> {
     out
 }
 
-/// Render the **agent** legend row: `@Name @Name ...` across the
-/// width of the input, each name in its own identity color. If the
-/// user is in the middle of typing an agent mention (`@partial`),
-/// names that prefix-match get an underline so the Tab target is
-/// visible.
-///
-/// Returns a `Vec` so the caller can splat it into an `element!`
-/// children slot with `#(...)`.
-pub fn legend_row(
-    known: &[KnownIdentity],
-    current_partial: Option<&str>,
-) -> Vec<AnyElement<'static>> {
-    let caps = ColorDepth::detect();
-    let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
-    let chips: Vec<AnyElement<'static>> = known
-        .iter()
-        .map(|k| {
-            let matches = lc_partial
-                .as_ref()
-                .map(|p| !p.is_empty() && k.nickname.to_ascii_lowercase().starts_with(p))
-                .unwrap_or(false);
-            let color = color_for(k.palette, caps);
-            let weight = if k.style.bold || matches { Weight::Bold } else { Weight::Normal };
-            let italic = k.style.italic;
-            let decoration = if matches {
-                TextDecoration::Underline
-            } else {
-                TextDecoration::None
-            };
-            let content = format!("@{} ", k.nickname);
-            element! {
-                Text(color, weight, italic, decoration, content, wrap: TextWrap::NoWrap)
-            }
-            .into_any()
-        })
-        .collect();
-    vec![element! {
-        View(
-            flex_direction: FlexDirection::Row,
-            padding_left: 1,
-            padding_right: 1,
-            height: 1u32,
-            flex_shrink: 0.0,
-            overflow: Overflow::Hidden,
-        ) {
-            #(chips)
-        }
-    }
-    .into_any()]
-}
-
-/// Render the **group** legend row: `<glyph> #name` per group, each
-/// in its own hashed color. Sits at the top of the TUI so the user
-/// can see at a glance what focus groups exist and in what color
-/// they'll appear on agent chips.
-///
-/// If the user is mid-`#partial`, prefix-matching group names get
-/// an underline so Tab-target is obvious. Glyphs stay single-width;
-/// the name-color matches the glyph-color (same palette entry) so
-/// visual recognition carries even if the glyph degrades on a
-/// limited terminal.
-pub fn group_legend_row(
-    known: &[KnownGroup],
-    current_partial: Option<&str>,
-) -> Vec<AnyElement<'static>> {
-    let caps = ColorDepth::detect();
-    let lc_partial = current_partial.map(|p| p.to_ascii_lowercase());
-    let chips: Vec<AnyElement<'static>> = known
-        .iter()
-        .map(|k| {
-            let matches = lc_partial
-                .as_ref()
-                .map(|p| !p.is_empty() && k.group.name.to_ascii_lowercase().starts_with(p))
-                .unwrap_or(false);
-            let color = color_for(k.group.palette, caps);
-            // Base channel (`#open`) always renders bold as the
-            // visual affordance for "this is the commons" —
-            // ADR-124 §4. Partial-match underline still overlays.
-            let weight = if k.is_base || k.group.style.bold || matches {
-                Weight::Bold
-            } else {
-                Weight::Normal
-            };
-            let italic = k.group.style.italic;
-            let decoration = if matches { TextDecoration::Underline } else { TextDecoration::None };
-            let content = format!("{} #{} ", k.group.glyph, k.group.name);
-            element! {
-                Text(color, weight, italic, decoration, content, wrap: TextWrap::NoWrap)
-            }
-            .into_any()
-        })
-        .collect();
-    vec![element! {
-        View(
-            flex_direction: FlexDirection::Row,
-            padding_left: 1,
-            padding_right: 1,
-            height: 1u32,
-            flex_shrink: 0.0,
-            overflow: Overflow::Hidden,
-        ) {
-            #(chips)
-        }
-    }
-    .into_any()]
-}
-
-/// Apply a completion to `input`: replace the trailing `@partial`
-/// with `@<full> ` so the caret lands past a trailing space ready for
-/// the message body.
+/// Apply a completion to `input`: replace the trailing `@partial` or
+/// `#partial` with the sigil, `<full>` and a space, so the caret lands
+/// past the space ready for the message body. The sigil is the
+/// mention's own: a `#` completion stays a channel.
 ///
 /// Returns the new buffer and the new char-cursor position.
 pub fn apply_completion(input: &str, mention: &Mention<'_>, full_name: &str) -> (String, usize) {
-    // `prefix` already includes the `@`. Drop the `@` and append the
-    // expansion so we control whether there's a space after it.
-    let prefix_no_at = &mention.prefix[..mention.prefix.len() - 1];
+    // `prefix` already ends in the sigil.
     let mut out = String::with_capacity(input.len() + full_name.len() + 1);
-    out.push_str(prefix_no_at);
-    out.push('@');
+    out.push_str(mention.prefix);
     out.push_str(full_name);
     out.push(' ');
     let new_cursor = out.chars().count();
@@ -485,7 +374,7 @@ mod tests {
         use agent_identity::Group;
         use crate::groups::KnownGroup;
         let mk = |name: &str| KnownGroup {
-            group: Group::for_name(name, ColorDepth::TrueColor),
+            group: Group::for_name(name, agent_theme::ColorDepth::TrueColor),
             membership: attend_groups::GroupEntry::default(),
             is_base: false,
         };
@@ -507,6 +396,14 @@ mod tests {
         let m = find_trailing_mention("@Tam").unwrap();
         let (out, _) = apply_completion("@Tam", &m, "Tamsin");
         assert_eq!(out, "@Tamsin ");
+    }
+
+    #[test]
+    fn apply_completion_keeps_a_channel_sigil() {
+        let m = find_trailing_mention("ping #dep").unwrap();
+        let (out, cursor) = apply_completion("ping #dep", &m, "deploy");
+        assert_eq!(out, "ping #deploy ");
+        assert_eq!(cursor, out.chars().count());
     }
 
     #[test]

@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use agent_tui::markdown;
 use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use agent_tui::ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
@@ -647,7 +646,7 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
             let entry = facet(&w.id, &w.trigger);
             let path = entry.and_then(|e| e.way_path.clone());
             let body = path.and_then(|p| r.bodies.entry(p.clone()).or_insert_with(|| why::read_way_body(&p)).clone());
-            why::detail_lines(&w.id, entry, body.as_deref(), text_w).iter().flat_map(|l| markdown::wrap_line(l, text_w)).collect()
+            why::detail_lines(&w.id, entry, body.as_deref(), text_w).iter().flat_map(|l| agent_tui::wrap::wrap_line(l, text_w as usize)).collect()
         }
     };
     let inner_h = right.height.saturating_sub(2) as usize;

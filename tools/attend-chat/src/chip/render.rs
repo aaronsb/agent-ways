@@ -9,11 +9,11 @@
 use agent_identity::{Identity, PaletteEntry, Style};
 use agent_theme::ColorDepth;
 use attend_instances::SnapshotCache;
-use iocraft::prelude::Color;
+use agent_tui::ratatui::style::Color;
 
 /// Width of the chip box in columns. Interior width for text =
 /// `CHIP_WIDTH - 2 (border) - 2 (padding)`.
-pub const CHIP_WIDTH: u32 = 20;
+pub const CHIP_WIDTH: u16 = 20;
 
 /// Display-layer facts for one signal's sender chip.
 pub struct ChipInfo {
@@ -104,15 +104,18 @@ pub fn chip_for(
     }
 }
 
-/// Map a palette entry to an iocraft `Color`. Rich terminals get
-/// RGB; basic ones get a named ANSI bright to avoid truecolor on
-/// terminals that would approximate it poorly.
-pub fn color_for(p: PaletteEntry, caps: ColorDepth) -> Color {
-    if agent_identity::is_rich(caps) {
-        Color::Rgb { r: p.rgb.0, g: p.rgb.1, b: p.rgb.2 }
+/// A palette entry as a colour at `depth`, through agent-theme's
+/// output. Identity colours are the categorical palette and no theme
+/// role (ADR-504 §4, §6): rich terminals get the entry's RGB (at 256
+/// colours, its nearest index); basic ones get the entry's own ANSI
+/// pick, chosen to read well; without colour, the terminal's default.
+pub fn color_for(p: PaletteEntry, depth: ColorDepth) -> Color {
+    let c = if agent_identity::is_rich(depth) {
+        agent_theme::Color::Rgb(agent_theme::Rgb(p.rgb.0, p.rgb.1, p.rgb.2))
     } else {
-        Color::AnsiValue(p.ansi16)
-    }
+        agent_theme::Color::Ansi(p.ansi16)
+    };
+    c.at(depth).map(agent_theme::ratatui::color).unwrap_or(Color::Reset)
 }
 
 /// `<nickname>-<instance>` composition (ADR-129) is the shared
@@ -212,20 +215,11 @@ mod tests {
     }
 
     #[test]
-    fn color_for_rich_is_rgb() {
-        let p = PaletteEntry { rgb: (10, 20, 30), ansi16: 3, name: "test" };
-        match color_for(p, ColorDepth::TrueColor) {
-            Color::Rgb { r, g, b } => assert_eq!((r, g, b), (10, 20, 30)),
-            other => panic!("expected Rgb, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn color_for_basic_is_ansi() {
+    fn color_for_follows_the_depth() {
         let p = PaletteEntry { rgb: (10, 20, 30), ansi16: 9, name: "test" };
-        match color_for(p, ColorDepth::Ansi16) {
-            Color::AnsiValue(v) => assert_eq!(v, 9),
-            other => panic!("expected AnsiValue, got {other:?}"),
-        }
+        assert_eq!(color_for(p, ColorDepth::TrueColor), Color::Rgb(10, 20, 30));
+        assert!(matches!(color_for(p, ColorDepth::Ansi256), Color::Indexed(_)));
+        assert_eq!(color_for(p, ColorDepth::Ansi16), Color::LightRed, "the entry's own ANSI pick");
+        assert_eq!(color_for(p, ColorDepth::NoColor), Color::Reset);
     }
 }

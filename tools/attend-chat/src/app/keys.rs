@@ -1,10 +1,8 @@
-//! Keyboard handlers extracted from the iocraft component closure.
-//!
-//! Each handler is a free function that takes the relevant string +
-//! cursor + cycle inputs and returns the next state. The component
-//! closure does the `State::set` calls; pulling the logic out keeps
-//! the closure short and lets the handlers be unit-tested without
-//! standing up an iocraft `App` instance.
+//! The chat's own key handlers: Enter (send, or run a slash command)
+//! and Tab (complete). Each is a free function that takes the buffer,
+//! cursor and cycle and returns the next state, so it can be tested
+//! without a terminal; [`super::Chat::key`] applies the result. The
+//! editing keys are the shared input's (`agent_tui::input`).
 
 use agent_theme::ColorDepth;
 
@@ -22,7 +20,6 @@ use crate::signal::{
 use crate::tabs::{self, Tab};
 use crate::watcher::accept_path;
 use crate::slash;
-use crate::text_layout::split_at_char;
 
 /// Tab-completion cycle state.
 ///
@@ -43,7 +40,7 @@ pub struct TabCycle {
     pub index: usize,
 }
 
-/// What the closure should do after `handle_enter` runs.
+/// What the screen does after `handle_enter` runs.
 pub enum EnterAction {
     /// Empty input — no state change.
     None,
@@ -53,7 +50,7 @@ pub enum EnterAction {
     /// also append `echo` to the transcript. Directed (`@name`) sends
     /// land in the recipient's cwd inbox, which the sender does not
     /// watch, so — unlike broadcasts — they never round-trip back into
-    /// the sender's own view. The closure appends `echo` so the sender
+    /// the sender's own view. The screen appends `echo` so the sender
     /// sees their own message land.
     ClearWithStatusAndEcho { status: String, echo: Signal },
     /// Failure path: set status, leave input + cursor intact so the
@@ -71,7 +68,7 @@ pub enum EnterAction {
 /// `@`/`#` address sigil and write to the right inbox. `foreground`
 /// is the active tab (#393): unaddressed sends target its channel,
 /// and channel commands with no argument scope to it. Returns an
-/// `EnterAction` describing how the closure should update state.
+/// `EnterAction` describing how the screen should update its state.
 pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> EnterAction {
     let msg = input_value.trim_end().to_string();
     if msg.is_empty() {
@@ -714,7 +711,7 @@ fn resolve_recipients(
 }
 
 /// Result of a Tab keypress. Always returns the next buffer +
-/// cursor + cycle so the closure applies the result unconditionally,
+/// cursor + cycle so the screen applies the result unconditionally,
 /// with no "did anything change" branching at the call site.
 pub struct TabResult {
     pub new_buf: String,
@@ -724,8 +721,7 @@ pub struct TabResult {
 
 /// Tab-completion + cycle advance. No-op when the caret is mid-buffer
 /// (avoids surprising mid-sentence edits) or when no completion
-/// applies. Slash completions short-circuit before `@`/`#` parsing,
-/// matching the original closure's order.
+/// applies. Slash completions short-circuit before `@`/`#` parsing.
 pub fn handle_tab(
     buf: &str,
     cursor: usize,
@@ -827,58 +823,6 @@ pub fn handle_tab(
     }
 }
 
-/// Insert a newline at the cursor (Shift-Enter / Alt-Enter).
-pub fn handle_newline_insert(buf: &str, cursor: usize) -> (String, usize) {
-    let (before, after) = split_at_char(buf, cursor);
-    (format!("{}\n{}", before, after), cursor + 1)
-}
-
-/// Insert a single char at the cursor.
-pub fn handle_char_insert(buf: &str, cursor: usize, c: char) -> (String, usize) {
-    let (before, after) = split_at_char(buf, cursor);
-    (format!("{}{}{}", before, c, after), cursor + 1)
-}
-
-/// Drop the char to the left of the cursor.
-pub fn handle_backspace(buf: &str, cursor: usize) -> (String, usize) {
-    if cursor == 0 {
-        return (buf.to_string(), 0);
-    }
-    let (before, after) = split_at_char(buf, cursor);
-    let trimmed: String = before.chars().take(cursor.saturating_sub(1)).collect();
-    (format!("{}{}", trimmed, after), cursor - 1)
-}
-
-/// Drop the char at the cursor.
-pub fn handle_delete(buf: &str, cursor: usize) -> (String, usize) {
-    let total = buf.chars().count();
-    if cursor >= total {
-        return (buf.to_string(), cursor);
-    }
-    let (before, after) = split_at_char(buf, cursor);
-    let trimmed: String = after.chars().skip(1).collect();
-    (format!("{}{}", before, trimmed), cursor)
-}
-
-/// Jump to the start of the current logical line.
-pub fn handle_home(buf: &str, cursor: usize) -> usize {
-    let (before, _) = split_at_char(buf, cursor);
-    before
-        .rfind('\n')
-        .map(|i| before[..=i].chars().count())
-        .unwrap_or(0)
-}
-
-/// Jump to the end of the current logical line.
-pub fn handle_end(buf: &str, cursor: usize) -> usize {
-    let (_, after) = split_at_char(buf, cursor);
-    let add = match after.find('\n') {
-        Some(byte) => after[..byte].chars().count(),
-        None => after.chars().count(),
-    };
-    cursor + add
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -938,65 +882,6 @@ mod tests {
         assert!(sender_watches(&cwd_dir(&own)));
         // `@agent` in some other cwd : NOT watched (invisible → echo).
         assert!(!sender_watches(&signals_base().join("some-other-cwd-abc123")));
-    }
-
-    #[test]
-    fn backspace_at_zero_is_noop() {
-        let (b, c) = handle_backspace("hello", 0);
-        assert_eq!(b, "hello");
-        assert_eq!(c, 0);
-    }
-
-    #[test]
-    fn backspace_drops_left_char() {
-        let (b, c) = handle_backspace("hello", 5);
-        assert_eq!(b, "hell");
-        assert_eq!(c, 4);
-    }
-
-    #[test]
-    fn delete_at_end_is_noop() {
-        let (b, c) = handle_delete("hi", 2);
-        assert_eq!(b, "hi");
-        assert_eq!(c, 2);
-    }
-
-    #[test]
-    fn delete_drops_right_char() {
-        let (b, c) = handle_delete("hi", 0);
-        assert_eq!(b, "i");
-        assert_eq!(c, 0);
-    }
-
-    #[test]
-    fn char_insert_splits_at_cursor() {
-        let (b, c) = handle_char_insert("abc", 1, 'X');
-        assert_eq!(b, "aXbc");
-        assert_eq!(c, 2);
-    }
-
-    #[test]
-    fn newline_insert_splits_at_cursor() {
-        let (b, c) = handle_newline_insert("abc", 1);
-        assert_eq!(b, "a\nbc");
-        assert_eq!(c, 2);
-    }
-
-    #[test]
-    fn home_jumps_to_line_start() {
-        // "ab\ncd" with cursor on `d` (chars index 4) → jump to char 3
-        // (first char of second line).
-        assert_eq!(handle_home("ab\ncd", 4), 3);
-        // Single-line buffer → start of buffer.
-        assert_eq!(handle_home("hello", 3), 0);
-    }
-
-    #[test]
-    fn end_jumps_to_line_end() {
-        // "ab\ncd" cursor on `c` (index 3) → end of line is index 5.
-        assert_eq!(handle_end("ab\ncd", 3), 5);
-        // No trailing newline → end of buffer.
-        assert_eq!(handle_end("abc", 1), 3);
     }
 
     fn tempdir_like() -> std::path::PathBuf {

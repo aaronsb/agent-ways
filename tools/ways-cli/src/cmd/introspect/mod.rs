@@ -92,7 +92,7 @@ fn look(depth: ColorDepth) -> (Palette, Shape) {
 /// Show the screens: on the terminal until they close, or headless.
 fn show(mut screen: Introspect, open: &Open) -> Result<()> {
     if !open.headless() {
-        if let Some(sig) = agent_tui::screen::run(&mut screen)? {
+        if let Some(sig) = agent_tui::screen::run_screen(&mut screen)? {
             // The terminal is restored; end as the signal would have.
             std::process::exit(128 + sig);
         }
@@ -110,7 +110,7 @@ fn show(mut screen: Introspect, open: &Open) -> Result<()> {
             .and_then(|(w, h)| Some((w.parse::<u16>().ok()?, h.parse::<u16>().ok()?)))
             .filter(|(w, h)| *w > 0 && *h > 0)
             .ok_or_else(|| anyhow::anyhow!("--snap {size}: WIDTHxHEIGHT, such as 100x30"))?;
-        print!("{}", agent_tui::testkit::frame(&agent_tui::screen::render(&mut screen, w, h)));
+        print!("{}", agent_tui::testkit::frame(&agent_tui::testkit::render_screen(&mut screen, w, h)));
     }
     Ok(())
 }

@@ -16,9 +16,6 @@
 
 use std::path::Path;
 
-use agent_theme::ColorDepth;
-use iocraft::prelude::*;
-
 /// Tokenize `text` shell-paste style and keep the absolute-path
 /// candidates, unquoted/unescaped. Pure string work — existence is
 /// the caller's concern ([`existing_attachments`] for render sites,
@@ -81,29 +78,10 @@ pub fn existing_attachments(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Render one flat chip per attachment: glyph + basename, inverse on
-/// dark grey so a file reads as an object, not body text. Only
-/// existing files reach here (the caller filters), which is the
-/// never-error degradation: a vanished file loses its chip, nothing
-/// more.
-pub fn attachment_chips(paths: &[String], caps: ColorDepth) -> Vec<AnyElement<'static>> {
-    let glyph = if agent_identity::is_rich(caps) { "⎘ " } else { "file: " };
-    paths
-        .iter()
-        .map(|p| {
-            let name = Path::new(p)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or(p.as_str());
-            let content = format!(" {glyph}{name} ");
-            element! {
-                View(background_color: Color::DarkGrey, margin_right: 1) {
-                    Text(color: Color::White, content, wrap: TextWrap::NoWrap)
-                }
-            }
-            .into_any()
-        })
-        .collect()
+/// The label of an attachment's chip: its file name, or the whole path
+/// when it has none.
+pub fn attachment_name(path: &str) -> &str {
+    Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path)
 }
 
 #[cfg(test)]

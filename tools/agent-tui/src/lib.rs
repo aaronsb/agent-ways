@@ -10,19 +10,30 @@
 //! commands, and the tree it builds is the content of the tree-and-detail
 //! screen.
 //!
+//! An application of another shape, such as attend-chat, runs on
+//! [`screen`] with the same terminal handling and draws with the shared
+//! parts: the text entry ([`input`]), a feed of boxed entries ([`feed`]),
+//! tabs and chip rows ([`strip`]) and wrapping ([`wrap`]).
+//!
 //! Dependency direction: applications depend on this crate; it depends on
 //! `agent-theme` and ratatui only. Nothing on a hook path links it into
 //! anything it calls (ADR-504 §11).
 
 pub mod adapter;
 pub mod app;
+pub mod feed;
+pub mod input;
 pub mod markdown;
 pub mod screen;
+pub mod strip;
 pub mod testkit;
 pub mod timeline;
 pub mod tree;
+pub mod wrap;
 
 use std::io;
+
+use ratatui::DefaultTerminal;
 
 pub use adapter::{Adapter, Unwired, Write};
 pub use app::flow;
@@ -39,6 +50,12 @@ pub use ratatui;
 /// signal ends the session with [`Session::signal`] set; the caller exits
 /// with 128 plus it.
 pub fn run(app: App) -> io::Result<Session> {
+    with_terminal(|term, signals| app.run(term, signals))
+}
+
+/// Take the terminal, catch the termination signals and install the panic
+/// hook, then hand the terminal to `body`; restore it on every exit path.
+pub(crate) fn with_terminal<T>(body: impl FnOnce(&mut DefaultTerminal, &Signals) -> io::Result<T>) -> io::Result<T> {
     let signals = Signals::install()?;
     // The hook in place before ratatui::init adds its own. Its own restores
     // less (not mouse capture or the cursor) and prints when the terminal
@@ -47,11 +64,6 @@ pub fn run(app: App) -> io::Result<Session> {
     let hook = std::panic::take_hook();
     let mut guard = TermGuard::new();
     let _ratatui_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        // A panic that aborts runs no drop: end the command in flight here.
-        app::term::kill_job_group();
-        restore();
-        hook(info);
-    }));
-    app.run(&mut guard.term, &signals)
+    std::panic::set_hook(screen::panic_hook(hook));
+    body(&mut guard.term, &signals)
 }

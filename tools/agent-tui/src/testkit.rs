@@ -25,6 +25,7 @@ use ratatui::Terminal;
 
 use crate::adapter::{Adapter, Write};
 use crate::app::App;
+use crate::screen::Screen;
 use crate::tree::{Queued, Store};
 
 /// One frame of `app` at `w` by `h`, drawn as the run loop draws it.
@@ -32,6 +33,20 @@ pub fn render(app: &mut App, w: u16, h: u16) -> Buffer {
     let mut term = Terminal::new(TestBackend::new(w, h)).expect("a test backend");
     term.draw(|f| app.draw(f)).expect("a frame");
     term.backend().buffer().clone()
+}
+
+/// One frame of a [`Screen`] at `w` by `h`, drawn as [`crate::screen::run_screen`] draws
+/// it: its palette set, the frame drawn, the theme's ground filled.
+pub fn render_screen<S: Screen + ?Sized>(screen: &mut S, w: u16, h: u16) -> Buffer {
+    let mut term = Terminal::new(TestBackend::new(w, h)).expect("a test backend");
+    term.draw(|f| crate::screen::frame(screen, f)).expect("a frame");
+    term.backend().buffer().clone()
+}
+
+/// Send each key to a [`Screen`]'s key handler. Returns false if any ended
+/// the session; the keys after it are not sent.
+pub fn drive<S: Screen + ?Sized>(screen: &mut S, keys: &[KeyEvent]) -> bool {
+    keys.iter().all(|k| screen.key(*k))
 }
 
 /// The glyphs of a frame, one line per row.

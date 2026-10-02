@@ -18,7 +18,9 @@ use agent_theme::Role;
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_segmentation::UnicodeSegmentation;
+
+use crate::wrap::{str_width, wrap_cells, Cell};
 
 use crate::theme;
 
@@ -36,17 +38,6 @@ pub fn render(md: &str, width: u16) -> Vec<Line<'static>> {
         r.event(ev);
     }
     r.finish()
-}
-
-/// A styled line word-wrapped to `width` columns, as [`render`] wraps
-/// prose: for text drawn beside a rendered document that has to scroll
-/// with it.
-pub fn wrap_line(line: &Line, width: u16) -> Vec<Line<'static>> {
-    let runs: Vec<Run> = line.spans.iter().map(|s| (s.content.to_string(), line.style.patch(s.style))).collect();
-    if runs_width(&runs) == 0 {
-        return vec![Line::raw("")];
-    }
-    wrap(&runs, (width as usize).max(1)).into_iter().map(to_line).collect()
 }
 
 /// The second accent, which code takes.
@@ -258,7 +249,7 @@ impl Renderer {
                     }
                     _ => ("• ".to_string(), theme::accent()),
                 };
-                let width = marker.0.width();
+                let width = str_width(&marker.0);
                 self.items.push(Item { width, marker: Some(vec![marker]) });
             }
             Tag::Table(_) => {
@@ -382,12 +373,11 @@ fn clip_left(runs: Vec<Run>, max: usize) -> Vec<Run> {
             continue;
         }
         let mut kept = String::new();
-        for c in text.chars() {
-            let cw = c.width().unwrap_or(0);
+        for g in text.graphemes(true) {
             if over > 0 {
-                over = over.saturating_sub(cw.max(1));
+                over = over.saturating_sub(str_width(g).max(1));
             } else {
-                kept.push(c);
+                kept.push_str(g);
             }
         }
         if !kept.is_empty() {
@@ -407,14 +397,14 @@ fn expand_tabs(seg: &str, mut col: usize) -> String {
             col += n;
         } else {
             out.push(c);
-            col += c.width().unwrap_or(0);
+            col += str_width(c.encode_utf8(&mut [0; 4]));
         }
     }
     out
 }
 
 fn runs_width(runs: &[Run]) -> usize {
-    runs.iter().map(|(t, _)| t.width()).sum()
+    runs.iter().map(|(t, _)| str_width(t)).sum()
 }
 
 /// Runs as a line, neighbours of one style joined.
@@ -432,85 +422,15 @@ fn to_line(runs: Vec<Run>) -> Line<'static> {
     Line::from(merged.into_iter().map(|(t, s)| Span::styled(t, s)).collect::<Vec<_>>())
 }
 
-/// Split runs into words and the spaces between them, each with its style.
-fn pieces(runs: &[Run]) -> Vec<(String, Style, bool)> {
-    let mut out: Vec<(String, Style, bool)> = Vec::new();
-    for (text, style) in runs {
-        let mut word = String::new();
-        let mut space = false;
-        for c in text.chars() {
-            let is_space = c == ' ';
-            if !word.is_empty() && is_space != space {
-                out.push((std::mem::take(&mut word), *style, space));
-            }
-            space = is_space;
-            word.push(c);
-        }
-        if !word.is_empty() {
-            out.push((word, *style, space));
-        }
-    }
-    out
-}
-
-/// Word-wrap runs to `width` columns. Spaces at a break are dropped; a word
-/// wider than the line is cut.
+/// Word-wrap runs to `width` columns, as `crate::wrap` wraps prose: the
+/// indent that opens the text is kept, spaces at a break are dropped, and a
+/// word wider than the line is cut between grapheme clusters.
 fn wrap(runs: &[Run], width: usize) -> Vec<Vec<Run>> {
-    let width = width.max(1);
-    let mut lines: Vec<Vec<Run>> = vec![Vec::new()];
-    let mut w = 0usize;
-    // Spaces that open the text are kept, as an indent; spaces at a break
-    // are not.
-    let mut broke = false;
-    for (text, style, space) in pieces(runs) {
-        let tw = text.width();
-        if space {
-            if w + tw <= width && (w > 0 || !broke) {
-                lines.last_mut().expect("a line").push((text, style));
-                w += tw;
-            } else if w > 0 {
-                lines.push(Vec::new());
-                w = 0;
-                broke = true;
-            }
-            continue;
-        }
-        broke = true;
-        if w + tw > width && w > 0 {
-            // Spaces left at the end of the line go with the break.
-            trim_end(lines.last_mut().expect("a line"));
-            lines.push(Vec::new());
-            w = 0;
-        }
-        if tw <= width {
-            lines.last_mut().expect("a line").push((text, style));
-            w += tw;
-            continue;
-        }
-        for c in text.chars() {
-            let cw = c.width().unwrap_or(0);
-            if w + cw > width && w > 0 {
-                lines.push(Vec::new());
-                w = 0;
-            }
-            lines.last_mut().expect("a line").push((c.to_string(), style));
-            w += cw;
-        }
-    }
-    if let Some(l) = lines.last_mut() {
-        trim_end(l);
-    }
-    lines
-}
-
-fn trim_end(line: &mut Vec<Run>) {
-    while line.last().is_some_and(|(t, _)| t.trim_end_matches(' ').is_empty()) {
-        line.pop();
-    }
-    if let Some((t, _)) = line.last_mut() {
-        let k = t.trim_end_matches(' ').len();
-        t.truncate(k);
-    }
+    let cells: Vec<Cell> = runs
+        .iter()
+        .flat_map(|(t, st)| t.graphemes(true).map(move |g| Cell { text: g.to_string(), style: *st, sticky: false }))
+        .collect();
+    wrap_cells(&cells, width, true).into_iter().map(|row| row.into_iter().map(|c| (c.text, c.style)).collect()).collect()
 }
 
 /// Cut runs at `width` columns, spaces kept: code.
@@ -519,13 +439,13 @@ fn cut(runs: &[Run], width: usize) -> Vec<Vec<Run>> {
     let mut lines: Vec<Vec<Run>> = vec![Vec::new()];
     let mut w = 0usize;
     for (text, style) in runs {
-        for c in text.chars() {
-            let cw = c.width().unwrap_or(0);
+        for g in text.graphemes(true) {
+            let cw = str_width(g);
             if w + cw > width && w > 0 {
                 lines.push(Vec::new());
                 w = 0;
             }
-            lines.last_mut().expect("a line").push((c.to_string(), *style));
+            lines.last_mut().expect("a line").push((g.to_string(), *style));
             w += cw;
         }
     }
@@ -694,11 +614,11 @@ mod tests {
     fn a_line_wraps_with_its_styles_kept() {
         set(Palette::terminal(ColorDepth::TrueColor));
         let l = Line::from(vec![Span::styled("  vocabulary: ", theme::muted()), Span::raw("alpha beta gamma")]);
-        let out = wrap_line(&l, 20);
+        let out = crate::wrap::wrap_line(&l, 20);
         let lines: Vec<String> = out.iter().map(text).collect();
         assert_eq!(lines, ["  vocabulary: alpha", "beta gamma"], "the indent that opens the line is kept");
         assert_eq!(out[0].spans[0].style, theme::muted());
-        assert_eq!(wrap_line(&Line::raw(""), 5).len(), 1, "a blank line stays one line");
+        assert_eq!(crate::wrap::wrap_line(&Line::raw(""), 5).len(), 1, "a blank line stays one line");
     }
 
     /// A tab in code goes to the next stop of 8, as a terminal puts it;

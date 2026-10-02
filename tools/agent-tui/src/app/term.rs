@@ -14,7 +14,7 @@ use super::*;
 
 /// How long the loop waits for input before it looks at the tick, the watch
 /// and the signals again.
-const POLL: Duration = Duration::from_millis(100);
+pub(crate) const POLL: Duration = Duration::from_millis(100);
 
 /// Put the terminal back as the shell found it: mouse reporting off, raw
 /// mode off, the main screen back, the cursor shown. Safe to call twice.
@@ -144,9 +144,9 @@ pub fn kill_group(pgid: u32) {
 
 /// The signal a hung-up terminal stands for.
 #[cfg(unix)]
-const HANGUP: i32 = libc::SIGHUP;
+pub(crate) const HANGUP: i32 = libc::SIGHUP;
 #[cfg(not(unix))]
-const HANGUP: i32 = 1;
+pub(crate) const HANGUP: i32 = 1;
 
 /// How long the loop has to act on a signal before the watch thread ends
 /// the process itself, and how long once the loop has taken it up.
