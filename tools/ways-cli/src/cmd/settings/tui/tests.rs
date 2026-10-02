@@ -461,7 +461,8 @@ fn stopping_a_command_ends_what_it_started_at_once() {
     let _ = std::fs::remove_dir_all(in_fixture("child_stops_a_command_and_its_children"));
 }
 
-#[cfg(unix)]
+// Linux: macOS has no setsid command.
+#[cfg(target_os = "linux")]
 #[test]
 #[ignore = "run by a_stop_does_not_wait_on_a_process_that_left_the_group"]
 fn child_does_not_wait_on_a_process_out_of_the_group() {
@@ -488,7 +489,7 @@ fn child_does_not_wait_on_a_process_out_of_the_group() {
     assert!(matches!(ended, Some(Err(_))), "{ended:?}");
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_stop_does_not_wait_on_a_process_that_left_the_group() {
     let _ = std::fs::remove_dir_all(in_fixture("child_does_not_wait_on_a_process_out_of_the_group"));
