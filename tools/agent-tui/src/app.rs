@@ -231,6 +231,9 @@ pub struct App {
     drag: Option<usize>,
     /// A reading action running outside the queue: its label and job.
     reading: Option<(String, Box<dyn crate::adapter::Job>)>,
+    /// A check ended while the tree could not be read again: the next
+    /// watch reads it, keeping the check's outcome on the bottom bar.
+    owed: bool,
 }
 
 impl App {
@@ -258,6 +261,7 @@ impl App {
             adapter: Box::new(Unwired),
             stamp: None,
             reading: None,
+            owed: false,
             themes: Themes::new(None, agent_theme::ColorDepth::TrueColor, None),
             drag: None,
         }

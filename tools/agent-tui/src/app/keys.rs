@@ -669,6 +669,7 @@ impl App {
         if !matches!(self.mode, Mode::Browse | Mode::Review { run: None, .. }) {
             self.msg = said;
             self.stamp = None;
+            self.owed = true;
             return;
         }
         let r = self.reload();

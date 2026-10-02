@@ -441,6 +441,7 @@ fn a_check_ending_under_an_open_menu_marks_the_tree_unread() {
     assert_eq!(app.stamp, None, "the next watch reads the tree");
     press(&mut app, &[KeyCode::Esc]);
     app.watch();
+    assert_eq!(app.message(), "check: killed", "the owed reload keeps the check's outcome");
     assert_eq!(slow.reloads.get(), 1);
 }
 
