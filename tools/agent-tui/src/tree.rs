@@ -202,6 +202,9 @@ pub enum Arg {
     /// queues the flow's own commands, so the action's `command` is only a
     /// description for the detail pane.
     Flow(String),
+    /// A change of what the tree shows, named for the adapter
+    /// ([`crate::Adapter::view`]). Nothing is queued; the tree reloads.
+    View(String),
 }
 
 /// Something a node can do that is not a value change: a named command line.
@@ -253,7 +256,7 @@ impl Action {
             Arg::None => self.command.clone(),
             Arg::Text(_) => self.command.replace("{}", &quote(text)),
             Arg::Secret => format!("{} < <stdin>", self.command),
-            Arg::Flow(_) => self.command.clone(),
+            Arg::Flow(_) | Arg::View(_) => self.command.clone(),
         }
     }
 }

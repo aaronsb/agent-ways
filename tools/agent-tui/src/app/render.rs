@@ -331,7 +331,11 @@ impl App {
             lines.push(Line::raw(""));
             lines.push(Line::styled("actions", dim));
             for (a, k) in n.actions.iter().zip(tree::action_keys(&n.actions)) {
-                let tag = if a.confirm { " (asks first)" } else { "" };
+                let tag = match (&a.arg, a.confirm) {
+                    (Arg::View(_), _) => " (view)",
+                    (_, true) => " (asks first)",
+                    _ => "",
+                };
                 lines.push(Line::from(vec![Span::styled(format!("  {} ", k.unwrap_or(' ')), theme::accent()), Span::raw(format!("{}{tag}", a.label))]));
                 lines.push(Line::styled(format!("    {}", a.render("<arg>")), dim));
             }
@@ -411,6 +415,7 @@ impl App {
                 let tag = match (&a.arg, a.confirm) {
                     (Arg::Secret, _) => "  masked".to_string(),
                     (Arg::Flow(_), _) => "  guided".to_string(),
+                    (Arg::View(_), _) => "  view".to_string(),
                     (Arg::Text(p), true) => format!("  {p}, asks first"),
                     (Arg::Text(p), false) => format!("  {p}"),
                     (Arg::None, true) => "  asks first".to_string(),

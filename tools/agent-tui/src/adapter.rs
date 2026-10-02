@@ -79,6 +79,12 @@ pub trait Adapter {
         None
     }
 
+    /// Switch to the view an action's `Arg::View` names. The shell reloads
+    /// the tree after; the message, if any, goes to the bottom bar.
+    fn view(&mut self, _name: &str) -> Option<String> {
+        None
+    }
+
     /// The help text for a tab, as the application's own `--help` prints it
     /// (ADR-503 §10). The help overlay shows it below the keys.
     fn help(&self, _tab: &str) -> Option<String> {
