@@ -409,7 +409,7 @@ fn plan(env: &Env, args: &RelocateArgs, out: &mut dyn Write) -> Result<Option<Pl
     let create_target = !new_path.is_dir();
 
     let mut warnings: Vec<String> = Vec::new();
-    let recent = transcripts.iter().filter(|t| is_live(t, super::epoch_now())).count();
+    let recent = transcripts.iter().filter(|t| is_live(t, agent_fmt::when::now_secs())).count();
     if recent > 0 {
         warnings.push(format!(
             "{recent} transcript(s) modified in the last {LIVE_SESSION_WINDOW}s — a session may be live in this project"

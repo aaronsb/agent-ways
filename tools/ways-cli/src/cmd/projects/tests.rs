@@ -221,7 +221,7 @@ fn cleanup_dry_run_and_decline_remove_nothing() {
 fn cleanup_moves_only_dirs_with_no_files_to_the_trash() {
     let mut f = populated("cleanup");
     // An hour from now: the fixture dirs are not "just created".
-    f.env.now = super::epoch_now() + 3_600;
+    f.env.now = agent_fmt::when::now_secs() + 3_600;
     // Empty by the listing's measure, but holding a file: kept.
     f.write(".claude/projects/-srv-busy/subagents/agent-1.meta.json", "{}");
     let (_, out) = f.run_answering(ProjectsCommand::Cleanup { dry_run: false }, true);
@@ -241,7 +241,7 @@ fn cleanup_skips_a_dir_a_session_just_created() {
     // Claude Code creates the dir as a session starts, before the first
     // transcript; the fixture's dirs were made moments ago.
     let mut f = populated("cleanup-recent");
-    f.env.now = super::epoch_now();
+    f.env.now = agent_fmt::when::now_secs();
     let (_, out) = f.run_answering(ProjectsCommand::Cleanup { dry_run: false }, true);
     assert!(out.contains("modified in the last 5 minutes"), "{out}");
     assert!(f.projects().join("-srv-gone").exists());
@@ -273,7 +273,7 @@ fn hygiene_never_flags_a_transcript_newer_than_a_stale_index() {
 #[test]
 fn hygiene_moves_empty_session_dirs_to_the_trash() {
     let mut f = populated("hygiene");
-    f.env.now = super::epoch_now() + 3_600;
+    f.env.now = agent_fmt::when::now_secs() + 3_600;
     std::fs::create_dir_all(f.projects().join("-srv-app-one/s1")).unwrap();
     let (_, out) = f.run(ProjectsCommand::Hygiene { dry_run: true });
     assert!(out.contains("Empty session dirs: 2"), "{out}");
@@ -302,7 +302,7 @@ fn hygiene_moves_empty_session_dirs_to_the_trash() {
 #[test]
 fn hygiene_leaves_a_session_dir_made_moments_ago() {
     let mut f = populated("hygiene-recent");
-    f.env.now = super::epoch_now();
+    f.env.now = agent_fmt::when::now_secs();
     std::fs::create_dir_all(f.projects().join("-srv-app-one/tool-results")).unwrap();
     let (_, out) = f.run_answering(ProjectsCommand::Hygiene { dry_run: false }, true);
     assert!(f.projects().join("-srv-app-one/tool-results").is_dir(), "{out}");
@@ -387,7 +387,7 @@ fn relocate_execute_moves_history_and_config() {
 #[test]
 fn relocate_refuses_a_live_session_and_an_existing_target() {
     let f = populated("reloc-refuse");
-    f.transcript("/srv/app_one", "live", "/srv/app_one", super::epoch_now());
+    f.transcript("/srv/app_one", "live", "/srv/app_one", agent_fmt::when::now_secs());
     let target = f.base.join("work").join("t");
     let mut args = relocate_args("/srv/app_one", &target.to_string_lossy());
     args.execute = true;

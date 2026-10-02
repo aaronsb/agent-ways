@@ -15,7 +15,7 @@ mod rewrite;
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use clap::Subcommand;
@@ -95,7 +95,7 @@ impl Env {
             claude: ways_core::paths::claude_dir(),
             claude_json: home.join(".claude.json"),
             home: home.to_string_lossy().into_owned(),
-            now: epoch_now(),
+            now: agent_fmt::when::now_secs(),
         }
     }
 
@@ -281,20 +281,15 @@ fn scan_all(env: &Env) -> Vec<Project> {
 
 // ── Formatting ──────────────────────────────────────────────────
 
-fn epoch_now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
 /// The first ten characters of an ISO timestamp (its date) as epoch seconds
 /// at midnight UTC.
 fn date_epoch(ts: &str) -> Option<u64> {
     let date = ts.get(..10)?;
-    crate::cmd::context::iso_to_epoch(&format!("{date}T00:00:00Z"))
+    agent_fmt::when::parse_utc_iso(&format!("{date}T00:00:00Z"))
 }
 
 fn fmt_date(epoch: u64) -> String {
-    let (y, m, d) = ways_core::util::days_to_ymd(epoch / 86_400);
-    format!("{y:04}-{m:02}-{d:02}")
+    agent_fmt::when::utc_date(epoch)
 }
 
 fn fmt_bytes(n: u64) -> String {

@@ -6,7 +6,7 @@
 mod banner;
 pub mod permissions;
 mod table;
-mod when;
+pub mod when;
 
 pub use banner::{Banner, GRADIENT_CORAL, GRADIENT_TEAL};
 pub use table::{Align, Table, terminal_width, truncate_visible};

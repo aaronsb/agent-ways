@@ -242,7 +242,7 @@ impl CheckRecord {
         CheckRecord {
             result: result.to_string(),
             model: model.to_string(),
-            at: now_s(),
+            at: agent_fmt::when::now_secs(),
             source: source.to_string(),
             stamp: stamp(source),
         }
@@ -256,7 +256,7 @@ impl CheckRecord {
 
     /// Seconds since the check.
     pub fn age_s(&self) -> u64 {
-        now_s().saturating_sub(self.at)
+        agent_fmt::when::now_secs().saturating_sub(self.at)
     }
 }
 
@@ -275,10 +275,6 @@ fn stamp(source: &Source) -> Option<(u64, u64)> {
     let meta = std::fs::metadata(path).ok()?;
     let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
     Some((mtime, meta.len()))
-}
-
-fn now_s() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 fn check_path(provider: Provider) -> PathBuf {

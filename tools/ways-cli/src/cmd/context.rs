@@ -360,7 +360,7 @@ fn read_usage_tail(content: &str, n: usize) -> Vec<UsageEntry> {
             ""
         };
         tail.push(UsageEntry {
-            at_epoch: iso_to_epoch(&at).unwrap_or(0),
+            at_epoch: agent_fmt::when::parse_utc_iso(&at).unwrap_or(0),
             at,
             model: message.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string(),
             input: usage["input_tokens"].as_u64().unwrap_or(0),
@@ -372,41 +372,6 @@ fn read_usage_tail(content: &str, n: usize) -> Vec<UsageEntry> {
     }
     tail.reverse();
     tail
-}
-
-/// `YYYY-MM-DDTHH:MM:SS[.fff]Z` to Unix seconds. The transcript writes UTC
-/// with a trailing `Z`; any other offset returns `None` rather than a wrong
-/// instant. Fractional seconds are dropped.
-pub fn iso_to_epoch(s: &str) -> Option<u64> {
-    let s = s.trim().strip_suffix('Z')?;
-    let (date, time) = s.split_once('T')?;
-    let mut d = date.split('-');
-    let y: i64 = d.next()?.parse().ok()?;
-    let m: u32 = d.next()?.parse().ok()?;
-    let day: u32 = d.next()?.parse().ok()?;
-    if d.next().is_some() || !(1..=12).contains(&m) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let time = time.split('.').next()?;
-    let mut t = time.split(':');
-    let hh: u64 = t.next()?.parse().ok()?;
-    let mm: u64 = t.next()?.parse().ok()?;
-    let ss: u64 = t.next()?.parse().ok()?;
-    if t.next().is_some() || hh > 23 || mm > 59 || ss > 60 {
-        return None;
-    }
-    // Days from civil, Howard Hinnant's algorithm.
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as u64;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp as u64 + 2) / 5 + day as u64 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe as i64 - 719_468;
-    if days < 0 {
-        return None;
-    }
-    Some(days as u64 * 86_400 + hh * 3_600 + mm * 60 + ss)
 }
 
 /// The root every session transcript lives under, one directory per project.
@@ -528,16 +493,6 @@ mod tests {
         let err = resolve_transcript(None, None, Some(""), &root).unwrap_err();
         assert!(err.to_string().contains("No active transcript"));
         std::fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn iso_to_epoch_parses_transcript_timestamps() {
-        // date -u -d 2026-09-17T20:37:03Z +%s
-        assert_eq!(iso_to_epoch("2026-09-17T20:37:03.286Z"), Some(1_789_677_423));
-        assert_eq!(iso_to_epoch("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(iso_to_epoch("2000-03-01T00:00:00Z"), Some(951_868_800));
-        assert_eq!(iso_to_epoch("2026-09-17T20:37:03+02:00"), None);
-        assert_eq!(iso_to_epoch("garbage"), None);
     }
 
     #[test]

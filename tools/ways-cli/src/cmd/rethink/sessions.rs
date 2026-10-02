@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 
-use crate::util::parse_ts_secs;
+use agent_fmt::when::parse_utc_iso;
 
 use super::scope::project_matches;
 
@@ -95,8 +95,8 @@ pub(crate) fn gather_sessions(content: &str, project_filter: Option<&str>) -> Ve
             s.way_fires = *fires;
         }
         if let Some(last) = last_ts.get(&s.id) {
-            let start = parse_ts_secs(&s.ts);
-            let end = parse_ts_secs(last);
+            let start = parse_utc_iso(&s.ts).unwrap_or(0);
+            let end = parse_utc_iso(last).unwrap_or(0);
             s.duration_secs = end.saturating_sub(start);
         }
     }
@@ -125,7 +125,7 @@ pub(super) fn list_sessions(content: &str, project_filter: Option<&str>) -> Resu
         let short_id = &s.id[..s.id.len().min(12)];
         let date = &s.ts[..s.ts.len().min(16)];
         let project_short = s.project.split('/').next_back().unwrap_or(&s.project);
-        let duration = format_duration(s.duration_secs);
+        let duration = agent_fmt::when::duration(s.duration_secs);
         println!(
             "  {:<12} {:<20} {:<30} {:>6} {:>6} {:>8}",
             short_id, date, project_short, s.event_count, s.way_fires, duration
@@ -186,7 +186,7 @@ pub(super) fn pick_session(content: &str, project_filter: Option<&str>) -> Optio
             let short_id = &s.id[..s.id.len().min(12)];
             let date = &s.ts[..s.ts.len().min(16)];
             let project_short = s.project.split('/').next_back().unwrap_or(&s.project);
-            let duration = format_duration(s.duration_secs);
+            let duration = agent_fmt::when::duration(s.duration_secs);
 
             let (prefix, suffix) = if i == selected { pair(Role::Selection) } else { (String::new(), "") };
 
@@ -257,18 +257,6 @@ pub(super) fn pick_session(content: &str, project_filter: Option<&str>) -> Optio
                 _ => {}
             }
         }
-    }
-}
-
-fn format_duration(secs: u64) -> String {
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m {}s", secs / 60, secs % 60)
-    } else {
-        let h = secs / 3600;
-        let m = (secs % 3600) / 60;
-        format!("{h}h {m}m")
     }
 }
 

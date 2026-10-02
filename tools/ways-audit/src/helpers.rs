@@ -11,14 +11,7 @@ pub fn obj_len(v: &Value) -> usize {
 }
 
 pub fn cutoff_date(days: u32) -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let cutoff_secs = secs.saturating_sub(days as u64 * 86400);
-    let days_since = cutoff_secs / 86400;
-    let (y, m, d) = ways_core::util::days_to_ymd(days_since);
-    format!("{y:04}-{m:02}-{d:02}")
+    agent_fmt::when::utc_date(agent_fmt::when::now_secs().saturating_sub(days as u64 * 86400))
 }
 
 pub fn find_stale_ways(manifest: &Value, days: u32) -> Vec<String> {

@@ -381,11 +381,7 @@ pub fn get_check_fires(way_id: &str, session_id: &str) -> u64 {
 pub fn stamp_core(session_id: &str) {
     let path = session_dir(session_id).join("core");
     ensure_parent(&path);
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let _ = std::fs::write(&path, ts.to_string());
+    let _ = std::fs::write(&path, agent_fmt::when::now_secs().to_string());
 }
 
 pub fn core_is_shown(session_id: &str) -> bool {
@@ -467,7 +463,7 @@ pub fn log_event(fields: &[(&str, &str)]) {
         let _ = std::fs::create_dir_all(stats_dir);
     }
 
-    let ts = chrono_utc_now();
+    let ts = agent_fmt::when::now_utc_iso();
     let mut obj = serde_json::Map::new();
     obj.insert("ts".to_string(), serde_json::Value::String(ts));
     for (k, v) in fields {
@@ -535,23 +531,6 @@ fn compact_log_tail(path: &std::path::Path, keep_bytes: u64) -> std::io::Result<
         let _ = std::fs::remove_file(&tmp); // never leave a stray temp behind
     }
     res
-}
-
-/// UTC timestamp without chrono dependency.
-fn chrono_utc_now() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days_since_epoch = secs / 86400;
-    let time_of_day = secs % 86400;
-    let hours = time_of_day / 3600;
-    let minutes = (time_of_day % 3600) / 60;
-    let seconds = time_of_day % 60;
-    let (year, month, day) = crate::util::days_to_ymd(days_since_epoch);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}Z"
-    )
 }
 
 // ── Domain disable check ────────────────────────────────────────

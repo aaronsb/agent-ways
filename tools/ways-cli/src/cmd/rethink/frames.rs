@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::cmd::render;
 use crate::session;
-use crate::util::parse_ts_secs;
+use agent_fmt::when::parse_utc_iso;
 
 use super::model::{ActiveWay, Frame, WayEvent};
 
@@ -56,7 +56,7 @@ fn build_frames(
     let mut window: u64 = 1;
 
     let start_ts = events.first().map(|e| &e.ts).cloned().unwrap_or_default();
-    let start_secs = parse_ts_secs(&start_ts);
+    let start_secs = parse_utc_iso(&start_ts).unwrap_or(0);
 
     // Cluster events by timestamp proximity (≤3s gap = same epoch)
     let mut clusters: Vec<Vec<&WayEvent>> = Vec::new();
@@ -64,7 +64,7 @@ fn build_frames(
     let mut last_ts_secs: u64 = 0;
 
     for ev in events {
-        let ts_secs = parse_ts_secs(&ev.ts);
+        let ts_secs = parse_utc_iso(&ev.ts).unwrap_or(0);
         if !current_cluster.is_empty() && ts_secs > last_ts_secs + 3 {
             clusters.push(std::mem::take(&mut current_cluster));
         }
@@ -91,7 +91,7 @@ fn build_frames(
 
         epoch += 1;
         let cluster_ts = cluster[0].ts.clone();
-        let cluster_secs = parse_ts_secs(&cluster_ts);
+        let cluster_secs = parse_utc_iso(&cluster_ts).unwrap_or(0);
         let elapsed = cluster_secs.saturating_sub(start_secs);
 
         let token_k = find_token_position(token_timeline, &cluster_ts);

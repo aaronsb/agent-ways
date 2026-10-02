@@ -37,7 +37,7 @@
 //! A consumer that needs the cumulative timeline reads `build_frames`; one that
 //! needs the per-turn "why" reads this model; the drill-down bridges them by id.
 
-use crate::util::parse_ts_secs;
+use agent_fmt::when::parse_utc_iso;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -235,7 +235,7 @@ impl SessionIntrospection {
         let mut last_secs: u64 = 0;
 
         for f in &fires {
-            let secs = parse_ts_secs(&f.ts);
+            let secs = parse_utc_iso(&f.ts).unwrap_or(0);
             if !cluster.is_empty() && secs > last_secs + 3 {
                 epoch += 1;
                 turns.push(build_turn(&cluster, epoch, criteria));
@@ -334,10 +334,10 @@ fn nearest_prompt_turn<'a>(
     turn_ts: &str,
     prompt_turns: &'a [crate::transcript::PromptTurn],
 ) -> Option<&'a crate::transcript::PromptTurn> {
-    let turn_secs = parse_ts_secs(turn_ts);
+    let turn_secs = parse_utc_iso(turn_ts).unwrap_or(0);
     let in_tolerance: Vec<(&crate::transcript::PromptTurn, u64)> = prompt_turns
         .iter()
-        .map(|pt| (pt, parse_ts_secs(&pt.ts).abs_diff(turn_secs)))
+        .map(|pt| (pt, parse_utc_iso(&pt.ts).unwrap_or(0).abs_diff(turn_secs)))
         .filter(|(_, diff)| *diff <= JOIN_TOLERANCE_SECS)
         .collect();
 

@@ -74,7 +74,7 @@ pub fn run(
             let bin = crate::paths::way_embed_in(&engine_dir);
             let engine = engine_fingerprint(bin.as_deref(), &engine_dir);
             if !is_stale(&manifest, &global_dir, &project_dir)
-                && !retry_due(&manifest, &engine, unix_now())
+                && !retry_due(&manifest, &engine, agent_fmt::when::now_secs())
             {
                 vlog("corpus is fresh — nothing to do");
                 return Ok(());
@@ -278,7 +278,7 @@ pub fn run(
         "calibration": calibration,
         "embedded": complete,
         "reason": reason,
-        "failed_at": if complete { None } else { Some(unix_now()) },
+        "failed_at": if complete { None } else { Some(agent_fmt::when::now_secs()) },
         "engine": engine,
     });
     vlog("writing manifest");
@@ -524,13 +524,6 @@ fn read_manifest(path: &Path) -> Option<serde_json::Value> {
 
 /// How long a failed build waits before `--if-stale` retries it on its own.
 const RETRY_AFTER_SECS: u64 = 24 * 3600;
-
-fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
 
 /// True when the manifest records a build that did not fully embed and a
 /// retry is due: the engine changed since (a repair), or a day has passed (a
