@@ -85,7 +85,8 @@ enum Commands {
     },
     /// This session and past ones: fired ways, replay, reset
     ///
-    /// Run bare on a terminal, the session screen; in a pipe, this help.
+    /// Run bare on a terminal, it opens the session screen; in a pipe, it
+    /// prints this help.
     Session {
         #[command(subcommand)]
         action: Option<SessionCommand>,
@@ -1070,7 +1071,9 @@ fn run() -> Result<()> {
         },
         Commands::Session { action: None } => {
             // A bare group opens its screen on a terminal and keeps its help
-            // and exit 2 in a pipe (ADR-507 §7, note of 2026-10-02).
+            // and exit 2 in a pipe (ADR-507 §7, note of 2026-10-02). The long
+            // help, unlike the other groups' short one, carries the line that
+            // says a bare run on a terminal opens the screen.
             use std::io::IsTerminal;
             if std::io::stdout().is_terminal() && std::io::stdin().is_terminal() {
                 cmd::introspect::replay(None, None, false, None, false, false, &cmd::introspect::Open::default())

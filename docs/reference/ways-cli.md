@@ -87,7 +87,9 @@ ways tune stats --json
 
 **When:** After a session where guidance seemed off, to replay exactly what fired, when, and why. Also useful for onboarding: walk through a past session to see the system in action, or follow the current one as ways fire.
 
-**Run from:** The project directory, which scopes the sessions to that project. `--project <dir>` picks another project and `--all` takes every project; when the current project cannot be detected, the command fails rather than reading every project. `ways session` with no verb, on a terminal, opens the session screen as `replay` does; in a pipe it prints its help and exits 2, so a script names the verb.
+**Run from:** The project directory, which scopes the sessions to that project. `--project <dir>` picks another project and `--all` takes every project; when the current project cannot be detected, the command fails rather than reading every project.
+
+**Bare:** `ways session` with no verb, on a terminal, opens the session screen as `replay` does; in a pipe it prints its help and exits 2, so a script names the verb.
 
 **Tells you:**
 
