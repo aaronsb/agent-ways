@@ -621,3 +621,4 @@ These are used internally by hook scripts. They are hidden from `ways --help` an
 | `ways events-log-path` | Scripts outside the binary that read telemetry |
 | `ways show way\|check\|core\|attend` | Agents told by attend to run `ways show attend <signal>`; authors checking a way's delivered text |
 | `ways manifest` | Debugging `reconcile`: the projection manifest it converges toward |
+| `ways judge-setup` | `scripts/install.sh` and the end of `ways update` — checks the relevance judge's keys and, on a terminal, offers to add one |

@@ -201,17 +201,17 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         println!("available and no build toolchain?). Your install still runs the previous binary —");
         println!("retry `ways update`, or `make update-binaries` with a toolchain, then restart Claude Code.");
     }
-    if no_agent_key() {
-        println!("\nOptional: turn on the relevance gate (Claude Haiku judges each matched way) with `ways agent key add --provider anthropic`");
-    }
+    judge_setup();
     Ok(())
 }
 
-/// True when no provider has a key file: the agent reads only the file.
-fn no_agent_key() -> bool {
-    ways_agent_core::profile::Provider::ALL
-        .into_iter()
-        .all(|p| !ways_agent_core::keys::key_path(p).is_file())
+/// The relevance judge's check and offer, after an update that succeeded. Its
+/// failure is reported and never fails the update.
+fn judge_setup() {
+    println!();
+    if let Err(e) = super::judge::setup() {
+        eprintln!("ways: judge setup: {e:#}");
+    }
 }
 
 /// Current HEAD sha of the app checkout, or None if git can't answer.
@@ -448,6 +448,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
     println!("\nUpgraded to {git_ref} (built from source; the checkout is on a detached HEAD).");
     println!("Return to the release channel with:  ways update --ref main");
     println!("Restart Claude Code to pick up the new version.");
+    judge_setup();
     Ok(())
 }
 

@@ -66,6 +66,41 @@ fn a_bare_ways_in_a_pipe_prints_help_without_the_banner() {
     assert_eq!(listed(&text), listed(&stdout(&ways(&["--help"]))));
 }
 
+/// `ways` with its config and state in a fresh directory and no key in the environment.
+fn ways_isolated(name: &str, agent_yaml: Option<&str>, args: &[&str]) -> String {
+    let dir = std::env::temp_dir().join(format!("ways-cli-shape-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("config/agent-ways")).unwrap();
+    if let Some(text) = agent_yaml {
+        std::fs::write(dir.join("config/agent-ways/agent.yaml"), text).unwrap();
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_ways"))
+        .args(args)
+        .env("NO_COLOR", "1")
+        .env("XDG_CONFIG_HOME", dir.join("config"))
+        .env("XDG_STATE_HOME", dir.join("state"))
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("OPENROUTER_API_KEY")
+        .output()
+        .expect("run ways");
+    let _ = std::fs::remove_dir_all(&dir);
+    stdout(&out)
+}
+
+#[test]
+fn help_warns_when_the_judge_cannot_gate_and_only_there() {
+    for args in [&[][..], &["--help"], &["help"]] {
+        let help = ways_isolated("nokey", None, args);
+        assert!(help.contains("Ways is degraded") && help.contains("key add"), "{args:?}: {help}");
+        assert!(help.lines().all(|l| l.chars().count() <= 80), "{help}");
+    }
+    let off = ways_isolated("off", Some("mode: off\n"), &["--help"]);
+    assert!(!off.contains("degraded"), "gate.mode off is the operator's choice: {off}");
+    for args in [&["help", "status"][..], &["status", "--help"], &["scan", "--help"], &["sessions-root"]] {
+        assert!(!ways_isolated("other", None, args).contains("degraded"), "{args:?}");
+    }
+}
+
 #[test]
 fn removed_commands_are_unknown() {
     for args in [&["config", "show"][..], &["disable", "x"], &["enable", "x"], &["list"], &["introspect", "list"], &["lint"]] {

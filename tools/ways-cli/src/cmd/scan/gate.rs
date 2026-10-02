@@ -57,7 +57,7 @@ pub(super) fn apply(
     // The agent reads the key file, never a hook's environment, so only a key
     // file turns the gate on: an ANTHROPIC_API_KEY set for Claude Code itself
     // must not send every prompt to an agent with no key to use.
-    apply_from(&profile::user_layer_path(), |p| keys::key_path(p).is_file(), pending, prompt, response_context, log, |req, timeout| {
+    apply_from(&profile::user_layer_path(), |p| keys::locate_file(p).is_some(), pending, prompt, response_context, log, |req, timeout| {
         ways_agent_core::client::call(Request::Judge(req), timeout, true)
     })
 }

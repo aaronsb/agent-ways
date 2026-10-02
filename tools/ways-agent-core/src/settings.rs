@@ -191,7 +191,8 @@ fn key_presence(bound: &[String]) -> Value {
     let present = bound
         .first()
         .and_then(|p| Provider::parse(p).ok())
-        .is_some_and(|p| crate::keys::locate(p).is_some());
+        // The key file, which hooks read; a key only in the variable is absent to them.
+        .is_some_and(|p| crate::keys::locate_file(p).is_some());
     Value::String(if present { "present" } else { "absent" }.into())
 }
 
