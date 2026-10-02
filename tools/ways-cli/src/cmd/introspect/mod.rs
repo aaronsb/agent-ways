@@ -16,6 +16,8 @@
 mod dump;
 mod frames;
 mod model;
+mod picker;
+mod fires_tab;
 mod report;
 mod scope;
 mod screen;
@@ -35,7 +37,8 @@ use agent_tui::theme::{Palette, Shape};
 
 use crate::session;
 pub(crate) use model::Frame;
-use screen::{Introspect, Picker, Replay};
+use picker::Picker;
+use screen::{Introspect, Replay};
 
 /// A session id shortened for a table or a message: its first 12
 /// characters. Cut by characters, since an id from the command line or the
@@ -215,7 +218,10 @@ pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result
     let (palette, shape) = look(depth_of(open.depth.as_deref())?);
     match Replay::load(&content, &session_id, Some(&launch_project), true) {
         Ok(r) => {
-            let spend = report::Spend::new(ways_agent_core::spend::load(), Some(&launch_project), launch_project.clone());
+            // The spend is scoped to the project's root, as judge calls record
+            // it, though the monitor may have been launched in a subdirectory.
+            let root = project.map(str::to_string).or_else(ways_core::util::project_root).unwrap_or_else(|| launch_project.clone());
+            let spend = report::Spend::new(ways_agent_core::spend::load(), Some(&root), root.clone());
             show(Introspect::showing(r, spend, palette, shape), open)
         }
         Err(_) => {

@@ -23,10 +23,10 @@ use ways_core::introspection::SessionIntrospection;
 
 use super::model::{ActiveWay, Frame, Outcome};
 use super::report::Spend;
-use super::sessions::SessionInfo;
 use super::table;
 use super::why::{self, WhyIndex};
-use super::SemanticFire;
+use super::fires_tab::Fires;
+use super::picker::{draw_picker, Picker};
 
 /// How often a live timeline reads the event log again (ADR-154 §3); the
 /// stat check keeps an unchanged log cheap.
@@ -66,9 +66,7 @@ pub(crate) struct Replay {
     pub(crate) cost: bool,
     /// The session's semantic fires, lowest score first, and the one
     /// selected on the fires tab.
-    pub(crate) fires: Vec<SemanticFire>,
-    fires_sel: usize,
-    fires_table: TableState,
+    pub(crate) fires: Fires,
     /// The selected way of the frame shown, in both views.
     sel: usize,
     /// The why-fired detail's scroll, and its page from the last frame.
@@ -102,9 +100,7 @@ impl Replay {
             judged: false,
             spend: None,
             cost: false,
-            fires: Vec::new(),
-            fires_sel: 0,
-            fires_table: TableState::default(),
+            fires: Fires::default(),
             sel: 0,
             scroll: 0,
             page: 10,
@@ -143,7 +139,7 @@ impl Replay {
         r.from_log = true;
         r.judged = super::frames::has_verdicts(&events);
         r.spend = session_spend(content, session_id);
-        r.fires = super::semantic_fires(content, session_id);
+        r.fires.set(super::semantic_fires(content, session_id));
         if live {
             r.sig = events_signature();
         }
@@ -280,20 +276,6 @@ impl Replay {
         Step::Stay
     }
 
-    /// A key on the fires tab: move the selection.
-    fn fires_key(&mut self, k: KeyCode) {
-        let last = self.fires.len().saturating_sub(1);
-        self.fires_sel = match k {
-            KeyCode::Up | KeyCode::Char('k') => self.fires_sel.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => (self.fires_sel + 1).min(last),
-            KeyCode::PageUp => self.fires_sel.saturating_sub(10),
-            KeyCode::PageDown => (self.fires_sel + 10).min(last),
-            KeyCode::Home | KeyCode::Char('g') => 0,
-            KeyCode::End | KeyCode::Char('G') => last,
-            _ => self.fires_sel,
-        };
-    }
-
     fn tick_every(&self) -> Option<Duration> {
         if self.play.is_live() {
             Some(LIVE_REFRESH)
@@ -304,25 +286,27 @@ impl Replay {
         }
     }
 
-    fn tick(&mut self) {
+    /// Play a frame on, or read a live session again. True when the event
+    /// log changed and was read.
+    fn tick(&mut self) -> bool {
         if self.play.is_live() {
             self.now = agent_fmt::when::now_secs();
-            if self.from_log {
-                self.refresh();
-            }
+            self.from_log && self.refresh()
         } else {
             self.travel(|p| {
                 p.tick();
             });
+            false
         }
     }
 
     /// Read the live session again when the event log changed: new frames,
     /// the newest shown while following, and the why index read afresh.
-    fn refresh(&mut self) {
+    /// True when the log changed.
+    fn refresh(&mut self) -> bool {
         let sig = events_signature();
         if sig == self.sig {
-            return;
+            return false;
         }
         self.sig = sig;
         // At launch the transcript may hold no model turn yet, so the window
@@ -333,13 +317,13 @@ impl Replay {
         let content = ways_core::firing::load_events_text();
         let events = super::frames::load_session_events(&content, &self.session_id);
         let frames = super::frames::reconstruct_all(&events, &self.project, &self.session_id, self.window_k * 1000);
-        if frames.is_empty() {
-            return;
-        }
-        self.judged = super::frames::has_verdicts(&events);
         self.spend = session_spend(&content, &self.session_id);
-        self.fires = super::semantic_fires(&content, &self.session_id);
-        self.take_frames(frames);
+        self.fires.set(super::semantic_fires(&content, &self.session_id));
+        if !frames.is_empty() {
+            self.judged = super::frames::has_verdicts(&events);
+            self.take_frames(frames);
+        }
+        true
     }
 
     /// The frames read again: the newest shown while following, the
@@ -398,35 +382,6 @@ fn events_signature() -> (u64, u64) {
         }
     }
     (len, mtime)
-}
-
-/// The sessions to pick from, newest first.
-pub(crate) struct Picker {
-    pub(crate) sessions: Vec<SessionInfo>,
-    /// Where the sessions come from: a project, or every project.
-    pub(crate) scope: String,
-    sel: usize,
-    table: TableState,
-}
-
-impl Picker {
-    pub(crate) fn new(mut sessions: Vec<SessionInfo>, scope: String) -> Picker {
-        sessions.reverse();
-        Picker { sessions, scope, sel: 0, table: TableState::default() }
-    }
-
-    fn key(&mut self, k: KeyCode) {
-        let last = self.sessions.len().saturating_sub(1);
-        self.sel = match k {
-            KeyCode::Up | KeyCode::Char('k') => self.sel.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => (self.sel + 1).min(last),
-            KeyCode::PageUp => self.sel.saturating_sub(10),
-            KeyCode::PageDown => (self.sel + 10).min(last),
-            KeyCode::Home | KeyCode::Char('g') => 0,
-            KeyCode::End | KeyCode::Char('G') => last,
-            _ => self.sel,
-        };
-    }
 }
 
 /// Opens a session the picker chose.
@@ -504,30 +459,30 @@ impl Screen for Introspect {
     }
 
     fn draw(&mut self, f: &mut Draw) {
-        let (shape, bar) = (self.shape, self.bar());
-        match self.tab {
-            Tab::Timeline if self.replay.is_some() => draw_replay(f, self.replay.as_mut().unwrap(), bar, shape),
-            Tab::Sessions => {
-                if let Some(p) = &mut self.picker {
-                    draw_picker(f, p, bar, shape, &self.msg);
-                }
-            }
-            Tab::Fires if self.replay.is_some() => draw_fires(f, self.replay.as_mut().unwrap(), bar, shape),
-            Tab::Spend => {
+        let (shape, bar, back) = (self.shape, self.bar(), self.picker.is_some());
+        match (self.tab, &mut self.replay, &mut self.picker) {
+            (Tab::Sessions, _, Some(p)) => draw_picker(f, p, bar, shape, &self.msg),
+            (Tab::Timeline, Some(r), _) => draw_replay(f, r, bar, shape),
+            (Tab::Fires, Some(r), _) => r.fires.draw(f, &r.session_id, bar, shape, back),
+            (Tab::Spend, ..) => {
                 let [top, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
                 f.render_widget(Paragraph::new(bar), top);
                 self.spend.draw(f, body);
                 let mut keys = self.spend.keys();
+                if back {
+                    keys.push(("esc", "sessions"));
+                }
                 keys.push(("q", "quit"));
                 f.render_widget(Paragraph::new(key_bar(shape, "spend", Ground::Accent, &keys, Vec::new(), status.width)), status);
             }
             // A session tab before a session is open.
-            _ => {
+            (tab, ..) => {
                 let [top, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
                 f.render_widget(Paragraph::new(bar), top);
                 let hint = Line::styled("no session open: pick one on the sessions tab", theme::muted());
-                f.render_widget(Paragraph::new(hint).block(pane(format!(" {} ", self.tab.name()))), body);
-                f.render_widget(Paragraph::new(key_bar(shape, self.tab.name(), Ground::Accent, &[("q", "quit")], Vec::new(), status.width)), status);
+                f.render_widget(Paragraph::new(hint).block(pane(format!(" {} ", tab.name()))), body);
+                let keys = [("esc", "sessions"), ("q", "quit")];
+                f.render_widget(Paragraph::new(key_bar(shape, tab.name(), Ground::Accent, &keys, Vec::new(), status.width)), status);
             }
         }
     }
@@ -542,42 +497,44 @@ impl Screen for Introspect {
             }
             return true;
         }
-        match self.tab {
-            Tab::Timeline if self.replay.is_some() => match self.replay.as_mut().unwrap().key(k) {
+        match (self.tab, &mut self.replay, &mut self.picker) {
+            (Tab::Sessions, _, Some(p)) => match k.code {
+                KeyCode::Esc | KeyCode::Char('q') => false,
+                KeyCode::Enter => {
+                    let Some(id) = p.sessions.get(p.sel).map(|s| s.id.clone()) else { return true };
+                    // The session already open is shown as it was left.
+                    if self.replay.as_ref().is_some_and(|r| r.session_id == id) {
+                        self.tab = Tab::Timeline;
+                        return true;
+                    }
+                    match (self.open)(&id) {
+                        Ok(r) => {
+                            self.replay = Some(r);
+                            self.tab = Tab::Timeline;
+                            self.msg.clear();
+                        }
+                        Err(e) => self.msg = e,
+                    }
+                    true
+                }
+                c => {
+                    p.key(c);
+                    true
+                }
+            },
+            (Tab::Timeline, Some(r), _) => match r.key(k) {
                 Step::Stay => true,
                 Step::Quit => false,
                 Step::Back => self.back(),
             },
-            Tab::Sessions => {
-                let Some(p) = &mut self.picker else { return false };
-                match k.code {
-                    KeyCode::Esc | KeyCode::Char('q') => return false,
-                    KeyCode::Enter => {
-                        if let Some(s) = p.sessions.get(p.sel) {
-                            match (self.open)(&s.id) {
-                                Ok(r) => {
-                                    self.replay = Some(r);
-                                    self.tab = Tab::Timeline;
-                                    self.msg.clear();
-                                }
-                                Err(e) => self.msg = e,
-                            }
-                        }
-                    }
-                    c => p.key(c),
-                }
-                true
-            }
-            tab => match k.code {
+            (tab, replay, _) => match k.code {
                 KeyCode::Char('q') => false,
                 KeyCode::Esc => self.back(),
-                c if tab == Tab::Spend => {
-                    self.spend.key(c);
-                    true
-                }
                 c => {
-                    if let Some(r) = &mut self.replay {
-                        r.fires_key(c);
+                    match (tab, replay) {
+                        (Tab::Spend, _) => self.spend.key(c),
+                        (Tab::Fires, Some(r)) => r.fires.key(c),
+                        _ => {}
                     }
                     true
                 }
@@ -585,13 +542,17 @@ impl Screen for Introspect {
         }
     }
 
+    /// A replay plays only while its timeline is shown; a live one reads
+    /// the log on every tab, so the fires and spend tabs keep up.
     fn tick_every(&self) -> Option<Duration> {
-        self.replay.as_ref().and_then(Replay::tick_every)
+        self.replay.as_ref().filter(|r| self.tab == Tab::Timeline || r.play.is_live()).and_then(Replay::tick_every)
     }
 
     fn tick(&mut self) {
         if let Some(r) = &mut self.replay {
-            r.tick();
+            if r.tick() {
+                self.spend.reload();
+            }
         }
     }
 }
@@ -610,71 +571,6 @@ fn tabs(shape: Shape, views: &[(String, bool)]) -> Line<'static> {
         spans.extend(shape.lozenge(&[seg]));
     }
     Line::from(spans)
-}
-
-fn draw_picker(f: &mut Draw, p: &mut Picker, tab_line: Line<'static>, shape: Shape, msg: &str) {
-    let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
-    f.render_widget(Paragraph::new(tab_line), bar);
-    // The count first: a long scope is cut at its end, never the count.
-    let title = format!(" {} sessions in {} ", p.sessions.len(), p.scope);
-    if p.sessions.is_empty() {
-        f.render_widget(Paragraph::new(Line::styled("no sessions recorded", theme::muted())).block(pane(title)), main);
-    } else {
-        let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
-        let header = Row::new(vec![
-            Cell::from("Session"),
-            Cell::from("Date"),
-            Cell::from("Project"),
-            right("Events".into()),
-            right("Ways".into()),
-            right("Duration".into()),
-            Cell::from("Transcript"),
-        ])
-        .style(Style::new().add_modifier(Modifier::BOLD));
-        let rows: Vec<Row> = p
-            .sessions
-            .iter()
-            .map(|s| {
-                let project = s.project.rsplit('/').next().unwrap_or(&s.project).to_string();
-                let date = s.ts.replace('T', " ");
-                let transcript = if s.transcript { Span::styled("yes", theme::ok()) } else { Span::styled("gone", theme::muted()) };
-                Row::new(vec![
-                    Cell::from(s.id.chars().take(12).collect::<String>()),
-                    Cell::from(date.chars().take(16).collect::<String>()),
-                    Cell::from(project),
-                    right(s.event_count.to_string()),
-                    right(s.way_fires.to_string()),
-                    right(agent_fmt::when::duration(s.duration_secs)),
-                    Cell::from(transcript),
-                ])
-            })
-            .collect();
-        let widths = [
-            Constraint::Length(12),
-            Constraint::Length(16),
-            Constraint::Min(8),
-            Constraint::Length(6),
-            Constraint::Length(5),
-            Constraint::Length(8),
-            Constraint::Length(10),
-        ];
-        let t = Table::new(rows, widths)
-            .header(header)
-            .column_spacing(1)
-            .block(pane(title))
-            .row_highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
-            .highlight_spacing(HighlightSpacing::Always);
-        p.table.select(Some(p.sel));
-        f.render_stateful_widget(t, main, &mut p.table);
-    }
-    let right = if msg.is_empty() {
-        vec![Span::styled(format!("{}/{}", (p.sel + 1).min(p.sessions.len()), p.sessions.len()), theme::muted())]
-    } else {
-        vec![Span::styled(msg.to_string(), theme::err().add_modifier(Modifier::BOLD))]
-    };
-    let keys = [("↑↓", "select"), ("⏎", "replay"), ("q", "quit")];
-    f.render_widget(Paragraph::new(key_bar(shape, "pick", Ground::Accent, &keys, right, status.width)), status);
 }
 
 /// `2026-07-03T16:52:00Z` as `2026-07-03 16:52`.
@@ -910,52 +806,3 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
     f.render_widget(Paragraph::new(lines).scroll((r.scroll as u16, 0)).block(pane(Line::from(title))), right);
 }
 
-/// The fires tab: each semantic fire of the session as score, way and the
-/// text it matched, the borderline fires first, as `ways session fires`
-/// lists them.
-fn draw_fires(f: &mut Draw, r: &mut Replay, tab_line: Line<'static>, shape: Shape) {
-    let [bar, head, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
-    f.render_widget(Paragraph::new(tab_line), bar);
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("Session ", Style::new().add_modifier(Modifier::BOLD)),
-            Span::raw(super::short_id(&r.session_id)),
-            Span::styled("  lowest score first · ↻ a re-disclosure", theme::muted()),
-        ])),
-        head,
-    );
-    let title = format!(" {} semantic fires ", r.fires.len());
-    if r.fires.is_empty() {
-        let none = Line::styled("no semantic fires: keyword and state fires carry no score or surface", theme::muted());
-        f.render_widget(Paragraph::new(none).block(pane(title)), body);
-    } else {
-        let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
-        let header = Row::new(vec![right("Score".into()), Cell::from(""), Cell::from("Way"), Cell::from("Surface")]).style(Style::new().add_modifier(Modifier::BOLD));
-        let rows: Vec<Row> = r
-            .fires
-            .iter()
-            .map(|x| {
-                Row::new(vec![
-                    right(format!("{:.3}", x.score)),
-                    Cell::from(if x.redisclosed { "↻" } else { " " }),
-                    Cell::from(x.way.clone()),
-                    Cell::from(Span::styled(x.surface.clone(), theme::muted())),
-                ])
-            })
-            .collect();
-        let widths = [Constraint::Length(5), Constraint::Length(1), Constraint::Percentage(40), Constraint::Min(10)];
-        r.fires_sel = r.fires_sel.min(r.fires.len() - 1);
-        r.fires_table.select(Some(r.fires_sel));
-        let t = Table::new(rows, widths)
-            .header(header)
-            .column_spacing(1)
-            .block(pane(title))
-            .row_highlight_style(theme::selected())
-            .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
-            .highlight_spacing(HighlightSpacing::Always);
-        f.render_stateful_widget(t, body, &mut r.fires_table);
-    }
-    let right = vec![Span::styled(format!("{}/{}", (r.fires_sel + 1).min(r.fires.len()), r.fires.len()), theme::muted())];
-    let keys = [("↑↓", "select"), ("esc", "back"), ("q", "quit")];
-    f.render_widget(Paragraph::new(key_bar(shape, "fires", Ground::Accent, &keys, right, status.width)), status);
-}

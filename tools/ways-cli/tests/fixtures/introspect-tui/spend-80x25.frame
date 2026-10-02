@@ -2,10 +2,10 @@ agent-tui frame 80x25
 | introspect    1 timeline    2 fires    3 spend                                 |
 |Judge spend by day · the log holds calls from 2026-06-30                        |
 |┌ 3 judge calls in /home/dev/proj ─────────────────────────────────────────────┐|
-|│ Day        Calls     Input   Output     Cache Tokens                Cost     │|
-|│▌2026-07-03     2      2500      250         0   2.8K $0.0220 + 1 unknown     │|
-|│ 2026-07-01     1      1000      100         0   1.1K             $0.0110     │|
-|│ total          3      3500      350         0   3.9K $0.0330 + 1 unknown     │|
+|│ Day        Calls     Input   Output     Cache Tokens                  Cost   │|
+|│▌2026-07-03     2      2500      250         0   2.8K   $0.0220 + 1 unknown   │|
+|│ 2026-07-01     1      1000      100         0   1.1K               $0.0110   │|
+|│ total          3      3500      350         0   3.9K   $0.0330 + 1 unknown   │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|

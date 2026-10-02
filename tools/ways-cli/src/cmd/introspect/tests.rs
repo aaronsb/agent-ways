@@ -21,7 +21,8 @@ use ways_core::introspection::{CriteriaMap, FiredWay, IntrospectionSummary, Join
 use super::frames::{build_frames, has_verdicts};
 use super::model::WayEvent;
 use super::report::Spend;
-use super::screen::{reselect_by_anchor, session_spend, Introspect, Picker, Replay};
+use super::picker::Picker;
+use super::screen::{reselect_by_anchor, session_spend, Introspect, Replay};
 use super::sessions::{gather_sessions, SessionInfo};
 use super::why::build_why_index;
 
@@ -579,9 +580,59 @@ fn digits_pick_the_tabs_and_esc_goes_back_to_the_picker() {
     assert!(text(&render(&mut s, 80, 25)).contains("Judge spend by day"), "a digit past the tabs does nothing");
     press(&mut s, &[KeyCode::Esc]);
     assert!(text(&render(&mut s, 80, 25)).contains("3 sessions in"), "back on the picker");
-    // Back on the timeline, the session is where it was left.
+    // Back on the timeline, the session is where it was left: by digit, and
+    // by Enter on the session already open, which does not read it again.
+    press(&mut s, &[KeyCode::Char('2'), KeyCode::Right, KeyCode::Right, KeyCode::Down]);
+    let left = text(&render(&mut s, 120, 40));
+    assert!(left.contains("3/4"), "{left}");
+    press(&mut s, &[KeyCode::Esc, KeyCode::Char('2')]);
+    assert_eq!(text(&render(&mut s, 120, 40)), left);
+    press(&mut s, &[KeyCode::Esc, KeyCode::Enter]);
+    assert_eq!(text(&render(&mut s, 120, 40)), left);
+}
+
+/// Esc on the fires and spend tabs is named only where it leads back to a
+/// sessions tab.
+#[test]
+fn the_key_bar_names_esc_only_with_a_sessions_tab() {
+    let mut p = picker(terminal());
+    press(&mut p, &[KeyCode::Enter, KeyCode::Char('3')]);
+    assert!(text(&render(&mut p, 80, 25)).contains("esc sessions"));
+    press(&mut p, &[KeyCode::Char('4')]);
+    assert!(text(&render(&mut p, 80, 25)).contains("esc sessions"));
+    let mut d = showing(replay(false), terminal(), Shape::PLAIN);
+    press(&mut d, &[KeyCode::Char('2')]);
+    assert!(!text(&render(&mut d, 80, 25)).contains("esc"));
+    press(&mut d, &[KeyCode::Char('3')]);
+    assert!(!text(&render(&mut d, 80, 25)).contains("esc"));
+}
+
+/// A replay plays only while its timeline is shown; a live one keeps
+/// reading the log on every tab.
+#[test]
+fn playback_pauses_off_the_timeline_but_live_keeps_reading() {
+    let mut s = showing(replay(false), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char(' ')]);
+    assert!(s.tick_every().is_some(), "playing on the timeline");
     press(&mut s, &[KeyCode::Char('2')]);
-    assert!(text(&render(&mut s, 80, 25)).contains(&format!("Session {SESSION}")));
+    assert!(s.tick_every().is_none(), "no play on the fires tab");
+    let mut l = showing(replay(true), terminal(), Shape::PLAIN);
+    press(&mut l, &[KeyCode::Char('3')]);
+    assert!(l.tick_every().is_some(), "live reads on the spend tab");
+}
+
+/// The fires read again keep the selection on its fire, though a new
+/// lower-scoring one sorts in above it.
+#[test]
+fn a_fires_refresh_keeps_the_selection_on_its_fire() {
+    let fire = |score: f64, way: &str| super::SemanticFire { score, way: way.into(), surface: "—".into(), redisclosed: false };
+    let mut r = replay(false);
+    r.fires.set(vec![fire(0.4, "a"), fire(0.5, "b")]);
+    let mut s = showing(r, terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('2'), KeyCode::Down]);
+    assert!(selected(&mut s).contains("0.500"));
+    s.replay.as_mut().unwrap().fires.set(vec![fire(0.3, "c"), fire(0.4, "a"), fire(0.5, "b")]);
+    assert!(selected(&mut s).contains("0.500   b"), "{}", selected(&mut s));
 }
 
 /// Opened on one session there is no sessions tab: the digits start at the
@@ -609,7 +660,7 @@ fn the_fires_tab_lists_the_sessions_semantic_fires() {
     .map(|v| v.to_string())
     .join("\n");
     let mut r = replay(false);
-    r.fires = super::semantic_fires(&log, SESSION);
+    r.fires.set(super::semantic_fires(&log, SESSION));
     let mut s = showing(r, terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('2')]);
     let t = text(&render(&mut s, 80, 25));
@@ -634,6 +685,11 @@ fn the_spend_tab_groups_the_scopes_judge_calls_by_day_or_month() {
     let jul1 = t.find("2026-07-01").expect("older day");
     assert!(jul3 < jul1, "newest first: {t}");
     assert!(t.contains("$0.0220 + 1 unknown") && t.contains("$0.0330 + 1 unknown") && t.matches("2026-06-30").count() == 1, "another project's day is left out: {t}");
+    // A scope written with a trailing slash matches as the sessions do.
+    let slashed = Spend::new(spend_calls(), Some("/home/dev/proj/"), PROJECT.into());
+    let mut d = Introspect::showing(replay(false), slashed, terminal(), Shape::PLAIN);
+    press(&mut d, &[KeyCode::Char('3')]);
+    assert!(text(&render(&mut d, 120, 40)).contains("3 judge calls"));
     press(&mut s, &[KeyCode::Char('m')]);
     let t = text(&render(&mut s, 120, 40));
     assert!(t.contains("Judge spend by month") && t.contains("2026-07 ") && !t.contains("2026-07-01"), "{t}");
@@ -643,14 +699,36 @@ fn the_spend_tab_groups_the_scopes_judge_calls_by_day_or_month() {
 fn tab_golden_frames() {
     let mut g = goldens();
     let mut f = showing(judged_replay(), terminal(), Shape::PLAIN);
-    f.replay.as_mut().unwrap().fires = vec![
+    f.replay.as_mut().unwrap().fires.set(vec![
         super::SemanticFire { score: 0.405, way: "softwaredev/docs/adr".into(), surface: "record the decision".into(), redisclosed: true },
         super::SemanticFire { score: 0.612, way: "softwaredev/code/testing".into(), surface: "add a unit test for the parser".into(), redisclosed: false },
-    ];
+    ]);
     press(&mut f, &[KeyCode::Char('2'), KeyCode::Down]);
     check(&mut g, "fires", &mut f);
     let mut s = Introspect::showing(replay(false), Spend::new(spend_calls(), Some(PROJECT), PROJECT.into()), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('3')]);
     check(&mut g, "spend", &mut s);
     g.finish();
+}
+
+/// A two-digit cost with a two-digit unknown count fits the cost column
+/// at 80 columns.
+#[test]
+fn a_heavy_spend_row_fits_at_80_columns() {
+    let call = |cost: Option<f64>| ways_agent_core::spend::Call {
+        ts: "2026-07-03T16:52:00Z".into(),
+        session: SESSION.into(),
+        project: PROJECT.into(),
+        cost_usd: cost,
+        input_tokens: 1,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+    };
+    let mut calls = vec![call(Some(12.3456))];
+    calls.extend((0..12).map(|_| call(None)));
+    let mut s = Introspect::showing(replay(false), Spend::new(calls, None, "every project".into()), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('3')]);
+    let t = text(&render(&mut s, 80, 25));
+    assert!(t.contains("$12.3456 + 12 unknown"), "{t}");
 }

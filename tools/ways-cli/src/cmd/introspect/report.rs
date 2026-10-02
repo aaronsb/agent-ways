@@ -21,6 +21,8 @@ pub(crate) struct Spend {
     /// Where the scope's history begins: the earliest call the event log
     /// still holds, before compaction dropped older ones.
     covers_since: Option<String>,
+    /// The project the calls are kept for; `None` keeps every project's.
+    project: Option<String>,
     /// The scope the calls were taken from, as the sessions tab names it.
     scope: String,
     pub(crate) by: By,
@@ -33,9 +35,22 @@ impl Spend {
     /// `covers_since` is taken from all of `calls`, before the project
     /// filter: the log's start bounds every scope alike.
     pub(crate) fn new(calls: Vec<Call>, project: Option<&str>, scope: String) -> Spend {
-        let covers_since = spend::covers_since(&calls);
-        let calls = calls.into_iter().filter(|c| project.is_none_or(|p| c.project == p)).collect();
-        Spend { calls, covers_since, scope, by: By::Day, sel: 0, table: TableState::default() }
+        let mut s = Spend { calls: Vec::new(), covers_since: None, project: project.map(str::to_string), scope, by: By::Day, sel: 0, table: TableState::default() };
+        s.take(calls);
+        s
+    }
+
+    /// Keep the calls of the scope's project, matched as the sessions tab
+    /// matches a session's.
+    fn take(&mut self, calls: Vec<Call>) {
+        self.covers_since = spend::covers_since(&calls);
+        let project = self.project.as_deref();
+        self.calls = calls.into_iter().filter(|c| project.is_none_or(|p| super::scope::project_matches(&c.project, p))).collect();
+    }
+
+    /// Read the event log again, as a live screen does when it changed.
+    pub(crate) fn reload(&mut self) {
+        self.take(spend::load());
     }
 
     fn groups(&self) -> Vec<Group> {
@@ -109,7 +124,7 @@ impl Spend {
             Constraint::Length(8),
             Constraint::Length(9),
             Constraint::Length(6),
-            Constraint::Length(19),
+            Constraint::Length(21),
             // The slack, so the cost stays beside the tokens.
             Constraint::Fill(1),
         ];
