@@ -284,13 +284,14 @@ judge_setup() {
     local keys="${XDG_CONFIG_HOME:-$HOME/.config}/agent-ways/keys"
     if [[ ! -e "$keys/anthropic" && ! -e "$keys/openrouter" ]]; then
       echo -e "  ${YELLOW}Ways is degraded: the relevance judge is off, so every matched way is injected.${RESET}"
-      echo -e "  Fix: ${CYAN}ways agent key add --provider anthropic|openrouter${RESET}"
+      echo -e "  Fix: ${CYAN}ways agent key add --provider anthropic${RESET} (or openrouter)"
       echo ""
     fi
     return 0
   fi
   if { : </dev/tty >/dev/tty; } 2>/dev/null; then
-    "$ways" judge-setup </dev/tty >/dev/tty || true
+    # Ctrl-C at the prompt skips the offer; it never fails the install.
+    ( trap 'exit 0' INT; "$ways" judge-setup </dev/tty >/dev/tty ) || true
   else
     "$ways" judge-setup || true
   fi

@@ -201,8 +201,17 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         println!("available and no build toolchain?). Your install still runs the previous binary —");
         println!("retry `ways update`, or `make update-binaries` with a toolchain, then restart Claude Code.");
     }
+    judge_setup();
+    Ok(())
+}
+
+/// The relevance judge's check and offer, after an update that succeeded. Its
+/// failure is reported and never fails the update.
+fn judge_setup() {
     println!();
-    super::judge::setup()
+    if let Err(e) = super::judge::setup() {
+        eprintln!("ways: judge setup: {e:#}");
+    }
 }
 
 /// Current HEAD sha of the app checkout, or None if git can't answer.
@@ -439,8 +448,8 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
     println!("\nUpgraded to {git_ref} (built from source; the checkout is on a detached HEAD).");
     println!("Return to the release channel with:  ways update --ref main");
     println!("Restart Claude Code to pick up the new version.");
-    println!();
-    super::judge::setup()
+    judge_setup();
+    Ok(())
 }
 
 /// Refresh one component binary safely: rename the existing binary aside (so the

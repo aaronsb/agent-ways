@@ -227,3 +227,7 @@ This amends ADR-503's Decision at §14: the groups are the ones above, and old n
 ## Note (2026-10-02): the agent.yaml write path is gone
 
 Decision item 4 said the change rewrites the header `ways-agent-core` writes to a new `agent.yaml`. The implementation removed that header and the `UserLayer` write path instead, since `ways agent use` and `mode` were its only callers. `ways settings set gate.…` now writes `agent.yaml` through the settings writer, and a new file has no header. An existing file keeps its old comment, as the Negative consequences say.
+
+## Note (2026-10-02): the top-level help may end with a judge footer
+
+Issue #751 adds a footer to the help that item 7 governs. The top-level help (a bare `ways`, `ways --help`, `ways help`) may end with a footer of at most two lines, each within 80 columns, saying the relevance judge cannot gate and how to fix it. It prints only when the judge cannot gate, read from stored state with no network call. Per-command help and hooks never print it.

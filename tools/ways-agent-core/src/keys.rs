@@ -45,8 +45,19 @@ fn locate_in(provider: Provider, dir: &Path) -> Option<Source> {
     if std::env::var(provider.key_env()).is_ok_and(|v| !v.trim().is_empty()) {
         return Some(Source::Env(provider.key_env()));
     }
+    locate_file_in(provider, dir).map(Source::File)
+}
+
+/// The provider's key file, ignoring the environment. The hook gate and the
+/// agent a hook starts read only this file (ADR-502 §6): that agent takes no
+/// key variable, so a key only in the environment never reaches it.
+pub fn locate_file(provider: Provider) -> Option<PathBuf> {
+    locate_file_in(provider, &keys_dir())
+}
+
+fn locate_file_in(provider: Provider, dir: &Path) -> Option<PathBuf> {
     let path = dir.join(provider.as_str());
-    path.is_file().then_some(Source::File(path))
+    path.is_file().then_some(path)
 }
 
 /// Reads the key. Only the agent and `key check` call this.
@@ -311,18 +322,20 @@ pub fn clear_check(provider: Provider) {
 }
 
 /// Whether the relevance judge can gate, from stored state alone: the user
-/// layer, where the key is, and its last recorded check. No network.
+/// layer, the key file, and its last recorded check. No network, and no key
+/// variable, since the agent hooks start never sees one.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Readiness {
-    /// The engine's key passed its last check.
-    Ready(Provider),
+    /// The engine's key file passed its last check; the gate runs in this mode
+    /// (enforce or shadow).
+    Ready(Provider, crate::profile::Mode),
     /// The operator set `gate.mode: off`.
     Off,
-    /// No key: for the named engine's provider, or for any provider when no
-    /// engine is named.
+    /// No key file: for the named engine's provider, or for any provider when
+    /// no engine is named.
     NoKey(Option<Provider>),
-    /// The engine's key has no check that describes it, or its last check
-    /// found this result.
+    /// The engine's key file has no check that describes it, or its last
+    /// check found this result.
     Unverified(Provider, Option<String>),
     /// agent.yaml fails closed or names no usable engine.
     Config(String),
@@ -331,7 +344,7 @@ pub enum Readiness {
 impl Readiness {
     /// True when the judge gates or the operator turned it off: nothing to fix.
     pub fn settled(&self) -> bool {
-        matches!(self, Readiness::Ready(_) | Readiness::Off)
+        matches!(self, Readiness::Ready(..) | Readiness::Off)
     }
 }
 
@@ -352,17 +365,18 @@ fn judge_ready_in(layer: &Path, keys: &Path, checks: &Path) -> Readiness {
     if user.mode == Some(Mode::Off) {
         return Readiness::Off;
     }
-    let settings = match resolve(&user, |p| locate_in(p, keys).is_some()) {
+    let settings = match resolve(&user, |p| locate_file_in(p, keys).is_some()) {
         Ok(Some(s)) => s,
         Ok(None) => return Readiness::NoKey(None),
         Err(e) => return Readiness::Config(format!("{e:#}")),
     };
     let provider = settings.profile.provider;
-    let Some(source) = locate_in(provider, keys) else { return Readiness::NoKey(Some(provider)) };
+    let Some(path) = locate_file_in(provider, keys) else { return Readiness::NoKey(Some(provider)) };
     // A verdict on the key stands until the key or model changes (the agent's
-    // `verified`), so a valid record that still describes the key is enough.
+    // `verified`), so a valid record that still describes the file is enough.
+    let source = Source::File(path);
     match last_check_in(checks, provider).filter(|r| r.describes(&source, &settings.profile.model)) {
-        Some(r) if r.result == "valid" => Readiness::Ready(provider),
+        Some(r) if r.result == "valid" => Readiness::Ready(provider, settings.mode),
         r => Readiness::Unverified(provider, r.map(|r| r.result)),
     }
 }
@@ -464,16 +478,24 @@ mod tests {
     }
 
     #[test]
-    fn judge_ready_reads_the_layer_the_key_and_its_check() {
-        // A key in the environment overrides the files this test writes.
-        if Provider::ALL.into_iter().any(|p| locate_env(p).is_some()) {
-            return;
-        }
+    fn judge_ready_reads_the_layer_the_key_file_and_its_check() {
+        use crate::profile::Mode;
         let base = scratch("ready");
         let (layer, keys, checks) = (base.join("agent.yaml"), base.join("keys"), base.join("state"));
         let ready = || judge_ready_in(&layer, &keys, &checks);
         assert_eq!(ready(), Readiness::NoKey(None));
         assert!(!ready().settled());
+
+        // A key only in the environment never reaches the agent a hook starts.
+        // No other test reads this variable's value.
+        let saved = std::env::var_os(Provider::Anthropic.key_env());
+        std::env::set_var(Provider::Anthropic.key_env(), "sk-ant-from-the-environment-only");
+        let with_env = ready();
+        match saved {
+            Some(v) => std::env::set_var(Provider::Anthropic.key_env(), v),
+            None => std::env::remove_var(Provider::Anthropic.key_env()),
+        }
+        assert_eq!(with_env, Readiness::NoKey(None));
 
         let source = Source::File(store_in(&keys, Provider::Openrouter, "sk-or-v1-abcdefghijklmnop").unwrap());
         assert_eq!(ready(), Readiness::Unverified(Provider::Openrouter, None));
@@ -489,8 +511,10 @@ mod tests {
         record("valid", "anthropic/another-model");
         assert_eq!(ready(), Readiness::Unverified(Provider::Openrouter, None), "a check of another model is stale");
         record("valid", model);
-        assert_eq!(ready(), Readiness::Ready(Provider::Openrouter));
+        assert_eq!(ready(), Readiness::Ready(Provider::Openrouter, Mode::Enforce));
         assert!(ready().settled());
+        std::fs::write(&layer, "mode: shadow\n").unwrap();
+        assert_eq!(ready(), Readiness::Ready(Provider::Openrouter, Mode::Shadow));
 
         std::fs::write(&layer, "engine: anthropic\n").unwrap();
         assert_eq!(ready(), Readiness::NoKey(Some(Provider::Anthropic)));
