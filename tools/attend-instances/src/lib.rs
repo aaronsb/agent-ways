@@ -123,8 +123,9 @@ impl Registry {
     /// The registry files attend wrote for `cwd` under its old naming
     /// rules, with their lock files.
     fn legacy_paths_for(&self, cwd: &str) -> Vec<(PathBuf, PathBuf)> {
-        claude_sessions::legacy_attend_names(cwd)
+        claude_sessions::legacy_registry_name(cwd)
             .into_iter()
+            .filter(|n| *n != claude_sessions::attend_key(cwd))
             .map(|n| (self.base_dir.join(format!("{n}.yaml")), self.base_dir.join(format!("{n}.yaml.lock"))))
             .collect()
     }
@@ -194,6 +195,7 @@ impl Registry {
     /// only — no allocation, no GC, no write. Returns `None` when
     /// the registry file is absent or the session has no entry.
     pub fn lookup(&self, cwd: &str, session_id: &str) -> Option<String> {
+        // transition read: removed by #701 (ADR-506)
         let path = self.read_path_for(cwd);
         let content = fs::read_to_string(&path).ok()?;
         let map = parse_registry(&content);
@@ -391,6 +393,7 @@ impl Registry {
     /// legend), not for hot per-render lookups (`lookup` is cheaper
     /// since it short-circuits as soon as it finds the row).
     pub fn snapshot(&self, cwd: &str) -> BTreeMap<String, InstanceEntry> {
+        // transition read: removed by #701 (ADR-506)
         let path = self.read_path_for(cwd);
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
@@ -860,6 +863,28 @@ sess-a:
             // A new session cannot be handed a migrated peer's name.
             assert_eq!(reg.register("/srv/a b", "sess-c").unwrap(), "alpha");
             assert_eq!(reg.register("/srv/a b", "sess-d").unwrap(), "delta");
+        });
+    }
+
+    #[test]
+    fn a_colon_path_does_not_take_a_siblings_registry() {
+        // `-x-a-b.yaml` is `/x/a/b`'s registry. Under the wider tray rule
+        // `/x/a:b` also reads as `-x-a-b`, but attend-instances never wrote
+        // that form, so registering in `/x/a:b` must leave it alone.
+        with_registry(|reg| {
+            fs::create_dir_all(&reg.base_dir).unwrap();
+            let sibling = reg.base_dir.join("-x-a-b.yaml");
+            write_registry(
+                &sibling,
+                &BTreeMap::from([(
+                    "sess-ab".to_string(),
+                    InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: now_secs() },
+                )]),
+            )
+            .unwrap();
+            reg.register("/x/a:b", "sess-colon").unwrap();
+            assert!(!reg.snapshot("/x/a:b").contains_key("sess-ab"));
+            assert_eq!(reg.register("/x/a/b", "sess-ab").unwrap(), "beta");
         });
     }
 

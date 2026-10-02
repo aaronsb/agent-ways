@@ -155,7 +155,7 @@ fn verify_move(
 }
 
 /// POSIX shell quoting, as Python's `shlex.quote`.
-fn shell_quote(s: &str) -> String {
+pub(super) fn shell_quote(s: &str) -> String {
     let safe = |c: char| c.is_ascii_alphanumeric() || "@%+=:,./-_".contains(c);
     if !s.is_empty() && s.chars().all(safe) {
         s.to_string()
@@ -268,9 +268,12 @@ fn plan(env: &Env, args: &RelocateArgs, out: &mut dyn Write) -> Result<Option<Pl
 
     let projects = env.projects();
     let dir_name = |d: &Path| d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    // A long path's directory is found by its slug prefix only when verified
-    // to be that path's; a sibling sharing the prefix is never taken.
-    for path in [&old, &new] {
+    // OLD's directory is found by its slug prefix only when verified to be
+    // OLD's; a sibling sharing the prefix is never taken. NEW normally has no
+    // history yet, so an unverified sibling there is no ambiguity: NEW gets
+    // the exact name Claude Code tries first.
+    {
+        let path = &old;
         let candidates = claude_sessions::prefix_candidates_in(&projects, path);
         if claude_sessions::find_project_dir_in(&projects, path).is_none() && !candidates.is_empty() {
             writeln!(

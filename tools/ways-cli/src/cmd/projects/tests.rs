@@ -265,7 +265,8 @@ fn hygiene_never_flags_a_transcript_newer_than_a_stale_index() {
 
 #[test]
 fn hygiene_moves_empty_session_dirs_to_the_trash() {
-    let f = populated("hygiene");
+    let mut f = populated("hygiene");
+    f.env.now = super::epoch_now() + 3_600;
     std::fs::create_dir_all(f.projects().join("-srv-app-one/s1")).unwrap();
     let (_, out) = f.run(ProjectsCommand::Hygiene { dry_run: true });
     assert!(out.contains("Empty session dirs: 2"), "{out}");
@@ -277,6 +278,44 @@ fn hygiene_moves_empty_session_dirs_to_the_trash() {
     assert!(!f.projects().join("-srv-app-one/s1").exists());
     let trash = trash_dirs(&f);
     assert!(trash[0].join("-srv-app-one/s1").is_dir(), "{out}");
+
+    // The printed restore commands put each dir back into its project dir.
+    #[cfg(unix)]
+    {
+        let cmds: Vec<&str> = out.lines().filter(|l| l.trim_start().starts_with("mv ")).collect();
+        assert_eq!(cmds.len(), 2, "{out}");
+        for cmd in cmds {
+            let ok = std::process::Command::new("sh").arg("-c").arg(cmd.trim()).status().unwrap().success();
+            assert!(ok, "{cmd}");
+        }
+        assert!(f.projects().join("-srv-app-one/s1").is_dir());
+    }
+}
+
+#[test]
+fn hygiene_leaves_a_session_dir_made_moments_ago() {
+    let mut f = populated("hygiene-recent");
+    f.env.now = super::epoch_now();
+    std::fs::create_dir_all(f.projects().join("-srv-app-one/tool-results")).unwrap();
+    let (_, out) = f.run_answering(ProjectsCommand::Hygiene { dry_run: false }, true);
+    assert!(f.projects().join("-srv-app-one/tool-results").is_dir(), "{out}");
+}
+
+#[test]
+fn relocate_to_a_long_new_path_beside_a_sibling_with_history() {
+    // NEW has no history yet; a sibling sharing its 200-character prefix
+    // is not ambiguity, and the move goes to NEW's own slug.
+    let f = populated("reloc-long-new");
+    let base = f.base.join(format!("work/{}", "w".repeat(220))).to_string_lossy().into_owned();
+    let (wt1, wt2) = (format!("{base}/wt1"), format!("{base}/wt2"));
+    let name1 = claude_sessions::project_slug(&wt1);
+    f.write(&format!(".claude/projects/{name1}/s.jsonl"), &format!("{{\"cwd\":\"{wt1}\"}}\n"));
+    let mut args = relocate_args("/srv/app_one", &wt2);
+    args.execute = true;
+    let (ok, out) = f.run(ProjectsCommand::Relocate(args));
+    assert!(ok, "{out}");
+    assert!(f.projects().join(claude_sessions::project_slug(&wt2)).join("s1.jsonl").exists(), "{out}");
+    assert!(f.projects().join(&name1).join("s.jsonl").exists());
 }
 
 #[test]

@@ -510,10 +510,14 @@ impl PeerSensor {
 }
 
 /// The last complete lines of `path` that hold an assistant turn with
-/// usage: a 64 KB tail, doubled until it holds one or reaches the start of
-/// the file. A long final assistant line (tool output, long answers run
+/// usage: a 64 KB tail, doubled until it holds one, reaches the start of
+/// the file, or reaches [`MAX_TAIL`] (a transcript with no usage line, such
+/// as a session with only user turns so far, is not re-read whole each
+/// poll). A long final assistant line (tool output, long answers run
 /// past 49 KB) is read whole rather than cut, which `serde_json` cannot
 /// parse.
+const MAX_TAIL: u64 = 4 * 1024 * 1024;
+
 fn usage_tail(path: &std::path::Path) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = fs::File::open(path).ok()?;
@@ -534,7 +538,7 @@ fn usage_tail(path: &std::path::Path) -> Option<String> {
             }
         };
         let text = String::from_utf8_lossy(body).into_owned();
-        if start == 0 || claude_sessions::usage::last_context_tokens(&text).is_some() {
+        if start == 0 || size >= MAX_TAIL || claude_sessions::usage::last_context_tokens(&text).is_some() {
             return Some(text);
         }
         size = size.saturating_mul(2);

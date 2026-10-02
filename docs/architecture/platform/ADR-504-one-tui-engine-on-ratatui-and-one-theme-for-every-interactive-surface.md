@@ -184,6 +184,7 @@ A dry-run spike (`tools/spikes/settings-tui` on `spike/settings-tui`) built the 
    - *Rust.* New tooling on these paths is Rust: the crates above, the `ways projects` port, the SGR check and the test kit's PNG renderer (§12). Once the port lands no Python remains on them, and no shim keeps the `claude-projects` name. Existing non-Rust tools on these paths are follow-ups outside this decision: the bash hook adapters in `hooks/ways/`, whose remaining logic moves into the binaries under §11.
    - *Note, 2026-10-02 (PR #714 review).* Attend's signal trays and instance registries are not named by the bare encoder. `claude-sessions::attend_key` names them: the project slug, `-`, then base 36 of Claude Code's 32-bit path hash over the full path.
      - **Why.** The slug is lossy. `/srv/my proj` and `/srv/my-proj` share one, and so do two all-CJK names of one length. A shared tray delivers a directed message to the wrong project's sessions.
+     - **Limit.** The hash is Java's `hashCode` form, which keeps accidental collisions unlikely but not deliberate ones: anyone who can create directories as the user can build two paths with one key. That is the same user, so it is not a privacy boundary.
      - **Liveness.** Cleanup reads the slug part, before the last `-`, against `projects/`.
      - **Transition.** Trays and registries under attend's old names are moved into the new names once, at `attend run` start and in `attend cleanup`, and are read until #701 removes that code (ADR-506).
 

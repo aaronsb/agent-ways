@@ -51,8 +51,14 @@ fn tray_live(projects: &Path, tray: &str) -> bool {
     }
     // transition read: removed by #701 (ADR-506)
     // A tray named under attend's old rule for a path of letters, digits,
-    // `/`, `_` and `.` has the project directory's own name.
-    projects.join(tray).is_dir()
+    // `/`, `_` and `.` has the project directory's own name, or, over 200
+    // characters, shares its first 200 and the `-` Claude Code puts next.
+    if projects.join(tray).is_dir() {
+        return true;
+    }
+    let slug = claude_sessions::project_slug(tray);
+    slug.len() > claude_sessions::MAX_SLUG_LEN
+        && !claude_sessions::prefix_candidates_in(projects, tray).is_empty()
 }
 
 /// Move pending signals out of trays named under attend's old rule into
@@ -63,7 +69,8 @@ fn tray_live(projects: &Path, tray: &str) -> bool {
 /// The project of an old tray is found among `known_paths` (this session's
 /// origin and the session records' cwds) and the paths the project
 /// directories record; an old tray matches a path when it is one of that
-/// path's [`claude_sessions::legacy_attend_names`]. Signal filenames are
+/// path's [`claude_sessions::legacy_tray_names`]; a tray two paths claim
+/// is left in place. Signal filenames are
 /// unique ids, so a move never overwrites; one already present is left in
 /// place. Returns the number of signals moved.
 // transition read: removed by #701 (ADR-506)
@@ -77,21 +84,31 @@ pub(crate) fn migrate_legacy_trays(base: &Path, projects: &Path, known_paths: &[
         .collect();
     let mut moved = 0;
     for tray in &trays {
-        // Every old-rule name encodes to the project directory's name.
+        // An old-rule name encodes to the project directory's name; over
+        // 200 characters, to its prefix (the hash differs: it is taken over
+        // the tray name, not the path).
         let dir_name = claude_sessions::project_slug(tray);
-        let resolved = projects
-            .join(&dir_name)
-            .is_dir()
-            .then(|| claude_sessions::resolve_project_path(projects, &dir_name))
-            .flatten();
-        let Some(path) = known_paths
+        let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+        if projects.join(&dir_name).is_dir() {
+            dirs.push(projects.join(&dir_name));
+        }
+        dirs.extend(claude_sessions::prefix_candidates_in(projects, tray));
+        let resolved: Vec<String> = dirs
+            .iter()
+            .filter_map(|d| d.file_name()?.to_str().map(str::to_string))
+            .filter_map(|n| claude_sessions::resolve_project_path(projects, &n))
+            .collect();
+        let mut claims: Vec<&str> = known_paths
             .iter()
             .map(String::as_str)
-            .chain(resolved.as_deref())
-            .find(|p| claude_sessions::legacy_attend_names(p).iter().any(|n| n == tray))
-        else {
-            continue;
-        };
+            .chain(resolved.iter().map(String::as_str))
+            .filter(|p| claude_sessions::legacy_tray_names(p).iter().any(|n| n == tray))
+            .collect();
+        claims.sort_unstable();
+        claims.dedup();
+        // An old tray two projects' names both map to was shared; moving it
+        // to one of them would hide its mail from the other. Leave it.
+        let [path] = claims[..] else { continue };
         let target = base.join(claude_sessions::attend_key(path));
         let old = base.join(tray);
         let Ok(files) = std::fs::read_dir(&old) else { continue };
@@ -320,6 +337,49 @@ mod tests {
         let key = claude_sessions::attend_key(project);
         assert!(base.join(&key).join("m1.signal").exists(), "the signal moved into the key tray");
         assert!(!base.join("-srv-my proj").exists(), "the emptied old tray is removed");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_long_live_projects_old_tray_is_moved_not_reaped() {
+        // A 250-character path: Claude Code's dir is the 200-char prefix
+        // and a hash, so the old tray's name matches it only by prefix. No
+        // session names the path; only its transcript does.
+        let (root, base, projects) = fixture("long");
+        let project = format!("/srv/{}", "a".repeat(250));
+        let dir = projects.join(claude_sessions::project_slug(&project));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("s1.jsonl"), format!("{{\"cwd\":\"{project}\"}}\n")).unwrap();
+        let old = claude_sessions::legacy_tray_names(&project).remove(0);
+        signal(&base.join(&old), "m1.signal");
+
+        let stats = run_cleanup_in(&base, &projects, &[], false, false);
+        assert_eq!(stats.removed, 0);
+        let key = base.join(claude_sessions::attend_key(&project));
+        assert!(key.join("m1.signal").exists(), "moved into the key tray");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_long_old_tray_is_live_by_prefix() {
+        let (root, _base, projects) = fixture("long-live");
+        let project = format!("/srv/{}", "b".repeat(250));
+        std::fs::create_dir_all(projects.join(claude_sessions::project_slug(&project))).unwrap();
+        let old = claude_sessions::legacy_tray_names(&project).remove(0);
+        assert!(tray_live(&projects, &old));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_tray_two_paths_claim_is_left_in_place() {
+        // `/x/a:b` (under the wider old rule) and `/x/a/b` both named their
+        // tray `-x-a-b`. Moving it to either would hide mail from the other.
+        let (root, base, projects) = fixture("shared");
+        std::fs::create_dir_all(projects.join("-x-a-b")).unwrap();
+        signal(&base.join("-x-a-b"), "m3.signal");
+        let known = ["/x/a:b".to_string(), "/x/a/b".to_string()];
+        run_cleanup_in(&base, &projects, &known, false, false);
+        assert!(base.join("-x-a-b").join("m3.signal").exists());
         std::fs::remove_dir_all(&root).ok();
     }
 

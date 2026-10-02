@@ -32,23 +32,26 @@ pub fn attend_key_slug(name: &str) -> Option<&str> {
 }
 
 // transition read: removed by #701 (ADR-506)
-/// The names attend gave a project's tray and registry before
-/// [`attend_key`]: `attend`, `sensor-peers` and the old cleanup mapped
-/// `/ _ . \ :` to `-`; `attend-chat`, `attend-instances` and
-/// `attend-groups` mapped only `/ _ .`. Every other character was kept.
-/// Both forms, without duplicates, and none equal to the current key.
-pub fn legacy_attend_names(path: &str) -> Vec<String> {
+/// `path` with `/ _ .` and the `extra` characters mapped to `-` and every
+/// other character kept: attend's naming before [`attend_key`].
+fn old_rule(path: &str, extra: &[char]) -> String {
+    path.chars()
+        .map(|c| if matches!(c, '/' | '_' | '.') || extra.contains(&c) { '-' } else { c })
+        .collect()
+}
+
+// transition read: removed by #701 (ADR-506)
+/// The names a project's signal tray had before [`attend_key`]. Trays were
+/// written under two rules: `attend` and `sensor-peers` mapped
+/// `/ _ . \ :` to `-`; `attend-chat` mapped only `/ _ .`. Both forms,
+/// without duplicates, none equal to the current key.
+pub fn legacy_tray_names(path: &str) -> Vec<String> {
     if path.is_empty() {
         return Vec::new();
     }
-    let map = |extra: &[char]| -> String {
-        path.chars()
-            .map(|c| if matches!(c, '/' | '_' | '.') || extra.contains(&c) { '-' } else { c })
-            .collect()
-    };
     let current = attend_key(path);
     let mut out: Vec<String> = Vec::new();
-    for name in [map(&['\\', ':']), map(&[])] {
+    for name in [old_rule(path, &['\\', ':']), old_rule(path, &[])] {
         if name != current && !out.contains(&name) {
             out.push(name);
         }
@@ -56,8 +59,16 @@ pub fn legacy_attend_names(path: &str) -> Vec<String> {
     out
 }
 
+// transition read: removed by #701 (ADR-506)
+/// The name `attend-instances` gave a project's registry before
+/// [`attend_key`]: it mapped only `/ _ .`. The wider tray rule is not
+/// probed: under it `/x/a:b` reads as `-x-a-b`, the registry of `/x/a/b`.
+pub fn legacy_registry_name(path: &str) -> Option<String> {
+    (!path.is_empty()).then(|| old_rule(path, &[]))
+}
+
 /// The tray names to read for the project at `path`: [`attend_key`] first,
-/// then, during the transition, [`legacy_attend_names`]. Empty for an empty
+/// then, during the transition, [`legacy_tray_names`]. Empty for an empty
 /// path. Sends go to the first name only.
 pub fn attend_tray_names(path: &str) -> Vec<String> {
     if path.is_empty() {
@@ -65,7 +76,7 @@ pub fn attend_tray_names(path: &str) -> Vec<String> {
     }
     let mut names = vec![attend_key(path)];
     // transition read: removed by #701 (ADR-506)
-    names.extend(legacy_attend_names(path));
+    names.extend(legacy_tray_names(path));
     names
 }
 
@@ -100,12 +111,12 @@ mod tests {
 
     #[test]
     fn legacy_names_cover_both_old_rules() {
-        assert_eq!(legacy_attend_names("/home/a/.claude"), vec!["-home-a--claude".to_string()]);
-        assert_eq!(
-            legacy_attend_names("/x/a b:c"),
-            vec!["-x-a b-c".to_string(), "-x-a b:c".to_string()]
-        );
-        assert!(legacy_attend_names("").is_empty());
+        assert_eq!(legacy_tray_names("/home/a/.claude"), vec!["-home-a--claude".to_string()]);
+        assert_eq!(legacy_tray_names("/x/a b:c"), vec!["-x-a b-c".to_string(), "-x-a b:c".to_string()]);
+        assert!(legacy_tray_names("").is_empty());
+        // Registries were written under the narrow rule only.
+        assert_eq!(legacy_registry_name("/x/a:b").as_deref(), Some("-x-a:b"));
+        assert_eq!(legacy_registry_name(""), None);
     }
 
     #[test]

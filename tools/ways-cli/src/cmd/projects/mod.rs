@@ -722,6 +722,9 @@ fn hygiene(
             if path.is_dir()
                 && sub.file_name() != "memory"
                 && std::fs::read_dir(&path).map(|mut r| r.next().is_none()).unwrap_or(false)
+                // A live session creates its tool-results and subagents dirs
+                // empty; one made moments ago may be about to fill.
+                && !recently_modified(&path, env.now)
             {
                 let file = format!("{}/{}", p.dirname, sub.file_name().to_string_lossy());
                 empty_dirs.push(Issue { project: p.path.clone(), file, size: 0, path });
@@ -765,14 +768,22 @@ fn hygiene(
         && confirm(&format!("  Move {} empty session directories to the trash? [y/N] ", empty_dirs.len()))
     {
         let trash = fsio::trash_dir(&env.projects());
-        let mut moved = 0;
+        let mut restore: Vec<String> = Vec::new();
         for i in &empty_dirs {
             match fsio::move_to_trash(&i.path, &trash, Path::new(&i.file)) {
-                Ok(_) => moved += 1,
+                // Each goes back into its project dir, which still exists.
+                Ok(dest) => restore.push(format!(
+                    "    mv {} {}/",
+                    relocate::shell_quote(&dest.to_string_lossy()),
+                    relocate::shell_quote(&i.path.parent().unwrap_or(&i.path).to_string_lossy())
+                )),
                 Err(e) => writeln!(out, "  error {}: {e}", i.path.display())?,
             }
         }
-        writeln!(out, "  Moved {moved} directories to {}; move them back to restore.", trash.display())?;
+        writeln!(out, "  Moved {} directories to {}. To restore:", restore.len(), trash.display())?;
+        for line in &restore {
+            writeln!(out, "{line}")?;
+        }
     }
     writeln!(out)?;
     Ok(())
