@@ -52,6 +52,26 @@ pub(crate) fn own_origin_cwd() -> String {
     attend_presence::session::identity().origin_path
 }
 
+/// Move everything attend keeps under session id `old` to `new`, for a
+/// session whose id changed under the same Claude Code process (`/clear`):
+/// the seen-set and cold-start mark, the enrollment record, the registry
+/// slot with its instance name, channel memberships and the last-inbound
+/// record. The old heartbeat is cleared. Idempotent: a move already done,
+/// or done in part, completes.
+pub(crate) fn move_session(old: &str, new: &str, origin: &str) {
+    let old_store = attend_state::StateStore::new(Some(old.to_string()));
+    if let Some(snapshot) = old_store.load() {
+        attend_state::StateStore::new(Some(new.to_string())).checkpoint(&snapshot);
+        old_store.clear();
+    }
+    attend_presence::enrollment::carry(old, new).ok();
+    attend_instances::Registry::new().rename(origin, old, new).ok();
+    groups::Groups::new(&signals_base(), new).rename_member(old, new);
+    let state_dir = attend_presence::cache::state_dir();
+    std::fs::rename(state_dir.join(format!("{old}.last-inbound")), state_dir.join(format!("{new}.last-inbound"))).ok();
+    attend_presence::heartbeat::clear(old).ok();
+}
+
 /// Record that this session enrolled by joining a channel (#720). Only a
 /// resolved session enrolls: the drain never runs for any other.
 pub(crate) fn enroll_by_join() {

@@ -414,7 +414,14 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // no channel has chosen not to take part, so the drain delivers it
     // nothing and writes nothing, not even the heartbeat below.
     if !attend_presence::enrollment::is_enrolled(&session_id) {
-        return;
+        // `/clear` gives the process a new id. An enrollment recorded for
+        // this same Claude Code process under its previous id moves here,
+        // with its seen-set and channels, as `attend run` would move it.
+        let previous = ident
+            .claude_key()
+            .and_then(|key| attend_presence::enrollment::previous_id(&key, &session_id));
+        let Some(old) = previous else { return };
+        crate::util::move_session(&old, &session_id, &ident.origin_path);
     }
     let base = signals_base();
     let r = crate::groups::Groups::new(&base, &session_id);

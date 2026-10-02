@@ -143,12 +143,11 @@ fn lock_path(session_id: &str) -> PathBuf {
 /// attend's non-blocking attempt fails fast instead of silently
 /// double-running.
 ///
-/// Self-reload via `exec()` (Unix) keeps the same PID, but file
-/// descriptors are normally inherited (no `O_CLOEXEC`), and the
-/// kernel's flock state is keyed on the open-file-description. The
-/// new code path inherits the lock automatically — it does not have
-/// to re-acquire. Callers in the reload path should skip the lock
-/// attempt entirely (e.g., gated on `ATTEND_RELOADED_FROM`).
+/// Self-reload via `exec()` (Unix) keeps the same PID. Rust's standard
+/// library opens files with `O_CLOEXEC`, so the lock's descriptor closes
+/// at `exec()` and the kernel releases the lock; the re-executed process
+/// acquires it again. A reload that finds it held (`Ok(None)` under
+/// `ATTEND_RELOADED_FROM`) proceeds rather than exiting.
 ///
 /// On Windows self-reload spawns a new process rather than exec()ing,
 /// so the lock IS released before the child starts; the new process
@@ -199,14 +198,10 @@ pub fn try_acquire_session_lock(session_id: &str) -> io::Result<Option<SessionLo
 /// file, so asking does not make the session look alive.
 pub fn run_is_live(session_id: &str) -> bool {
     #[cfg(unix)]
-    let path = heartbeat_path(session_id);
-    #[cfg(windows)]
-    let path = lock_path(session_id);
-    let Ok(file) = fs::OpenOptions::new().write(true).open(&path) else {
-        return false;
-    };
-    #[cfg(unix)]
     {
+        let Ok(file) = fs::OpenOptions::new().write(true).open(heartbeat_path(session_id)) else {
+            return false;
+        };
         let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
         if ret == 0 {
             unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
@@ -216,9 +211,10 @@ pub fn run_is_live(session_id: &str) -> bool {
     }
     #[cfg(windows)]
     {
-        drop(file);
+        // The run holds `<id>.lock` with no sharing, so any other open of
+        // it fails with ERROR_SHARING_VIOLATION (32) while the run lives.
         matches!(
-            fs::OpenOptions::new().write(true).share_mode(0).open(&path),
+            fs::OpenOptions::new().write(true).open(lock_path(session_id)),
             Err(e) if e.raw_os_error() == Some(32)
         )
     }

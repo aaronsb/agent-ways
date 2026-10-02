@@ -45,6 +45,14 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     }
     emit::log(&format!("focus: {} ({})", focus.description, focus.working_dir));
 
+    // A run re-executed after `/clear` moves the old id's state to this
+    // one before anything below reads it.
+    let moved_from = if ident.resolved() {
+        rekey::complete_move(&ident.session_id, &ident.origin_path)
+    } else {
+        None
+    };
+
     // Load config: user scope → project scope overlay
     let cfg = config::Config::load(&focus.working_dir);
 
@@ -56,16 +64,10 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // the same session. The lock is released by the kernel on process
     // exit, so a panicking or killed attend does not need a janitor.
     //
-    // Self-reload exec() keeps file descriptors and their flocks open,
-    // so the post-exec process *should* already hold the lock through
-    // FD inheritance. Re-acquiring with a fresh FD on that path will
-    // therefore return EWOULDBLOCK — we treat that as success on the
-    // reload path (gated on `ATTEND_RELOADED_FROM`).
-    //
-    // We still attempt the acquire on the reload path so the
-    // bootstrap migration works: when an older binary that did not
-    // take a lock execs into a new binary that does, the new process
-    // has no inherited lock, and the attempt below cleanly grabs one.
+    // Rust opens files with O_CLOEXEC, so a self-reload or a hand-over
+    // after an id change releases the lock at exec() and the new process
+    // acquires it here. A reload that finds it held (`Ok(None)` under
+    // `ATTEND_RELOADED_FROM`) proceeds rather than exiting.
     //
     // The lock value lives on the stack until `cmd_run` returns; the
     // sensor loop never returns under normal operation, so the lock
@@ -200,7 +202,12 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         }
     }
 
-    print_startup_banner(&enabled_names, &focus_desc);
+    match &moved_from {
+        Some(old) => println!(
+            "[attend] session id changed ({old} → {session_id}): registry slot, enrollment and seen-set carried over"
+        ),
+        None => print_startup_banner(&enabled_names, &focus_desc),
+    }
 
     let mut governor = DisclosureGovernor::new(
         cfg.governor.base_cooldown,
@@ -263,6 +270,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // exists; what matters is that it can never *disagree* with the
     // id the registry and groups saw (PR #380 review, finding 1).
     let heartbeat_id = session_id.clone();
+    let mut failed_handover: Option<String> = None;
 
     loop {
         // `/clear` gives this session a new id under us. Checked every
@@ -270,7 +278,12 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         // id finds it enrolled before the next turn ends.
         if ident.resolved() {
             if let Some(new_id) = rekey::changed_id(&heartbeat_id) {
-                rekey::follow(&heartbeat_id, &new_id, &focus.working_dir, &slots, &state_store);
+                if failed_handover.as_deref() != Some(new_id.as_str()) {
+                    rekey::hand_over(&heartbeat_id, &new_id, &mut slots, &state_store);
+                    // Still here: the exec failed. Carry on under the old
+                    // id rather than retrying every tick.
+                    failed_handover = Some(new_id);
+                }
             }
         }
 
@@ -286,7 +299,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
                 self_exe.as_deref(),
                 &mut initial_mtime,
                 initial_hash,
-                &slots,
+                &mut slots,
                 &state_store,
             );
             last_reload_check = Instant::now();
@@ -343,11 +356,6 @@ fn print_startup_banner(enabled_names: &[String], focus_desc: &str) {
     // subprocesses attend itself spawns.
     let reloaded_from = std::env::var("ATTEND_RELOADED_FROM").ok();
     std::env::remove_var("ATTEND_RELOADED_FROM");
-    if let Ok(moved) = std::env::var(rekey::MOVED_FROM) {
-        std::env::remove_var(rekey::MOVED_FROM);
-        println!("[attend] session id changed ({moved}): registry slot, enrollment and seen-set carried over");
-        return;
-    }
     let stamp_path = signals_base().join("_last_banner");
     let prev_fingerprint = std::fs::read_to_string(&stamp_path).unwrap_or_default();
     if let Some(prev_version) = reloaded_from {

@@ -126,7 +126,7 @@ pub(super) fn maybe_self_reload(
     self_exe: Option<&Path>,
     baseline_mtime: &mut Option<SystemTime>,
     baseline_hash: Option<u64>,
-    slots: &[SensorSlot],
+    slots: &mut [SensorSlot],
     state_store: &state::StateStore,
 ) {
     let Some(exe) = self_exe else {
@@ -155,6 +155,7 @@ pub(super) fn maybe_self_reload(
         return;
     }
     emit::log("binary changed — checkpointing and reloading");
+    flush_message_lane(slots);
     let snapshot = collect_snapshot(slots);
     state_store.checkpoint(&snapshot);
 
@@ -430,6 +431,28 @@ fn try_disclose(
     }
 
     for &i in ready {
+        slots[i].accumulator.reset();
+    }
+}
+
+/// Emit every message-lane line the disclosure governor is holding, before
+/// a checkpoint that precedes an exec. The sensor marks a message seen when
+/// it scans it; a line still held in the cooldown at exec time would
+/// otherwise be recorded as consumed and never shown.
+pub(super) fn flush_message_lane(slots: &mut [SensorSlot]) {
+    let held: Vec<usize> = (0..slots.len())
+        .filter(|&i| rides_message_lane(slots[i].name()) && slots[i].accumulator.magnitude > 0.0)
+        .collect();
+    if held.is_empty() {
+        return;
+    }
+    let batch: Vec<_> = held
+        .iter()
+        .map(|&i| (slots[i].name().to_string(), "high".to_string(), slots[i].accumulator.drain_events()))
+        .collect();
+    emit::log(&format!("flushing {} held message-lane batch(es) before exec", batch.len()));
+    emit::emit_batch(&batch);
+    for &i in &held {
         slots[i].accumulator.reset();
     }
 }

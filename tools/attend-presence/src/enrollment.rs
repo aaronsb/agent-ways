@@ -6,9 +6,16 @@
 //! heartbeat, or `cleanup_stale` pruning a channel membership, does not
 //! un-enroll a session. Only an explicit opt-out does.
 //!
-//! The record is `<cache>/enrolled/<session-id>`, one line per way the
-//! session enrolled (`run`, `join`). The session is enrolled while the file
-//! exists; withdrawing the last way removes it.
+//! The record is `<cache>/enrolled/<session-id>`, one line each for:
+//! - every way the session enrolled (`run`, `join`);
+//! - `optout`, when `attend scene private` ran while an `attend run` held
+//!   the session: the run's enrollment ends once no run holds it;
+//! - `claude <key>`, the Claude Code process the session ran in (pid and
+//!   start time), so a session whose id changes under the same process
+//!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it.
+//!
+//! The session is enrolled while the record holds a way. Every edit is a
+//! read-modify-write under `enrolled/.lock`.
 
 use std::fs;
 use std::io;
@@ -30,13 +37,43 @@ impl Source {
             Source::Join => "join",
         }
     }
+}
 
-    fn parse(s: &str) -> Option<Self> {
-        match s.trim() {
-            "run" => Some(Source::Run),
-            "join" => Some(Source::Join),
-            _ => None,
+/// One session's enrollment record.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct Record {
+    sources: Vec<Source>,
+    optout: bool,
+    claude: Option<String>,
+}
+
+impl Record {
+    fn parse(text: &str) -> Self {
+        let mut r = Record::default();
+        for line in text.lines().map(str::trim) {
+            match line {
+                "run" => r.sources.push(Source::Run),
+                "join" => r.sources.push(Source::Join),
+                "optout" => r.optout = true,
+                _ => {
+                    if let Some(key) = line.strip_prefix("claude ") {
+                        r.claude = Some(key.to_string());
+                    }
+                }
+            }
         }
+        r
+    }
+
+    fn render(&self) -> String {
+        let mut out: String = self.sources.iter().map(|s| format!("{}\n", s.as_str())).collect();
+        if self.optout {
+            out.push_str("optout\n");
+        }
+        if let Some(key) = &self.claude {
+            out.push_str(&format!("claude {key}\n"));
+        }
+        out
     }
 }
 
@@ -48,63 +85,135 @@ fn path(session_id: &str) -> PathBuf {
     dir().join(session_id)
 }
 
-/// Whether `session_id` is enrolled.
-pub fn is_enrolled(session_id: &str) -> bool {
-    !session_id.is_empty() && path(session_id).is_file()
+fn index_path(claude_key: &str) -> PathBuf {
+    dir().join("by-claude").join(claude_key)
 }
 
-/// The ways `session_id` enrolled, empty when it is not enrolled.
-pub fn sources(session_id: &str) -> Vec<Source> {
-    fs::read_to_string(path(session_id))
-        .map(|s| s.lines().filter_map(Source::parse).collect())
-        .unwrap_or_default()
+fn read(session_id: &str) -> Option<Record> {
+    fs::read_to_string(path(session_id)).ok().map(|t| Record::parse(&t))
 }
 
-fn write(session_id: &str, sources: &[Source]) -> io::Result<()> {
+/// Write `record` for `session_id`, or remove it when it holds no way.
+fn write(session_id: &str, record: &Record) -> io::Result<()> {
     let p = path(session_id);
-    if sources.is_empty() {
+    if record.sources.is_empty() {
         return match fs::remove_file(&p) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
         };
     }
     fs::create_dir_all(dir())?;
-    let body: String = sources.iter().map(|s| format!("{}\n", s.as_str())).collect();
     let tmp = p.with_extension(format!("tmp.{}", std::process::id()));
-    fs::write(&tmp, body)?;
-    fs::rename(&tmp, &p)
+    fs::write(&tmp, record.render())?;
+    fs::rename(&tmp, &p)?;
+    if let Some(key) = &record.claude {
+        let index = index_path(key);
+        fs::create_dir_all(index.parent().unwrap_or(&dir()))?;
+        fs::write(index, session_id)?;
+    }
+    Ok(())
 }
 
-/// Record that `session_id` enrolled by `source`. Idempotent.
+/// Run `edit` on `session_id`'s record under the enrollment lock and write
+/// the result.
+fn edit(session_id: &str, edit: impl FnOnce(&mut Record)) -> io::Result<()> {
+    fs::create_dir_all(dir())?;
+    let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir().join(".lock"))?;
+    lock.lock()?;
+    let mut record = read(session_id).unwrap_or_default();
+    edit(&mut record);
+    write(session_id, &record)
+}
+
+/// The key of the Claude Code process this process runs under.
+fn own_claude_key() -> Option<String> {
+    crate::session::identity_for_pid(std::process::id()).claude_key()
+}
+
+/// Whether `session_id` is enrolled. A recorded opt-out takes effect here
+/// once no `attend run` holds the session, and the record is removed.
+pub fn is_enrolled(session_id: &str) -> bool {
+    if session_id.is_empty() {
+        return false;
+    }
+    let Some(record) = read(session_id) else { return false };
+    if record.optout && !crate::heartbeat::run_is_live(session_id) {
+        edit(session_id, |r| {
+            if r.optout {
+                r.sources.clear();
+            }
+        })
+        .ok();
+        return false;
+    }
+    !record.sources.is_empty()
+}
+
+/// The ways `session_id` enrolled, empty when it is not enrolled.
+pub fn sources(session_id: &str) -> Vec<Source> {
+    read(session_id).map(|r| r.sources).unwrap_or_default()
+}
+
+/// Record that `session_id` enrolled by `source`. Idempotent. Enrolling
+/// again clears a pending opt-out, and records the Claude Code process.
 pub fn enroll(session_id: &str, source: Source) -> io::Result<()> {
-    let mut have = sources(session_id);
-    if have.contains(&source) && path(session_id).is_file() {
-        return Ok(());
-    }
-    if !have.contains(&source) {
-        have.push(source);
-    }
-    write(session_id, &have)
+    let claude = own_claude_key();
+    edit(session_id, |r| {
+        if !r.sources.contains(&source) {
+            r.sources.push(source);
+        }
+        r.optout = false;
+        if claude.is_some() {
+            r.claude = claude;
+        }
+    })
 }
 
 /// Withdraw one way `session_id` enrolled. The session stays enrolled while
 /// another way remains.
 pub fn withdraw(session_id: &str, source: Source) -> io::Result<()> {
-    let have: Vec<Source> = sources(session_id).into_iter().filter(|s| *s != source).collect();
-    write(session_id, &have)
+    edit(session_id, |r| r.sources.retain(|s| *s != source))
 }
 
-/// Move `old`'s enrollment to `new`, for a session whose id changed under a
-/// running process (`/clear`). Keeps any way `new` already had.
-pub fn carry(old: &str, new: &str) -> io::Result<()> {
-    let mut have = sources(new);
-    for s in sources(old) {
-        if !have.contains(&s) {
-            have.push(s);
+/// `attend scene private`: the explicit opt-out. Withdraws the join, and
+/// the run too unless an `attend run` holds the session; then the run's
+/// enrollment ends once it no longer does ([`is_enrolled`] applies it).
+pub fn opt_out(session_id: &str) -> io::Result<()> {
+    let live = crate::heartbeat::run_is_live(session_id);
+    edit(session_id, |r| {
+        r.sources.retain(|s| *s != Source::Join);
+        if live && r.sources.contains(&Source::Run) {
+            r.optout = true;
+        } else {
+            r.sources.clear();
         }
-    }
-    write(new, &have)?;
-    write(old, &[])
+    })
+}
+
+/// Move `old`'s enrollment to `new`, for a session whose id changed under
+/// the same process (`/clear`). Keeps any way `new` already had.
+pub fn carry(old: &str, new: &str) -> io::Result<()> {
+    let Some(from) = read(old) else { return Ok(()) };
+    edit(new, |r| {
+        for s in &from.sources {
+            if !r.sources.contains(s) {
+                r.sources.push(*s);
+            }
+        }
+        r.optout |= from.optout;
+        if r.claude.is_none() {
+            r.claude = from.claude.clone();
+        }
+    })?;
+    edit(old, |r| *r = Record::default())
+}
+
+/// The enrolled session recorded for the Claude Code process `claude_key`,
+/// when it is not `current`: the id this process had before `/clear`.
+pub fn previous_id(claude_key: &str, current: &str) -> Option<String> {
+    let sid = fs::read_to_string(index_path(claude_key)).ok()?;
+    let sid = sid.trim();
+    (sid != current && read(sid).is_some_and(|r| r.claude.as_deref() == Some(claude_key))).then(|| sid.to_string())
 }
 
 #[cfg(test)]

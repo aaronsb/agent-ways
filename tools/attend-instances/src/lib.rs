@@ -240,23 +240,22 @@ impl Registry {
     }
 
     /// Give `old`'s slot in `cwd` to `new`, keeping its instance name, for
-    /// a session whose id changed under a running attend (`/clear`). When
-    /// `old` has no slot, `new` is registered as usual. Returns `new`'s
-    /// instance.
-    pub fn rename(&self, cwd: &str, old: &str, new: &str) -> io::Result<String> {
+    /// a session whose id changed under the same process (`/clear`). Does
+    /// nothing when `old` has no slot: only `attend run` registers. Returns
+    /// `new`'s instance when it has one.
+    pub fn rename(&self, cwd: &str, old: &str, new: &str) -> io::Result<Option<String>> {
         fs::create_dir_all(&self.base_dir)?;
         let path = self.path_for(cwd);
         let lock_file = fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.lock_path(cwd))?;
         acquire_exclusive(&lock_file)?;
         let mut map = parse_registry(&fs::read_to_string(&path).unwrap_or_default());
         let Some(mut entry) = map.remove(old) else {
-            drop(lock_file);
-            return self.register(cwd, new);
+            return Ok(map.get(new).map(|e| e.instance.clone()));
         };
         entry.last_seen = now_secs();
         let instance = map.entry(new.to_string()).or_insert(entry).instance.clone();
         write_registry(&path, &map)?;
-        Ok(instance)
+        Ok(Some(instance))
     }
 
     /// Remove `session_id` from every registry file other than
@@ -781,12 +780,13 @@ sess-a:
         with_registry(|reg| {
             reg.register("/x", "sess-a").unwrap();
             assert_eq!(reg.register("/x", "sess-b").unwrap(), "beta");
-            assert_eq!(reg.rename("/x", "sess-b", "sess-c").unwrap(), "beta");
+            assert_eq!(reg.rename("/x", "sess-b", "sess-c").unwrap().as_deref(), Some("beta"));
             let snap = reg.snapshot("/x");
             assert!(!snap.contains_key("sess-b"));
             assert_eq!(snap.get("sess-c").map(|e| e.instance.as_str()), Some("beta"));
-            // No old slot: the new id registers like any other.
-            assert_eq!(reg.rename("/x", "gone", "sess-d").unwrap(), "gamma");
+            // No old slot: nothing is registered for the new id.
+            assert_eq!(reg.rename("/x", "gone", "sess-d").unwrap(), None);
+            assert!(!reg.snapshot("/x").contains_key("sess-d"));
         });
     }
 

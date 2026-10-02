@@ -101,6 +101,7 @@ mod tests {
             origin_path: "/proj".into(),
             session_resolved: true,
             origin_resolved: true,
+            claude_pid: None,
         };
         let lines = machine_lines(&ident);
         assert_eq!(

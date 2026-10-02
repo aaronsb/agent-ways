@@ -1,20 +1,21 @@
 //! Following a session id that changes under a running `attend run`.
 //!
 //! Claude Code's `/clear` gives the running process a new session id and
-//! rewrites its session record. Everything attend keeps is keyed on the id
-//! (the registry slot, the enrollment record, the seen-set, channel
-//! memberships, the heartbeat), so a run that kept the startup id would
-//! leave the drain, which resolves afresh, looking at an unenrolled
-//! session. On a change the run moves that state to the new id and
-//! re-executes itself, so every part of the loop starts again keyed on the
-//! new id.
+//! rewrites its session record. The old process does two things: it shows
+//! every message line the disclosure cooldown still holds, so nothing it
+//! has marked seen is lost, and it checkpoints under the old id. Then it
+//! re-executes with [`MOVED_FROM`] naming the old id. The new process
+//! resolves the new id and moves the session's state across at startup
+//! (`crate::util::move_session`), before it reads any of it. A crash before
+//! the exec leaves everything on the old id, which is consistent, and the
+//! moves are idempotent, so a crash during them is repaired by the next
+//! start.
 
-use super::tick::{collect_snapshot, reexec};
+use super::tick::{collect_snapshot, flush_message_lane, reexec};
 use crate::sensors::SensorSlot;
-use crate::util::signals_base;
-use crate::{emit, groups, state};
+use crate::{emit, state};
 
-/// The env var a re-executed run reads to announce the move.
+/// The env var a re-executed run reads: the session id it moved from.
 pub(super) const MOVED_FROM: &str = "ATTEND_SESSION_MOVED_FROM";
 
 /// The session id this process belongs to now, when it resolves and
@@ -25,28 +26,22 @@ pub(super) fn changed_id(current: &str) -> Option<String> {
     (now.resolved() && now.session_id != current).then_some(now.session_id)
 }
 
-/// Move `old`'s state to `new` and re-execute. Returns only if the exec
-/// failed, after which the loop carries on under the old id.
-pub(super) fn follow(old: &str, new: &str, origin: &str, slots: &[SensorSlot], store: &state::StateStore) {
-    emit::log(&format!("session id changed ({old} → {new}); moving state and restarting"));
+/// Hand over to a process running under the new id. Returns only if the
+/// exec failed; the caller then stops trying for this id.
+pub(super) fn hand_over(old: &str, new: &str, slots: &mut [SensorSlot], store: &state::StateStore) {
+    emit::log(&format!("session id changed ({old} → {new}); restarting under the new id"));
+    flush_message_lane(slots);
+    store.checkpoint(&collect_snapshot(slots));
+    reexec(MOVED_FROM, old);
+}
 
-    // The seen-set: what this run's sensors hold, unioned with whatever
-    // the new id already has on disk.
-    let snapshot = collect_snapshot(slots);
-    store.checkpoint(&snapshot);
-    state::StateStore::new(Some(new.to_string())).checkpoint(&snapshot);
-    store.clear();
-
-    attend_presence::enrollment::carry(old, new).ok();
-    attend_instances::Registry::new().rename(origin, old, new).ok();
-    groups::Groups::new(&signals_base(), new).rename_member(old, new);
-    let state_dir = attend_presence::cache::state_dir();
-    std::fs::rename(
-        state_dir.join(format!("{old}.last-inbound")),
-        state_dir.join(format!("{new}.last-inbound")),
-    )
-    .ok();
-    attend_presence::heartbeat::clear(old).ok();
-
-    reexec(MOVED_FROM, &format!("{old} → {new}"));
+/// At startup: when this run was re-executed after an id change, move the
+/// old id's state to `new`. Returns the old id for the banner.
+pub(super) fn complete_move(new: &str, origin: &str) -> Option<String> {
+    let old = std::env::var(MOVED_FROM).ok()?;
+    std::env::remove_var(MOVED_FROM);
+    if old != new && !old.is_empty() {
+        crate::util::move_session(&old, new, origin);
+    }
+    Some(old)
 }

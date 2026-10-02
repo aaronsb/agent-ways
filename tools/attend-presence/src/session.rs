@@ -51,6 +51,8 @@ pub struct SessionIdentity {
     /// Distinct from `session_resolved` so "no session at all" and
     /// "session record without a cwd" stay distinguishable.
     pub origin_resolved: bool,
+    /// The Claude Code process whose session record matched, when one did.
+    pub claude_pid: Option<u32>,
 }
 
 impl SessionIdentity {
@@ -59,6 +61,14 @@ impl SessionIdentity {
     /// whoami's fallback warning) branch on this.
     pub fn resolved(&self) -> bool {
         self.session_resolved && self.origin_resolved
+    }
+
+    /// The key of the Claude Code process this session runs in: its pid and
+    /// start time, which together outlive a session-id change (`/clear`)
+    /// and are never reused for another process.
+    pub fn claude_key(&self) -> Option<String> {
+        let pid = self.claude_pid?;
+        Some(format!("{pid}-{}", crate::process::start_time(pid)?))
     }
 }
 
@@ -90,8 +100,8 @@ pub fn identity_in(dir: &Path, pid: u32) -> SessionIdentity {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default()
     };
-    match find_session_id_in(dir, pid) {
-        Some(sid) => {
+    match find_session_in(dir, pid) {
+        Some((sid, claude_pid)) => {
             let origin = origin_path_in(dir, &sid);
             let origin_resolved = origin.is_some();
             SessionIdentity {
@@ -99,6 +109,7 @@ pub fn identity_in(dir: &Path, pid: u32) -> SessionIdentity {
                 session_id: sid,
                 session_resolved: true,
                 origin_resolved,
+                claude_pid: Some(claude_pid),
             }
         }
         None => SessionIdentity {
@@ -106,6 +117,7 @@ pub fn identity_in(dir: &Path, pid: u32) -> SessionIdentity {
             origin_path: process_cwd(),
             session_resolved: false,
             origin_resolved: false,
+            claude_pid: None,
         },
     }
 }

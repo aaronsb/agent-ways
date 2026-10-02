@@ -88,6 +88,34 @@ fn powershell(script: &str) -> Option<String> {
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// When `pid` started, as an opaque string that differs between two
+/// processes that had the same pid. `None` when the process is gone.
+pub fn start_time(pid: u32) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    if proc_mounted() {
+        // Field 22 (starttime, in clock ticks since boot), counted from
+        // the last `)` like the parent pid.
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let rest = &stat[stat.rfind(')')? + 1..];
+        return rest.split_whitespace().nth(19).map(str::to_string);
+    }
+    start_time_by_command(pid)
+}
+
+#[cfg(not(windows))]
+fn start_time_by_command(pid: u32) -> Option<String> {
+    let out = Command::new("ps").args(["-p", &pid.to_string(), "-o", "lstart="]).output().ok()?;
+    let s = String::from_utf8_lossy(&out.stdout).split_whitespace().collect::<Vec<_>>().join("_");
+    (out.status.success() && !s.is_empty()).then_some(s)
+}
+
+#[cfg(windows)]
+fn start_time_by_command(pid: u32) -> Option<String> {
+    let s = powershell(&format!("(Get-Process -Id {pid} -ErrorAction SilentlyContinue).StartTime.Ticks"))?;
+    let s = s.trim();
+    (!s.is_empty()).then(|| s.to_string())
+}
+
 /// Whether `pid` is alive and running Claude Code: some argument of its
 /// command line names `claude`. The full line is read, not `comm`:
 /// background sessions exec the versioned binary directly, so `comm` shows
@@ -136,5 +164,8 @@ mod tests {
         assert!(has_ancestor(me, parent));
         assert!(has_ancestor(me, me));
         assert!(!argv(me).expect("own command line").is_empty());
+        let started = start_time(me).expect("own start time");
+        assert_eq!(start_time(me).as_deref(), Some(started.as_str()), "stable");
+        assert_ne!(start_time(parent), Some(started), "another process differs");
     }
 }
