@@ -28,6 +28,7 @@ members = [
     "agent-tui",
     "claude-sessions",
     "attend-config",
+    "tui-harness",
 ]
 resolver = "2"
 
