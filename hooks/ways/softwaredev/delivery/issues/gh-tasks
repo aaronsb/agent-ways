@@ -489,7 +489,9 @@ claude_pid() {
 }
 
 # Start time in ms of the claude process, or nothing.
+# GH_TASKS_PROCESS_START_MS overrides it for tests.
 process_start_ms() {
+  if [[ -n "${GH_TASKS_PROCESS_START_MS:-}" ]]; then printf '%s' "$GH_TASKS_PROCESS_START_MS"; return 0; fi
   local pid age
   pid="$(claude_pid)"; [[ -n "$pid" ]] || return 0
   age="$(elapsed_seconds "$pid")"

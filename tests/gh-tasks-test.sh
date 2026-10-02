@@ -25,6 +25,9 @@ export XDG_RUNTIME_DIR="$TMP/runtime"
 export CLAUDE_CODE_SESSION_ID="abcdef12-0000-0000-0000-000000000000"
 export GH_TASKS_TTL=0
 export GH_TASKS_PROCESS="4242 Thu Oct  1 13:54:00 2026"
+# The process start time as the hooks would see it under a claude process,
+# so the suite gives the same result with or without a claude ancestor.
+export GH_TASKS_PROCESS_START_MS=$(( ($(date +%s) - 3600) * 1000 ))
 unset CLAUDE_CODE_TASK_LIST_ID
 mkdir -p "$CLAUDE_CONFIG_DIR" "$XDG_RUNTIME_DIR"
 
