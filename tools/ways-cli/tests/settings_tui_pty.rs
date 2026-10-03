@@ -62,8 +62,9 @@ struct Screens {
 impl Screens {
     fn start(tag: &str) -> Screens {
         let mut s = Screens::open(tag);
-        // The targets row's menu, plan, a directory, then review and apply.
-        for k in ["a", "j", "j", "\r", "/tmp/x", "\r", "w", "a"] {
+        // The targets row's menu, add, a directory, confirmed, then review
+        // and apply. (Plan only reads: it runs at once and is never queued.)
+        for k in ["a", "j", "\r", "/tmp/x", "\r", "y", "w", "a"] {
             s.press(k);
         }
         s.wait_for("applying");

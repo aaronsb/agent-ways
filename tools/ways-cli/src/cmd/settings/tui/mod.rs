@@ -26,7 +26,7 @@ use agent_theme::ColorDepth;
 use agent_tui::flow::Flow;
 use agent_tui::theme::Shape;
 use agent_tui::tree::{Node, Queued, Store};
-use agent_tui::adapter::{Ended, Job};
+use agent_tui::adapter::{Ended, Job, Printed};
 use agent_tui::{Adapter, App, Themes, Write};
 use serde_yaml::Value;
 
@@ -318,7 +318,7 @@ impl Adapter for Ways {
         let out = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
         let err = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
         let home = self.ctx.home.display().to_string();
-        let mut proc = Proc { child, out, err, home };
+        let mut proc = Proc { child, out, err, home, printed: None };
         if let (Some(secret), Some(mut pipe)) = (&q.stdin, proc.child.stdin.take()) {
             if let Err(e) = pipe.write_all(secret.reveal().as_bytes()) {
                 // Never leave the command, or anything it started, behind.
@@ -407,8 +407,10 @@ struct Proc {
     child: std::process::Child,
     out: std::sync::mpsc::Receiver<Vec<u8>>,
     err: std::sync::mpsc::Receiver<Vec<u8>>,
-    /// Shown as `~` in the messages.
+    /// Shown as `~` in the messages and in what it printed.
     home: String,
+    /// What it printed, once it has ended.
+    printed: Option<Printed>,
 }
 
 /// How long the output of an ended command is waited for. A process it
@@ -416,14 +418,22 @@ struct Proc {
 const OUTPUT_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl Proc {
+    /// Take what the ended command printed, with paths under home as `~`.
+    fn take(&mut self, code: Option<i32>) -> &Printed {
+        let home = self.home.clone();
+        let text = |r: &std::sync::mpsc::Receiver<Vec<u8>>| {
+            let t = String::from_utf8_lossy(&r.recv_timeout(OUTPUT_WAIT).unwrap_or_default()).into_owned();
+            if home.len() > 1 { t.replace(&home, "~") } else { t }
+        };
+        let (stdout, stderr) = (text(&self.out), text(&self.err));
+        self.printed.insert(Printed { code, stdout, stderr })
+    }
+
     /// The last line a failed command printed: on stderr, else on stdout,
     /// since some commands (`ways agent key add`) report a refusal there.
-    fn reason(&mut self) -> String {
-        let take = |r: &std::sync::mpsc::Receiver<Vec<u8>>| r.recv_timeout(OUTPUT_WAIT).unwrap_or_default();
-        let (out, err) = (take(&self.out), take(&self.err));
-        let last = |b: &[u8]| String::from_utf8_lossy(b).lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string());
-        let line = last(&err).or_else(|| last(&out)).unwrap_or_else(|| "it printed nothing".into());
-        if self.home.len() > 1 { line.replace(&self.home, "~") } else { line }
+    fn reason(p: &Printed) -> String {
+        let last = |t: &str| t.lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string());
+        last(&p.stderr).or_else(|| last(&p.stdout)).unwrap_or_else(|| "it printed nothing".into())
     }
 }
 
@@ -432,11 +442,11 @@ impl Job for Proc {
         match self.child.try_wait() {
             Ok(None) => None,
             Ok(Some(status)) if status.success() => {
-                let _ = self.reason();
+                self.take(status.code());
                 Some(Ok(()))
             }
             Ok(Some(status)) => {
-                let why = self.reason();
+                let why = Proc::reason(self.take(status.code()));
                 Some(Err(match status.code() {
                     Some(c) => format!("exit {c}: {why}"),
                     None => format!("ended by a signal: {why}"),
@@ -444,6 +454,10 @@ impl Job for Proc {
             }
             Err(e) => Some(Err(format!("waiting on the command: {e}"))),
         }
+    }
+
+    fn printed(&mut self) -> Option<Printed> {
+        self.printed.clone()
     }
 
     /// End the command and every process in its group, then reap it.

@@ -398,11 +398,23 @@ impl Ways {
                         .confirm()
                         .doc("Rewrites each recorded target's projection to match the settings: hooks, settings.json and the corpus.")
                         .touches("every recorded target directory"),
+                    self.lint(),
                 ];
             }
             _ => {}
         }
         root
+    }
+
+    /// `ways settings lint` over the files the screens read: a pass, or the
+    /// findings it prints and a fail.
+    fn lint(&self) -> Action {
+        let here = self.ctx.project == super::super::project_dir(None);
+        let project = if here { String::new() } else { format!(" --project {}", quote(&self.ctx.project.display().to_string())) };
+        Action::new("lint", format!("ways settings lint{project}"))
+            .reads()
+            .verifies()
+            .doc("Checks every settings file the screens read against the schema and shows what `ways settings lint` prints. Writes nothing.")
     }
 
     /// Every way a session here can fire, by id: the project's own, the
@@ -505,7 +517,7 @@ impl Ways {
         if present {
             out.push(Action::new("remove", key("remove")).confirm().doc(format!("Deletes the stored {p} key; the gate cannot use that provider until a key is set again.")));
         }
-        out.push(Action::new("check", key("check")).reads().doc(format!("Asks {p} whether the stored key is accepted. Stores only when the key was last checked.")));
+        out.push(Action::new("check", key("check")).reads().verifies().doc(format!("Asks {p} whether the stored key is accepted. Stores only when the key was last checked.")));
         out
     }
 
@@ -561,7 +573,11 @@ impl Ways {
                 .confirm()
                 .doc("Records the directory as a target and projects agent-ways into it.")
                 .touches("the directory given"),
-            Action::new("plan", "ways target plan {}").arg(Arg::Text("directory".into())).doc("Previews what adding the directory would write. Writes nothing."),
+            Action::new("plan", "ways target plan {}")
+                .arg(Arg::Text("directory".into()))
+                .reads()
+                .reports()
+                .doc("Previews what adding the directory would write, and shows what `ways target plan` prints. Writes nothing."),
         ]);
         g.open = none;
         if let Some(f) = finding_for(layers, b.spec.file, b.spec.section, &b.path()) {
@@ -620,6 +636,7 @@ impl Ways {
             }
         }
         Node::group("findings", "What `ways settings lint` finds in the files this tab reads. A section a finding drops falls through to the layers beneath; a file that does not parse fails closed.", rows)
+            .with_actions(vec![self.lint()])
     }
 }
 

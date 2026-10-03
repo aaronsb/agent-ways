@@ -122,6 +122,15 @@ impl Fx {
         out
     }
 
+    /// [`Fx::snap`] with extra environment.
+    fn snap_with(&self, tab: &str, keys: &str, size: &str, depth: &str, env: &[(&str, &Path)]) -> String {
+        let args = ["settings", tab, "--depth", depth, "--snap", size, "--keys", keys];
+        let (out, err, code) = self.run_with(&args, env);
+        assert_eq!(code, 0, "ways settings {tab} --keys {keys}: {err}");
+        assert!(out.starts_with("agent-tui frame "), "not a frame: {out}{err}");
+        out
+    }
+
     /// The screens on `tab`, the keys fed, then what is left pending.
     fn drive(&self, tab: &str, keys: &str) -> String {
         let (out, err, code) = self.run(&["settings", tab, "--keys", keys]);
@@ -134,6 +143,11 @@ impl Drop for Fx {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
     }
+}
+
+/// Make a stand-in script runnable.
+fn executable(p: &Path) {
+    std::fs::set_permissions(p, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
 }
 
 fn glyphs(frame: &str) -> String {
@@ -395,9 +409,10 @@ exit 1
     std::os::unix::fs::PermissionsExt::set_mode(&mut std::fs::metadata(&runner).unwrap().permissions(), 0o755);
     #[cfg(unix)]
     std::fs::set_permissions(&runner, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    // install: the targets row's menu, plan, a directory, review, apply.
+    // install: the targets row's menu, add, a directory, confirmed, review,
+    // apply. (Plan only reads: it runs at once and is never queued.)
     let (out, err, code) = fx.run_with(
-        &["settings", "install", "--depth", "16", "--snap", "240x30", "--keys", "a down down enter text:/tmp/x enter w a"],
+        &["settings", "install", "--depth", "16", "--snap", "240x30", "--keys", "a down enter text:/tmp/x enter y w a"],
         &[("WAYS_SETTINGS_RUNNER", &runner)],
     );
     assert_eq!(code, 0, "{err}");
@@ -460,8 +475,8 @@ fn golden_frames() {
         g.check_text(name, &fx.snap(tab, keys, size, "16"));
     }
     // A stored anthropic key, so its menu has rotate and remove: remove is
-    // queued and confirmed. Its check only reads, runs at once and is never
-    // queued, so no shot picks it: it would start a real command.
+    // queued and confirmed. Its check only reads and runs at once; the shots
+    // that pick it below run a stand-in, never the real check.
     let keyed = Fx::new();
     keyed.file(".config/agent-ways/config.yaml", "# by hand\nnear_miss_margin: 0.1\n");
     keyed.file(".config/agent-ways/keys/anthropic", "sk-ant-golden-frame-fixture");
@@ -492,5 +507,25 @@ fn golden_frames() {
     let broken = Fx::new();
     broken.file(".config/agent-ways/config.yaml", BROKEN);
     g.check_text("matching-broken", &broken.snap("matching", "", "100x30", "16"));
+    // The response modal (#778): a reading action's outcome with what its
+    // command printed. The key check, through a stand-in for the binary
+    // that answers as a check does, passing and then failing.
+    let check = "/ text:keys.anthropic enter end enter a down down enter";
+    keyed.file("runner.sh", "#!/bin/sh\necho 'provider: anthropic'\necho 'key:      sk-ant-…ture'\necho 'model:    claude-haiku-4-5'\necho 'result:   accepted'\n");
+    executable(&keyed.path("runner.sh"));
+    g.check_text("gate-check-pass", &keyed.snap_with("gate", check, "100x30", "16", &[("WAYS_SETTINGS_RUNNER", &keyed.path("runner.sh"))]));
+    keyed.file("runner.sh", "#!/bin/sh\necho 'provider: anthropic'\necho 'check: the key was refused (401)' >&2\nexit 1\n");
+    g.check_text("gate-check-fail", &keyed.snap_with("gate", check, "100x30", "16", &[("WAYS_SETTINGS_RUNNER", &keyed.path("runner.sh"))]));
+    // Lint on the findings of a broken file, the real command: a fail with
+    // its findings. On the install tab over sound files: a pass.
+    g.check_text("matching-lint-fail", &broken.snap("matching", "a enter", "100x30", "16"));
+    g.check_text("install-lint-pass", &fx.snap("install", "down down down a down down enter", "100x30", "16"));
+    // A report: the targets row's plan, the real command, for a Claude
+    // config directory under the fixture home. One that is not there is an
+    // error: the exit code and what the command printed on stderr.
+    let planned = Fx::new();
+    planned.file("work-claude/settings.json", "{}\n");
+    g.check_text("install-plan-report", &planned.snap("install", "p text:~/work-claude enter", "100x30", "16"));
+    g.check_text("install-plan-error", &fx.snap("install", "p text:~/elsewhere enter", "100x30", "16"));
     g.finish();
 }
