@@ -51,6 +51,7 @@ impl App {
     fn next_shape(&mut self) -> Result<String, String> {
         let next = self.shape.next();
         self.adapter.choose_shape(next.name())?;
+        self.own_write();
         self.shape = next;
         Ok(format!("shape {} (Nerd Font glyphs unless plain)", next.name()))
     }
@@ -58,8 +59,19 @@ impl App {
     /// Make `name` the active theme: the adapter keeps the choice first.
     pub(super) fn choose_theme(&mut self, name: &str) -> Result<String, String> {
         self.adapter.choose_theme(name)?;
+        self.own_write();
         self.themes.active = name.into();
         Ok(format!("{name} is the active theme"))
+    }
+
+    /// The adapter kept a choice in a file the tree may be read from: take
+    /// its stamp, so the watch does not report the screen's own write as a
+    /// change on disk over the message that says what was done. A watch
+    /// already owed a reload keeps it.
+    fn own_write(&mut self) {
+        if self.stamp.is_some() {
+            self.stamp = self.adapter.stamp();
+        }
     }
 
     /// After a copy, rename or delete: the active choice follows through
@@ -67,6 +79,7 @@ impl App {
     pub(super) fn theme_done(&mut self, done: Done) {
         let adapter = &mut self.adapter;
         self.msg = self.themes.settle(&done, |n| adapter.choose_theme(n));
+        self.own_write();
         if let Done::Copied { to, .. } = &done {
             if let Some(t) = self.themes.get(to).cloned() {
                 self.themes.editor = Some(Editor::new(t, true));

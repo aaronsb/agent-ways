@@ -34,6 +34,36 @@ impl Adapter for Choice {
     fn choose_shape(&mut self, name: &str) -> Result<(), String> {
         std::fs::write(self.0.join("shape"), name).map_err(|e| e.to_string())
     }
+    /// The choice file stands in for the settings file the tree is read
+    /// from: its stamp moves when a choice is kept.
+    fn stamp(&self) -> Option<u64> {
+        let kept = std::fs::read_to_string(self.0.join("choice")).unwrap_or_default();
+        Some(kept.bytes().fold(7u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64)))
+    }
+}
+
+#[test]
+fn the_screens_own_choice_is_not_reported_as_a_change_on_disk() {
+    let d = dir("ownwrite");
+    let mut app = app_in(&d, ColorDepth::TrueColor);
+    keys(&mut app, &[KeyCode::Char('3')]);
+    app.watch();
+    keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    app.watch();
+    assert_eq!(app.msg, "nord is the active theme");
+    // A rename of the active theme keeps the choice too, and says so.
+    act(&mut app, "copy");
+    type_str(&mut app, "mine");
+    keys(&mut app, &[KeyCode::Enter, KeyCode::Esc, KeyCode::Enter]);
+    act(&mut app, "rename");
+    type_str(&mut app, "ours");
+    keys(&mut app, &[KeyCode::Enter]);
+    app.watch();
+    assert_eq!(app.msg, "renamed mine to ours; the active choice follows");
+    // A write from elsewhere is still seen.
+    std::fs::write(d.join("choice"), "dracula\n").unwrap();
+    app.watch();
+    assert!(app.msg.starts_with("reloaded"), "{}", app.msg);
 }
 
 #[test]
