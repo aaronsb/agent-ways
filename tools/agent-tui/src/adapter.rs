@@ -27,6 +27,21 @@ pub trait Job {
     fn poll(&mut self) -> Option<Result<(), String>>;
     /// End the command now. A later `poll` reports how it ended.
     fn stop(&mut self) {}
+    /// What the command printed, once `poll` has reported its end: what a
+    /// response modal shows. `None` from a job that keeps no output; the
+    /// modal then shows the outcome `poll` gave.
+    fn printed(&mut self) -> Option<Printed> {
+        None
+    }
+}
+
+/// What an ended command printed and how it exited.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Printed {
+    /// The exit code; `None` when a signal ended it.
+    pub code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 /// A job that ended before it was polled: what [`Adapter::start`] gives for

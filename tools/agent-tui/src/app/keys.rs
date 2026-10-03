@@ -108,6 +108,7 @@ impl App {
                 _ => self.mode = Mode::Edit(buf),
             },
             Mode::Pick(p) => self.pick_key(p, k),
+            Mode::Response(s) => self.response_key(s, k),
             Mode::Menu { path, sel } => {
                 let len = tree::get(&self.roots, &path).actions.len();
                 match k.code {
@@ -450,6 +451,14 @@ impl App {
             }
             Mode::Guard { confirm: false } | Mode::ThemeUnsaved if click => self.click_button(at),
             Mode::Help { .. } if click => self.mode = Mode::Browse,
+            Mode::Response(_) => {
+                if let Some(k) = wheel {
+                    self.key(press(k));
+                } else if click && !self.hits.menu.as_ref().is_some_and(|(r, _)| r.contains(at)) {
+                    // A click outside closes it; inside, the text stays put.
+                    self.key(press(KeyCode::Esc));
+                }
+            }
             _ => {}
         }
     }
@@ -606,7 +615,7 @@ impl App {
     pub(super) fn pick(&mut self, path: Vec<usize>, action: usize) {
         let a = &tree::get(&self.roots, &path).actions[action];
         if a.reads && matches!(a.arg, Arg::None) {
-            return self.read_now(&path, action);
+            return self.read_now(&path, action, "");
         }
         match a.arg.clone() {
             Arg::None => self.stage(&path, action, "", None),
@@ -640,8 +649,13 @@ impl App {
     }
 
     /// Build the queued command; ask first when the action needs confirming.
+    /// A reading action with a typed argument runs at once, as one without
+    /// does.
     pub(super) fn stage(&mut self, path: &[usize], action: usize, text: &str, stdin: Option<SecretBuf>) {
         let a = &tree::get(&self.roots, path).actions[action];
+        if a.reads && matches!(a.arg, Arg::Text(_)) {
+            return self.read_now(path, action, text);
+        }
         let mut queued = Queued::new(tree::key(&self.roots, path), a.label.clone(), a.render(text), a.confirm);
         queued.stdin = stdin;
         if a.confirm {
@@ -652,40 +666,49 @@ impl App {
     }
 
     /// Run an action that only reads, at once and outside the queue: there
-    /// is nothing to review or apply. Its outcome goes to the bottom bar.
-    pub(super) fn read_now(&mut self, path: &[usize], action: usize) {
+    /// is nothing to review or apply. `text` is its typed argument, if it
+    /// takes one. Its outcome goes to the bottom bar, and to a modal as its
+    /// response kind says.
+    pub(super) fn read_now(&mut self, path: &[usize], action: usize, text: &str) {
         if self.reading.is_some() {
             self.msg = "a check is running".into();
             return;
         }
         let a = &tree::get(&self.roots, path).actions[action];
-        let q = Queued::new(tree::key(&self.roots, path), a.label.clone(), a.render(""), false);
+        let q = Queued::new(tree::key(&self.roots, path), a.label.clone(), a.render(text), false);
         self.msg = format!("{}: running…", a.label);
+        let reading = Reading { label: a.label.clone(), command: q.command.clone(), response: a.response };
         let job = self.adapter.start(&q);
-        self.reading = Some((a.label.clone(), job));
+        self.reading = Some((reading, job));
         self.tick_reading();
     }
 
-    /// Poll the reading action, if one runs: when it ends, say how, and read
-    /// the tree again, since what it found may show there. A tree is read
-    /// again only when nothing is open over it; otherwise the stamp is
-    /// cleared so the next watch reads it.
+    /// Poll the reading action, if one runs: when it ends, say how, show
+    /// what it printed as its response kind says, and read the tree again,
+    /// since what it found may show there. A tree is read again only when
+    /// nothing is open over it; otherwise the stamp is cleared so the next
+    /// watch reads it.
     pub(crate) fn tick_reading(&mut self) {
-        let Some((label, job)) = &mut self.reading else { return };
+        let Some((r, job)) = &mut self.reading else { return };
         let Some(outcome) = job.poll() else { return };
-        let said = match outcome {
-            Ok(()) => format!("{label}: ok"),
-            Err(e) => format!("{label}: {e}"),
+        let printed = job.printed();
+        let said = match &outcome {
+            Ok(()) => format!("{}: ok", r.label),
+            Err(e) => format!("{}: {e}", r.label),
         };
+        let shown = response::Shown::of(&r.label, &r.command, r.response, &outcome, printed);
         self.reading = None;
         if !matches!(self.mode, Mode::Browse | Mode::Review { run: None, .. }) {
             self.msg = said;
             self.stamp = None;
             self.owed = true;
-            return;
+        } else {
+            let r = self.reload();
+            self.msg = if r.is_clean() { said } else { format!("{said} · {}", r.message()) };
         }
-        let r = self.reload();
-        self.msg = if r.is_clean() { said } else { format!("{said} · {}", r.message()) };
+        if let Some(s) = shown {
+            self.show_response(s);
+        }
     }
 
     pub(super) fn enqueue(&mut self, q: Queued) {

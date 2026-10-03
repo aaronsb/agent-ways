@@ -136,6 +136,7 @@ impl App {
                     self.draw_menu_items(f, main, title, items, sel);
                 }
                 Mode::ThemeUnsaved => self.draw_unsaved(f, main),
+                Mode::Response(_) => self.draw_open_response(f, main),
                 _ => {}
             }
             return self.draw_status(f, status);
@@ -181,6 +182,7 @@ impl App {
                 let p = p.clone();
                 self.draw_pick(f, main, &p);
             }
+            Mode::Response(_) => self.draw_open_response(f, main),
             _ => {}
         }
         self.draw_status(f, status);
@@ -497,6 +499,10 @@ impl App {
                 spans.extend(mode("pick", Ground::Accent));
                 spans.extend([hint("  ↑↓ choose · Enter or click sets · Esc closes"), msg]);
             }
+            Mode::Response(s) => {
+                spans.extend(mode(s.verdict.word(), s.verdict.ground()));
+                spans.extend([hint("  ↑↓ PgUp PgDn scroll · Esc Enter q close"), msg]);
+            }
             Mode::Arg { path, action, buf } => {
                 let prompt = match &tree::get(&self.roots, path).actions[*action].arg {
                     Arg::Text(p) => p.clone(),
@@ -701,6 +707,16 @@ pub const KEYS: &[&str] = &[
 ];
 
 impl App {
+    /// The open response modal, its scroll held to what was drawn.
+    fn draw_open_response(&mut self, f: &mut Frame, area: Rect) {
+        let Mode::Response(s) = &self.mode else { return };
+        let s = s.clone();
+        let scroll = self.draw_response(f, area, &s);
+        if let Mode::Response(s) = &mut self.mode {
+            s.scroll = scroll;
+        }
+    }
+
     /// The keys, then the shown tab's help as the adapter's own `--help`
     /// prints it, scrolled `scroll` lines.
     fn draw_help(&mut self, f: &mut Frame, area: Rect, scroll: u16) {

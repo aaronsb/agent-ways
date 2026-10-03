@@ -9,6 +9,7 @@ pub mod flow;
 mod keys;
 mod pick;
 mod render;
+mod response;
 mod review;
 pub mod theme;
 pub mod themestate;
@@ -48,6 +49,8 @@ pub(crate) enum Mode {
     Menu { path: Vec<usize>, sel: usize },
     /// Choosing a choice's value from its options.
     Pick(pick::Pick),
+    /// What a reading action's command printed, scrolled (#778).
+    Response(Box<response::Shown>),
     /// A visible argument, such as a path, for action `action` of the node.
     Arg { path: Vec<usize>, action: usize, buf: String },
     /// A masked argument for action `action` of the node.
@@ -146,6 +149,14 @@ struct Hits {
     hex: Rect,
 }
 
+/// A reading action in flight: its label, its command line, and what it
+/// answers with.
+pub(crate) struct Reading {
+    label: String,
+    command: String,
+    response: tree::Response,
+}
+
 /// What a session leaves behind: the edited tree and the queued actions.
 pub struct Session {
     pub roots: Vec<Node>,
@@ -232,8 +243,10 @@ pub struct App {
     pub themes: Themes,
     /// The slider channel a mouse drag holds.
     drag: Option<usize>,
-    /// A reading action running outside the queue: its label and job.
-    reading: Option<(String, Box<dyn crate::adapter::Job>)>,
+    /// A reading action running outside the queue: what ran, and its job.
+    reading: Option<(Reading, Box<dyn crate::adapter::Job>)>,
+    /// A response modal waiting for the screen to be back to browsing.
+    held: Option<response::Shown>,
     /// A check ended while the tree could not be read again: the next
     /// watch reads it, keeping the check's outcome on the bottom bar.
     owed: bool,
@@ -264,6 +277,7 @@ impl App {
             adapter: Box::new(Unwired),
             stamp: None,
             reading: None,
+            held: None,
             owed: false,
             themes: Themes::new(None, agent_theme::ColorDepth::TrueColor, None),
             drag: None,
@@ -362,6 +376,7 @@ impl App {
     /// after its last state, so the last glyph is seen.
     pub fn tick(&mut self) {
         self.tick_reading();
+        self.open_held();
         let Mode::Review { run: Some(run), .. } = &mut self.mode else { return };
         if run.finished() {
             return self.finish_run();
