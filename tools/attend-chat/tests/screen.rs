@@ -451,3 +451,63 @@ fn a_short_terminal_keeps_the_compose_cursor_in_view() {
     let text = testkit::text(&testkit::render_screen(&mut c, 30, 10));
     assert!(text.contains("twelve"), "the row with the cursor is shown: {text}");
 }
+
+/// Each key after a frame at `w` by `h`, as the terminal draws one before
+/// it reads the next key: what a key does can depend on the frame, such
+/// as a page's height.
+fn drawn(c: &mut Chat, keys: &[KeyEvent], w: u16, h: u16) -> bool {
+    keys.iter().all(|k| {
+        testkit::render_screen(c, w, h);
+        press(c, *k)
+    })
+}
+
+fn chars(s: &str) -> Vec<KeyEvent> {
+    s.chars().map(|ch| key(KeyCode::Char(ch))).collect()
+}
+
+#[test]
+fn golden_compose_and_send_to_the_foreground_channel() {
+    let mut g = goldens();
+    let mut c = chat();
+    // Alt+3 is #deploy, where beta is a live member.
+    drawn(&mut c, &[KeyEvent::new(KeyCode::Char('3'), KeyModifiers::ALT)], 80, 25);
+    drawn(&mut c, &chars("ship it at 15:00"), 80, 25);
+    g.check("compose-deploy-80x25", &testkit::render_screen(&mut c, 80, 25));
+    drawn(&mut c, &[key(KeyCode::Enter)], 80, 25);
+    assert!(c.input().is_empty());
+    assert_eq!(c.status(), "sent → #deploy");
+    g.check("sent-deploy-80x25", &testkit::render_screen(&mut c, 80, 25));
+    g.finish();
+}
+
+#[test]
+fn golden_channel_switch_by_alt_digit() {
+    let mut g = goldens();
+    let mut c = chat();
+    drawn(&mut c, &[KeyEvent::new(KeyCode::Char('4'), KeyModifiers::ALT)], 80, 25);
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+    g.check("channel-infra-80x25", &testkit::render_screen(&mut c, 80, 25));
+    g.finish();
+}
+
+#[test]
+fn golden_a_slash_command_runs_and_says_so() {
+    let mut g = goldens();
+    let mut c = chat();
+    drawn(&mut c, &chars("/help"), 80, 25);
+    drawn(&mut c, &[key(KeyCode::Enter)], 80, 25);
+    assert!(c.status().starts_with("available:"), "{}", c.status());
+    g.check("slash-help-ran-80x25", &testkit::render_screen(&mut c, 80, 25));
+    g.finish();
+}
+
+#[test]
+fn golden_the_feed_paged_back() {
+    let mut g = goldens();
+    let mut c = chat();
+    drawn(&mut c, &[key(KeyCode::PageUp)], 80, 25);
+    assert!(c.scroll() > 0);
+    g.check("scrolled-back-80x25", &testkit::render_screen(&mut c, 80, 25));
+    g.finish();
+}
