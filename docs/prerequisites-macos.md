@@ -13,14 +13,16 @@ brew install jq gh python3 coreutils
 export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
 ```
 
-**Already present on macOS:** `git` (via Xcode CLT), `bash`, `gzip`, `bc`, `grep`, `awk`, `sed`
+**Already present on macOS:** `git` and `make` (via Xcode CLT), `bash`, `grep`, `awk`, `sed`
 
 > If you don't have Xcode Command Line Tools: `xcode-select --install`
 
 **Install Claude Code:**
 
 ```bash
-npm install -g @anthropic-ai/claude-code
+curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-See the [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) for authentication setup.
+The [Claude Code setup guide](https://code.claude.com/docs/en/setup) lists the other install methods and covers authentication.
+
+**Only for a source build:** when no prebuilt binary fits your platform, the installer builds from source. That needs `cargo` (Rust 1.89 or later, from [rustup](https://rustup.rs/)), and `way-embed` needs cmake and a C++ compiler. `make deps` in the app dir installs cmake and the compiler. See [Finishing an install](finish-install.md).

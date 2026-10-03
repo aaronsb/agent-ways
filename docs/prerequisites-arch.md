@@ -1,7 +1,7 @@
 # Prerequisites — Arch Linux
 
 ```bash
-sudo pacman -S jq bc gzip python git
+sudo pacman -S jq make python git
 ```
 
 For the GitHub CLI (`gh`):
@@ -10,14 +10,14 @@ For the GitHub CLI (`gh`):
 sudo pacman -S github-cli
 ```
 
-**Already present on most Arch installs:** `bash`, `coreutils` (provides `timeout`, `tr`, `sort`, `wc`, etc.), `grep`, `awk`, `sed`, `gzip`, `find`
-
-> `bc` is not part of `base` — if you're on a minimal install, make sure it's there.
+**Already present on most Arch installs:** `bash`, `coreutils` (provides `timeout`, `tr`, `sort`, `wc`, etc.), `grep`, `awk`, `sed`, `find`
 
 **Install Claude Code:**
 
 ```bash
-npm install -g @anthropic-ai/claude-code
+curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-See the [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) for authentication setup.
+The [Claude Code setup guide](https://code.claude.com/docs/en/setup) lists the other install methods and covers authentication.
+
+**Only for a source build:** when no prebuilt binary fits your platform, the installer builds from source. That needs `cargo` (Rust 1.89 or later, from [rustup](https://rustup.rs/)), and `way-embed` needs cmake and a C++ compiler. `make deps` in the app dir installs cmake and the compiler. See [Finishing an install](finish-install.md).
