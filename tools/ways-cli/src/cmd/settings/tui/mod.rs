@@ -199,7 +199,7 @@ impl Ways {
 
     /// A message with paths under home as `~`.
     fn short(&self, msg: &str) -> String {
-        build::home_as_tilde(msg, &self.ctx.home.display().to_string())
+        build::tilde_home(msg, &self.ctx.home)
     }
 }
 
@@ -313,7 +313,7 @@ impl Adapter for Ways {
         };
         let out = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
         let err = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-        let home = self.ctx.home.display().to_string();
+        let home = self.ctx.home.clone();
         let mut proc = Proc { child, out, err, home, printed: None };
         if let (Some(secret), Some(mut pipe)) = (&q.stdin, proc.child.stdin.take()) {
             if let Err(e) = pipe.write_all(secret.reveal().as_bytes()) {
@@ -404,7 +404,7 @@ struct Proc {
     out: std::sync::mpsc::Receiver<Vec<u8>>,
     err: std::sync::mpsc::Receiver<Vec<u8>>,
     /// Shown as `~` in the messages and in what it printed.
-    home: String,
+    home: PathBuf,
     /// What it printed, once it has ended.
     printed: Option<Printed>,
 }
@@ -419,7 +419,7 @@ impl Proc {
         let home = self.home.clone();
         let text = |r: &std::sync::mpsc::Receiver<Vec<u8>>| {
             let t = String::from_utf8_lossy(&r.recv_timeout(OUTPUT_WAIT).unwrap_or_default()).into_owned();
-            build::home_as_tilde(&t, &home)
+            build::tilde_home(&t, &home)
         };
         let (stdout, stderr) = (text(&self.out), text(&self.err));
         self.printed.insert(Printed { code, stdout, stderr })

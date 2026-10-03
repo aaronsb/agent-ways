@@ -66,7 +66,19 @@ pub fn tilde(p: &Path, home: &Path) -> String {
 
 /// Every path in `text` under the home directory, written with `~`.
 fn tilde_text(text: &str, home: &Path) -> String {
-    home_as_tilde(text, &home.display().to_string()).replace('\\', "/")
+    tilde_home(text, home).replace('\\', "/")
+}
+
+/// `text` with home written `~`, both as given and as the filesystem
+/// resolves it: a command prints a canonical path, and a home reached
+/// through a symlink (macOS's /var is /private/var) is otherwise left whole.
+pub(super) fn tilde_home(text: &str, home: &Path) -> String {
+    let given = home.display().to_string();
+    let text = match std::fs::canonicalize(home).map(|p| p.display().to_string()) {
+        Ok(real) if real != given => home_as_tilde(text, &real),
+        _ => text.to_string(),
+    };
+    home_as_tilde(&text, &given)
 }
 
 /// `text` with each whole `home` in it written `~`: only where it stands as

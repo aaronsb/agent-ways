@@ -832,3 +832,21 @@ fn home_shows_as_tilde_only_where_it_is_a_whole_path() {
     assert_eq!(t("/home/al..x"), "/home/al..x");
     assert_eq!(super::build::home_as_tilde("/home/al/x", "/"), "/home/al/x");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_home_reached_through_a_symlink_shows_as_tilde_in_its_canonical_form_too() {
+    // As on macOS, where a temp HOME under /var/folders is /private/var/folders.
+    let root = std::env::temp_dir().join(format!("ways-tui-symlinked-home-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let real = root.join("real-home");
+    std::fs::create_dir_all(real.join("work-claude")).unwrap();
+    let link = root.join("link-home");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let canonical = std::fs::canonicalize(&real).unwrap().display().to_string();
+    let t = |s: &str| super::build::tilde_home(s, &link);
+    assert_eq!(t(&format!("plan for {canonical}/work-claude")), "plan for ~/work-claude");
+    assert_eq!(t(&format!("{}/x", link.display())), "~/x", "the home as given still shows as ~");
+    assert_eq!(t(&format!("{canonical}-other/x")), format!("{canonical}-other/x"), "at a path boundary only");
+    let _ = std::fs::remove_dir_all(&root);
+}
