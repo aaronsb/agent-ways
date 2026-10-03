@@ -145,6 +145,50 @@ impl Input {
         true
     }
 
+    /// Where the cursor is drawn in [`Input::rows`] at `width`: its row,
+    /// and its column in display cells.
+    fn drawn_at(&self, width: u16) -> (usize, usize) {
+        let rows = self.rows(width, Style::new());
+        for (r, line) in rows.iter().enumerate() {
+            let mut col = 0;
+            for span in &line.spans {
+                if span.style.add_modifier.contains(Modifier::REVERSED) {
+                    return (r, col);
+                }
+                col += span.width();
+            }
+        }
+        (rows.len().saturating_sub(1), 0)
+    }
+
+    /// Put the cursor where a click at `row` and display column `col` of
+    /// [`Input::rows`] at `width` lands: on the cluster there, or past the
+    /// end of the row when the click is beyond it. The cursor only moves.
+    pub fn click(&mut self, width: u16, row: usize, col: usize) {
+        // Where the cursor draws grows with it: search the boundaries for
+        // the last one drawn at or before the click.
+        let bounds = self.bounds();
+        let mut probe = self.clone();
+        let mut at = |b: usize| {
+            probe.cursor = b;
+            probe.drawn_at(width)
+        };
+        let (mut lo, mut hi) = (0, bounds.len() - 1);
+        if at(bounds[0]) > (row, col) {
+            self.cursor = 0;
+            return;
+        }
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+            if at(bounds[mid]) <= (row, col) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        self.cursor = bounds[lo];
+    }
+
     /// The text word-wrapped to rows of `width` columns, an explicit newline
     /// starting a row, with the cursor's cluster in reverse video (a space
     /// past the end of a line). `style` is the text's.
@@ -257,6 +301,30 @@ mod tests {
         assert_eq!(i.cursor(), 0);
         i.end();
         assert_eq!(i.cursor(), 3);
+    }
+
+    /// A click puts the cursor on the cluster under it, at the end of a
+    /// row clicked past its end, and at the end of the text below it.
+    #[test]
+    fn a_click_puts_the_cursor_under_it() {
+        let mut i = at("hello there world", 0);
+        // "hello there" / "world" at 12 columns.
+        i.click(12, 0, 6);
+        assert_eq!(i.cursor(), 6, "on the t");
+        i.click(12, 1, 2);
+        assert_eq!(i.cursor(), 14, "on the r of world");
+        i.click(12, 0, 30);
+        assert_eq!(i.cursor(), 11, "past the end of the first row: its end");
+        i.click(12, 9, 0);
+        assert_eq!(i.cursor(), 17, "below the text: its end");
+        let mut i = at("ab\ncd", 0);
+        i.click(10, 1, 1);
+        assert_eq!(i.cursor(), 4);
+        i.click(10, 0, 0);
+        assert_eq!(i.cursor(), 0);
+        let mut i = at("日本語", 0);
+        i.click(10, 0, 3);
+        assert_eq!(i.cursor(), 1, "a wide character takes two columns");
     }
 
     #[test]

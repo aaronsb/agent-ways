@@ -14,7 +14,7 @@ use super::pane::{footer_spans, Binding, Keyed, Open, Tone};
 use super::pick::Pick;
 use super::render::{modal_rect, pane as bordered};
 use super::response::Shown;
-use super::theme::{self, Ground, Seg};
+use super::theme::{self, Seg};
 use super::*;
 use crate::adapter::Printed;
 use crate::wrap::str_width;
@@ -61,12 +61,23 @@ impl App {
         vec![
             Binding::new(k("?", "F1"), "keys"),
             Binding::new(k("1-9", "M-1-9"), "tabs"),
-            Binding::help(k("m", "M-m"), "mouse on or off (off lets the terminal select text)"),
+            Binding::help(self.mouse_key(), "mouse on or off (off lets the terminal select text)"),
             Binding::help("Shift-drag", "selects text while the mouse is on, in most terminals"),
             Binding::help("middle-click", "pastes only while the mouse is off"),
             Binding::help(k("q Esc ^C", "Esc ^C"), "quit; asks first over unsaved work"),
             Binding::help("click", "a tab shows it; the wheel scrolls"),
         ]
+    }
+
+    /// The key that turns the mouse on or off as the bar names it: `m`, or
+    /// `M-m` beside text or where the pane takes a plain `m`.
+    pub(super) fn mouse_key(&self) -> &'static str {
+        let m = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE);
+        if self.owns_text() || self.pane.as_ref().is_some_and(|p| p.takes_key(m)) {
+            "M-m"
+        } else {
+            "m"
+        }
     }
 
     /// The key help, then the pane's bindings, then the rest of the shell's.
@@ -133,16 +144,11 @@ impl App {
     /// when the message needs its room, and a message longer than the bar
     /// ends in `…`.
     pub(super) fn pane_status(&mut self, area: Rect) -> Vec<Span<'static>> {
-        let text = self.owns_text();
-        let mouse = match (self.mouse, text) {
-            (true, true) => "mouse on (M-m; Shift-drag selects)",
-            (false, true) => "mouse off (M-m)",
-            (true, false) => "mouse on (m; Shift-drag selects)",
-            (false, false) => "mouse off (m)",
-        };
+        let key = self.mouse_key();
+        let mouse = if self.mouse { format!("mouse on ({key}; Shift-drag selects)") } else { format!("mouse off ({key})") };
         let footer: Vec<Binding> = self.bindings().into_iter().filter(|b| b.footer).collect();
         let Some(p) = &mut self.pane else { return Vec::new() };
-        let lozenge = self.shape.lozenge(&[Seg::on(format!(" {} ", p.mode()), Ground::Accent).bold()]);
+        let lozenge = self.shape.lozenge(&[Seg::on(format!(" {} ", p.mode()), p.mode_ground()).bold()]);
         // What the shell said last (the mouse toggled) until the next key
         // reaches the pane; else the pane's own.
         let said = if self.msg.is_empty() { p.status() } else { Some((self.msg.clone(), Tone::Said)) };
@@ -215,9 +221,11 @@ impl App {
     /// passes on and quits, quits.
     pub(super) fn pane_key(&mut self, k: KeyEvent) -> bool {
         let text = self.owns_text();
-        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-        // The shell's letter and digit keys: Alt chords beside text.
-        let shell = if text { k.modifiers == KeyModifiers::ALT } else { plain };
+        let taken = self.pane.as_ref().is_some_and(|p| p.takes_key(k));
+        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) && !taken;
+        // The shell's letter and digit keys: plain, or the Alt chord, which
+        // is the only form beside text or where the pane takes the plain key.
+        let shell = k.modifiers == KeyModifiers::ALT || (!text && plain);
         match k.code {
             KeyCode::F(1) => {
                 self.mode = Mode::Help { scroll: 0 };
@@ -336,7 +344,7 @@ impl App {
         match m.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if self.hits.pane.contains(at) => {
                 if let Some(p) = &mut self.pane {
-                    p.wheel(m.kind == MouseEventKind::ScrollUp);
+                    p.wheel_at(m.kind == MouseEventKind::ScrollUp, at);
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
@@ -350,7 +358,7 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Middle) => {
-                let key = if self.owns_text() { "M-m" } else { "m" };
+                let key = self.mouse_key();
                 self.msg = format!("middle-click pastes with the mouse off: {key}, paste, {key}");
                 return;
             }
@@ -376,6 +384,37 @@ impl App {
     /// The palette a pane screen draws in.
     pub(super) fn pane_palette(&self) -> Option<theme::Palette> {
         self.pane.as_ref().map(|p| p.palette())
+    }
+}
+
+/// The shell as a [`crate::screen::Screen`], so a headless run and the
+/// tests drive it as they drive any screen: its keys, its mouse, the
+/// pane's tick and a running apply's. On the terminal it runs through
+/// [`crate::run`], which also reports the mouse.
+impl crate::screen::Screen for App {
+    fn palette(&self) -> theme::Palette {
+        self.pane_palette().unwrap_or_else(|| self.themes.palette(self.shown_theme()))
+    }
+
+    fn draw(&mut self, f: &mut Frame) {
+        App::draw(self, f);
+    }
+
+    fn key(&mut self, k: KeyEvent) -> bool {
+        App::key(self, k)
+    }
+
+    fn mouse(&mut self, m: MouseEvent) {
+        App::mouse(self, m);
+    }
+
+    fn tick_every(&self) -> Option<std::time::Duration> {
+        self.pane_tick_every()
+    }
+
+    fn tick(&mut self) {
+        self.tick_pane();
+        App::tick(self);
     }
 }
 

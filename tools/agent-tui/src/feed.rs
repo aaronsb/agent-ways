@@ -37,13 +37,20 @@ struct Laid {
     total: usize,
 }
 
-/// How far the feed is scrolled back, in rows from the bottom, and the
-/// layout kept between frames. Drawing keeps the scroll inside what the
-/// entries allow.
+/// How far the feed is scrolled back, in rows from the bottom, the entry
+/// selected, and the layout kept between frames. Drawing keeps the scroll
+/// inside what the entries allow.
 #[derive(Debug, Clone, Default)]
 pub struct FeedState {
     pub scroll: usize,
+    /// The entry a click selected: its label box is drawn in the feed's
+    /// selected style.
+    pub selected: Option<usize>,
     laid: Laid,
+    /// The feed's row at the top of the area, and the area's height, in
+    /// the last frame: where a click lands.
+    top: usize,
+    view: usize,
     /// How many times the entries were laid out, for tests of the cache.
     layouts: usize,
 }
@@ -53,6 +60,39 @@ impl FeedState {
     pub fn layouts(&self) -> usize {
         self.layouts
     }
+
+    /// Where entry `i` starts and ends, in feed rows, its blank row left out.
+    fn span(&self, i: usize) -> Option<(usize, usize)> {
+        let h = *self.laid.heights.get(i)?;
+        let start: usize = self.laid.heights[..i].iter().sum();
+        Some((start, start + h.saturating_sub(1)))
+    }
+
+    /// The entry drawn at `row` of the area in the last frame; `None` on a
+    /// blank row between entries or below them.
+    pub fn entry_at(&self, row: u16) -> Option<usize> {
+        if row as usize >= self.view {
+            return None;
+        }
+        let at = self.top + row as usize;
+        (0..self.laid.heights.len()).find(|&i| self.span(i).is_some_and(|(a, b)| (a..b).contains(&at)))
+    }
+
+    /// Select entry `i` and scroll it into view: whole when it fits, else
+    /// from its first row.
+    pub fn reveal(&mut self, i: usize) {
+        let Some((start, end)) = self.span(i) else { return };
+        self.selected = Some(i);
+        let (total, view) = (self.laid.total, self.view);
+        let top = if start < self.top || end - start > view {
+            start
+        } else if end > self.top + view {
+            end - view
+        } else {
+            self.top
+        };
+        self.scroll = total.saturating_sub(view + top);
+    }
 }
 
 pub struct Feed<'a> {
@@ -60,13 +100,15 @@ pub struct Feed<'a> {
     /// The label box's width, borders included.
     label_width: u16,
     border: Style,
+    /// The selected entry's label box.
+    selected: Style,
     /// Changes whenever the entries do; `None` lays them out every frame.
     generation: Option<u64>,
 }
 
 impl<'a> Feed<'a> {
     pub fn new(entries: &'a [Entry]) -> Feed<'a> {
-        Feed { entries, label_width: 20, border: Style::new(), generation: None }
+        Feed { entries, label_width: 20, border: Style::new(), selected: Style::new(), generation: None }
     }
 
     pub fn label_width(mut self, w: u16) -> Feed<'a> {
@@ -77,6 +119,12 @@ impl<'a> Feed<'a> {
     /// The label box's border.
     pub fn border(mut self, s: Style) -> Feed<'a> {
         self.border = s;
+        self
+    }
+
+    /// The selected entry's label box ([`FeedState::selected`]).
+    pub fn selected(mut self, s: Style) -> Feed<'a> {
+        self.selected = s;
         self
     }
 
@@ -112,8 +160,9 @@ impl<'a> Feed<'a> {
         self.lay_out(width).total
     }
 
-    /// Draw rows `rows` of entry `e` (entry-relative) at screen row `y`.
-    fn draw_rows(&self, e: &Entry, body: &[Line<'static>], area: Rect, y: u16, rows: std::ops::Range<usize>, buf: &mut Buffer) {
+    /// Draw rows `rows` of entry `e` (entry-relative) at screen row `y` of
+    /// `area`, its label box in `border`.
+    fn draw_rows(&self, e: &Entry, body: &[Line<'static>], (area, y): (Rect, u16), rows: std::ops::Range<usize>, border: Style, buf: &mut Buffer) {
         let (from, to) = (rows.start, rows.end);
         let lw = self.label_width.min(area.width);
         let label_h = e.label.len() + 2;
@@ -134,7 +183,7 @@ impl<'a> Feed<'a> {
                 .collect();
             let boxed = Rect::new(0, 0, lw, label_h.min(u16::MAX as usize) as u16);
             let mut scratch = Buffer::empty(boxed);
-            let block = Block::bordered().border_type(BorderType::Rounded).border_style(self.border).padding(Padding::horizontal(1));
+            let block = Block::bordered().border_type(BorderType::Rounded).border_style(border).padding(Padding::horizontal(1));
             Paragraph::new(label).block(block).render(boxed, &mut scratch);
             for row in from..to.min(label_h) {
                 let dst = y + (row - from) as u16;
@@ -178,6 +227,8 @@ impl StatefulWidget for Feed<'_> {
         state.scroll = state.scroll.min(laid.total.saturating_sub(view));
         // The feed's row shown at the top of the area.
         let top = laid.total.saturating_sub(view + state.scroll);
+        state.top = top;
+        state.view = view;
         let mut y = 0usize;
         for (i, e) in self.entries.iter().enumerate() {
             let Some(&h) = laid.heights.get(i) else { break };
@@ -191,7 +242,8 @@ impl StatefulWidget for Feed<'_> {
             }
             let (from, to) = (start.max(top) - start, end.min(top + view) - start);
             let dst = area.y + (start + from - top) as u16;
-            self.draw_rows(e, &laid.bodies[i], area, dst, from..to, buf);
+            let border = if state.selected == Some(i) { self.selected } else { self.border };
+            self.draw_rows(e, &laid.bodies[i], (area, dst), from..to, border, buf);
         }
     }
 }
@@ -272,6 +324,35 @@ mod tests {
         assert_eq!(st.layouts(), 2, "a new width lays it out again");
         Feed::new(&es).generation(8).render(buf.area, &mut buf, &mut st);
         assert_eq!(st.layouts(), 3, "a new generation lays it out again");
+    }
+
+    /// A click finds the entry drawn on its row, and revealing an entry
+    /// cut off at the top scrolls it whole into view.
+    #[test]
+    fn a_row_names_its_entry_and_a_reveal_brings_it_whole_into_view() {
+        let es: Vec<Entry> = (0..4).map(|i| entry(&format!("e{i}"), "x")).collect();
+        let mut st = FeedState::default();
+        let frame = |st: &mut FeedState| {
+            let mut buf = Buffer::empty(Rect::new(0, 0, 20, 6));
+            Feed::new(&es).label_width(8).selected(Style::new().fg(ratatui::style::Color::Red)).render(buf.area, &mut buf, st);
+            buf
+        };
+        let buf = frame(&mut st);
+        // 16 rows of feed in 6: e2 is cut at the top, e3 whole below it.
+        let r = rows(&buf);
+        assert!(r[3].contains("e3"), "{r:?}");
+        assert_eq!(st.entry_at(3), Some(3));
+        assert_eq!(st.entry_at(5), None, "the blank row after an entry");
+        assert_eq!(st.entry_at(0), Some(2));
+        st.reveal(2);
+        let buf = frame(&mut st);
+        let r = rows(&buf);
+        assert!(r[0].starts_with('╭') && r[1].contains("e2"), "e2 whole from the top: {r:?}");
+        assert_eq!(buf[(0, 0)].fg, ratatui::style::Color::Red, "the selected entry's box");
+        st.reveal(3);
+        let r = rows(&frame(&mut st));
+        assert_eq!(st.scroll, 1, "e3 cut at the bottom: scrolled down to its last row");
+        assert!(r[3].starts_with('╭') && r[5].starts_with('╰'), "{r:?}");
     }
 
     #[test]

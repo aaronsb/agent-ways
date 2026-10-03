@@ -218,6 +218,28 @@ impl Scrubber<'_> {
     }
 }
 
+impl Scrubber<'_> {
+    /// The frame whose cell is at column `x` of a scrubber `width` wide, the
+    /// nearest frame to the cell: a click on the track seeks there. `None`
+    /// on the `pos/len` label or with no frames.
+    pub fn frame_at(&self, width: u16, x: u16) -> Option<usize> {
+        let label = format!(" {}/{}", if self.len == 0 { 0 } else { self.pos + 1 }, self.len).chars().count();
+        let track = (width as usize).saturating_sub(label);
+        let x = x as usize;
+        if self.len == 0 || x >= track {
+            return None;
+        }
+        if self.len == 1 || track == 1 {
+            return Some(0);
+        }
+        // The first frame drawn in the cell, or with none there the nearest:
+        // one of the two frames either side of the inverse of the cell map.
+        let cell = |i: usize| i * (track - 1) / (self.len - 1);
+        let near = x * (self.len - 1) / (track - 1);
+        (near.saturating_sub(1)..=(near + 2).min(self.len - 1)).min_by_key(|&f| (cell(f).abs_diff(x), f))
+    }
+}
+
 impl Widget for Scrubber<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         Paragraph::new(self.line(area.width)).render(area, buf);
@@ -247,6 +269,28 @@ mod tests {
     use super::*;
     use crate::theme::{set, Palette};
     use agent_theme::ColorDepth;
+
+    /// A click on the track seeks to the frame drawn in that cell: the
+    /// ends are the first and last frames, and every frame's own cell
+    /// leads back to it.
+    #[test]
+    fn a_column_of_the_track_is_the_frame_drawn_there() {
+        for len in [1usize, 2, 7, 40, 300] {
+            let s = Scrubber { len, pos: 0, marks: &[], notes: &[] };
+            let width = 60u16;
+            let track = width as usize - format!(" 1/{len}").chars().count();
+            assert_eq!(s.frame_at(width, 0), Some(0));
+            assert_eq!(s.frame_at(width, track as u16 - 1), Some(len - 1), "len {len}");
+            assert_eq!(s.frame_at(width, track as u16), None, "the label");
+            for i in 0..len {
+                let cell = if len <= 1 { 0 } else { i * (track - 1) / (len - 1) };
+                let back = s.frame_at(width, cell as u16).unwrap();
+                let again = if len <= 1 { 0 } else { back * (track - 1) / (len - 1) };
+                assert_eq!(again, cell, "len {len} frame {i}: its cell seeks a frame drawn in the same cell");
+            }
+        }
+        assert_eq!(Scrubber { len: 0, pos: 0, marks: &[], notes: &[] }.frame_at(40, 0), None);
+    }
 
     #[test]
     fn a_replay_plays_to_the_end_and_stops() {

@@ -143,6 +143,12 @@ pub trait Pane: Any {
     /// The mouse wheel over the pane: `up` toward older content.
     fn wheel(&mut self, _up: bool) {}
 
+    /// The mouse wheel at `at`, inside the pane's area, for a pane whose
+    /// parts scroll apart; [`Pane::wheel`] by default.
+    fn wheel_at(&mut self, up: bool, _at: Position) {
+        self.wheel(up);
+    }
+
     /// A left click at `at`, inside the pane's area.
     fn click(&mut self, _at: Position) {}
 
@@ -152,6 +158,20 @@ pub trait Pane: Any {
     /// The bottom bar's lozenge: what the pane is doing.
     fn mode(&self) -> String {
         "browse".into()
+    }
+
+    /// The lozenge's ground: the accent, or a state's own colour, such as
+    /// a live view's ok and a paused one's warning.
+    fn mode_ground(&self) -> theme::Ground {
+        theme::Ground::Accent
+    }
+
+    /// Whether the pane answers plain key `k` itself where the shell would
+    /// take it (the shell's `m`, `q`, `?` and digits beside a pane that
+    /// owns no text). The shell's key keeps its Alt form there, and the
+    /// bar names that form while the pane takes the plain one.
+    fn takes_key(&self, _k: KeyEvent) -> bool {
+        false
     }
 
     /// The bottom bar's message and how it reads, asked each frame.

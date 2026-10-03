@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::style::{Color, Modifier};
 use ratatui::Terminal;
 
@@ -78,18 +78,44 @@ pub fn type_str(app: &mut App, s: &str) -> bool {
 /// Key events from a script of tokens, so a headless run (a `--snap`, a
 /// test of the real binary) drives the real key handler. A token is one
 /// character, a key name (`enter`, `esc`, `tab`, `backtab`, `up`, `down`,
-/// `left`, `right`, `home`, `end`, `pgup`, `pgdn`, `bksp`, `space`),
-/// `ctrl-<c>` or `shift-<key>`, or `text:<chars>` to type the characters.
+/// `left`, `right`, `home`, `end`, `pgup`, `pgdn`, `bksp`, `del`, `space`,
+/// `f1`), `ctrl-<c>`, `alt-<c>` or `shift-<key>`, or `text:<chars>` to
+/// type the characters. A mouse token ([`parse_events`]) is refused here.
 pub fn parse_keys<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Result<Vec<KeyEvent>, String> {
     let mut out = Vec::new();
     for t in tokens {
+        for e in parse_events([t])? {
+            match e {
+                Event::Key(k) => out.push(k),
+                _ => return Err(format!("`{t}` is a mouse event, and this script takes keys only")),
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Events from a script of tokens: the keys of [`parse_keys`], and the
+/// mouse, so a golden covers a click without raw escape bytes. Columns and
+/// rows count from 0 at the top left, as the frame's rows are printed:
+///
+/// - `click:C,R`: the left button pressed and released at column C, row R;
+/// - `middle:C,R`: the middle button, likewise;
+/// - `wheel:up@C,R`, `wheel:down@C,R`: one notch of the wheel there.
+pub fn parse_events<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Result<Vec<Event>, String> {
+    let mut out = Vec::new();
+    for t in tokens {
         if let Some(text) = t.strip_prefix("text:") {
-            out.extend(text.chars().map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
+            out.extend(text.chars().map(|c| Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))));
             continue;
         }
-        let (mods, name) = match (t.strip_prefix("ctrl-"), t.strip_prefix("shift-")) {
-            (Some(n), _) => (KeyModifiers::CONTROL, n),
-            (_, Some(n)) => (KeyModifiers::SHIFT, n),
+        if let Some(mouse) = mouse_token(t)? {
+            out.extend(mouse);
+            continue;
+        }
+        let (mods, name) = match (t.strip_prefix("ctrl-"), t.strip_prefix("alt-"), t.strip_prefix("shift-")) {
+            (Some(n), ..) => (KeyModifiers::CONTROL, n),
+            (_, Some(n), _) => (KeyModifiers::ALT, n),
+            (.., Some(n)) => (KeyModifiers::SHIFT, n),
             _ => (KeyModifiers::NONE, t),
         };
         let code = match name {
@@ -106,13 +132,65 @@ pub fn parse_keys<'a>(tokens: impl IntoIterator<Item = &'a str>) -> Result<Vec<K
             "pgup" => KeyCode::PageUp,
             "pgdn" => KeyCode::PageDown,
             "bksp" => KeyCode::Backspace,
+            "del" => KeyCode::Delete,
             "space" => KeyCode::Char(' '),
+            "f1" => KeyCode::F(1),
             n if n.chars().count() == 1 => KeyCode::Char(n.chars().next().expect("one character")),
             other => return Err(format!("unknown key `{other}`")),
         };
-        out.push(KeyEvent::new(code, mods));
+        out.push(Event::Key(KeyEvent::new(code, mods)));
     }
     Ok(out)
+}
+
+/// The events of a mouse token, `None` when `t` is not one.
+fn mouse_token(t: &str) -> Result<Option<Vec<Event>>, String> {
+    let at = |s: &str| -> Result<(u16, u16), String> {
+        s.split_once(',')
+            .and_then(|(c, r)| Some((c.trim().parse().ok()?, r.trim().parse().ok()?)))
+            .ok_or_else(|| format!("`{t}`: a place is COLUMN,ROW, such as 10,3"))
+    };
+    let ev = |kind, (column, row): (u16, u16)| Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE });
+    let press = |b: MouseButton, p: (u16, u16)| vec![ev(MouseEventKind::Down(b), p), ev(MouseEventKind::Up(b), p)];
+    if let Some(p) = t.strip_prefix("click:") {
+        return Ok(Some(press(MouseButton::Left, at(p)?)));
+    }
+    if let Some(p) = t.strip_prefix("middle:") {
+        return Ok(Some(press(MouseButton::Middle, at(p)?)));
+    }
+    if let Some(rest) = t.strip_prefix("wheel:") {
+        let (dir, p) = rest.split_once('@').ok_or_else(|| format!("`{t}`: wheel:up@COLUMN,ROW or wheel:down@COLUMN,ROW"))?;
+        let kind = match dir {
+            "up" => MouseEventKind::ScrollUp,
+            "down" => MouseEventKind::ScrollDown,
+            _ => return Err(format!("`{t}`: the wheel goes up or down")),
+        };
+        return Ok(Some(vec![ev(kind, at(p)?)]));
+    }
+    Ok(None)
+}
+
+/// Send `events` to `screen` as the terminal loop does, drawing a frame at
+/// `size` before each, as a terminal draws one before it reads the next:
+/// what an event does can depend on what was drawn, such as a page's
+/// height or where a row sits for a click. Returns false if a key ended
+/// the session; the events after it are not sent.
+pub fn play<S: Screen + ?Sized>(screen: &mut S, events: &[Event], size: Option<(u16, u16)>) -> bool {
+    for e in events {
+        if let Some((w, h)) = size {
+            render_screen(screen, w, h);
+        }
+        match e {
+            Event::Key(k) => {
+                if !screen.key(*k) {
+                    return false;
+                }
+            }
+            Event::Mouse(m) => screen.mouse(*m),
+            _ => {}
+        }
+    }
+    true
 }
 
 /// Tick a running apply until it has ended and review has closed it out.
@@ -376,6 +454,22 @@ mod tests {
 
     fn buf(lines: &[&str]) -> Buffer {
         Buffer::with_lines(lines.iter().copied())
+    }
+
+    #[test]
+    fn a_script_names_keys_and_the_mouse() {
+        let evs = parse_events(["alt-m", "click:3,4", "wheel:down@0,9", "text:hi", "f1"]).expect("a script");
+        assert_eq!(evs[0], Event::Key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT)));
+        let m = |kind, column, row| Event::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE });
+        assert_eq!(evs[1], m(MouseEventKind::Down(MouseButton::Left), 3, 4));
+        assert_eq!(evs[2], m(MouseEventKind::Up(MouseButton::Left), 3, 4));
+        assert_eq!(evs[3], m(MouseEventKind::ScrollDown, 0, 9));
+        assert_eq!(evs.len(), 7);
+        assert_eq!(evs[6], Event::Key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)));
+        assert!(parse_events(["click:3"]).is_err());
+        assert!(parse_events(["wheel:left@1,1"]).is_err());
+        assert!(parse_keys(["click:1,1"]).unwrap_err().contains("mouse"), "a key script refuses the mouse");
+        assert_eq!(parse_keys(["q"]).unwrap(), [KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)]);
     }
 
     #[test]
