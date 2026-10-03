@@ -40,13 +40,13 @@ styles
   3  51-75  - - DIM
   3  76-79  - - BOLD
   4   0-0   - - DIM
-  4   1-14  Blue - BOLD|DIM
+  4   1-14  LightBlue - BOLD|DIM
   4  15-26  - - DIM
-  4  27-48  Blue - BOLD|DIM
+  4  27-48  LightBlue - BOLD|DIM
   4  49-79  - - DIM
   5   0-0   - - DIM
   5   4-6   - - DIM
-  5   7-24  Blue - -
+  5   7-24  LightBlue - -
   5  25-26  - - DIM
   5  27-50  - - BOLD
   5  79-79  - - DIM

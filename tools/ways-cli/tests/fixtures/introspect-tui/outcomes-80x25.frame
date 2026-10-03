@@ -4,15 +4,15 @@ agent-tui frame 80x25
 |epoch 3 · 200K ctx · 7 ways · window 1/1 · 2026-07-03 16:55  ◆ matched          |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 3/3|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────┐|
-|│ Way                      Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
-|│ softwaredev/delivery/co  main       1      2  keyword        ●  ● now        │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
+|│ …/delivery/commits       main       1      2  keyword        ●  ● now        │|
 |│ softwaredev/docs/adr     main       2      1  file           ◆  ◐ 85%        │|
-|│   ✓ check (1 fires, dec  main                                                │|
-|│▌↩ softwaredev/code/test  main       3      0  embed:en       ■  ─            │|
-|│ ◌ softwaredev/delivery/  main       3      0  keyword        ▲  ─            │|
+|│   ✓ ×1 decay 0.50        main                                                │|
+|│▌↩ …/code/testing         main       3      0  embed:en       ■  ─            │|
+|│ ◌ …/delivery/review      main       3      0  keyword        ▲  ─            │|
 |│ ⊘ itops/incident                    3      0  judge 0.050       not injected │|
 |│ ⊟ meta/knowledge         main       3      0  keyword           not injected │|
-|│ ◷ softwaredev/delivery/  main       3      0  keyword           not injected │|
+|│ ◷ …/delivery/commits     main       3      0  keyword           not injected │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -38,20 +38,20 @@ styles
   3  75-75  Cyan - BOLD
   3  76-79  - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-79  - - DIM
   5   0-0   - - DIM
   5   1-78  - - BOLD
   5  79-79  - - DIM
   6   0-0   - - DIM
-  6   2-24  Green - -
+  6   2-19  Green - -
   6  27-31  - - DIM
   6  41-45  Red - -
   6  63-63  #5ac8fa - -
   6  66-70  Green - -
   6  79-79  - - DIM
   7   0-0   - - DIM
-  7   2-21  Blue - -
+  7   2-21  LightBlue - -
   7  27-31  - - DIM
   7  41-45  Yellow - BOLD
   7  63-63  #7dd87d - -
@@ -62,8 +62,8 @@ styles
   8  27-31  - - DIM
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9   1-24  Cyan - BOLD|REVERSED
-  9  25-26  - - BOLD|REVERSED
+  9   1-17  Cyan - BOLD|REVERSED
+  9  18-26  - - BOLD|REVERSED
   9  27-31  - - BOLD|DIM|REVERSED
   9  32-40  - - BOLD|REVERSED
   9  41-45  Green - BOLD|REVERSED
@@ -75,8 +75,8 @@ styles
   9  79-79  - - DIM
  10   0-0   - - DIM
  10   1-1   - - BOLD
- 10   2-24  Yellow - BOLD
- 10  25-26  - - BOLD
+ 10   2-20  Yellow - BOLD
+ 10  21-26  - - BOLD
  10  27-31  - - BOLD|DIM
  10  32-40  - - BOLD
  10  41-45  Green - BOLD
@@ -94,7 +94,7 @@ styles
  11  66-77  - - DIM
  11  79-79  - - DIM
  12   0-0   - - DIM
- 12   2-17  LightRed - -
+ 12   2-17  Yellow - -
  12  27-31  - - DIM
  12  38-38  - - DIM
  12  45-45  - - DIM
@@ -102,7 +102,7 @@ styles
  12  66-77  - - DIM
  12  79-79  - - DIM
  13   0-0   - - DIM
- 13   2-24  - - DIM
+ 13   2-21  - - DIM
  13  27-31  - - DIM
  13  38-38  - - DIM
  13  45-45  - - DIM
@@ -117,7 +117,7 @@ styles
  16  79-79  - - DIM
  17   0-79  - - DIM
  18   0-0   - - DIM
- 18   1-9   Blue - BOLD|DIM
+ 18   1-9   LightBlue - BOLD|DIM
  18  10-79  - - DIM
  19   0-0   - - DIM
  19   1-60  Yellow - BOLD

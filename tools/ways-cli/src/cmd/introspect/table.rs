@@ -59,19 +59,61 @@ pub(super) fn look(fate: Fate) -> (&'static str, Style) {
         Fate::WouldBlock => ("◌ ", theme::warn()),
         Fate::Blocked => ("⊘ ", theme::err()),
         Fate::RefireHeld => ("◷ ", theme::muted()),
-        Fate::CapHeld => ("⊟ ", theme::hot()),
+        Fate::CapHeld => ("⊟ ", ink(agent_theme::Style::new().role(agent_theme::Role::Alt))),
     }
 }
 
-/// A way's name with its fate's mark, in its fate's colour.
-pub(super) fn way_name(w: &ActiveWay) -> Span<'static> {
+/// A way's name with its fate's mark, in its fate's colour, cut to `width`
+/// cells from the left so the leaf stays.
+pub(super) fn way_name(w: &ActiveWay, width: usize) -> Span<'static> {
     let (mark, style) = look(Fate::of(w));
-    Span::styled(format!("{mark}{}", w.id), style)
+    let room = width.saturating_sub(agent_fmt::visible_len(mark));
+    Span::styled(format!("{mark}{}", keep_tail(&w.id, room)), style)
 }
 
-/// An agent's name in its colour, cut to the column.
+/// `id` in at most `width` cells: whole trailing segments after `…/`
+/// (`…/docs/adr`), or the leaf's tail after `…` when even it does not fit.
+pub(super) fn keep_tail(id: &str, width: usize) -> String {
+    let len = |s: &str| s.chars().count();
+    if len(id) <= width {
+        return id.to_string();
+    }
+    let segs: Vec<&str> = id.split('/').collect();
+    let mut tail = String::new();
+    for seg in segs.iter().rev() {
+        let next = if tail.is_empty() { seg.to_string() } else { format!("{seg}/{tail}") };
+        if len(&next) + 2 > width {
+            break;
+        }
+        tail = next;
+    }
+    if !tail.is_empty() {
+        return format!("…/{tail}");
+    }
+    let keep = width.saturating_sub(1);
+    let chars: Vec<char> = id.chars().collect();
+    format!("…{}", chars[chars.len().saturating_sub(keep)..].iter().collect::<String>())
+}
+
+/// The Way column's width beside an Agent column `agent_w` wide.
+pub(super) fn way_width(inner: usize, agent_w: u16) -> usize {
+    inner.saturating_sub(HIGHLIGHT + agent_w as usize + FIXED + GAPS).max(WAY_MIN)
+}
+
+/// An agent's name in its colour, cut to the column: a workflow member
+/// keeps the end of its label (`wf·…:judge`), any other the start.
 pub(super) fn agent_cell(agents: &Agents, id: &str, width: u16) -> Line<'static> {
-    Line::styled(agent_fmt::truncate_visible(&agents.label(id), width as usize), agents.style(id))
+    let label = agents.label(id);
+    let w = width as usize;
+    let text = match label.strip_prefix("wf·") {
+        Some(l) if label.chars().count() > w => {
+            let keep = w.saturating_sub(4);
+            let chars: Vec<char> = l.chars().collect();
+            format!("wf·…{}", chars[chars.len().saturating_sub(keep)..].iter().collect::<String>())
+        }
+        _ => agent_fmt::truncate_visible(&label, w),
+    };
+    Line::styled(text, agents.style(id))
 }
 
 
@@ -82,7 +124,7 @@ fn ink(s: agent_theme::Style) -> Style {
 
 pub(super) fn header() -> Row<'static> {
     let right = |t: &'static str| Cell::from(Line::from(t).alignment(Alignment::Right));
-    Row::new(vec![Cell::from("Way"), Cell::from("Agent"), right("Epoch"), right("Dist"), Cell::from("Trigger"), Cell::from("\u{2316}"), Cell::from("Re-disclose")])
+    Row::new(vec![Cell::from("Way"), Cell::from("Agent"), right("Epoch"), right("Dist"), Cell::from("Trigger"), Cell::from(render::PIN_HEADER), Cell::from("Re-disclose")])
         .style(Style::new().add_modifier(Modifier::BOLD))
 }
 
@@ -109,6 +151,7 @@ pub(super) fn clusters(ways: &[ActiveWay], window_k: u64, bar: usize) -> (Vec<Op
 /// fired or re-disclosed in this frame is bold.
 pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, bar: usize) -> Vec<Row<'static>> {
     let (pos, unique) = clusters(&frame.ways, window_k, bar);
+    let way_w = way_width(bar, agent_w);
     frame
         .ways
         .iter()
@@ -117,11 +160,10 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
             let distance = frame.epoch.saturating_sub(w.epoch_fired);
             let (next, next_style) = render::next_cell(w, frame.epoch, frame.token_position_k);
             let pin = pos.get(i).copied().flatten().map_or(Span::raw(" "), |p| pin(render::cluster_of(p, &unique)));
-            let mut way = vec![Line::from(way_name(w))];
+            let mut way = vec![Line::from(way_name(w, way_w))];
             let mut agent = vec![agent_cell(agents, &w.agent, agent_w)];
             if w.check_fires > 0 {
-                let decay = 1.0 / (w.check_fires as f64 + 1.0);
-                way.push(Line::styled(format!("  ✓ check ({} fires, decay={decay:.2})", w.check_fires), theme::muted()));
+                way.push(Line::styled(format!("  ✓ ×{} decay {:.2}", w.check_fires, decay(w.check_fires)), theme::muted()));
                 agent.push(agent_cell(agents, &w.agent, agent_w));
             }
             let height = way.len() as u16;
@@ -139,6 +181,11 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
             .style(style)
         })
         .collect()
+}
+
+/// A check's decay after `fires` fires.
+pub(super) fn decay(fires: u64) -> f64 {
+    1.0 / (fires as f64 + 1.0)
 }
 
 /// The lines under the table, most useful first: the token gauge, the

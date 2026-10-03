@@ -4,7 +4,7 @@ agent-tui frame 120x40
 |epoch 1 · 200K ctx · 3 ways · window 1/1 · 2026-07-03 16:52  ◆ matched                                                  |
 |●─────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 1/2|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                              Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│ Way                                                              Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
 |│▌softwaredev/code/testing                                         main       1      0  embed:en       ◆  ─            │|
 |│ ◌ softwaredev/delivery/commits                                   main       1      0  keyword        ●  ─            │|
 |│ ⊘ itops/incident                                                            1      0  judge 0.050       not injected │|
@@ -53,7 +53,7 @@ styles
   3   1-115 - - DIM
   3 116-119 - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-119 - - DIM
   5   0-0   - - DIM
   5   1-118 - - BOLD
@@ -139,7 +139,7 @@ styles
  31 119-119 - - DIM
  32   0-119 - - DIM
  33   0-0   - - DIM
- 33   1-9   Blue - BOLD|DIM
+ 33   1-9   LightBlue - BOLD|DIM
  33  10-119 - - DIM
  34   0-0   - - DIM
  34   1-102 Green - -

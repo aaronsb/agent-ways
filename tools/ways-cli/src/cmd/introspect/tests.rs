@@ -1239,7 +1239,7 @@ fn a_click_on_a_live_track_pauses_and_the_end_follows() {
 fn a_click_on_a_way_selects_it_and_a_second_opens_why() {
     let mut s = showing(replay(false), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Right, KeyCode::Right]);
-    let check = at(&mut s, "✓ check");
+    let check = at(&mut s, "✓ ×");
     click(&mut s, check);
     assert!(selected(&mut s).contains("softwaredev/delivery/commits"), "the check's line is its way's row");
     click(&mut s, check);
@@ -1388,10 +1388,12 @@ fn main_and_a_subagent_firing_one_way_are_a_row_each_named() {
     assert!(row(" main "), "{t}");
     assert!(row("code-reviewer"), "{t}");
     assert!(row("wf·audit:judge"), "{t}");
-    assert!(t.lines().any(|l| l.contains("✓ check (1 fires") && l.contains("code-reviewer")), "the check sub-row names its agent: {t}");
-    // At 80 columns both columns keep enough to tell rows apart.
+    assert!(t.lines().any(|l| l.contains("✓ ×1 decay 0.50") && l.contains("code-reviewer")), "the check sub-row names its agent: {t}");
+    // At 80 columns the way keeps its leaf, a workflow member its label's end.
     let t = text(&render(&mut s, 80, 25));
-    assert!(t.contains("softwaredev/docs/a  code-revi…"), "{t}");
+    assert!(t.contains("…/docs/adr          code-revi…"), "{t}");
+    assert!(t.contains("wf·…:judge"), "{t}");
+    assert!(t.contains("  ✓ ×1 decay 0.50"), "{t}");
 }
 
 #[test]
@@ -1463,4 +1465,13 @@ fn outcomes_golden_frames() {
     press(&mut s, &[KeyCode::Right, KeyCode::Right, KeyCode::Char('f')]);
     check(&mut g, "outcomes", &mut s);
     g.finish();
+}
+
+#[test]
+fn a_long_way_id_keeps_its_trailing_segments() {
+    use super::table::keep_tail;
+    assert_eq!(keep_tail("softwaredev/docs/adr", 20), "softwaredev/docs/adr");
+    assert_eq!(keep_tail("softwaredev/docs/adr", 18), "…/docs/adr");
+    assert_eq!(keep_tail("softwaredev/code/supplychain/repoaudit", 18), "…/repoaudit");
+    assert_eq!(keep_tail("a/averyveryverylongleaf", 8), "…ongleaf");
 }

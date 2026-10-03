@@ -1076,10 +1076,11 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
         // `Frame::ways` keeps.
         let agent_w = table::agent_width(&shown.ways, &r.agents, inner_w);
         let mut rows = table::rows(fr, &r.agents, agent_w, r.window_k, inner_w);
+        let way_w = table::way_width(inner_w, agent_w);
         let withheld = || shown.ways.iter().filter(|w| !w.outcome.injected());
         // A way whose check fired takes a second line.
         let heights: Vec<u16> = fr.ways.iter().map(|w| 1 + u16::from(w.check_fires > 0)).chain(withheld().map(|_| 1)).collect();
-        rows.extend(withheld().map(|w| withheld_row(w, &r.agents, agent_w, shown.epoch)));
+        rows.extend(withheld().map(|w| withheld_row(w, &r.agents, agent_w, way_w, shown.epoch)));
         let t = Table::new(rows, table::widths(agent_w))
             .header(table::header())
             .column_spacing(2)
@@ -1116,13 +1117,13 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
 /// marked and coloured by what kept it out, its trigger (a judged way's
 /// P(yes)), and nothing to re-disclose, for it injected nothing. A way
 /// blocked with its ancestor names it.
-fn withheld_row(w: &ActiveWay, agents: &Agents, agent_w: u16, epoch: u64) -> Row<'static> {
+fn withheld_row(w: &ActiveWay, agents: &Agents, agent_w: u16, way_w: usize, epoch: u64) -> Row<'static> {
     let muted = |t: String| Span::styled(t, theme::muted());
     let right = |t: String| Cell::from(Line::from(muted(t)).alignment(Alignment::Right));
     let with = if w.ancestor.is_empty() { String::new() } else { format!(" (with {})", w.ancestor) };
     let trigger = if w.outcome == Outcome::Blocked { format!("{} {}", w.trigger, w.p_yes) } else { render::format_trigger(&w.trigger) };
     Row::new(vec![
-        Cell::from(Line::from(vec![table::way_name(w), muted(with)])),
+        Cell::from(Line::from(vec![table::way_name(w, way_w), muted(with)])),
         Cell::from(table::agent_cell(agents, &w.agent, agent_w)),
         right(w.epoch_fired.to_string()),
         right(epoch.saturating_sub(w.epoch_fired).to_string()),
@@ -1148,7 +1149,7 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
             ListItem::new(Line::from(vec![
                 Span::raw(format!("{bullet} ")),
                 Span::styled(format!("e{:>ew$} ", w.epoch_fired), theme::muted()),
-                table::way_name(w),
+                table::way_name(w, usize::MAX),
             ]))
         })
         .collect();
@@ -1164,7 +1165,7 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
     r.list.select(if fr.ways.is_empty() { None } else { Some(r.sel) });
 
     let text_w = right.width.saturating_sub(2);
-    let lines: Vec<Line> = match fr.ways.get(r.sel) {
+    let mut lines: Vec<Line> = match fr.ways.get(r.sel) {
         None => vec![Line::styled("no ways fired in this frame", theme::muted())],
         Some(w) if r.why.is_none() => vec![Line::styled(w.id.clone(), Style::new().add_modifier(Modifier::BOLD)), Line::styled("no introspection model for this session", theme::muted())],
         Some(w) => {
@@ -1174,6 +1175,12 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
             why::detail_lines(&w.id, entry, body.as_deref(), text_w).iter().flat_map(|l| agent_tui::wrap::wrap_line(l, text_w as usize)).collect()
         }
     };
+    // The table's `✓ ×N decay` line in full, under the way's name.
+    if let Some(w) = fr.ways.get(r.sel).filter(|w| w.check_fires > 0) {
+        let n = w.check_fires;
+        let line = format!("✓ check fired {n} time{} in {}, decay={:.2}", if n == 1 { "" } else { "s" }, r.agents.label(&w.agent), table::decay(n));
+        lines.insert(1.min(lines.len()), Line::styled(line, theme::muted()));
+    }
     let inner_h = right.height.saturating_sub(2) as usize;
     r.page = inner_h.saturating_sub(1).max(1);
     r.scroll = r.scroll.min(lines.len().saturating_sub(inner_h));

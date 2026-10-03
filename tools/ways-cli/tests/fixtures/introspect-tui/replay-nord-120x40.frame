@@ -4,9 +4,9 @@ agent-tui frame 120x40
 |epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ◇ injected · 1 judged out                                  |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                              Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│ Way                                                              Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
 |│ softwaredev/delivery/commits                                     main       1      2  keyword        ●  ● now        │|
-|│   ✓ check (1 fires, decay=0.50)                                  main                                                │|
+|│   ✓ ×1 decay 0.50                                                main                                                │|
 |│ softwaredev/docs/adr                                             main       2      1  file           ◆  ◐ 85%        │|
 |│▌↩ softwaredev/code/testing                                       main       3      0  embed:en       ■  ─            │|
 |│                                                                                                                      │|

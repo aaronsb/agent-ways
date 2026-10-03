@@ -4,11 +4,11 @@ agent-tui frame 80x25
 |epoch 3 · 200K ctx · 3 ways · window 1/2  ◇ injected · 1 judged out             |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●────────────────────────┼ 3/4|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────┐|
-|│ Way                      Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
-|│ softwaredev/delivery/co  main       1      2  keyword        ●  ● now        │|
-|│   ✓ check (1 fires, dec  main                                                │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
+|│ …/delivery/commits       main       1      2  keyword        ●  ● now        │|
+|│   ✓ ×1 decay 0.50        main                                                │|
 |│ softwaredev/docs/adr     main       2      1  file           ◆  ◐ 85%        │|
-|│▌↩ softwaredev/code/test  main       3      0  embed:en       ■  ─            │|
+|│▌↩ …/code/testing         main       3      0  embed:en       ■  ─            │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -40,13 +40,13 @@ styles
   3  51-75  - - DIM
   3  76-79  - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-79  - - DIM
   5   0-0   - - DIM
   5   1-78  - - BOLD
   5  79-79  - - DIM
   6   0-0   - - DIM
-  6   2-24  Blue - -
+  6   2-19  LightBlue - -
   6  27-31  - - DIM
   6  41-45  Red - -
   6  63-63  #5ac8fa - -
@@ -64,8 +64,8 @@ styles
   8  66-70  Yellow - BOLD
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9   1-24  Cyan - BOLD|REVERSED
-  9  25-26  - - BOLD|REVERSED
+  9   1-17  Cyan - BOLD|REVERSED
+  9  18-26  - - BOLD|REVERSED
   9  27-31  - - BOLD|DIM|REVERSED
   9  32-40  - - BOLD|REVERSED
   9  41-45  Green - BOLD|REVERSED
@@ -91,7 +91,7 @@ styles
  16  79-79  - - DIM
  17   0-79  - - DIM
  18   0-0   - - DIM
- 18   1-9   Blue - BOLD|DIM
+ 18   1-9   LightBlue - BOLD|DIM
  18  10-79  - - DIM
  19   0-0   - - DIM
  19   1-60  Yellow - BOLD

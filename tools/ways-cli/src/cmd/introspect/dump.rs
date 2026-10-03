@@ -107,11 +107,12 @@ struct DumpWay {
     /// On a way blocked with its ancestor, the ancestor whose P(yes) it shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     ancestor: Option<String>,
-    /// The agent it was injected into (#814): `main` or the subagent's id;
-    /// left out on a blocked row whose verdict did not name one. A way
-    /// several agents fired is an entry per agent.
+    /// The subagent it was injected into (#814); left out for the main
+    /// agent, as `ways session ways --json` leaves it out, and on a blocked
+    /// row whose verdict did not name one. A way several agents fired is an
+    /// entry per agent.
     #[serde(skip_serializing_if = "Option::is_none")]
-    agent: Option<String>,
+    agent_id: Option<String>,
     /// The subagent's `subagent_type` from its transcript, or
     /// `workflow-subagent` for a workflow member; left out when unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -242,7 +243,7 @@ fn to_dump_frame(f: &Frame, agents: &Agents) -> DumpFrame {
             outcome: w.outcome.as_str(),
             p_yes: Some(w.p_yes.clone()).filter(|p| !p.is_empty()),
             ancestor: Some(w.ancestor.clone()).filter(|a| !a.is_empty()),
-            agent: Some(w.agent.clone()).filter(|a| !a.is_empty()),
+            agent_id: Some(w.agent.clone()).filter(|a| !a.is_empty() && a != frames::MAIN),
             agent_type: agents.agent_type(&w.agent).map(str::to_string),
         })
         .collect();

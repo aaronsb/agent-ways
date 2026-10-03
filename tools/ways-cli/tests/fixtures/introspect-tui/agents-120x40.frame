@@ -4,11 +4,11 @@ agent-tui frame 120x40
 |epoch 2 · 200K ctx · 4 ways · window 1/1 · 2026-07-03 16:53                                                             |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 2/2|
 |┌ ways at epoch 2 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                     Agent           Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│ Way                                                     Agent           Epoch   Dist  Trigger        ◎  Re-disclose  │|
 |│▌softwaredev/code/testing                                main                1      1  embed:en       ●  ● now        │|
 |│ softwaredev/docs/adr                                    main                2      0  file           ◆  ─            │|
 |│ softwaredev/docs/adr                                    code-reviewer       2      0  file           ◆  ─            │|
-|│   ✓ check (1 fires, decay=0.50)                         code-reviewer                                                │|
+|│   ✓ ×1 decay 0.50                                       code-reviewer                                                │|
 |│ softwaredev/docs/adr                                    wf·audit:judge      2      0  keyword        ◆  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -52,7 +52,7 @@ styles
   3 115-115 Cyan - BOLD
   3 116-119 - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-119 - - DIM
   5   0-0   - - DIM
   5   1-118 - - BOLD
@@ -85,7 +85,7 @@ styles
   7 119-119 - - DIM
   8   0-0   - - DIM
   8   1-1   - - BOLD
-  8   2-21  Blue - BOLD
+  8   2-21  LightBlue - BOLD
   8  22-57  - - BOLD
   8  58-71  #5ac8fa - BOLD
   8  72-80  - - BOLD
@@ -160,7 +160,7 @@ styles
  31 119-119 - - DIM
  32   0-119 - - DIM
  33   0-0   - - DIM
- 33   1-9   Blue - BOLD|DIM
+ 33   1-9   LightBlue - BOLD|DIM
  33  10-119 - - DIM
  34   0-0   - - DIM
  34   1-101 Green - -

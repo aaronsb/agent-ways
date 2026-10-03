@@ -4,11 +4,11 @@ agent-tui frame 80x25
 |epoch 3 · 200K ctx · 3 ways · window 1/2  ◇ injected · 1 judged out             |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●────────────────────────┼ 3/4|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────┐|
-|│ Way                      Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
-|│ softwaredev/delivery/co  main       1      2  keyword        ●  ● now        │|
-|│   ✓ check (1 fires, dec  main                                                │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
+|│ …/delivery/commits       main       1      2  keyword        ●  ● now        │|
+|│   ✓ ×1 decay 0.50        main                                                │|
 |│ softwaredev/docs/adr     main       2      1  file           ◆  ◐ 85%        │|
-|│▌↩ softwaredev/code/test  main       3      0  embed:en       ■  ─            │|
+|│▌↩ …/code/testing         main       3      0  embed:en       ■  ─            │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -57,7 +57,7 @@ styles
   5   1-78  - - BOLD
   5  79-79  #434c5e - -
   6   0-0   #434c5e - -
-  6   2-24  #8cafd1 - -
+  6   2-19  #8cafd1 - -
   6  27-31  #7c8baa - -
   6  41-45  #ff8994 - -
   6  63-63  #5ac8fa - -
@@ -75,8 +75,8 @@ styles
   8  66-70  #e49b71 - BOLD
   8  79-79  #434c5e - -
   9   0-0   #434c5e - -
-  9   1-24  #c99fc1 #3f3f4e BOLD
-  9  25-26  - #3f3f4e BOLD
+  9   1-17  #c99fc1 #3f3f4e BOLD
+  9  18-26  - #3f3f4e BOLD
   9  27-31  #7c8baa #3f3f4e BOLD
   9  32-40  - #3f3f4e BOLD
   9  41-45  #a3be8c #3f3f4e BOLD

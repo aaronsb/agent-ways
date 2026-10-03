@@ -4,9 +4,9 @@ agent-tui frame 80x25
 |epoch 1 · 200K ctx · 3 ways · window 1/1 · 2026-07-03 16:52  ◆ matched          |
 |●─────────────────────────────────────────────────────────────────────────── 1/2|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────┐|
-|│ Way                      Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
-|│▌softwaredev/code/testin  main       1      0  embed:en       ◆  ─            │|
-|│ ◌ softwaredev/delivery/  main       1      0  keyword        ●  ─            │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
+|│▌…/code/testing           main       1      0  embed:en       ◆  ─            │|
+|│ ◌ …/delivery/commits     main       1      0  keyword        ●  ─            │|
 |│ ⊘ itops/incident                    1      0  judge 0.050       not injected │|
 |│                                                                              │|
 |│                                                                              │|
@@ -38,15 +38,15 @@ styles
   3   1-75  - - DIM
   3  76-79  - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-79  - - DIM
   5   0-0   - - DIM
   5   1-78  - - BOLD
   5  79-79  - - DIM
   6   0-0   - - DIM
   6   1-1   Cyan - BOLD|REVERSED
-  6   2-24  Green - BOLD|REVERSED
-  6  25-26  - - BOLD|REVERSED
+  6   2-15  Green - BOLD|REVERSED
+  6  16-26  - - BOLD|REVERSED
   6  27-31  - - BOLD|DIM|REVERSED
   6  32-40  - - BOLD|REVERSED
   6  41-45  Green - BOLD|REVERSED
@@ -58,8 +58,8 @@ styles
   6  79-79  - - DIM
   7   0-0   - - DIM
   7   1-1   - - BOLD
-  7   2-24  Yellow - BOLD
-  7  25-26  - - BOLD
+  7   2-21  Yellow - BOLD
+  7  22-26  - - BOLD
   7  27-31  - - BOLD|DIM
   7  32-40  - - BOLD
   7  41-45  Green - BOLD
@@ -94,7 +94,7 @@ styles
  16  79-79  - - DIM
  17   0-79  - - DIM
  18   0-0   - - DIM
- 18   1-9   Blue - BOLD|DIM
+ 18   1-9   LightBlue - BOLD|DIM
  18  10-79  - - DIM
  19   0-0   - - DIM
  19   1-62  Green - -

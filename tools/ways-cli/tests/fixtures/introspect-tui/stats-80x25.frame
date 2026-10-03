@@ -33,9 +33,9 @@ styles
   1   0-4   - - BOLD
   1   5-72  - - DIM
   2   0-0   - - DIM
-  2   1-26  Blue - BOLD|DIM
+  2   1-26  LightBlue - BOLD|DIM
   2  27-48  - - DIM
-  2  49-64  Blue - BOLD|DIM
+  2  49-64  LightBlue - BOLD|DIM
   2  65-79  - - DIM
   3   0-0   - - DIM
   3   1-46  - - BOLD
@@ -106,7 +106,7 @@ styles
  22  47-48  - - DIM
  22  79-79  - - DIM
  23   0-0   - - DIM
- 23   1-46  Blue - BOLD|DIM
+ 23   1-46  LightBlue - BOLD|DIM
  23  47-79  - - DIM
  24   0-6   Black Cyan BOLD
  24   8-19  - - DIM|ITALIC

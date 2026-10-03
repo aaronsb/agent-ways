@@ -184,6 +184,9 @@ pub fn cluster_of(bar_pos: usize, unique_positions: &[usize]) -> usize {
         % PIN_SYMBOLS.len()
 }
 
+/// The pin column's header: a glyph the bundled terminal fonts draw.
+pub const PIN_HEADER: &str = "◎";
+
 /// Render pin symbol for a cluster index. Clusters are told apart by colour
 /// alone, so the colour is agent-identity's categorical palette (ADR-504
 /// §6), at the terminal's depth.
@@ -207,7 +210,7 @@ pub fn write_table_header_with(out: &mut String, layout: &Layout) {
     let head = format!(
         "{way:<way_w$}{g}{ep:>ep_w$}{g}{di:>di_w$}{g}{tr:<tr_w$}{g}{pin:^pin_w$}{g}{rd:<rd_w$}{g}Agent",
         way = "Way", ep = "Epoch", di = "Dist", tr = "Trigger",
-        pin = "\u{2316}", rd = "Re-disclose",
+        pin = PIN_HEADER, rd = "Re-disclose",
         way_w = layout.way_col, ep_w = EPOCH_W, di_w = DIST_W,
         tr_w = TRIG_W, pin_w = PIN_W, rd_w = RD_W,
     );

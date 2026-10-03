@@ -4,7 +4,7 @@ agent-tui frame 120x40
 |epoch 1 · 200K ctx · 1 ways · window 2/2 · 2026-07-03 17:52  ◇ injected  ● LIVE · 6s ago                                |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 4/4|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                              Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│ Way                                                              Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
 |│▌↩ softwaredev/delivery/commits                                   main       1      0  keyword        ●  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -56,7 +56,7 @@ styles
   3 115-115 Cyan - BOLD
   3 116-119 - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-119 - - DIM
   5   0-0   - - DIM
   5   1-118 - - BOLD
@@ -125,7 +125,7 @@ styles
  31 119-119 - - DIM
  32   0-119 - - DIM
  33   0-0   - - DIM
- 33   1-9   Blue - BOLD|DIM
+ 33   1-9   LightBlue - BOLD|DIM
  33  10-119 - - DIM
  34   0-0   - - DIM
  34   1-101 Green - -
