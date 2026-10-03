@@ -6,8 +6,10 @@
 //! records them for review, and that run fails by design; a run without it
 //! checks them.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::Path;
+use std::rc::Rc;
 
 use agent_theme::{ColorDepth, ThemeSet};
 use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -19,6 +21,7 @@ use agent_tui::timeline::Playback;
 use ways_core::introspection::{CriteriaMap, FiredWay, IntrospectionSummary, JoinConfidence, MatchCriteria, MatchDetail, SessionIntrospection, Turn, WayMeta};
 
 use super::frames::{build_frames, has_verdicts};
+use super::live::{Follow, Probe, SAMPLE_TICK};
 use super::model::WayEvent;
 use super::report::{Reports, Spend};
 use super::picker::Picker;
@@ -43,6 +46,9 @@ fn ev(ts: &str, event: &str, way: &str, trigger: &str) -> WayEvent {
         p_yes: if event == "way_judged" { "0.050".into() } else { String::new() },
         verdict: if event == "way_judged" { "block".into() } else { String::new() },
         ancestor: String::new(),
+        switch: String::new(),
+        lane: String::new(),
+        agent: String::new(),
     }
 }
 
@@ -148,7 +154,7 @@ fn nord() -> Palette {
 }
 
 fn picker(palette: Palette) -> Introspect {
-    let open = Box::new(|id: &str| if id == SESSION { Ok(replay(false)) } else { Err(format!("no events for session {}", &id[..12])) });
+    let open = Box::new(|id: &str, live: bool| if id == SESSION { Ok(replay(live)) } else { Err(format!("no events for session {}", &id[..12])) });
     Introspect::picking(Picker::new(sessions(), PROJECT.into()), open, no_spend(), palette, Shape::PLAIN)
 }
 
@@ -242,7 +248,7 @@ fn enter_opens_a_session_esc_comes_back_and_q_quits() {
 /// A scope too long for the pane's title loses its end, not the count.
 #[test]
 fn a_long_scope_keeps_the_session_count_in_view() {
-    let open = Box::new(|_: &str| Err("none".to_string()));
+    let open = Box::new(|_: &str, _: bool| Err("none".to_string()));
     let scope = format!("/var/folders/{}/proj", "x".repeat(120));
     let mut s = Introspect::picking(Picker::new(sessions(), scope), open, no_spend(), terminal(), Shape::PLAIN);
     assert!(text(&render(&mut s, 80, 10)).contains("3 sessions in /var/folders/"));
@@ -857,4 +863,288 @@ fn the_default_session_prefers_the_project_over_its_worktrees() {
     let only = start("2026-07-03T11:00:00Z", "flow", &worktree);
     assert_eq!(super::dump::most_recent_session(&only, Some(PROJECT)).as_deref(), Some("flow"));
     assert_eq!(super::dump::most_recent_session(&log, None).as_deref(), Some("other"), "unscoped: the newest anywhere");
+}
+
+// ── Live sessions (#780) and suppressions (#786) ──────────────
+
+/// The fixed now of the live tests: five seconds after the fixture's newest
+/// frame fired, as the live replay's own clock is set.
+const NOW_MS: u64 = 1_783_101_126_000;
+
+const SECOND: &str = "1b2c3d4e-0000-4000-8000-000000000001";
+
+/// A stat over transcripts the test names, by when each was last written,
+/// counting the stats it serves.
+fn fake_stat(writes: Vec<(&'static str, u64)>, served: Rc<Cell<usize>>) -> super::live::Stat {
+    Rc::new(move |p: &Path| {
+        served.set(served.get() + 1);
+        let name = p.file_name()?.to_str()?;
+        writes.iter().find(|(id, _)| *id == name).map(|(_, t)| Probe { len: 1, mtime_ms: *t })
+    })
+}
+
+/// The picker with the transcripts stated: this session written five
+/// seconds ago, the second forty seconds ago, the third gone. Both are
+/// live; this session is marked as the one the screen was opened from.
+/// Enter on a live session opens it following, at the first three frames.
+fn live_picker(served: Rc<Cell<usize>>, now: Rc<Cell<u64>>) -> Introspect {
+    let mut s = sessions();
+    for x in &mut s {
+        if x.transcript {
+            x.transcript_path = Some(std::path::PathBuf::from(format!("/t/{}", x.id)));
+        }
+    }
+    let stat = fake_stat(vec![(SESSION, NOW_MS - 5_000), (SECOND, NOW_MS - 40_000)], served);
+    let clock: super::live::Clock = Rc::new(move || now.get());
+    let p = Picker::new(s, PROJECT.into()).watching(stat, clock).own(Some(SESSION.into()));
+    let open = Box::new(|id: &str, live: bool| {
+        if id != SESSION {
+            return Err(format!("no events for session {}", &id[..12]));
+        }
+        let mut r = replay(live);
+        if live {
+            let first = r.frames[..3].to_vec();
+            r.take_frames(first);
+        }
+        Ok(r)
+    });
+    Introspect::picking(p, open, no_spend(), terminal(), Shape::PLAIN)
+}
+
+fn fixed_now() -> Rc<Cell<u64>> {
+    Rc::new(Cell::new(NOW_MS))
+}
+
+/// The session list marks the live sessions and counts them in its title;
+/// this session says so in its transcript column; the bar says when the
+/// selected session was written, and Enter on a live one follows it.
+#[test]
+fn the_list_marks_live_sessions_and_this_session() {
+    let served = Rc::new(Cell::new(0));
+    let mut s = live_picker(served.clone(), fixed_now());
+    assert_eq!(served.get(), 2, "one stat per transcript at build; the gone one has none");
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("3 sessions in /home/dev/proj · 2 live"), "{t}");
+    let row = |id: &str| t.lines().find(|l| l.contains(&id[..12])).unwrap_or("").to_string();
+    assert!(row(SESSION).contains("● 8f3a2c1d-5e6") && row(SESSION).contains("this session"), "{}", row(SESSION));
+    assert!(row(SECOND).contains("● 1b2c3d4e-000") && row(SECOND).contains("yes"), "{}", row(SECOND));
+    assert!(!row("9e8d7c6b-0000").contains('●') && row("9e8d7c6b-0000").contains("gone"));
+    assert!(t.contains("● live · written 5s ago · 1/3") && t.contains("⏎ follow"), "{t}");
+    // Enter on a live session opens its replay following the newest frame.
+    press(&mut s, &[KeyCode::Enter]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("● LIVE") && t.contains("3/3"), "{t}");
+}
+
+/// A long scope is cut at its end; the live count stays with the total.
+#[test]
+fn a_long_scope_keeps_the_live_count_in_view() {
+    let mut s = live_picker(Rc::new(Cell::new(0)), fixed_now());
+    let scope = format!("/var/folders/{}/proj", "x".repeat(120));
+    if let Some(p) = s.picker_mut() {
+        p.scope = scope;
+    }
+    let t = text(&render(&mut s, 80, 10));
+    assert!(t.contains("3 sessions in /var/folders/") && t.contains("… · 2 live"), "{t}");
+}
+
+/// The list states its transcripts on the screen's tick only while it is
+/// shown, and a mark goes out once the last write is older than the live
+/// window, though no stat says so.
+#[test]
+fn the_list_states_only_while_shown_and_a_mark_ages_out() {
+    let served = Rc::new(Cell::new(0));
+    let now = fixed_now();
+    let mut s = live_picker(served.clone(), now.clone());
+    assert_eq!(s.tick_every(), Some(SAMPLE_TICK));
+    let step = |s: &mut Introspect, secs: u64| {
+        for _ in 0..secs {
+            now.set(now.get() + 1_000);
+            s.tick();
+        }
+    };
+    step(&mut s, 10);
+    let shown = served.get();
+    assert!(shown > 2, "re-stated while shown: {shown}");
+    press(&mut s, &[KeyCode::Char('4')]);
+    assert_eq!(s.tick_every(), None, "nothing to tick on the spend tab");
+    step(&mut s, 60);
+    assert_eq!(served.get(), shown, "no stat while the list is hidden");
+    press(&mut s, &[KeyCode::Char('1')]);
+    step(&mut s, 60);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(!t.contains(" live") && !t.contains('●'), "130s after the last write, no session is live: {t}");
+}
+
+/// A live replay states the event log on the backoff through the screen's
+/// tick, on every tab, and reads it only when it was written.
+#[test]
+fn a_live_replay_follows_on_the_backoff() {
+    let now = fixed_now();
+    let probe = Rc::new(Cell::new(Probe { len: 1, mtime_ms: NOW_MS }));
+    let (n, p) = (now.clone(), probe.clone());
+    let mut r = replay(true);
+    r.follow = Some(Follow::new(Rc::new(move || Some(p.get())), Rc::new(move || n.get())));
+    let mut s = showing(r, terminal(), Shape::PLAIN);
+    assert_eq!(s.tick_every(), Some(SAMPLE_TICK));
+    press(&mut s, &[KeyCode::Char('3')]);
+    assert_eq!(s.tick_every(), Some(SAMPLE_TICK), "a live replay follows from every tab");
+    for sec in 1..=40u64 {
+        now.set(NOW_MS + sec * 1_000);
+        if sec == 20 {
+            probe.set(Probe { len: 2, mtime_ms: NOW_MS + sec * 1_000 });
+        }
+        s.tick();
+    }
+    let f = s.replay.as_ref().unwrap().follow.as_ref().unwrap();
+    // Stated at 2, 6, 14 and 30 seconds; the write at 20 seen at 30, and
+    // the floor again: 32, 36.
+    assert_eq!(f.stats(), 7);
+    assert_eq!(f.backoff().interval(), std::time::Duration::from_secs(8));
+}
+
+/// A session whose ways the subagent switch held back: a dispatch and an
+/// agent under the session switch, then a dispatch under the config.
+fn suppressed_replay() -> Replay {
+    let held = |ts: &str, switch: &str, lane: &str, agent: &str| WayEvent {
+        ts: ts.into(),
+        event: "injection_suppressed".into(),
+        switch: switch.into(),
+        lane: lane.into(),
+        agent: agent.into(),
+        ..Default::default()
+    };
+    let events = vec![
+        ev("2026-07-03T16:52:00Z", "session_start", "", ""),
+        ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/code/testing", "semantic:embedding:en"),
+        held("2026-07-03T16:53:00Z", "session", "task", ""),
+        held("2026-07-03T16:53:01Z", "session", "command", "a7f3c2"),
+        ev("2026-07-03T16:55:00Z", "way_fired", "softwaredev/docs/adr", "file"),
+        held("2026-07-03T16:58:00Z", "config", "task", ""),
+    ];
+    replay_of(events, false)
+}
+
+/// Each suppression is a mark on the timeline and a line in its frame; the
+/// header counts the session's.
+#[test]
+fn the_timeline_marks_each_suppression_and_counts_them() {
+    let r = suppressed_replay();
+    let at: Vec<usize> = r.frames.iter().enumerate().filter(|(_, f)| !f.suppressed.is_empty()).map(|(i, _)| i).collect();
+    assert_eq!(at, [1, 3]);
+    assert!(r.frames.iter().all(|f| f.new_events.iter().all(|e| !e.contains("suppress"))), "not an event note");
+    let mut s = showing(r, terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Right]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("⊝ suppressed: dispatch (session switch), agent a7f3c2 (session switch)"), "{t}");
+    assert!(t.contains("⊝ 3 suppressed"), "{t}");
+    assert_eq!(t.lines().nth(3).unwrap_or("").matches('⊝').count(), 1, "the other mark is under the position: {t}");
+    press(&mut s, &[KeyCode::Right]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(!t.contains("⊝ suppressed:"), "a frame without one has no line: {t}");
+    assert_eq!(t.lines().nth(3).unwrap_or("").matches('⊝').count(), 2, "both marks on the scrubber: {t}");
+}
+
+#[test]
+fn live_golden_frames() {
+    let mut g = goldens();
+    // The list with two live sessions, this session among them, the
+    // second selected.
+    let mut p = live_picker(Rc::new(Cell::new(0)), fixed_now());
+    press(&mut p, &[KeyCode::Down]);
+    check(&mut g, "picker-live", &mut p);
+    // Enter on this session follows it; a frame appends and the cursor
+    // rides the newest way.
+    let mut f = live_picker(Rc::new(Cell::new(0)), fixed_now());
+    press(&mut f, &[KeyCode::Enter]);
+    let all = replay(true).frames;
+    f.replay.as_mut().unwrap().take_frames(all);
+    check(&mut g, "live-appended", &mut f);
+    // Suppressions: the frame of a dispatch and an agent held back.
+    let mut s = showing(suppressed_replay(), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Right]);
+    check(&mut g, "suppressed", &mut s);
+    g.finish();
+}
+
+/// A replay opened on a quiet session watches its transcript and goes live
+/// on the first write: paused when the reader is on an earlier frame,
+/// following when on the newest.
+#[test]
+fn a_quiet_replay_goes_live_when_its_session_is_written() {
+    for (keys, following) in [(vec![KeyCode::Right], false), (vec![KeyCode::End], true)] {
+        let now = fixed_now();
+        let probe = Rc::new(Cell::new(Probe { len: 1, mtime_ms: NOW_MS - 3_600_000 }));
+        let (n, p) = (now.clone(), probe.clone());
+        let mut r = replay(false);
+        r.follow = Some(Follow::watch(Rc::new(move || Some(p.get())), Rc::new(move || n.get())));
+        let mut s = showing(r, terminal(), Shape::PLAIN);
+        press(&mut s, &keys);
+        assert_eq!(s.tick_every(), Some(SAMPLE_TICK), "a quiet replay watches its transcript");
+        // Quiet an hour: the watch states once a minute.
+        for _ in 0..90 {
+            now.set(now.get() + 1_000);
+            s.tick();
+        }
+        assert!(!s.replay.as_ref().unwrap().play.is_live());
+        assert_eq!(s.replay.as_ref().unwrap().follow.as_ref().unwrap().stats(), 2, "one stat at open, one a minute on");
+        probe.set(Probe { len: 2, mtime_ms: now.get() });
+        for _ in 0..60 {
+            now.set(now.get() + 1_000);
+            s.tick();
+        }
+        let r = s.replay.as_ref().unwrap();
+        assert!(r.play.is_live(), "the write woke it");
+        assert_eq!(r.play.following(), following, "{keys:?}");
+        let t = text(&render(&mut s, 120, 40));
+        let want = if following { "● LIVE ·" } else { "● LIVE paused" };
+        assert!(t.contains(want), "{t}");
+    }
+}
+
+/// Enter on a row the list marks live, its session open in a replay that
+/// was quiet when it opened, shows that replay live.
+#[test]
+fn enter_on_a_live_row_wakes_the_replay_it_left() {
+    let now = fixed_now();
+    let written = Rc::new(Cell::new(NOW_MS - 3_600_000));
+    let w = written.clone();
+    let stat: super::live::Stat = Rc::new(move |p: &Path| (p.file_name()?.to_str()? == SESSION).then(|| Probe { len: w.get(), mtime_ms: w.get() }));
+    let mut s = sessions();
+    for x in &mut s {
+        x.transcript_path = Some(std::path::PathBuf::from(format!("/t/{}", x.id)));
+    }
+    let n = now.clone();
+    let p = Picker::new(s, PROJECT.into()).watching(stat, Rc::new(move || n.get()));
+    let open = Box::new(|_: &str, live: bool| Ok(replay(live)));
+    let mut s = Introspect::picking(p, open, no_spend(), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Enter]);
+    assert!(!text(&render(&mut s, 120, 40)).contains("LIVE"), "opened quiet");
+    press(&mut s, &[KeyCode::Esc]);
+    written.set(now.get() + 1_000);
+    for _ in 0..61 {
+        now.set(now.get() + 1_000);
+        s.tick();
+    }
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("· 1 live") && t.contains("⏎ follow"), "{t}");
+    press(&mut s, &[KeyCode::Enter]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("● LIVE paused") && t.contains("1/4"), "the replay as it was left, live now: {t}");
+    press(&mut s, &[KeyCode::End]);
+    assert!(text(&render(&mut s, 120, 40)).contains("● LIVE ·"));
+}
+
+/// At 80 columns the suppression count goes before the judged-out count.
+#[test]
+fn the_suppression_count_drops_before_the_judged_out_count() {
+    let mut events = session_events();
+    events.push(WayEvent { ts: "2026-07-03T16:55:02Z".into(), event: "injection_suppressed".into(), switch: "session".into(), lane: "task".into(), ..Default::default() });
+    let mut s = showing(replay_of(events, false), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Right, KeyCode::Right]);
+    let head = |s: &mut Introspect, w| text(&render(s, w, 25)).lines().nth(2).unwrap_or("").to_string();
+    let narrow = head(&mut s, 80);
+    assert!(narrow.contains("◇ injected · 1 judged out") && !narrow.contains("suppressed"), "{narrow}");
+    let wide = head(&mut s, 120);
+    assert!(wide.contains("⊝ 1 suppressed") && wide.contains("1 judged out"), "{wide}");
 }

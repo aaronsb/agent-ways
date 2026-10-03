@@ -10,6 +10,7 @@ use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
+use super::model::Suppression;
 use super::{frames, scope, sessions, Frame};
 use crate::session;
 
@@ -37,6 +38,19 @@ struct Summary {
     trigger_breakdown: BTreeMap<String, u64>,
     top_ways: Vec<TopWay>,
     gate: GateSummary,
+    /// What the subagent switch held back (#786); new after `gate`, so
+    /// the fields before it read as they did.
+    suppressed: SuppressedSummary,
+}
+
+/// The `injection_suppressed` events of the session: each Task dispatch
+/// and each agent the subagent switch kept ways from, and by which switch.
+#[derive(Serialize, Default)]
+struct SuppressedSummary {
+    total: u64,
+    dispatches: u64,
+    agents: u64,
+    by_switch: BTreeMap<String, u64>,
 }
 
 /// The relevance gate's work in this session (ADR-196): what it judged, what
@@ -69,6 +83,9 @@ struct DumpFrame {
     token_position_k: u64,
     active_ways: Vec<DumpWay>,
     new_events: Vec<String>,
+    /// The suppressions in this frame (#786); left out when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    suppressed: Vec<Suppression>,
 }
 
 #[derive(Serialize)]
@@ -155,6 +172,10 @@ pub fn run_list_json(project: Option<&str>, all: bool) -> Result<()> {
     };
     let mut sessions = sessions::gather_sessions(&content, scope.as_deref());
     sessions.sort_by(|a, b| b.ts.cmp(&a.ts)); // newest first
+    // `last_write` and `live`: one stat of each transcript, as the screen's
+    // first pass makes (#780).
+    sessions::find_transcripts(&mut sessions, &ways_core::paths::claude_dir());
+    sessions::mark_live(&mut sessions, &super::live::stat_file, (super::live::system_clock())());
     let out = serde_json::json!({
         "scope": scope,
         "count": sessions.len(),
@@ -218,6 +239,7 @@ fn to_dump_frame(f: &Frame) -> DumpFrame {
         token_position_k: f.token_position_k,
         active_ways,
         new_events: f.new_events.clone(),
+        suppressed: f.suppressed.clone(),
     }
 }
 
@@ -234,6 +256,7 @@ fn build_summary(
     let mut way_fires: BTreeMap<String, u64> = BTreeMap::new();
     let mut gate = GateSummary::default();
     let mut gate_ms: Vec<u64> = Vec::new();
+    let mut suppressed = SuppressedSummary::default();
 
     for v in session_events(content, session_id) {
         match v["event"].as_str() {
@@ -263,6 +286,15 @@ fn build_summary(
                 if let Some(ms) = v["gate_ms"].as_str().and_then(|s| s.parse().ok()) {
                     gate_ms.push(ms);
                 }
+            }
+            Some("injection_suppressed") => {
+                suppressed.total += 1;
+                if v["lane"].as_str() == Some("task") {
+                    suppressed.dispatches += 1;
+                } else {
+                    suppressed.agents += 1;
+                }
+                *suppressed.by_switch.entry(v["switch"].as_str().unwrap_or("unknown").to_string()).or_insert(0) += 1;
             }
             Some("gate_capped") => {
                 gate.unjudged += v["unjudged"].as_str().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
@@ -304,6 +336,7 @@ fn build_summary(
             let pct = |q: f64| (!gate_ms.is_empty()).then(|| gate_ms[((gate_ms.len() - 1) as f64 * q).round() as usize]);
             GateSummary { gate_ms_p50: pct(0.5), gate_ms_p95: pct(0.95), ..gate }
         },
+        suppressed,
     }
 }
 

@@ -24,6 +24,15 @@ pub(crate) struct SessionInfo {
     /// [`find_transcripts`]; not part of the `list --json` output.
     #[serde(skip)]
     pub(crate) transcript: bool,
+    /// Where the transcript is, for the stat that says whether it is being
+    /// written to. Filled by [`find_transcripts`].
+    #[serde(skip)]
+    pub(crate) transcript_path: Option<std::path::PathBuf>,
+    /// When the transcript was last written, from its mtime (#780); `None`
+    /// without one. Filled by [`mark_live`].
+    pub(crate) last_write: Option<String>,
+    /// Whether the transcript was written within [`super::live::LIVE_WINDOW`].
+    pub(crate) live: bool,
 }
 
 pub(crate) fn gather_sessions(content: &str, project_filter: Option<&str>) -> Vec<SessionInfo> {
@@ -68,6 +77,9 @@ pub(crate) fn gather_sessions(content: &str, project_filter: Option<&str>) -> Ve
                     way_fires: 0,
                     duration_secs: 0,
                     transcript: false,
+                    transcript_path: None,
+                    last_write: None,
+                    live: false,
                 });
             }
         }
@@ -147,10 +159,21 @@ pub(crate) fn find_transcripts(sessions: &mut [SessionInfo], claude: &claude_ses
     let mut dirs: HashMap<String, Option<std::path::PathBuf>> = HashMap::new();
     for s in sessions.iter_mut() {
         let dir = dirs.entry(s.project.clone()).or_insert_with(|| claude.find_project_dir(&s.project));
-        s.transcript = match dir {
-            Some(d) if d.join(format!("{}.jsonl", s.id)).is_file() => true,
-            _ => claude.find_transcript(None, &s.id).is_some(),
+        s.transcript_path = match dir {
+            Some(d) if d.join(format!("{}.jsonl", s.id)).is_file() => Some(d.join(format!("{}.jsonl", s.id))),
+            _ => claude.find_transcript(None, &s.id),
         };
+        s.transcript = s.transcript_path.is_some();
+    }
+}
+
+/// State each session's transcript once: when it was last written, and
+/// whether that makes it live at `now_ms`. The stat reads no text.
+pub(crate) fn mark_live(sessions: &mut [SessionInfo], stat: &dyn Fn(&std::path::Path) -> Option<super::live::Probe>, now_ms: u64) {
+    for s in sessions {
+        let probe = s.transcript_path.as_deref().and_then(stat);
+        s.last_write = probe.map(|p| agent_fmt::when::utc_iso(p.mtime_ms / 1000));
+        s.live = probe.is_some_and(|p| super::live::is_live(p.mtime_ms, now_ms));
     }
 }
 

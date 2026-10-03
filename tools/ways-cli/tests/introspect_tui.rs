@@ -55,9 +55,15 @@ impl Fx {
     }
 
     fn run(&self, args: &[&str]) -> (String, String, i32) {
+        self.run_as(args, None)
+    }
+
+    /// `run`, from inside session `own` when one is named, as Claude Code
+    /// sets `CLAUDE_CODE_SESSION_ID` for the commands it runs.
+    fn run_as(&self, args: &[&str], own: Option<&str>) -> (String, String, i32) {
         let home = self.home();
-        let o = Command::new(env!("CARGO_BIN_EXE_ways"))
-            .args(args)
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_ways"));
+        cmd.args(args)
             .current_dir(home.join("my_proj"))
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
@@ -66,14 +72,20 @@ impl Fx {
             .env("XDG_DATA_HOME", home.join(".local/share"))
             .env("XDG_STATE_HOME", home.join(".local/state"))
             .env("XDG_CACHE_HOME", home.join(".cache"))
-            .env("CLAUDE_PROJECT_DIR", home.join("my_proj"))
-            .output()
-            .unwrap();
+            .env("CLAUDE_PROJECT_DIR", home.join("my_proj"));
+        if let Some(id) = own {
+            cmd.env("CLAUDE_CODE_SESSION_ID", id);
+        }
+        let o = cmd.output().unwrap();
         (String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned(), o.status.code().unwrap_or(-1))
     }
 
     fn snap(&self, args: &[&str]) -> String {
-        let (out, err, code) = self.run(args);
+        self.snap_as(args, None)
+    }
+
+    fn snap_as(&self, args: &[&str], own: Option<&str>) -> String {
+        let (out, err, code) = self.run_as(args, own);
         assert_eq!(code, 0, "ways {}: {err}", args.join(" "));
         assert!(out.starts_with("agent-tui frame "), "not a frame: {out}{err}");
         out.split("\nstyles\n").next().unwrap_or(&out).to_string()
@@ -109,6 +121,40 @@ fn the_picker_lists_the_project_s_sessions_and_opens_one() {
     // Esc goes back to the picker; Down then Enter opens the older one.
     let back = fx.snap(&["session", "replay", "--depth", "none", "--keys", "enter esc down enter", "--snap", "100x20"]);
     assert!(back.contains(&format!("Session {OLD}")), "{back}");
+}
+
+/// The newer session's transcript was written as the fixture was made:
+/// it is live, marked on its row and counted in the title, and from inside
+/// it the row says this session. `list --json` says the same, as data.
+#[test]
+fn the_list_marks_the_session_being_written_to() {
+    let fx = Fx::new();
+    let picker = fx.snap_as(&["session", "replay", "--depth", "none", "--snap", "100x12"], Some(NEW));
+    assert!(picker.contains("2 sessions in") && picker.contains("· 1 live"), "{picker}");
+    let row = |id: &str| picker.lines().find(|l| l.contains(id)).unwrap_or("").to_string();
+    assert!(row("bbbbbbbb").contains("● bbbbbbbb") && row("bbbbbbbb").contains("this session"), "{picker}");
+    assert!(!row("aaaaaaaa").contains('●') && row("aaaaaaaa").contains("gone"), "{picker}");
+    assert!(picker.contains("⏎ follow") && picker.contains("● live · written"), "{picker}");
+
+    let (out, err, code) = fx.run(&["session", "list", "--json"]);
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).expect("json");
+    let s = v["sessions"].as_array().unwrap();
+    assert_eq!(s[0]["id"], NEW);
+    assert_eq!(s[0]["live"], true);
+    assert!(s[0]["last_write"].as_str().is_some_and(|t| t.ends_with('Z')), "{v}");
+    assert_eq!((s[1]["live"].as_bool(), s[1]["last_write"].is_null()), (Some(false), true), "no transcript: {v}");
+}
+
+/// `ways session live` is the replay screen opened on the session,
+/// following, with the project's sessions behind it.
+#[test]
+fn live_opens_the_replay_following_with_the_list_behind_it() {
+    let fx = Fx::new();
+    let live = fx.snap(&["session", "live", "--depth", "none", "--snap", "100x20"]);
+    assert!(live.contains("1 sessions") && live.contains("2 timeline") && live.contains("● LIVE"), "{live}");
+    let back = fx.snap(&["session", "live", "--depth", "none", "--keys", "esc", "--snap", "100x12"]);
+    assert!(back.contains("2 sessions in") && back.contains("▌● bbbbbbbb"), "the list, on the session followed: {back}");
 }
 
 #[test]

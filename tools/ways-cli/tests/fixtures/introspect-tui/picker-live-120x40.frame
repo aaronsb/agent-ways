@@ -1,9 +1,9 @@
 agent-tui frame 120x40
 | session   1 sessions   2 timeline   3 fires   4 spend   5 stats   6 precision                                          |
-|┌ 3 sessions in /home/dev/proj ────────────────────────────────────────────────────────────────────────────────────────┐|
+|┌ 3 sessions in /home/dev/proj · 2 live ───────────────────────────────────────────────────────────────────────────────┐|
 |│   Session      Date             Project                                            Events  Ways Duration Transcript  │|
-|│   8f3a2c1d-5e6 2026-07-03 16:52 proj                                                   10     9      18s yes         │|
-|│▌  1b2c3d4e-000 2026-07-01 09:10 proj                                                    4     3      12s yes         │|
+|│ ● 8f3a2c1d-5e6 2026-07-03 16:52 proj                                                   10     9      18s this session│|
+|│▌● 1b2c3d4e-000 2026-07-01 09:10 proj                                                    4     3      12s yes         │|
 |│   9e8d7c6b-000 2026-06-28 22:05 other_proj                                              2     1      10s gone        │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| pick   ↑↓ select  ⏎ replay  q quit                                                                                  2/3|
+| pick   ↑↓ select  ⏎ follow  q quit                                                       ● live · written 40s ago · 2/3|
 styles
   0   0-8   White Blue -
   0  10-21  Black Cyan BOLD
@@ -48,17 +48,19 @@ styles
   0  56-64  White DarkGray DIM
   0  66-78  White DarkGray DIM
   1   0-0   - - DIM
-  1   1-30  Blue - BOLD|DIM
-  1  31-119 - - DIM
+  1   1-39  Blue - BOLD|DIM
+  1  40-119 - - DIM
   2   0-0   - - DIM
   2   1-118 - - BOLD
   2 119-119 - - DIM
   3   0-0   - - DIM
-  3 107-109 Green - -
+  3   2-2   Green - BOLD
+  3 107-118 Cyan - BOLD
   3 119-119 - - DIM
   4   0-0   - - DIM
   4   1-1   Cyan - BOLD|REVERSED
-  4   2-106 - - BOLD|REVERSED
+  4   2-2   Green - BOLD|REVERSED
+  4   3-106 - - BOLD|REVERSED
   4 107-109 Green - BOLD|REVERSED
   4 110-118 - - BOLD|REVERSED
   4 119-119 - - DIM
@@ -137,4 +139,5 @@ styles
  39  20-26  - - DIM|ITALIC
  39  29-29  Cyan - BOLD
  39  30-34  - - DIM|ITALIC
+ 39  90-116 Green - -
  39 117-119 - - DIM

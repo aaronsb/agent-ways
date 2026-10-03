@@ -128,6 +128,15 @@ impl Playback {
         }
     }
 
+    /// The source has started writing: a replay becomes live. At the newest
+    /// frame it follows; reviewing an earlier one, it stays there, paused,
+    /// until the end or the toggle resumes the follow.
+    pub fn go_live(&mut self) {
+        self.playing = false;
+        self.following = self.pos >= self.last();
+        self.live = true;
+    }
+
     pub fn faster(&mut self) {
         self.speed = (self.speed + 1).min(SPEEDS.len() - 1);
     }
@@ -167,11 +176,13 @@ impl Playback {
 
 /// The position in a timeline as a track: played in the accent, the rest
 /// in the rule colour, `marks` (frame indexes, such as where a window
-/// starts) as ticks, the position as a dot, and `pos/len` at the right.
+/// starts) as ticks, `notes` (frames that carry something to look at) as
+/// warnings, the position as a dot, and `pos/len` at the right.
 pub struct Scrubber<'a> {
     pub len: usize,
     pub pos: usize,
     pub marks: &'a [usize],
+    pub notes: &'a [usize],
 }
 
 impl Scrubber<'_> {
@@ -186,9 +197,12 @@ impl Scrubber<'_> {
             let cell = |i: usize| if self.len <= 1 { 0 } else { i * (track - 1) / (self.len - 1) };
             let head = cell(self.pos.min(self.len.saturating_sub(1)));
             let marks: Vec<usize> = self.marks.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
+            let notes: Vec<usize> = self.notes.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
             for x in 0..track {
                 let (glyph, style) = if x == head {
                     ("●", theme::accent().add_modifier(Modifier::BOLD))
+                } else if notes.contains(&x) {
+                    ("⊝", theme::warn())
                 } else if marks.contains(&x) {
                     ("┼", theme::muted())
                 } else if x < head {
@@ -302,6 +316,25 @@ mod tests {
         assert_eq!(Playback::replay(1).with_speed_ms(5000).speed_label(), "2.0s", "slower than every speed is the slowest");
     }
 
+    #[test]
+    fn a_replay_goes_live_following_at_the_end_and_paused_before_it() {
+        let mut at_end = Playback::replay(3);
+        at_end.end();
+        at_end.go_live();
+        assert!(at_end.is_live() && at_end.following());
+        at_end.resize(4);
+        assert_eq!(at_end.pos(), 3, "a frame appended is followed");
+
+        let mut back = Playback::replay(3);
+        back.toggle();
+        back.go_live();
+        assert!(back.is_live() && !back.following() && !back.playing(), "reviewing frame 1: paused");
+        back.resize(4);
+        assert_eq!(back.pos(), 0);
+        back.end();
+        assert!(back.following() && back.pos() == 3, "End resumes the follow");
+    }
+
     fn glyphs(l: &Line) -> String {
         l.spans.iter().map(|s| s.content.as_ref()).collect()
     }
@@ -309,12 +342,16 @@ mod tests {
     #[test]
     fn the_scrubber_puts_the_first_frame_left_the_last_right_and_marks_between() {
         set(Palette::terminal(ColorDepth::TrueColor));
-        let at = |pos| glyphs(&Scrubber { len: 5, pos, marks: &[2] }.line(14));
+        let at = |pos| glyphs(&Scrubber { len: 5, pos, marks: &[2], notes: &[] }.line(14));
         assert_eq!(at(0), "●───┼───── 1/5");
         assert_eq!(at(4), "━━━━┼━━━━● 5/5");
         assert_eq!(at(2), "━━━━●───── 3/5", "the position hides a mark under it");
-        assert_eq!(glyphs(&Scrubber { len: 0, pos: 0, marks: &[] }.line(8)), "●─── 0/0");
-        assert_eq!(glyphs(&Scrubber { len: 3, pos: 1, marks: &[] }.line(3)), " 2/3", "no room, no track");
+        assert_eq!(glyphs(&Scrubber { len: 0, pos: 0, marks: &[], notes: &[] }.line(8)), "●─── 0/0");
+        assert_eq!(glyphs(&Scrubber { len: 3, pos: 1, marks: &[], notes: &[] }.line(3)), " 2/3", "no room, no track");
+        // A note shows over a mark in the same cell, and under the position.
+        let noted = |pos| glyphs(&Scrubber { len: 5, pos, marks: &[2], notes: &[2, 3] }.line(14));
+        assert_eq!(noted(0), "●───⊝─⊝─── 1/5");
+        assert_eq!(noted(3), "━━━━⊝━●─── 4/5");
     }
 
     #[test]

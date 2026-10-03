@@ -1,10 +1,10 @@
 agent-tui frame 120x40
 | session   1 sessions   2 timeline   3 fires   4 spend   5 stats   6 precision                                          |
 |┌ 3 sessions in /home/dev/proj ────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Session      Date             Project                                                Events  Ways Duration Transcript│|
-|│▌8f3a2c1d-5e6 2026-07-03 16:52 proj                                                       10     9      18s yes       │|
-|│ 1b2c3d4e-000 2026-07-01 09:10 proj                                                        4     3      12s yes       │|
-|│ 9e8d7c6b-000 2026-06-28 22:05 other_proj                                                  2     1      10s gone      │|
+|│   Session      Date             Project                                            Events  Ways Duration Transcript  │|
+|│▌  8f3a2c1d-5e6 2026-07-03 16:52 proj                                                   10     9      18s yes         │|
+|│   1b2c3d4e-000 2026-07-01 09:10 proj                                                    4     3      12s yes         │|
+|│   9e8d7c6b-000 2026-06-28 22:05 other_proj                                              2     1      10s gone        │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -59,7 +59,7 @@ styles
   4   0-0   - - DIM
   4 119-119 - - DIM
   5   0-0   - - DIM
-  5 109-112 - - DIM
+  5 107-110 - - DIM
   5 119-119 - - DIM
   6   0-0   - - DIM
   6 119-119 - - DIM

@@ -1,6 +1,6 @@
 //! `ways session` — the user/agent-facing surface over a session's way
-//! firings (ADR-154). Modes: `replay` and `live`, timeline screens on
-//! agent-tui (ADR-504 §1, §9), with `replay --json` as the replay's CLI form;
+//! firings (ADR-154). Modes: `replay` and `live`, one timeline screen on
+//! agent-tui (ADR-504 §1, §9; #780), with `replay --json` as the replay's CLI form;
 //! `list`, the session table or `--json`; `dump`, the `SessionIntrospection`
 //! model as JSON; `fires`, the semantic fires by score.
 //!
@@ -8,6 +8,7 @@
 //! - [`scope`] — project-scope resolution and matching.
 //! - [`frames`] — frame reconstruction and event/token loading.
 //! - [`sessions`] — session enumeration, the `list` table, transcript discovery.
+//! - [`live`] — which sessions are being written to, by stat on a backoff.
 //! - [`dump`] — `replay --json` and `list --json`.
 //! - [`why`] — the why-fired index and detail.
 //! - [`table`] — the ways table and context lines on agent-tui.
@@ -18,6 +19,7 @@ mod frames;
 mod model;
 mod picker;
 mod fires_tab;
+mod live;
 mod report;
 mod scope;
 mod screen;
@@ -79,7 +81,8 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
     let shown = scope.clone().unwrap_or_else(|| "every project".into());
     let reports = report::Reports::new(&content, scope.as_deref(), shown.clone());
     let screen = match session {
-        Some(id) => match Replay::load(&content, id, None, false) {
+        // A session being written to opens following, as Enter opens it.
+        Some(id) => match Replay::load(&content, id, None, transcript_live(&content, id)) {
             Ok(r) => Introspect::showing(with_speed(r), reports, palette, shape),
             Err(e) => {
                 println!("{e}");
@@ -87,17 +90,38 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
             }
         },
         None => {
-            let mut found = sessions::gather_sessions(&content, scope.as_deref());
-            if found.is_empty() {
+            let Some(picker) = picker(&content, scope.as_deref(), shown) else {
                 println!("No sessions found.");
                 return Ok(());
-            }
-            sessions::find_transcripts(&mut found, &ways_core::paths::claude_dir());
-            let opener: screen::Opener = Box::new(move |id| Replay::load(&content, id, None, false).map(with_speed));
-            Introspect::picking(Picker::new(found, shown), opener, reports, palette, shape)
+            };
+            let opener: screen::Opener = Box::new(move |id, live| Replay::load(&content, id, None, live).map(with_speed));
+            Introspect::picking(picker, opener, reports, palette, shape)
         }
     };
     show(screen, open)
+}
+
+/// The sessions in `scope`, newest first, their transcripts found and
+/// stated once, re-stated on the backoff while the list is shown; the
+/// session this process runs in marked. `None` when there are none.
+fn picker(content: &str, scope: Option<&str>, shown: String) -> Option<Picker> {
+    let mut found = sessions::gather_sessions(content, scope);
+    if found.is_empty() {
+        return None;
+    }
+    sessions::find_transcripts(&mut found, &ways_core::paths::claude_dir());
+    let own = std::env::var("CLAUDE_CODE_SESSION_ID").ok().filter(|s| !s.is_empty());
+    Some(Picker::new(found, shown).watching(live::system_stat(), live::system_clock()).own(own))
+}
+
+/// Whether session `id`'s transcript is being written to: one stat.
+fn transcript_live(content: &str, id: &str) -> bool {
+    let project = frames::find_session_project(content, id);
+    let now = (live::system_clock())();
+    ways_core::paths::claude_dir()
+        .find_transcript(project.as_deref(), id)
+        .and_then(|p| live::stat_file(&p))
+        .is_some_and(|p| live::is_live(p.mtime_ms, now))
 }
 
 /// `ways session live` — monitor the current session's way firings, following
@@ -105,6 +129,9 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
 /// scope (the one actively writing events); `--session` overrides it. Scoping
 /// mirrors `replay`: defaults to the current project, `--project` for a specific
 /// one, and fails loud rather than silently globalizing when detection fails.
+///
+/// It is the replay screen opened on that session, following (#780): the
+/// sessions tab lists the project's sessions behind it, and Esc goes there.
 pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result<()> {
     let project = project.map(ways_core::util::project_arg);
     let project = project.as_deref();
@@ -153,7 +180,22 @@ pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result
             // it, though the monitor may have been launched in a subdirectory.
             let root = project.map(str::to_string).or_else(ways_core::util::project_root).unwrap_or_else(|| launch_project.clone());
             let reports = report::Reports::new(&content, Some(&root), root.clone());
-            show(Introspect::showing(r, reports, palette, shape), open)
+            // The list behind it is the replay's: the project's sessions. When
+            // the project cannot be told, the session shows alone, as before.
+            let list = scope::resolve_project_scope(project, false).ok().and_then(|scope| {
+                let shown = scope.clone().unwrap_or_else(|| "every project".into());
+                picker(&content, scope.as_deref(), shown)
+            });
+            let screen = match list {
+                Some(mut p) => {
+                    p.select(&session_id);
+                    let content = content.clone();
+                    let opener: screen::Opener = Box::new(move |id, live| Replay::load(&content, id, None, live));
+                    Introspect::picking(p, opener, reports, palette, shape).opened(r)
+                }
+                None => Introspect::showing(r, reports, palette, shape),
+            };
+            show(screen, open)
         }
         Err(_) => {
             println!("No events for the current session yet.");

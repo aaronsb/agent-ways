@@ -704,7 +704,7 @@ fn the_detail_scrolls_and_a_new_selection_starts_at_its_top() {
     let small = |s: &mut Projects| text(&agent_tui::testkit::render_screen(s, 80, 25));
     let top = small(&mut s);
     assert!(top.contains("more ↓") && !top.contains("Initial setup"), "{top}");
-    press(&mut s, &[KeyCode::Char('J'); 40].as_slice());
+    press(&mut s, [KeyCode::Char('J'); 40].as_slice());
     let end = small(&mut s);
     assert!(end.contains("Initial setup") && !end.contains("more ↓"), "{end}");
     press(&mut s, &[KeyCode::Up, KeyCode::Down]);

@@ -4,6 +4,7 @@
 use crate::cmd::render::WayRow;
 
 /// A way event from events.jsonl.
+#[derive(Default)]
 pub(crate) struct WayEvent {
     pub(super) ts: String,
     pub(super) event: String,
@@ -15,6 +16,40 @@ pub(crate) struct WayEvent {
     pub(super) verdict: String,
     /// The blocked ancestor of a way the gate blocked with it, unjudged.
     pub(super) ancestor: String,
+    /// On an `injection_suppressed` event (#786): the switch that applied
+    /// (`session` or `config`), the lane it held back, and the agent.
+    pub(super) switch: String,
+    pub(super) lane: String,
+    pub(super) agent: String,
+}
+
+/// Ways held back from a subagent by the subagent switch (#768, #786):
+/// one Task dispatch (lane `task`), or one agent's hooks, logged once per
+/// agent.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub(crate) struct Suppression {
+    /// `session` (`ways session subagents off`) or `config` (`subagents: false`).
+    pub(crate) switch: String,
+    pub(crate) lane: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) agent: Option<String>,
+}
+
+impl Suppression {
+    /// A Task dispatch, rather than an agent's own hooks.
+    pub(crate) fn is_dispatch(&self) -> bool {
+        self.lane == "task"
+    }
+
+    /// How the timeline names it: `dispatch` or `agent <id>`, and the switch.
+    pub(crate) fn label(&self) -> String {
+        let what = match (&self.agent, self.is_dispatch()) {
+            (_, true) => "dispatch".to_string(),
+            (Some(a), false) => format!("agent {a}"),
+            (None, false) => "agent".to_string(),
+        };
+        format!("{what} ({} switch)", self.switch)
+    }
 }
 
 /// What the relevance judge's verdict left of a way in a frame (ADR-196).
@@ -89,6 +124,8 @@ pub(crate) struct Frame {
     /// judge blocked in this frame, by id. [`Frame::shown`] filters them.
     pub(crate) ways: Vec<ActiveWay>,
     pub(crate) new_events: Vec<String>,
+    /// Ways the subagent switch held back in this frame, in log order.
+    pub(crate) suppressed: Vec<Suppression>,
     /// Which compaction window (1-based) this frame belongs to. A long session is
     /// segmented at each `session_start` boundary; epoch/distance restart per window
     /// and the accumulated ways reset, so the latest window mirrors `ways session ways`. The

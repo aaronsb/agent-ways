@@ -171,5 +171,10 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
     if !frame.new_events.is_empty() {
         out.push((2, Line::styled(format!("+ {}", frame.new_events.join(", ")), theme::ok().add_modifier(Modifier::BOLD))));
     }
+    // #786: the subagent switch held ways back here, one mark each.
+    if !frame.suppressed.is_empty() {
+        let each: Vec<String> = frame.suppressed.iter().map(|s| s.label()).collect();
+        out.push((2, Line::styled(format!("⊝ suppressed: {}", each.join(", ")), theme::warn())));
+    }
     out
 }

@@ -1,17 +1,11 @@
 agent-tui frame 120x40
 | session   1 sessions   2 timeline   3 fires   4 spend   5 stats   6 precision                                          |
-|┌ 3 sessions in /home/dev/proj ────────────────────────────────────────────────────────────────────────────────────────┐|
-|│   Session      Date             Project                                            Events  Ways Duration Transcript  │|
-|│   8f3a2c1d-5e6 2026-07-03 16:52 proj                                                   10     9      18s yes         │|
-|│▌  1b2c3d4e-000 2026-07-01 09:10 proj                                                    4     3      12s yes         │|
-|│   9e8d7c6b-000 2026-06-28 22:05 other_proj                                              2     1      10s gone        │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
+|Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
+|epoch 1 · 200K ctx · 1 ways · window 2/2 · 2026-07-03 17:52  ◇ injected  ● LIVE · 6s ago                                |
+|━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 4/4|
+|┌ ways at epoch 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
+|│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
+|│▌softwaredev/delivery/commits                                                1      0  keyword        ●  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -38,34 +32,44 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| pick   ↑↓ select  ⏎ replay  q quit                                                                                  2/3|
+|┌ context ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐|
+|│███████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 15% (31K / 200K)│|
+|│○ 1 distant  │ 30K interval                                                                                           │|
+|│··································································································● forecast 31K → 61K│|
+|│+ ⎯ compaction · window 2 ⎯, ↻ softwaredev/delivery/commits                                                           │|
+|└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
+| live   ↑↓ select  ⏎ why  ←→ frame  space pause  f matched  q quit                                                      |
 styles
   0   0-8   White Blue -
-  0  10-21  Black Cyan BOLD
-  0  23-34  White DarkGray DIM
+  0  10-21  White DarkGray DIM
+  0  23-34  Black Cyan BOLD
   0  36-44  White DarkGray DIM
   0  46-54  White DarkGray DIM
   0  56-64  White DarkGray DIM
   0  66-78  White DarkGray DIM
-  1   0-0   - - DIM
-  1   1-30  Blue - BOLD|DIM
-  1  31-119 - - DIM
-  2   0-0   - - DIM
-  2   1-118 - - BOLD
-  2 119-119 - - DIM
-  3   0-0   - - DIM
-  3 107-109 Green - -
-  3 119-119 - - DIM
+  1   0-7   - - BOLD
+  1  44-59  - - DIM
+  2   0-58  - - DIM
+  2  59-70  Cyan - -
+  2  71-78  Green - BOLD
+  2  79-87  - - DIM
+  3   0-114 Cyan - -
+  3 115-115 Cyan - BOLD
+  3 116-119 - - BOLD
   4   0-0   - - DIM
-  4   1-1   Cyan - BOLD|REVERSED
-  4   2-106 - - BOLD|REVERSED
-  4 107-109 Green - BOLD|REVERSED
-  4 110-118 - - BOLD|REVERSED
-  4 119-119 - - DIM
+  4   1-17  Blue - BOLD|DIM
+  4  18-119 - - DIM
   5   0-0   - - DIM
-  5 107-110 - - DIM
+  5   1-118 - - BOLD
   5 119-119 - - DIM
   6   0-0   - - DIM
+  6   1-80  Cyan - BOLD|REVERSED
+  6  81-85  Green - BOLD|REVERSED
+  6  86-102 Cyan - BOLD|REVERSED
+  6 103-103 #5ac8fa - BOLD|REVERSED
+  6 104-105 Cyan - BOLD|REVERSED
+  6 106-106 Cyan - BOLD|DIM|REVERSED
+  6 107-118 Cyan - BOLD|REVERSED
   6 119-119 - - DIM
   7   0-0   - - DIM
   7 119-119 - - DIM
@@ -117,24 +121,32 @@ styles
  30 119-119 - - DIM
  31   0-0   - - DIM
  31 119-119 - - DIM
- 32   0-0   - - DIM
- 32 119-119 - - DIM
+ 32   0-119 - - DIM
  33   0-0   - - DIM
- 33 119-119 - - DIM
+ 33   1-9   Blue - BOLD|DIM
+ 33  10-119 - - DIM
  34   0-0   - - DIM
+ 34   1-101 Green - -
  34 119-119 - - DIM
- 35   0-0   - - DIM
+ 35   0-27  - - DIM
  35 119-119 - - DIM
- 36   0-0   - - DIM
- 36 119-119 - - DIM
+ 36   0-98  - - DIM
+ 36  99-99  #5ac8fa - -
+ 36 100-119 - - DIM
  37   0-0   - - DIM
+ 37   1-59  Green - BOLD
  37 119-119 - - DIM
  38   0-119 - - DIM
- 39   0-5   Black Cyan BOLD
+ 39   0-5   Black Green BOLD
  39   8-9   Cyan - BOLD
  39  10-16  - - DIM|ITALIC
  39  19-19  Cyan - BOLD
- 39  20-26  - - DIM|ITALIC
- 39  29-29  Cyan - BOLD
- 39  30-34  - - DIM|ITALIC
- 39 117-119 - - DIM
+ 39  20-23  - - DIM|ITALIC
+ 39  26-27  Cyan - BOLD
+ 39  28-33  - - DIM|ITALIC
+ 39  36-40  Cyan - BOLD
+ 39  41-46  - - DIM|ITALIC
+ 39  49-49  Cyan - BOLD
+ 39  50-57  - - DIM|ITALIC
+ 39  60-60  Cyan - BOLD
+ 39  61-65  - - DIM|ITALIC
