@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                              ││                              │|
 |│                                              ││                              │|
 |└ ways tune stats --json --project /home/dev/pr┘└──────────────────────────────┘|
-| stats  mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · 1-9 tabs        |
+| stats  mouse on (m) │ ? keys · ↑↓ select · 1-9 tabs                            |
 styles
   0   0-11  White Blue -
   0  14-22  White Blue -
@@ -109,11 +109,11 @@ styles
  23   1-46  Blue - BOLD|DIM
  23  47-79  - - DIM
  24   0-6   Black Cyan BOLD
- 24   8-39  - - DIM|ITALIC
- 24  40-42  - - DIM
- 24  43-44  Cyan - -
- 24  45-51  - - DIM|ITALIC
- 24  52-54  Cyan - -
- 24  55-63  - - DIM|ITALIC
- 24  64-67  Cyan - -
- 24  68-71  - - DIM|ITALIC
+ 24   8-19  - - DIM|ITALIC
+ 24  20-22  - - DIM
+ 24  23-24  Cyan - -
+ 24  25-31  - - DIM|ITALIC
+ 24  32-34  Cyan - -
+ 24  35-43  - - DIM|ITALIC
+ 24  44-47  Cyan - -
+ 24  48-51  - - DIM|ITALIC

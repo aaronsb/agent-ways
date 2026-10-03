@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│························◆·························································■·············· forecast 132K → 179K│|
 |│+ ↻ softwaredev/code/testing                                                                                          │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| playing  mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause · +- 1.0s · f matched|
+| playing  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause · +- 1.0s · f matched · 1-9 tabs         |
 styles
   0   0-0   #c99fc1 - -
   0   1-12  #2e3440 #c99fc1 BOLD
@@ -163,19 +163,21 @@ styles
  39   0-0   #a3be8c - -
  39   1-9   #2e3440 #a3be8c BOLD
  39  10-10  #a3be8c - -
- 39  12-43  #7c8baa - ITALIC
- 39  44-46  #434c5e - -
- 39  47-48  #c99fc1 - -
- 39  49-55  #7c8baa - ITALIC
+ 39  12-23  #7c8baa - ITALIC
+ 39  24-26  #434c5e - -
+ 39  27-28  #c99fc1 - -
+ 39  29-35  #7c8baa - ITALIC
+ 39  36-38  #c99fc1 - -
+ 39  39-47  #7c8baa - ITALIC
+ 39  48-49  #c99fc1 - -
+ 39  50-55  #7c8baa - ITALIC
  39  56-58  #c99fc1 - -
- 39  59-67  #7c8baa - ITALIC
- 39  68-69  #c99fc1 - -
- 39  70-75  #7c8baa - ITALIC
- 39  76-78  #c99fc1 - -
- 39  79-86  #7c8baa - ITALIC
- 39  87-92  #c99fc1 - -
- 39  93-100 #7c8baa - ITALIC
- 39 101-103 #c99fc1 - -
- 39 104-110 #7c8baa - ITALIC
- 39 111-112 #c99fc1 - -
- 39 113-119 #7c8baa - ITALIC
+ 39  59-66  #7c8baa - ITALIC
+ 39  67-72  #c99fc1 - -
+ 39  73-80  #7c8baa - ITALIC
+ 39  81-83  #c99fc1 - -
+ 39  84-90  #7c8baa - ITALIC
+ 39  91-92  #c99fc1 - -
+ 39  93-102 #7c8baa - ITALIC
+ 39 103-106 #c99fc1 - -
+ 39 107-110 #7c8baa - ITALIC

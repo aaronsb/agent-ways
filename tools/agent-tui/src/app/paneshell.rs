@@ -70,10 +70,9 @@ impl App {
     }
 
     /// The key that turns the mouse on or off as the bar names it: `m`, or
-    /// `M-m` beside text or where the pane takes a plain `m`.
+    /// `M-m` beside text.
     pub(super) fn mouse_key(&self) -> &'static str {
-        let m = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE);
-        if self.owns_text() || self.pane.as_ref().is_some_and(|p| p.takes_key(m)) {
+        if self.owns_text() {
             "M-m"
         } else {
             "m"
@@ -145,7 +144,8 @@ impl App {
     /// ends in `…`.
     pub(super) fn pane_status(&mut self, area: Rect) -> Vec<Span<'static>> {
         let key = self.mouse_key();
-        let mouse = if self.mouse { format!("mouse on ({key}; Shift-drag selects)") } else { format!("mouse off ({key})") };
+        // As the settings tree names it; Shift-drag is in the key help.
+        let mouse = if self.mouse { format!("mouse on ({key})") } else { format!("mouse off ({key})") };
         let footer: Vec<Binding> = self.bindings().into_iter().filter(|b| b.footer).collect();
         let Some(p) = &mut self.pane else { return Vec::new() };
         let lozenge = self.shape.lozenge(&[Seg::on(format!(" {} ", p.mode()), p.mode_ground()).bold()]);
@@ -221,10 +221,9 @@ impl App {
     /// passes on and quits, quits.
     pub(super) fn pane_key(&mut self, k: KeyEvent) -> bool {
         let text = self.owns_text();
-        let taken = self.pane.as_ref().is_some_and(|p| p.takes_key(k));
-        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) && !taken;
+        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         // The shell's letter and digit keys: plain, or the Alt chord, which
-        // is the only form beside text or where the pane takes the plain key.
+        // is the only form beside text.
         let shell = k.modifiers == KeyModifiers::ALT || (!text && plain);
         match k.code {
             KeyCode::F(1) => {

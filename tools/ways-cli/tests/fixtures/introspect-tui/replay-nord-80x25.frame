@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│··············◆·································■········ forecast 132K → 179K│|
 |│+ ↻ softwaredev/code/testing                                                  │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-| playing  mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · ⏎ why       |
+| playing  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause  |
 styles
   0   0-0   #c99fc1 - -
   0   1-12  #2e3440 #c99fc1 BOLD
@@ -118,11 +118,15 @@ styles
  24   0-0   #a3be8c - -
  24   1-9   #2e3440 #a3be8c BOLD
  24  10-10  #a3be8c - -
- 24  12-43  #7c8baa - ITALIC
- 24  44-46  #434c5e - -
- 24  47-48  #c99fc1 - -
- 24  49-55  #7c8baa - ITALIC
+ 24  12-23  #7c8baa - ITALIC
+ 24  24-26  #434c5e - -
+ 24  27-28  #c99fc1 - -
+ 24  29-35  #7c8baa - ITALIC
+ 24  36-38  #c99fc1 - -
+ 24  39-47  #7c8baa - ITALIC
+ 24  48-49  #c99fc1 - -
+ 24  50-55  #7c8baa - ITALIC
  24  56-58  #c99fc1 - -
- 24  59-67  #7c8baa - ITALIC
- 24  68-69  #c99fc1 - -
- 24  70-72  #7c8baa - ITALIC
+ 24  59-66  #7c8baa - ITALIC
+ 24  67-72  #c99fc1 - -
+ 24  73-77  #7c8baa - ITALIC

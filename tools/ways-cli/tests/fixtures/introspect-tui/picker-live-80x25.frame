@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-| pick  ● live · written 40s ago · 2/3 │ ? keys · ↑↓ select · ⏎ follow · 1-9 tabs|
+| pick  ● live · written 40s ago · 2/3 │ mouse on (m) │ ? keys · ↑↓ select       |
 styles
   0   0-11  Black Cyan BOLD
   0  14-25  White Blue -
@@ -88,11 +88,9 @@ styles
  23   0-79  - - DIM
  24   0-5   Black Cyan BOLD
  24   7-39  - - DIM
- 24  40-41  Cyan - -
- 24  42-48  - - DIM|ITALIC
- 24  49-51  Cyan - -
- 24  52-60  - - DIM|ITALIC
- 24  61-62  Cyan - -
- 24  63-71  - - DIM|ITALIC
- 24  72-75  Cyan - -
- 24  76-79  - - DIM|ITALIC
+ 24  40-51  - - DIM|ITALIC
+ 24  52-54  - - DIM
+ 24  55-56  Cyan - -
+ 24  57-63  - - DIM|ITALIC
+ 24  64-66  Cyan - -
+ 24  67-72  - - DIM|ITALIC

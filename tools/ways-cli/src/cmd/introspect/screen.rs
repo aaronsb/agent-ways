@@ -772,7 +772,7 @@ impl Pane for Sessions {
             (Tab::Timeline, Some(r), _) => r.bindings(),
             (Tab::Spend, ..) => {
                 let by = if self.reports.by_day() { "by month" } else { "by day" };
-                vec![Binding::new("↑↓", "select"), Binding::new("m", by), Binding::help("click a row", "selects it")]
+                vec![Binding::new("↑↓", "select"), Binding::new("d", by), Binding::help("click a row", "selects it")]
             }
             (Tab::Fires | Tab::Stats | Tab::Precision, ..) => vec![Binding::new("↑↓", "select"), Binding::help("click a row", "selects it")],
             _ => Vec::new(),
@@ -808,12 +808,6 @@ impl Pane for Sessions {
             (Tab::Fires, Some(r), _) => Some((r.fires.place(), Tone::Back)),
             _ => None,
         }
-    }
-
-    /// `m` is the spend tab's, which groups by month; the mouse takes M-m
-    /// there.
-    fn takes_key(&self, k: KeyEvent) -> bool {
-        self.tab == Tab::Spend && k.code == KeyCode::Char('m') && k.modifiers == KeyModifiers::NONE
     }
 
     fn help(&self) -> Option<String> {
@@ -871,7 +865,8 @@ fn picker_status(p: &Picker) -> String {
 
 /// The session screen on the shell: [`Sessions`] inside `agent_tui::App`.
 /// The terminal runs [`Introspect::into_app`]; the headless `--snap` and
-/// the tests drive the same shell as a [`Screen`]. It reads as the pane.
+/// the tests drive the same shell as a [`Screen`]; [`Introspect::pane`]
+/// reaches the screen's state.
 pub(crate) struct Introspect {
     app: App,
 }
@@ -888,9 +883,19 @@ impl Introspect {
     /// The picker with `replay` open on the timeline, as `ways session live`
     /// opens it: Esc goes back to the list.
     pub(crate) fn opened(mut self, replay: Replay) -> Introspect {
-        self.replay = Some(replay);
-        self.tab = Tab::Timeline;
+        let p = self.pane_mut();
+        p.replay = Some(replay);
+        p.tab = Tab::Timeline;
         self
+    }
+
+    /// The screen's state: the pane the shell hosts, which it never swaps.
+    pub(crate) fn pane(&self) -> &Sessions {
+        self.app.pane_ref().expect("the session screen's pane")
+    }
+
+    pub(crate) fn pane_mut(&mut self) -> &mut Sessions {
+        self.app.pane_mut().expect("the session screen's pane")
     }
 
     pub(crate) fn showing(replay: Replay, reports: Reports, palette: Palette, shape: Shape) -> Introspect {
@@ -910,22 +915,9 @@ impl Introspect {
     }
 }
 
-impl std::ops::Deref for Introspect {
-    type Target = Sessions;
-    fn deref(&self) -> &Sessions {
-        self.app.pane_ref().expect("the session screen's pane")
-    }
-}
-
-impl std::ops::DerefMut for Introspect {
-    fn deref_mut(&mut self) -> &mut Sessions {
-        self.app.pane_mut().expect("the session screen's pane")
-    }
-}
-
 impl Screen for Introspect {
     fn palette(&self) -> Palette {
-        self.palette
+        self.pane().palette
     }
 
     fn draw(&mut self, f: &mut Draw) {
@@ -1080,9 +1072,20 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
             .row_highlight_style(theme::selected())
             .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
             .highlight_spacing(HighlightSpacing::Always);
-        // From the top each frame: the table scrolls only as far as the
-        // selection needs, so a frame with fewer ways never hides its first.
-        *r.table.offset_mut() = 0;
+        // The scroll is kept between frames, so a row stays under the
+        // pointer for a second click, but never past where the last rows
+        // fill the view: a frame with fewer ways never hides its first.
+        let view = ways.height.saturating_sub(3) as usize;
+        let (mut fill, mut max_off) = (0usize, heights.len());
+        for (i, h) in heights.iter().enumerate().rev() {
+            fill += *h as usize;
+            if fill > view {
+                break;
+            }
+            max_off = i;
+        }
+        let kept = r.table.offset().min(max_off);
+        *r.table.offset_mut() = kept;
         r.table.select(Some(r.sel));
         f.render_stateful_widget(t, ways, &mut r.table);
         r.hits.rows = ways;
@@ -1137,7 +1140,10 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
         .highlight_style(theme::selected())
         .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
         .highlight_spacing(HighlightSpacing::Always);
-    *r.list.offset_mut() = 0;
+    // Kept between frames, as the table's is, and clamped so the last ways
+    // fill the view.
+    let kept = r.list.offset().min(fr.ways.len().saturating_sub(left.height.saturating_sub(2) as usize));
+    *r.list.offset_mut() = kept;
     r.list.select(if fr.ways.is_empty() { None } else { Some(r.sel) });
 
     let text_w = right.width.saturating_sub(2);

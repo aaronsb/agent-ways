@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                              │|
 |└ ways tune precision --json --project /home/dev/proj ─────────────────────────┘|
 |remedy insufficient sample                                                      |
-| precision  mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · 1-9 tabs    |
+| precision  mouse on (m) │ ? keys · ↑↓ select · 1-9 tabs                        |
 styles
   0   0-11  White Blue -
   0  14-22  White Blue -
@@ -84,11 +84,11 @@ styles
  22  54-79  - - DIM
  23   0-6   - - DIM
  24   0-10  Black Cyan BOLD
- 24  12-43  - - DIM|ITALIC
- 24  44-46  - - DIM
- 24  47-48  Cyan - -
- 24  49-55  - - DIM|ITALIC
- 24  56-58  Cyan - -
- 24  59-67  - - DIM|ITALIC
- 24  68-71  Cyan - -
- 24  72-75  - - DIM|ITALIC
+ 24  12-23  - - DIM|ITALIC
+ 24  24-26  - - DIM
+ 24  27-28  Cyan - -
+ 24  29-35  - - DIM|ITALIC
+ 24  36-38  Cyan - -
+ 24  39-47  - - DIM|ITALIC
+ 24  48-51  Cyan - -
+ 24  52-55  - - DIM|ITALIC

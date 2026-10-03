@@ -137,7 +137,10 @@ pub trait Pane: Any {
     /// Draw the area between the tab bar and the bottom bar.
     fn draw(&mut self, f: &mut Frame, area: Rect);
 
-    /// A key the shell did not take.
+    /// A key the shell did not take. The shell takes F1, its Alt chords
+    /// (Alt+1-9 for a tab, Alt+m for the mouse) on every pane, and beside
+    /// a pane that owns no text its plain forms too: `?`, `q`, `m` and the
+    /// digits. A pane binds none of these.
     fn key(&mut self, k: KeyEvent) -> Keyed;
 
     /// The mouse wheel over the pane: `up` toward older content.
@@ -166,13 +169,6 @@ pub trait Pane: Any {
         theme::Ground::Accent
     }
 
-    /// Whether the pane answers plain key `k` itself where the shell would
-    /// take it (the shell's `m`, `q`, `?` and digits beside a pane that
-    /// owns no text). The shell's key keeps its Alt form there, and the
-    /// bar names that form while the pane takes the plain one.
-    fn takes_key(&self, _k: KeyEvent) -> bool {
-        false
-    }
 
     /// The bottom bar's message and how it reads, asked each frame.
     fn status(&mut self) -> Option<(String, Tone)> {

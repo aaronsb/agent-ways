@@ -164,7 +164,7 @@ impl Spend {
     pub(crate) fn key(&mut self, k: KeyCode) {
         let last = self.groups().len().saturating_sub(1);
         match k {
-            KeyCode::Char('m') => {
+            KeyCode::Char('d') => {
                 self.by = if self.by == By::Day { By::Month } else { By::Day };
                 self.sel = 0;
             }

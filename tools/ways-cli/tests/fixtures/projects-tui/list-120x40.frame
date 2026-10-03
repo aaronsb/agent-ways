@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| projects  2/3 │ mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · J/K detail · / filter · 1-9 tabs               |
+| projects  2/3 │ mouse on (m) │ ? keys · ↑↓ select · J/K detail · / filter · 1-9 tabs                                   |
 styles
   0   0-9   White Blue -
   1   0-0   - - DIM
@@ -123,15 +123,15 @@ styles
  38   0-119 - - DIM
  39   0-9   Black Cyan BOLD
  39  11-16  - - DIM
- 39  17-48  - - DIM|ITALIC
- 39  49-51  - - DIM
- 39  52-53  Cyan - -
- 39  54-60  - - DIM|ITALIC
- 39  61-63  Cyan - -
- 39  64-72  - - DIM|ITALIC
- 39  73-76  Cyan - -
- 39  77-85  - - DIM|ITALIC
- 39  86-87  Cyan - -
- 39  88-96  - - DIM|ITALIC
- 39  97-100 Cyan - -
- 39 101-104 - - DIM|ITALIC
+ 39  17-28  - - DIM|ITALIC
+ 39  29-31  - - DIM
+ 39  32-33  Cyan - -
+ 39  34-40  - - DIM|ITALIC
+ 39  41-43  Cyan - -
+ 39  44-52  - - DIM|ITALIC
+ 39  53-56  Cyan - -
+ 39  57-65  - - DIM|ITALIC
+ 39  66-67  Cyan - -
+ 39  68-76  - - DIM|ITALIC
+ 39  77-80  Cyan - -
+ 39  81-84  - - DIM|ITALIC

@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |└ ways agent cost --json --project /home/dev/proj ─────────────────────────────┘|
-| spend  mouse on (M-m; Shift-drag selects) │ ? keys · ↑↓ select · m by month    |
+| spend  mouse on (m) │ ? keys · ↑↓ select · d by month · 1-9 tabs               |
 styles
   0   0-11  White Blue -
   0  14-22  White Blue -
@@ -83,11 +83,13 @@ styles
  23   1-49  Blue - BOLD|DIM
  23  50-79  - - DIM
  24   0-6   Black Cyan BOLD
- 24   8-41  - - DIM|ITALIC
- 24  42-44  - - DIM
- 24  45-46  Cyan - -
- 24  47-53  - - DIM|ITALIC
- 24  54-56  Cyan - -
- 24  57-65  - - DIM|ITALIC
- 24  66-67  Cyan - -
- 24  68-75  - - DIM|ITALIC
+ 24   8-19  - - DIM|ITALIC
+ 24  20-22  - - DIM
+ 24  23-24  Cyan - -
+ 24  25-31  - - DIM|ITALIC
+ 24  32-34  Cyan - -
+ 24  35-43  - - DIM|ITALIC
+ 24  44-45  Cyan - -
+ 24  46-56  - - DIM|ITALIC
+ 24  57-60  Cyan - -
+ 24  61-64  - - DIM|ITALIC

@@ -186,15 +186,33 @@ pub struct Scrubber<'a> {
 }
 
 impl Scrubber<'_> {
+    /// The `pos/len` label at the right end.
+    fn label(&self) -> String {
+        format!(" {}/{}", if self.len == 0 { 0 } else { self.pos + 1 }, self.len)
+    }
+
+    /// The track's columns in a scrubber `width` wide: what the label leaves.
+    fn track(&self, width: u16) -> usize {
+        (width as usize).saturating_sub(self.label().chars().count())
+    }
+
+    /// The cell of a `track` a frame falls in: the first frame at the left
+    /// end, the last at the right.
+    fn cell(&self, i: usize, track: usize) -> usize {
+        if self.len <= 1 || track == 0 {
+            0
+        } else {
+            i * (track - 1) / (self.len - 1)
+        }
+    }
+
     /// The line the scrubber draws in `width` columns.
     pub fn line(&self, width: u16) -> Line<'static> {
-        let label = format!(" {}/{}", if self.len == 0 { 0 } else { self.pos + 1 }, self.len);
-        let track = (width as usize).saturating_sub(label.chars().count());
+        let label = self.label();
+        let track = self.track(width);
         let mut spans = Vec::new();
         if track > 0 {
-            // The cell a frame falls in: the first frame at the left end,
-            // the last at the right.
-            let cell = |i: usize| if self.len <= 1 { 0 } else { i * (track - 1) / (self.len - 1) };
+            let cell = |i: usize| self.cell(i, track);
             let head = cell(self.pos.min(self.len.saturating_sub(1)));
             let marks: Vec<usize> = self.marks.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
             let notes: Vec<usize> = self.notes.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
@@ -223,8 +241,7 @@ impl Scrubber<'_> {
     /// nearest frame to the cell: a click on the track seeks there. `None`
     /// on the `pos/len` label or with no frames.
     pub fn frame_at(&self, width: u16, x: u16) -> Option<usize> {
-        let label = format!(" {}/{}", if self.len == 0 { 0 } else { self.pos + 1 }, self.len).chars().count();
-        let track = (width as usize).saturating_sub(label);
+        let track = self.track(width);
         let x = x as usize;
         if self.len == 0 || x >= track {
             return None;
@@ -234,7 +251,7 @@ impl Scrubber<'_> {
         }
         // The first frame drawn in the cell, or with none there the nearest:
         // one of the two frames either side of the inverse of the cell map.
-        let cell = |i: usize| i * (track - 1) / (self.len - 1);
+        let cell = |i: usize| self.cell(i, track);
         let near = x * (self.len - 1) / (track - 1);
         (near.saturating_sub(1)..=(near + 2).min(self.len - 1)).min_by_key(|&f| (cell(f).abs_diff(x), f))
     }

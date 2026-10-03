@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│··············◆·································■········ forecast 132K → 179K│|
 |│+ ↻ softwaredev/code/testing                                                  │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-| replay  mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · ⏎ why          |
+| replay  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space play      |
 styles
   0   0-11  Black Cyan BOLD
   0  14-22  White Blue -
@@ -103,11 +103,15 @@ styles
  22  79-79  - - DIM
  23   0-79  - - DIM
  24   0-7   Black Cyan BOLD
- 24   9-40  - - DIM|ITALIC
- 24  41-43  - - DIM
- 24  44-45  Cyan - -
- 24  46-52  - - DIM|ITALIC
+ 24   9-20  - - DIM|ITALIC
+ 24  21-23  - - DIM
+ 24  24-25  Cyan - -
+ 24  26-32  - - DIM|ITALIC
+ 24  33-35  Cyan - -
+ 24  36-44  - - DIM|ITALIC
+ 24  45-46  Cyan - -
+ 24  47-52  - - DIM|ITALIC
  24  53-55  Cyan - -
- 24  56-64  - - DIM|ITALIC
- 24  65-66  Cyan - -
- 24  67-69  - - DIM|ITALIC
+ 24  56-63  - - DIM|ITALIC
+ 24  64-69  Cyan - -
+ 24  70-73  - - DIM|ITALIC

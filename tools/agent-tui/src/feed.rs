@@ -75,7 +75,15 @@ impl FeedState {
             return None;
         }
         let at = self.top + row as usize;
-        (0..self.laid.heights.len()).find(|&i| self.span(i).is_some_and(|(a, b)| (a..b).contains(&at)))
+        let mut start = 0usize;
+        for (i, h) in self.laid.heights.iter().enumerate() {
+            if at < start + h {
+                // The blank row after an entry is no entry's.
+                return (at + 1 < start + h).then_some(i);
+            }
+            start += h;
+        }
+        None
     }
 
     /// Select entry `i` and scroll it into view: whole when it fits, else

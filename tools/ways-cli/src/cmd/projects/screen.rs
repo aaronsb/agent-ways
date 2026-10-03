@@ -304,7 +304,7 @@ impl Pane for ProjectsPane {
 
 /// The projects screen on the shell: [`ProjectsPane`] inside
 /// `agent_tui::App`, run on the terminal as [`Projects::into_app`] and
-/// driven headless as a [`Screen`]. It reads as the pane.
+/// driven headless as a [`Screen`].
 pub(crate) struct Projects {
     app: App,
 }
@@ -317,18 +317,16 @@ impl Projects {
     pub(crate) fn into_app(self) -> App {
         self.app
     }
-}
 
-impl std::ops::Deref for Projects {
-    type Target = ProjectsPane;
-    fn deref(&self) -> &ProjectsPane {
+    /// The screen's state: the pane the shell hosts, which it never swaps.
+    fn pane(&self) -> &ProjectsPane {
         self.app.pane_ref().expect("the projects pane")
     }
 }
 
 impl Screen for Projects {
     fn palette(&self) -> Palette {
-        self.palette
+        self.pane().palette
     }
 
     fn draw(&mut self, f: &mut Draw) {

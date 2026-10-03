@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |└ ways session fires --json ───────────────────────────────────────────────────┘|
-| fires  2/2 │ mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · 1-9 tabs  |
+| fires  2/2 │ mouse on (m) │ ? keys · ↑↓ select · 1-9 tabs                      |
 styles
   0   0-11  White Blue -
   0  14-22  Black Cyan BOLD
@@ -86,11 +86,11 @@ styles
  23  28-79  - - DIM
  24   0-6   Black Cyan BOLD
  24   8-13  - - DIM
- 24  14-45  - - DIM|ITALIC
- 24  46-48  - - DIM
- 24  49-50  Cyan - -
- 24  51-57  - - DIM|ITALIC
- 24  58-60  Cyan - -
- 24  61-69  - - DIM|ITALIC
- 24  70-73  Cyan - -
- 24  74-77  - - DIM|ITALIC
+ 24  14-25  - - DIM|ITALIC
+ 24  26-28  - - DIM
+ 24  29-30  Cyan - -
+ 24  31-37  - - DIM|ITALIC
+ 24  38-40  Cyan - -
+ 24  41-49  - - DIM|ITALIC
+ 24  50-53  Cyan - -
+ 24  54-57  - - DIM|ITALIC
