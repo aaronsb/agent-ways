@@ -329,28 +329,28 @@ fn languages(_layers: &[Layer]) -> Result<Vec<String>, String> {
 
 /// The domains `ways.disabled_domains` may name: the top-level directories
 /// of the user, shipped and projected ways roots that hold a way, as the
-/// scanner counts one (a `description:` in its frontmatter). The project's
-/// own ways are left out, so the list does not change with the directory.
-fn domains(_layers: &[Layer]) -> Result<Vec<String>, String> {
-    Ok(domains_in(crate::paths::ways_roots(None)).into_iter().collect())
-}
-
-/// The domains of the project's own ways, which a write to that project's
-/// file may disable though the machine-wide list leaves them out.
-pub fn project_domains(project: &Path) -> Vec<String> {
-    domains_in(vec![project.join(".claude/ways")]).into_iter().collect()
-}
-
-fn domains_in(roots: Vec<PathBuf>) -> std::collections::BTreeSet<String> {
+/// scanner counts one (a `description:` in its frontmatter), and those of
+/// each project the layers carry (`<project>/.claude/ways.yaml` names its
+/// `.claude/ways/`), since the engine honours a project's own domain there.
+/// So the rule is the layers': a write to a project's file, and a write
+/// from inside that project, see its domains; from another directory they
+/// do not, and a stored item always stays settable.
+fn domains(layers: &[Layer]) -> Result<Vec<String>, String> {
+    let mut roots = crate::paths::ways_roots(None);
+    for l in layers.iter().filter(|l| l.file == FILE && l.scope == LayerScope::Project) {
+        if let Some(dir) = l.path.as_deref().and_then(Path::parent) {
+            roots.push(dir.join("ways"));
+        }
+    }
     let mut found = std::collections::BTreeSet::new();
-    for root in roots {
-        for way in crate::scanner::scan_ways(&root).unwrap_or_default() {
+    for root in roots.iter().filter(|r| r.is_dir()) {
+        for way in crate::scanner::scan_ways(root).unwrap_or_default() {
             if !way.domain.starts_with('.') {
                 found.insert(way.domain);
             }
         }
     }
-    found
+    Ok(found.into_iter().collect())
 }
 
 /// A per-way toggle: anything but an explicit on reads as disabled.

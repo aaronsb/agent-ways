@@ -212,6 +212,26 @@ fn a_multi_pick_applied_in_the_screens_writes_the_list_set_writes() {
     assert!(written.unwrap().contains("itops"));
 }
 
+/// A project's own domain is offered by its layer and picked in the screens:
+/// the file written holds it, as `set` writes it.
+#[test]
+fn the_project_s_own_domain_is_picked_into_disabled_domains() {
+    let fx = Fx::new();
+    fx.file("proj/.claude/ways/mine/mine.md", "---\ndescription: the mine way\nvocabulary: mine\n---\n");
+    fx.file("proj/.claude/ways.yaml", "enabled: true\n");
+    // itops, mine, softwaredev: the cursor on mine after one down.
+    let left = fx.drive("ways", "down down down down down enter down space enter w a");
+    assert_eq!(left, "nothing pending\n");
+    let cli = Fx::new();
+    cli.file("proj/.claude/ways/mine/mine.md", "---\ndescription: the mine way\nvocabulary: mine\n---\n");
+    cli.file("proj/.claude/ways.yaml", "enabled: true\n");
+    let (_, err, code) = cli.run(&["settings", "set", "ways.disabled_domains", "mine"]);
+    assert_eq!(code, 0, "{err}");
+    let written = fx.read(".config/agent-ways/config.yaml");
+    assert_eq!(written, cli.read(".config/agent-ways/config.yaml"));
+    assert!(written.unwrap().contains("mine"));
+}
+
 /// An attend user file with comments, which both writers must keep.
 const ATTEND: &str = "# my attend settings\nengagement:\n  decay_per_minute: 0.1  # tuned\n";
 

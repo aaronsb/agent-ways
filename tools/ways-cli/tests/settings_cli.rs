@@ -823,10 +823,8 @@ fn the_disabled_domains_are_picked_from_the_corpus_domains() {
     f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/.hidden/h.md"), way);
     f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/notes/note.md"), "no frontmatter\n");
     f.write(&f.root.join("xdg/config/agent-ways/ways/itops/y/y.md"), way);
-    f.write(&f.root.join("proj/.claude/ways/mine/m.md"), way);
-    f.write(&f.overlay(), "enabled: true\n");
     let v = json(&f, &["settings", "get", "ways.disabled_domains", "--json"]);
-    // The project's own domain (mine) is not listed, and nor is a dir with no way.
+    // Hidden directories and directories with no way are not domains.
     assert_eq!(v["options"], serde_json::json!(["ea", "itops"]));
     assert_eq!(v["value"], serde_json::json!([]));
     let (out, _, _) = f.run(&["settings", "help", "ways.disabled_domains"]);
@@ -840,33 +838,41 @@ fn the_disabled_domains_are_picked_from_the_corpus_domains() {
     assert_eq!(code, 3, "{err}");
     assert!(err.contains("nope"), "{err}");
     assert_eq!(std::fs::read_to_string(f.user()).unwrap(), before);
-    // A stored domain no root lists, such as a project's own, stays settable:
-    // only an item newly added must be in the list. Lint still notes it.
-    f.write(&f.user(), "disabled_domains: [mine]\n");
-    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "mine,ea"]).2, 0);
-    assert_eq!(json(&f, &["settings", "get", "ways.disabled_domains", "--json"])["value"], serde_json::json!(["mine", "ea"]));
-    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "mine,nope"]).2, 3);
-    f.write(&f.user(), "disabled_domains: [mine]\n");
-    let (out, _, code) = f.run(&["settings", "lint"]);
-    assert_eq!(code, 3, "{out}");
-    assert!(out.contains("mine"), "{out}");
-    // A write to the project's file may name that project's own domain, which
-    // the engine honours there. A user-file write from inside the project does
-    // not: the user file applies everywhere, and the list there is the same
-    // from every directory.
-    let proj = f.root.join("proj");
-    let p = proj.to_str().unwrap();
+}
+
+#[test]
+fn a_project_s_own_domain_is_a_choice_through_its_layer_and_a_stored_one_stays_settable() {
+    let f = Fx::new();
+    let way = "---\ndescription: d\n---\n";
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/ea/x/x.md"), way);
+    f.write(&f.root.join("proj/.claude/ways/mine/m.md"), way);
+    let p = f.root.join("proj");
+    let p = p.to_str().unwrap();
+    // The project layer lists its own domain, so `set --project` and a write
+    // from inside the project take it, and the user file's write does too:
+    // one rule, the layers' (no special case by key).
+    let v = json(&f, &["settings", "get", "ways.disabled_domains", "--json"]);
+    assert_eq!(v["options"], serde_json::json!(["ea", "mine"]));
     let (_, err, code) = f.run(&["settings", "set", "ways.disabled_domains", "mine", "--project", p]);
     assert_eq!(code, 0, "{err}");
     assert!(std::fs::read_to_string(f.overlay()).unwrap().contains("mine"));
     assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "nope", "--project", p]).2, 3);
-    f.write(&f.user(), "");
-    f.write(&f.overlay(), "enabled: true\n");
-    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "mine"]).2, 3);
-    // From another directory, adding to a list that holds a project-only domain succeeds.
+    // From another directory the project's domain is not listed, but a
+    // stored one stays settable, and adding a listed one succeeds.
     f.write(&f.user(), "disabled_domains: [mine]\n");
     let other = f.root.join("home");
-    let mut c = f.cmd(&["settings", "set", "ways.disabled_domains", "mine,itops"]);
-    c.current_dir(&other);
-    assert!(c.status().unwrap().success());
+    let from_other = |args: &[&str]| {
+        let mut c = f.cmd(args);
+        c.current_dir(&other).env("CLAUDE_PROJECT_DIR", &other);
+        c.output().unwrap()
+    };
+    let out = from_other(&["settings", "get", "ways.disabled_domains", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["options"], serde_json::json!(["ea"]));
+    assert!(from_other(&["settings", "set", "ways.disabled_domains", "mine,ea"]).status.success());
+    assert_eq!(from_other(&["settings", "set", "ways.disabled_domains", "mine,nope"]).status.code(), Some(3));
+    f.write(&f.user(), "disabled_domains: [mine]\n");
+    let out = from_other(&["settings", "lint"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("mine"), "{}", String::from_utf8_lossy(&out.stdout));
 }
