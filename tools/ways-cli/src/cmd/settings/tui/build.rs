@@ -90,7 +90,7 @@ pub fn display(v: Option<&Value>, kind: Kind) -> String {
 
 /// The screens' kind of a key, its choices read over `layers`. A computed
 /// choice whose source cannot answer is edited as text.
-fn kind(k: Kind, layers: &[Layer]) -> TKind {
+pub(crate) fn kind(k: Kind, layers: &[Layer]) -> TKind {
     match k {
         Kind::Bool | Kind::Toggle => TKind::Bool,
         Kind::Int { min, max } => TKind::Int { min, max },
@@ -602,6 +602,8 @@ impl Ways {
                 };
                 let doc = if f.is_parse_failure() {
                     "Fix the file's syntax by hand. Until then it sets nothing, every switch in its scope is off, and nothing is written to it.".to_string()
+                } else if let (Some(r), false) = (&f.repair, f.fallback) {
+                    format!("The value loads as written, but its list of choices does not name it. {r} repairs it; `fix` does not.")
                 } else {
                     "`ways settings lint` lists the findings; `fix` repairs what this section's findings point at, and a switch stays off.".to_string()
                 };
@@ -617,7 +619,7 @@ impl Ways {
                 rows.push(node);
             }
         }
-        Node::group("findings", "What `ways settings lint` finds in the files this tab reads. A section with a finding falls through to the layers beneath; a file that does not parse fails closed.", rows)
+        Node::group("findings", "What `ways settings lint` finds in the files this tab reads. A section a finding drops falls through to the layers beneath; a file that does not parse fails closed.", rows)
     }
 }
 

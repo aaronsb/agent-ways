@@ -420,6 +420,7 @@ impl State {
             pid: std::process::id(),
             uptime_s: self.started.elapsed().as_secs(),
             engine: settings.as_ref().map(|s| s.engine.clone()),
+            engine_set: settings.as_ref().map(|s| s.engine_set),
             model: settings.as_ref().map(|s| s.profile.model.clone()),
             mode: settings.as_ref().map(|s| s.mode),
             requests: stats.requests,

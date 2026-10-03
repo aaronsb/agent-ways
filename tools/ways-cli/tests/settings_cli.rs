@@ -353,9 +353,13 @@ fn the_engine_is_one_of_the_profiles_in_effect() {
     assert_eq!(code, 3, "{out}");
     // A value the list lacks, written by hand, loads and is a lint finding.
     f.write(&agent, "engine: gone\n");
-    let (out, _, code) = f.run(&["settings", "lint"]);
+    let (out, err, code) = f.run(&["settings", "lint"]);
     assert_eq!(code, 3);
-    assert!(out.contains("agent.yaml:1: [gate] engine: expected one of anthropic, openrouter, found 'gone'"), "{out}");
+    assert!(
+        out.contains("agent.yaml:1: [gate] engine: expected one of anthropic, openrouter, found 'gone'; it loads as written, and `ways settings set gate.engine <choice>` repairs it"),
+        "{out}"
+    );
+    assert!(err.contains("1 finding; each line names its repair") && !err.contains("fix"), "{err}");
     assert_eq!(f.run(&["settings", "get", "gate.engine"]).0, "gone\n");
 }
 

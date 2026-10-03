@@ -53,7 +53,14 @@ fn choice_notes(reg: &Registry, prefix: &str, layers: Option<&[Layer]>) -> Vec<(
             &live
         }
     };
-    computed.iter().map(|b| (b.spec.file, format!("{}: {}", b.name(), b.spec.kind.describe(layers)))).collect()
+    computed.iter().map(|b| (b.spec.file, choice_note(&b.name(), b.spec.kind, layers))).collect()
+}
+
+/// The `emit` comment of one computed choice, on one line whatever its
+/// source answered: a newline would end the comment and the rest would
+/// be read back by `apply` as settings.
+pub(super) fn choice_note(name: &str, kind: Kind, layers: &[Layer]) -> String {
+    agent_settings::schema::one_line(&format!("{name}: {}", kind.describe(layers)))
 }
 
 pub(super) fn file_label(file: &str) -> &'static str {
@@ -68,14 +75,23 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     agent_settings::load::trace("lint");
     let layers = layers_for(file, project)?;
     let mut n = 0;
+    // Findings `fix` can repair; the others name their own repair.
+    let mut fixable = 0;
     for l in layers.iter().filter(|l| l.present) {
         for f in &l.findings {
-            println!("{f}");
+            println!("{f}{}", f.lint_note());
             n += 1;
+            fixable += f.lint_note().is_empty() as usize;
         }
     }
     if n > 0 {
-        return Err(fail(exit::REJECTED, format!("{n} finding{}; `ways settings fix <section>` repairs what a section's findings point at", if n == 1 { "" } else { "s" })));
+        let s = if n == 1 { "" } else { "s" };
+        let how = match fixable {
+            0 => "each line names its repair",
+            _ if fixable == n => "`ways settings fix <section>` repairs what a section's findings point at",
+            _ => "`ways settings fix <section>` repairs what a section's findings point at; a line that names its own repair is not one of them",
+        };
+        return Err(fail(exit::REJECTED, format!("{n} finding{s}; {how}")));
     }
     Ok(())
 }

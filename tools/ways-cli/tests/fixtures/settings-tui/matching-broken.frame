@@ -4,12 +4,12 @@ agent-tui frame 100x30
 |│▌▾ findings                                          ││matching.findings                          │|
 |│     #1                        does not parse: the wh││                                           │|
 |│ ▾ settings                    value                 ││What `ways settings lint` finds in the     │|
-|│     semantic_fire_probability 0.5                   ││files this tab reads. A section with a     │|
-|│     keyword_floor_probability 0.15                  ││finding falls through to the layers        │|
-|│     parent_threshold_multiplier 0.8                 ││beneath; a file that does not parse fails  │|
-|│     parent_boost_floor        0.3                   ││closed.                                    │|
-|│     near_miss_margin          0.05                  ││                                           │|
-|│ ▸ refire_presets · setting    value                 ││1 entry, 0 changed                         │|
+|│     semantic_fire_probability 0.5                   ││files this tab reads. A section a finding  │|
+|│     keyword_floor_probability 0.15                  ││drops falls through to the layers beneath; │|
+|│     parent_threshold_multiplier 0.8                 ││a file that does not parse fails closed.   │|
+|│     parent_boost_floor        0.3                   ││                                           │|
+|│     near_miss_margin          0.05                  ││1 entry, 0 changed                         │|
+|│ ▸ refire_presets · setting    value                 ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -69,13 +69,13 @@ styles
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9  54-55  - - DIM
+  9  54-73  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
  10   2-17  - - BOLD
  10  18-27  - - DIM
  10  32-36  - - DIM
- 10  54-73  - - DIM
+ 10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
  11  54-55  - - DIM

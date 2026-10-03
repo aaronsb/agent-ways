@@ -190,7 +190,12 @@ fn agent_status(start: bool) -> Result<ExitCode> {
     };
     println!("ways-agent {} (pid {}), up {}s, socket {}", status.version, status.pid, status.uptime_s, ways_agent::protocol::socket_path().display());
     match (&status.engine, &status.model, status.mode) {
-        (Some(e), Some(m), Some(mode)) => println!("engine {e} ({}; {m}), mode {}", engine_origin(e), mode.as_str()),
+        (Some(e), Some(m), Some(mode)) => {
+            // The agent says how it chose; an agent built before it could
+            // say is answered from agent.yaml here.
+            let set = engine_set(status.engine_set, || engine_set_locally(e));
+            println!("engine {e} ({}; {m}), mode {}", origin(set), mode.as_str())
+        }
         _ => println!("gate off: no engine named and no key found"),
     }
     let pct = |v: Option<u64>| v.map(|ms| format!("{ms} ms")).unwrap_or_else(|| "—".into());
@@ -257,22 +262,27 @@ fn key_add(provider: Provider, from_file: Option<PathBuf>, check: bool, rotate: 
 /// not `provider`, the setting that switches to it. Adding a key never
 /// switches the engine by itself.
 fn engine_note(provider: Provider) {
-    let (user, settings) = match current_settings() {
+    let (_, settings) = match current_settings() {
         Ok(s) => s,
         Err(e) => return println!("engine: {e:#}; `ways settings help gate.engine` lists the profiles"),
     };
     let Some(s) = settings else { return };
-    let set = user.engine.is_some();
-    println!("engine in effect: {} ({})", s.engine, origin(set));
+    println!("engine in effect: {} ({})", s.engine, origin(s.engine_set));
     if s.profile.provider != provider {
         println!("to judge with {provider}: ways settings set gate.engine {provider}");
     }
 }
 
-/// Whether the engine `engine` was set in agent.yaml or picked by key order.
-fn engine_origin(engine: &str) -> &'static str {
-    let set = UserLayer::load_with_findings(&profile::user_layer_path()).is_ok_and(|(u, _)| u.engine.as_deref() == Some(engine));
-    origin(set)
+/// Whether the engine was set: as the agent reports it, else as `local`
+/// reads agent.yaml, for an agent built before it reported it.
+fn engine_set(reported: Option<bool>, local: impl FnOnce() -> bool) -> bool {
+    reported.unwrap_or_else(local)
+}
+
+/// Whether this process's agent.yaml names `engine`: for an agent that
+/// does not report it.
+fn engine_set_locally(engine: &str) -> bool {
+    UserLayer::load_with_findings(&profile::user_layer_path()).is_ok_and(|(u, _)| u.engine.as_deref() == Some(engine))
 }
 
 fn origin(set: bool) -> &'static str {
@@ -627,6 +637,14 @@ fn cost_note(m: &net::ModelInfo, base: Option<&net::ModelInfo>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_takes_the_agent_s_word_on_the_engine_and_reads_the_file_for_an_old_agent() {
+        assert!(engine_set(Some(true), || panic!("not read when the agent says")));
+        assert!(!engine_set(Some(false), || panic!("not read when the agent says")));
+        assert!(engine_set(None, || true));
+        assert_eq!((origin(true), origin(false)), ("set", "picked: first key"));
+    }
 
     /// `s` with each `^` as the ESC byte, so no raw escape literal sits in
     /// the source (the agent-theme SGR lint).

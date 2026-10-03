@@ -182,14 +182,25 @@ fn shipped_field(bound: &[String], field: &str) -> Option<Value> {
 }
 
 /// The profiles `gate.engine` may name: the shipped ones, then each the
-/// user layer adds under `profiles:`, in the file's order.
+/// user layer adds under `profiles:`, in the file's order. A profile whose
+/// patch does not build, such as a new one with no model, names nothing
+/// the gate could run, so it is left out, a patched shipped one too.
 fn profile_names(layers: &[Layer]) -> Result<Vec<String>, String> {
-    let mut out: Vec<String> = profile::shipped().into_keys().collect();
+    let shipped = profile::shipped();
+    let mut out: Vec<String> = shipped.keys().cloned().collect();
     for l in layers.iter().filter(|l| l.file == FILE) {
         let Some(Value::Mapping(m)) = l.accepted.get("profiles") else { continue };
-        for name in m.keys().filter_map(Value::as_str) {
-            if !out.iter().any(|o| o == name) {
-                out.push(name.to_string());
+        for (k, v) in m {
+            let Some(name) = k.as_str() else { continue };
+            let builds = serde_yaml::from_value::<profile::ProfilePatch>(v.clone())
+                .ok()
+                .is_some_and(|p| profile::patched(name, &p, &shipped).is_ok());
+            match (builds, out.iter().position(|o| o == name)) {
+                (true, None) => out.push(name.to_string()),
+                (false, Some(i)) => {
+                    out.remove(i);
+                }
+                _ => {}
             }
         }
     }
@@ -246,6 +257,10 @@ mod tests {
         assert!(engine.parse_cli("openrouter", &layers).is_ok());
         let e = engine.parse_cli("open-router", &layers).unwrap_err();
         assert_eq!(e, "expected one of anthropic, openrouter, mine, found 'open-router'");
+        // A profile the gate could not build is no choice: a new one with no
+        // model, or a shipped one switched to another provider without one.
+        let layers = user("profiles:\n  half:\n    provider: openrouter\n  anthropic:\n    provider: openrouter\n  ok:\n    provider: openrouter\n    model: x/y\n");
+        assert_eq!(engine.kind.describe(&layers), "one of openrouter, ok");
         // The hook path loads one file on its own and keeps the value.
         assert!(user("engine: nope\n")[0].findings.is_empty());
     }

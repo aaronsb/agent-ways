@@ -693,26 +693,36 @@ impl App {
         self.queue.push(q);
     }
 
+    /// Enter in the editor: set the selected row's value, or stay editing.
     pub(super) fn commit(&mut self, buf: &str) {
         let rows = self.rows();
         let path = rows[self.cursor.min(rows.len() - 1)].path.clone();
+        if !self.set_value(&path, buf) {
+            self.mode = Mode::Edit(buf.to_string());
+        }
+    }
+
+    /// Check `buf` for the setting at `path` as the adapter checks typed
+    /// text, and set it. False when it is rejected; the bottom bar says why.
+    pub(super) fn set_value(&mut self, path: &[usize], buf: &str) -> bool {
         let checked = {
-            let s = tree::get(&self.roots, &path).setting.as_ref().expect("edit mode only on settings");
+            let s = tree::get(&self.roots, path).setting.as_ref().expect("a value is set only on settings");
             match s.store.as_ref().and_then(|st| self.adapter.validate(st, buf)) {
                 Some(r) => r,
                 None => s.validate(buf),
             }
         };
-        let n = tree::get_mut(&mut self.roots, &path);
-        let s = n.setting.as_mut().expect("edit mode only on settings");
+        let n = tree::get_mut(&mut self.roots, path);
+        let s = n.setting.as_mut().expect("a value is set only on settings");
         match checked {
             Ok(v) => {
                 s.value = v;
                 self.msg = format!("{} = {}", n.name, s.value);
+                true
             }
             Err(e) => {
                 self.msg = format!("rejected: {e}");
-                self.mode = Mode::Edit(buf.to_string());
+                false
             }
         }
     }

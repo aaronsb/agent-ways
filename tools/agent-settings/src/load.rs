@@ -91,7 +91,18 @@ impl Finding {
                  `ways settings lint` lists the findings, {}",
                 fix(s)
             ),
+            // A value that loads but names nothing in its list.
+            (_, _, false) if self.repair.is_some() => format!("[{tool}] settings: {self}{}", self.lint_note()),
             _ => format!("[{tool}] settings: {self}"),
+        }
+    }
+
+    /// What `lint` adds after the finding: the repair of a value that
+    /// loads, which `fix` does not touch. Empty for every other finding.
+    pub fn lint_note(&self) -> String {
+        match (&self.repair, self.fallback) {
+            (Some(r), false) => format!("; it loads as written, and {r} repairs it"),
+            _ => String::new(),
         }
     }
 }
@@ -598,9 +609,7 @@ pub fn check_choices<'a>(keys: impl IntoIterator<Item = &'a KeySpec>, layers: &m
             for b in bindings(k, std::slice::from_ref(l)) {
                 let (name, path) = k.bind(&b);
                 let Some(v) = l.get(&path) else { continue };
-                let Err(why) = k.check_value_in(v, Some(layers)) else { continue };
-                // `fix` repairs what a load drops; this value loads, so `set` is the repair.
-                let message = format!("{why}; `ways settings set {name} <choice>` repairs it");
+                let Err(message) = k.check_value_in(v, Some(layers)) else { continue };
                 let line = l
                     .path
                     .as_ref()
@@ -617,7 +626,10 @@ pub fn check_choices<'a>(keys: impl IntoIterator<Item = &'a KeySpec>, layers: &m
                         key: Some(path.join(".")),
                         message,
                         fallback: false,
-                        repair: None,
+                        // `fix` repairs what a load drops; this value loads,
+                        // so setting a listed one is the repair, and naming
+                        // it keeps the screens from offering `fix`.
+                        repair: Some(format!("`ways settings set {name} <choice>`")),
                         closed: false,
                     },
                 ));
@@ -930,7 +942,11 @@ mod tests {
         assert!(layers[0].findings.is_empty(), "a preset another section of the file names");
         let f = &layers[1].findings[0];
         assert_eq!((f.key.as_deref(), f.fallback, f.section.as_deref()), (Some("language"), false, Some("general")));
-        assert_eq!(f.message, "expected one of auto, rare, found 'gone'; `ways settings set general.language <choice>` repairs it");
+        assert_eq!(f.message, "expected one of auto, rare, found 'gone'");
+        assert_eq!(f.repair.as_deref(), Some("`ways settings set general.language <choice>`"));
+        let d = f.diagnostic("t");
+        assert!(d.ends_with("found 'gone'; it loads as written, and `ways settings set general.language <choice>` repairs it"), "{d}");
+        assert!(!d.contains("resolve from the layers beneath") && !d.contains("ways settings fix"), "{d}");
         assert_eq!(layers[1].get(&["language".into()]), Some(&Value::String("gone".into())), "the value still loads");
     }
 

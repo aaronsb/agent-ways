@@ -114,6 +114,23 @@ fn nodes(n: &Node) -> Vec<&Node> {
 }
 
 #[test]
+fn an_engine_no_profile_names_is_a_finding_set_repairs_not_fix() {
+    let fx = Fixture::home();
+    let path = fx.root.join(".config/agent-ways/agent.yaml");
+    let schema = &ways_agent_core::settings::SCHEMA;
+    let layer = agent_settings::Layer::from_text(schema, "user", ways_agent_core::settings::FILE, agent_settings::LayerScope::User, Some(&path), "engine: gone\n");
+    let layers = super::super::with_choices(vec![layer]);
+    let roots = Ways::new(ctx_of(&fx)).build(&layers);
+    let gate = roots.iter().find(|r| r.name == "gate").expect("a gate tab");
+    let findings = nodes(gate).into_iter().find(|n| n.name == "findings").expect("a findings group");
+    let row = &findings.children[0];
+    assert!(row.finding.as_deref().is_some_and(|f| f.contains("expected one of anthropic, openrouter, found 'gone'")), "{:?}", row.finding);
+    assert!(row.actions.is_empty(), "no `fix`: it would change nothing");
+    assert!(row.doc.contains("`ways settings set gate.engine <choice>` repairs it") && row.doc.contains("loads as written"), "{}", row.doc);
+    assert!(!findings.doc.contains("A section with a finding falls through"), "{}", findings.doc);
+}
+
+#[test]
 fn every_action_on_every_tab_has_one_key_of_its_own() {
     let fx = Fixture::home();
     let roots = roots(&fx);

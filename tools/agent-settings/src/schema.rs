@@ -120,8 +120,9 @@ impl Kind {
         match (self, layers) {
             (Kind::Choice(c), _) => Choices::Of { items: c.iter().map(|s| s.to_string()).collect(), multi: false },
             (Kind::ChoiceOf { options, multi }, Some(l)) => match options(l) {
-                Ok(items) => Choices::Of { items, multi: *multi },
-                Err(why) => Choices::Unavailable(why),
+                // An item no one could type or see whole is no choice.
+                Ok(items) => Choices::Of { items: items.into_iter().filter(|i| !i.chars().any(char::is_control)).collect(), multi: *multi },
+                Err(why) => Choices::Unavailable(one_line(&why)),
             },
             _ => Choices::None,
         }
@@ -223,6 +224,14 @@ impl Kind {
         self.check_in(&v, layers)?;
         Ok(v)
     }
+}
+
+/// A source's reason as one line of plain text: control characters,
+/// newlines among them, become spaces, and runs of spaces one. It lands in
+/// help, the screens and a YAML comment in `emit`, where a newline would
+/// end the comment and turn the rest into settings.
+pub fn one_line(s: &str) -> String {
+    s.split(|c: char| c.is_control() || c.is_whitespace()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
 /// The one check of a choice, fixed or computed: the shape, then each item
@@ -558,6 +567,20 @@ mod tests {
 
     fn offline(_: &[Layer]) -> Result<Vec<String>, String> {
         Err("no network".into())
+    }
+
+    #[test]
+    fn a_source_s_reason_and_items_reach_the_output_as_one_line() {
+        fn noisy(_: &[Layer]) -> Result<Vec<String>, String> {
+            Err("timed out\nengine: injected\r\n\tretry \u{7}later".into())
+        }
+        fn odd(_: &[Layer]) -> Result<Vec<String>, String> {
+            Ok(vec!["a".into(), "b\nc: d".into()])
+        }
+        let d = Kind::ChoiceOf { options: noisy, multi: false }.describe(&[]);
+        assert_eq!(d, "text (the choices could not be listed: timed out engine: injected retry later)");
+        assert!(!d.chars().any(char::is_control));
+        assert_eq!(Kind::ChoiceOf { options: odd, multi: false }.describe(&[]), "one of a");
     }
 
     fn with_names(names: &str) -> Vec<Layer> {

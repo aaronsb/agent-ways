@@ -319,3 +319,45 @@ pub(super) fn report(layers: &[Layer]) {
         }
     }
 }
+
+#[cfg(test)]
+mod choice_tests {
+    use super::*;
+    use agent_settings::{DefaultValue, KeySpec};
+
+    /// A source that cannot answer, with a reason a careless one might give.
+    fn offline(_: &[Layer]) -> Result<Vec<String>, String> {
+        Err("network down\nmode: off\n".into())
+    }
+
+    const SPEC: KeySpec = KeySpec {
+        name: "gate.profiles.*.model",
+        section: "gate.profiles",
+        file: "agent",
+        path: &["profiles", "*", "model"],
+        kind: Kind::ChoiceOf { options: offline, multi: false },
+        default: DefaultValue::None,
+        instances: &[],
+        scope: Scope::User,
+        doc: "",
+        long: "",
+        check: None,
+        computed: None,
+        fail_closed: None,
+    };
+
+    #[test]
+    fn a_source_that_cannot_answer_leaves_text_and_says_so_on_one_line() {
+        // --json: the key has options, and they are unknown.
+        assert_eq!(options_json(&SPEC, &[]), Some(serde_json::Value::Null));
+        // emit: one comment line, which apply reads past.
+        let note = maintain::choice_note("gate.profiles.anthropic.model", SPEC.kind, &[]);
+        assert_eq!(note, "gate.profiles.anthropic.model: text (the choices could not be listed: network down mode: off)");
+        let emitted = format!("# {note}\nengine: anthropic\n");
+        assert_eq!(serde_yaml::from_str::<Value>(&emitted).unwrap(), serde_yaml::from_str::<Value>("engine: anthropic").unwrap());
+        // The screens: typed text, no picker.
+        assert!(matches!(tui::build::kind(SPEC.kind, &[]), agent_tui::tree::Kind::Text));
+        // And any text is taken.
+        assert_eq!(SPEC.parse_cli("claude-x", &[]).unwrap(), Value::from("claude-x"));
+    }
+}
