@@ -32,7 +32,7 @@ Common choices (numeric ↔ preset, matching the built-in defaults):
 
 Numeric values between these presets are fine — for example, the 14 ways migrated from the PR #70 1M-Opus narrow-tune (ADR-126) sit at `refire: 0.2` (between `normal` and `rare`), deliberately pinned to today's model.
 
-Missing `refire:` on a fire-bearing way means the way fires once and never re-discloses — valid but uncommon, and `ways author lint` warns on it. Check files and `trigger: attend` handlers are exempt (checks ride on parent way firing; attend handlers are signal-triggered).
+Missing `refire:` on a fire-bearing way means the way never fires: the runtime needs its cadence before the first fire, and `ways author lint` reports it as an error. Use `refire: once` for a way that should fire once per session. Check files and `trigger: attend` handlers are exempt (checks ride on parent way firing; attend handlers are signal-triggered).
 
 The legacy `curve:` block (ADR-123) is no longer part of the schema. Writing `curve:` in new ways will trigger a lint UNKNOWN/foreign-field warning.
 
