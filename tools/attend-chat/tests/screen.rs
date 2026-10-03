@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, UNIX_EPOCH};
 
 use agent_theme::ColorDepth;
-use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use agent_tui::screen::Screen;
 use agent_tui::testkit::{self, Goldens};
 use agent_tui::theme::{Palette, Shape};
@@ -500,6 +500,118 @@ fn golden_a_slash_command_runs_and_says_so() {
     assert!(c.status().starts_with("available:"), "{}", c.status());
     g.check("slash-help-ran-80x25", &testkit::render_screen(&mut c, 80, 25));
     g.finish();
+}
+
+fn alt(c: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
+}
+
+fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
+}
+
+/// Alt+m is the shell's mouse toggle beside a text entry, where m types;
+/// the bottom bar says which way it is.
+#[test]
+fn golden_alt_m_turns_the_mouse_off_and_m_types() {
+    let mut g = goldens();
+    let mut c = chat();
+    assert!(c.app().mouse_on(), "the shell reports the mouse by default");
+    drawn(&mut c, &[alt('m')], 80, 25);
+    assert!(!c.app().mouse_on());
+    assert!(c.input().is_empty(), "Alt+m types nothing");
+    g.check("mouse-off-80x25", &testkit::render_screen(&mut c, 80, 25));
+    drawn(&mut c, &[key(KeyCode::Char('m'))], 80, 25);
+    assert_eq!(c.input().text(), "m", "a plain m is text");
+    assert!(!c.app().mouse_on());
+    g.finish();
+}
+
+#[test]
+fn a_click_on_a_tab_shows_its_channel() {
+    let mut c = chat();
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "1 merged").expect("the tab is drawn");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    assert_eq!(c.foreground(), &Tab::Merged);
+}
+
+#[test]
+fn golden_a_tab_clicked() {
+    let mut g = goldens();
+    let mut c = chat();
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "4 #infra").expect("the tab is drawn");
+    // The glyph before the lozenge is part of the target.
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x.saturating_sub(3), y));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+    g.check("clicked-infra-80x25", &testkit::render_screen(&mut c, 80, 25));
+    g.finish();
+}
+
+#[test]
+fn the_wheel_scrolls_the_feed_and_not_outside_it() {
+    let mut c = chat();
+    testkit::render_screen(&mut c, 80, 16);
+    c.mouse(mouse(MouseEventKind::ScrollUp, 10, 0));
+    assert_eq!(c.scroll(), 0, "the tab bar is not the feed");
+    c.mouse(mouse(MouseEventKind::ScrollUp, 10, 5));
+    assert_eq!(c.scroll(), 3);
+    c.mouse(mouse(MouseEventKind::ScrollDown, 10, 5));
+    c.mouse(mouse(MouseEventKind::ScrollDown, 10, 5));
+    assert_eq!(c.scroll(), 0);
+}
+
+/// Esc over a draft asks first, as the settings shell does over pending
+/// edits; Esc goes back to it, D then y quits and drops it.
+#[test]
+fn golden_esc_over_a_draft_asks_first() {
+    let mut g = goldens();
+    let mut c = chat();
+    drawn(&mut c, &chars("half a thought"), 80, 25);
+    assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25), "a draft keeps the chat open");
+    assert!(c.app().guarding());
+    g.check("guard-draft-80x25", &testkit::render_screen(&mut c, 80, 25));
+    assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25));
+    assert!(!c.app().guarding());
+    assert_eq!(c.input().text(), "half a thought", "back to the draft as it was");
+    assert!(drawn(&mut c, &[KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)], 80, 25), "^C asks too");
+    assert!(c.app().guarding());
+    assert!(drawn(&mut c, &[key(KeyCode::Char('D'))], 80, 25));
+    assert!(!drawn(&mut c, &[key(KeyCode::Char('y'))], 80, 25), "quit and discard");
+    g.finish();
+}
+
+#[test]
+fn golden_f1_shows_the_keys_from_their_declaration() {
+    let mut g = goldens();
+    let mut c = chat();
+    drawn(&mut c, &[key(KeyCode::F(1))], 80, 25);
+    let text = testkit::text(&testkit::render_screen(&mut c, 80, 25));
+    for b in c.app().bindings() {
+        assert!(text.contains(&b.keys), "the help lists {}: {text}", b.keys);
+    }
+    g.check("keys-80x25", &testkit::render_screen(&mut c, 80, 25));
+    drawn(&mut c, &[key(KeyCode::Char('x'))], 80, 25);
+    assert!(c.input().is_empty(), "the key that closes the help types nothing");
+    g.finish();
+}
+
+/// Every binding the footer shows is one the declaration holds, in its
+/// order: the footer writes no key's meaning of its own.
+#[test]
+fn the_footer_is_the_declaration() {
+    let mut c = chat();
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 200, 25));
+    let bar = rows.last().expect("a bottom bar");
+    let shown: Vec<String> =
+        c.app().bindings().iter().filter(|b| b.footer).map(|b| format!("{} {}", b.keys, b.label)).collect();
+    let footer = bar.split(" │ ").last().expect("the footer").trim_end();
+    assert_eq!(footer, shown.join(" · "));
 }
 
 #[test]

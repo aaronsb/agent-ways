@@ -1,12 +1,16 @@
-//! The chat screen on `agent-tui` (ADR-504 §1): a tab strip of channels
-//! on top, the message feed, the compose box, the helper row (legend,
-//! slash commands, hints) and the status line. Colour comes from the one
-//! theme (`crate::theme`); identity colours stay the categorical palette.
+//! The chat screen on `agent-tui`'s shell (ADR-504 §1, §3): the channels
+//! on the shell's tab bar, then the message feed, the compose box and the
+//! helper row (legend, slash commands, hints), then the shell's bottom bar
+//! with the status and the footer. Colour comes from the one theme
+//! (`crate::theme`); identity colours stay the categorical palette.
 //!
-//! [`Chat`] holds the state and implements [`Screen`]: `key` is the one
-//! key handler, used by the terminal loop, the headless `--snap` and the
-//! tests; `tick` drains the watcher and keeps the human's heartbeat; and
-//! `draw` (in [`view`]) paints a frame. The Enter and Tab logic lives in
+//! [`ChatPane`] holds the chat's state and is a [`Pane`]: the shell draws
+//! the tabs it lists and the footer from the keys it declares, takes the
+//! mouse, the exit guard and the key help, and hands it the keys it leaves.
+//! [`Chat`] is the shell over that pane, as the terminal runs it
+//! ([`Chat::into_app`]) and as the headless `--snap` and the tests drive
+//! it. `tick` drains the watcher and keeps the human's heartbeat; `draw`
+//! (in [`view`]) paints the pane. The Enter and Tab logic lives in
 //! [`keys`] as free functions; the editing keys are the shared input's.
 
 mod keys;
@@ -17,10 +21,14 @@ use std::time::{Duration, Instant, SystemTime};
 
 use agent_tui::feed::{Entry, FeedState};
 use agent_tui::input::Input;
-use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use agent_tui::ratatui::buffer::Cell;
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use agent_tui::ratatui::layout::Rect;
+use agent_tui::ratatui::text::Span;
 use agent_tui::ratatui::Frame;
 use agent_tui::screen::Screen;
 use agent_tui::theme::{Palette, Shape};
+use agent_tui::{App, Binding, Keyed, Pane, PaneTab, Tone};
 use attend_instances::SnapshotCache;
 
 use crate::chip::{known_identities, KnownIdentity};
@@ -54,6 +62,9 @@ const REFRESH: Duration = Duration::from_secs(5);
 /// How often the watcher's channel is drained.
 const TICK: Duration = Duration::from_millis(100);
 
+/// How many rows a notch of the mouse wheel scrolls the feed.
+const WHEEL_ROWS: usize = 3;
+
 /// The time a frame shows timestamps against.
 #[derive(Debug, Clone, Copy)]
 enum Clock {
@@ -73,7 +84,8 @@ struct World {
     instances: SnapshotCache,
 }
 
-pub struct Chat {
+/// The chat's state: the messages, the compose box, the shown channel.
+pub struct ChatPane {
     signals: Vec<Signal>,
     input: Input,
     status: String,
@@ -91,7 +103,6 @@ pub struct Chat {
     feed_rows: u16,
     rx: Option<Receiver<Signal>>,
     palette: Palette,
-    shape: Shape,
     clock: Clock,
     world: Option<World>,
     /// The feed's entries for the foreground tab, rebuilt when the world,
@@ -104,14 +115,12 @@ pub struct Chat {
     /// Bumped whenever the feed's entries are rebuilt, so the feed keeps
     /// its layout between frames until they change.
     generation: u64,
-    /// The last frame drawn and whether anything has changed since: a key,
-    /// new messages, a refresh, a status message. An unchanged screen is
-    /// copied, not drawn again; idle costs nothing per frame.
-    last_frame: Option<agent_tui::ratatui::buffer::Buffer>,
+    /// The pane as last drawn, its area and cells, and whether anything
+    /// it shows has changed since: a key, new messages, a refresh. An
+    /// unchanged pane is copied, not drawn again; idle costs nothing per
+    /// frame.
+    last_frame: Option<(Rect, Vec<Cell>)>,
     dirty: bool,
-    /// Whether the status line was in its assert window when last drawn;
-    /// the frame after the window closes is drawn afresh.
-    drawn_fresh: bool,
     /// A dry run (`--snap`): Enter sends nothing and runs no command.
     dry_run: bool,
     /// Frames drawn afresh, for tests of the skip.
@@ -121,10 +130,10 @@ pub struct Chat {
     day_seen: Option<SystemTime>,
 }
 
-impl Chat {
-    /// A chat fed by `rx`, drawn with `palette` and lozenges in `shape`.
-    pub fn new(rx: Option<Receiver<Signal>>, palette: Palette, shape: Shape) -> Chat {
-        Chat {
+impl ChatPane {
+    /// A chat fed by `rx`, drawn with `palette`.
+    pub fn new(rx: Option<Receiver<Signal>>, palette: Palette) -> ChatPane {
+        ChatPane {
             signals: Vec::new(),
             input: Input::new(),
             status: String::new(),
@@ -136,7 +145,6 @@ impl Chat {
             feed_rows: 0,
             rx,
             palette,
-            shape,
             clock: Clock::Live,
             world: None,
             entries: None,
@@ -145,31 +153,10 @@ impl Chat {
             generation: 0,
             last_frame: None,
             dirty: true,
-            drawn_fresh: false,
             dry_run: false,
             draws: 0,
             day_seen: None,
         }
-    }
-
-    /// Show timestamps against a fixed `now` at a UTC `offset` in seconds.
-    pub fn pinned(mut self, now: SystemTime, offset: i64) -> Chat {
-        self.clock = Clock::Pinned { now, offset };
-        self
-    }
-
-    /// Keep the human's presence heartbeat, or not.
-    pub fn heartbeat(mut self, on: bool) -> Chat {
-        self.heartbeat = on;
-        self
-    }
-
-    /// A dry run: Enter sends nothing to the bus and runs no slash
-    /// command; the status line says what it would have done. For a
-    /// headless frame (`--snap`), which must never post or change state.
-    pub fn dry_run(mut self, on: bool) -> Chat {
-        self.dry_run = on;
-        self
     }
 
     /// A status message, as a command's result shows it.
@@ -180,38 +167,12 @@ impl Chat {
         self.dirty = true;
     }
 
-    /// How far the feed is paged back, in rows from the bottom.
-    pub fn scroll(&self) -> usize {
-        self.feed.scroll
-    }
-
-    /// How many frames were drawn afresh rather than copied.
-    pub fn draws(&self) -> usize {
-        self.draws
-    }
-
     /// The feed's entries are out of date: rebuild them, and their layout,
     /// on the next frame.
     fn invalidate(&mut self) {
         self.entries = None;
         self.generation += 1;
         self.dirty = true;
-    }
-
-    pub fn input(&self) -> &Input {
-        &self.input
-    }
-
-    pub fn foreground(&self) -> &Tab {
-        &self.foreground
-    }
-
-    pub fn status(&self) -> &str {
-        &self.status
-    }
-
-    pub fn signals(&self) -> &[Signal] {
-        &self.signals
     }
 
     /// Append `sig`, dropping from the head past [`MAX_SIGNALS`]. Both
@@ -360,82 +321,14 @@ impl Chat {
 
     fn page(&mut self, up: bool) {
         let step = (self.feed_rows as usize).saturating_sub(1).max(1);
-        self.feed.scroll = if up { self.feed.scroll + step } else { self.feed.scroll.saturating_sub(step) };
-    }
-}
-
-impl Screen for Chat {
-    fn palette(&self) -> Palette {
-        self.palette
+        self.scroll_by(up, step);
     }
 
-    /// The watcher is drained, and the world refreshed when due, ten times
-    /// a second.
-    fn tick_every(&self) -> Option<Duration> {
-        Some(TICK)
-    }
-
-    fn draw(&mut self, f: &mut Frame) {
-        let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
-        if !self.dirty && fresh == self.drawn_fresh {
-            if let Some(last) = &self.last_frame {
-                if last.area == f.area() {
-                    f.buffer_mut().content.clone_from_slice(&last.content);
-                    return;
-                }
-            }
-        }
-        view::draw(self, f);
-        self.draws += 1;
-        self.dirty = false;
-        self.drawn_fresh = fresh;
-        self.last_frame = Some(f.buffer_mut().clone());
-    }
-
-    /// The one key handler. Esc and Ctrl-C end the chat.
-    fn key(&mut self, k: KeyEvent) -> bool {
+    fn scroll_by(&mut self, up: bool, rows: usize) {
+        self.feed.scroll = if up { self.feed.scroll + rows } else { self.feed.scroll.saturating_sub(rows) };
         self.dirty = true;
-        let m = k.modifiers;
-        match k.code {
-            KeyCode::Esc => return false,
-            KeyCode::Char('c') if m.contains(KeyModifiers::CONTROL) => return false,
-            KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.enter(),
-            KeyCode::Tab => self.tab_key(),
-            KeyCode::PageUp => self.page(true),
-            KeyCode::PageDown => self.page(false),
-            // Alt+1..9 jumps straight to a tab (IRC prior): 1 = merged,
-            // 2 = #open, 3.. = named channels in strip order. Empty slots
-            // are no-ops.
-            KeyCode::Char(c) if m.contains(KeyModifiers::ALT) && c.is_ascii_digit() => {
-                let names = self.strip_names();
-                if let Some(t) = c.to_digit(10).and_then(|slot| tabs::jump(slot, &names)) {
-                    self.set_tab(t);
-                }
-            }
-            _ => {
-                self.input.key(k);
-            }
-        }
-        true
     }
 
-    fn tick(&mut self) {
-        self.drain();
-        self.new_day();
-        if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
-            // Human presence (ADR-170): while the chat is open, keep
-            // `heartbeat/<username>` fresh so this human counts as a live
-            // channel member. Best-effort, like every heartbeat write.
-            if self.heartbeat {
-                let _ = attend_presence::heartbeat::touch(&crate::signal::human_member_id());
-            }
-            self.refresh();
-            self.refreshed = Some(Instant::now());
-        }
-    }
-}
-
-impl Chat {
     /// The time frames show times against.
     fn now(&self) -> SystemTime {
         match self.clock {
@@ -472,6 +365,281 @@ impl Chat {
         if before.as_ref() != Some(&after) {
             self.invalidate();
         }
+    }
+}
+
+impl Pane for ChatPane {
+    fn palette(&self) -> Palette {
+        self.palette
+    }
+
+    fn tabs(&mut self) -> Vec<PaneTab> {
+        view::tabs(self)
+    }
+
+    fn tab(&mut self) -> usize {
+        match self.normal_tab() {
+            Tab::Merged => 0,
+            Tab::Channel(g) => self.strip_names().iter().position(|n| *n == g).map_or(0, |i| i + 1),
+        }
+    }
+
+    /// 0 is merged, then the channels in strip order (Alt+N's slots, less
+    /// one). An index past them does nothing.
+    fn set_tab(&mut self, i: usize) {
+        let names = self.strip_names();
+        if let Some(t) = tabs::jump(i as u32 + 1, &names) {
+            ChatPane::set_tab(self, t);
+        }
+    }
+
+    fn trailer(&mut self) -> Vec<Span<'static>> {
+        view::trailer(self)
+    }
+
+    fn draw(&mut self, f: &mut Frame, area: Rect) {
+        if !self.dirty {
+            if let Some((at, cells)) = &self.last_frame {
+                if *at == area {
+                    let buf = f.buffer_mut();
+                    let mut it = cells.iter();
+                    for y in area.top()..area.bottom() {
+                        for x in area.left()..area.right() {
+                            if let (Some(c), Some(to)) = (it.next(), buf.cell_mut((x, y))) {
+                                *to = c.clone();
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+        view::draw(self, f, area);
+        self.draws += 1;
+        self.dirty = false;
+        let buf = f.buffer_mut();
+        let cells = (area.top()..area.bottom())
+            .flat_map(|y| (area.left()..area.right()).map(move |x| (x, y)))
+            .filter_map(|p| buf.cell(p).cloned())
+            .collect();
+        self.last_frame = Some((area, cells));
+    }
+
+    /// The chat's keys. Esc is the shell's: it quits, asking first over a
+    /// draft. Alt+1..9 (a tab), Alt+m (the mouse) and F1 (the keys) are
+    /// the shell's too, and never reach here.
+    fn key(&mut self, k: KeyEvent) -> Keyed {
+        self.dirty = true;
+        let m = k.modifiers;
+        match k.code {
+            KeyCode::Esc => return Keyed::Pass,
+            KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.enter(),
+            KeyCode::Tab => self.tab_key(),
+            KeyCode::PageUp => self.page(true),
+            KeyCode::PageDown => self.page(false),
+            _ => {
+                self.input.key(k);
+            }
+        }
+        Keyed::Done
+    }
+
+    fn wheel(&mut self, up: bool) {
+        self.scroll_by(up, WHEEL_ROWS);
+    }
+
+    fn bindings(&self) -> Vec<Binding> {
+        vec![
+            Binding::new("Enter", "send"),
+            Binding::new("Tab", "complete"),
+            Binding::new("PgUp PgDn", "scroll"),
+            Binding::help("S-Enter M-Enter", "new line"),
+            Binding::help("← → Home End", "move the cursor"),
+            Binding::help("Bksp Del", "edit"),
+        ]
+    }
+
+    fn mode(&self) -> String {
+        "chat".into()
+    }
+
+    /// The status slot (#398, #400): a fresh result asserts itself, an
+    /// error in the error role; past [`STATUS_ASSERT`] the help of a
+    /// command being typed, or the last result, set back.
+    fn status(&mut self) -> Option<(String, Tone)> {
+        let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
+        let (line, how) = status_slot(fresh, self.status_is_error, crate::slash::contextual_help(self.input.text()), &self.status);
+        let tone = match how {
+            Some(true) => Tone::Err,
+            Some(false) => Tone::Said,
+            None => Tone::Back,
+        };
+        (!line.is_empty()).then_some((line, tone))
+    }
+
+    fn owns_text(&self) -> bool {
+        true
+    }
+
+    fn unsaved(&self) -> Option<String> {
+        (!self.input.is_empty()).then(|| "a draft in the compose box".to_string())
+    }
+
+    fn discard(&mut self) {
+        self.input.clear();
+    }
+
+    fn help(&self) -> Option<String> {
+        Some(
+            "Enter sends to the shown channel; merged sends to #open. @name or #channel\n\
+             at the start addresses the message; Tab completes them, and on an empty\n\
+             line shows the next tab. /help lists the slash commands. `attend inbox`\n\
+             and `attend send` are the same bus outside the screen."
+                .into(),
+        )
+    }
+
+    /// The watcher is drained, and the world refreshed when due, ten times
+    /// a second.
+    fn tick_every(&self) -> Option<Duration> {
+        Some(TICK)
+    }
+
+    fn tick(&mut self) {
+        self.drain();
+        self.new_day();
+        if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
+            // Human presence (ADR-170): while the chat is open, keep
+            // `heartbeat/<username>` fresh so this human counts as a live
+            // channel member. Best-effort, like every heartbeat write.
+            if self.heartbeat {
+                let _ = attend_presence::heartbeat::touch(&crate::signal::human_member_id());
+            }
+            self.refresh();
+            self.refreshed = Some(Instant::now());
+        }
+    }
+}
+
+/// The chat on the shell: [`ChatPane`] inside `agent_tui::App`. The
+/// terminal runs [`Chat::into_app`] through `agent_tui::run`; the headless
+/// `--snap` and the tests drive the same shell as a [`Screen`].
+pub struct Chat {
+    app: App,
+}
+
+impl Chat {
+    /// A chat fed by `rx`, drawn with `palette` and lozenges in `shape`.
+    pub fn new(rx: Option<Receiver<Signal>>, palette: Palette, shape: Shape) -> Chat {
+        Chat { app: App::with_pane("chat", ChatPane::new(rx, palette)).shape(shape) }
+    }
+
+    fn pane(&self) -> &ChatPane {
+        self.app.pane_ref().expect("the chat's pane")
+    }
+
+    fn pane_mut(&mut self) -> &mut ChatPane {
+        self.app.pane_mut().expect("the chat's pane")
+    }
+
+    /// Show timestamps against a fixed `now` at a UTC `offset` in seconds.
+    pub fn pinned(mut self, now: SystemTime, offset: i64) -> Chat {
+        self.pane_mut().clock = Clock::Pinned { now, offset };
+        self
+    }
+
+    /// Keep the human's presence heartbeat, or not.
+    pub fn heartbeat(mut self, on: bool) -> Chat {
+        self.pane_mut().heartbeat = on;
+        self
+    }
+
+    /// A dry run: Enter sends nothing to the bus and runs no slash
+    /// command; the status line says what it would have done. For a
+    /// headless frame (`--snap`), which must never post or change state.
+    pub fn dry_run(mut self, on: bool) -> Chat {
+        self.pane_mut().dry_run = on;
+        self
+    }
+
+    /// The shell, to run on the terminal.
+    pub fn into_app(self) -> App {
+        self.app
+    }
+
+    /// The shell, as it stands.
+    pub fn app(&self) -> &App {
+        &self.app
+    }
+
+    /// A status message, as a command's result shows it.
+    pub fn say(&mut self, s: impl Into<String>, error: bool) {
+        self.pane_mut().say(s, error);
+    }
+
+    /// How far the feed is paged back, in rows from the bottom.
+    pub fn scroll(&self) -> usize {
+        self.pane().feed.scroll
+    }
+
+    /// How many frames of the pane were drawn afresh rather than copied.
+    pub fn draws(&self) -> usize {
+        self.pane().draws
+    }
+
+    pub fn input(&self) -> &Input {
+        &self.pane().input
+    }
+
+    pub fn foreground(&self) -> &Tab {
+        &self.pane().foreground
+    }
+
+    pub fn status(&self) -> &str {
+        &self.pane().status
+    }
+
+    pub fn signals(&self) -> &[Signal] {
+        &self.pane().signals
+    }
+
+    pub fn push(&mut self, sig: Signal) {
+        self.pane_mut().push(sig);
+    }
+
+    pub fn drain(&mut self) -> bool {
+        self.pane_mut().drain()
+    }
+
+    pub fn refresh(&mut self) {
+        self.pane_mut().refresh();
+    }
+
+    /// A mouse event, through the shell's mouse handler.
+    pub fn mouse(&mut self, m: MouseEvent) {
+        self.app.mouse(m);
+    }
+}
+
+impl Screen for Chat {
+    fn palette(&self) -> Palette {
+        self.pane().palette
+    }
+
+    fn draw(&mut self, f: &mut Frame) {
+        self.app.draw(f);
+    }
+
+    fn key(&mut self, k: KeyEvent) -> bool {
+        self.app.key(k)
+    }
+
+    fn tick_every(&self) -> Option<Duration> {
+        self.app.pane_tick_every()
+    }
+
+    fn tick(&mut self) {
+        self.app.tick();
     }
 }
 
@@ -526,5 +694,18 @@ mod status_slot_tests {
         assert_eq!(how, None);
         let (text, _) = status_slot(false, true, None, "err");
         assert_eq!(text, "err");
+    }
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use super::*;
+
+    /// The footer and the key help read one declaration; a key in it twice
+    /// would name two meanings.
+    #[test]
+    fn the_chats_keys_are_bound_once_each() {
+        let c = Chat::new(None, Palette::default(), Shape::PLAIN);
+        assert_eq!(agent_tui::binding_conflicts(&c.app().bindings()), Vec::<String>::new());
     }
 }

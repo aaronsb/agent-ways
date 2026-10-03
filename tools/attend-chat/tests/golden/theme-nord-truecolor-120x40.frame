@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-|  1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                                                                    |
+| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                                                                     |
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                                                                 │|
 |│ │ Laszlo           │ starting the theme port; the legend moves first                                                 │|
@@ -38,15 +38,15 @@ agent-tui frame 120x40
 |│                                                                                                               #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @aaron @Wells                                                                                                  |
-|                                                                                                                        |
+| chat  mouse on (M-m) │ Enter send · Tab complete · PgUp PgDn scroll · M-1-9 tabs · F1 keys                             |
 styles
-  0   1-10  #2e3440 #c99fc1 BOLD
-  0  13-14  #ffb3a1 - BOLD
-  0  15-23  #2e3440 #bfa2c3 -
-  0  26-27  #e07b7b - -
-  0  28-38  #2e3440 #bfa2c3 -
-  0  41-42  #b0bec5 - -
-  0  43-52  #2e3440 #bfa2c3 -
+  0   0-9   #2e3440 #c99fc1 BOLD
+  0  12-13  #ffb3a1 - BOLD
+  0  14-22  #2e3440 #bfa2c3 -
+  0  25-26  #e07b7b - -
+  0  27-37  #2e3440 #bfa2c3 -
+  0  40-41  #b0bec5 - -
+  0  42-51  #2e3440 #bfa2c3 -
   1   0-119 #434c5e - -
   2   0-0   #434c5e - -
   2   2-21  #434c5e - -
@@ -175,3 +175,16 @@ styles
  38   1-7   #c67eff - BOLD
  38   9-14  #e07b7b - -
  38  16-21  #c9e265 - -
+ 39   0-5   #2e3440 #c99fc1 BOLD
+ 39   7-20  #7c8baa - ITALIC
+ 39  21-23  #434c5e - -
+ 39  24-29  #c99fc1 - -
+ 39  30-36  #7c8baa - ITALIC
+ 39  37-40  #c99fc1 - -
+ 39  41-51  #7c8baa - ITALIC
+ 39  52-61  #c99fc1 - -
+ 39  62-70  #7c8baa - ITALIC
+ 39  71-76  #c99fc1 - -
+ 39  77-83  #7c8baa - ITALIC
+ 39  84-86  #c99fc1 - -
+ 39  87-90  #7c8baa - ITALIC

@@ -1,7 +1,7 @@
 //! The chat's own key handlers: Enter (send, or run a slash command)
 //! and Tab (complete). Each is a free function that takes the buffer,
 //! cursor and cycle and returns the next state, so it can be tested
-//! without a terminal; [`super::Chat::key`] applies the result. The
+//! without a terminal; [`super::ChatPane`] applies the result. The
 //! editing keys are the shared input's (`agent_tui::input`).
 
 use agent_theme::ColorDepth;

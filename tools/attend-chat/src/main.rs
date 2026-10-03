@@ -1,7 +1,7 @@
 use std::io::{IsTerminal, Write};
 
 use agent_theme::ColorDepth;
-use agent_tui::screen::{run_screen, Screen};
+use agent_tui::screen::Screen;
 use agent_tui::testkit;
 use attend_chat::app::Chat;
 use attend_chat::{signal, theme, watcher};
@@ -10,7 +10,7 @@ const HELP: &str = "attend-chat — interactive chat TUI for attend (ADR-120)
 
 usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
 
-  Esc / Ctrl-C              exit
+  Esc / Ctrl-C              exit; with a draft in the compose box, asks first
   Enter                     send to the foreground channel
   Tab                       cycle tabs (empty input) / complete @name #channel /command
   Alt+1..9                  jump to tab (1 = merged, 2 = #open, ...)
@@ -18,6 +18,9 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
   Left / Right / Home / End move cursor
   Backspace / Delete        edit
   PgUp / PgDn               scroll the messages
+  Alt+m                     mouse on or off (off lets the terminal select text)
+  F1                        the keys
+  mouse                     click a tab to show it; the wheel scrolls the messages
 
   The colours follow the agent-ways theme (`ways settings theme`).
 
@@ -131,17 +134,24 @@ fn main() {
         // sends nothing and runs no slash command.
         let mut chat = chat.heartbeat(false).dry_run(true);
         chat.tick();
-        testkit::drive(&mut chat, &keys(&args.keys));
+        // A frame before each key, as the terminal draws one before it
+        // reads the next: what a key does can depend on what was drawn,
+        // such as a page's height.
+        for k in keys(&args.keys) {
+            testkit::render_screen(&mut chat, w, h);
+            if !chat.key(k) {
+                break;
+            }
+        }
         let frame = testkit::frame(&testkit::render_screen(&mut chat, w, h));
         let _ = std::io::stdout().write_all(frame.as_bytes());
         std::process::exit(0);
     }
 
-    // The screen's signal handler stays installed after it closes, so the
+    // The shell's signal handler stays installed after it closes, so the
     // process ends here, with 128 plus the signal when one ended it.
-    let code = match run_screen(&mut chat) {
-        Ok(None) => 0,
-        Ok(Some(sig)) => 128 + sig,
+    let code = match agent_tui::run(chat.into_app()) {
+        Ok(session) => session.signal.map_or(0, |sig| 128 + sig),
         Err(e) => {
             eprintln!("attend-chat: terminal: {e}");
             1
