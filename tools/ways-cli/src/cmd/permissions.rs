@@ -64,13 +64,13 @@ fn collect_requirements(roots: &[(&str, std::path::PathBuf)], out: &mut Vec<(Str
             let Ok(content) = std::fs::read_to_string(&path) else { continue };
             let Some((fm, _)) = crate::frontmatter::split(&content) else { continue };
             let Ok(rel) = path.strip_prefix(root) else { continue };
-            let dir_id = rel.parent().map(|p| p.display().to_string()).unwrap_or_default();
+            let dir_id = rel.parent().map(crate::util::path_to_id).unwrap_or_default();
             if claimed.contains(&dir_id) {
                 continue;
             }
             here.push(dir_id);
             if let Some(reqs) = extract_requires(&fm).filter(|r| !r.is_empty()) {
-                out.push((format!("{label}{}", rel.with_extension("").display()), reqs));
+                out.push((format!("{label}{}", crate::util::path_to_id(&rel.with_extension(""))), reqs));
             }
         }
         claimed.extend(here);
