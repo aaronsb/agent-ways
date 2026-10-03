@@ -5,8 +5,9 @@
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Position;
 
-use super::themestate::{Editor, Focus, NameOp, ThemeAct, CHANNELS, DEFAULT, NEW_FROM, ROWS};
+use super::themestate::{Editor, Focus, NameOp, ThemeAct, CHANNELS, NEW_FROM, ROWS};
 use super::{App, Btn, Mode};
+use crate::named::{self, Done};
 use agent_theme::{Source, Theme};
 
 impl App {
@@ -35,14 +36,13 @@ impl App {
         self.themes.active_theme()
     }
 
-    /// The menu's entries for the theme under the cursor: rename and delete
-    /// only for a user file.
+    /// The menu's entries for the theme under the cursor: new, the
+    /// named-item actions (rename and delete only for a user file), edit
+    /// and shape.
     pub(super) fn theme_acts(&self) -> Vec<ThemeAct> {
-        let user = self.themes.under_cursor().1 != Source::Bundled;
-        let mut v = vec![ThemeAct::New, ThemeAct::Copy];
-        if user {
-            v.extend([ThemeAct::Rename, ThemeAct::Delete]);
-        }
+        let name = &self.themes.under_cursor().0.name;
+        let mut v = vec![ThemeAct::New];
+        v.extend(named::acts(&self.themes, name).into_iter().map(ThemeAct::Item));
         v.extend([ThemeAct::Edit, ThemeAct::Shape]);
         v
     }
@@ -62,22 +62,17 @@ impl App {
         Ok(format!("{name} is the active theme"))
     }
 
-    /// Delete a user theme's file. When it was the active one and nothing of
-    /// that name is left, the default becomes the active choice.
-    pub(super) fn theme_delete(&mut self, name: &str) {
-        let was = self.themes.active == name;
-        self.msg = match self.themes.delete(name) {
-            Ok(mut m) => {
-                if was && self.themes.get(name).is_none() {
-                    match self.choose_theme(DEFAULT) {
-                        Ok(_) => m += &format!("; {DEFAULT} is active"),
-                        Err(e) => m += &format!("; the choice was not kept: {e}"),
-                    }
-                }
-                m
+    /// After a copy, rename or delete: the active choice follows through
+    /// the adapter, and a copy opens in the editor.
+    pub(super) fn theme_done(&mut self, done: Done) {
+        let adapter = &mut self.adapter;
+        self.msg = self.themes.settle(&done, |n| adapter.choose_theme(n));
+        if let Done::Copied { to, .. } = &done {
+            if let Some(t) = self.themes.get(to).cloned() {
+                self.themes.editor = Some(Editor::new(t, true));
+                self.msg += "; editing it";
             }
-            Err(e) => format!("rejected: {e}"),
-        };
+        }
     }
 
     fn report(&mut self, r: Result<String, String>) {
@@ -92,9 +87,7 @@ impl App {
         let name = t.name.clone();
         match act {
             ThemeAct::New => self.mode = Mode::ThemeName { op: NameOp::New, buf: String::new() },
-            ThemeAct::Copy => self.mode = Mode::ThemeName { op: NameOp::Copy(name), buf: String::new() },
-            ThemeAct::Rename => self.mode = Mode::ThemeName { op: NameOp::Rename(name), buf: String::new() },
-            ThemeAct::Delete => self.mode = Mode::ThemeDelete { name },
+            ThemeAct::Item(a) => self.item_act(a, name),
             ThemeAct::Edit if src == Source::Bundled => self.mode = Mode::ThemeName { op: NameOp::EditCopy(name), buf: String::new() },
             ThemeAct::Shape => {
                 let r = self.next_shape();
@@ -108,7 +101,9 @@ impl App {
         }
     }
 
-    /// A name was typed: do what it was for, or stay and say why not.
+    /// A name was typed for a new theme or an edited copy: do what it was
+    /// for, or stay and say why not. Copy and rename are the named-item
+    /// flow's (`items`).
     pub(super) fn theme_named(&mut self, op: NameOp, buf: String) {
         let name = buf.trim().to_string();
         if let Err(e) = self.themes.check_name(&name) {
@@ -121,18 +116,6 @@ impl App {
             NameOp::New => {
                 let base = from(self, NEW_FROM);
                 self.themes.create(&base, &name)
-            }
-            NameOp::Copy(f) => {
-                let base = from(self, f);
-                self.themes.create(&base, &name)
-            }
-            NameOp::Rename(f) => {
-                let was = self.themes.active == *f;
-                let r = self.themes.rename(f, &name);
-                match (&r, was) {
-                    (Ok(_), true) => r.and_then(|m| self.adapter.choose_theme(&name).map(|()| format!("{m}; the active choice follows"))),
-                    _ => r,
-                }
             }
             NameOp::EditCopy(f) => {
                 let base = from(self, f);

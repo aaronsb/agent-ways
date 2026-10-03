@@ -596,9 +596,13 @@ impl App {
                 spans.extend(mode(&op.prompt(), Ground::Accent));
                 spans.extend([input(buf.clone()), hint(" Enter · Esc cancel"), msg]);
             }
-            Mode::ThemeDelete { name } => {
+            Mode::ItemName { op, buf } => {
+                spans.extend(mode(&op.prompt(), Ground::Accent));
+                spans.extend([input(buf.clone()), hint(" Enter · Esc cancel"), msg]);
+            }
+            Mode::ItemDelete { name } => {
                 spans.extend(mode("confirm", Ground::Warn));
-                spans.push(Span::raw(format!(" delete theme {name}?  ")));
+                spans.push(Span::raw(format!(" delete {} {name}?  ", self.item_noun())));
                 answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y delete ", Ground::Err), (false, " n keep ", Ground::Ok)]);
             }
             Mode::ThemeMenu { .. } => {

@@ -14,6 +14,7 @@ use ratatui::Terminal;
 use super::themestate::{Focus, Themes};
 use super::*;
 use crate::adapter::Write;
+use crate::named::ItemAct;
 use crate::tree::Setting;
 use agent_theme::{parse, ColorDepth, Rgb};
 
@@ -203,22 +204,24 @@ fn new_copy_rename_and_delete_write_the_themes_dir() {
     assert_eq!((mine.name.as_str(), mine.slots), ("mine", app.themes.set.get("agent-ways").unwrap().slots));
     assert_eq!(shown(&app), "mine", "the cursor moves to the new theme");
 
-    // Copy nord; a bad and a taken name are refused and the prompt stays.
+    // Copy nord; each refused name keeps the prompt open with the reason.
     keys(&mut app, &[KeyCode::Home, KeyCode::Down, KeyCode::Down]);
     act(&mut app, "copy");
-    type_str(&mut app, "Nord 2");
-    keys(&mut app, &[KeyCode::Enter]);
-    assert!(app.msg.contains("lowercase") && matches!(app.mode, Mode::ThemeName { .. }), "{}", app.msg);
-    for _ in 0..6 {
-        keys(&mut app, &[KeyCode::Backspace]);
+    for (bad, why) in [("Nord2", "lowercase"), ("my/nord", "path separator"), ("nord 2", "no spaces"), ("mine", "taken by a user theme"), ("dracula", "taken by a bundled theme"), ("", "cannot be empty")] {
+        type_str(&mut app, bad);
+        keys(&mut app, &[KeyCode::Enter]);
+        assert!(app.msg.contains(why) && matches!(&app.mode, Mode::ItemName { op: ItemOp::Copy(f), .. } if f == "nord"), "{bad}: {}", app.msg);
+        keys(&mut app, &vec![KeyCode::Backspace; bad.len()]);
     }
-    type_str(&mut app, "mine");
-    keys(&mut app, &[KeyCode::Enter]);
-    assert!(app.msg.contains("taken"), "{}", app.msg);
-    keys(&mut app, &[KeyCode::Backspace, KeyCode::Backspace, KeyCode::Backspace, KeyCode::Backspace]);
     type_str(&mut app, "nord-2");
     keys(&mut app, &[KeyCode::Enter]);
     assert_eq!(parse(&std::fs::read_to_string(d.join("nord-2.theme")).unwrap()).unwrap().slots, app.themes.set.get("nord").unwrap().slots);
+    // The copy opens in the editor, saved; Esc closes it on the copy.
+    let e = app.themes.editor.as_ref().expect("the copy opens in the editor");
+    assert_eq!((e.theme.name.as_str(), e.written, e.dirty()), ("nord-2", true, false));
+    assert!(app.msg.contains("copied nord to nord-2") && app.msg.contains("editing it"), "{}", app.msg);
+    keys(&mut app, &[KeyCode::Esc]);
+    assert_eq!(shown(&app), "nord-2");
 
     // Rename the active theme: the file moves and the active choice follows.
     keys(&mut app, &[KeyCode::Enter]);
@@ -241,6 +244,38 @@ fn new_copy_rename_and_delete_write_the_themes_dir() {
     assert_eq!(chosen(&d).unwrap(), "terminal\n");
     assert_eq!(app.themes.active, "terminal");
     assert!(app.themes.set.get("arctic").is_none());
+    assert!(app.msg.contains("it was the active theme, so terminal is active now"), "{}", app.msg);
+}
+
+#[test]
+fn a_bundled_theme_is_never_renamed_or_deleted() {
+    let d = dir("bundled");
+    let mut app = app_in(&d, ColorDepth::TrueColor);
+    keys(&mut app, &[KeyCode::Char('3'), KeyCode::Down, KeyCode::Down]);
+    assert_eq!(shown(&app), "nord");
+    let labels: Vec<&str> = app.theme_acts().iter().map(|a| a.label()).collect();
+    assert_eq!(labels, ["new", "copy", "edit", "shape"], "the menu leaves rename and delete out");
+    // Reached anyway, the flow refuses with the reason and asks nothing.
+    app.item_act(ItemAct::Delete, "nord".into());
+    assert!(matches!(app.mode, Mode::Browse) && app.msg == "rejected: nord is a bundled theme, which is never deleted; copy it to change it", "{}", app.msg);
+    app.item_act(ItemAct::Rename, "terminal".into());
+    assert!(matches!(app.mode, Mode::Browse) && app.msg.contains("terminal is a bundled theme, which is never renamed"), "{}", app.msg);
+    assert_eq!(std::fs::read_dir(&d).unwrap().count(), 0, "nothing was written");
+}
+
+#[test]
+fn deleting_an_override_leaves_the_bundled_theme_active() {
+    let d = dir("override");
+    let nord = app_in(&d, ColorDepth::TrueColor).themes.get("nord").cloned().unwrap();
+    std::fs::write(d.join("nord.theme"), agent_theme::to_text(&agent_theme::Theme { label: "My Nord".into(), ..nord })).unwrap();
+    let mut app = app_in(&d, ColorDepth::TrueColor);
+    keys(&mut app, &[KeyCode::Char('3'), KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    assert_eq!((app.themes.active.as_str(), app.themes.get("nord").unwrap().label.as_str()), ("nord", "My Nord"));
+    act(&mut app, "delete");
+    keys(&mut app, &[KeyCode::Char('y')]);
+    assert!(!d.join("nord.theme").exists());
+    assert_eq!((app.themes.active.as_str(), chosen(&d).unwrap().as_str()), ("nord", "nord\n"), "the bundled nord is still there");
+    assert!(!app.msg.contains("active now"), "{}", app.msg);
 }
 
 #[test]

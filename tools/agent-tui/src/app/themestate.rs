@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use super::theme::Palette;
+use crate::named::{self, Done, ItemAct, NamedItems};
 use agent_theme::{to_text, Background, ColorDepth, Kind, Rgb, Roles, Slots, Source, Theme, ThemeSet, ANSI16_RGB};
 
 /// The default theme: the terminal's own 16 colours, chosen when nothing
@@ -146,15 +147,10 @@ impl Themes {
         r
     }
 
-    /// `[a-z0-9-]+` and not already a theme's name.
+    /// A name a new theme may take: the shared rules of
+    /// [`named::check_name`], `[a-z0-9-]+`, and not already a theme's name.
     pub fn check_name(&self, name: &str) -> Result<(), String> {
-        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
-            return Err(format!("`{name}`: a name is lowercase letters, digits and -"));
-        }
-        if self.get(name).is_some() {
-            return Err(format!("`{name}` is taken"));
-        }
-        Ok(())
+        named::check_name(self, name).map_err(|r| r.message)
     }
 
     fn dir(&self) -> Result<&Path, String> {
@@ -163,9 +159,6 @@ impl Themes {
 
     fn reload(&mut self) {
         self.set = ThemeSet::load(self.dir.as_deref());
-        if self.get(&self.active).is_none() {
-            self.active = DEFAULT.into();
-        }
         self.cursor = self.cursor.min(self.list().len() - 1);
         self.cache.borrow_mut().clear();
         self.roles.borrow_mut().clear();
@@ -195,37 +188,104 @@ impl Themes {
     /// A new user theme: `from` under `name`, written at once.
     pub fn create(&mut self, from: &Theme, name: &str) -> Result<String, String> {
         self.check_name(name)?;
-        let t = Theme { name: name.into(), label: name.into(), ..from.clone() };
-        let path = self.save(&t)?;
-        self.focus(name);
+        let path = self.write_as(from, name)?;
         Ok(format!("wrote {}", self.show(&path)))
     }
 
-    /// A user theme's file under a new name. The caller moves the active
-    /// choice when it was this theme.
-    pub fn rename(&mut self, from: &str, to: &str) -> Result<String, String> {
-        self.check_name(to)?;
+    /// `from` written as user theme `name`, labelled with its name, and focused.
+    fn write_as(&mut self, from: &Theme, name: &str) -> Result<PathBuf, String> {
+        let path = self.save(&Theme { name: name.into(), label: name.into(), ..from.clone() })?;
+        self.focus(name);
+        Ok(path)
+    }
+
+    /// Where the active choice moves after `done`: to the new name when the
+    /// active theme was renamed, to the default when it was deleted, unless
+    /// a bundled theme of its name is left in its place.
+    pub fn follow(&self, done: &Done) -> Option<String> {
+        match done {
+            Done::Renamed { from, to, .. } if self.active == *from => Some(to.clone()),
+            Done::Deleted { name, .. } if self.active == *name && self.get(name).is_none() => Some(DEFAULT.into()),
+            _ => None,
+        }
+    }
+
+    /// After a copy, rename or delete: move the active choice where it
+    /// follows, kept first by `keep` (the adapter's write of the setting),
+    /// focus the theme the operation left, and say what happened. The
+    /// screens and `ways settings theme` both end here.
+    pub fn settle(&mut self, done: &Done, keep: impl FnOnce(&str) -> Result<(), String>) -> String {
+        let mut msg = match done {
+            Done::Copied { from, to, .. } => format!("copied {from} to {to}"),
+            Done::Renamed { from, to, .. } => format!("renamed {from} to {to}"),
+            Done::Deleted { name, .. } => format!("deleted {name}"),
+        };
+        if let Some(next) = self.follow(done) {
+            match keep(&next) {
+                Ok(()) => {
+                    msg += &match done {
+                        Done::Renamed { .. } => "; the active choice follows".to_string(),
+                        _ => format!("; it was the active theme, so {next} is active now"),
+                    };
+                    self.active = next;
+                }
+                Err(e) => msg += &format!("; the active choice was not kept: {e}"),
+            }
+        }
+        let at = match done {
+            Done::Copied { to, .. } | Done::Renamed { to, .. } => to.clone(),
+            Done::Deleted { .. } => self.active.clone(),
+        };
+        self.focus(&at);
+        msg
+    }
+}
+
+/// Themes as named items: the bundled ones, the default among them, are
+/// copied, never renamed or deleted; a user file, an override of a bundled
+/// name included, is the user's.
+impl NamedItems for Themes {
+    fn noun(&self) -> &'static str {
+        "theme"
+    }
+
+    fn exists(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    fn bundled(&self, name: &str) -> bool {
+        self.list().iter().any(|(t, s)| t.name == name && *s == Source::Bundled)
+    }
+
+    fn name_rule(&self, name: &str) -> Result<(), String> {
+        if !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
+            return Err(format!("`{name}`: a theme name is lowercase letters, digits and -"));
+        }
+        Ok(())
+    }
+
+    fn copy_item(&mut self, from: &str, to: &str) -> Result<PathBuf, String> {
+        let base = self.get(from).ok_or("no such theme")?.clone();
+        self.write_as(&base, to)
+    }
+
+    /// The theme written under its new name, then the old file removed. A
+    /// label that was the old name becomes the new one.
+    fn rename_item(&mut self, from: &str, to: &str) -> Result<PathBuf, String> {
         let old = self.set.get(from).ok_or("no such theme")?.clone();
-        let gone = self.path_of(from).ok_or("no themes directory")?;
+        let gone = self.path_of(from).ok_or("no themes directory; nothing is saved")?;
         let label = if old.label == old.name { to.to_string() } else { old.label.clone() };
         let path = self.save(&Theme { name: to.into(), label, ..old })?;
         std::fs::remove_file(&gone).map_err(|e| format!("{}: {e}", gone.display()))?;
-        if self.active == from {
-            self.active = to.into();
-        }
         self.reload();
-        self.focus(to);
-        Ok(format!("renamed {from} to {to}: {}", self.show(&path)))
+        Ok(path)
     }
 
-    /// Remove a user theme's file. When it was active the default takes
-    /// over, unless it overrode a bundled theme, which stays active.
-    pub fn delete(&mut self, name: &str) -> Result<String, String> {
-        let path = self.path_of(name).ok_or("no themes directory")?;
+    fn delete_item(&mut self, name: &str) -> Result<PathBuf, String> {
+        let path = self.path_of(name).ok_or("no themes directory; nothing is saved")?;
         std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         self.reload();
-        self.focus(&self.active.clone());
-        Ok(format!("deleted {}", self.show(&path)))
+        Ok(path)
     }
 }
 
@@ -321,12 +381,10 @@ impl Editor {
     }
 }
 
-/// What a typed name is for.
+/// What a typed name is for, past the named-item actions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NameOp {
     New,
-    Copy(String),
-    Rename(String),
     /// Editing a bundled theme: the copy's name.
     EditCopy(String),
 }
@@ -335,20 +393,17 @@ impl NameOp {
     pub fn prompt(&self) -> String {
         match self {
             NameOp::New => "new theme name".into(),
-            NameOp::Copy(f) => format!("copy {f} as"),
-            NameOp::Rename(f) => format!("rename {f} to"),
             NameOp::EditCopy(f) => format!("{f} is bundled; edit a copy named"),
         }
     }
 }
 
-/// The theme menu's entries.
+/// The theme menu's entries: copy, rename and delete are the named-item
+/// actions; the rest are the theme tab's own.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ThemeAct {
     New,
-    Copy,
-    Rename,
-    Delete,
+    Item(ItemAct),
     Edit,
     /// The lozenge shape, a setting of its own, cycled.
     Shape,
@@ -358,9 +413,7 @@ impl ThemeAct {
     pub fn label(self) -> &'static str {
         match self {
             ThemeAct::New => "new",
-            ThemeAct::Copy => "copy",
-            ThemeAct::Rename => "rename",
-            ThemeAct::Delete => "delete",
+            ThemeAct::Item(a) => a.label(),
             ThemeAct::Edit => "edit",
             ThemeAct::Shape => "shape",
         }

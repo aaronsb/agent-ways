@@ -79,11 +79,7 @@ impl App {
                 }
                 _ => self.mode = Mode::ThemeName { op, buf },
             },
-            Mode::ThemeDelete { name } => match k.code {
-                KeyCode::Char('y' | 'Y') => self.theme_delete(&name),
-                KeyCode::Char('n' | 'N') | KeyCode::Esc => self.msg = "kept".into(),
-                _ => self.mode = Mode::ThemeDelete { name },
-            },
+            m @ (Mode::ItemName { .. } | Mode::ItemDelete { .. }) => self.item_key(m, k),
             Mode::ThemeUnsaved => self.unsaved_key(k),
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),
@@ -459,7 +455,7 @@ impl App {
                 }
             }
             Mode::Review { run: Some(_), .. } => {}
-            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ThemeDelete { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
+            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ItemDelete { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
                 if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
                     let answer = match (self.owns_text() && matches!(self.mode, Mode::Guard { .. }), yes) {
                         (true, true) => KeyCode::Enter,

@@ -4,8 +4,8 @@
 //! It owns the tab bar with pending badges, the bottom bar, the modes
 //! (browse, edit, review and apply), the exit guard across tabs, mouse with
 //! a capture toggle, confirm and masked entry, guided flows (pick, preview,
-//! confirm), the theme tab, and the test kit: a headless render and golden
-//! frames. Colour comes from `agent-theme`. It knows nothing about ways or
+//! confirm), the theme tab, the copy, rename and delete of named items
+//! ([`named`]), and the test kit: a headless render and golden frames. Colour comes from `agent-theme`. It knows nothing about ways or
 //! attend: an [`Adapter`] supplies the content, does the writes and runs the
 //! commands, and the tree it builds is the content of the tree-and-detail
 //! screen.
@@ -28,6 +28,7 @@ pub mod feed;
 pub mod hit;
 pub mod input;
 pub mod markdown;
+pub mod named;
 pub mod screen;
 pub mod strip;
 pub mod testkit;

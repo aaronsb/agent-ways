@@ -6,6 +6,7 @@
 
 mod apply;
 pub mod flow;
+mod items;
 mod keys;
 pub mod pane;
 mod paneshell;
@@ -39,6 +40,7 @@ use crate::tree::{self, Arg, Kind, Node, Queue, Queued, Row, SecretBuf, Setting}
 use apply::{Failure, Outcome, Run};
 use flow::{Flow, FlowEvent};
 pub use themestate::Themes;
+use crate::named::ItemOp;
 use themestate::NameOp;
 
 pub(crate) enum Mode {
@@ -72,10 +74,12 @@ pub(crate) enum Mode {
     Flow(Box<Flow>),
     /// The theme tab's action menu.
     ThemeMenu { sel: usize },
-    /// A theme name typed for a new theme, a copy or a rename.
+    /// A theme name typed for a new theme or an edited copy.
     ThemeName { op: NameOp, buf: String },
-    /// y/n before a user theme's file is deleted.
-    ThemeDelete { name: String },
+    /// A new name typed for a copy or a rename of the tab's named items.
+    ItemName { op: ItemOp, buf: String },
+    /// y/n before one of the tab's named items is deleted.
+    ItemDelete { name: String },
     /// Esc in the editor with unsaved edits: save, discard, or back.
     ThemeUnsaved,
 }

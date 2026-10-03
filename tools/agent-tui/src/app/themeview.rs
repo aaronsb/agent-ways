@@ -13,6 +13,7 @@ use super::review::{fields, LABEL};
 use super::theme::{self, Ground, Seg, Shape};
 use super::themestate::{Editor, Focus, ThemeAct, CHANNELS};
 use super::{App, Btn};
+use crate::named::ItemAct;
 use agent_theme::{contrast, Background, Kind, Rgb, Roles, Slots, Source, MIN_DISTINCT};
 
 /// The slots a list row shows as a strip, in this order.
@@ -86,9 +87,10 @@ impl App {
         let (t, src) = self.themes.under_cursor();
         match a {
             ThemeAct::New => "from agent-ways".into(),
-            ThemeAct::Copy => format!("of {}", t.name),
-            ThemeAct::Rename => "the active choice follows".into(),
-            ThemeAct::Delete => "asks first".into(),
+            ThemeAct::Item(ItemAct::Copy) if src == Source::Bundled => format!("of {}; bundled: copy only", t.name),
+            ThemeAct::Item(ItemAct::Copy) => format!("of {}, then edit it", t.name),
+            ThemeAct::Item(ItemAct::Rename) => "the active choice follows".into(),
+            ThemeAct::Item(ItemAct::Delete) => "asks first".into(),
             ThemeAct::Edit if src == Source::Bundled => "bundled: edits a copy".into(),
             ThemeAct::Edit => String::new(),
             ThemeAct::Shape => format!("{} now; the next is {}", self.shape.name(), self.shape.next().name()),
