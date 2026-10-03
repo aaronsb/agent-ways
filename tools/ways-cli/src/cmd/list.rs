@@ -22,6 +22,10 @@ struct FiredWay {
     #[allow(dead_code)]
     parent: String,
     agent_id: String,
+    /// The epoch counter and token position (in thousands) of the agent this
+    /// row belongs to, which its distances are measured from.
+    agent_epoch: u64,
+    agent_tokens_k: u64,
     /// Per-way re-fire distance in thousands of tokens, derived from
     /// the way's frontmatter `refire:` field (resolved to a `Curve`) via
     /// [`sensor_trait::Curve::refire_delta`]. Falls back to 25% of the
@@ -99,6 +103,7 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
         &project_dir,
         fallback_refire_k,
         context_window,
+        (current_epoch, current_tokens_k),
     );
 
     let blocks = matched.then(|| ways_core::introspection::judge_blocks(&ways_core::firing::load_events_text(), &session_id));
@@ -114,15 +119,17 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
         return Ok(());
     }
 
-    // Sort
+    // Sort. Rows arrive main's first, then each subagent's; the sorts are
+    // stable, and epochs order rows only within one agent.
     match sort {
         "name" => ways.sort_by(|a, b| a.id.cmp(&b.id)),
         "distance" => ways.sort_by(|a, b| {
-            let da = current_epoch.saturating_sub(a.epoch_at_fire);
-            let db = current_epoch.saturating_sub(b.epoch_at_fire);
+            let da = a.agent_epoch.saturating_sub(a.epoch_at_fire);
+            let db = b.agent_epoch.saturating_sub(b.epoch_at_fire);
             db.cmp(&da) // highest distance first
         }),
-        _ => ways.sort_by_key(|w| w.epoch_at_fire), // epoch = conversation order
+        // epoch = conversation order, per agent
+        _ => ways.sort_by_key(|w| (w.agent_id != session::MAIN_AGENT, w.agent_id.clone(), w.epoch_at_fire)),
     }
 
     if json_out {
@@ -143,7 +150,7 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
         agent_theme::paint(agent_theme::Style::new().bold(), "Session"),
         agent_theme::paint(
             agent_theme::Role::Muted,
-            format!("epoch {current_epoch} · {context_window_k}K ctx · {} ways fired", ways.len())
+            format!("epoch {current_epoch} · {context_window_k}K ctx · {} ways fired", distinct_ways(&ways))
         )
     );
     let _ = writeln!(out);
@@ -155,8 +162,9 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
     render::write_table_header_with(&mut out, &layout);
 
     for (i, w) in ways.iter().enumerate() {
+        // Each row's distances count from its own agent's epoch and position.
         render::write_way_row_with(
-            &mut out, w, current_epoch, current_tokens_k,
+            &mut out, w, w.agent_epoch, w.agent_tokens_k,
             &bar_positions, &unique_pos, i, "", "", &layout,
         );
     }
@@ -180,52 +188,65 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
 
 // ── Data collection ────────────────────────────────────────────
 
+/// One row per (agent, way) the session's agents have fired, main's first.
+/// Each agent's rows read its own state (#815). `main_now` is main's epoch
+/// and token position (thousands), already resolved by the caller.
 fn collect_fired_ways(
     session_id: &str,
-    metrics: &HashMap<String, MetricEntry>,
+    metrics: &HashMap<(String, String), MetricEntry>,
     project_dir: &str,
     fallback_refire_k: u64,
     context_window: u64,
+    main_now: (u64, u64),
 ) -> Vec<FiredWay> {
-    let way_epochs = session::list_way_epochs(session_id);
-
-    way_epochs
-        .into_iter()
-        .map(|(way_id, epoch_at_fire)| {
-            let token_pos = session::get_token_position_for_way(&way_id, session_id);
-            let check_fires = session::get_check_fires(&way_id, session_id);
-
-            let (trigger, depth, parent, agent_id) = metrics
-                .get(&way_id)
-                .map(|m| (m.trigger.clone(), m.depth, m.parent.clone(), m.agent_id.clone()))
-                .unwrap_or_else(|| ("unknown".to_string(), 0, "none".to_string(), "main".to_string()));
-
+    let mut ways = Vec::new();
+    for agent in session::agents_in(session_id) {
+        let state = session::AgentState { session_id, agent: &agent };
+        let (agent_epoch, agent_tokens_k) = if agent == session::MAIN_AGENT {
+            main_now
+        } else {
+            (state.epoch(), state.token_position() / 1000)
+        };
+        for (way_id, epoch_at_fire) in session::list_way_epochs(session_id, &agent) {
+            let (trigger, depth, parent) = metrics
+                .get(&(agent.clone(), way_id.clone()))
+                .map(|m| (m.trigger.clone(), m.depth, m.parent.clone()))
+                .unwrap_or_else(|| ("unknown".to_string(), 0, "none".to_string()));
             let refire_threshold_k = session::way_refire_threshold_k(&way_id, project_dir, context_window)
                 .unwrap_or(fallback_refire_k);
-
-            FiredWay {
+            ways.push(FiredWay {
+                token_pos: state.way_tokens(&way_id),
+                check_fires: state.check_fires(&way_id),
                 id: way_id,
                 epoch_at_fire,
-                token_pos,
                 trigger,
                 depth,
-                check_fires,
                 parent,
-                agent_id,
+                agent_id: agent.clone(),
+                agent_epoch,
+                agent_tokens_k,
                 refire_threshold_k,
-            }
-        })
-        .collect()
+            });
+        }
+    }
+    ways
+}
+
+/// How many distinct ways fired, whichever agents fired them. The rows are
+/// per (agent, way), so a way two agents fired is one way and two rows.
+fn distinct_ways(ways: &[FiredWay]) -> usize {
+    ways.iter().map(|w| w.id.as_str()).collect::<std::collections::HashSet<_>>().len()
 }
 
 struct MetricEntry {
     trigger: String,
     depth: u64,
     parent: String,
-    agent_id: String,
 }
 
-fn load_metrics(session_id: &str) -> HashMap<String, MetricEntry> {
+/// The newest metric per (agent, way). Rows written before the field existed
+/// carry no `agent_id` and read as main's.
+fn load_metrics(session_id: &str) -> HashMap<(String, String), MetricEntry> {
     let path = format!("{}/{session_id}/metrics.jsonl", crate::session::sessions_root());
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
@@ -236,13 +257,13 @@ fn load_metrics(session_id: &str) -> HashMap<String, MetricEntry> {
     for line in content.lines() {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
             if let Some(way) = v["way"].as_str() {
+                let agent = v["agent_id"].as_str().unwrap_or(session::MAIN_AGENT);
                 map.insert(
-                    way.to_string(),
+                    (agent.to_string(), way.to_string()),
                     MetricEntry {
                         trigger: v["trigger"].as_str().unwrap_or("unknown").to_string(),
                         depth: v["depth"].as_u64().unwrap_or(0),
                         parent: v["parent"].as_str().unwrap_or("none").to_string(),
-                        agent_id: v["agent_id"].as_str().unwrap_or("main").to_string(),
                     },
                 );
             }
@@ -375,11 +396,16 @@ fn json_output(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, con
     let entries: Vec<serde_json::Value> = ways
         .iter()
         .map(|w| {
-            let distance = current_epoch.saturating_sub(w.epoch_at_fire);
+            // Distances count from the row's own agent; main's rows use the
+            // session's figures, as they always have.
+            let is_main = w.agent_id == session::MAIN_AGENT;
+            let (now_epoch, now_tokens_k) =
+                if is_main { (current_epoch, current_tokens_k) } else { (w.agent_epoch, w.agent_tokens_k) };
+            let distance = now_epoch.saturating_sub(w.epoch_at_fire);
             let token_pos_k = w.token_pos / 1000;
-            let token_distance_k = current_tokens_k.saturating_sub(token_pos_k);
+            let token_distance_k = now_tokens_k.saturating_sub(token_pos_k);
             let token_pct = (token_distance_k * 100).checked_div(w.refire_threshold_k).unwrap_or(0);
-            json!({
+            let mut entry = json!({
                 "id": w.id,
                 "epoch_at_fire": w.epoch_at_fire,
                 "epoch_distance": distance,
@@ -391,7 +417,13 @@ fn json_output(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, con
                 "depth": w.depth,
                 "check_fires": w.check_fires,
                 "parent": w.parent,
-            })
+            });
+            // A subagent's row names its agent; a row without the field is
+            // main's, so main-only output is unchanged.
+            if !is_main {
+                entry["agent_id"] = json!(w.agent_id);
+            }
+            entry
         })
         .collect();
 
@@ -400,7 +432,7 @@ fn json_output(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, con
         "current_epoch": current_epoch,
         "current_tokens_k": current_tokens_k,
         "context_window_k": context_window_k,
-        "ways_fired": entries.len(),
+        "ways_fired": distinct_ways(ways),
         "ways": entries,
     });
     let mut output = output;
@@ -430,6 +462,8 @@ mod tests {
             check_fires: 0,
             parent: "none".into(),
             agent_id: "main".into(),
+            agent_epoch: 2,
+            agent_tokens_k: 10,
             refire_threshold_k: 50,
         };
         let out = json_output(std::slice::from_ref(&way), 2, 10, 200, Some(&blocks));
