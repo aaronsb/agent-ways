@@ -14,8 +14,8 @@ use crate::tree::{self, Kind};
 #[derive(Debug, Clone)]
 pub(crate) struct Pick {
     pub(crate) path: Vec<usize>,
-    /// The choices, then on a list the stored items no choice names, which
-    /// stay until unmarked rather than vanish unseen.
+    /// The choices, then the stored value or items no choice names, shown
+    /// rather than vanishing unseen.
     pub(crate) options: Vec<String>,
     /// How many of `options` are choices; the rest are unknown items.
     pub(crate) known: usize,
@@ -34,9 +34,10 @@ impl Pick {
     pub(crate) fn new(path: Vec<usize>, mut options: Vec<String>, multi: bool, value: &str) -> Pick {
         let known = options.len();
         let held = if multi { tree::list_items(value) } else { vec![value.to_string()] };
-        if multi {
-            options.extend(held.iter().filter(|h| !options[..known].contains(h)).cloned().collect::<Vec<_>>());
-        }
+        // What is set shows, a choice or not: on one, the stored value, which
+        // Enter leaves as it is; on a list, each item, kept until unmarked.
+        let unknown: Vec<String> = held.iter().filter(|h| !h.is_empty() && !options[..known].contains(h)).cloned().collect();
+        options.extend(unknown);
         let marked: Vec<bool> = options.iter().map(|o| held.contains(o)).collect();
         let sel = marked.iter().position(|m| *m).unwrap_or(0);
         Pick { path, options, known, multi, sel, marked, was: value.to_string() }
@@ -59,7 +60,12 @@ impl Pick {
             .zip(&self.marked)
             .enumerate()
             .map(|(i, (o, m))| {
-                let tag = if i >= self.known { "  not a choice" } else if !self.multi && *m { "  current" } else { "" };
+                let tag = match (i >= self.known, !self.multi && *m) {
+                    (true, true) => "  current, not a choice",
+                    (true, false) => "  not a choice",
+                    (false, true) => "  current",
+                    (false, false) => "",
+                };
                 let mark = match (self.multi, m) {
                     (true, true) => "[x]",
                     (true, false) => "[ ]",
@@ -83,6 +89,8 @@ impl App {
             return;
         }
         self.mode = Mode::Pick(Pick::new(path.to_vec(), options.clone(), *multi, &s.value));
+        // The bottom bar keeps room for why a pick is refused.
+        self.msg.clear();
     }
 
     /// One key in the picker. Enter sets the value; on a list, Space marks
@@ -141,8 +149,14 @@ mod tests {
         assert_eq!(p.items()[1], ("● openrouter".to_string(), "  current".to_string()));
         p.sel = 2;
         assert_eq!(p.value(), "mine");
-        // A value no option names: nothing marked, the cursor at the top.
-        assert_eq!(Pick::new(vec![0], opts(), false, "").sel, 0);
+        // Nothing set: nothing marked, the cursor at the top.
+        let p = Pick::new(vec![0], opts(), false, "");
+        assert_eq!((p.sel, p.options.len()), (0, 3));
+        // A value no option names shows, marked current, under the cursor.
+        let p = Pick::new(vec![0], opts(), false, "gone");
+        assert_eq!((p.sel, p.known, p.options.len()), (3, 3, 4));
+        assert_eq!(p.items()[3], ("● gone".to_string(), "  current, not a choice".to_string()));
+        assert_eq!(p.value(), "gone", "Enter on it leaves it as it is");
     }
 
     #[test]
@@ -176,6 +190,48 @@ mod tests {
 
     fn value(app: &App, i: usize) -> String {
         app.roots[0].children[i].setting.as_ref().unwrap().value.clone()
+    }
+
+    #[test]
+    fn a_list_with_an_unknown_item_still_marked_is_refused_until_it_is_unmarked() {
+        let mut app = app();
+        tree::get_mut(&mut app.roots, &[0, 1]).setting.as_mut().unwrap().value = "[mine, gone]".into();
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Enter);
+        // Mark openrouter, keep `gone` marked, and set.
+        press(&mut app, KeyCode::Home);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Char(' '));
+        press(&mut app, KeyCode::Enter);
+        let Mode::Pick(p) = &app.mode else { panic!("a refused pick keeps the picker open: {}", app.msg) };
+        let gone = p.options.iter().position(|o| o == "gone").unwrap();
+        assert!(app.msg.starts_with("rejected: gone is not one of"), "{}", app.msg);
+        assert_eq!(value(&app, 1), "[mine, gone]", "nothing set");
+        let text = crate::testkit::rows(&crate::testkit::render(&mut app, 100, 30)).join("\n");
+        assert!(text.contains("rejected: gone is not one of"), "the bottom bar says why:\n{text}");
+        // Unmark it: the list sets.
+        press(&mut app, KeyCode::End);
+        assert!(matches!(&app.mode, Mode::Pick(p) if p.sel == gone));
+        press(&mut app, KeyCode::Char(' '));
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(app.mode, Mode::Browse), "{}", app.msg);
+        assert_eq!(value(&app, 1), "[openrouter, mine]");
+    }
+
+    #[test]
+    fn a_single_value_no_option_names_shows_and_enter_keeps_it() {
+        let mut app = app();
+        tree::get_mut(&mut app.roots, &[0, 0]).setting.as_mut().unwrap().value = "gone".into();
+        press(&mut app, KeyCode::Enter);
+        let text = crate::testkit::rows(&crate::testkit::render(&mut app, 100, 30)).join("\n");
+        assert!(text.contains("● gone") && text.contains("current, not a choice"), "{text}");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!((value(&app, 0), app.msg.as_str()), ("gone".to_string(), "unchanged"));
+        // Re-picked: a choice replaces it.
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Home);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(value(&app, 0), "anthropic");
     }
 
     #[test]

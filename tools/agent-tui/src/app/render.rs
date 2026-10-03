@@ -491,11 +491,11 @@ impl App {
             }
             Mode::Pick(p) if p.multi => {
                 spans.extend(mode("pick", Ground::Accent));
-                spans.push(hint("  ↑↓ move · Space or click marks · Enter sets · Esc closes"));
+                spans.extend([hint("  ↑↓ move · Space or click marks · Enter sets · Esc closes"), msg]);
             }
             Mode::Pick(_) => {
                 spans.extend(mode("pick", Ground::Accent));
-                spans.push(hint("  ↑↓ choose · Enter or click sets · Esc closes"));
+                spans.extend([hint("  ↑↓ choose · Enter or click sets · Esc closes"), msg]);
             }
             Mode::Arg { path, action, buf } => {
                 let prompt = match &tree::get(&self.roots, path).actions[*action].arg {
