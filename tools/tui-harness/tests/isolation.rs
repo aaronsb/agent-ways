@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
-use common::{tmux_or_skip, Scratch};
+use common::{tmux_or_skip, unwrapped, Scratch};
 use tui_harness::session::TMUX_SOCKET;
 use tui_harness::{Harness, LaunchOptions};
 
@@ -126,7 +126,7 @@ fn a_cwd_with_tmux_style_syntax_is_entered_exactly() {
         let text = s.wait_for("cwd=[", WAIT).unwrap();
         let want = format!("cwd=[{}]", cwd.canonicalize().unwrap().display());
         assert!(
-            text.replace('\n', "").contains(&want),
+            unwrapped(&text).contains(&want),
             "{dir}: pane was:\n{text}"
         );
     }

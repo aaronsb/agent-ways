@@ -16,6 +16,13 @@ pub fn tmux_or_skip(test: &str) -> bool {
     false
 }
 
+/// A pane capture with its soft wraps undone. The pane is a fixed number of
+/// columns wide, so a long path (a deep checkout, a long `TMPDIR`) wraps
+/// across rows; assertions on a path must not depend on it fitting one.
+pub fn unwrapped(pane: &str) -> String {
+    pane.replace('\n', "")
+}
+
 /// A temporary state root plus the tmux sessions a test made. `Drop` kills
 /// the sessions and removes the root, best effort and without asserting, so
 /// a failing test still cleans up and its own panic is the one reported.

@@ -7,7 +7,7 @@ mod common;
 use std::process::Command;
 use std::time::Duration;
 
-use common::{fixture, tmux_or_skip, Scratch};
+use common::{fixture, tmux_or_skip, unwrapped, Scratch};
 use tui_harness::{sgr::BASIC, Harness, LaunchOptions, Renderer};
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -113,11 +113,11 @@ fn each_session_gets_its_callers_env_and_cwd() {
     assert!(one.contains("probe=[one]"), "pane was:\n{one}");
     assert!(two.contains("probe=[two]"), "pane was:\n{two}");
     assert!(
-        one.contains(&format!("cwd=[{cwd_one}]")),
+        unwrapped(&one).contains(&format!("cwd=[{cwd_one}]")),
         "pane was:\n{one}"
     );
     assert!(
-        two.contains(&format!("cwd=[{cwd_two}]")),
+        unwrapped(&two).contains(&format!("cwd=[{cwd_two}]")),
         "pane was:\n{two}"
     );
 }
