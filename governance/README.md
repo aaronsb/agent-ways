@@ -53,7 +53,7 @@ This directory is separable:
 
 1. Copy `governance/` to a new repository.
 2. Add `provenance.yaml` files to your ways, with policy URIs pointing at your own policy documents.
-3. Run `ways-audit report` from a project whose `.claude/ways/` holds those ways.
-4. Run `ways-audit lint` from the compliance repository's root, so relative policy URIs resolve against it.
+3. Point `ways-audit` at the project whose `.claude/ways/` holds those ways: `CLAUDE_PROJECT_DIR=<project> ways-audit report`. Without a project it reads the shipped ways.
+4. Check the claims with `CLAUDE_PROJECT_DIR=<project> ways-audit lint`. A relative policy URI resolves against that project's root, so keep the policies inside it, or use `github://` URIs for policies in another repository.
 
 The `ways-audit` binary is the only dependency. Your compliance repo owns the policies; your ways own the guidance and the claims.

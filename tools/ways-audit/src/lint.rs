@@ -7,7 +7,19 @@ use agent_theme::{paint, Role, Style};
 const BOLD: Style = Style::new().bold();
 const WARN: Style = Style::new().role(Role::Warn).bold();
 
-pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
+/// The directories a relative policy URI may resolve under, in order: the app
+/// (where the shipped `governance/` lives since ADR-142), the `~/.claude`
+/// projection, then the project whose ways are being linted, if any. The
+/// working directory is never a base, so the result does not depend on where
+/// lint runs.
+pub fn uri_bases(project_root: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
+    let mut bases = vec![ways_core::paths::data_root(), ways_core::paths::projection_root()];
+    bases.extend(project_root.map(std::path::Path::to_path_buf));
+    bases
+}
+
+pub fn run(manifest: &Value, project_root: Option<&std::path::Path>, json_out: bool) -> Result<()> {
+    let bases = uri_bases(project_root);
     let ways = match manifest["ways"].as_object() {
         Some(m) => m,
         None => {
@@ -72,13 +84,7 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
             for p in policies {
                 if let Some(uri) = p["uri"].as_str() {
                     if !uri.starts_with("github://") && !uri.starts_with("http") {
-                        // A relative URI names a file in the app (where the
-                        // shipped governance/ lives since ADR-142), in the
-                        // ~/.claude projection, or under the directory lint
-                        // runs from (a separate compliance repo's root).
-                        let found = [ways_core::paths::data_root(), ways_core::paths::projection_root(), std::path::PathBuf::from(".")]
-                            .iter()
-                            .any(|base| base.join(uri).exists());
+                        let found = bases.iter().any(|base| base.join(uri).exists());
                         if !found {
                             errors.push((
                                 way_id.clone(),

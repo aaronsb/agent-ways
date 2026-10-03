@@ -56,7 +56,7 @@ It reads one ways root: the current project's `.claude/ways/` when there is one,
 
 Every command takes `--json`.
 
-`lint` resolves a relative policy URI against the app directory (`$XDG_DATA_HOME/agent-ways`, where the shipped `governance/policies/` lives), the `~/.claude` projection, and the directory it runs from. `github://` and `http` URIs are not checked.
+`lint` resolves a relative policy URI against the app directory (`$XDG_DATA_HOME/agent-ways`, where the shipped `governance/policies/` lives), then the `~/.claude` projection, then the root of the project whose ways it is linting. The working directory is not a base, so the result does not depend on where lint runs. `github://` and `http` URIs are not checked.
 
 ### Findings: assembled, not determined
 
