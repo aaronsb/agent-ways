@@ -335,7 +335,7 @@ pub(super) fn build_frames(
 }
 
 /// The top-level agent's id in the event log.
-pub(crate) const MAIN: &str = "main";
+pub(crate) const MAIN: &str = session::MAIN_AGENT;
 
 /// The agent a fire or re-disclosure went to. A row written before the
 /// log recorded agents was the top-level agent's.

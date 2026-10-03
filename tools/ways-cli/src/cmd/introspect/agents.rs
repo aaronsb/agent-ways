@@ -8,7 +8,9 @@
 //! `subagent_type`, and a workflow member at
 //! `subagents/workflows/<run>/agent-<id>.meta.json`, whose `description`
 //! is its label in the run. The hook input does not say which kind an
-//! agent is; the directory does.
+//! agent is; the directory does. The log records an agent under
+//! [`crate::session::agent_key`] of its id, so a file's id is keyed the same
+//! way before it is matched.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -128,7 +130,7 @@ fn read_dir_meta(dir: &Path, workflow: bool, out: &mut HashMap<String, Meta>) {
         let agent_type = v["agentType"].as_str().unwrap_or("").to_string();
         let workflow = workflow || agent_type == "workflow-subagent";
         out.insert(
-            id.to_string(),
+            crate::session::agent_key(id),
             Meta { agent_type, workflow_label: workflow.then(|| v["description"].as_str().unwrap_or("").to_string()) },
         );
     }

@@ -1475,3 +1475,19 @@ fn a_long_way_id_keeps_its_trailing_segments() {
     assert_eq!(keep_tail("softwaredev/code/supplychain/repoaudit", 18), "…/repoaudit");
     assert_eq!(keep_tail("a/averyveryverylongleaf", 8), "…ongleaf");
 }
+
+/// #818 logs a check's agent: two agents' fires of one check count apart.
+#[test]
+fn two_agents_checks_of_one_way_count_apart() {
+    let by = |e: WayEvent, agent: &str| WayEvent { agent_id: agent.into(), ..e };
+    let events = vec![
+        by(ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), "main"),
+        by(ev("2026-07-03T16:52:02Z", "way_fired", "softwaredev/docs/adr", "file"), "a1b2c3d4e5f6a7b8c"),
+        by(ev("2026-07-03T16:52:03Z", "check_fired", "softwaredev/docs/adr", ""), "main"),
+        by(ev("2026-07-03T16:52:04Z", "check_fired", "softwaredev/docs/adr", ""), "a1b2c3d4e5f6a7b8c"),
+        by(ev("2026-07-03T16:52:05Z", "check_fired", "softwaredev/docs/adr", ""), "a1b2c3d4e5f6a7b8c"),
+    ];
+    let frames = build_frames(&events, &[], &HashMap::new(), 50);
+    let counts: Vec<(&str, u64)> = frames[0].ways.iter().map(|w| (w.agent.as_str(), w.check_fires)).collect();
+    assert_eq!(counts, [("main", 1), ("a1b2c3d4e5f6a7b8c", 2)]);
+}
