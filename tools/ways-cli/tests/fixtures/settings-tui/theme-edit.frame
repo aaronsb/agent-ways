@@ -39,9 +39,9 @@ styles
   0  72-80  Black Cyan BOLD
   0  81-84  Black Yellow BOLD
   1   0-0   - - DIM
-  1   1-39  Blue - BOLD|DIM
+  1   1-39  LightBlue - BOLD|DIM
   1  40-55  - - DIM
-  1  56-59  Blue - BOLD|DIM
+  1  56-59  LightBlue - BOLD|DIM
   1  60-99  - - DIM
   2   0-0   - - DIM
   2  14-16  - Black -
@@ -116,7 +116,7 @@ styles
  12  54-55  - - DIM
  12  56-56  Cyan - -
  12  57-64  - - BOLD
- 12  65-69  Blue - -
+ 12  65-69  LightBlue - -
  12  70-77  Yellow - BOLD
  12  78-84  LightRed - -
  12  85-88  Gray - -
@@ -125,7 +125,7 @@ styles
  13  54-55  - - DIM
  13  65-69  Green - -
  13  70-76  Red - -
- 13  77-81  Blue - -
+ 13  77-81  LightBlue - -
  13  82-83  - - DIM|ITALIC
  13  99-99  - - DIM
  14   0-0   - - DIM

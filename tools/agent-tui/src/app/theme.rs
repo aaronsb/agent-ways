@@ -107,11 +107,11 @@ pub fn accent() -> Style {
     role(Role::Accent)
 }
 /// The accent stepped back: titles, inactive tabs, values off their default.
-/// The terminal palette has no such step and uses blue.
+/// The terminal palette has no such step and uses its info colour.
 pub fn accent_dim() -> Style {
     match current().roles() {
         Some(r) => Style::new().fg(rgb(r.accent_dim)),
-        None => Style::new().fg(ansi(4)),
+        None => info(),
     }
 }
 pub fn body() -> Style {

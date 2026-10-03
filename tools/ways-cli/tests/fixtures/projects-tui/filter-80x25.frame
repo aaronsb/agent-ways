@@ -29,7 +29,7 @@ styles
   0  10-13  Cyan - -
   0  20-20  - - REVERSED
   1   0-0   - - DIM
-  1   1-36  Blue - BOLD|DIM
+  1   1-36  LightBlue - BOLD|DIM
   1  37-79  - - DIM
   2   0-0   - - DIM
   2   1-78  - - BOLD
@@ -40,7 +40,7 @@ styles
   3  79-79  - - DIM
   4   0-79  - - DIM
   5   0-0   - - DIM
-  5   1-39  Blue - BOLD|DIM
+  5   1-39  LightBlue - BOLD|DIM
   5  40-79  - - DIM
   6   0-0   - - DIM
   6   1-18  Cyan - -
@@ -78,7 +78,7 @@ styles
  22   0-0   - - DIM
  22  79-79  - - DIM
  23   0-70  - - DIM
- 23  71-78  Blue - BOLD|DIM
+ 23  71-78  LightBlue - BOLD|DIM
  23  79-79  - - DIM
  24   0-7   Black Cyan BOLD
  24   9-14  - - DIM

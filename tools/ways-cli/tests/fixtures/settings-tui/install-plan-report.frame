@@ -38,9 +38,9 @@ styles
   0  59-69  White Blue -
   0  72-80  White Blue -
   1   0-0   - - DIM
-  1   1-24  Blue - BOLD|DIM
+  1   1-24  LightBlue - BOLD|DIM
   1  25-55  - - DIM
-  1  56-61  Blue - BOLD|DIM
+  1  56-61  LightBlue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM
   2   1-1   Cyan - BOLD|REVERSED
@@ -79,41 +79,41 @@ styles
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10  18-18  Blue - -
- 10  19-30  Blue - BOLD
- 10  31-81  Blue - -
+ 10  18-18  LightBlue - -
+ 10  19-30  LightBlue - BOLD
+ 10  31-81  LightBlue - -
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  18-18  Blue - -
+ 11  18-18  LightBlue - -
  11  20-51  - - DIM|ITALIC
- 11  81-81  Blue - -
+ 11  81-81  LightBlue - -
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  18-18  Blue - -
- 12  81-81  Blue - -
+ 12  18-18  LightBlue - -
+ 12  81-81  LightBlue - -
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  18-18  Blue - -
- 13  81-81  Blue - -
+ 13  18-18  LightBlue - -
+ 13  81-81  LightBlue - -
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  18-18  Blue - -
- 14  81-81  Blue - -
+ 14  18-18  LightBlue - -
+ 14  81-81  LightBlue - -
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  18-18  Blue - -
- 15  81-81  Blue - -
+ 15  18-18  LightBlue - -
+ 15  81-81  LightBlue - -
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16  18-18  Blue - -
- 16  81-81  Blue - -
+ 16  18-18  LightBlue - -
+ 16  81-81  LightBlue - -
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17  18-18  Blue - -
- 17  81-81  Blue - -
+ 17  18-18  LightBlue - -
+ 17  81-81  LightBlue - -
  17  82-99  - - DIM
  18   0-0   - - DIM
- 18  18-81  Blue - -
+ 18  18-81  LightBlue - -
  18  99-99  - - DIM
  19   0-0   - - DIM
  19  54-55  - - DIM

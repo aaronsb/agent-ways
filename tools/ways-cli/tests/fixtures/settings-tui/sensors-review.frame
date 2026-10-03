@@ -39,9 +39,9 @@ styles
   0  70-75  Black Yellow BOLD
   0  78-86  White DarkGray DIM
   1   0-0   - - DIM
-  1   1-33  Blue - BOLD|DIM
+  1   1-33  LightBlue - BOLD|DIM
   1  34-55  - - DIM
-  1  56-61  Blue - BOLD|DIM
+  1  56-61  LightBlue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM
   2   1-1   Cyan - BOLD|REVERSED
