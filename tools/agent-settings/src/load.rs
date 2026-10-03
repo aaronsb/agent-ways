@@ -609,7 +609,7 @@ pub fn check_choices<'a>(keys: impl IntoIterator<Item = &'a KeySpec>, layers: &m
             for b in bindings(k, std::slice::from_ref(l)) {
                 let (name, path) = k.bind(&b);
                 let Some(v) = l.get(&path) else { continue };
-                let Err(message) = k.check_value_for(v, Some(layers), &b) else { continue };
+                let Err(message) = k.check_value_in(v, Some(layers), &b) else { continue };
                 let line = l
                     .path
                     .as_ref()

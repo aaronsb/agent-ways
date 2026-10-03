@@ -97,19 +97,15 @@ pub enum Choices {
 }
 
 impl Kind {
-    /// What the type is, with the choices in effect over `layers`.
-    pub fn describe(&self, layers: &[Layer]) -> String {
-        self.describe_for(layers, &[])
-    }
-
-    /// [`Kind::describe`] for the instance of a pattern key that `bound` names.
-    pub fn describe_for(&self, layers: &[Layer], bound: &[String]) -> String {
+    /// What the type is, with the choices in effect over `layers` for the
+    /// instance of a pattern key that `bound` names (empty for a fixed key).
+    pub fn describe(&self, layers: &[Layer], bound: &[String]) -> String {
         match self {
             Kind::Bool => "bool".into(),
             Kind::Int { min, max } if *max == i64::MAX => format!("int, at least {min}"),
             Kind::Int { min, max } => format!("int, {min}..{max}"),
             Kind::Float { min, max } => format!("float, {min}..{max}"),
-            Kind::Choice(_) | Kind::ChoiceOf { .. } => match self.choices_for(Some(layers), bound) {
+            Kind::Choice(_) | Kind::ChoiceOf { .. } => match self.choices(Some(layers), bound) {
                 Choices::Of { items, multi: false } => format!("one of {}", items.join(", ")),
                 Choices::Of { items, multi: true } => format!("a list, each one of {}", items.join(", ")),
                 Choices::Unavailable(why) => format!("{} (the choices could not be listed: {why})", self.shape()),
@@ -127,12 +123,10 @@ impl Kind {
     /// The choices over `layers`. With no layers, as when a load checks one
     /// file on its own, a computed list is not read: its key is checked as
     /// text there, and `set`, `apply` and `lint` check it against the list.
-    pub fn choices(&self, layers: Option<&[Layer]>) -> Choices {
-        self.choices_for(layers, &[])
-    }
-
-    /// [`Kind::choices`] for the instance of a pattern key that `bound` names.
-    pub fn choices_for(&self, layers: Option<&[Layer]>, bound: &[String]) -> Choices {
+    ///
+    /// `bound` is what a pattern key's wildcards bound to; a source that
+    /// depends on the instance reads it.
+    pub fn choices(&self, layers: Option<&[Layer]>, bound: &[String]) -> Choices {
         match (self, layers) {
             (Kind::Choice(c), _) => Choices::Of { items: c.iter().map(|s| s.to_string()).collect(), multi: false },
             (Kind::ChoiceOf { options, multi }, Some(l)) => match options(l, bound) {
@@ -166,17 +160,12 @@ impl Kind {
     /// wrong. A computed choice is checked as text here; [`Kind::check_in`]
     /// checks it against its list.
     pub fn check(&self, v: &Value) -> Result<(), String> {
-        self.check_in(v, None)
+        self.check_in(v, None, &[])
     }
 
     /// Check a stored value against the type, and a choice against the
     /// choices over `layers`.
-    pub fn check_in(&self, v: &Value, layers: Option<&[Layer]>) -> Result<(), String> {
-        self.check_in_keeping(v, layers, &[], &[])
-    }
-
-    /// [`Kind::check_in`] for the instance of a pattern key that `bound` names.
-    pub fn check_in_for(&self, v: &Value, layers: Option<&[Layer]>, bound: &[String]) -> Result<(), String> {
+    pub fn check_in(&self, v: &Value, layers: Option<&[Layer]>, bound: &[String]) -> Result<(), String> {
         self.check_in_keeping(v, layers, &[], bound)
     }
 
@@ -188,7 +177,7 @@ impl Kind {
             Kind::Int { min, max } => {
                 let n = v.as_i64().ok_or_else(|| format!("expected an integer, found {}", show(v)))?;
                 if n < *min || n > *max {
-                    return Err(format!("{n} is outside {}", Kind::Int { min: *min, max: *max }.describe(&[])));
+                    return Err(format!("{n} is outside {}", Kind::Int { min: *min, max: *max }.describe(&[], &[])));
                 }
                 Ok(())
             }
@@ -203,7 +192,7 @@ impl Kind {
                 }
                 Ok(())
             }
-            Kind::Choice(_) | Kind::ChoiceOf { .. } => check_choice(v, &self.choices_for(layers, bound), self.multi(), keep),
+            Kind::Choice(_) | Kind::ChoiceOf { .. } => check_choice(v, &self.choices(layers, bound), self.multi(), keep),
             Kind::Text | Kind::Path => v.as_str().map(|_| ()).ok_or_else(|| format!("expected text, found {}", show(v))),
             Kind::List => match v {
                 Value::Sequence(s) if s.iter().all(|i| i.is_string()) => Ok(()),
@@ -224,8 +213,8 @@ impl Kind {
 
     /// Parse a command-line value into a typed value. Errors name the type.
     /// A choice is checked against the choices over `layers`.
-    pub fn parse_cli(&self, s: &str, layers: Option<&[Layer]>) -> Result<Value, String> {
-        self.parse_cli_keeping(s, layers, &[], &[])
+    pub fn parse_cli(&self, s: &str, layers: Option<&[Layer]>, bound: &[String]) -> Result<Value, String> {
+        self.parse_cli_keeping(s, layers, &[], bound)
     }
 
     /// [`Kind::parse_cli`], keeping the items of a multi choice in `keep`.
@@ -379,32 +368,47 @@ impl KeySpec {
     /// Check a stored value as a load does, one file on its own: the type,
     /// then the key's own check. A computed choice is checked as text.
     pub fn check_value(&self, v: &Value) -> Result<(), String> {
-        self.check_value_in(v, None)
+        self.check_value_in(v, None, &[])
     }
 
     /// Check a value about to be written, or reported by `lint`: as
     /// [`KeySpec::check_value`], and a choice against the choices over
     /// `layers`.
-    pub fn check_value_in(&self, v: &Value, layers: Option<&[Layer]>) -> Result<(), String> {
-        self.check_value_for(v, layers, &[])
-    }
-
-    /// [`KeySpec::check_value_in`] for the instance `bound` names.
-    pub fn check_value_for(&self, v: &Value, layers: Option<&[Layer]>, bound: &[String]) -> Result<(), String> {
-        self.kind.check_in_for(v, layers, bound)?;
+    pub fn check_value_in(&self, v: &Value, layers: Option<&[Layer]>, bound: &[String]) -> Result<(), String> {
+        if layers.is_some() {
+            self.require_binding(bound)?;
+        }
+        self.kind.check_in(v, layers, bound)?;
         if let Some(c) = self.check {
             c(v)?;
         }
         Ok(())
     }
 
-    /// The strings each layer of this key's file stores under its path.
-    fn stored_items(&self, layers: &[Layer]) -> Vec<String> {
+    /// A computed choice of a pattern key is the choice of one instance, so
+    /// checking it against the layers needs the wildcards' values. Without
+    /// them the list cannot be read, and a value would pass against nothing.
+    fn require_binding(&self, bound: &[String]) -> Result<(), String> {
+        let wildcards = self.name.split('.').filter(|p| *p == "*").count();
+        if matches!(self.kind, Kind::ChoiceOf { .. }) && bound.len() != wildcards {
+            return Err(format!("{} is checked per instance; name which one", self.name));
+        }
+        Ok(())
+    }
+
+    /// The strings each layer of this key's file stores under its path, for
+    /// the instance `bound` names: each `*` of the path is its bound value.
+    fn stored_items(&self, layers: &[Layer], bound: &[String]) -> Vec<String> {
         let mut out = Vec::new();
+        let mut values = bound.iter();
+        let path: Vec<Option<&str>> = self.path.iter().map(|k| if *k == "*" { values.next().map(String::as_str) } else { Some(*k) }).collect();
+        if path.iter().any(Option::is_none) {
+            return out;
+        }
         for l in layers.iter().filter(|l| l.file == self.file) {
-            let mut at = l.accepted.get(self.path.first().copied().unwrap_or(""));
-            for k in self.path.iter().skip(1) {
-                at = at.and_then(|v| v.get(*k));
+            let mut at = l.accepted.get(path[0].unwrap_or(""));
+            for k in path.iter().skip(1) {
+                at = at.and_then(|v| v.get(k.unwrap_or("")));
             }
             if let Some(Value::Sequence(seq)) = at {
                 out.extend(seq.iter().filter_map(Value::as_str).map(str::to_string));
@@ -415,16 +419,12 @@ impl KeySpec {
 
     /// Parse a command-line value: the type, a choice against the choices
     /// over `layers`, then the key's own check.
-    pub fn parse_cli(&self, s: &str, layers: &[Layer]) -> Result<Value, String> {
-        self.parse_cli_for(s, layers, &[])
-    }
-
-    /// [`KeySpec::parse_cli`] for the instance `bound` names.
-    pub fn parse_cli_for(&self, s: &str, layers: &[Layer], bound: &[String]) -> Result<Value, String> {
+    pub fn parse_cli(&self, s: &str, layers: &[Layer], bound: &[String]) -> Result<Value, String> {
+        self.require_binding(bound)?;
         // A multi choice keeps what a layer already stores, so one entry
         // that has left the list never blocks adding another; lint still
         // reports it.
-        let keep = if self.kind.is_multi() { self.stored_items(layers) } else { Vec::new() };
+        let keep = if self.kind.is_multi() { self.stored_items(layers, bound) } else { Vec::new() };
         let v = self.kind.parse_cli_keeping(s, Some(layers), &keep, bound)?;
         if let Some(c) = self.check {
             c(&v)?;
@@ -608,14 +608,14 @@ mod tests {
     #[test]
     fn kinds_check_and_parse() {
         let f = Kind::Float { min: 0.0, max: 1.0 };
-        assert!(f.parse_cli("0.4", None).is_ok());
-        assert!(f.parse_cli("1.5", None).is_err());
+        assert!(f.parse_cli("0.4", None, &[]).is_ok());
+        assert!(f.parse_cli("1.5", None, &[]).is_err());
         assert!(f.check(&Value::Number(1.into())).is_ok());
         assert!(Kind::Toggle.check(&serde_yaml::from_str("{enabled: false, later: 1}").unwrap()).is_ok());
         assert!(Kind::Toggle.check(&serde_yaml::from_str("{enabled: 3}").unwrap()).is_err());
-        assert_eq!(Kind::List.parse_cli("a, b", None).unwrap(), serde_yaml::from_str::<Value>("[a, b]").unwrap());
-        assert!(Kind::Choice(&["x"]).parse_cli("y", None).is_err());
-        assert!(Kind::Secret.parse_cli("sk-123", None).is_err());
+        assert_eq!(Kind::List.parse_cli("a, b", None, &[]).unwrap(), serde_yaml::from_str::<Value>("[a, b]").unwrap());
+        assert!(Kind::Choice(&["x"]).parse_cli("y", None, &[]).is_err());
+        assert!(Kind::Secret.parse_cli("sk-123", None, &[]).is_err());
     }
 
     /// Names in the layers' `names` lists, after a fixed base: the shape of
@@ -642,10 +642,10 @@ mod tests {
         fn odd(_: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
             Ok(vec!["a".into(), "b\nc: d".into()])
         }
-        let d = Kind::ChoiceOf { options: noisy, multi: false }.describe(&[]);
+        let d = Kind::ChoiceOf { options: noisy, multi: false }.describe(&[], &[]);
         assert_eq!(d, "text (the choices could not be listed: timed out engine: injected retry later)");
         assert!(!d.chars().any(char::is_control));
-        assert_eq!(Kind::ChoiceOf { options: odd, multi: false }.describe(&[]), "one of a");
+        assert_eq!(Kind::ChoiceOf { options: odd, multi: false }.describe(&[], &[]), "one of a");
     }
 
     fn with_names(names: &str) -> Vec<Layer> {
@@ -657,35 +657,63 @@ mod tests {
     static EMPTY: Schema = Schema { component: "t", files: &[FileSpec { id: "cfg", retired: &[] }], sections: &[], keys: &[] };
 
     #[test]
+    fn a_pattern_key_s_choice_is_checked_per_instance_never_unbound() {
+        let k = KeySpec {
+            name: "p.*.items",
+            file: "cfg",
+            path: &["p", "*", "items"],
+            kind: Kind::ChoiceOf { options: names, multi: true },
+            ..K
+        };
+        let mut layers = with_names("[mine]");
+        layers[0].accepted.insert("p".into(), serde_yaml::from_str("{a: {items: [x]}, b: {items: [y]}}").unwrap());
+        // Without its binding a value would be checked against nothing: refused instead.
+        let e = k.parse_cli("mine", &layers, &[]).unwrap_err();
+        assert_eq!(e, "p.*.items is checked per instance; name which one");
+        assert!(k.check_value_in(&Value::from("mine"), Some(&layers), &[]).is_err());
+        let a = ["a".to_string()];
+        assert!(k.parse_cli("mine", &layers, &a).is_ok());
+        assert!(k.parse_cli("[base, nope]", &layers, &a).is_err());
+        // A multi choice keeps what the instance stores, not another's.
+        assert!(k.parse_cli("[mine, x]", &layers, &a).is_ok(), "x is stored under a");
+        assert!(k.parse_cli("[mine, y]", &layers, &a).is_err(), "y is stored under b");
+        assert_eq!(k.stored_items(&layers, &a), ["x"]);
+        assert_eq!(k.stored_items(&layers, &["b".to_string()]), ["y"]);
+        assert!(k.stored_items(&layers, &[]).is_empty());
+        // A load checks one file on its own, with no layers: text.
+        assert!(k.check_value(&Value::from(vec!["anything"])).is_ok());
+    }
+
+    #[test]
     fn a_computed_choice_accepts_and_refuses_against_the_layers() {
         let one = Kind::ChoiceOf { options: names, multi: false };
         let layers = with_names("[mine]");
-        assert_eq!(one.parse_cli("mine", Some(&layers)).unwrap(), Value::from("mine"));
-        assert_eq!(one.parse_cli("base", Some(&layers)).unwrap(), Value::from("base"));
-        assert_eq!(one.parse_cli("nope", Some(&layers)).unwrap_err(), "expected one of base, mine, found 'nope'");
-        assert!(one.parse_cli("mine", Some(&[])).is_err(), "a name only another layer holds");
+        assert_eq!(one.parse_cli("mine", Some(&layers), &[]).unwrap(), Value::from("mine"));
+        assert_eq!(one.parse_cli("base", Some(&layers), &[]).unwrap(), Value::from("base"));
+        assert_eq!(one.parse_cli("nope", Some(&layers), &[]).unwrap_err(), "expected one of base, mine, found 'nope'");
+        assert!(one.parse_cli("mine", Some(&[]), &[]).is_err(), "a name only another layer holds");
         // A load checks one file on its own: the shape, not the list.
         assert!(one.check(&Value::from("nope")).is_ok());
         assert!(one.check(&Value::from(3)).is_err());
-        assert!(one.check_in(&Value::from("nope"), Some(&layers)).is_err());
+        assert!(one.check_in(&Value::from("nope"), Some(&layers), &[]).is_err());
         // Several at once.
         let many = Kind::ChoiceOf { options: names, multi: true };
-        assert_eq!(many.parse_cli("base, mine", Some(&layers)).unwrap(), serde_yaml::from_str::<Value>("[base, mine]").unwrap());
-        assert_eq!(many.parse_cli("[base, x]", Some(&layers)).unwrap_err(), "'x' is not one of base, mine");
-        assert!(many.check_in(&Value::from("base"), Some(&layers)).is_err(), "a list, not one");
+        assert_eq!(many.parse_cli("base, mine", Some(&layers), &[]).unwrap(), serde_yaml::from_str::<Value>("[base, mine]").unwrap());
+        assert_eq!(many.parse_cli("[base, x]", Some(&layers), &[]).unwrap_err(), "'x' is not one of base, mine");
+        assert!(many.check_in(&Value::from("base"), Some(&layers), &[]).is_err(), "a list, not one");
         // A source that cannot answer leaves the key taking text.
         let net = Kind::ChoiceOf { options: offline, multi: false };
-        assert!(net.parse_cli("anything", Some(&layers)).is_ok());
-        assert_eq!(net.choices(Some(&layers)), Choices::Unavailable("no network".into()));
+        assert!(net.parse_cli("anything", Some(&layers), &[]).is_ok());
+        assert_eq!(net.choices(Some(&layers), &[]), Choices::Unavailable("no network".into()));
     }
 
     #[test]
     fn describe_lists_the_choices_in_effect() {
         let layers = with_names("[mine]");
-        assert_eq!(Kind::Choice(&["a", "b"]).describe(&[]), "one of a, b");
-        assert_eq!(Kind::ChoiceOf { options: names, multi: false }.describe(&layers), "one of base, mine");
-        assert_eq!(Kind::ChoiceOf { options: names, multi: true }.describe(&[]), "a list, each one of base");
-        assert_eq!(Kind::ChoiceOf { options: offline, multi: false }.describe(&[]), "text (the choices could not be listed: no network)");
+        assert_eq!(Kind::Choice(&["a", "b"]).describe(&[], &[]), "one of a, b");
+        assert_eq!(Kind::ChoiceOf { options: names, multi: false }.describe(&layers, &[]), "one of base, mine");
+        assert_eq!(Kind::ChoiceOf { options: names, multi: true }.describe(&[], &[]), "a list, each one of base");
+        assert_eq!(Kind::ChoiceOf { options: offline, multi: false }.describe(&[], &[]), "text (the choices could not be listed: no network)");
         // A fixed choice says the same thing it always has.
         assert_eq!(Kind::Choice(&["x"]).check(&Value::from(1)).unwrap_err(), "expected one of x, found 1");
     }

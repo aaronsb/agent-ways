@@ -403,8 +403,20 @@ fn a_profile_s_model_is_one_of_the_cached_list_of_its_provider() {
     assert_eq!(f.run(&["settings", "set", "gate.profiles.mine.model", "claude-sonnet-5-5"]).2, 3);
     let (out, _, _) = f.run(&["settings", "emit", "gate"]);
     assert!(out.contains("# gate.profiles.anthropic.model: one of claude-haiku-4-5, claude-sonnet-5-5\n"), "{out}");
+    // The pattern key's help names no one provider.
+    let (out, _, _) = f.run(&["settings", "help", "gate.profiles.*.model"]);
+    assert!(out.contains("text (the choices could not be listed: the list depends on the profile's provider)"), "{out}");
+    // The canonical body shows the shipped provider, and its note follows it
+    // even when a stored patch moves that profile to another provider.
+    f.write(&agent, "profiles:\n  anthropic:\n    provider: openrouter\n    model: openai/gpt-5\n");
+    let (canon, _, _) = f.run(&["settings", "emit", "gate"]);
+    assert!(canon.contains("# gate.profiles.anthropic.model: one of claude-haiku-4-5, claude-sonnet-5-5\n") && canon.contains("    provider: anthropic\n"), "{canon}");
+    let (eff, _, _) = f.run(&["settings", "emit", "--effective", "gate"]);
+    assert!(eff.contains("# gate.profiles.anthropic.model: one of anthropic/claude-haiku-4.5, openai/gpt-5\n") && eff.contains("    provider: openrouter\n"), "{eff}");
+    f.write(&agent, "profiles:\n  mine:\n    provider: openrouter\n    model: openai/gpt-5\n");
     // What emit prints, apply takes back unchanged.
-    let (out, err, code) = f.run_stdin(&["settings", "apply", "--dry-run"], Some(&out));
+    let emitted = f.run(&["settings", "emit", "gate"]).0;
+    let (out, err, code) = f.run_stdin(&["settings", "apply", "--dry-run"], Some(&emitted));
     assert_eq!(code, 0, "{out}{err}");
     // apply checks a model against the provider's list too.
     let (_, _, code) = f.run_stdin(&["settings", "apply", "--dry-run"], Some("profiles:\n  anthropic:\n    model: nope-1\n"));

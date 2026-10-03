@@ -196,7 +196,7 @@ pub(super) fn options_json(spec: &agent_settings::KeySpec, layers: &[Layer], bou
     if !matches!(spec.kind, Kind::ChoiceOf { .. }) {
         return None;
     }
-    Some(match spec.kind.choices_for(Some(layers), bound) {
+    Some(match spec.kind.choices(Some(layers), bound) {
         agent_settings::Choices::Of { items, .. } => json!(items),
         _ => serde_json::Value::Null,
     })
@@ -358,6 +358,6 @@ mod choice_tests {
         // The screens: typed text, no picker.
         assert!(matches!(tui::build::kind(SPEC.kind, &[], &[]), agent_tui::tree::Kind::Text));
         // And any text is taken.
-        assert_eq!(SPEC.parse_cli("claude-x", &[]).unwrap(), Value::from("claude-x"));
+        assert_eq!(SPEC.parse_cli("claude-x", &[], &["anthropic".to_string()]).unwrap(), Value::from("claude-x"));
     }
 }

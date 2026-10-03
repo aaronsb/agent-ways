@@ -38,10 +38,10 @@ pub fn help_text(topic: Option<&str>) -> Result<String, Failure> {
         }
         return Ok(out);
     };
-    if let Some(b) = reg.lookup(topic).or_else(|| {
-        // A pattern key by its own name, `ways.project.*`.
-        reg.keys().find(|(_, k)| k.name == topic).map(|(schema, spec)| Bound { schema, spec, bound: vec![] })
-    }) {
+    // A pattern key by its own name, `ways.project.*`, is no instance: its
+    // wildcards are bound to nothing, not to the `*` that was typed.
+    let by_pattern = reg.keys().find(|(_, k)| k.is_pattern() && k.name == topic).map(|(schema, spec)| Bound { schema, spec, bound: vec![] });
+    if let Some(b) = by_pattern.or_else(|| reg.lookup(topic)) {
         let s = b.spec;
         let _ = writeln!(out, "{}", if b.bound.is_empty() { s.name.to_string() } else { b.name() });
         let _ = writeln!(out, "  {}", s.doc);
@@ -50,7 +50,7 @@ pub fn help_text(topic: Option<&str>) -> Result<String, Failure> {
             Kind::ChoiceOf { .. } => live_layers(&project_dir(None)),
             _ => Vec::new(),
         };
-        let _ = writeln!(out, "  type:    {}", s.kind.describe_for(&layers, &b.bound));
+        let _ = writeln!(out, "  type:    {}", s.kind.describe(&layers, &b.bound));
         if let Some(d) = s.default_for(&b.bound) {
             let _ = writeln!(out, "  default: {}", plain(Some(&d)));
         }

@@ -70,7 +70,7 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
     let layers = live_layers(&project_dir(project));
     let v = b
         .spec
-        .parse_cli_for(value, &layers, &b.bound)
+        .parse_cli(value, &layers, &b.bound)
         .map_err(|m| fail(exit::REJECTED, format!("{key}: {m}; `ways settings help {key}`")))?;
     let (path, _) = target_file(&b, project)?;
     write_file(&path, &[(b.path(), v)])?;

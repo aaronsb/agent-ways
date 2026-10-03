@@ -217,6 +217,9 @@ fn model_ids(layers: &[Layer], bound: &[String]) -> Result<Vec<String>, String> 
 }
 
 fn model_ids_in(dir: &std::path::Path, layers: &[Layer], bound: &[String]) -> Result<Vec<String>, String> {
+    if bound.is_empty() {
+        return Err("the list depends on the profile's provider".into());
+    }
     let provider = profile_provider(layers, bound).ok_or("no provider known for this profile")?;
     crate::models::options_in(dir, provider)
 }
@@ -306,28 +309,28 @@ mod tests {
     fn the_model_key_checks_the_shape_when_no_list_is_read() {
         let k = KEYS.iter().find(|k| k.name == "gate.profiles.*.model").unwrap();
         let b = vec!["anthropic".to_string()];
-        assert!(k.check_value_for(&Value::from("claude-x-1"), None, &b).is_ok());
-        assert!(k.check_value_for(&Value::from("bad id!"), None, &b).is_err());
-        assert!(k.check_value_for(&Value::from(3), None, &[]).is_err());
+        assert!(k.check_value_in(&Value::from("claude-x-1"), None, &b).is_ok());
+        assert!(k.check_value_in(&Value::from("bad id!"), None, &b).is_err());
+        assert!(k.check_value_in(&Value::from(3), None, &[]).is_err());
     }
 
     #[test]
     fn the_engine_is_a_profile_the_shipped_file_or_the_user_layer_names() {
         let engine = KEYS.iter().find(|k| k.name == "gate.engine").unwrap();
         assert_eq!(
-            engine.kind.choices(Some(&user(""))),
+            engine.kind.choices(Some(&user("")), &[]),
             Choices::Of { items: vec!["anthropic".into(), "openrouter".into()], multi: false }
         );
         let layers = user("profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n  anthropic:\n    threshold: 0.4\n");
-        assert_eq!(engine.kind.describe(&layers), "one of anthropic, openrouter, mine");
-        assert!(engine.parse_cli("mine", &layers).is_ok());
-        assert!(engine.parse_cli("openrouter", &layers).is_ok());
-        let e = engine.parse_cli("open-router", &layers).unwrap_err();
+        assert_eq!(engine.kind.describe(&layers, &[]), "one of anthropic, openrouter, mine");
+        assert!(engine.parse_cli("mine", &layers, &[]).is_ok());
+        assert!(engine.parse_cli("openrouter", &layers, &[]).is_ok());
+        let e = engine.parse_cli("open-router", &layers, &[]).unwrap_err();
         assert_eq!(e, "expected one of anthropic, openrouter, mine, found 'open-router'");
         // A profile the gate could not build is no choice: a new one with no
         // model, or a shipped one switched to another provider without one.
         let layers = user("profiles:\n  half:\n    provider: openrouter\n  anthropic:\n    provider: openrouter\n  ok:\n    provider: openrouter\n    model: x/y\n");
-        assert_eq!(engine.kind.describe(&layers), "one of openrouter, ok");
+        assert_eq!(engine.kind.describe(&layers, &[]), "one of openrouter, ok");
         // The hook path loads one file on its own and keeps the value.
         assert!(user("engine: nope\n")[0].findings.is_empty());
     }

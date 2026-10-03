@@ -135,7 +135,7 @@ pub(crate) fn kind(k: Kind, layers: &[Layer], bound: &[String]) -> TKind {
         Kind::Bool | Kind::Toggle => TKind::Bool,
         Kind::Int { min, max } => TKind::Int { min, max },
         Kind::Float { min, max } => TKind::Float { min, max },
-        Kind::Choice(_) | Kind::ChoiceOf { .. } => match k.choices_for(Some(layers), bound) {
+        Kind::Choice(_) | Kind::ChoiceOf { .. } => match k.choices(Some(layers), bound) {
             agent_settings::Choices::Of { items, multi } => TKind::Choice { options: items, multi },
             _ => TKind::Text,
         },
