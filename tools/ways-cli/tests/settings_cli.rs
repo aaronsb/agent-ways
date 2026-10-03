@@ -850,7 +850,21 @@ fn the_disabled_domains_are_picked_from_the_corpus_domains() {
     let (out, _, code) = f.run(&["settings", "lint"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("mine"), "{out}");
+    // A write to the project's file may name that project's own domain, which
+    // the engine honours there. A user-file write from inside the project does
+    // not: the user file applies everywhere, and the list there is the same
+    // from every directory.
+    let proj = f.root.join("proj");
+    let p = proj.to_str().unwrap();
+    let (_, err, code) = f.run(&["settings", "set", "ways.disabled_domains", "mine", "--project", p]);
+    assert_eq!(code, 0, "{err}");
+    assert!(std::fs::read_to_string(f.overlay()).unwrap().contains("mine"));
+    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "nope", "--project", p]).2, 3);
+    f.write(&f.user(), "");
+    f.write(&f.overlay(), "enabled: true\n");
+    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "mine"]).2, 3);
     // From another directory, adding to a list that holds a project-only domain succeeds.
+    f.write(&f.user(), "disabled_domains: [mine]\n");
     let other = f.root.join("home");
     let mut c = f.cmd(&["settings", "set", "ways.disabled_domains", "mine,itops"]);
     c.current_dir(&other);

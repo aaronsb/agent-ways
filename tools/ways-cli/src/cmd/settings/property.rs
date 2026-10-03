@@ -68,9 +68,16 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
     let reg = registry();
     let b = lookup(&reg, key)?;
     let layers = live_layers(&project_dir(project));
+    // A write to a project's file may also name that project's own domains,
+    // which the engine honours there; a user-file write takes the list as
+    // it is, the same from every directory.
+    let also = match (key, project) {
+        ("ways.disabled_domains", Some(p)) => ways_core::settings::project_domains(p),
+        _ => Vec::new(),
+    };
     let v = b
         .spec
-        .parse_cli(value, &layers)
+        .parse_cli_also(value, &layers, &also)
         .map_err(|m| fail(exit::REJECTED, format!("{key}: {m}; `ways settings help {key}`")))?;
     let (path, _) = target_file(&b, project)?;
     write_file(&path, &[(b.path(), v)])?;

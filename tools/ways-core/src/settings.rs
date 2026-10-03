@@ -332,15 +332,25 @@ fn languages(_layers: &[Layer]) -> Result<Vec<String>, String> {
 /// scanner counts one (a `description:` in its frontmatter). The project's
 /// own ways are left out, so the list does not change with the directory.
 fn domains(_layers: &[Layer]) -> Result<Vec<String>, String> {
+    Ok(domains_in(crate::paths::ways_roots(None)).into_iter().collect())
+}
+
+/// The domains of the project's own ways, which a write to that project's
+/// file may disable though the machine-wide list leaves them out.
+pub fn project_domains(project: &Path) -> Vec<String> {
+    domains_in(vec![project.join(".claude/ways")]).into_iter().collect()
+}
+
+fn domains_in(roots: Vec<PathBuf>) -> std::collections::BTreeSet<String> {
     let mut found = std::collections::BTreeSet::new();
-    for root in crate::paths::ways_roots(None) {
+    for root in roots {
         for way in crate::scanner::scan_ways(&root).unwrap_or_default() {
             if !way.domain.starts_with('.') {
                 found.insert(way.domain);
             }
         }
     }
-    Ok(found.into_iter().collect())
+    found
 }
 
 /// A per-way toggle: anything but an explicit on reads as disabled.

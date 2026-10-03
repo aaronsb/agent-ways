@@ -392,10 +392,20 @@ impl KeySpec {
     /// Parse a command-line value: the type, a choice against the choices
     /// over `layers`, then the key's own check.
     pub fn parse_cli(&self, s: &str, layers: &[Layer]) -> Result<Value, String> {
+        self.parse_cli_also(s, layers, &[])
+    }
+
+    /// [`KeySpec::parse_cli`], where a multi choice also takes the items in
+    /// `also`: choices the list leaves out that this write may still name,
+    /// such as a project's own domain in a write to that project's file.
+    pub fn parse_cli_also(&self, s: &str, layers: &[Layer], also: &[String]) -> Result<Value, String> {
         // A multi choice keeps what a layer already stores, so one entry
         // that has left the list never blocks adding another; lint still
         // reports it.
-        let keep = if self.kind.is_multi() { self.stored_items(layers) } else { Vec::new() };
+        let mut keep = if self.kind.is_multi() { self.stored_items(layers) } else { Vec::new() };
+        if self.kind.is_multi() {
+            keep.extend(also.iter().cloned());
+        }
         let v = self.kind.parse_cli_keeping(s, Some(layers), &keep)?;
         if let Some(c) = self.check {
             c(&v)?;
