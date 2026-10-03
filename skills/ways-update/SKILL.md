@@ -46,7 +46,7 @@ APP="${XDG_DATA_HOME:-$HOME/.local/share}/agent-ways"
 
 ```bash
 # The app source must exist and be a git checkout.
-# (A pre-1.0 in-place clone has none: see docs/migration-1.0.md.)
+# (A pre-1.0 in-place clone has none: see https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md)
 grep -q 'agent-ways' "$APP/Makefile" 2>/dev/null && git -C "$APP" rev-parse --git-dir >/dev/null 2>&1 \
   || { echo "No agent-ways app source at $APP. (Re-run the installer to (re)stage it.)"; exit 1; }
 ```
@@ -134,4 +134,4 @@ make -C "$APP" test     # full suite: lint + smoke + unit + sim + lang (slow)
 - For a first-time install (not an update), run the installer one-liner instead —
   this skill assumes an existing app checkout at `$XDG_DATA_HOME/agent-ways`.
 - See `docs/development.md` for the install-vs-dev-checkout distinction, and
-  `docs/migration-1.0.md` for moving a legacy in-place clone onto the projection.
+  https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md for moving a legacy in-place clone onto the projection.
