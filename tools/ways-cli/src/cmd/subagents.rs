@@ -4,7 +4,8 @@
 //! The project's or the user's `subagents:` setting is the standing switch;
 //! this one is for a single session, set by the operator or by an agent before
 //! it launches a workflow. It holds until switched back, through compaction
-//! and `ways session reset`.
+//! and `ways session reset`; `/clear` starts a new session id without it, and
+//! a switch untouched for 30 days is pruned.
 
 use anyhow::{bail, Result};
 
@@ -33,8 +34,13 @@ pub fn run(state: Option<&str>, session: Option<&str>, json: bool) -> Result<()>
     if !session::is_plain_session_id(&session_id) {
         bail!("not a session id: {session_id}");
     }
-    if state.is_some() && !session::session_dir(&session_id).exists() {
-        eprintln!("note: no ways state for session {session_id} yet; the switch applies once its hooks run");
+    // A named session with no transcript is most likely a typo; the switch is
+    // still written, since a session can be named before its first turn lands.
+    if state.is_some()
+        && session.is_some()
+        && claude_sessions::find_transcript_in(&crate::cmd::context::projects_root(), None, &session_id).is_none()
+    {
+        eprintln!("note: no transcript for session {session_id}; check the id (`ways session list` lists them)");
     }
     if let Some(state) = state {
         session::set_subagents(&session_id, state == "on")?;

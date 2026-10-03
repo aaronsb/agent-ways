@@ -432,6 +432,20 @@ pub fn set_subagents(session_id: &str, on: bool) -> std::io::Result<()> {
     }
 }
 
+/// Remove session switches untouched for longer than `max_age`. Only
+/// `ways session subagents on` removes one otherwise, so a session that ended
+/// switched off, a mistyped `--session`, and the old id a `/clear` leaves
+/// behind would each keep a file forever. Run at SessionStart.
+pub fn prune_subagent_switches(max_age: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(crate::paths::state_root().join("subagent-switch")) else { return };
+    for entry in entries.flatten() {
+        let stale = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > max_age);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Record a suppressed injection once per agent: a subagent's tool calls each
 /// run the hooks, and one line says the whole agent ran without ways. Returns
 /// whether this call is the first for the agent.

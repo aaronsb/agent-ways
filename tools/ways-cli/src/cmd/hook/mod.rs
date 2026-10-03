@@ -105,6 +105,7 @@ pub fn run(event: HookEvent) -> Result<()> {
             if let Some(sid) = &session {
                 crate::cmd::reset::clear_session(sid);
             }
+            session::prune_subagent_switches(SUBAGENT_SWITCH_MAX_AGE);
             session::log_event(&[
                 ("event", "session_start"),
                 ("project", common.project.as_deref().unwrap_or("unknown")),
@@ -122,6 +123,10 @@ pub fn run(event: HookEvent) -> Result<()> {
         }
     }
 }
+
+/// How long a session's subagent switch outlives its last change. A session
+/// that runs longer than this with ways off for its subagents switches again.
+const SUBAGENT_SWITCH_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
 
 /// The lane a request injects into a subagent or teammate through, or `None`
 /// for the main agent's own lanes and for session upkeep. The Task dispatch

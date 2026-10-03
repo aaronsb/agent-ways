@@ -1338,6 +1338,27 @@ fn scenario_subagent_switch_keeps_ways_from_subagents_only() {
     assert!(events().lines().any(|l| l.contains("injection_suppressed") && l.contains("\"switch\":\"config\"")));
     assert!(hook_command(&home, &state, &project, &s3, None).contains("# Marker w"));
 
+    // SessionStart prunes switches untouched for 30 days and keeps fresh ones.
+    let switches = state.join("agent-ways/subagent-switch");
+    std::fs::create_dir_all(&switches).unwrap();
+    std::fs::write(switches.join("sim-old-switch"), "").unwrap();
+    std::fs::write(switches.join("sim-new-switch"), "").unwrap();
+    assert!(Command::new("touch").args(["-d", "40 days ago"]).arg(switches.join("sim-old-switch")).status().unwrap().success());
+    {
+        use std::io::Write;
+        let mut child = ways_cmd(&home, &home.join(".cache"), &state)
+            .args(["hook", "session-start"])
+            .env("CLAUDE_PROJECT_DIR", &project)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(br#"{"session_id":"sim-prune","hook_event_name":"SessionStart","source":"startup"}"#).unwrap();
+        assert!(child.wait().unwrap().success());
+    }
+    assert!(!switches.join("sim-old-switch").exists(), "a 40-day-old switch is pruned");
+    assert!(switches.join("sim-new-switch").exists(), "a fresh one stays");
+
     let _ = std::fs::remove_dir_all(&base);
 }
 

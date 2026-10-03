@@ -29,7 +29,7 @@ ways session ways --json               # machine-readable output
 
 **Run from:** The project. Switching names a session: `--session <id>`, or the session the command runs in (`CLAUDE_CODE_SESSION_ID`). A report without either auto-detects the current session.
 
-**Tells you:** Whether this session's subagents get ways, and which switch decides it: the session's own, the `subagents:` setting in the project or user `ways.yaml`, or the default (on). The main agent's ways are unaffected. The session switch holds through compaction and `ways session reset`.
+**Tells you:** Whether this session's subagents get ways, and which switch decides it: the session's own, the `subagents:` setting in the project or user `ways.yaml`, or the default (on). The main agent's ways are unaffected. The session switch holds through compaction and `ways session reset`; `/clear` starts a new session id without it, and a switch untouched for 30 days is pruned.
 
 ```
 ways session subagents                 # report

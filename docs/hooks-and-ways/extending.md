@@ -166,7 +166,7 @@ ways session subagents on      # back to the configured setting
 ways session subagents --json  # which switch is in effect
 ```
 
-Switching names a session: `--session <id>`, or the session the command runs in when Claude Code sets `CLAUDE_CODE_SESSION_ID`. The session switch lives outside the session's state, so it holds through compaction and `ways session reset` until switched back.
+Switching names a session: `--session <id>`, or the session the command runs in when Claude Code sets `CLAUDE_CODE_SESSION_ID`. The session switch lives outside the session's state, so it holds through compaction and `ways session reset` until switched back. `/clear` starts a new session id without it, and a switch untouched for 30 days is pruned.
 
 Both switches withhold the ways stashed for a Task dispatch and every hook that runs inside a subagent. A teammate whose own hooks do not identify it as a subagent is covered at dispatch only.
 
