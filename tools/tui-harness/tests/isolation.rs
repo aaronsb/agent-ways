@@ -31,8 +31,19 @@ fn ok(out: &Output) {
 }
 
 /// A command that prints a marker and then waits on stdin, using only the
-/// shell's builtins, so it needs nothing on PATH.
+/// shell's builtins, so it needs nothing on PATH. It prints nothing else, so
+/// the marker stays on screen however long the working directory is.
 fn marker_cmd(marker: &str) -> Vec<String> {
+    vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        format!("echo {marker}; read -r line"),
+    ]
+}
+
+/// Like `marker_cmd`, but also prints the directory it ran in. The line can
+/// wrap in a narrow pane, so read it back through `unwrapped`.
+fn cwd_cmd(marker: &str) -> Vec<String> {
     vec![
         "/bin/sh".into(),
         "-c".into(),
@@ -122,7 +133,7 @@ fn a_cwd_with_tmux_style_syntax_is_entered_exactly() {
             cwd: Some(cwd.clone()),
             ..LaunchOptions::default()
         };
-        let s = harness.launch(&name, &opts, &marker_cmd("cwd-ok")).unwrap();
+        let s = harness.launch(&name, &opts, &cwd_cmd("cwd-ok")).unwrap();
         let text = s.wait_for("cwd=[", WAIT).unwrap();
         let want = format!("cwd=[{}]", cwd.canonicalize().unwrap().display());
         assert!(
