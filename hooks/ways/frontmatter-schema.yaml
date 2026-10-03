@@ -47,7 +47,7 @@ way:
       role: Space-separated domain keywords reinforcing the description (embedded as part of the canonical way alias per ADR-125)
     refire:
       type: scalar
-      required: recommended
+      required: conditional  # required on every fire-bearing way
       role: |
         ADR-126 refire specification. Half-life as a fraction of the session
         context window, resolved against model_to_window() at fire time so
@@ -55,8 +55,9 @@ way:
         generations. Accepts either a numeric fraction (e.g., 0.2) to pin
         the cadence to today's model, or a preset name (once, rare, normal,
         frequent, or any custom name defined in config.refire_presets) that
-        tracks the project's current tuning. Fire-bearing ways should carry
-        this field; absence triggers a lint warning.
+        tracks the project's current tuning. Fire-bearing ways must carry
+        this field: the runtime refuses a way without it, so the way never
+        fires, and lint reports its absence as an error.
 
         The legacy `curve:` block (ADR-123) is no longer recognized by the
         schema — lint flags it as unknown/foreign, and existing ways were

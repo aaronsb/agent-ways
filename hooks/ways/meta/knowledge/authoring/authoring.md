@@ -58,7 +58,7 @@ ways author template softwaredev/code/newway \
   --description "what this way covers" \
   --vocabulary "domain keywords users would say"
 
-# Global
+# Your own ways, every project ($XDG_CONFIG_HOME/agent-ways/ways/)
 ways author template meta/newway \
   --description "what this way covers" \
   --global
@@ -67,9 +67,9 @@ ways author template meta/newway \
 This creates:
 - `{wayname}/{wayname}.md` — frontmatter + body template with guidance placeholders
 
-Ways are authored **English-only** (ADR-139): localization is adopter-run, not authored per-way — there is no translation step here. Then: run `ways corpus` and `ways author lint`.
+Ways are authored **English-only** (ADR-139): localization is adopter-run, not authored per-way — there is no translation step here. Then: `ways author lint <path>`, `ways corpus`, and `ways author match "<prompt>"`. A fire-bearing way needs `refire:`; without it the way never fires.
 
-**Manual creation** also works: create `{domain}/{wayname}/{wayname}.md` with frontmatter + guidance. No config files to update. Project ways override global ways with the same path. Ways can nest arbitrarily: `{domain}/{parent}/{child}/{child}.md`.
+**Manual creation** also works: create `{domain}/{wayname}/{wayname}.md` with frontmatter + guidance. No config files to update. A project way overrides your own way with the same path, and yours overrides the shipped one. Ways can nest arbitrarily: `{domain}/{parent}/{child}/{child}.md`.
 
 ## Writing Ways Well
 

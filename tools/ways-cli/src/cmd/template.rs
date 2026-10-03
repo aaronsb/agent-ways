@@ -15,14 +15,15 @@ pub fn run(
     scope: String,
     global: bool,
 ) -> Result<()> {
-    // Resolve the ways root
+    // Resolve the ways root: the project's `.claude/ways/`, or the operator's
+    // own root (ADR-143). Never the shipped ways under `~/.claude/hooks/ways`:
+    // that is a projection of the app, and `ways update` replaces it.
     let ways_root = if global {
-        crate::paths::projected_ways_root()
+        crate::paths::user_ways_root()
     } else {
-        // Try project-local first
         match crate::util::detect_project_dir() {
             Some(proj) => PathBuf::from(proj).join(".claude/ways"),
-            None => crate::paths::projected_ways_root(),
+            None => crate::paths::user_ways_root(),
         }
     };
 
@@ -94,8 +95,9 @@ This way activates when the user or agent is working with:
     eprintln!();
     eprintln!("Next steps:");
     eprintln!("  1. Edit {}", way_file.display());
-    eprintln!("  2. ways corpus");
-    eprintln!("  3. ways author lint --global");
+    eprintln!("  2. ways author lint {}", way_file.display());
+    eprintln!("  3. ways corpus");
+    eprintln!("  4. ways author match \"<a prompt that should fire it>\"");
 
     Ok(())
 }
