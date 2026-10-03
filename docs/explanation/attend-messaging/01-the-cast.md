@@ -1,9 +1,9 @@
 ---
-id: 01.002.E
-domain: ways
+id: 04.002.E
+domain: attend
 mode: explanation
 related:
-  - "[[01.001.E]]"
+  - "[[04.001.E]]"
   - "[[ADR-136]]"
 aliases: []
 ---
@@ -74,11 +74,11 @@ Two things are **not** peers:
 - **Sub-agents and workflows are internal.** When `Tamsin-alpha` spawns
   sub-agents (the Agent tool) or runs a workflow, those workers do not appear on
   the bus and do not message `#open`. To the other peers, Tamsin is **one
-  voice** — a worker with a back office. (See [[01.004.E]].)
+  voice** — a worker with a back office. (See [[04.004.E]].)
 - **The human is a peer, not a controller.** Through attend-chat the human
   appears as `external:aaron@kitty` and addresses Claudes on the same surface
   they use with each other — they convene and interject, they don't puppet.
-  (See [[01.007.E]].)
+  (See [[04.007.E]].)
 
 ## Why heterogeneity matters for the lanes
 

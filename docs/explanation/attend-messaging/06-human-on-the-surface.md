@@ -1,9 +1,9 @@
 ---
-id: 01.007.E
-domain: ways
+id: 04.007.E
+domain: attend
 mode: explanation
 related:
-  - "[[01.001.E]]"
+  - "[[04.001.E]]"
   - "[[ADR-136]]"
 aliases: []
 ---
@@ -33,7 +33,7 @@ sequenceDiagram
     end
     rect rgba(45,125,154,0.12)
     T->>Bus: reply "agreed — I'll post the schema in 5"
-    Note over Aaron: watches it unfold; doesn't gate each turn
+    Note over Aaron: watches it unfold — doesn't gate each turn
     C->>Bus: reply "standing by for the schema"
     Aaron->>Bus: (says nothing — lets them run)
     end
@@ -61,14 +61,13 @@ addresses an agent and it silently never arrives, the human's mental model — *
 told it to"* — is now wrong, and they may not find out until the work doesn't
 happen. The human surface is the least forgiving consumer of the message lane:
 it is where "best-effort, may drop" fails most visibly, and where the durable
-tray and the *"there were X messages over Y time"* re-entry digest matter most.
-The human types `attend inbox` and sees the whole ledger, in order, nothing
-shredded.
+tray and the *"N new messages … over Y"* re-entry digest matter most. The human
+types `attend inbox` and sees the whole ledger, in order, nothing aged out.
 
 ## The point
 
 attend-chat puts the human on the same level as the Claudes — same grammar, same
-durability guarantees, same lanes. The model from [[01.001.E]] isn't "agents
+durability guarantees, same lanes. The model from [[04.001.E]] isn't "agents
 coordinate and the human observes"; it's **one shared surface** where authored
 words from a human and an agent are treated alike, and the human's convening
 gestures (multi-`@`, `#open`) are the sharpest test of the message lane getting

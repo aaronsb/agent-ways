@@ -1,6 +1,6 @@
 ---
 description: attend binary — active awareness sensor loop, peer session discovery, inter-session signaling for Claude Code
-vocabulary: attend attend-run attend-send attend-channels attend-peers attend-status attend-scene sensor-loop awareness-layer focus-group signal-file disclosure-governor peer-session peer-discovery session-awareness environmental-sensing inter-session claude-session another-claude scene-private scene-open attend-keepwarm keepwarm cache-warm prompt-cache
+vocabulary: attend attend-run attend-send attend-channels attend-peers attend-status attend-scene sensor-loop awareness-layer focus-group signal-file disclosure-governor peer-session peer-discovery session-awareness environmental-sensing inter-session claude-session another-claude scene-private attend-keepwarm keepwarm cache-warm prompt-cache
 pattern: attend|awareness.?layer|peer.?session|peer.?discover|signal.?file|focus.?group|sensor.?loop
 commands: attend
 refire: 0.15
@@ -69,7 +69,7 @@ A notification beginning `keepwarm:` asks for one word and no tools. Do not inve
 
 ## Channels (escape hatch)
 
-For long-running coordinated work where you want a private channel (ADR-173; `focus` remains a deprecated alias):
+For long-running coordinated work where you want a private channel (ADR-173; the old `focus` verbs are removed):
 
 ```bash
 attend join deploy                         # join a named channel
@@ -83,7 +83,6 @@ You almost never need this. Default broadcast + attention filtering handles norm
 
 ```bash
 attend scene private                       # leave all channels
-attend scene open                          # join shared "open" channel
 ```
 
 ## Discovery

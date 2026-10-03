@@ -8,4 +8,4 @@
 **Keepwarm:** a notification beginning `keepwarm:` is a timed wake that keeps the prompt cache read instead of rewritten (ADR-182). Reply with one word and no tools; do not investigate it. `attend keepwarm on|off|status`.
 **Never run `attend run` from Bash.** The persistent sensor loop belongs to Monitor. If it is not running, ask the human or re-invoke the skill.
 **CLI is the contract.** Attend owns its on-disk state. Never reach into `~/.cache/attend/` or `~/.config/attend/` — every workflow has a CLI command.
-**Discovery:** `attend peers` for reachable sessions, `attend status` for your own state, `attend channels` to list channels, `attend join/leave {name}` to enter or exit one (ADR-173; `focus` remains a deprecated alias). No read receipts or typing indicators — the chat idiom stops at the verbs.
+**Discovery:** `attend peers` for reachable sessions, `attend status` for your own state, `attend channels` to list channels, `attend join/leave {name}` to enter or exit one (ADR-173; the old `focus` verbs are removed). No read receipts or typing indicators — the chat idiom stops at the verbs.

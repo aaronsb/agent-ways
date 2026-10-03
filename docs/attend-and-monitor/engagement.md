@@ -2,6 +2,8 @@
 
 Attend's engagement model governs *when a sensor is allowed to fire a disclosure*. The idea it implements is established: in cognitive architectures like ACT-R, base-level activation decays with disuse, and recent activity changes how easily the next stimulus gets through. Attend applies that idea per sensor, borrowing its shape from the neuronal action potential: resting baseline, rapid rise on stimulus, refractory period after a burst, gradual return to rest. The biology gives us a predictable, well-studied shape for a phenomenon we actually care about — how productive engagement with a stimulus decays naturally over time.
 
+Engagement gates the **event lane** only: `context`, `git`, `processes` and `disclosure`. The message lane (`peers` and `keepwarm`) skips it, so a peer message or a keepwarm wake is never held by a refractory (ADR-136, see [`delivery.md`](delivery.md)).
+
 This page covers the model in prose and diagrams, explains what each parameter does, and walks through how it interacts with the disclosure governor. The canonical architecture is **[ADR-123](../architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md)** — the progression-axis unification that moved the firing-dynamics core into a shared crate consumed by both attend and ways. This page is the attend-specific, implementer-and-author-friendly explainer for how attend instantiates that core.
 
 ## The problem engagement solves
@@ -66,12 +68,13 @@ Curve::ActionPotential {
 }
 ```
 
-Everything attend used to express with `burst_window`, `step_multiplier`, and `decay_per_minute` now maps onto these four parameters at config-load time. The yaml field names stay the same for back-compat (see [`configuration.md`](configuration.md)), but attend converts them via:
+The config keys predate ADR-123 (see [`configuration.md`](configuration.md)). Attend converts them at load time:
 
 - `peak_multiplier = 1.0 + step_multiplier` — the old "peak at exactly burst_threshold" value (2.25 at defaults) becomes a fixed ceiling rather than a growing scale.
 - `multiplier_half_life = ln(0.5) / ln(1 - decay_per_minute) × 60` — converts the pre-ADR-123 per-minute linear-decay rate into an exponential half-life in seconds. At the default `decay_per_minute = 0.1`, the half-life is ≈ 395 s (≈ 6.6 min).
 - `absolute_refractory` and `burst_threshold` pass through unchanged.
-- `burst_window` is currently parsed from yaml but has no runtime effect. See "Event-count burst detection" below for why — the window is implicit.
+
+There is no `burst_window` key: the window is implicit (see "Event-count burst detection" below). A `burst_window` left in a config file is an unknown key, which makes the whole `engagement` section fall back to the layers beneath it; `ways settings fix attend.engagement` removes it.
 
 ## Event-count burst detection
 
@@ -81,7 +84,7 @@ The most visible difference between the pre-ADR-123 model and the current one is
 
 **After ADR-123**, a burst is "N firings whose contribution to the multiplier hasn't decayed past an epsilon." The engine asks each history entry: is your exponential contribution under `multiplier_half_life` still above ~1%? If yes, you count toward burst detection. If no, you age out. The "burst window" is an emergent property of `multiplier_half_life`, not a standalone parameter.
 
-For attend on wall-clock seconds, this makes essentially no practical difference — `multiplier_half_life` of 395 s produces an effective burst window of ~15 min (the point at which the contribution falls below epsilon), which is close to the old 900 s `burst_window` default. The unification lets ways and attend share the same engine without attend having to carry time-specific assumptions into a shared crate.
+For attend on wall-clock seconds, this makes essentially no practical difference — `multiplier_half_life` of 395 s produces an effective burst window of ~15 min (the point at which the contribution falls below epsilon), close to the 900 s window the old model used. The unification lets ways and attend share the same engine without attend having to carry time-specific assumptions into a shared crate.
 
 Defaults at config load:
 
@@ -145,20 +148,9 @@ slots[i].engagement.record_fire(tick, 1.0);
 
 The `record_fire(tick, magnitude)` call replaces the pre-ADR-123 `record_disclosure()` — same moment in the flow, new API shape. Magnitude is `1.0` (unit-weight) for attend; the engine supports weighted fires for callers that want them, but attend's sensors all contribute equally to the burst count.
 
-## Per-peer boost (sensor-peers specific)
+## Per-peer boost
 
-One extension to the basic model lives inside `sensor-peers`: a **per-peer magnitude boost** that amplifies messages from agents the user has been actively conversing with. It's the engagement model applied at the level of individual conversation partners, not the sensor as a whole.
-
-The rules:
-
-- Track a sliding window (default 900 seconds = 15 minutes) of messages from each peer via `peer_activity_window`.
-- The first message from a peer in that window gets magnitude × 1.0 (normal).
-- The second message gets × 1.75 (participant emerging).
-- The third and subsequent get × 2.5 (established conversation partner — reliably breaks through elevated refractory).
-
-The effect: messages from a peer you've been going back and forth with climb above the refractory threshold, while broadcast noise from uninvolved peers stays at baseline and gets suppressed. **Auto-grouping emerges from the magnitude gradient** without any explicit group infrastructure — the conversation partners you care about naturally break through, and the unrelated chatter doesn't.
-
-The peer window is the one place in attend's engagement config that is still explicitly a tick-span — sensor-peers implements its own sliding-window count rather than using the shared curve engine, because the boost is per-peer rather than per-sensor and doesn't fit the single-subject shape the curve engine is built around.
+`sensor-peers` multiplies a message's magnitude by how often the same peer has written within `peer_activity_window` (default 900 s): ×1.0 for the first message, ×1.75 for the second, ×2.5 from the third. Since peer messages ride the message lane, the boost only raises the line's priority. It does not decide whether a message is shown: every message is shown once. The sensor counts per peer in its own sliding window rather than through the curve engine, because the boost is per peer, not per sensor.
 
 ## Tuning with `attend tune`
 
@@ -180,26 +172,28 @@ $ attend tune
 
 === derived engagement config ===
 engagement:
-  burst_window: 1467          # 489s p90 × 3 burst threshold
-  burst_threshold: 3
-  step_multiplier: 1.25
-  absolute_refractory: 31     # median think time
-  decay_per_minute: 0.0256    # peak decays over 2× burst_window
-  peer_activity_window: 1467  # matches burst_window
+  burst_threshold: 3     # yours, unchanged
+  step_multiplier: 1.25     # yours, unchanged
+  absolute_refractory: 32     # median think time
+  decay_per_minute: 0.0256     # peak decays over ~2× burst-window equivalent
+  peer_activity_window: 1467    # sized from u2u p90 × burst_threshold
 
 (pass --apply to write these values to your attend config)
 ```
 
-The output is not applied automatically — it's a recommendation. Review, tweak, then `attend tune --apply` writes the values to your user-scope config. This is a one-time calibration; re-run whenever your session patterns change significantly.
+`burst_threshold` and `step_multiplier` are yours: tune reads them from your user config and derives the other three from them and the survey.
 
-Two notes on what tune emits after ADR-123:
+- `absolute_refractory` is the median think time, clamped to 15–300 s.
+- `peer_activity_window` is the user→user p90 times `burst_threshold`, clamped to 300–3600 s.
+- `decay_per_minute` is chosen so a linear relaxation from the peak would reach rest over twice that window.
 
-1. **Yaml field names are stable**. Tune still writes `decay_per_minute` and `burst_window` because attend's config yaml keeps those keys for back-compat. At runtime, attend converts `decay_per_minute` to `multiplier_half_life` via `ln(0.5) / ln(1 - rate) × 60` and ignores `burst_window` (the engine derives the burst window implicitly from `multiplier_half_life`). If you hand-edit the config to `decay_per_minute: 0.0256`, the engine will translate it to `multiplier_half_life ≈ 1611` seconds (~27 min).
-2. **Tune's underlying math is still linear**. Tune derives `decay_per_minute` from a linear assumption: "peak should relax to rest over 2 × burst_window minutes." When attend loads that value and converts to exponential half-life, the shapes differ — linear reaches rest at ~2× burst_window, exponential decays to ~25% of the excess at the same point and never quite reaches 1.0. In the load-bearing first few minutes post-burst the shapes are close; at the tail they diverge. If you need exact reproduction of the old linear shape, this is the friction point. A future empirical calibration sweep will replace tune's heuristic with a direct half-life choice.
+Nothing is applied until you pass `--apply`, which writes only those three keys to your user-scope config through the settings writer, leaving comments and other keys as they were. Re-run it when your session rhythm changes.
+
+Tune's arithmetic is linear and the engine's decay is exponential. At load time `decay_per_minute: 0.0256` becomes `multiplier_half_life ≈ 1611` s (~27 min). The two shapes are close in the first minutes after a burst and diverge in the tail, where the exponential never quite returns to 1.0.
 
 ## Interaction with the disclosure governor
 
-Engagement is a **per-sensor** gate. The disclosure governor is a **global** gate. Both must permit a firing for it to happen.
+Engagement is a **per-sensor** gate. The disclosure governor is a **global** gate. On the event lane both must permit a firing for it to happen. The message lane has its own permissive governor and no engagement gate.
 
 - **Sensor refractory says NO** → event accumulates silently. No disclosure fires.
 - **Sensor refractory says YES, governor cooldown active** → sensor is "ready" but held. The loop logs `N sensors ready but governor holding`. When the cooldown rolls, accumulated sensors fire together.

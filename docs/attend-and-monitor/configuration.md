@@ -93,7 +93,23 @@ sensors:
     decay_threshold: 5
     requires:
       - Bash(ps:*)
+  disclosure:
+    interval: 60
+    min_interval: 20
+    threshold: 5.0
+    decay_threshold: 3
+    requires:
+      - Bash(ways:*)
+  keepwarm:                  # wakes only while armed (attend keepwarm on)
+    interval: 60
+    min_interval: 60
+    threshold: 3.0
+    decay_threshold: 3
+    requires:
+      - Bash(ways:*)
 ```
+
+The `governor` block governs the event lane. The message lane (`peers`, `keepwarm`) uses a fixed permissive governor with no keys (see [`delivery.md`](delivery.md#the-monitor-line)).
 
 ## Section reference
 
@@ -134,7 +150,7 @@ The action potential model parameters. Governs per-sensor refractory behavior. S
 
 Background signal-file cleanup. Prevents the signals base from accumulating indefinitely. Scoped strictly to `~/.cache/attend/signals/`; never touches ways data or anything else.
 
-Reaping is by **project liveness** (ADR-136), not by age: a signal is removed when its owning project is gone, mirroring Claude Code's notion of a live project. Durable messages therefore wait as long as their recipient project is alive — there is no age cutoff and no `retention` dial.
+Reaping is by **project liveness** (ADR-136), not by age: a signal is removed when the project that owns it is gone, mirroring Claude Code's notion of a live project. A project-tray signal belongs to the recipient's project; a `#open` or channel signal belongs to the sender's. There is no age cutoff and no `retention` dial. See [`signals.md`](signals.md#the-full-lifecycle).
 
 - **`enabled`** (bool, default true): master switch. If false, auto-cleanup is skipped and you must run `attend cleanup` manually to reclaim space.
 - **`interval`** (seconds, default 600): how often the auto-sweep runs inside `attend run`. At this interval the loop scans the signals base and reaps signals whose owning project is no longer live.
@@ -208,7 +224,7 @@ All sensors (built-in or script) accept:
 
 Some sensors accept additional sensor-specific keys:
 
-- **`processes.watch`** (list): overrides the default build-tool watch list. Only processes on this list get exit-code enrichment (success/failure magnitudes, marker correlation); everything else produces a plain `X exited`. Explicit-replace — passing `watch:` drops the defaults. See [`sensors.md`](sensors.md#watched-processes) for the default list and format examples.
+- **`processes.watch`** (list): replaces the default build-tool watch list. Exits of tools on this list get build enrichment (the affordance line, success and failure magnitudes, the marker file); other tracked processes get a plain `X exited`. See [`sensors.md`](sensors.md#the-watch-list) for the default list.
 
 ## Overlay semantics
 
@@ -245,7 +261,7 @@ Merged result in that project:
 
 - `git`: interval 60 (from project), threshold 2.0 (inherited from user)
 - `processes`: disabled
-- `context`, `peers`: unchanged defaults
+- `context`, `peers`, `disclosure`, `keepwarm`: unchanged defaults
 - `build-watcher`: active per project-scope declaration
 
 ## Permissions (ADR-116)
@@ -254,13 +270,21 @@ The `requires:` list on each sensor block declares the harness permissions that 
 
 ```bash
 $ attend permissions audit
-Attend Permissions Audit
-────────────────────────
-  context        Read               ✓ granted
-  git            Bash(git:*)        ✓ granted
-  peers          Read               ✓ granted
-  processes      Bash(ps:*)         ✓ granted
-  build-watcher  Bash(cargo:*)      ✗ MISSING
+
+  Attend Permissions Audit (ADR-116)
+
+  Sensor          Requires       Status
+  ──────────────────────────────────────
+  +build-watcher  Bash(cargo:*)  MISSING
+  context         Read           granted
+  disclosure      Bash(ways:*)   granted
+  git             Bash(git:*)    granted
+  keepwarm        Bash(ways:*)   granted
+  peers           Read           granted
+  processes       Bash(ps:*)     granted
+
+  1 missing permission(s). Add to settings.json:
+    "Bash(cargo:*)"
 ```
 
 Use this to confirm your config will actually work before launching attend — a sensor that requires a permission you haven't granted will silently emit nothing.

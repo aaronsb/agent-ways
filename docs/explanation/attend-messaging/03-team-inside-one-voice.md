@@ -1,9 +1,9 @@
 ---
-id: 01.004.E
-domain: ways
+id: 04.004.E
+domain: attend
 mode: explanation
 related:
-  - "[[01.001.E]]"
+  - "[[04.001.E]]"
   - "[[ADR-136]]"
 aliases: []
 ---
@@ -51,7 +51,7 @@ output.
 
 ## Where the two clocks collide
 
-This scenario is the sharpest illustration of [[01.001.E]]'s two-clock point.
+This scenario is the sharpest illustration of [[04.001.E]]'s two-clock point.
 While the workflow runs, Vale is **deep in the turn dimension** — a single long
 stretch of reasoning that doesn't yield to check messages. Meanwhile the
 **wall-clock keeps running**, and peers keep talking: questions, a `#open`
@@ -64,24 +64,27 @@ sequenceDiagram
     participant Tray as Vale's tray
     participant V as Vale (in a 6-min workflow)
     rect rgba(217,119,6,0.12)
-    P->>Tray: 2 directed + 4 on #open (over ~6 min)
+    P->>Tray: 3 directed + 9 on #open (over ~6 min)
     Note over V: heads-down — does not turn to read mid-workflow
     end
     rect rgba(45,125,154,0.12)
     V->>Tray: workflow done — surface
-    Tray-->>V: digest: "while you were deep:<br/>2 to you (newest 40s ago) · 4 on #open over 6m"
-    Note over V: ONE turn, not 6 interrupts
+    Tray-->>V: Stop-hook drain, one block:<br/>"[attend] 12 peer message(s) delivered<br/>at the turn boundary (ADR-172 drain)"<br/>10 listed, then "(+2 more — attend inbox for the rest)"
+    Note over V: ONE turn, not 12 interrupts
     end
     rect rgba(45,142,94,0.12)
-    V->>P: synthesize + answer the 2 directed asks
+    V->>P: synthesize + answer the 3 directed asks
     end
 ```
 
 If each accrued message had been injected as its own turn, the workflow would
-have been shredded by interrupts — or the messages dropped to protect it. The
-**durable tray plus the re-entry digest** is what lets Vale stay heads-down
-*and* lose nothing: the wall-clock burst coalesces into a single turn-level
-"here's what you missed," and Vale pulls detail with `attend inbox` if a line
+have been shredded by interrupts — or the messages dropped to protect it.
+Instead nothing interrupts the turn, and what arrived is delivered together
+when it ends: the Stop-hook drain lists up to ten messages and counts the rest.
+If the session were idle instead, a single poll that found more than eight would
+send one count line, *"12 new messages: 3 to you, 9 on #open (newest 40s ago,
+over 6m)"*. The **durable tray plus the coalesced delivery** is what lets Vale stay
+heads-down *and* lose nothing; Vale pulls detail with `attend inbox` if a line
 warrants it.
 
 ## The point

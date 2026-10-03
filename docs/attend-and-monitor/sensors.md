@@ -1,122 +1,103 @@
 # Sensors — the built-in set
 
-Attend ships with four built-in sensors, each compiled in as a separate Rust crate and wired into the orchestrator via a feature flag. They form the baseline observation surface — the awareness an employee would otherwise have ambiently: context state, git state, peer sessions, and process activity. Everything beyond these four is a user-authored sensor, either another crate or an external script (see [`authoring-sensors.md`](authoring-sensors.md)).
+Attend ships six built-in sensors. Three are modules of the attend crate and always compiled in: `context`, `git` and `disclosure`, under `tools/attend/src/sensors/`. Three are separate crates linked behind feature flags: `sensor-peers`, `sensor-processes` and `sensor-keepwarm`. Anything else is a sensor of your own, an external script or another crate (see [`authoring-sensors.md`](authoring-sensors.md)).
 
-This page covers what each built-in observes, what magnitudes it emits, and what kinds of events a reader will see in notifications.
+`attend sensors` lists what is running:
+
+```
+  Sensor     Kind    State  Interval  Description                                                   Source
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  context    builtin active 60s / 20s tracks context window usage and projects compaction           attend@0.15.2
+  git        builtin active 30s / 10s tracks dirty files, branch changes, and upstream divergence   attend@0.15.2
+  peers      builtin active 30s / 10s discovers Claude Code sessions and reads peer signals         sensor-peers@0.6.0
+  processes  builtin active 30s / 5s  watches build/package tools and correlates exits with markers sensor-processes@0.6.0
+  disclosure builtin active 60s / 20s reheats affordance instructions on token-distance drift       attend@0.15.2
+  keepwarm   builtin active 60s / 60s keeps the prompt cache warm with one wake per idle stretch    sensor-keepwarm@0.1.0
+```
 
 ## Summary
 
-| Sensor | Observes | Base interval | Min interval | Threshold | Emits |
-|---|---|---|---|---|---|
-| **context** | Claude's own token usage | 60s | 20s | 1.5 | tier crossings, velocity spikes |
-| **git** | Working tree git state | 30s | 10s | 2.0 | branch changes, new commits, dirty file deltas |
-| **peers** | Other Claude sessions + signal files | 30s | 10s | 2.0 | peer status changes, peer messages |
-| **processes** | Build/dev-tool processes | 30s | 5s | 2.0 | process start/exit (cargo, npm, make, etc.) |
+| Sensor | Observes | Interval / min | Threshold | Lane |
+|---|---|---|---|---|
+| **context** | the session's own token usage | 60s / 20s | 1.5 | event |
+| **git** | the working tree and its upstream | 30s / 10s | 2.0 | event |
+| **peers** | other Claude sessions and peer messages | 30s / 10s | 2.0 | message |
+| **processes** | build and dev-tool processes | 30s / 5s | 2.0 | event |
+| **disclosure** | tokens since attend last taught the messaging contract | 60s / 20s | 5.0 | event |
+| **keepwarm** | idle time against the prompt-cache hour | 60s / 60s | 3.0 | message |
 
-All four use the adaptive interval scheme — they poll fast (`min_interval`) during active change and slow (`base_interval`) when quiet. All four participate in the action potential engagement model (ADR-123) with the shared global config.
+Every sensor polls faster (toward its minimum interval) while it sees change and slower (toward its base interval) when quiet. Event-lane sensors pass through the action-potential refractory and the strict governor ([`engagement.md`](engagement.md)). Message-lane sensors skip the refractory and use the message lane's permissive governor ([`delivery.md`](delivery.md#the-monitor-line)).
 
-## `context` — interoceptive
+When a sensor discloses, its events print to stdout only if its accumulated magnitude has reached 3.0 (medium priority) or 5.0 (high). Below that they go to stderr, and if another sensor in the same batch did print, one `[attend] also: N quiet event(s) from …` line counts them.
 
-The canonical first sensor from ADR-113 — the one that prevents Claude from silently running off the context cliff. It's called "interoceptive" because it's the one sensor that watches *Claude itself* rather than the external world. The data source is `ways context --json`, which reads the running session's current token usage.
+## `context`
 
-### What it emits
+The sensor that watches the session itself rather than the world (ADR-113). Each poll runs `ways context --json` and reads the current token usage.
 
-**Tier crossings.** Context percentage is bucketed into tiers; crossing into a new tier fires an observation. Each tier has an increasing magnitude:
+**Tier crossings.** Crossing into a tier emits once per session:
 
-| Tier | % used | Magnitude | Label |
-|---|---|---|---|
-| low | 40% | 1.5 | approaching midpoint — plan wrap-up scope |
-| mid | 50% | 2.0 | midpoint — wrap-up window opening |
-| high | 65% | 3.0 | ways will fire todos checkpoint at 75% |
-| alert | 85% | 4.0 | ways fired memory save at 80% — verify it happened |
-| critical | 92% | 5.0 | compaction checkpoint at 95% — finish current task |
+| % used | Magnitude | Gist of the message |
+|---|---|---|
+| 50% | 1.5 | halfway; keep going if on track, scope the next stages if barely started |
+| 65% | 3.0 | agent-ways will capture todos (75%) and memory (80%) shortly |
+| 83% | 4.0 | the compaction checkpoint fires at 85%; finish the current task and sync |
+| 90% | 5.0 | stop or compact now; quality degrades past here, and auto-compact is off |
 
-Each tier is disclosed once per session — once you've crossed 65%, you won't see the 65% tier message again even if you bounce around that value. The emit includes the current percentage and a projection to 95% based on recent velocity.
+The line reads `context at N% — <message>`. When the burn rate is known it adds `(burning V%/min`, and below 90% also `, ~M min to critical` when that estimate is under an hour. The 90% line also names the way to read: ``Use `ways show attend context-pressure --session $CLAUDE_SESSION_ID` for reflection guidance``.
 
-**Velocity spikes.** If context burn rate exceeds 2%/min and the percentage change is significant (>5%), a magnitude 2.0 observation fires separately: "context velocity spike: X% in last N min (V%/min)." This catches the case where you're burning through context unexpectedly fast — useful for detecting runaway tool loops or overly verbose file reads.
+**Velocity spikes.** Burning more than 2% a minute with more than 5 points of change since the previous reading emits `context velocity spike: X% in last N min (V%/min)` at 2.0.
 
-**Affordance strings.** High-tier observations (alert and critical) append `Use \`ways show attend context-pressure --session $CLAUDE_SESSION_ID\` for reflection guidance` to the message. This points the agent at the context-pressure way for structured next-step decisions.
+The sensor surfaces observations only. The ways layer acts at its own thresholds.
 
-### State the sensor carries
+## `git`
 
-- Last-disclosed tier per session (so tiers fire once, not repeatedly)
-- Prior snapshot (token count, percentage, wall-clock) for velocity computation
-
-### What it doesn't do
-
-Doesn't enforce anything. Doesn't compact for you. Doesn't save state. It only surfaces observations — the response is up to the agent and to the ways layer that fires at specific thresholds.
-
-## `git` — working tree state
-
-Watches git state in the current working directory. Reports application-level deltas (branch changed, N new commits, M new dirty files) rather than file-by-file churn. The underlying data comes from `git` shell-outs (with `GIT_OPTIONAL_LOCKS=0` to avoid races against foreground commits).
-
-### What it emits
+Watches git state in the working directory through `git` with `GIT_OPTIONAL_LOCKS=0`, so it never races a foreground commit. It reports deltas between polls:
 
 | Event | Magnitude | Example |
 |---|---|---|
 | branch changed | 3.0 | `branch changed: main → feat/new-thing` |
-| new commits on current branch | 2.0 | `new commits on feat/attend: HEAD abc123 → def456` |
-| new dirty files | 2.0 (burst scales) | `3 new dirty files: src/main.rs, src/config.rs, Cargo.toml` |
+| new commits on the current branch | 2.0 | `new commits on feat/attend (HEAD abc123 → def456)` |
+| upstream moved ahead | 2.5 | `4 new commits on upstream (now 4 behind)` |
+| new dirty files | 1.5 | `3 new dirty files: src/main.rs, src/config.rs, Cargo.toml` |
 | working tree clean | 1.0 | `working tree clean (changes committed or stashed)` |
-| new upstream commits | 2.0 | `4 new commits on upstream (now 4 behind)` |
-| unpushed local commits | 1.0 | `2 commits ahead of upstream (unpushed)` |
+| ahead of upstream | 1.0 | `2 commits ahead of upstream (unpushed)` |
 
-Branch changes are the loudest event (3.0) because they're usually the signal of "I just switched contexts." New commits on the current branch (2.0) fire when something lands that you care about. Clean state (1.0) is soft — it aggregates with other background events rather than firing on its own.
+It does not read commit messages, tags or hooks.
 
-### State the sensor carries
+## `peers`
 
-- Previous snapshot: branch name, HEAD SHA, dirty file set, ahead/behind counts
+Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads peer messages from the signals base. This is the sensor that makes multi-agent work possible: who else is working, where, and what they said.
 
-### What it doesn't do
+**Sessions.**
 
-Doesn't watch git hooks, doesn't parse commit messages, doesn't look at tags. It's strictly about working tree state and upstream divergence.
+| Event | Magnitude |
+|---|---|
+| peer session started, same project / other project | 3.0 / 1.0 |
+| peer session exited, same project / other project | 2.0 / 0.5 |
+| same-project peer changed status (working, waiting) | 1.5 |
+| same-project peer crossed 80% context | 2.0 |
 
-## `sensor-peers` — other sessions and signal files
+**Messages.** Each poll scans the project tray, `_broadcast/` and every joined channel, and emits every unseen message. Base magnitudes are 7.0 for a message sent to the project, 5.0 for a channel and 4.0 for `#open`, raised by the per-peer boost ([`engagement.md`](engagement.md#per-peer-boost)). More than 8 messages in one poll become one count line. [`delivery.md`](delivery.md) covers the line format, the cold start and the Stop-hook drain.
 
-Discovers other Claude Code sessions and reads peer signal files from `~/.cache/attend/signals/`. This is the sensor that makes multi-agent coordination possible — workspace awareness (Dourish & Bellotti) for agent sessions: who else is working, where, and what they said via `attend send`.
+The whole sensor rides the message lane, so session events skip the refractory too. That is a known limitation of ADR-136, which chose lanes per sensor rather than per observation.
 
-### What it observes
+The sensor re-reads `_groups.yaml` on every poll, so `attend join` and `attend leave` take effect on the next scan.
 
-**Peer sessions.** Walks `~/.claude/sessions/*.json` to find other running Claude sessions. For each, tracks cwd, PID, project name, context percentage, model, and working/waiting status. Emits when peers appear, disappear, or change state.
+## `processes`
 
-**Signal files.** Scans the sender's own project directory, `_broadcast`, and every focus group the session has joined. New `.signal` files (not in the seen-set) are parsed and emitted as peer message events.
+Tracks dev-tool processes in `ps` output, not every process. A process produces start and exit events only if its name is on the sensor's tracked list (build tools, runtimes, editors, servers, `ssh`, `git` and similar, in `tools/sensor-processes/src/lib.rs`) or contains one of the session's focus keywords.
 
-### What it emits
-
-| Event | Magnitude | Notes |
+| Event | Magnitude | Example |
 |---|---|---|
-| peer session appeared | 2.0 | new Claude session detected |
-| peer session disappeared | 1.5 | session exited |
-| peer status change | 1.5 | working → waiting, etc. |
-| peer message | base × peer boost | see below |
+| process started | 2.0 | `cargo started` |
+| process exited | 2.0 | `nvim exited` |
+| watched build tool exited, no marker | 2.5 | ``cargo exited. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps`` |
+| watched build tool exited, success | 2.5 | `cargo exited (success). …` |
+| watched build tool exited, failure | 3.5 | `cargo exited (failure, code 101). …` |
 
-**Per-peer engagement boost.** Peer messages don't have a fixed magnitude — they're amplified based on how much back-and-forth the recipient has had with that specific peer:
+### The watch list
 
-- First message from a peer in the activity window (default 15 min): × 1.0
-- Second message: × 1.75
-- Third and beyond: × 2.5
-
-This creates emergent auto-grouping: active conversation partners climb above the refractory threshold, while uninvolved broadcast noise stays at baseline and gets suppressed. See [`engagement.md`](engagement.md) for the full model.
-
-### State the sensor carries
-
-- Prior snapshot of all known peer sessions
-- Set of already-seen signal filenames (keyed by directory + filename)
-- Per-peer engagement history (sliding window of recent message timestamps)
-- Reply-hint-shown flag (once per session, not per message)
-- Own session ID (to skip self-signals)
-
-### Focus group provider
-
-As of the awareness-stabilization bundle (issue #15), the list of focus-group directories to scan is refreshed on every poll via a closure provider, not snapshotted at startup. This means mid-session `attend join <name>` takes effect immediately without restarting the sensor loop.
-
-## `sensor-processes` — build and dev tools
-
-Tracks specific dev-tool processes running under the user's session. Not a general process monitor — it's scoped to a whitelist of compilers, build tools, and package managers, because those are the processes whose lifecycle matters to a coding session.
-
-### Watched processes
-
-The sensor enriches a specific list of build/dev tools with "exited (success/failure)" events. The default list covers common toolchains:
+The watch list picks which exits get build enrichment: the affordance line and the success or failure magnitude. The default is:
 
 ```
 cargo, rustc, make, cmake, ninja,
@@ -125,52 +106,17 @@ go, npm, yarn, pnpm, tsc,
 mvn, gradle, pip, pip3
 ```
 
-Any process *not* on this list still produces a plain `X exited` at magnitude 2.0 when it disappears from the snapshot — the watch list only controls who gets the marker-correlated enrichment (success/failure codes, louder magnitudes). Process **start** events are not gated by the watch list.
-
-**Overriding the list.** Set `sensors.processes.watch:` in your attend config. Both YAML shapes are accepted:
+`sensors.processes.watch` replaces the default; it is not merged, and an empty list turns enrichment off. It cannot add a tool to the tracked list: a watched tool that is not tracked (`yarn`, `tsc`, `clang` among the defaults) produces no events at all unless a focus keyword matches it. To enrich only Rust and C builds:
 
 ```yaml
 sensors:
   processes:
-    watch:
-      - cargo
-      - rustc
-      - mix          # elixir
-      - zig
-      - ./build.sh
+    watch: [cargo, rustc, make, cmake, ninja, gcc, g++]
 ```
 
-Or inline:
+### Exit codes through a marker file
 
-```yaml
-sensors:
-  processes:
-    watch: [cargo, rustc, mix, zig]
-```
-
-The explicit list **replaces** the defaults verbatim — no merging. If you want the defaults plus one extra entry, you list all of them. If you want to disable enrichment entirely, pass an empty list (`watch: []`). This contract makes the config the single source of truth: what you write is what the sensor runs.
-
-### What it emits
-
-| Event | Magnitude | Example |
-|---|---|---|
-| process started | 2.0 | `cargo started` |
-| process exited (non-build) | 2.0 | `nvim exited` |
-| build exited, no marker | 2.5 | `cargo exited. Use \`ways show attend build-complete --session $CLAUDE_SESSION_ID\` for next steps` |
-| build exited (success) | 2.5 | `cargo exited (success). …` |
-| build exited (failure, code N) | 3.5 | `cargo exited (failure, code 101). …` |
-
-Exit events on build tools include an affordance string pointing at the build-complete way. Failures get a louder magnitude (3.5) so they break through refractory gating — success is quieter (2.5) because most successful builds don't need the agent's attention.
-
-### Opt-in: exit-code awareness via a build-status marker
-
-The sensor observes `ps` diffs, so by the time it notices an exit the process is already gone — it can't read the exit code directly. To enrich build exits with success/failure context, wrap your build command so it writes a single-line marker file when it finishes:
-
-```
-$XDG_STATE_HOME/attend/last-build-status    # or ~/.local/state/attend/last-build-status
-```
-
-Format: `cmd|exit_code|unix_ts`, e.g. `cargo|101|1712983456`. A minimal shell wrapper:
+`ps` cannot see an exit code after the process is gone. To get success or failure, wrap the build so it writes one line to `$XDG_STATE_HOME/attend/last-build-status` (`~/.local/state/attend/last-build-status`) as it finishes:
 
 ```sh
 attend_build() {
@@ -181,45 +127,38 @@ attend_build() {
   printf '%s|%d|%d\n' "$1" "$code" "$(date +%s)" > "$dir/last-build-status"
   return $code
 }
-
 # usage: attend_build cargo build
 ```
 
-The sensor reads this file on each poll. When it detects an exit for a build tool *and* the marker's `cmd` matches *and* the marker timestamp is within 60 s, it enriches the event. Otherwise it falls back to the legacy "X exited" text — there's no penalty for skipping the wrapper.
+The format is `cmd|exit_code|unix_ts`. When a watched tool exits, the marker's `cmd` matches, and the marker is under 60 seconds old, the exit is enriched; otherwise it falls back to the plain line. The marker is one slot for the whole machine, so concurrent builds overwrite each other. On a network filesystem, write to a temporary file and `mv` it into place.
 
-**Known limits of v1.**
+The sensor does not capture output, and it does not batch a build's child processes: `cargo` and each `rustc` it starts are separate events.
 
-- **Single-slot, global marker.** There's one marker file for the whole machine. Two concurrent `cargo build` invocations in different directories will last-writer-wins, and a quick `cargo --version` that happens inside the 60 s window can mask a real build's failure. For single-user, single-project sessions the aliasing is rare; for parallel builds across projects you'll want a smarter wrapper that keys the marker filename on `$PWD` or `$CLAUDE_SESSION_ID`. Widening the marker to a per-session slot is tracked as a follow-up.
-- **Non-atomic write.** The wrapper above uses `> "$dir/last-build-status"`. For a ~30-byte payload on local ext4/xfs this is effectively atomic (one `write()` syscall, well under a page), but on NFS or if the wrapper is killed mid-write the reader could see a truncated line. `parse_marker` treats malformed input as "no fresh marker" (falls back to legacy text), so the actual failure mode is bounded — but if you're on a networked filesystem, prefer an atomic `printf … > "$tmp" && mv "$tmp" "$dst"`.
+## `disclosure`
 
-### State the sensor carries
+Re-teaches the messaging contract when it has drifted out of the agent's recent context (ADR-122). Each poll reads the token count from `ways context --json`. The first poll of an `attend run` emits the contract (how to send, reply and scope messages, the drain, keepwarm, the CLI-is-the-contract rule), and it emits again each time the session has moved 25% of the context window since the last time. The magnitude is 5.0, so the line prints at high priority on a single poll.
 
-- Previous snapshot: map of app name → instance count
-- Most recently parsed build-status marker (if any) and its mtime
+The body is `tools/attend/src/sensors/disclosures/messaging.md`, compiled into the binary. It is kept in step with the attend skill and the attend way. The ledger is in memory only, so a restarted run teaches again on its first poll.
 
-### What it doesn't do
+## `keepwarm`
 
-Doesn't capture stdout/stderr from the watched processes. Without the build-status marker, it also doesn't know exit codes — plain `ps` diffs can't see a return status after the fact.
+While armed, wakes an idle session once at 50 idle minutes so the prompt cache is read before its hour lapses (ADR-182). It emits at 3.0 on the message lane and needs a resolved session id; without one it does not start. Arming, the status card, the cost model and the agent's one-word contract are in [`keepwarm.md`](keepwarm.md).
 
-Also doesn't batch multiple events from the same build tool. If `cargo` starts, then `rustc` starts as a child, then `rustc` exits, then `cargo` exits, that's four events. Smoothing build lifecycles into "build started → build finished" aggregate events is a known todo (see issue #2 — "build event batching").
+## Choosing where a new observation goes
 
-## Picking the right sensor for a new observation
-
-If you want attend to notice *something new*, ask in order:
-
-1. **Does an existing built-in cover it?** If you want to know when git state changes, the `git` sensor already does. Don't duplicate.
-2. **Can it be done with an external script?** Anything you can observe with a shell command is a candidate for an external sensor. This is usually the right choice — no recompile, no Rust required, fast iteration. See [`authoring-sensors.md`](authoring-sensors.md).
-3. **Does it need native performance, shared state, or complex logic?** If yes, write a new crate sensor. Create a new `sensor-*` crate in `tools/`, implement `Sensor`, add it to `attend`'s Cargo.toml as an optional dep + feature, register it in `sensors/mod.rs`.
-
-Almost everything falls into category 2. Crate sensors are for the core observation surfaces that justify being in the binary — the current four. User-level observations (GitHub Project boards, Slack activity, custom event logs, etc.) are external sensors.
+1. **Does a built-in cover it?** The `git` sensor already watches git state.
+2. **Can a shell command observe it?** Then write an external script sensor: no Rust and no rebuild. Almost everything belongs here, from GitHub Project boards to custom event logs. See [`authoring-sensors.md`](authoring-sensors.md).
+3. **Does it need native speed, shared state or complex logic?** Then write a crate sensor: a new `sensor-*` crate in `tools/` that implements `Sensor`, added to attend's `Cargo.toml` as an optional dependency with a feature, and registered in `tools/attend/src/sensors/mod.rs`.
 
 ## Related
 
-- [`authoring-sensors.md`](authoring-sensors.md) — how to write new sensors
-- [`engagement.md`](engagement.md) — the action potential model the sensors play into
-- [`signals.md`](signals.md) — the signal file format `sensor-peers` reads and writes
-- [`loop.md`](loop.md) — the sensor loop substrate
-- **ADR-113** — the original design of attend, including the first context sensor
+- [`authoring-sensors.md`](authoring-sensors.md) — writing new sensors
+- [`engagement.md`](engagement.md) — the event lane's refractory
+- [`delivery.md`](delivery.md) — the message lane and its two conduits
+- [`keepwarm.md`](keepwarm.md) — the keepwarm sensor in full
+- [`configuration.md`](configuration.md) — per-sensor keys and defaults
+- **ADR-113** — attend and the first context sensor
 - **ADR-117** — sensor crate extraction and feature flags
-- **ADR-118** — focus groups (used by `sensor-peers`)
-- **ADR-123** — action potential engagement model
+- **ADR-122** — the disclosure sensor
+- **ADR-136** — the event and message lanes
+- **ADR-182** — keepwarm

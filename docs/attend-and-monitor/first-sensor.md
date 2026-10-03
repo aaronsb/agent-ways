@@ -217,7 +217,7 @@ The knobs:
 - **`threshold`** — the accumulator floor. Events whose magnitude crosses this get disclosed; events below just add to the accumulator until the sum crosses. Our `1.5` touch events accumulate, our `2.0`/`3.0` edit events fire on their own.
 - **`decay_threshold`** — how many quiet polls before the loop relaxes the elevated refractory threshold after a burst. If your sensor produces natural bursts (file edited rapidly, then goes quiet), 4–5 is a good value. See [`engagement.md`](engagement.md) for the full model.
 
-There's no tuning ritual at this stage — pick sensible defaults, run it for a day, adjust if you're getting too many or too few notifications. Attend's [`attend tune`](configuration.md#attend-tune) command can also derive some parameters from session history.
+There's no tuning ritual at this stage — pick sensible defaults, run it for a day, adjust if you're getting too many or too few notifications. Attend's [`attend tune`](engagement.md#tuning-with-attend-tune) command can also derive some parameters from session history.
 
 ## Step 7 — Ship it
 

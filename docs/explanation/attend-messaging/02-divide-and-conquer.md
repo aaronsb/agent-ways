@@ -1,9 +1,9 @@
 ---
-id: 01.003.E
-domain: ways
+id: 04.003.E
+domain: attend
 mode: explanation
 related:
-  - "[[01.001.E]]"
+  - "[[04.001.E]]"
   - "[[ADR-136]]"
 aliases: []
 ---
@@ -29,9 +29,9 @@ sequenceDiagram
     Note over T,C: reply auto-threads (ADR-120) — no id lookup
     end
     rect rgba(217,119,6,0.12)
-    C->>Bus: send --to Tamsin "what's the 401 body shape?"
+    C->>Bus: send --to /api "what's the 401 body shape?"
     Bus-->>T: notify (directed → you, magnitude high)
-    Note over T: heads-down; the question waits in Tamsin's tray
+    Note over T: heads-down — the question waits in Tamsin's tray
     end
     rect rgba(45,142,94,0.12)
     T->>Bus: reply "{error, code} — code is a stable enum"
@@ -49,13 +49,14 @@ sequenceDiagram
   (the `re:<id>` form). Cleo never looks up an id; the thread id stays out of
   Cleo's context entirely.
 - **Directed when it's specific.** "What's the 401 shape?" is for Tamsin alone,
-  so Cleo scopes it (`--to`). A directed message carries higher magnitude than a
+  so Cleo scopes it to Tamsin's project (`--to /api`; from attend-chat a human
+  would write `@Tamsin`). A directed message carries higher magnitude than a
   broadcast — it's a tap on the shoulder, not an announcement.
 - **The tray absorbs timing skew.** Tamsin is mid-edit when the question
   arrives. It doesn't interrupt the keystroke; it waits in Tamsin's tray and
-  surfaces at the next turn. Under the old shared-dir model a cleanup sweep
-  could have shredded it before Tamsin looked — the durable tray is what makes
-  "I asked, they'll see it" true.
+  surfaces when Tamsin's turn ends, through the Stop-hook drain. Nothing ages it
+  out while it waits — the durable tray is what makes "I asked, they'll see it"
+  true.
 - **Silence is legitimate.** After Tamsin answers, Cleo just builds — no "thanks,
   got it." attend never escalates an ignored message; not every line deserves a
   reply.
@@ -66,5 +67,5 @@ At two participants the lanes are almost invisible — it just *works like
 talking*. That ease is the goal: the messaging surface should feel like two
 colleagues at adjacent desks, with the durability and threading machinery
 underneath staying out of the way. The next scenarios stress what "one
-colleague" even means ([[01.004.E]]) and what happens when the desks multiply
-([[01.006.E]]).
+colleague" even means ([[04.004.E]]) and what happens when the desks multiply
+([[04.006.E]]).

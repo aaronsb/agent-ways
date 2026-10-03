@@ -48,7 +48,7 @@ docs/scripts/doc lint [--strict]                # lint the catalog graph (the te
 4. **Write the body** faithful to its mode (a tutorial teaches; a reference
    describes; don't blend).
 5. **Link edges**: add `related:`/`supersedes:` as Obsidian wikilinks
-   (`[[ADR-136]]`, `[[01.003.E]]`) — these are the graph edges the linter checks.
+   (`[[ADR-136]]`, `[[01.999.E]]`) — these are the graph edges the linter checks.
 6. **Lint**: `docs/scripts/doc lint` before committing (dangling edges, malformed
    ids, mode/pole mismatches all surface here).
 7. **Validate after a substantial change** (a new page set, a rewritten tutorial,
@@ -64,10 +64,10 @@ The tool generates catalog frontmatter — identity is the `id`, not the path:
 
 ```markdown
 ---
-id: 01.003.E          # DD.NNN.P — domain band . serial . mode pole
+id: 01.999.E          # DD.NNN.P — domain band . serial . mode pole
 domain: system
 mode: explanation     # tutorial=T  how-to=H  reference=R  explanation=E
-related: []           # wikilink edges: [[ADR-136]], [[01.001.E]]
+related: []           # wikilink edges: [[ADR-136]], [[01.998.E]]
 aliases: []
 ---
 

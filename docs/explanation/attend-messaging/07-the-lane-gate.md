@@ -1,9 +1,9 @@
 ---
-id: 01.008.E
-domain: ways
+id: 04.008.E
+domain: attend
 mode: explanation
 related:
-  - "[[01.001.E]]"
+  - "[[04.001.E]]"
   - "[[ADR-136]]"
 aliases: []
 ---
@@ -12,7 +12,7 @@ aliases: []
 
 The scenarios show the two lanes *in use*. This page is the mechanism
 underneath them: the single fork every observation passes through, and what
-each branch does with it. If [[01.001.E]] is the *why*, this is *how the
+each branch does with it. If [[04.001.E]] is the *why*, this is *how the
 routing decides*.
 
 ## The one question the gate asks
@@ -47,8 +47,13 @@ stateDiagram-v2
   of work routed to a recipient, and a dropped one means the work silently
   never happens. It must be **delivered, once, and survive a brief absence.**
 - **No → event lane.** The world moved. Useful, but *noise by design* — the
-  whole salience / refractory / governor stack exists to **suppress** most of
+  whole threshold / refractory / governor stack exists to **suppress** most of
   it so a session is only woken for something that actually matters.
+
+In the code the lane is chosen per sensor, not per observation: everything
+the `peers` sensor emits rides the message lane, including a peer appearing
+or going idle, and the keepwarm wake rides it too. Splitting peer presence
+onto the event lane is an open ADR-136 follow-up.
 
 ## What each lane does with what it's handed
 
@@ -65,16 +70,16 @@ stateDiagram-v2
         Digested --> Surfaced
         Surfaced --> [*]
         note right of Trayed
-            Never aged out. Waits on disk until the
-            recipient actually sees it — a passing
-            cleanup sweep can't shred an unread message.
+            Never aged out. Stays on disk while its
+            project lives, whether or not it was read;
+            the sweep reaps only dead projects' trays.
         end note
     }
 
     state "EVENT LANE — best-effort" as EventLane {
-        [*] --> Salience : loud enough, fresh enough?
-        Salience --> Decayed : stale / sub-threshold
-        Salience --> Refractory : did this sensor just fire a burst?
+        [*] --> Threshold : accumulated magnitude over the sensor's threshold?
+        Threshold --> Decayed : sub-threshold, decays away
+        Threshold --> Refractory : did this sensor just fire a burst?
         Refractory --> Held : suppressed during the refractory window
         Refractory --> Governor : clear
         Governor --> Held : rate window full — hold
@@ -82,7 +87,7 @@ stateDiagram-v2
         Held --> Decayed : ages out while held
         Disclosed --> [*]
         Decayed --> [*]
-        note right of Salience
+        note right of Threshold
             Designed to drop. A stale observation
             is simply less worth a wake-up than a
             fresh one.
@@ -98,7 +103,7 @@ stateDiagram-v2
     class Deduped process
     class Digested process
     class Surfaced store
-    class Salience gate
+    class Threshold gate
     class Refractory process
     class Governor process
     class Disclosed store
@@ -116,25 +121,25 @@ Both lanes timestamp everything — they just *use* time in opposite directions:
 | | Message lane | Event lane |
 |---|---|---|
 | **Uses time to** | stamp & **digest** | decay & **drop** |
-| **On a burst** | coalesce into *"6 on `#open` over 21 min"* | suppress the noise, surface the one that moved |
+| **On a burst** | coalesce into *"12 new messages: 3 to you, 9 on #open"* | suppress the noise, surface the one that moved |
 | **On absence** | hold durably until you return | age out — you didn't miss much |
 | **Pull surface** | `attend inbox` — the full chronological ledger | none needed; it was noise |
 | **Failure that matters** | a dropped message = work that never happens | a dropped event = a wake-up you didn't need |
 
-The office analogy from [[01.001.E]]: workers talking is the message lane —
+The office analogy from [[04.001.E]]: workers talking is the message lane —
 durable conversation. The phone ringing and faxes arriving is the event lane —
-interrupts you can queue or ignore. The fax in your tray waits until *you*
-process it; no passing colleague gets to shred your unread fax.
+interrupts you can queue or ignore. The fax in your tray waits for *you*; it
+is not cleared on a timer.
 
 ## Where this shows up in the scenarios
 
-- [[01.003.E]] and [[01.006.E]] lean on the **message-lane** half — durable
+- [[04.003.E]] and [[04.006.E]] lean on the **message-lane** half — durable
   trays, threading, and the re-entry digest that turns a crowd's 17 messages
   into one turn.
-- [[01.004.E]] is the sharpest case: a session heads-down in a long workflow
+- [[04.004.E]] is the sharpest case: a session heads-down in a long workflow
   is exactly when wall-clock messages pile up, and the durable tray plus digest
   is what lets it stay deep *and* lose nothing.
-- [[01.007.E]] raises the stakes — when the *human* addresses an agent and it
+- [[04.007.E]] raises the stakes — when the *human* addresses an agent and it
   silently never arrives, their mental model is now wrong. The human surface is
   the least forgiving consumer of the message lane's "delivered, once" promise.
 

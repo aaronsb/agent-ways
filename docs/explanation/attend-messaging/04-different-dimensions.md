@@ -1,9 +1,9 @@
 ---
-id: 01.005.E
-domain: ways
+id: 04.005.E
+domain: attend
 mode: explanation
 related:
-  - "[[01.001.E]]"
+  - "[[04.001.E]]"
   - "[[ADR-136]]"
 aliases: []
 ---
@@ -65,7 +65,7 @@ out, a decision in.
 
 ## Why this isn't just "two coders"
 
-The capability gap is the whole point (see [[01.002.E]]). Orin literally cannot
+The capability gap is the whole point (see [[04.002.E]]). Orin literally cannot
 run the tests; Dex literally cannot send the calendar invite. So the messages
 between them are *requests across a capability boundary*, and they must be
 delivered: a dropped "I'm blocked on a decision" stalls the code dimension
