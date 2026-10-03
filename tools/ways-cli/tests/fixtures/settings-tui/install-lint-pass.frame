@@ -1,22 +1,22 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
-|│▌▾ findings                     [a]                  ││matching.findings                          │|
-|│     #1                        does not parse: the wh││                                           │|
-|│ ▾ settings                    value                 ││What `ways settings lint` finds in the     │|
-|│     semantic_fire_probability 0.5                   ││files this tab reads. A section a finding  │|
-|│     keyword_floor_probability 0.15                  ││drops falls through to the layers beneath; │|
-|│     parent_threshold_multiplier 0.8                 ││a file that does not parse fails closed.   │|
-|│     parent_boost_floor        0.3                   ││                                           │|
-|│     near_miss_margin          0.05                  ││1 entry, 0 changed                         │|
-|│ ▸ refire_presets · setting    value                 ││                                           │|
-|│                                                     ││actions                                    │|
-|│                                                     ││  i lint                                   │|
-|│                                                     ││    ways settings lint                     │|
+|│ ▾ targets · target            state [a]             ││install.secret_path_deny                   │|
+|│     (none recorded)           ~/.claude (default) [a││                                           │|
+|│ ▾ settings                    value                 ││Merge the secret-path permissions.deny     │|
+|│▌    secret_path_deny          true                  ││baseline into settings.json.               │|
 |│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
+|│                                                     ││On by default (ADR-152). false suppresses  │|
+|│                                                     ││the baseline entirely; a Claude Code deny  │|
+|│                                                     ││cannot be reopened by an allow, so this is │|
+|│                                                     ││the one opt-out.                           │|
+|│                 ┌lint: pass────────────────────────────────────────────────────┐                 │|
+|│                 │ $ ways settings lint                                         │                 │|
+|│                 │                                                              │es)              │|
+|│                 │ (it printed nothing)                                         │                 │|
+|│                 │                                                              │                 │|
+|│                 │ exit 0                                                       │ays/config.yaml  │|
+|│                 └──────────────────────────────────────────────────────────────┘                 │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -28,12 +28,12 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| browse  0 changed │ 0 queued │ mouse on (m)  ? keys · Tab 1-9 tabs · / filters all tabs │ i lint   |
+| pass   ↑↓ PgUp PgDn scroll · Esc Enter q close  lint: ok                                           |
 styles
   0   0-7   White Blue -
-  0  10-21  Black Cyan BOLD
+  0  10-21  White Blue -
   0  24-31  White Blue -
-  0  34-44  White Blue -
+  0  34-44  Black Cyan BOLD
   0  47-56  White Blue -
   0  59-69  White Blue -
   0  72-80  White Blue -
@@ -43,15 +43,17 @@ styles
   1  56-61  Blue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM
-  2   1-1   Cyan - BOLD|REVERSED
-  2   2-31  - - BOLD|REVERSED
-  2  32-35  - - BOLD|DIM|ITALIC|REVERSED
-  2  36-53  - - BOLD|REVERSED
+  2   2-10  - - BOLD
+  2  11-19  - - DIM
+  2  32-36  - - DIM
+  2  37-40  - - DIM|ITALIC
   2  54-55  - - DIM
-  2  56-72  - - BOLD
+  2  56-79  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
-  3  32-55  - - DIM
+  3  32-50  - - DIM
+  3  51-53  - - DIM|ITALIC
+  3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
   4   2-11  - - BOLD
@@ -59,6 +61,8 @@ styles
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
+  5   1-1   Cyan - BOLD|REVERSED
+  5   2-53  - - BOLD|REVERSED
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
@@ -71,35 +75,39 @@ styles
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9  54-73  - - DIM
+  9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10   2-17  - - BOLD
- 10  18-27  - - DIM
- 10  32-36  - - DIM
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  54-62  - - DIM
+ 11  18-18  Green - -
+ 11  19-28  Green - BOLD
+ 11  29-81  Green - -
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-55  - - DIM
- 12  56-59  Cyan - -
+ 12  18-18  Green - -
+ 12  20-39  - - DIM|ITALIC
+ 12  81-81  Green - -
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-77  - - DIM
+ 13  18-18  Green - -
+ 13  81-81  Green - -
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-55  - - DIM
+ 14  18-18  Green - -
+ 14  81-81  Green - -
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  54-55  - - DIM
+ 15  18-18  Green - -
+ 15  81-81  Green - -
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16  54-55  - - DIM
+ 16  18-18  Green - -
+ 16  81-81  Green - -
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17  54-55  - - DIM
+ 17  18-81  Green - -
  17  99-99  - - DIM
  18   0-0   - - DIM
  18  54-55  - - DIM
@@ -132,12 +140,5 @@ styles
  27  54-55  - - DIM
  27  99-99  - - DIM
  28   0-99  - - DIM
- 29   0-7   Black Cyan BOLD
- 29   9-17  - - DIM|ITALIC
- 29  18-20  - - DIM
- 29  21-28  - - DIM|ITALIC
- 29  29-31  - - DIM
- 29  32-43  - - DIM|ITALIC
- 29  88-90  - - DIM
- 29  91-92  Cyan - -
- 29  93-96  - - DIM|ITALIC
+ 29   0-5   Black Green BOLD
+ 29   6-46  - - DIM|ITALIC

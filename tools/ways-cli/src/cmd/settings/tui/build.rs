@@ -66,11 +66,51 @@ pub fn tilde(p: &Path, home: &Path) -> String {
 
 /// Every path in `text` under the home directory, written with `~`.
 fn tilde_text(text: &str, home: &Path) -> String {
-    let h = home.display().to_string();
-    if h.is_empty() || h == "/" {
+    tilde_home(text, home).replace('\\', "/")
+}
+
+/// `text` with home written `~`, both as given and as the filesystem
+/// resolves it: a command prints a canonical path, and a home reached
+/// through a symlink (macOS's /var is /private/var) is otherwise left whole.
+pub(super) fn tilde_home(text: &str, home: &Path) -> String {
+    let given = home.display().to_string();
+    let text = match std::fs::canonicalize(home).map(|p| p.display().to_string()) {
+        Ok(real) if real != given => home_as_tilde(text, &real),
+        _ => text.to_string(),
+    };
+    home_as_tilde(&text, &given)
+}
+
+/// `text` with each whole `home` in it written `~`: only where it stands as
+/// a path of its own, so with home `/home/al` a `/home/alice` stays as it is.
+pub(super) fn home_as_tilde(text: &str, home: &str) -> String {
+    if home.is_empty() || home == "/" {
         return text.to_string();
     }
-    text.replace(&h, "~").replace('\\', "/")
+    // A character that would make the match part of a longer name. After
+    // it, a `.` joins only when a name goes on past it (`/home/al.bak`); a
+    // `.` that ends a sentence, like `,` or `)`, is a boundary.
+    let joins = |c: char| c.is_alphanumeric() || "_-~".contains(c);
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(home) {
+        let before = rest[..at].chars().last().or_else(|| out.chars().last());
+        let mut after = rest[at + home.len()..].chars();
+        let continues = match after.next() {
+            Some('.') => after.next().is_some_and(|c| joins(c) || c == '.'),
+            Some(c) => joins(c),
+            None => false,
+        };
+        out.push_str(&rest[..at]);
+        if before.is_some_and(|c| joins(c) || c == '.' || c == '/') || continues {
+            out.push_str(home);
+        } else {
+            out.push('~');
+        }
+        rest = &rest[at + home.len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A value as the screens show it and as `set` reads it back: text bare,
@@ -398,11 +438,23 @@ impl Ways {
                         .confirm()
                         .doc("Rewrites each recorded target's projection to match the settings: hooks, settings.json and the corpus.")
                         .touches("every recorded target directory"),
+                    self.lint(),
                 ];
             }
             _ => {}
         }
         root
+    }
+
+    /// `ways settings lint` over the files the screens read: a pass, or the
+    /// findings it prints and a fail.
+    fn lint(&self) -> Action {
+        let here = self.ctx.project == super::super::project_dir(None);
+        let project = if here { String::new() } else { format!(" --project {}", quote(&self.ctx.project.display().to_string())) };
+        Action::new("lint", format!("ways settings lint{project}"))
+            .reads()
+            .verifies()
+            .doc("Checks every settings file the screens read against the schema and shows what `ways settings lint` prints. Writes nothing.")
     }
 
     /// Every way a session here can fire, by id: the project's own, the
@@ -505,7 +557,7 @@ impl Ways {
         if present {
             out.push(Action::new("remove", key("remove")).confirm().doc(format!("Deletes the stored {p} key; the gate cannot use that provider until a key is set again.")));
         }
-        out.push(Action::new("check", key("check")).reads().doc(format!("Asks {p} whether the stored key is accepted. Stores only when the key was last checked.")));
+        out.push(Action::new("check", key("check")).reads().verifies().doc(format!("Asks {p} whether the stored key is accepted. Stores only when the key was last checked.")));
         out
     }
 
@@ -561,7 +613,11 @@ impl Ways {
                 .confirm()
                 .doc("Records the directory as a target and projects agent-ways into it.")
                 .touches("the directory given"),
-            Action::new("plan", "ways target plan {}").arg(Arg::Text("directory".into())).doc("Previews what adding the directory would write. Writes nothing."),
+            Action::new("plan", "ways target plan {}")
+                .arg(Arg::Text("directory".into()))
+                .reads()
+                .reports()
+                .doc("Previews what adding the directory would write, and shows what `ways target plan` prints. Writes nothing."),
         ]);
         g.open = none;
         if let Some(f) = finding_for(layers, b.spec.file, b.spec.section, &b.path()) {
@@ -620,6 +676,7 @@ impl Ways {
             }
         }
         Node::group("findings", "What `ways settings lint` finds in the files this tab reads. A section a finding drops falls through to the layers beneath; a file that does not parse fails closed.", rows)
+            .with_actions(vec![self.lint()])
     }
 }
 

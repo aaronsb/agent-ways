@@ -1,0 +1,148 @@
+agent-tui frame 100x30
+| 1 ways    2 matching    3 gate    4 install  ●1 ↺    5 attend    6 sensors    7 theme              |
+|┌ ways settings — ~/proj — review ────────────────────┐┌detail─────────────────────────────────────┐|
+|│   ▾ queued  ●1                                      ││$ ways target add /tmp/x                   │|
+|│▌✗     1. $ ways target add /tmp/x  ▲                ││                                           │|
+|│                                                     ││Records the directory as a target and      │|
+|│                                                     ││projects agent-ways into it.               │|
+|│                                                     ││                                           │|
+|│                                                     ││queued by install.targets                  │|
+|│                                                     ││asks      yes: it is destructive or reconci│|
+|│                                                     ││          les                              │|
+|│                                                     ││touches   the directory given              │|
+|│                 ┌add: error────────────────────────────────────────────────────┐                 │|
+|│                 │ $ ways target add /tmp/x                                     │add /tmp/x       │|
+|│                 │                                                              │dd: ~/x is not a │|
+|│                 │ target add: ~/x is not a Claude config directory             │rectory          │|
+|│                 │ adding ~/x as a target                                       │                 │|
+|│                 │                                                              │                 │|
+|│                 │ exit 2                                                       │                 │|
+|│                 └──────────────────────────────────────────────────────────────┘                 │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
+| error   ↑↓ PgUp PgDn scroll · Esc Enter q close  stopped at step 1 of 1: exit 2: target add: ~/x is|
+styles
+  0   0-7   White DarkGray DIM
+  0  10-21  White DarkGray DIM
+  0  24-31  White DarkGray DIM
+  0  34-44  Black Cyan BOLD
+  0  45-50  Black Yellow BOLD
+  0  53-62  White DarkGray DIM
+  0  65-75  White DarkGray DIM
+  0  78-86  White DarkGray DIM
+  1   0-0   - - DIM
+  1   1-33  Blue - BOLD|DIM
+  1  34-55  - - DIM
+  1  56-61  Blue - BOLD|DIM
+  1  62-99  - - DIM
+  2   0-0   - - DIM
+  2   4-11  - - BOLD
+  2  12-15  LightRed - -
+  2  54-55  - - DIM
+  2  56-79  LightRed - BOLD
+  2  99-99  - - DIM
+  3   0-0   - - DIM
+  3   1-1   Cyan - BOLD|REVERSED
+  3   2-3   Red - BOLD|REVERSED
+  3   4-12  - - BOLD|REVERSED
+  3  13-34  LightRed - BOLD|REVERSED
+  3  35-37  Yellow - BOLD|REVERSED
+  3  38-53  - - BOLD|REVERSED
+  3  54-55  - - DIM
+  3  99-99  - - DIM
+  4   0-0   - - DIM
+  4  54-55  - - DIM
+  4  99-99  - - DIM
+  5   0-0   - - DIM
+  5  54-55  - - DIM
+  5  99-99  - - DIM
+  6   0-0   - - DIM
+  6  54-55  - - DIM
+  6  99-99  - - DIM
+  7   0-0   - - DIM
+  7  54-65  - - DIM
+  7  99-99  - - DIM
+  8   0-0   - - DIM
+  8  54-65  - - DIM
+  8  66-98  Yellow - BOLD
+  8  99-99  - - DIM
+  9   0-0   - - DIM
+  9  54-55  - - DIM
+  9  66-68  Yellow - BOLD
+  9  99-99  - - DIM
+ 10   0-0   - - DIM
+ 10  54-65  - - DIM
+ 10  99-99  - - DIM
+ 11   0-0   - - DIM
+ 11  18-18  Red - -
+ 11  19-28  Red - BOLD
+ 11  29-81  Red - -
+ 11  99-99  - - DIM
+ 12   0-0   - - DIM
+ 12  18-18  Red - -
+ 12  20-43  - - DIM|ITALIC
+ 12  81-91  Red - -
+ 12  99-99  - - DIM
+ 13   0-0   - - DIM
+ 13  18-18  Red - -
+ 13  81-81  Red - -
+ 13  82-98  Red - BOLD
+ 13  99-99  - - DIM
+ 14   0-0   - - DIM
+ 14  18-18  Red - -
+ 14  81-81  Red - -
+ 14  82-88  Red - BOLD
+ 14  99-99  - - DIM
+ 15   0-0   - - DIM
+ 15  18-18  Red - -
+ 15  81-81  Red - -
+ 15  99-99  - - DIM
+ 16   0-0   - - DIM
+ 16  18-18  Red - -
+ 16  81-81  Red - -
+ 16  99-99  - - DIM
+ 17   0-0   - - DIM
+ 17  18-18  Red - -
+ 17  81-81  Red - -
+ 17  99-99  - - DIM
+ 18   0-0   - - DIM
+ 18  18-81  Red - -
+ 18  99-99  - - DIM
+ 19   0-0   - - DIM
+ 19  54-55  - - DIM
+ 19  99-99  - - DIM
+ 20   0-0   - - DIM
+ 20  54-55  - - DIM
+ 20  99-99  - - DIM
+ 21   0-0   - - DIM
+ 21  54-55  - - DIM
+ 21  99-99  - - DIM
+ 22   0-0   - - DIM
+ 22  54-55  - - DIM
+ 22  99-99  - - DIM
+ 23   0-0   - - DIM
+ 23  54-55  - - DIM
+ 23  99-99  - - DIM
+ 24   0-0   - - DIM
+ 24  54-55  - - DIM
+ 24  99-99  - - DIM
+ 25   0-0   - - DIM
+ 25  54-55  - - DIM
+ 25  99-99  - - DIM
+ 26   0-0   - - DIM
+ 26  54-55  - - DIM
+ 26  99-99  - - DIM
+ 27   0-0   - - DIM
+ 27  54-55  - - DIM
+ 27  99-99  - - DIM
+ 28   0-99  - - DIM
+ 29   0-6   White Red BOLD
+ 29   7-47  - - DIM|ITALIC

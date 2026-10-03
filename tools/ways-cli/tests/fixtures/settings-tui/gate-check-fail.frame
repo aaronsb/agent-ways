@@ -1,0 +1,153 @@
+agent-tui frame 100x30
+| 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
+|┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
+|│ ▾ settings                    value                 ││gate.keys.anthropic                        │|
+|│     engine                                          ││                                           │|
+|│     mode                      enforce               ││Whether a provider key is present.         │|
+|│ ▸ profiles · setting          value                 ││                                           │|
+|│ ▾ keys · provider             key                   ││Never shown and never passed as an argument│|
+|│▌    anthropic                 present [a]           ││(ADR-503 §12). Add or rotate one with `ways│|
+|│     openrouter                absent [a]            ││agent key add --provider <p>`, which reads │|
+|│                                                     ││it from stdin or a prompt that shows a dot │|
+|│                                                     ││per character.                             │|
+|│                 ┌check: fail───────────────────────────────────────────────────┐                 │|
+|│                 │ $ ways agent key check --provider anthropic                  │                 │|
+|│                 │                                                              │ers it masked)   │|
+|│                 │ provider: anthropic                                          │                 │|
+|│                 │ check: the key was refused (401)                             │                 │|
+|│                 │                                                              │                 │|
+|│                 │ exit 1                                                       │                 │|
+|│                 └──────────────────────────────────────────────────────────────┘--provider       │|
+|│                                                     ││anthropic < <stdin>                        │|
+|│                                                     ││  o remove (asks first)                    │|
+|│                                                     ││    ways agent key remove --provider       │|
+|│                                                     ││anthropic                                  │|
+|│                                                     ││  C check                                  │|
+|│                                                     ││    ways agent key check --provider        │|
+|│                                                     ││anthropic                                  │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
+| fail   ↑↓ PgUp PgDn scroll · Esc Enter q close  check: exit 1: check: the key was refused (401)    |
+styles
+  0   0-7   White Blue -
+  0  10-21  White Blue -
+  0  24-31  Black Cyan BOLD
+  0  34-44  White Blue -
+  0  47-56  White Blue -
+  0  59-69  White Blue -
+  0  72-80  White Blue -
+  1   0-0   - - DIM
+  1   1-24  Blue - BOLD|DIM
+  1  25-55  - - DIM
+  1  56-61  Blue - BOLD|DIM
+  1  62-99  - - DIM
+  2   0-0   - - DIM
+  2   2-11  - - BOLD
+  2  32-36  - - DIM
+  2  54-55  - - DIM
+  2  56-74  - - BOLD
+  2  99-99  - - DIM
+  3   0-0   - - DIM
+  3  54-55  - - DIM
+  3  99-99  - - DIM
+  4   0-0   - - DIM
+  4  54-55  - - DIM
+  4  99-99  - - DIM
+  5   0-0   - - DIM
+  5   2-11  - - BOLD
+  5  12-21  - - DIM
+  5  32-36  - - DIM
+  5  54-55  - - DIM
+  5  99-99  - - DIM
+  6   0-0   - - DIM
+  6   2-7   - - BOLD
+  6   8-18  - - DIM
+  6  32-34  - - DIM
+  6  54-55  - - DIM
+  6  99-99  - - DIM
+  7   0-0   - - DIM
+  7   1-1   Cyan - BOLD|REVERSED
+  7   2-31  - - BOLD|REVERSED
+  7  32-38  Green - BOLD|REVERSED
+  7  39-42  - - BOLD|DIM|ITALIC|REVERSED
+  7  43-53  - - BOLD|REVERSED
+  7  54-55  - - DIM
+  7  99-99  - - DIM
+  8   0-0   - - DIM
+  8  32-37  - - DIM
+  8  38-41  - - DIM|ITALIC
+  8  54-55  - - DIM
+  8  99-99  - - DIM
+  9   0-0   - - DIM
+  9  54-55  - - DIM
+  9  99-99  - - DIM
+ 10   0-0   - - DIM
+ 10  54-55  - - DIM
+ 10  99-99  - - DIM
+ 11   0-0   - - DIM
+ 11  18-18  Red - -
+ 11  19-29  Red - BOLD
+ 11  30-81  Red - -
+ 11  99-99  - - DIM
+ 12   0-0   - - DIM
+ 12  18-18  Red - -
+ 12  20-62  - - DIM|ITALIC
+ 12  81-81  Red - -
+ 12  99-99  - - DIM
+ 13   0-0   - - DIM
+ 13  18-18  Red - -
+ 13  81-81  Red - -
+ 13  99-99  - - DIM
+ 14   0-0   - - DIM
+ 14  18-18  Red - -
+ 14  81-81  Red - -
+ 14  99-99  - - DIM
+ 15   0-0   - - DIM
+ 15  18-18  Red - -
+ 15  81-81  Red - -
+ 15  99-99  - - DIM
+ 16   0-0   - - DIM
+ 16  18-18  Red - -
+ 16  81-81  Red - -
+ 16  99-99  - - DIM
+ 17   0-0   - - DIM
+ 17  18-18  Red - -
+ 17  81-81  Red - -
+ 17  99-99  - - DIM
+ 18   0-0   - - DIM
+ 18  18-81  Red - -
+ 18  82-91  - - DIM
+ 18  99-99  - - DIM
+ 19   0-0   - - DIM
+ 19  54-74  - - DIM
+ 19  99-99  - - DIM
+ 20   0-0   - - DIM
+ 20  54-55  - - DIM
+ 20  56-59  Cyan - -
+ 20  99-99  - - DIM
+ 21   0-0   - - DIM
+ 21  54-91  - - DIM
+ 21  99-99  - - DIM
+ 22   0-0   - - DIM
+ 22  54-64  - - DIM
+ 22  99-99  - - DIM
+ 23   0-0   - - DIM
+ 23  54-55  - - DIM
+ 23  56-59  Cyan - -
+ 23  99-99  - - DIM
+ 24   0-0   - - DIM
+ 24  54-90  - - DIM
+ 24  99-99  - - DIM
+ 25   0-0   - - DIM
+ 25  54-64  - - DIM
+ 25  99-99  - - DIM
+ 26   0-0   - - DIM
+ 26  54-55  - - DIM
+ 26  99-99  - - DIM
+ 27   0-0   - - DIM
+ 27  54-55  - - DIM
+ 27  99-99  - - DIM
+ 28   0-99  - - DIM
+ 29   0-5   White Red BOLD
+ 29   6-46  - - DIM|ITALIC

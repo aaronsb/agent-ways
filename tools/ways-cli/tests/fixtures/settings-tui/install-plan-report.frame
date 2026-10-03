@@ -1,0 +1,149 @@
+agent-tui frame 100x30
+| 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
+|┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
+|│▌▾ targets · target            state [a]             ││install.targets                            │|
+|│     (none recorded)           ~/.claude (default) [a││                                           │|
+|│ ▾ settings                    value                 ││The Claude Code config directories         │|
+|│     secret_path_deny          true                  ││agent-ways is active in.                   │|
+|│                                                     ││                                           │|
+|│                                                     ││Changed by actions, since each change      │|
+|│                                                     ││reconciles: `ways target                   │|
+|│                                                     ││add|enable|disable|remove <dir>` (ADR-184).│|
+|│                 ┌plan: report──────────────────────────────────────────────────┐/.claude,        │|
+|│                 │ $ ways target plan ~/work-claude                             │                 │|
+|│                 │                                                              │                 │|
+|│                 │ plan for ~/work-claude                                       │                 │|
+|│                 │   Root       Action Detail                                   │                 │|
+|│                 │   ────────────────────────                                   │                 │|
+|│                 │   hooks/ways link   absent                                   │                 │|
+|│                 │ settings.json: the source ships none; nothing merged         │nfig directories,│|
+|│                 └──────────────────────────────────────────────────────────────┘                 │|
+|│                                                     ││  A add (asks first)                       │|
+|│                                                     ││    ways target add '<arg>'                │|
+|│                                                     ││  p plan                                   │|
+|│                                                     ││    ways target plan '<arg>'               │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
+|└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
+| report   ↑↓ PgUp PgDn scroll · Esc Enter q close  plan: ok                                         |
+styles
+  0   0-7   White Blue -
+  0  10-21  White Blue -
+  0  24-31  White Blue -
+  0  34-44  Black Cyan BOLD
+  0  47-56  White Blue -
+  0  59-69  White Blue -
+  0  72-80  White Blue -
+  1   0-0   - - DIM
+  1   1-24  Blue - BOLD|DIM
+  1  25-55  - - DIM
+  1  56-61  Blue - BOLD|DIM
+  1  62-99  - - DIM
+  2   0-0   - - DIM
+  2   1-1   Cyan - BOLD|REVERSED
+  2   2-10  - - BOLD|REVERSED
+  2  11-19  - - BOLD|DIM|REVERSED
+  2  20-31  - - BOLD|REVERSED
+  2  32-36  - - BOLD|DIM|REVERSED
+  2  37-40  - - BOLD|DIM|ITALIC|REVERSED
+  2  41-53  - - BOLD|REVERSED
+  2  54-55  - - DIM
+  2  56-70  - - BOLD
+  2  99-99  - - DIM
+  3   0-0   - - DIM
+  3  32-50  - - DIM
+  3  51-53  - - DIM|ITALIC
+  3  54-55  - - DIM
+  3  99-99  - - DIM
+  4   0-0   - - DIM
+  4   2-11  - - BOLD
+  4  32-36  - - DIM
+  4  54-55  - - DIM
+  4  99-99  - - DIM
+  5   0-0   - - DIM
+  5  54-55  - - DIM
+  5  99-99  - - DIM
+  6   0-0   - - DIM
+  6  54-55  - - DIM
+  6  99-99  - - DIM
+  7   0-0   - - DIM
+  7  54-55  - - DIM
+  7  99-99  - - DIM
+  8   0-0   - - DIM
+  8  54-55  - - DIM
+  8  99-99  - - DIM
+  9   0-0   - - DIM
+  9  54-55  - - DIM
+  9  99-99  - - DIM
+ 10   0-0   - - DIM
+ 10  18-18  Blue - -
+ 10  19-30  Blue - BOLD
+ 10  31-81  Blue - -
+ 10  99-99  - - DIM
+ 11   0-0   - - DIM
+ 11  18-18  Blue - -
+ 11  20-51  - - DIM|ITALIC
+ 11  81-81  Blue - -
+ 11  99-99  - - DIM
+ 12   0-0   - - DIM
+ 12  18-18  Blue - -
+ 12  81-81  Blue - -
+ 12  99-99  - - DIM
+ 13   0-0   - - DIM
+ 13  18-18  Blue - -
+ 13  81-81  Blue - -
+ 13  99-99  - - DIM
+ 14   0-0   - - DIM
+ 14  18-18  Blue - -
+ 14  81-81  Blue - -
+ 14  99-99  - - DIM
+ 15   0-0   - - DIM
+ 15  18-18  Blue - -
+ 15  81-81  Blue - -
+ 15  99-99  - - DIM
+ 16   0-0   - - DIM
+ 16  18-18  Blue - -
+ 16  81-81  Blue - -
+ 16  99-99  - - DIM
+ 17   0-0   - - DIM
+ 17  18-18  Blue - -
+ 17  81-81  Blue - -
+ 17  82-99  - - DIM
+ 18   0-0   - - DIM
+ 18  18-81  Blue - -
+ 18  99-99  - - DIM
+ 19   0-0   - - DIM
+ 19  54-55  - - DIM
+ 19  56-59  Cyan - -
+ 19  99-99  - - DIM
+ 20   0-0   - - DIM
+ 20  54-82  - - DIM
+ 20  99-99  - - DIM
+ 21   0-0   - - DIM
+ 21  54-55  - - DIM
+ 21  56-59  Cyan - -
+ 21  99-99  - - DIM
+ 22   0-0   - - DIM
+ 22  54-83  - - DIM
+ 22  99-99  - - DIM
+ 23   0-0   - - DIM
+ 23  54-55  - - DIM
+ 23  99-99  - - DIM
+ 24   0-0   - - DIM
+ 24  54-55  - - DIM
+ 24  99-99  - - DIM
+ 25   0-0   - - DIM
+ 25  54-55  - - DIM
+ 25  99-99  - - DIM
+ 26   0-0   - - DIM
+ 26  54-55  - - DIM
+ 26  99-99  - - DIM
+ 27   0-0   - - DIM
+ 27  54-55  - - DIM
+ 27  99-99  - - DIM
+ 28   0-99  - - DIM
+ 29   0-7   Black Cyan BOLD
+ 29   8-48  - - DIM|ITALIC

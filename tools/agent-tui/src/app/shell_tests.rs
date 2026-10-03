@@ -439,6 +439,12 @@ fn a_check_ending_under_an_open_menu_marks_the_tree_unread() {
     assert_eq!(app.message(), "check: killed");
     assert_eq!(slow.reloads.get(), 0, "nothing is read under the open overlay");
     assert_eq!(app.stamp, None, "the next watch reads the tree");
+    // Closing the help opens the check's error, held under it; closing
+    // that leaves the screen browsing, where the owed read happens.
+    press(&mut app, &[KeyCode::Esc]);
+    assert!(matches!(app.mode, Mode::Response(_)), "the held error opens as the help closes");
+    app.watch();
+    assert_eq!(slow.reloads.get(), 0, "nothing is read under the modal either");
     press(&mut app, &[KeyCode::Esc]);
     app.watch();
     assert_eq!(app.message(), "check: killed", "the owed reload keeps the check's outcome");
@@ -474,6 +480,9 @@ fn a_command_in_flight_keeps_the_screen_live_and_a_second_ctrl_c_stops_it() {
     assert!(app.message().contains("stopped at step 1 of 1: stopped by ^C"), "{}", app.message());
     assert_eq!(slow.reloads.get(), 1, "a failed command is followed by a read of the files");
     assert_eq!(app.queued().len(), 1, "the command stays queued");
+    assert!(matches!(app.mode, Mode::Review { run: None, .. }), "a stop opens no response modal: the bar says why");
+    press(&mut app, &[KeyCode::Esc]);
+    assert!(matches!(app.mode, Mode::Browse), "and nothing was held to open later");
 }
 
 #[test]

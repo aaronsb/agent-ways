@@ -253,13 +253,33 @@ pub struct Action {
     /// assigned from the label ([`action_keys`]).
     pub key: Option<char>,
     /// It only reads: it runs at once, outside the queue, with nothing to
-    /// review, and its outcome goes to the bottom bar.
+    /// review, and its outcome shows as its [`Response`] says.
     pub reads: bool,
+    /// What a run of it answers with, and so how the outcome of a reading
+    /// action shows.
+    pub response: Response,
+}
+
+/// What an action's command answers with (#778). It decides how the outcome
+/// of a reading action shows: on the bottom bar, or in a modal with what the
+/// command printed. A queued action's outcome shows in review, and a failed
+/// one in the error modal over it, whatever its kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Response {
+    /// A change: the bottom bar says it ended. A failure opens the error
+    /// modal, with the exit code and what the command printed: at once for
+    /// a [`Action::reads`] action, over review for a queued one.
+    #[default]
+    Write,
+    /// A pass or a fail, with the command's text either way.
+    Verify,
+    /// Text to read, scrolled in a modal; a failure is an error.
+    Report,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, command: impl Into<String>) -> Self {
-        Action { label: label.into(), command: command.into(), arg: Arg::None, confirm: false, doc: String::new(), touches: String::new(), key: None, reads: false }
+        Action { label: label.into(), command: command.into(), arg: Arg::None, confirm: false, doc: String::new(), touches: String::new(), key: None, reads: false, response: Response::Write }
     }
     pub fn doc(mut self, doc: impl Into<String>) -> Self {
         self.doc = doc.into();
@@ -275,6 +295,16 @@ impl Action {
     }
     pub fn reads(mut self) -> Self {
         self.reads = true;
+        self
+    }
+    /// It checks something and answers pass or fail: [`Response::Verify`].
+    pub fn verifies(mut self) -> Self {
+        self.response = Response::Verify;
+        self
+    }
+    /// It answers with text to read: [`Response::Report`].
+    pub fn reports(mut self) -> Self {
+        self.response = Response::Report;
         self
     }
 

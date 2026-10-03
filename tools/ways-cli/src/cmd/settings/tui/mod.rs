@@ -26,7 +26,7 @@ use agent_theme::ColorDepth;
 use agent_tui::flow::Flow;
 use agent_tui::theme::Shape;
 use agent_tui::tree::{Node, Queued, Store};
-use agent_tui::adapter::{Ended, Job};
+use agent_tui::adapter::{Ended, Job, Printed};
 use agent_tui::{Adapter, App, Themes, Write};
 use serde_yaml::Value;
 
@@ -199,11 +199,7 @@ impl Ways {
 
     /// A message with paths under home as `~`.
     fn short(&self, msg: &str) -> String {
-        let h = self.ctx.home.display().to_string();
-        if h.is_empty() || h == "/" {
-            return msg.to_string();
-        }
-        msg.replace(&h, "~")
+        build::tilde_home(msg, &self.ctx.home)
     }
 }
 
@@ -317,8 +313,8 @@ impl Adapter for Ways {
         };
         let out = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
         let err = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-        let home = self.ctx.home.display().to_string();
-        let mut proc = Proc { child, out, err, home };
+        let home = self.ctx.home.clone();
+        let mut proc = Proc { child, out, err, home, printed: None };
         if let (Some(secret), Some(mut pipe)) = (&q.stdin, proc.child.stdin.take()) {
             if let Err(e) = pipe.write_all(secret.reveal().as_bytes()) {
                 // Never leave the command, or anything it started, behind.
@@ -407,8 +403,10 @@ struct Proc {
     child: std::process::Child,
     out: std::sync::mpsc::Receiver<Vec<u8>>,
     err: std::sync::mpsc::Receiver<Vec<u8>>,
-    /// Shown as `~` in the messages.
-    home: String,
+    /// Shown as `~` in the messages and in what it printed.
+    home: PathBuf,
+    /// What it printed, once it has ended.
+    printed: Option<Printed>,
 }
 
 /// How long the output of an ended command is waited for. A process it
@@ -416,14 +414,22 @@ struct Proc {
 const OUTPUT_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl Proc {
+    /// Take what the ended command printed, with paths under home as `~`.
+    fn take(&mut self, code: Option<i32>) -> &Printed {
+        let home = self.home.clone();
+        let text = |r: &std::sync::mpsc::Receiver<Vec<u8>>| {
+            let t = String::from_utf8_lossy(&r.recv_timeout(OUTPUT_WAIT).unwrap_or_default()).into_owned();
+            build::tilde_home(&t, &home)
+        };
+        let (stdout, stderr) = (text(&self.out), text(&self.err));
+        self.printed.insert(Printed { code, stdout, stderr })
+    }
+
     /// The last line a failed command printed: on stderr, else on stdout,
     /// since some commands (`ways agent key add`) report a refusal there.
-    fn reason(&mut self) -> String {
-        let take = |r: &std::sync::mpsc::Receiver<Vec<u8>>| r.recv_timeout(OUTPUT_WAIT).unwrap_or_default();
-        let (out, err) = (take(&self.out), take(&self.err));
-        let last = |b: &[u8]| String::from_utf8_lossy(b).lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string());
-        let line = last(&err).or_else(|| last(&out)).unwrap_or_else(|| "it printed nothing".into());
-        if self.home.len() > 1 { line.replace(&self.home, "~") } else { line }
+    fn reason(p: &Printed) -> String {
+        let last = |t: &str| t.lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string());
+        last(&p.stderr).or_else(|| last(&p.stdout)).unwrap_or_else(|| "it printed nothing".into())
     }
 }
 
@@ -432,11 +438,11 @@ impl Job for Proc {
         match self.child.try_wait() {
             Ok(None) => None,
             Ok(Some(status)) if status.success() => {
-                let _ = self.reason();
+                self.take(status.code());
                 Some(Ok(()))
             }
             Ok(Some(status)) => {
-                let why = self.reason();
+                let why = Proc::reason(self.take(status.code()));
                 Some(Err(match status.code() {
                     Some(c) => format!("exit {c}: {why}"),
                     None => format!("ended by a signal: {why}"),
@@ -444,6 +450,10 @@ impl Job for Proc {
             }
             Err(e) => Some(Err(format!("waiting on the command: {e}"))),
         }
+    }
+
+    fn printed(&mut self) -> Option<Printed> {
+        self.printed.clone()
     }
 
     /// End the command and every process in its group, then reap it.
@@ -595,7 +605,23 @@ pub fn open(o: &Open) -> Out {
         return Ok(());
     }
     let keys = agent_tui::testkit::parse_keys(o.keys.iter().flat_map(|k| k.split_whitespace())).map_err(|e| fail(exit::USAGE, format!("--keys: {e}")))?;
+    let size = match &o.snap {
+        Some(size) => Some(
+            size.split_once('x')
+                .and_then(|(w, h)| Some((w.parse::<u16>().ok()?, h.parse::<u16>().ok()?)))
+                .filter(|(w, h)| *w > 0 && *h > 0)
+                .ok_or_else(|| fail(exit::USAGE, format!("--snap {size}: WIDTHxHEIGHT, such as 100x30")))?,
+        ),
+        None => None,
+    };
     for k in keys {
+        // A frame before each key, as a terminal draws one before it reads
+        // the next: what a key does can depend on what was drawn, such as
+        // how far a modal's text scrolls, so a snapshot shows what the
+        // terminal would.
+        if let Some((w, h)) = size {
+            let _ = agent_tui::testkit::render(&mut app, w, h);
+        }
         // A secret never comes from an argument: it would sit in argv and
         // the process list. A key script stops at a masked entry.
         if app.masked() && matches!(k.code, agent_tui::ratatui::crossterm::event::KeyCode::Char(_)) {
@@ -606,15 +632,8 @@ pub fn open(o: &Open) -> Out {
         }
         agent_tui::testkit::finish_apply(&mut app);
     }
-    match &o.snap {
-        Some(size) => {
-            let (w, h) = size
-                .split_once('x')
-                .and_then(|(w, h)| Some((w.parse::<u16>().ok()?, h.parse::<u16>().ok()?)))
-                .filter(|(w, h)| *w > 0 && *h > 0)
-                .ok_or_else(|| fail(exit::USAGE, format!("--snap {size}: WIDTHxHEIGHT, such as 100x30")))?;
-            print!("{}", agent_tui::testkit::frame(&agent_tui::testkit::render(&mut app, w, h)));
-        }
+    match size {
+        Some((w, h)) => print!("{}", agent_tui::testkit::frame(&agent_tui::testkit::render(&mut app, w, h))),
         None => print!("{}", app.summary()),
     }
     Ok(())
