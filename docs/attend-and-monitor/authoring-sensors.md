@@ -30,7 +30,7 @@ This constraint is what makes the rest of the document tractable. Magnitudes, th
 | **Startup cost** | Free (already in memory) | Process spawn per poll — ~5–30 ms |
 | **Timeout** | None (sensor owns its poll duration) | 10 seconds, enforced by attend |
 | **Good for** | Built-in system sensors, high-frequency polling, complex state | Integrations with CLI tools, per-project sensors, quick experiments |
-| **Example** | `context`, `git`, `sensor-peers`, `sensor-processes` | `gh`-cli GitHub Project watcher, `kubectl` pod status, `docker events` tail |
+| **Example** | `context`, `git`, `sensor-peers`, `sensor-processes`, `sensor-keepwarm` | `gh`-cli GitHub Project watcher, `kubectl` pod status, `docker events` tail |
 
 Both implementations land at the same place in the loop — attend calls `poll()` on a schedule, reads back a `Vec<(f64, String)>` of observations, and feeds them into the accumulator. The only difference is *how the code gets loaded and run*. Design-wise they're identical; pick the one that matches your integration and performance needs.
 
@@ -42,7 +42,9 @@ Before you write a single line of code, understand what your events will encount
 2. **Emission threshold.** A per-sensor threshold — the accumulator has to exceed this before the sensor is a candidate to disclose. Low-magnitude events accumulate silently until several of them add up; a single high-magnitude event may cross threshold on its own.
 3. **Engagement / refractory (ADR-123).** After the sensor recently fired a disclosure, its effective threshold is temporarily elevated (relative refractory) or it's fully suppressed (absolute refractory, ~60s by default). During refractory, new events still accumulate but don't fire until the cooldown passes — unless their magnitude is high enough to break through the elevated threshold. This is how attend models "disengagement after a burst": low-magnitude follow-ups get swallowed, truly urgent events still get through.
 4. **Disclosure governor.** Even after the sensor is ready, a global governor rate-limits disclosures across the whole loop (default: 3 per 120s, with a 15s cooldown between them). If a burst of sensors all want to fire at once, some get held until the window rolls.
-5. **Monitor delivery.** Whatever survives all of the above gets printed as one stdout line per event and picked up by Monitor (or the `attend chat` TUI) as an async notification into the conversation.
+5. **Monitor delivery.** Whatever survives all of the above, at medium or high priority (accumulated magnitude 3.0 or more), is printed as one stdout line per event and picked up by Monitor as a notification into the conversation. Lower-priority events go to stderr.
+
+Your sensor rides this event lane. The message lane, which skips step 3 and has a permissive governor in step 4, is reserved for the built-in `peers` and `keepwarm` sensors (see [`delivery.md`](delivery.md)).
 
 **The design implication**: *magnitude is the author's main lever*. Don't emit uniform-magnitude events; think carefully about which changes are loud and which are quiet. A sensor that emits magnitude 5.0 for every tick will flood the governor; one that emits 0.1 for everything will never fire. The right shape is usually a hierarchy: cheap background changes at 0.5–1.0, routine notable events at 2.0–3.0, things you want to break through refractory at 5.0+.
 
@@ -53,6 +55,8 @@ A crate sensor implements `sensor_trait::Sensor`:
 ```rust
 pub trait Sensor: Send {
     fn name(&self) -> &str;
+    fn description(&self) -> &str { "" }
+    fn source(&self) -> String { String::new() }
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)>;
     fn emission_threshold(&self) -> f64;
     fn base_interval(&self) -> Duration;
@@ -68,6 +72,7 @@ pub trait Sensor: Send {
 The contract:
 
 - **`name()`** — stable identifier used in logs, config, and state keys.
+- **`description()`** and **`source()`** — what `attend sensors` prints. Put `sensor_trait::sensor_metadata!();` inside the `impl` to fill both from the crate's `Cargo.toml` (the `description` field, and `name@version`).
 - **`poll(focus)`** — called whenever the sensor's turn comes up in the priority queue. Returns a list of `(magnitude, description)` pairs. Empty vec means "nothing changed this tick." The `Focus` argument carries the working directory, a human-readable description of current work, and any keywords attend knows about — use it to scope observations or skip irrelevant ones.
 - **`emission_threshold()`** — the accumulator floor this sensor must cross before it's a disclosure candidate. Typical values 1.5–2.5.
 - **`base_interval()`** — the slowest polling interval, used when the sensor has been quiet for a while. Typical 30–60 seconds.
@@ -272,9 +277,9 @@ Written as heuristics, not commandments:
 ## Related
 
 - [`loop.md`](loop.md) — the substrate your sensor plugs into
-- [`engagement.md`](engagement.md) *(planned)* — the action potential model in detail
-- [`sensors.md`](sensors.md) *(planned)* — reference for the built-in sensors
-- [`configuration.md`](configuration.md) *(planned)* — config schema for declaring sensors
+- [`engagement.md`](engagement.md) — the action potential model in detail
+- [`sensors.md`](sensors.md) — reference for the built-in sensors
+- [`configuration.md`](configuration.md) — config schema for declaring sensors
 - **ADR-117** — sensor crate extraction and feature flags
 - **ADR-123** — firing dynamics; the action potential engagement model in force
 - **ADR-116** — permission requirements for sensors
