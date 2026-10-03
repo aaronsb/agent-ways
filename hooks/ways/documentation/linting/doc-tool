@@ -254,7 +254,8 @@ def _historic_serials(band: int) -> set:
     that added or removed an `id:` line, so the cost is one pass over a handful
     of diffs. ADR files under docs/architecture are excluded: they quote example
     ids. Outside a git checkout this returns an empty set and allocation falls
-    back to the live catalog.
+    back to the live catalog. A shallow clone sees only partial history, so
+    a serial retired before its cut-off can be reissued there.
     """
     try:
         out = subprocess.run(
