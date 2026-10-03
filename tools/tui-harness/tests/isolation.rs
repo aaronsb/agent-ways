@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
-use common::{tmux_or_skip, Scratch};
+use common::{tmux_or_skip, unwrapped, Scratch};
 use tui_harness::session::TMUX_SOCKET;
 use tui_harness::{Harness, LaunchOptions};
 
@@ -31,13 +31,21 @@ fn ok(out: &Output) {
 }
 
 /// A command that prints a marker and then waits on stdin, using only the
-/// shell's builtins, so it needs nothing on PATH.
+/// shell's builtins, so it needs nothing on PATH. It prints nothing else, so
+/// the marker stays on screen however long the working directory is.
 fn marker_cmd(marker: &str) -> Vec<String> {
     vec![
         "/bin/sh".into(),
         "-c".into(),
-        format!("echo {marker}; echo \"cwd=[$(pwd -P)]\"; read -r line"),
+        format!("echo {marker}; read -r line"),
     ]
+}
+
+/// Prints only the directory it ran in: a marker printed first would be what
+/// a long cwd's wrapped rows scroll off the pane. The line can wrap, so read
+/// it back through `unwrapped`.
+fn cwd_cmd() -> Vec<String> {
+    vec!["/bin/sh".into(), "-c".into(), "echo \"cwd=[$(pwd -P)]\"; read -r line".into()]
 }
 
 fn which(prog: &str) -> PathBuf {
@@ -122,11 +130,11 @@ fn a_cwd_with_tmux_style_syntax_is_entered_exactly() {
             cwd: Some(cwd.clone()),
             ..LaunchOptions::default()
         };
-        let s = harness.launch(&name, &opts, &marker_cmd("cwd-ok")).unwrap();
+        let s = harness.launch(&name, &opts, &cwd_cmd()).unwrap();
         let text = s.wait_for("cwd=[", WAIT).unwrap();
         let want = format!("cwd=[{}]", cwd.canonicalize().unwrap().display());
         assert!(
-            text.replace('\n', "").contains(&want),
+            unwrapped(&text).contains(&want),
             "{dir}: pane was:\n{text}"
         );
     }
