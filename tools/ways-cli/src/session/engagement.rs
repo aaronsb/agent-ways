@@ -8,7 +8,7 @@
 //! a clean ADR-123 unit and carries its own tests, so it splits
 //! without discovering new seams.
 //!
-//! Dependencies on sibling session-state helpers (`session_dir`,
+//! Dependencies on sibling session-state helpers (`agent_state_dir`,
 //! `ensure_parent`, `get_token_position`, `resolve_way_file`) are
 //! reached through `super::`; Rust's privacy model lets descendant
 //! modules see parent-private items, so no visibility promotion was
@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 use sensor_trait::{Curve, EngagementState, Tick};
 
-use super::{ensure_parent, resolve_way_file, session_dir};
+use super::{agent_state_dir, ensure_parent, resolve_way_file};
 
 /// Floor on `EngagementState::current_salience` below which a re-fire is
 /// considered warranted. Tuned so that `Curve::Exponential { half_life: H }`
@@ -50,7 +50,7 @@ impl FireOutcome {
 }
 
 fn engagement_path(way_id: &str, session_id: &str) -> PathBuf {
-    session_dir(session_id)
+    agent_state_dir(session_id)
         .join("way-engagement")
         .join(format!("{}.json", way_id.replace('/', "__")))
 }

@@ -235,6 +235,12 @@ fn load_metrics(session_id: &str) -> HashMap<String, MetricEntry> {
     let mut map = HashMap::new();
     for line in content.lines() {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+            // The rows describe the main agent's firing state (#815), so a
+            // subagent's later fire of the same way must not relabel one.
+            let agent = v["agent_id"].as_str().unwrap_or(session::MAIN_AGENT);
+            if agent != session::MAIN_AGENT {
+                continue;
+            }
             if let Some(way) = v["way"].as_str() {
                 map.insert(
                     way.to_string(),

@@ -175,10 +175,7 @@ fn log_way_suppressed(
     project_dir: &str,
     session_id: &str,
 ) {
-    let agent_id = std::env::var("CLAUDE_AGENT_ID")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "main".to_string());
+    let agent_id = session::current_agent();
     session::log_event(&[
         ("event", "way_suppressed"),
         ("kind", kind),
@@ -564,10 +561,7 @@ pub fn way_scored(
     let (sibling_total, sibling_fired) = count_siblings(id, &project_dir, session_id);
 
     // Metrics JSONL
-    let agent_id = std::env::var("CLAUDE_AGENT_ID")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "main".to_string());
+    let agent_id = session::current_agent();
 
     session::append_metric(
         session_id,
@@ -797,6 +791,8 @@ pub fn check_within(
         ("scope", &scope),
         ("project", &project_dir),
         ("session", session_id),
+        // Whose fire count this is: check state is kept per agent.
+        ("agent_id", &session::current_agent()),
     ]);
 
     Ok(output)
