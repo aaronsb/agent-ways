@@ -36,6 +36,10 @@ basis:
     level: directed
     said: "we should be able to through the cli invoke or trigger an event for testing too"
     via: session 2026-10-03
+  - operator: aaronsb
+    level: directed
+    said: "(and delete, unless it's a bundled item (compiled sensors, bundled themes)"
+    via: "session 2026-10-03, on copying and renaming themes in the TUI; preceded by \"this will come in handy to have defined that tui flow for sensors\""
   - evidence: "attend today: compiled sensors implement sensor_trait::Sensor and are wired by cargo feature plus register_builtin! with hard-coded defaults (tools/attend/src/sensors/mod.rs); script sensors are configured inline as attend.sensors.<name>.script, run under bash with a 10 s timeout and a magnitude|description stdout contract, and drop malformed output silently (tools/attend/src/sensors/script.rs); the lane is chosen by sensor name in rides_message_lane (tools/attend/src/cmd/run/tick.rs)"
   - evidence: "the workspace already parses and writes YAML through serde_yaml in attend-config and agent-settings; toml is used only by agent-theme"
   - precedent: ADR-503
@@ -141,7 +145,7 @@ Every field of every sensor, trigger and rule has a settings key: `attend.sensor
 - `set` refuses a value that would make the sensor invalid, and says why;
 - `help` reads the spec's schema.
 
-The sensors tab (ADR-503, ADR-504) is a view over the same commands. It lists every sensor of every kind with its source file and live state, toggles a sensor or trigger, edits fields in a form, and previews a change with a dry run. Anything one surface can do, the other can.
+Sensor files are managed with the same named-item flow the theme tab uses: copy any sensor to a new name, rename it, or delete it. Shipped files are bundled, so they can be copied (the usual way to start a variant) but not renamed or deleted; a user or project override of one can be. The sensors tab (ADR-503, ADR-504) is a view over the same commands. It lists every sensor of every kind with its source file and live state, toggles a sensor or trigger, edits fields in a form, and previews a change with a dry run. Anything one surface can do, the other can.
 
 ### 6. Test from the CLI
 

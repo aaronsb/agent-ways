@@ -57,6 +57,7 @@ _The ways engine: how ways are matched, disclosed and re-disclosed_
 | [ADR-196](./ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md) | A yes/no relevance gate on way injection, judged by a hosted model | accepted |
 | [ADR-197](./ways/ADR-197-cap-the-candidates-the-relevance-gate-judges-per-request.md) | Cap the candidates the relevance gate judges per request | accepted |
 | [ADR-198](./ways/ADR-198-uninstall-is-a-lifecycle-command-that-keeps-what-the-operator-owns.md) | Uninstall is a lifecycle command that keeps what the operator owns | accepted |
+| [ADR-199](./ways/ADR-199-ways-sensors-dispatch-session-activity-to-external-consumers-async-under-a-watchdog.md) | Ways sensors dispatch session activity to external consumers, async under a watchdog | proposed |
 
 ## Governance
 _Provenance, traceability, controls, compliance mapping_
@@ -117,6 +118,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-400](./attend/ADR-400-attend-messaging-disclosure-with-token-gated-reheat.md) | Attend messaging disclosure with token-gated reheat | accepted |
 | [ADR-401](./attend/ADR-401-attend-envelope-fields-sender-kind-principal-and-addressee-on-every-signal.md) | Attend envelope fields: sender kind, principal, and addressee on every signal | accepted |
 | [ADR-402](./attend/ADR-402-claude-code-channels-deliver-mcp-server-events-into-the-model-s-turn-and-wake-an-idle-session.md) | Claude Code channels deliver MCP server events into the model's turn and wake an idle session | accepted |
+| [ADR-403](./attend/ADR-403-attend-hosts-sensors-under-one-spec-compiled-command-and-mcp-sensors-in-yaml-files.md) | Attend hosts sensors under one spec: compiled, command and MCP sensors in YAML files | proposed |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_
