@@ -32,10 +32,11 @@ sequenceDiagram
     rect rgba(106, 27, 154, 0.2)
         C->>W: about to run: git commit
         W-->>C: Commit format rules
+        Note right of W: tool lanes skip the judge
     end
     rect rgba(0, 105, 92, 0.2)
         C->>W: spawning subagent
-        W-->>C: Security (injected into subagent too)
+        W-->>C: Security, to the subagent
     end
     rect rgba(198, 40, 40, 0.15)
         Note over U,J: Context fills up → auto-compact → ways reset → cycle repeats
@@ -69,15 +70,54 @@ This repo ships with software development ways, but the mechanism is general-pur
 
 agent-ways is a suite of binaries plus the ways corpus, the hooks that deliver it, skills and subagents. `tools/suite-bins` lists the Rust binaries the installer builds and links onto your `PATH`.
 
+```mermaid
+flowchart LR
+    classDef outside fill:#475569,stroke:#94a3b8,color:#ffffff
+    classDef core fill:#7c3aed,stroke:#4a5568,color:#ffffff
+    classDef compute fill:#2d7d9a,stroke:#4a5568,color:#ffffff
+    classDef store fill:#2d8e5e,stroke:#4a5568,color:#ffffff
+    classDef external fill:#f6821f,stroke:#4a5568,color:#1a1a1a
+
+    CC["Claude Code<br>hooks · Monitor · MCP"]:::outside
+    W["ways CLI<br>the hook engine"]:::core
+    E["way-embed<br>local embeddings"]:::compute
+    R[("ways roots<br>project · user · core")]:::store
+    A["ways-agent<br>judge daemon, holds the key"]:::core
+    P["hosted provider<br>Anthropic or OpenRouter"]:::external
+    M["ways-mcp<br>registered as agent-ways<br>ways_status"]:::core
+    AT["attend<br>sensor loop"]:::compute
+    B[("message bus<br>signal files · channels")]:::store
+    CH["attend-chat<br>you, on the bus"]:::outside
+    AU["ways-audit<br>compliance claims"]:::compute
+
+    CC -->|hook events| W
+    W -->|guidance| CC
+    W -->|match| E
+    W -->|read ways| R
+    W -->|prompt and queued matches| A
+    A -->|yes or no per way| P
+    CC -->|Monitor, Stop hook| AT
+    CC -->|MCP tools| M
+    AT <--> B
+    CH <--> B
+    AU -->|"project or core root"| R
+```
+
+The judge is the only part that sends conversation text off your machine, and only when you have stored a provider key. [docs/architecture.md](docs/architecture.md) draws the hook flow, the matching pipeline and the [per-agent disclosure state machine](docs/architecture.md#disclosure-cadence).
+
 | Component | What it does | Docs |
 |---|---|---|
 | `ways` | The CLI and the hook engine. Every hook script calls it to match ways, track session state and inject guidance. It also carries install, update, settings and authoring commands. | [CLI reference](docs/reference/ways-cli.md) |
 | `way-embed` | The embedding engine (C++, llama.cpp) for semantic matching. It is optional: without it, only `pattern:`, `commands:` and `files:` triggers fire. | [Matching](docs/hooks-and-ways/matching.md), [finishing an install](docs/finish-install.md) |
 | `ways-agent` | A resident per-user daemon that holds your provider key and runs the relevance judge. The hook starts it on first use. | [Relevance judge](docs/explanation/relevance-judge/), [ADR-502](docs/architecture/platform/ADR-502-the-ways-agent-one-resident-daemon-per-user-for-search-judging-and-key-custody.md) |
-| `ways-mcp` | The agent-ways MCP server, registered with Claude Code as `agent-ways`. It hosts attend and later modules. | [ADR-501](docs/architecture/platform/ADR-501-the-agent-ways-mcp-server-one-server-for-attend-keepalive-and-later-modules-inbound-through-channels.md) |
+| `ways-mcp` | The agent-ways MCP server, registered with Claude Code as `agent-ways`. Today it hosts one read-only tool, `ways_status`. ADR-501 plans attend and keepalive modules on it. | [ADR-501](docs/architecture/platform/ADR-501-the-agent-ways-mcp-server-one-server-for-attend-keepalive-and-later-modules-inbound-through-channels.md) |
 | `attend` | The awareness layer: sensors for git state, peer sessions and process activity, surfaced into a running session as notifications. | [Attend and Monitor](docs/attend-and-monitor/README.md) |
 | `attend-chat` | A terminal chat that puts you on the same signal bus the agents use. | [`attend chat`](docs/attend-and-monitor/tui.md) |
 | `ways-audit` | Reports on the compliance claims ways carry: coverage, control traces, provenance lint. | [Governance](docs/governance.md) |
+
+Attend delivers a peer's message to a session two ways: a Monitor line wakes an idle session, and the Stop hook hands messages over at the end of a busy turn ([delivery](docs/attend-and-monitor/delivery.md)). Its keepwarm sensor, once armed, wakes an idle session before the prompt cache lapses ([keepwarm](docs/attend-and-monitor/keepwarm.md)). In `attend chat` you address agents by name or channel on the same bus:
+
+<img src="docs/images/attend/attend-chat-fanout.png" alt="attend-chat on the merged tab: messages from the agents Elio and Lachlan and from the operator, each with its project and channel mark, and a draft addressed to @Elio @Lachlan with both recipients flagged under the input" width="720" />
 
 ## Prerequisites
 
@@ -132,22 +172,28 @@ To remove it, `ways uninstall` lists what it would do: withdraw from `~/.claude`
 2. The **relevance judge** reviews those matches when you have stored a provider key. In `enforce` mode a way it judges irrelevant is held back; in `shadow` mode it only logs its verdicts; `off` skips it.
 3. The ways that pass are **injected** into the conversation.
 4. **PreToolUse** matches commands and file edits *before they execute* and injects the ways they trigger.
-5. **SubagentStart** injects relevant ways into subagents spawned via the Agent tool.
+5. **SubagentStart** injects the ways matched on the Agent tool's prompt into the subagent it spawns. From then on the subagent keeps its own firing state, with its token position read from its own transcript, so a way shown to a subagent does not silence it for the main agent.
 6. **PostToolUse** runs a way's postchecks after an edit or command, and matches any message you queued while Claude was working; those matches go through the judge like a prompt's. **Stop** records Claude's last reply so the next prompt is matched against it too.
 
-A way fires when matched, then **re-discloses on its `refire:` cadence** (a fraction of the context window, ADR-126) as its salience decays. Marker files track the first fire and drive that re-disclosure state machine; they don't permanently block re-triggering.
+A way fires when matched, then **re-discloses on its `refire:` cadence** (a fraction of the context window, ADR-126) as its salience decays. A marker file per way and agent records the fire and drives that re-disclosure state machine; it does not block the way for good.
 
 Matching has two channels: regex patterns for known keywords/commands/files, and [sentence-embedding](docs/architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) semantic scoring (all-MiniLM-L6-v2). See [matching.md](docs/hooks-and-ways/matching.md) for the full strategy. The judge sends text from your conversation to a hosted model; the [install guide](docs/install-guide.md#the-relevance-judge) says what and gives the commands.
 
-`ways session ways` shows the live session state — which ways fired, when (epoch), how far back (distance), what triggered them, tree relationships, check decay curves, and a re-disclosure forecast showing when distant ways will re-fire as context fills:
+`ways session` opens the session screen. Its timeline tab lists each way once per agent that fired it, with the epoch, the distance back, the trigger and the re-disclosure forecast, and marks what happened to each way: injected, re-disclosed, or kept out by the judge. `ways session ways` prints the current session's list as text.
 
-<img src="docs/images/ways-list-session.png" alt="ways session ways showing live session state — epoch when each way fired, distance in context, colored pins for attention proximity, tree disclosure, and a forecast of when distant ways will re-fire" width="100%" />
+<img src="docs/images/ways/session-timeline.png" alt="The ways session timeline at epoch 9 of a 200K-token session, matched view: an Agent column naming main, code-reviewer, a workflow member, two general-purpose subagents and one by id; ways marked as injected, re-disclosed, shadow-flagged, judge-blocked with P(yes) 0.050, held by the context cap and held in the refire window; a check line showing five fires and decay 0.17; and the context gauge at 29% with a forecast of re-disclosures between 58K and 104K tokens" width="800" />
+
+The [CLI reference](docs/reference/ways-cli.md#timeline-tab) explains each column and mark.
 
 For the complete system guide — trigger flow, state machines, the pipeline from principle to implementation — see **[docs/hooks-and-ways/README.md](docs/hooks-and-ways/README.md)**.
 
 ## Configuration
 
-`ways settings` on a terminal opens the settings screens (ways, matching, gate, install, theme). The same keys work from the command line:
+`ways settings` on a terminal opens the settings screens: ways, matching, gate, install, attend, sensors and theme. An edit is queued, and nothing reaches a file until you review and apply it. On the gate tab, Enter on a profile's model opens a picker of the models the provider serves, once `ways agent models` has fetched them:
+
+<img src="docs/images/ways/settings-model-picker.png" alt="The gate tab of ways settings: the anthropic profile's keys in a tree on the left, a picker over it listing claude-haiku-4-5 (current), claude-3-5-haiku-latest, claude-opus-4-5 and claude-sonnet-4-5, and the detail pane on the right giving the key's default and the file it writes, agent.yaml" width="720" />
+
+The same keys work from the command line:
 
 ```bash
 ways settings list                          # every key and its value
@@ -156,7 +202,7 @@ ways settings set ways.disabled_domains itops,ea
 ways settings set gate.mode shadow
 ```
 
-User settings live in `$XDG_CONFIG_HOME/agent-ways/config.yaml`, except the `gate.*` keys, which live in `agent.yaml` beside it. A project can set its own in `.claude/ways.yaml`. `ways settings help <key>` names each key's file. The file form of the `disabled_domains` example:
+User settings live in `$XDG_CONFIG_HOME/agent-ways/config.yaml`, except the `gate.*` keys, which live in `agent.yaml` beside it, and the `attend.*` keys, which live in `$XDG_CONFIG_HOME/attend/config.yaml`. A project overlays its own: ways keys in `.claude/ways.yaml`, attend keys in `.claude/attend.yaml`. `ways settings help <key>` names each key's file. The file form of the `disabled_domains` example:
 
 ```yaml
 disabled_domains:
@@ -334,10 +380,13 @@ At session start, `check-config-updates.sh` flags when the app source is behind 
 | [docs/hooks-and-ways/README.md](docs/hooks-and-ways/README.md) | **Start here for ways** — the pipeline, creating ways, reading order |
 | [docs/hooks-and-ways/](docs/hooks-and-ways/) | Matching, macros, provenance, teams, stats |
 | [docs/hooks-and-ways.md](docs/hooks-and-ways.md) | Reference: hook lifecycle, state management, data flow |
-| [docs/attend-and-monitor/](docs/attend-and-monitor/README.md) | The awareness layer: sensors, signals, `attend chat` |
+| [docs/attend-and-monitor/](docs/attend-and-monitor/README.md) | The awareness layer: sensors, delivery, keepwarm, `attend chat` |
+| [docs/reference/ways-cli.md](docs/reference/ways-cli.md) | The `ways` command, its subcommands and screens |
+| [docs/explanation/relevance-judge/](docs/explanation/relevance-judge/relevance-judge-the-model.md) | The relevance judge: what it sees, its modes, what it sends and costs |
+| [docs/reference/events.md](docs/reference/events.md) | Every event in `events.jsonl` and its fields |
 | [docs/install-guide.md](docs/install-guide.md) | Installing over an existing `~/.claude`, forks, previous installs, the relevance judge |
 | [docs/governance.md](docs/governance.md) | Reference: compilation chain, provenance mechanics |
-| [docs/architecture.md](docs/architecture.md) | System architecture diagrams |
+| [docs/architecture.md](docs/architecture.md) | Architecture diagrams: runtime roots, hook flow, disclosure cadence, matching |
 | [docs/architecture/](docs/architecture/) | Agent Decision Records |
 | [governance/](governance/) | Governance traceability and reporting |
 | [docs/README.md](docs/README.md) | Full documentation map |
