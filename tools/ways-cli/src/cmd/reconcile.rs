@@ -417,7 +417,7 @@ fn converge_one(
              reconcile will not delete them. Move them aside yourself, or re-run with \
              --force to rename each to a timestamped sibling (<name>.ways-backup-<seconds>). \
              If {} is itself a git clone of agent-ways (pre-1.0), do not use --force; \
-             see docs/migration-1.0.md.",
+             see https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md.",
             foreign.len(),
             dest_root.display(),
             list,

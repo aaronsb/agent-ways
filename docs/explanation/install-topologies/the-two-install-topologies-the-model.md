@@ -16,7 +16,7 @@ aliases: []
 > single **native projection**: `~/.claude` becomes a thin projection of an XDG app whose
 > source lives in `$XDG_DATA_HOME/agent-ways` ([[ADR-142]]). There is no longer a topology
 > *choice* to make. This page is kept as a record of how the model evolved — for installing
-> or migrating today, see the [Migration Guide](../../migration-1.0.md) and
+> or migrating today, see the [Migration Guide](https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md) and
 > [install-guide](../../install-guide.md).
 
 agent-ways can live in your `~/.claude` in one of two shapes. They are not two

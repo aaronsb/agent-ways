@@ -20,6 +20,9 @@ One sentence, no invented words: *procedural memory for coding agents, maintaine
 | Peer presence, heartbeats, instance identity | **Workspace awareness** | CSCW (Dourish & Bellotti 1992) |
 | Way authoring from team norms | **Externalization of tacit knowledge** | Nonaka & Takeuchi (SECI) |
 | Way matching and fixture testing | **Information retrieval**, precision-first evaluation | Cranfield paradigm |
+| Relevance gate (the judge on matched ways) | **Retrieve-then-rerank**, with an **LLM-as-a-judge** as the reranker | Nogueira & Cho 2019; Zheng et al. 2023 |
+| The ways agent (resident daemon holding the key) | A per-user **credential agent** | `ssh-agent`, `gpg-agent` |
+| Projection into `~/.claude` | A **symlink farm** over an application installed in XDG directories | GNU Stow; XDG Base Directory Specification |
 | Progressive disclosure | Progressive disclosure (industry-converged term) | — |
 | Agent behavior without ways (follow-ups, hedging) | **Preference uncertainty** | Principal–agent theory |
 

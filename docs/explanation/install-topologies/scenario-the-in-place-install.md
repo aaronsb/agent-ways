@@ -16,7 +16,7 @@ aliases: []
 > **superseded** by the 1.0 native projection ([[ADR-142]]). A pre-1.0 in-place clone
 > migrates to the projection with `ways migrate`, which left the binary in 1.9.0 ([[ADR-179]])
 > and now runs from the `ways-v1.8.3` tag; see the
-> [Migration Guide](../../migration-1.0.md). Kept as a record of how the model evolved.
+> [Migration Guide](https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md). Kept as a record of how the model evolved.
 
 **A greenfield machine: no existing `~/.claude` worth keeping.** The simplest, default
 shape — the repo *is* your config dir, and `git pull` is the entire update story.

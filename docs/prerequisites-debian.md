@@ -1,7 +1,7 @@
 # Prerequisites — Debian / Ubuntu
 
 ```bash
-sudo apt install jq bc gzip python3 git
+sudo apt install jq make python3 git
 ```
 
 For the GitHub CLI (`gh`):
@@ -14,12 +14,16 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubc
 sudo apt update && sudo apt install gh
 ```
 
-**Already present on most Debian/Ubuntu installs:** `bash`, `coreutils` (provides `timeout`, `tr`, `sort`, `wc`, etc.), `grep`, `awk`, `sed`, `gzip`, `find`
+**Already present on most Debian/Ubuntu installs:** `bash`, `coreutils` (provides `timeout`, `tr`, `sort`, `wc`, etc.), `grep`, `awk`, `sed`, `find`
 
 **Install Claude Code:**
 
 ```bash
-npm install -g @anthropic-ai/claude-code
+curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-See the [Claude Code docs](https://docs.anthropic.com/en/docs/claude-code) for authentication setup.
+The [Claude Code setup guide](https://code.claude.com/docs/en/setup) lists the other install methods and covers authentication.
+
+**Log in to `gh`:** run `gh auth login`. The installer downloads the prebuilt binaries through `gh`.
+
+**Only for a source build:** when `gh` is missing or not logged in, or no prebuilt binary fits your platform, the installer builds from source. That needs `cargo` (Rust 1.89 or later, from [rustup](https://rustup.rs/)), and `way-embed` needs cmake and a C++ compiler. `make deps` in the app dir installs cmake and the compiler. See [Finishing an install](finish-install.md).
