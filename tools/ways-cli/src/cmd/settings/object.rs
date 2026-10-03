@@ -26,6 +26,14 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
         }
     }
     let reg = registry();
+    // A choice is checked against the files and the object together: a
+    // profile the object adds may be the engine it names.
+    let mut layers = live_layers(&project_dir(project));
+    for doc in &docs {
+        let text = serde_yaml::to_string(doc).unwrap_or_default();
+        let schema = &ways_agent_core::settings::SCHEMA;
+        layers.push(Layer::from_text(schema, "apply", ways_agent_core::settings::FILE, LayerScope::User, None, &text));
+    }
     let mut findings = Vec::new();
     let mut accepted: Vec<(Bound, Value)> = Vec::new();
     let mut rejected = Vec::new();
@@ -38,7 +46,7 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
                 findings.push(json!({ "key": top, "ok": false, "message": "unknown key" }));
                 continue;
             };
-            walk(&reg, sec.file, &mut vec![top], v, &mut accepted, &mut rejected, &mut findings, project);
+            walk(&reg, &layers, sec.file, &mut vec![top], v, &mut accepted, &mut rejected, &mut findings, project);
         }
     }
     // Group the accepted keys by the file they are written to.
@@ -112,6 +120,7 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn walk(
     reg: &Registry,
+    layers: &[Layer],
     file: &str,
     path: &mut Vec<String>,
     v: &Value,
@@ -125,7 +134,7 @@ pub(super) fn walk(
         let verdict = match b.spec.kind {
             Kind::ReadOnly => Err("read-only; it is changed by its action command".to_string()),
             Kind::Secret => Err("a secret is never set from a settings object".to_string()),
-            _ => b.spec.check_value(v),
+            _ => b.spec.check_value_in(v, Some(layers)),
         }
         .and_then(|_| target_file(&b, project).map(|_| ()).map_err(|f| f.message));
         match verdict {
@@ -147,7 +156,7 @@ pub(super) fn walk(
         (Value::Mapping(m), true) => {
             for (k, cv) in m {
                 path.push(k.as_str().unwrap_or_default().to_string());
-                walk(reg, file, path, cv, accepted, rejected, findings, project);
+                walk(reg, layers, file, path, cv, accepted, rejected, findings, project);
                 path.pop();
             }
         }

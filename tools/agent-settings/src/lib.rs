@@ -11,7 +11,7 @@ pub mod yaml_edit;
 
 pub use load::{Finding, Layer, Resolved};
 pub use registry::{Bound, Registry};
-pub use schema::{DefaultValue, FileSpec, Kind, KeySpec, LayerScope, Schema, Scope, SectionSpec};
+pub use schema::{Choices, DefaultValue, FileSpec, Kind, KeySpec, LayerScope, Options, Schema, Scope, SectionSpec};
 
 /// Exit codes of `ways settings` property and object mode (ADR-503 §9).
 pub mod exit {

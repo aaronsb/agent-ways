@@ -512,7 +512,9 @@ ways settings set gate.mode shadow
 ways settings emit                                   # the canonical file, with comments
 ```
 
-`ways agent key check` checks a stored key against the model the gate is set to use.
+A key whose value is chosen from a list computed from the files, such as `gate.engine` (the shipped profiles and your own), lists the choices in effect in `help`, as an `options` array in `get --json` and `list --json`, and as a comment in `emit`. `set` and `apply` refuse a value outside the list with exit 3, and `lint` reports one written by hand. On the screens, Enter on any choice opens a picker.
+
+`ways agent key check` checks a stored key against the model the gate is set to use. Adding a key never switches the engine: `ways agent key add` names the engine in effect and the `ways settings set gate.engine` command when the new key's provider is not it, and `ways agent status` says whether the engine was set or picked by key order.
 
 ---
 

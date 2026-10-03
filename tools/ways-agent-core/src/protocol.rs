@@ -106,6 +106,10 @@ pub struct Status {
     pub pid: u32,
     pub uptime_s: u64,
     pub engine: Option<String>,
+    /// Whether agent.yaml names the engine, or key order picked it. Absent
+    /// from an agent built before it was added.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_set: Option<bool>,
     pub model: Option<String>,
     pub mode: Option<Mode>,
     pub requests: u64,
@@ -232,6 +236,18 @@ mod tests {
         let line = serde_json::to_string(&reply).unwrap();
         assert!(line.contains("\"kind\":\"fallback\"") && line.contains("\"exe\":\"/x/ways-agent\""));
         assert_eq!(serde_json::from_str::<ReplyEnvelope>(&line).unwrap(), reply);
+    }
+
+    #[test]
+    fn status_decodes_with_and_without_engine_set() {
+        // An agent built before engine_set sends none; the client then reads agent.yaml.
+        let old = r#"{"version":"0.5.0","pid":1,"uptime_s":2,"engine":"anthropic","model":"m","mode":"enforce","requests":0,"judged":0,"fallbacks":{},"in_flight":0,"concurrency":8,"latency_p50_ms":null,"latency_p95_ms":null}"#;
+        let s: Status = serde_json::from_str(old).unwrap();
+        assert_eq!(s.engine_set, None);
+        let new = Status { engine_set: Some(true), ..s };
+        let line = serde_json::to_string(&new).unwrap();
+        assert!(line.contains("\"engine_set\":true"), "{line}");
+        assert_eq!(serde_json::from_str::<Status>(&line).unwrap(), new);
     }
 
     #[test]

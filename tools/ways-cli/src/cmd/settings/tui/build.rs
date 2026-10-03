@@ -78,7 +78,7 @@ fn tilde_text(text: &str, home: &Path) -> String {
 pub fn display(v: Option<&Value>, kind: Kind) -> String {
     match (v, kind) {
         (Some(Value::Mapping(m)), Kind::Toggle) => m.get("enabled").and_then(Value::as_bool).unwrap_or(true).to_string(),
-        (Some(Value::Sequence(items)), Kind::List) => {
+        (Some(Value::Sequence(items)), Kind::List | Kind::ChoiceOf { multi: true, .. }) => {
             format!("[{}]", items.iter().map(|i| plain(Some(i))).collect::<Vec<_>>().join(", "))
         }
         // No list and no default: the reader keeps its own built-in list
@@ -88,12 +88,17 @@ pub fn display(v: Option<&Value>, kind: Kind) -> String {
     }
 }
 
-fn kind(k: Kind) -> TKind {
+/// The screens' kind of a key, its choices read over `layers`. A computed
+/// choice whose source cannot answer is edited as text.
+pub(crate) fn kind(k: Kind, layers: &[Layer]) -> TKind {
     match k {
         Kind::Bool | Kind::Toggle => TKind::Bool,
         Kind::Int { min, max } => TKind::Int { min, max },
         Kind::Float { min, max } => TKind::Float { min, max },
-        Kind::Choice(c) => TKind::Choice(c.iter().map(|s| s.to_string()).collect()),
+        Kind::Choice(_) | Kind::ChoiceOf { .. } => match k.choices(Some(layers)) {
+            agent_settings::Choices::Of { items, multi } => TKind::Choice { options: items, multi },
+            _ => TKind::Text,
+        },
         Kind::Text | Kind::Path | Kind::List => TKind::Text,
         Kind::ReadOnly => TKind::ReadOnly,
         Kind::Secret => TKind::Secret,
@@ -332,7 +337,7 @@ impl Ways {
                 Some(f) => format!("{layer} · {}", tilde(Path::new(&f), home)),
                 None => layer,
             };
-            let mut s = Setting::new(kind(b.spec.kind), display(r.value.as_ref(), b.spec.kind), source);
+            let mut s = Setting::new(kind(b.spec.kind, layers), display(r.value.as_ref(), b.spec.kind), source);
             if let Some(d) = r.default.as_ref().or(b.spec.default_for(&b.bound).as_ref()) {
                 s = s.default(display(Some(d), b.spec.kind));
             }
@@ -597,6 +602,8 @@ impl Ways {
                 };
                 let doc = if f.is_parse_failure() {
                     "Fix the file's syntax by hand. Until then it sets nothing, every switch in its scope is off, and nothing is written to it.".to_string()
+                } else if let (Some(r), false) = (&f.repair, f.fallback) {
+                    format!("The value loads as written, but its list of choices does not name it. {r} repairs it; `fix` does not.")
                 } else {
                     "`ways settings lint` lists the findings; `fix` repairs what this section's findings point at, and a switch stays off.".to_string()
                 };
@@ -612,7 +619,7 @@ impl Ways {
                 rows.push(node);
             }
         }
-        Node::group("findings", "What `ways settings lint` finds in the files this tab reads. A section with a finding falls through to the layers beneath; a file that does not parse fails closed.", rows)
+        Node::group("findings", "What `ways settings lint` finds in the files this tab reads. A section a finding drops falls through to the layers beneath; a file that does not parse fails closed.", rows)
     }
 }
 

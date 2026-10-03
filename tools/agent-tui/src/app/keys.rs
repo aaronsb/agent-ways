@@ -107,6 +107,7 @@ impl App {
                 }
                 _ => self.mode = Mode::Edit(buf),
             },
+            Mode::Pick(p) => self.pick_key(p, k),
             Mode::Menu { path, sel } => {
                 let len = tree::get(&self.roots, &path).actions.len();
                 match k.code {
@@ -419,6 +420,21 @@ impl App {
                     }
                 }
             }
+            Mode::Pick(p) => {
+                if let Some(k) = wheel {
+                    self.key(press(k));
+                } else if click {
+                    let Some((menu, items)) = &self.hits.menu else { return };
+                    if let Some(i) = items.iter().position(|r| r.contains(at)) {
+                        // A click picks the row: on a list it marks it, as Space does.
+                        p.sel = i;
+                        let k = if p.multi { KeyCode::Char(' ') } else { KeyCode::Enter };
+                        self.key(press(k));
+                    } else if !menu.contains(at) {
+                        self.key(press(KeyCode::Esc));
+                    }
+                }
+            }
             Mode::Review { run: Some(_), .. } => {}
             Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ThemeDelete { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
                 if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
@@ -526,7 +542,7 @@ impl App {
         }
     }
 
-    /// Enter: toggle a bool, cycle a choice, edit text and numbers, enter a
+    /// Enter: toggle a bool, pick a choice, edit text and numbers, enter a
     /// secret masked, open the action menu of a node that only has actions, or
     /// open and close a group.
     pub(super) fn activate(&mut self, path: &[usize]) {
@@ -544,11 +560,7 @@ impl App {
                     s.value = if s.value == "true" { "false" } else { "true" }.into();
                     self.msg = format!("{} = {}", n.name, s.value);
                 }
-                Kind::Choice(opts) => {
-                    let i = opts.iter().position(|o| *o == s.value).map_or(0, |i| (i + 1) % opts.len());
-                    s.value = opts[i].clone();
-                    self.msg = format!("{} = {}", n.name, s.value);
-                }
+                Kind::Choice { .. } => self.open_pick(path),
                 Kind::ReadOnly => self.msg = "read-only here; the detail pane names the command".into(),
                 Kind::Secret => match n.actions.iter().position(|a| matches!(a.arg, Arg::Secret)) {
                     Some(action) => self.mode = Mode::Secret { path: path.to_vec(), action, buf: SecretBuf::default() },
@@ -681,26 +693,36 @@ impl App {
         self.queue.push(q);
     }
 
+    /// Enter in the editor: set the selected row's value, or stay editing.
     pub(super) fn commit(&mut self, buf: &str) {
         let rows = self.rows();
         let path = rows[self.cursor.min(rows.len() - 1)].path.clone();
+        if !self.set_value(&path, buf) {
+            self.mode = Mode::Edit(buf.to_string());
+        }
+    }
+
+    /// Check `buf` for the setting at `path` as the adapter checks typed
+    /// text, and set it. False when it is rejected; the bottom bar says why.
+    pub(super) fn set_value(&mut self, path: &[usize], buf: &str) -> bool {
         let checked = {
-            let s = tree::get(&self.roots, &path).setting.as_ref().expect("edit mode only on settings");
+            let s = tree::get(&self.roots, path).setting.as_ref().expect("a value is set only on settings");
             match s.store.as_ref().and_then(|st| self.adapter.validate(st, buf)) {
                 Some(r) => r,
                 None => s.validate(buf),
             }
         };
-        let n = tree::get_mut(&mut self.roots, &path);
-        let s = n.setting.as_mut().expect("edit mode only on settings");
+        let n = tree::get_mut(&mut self.roots, path);
+        let s = n.setting.as_mut().expect("a value is set only on settings");
         match checked {
             Ok(v) => {
                 s.value = v;
                 self.msg = format!("{} = {}", n.name, s.value);
+                true
             }
             Err(e) => {
                 self.msg = format!("rejected: {e}");
-                self.mode = Mode::Edit(buf.to_string());
+                false
             }
         }
     }

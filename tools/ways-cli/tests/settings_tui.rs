@@ -172,7 +172,7 @@ fn a_change_applied_in_the_screens_writes_the_bytes_set_writes() {
         "matching",
         "/ text:near_miss enter down down enter e ctrl-u text:0.1 enter \
          / text:parent_boost enter down down enter e ctrl-u text:0.25 enter w a \
-         3 down down enter w a \
+         3 down down enter down enter w a \
          / text:incident enter end enter enter w a",
     );
     assert_eq!(left, "nothing pending\n", "every change applied");
@@ -465,7 +465,13 @@ fn golden_frames() {
     let keyed = Fx::new();
     keyed.file(".config/agent-ways/config.yaml", "# by hand\nnear_miss_margin: 0.1\n");
     keyed.file(".config/agent-ways/keys/anthropic", "sk-ant-golden-frame-fixture");
-    g.check_text("gate-review", &keyed.snap("gate", "down down enter / text:keys.anthropic enter end enter a down enter y w", "100x30", "16"));
+    g.check_text("gate-review", &keyed.snap("gate", "down down enter down enter / text:keys.anthropic enter end enter a down enter y w", "100x30", "16"));
+    // The picker over a fixed choice, the mode, and over the engine, whose
+    // choices are the shipped profiles and one of the user's own.
+    g.check_text("gate-pick-mode", &fx.snap("gate", "down down enter down", "100x30", "16"));
+    let mine = Fx::new();
+    mine.file(".config/agent-ways/agent.yaml", "engine: mine\nprofiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n");
+    g.check_text("gate-pick-engine", &mine.snap("gate", "down enter", "100x30", "16"));
     // A chosen theme at truecolor: its roles, and the editor's swatches.
     g.check_text("theme-nord-truecolor", &fx.snap("theme", "down down enter 1", "100x30", "truecolor"));
     // A project way with a macro: its switch above, what it is below.

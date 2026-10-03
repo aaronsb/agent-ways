@@ -318,36 +318,44 @@ pub fn profiles(user: &UserLayer) -> Result<BTreeMap<String, Profile>> {
     let shipped = shipped();
     let mut all = shipped.clone();
     for (name, patch) in &user.profiles {
-        // A changed provider needs its own model id: the base's id belongs to
-        // the base's provider.
-        if patch.provider.is_some() && patch.model.is_none() {
-            bail!("profile '{name}' sets provider, so it must set model too");
-        }
-        let profile = match shipped.get(name) {
-            Some(base) => patch.apply(base),
-            None => {
-                let (Some(provider), Some(_)) = (patch.provider, patch.model.as_ref()) else {
-                    bail!("profile '{name}' is not shipped, so it must set provider and model");
-                };
-                // New profiles inherit the shipped values for their provider,
-                // never another user patch, whatever the names sort to.
-                let base = shipped
-                    .get(provider.as_str())
-                    .cloned()
-                    .context("every provider has a shipped profile")?;
-                patch.apply(&base)
-            }
-        };
-        profile.validate(name)?;
-        all.insert(name.clone(), profile);
+        all.insert(name.clone(), patched(name, patch, &shipped)?);
     }
     Ok(all)
+}
+
+/// One profile after the user's patch `patch`, as [`profiles`] builds it.
+pub fn patched(name: &str, patch: &ProfilePatch, shipped: &BTreeMap<String, Profile>) -> Result<Profile> {
+    // A changed provider needs its own model id: the base's id belongs to
+    // the base's provider.
+    if patch.provider.is_some() && patch.model.is_none() {
+        bail!("profile '{name}' sets provider, so it must set model too");
+    }
+    let profile = match shipped.get(name) {
+        Some(base) => patch.apply(base),
+        None => {
+            let (Some(provider), Some(_)) = (patch.provider, patch.model.as_ref()) else {
+                bail!("profile '{name}' is not shipped, so it must set provider and model");
+            };
+            // New profiles inherit the shipped values for their provider,
+            // never another user patch, whatever the names sort to.
+            let base = shipped
+                .get(provider.as_str())
+                .cloned()
+                .context("every provider has a shipped profile")?;
+            patch.apply(&base)
+        }
+    };
+    profile.validate(name)?;
+    Ok(profile)
 }
 
 /// The settings the agent runs with.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
     pub engine: String,
+    /// Whether agent.yaml names the engine; false when it was picked by
+    /// key order.
+    pub engine_set: bool,
     pub profile: Profile,
     pub mode: Mode,
 }
@@ -367,7 +375,7 @@ pub fn resolve(user: &UserLayer, has_key: impl Fn(Provider) -> bool) -> Result<O
         .get(&engine)
         .cloned()
         .with_context(|| format!("engine '{engine}' names no profile"))?;
-    Ok(Some(Settings { engine, profile, mode: user.mode.unwrap_or_default() }))
+    Ok(Some(Settings { engine, engine_set: user.engine.is_some(), profile, mode: user.mode.unwrap_or_default() }))
 }
 
 #[cfg(test)]
@@ -404,8 +412,11 @@ mod tests {
         let s = resolve(&UserLayer::default(), |p| p == Provider::Openrouter).unwrap().unwrap();
         assert_eq!(s.engine, "openrouter");
         assert_eq!(s.mode, Mode::Enforce);
+        assert!(!s.engine_set, "picked by key order");
         let s = resolve(&UserLayer::default(), |_| true).unwrap().unwrap();
         assert_eq!(s.engine, "anthropic");
+        let named: UserLayer = serde_yaml::from_str("engine: openrouter\n").unwrap();
+        assert!(resolve(&named, |_| true).unwrap().unwrap().engine_set);
     }
 
     #[test]

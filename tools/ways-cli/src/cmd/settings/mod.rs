@@ -107,7 +107,15 @@ pub(super) fn live_layers(project: &Path) -> Vec<Layer> {
     let mut out = ways_core::settings::layers(project);
     out.extend(ways_agent_core::settings::layers());
     out.extend(attend_config::layers(project));
-    out
+    with_choices(out)
+}
+
+/// `layers` with a finding for each stored value a computed choice does not
+/// list, which a load, reading one file on its own, cannot check.
+pub(super) fn with_choices(mut layers: Vec<Layer>) -> Vec<Layer> {
+    let reg = registry();
+    agent_settings::load::check_choices(reg.keys().map(|(_, k)| k), &mut layers);
+    layers
 }
 
 /// One file read on its own (`--file`): `agent.yaml` is the agent kind, a
@@ -129,7 +137,7 @@ pub(super) fn file_layers(path: &Path) -> Result<Vec<Layer>, Failure> {
         let scope = if name == "ways.yaml" { LayerScope::Project } else { LayerScope::User };
         Layer::read(&ways_core::settings::SCHEMA, "file", ways_core::settings::FILE, scope, path)
     };
-    Ok(vec![layer])
+    Ok(with_choices(vec![layer]))
 }
 
 pub(super) fn layers_for(file: Option<&Path>, project: Option<&Path>) -> Result<Vec<Layer>, Failure> {
@@ -166,13 +174,31 @@ pub(super) fn layer_label(r: &Resolved, layers: &[Layer]) -> (String, Option<Str
     }
 }
 
-pub(super) fn describe(r: &Resolved, layers: &[Layer]) -> serde_json::Value {
+/// A key's value as `get --json` and `list --json` describe it. A computed
+/// choice adds the choices in effect; every other key's object is as it was.
+pub(super) fn describe(r: &Resolved, spec: &agent_settings::KeySpec, layers: &[Layer]) -> serde_json::Value {
     let (layer, file) = layer_label(r, layers);
-    json!({
+    let mut d = json!({
         "value": r.value.as_ref().map(to_json),
         "default": r.default.as_ref().map(to_json),
         "layer": layer,
         "file": file,
+    });
+    if let Some(o) = options_json(spec, layers) {
+        d["options"] = o;
+    }
+    d
+}
+
+/// The choices of a computed choice in effect, as JSON: the list, or
+/// `null` when its source could not answer. `None` for any other kind.
+pub(super) fn options_json(spec: &agent_settings::KeySpec, layers: &[Layer]) -> Option<serde_json::Value> {
+    if !matches!(spec.kind, Kind::ChoiceOf { .. }) {
+        return None;
+    }
+    Some(match spec.kind.choices(Some(layers)) {
+        agent_settings::Choices::Of { items, .. } => json!(items),
+        _ => serde_json::Value::Null,
     })
 }
 
@@ -291,5 +317,47 @@ pub(super) fn report(layers: &[Layer]) {
         for f in &l.findings {
             eprintln!("{}", f.diagnostic("ways"));
         }
+    }
+}
+
+#[cfg(test)]
+mod choice_tests {
+    use super::*;
+    use agent_settings::{DefaultValue, KeySpec};
+
+    /// A source that cannot answer, with a reason a careless one might give.
+    fn offline(_: &[Layer]) -> Result<Vec<String>, String> {
+        Err("network down\nmode: off\n".into())
+    }
+
+    const SPEC: KeySpec = KeySpec {
+        name: "gate.profiles.*.model",
+        section: "gate.profiles",
+        file: "agent",
+        path: &["profiles", "*", "model"],
+        kind: Kind::ChoiceOf { options: offline, multi: false },
+        default: DefaultValue::None,
+        instances: &[],
+        scope: Scope::User,
+        doc: "",
+        long: "",
+        check: None,
+        computed: None,
+        fail_closed: None,
+    };
+
+    #[test]
+    fn a_source_that_cannot_answer_leaves_text_and_says_so_on_one_line() {
+        // --json: the key has options, and they are unknown.
+        assert_eq!(options_json(&SPEC, &[]), Some(serde_json::Value::Null));
+        // emit: one comment line, which apply reads past.
+        let note = maintain::choice_note("gate.profiles.anthropic.model", SPEC.kind, &[]);
+        assert_eq!(note, "gate.profiles.anthropic.model: text (the choices could not be listed: network down mode: off)");
+        let emitted = format!("# {note}\nengine: anthropic\n");
+        assert_eq!(serde_yaml::from_str::<Value>(&emitted).unwrap(), serde_yaml::from_str::<Value>("engine: anthropic").unwrap());
+        // The screens: typed text, no picker.
+        assert!(matches!(tui::build::kind(SPEC.kind, &[]), agent_tui::tree::Kind::Text));
+        // And any text is taken.
+        assert_eq!(SPEC.parse_cli("claude-x", &[]).unwrap(), Value::from("claude-x"));
     }
 }

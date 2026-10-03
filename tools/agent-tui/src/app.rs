@@ -7,6 +7,7 @@
 mod apply;
 pub mod flow;
 mod keys;
+mod pick;
 mod render;
 mod review;
 pub mod theme;
@@ -45,6 +46,8 @@ pub(crate) enum Mode {
     Help { scroll: u16 },
     /// Choosing among the actions of the node at `path`.
     Menu { path: Vec<usize>, sel: usize },
+    /// Choosing a choice's value from its options.
+    Pick(pick::Pick),
     /// A visible argument, such as a path, for action `action` of the node.
     Arg { path: Vec<usize>, action: usize, buf: String },
     /// A masked argument for action `action` of the node.

@@ -5,20 +5,20 @@ agent-tui frame 100x30
 |│▌    engine                                          ││                                           │|
 |│     mode                      enforce               ││The profile the gate uses.                 │|
 |│ ▸ profiles · setting          value                 ││                                           │|
-|│ ▸ keys · provider             key                   ││Unset: the first shipped profile whose     │|
-|│                                                     ││provider has a key (anthropic, then        │|
-|│                                                     ││openrouter). `ways agent key check` checks │|
-|│                                                     ││the key against the profile's model.       │|
+|│ ▸ keys · provider             key                   ││A shipped profile or one of your own under │|
+|│                                                     ││gate.profiles. Unset: the first shipped    │|
+|│                                                     ││profile whose provider has a key           │|
+|│                                                     ││(anthropic, then openrouter); adding a key │|
+|│                                                     ││never switches it, and `ways agent status` │|
+|│                                                     ││says which applies. `ways agent key check` │|
+|│                                                     ││checks the key against the profile's model.│|
 |│                                                     ││                                           │|
 |│                                                     ││value                                      │|
-|│                                                     ││type     text (Enter edits)                │|
+|│                                                     ││type     one of anthropic | openrouter     │|
+|│                                                     ││(Enter picks)                              │|
 |│                                                     ││from     default                           │|
 |│                                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
 |│                                                     ││[gate.engine]                              │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -81,28 +81,28 @@ styles
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  54-64  - - DIM
+ 11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-64  - - DIM
+ 12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-64  - - DIM
+ 13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
  14  54-64  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  54-55  - - DIM
+ 15  54-64  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
  16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17  54-55  - - DIM
+ 17  54-64  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
- 18  54-55  - - DIM
+ 18  54-64  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
  19  54-55  - - DIM

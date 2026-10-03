@@ -48,9 +48,10 @@ const KEYS: &[KeySpec] = &[
         name: "gate.engine",
         section: "gate",
         path: &["engine"],
+        kind: Kind::ChoiceOf { options: profile_names, multi: false },
         instances: &[],
         doc: "The profile the gate uses.",
-        long: "Unset: the first shipped profile whose provider has a key (anthropic, then openrouter). `ways agent key check` checks the key against the profile's model.",
+        long: "A shipped profile or one of your own under gate.profiles. Unset: the first shipped profile whose provider has a key (anthropic, then openrouter); adding a key never switches it, and `ways agent status` says which applies. `ways agent key check` checks the key against the profile's model.",
         ..BASE
     },
     KeySpec {
@@ -180,6 +181,32 @@ fn shipped_field(bound: &[String], field: &str) -> Option<Value> {
     serde_yaml::to_value(p).ok()?.get(field).cloned()
 }
 
+/// The profiles `gate.engine` may name: the shipped ones, then each the
+/// user layer adds under `profiles:`, in the file's order. A profile whose
+/// patch does not build, such as a new one with no model, names nothing
+/// the gate could run, so it is left out, a patched shipped one too.
+fn profile_names(layers: &[Layer]) -> Result<Vec<String>, String> {
+    let shipped = profile::shipped();
+    let mut out: Vec<String> = shipped.keys().cloned().collect();
+    for l in layers.iter().filter(|l| l.file == FILE) {
+        let Some(Value::Mapping(m)) = l.accepted.get("profiles") else { continue };
+        for (k, v) in m {
+            let Some(name) = k.as_str() else { continue };
+            let builds = serde_yaml::from_value::<profile::ProfilePatch>(v.clone())
+                .ok()
+                .is_some_and(|p| profile::patched(name, &p, &shipped).is_ok());
+            match (builds, out.iter().position(|o| o == name)) {
+                (true, None) => out.push(name.to_string()),
+                (false, Some(i)) => {
+                    out.remove(i);
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn check_model(v: &Value) -> Result<(), String> {
     match v.as_str() {
         Some(m) if profile::valid_model_id(m) => Ok(()),
@@ -206,4 +233,35 @@ pub static SCHEMA: Schema = Schema {
 /// The layers the agent's keys resolve through: the user layer.
 pub fn layers() -> Vec<Layer> {
     vec![Layer::read(&SCHEMA, "user", FILE, LayerScope::User, &profile::user_layer_path())]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_settings::Choices;
+
+    fn user(text: &str) -> Vec<Layer> {
+        vec![Layer::from_text(&SCHEMA, "user", FILE, LayerScope::User, None, text)]
+    }
+
+    #[test]
+    fn the_engine_is_a_profile_the_shipped_file_or_the_user_layer_names() {
+        let engine = KEYS.iter().find(|k| k.name == "gate.engine").unwrap();
+        assert_eq!(
+            engine.kind.choices(Some(&user(""))),
+            Choices::Of { items: vec!["anthropic".into(), "openrouter".into()], multi: false }
+        );
+        let layers = user("profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n  anthropic:\n    threshold: 0.4\n");
+        assert_eq!(engine.kind.describe(&layers), "one of anthropic, openrouter, mine");
+        assert!(engine.parse_cli("mine", &layers).is_ok());
+        assert!(engine.parse_cli("openrouter", &layers).is_ok());
+        let e = engine.parse_cli("open-router", &layers).unwrap_err();
+        assert_eq!(e, "expected one of anthropic, openrouter, mine, found 'open-router'");
+        // A profile the gate could not build is no choice: a new one with no
+        // model, or a shipped one switched to another provider without one.
+        let layers = user("profiles:\n  half:\n    provider: openrouter\n  anthropic:\n    provider: openrouter\n  ok:\n    provider: openrouter\n    model: x/y\n");
+        assert_eq!(engine.kind.describe(&layers), "one of openrouter, ok");
+        // The hook path loads one file on its own and keeps the value.
+        assert!(user("engine: nope\n")[0].findings.is_empty());
+    }
 }

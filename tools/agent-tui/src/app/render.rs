@@ -177,6 +177,10 @@ impl App {
                 let (path, sel) = (path.clone(), *sel);
                 self.draw_menu(f, main, &path, sel);
             }
+            Mode::Pick(p) => {
+                let p = p.clone();
+                self.draw_pick(f, main, &p);
+            }
             _ => {}
         }
         self.draw_status(f, status);
@@ -485,6 +489,14 @@ impl App {
                 spans.extend(mode("action", Ground::Accent));
                 spans.push(hint("  ↑↓ choose · Enter or click picks · Esc closes"));
             }
+            Mode::Pick(p) if p.multi => {
+                spans.extend(mode("pick", Ground::Accent));
+                spans.extend([hint("  ↑↓ move · Space or click marks · Enter sets · Esc closes"), msg]);
+            }
+            Mode::Pick(_) => {
+                spans.extend(mode("pick", Ground::Accent));
+                spans.extend([hint("  ↑↓ choose · Enter or click sets · Esc closes"), msg]);
+            }
             Mode::Arg { path, action, buf } => {
                 let prompt = match &tree::get(&self.roots, path).actions[*action].arg {
                     Arg::Text(p) => p.clone(),
@@ -654,7 +666,8 @@ fn kind_label(k: &Kind) -> String {
         Kind::Bool => "bool (Enter toggles)".into(),
         Kind::Float { min, max } => format!("number {min}..={max} (Enter edits)"),
         Kind::Int { min, max } => format!("integer {min}..={max} (Enter edits)"),
-        Kind::Choice(o) => format!("one of {} (Enter cycles)", o.join(" | ")),
+        Kind::Choice { options, multi: false } => format!("one of {} (Enter picks)", options.join(" | ")),
+        Kind::Choice { options, multi: true } => format!("any of {} (Enter picks)", options.join(" | ")),
         Kind::Text => "text (Enter edits)".into(),
         Kind::ReadOnly => "read-only here".into(),
         Kind::Secret => "secret (Enter enters it masked)".into(),
@@ -666,7 +679,7 @@ pub const KEYS: &[&str] = &[
     "Tab S-Tab 1-9  switch tab; each keeps its cursor and open groups",
     "↑↓ / j k     move          PgUp PgDn g G   jump",
     "→ / l        open group    ← / h           close / parent",
-    "Enter Space  toggle bool, cycle choice, edit value, open group;",
+    "Enter Space  toggle bool, pick a choice, edit value, open group;",
     "             on a secret, masked entry; on an action-only node, its menu",
     "e            edit as text (^U clears)      d   set to default",
     "u            revert        /               filter all tabs by key",

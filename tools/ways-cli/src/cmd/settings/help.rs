@@ -45,7 +45,12 @@ pub fn help_text(topic: Option<&str>) -> Result<String, Failure> {
         let s = b.spec;
         let _ = writeln!(out, "{}", if b.bound.is_empty() { s.name.to_string() } else { b.name() });
         let _ = writeln!(out, "  {}", s.doc);
-        let _ = writeln!(out, "  type:    {}", s.kind.describe());
+        // The choices of a computed choice come from the files.
+        let layers = match s.kind {
+            Kind::ChoiceOf { .. } => live_layers(&project_dir(None)),
+            _ => Vec::new(),
+        };
+        let _ = writeln!(out, "  type:    {}", s.kind.describe(&layers));
         if let Some(d) = s.default_for(&b.bound) {
             let _ = writeln!(out, "  default: {}", plain(Some(&d)));
         }

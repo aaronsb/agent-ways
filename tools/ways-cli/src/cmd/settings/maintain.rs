@@ -15,7 +15,12 @@ pub fn emit(prefix: Option<&str>, effective: bool, project: Option<&Path>) -> Ou
         return Err(fail(exit::USAGE, format!("no key under {prefix}; `ways settings help` lists the sections")));
     }
     let files = reg.emit(prefix, layers.as_deref());
+    let notes = choice_notes(&reg, prefix, layers.as_deref());
     let many = files.len() > 1;
+    // A key with no value emits no fragment; its note still says the choices.
+    for (_, note) in notes.iter().filter(|(f, _)| !files.iter().any(|(e, _)| e == f)) {
+        println!("# {note}");
+    }
     for (i, (file, v)) in files.iter().enumerate() {
         if many {
             if i > 0 {
@@ -23,9 +28,39 @@ pub fn emit(prefix: Option<&str>, effective: bool, project: Option<&Path>) -> Ou
             }
             println!("# {}", file_label(file));
         }
+        for (_, note) in notes.iter().filter(|(f, _)| f == file) {
+            println!("# {note}");
+        }
         print!("{}", serde_yaml::to_string(v).unwrap_or_default());
     }
     Ok(())
+}
+
+/// A comment line per computed choice under `prefix`, by file kind: the
+/// choices in effect, which the fragment's values cannot show. A key with
+/// no value is still noted, since naming one of them is how it is set.
+fn choice_notes(reg: &Registry, prefix: &str, layers: Option<&[Layer]>) -> Vec<(&'static str, String)> {
+    let computed: Vec<_> = reg.concrete(prefix, layers.unwrap_or(&[])).into_iter().filter(|b| matches!(b.spec.kind, Kind::ChoiceOf { .. })).collect();
+    if computed.is_empty() {
+        return Vec::new();
+    }
+    // The choices come from the files, read for the canonical fragment too.
+    let live;
+    let layers = match layers {
+        Some(l) => l,
+        None => {
+            live = live_layers(&project_dir(None));
+            &live
+        }
+    };
+    computed.iter().map(|b| (b.spec.file, choice_note(&b.name(), b.spec.kind, layers))).collect()
+}
+
+/// The `emit` comment of one computed choice, on one line whatever its
+/// source answered: a newline would end the comment and the rest would
+/// be read back by `apply` as settings.
+pub(super) fn choice_note(name: &str, kind: Kind, layers: &[Layer]) -> String {
+    agent_settings::schema::one_line(&format!("{name}: {}", kind.describe(layers)))
 }
 
 pub(super) fn file_label(file: &str) -> &'static str {
@@ -40,14 +75,23 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     agent_settings::load::trace("lint");
     let layers = layers_for(file, project)?;
     let mut n = 0;
+    // Findings `fix` can repair; the others name their own repair.
+    let mut fixable = 0;
     for l in layers.iter().filter(|l| l.present) {
         for f in &l.findings {
-            println!("{f}");
+            println!("{f}{}", f.lint_note());
             n += 1;
+            fixable += f.lint_note().is_empty() as usize;
         }
     }
     if n > 0 {
-        return Err(fail(exit::REJECTED, format!("{n} finding{}; `ways settings fix <section>` repairs what a section's findings point at", if n == 1 { "" } else { "s" })));
+        let s = if n == 1 { "" } else { "s" };
+        let how = match fixable {
+            0 => "each line names its repair",
+            _ if fixable == n => "`ways settings fix <section>` repairs what a section's findings point at",
+            _ => "`ways settings fix <section>` repairs what a section's findings point at; a line that names its own repair is not one of them",
+        };
+        return Err(fail(exit::REJECTED, format!("{n} finding{s}; {how}")));
     }
     Ok(())
 }
