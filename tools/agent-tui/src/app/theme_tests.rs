@@ -14,7 +14,8 @@ use ratatui::Terminal;
 use super::themestate::{Focus, Themes};
 use super::*;
 use crate::adapter::Write;
-use crate::named::ItemAct;
+use super::themestate::NameOp;
+use crate::named::{self, ItemAct, ItemOp, Refusal};
 use crate::tree::Setting;
 use agent_theme::{parse, ColorDepth, Rgb};
 
@@ -40,6 +41,33 @@ impl Adapter for Choice {
         let kept = std::fs::read_to_string(self.0.join("choice")).unwrap_or_default();
         Some(kept.bytes().fold(7u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64)))
     }
+    /// Counts each read of the files in `<dir>/reloads`; the tree stays.
+    fn reload(&mut self) -> Option<Vec<Node>> {
+        std::fs::write(self.0.join("reloads"), (reloads(&self.0) + 1).to_string()).unwrap();
+        None
+    }
+}
+
+fn reloads(d: &std::path::Path) -> usize {
+    std::fs::read_to_string(d.join("reloads")).ok().and_then(|s| s.parse().ok()).unwrap_or(0)
+}
+
+#[test]
+fn an_outside_change_just_before_the_screens_own_write_is_still_read() {
+    let d = dir("owedread");
+    let mut app = app_in(&d, ColorDepth::TrueColor);
+    keys(&mut app, &[KeyCode::Char('3')]);
+    app.watch();
+    let before = reloads(&d);
+    // Another writer changes the file, then the screen keeps a choice
+    // before the next watch tick.
+    std::fs::write(d.join("choice"), "dracula\n").unwrap();
+    keys(&mut app, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]);
+    app.watch();
+    assert_eq!(reloads(&d), before + 1, "the files are read again");
+    assert_eq!(app.msg, "nord is the active theme", "quietly: the message says what the screen did");
+    app.watch();
+    assert_eq!(reloads(&d), before + 1, "and only once");
 }
 
 #[test]
@@ -240,7 +268,7 @@ fn new_copy_rename_and_delete_write_the_themes_dir() {
     for (bad, why) in [("Nord2", "lowercase"), ("my/nord", "path separator"), ("nord 2", "no spaces"), ("mine", "taken by a user theme"), ("dracula", "taken by a bundled theme"), ("", "cannot be empty")] {
         type_str(&mut app, bad);
         keys(&mut app, &[KeyCode::Enter]);
-        assert!(app.msg.contains(why) && matches!(&app.mode, Mode::ItemName { op: ItemOp::Copy(f), .. } if f == "nord"), "{bad}: {}", app.msg);
+        assert!(app.msg.contains(why) && matches!(&app.mode, Mode::Name { op: NameFor::Item(ItemOp::Copy(f)), .. } if f == "nord"), "{bad}: {}", app.msg);
         keys(&mut app, &vec![KeyCode::Backspace; bad.len()]);
     }
     type_str(&mut app, "nord-2");
@@ -294,6 +322,57 @@ fn a_bundled_theme_is_never_renamed_or_deleted() {
 }
 
 #[test]
+fn a_file_that_is_no_loaded_theme_is_never_overwritten() {
+    let d = dir("stray");
+    std::fs::write(d.join("precious.theme"), "not a theme\n").unwrap();
+    std::fs::write(d.join("other.toml"), "THEME_NAME=\"elsewhere\"\n").unwrap();
+    let mut t = Themes::new(Some(d.clone()), ColorDepth::TrueColor, None);
+    for name in ["precious", "other"] {
+        let r = named::copy(&mut t, "nord", name).unwrap_err();
+        assert_eq!((r.why, r.message.as_str()), (Refusal::Taken, format!("`{name}` is taken by a file that holds no theme of that name").as_str()));
+    }
+    assert!(t.check_name("precious").is_err(), "new and an edited copy refuse it too");
+    assert_eq!(std::fs::read_to_string(d.join("precious.theme")).unwrap(), "not a theme\n");
+    assert_eq!(std::fs::read_to_string(d.join("other.toml")).unwrap(), "THEME_NAME=\"elsewhere\"\n");
+}
+
+/// A user theme in `foo.theme` whose THEME_NAME is `bar`.
+fn misnamed(tag: &str) -> (Themes, PathBuf) {
+    let d = dir(tag);
+    let nord = Themes::new(None, ColorDepth::TrueColor, None).get("nord").cloned().unwrap();
+    std::fs::write(d.join("foo.theme"), agent_theme::to_text(&agent_theme::Theme { name: "bar".into(), label: "bar".into(), ..nord })).unwrap();
+    (Themes::new(Some(d.clone()), ColorDepth::TrueColor, Some("bar".into())), d)
+}
+
+fn files(d: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn rename_and_delete_act_on_the_file_a_theme_was_read_from() {
+    let (mut t, d) = misnamed("misnamed");
+    assert_eq!(t.path_of("bar"), Some(d.join("foo.theme")));
+    let done = named::rename(&mut t, "bar", "baz").unwrap();
+    assert_eq!(files(&d), ["baz.theme"], "the old file goes, the new one has the new name");
+    assert_eq!(t.follow(&done), Some("baz".into()), "the active choice follows");
+    let (mut t, d) = misnamed("misnamed-del");
+    named::delete(&mut t, "bar").unwrap();
+    assert!(files(&d).is_empty());
+}
+
+#[test]
+fn a_rename_whose_file_is_gone_writes_nothing() {
+    let (mut t, d) = misnamed("gone");
+    std::fs::remove_file(d.join("foo.theme")).unwrap();
+    let r = named::rename(&mut t, "bar", "baz").unwrap_err();
+    assert_eq!(r.why, Refusal::Write);
+    assert!(r.message.ends_with("is gone; nothing was written"), "{}", r.message);
+    assert!(files(&d).is_empty(), "no new file");
+}
+
+#[test]
 fn deleting_an_override_leaves_the_bundled_theme_active() {
     let d = dir("override");
     let nord = app_in(&d, ColorDepth::TrueColor).themes.get("nord").cloned().unwrap();
@@ -313,7 +392,7 @@ fn editing_a_bundled_theme_starts_a_copy() {
     let d = dir("editcopy");
     let mut app = app_in(&d, ColorDepth::TrueColor);
     keys(&mut app, &[KeyCode::Char('3'), KeyCode::Down, KeyCode::Down, KeyCode::Char('e')]);
-    assert!(matches!(&app.mode, Mode::ThemeName { op: NameOp::EditCopy(f), .. } if f == "nord"));
+    assert!(matches!(&app.mode, Mode::Name { op: NameFor::Theme(NameOp::EditCopy(f)), .. } if f == "nord"));
     type_str(&mut app, "my-nord");
     keys(&mut app, &[KeyCode::Enter]);
     let e = app.themes.editor.as_ref().expect("the editor is open");

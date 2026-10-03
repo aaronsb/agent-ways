@@ -66,20 +66,7 @@ impl App {
                     _ => self.mode = Mode::ThemeMenu { sel },
                 }
             }
-            Mode::ThemeName { op, mut buf } => match k.code {
-                KeyCode::Esc => self.msg = "cancelled".into(),
-                KeyCode::Enter => self.theme_named(op, buf),
-                KeyCode::Backspace => {
-                    buf.pop();
-                    self.mode = Mode::ThemeName { op, buf };
-                }
-                KeyCode::Char(c) => {
-                    buf.push(c);
-                    self.mode = Mode::ThemeName { op, buf };
-                }
-                _ => self.mode = Mode::ThemeName { op, buf },
-            },
-            m @ (Mode::ItemName { .. } | Mode::ItemDelete { .. }) => self.item_key(m, k),
+            m @ (Mode::Name { .. } | Mode::ItemDelete { .. }) => self.prompt_key(m, k),
             Mode::ThemeUnsaved => self.unsaved_key(k),
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),

@@ -27,6 +27,14 @@ pub trait NamedItems {
     /// renamed or deleted.
     fn bundled(&self, name: &str) -> bool;
 
+    /// Whether a new item of this name would land on something already
+    /// there: an item, or for a file-backed kind, a file that holds no item
+    /// of that name (one that does not parse, or names another). A copy or
+    /// a rename onto it would overwrite it.
+    fn occupied(&self, name: &str) -> bool {
+        self.exists(name)
+    }
+
     /// The kind's own rule for a name, past the shared one [`check_name`]
     /// applies first. The message names the rule.
     fn name_rule(&self, _name: &str) -> Result<(), String> {
@@ -149,9 +157,20 @@ pub fn acts(items: &dyn NamedItems, name: &str) -> Vec<ItemAct> {
     }
 }
 
-/// A new name: not empty, no path separator, no leading dot, no space or
-/// control character, the kind's own rule, and not the name of a bundled
-/// or user item.
+/// Names a file cannot take on Windows, whatever its extension.
+const RESERVED: [&str; 4] = ["con", "prn", "aux", "nul"];
+
+fn reserved(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    let stem = n.split('.').next().unwrap_or("");
+    let numbered = |p: &str| stem.strip_prefix(p).is_some_and(|d| matches!(d.as_bytes(), [b'1'..=b'9']));
+    RESERVED.contains(&stem) || numbered("com") || numbered("lpt")
+}
+
+/// A new name: not empty, no path separator, no leading dot or `-`, no
+/// space or control character, not a name Windows reserves for a device,
+/// the kind's own rule, and not the name of a bundled or user item or of a
+/// file already there.
 pub fn check_name(items: &dyn NamedItems, name: &str) -> Result<(), Refused> {
     let noun = items.noun();
     if name.is_empty() {
@@ -163,8 +182,14 @@ pub fn check_name(items: &dyn NamedItems, name: &str) -> Result<(), Refused> {
     if name.starts_with('.') {
         return Err(refuse(Refusal::Name, format!("`{name}`: a {noun} name does not start with a dot")));
     }
+    if name.starts_with('-') {
+        return Err(refuse(Refusal::Name, format!("`{name}`: a {noun} name does not start with -")));
+    }
     if name.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err(refuse(Refusal::Name, format!("`{name}`: a {noun} name has no spaces")));
+    }
+    if reserved(name) {
+        return Err(refuse(Refusal::Name, format!("`{name}`: a {noun} name is not one Windows reserves (con, prn, aux, nul, com1-9, lpt1-9)")));
     }
     items.name_rule(name).map_err(|m| refuse(Refusal::Name, m))?;
     if items.bundled(name) {
@@ -173,7 +198,24 @@ pub fn check_name(items: &dyn NamedItems, name: &str) -> Result<(), Refused> {
     if items.exists(name) {
         return Err(refuse(Refusal::Taken, format!("`{name}` is taken by a user {noun}")));
     }
+    if items.occupied(name) {
+        return Err(refuse(Refusal::Taken, format!("`{name}` is taken by a file that holds no {noun} of that name")));
+    }
     Ok(())
+}
+
+/// The refusal a bundled item's rename or delete meets, before any name is
+/// asked for; none for a copy or a user item.
+pub fn refuse_bundled(items: &dyn NamedItems, name: &str, act: ItemAct) -> Option<Refused> {
+    let verb = match act {
+        ItemAct::Copy => return None,
+        ItemAct::Rename => "renamed",
+        ItemAct::Delete => "deleted",
+    };
+    items.bundled(name).then(|| {
+        let noun = items.noun();
+        refuse(Refusal::Bundled, format!("{name} is a bundled {noun}, which is never {verb}; copy it to change it"))
+    })
 }
 
 fn existing(items: &dyn NamedItems, name: &str) -> Result<(), Refused> {
@@ -184,13 +226,9 @@ fn existing(items: &dyn NamedItems, name: &str) -> Result<(), Refused> {
     }
 }
 
-fn user_owned(items: &dyn NamedItems, name: &str, verb: &str) -> Result<(), Refused> {
+fn user_owned(items: &dyn NamedItems, name: &str, act: ItemAct) -> Result<(), Refused> {
     existing(items, name)?;
-    if items.bundled(name) {
-        let noun = items.noun();
-        return Err(refuse(Refusal::Bundled, format!("{name} is a bundled {noun}, which is never {verb}; copy it to change it")));
-    }
-    Ok(())
+    refuse_bundled(items, name, act).map_or(Ok(()), Err)
 }
 
 /// Copy any item, bundled or the user's, to a new user item `to`.
@@ -203,7 +241,7 @@ pub fn copy(items: &mut dyn NamedItems, from: &str, to: &str) -> Result<Done, Re
 
 /// Rename a user item. A bundled one is refused with the reason.
 pub fn rename(items: &mut dyn NamedItems, from: &str, to: &str) -> Result<Done, Refused> {
-    user_owned(items, from, "renamed")?;
+    user_owned(items, from, ItemAct::Rename)?;
     check_name(items, to)?;
     let file = items.rename_item(from, to).map_err(|m| refuse(Refusal::Write, m))?;
     Ok(Done::Renamed { from: from.into(), to: to.into(), file })
@@ -211,7 +249,7 @@ pub fn rename(items: &mut dyn NamedItems, from: &str, to: &str) -> Result<Done, 
 
 /// Delete a user item. A bundled one is refused with the reason.
 pub fn delete(items: &mut dyn NamedItems, name: &str) -> Result<Done, Refused> {
-    user_owned(items, name, "deleted")?;
+    user_owned(items, name, ItemAct::Delete)?;
     let file = items.delete_item(name).map_err(|m| refuse(Refusal::Write, m))?;
     Ok(Done::Deleted { name: name.into(), file })
 }
@@ -224,6 +262,8 @@ mod tests {
     struct Mem {
         shipped: Vec<&'static str>,
         user: Vec<String>,
+        /// Names a file already holds that is no item.
+        stray: Vec<&'static str>,
     }
 
     impl NamedItems for Mem {
@@ -235,6 +275,9 @@ mod tests {
         }
         fn bundled(&self, n: &str) -> bool {
             self.shipped.contains(&n)
+        }
+        fn occupied(&self, n: &str) -> bool {
+            self.exists(n) || self.stray.contains(&n)
         }
         fn name_rule(&self, n: &str) -> Result<(), String> {
             if n.chars().any(|c| c.is_ascii_uppercase()) {
@@ -258,7 +301,7 @@ mod tests {
     }
 
     fn mem() -> Mem {
-        Mem { shipped: vec!["base"], user: vec!["mine".into()] }
+        Mem { shipped: vec!["base"], user: vec!["mine".into()], stray: vec!["draft"] }
     }
 
     #[test]
@@ -278,9 +321,18 @@ mod tests {
         assert_eq!(why(".hidden"), Err(Refusal::Name));
         assert_eq!(why("two words"), Err(Refusal::Name));
         assert_eq!(why("Upper"), Err(Refusal::Name));
+        assert_eq!(why("-x"), Err(Refusal::Name));
+        assert_eq!(why("--"), Err(Refusal::Name));
+        for r in ["con", "prn", "aux", "nul", "com1", "com9", "lpt1", "lpt9"] {
+            assert_eq!(why(r), Err(Refusal::Name), "{r}");
+        }
+        for ok in ["com", "com10", "lpt0", "console", "a-b"] {
+            assert_eq!(why(ok), Ok(()), "{ok}");
+        }
         assert_eq!(why("base"), Err(Refusal::Taken));
         assert_eq!(why("mine"), Err(Refusal::Taken));
         assert_eq!(why("fresh"), Ok(()));
+        assert_eq!(why("draft"), Err(Refusal::Taken), "a file that is no item is not overwritten");
         assert!(check_name(&m, "base").unwrap_err().message.contains("bundled widget"));
         assert!(check_name(&m, "mine").unwrap_err().message.contains("user widget"));
     }
@@ -306,6 +358,10 @@ mod tests {
         assert_eq!(copy(&mut m, "gone", "x").unwrap_err().why, Refusal::Missing);
         assert_eq!(copy(&mut m, "base", "mine").unwrap_err().why, Refusal::Taken);
         assert_eq!(rename(&mut m, "mine", "base").unwrap_err().why, Refusal::Taken);
+        assert_eq!(copy(&mut m, "base", "draft").unwrap_err().why, Refusal::Taken);
+        assert_eq!(refuse_bundled(&m, "base", ItemAct::Copy), None);
+        assert_eq!(refuse_bundled(&m, "mine", ItemAct::Delete), None);
+        assert_eq!(refuse_bundled(&m, "base", ItemAct::Delete).map(|r| r.why), Some(Refusal::Bundled));
         assert_eq!((m.shipped, m.user), (vec!["base"], vec!["mine".to_string()]));
     }
 }

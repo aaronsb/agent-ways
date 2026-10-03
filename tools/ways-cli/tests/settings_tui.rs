@@ -393,6 +393,9 @@ fn the_cli_refuses_bundled_taken_bad_and_missing_names() {
         (&["copy", "nord", ""], 3, "a theme name cannot be empty"),
         (&["copy", "nord", "Loud"], 3, "`Loud`: a theme name is lowercase letters, digits and -"),
         (&["delete", "gone"], 2, "no theme named `gone`; `ways settings theme list` names the themes"),
+        (&["copy", "nord", "--", "-x"], 3, "`-x`: a theme name does not start with -"),
+        (&["copy", "nord", "con"], 3, "`con`: a theme name is not one Windows reserves (con, prn, aux, nul, com1-9, lpt1-9)"),
+        (&["copy", "nord", "lpt1"], 3, "`lpt1`: a theme name is not one Windows reserves (con, prn, aux, nul, com1-9, lpt1-9)"),
     ];
     for (args, want, msg) in cases {
         let mut a = vec!["settings", "theme"];
@@ -403,6 +406,41 @@ fn the_cli_refuses_bundled_taken_bad_and_missing_names() {
     let mut files: Vec<_> = std::fs::read_dir(fx.path(THEMES)).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     files.sort();
     assert_eq!(files, ["mine.theme"], "nothing else was written or removed");
+}
+
+#[test]
+fn a_file_that_is_no_loaded_theme_is_never_overwritten() {
+    let fx = Fx::new();
+    fx.file(&format!("{THEMES}/precious.theme"), "not a theme\n");
+    let (out, err, code) = fx.run(&["settings", "theme", "copy", "nord", "precious"]);
+    assert_eq!((code, err.as_str(), out.as_str()), (3, "ways settings: `precious` is taken by a file that holds no theme of that name\n", ""));
+    assert_eq!(fx.read(&format!("{THEMES}/precious.theme")).as_deref(), Some("not a theme\n"));
+    // The screens refuse it the same way and keep the prompt open.
+    let f = glyphs(&fx.snap("theme", "down down a down enter text:precious enter", "200x30", "16"));
+    assert!(f.contains("rejected: `precious` is taken by a file that holds no theme of that name"), "{f}");
+    assert_eq!(fx.read(&format!("{THEMES}/precious.theme")).as_deref(), Some("not a theme\n"));
+}
+
+#[test]
+fn rename_and_delete_follow_the_file_a_theme_was_read_from() {
+    let fx = Fx::new();
+    assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "bar"]).2, 0);
+    let text = fx.read(&format!("{THEMES}/bar.theme")).unwrap();
+    std::fs::remove_file(fx.path(&format!("{THEMES}/bar.theme"))).unwrap();
+    fx.file(&format!("{THEMES}/foo.theme"), &text);
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "bar"]).2, 0);
+    let (_, err, code) = fx.run(&["settings", "theme", "rename", "bar", "baz"]);
+    assert_eq!(code, 0, "{err}");
+    let mut files: Vec<_> = std::fs::read_dir(fx.path(THEMES)).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    files.sort();
+    assert_eq!(files, ["baz.theme"], "foo.theme, where bar lived, is gone");
+    assert_eq!(fx.run(&["settings", "get", "theme.active"]).0, "baz\n");
+    // Delete, the same way round.
+    fx.file(&format!("{THEMES}/foo.theme"), &text);
+    let (out, err, code) = fx.run(&["settings", "theme", "delete", "bar"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "deleted bar\n~/.config/agent-ways/themes/foo.theme\n");
+    assert!(fx.read(&format!("{THEMES}/foo.theme")).is_none());
 }
 
 #[test]

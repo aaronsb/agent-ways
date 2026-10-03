@@ -111,10 +111,20 @@ impl Themes {
     }
 
     /// The file a user theme is in, or would be written to.
+    /// A loaded user theme's file is the one it was read from, whatever its
+    /// stem; any other name's is the file with its stem.
     pub fn path_of(&self, name: &str) -> Option<PathBuf> {
+        if let Some(f) = self.set.file(name) {
+            return Some(f.to_path_buf());
+        }
         let dir = self.dir.as_ref()?;
-        let found = agent_theme::EXTENSIONS.iter().map(|x| dir.join(format!("{name}.{x}"))).find(|p| p.is_file());
-        Some(found.unwrap_or_else(|| dir.join(format!("{name}.theme"))))
+        Some(self.stem_file(name).unwrap_or_else(|| dir.join(format!("{name}.theme"))))
+    }
+
+    /// The file in the themes directory with stem `name`, if there is one.
+    fn stem_file(&self, name: &str) -> Option<PathBuf> {
+        let dir = self.dir.as_ref()?;
+        agent_theme::EXTENSIONS.iter().map(|x| dir.join(format!("{name}.{x}"))).find(|p| p.is_file())
     }
 
     pub fn palette(&self, t: &Theme) -> Palette {
@@ -269,21 +279,37 @@ impl NamedItems for Themes {
         self.write_as(&base, to)
     }
 
-    /// The theme written under its new name, then the old file removed. A
-    /// label that was the old name becomes the new one.
+    /// A name is occupied by a theme, or by a file with its stem that holds
+    /// no theme of that name: one that does not parse, or names another.
+    fn occupied(&self, name: &str) -> bool {
+        self.exists(name) || self.stem_file(name).is_some()
+    }
+
+    /// The theme written under its new name, then the file it was read
+    /// from removed; all or nothing: that file must be there before
+    /// anything is written, and the new file is taken back when it cannot
+    /// be removed. A label that was the old name becomes the new one.
     fn rename_item(&mut self, from: &str, to: &str) -> Result<PathBuf, String> {
         let old = self.set.get(from).ok_or("no such theme")?.clone();
-        let gone = self.path_of(from).ok_or("no themes directory; nothing is saved")?;
+        let gone = self.set.file(from).ok_or("not a user theme")?.to_path_buf();
+        if !gone.is_file() {
+            return Err(format!("{} is gone; nothing was written", self.show(&gone)));
+        }
         let label = if old.label == old.name { to.to_string() } else { old.label.clone() };
         let path = self.save(&Theme { name: to.into(), label, ..old })?;
-        std::fs::remove_file(&gone).map_err(|e| format!("{}: {e}", gone.display()))?;
+        if let Err(e) = std::fs::remove_file(&gone) {
+            let _ = std::fs::remove_file(&path);
+            self.reload();
+            return Err(format!("{}: {e}; the rename was taken back", self.show(&gone)));
+        }
         self.reload();
         Ok(path)
     }
 
+    /// The file the theme was read from, whatever its stem.
     fn delete_item(&mut self, name: &str) -> Result<PathBuf, String> {
-        let path = self.path_of(name).ok_or("no themes directory; nothing is saved")?;
-        std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let path = self.set.file(name).ok_or("not a user theme")?.to_path_buf();
+        std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", self.show(&path)))?;
         self.reload();
         Ok(path)
     }

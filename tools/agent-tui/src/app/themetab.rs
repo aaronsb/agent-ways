@@ -6,6 +6,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, Mo
 use ratatui::layout::Position;
 
 use super::themestate::{Editor, Focus, NameOp, ThemeAct, CHANNELS, NEW_FROM, ROWS};
+use super::items::NameFor;
 use super::{App, Btn, Mode};
 use crate::named::{self, Done};
 use agent_theme::{Source, Theme};
@@ -64,13 +65,14 @@ impl App {
         Ok(format!("{name} is the active theme"))
     }
 
-    /// The adapter kept a choice in a file the tree may be read from: take
-    /// its stamp, so the watch does not report the screen's own write as a
-    /// change on disk over the message that says what was done. A watch
-    /// already owed a reload keeps it.
+    /// The adapter kept a choice in a file the tree may be read from. When
+    /// that moved the stamp, the next watch owes a reload: it reads the
+    /// files, so a change from elsewhere that landed just before this write
+    /// is read too, and it keeps the message that says what was done
+    /// instead of reporting the screen's own write as a change on disk.
     fn own_write(&mut self) {
-        if self.stamp.is_some() {
-            self.stamp = self.adapter.stamp();
+        if self.adapter.stamp() != self.stamp {
+            self.owed = true;
         }
     }
 
@@ -99,9 +101,9 @@ impl App {
         let (t, src) = self.themes.under_cursor();
         let name = t.name.clone();
         match act {
-            ThemeAct::New => self.mode = Mode::ThemeName { op: NameOp::New, buf: String::new() },
+            ThemeAct::New => self.mode = Mode::Name { op: NameFor::Theme(NameOp::New), buf: String::new() },
             ThemeAct::Item(a) => self.item_act(a, name),
-            ThemeAct::Edit if src == Source::Bundled => self.mode = Mode::ThemeName { op: NameOp::EditCopy(name), buf: String::new() },
+            ThemeAct::Edit if src == Source::Bundled => self.mode = Mode::Name { op: NameFor::Theme(NameOp::EditCopy(name)), buf: String::new() },
             ThemeAct::Shape => {
                 let r = self.next_shape();
                 self.report(r);
@@ -121,7 +123,7 @@ impl App {
         let name = buf.trim().to_string();
         if let Err(e) = self.themes.check_name(&name) {
             self.msg = format!("rejected: {e}");
-            self.mode = Mode::ThemeName { op, buf };
+            self.mode = Mode::Name { op: NameFor::Theme(op), buf };
             return;
         }
         let from = |s: &App, n: &str| s.themes.get(n).cloned().expect("listed theme");
