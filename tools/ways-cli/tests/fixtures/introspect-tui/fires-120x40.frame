@@ -1,9 +1,9 @@
 agent-tui frame 120x40
 | 1 timeline    2 fires    3 spend    4 stats    5 precision                                                             |
-|Session 8f3a2c1d-5e6  lowest score first · ↻ a re-disclosure                                                            |
+|Session 8f3a2c1d-5e6  lowest score first · ↩ a re-disclosure                                                            |
 |┌ 2 semantic fires ────────────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│ Score   Way                                             Surface                                                      │|
-|│ 0.405 ↻ softwaredev/docs/adr                            record the decision                                          │|
+|│ 0.405 ↩ softwaredev/docs/adr                            record the decision                                          │|
 |│▌0.612   softwaredev/code/testing                        add a unit test for the parser                               │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|

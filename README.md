@@ -48,11 +48,11 @@ sequenceDiagram
 
 ### Session replay with `ways session replay`
 
-`ways session replay` replays a completed session's way-firing history as an interactive TUI animation. Each frame shows a way firing at a specific point in the conversation — you can see how guidance clusters near the active attention cursor and packs into the context window like a compression pattern.
+`ways session replay` replays a session's way-firing history frame by frame, and follows a live session as it writes. Each frame shows a way firing at a specific point in the conversation — you can see how guidance clusters near the active attention cursor and packs into the context window like a compression pattern.
 
 [<img src="docs/images/ways-introspect.gif" alt="ways session replay — each frame shows a way firing, guidance clusters near the attention cursor and packs like a compression pattern as context fills" width="800" />](docs/images/ways-introspect.mp4)
 
-<sub>The preview above is downscaled. [Download the full-resolution recording](docs/images/ways-introspect.mp4) (2.5MB MP4) to read the way names and re-disclosure percentages.</sub>
+<sub>[Download the recording](docs/images/ways-introspect.mp4) (228K MP4).</sub>
 
 Semantic matching runs on your machine through the **embedding engine** (all-MiniLM-L6-v2, a ~21MB GGUF model). It handles similarity of meaning: "pin lockfile versions" matches the supply chain way even though those exact words are absent from the way's vocabulary. `ways status` reports the matcher's current calibration.
 

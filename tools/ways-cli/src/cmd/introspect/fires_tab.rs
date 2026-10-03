@@ -66,7 +66,7 @@ impl Fires {
             Paragraph::new(Line::from(vec![
                 Span::styled("Session ", Style::new().add_modifier(Modifier::BOLD)),
                 Span::raw(super::short_id(session)),
-                Span::styled("  lowest score first · ↻ a re-disclosure", theme::muted()),
+                Span::styled("  lowest score first · ↩ a re-disclosure", theme::muted()),
             ])),
             head,
         );
@@ -83,7 +83,7 @@ impl Fires {
                 .map(|x| {
                     Row::new(vec![
                         right(format!("{:.3}", x.score)),
-                        Cell::from(if x.redisclosed { "↻" } else { " " }),
+                        Cell::from(if x.redisclosed { "↩" } else { " " }),
                         Cell::from(x.way.clone()),
                         Cell::from(Span::styled(x.surface.clone(), theme::muted())),
                     ])

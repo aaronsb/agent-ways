@@ -45,6 +45,9 @@ const AGENT_W: usize = 12;
 /// keeps Epoch/Dist/Trigger/… from reading as one crowded block.
 const COL_GAP: usize = 2;
 const INDENT: usize = 2;
+/// The room the token gauge leaves after its bar for its label,
+/// ` 100% (1000K / 1000K)`, so the gauge line fits the terminal.
+const GAUGE_LABEL_W: usize = 21;
 
 /// Nominal visible width of the fixed Epoch…Agent block that trails the Way
 /// column, inter-column gaps included. It's the reservation the ceiling clamp
@@ -86,10 +89,14 @@ fn display_id_width<W: WayRow>(w: &W) -> usize {
 pub struct Layout {
     /// Width of the Way ID column
     pub way_col: usize,
-    /// Width of the progress/forecast bar
+    /// Width of the progress/forecast bar: the terminal less the indent and
+    /// the gauge's label
     pub bar_width: usize,
     /// Total separator width
     pub separator: usize,
+    /// The terminal width the layout was made for; the timeline's text lines
+    /// fit within it
+    pub width: usize,
 }
 
 impl Layout {
@@ -116,9 +123,9 @@ impl Layout {
         // Never let the Way column crowd the trailing columns off the terminal.
         let ceiling = term_w.saturating_sub(INDENT + TRAILING_W).max(WAY_MIN);
         let way_col = snap_up(max_id_width + 1, WAY_TAB).clamp(WAY_MIN, ceiling);
-        let bar_width = term_w.saturating_sub(INDENT + 4).clamp(30, 200);
+        let bar_width = term_w.saturating_sub(INDENT + GAUGE_LABEL_W).clamp(10, 200);
         let separator = term_w.saturating_sub(INDENT + 2);
-        Layout { way_col, bar_width, separator }
+        Layout { way_col, bar_width, separator, width: term_w }
     }
 
     /// Reactive layout sized to the widest way id in `ways` (depth-indent prefix
@@ -296,15 +303,16 @@ pub fn write_way_row_with<W: WayRow>(
 
 // ── Token timeline ────────────────────────────────────────────
 
-/// Render the full token timeline: usage bar, forecast, zone summary.
+/// Render the full token timeline: usage bar, forecast, zone summary, each
+/// line within `layout.width`.
 pub fn write_token_timeline<W: WayRow>(
     out: &mut String,
     ways: &[W],
     unique_pos: &[usize],
     current_tokens_k: u64,
     context_window_k: u64,
+    layout: &Layout,
 ) {
-    let layout = Layout::detect();
     let bar_width = layout.bar_width;
 
     let pct = (current_tokens_k * 100).checked_div(context_window_k).unwrap_or(0).min(100);
@@ -481,18 +489,46 @@ pub fn write_token_timeline<W: WayRow>(
                 format!("{min}–{max}K intervals")
             }
         };
-        let _ = writeln!(
-            out,
-            "  {}  {}",
-            zones.join("  "),
-            paint(Role::Muted, format!("│ {interval_label}"))
-        );
-        let _ = writeln!(
-            out,
-            "  {}",
-            paint(Role::Muted, "now = past threshold, will re-inject on next match  │  approaching = near threshold  │  distant = far from re-injection")
-        );
+        zones.push(paint(Role::Muted, format!("│ {interval_label}")));
+        let room = layout.width.saturating_sub(INDENT);
+        for line in fit_items(&zones, "  ", room) {
+            let _ = writeln!(out, "  {line}");
+        }
+        let legend: Vec<String> = [
+            "now = past threshold, will re-inject on next match",
+            "approaching = near threshold",
+            "distant = far from re-injection",
+        ]
+        .iter()
+        .map(|t| paint(Role::Muted, *t))
+        .collect();
+        for line in fit_items(&legend, &paint(Role::Muted, "  │  "), room) {
+            let _ = writeln!(out, "  {line}");
+        }
     }
+}
+
+/// `items` joined by `sep` into as few lines as fit in `width` visible
+/// columns, an item never split: one too wide for any line stands alone.
+fn fit_items(items: &[String], sep: &str, width: usize) -> Vec<String> {
+    let sep_w = agent_fmt::visible_len(sep);
+    let mut lines: Vec<String> = Vec::new();
+    let mut used = 0;
+    for item in items {
+        let w = agent_fmt::visible_len(item);
+        match lines.last_mut() {
+            Some(line) if used + sep_w + w <= width => {
+                line.push_str(sep);
+                line.push_str(item);
+                used += sep_w + w;
+            }
+            _ => {
+                lines.push(item.clone());
+                used = w;
+            }
+        }
+    }
+    lines
 }
 
 // ── Shared helpers ────────────────────────────────────────────
@@ -677,6 +713,57 @@ mod tests {
         for c in &cells {
             assert!(agent_fmt::visible_len(c) <= RD_W, "{c:?} is wider than {RD_W}");
         }
+    }
+
+    /// A way fired at `token_k` with its own refire window.
+    struct Fired {
+        token_k: u64,
+        window_k: u64,
+    }
+
+    impl WayRow for Fired {
+        fn id(&self) -> &str { "d/w" }
+        fn epoch_fired(&self) -> u64 { 1 }
+        fn token_pos(&self) -> u64 { self.token_k * 1000 }
+        fn trigger(&self) -> &str { "keyword" }
+        fn check_fires(&self) -> u64 { 0 }
+        fn refire_threshold_k(&self) -> u64 { self.window_k }
+    }
+
+    /// The gauge, forecast, zones and legend each fit the terminal: the
+    /// bar leaves room for the gauge's widest label, and the zone and legend
+    /// lines break between their items rather than wrap.
+    #[test]
+    fn the_token_timeline_fits_the_terminal() {
+        let p = agent_theme::Painter::terminal(agent_theme::ColorDepth::TrueColor);
+        let _g = agent_theme::scoped(p);
+        // One way of each zone, and a window that makes the label its widest.
+        let ways = [
+            Fired { token_k: 0, window_k: 20 },
+            Fired { token_k: 900, window_k: 120 },
+            Fired { token_k: 960, window_k: 400 },
+        ];
+        for width in [80, 100, 160] {
+            let layout = Layout::for_id_width_in(3, width);
+            let pos = compute_bar_positions_in(&ways, 1000, layout.bar_width);
+            let unique = unique_positions(&pos);
+            let mut out = String::new();
+            write_token_timeline(&mut out, &ways, &unique, 1000, 1000, &layout);
+            assert!(out.contains("100% (1000K / 1000K)"), "{out}");
+            assert!(out.contains("approaching = near threshold"), "{out}");
+            for line in out.lines() {
+                let w = agent_fmt::visible_len(line);
+                assert!(w <= width, "{w} columns at {width}: {line:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn fit_items_breaks_between_items() {
+        let items: Vec<String> = ["aaaa", "bbbb", "cccc"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(fit_items(&items, " | ", 100), vec!["aaaa | bbbb | cccc"]);
+        assert_eq!(fit_items(&items, " | ", 11), vec!["aaaa | bbbb", "cccc"]);
+        assert_eq!(fit_items(&items, " | ", 2), vec!["aaaa", "bbbb", "cccc"]);
     }
 
     #[test]

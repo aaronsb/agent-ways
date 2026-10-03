@@ -43,7 +43,8 @@ enum Commands {
     /// key, 3 rejected, 4 overridden, 5 write failed
     #[command(disable_help_subcommand = true, args_conflicts_with_subcommands = true)]
     Settings {
-        /// Open the screens on this tab: ways, matching, gate, install or theme
+        /// Open the screens on this tab
+        #[arg(value_parser = clap::builder::PossibleValuesParser::new(cmd::settings::tui::tab_names()))]
         tab: Option<String>,
         /// The project whose .claude/ways.yaml the screens read and write
         #[arg(long)]

@@ -370,7 +370,7 @@ A click on the scrubber seeks to that frame, and the wheel there steps one.
 
 ![the fires tab: five semantic fires, lowest score first](../images/ways/session-fires.png)
 
-Each semantic fire of the session as score, way and the surface it matched, lowest score first, so a fire on the wrong text stands out. `↻` marks a re-disclosure. Keyword and state fires carry no score and are not listed. ↑↓ selects a row.
+Each semantic fire of the session as score, way and the surface it matched, lowest score first, so a fire on the wrong text stands out. `↩` marks a re-disclosure. Keyword and state fires carry no score and are not listed. ↑↓ selects a row.
 
 #### Spend tab
 

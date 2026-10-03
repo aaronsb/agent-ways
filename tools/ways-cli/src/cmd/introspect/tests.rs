@@ -686,7 +686,7 @@ fn the_fires_tab_lists_the_sessions_semantic_fires() {
     press(&mut s, &[KeyCode::Char('2')]);
     let t = text(&render(&mut s, 80, 25));
     assert!(t.contains("2 semantic fires"), "{t}");
-    let adr = t.find("0.405 ↻ softwaredev/docs/adr").expect("the re-disclosure, its surface a placeholder");
+    let adr = t.find("0.405 ↩ softwaredev/docs/adr").expect("the re-disclosure, its surface a placeholder");
     let testing = t.find("0.612   softwaredev/code/testing").expect("the first fire");
     assert!(adr < testing, "lowest score first: {t}");
     assert!(t.contains("add a unit test") && !t.contains("itops/incident"), "{t}");

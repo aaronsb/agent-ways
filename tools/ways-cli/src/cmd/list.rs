@@ -174,7 +174,7 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
         let _ = writeln!(out);
         render::write_token_timeline(
             &mut out, &ways, &unique_pos,
-            current_tokens_k, context_window_k,
+            current_tokens_k, context_window_k, &layout,
         );
     }
 
