@@ -24,7 +24,7 @@ The detection chain is a two-phase handoff between the lead agent and the spawne
 `check-task-pre.sh` reads the Task tool's parameters. If `team_name` is present, it writes a stash file with `is_teammate: true` and the team name. It also scans ways with `scope: teammate` or `scope: subagent` for content to inject.
 
 **Phase 2 — Teammate's hooks (SubagentStart):**
-`inject-subagent.sh` reads the stash, sees `is_teammate: true`, and creates a persistent marker at `{SESSIONS_ROOT}/{session_id}/teammate` containing the team name. From this point forward, the `ways` binary detects the marker and filters ways by scope accordingly.
+`inject-subagent.sh` reads the stash, sees `is_teammate: true`, and creates a persistent marker at `{SESSIONS_ROOT}/{session_id}/agents/{agent_id}/teammate` containing the team name. From this point forward, the `ways` binary detects the marker and filters ways by scope accordingly.
 
 ### Scope Filtering
 
@@ -34,7 +34,7 @@ Each way declares which scopes it applies to via the `scope:` frontmatter field:
 ---
 scope: agent              # Fires for any non-teammate agent on its own lanes, the main session included
 scope: teammate           # Only fires for team members
-scope: agent, teammate    # Fires for both, but not quick subagents
+scope: agent, teammate    # Every agent's own lanes; not stashed for quick subagents
 scope: agent, subagent    # Fires for main session and delegates, not teammates
 ---
 ```

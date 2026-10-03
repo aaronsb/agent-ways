@@ -30,7 +30,7 @@ The hooks are declared in the `hooks` block of the repo's [`settings.json`](../s
 
 Each script that touches ways is a thin adapter: it sources `require-ways.sh` and runs `ways hook <event>`, which reads Claude Code's JSON payload on stdin, makes every decision, and prints what the hook returns (ADR-504 §11). The scripts exit 0 whatever the binary returns, because a guidance hook never blocks a prompt or a tool. `ways scan` and `ways show` are internal subcommands the dispatcher uses. They are not part of the interface.
 
-Before any injecting lane runs, `ways hook` checks the switches described in [Switching ways off](#switching-ways-off). Ways are on for subagents by default: a subagent's own tool calls run the same lanes as the main agent's.
+Before any injecting lane runs, `ways hook` checks the switches described in [Switching ways off](#switching-ways-off). Ways are on for subagents by default: a subagent's own tool calls run the main agent's lanes except the queued-message scan, which runs for the main agent only.
 
 ### Session lifecycle
 
@@ -414,7 +414,7 @@ Ways resolve through three roots, highest first: the project's `$PROJECT/.claude
 
 ## Switching Ways Off
 
-Several switches turn ways off at different reaches. Each is checked by `ways hook` before a lane runs, except the domain and per-way switches, which drop ways when the candidates are collected (so a disabled way never boosts a child or takes a judge slot) and are checked again when a way is shown.
+Several switches turn ways off at different reaches. Each is checked by `ways hook` before a lane runs, except `ways target disable`, which removes the hooks themselves, and the domain and per-way switches, which drop ways when the candidates are collected (so a disabled way never boosts a child or takes a judge slot) and are checked again when a way is shown.
 
 | Switch | Reach | Where it is set |
 |---|---|---|
