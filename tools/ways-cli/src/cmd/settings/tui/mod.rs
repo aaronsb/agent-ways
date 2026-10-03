@@ -140,7 +140,7 @@ impl Ways {
     /// the key is written to.
     fn set_one(&self, key: &str, text: &str) -> Result<(), String> {
         let b = lookup(&self.reg, key).map_err(|f| f.message)?;
-        let v = b.spec.parse_cli(text, &live_layers(&self.ctx.project)).map_err(|m| format!("{key}: {m}"))?;
+        let v = b.spec.parse_cli_for(text, &live_layers(&self.ctx.project), &b.bound).map_err(|m| format!("{key}: {m}"))?;
         let (path, _) = target_file(&b, None).map_err(|f| f.message)?;
         self.refuse_broken(&path)?;
         write_file(&path, &[(b.path(), v)]).map(|_| ()).map_err(|f| self.short(&f.message))
@@ -206,7 +206,7 @@ impl Ways {
 impl Adapter for Ways {
     fn validate(&self, store: &Store, text: &str) -> Option<Result<String, String>> {
         let b = self.reg.lookup(&store.key)?;
-        Some(b.spec.parse_cli(text, &live_layers(&self.ctx.project)).map(|v| display(Some(&v), b.spec.kind)))
+        Some(b.spec.parse_cli_for(text, &live_layers(&self.ctx.project), &b.bound).map(|v| display(Some(&v), b.spec.kind)))
     }
 
     /// One locked edit of `file`, each value parsed by the schema exactly as
@@ -222,7 +222,7 @@ impl Adapter for Ways {
         let layers = live_layers(&self.ctx.project);
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
-            let v = b.spec.parse_cli(w.value, &layers).map_err(|m| format!("{}: {m}", w.store.key))?;
+            let v = b.spec.parse_cli_for(w.value, &layers, &b.bound).map_err(|m| format!("{}: {m}", w.store.key))?;
             let at = |p: &Path| target_file(&b, (b.spec.scope == Scope::Project).then_some(p)).map(|t| t.0).map_err(|f| f.message);
             let mut path = at(&self.ctx.project)?;
             if path != file && b.spec.scope == Scope::Project {

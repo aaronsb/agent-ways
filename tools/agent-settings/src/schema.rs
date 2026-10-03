@@ -78,7 +78,11 @@ pub enum Kind {
 
 /// The list of a computed choice, read from the layers given. `Err` says
 /// why the source cannot answer.
-pub type Options = fn(&[Layer]) -> Result<Vec<String>, String>;
+///
+/// The second argument is what a pattern key's wildcards bound to (the
+/// profile name of `gate.profiles.*.model`), empty for a fixed key or
+/// where the caller has no instance, as a load checking one file has not.
+pub type Options = fn(&[Layer], &[String]) -> Result<Vec<String>, String>;
 
 /// The choices a key offers.
 #[derive(Debug, Clone, PartialEq)]
@@ -95,12 +99,17 @@ pub enum Choices {
 impl Kind {
     /// What the type is, with the choices in effect over `layers`.
     pub fn describe(&self, layers: &[Layer]) -> String {
+        self.describe_for(layers, &[])
+    }
+
+    /// [`Kind::describe`] for the instance of a pattern key that `bound` names.
+    pub fn describe_for(&self, layers: &[Layer], bound: &[String]) -> String {
         match self {
             Kind::Bool => "bool".into(),
             Kind::Int { min, max } if *max == i64::MAX => format!("int, at least {min}"),
             Kind::Int { min, max } => format!("int, {min}..{max}"),
             Kind::Float { min, max } => format!("float, {min}..{max}"),
-            Kind::Choice(_) | Kind::ChoiceOf { .. } => match self.choices(Some(layers)) {
+            Kind::Choice(_) | Kind::ChoiceOf { .. } => match self.choices_for(Some(layers), bound) {
                 Choices::Of { items, multi: false } => format!("one of {}", items.join(", ")),
                 Choices::Of { items, multi: true } => format!("a list, each one of {}", items.join(", ")),
                 Choices::Unavailable(why) => format!("{} (the choices could not be listed: {why})", self.shape()),
@@ -119,9 +128,14 @@ impl Kind {
     /// file on its own, a computed list is not read: its key is checked as
     /// text there, and `set`, `apply` and `lint` check it against the list.
     pub fn choices(&self, layers: Option<&[Layer]>) -> Choices {
+        self.choices_for(layers, &[])
+    }
+
+    /// [`Kind::choices`] for the instance of a pattern key that `bound` names.
+    pub fn choices_for(&self, layers: Option<&[Layer]>, bound: &[String]) -> Choices {
         match (self, layers) {
             (Kind::Choice(c), _) => Choices::Of { items: c.iter().map(|s| s.to_string()).collect(), multi: false },
-            (Kind::ChoiceOf { options, multi }, Some(l)) => match options(l) {
+            (Kind::ChoiceOf { options, multi }, Some(l)) => match options(l, bound) {
                 // An item no one could type or see whole is no choice.
                 Ok(items) => Choices::Of { items: items.into_iter().filter(|i| !i.chars().any(char::is_control)).collect(), multi: *multi },
                 Err(why) => Choices::Unavailable(one_line(&why)),
@@ -158,12 +172,17 @@ impl Kind {
     /// Check a stored value against the type, and a choice against the
     /// choices over `layers`.
     pub fn check_in(&self, v: &Value, layers: Option<&[Layer]>) -> Result<(), String> {
-        self.check_in_keeping(v, layers, &[])
+        self.check_in_keeping(v, layers, &[], &[])
+    }
+
+    /// [`Kind::check_in`] for the instance of a pattern key that `bound` names.
+    pub fn check_in_for(&self, v: &Value, layers: Option<&[Layer]>, bound: &[String]) -> Result<(), String> {
+        self.check_in_keeping(v, layers, &[], bound)
     }
 
     /// [`Kind::check_in`], where the items of a multi choice in `keep`, such
     /// as those already stored, pass though no longer in the list.
-    fn check_in_keeping(&self, v: &Value, layers: Option<&[Layer]>, keep: &[String]) -> Result<(), String> {
+    fn check_in_keeping(&self, v: &Value, layers: Option<&[Layer]>, keep: &[String], bound: &[String]) -> Result<(), String> {
         match self {
             Kind::Bool => v.as_bool().map(|_| ()).ok_or_else(|| format!("expected a bool, found {}", show(v))),
             Kind::Int { min, max } => {
@@ -184,7 +203,7 @@ impl Kind {
                 }
                 Ok(())
             }
-            Kind::Choice(_) | Kind::ChoiceOf { .. } => check_choice(v, &self.choices(layers), self.multi(), keep),
+            Kind::Choice(_) | Kind::ChoiceOf { .. } => check_choice(v, &self.choices_for(layers, bound), self.multi(), keep),
             Kind::Text | Kind::Path => v.as_str().map(|_| ()).ok_or_else(|| format!("expected text, found {}", show(v))),
             Kind::List => match v {
                 Value::Sequence(s) if s.iter().all(|i| i.is_string()) => Ok(()),
@@ -206,11 +225,11 @@ impl Kind {
     /// Parse a command-line value into a typed value. Errors name the type.
     /// A choice is checked against the choices over `layers`.
     pub fn parse_cli(&self, s: &str, layers: Option<&[Layer]>) -> Result<Value, String> {
-        self.parse_cli_keeping(s, layers, &[])
+        self.parse_cli_keeping(s, layers, &[], &[])
     }
 
     /// [`Kind::parse_cli`], keeping the items of a multi choice in `keep`.
-    pub fn parse_cli_keeping(&self, s: &str, layers: Option<&[Layer]>, keep: &[String]) -> Result<Value, String> {
+    pub fn parse_cli_keeping(&self, s: &str, layers: Option<&[Layer]>, keep: &[String], bound: &[String]) -> Result<Value, String> {
         let v = match self {
             Kind::Bool | Kind::Toggle => match s {
                 "true" | "on" | "yes" => Value::Bool(true),
@@ -238,7 +257,7 @@ impl Kind {
             Kind::ReadOnly => return Err("read-only; it is changed by its action command".into()),
             Kind::Secret => return Err("a secret is entered on stdin to its own command, never as an argument".into()),
         };
-        self.check_in_keeping(&v, layers, keep)?;
+        self.check_in_keeping(&v, layers, keep, bound)?;
         Ok(v)
     }
 }
@@ -367,7 +386,12 @@ impl KeySpec {
     /// [`KeySpec::check_value`], and a choice against the choices over
     /// `layers`.
     pub fn check_value_in(&self, v: &Value, layers: Option<&[Layer]>) -> Result<(), String> {
-        self.kind.check_in(v, layers)?;
+        self.check_value_for(v, layers, &[])
+    }
+
+    /// [`KeySpec::check_value_in`] for the instance `bound` names.
+    pub fn check_value_for(&self, v: &Value, layers: Option<&[Layer]>, bound: &[String]) -> Result<(), String> {
+        self.kind.check_in_for(v, layers, bound)?;
         if let Some(c) = self.check {
             c(v)?;
         }
@@ -392,11 +416,16 @@ impl KeySpec {
     /// Parse a command-line value: the type, a choice against the choices
     /// over `layers`, then the key's own check.
     pub fn parse_cli(&self, s: &str, layers: &[Layer]) -> Result<Value, String> {
+        self.parse_cli_for(s, layers, &[])
+    }
+
+    /// [`KeySpec::parse_cli`] for the instance `bound` names.
+    pub fn parse_cli_for(&self, s: &str, layers: &[Layer], bound: &[String]) -> Result<Value, String> {
         // A multi choice keeps what a layer already stores, so one entry
         // that has left the list never blocks adding another; lint still
         // reports it.
         let keep = if self.kind.is_multi() { self.stored_items(layers) } else { Vec::new() };
-        let v = self.kind.parse_cli_keeping(s, Some(layers), &keep)?;
+        let v = self.kind.parse_cli_keeping(s, Some(layers), &keep, bound)?;
         if let Some(c) = self.check {
             c(&v)?;
         }
@@ -591,7 +620,7 @@ mod tests {
 
     /// Names in the layers' `names` lists, after a fixed base: the shape of
     /// a computed list, such as the shipped profiles and the user's.
-    fn names(layers: &[Layer]) -> Result<Vec<String>, String> {
+    fn names(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
         let mut out = vec!["base".to_string()];
         for l in layers {
             if let Some(Value::Sequence(s)) = l.accepted.get("names") {
@@ -601,16 +630,16 @@ mod tests {
         Ok(out)
     }
 
-    fn offline(_: &[Layer]) -> Result<Vec<String>, String> {
+    fn offline(_: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
         Err("no network".into())
     }
 
     #[test]
     fn a_source_s_reason_and_items_reach_the_output_as_one_line() {
-        fn noisy(_: &[Layer]) -> Result<Vec<String>, String> {
+        fn noisy(_: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
             Err("timed out\nengine: injected\r\n\tretry \u{7}later".into())
         }
-        fn odd(_: &[Layer]) -> Result<Vec<String>, String> {
+        fn odd(_: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
             Ok(vec!["a".into(), "b\nc: d".into()])
         }
         let d = Kind::ChoiceOf { options: noisy, multi: false }.describe(&[]);

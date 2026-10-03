@@ -321,7 +321,7 @@ fn closed_domains(v: &Value) -> Option<Value> {
 /// The values `ways.language` may take: `en` and `auto`, then the active
 /// languages of the registry, the codes a locale file may carry. Read from
 /// the registry compiled in, so it never depends on the directory.
-fn languages(_layers: &[Layer]) -> Result<Vec<String>, String> {
+fn languages(_layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
     let mut out = vec!["en".to_string(), "auto".to_string()];
     out.extend(crate::agents::get_active_languages().into_iter().filter(|l| l != "en" && l != "auto"));
     Ok(out)
@@ -335,7 +335,7 @@ fn languages(_layers: &[Layer]) -> Result<Vec<String>, String> {
 /// So the rule is the layers': a write to a project's file, and a write
 /// from inside that project, see its domains; from another directory they
 /// do not, and a stored item always stays settable.
-fn domains(layers: &[Layer]) -> Result<Vec<String>, String> {
+fn domains(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
     let mut roots = crate::paths::ways_roots(None);
     for l in layers.iter().filter(|l| l.file == FILE && l.scope == LayerScope::Project) {
         if let Some(dir) = l.path.as_deref().and_then(Path::parent) {

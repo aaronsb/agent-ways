@@ -609,7 +609,7 @@ pub fn check_choices<'a>(keys: impl IntoIterator<Item = &'a KeySpec>, layers: &m
             for b in bindings(k, std::slice::from_ref(l)) {
                 let (name, path) = k.bind(&b);
                 let Some(v) = l.get(&path) else { continue };
-                let Err(message) = k.check_value_in(v, Some(layers)) else { continue };
+                let Err(message) = k.check_value_for(v, Some(layers), &b) else { continue };
                 let line = l
                     .path
                     .as_ref()
@@ -924,7 +924,7 @@ mod tests {
     #[test]
     fn a_stored_value_a_computed_choice_lacks_is_a_finding_that_drops_nothing() {
         // The choices: `auto`, then every preset the layers name.
-        fn presets(layers: &[Layer]) -> Result<Vec<String>, String> {
+        fn presets(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
             let mut out = vec!["auto".to_string()];
             for l in layers {
                 if let Some(Value::Mapping(m)) = l.accepted.get("presets") {

@@ -50,7 +50,7 @@ pub fn help_text(topic: Option<&str>) -> Result<String, Failure> {
             Kind::ChoiceOf { .. } => live_layers(&project_dir(None)),
             _ => Vec::new(),
         };
-        let _ = writeln!(out, "  type:    {}", s.kind.describe(&layers));
+        let _ = writeln!(out, "  type:    {}", s.kind.describe_for(&layers, &b.bound));
         if let Some(d) = s.default_for(&b.bound) {
             let _ = writeln!(out, "  default: {}", plain(Some(&d)));
         }

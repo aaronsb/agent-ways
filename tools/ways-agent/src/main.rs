@@ -599,6 +599,10 @@ fn models(provider: Option<&str>, all: bool) -> Result<ExitCode> {
     };
     let key = keys::read(provider)?.map(|(k, _)| k);
     let mut list = net::models(provider, key.as_deref())?;
+    // The whole answer is cached, whatever is shown: the settings offer it.
+    if let Err(e) = keep_models(&ways_agent_core::models::cache_dir(), provider, &list) {
+        eprintln!("warning: the model list was not cached: {e:#}");
+    }
     if provider == Provider::Openrouter && !all {
         list.retain(|m| m.id.starts_with("anthropic/"));
     }
@@ -620,6 +624,11 @@ fn models(provider: Option<&str>, all: bool) -> Result<ExitCode> {
     }
     println!("choose one with `ways settings set gate.profiles.<profile>.model <id>`");
     Ok(ExitCode::SUCCESS)
+}
+
+/// Cache a fetched list for `gate.profiles.*.model` to offer (#795).
+fn keep_models(dir: &std::path::Path, provider: Provider, list: &[net::ModelInfo]) -> Result<PathBuf> {
+    ways_agent_core::models::write_in(dir, provider, list, ways_agent_core::models::now())
 }
 
 fn cost_note(m: &net::ModelInfo, base: Option<&net::ModelInfo>) -> String {
@@ -711,6 +720,21 @@ mod tests {
         assert_eq!(e.key, b"a");
         assert_eq!(feed(&mut e, &esc("^x")), [Typed::Continue, Typed::Continue], "Alt-x is dropped");
         assert_eq!(e.key, b"a");
+    }
+
+    #[test]
+    fn a_fetched_list_is_cached_whole_with_its_time() {
+        let dir = std::env::temp_dir().join(format!("ways-agent-models-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let m = |id: &str| net::ModelInfo { id: id.into(), name: id.into(), input_per_mtok: Some(1.0), output_per_mtok: None };
+        // OpenRouter's whole answer is kept; `models` filters only what it shows.
+        let list = vec![m("anthropic/claude-haiku-4.5"), m("openai/gpt-5")];
+        let path = keep_models(&dir, Provider::Openrouter, &list).unwrap();
+        assert_eq!(path, dir.join("models-openrouter.json"));
+        let c = ways_agent_core::models::read_in(&dir, Provider::Openrouter).unwrap();
+        assert_eq!(c.models, list);
+        assert!(c.fetched_at > 1_700_000_000);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

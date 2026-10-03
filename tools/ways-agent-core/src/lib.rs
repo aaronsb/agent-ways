@@ -6,6 +6,7 @@
 pub mod client;
 pub mod cost;
 pub mod judge;
+pub mod models;
 pub mod keys;
 pub mod profile;
 pub mod protocol;

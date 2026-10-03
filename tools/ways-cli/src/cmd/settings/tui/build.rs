@@ -130,12 +130,12 @@ pub fn display(v: Option<&Value>, kind: Kind) -> String {
 
 /// The screens' kind of a key, its choices read over `layers`. A computed
 /// choice whose source cannot answer is edited as text.
-pub(crate) fn kind(k: Kind, layers: &[Layer]) -> TKind {
+pub(crate) fn kind(k: Kind, layers: &[Layer], bound: &[String]) -> TKind {
     match k {
         Kind::Bool | Kind::Toggle => TKind::Bool,
         Kind::Int { min, max } => TKind::Int { min, max },
         Kind::Float { min, max } => TKind::Float { min, max },
-        Kind::Choice(_) | Kind::ChoiceOf { .. } => match k.choices(Some(layers)) {
+        Kind::Choice(_) | Kind::ChoiceOf { .. } => match k.choices_for(Some(layers), bound) {
             agent_settings::Choices::Of { items, multi } => TKind::Choice { options: items, multi },
             _ => TKind::Text,
         },
@@ -377,7 +377,7 @@ impl Ways {
                 Some(f) => format!("{layer} · {}", tilde(Path::new(&f), home)),
                 None => layer,
             };
-            let mut s = Setting::new(kind(b.spec.kind, layers), display(r.value.as_ref(), b.spec.kind), source);
+            let mut s = Setting::new(kind(b.spec.kind, layers, &b.bound), display(r.value.as_ref(), b.spec.kind), source);
             if let Some(d) = r.default.as_ref().or(b.spec.default_for(&b.bound).as_ref()) {
                 s = s.default(display(Some(d), b.spec.kind));
             }

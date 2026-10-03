@@ -176,7 +176,7 @@ pub(super) fn layer_label(r: &Resolved, layers: &[Layer]) -> (String, Option<Str
 
 /// A key's value as `get --json` and `list --json` describe it. A computed
 /// choice adds the choices in effect; every other key's object is as it was.
-pub(super) fn describe(r: &Resolved, spec: &agent_settings::KeySpec, layers: &[Layer]) -> serde_json::Value {
+pub(super) fn describe(r: &Resolved, spec: &agent_settings::KeySpec, layers: &[Layer], bound: &[String]) -> serde_json::Value {
     let (layer, file) = layer_label(r, layers);
     let mut d = json!({
         "value": r.value.as_ref().map(to_json),
@@ -184,7 +184,7 @@ pub(super) fn describe(r: &Resolved, spec: &agent_settings::KeySpec, layers: &[L
         "layer": layer,
         "file": file,
     });
-    if let Some(o) = options_json(spec, layers) {
+    if let Some(o) = options_json(spec, layers, bound) {
         d["options"] = o;
     }
     d
@@ -192,11 +192,11 @@ pub(super) fn describe(r: &Resolved, spec: &agent_settings::KeySpec, layers: &[L
 
 /// The choices of a computed choice in effect, as JSON: the list, or
 /// `null` when its source could not answer. `None` for any other kind.
-pub(super) fn options_json(spec: &agent_settings::KeySpec, layers: &[Layer]) -> Option<serde_json::Value> {
+pub(super) fn options_json(spec: &agent_settings::KeySpec, layers: &[Layer], bound: &[String]) -> Option<serde_json::Value> {
     if !matches!(spec.kind, Kind::ChoiceOf { .. }) {
         return None;
     }
-    Some(match spec.kind.choices(Some(layers)) {
+    Some(match spec.kind.choices_for(Some(layers), bound) {
         agent_settings::Choices::Of { items, .. } => json!(items),
         _ => serde_json::Value::Null,
     })
@@ -326,7 +326,7 @@ mod choice_tests {
     use agent_settings::{DefaultValue, KeySpec};
 
     /// A source that cannot answer, with a reason a careless one might give.
-    fn offline(_: &[Layer]) -> Result<Vec<String>, String> {
+    fn offline(_: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
         Err("network down\nmode: off\n".into())
     }
 
@@ -349,14 +349,14 @@ mod choice_tests {
     #[test]
     fn a_source_that_cannot_answer_leaves_text_and_says_so_on_one_line() {
         // --json: the key has options, and they are unknown.
-        assert_eq!(options_json(&SPEC, &[]), Some(serde_json::Value::Null));
+        assert_eq!(options_json(&SPEC, &[], &[]), Some(serde_json::Value::Null));
         // emit: one comment line, which apply reads past.
-        let note = maintain::choice_note("gate.profiles.anthropic.model", SPEC.kind, &[]);
+        let note = maintain::choice_note("gate.profiles.anthropic.model", SPEC.kind, &[], &[]);
         assert_eq!(note, "gate.profiles.anthropic.model: text (the choices could not be listed: network down mode: off)");
         let emitted = format!("# {note}\nengine: anthropic\n");
         assert_eq!(serde_yaml::from_str::<Value>(&emitted).unwrap(), serde_yaml::from_str::<Value>("engine: anthropic").unwrap());
         // The screens: typed text, no picker.
-        assert!(matches!(tui::build::kind(SPEC.kind, &[]), agent_tui::tree::Kind::Text));
+        assert!(matches!(tui::build::kind(SPEC.kind, &[], &[]), agent_tui::tree::Kind::Text));
         // And any text is taken.
         assert_eq!(SPEC.parse_cli("claude-x", &[]).unwrap(), Value::from("claude-x"));
     }
