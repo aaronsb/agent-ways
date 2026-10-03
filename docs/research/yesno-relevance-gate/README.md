@@ -1,6 +1,6 @@
 # Yes/no relevance gate probe
 
-A probe, run 2026-09-30 to 2026-10-01, of one question: can a model asked "is this way relevant to the conversation's most recent turns? yes or no" tell the relevant way injections from the rest, quickly enough to sit in a hook? The decision record that cites it is ADR-195 (evidence); the decisions built on it are ADR-196 (the gate) and ADR-502 (the daemon).
+A probe, run 2026-09-30 to 2026-10-01, of one question: can a model asked "is this way relevant to the conversation's most recent turns? yes or no" tell the relevant way injections from the rest, quickly enough to sit in a hook? The decision record that cites it is ADR-195 (evidence); the decisions built on it are ADR-196 (the gate) and ADR-502 (the daemon). The gate as shipped is explained in [the relevance judge](../../explanation/relevance-judge/relevance-judge-the-model.md).
 
 ## Answer
 

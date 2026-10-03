@@ -304,6 +304,14 @@ pub fn gate_settings(path: &Path, has_key: impl Fn(Provider) -> bool) -> Result<
     for f in &findings {
         eprintln!("{}", f.diagnostic("ways"));
     }
+    for (name, e) in dropped_profiles(&user) {
+        match (shipped().contains_key(&name), user.engine.as_deref() == Some(name.as_str())) {
+            (true, _) => eprintln!("ways: agent.yaml: {e:#}; the change is dropped and profile '{name}' runs as shipped"),
+            (false, false) => eprintln!("ways: agent.yaml: {e:#}; profile '{name}' is left out"),
+            // The engine's own: resolve fails with this reason.
+            (false, true) => {}
+        }
+    }
     resolve(&user, has_key)
 }
 
@@ -313,14 +321,29 @@ pub fn shipped() -> BTreeMap<String, Profile> {
 }
 
 /// Every profile after the user's patches: shipped ones patched, new ones built
-/// from the shipped profile of the provider they name.
-pub fn profiles(user: &UserLayer) -> Result<BTreeMap<String, Profile>> {
+/// from the shipped profile of the provider they name. A patch that does not
+/// build is dropped and the others load (ADR-503 addendum: each profile is
+/// its own unit), as a patch that fails the schema is: a shipped profile
+/// falls back to its shipped definition, a profile of your own is left out.
+/// The settings' list of profile names agrees. [`dropped_profiles`] says why.
+pub fn profiles(user: &UserLayer) -> BTreeMap<String, Profile> {
     let shipped = shipped();
     let mut all = shipped.clone();
     for (name, patch) in &user.profiles {
-        all.insert(name.clone(), patched(name, patch, &shipped)?);
+        if let Ok(p) = patched(name, patch, &shipped) {
+            all.insert(name.clone(), p);
+        }
     }
-    Ok(all)
+    all
+}
+
+/// The patches [`profiles`] drops, each with why.
+pub fn dropped_profiles(user: &UserLayer) -> Vec<(String, anyhow::Error)> {
+    let shipped = shipped();
+    user.profiles
+        .iter()
+        .filter_map(|(name, patch)| patched(name, patch, &shipped).err().map(|e| (name.clone(), e)))
+        .collect()
 }
 
 /// One profile after the user's patch `patch`, as [`profiles`] builds it.
@@ -363,7 +386,14 @@ pub struct Settings {
 /// Resolves the engine. `None` means no engine is named and no provider has a
 /// key: the gate is off and the hook keeps today's behaviour.
 pub fn resolve(user: &UserLayer, has_key: impl Fn(Provider) -> bool) -> Result<Option<Settings>> {
-    let all = profiles(user)?;
+    let all = profiles(user);
+    if let Some(name) = user.engine.as_ref().filter(|n| !all.contains_key(*n)) {
+        // The engine is a profile of your own that does not build: name
+        // why, and the gate is off.
+        if let Some((_, e)) = dropped_profiles(user).into_iter().find(|(n, _)| n == name) {
+            return Err(e.context(format!("engine '{name}' names a profile that does not build")));
+        }
+    }
     let engine = match &user.engine {
         Some(name) => name.clone(),
         None => match SHIPPED_ORDER.iter().find(|n| all.get(**n).is_some_and(|p| has_key(p.provider))) {
@@ -439,7 +469,8 @@ mod tests {
     #[test]
     fn a_new_profile_needs_provider_and_model() {
         let user: UserLayer = serde_yaml::from_str("profiles:\n  mine:\n    threshold: 0.4\n").unwrap();
-        assert!(profiles(&user).is_err());
+        assert!(!profiles(&user).contains_key("mine"));
+        assert_eq!(dropped_profiles(&user).len(), 1);
         let user: UserLayer = serde_yaml::from_str(
             "engine: mine\nprofiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n",
         )
@@ -456,14 +487,14 @@ mod tests {
                 "profiles:\n  anthropic:\n    threshold: 0.5\n  {name}:\n    provider: anthropic\n    model: claude-sonnet-5-5\n"
             ))
             .unwrap();
-            assert_eq!(profiles(&user).unwrap()[name].threshold, 0.3, "{name}");
+            assert_eq!(profiles(&user)[name].threshold, 0.3, "{name}");
         }
     }
 
     #[test]
     fn changing_provider_needs_a_model_and_ids_are_checked() {
         let user: UserLayer = serde_yaml::from_str("profiles:\n  anthropic:\n    provider: openrouter\n").unwrap();
-        assert!(profiles(&user).is_err());
+        assert_eq!(profiles(&user)["anthropic"], shipped()["anthropic"], "the patch is dropped, the shipped profile kept");
         for bad in ["../messages", "a?b", "a#b", "/x", "", ".", "a/./b", "a//b", "-x"] {
             assert!(!valid_model_id(bad), "{bad}");
         }
@@ -475,7 +506,9 @@ mod tests {
     #[test]
     fn bad_values_are_refused_by_resolve() {
         let user: UserLayer = serde_yaml::from_str("profiles:\n  anthropic:\n    threshold: 1.5\n").unwrap();
-        assert!(profiles(&user).is_err());
+        assert_eq!(profiles(&user)["anthropic"].threshold, 0.3, "the bad patch is dropped");
+        let user: UserLayer = serde_yaml::from_str("engine: mine\nprofiles:\n  mine:\n    threshold: 0.4\n").unwrap();
+        assert!(resolve(&user, |_| true).is_err(), "the engine is a custom profile that does not build: the gate is off");
         let user: UserLayer = serde_yaml::from_str("engine: nope\n").unwrap();
         assert!(resolve(&user, |_| true).is_err());
     }
@@ -514,6 +547,31 @@ mod tests {
         let (user, findings) = UserLayer::parse("mode: [\n", None).unwrap();
         assert_eq!(user, UserLayer { mode: Some(Mode::Off), ..Default::default() });
         assert!(findings[0].message.contains("does not parse"));
+    }
+
+    #[test]
+    fn a_profile_that_does_not_build_is_left_out_and_the_gate_still_runs() {
+        // ADR-503 addendum: each profile is its own unit. A custom profile
+        // with no model used to turn the whole gate off.
+        let user: UserLayer = serde_yaml::from_str(
+            "engine: openrouter\nprofiles:\n  mine:\n    threshold: 0.4\n  openrouter:\n    threshold: 0.5\n",
+        )
+        .unwrap();
+        let s = resolve(&user, |_| true).unwrap().unwrap();
+        assert_eq!((s.engine.as_str(), s.profile.threshold), ("openrouter", 0.5));
+        assert_eq!(dropped_profiles(&user).iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["mine"]);
+        // A shipped profile's bad patch is dropped and the shipped profile
+        // runs, named engine or picked by key order: with only an Anthropic
+        // key the gate still runs on anthropic, never off for want of a key.
+        for text in [
+            "profiles:\n  anthropic:\n    provider: openrouter\n",
+            "engine: anthropic\nprofiles:\n  anthropic:\n    provider: openrouter\n",
+        ] {
+            let user: UserLayer = serde_yaml::from_str(text).unwrap();
+            let s = resolve(&user, |p| p == Provider::Anthropic).unwrap().unwrap();
+            assert_eq!((s.engine.as_str(), &s.profile), ("anthropic", &shipped()["anthropic"]), "{text:?}");
+            assert_eq!(dropped_profiles(&user).iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["anthropic"]);
+        }
     }
 
     fn gate_with(text: &str) -> Result<Option<Settings>> {

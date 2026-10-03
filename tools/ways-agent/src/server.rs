@@ -333,7 +333,9 @@ impl State {
         let _slot = self.acquire(p.concurrency, deadline.saturating_sub(begun.elapsed()))?;
         let remaining = deadline.saturating_sub(begun.elapsed());
         if remaining.is_zero() {
-            return Err("deadline".to_string());
+            // Not `deadline`, which the hook reads as a provider call of
+            // unknown cost: none was made.
+            return Err("deadline: before call".to_string());
         }
         let turns = judge::render_turns(&req.turns, p.turns, p.max_turn_chars);
         let prompt = judge::render_prompt(&turns, &req.candidates);
