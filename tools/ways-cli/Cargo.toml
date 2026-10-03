@@ -1,6 +1,6 @@
 [package]
 name = "ways"
-version = "1.30.2"
+version = "1.31.0"
 edition = "2021"
 description = "Unified CLI for ways — knowledge guidance for Claude Code"
 license = "AGPL-3.0-or-later"
