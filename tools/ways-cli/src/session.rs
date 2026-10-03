@@ -451,6 +451,13 @@ const MAX_EVENTS_BYTES: u64 = 32 * 1024 * 1024;
 /// MAX provides hysteresis: ~8 MiB (~30k events) of new logging between
 /// compactions, so the rewrite is rare, not per-append.
 const KEEP_EVENTS_BYTES: u64 = 24 * 1024 * 1024;
+/// Compaction carries every `judge_call` line (#750), so the file settles at
+/// KEEP + judge history. Once that history exceeds MAX - KEEP the file is over
+/// MAX right after compacting; a rewrite that frees less than this is skipped so
+/// appends do not re-read and rewrite the whole file each time. Non-judge lines
+/// then accumulate until a compaction frees at least half the MAX-KEEP gap. The
+/// file is bounded by KEEP + judge history + MAX-KEEP/2 + that accumulation.
+const MIN_FREED_BYTES: u64 = (MAX_EVENTS_BYTES - KEEP_EVENTS_BYTES) / 2;
 
 /// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl — see paths::events_log).
 pub fn log_event(fields: &[(&str, &str)]) {
@@ -480,7 +487,7 @@ pub fn log_event(fields: &[(&str, &str)]) {
     // window of events, acceptable for a telemetry log, but never tears a line.
     if let Ok(meta) = std::fs::metadata(&events_file) {
         if meta.len() > MAX_EVENTS_BYTES {
-            let _ = compact_log_tail(&events_file, KEEP_EVENTS_BYTES);
+            let _ = compact_log_tail(&events_file, KEEP_EVENTS_BYTES, MIN_FREED_BYTES);
         }
     }
 }
@@ -494,7 +501,7 @@ pub fn log_event(fields: &[(&str, &str)]) {
 /// tuning cares about recent behavior, and the cap holds a year-plus of history.
 /// `judge_call` lines in the dropped head are carried ahead of the tail (#750).
 /// On any failure the original file is left intact and the temp is removed.
-fn compact_log_tail(path: &std::path::Path, keep_bytes: u64) -> std::io::Result<()> {
+fn compact_log_tail(path: &std::path::Path, keep_bytes: u64, min_freed: u64) -> std::io::Result<()> {
     let data = std::fs::read(path)?;
     let keep = keep_bytes as usize;
     if data.len() <= keep {
@@ -521,6 +528,9 @@ fn compact_log_tail(path: &std::path::Path, keep_bytes: u64) -> std::io::Result<
         }
     }
     out.extend_from_slice(&data[start..]);
+    if ((data.len() - out.len()) as u64) < min_freed {
+        return Ok(()); // would not pay for the rewrite
+    }
 
     // The shared writer's temp is unique per process and call, so two
     // concurrent compactions never write the same file and publish a torn tail.
@@ -793,7 +803,7 @@ mod compaction_tests {
         let before = std::fs::metadata(&path).unwrap().len();
 
         // Keep ~2 KB → far below the file size, so it must compact.
-        compact_log_tail(&path, 2000).unwrap();
+        compact_log_tail(&path, 2000, 0).unwrap();
 
         let after = std::fs::read_to_string(&path).unwrap();
         let after_len = after.len() as u64;
@@ -829,7 +839,7 @@ mod compaction_tests {
         content.push_str(&judge("2026-10-01T10:00:00Z"));
         std::fs::write(&path, &content).unwrap();
 
-        compact_log_tail(&path, 2000).unwrap();
+        compact_log_tail(&path, 2000, 0).unwrap();
         let after = std::fs::read_to_string(&path).unwrap();
         assert!(after.len() < content.len(), "filler is cut");
 
@@ -838,8 +848,38 @@ mod compaction_tests {
         assert_eq!(ways_agent_core::spend::covers_since(&calls).as_deref(), Some("2026-01-05T10:00:00Z"));
 
         // A second compaction carries them again without duplicating.
-        compact_log_tail(&path, 2000).unwrap();
+        compact_log_tail(&path, 2000, 0).unwrap();
         assert_eq!(ways_agent_core::spend::parse_log(&std::fs::read_to_string(&path).unwrap()).len(), 3);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn compaction_skips_a_rewrite_that_frees_too_little_and_keeps_judge_calls() {
+        let path = std::env::temp_dir().join(format!("ways-evt-gap-{}.jsonl", std::process::id()));
+        let judge = |i: usize| format!("{{\"event\":\"judge_call\",\"ts\":\"2026-01-05T10:00:{:02}Z\",\"cost_source\":\"unknown\"}}\n", i % 60);
+        // Judge history (~4 KB) larger than the gap (keep 500, min_freed 1000).
+        let mut content: String = (0..50).map(judge).collect();
+        std::fs::write(&path, &content).unwrap();
+        let (keep, min_freed) = (500, 1000);
+
+        // Appending filler: the first compactions free < min_freed, so the file is left as is.
+        for i in 0..10 {
+            content.push_str(&format!("{{\"event\":\"way_fired\",\"n\":\"{i}\"}}\n"));
+            std::fs::write(&path, &content).unwrap();
+            let before = std::fs::read(&path).unwrap();
+            compact_log_tail(&path, keep, min_freed).unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), before, "no rewrite while it frees too little");
+        }
+
+        // Enough filler to free more than min_freed: it compacts, and judge calls survive.
+        for i in 0..100 {
+            content.push_str(&format!("{{\"event\":\"way_fired\",\"n\":\"{i}\"}}\n"));
+        }
+        std::fs::write(&path, &content).unwrap();
+        compact_log_tail(&path, keep, min_freed).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.len() < content.len(), "compacted once it pays");
+        assert_eq!(ways_agent_core::spend::parse_log(&after).len(), 50, "every judge call kept");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -848,7 +888,7 @@ mod compaction_tests {
         let path = std::env::temp_dir().join(format!("ways-evt-small-{}.jsonl", std::process::id()));
         let content = "{\"n\":1}\n{\"n\":2}\n";
         std::fs::write(&path, content).unwrap();
-        compact_log_tail(&path, 1024 * 1024).unwrap();
+        compact_log_tail(&path, 1024 * 1024, 0).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
         let _ = std::fs::remove_file(&path);
     }
@@ -860,7 +900,7 @@ mod compaction_tests {
         // for a line-oriented log), leaving an empty file rather than a partial.
         let path = std::env::temp_dir().join(format!("ways-evt-blob-{}.jsonl", std::process::id()));
         std::fs::write(&path, "x".repeat(5000)).unwrap();
-        compact_log_tail(&path, 1000).unwrap();
+        compact_log_tail(&path, 1000, 0).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
         let _ = std::fs::remove_file(&path);
     }
@@ -874,9 +914,9 @@ mod compaction_tests {
             content.push_str(&format!("{{\"n\":{i}}}\n"));
         }
         std::fs::write(&path, &content).unwrap();
-        compact_log_tail(&path, 1500).unwrap();
+        compact_log_tail(&path, 1500, 0).unwrap();
         let once = std::fs::read_to_string(&path).unwrap();
-        compact_log_tail(&path, 1500).unwrap();
+        compact_log_tail(&path, 1500, 0).unwrap();
         let twice = std::fs::read_to_string(&path).unwrap();
         assert_eq!(once, twice, "second compaction is a no-op");
         let _ = std::fs::remove_file(&path);
