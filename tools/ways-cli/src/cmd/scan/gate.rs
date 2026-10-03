@@ -25,8 +25,11 @@ use ways_agent_core::profile::{self, Mode, Settings};
 use ways_agent_core::protocol::{JudgeRequest, Judged, Reply, Request};
 
 
-/// Grace beyond the engine's deadline for the hook's read: covers starting the
-/// agent and waiting for a provider slot, both inside the agent's own deadline.
+/// Grace beyond the engine's deadline for the hook's read, so the agent's own
+/// fallback reply arrives before the hook gives up. The agent waits for a
+/// provider slot inside its deadline; starting an agent (up to 1.5 s, in the
+/// client) comes before the read, so a cold start can take about
+/// `timeout_ms` plus 3 s.
 const READ_GRACE: Duration = Duration::from_millis(1500);
 
 /// Where gate events go: `session::log_event` in the hook.
@@ -146,7 +149,14 @@ fn settings(
         Err(e) => {
             // Logged for the tuning passes, and said on stderr, since a hook
             // shows nothing else: the gate is off until agent.yaml is fixed.
-            (log.sink)(&[("event", "gate_fallback"), ("reason", &format!("config: {e:#}"))]);
+            (log.sink)(&[
+                ("event", "gate_fallback"),
+                ("reason", &format!("config: {e:#}")),
+                ("hook", log.hook_event),
+                ("scope", log.scope),
+                ("project", log.project_dir),
+                ("session", log.session_id),
+            ]);
             eprintln!("[ways] settings: {e:#}");
             None
         }
@@ -655,7 +665,13 @@ mod tests {
                 calls.set(calls.get() + 1);
                 Err("stub".into())
             });
-            let fallback = events.borrow().iter().any(|e| field(e, "event") == "gate_fallback" && field(e, "reason").starts_with("config:"));
+            let fallback = events.borrow().iter().any(|e| {
+                field(e, "event") == "gate_fallback"
+                    && field(e, "reason").starts_with("config:")
+                    && field(e, "session") == "test-gate"
+                    && field(e, "hook") == "UserPromptSubmit"
+                    && field(e, "project") == "/tmp"
+            });
             if text.starts_with("mode: shadow") {
                 assert_eq!(calls.get(), 1, "the control reaches the stub");
             } else {
