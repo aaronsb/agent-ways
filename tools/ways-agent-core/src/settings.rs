@@ -183,9 +183,10 @@ fn shipped_field(bound: &[String], field: &str) -> Option<Value> {
 }
 
 /// The profiles `gate.engine` may name: the shipped ones, then each the
-/// user layer adds under `profiles:`, in the file's order. A profile whose
-/// patch does not build, such as a new one with no model, names nothing
-/// the gate could run, so it is left out, a patched shipped one too.
+/// user layer adds under `profiles:`, in the file's order. A profile of your
+/// own whose patch does not build, such as one with no model, names nothing
+/// the gate could run, so it is left out. A shipped one stays: its bad patch
+/// is dropped and it runs as shipped ([`profile::profiles`]).
 fn profile_names(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
     let shipped = profile::shipped();
     let mut out: Vec<String> = shipped.keys().cloned().collect();
@@ -196,12 +197,8 @@ fn profile_names(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> 
             let builds = serde_yaml::from_value::<profile::ProfilePatch>(v.clone())
                 .ok()
                 .is_some_and(|p| profile::patched(name, &p, &shipped).is_ok());
-            match (builds, out.iter().position(|o| o == name)) {
-                (true, None) => out.push(name.to_string()),
-                (false, Some(i)) => {
-                    out.remove(i);
-                }
-                _ => {}
+            if builds && !out.iter().any(|o| o == name) {
+                out.push(name.to_string());
             }
         }
     }
@@ -327,10 +324,11 @@ mod tests {
         assert!(engine.parse_cli("openrouter", &layers, &[]).is_ok());
         let e = engine.parse_cli("open-router", &layers, &[]).unwrap_err();
         assert_eq!(e, "expected one of anthropic, openrouter, mine, found 'open-router'");
-        // A profile the gate could not build is no choice: a new one with no
-        // model, or a shipped one switched to another provider without one.
+        // A profile of your own the gate could not build is no choice. A
+        // shipped one switched to another provider without a model stays:
+        // the bad patch is dropped and it runs as shipped.
         let layers = user("profiles:\n  half:\n    provider: openrouter\n  anthropic:\n    provider: openrouter\n  ok:\n    provider: openrouter\n    model: x/y\n");
-        assert_eq!(engine.kind.describe(&layers, &[]), "one of openrouter, ok");
+        assert_eq!(engine.kind.describe(&layers, &[]), "one of anthropic, openrouter, ok");
         // The hook path loads one file on its own and keeps the value.
         assert!(user("engine: nope\n")[0].findings.is_empty());
     }
