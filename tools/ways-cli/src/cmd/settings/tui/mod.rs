@@ -567,6 +567,12 @@ fn title(ctx: &Ctx, view: Option<&str>) -> String {
     format!(" ways settings — {}{view} ", tilde(&ctx.project, &ctx.home))
 }
 
+/// The screens' tabs in order: the settings tabs, then theme. `ways
+/// settings [TAB]` takes these names.
+pub fn tab_names() -> Vec<&'static str> {
+    TABS.iter().map(|t| t.name).chain(["theme"]).collect()
+}
+
 pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Failure> {
     let layers = ways.layers();
     let roots = ways.build(&layers);
@@ -574,8 +580,7 @@ pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Fail
     let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::PLAIN);
     let themes = Themes::new(ways.ctx.themes.clone(), depth, active).home(ways.ctx.home.clone());
     let title = title(&ways.ctx, None);
-    let mut names: Vec<&str> = TABS.iter().map(|t| t.name).collect();
-    names.push("theme");
+    let names = tab_names();
     let at = match tab {
         None => 0,
         Some(t) => names.iter().position(|n| *n == t).ok_or_else(|| fail(exit::USAGE, format!("no tab {t}; the tabs are {}", names.join(", "))))?,

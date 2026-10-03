@@ -376,7 +376,7 @@ fn bare_settings_in_a_pipe_prints_list_and_a_tab_needs_a_terminal() {
     assert!(err.contains("need a terminal"), "{err}");
     let (_, err, code) = fx.run(&["settings", "nope", "--snap", "80x25"]);
     assert_eq!(code, 2);
-    assert!(err.contains("no tab nope; the tabs are ways, matching, gate, install, attend, sensors, theme"), "{err}");
+    assert!(err.contains("invalid value 'nope'") && err.contains("[possible values: ways, matching, gate, install, attend, sensors, theme]"), "{err}");
 }
 
 #[test]
