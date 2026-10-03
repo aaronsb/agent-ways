@@ -5,6 +5,13 @@
 //! all, so the process runs one screen session. A digit picks a tab, Enter
 //! in the picker opens a session on the timeline, and Esc goes back to the
 //! picker.
+//!
+//! Replay and live are one view (#780): Enter on a live session opens its
+//! replay at the newest frame, following. New frames append while the
+//! cursor rides the newest; moving back stops the follow and End resumes
+//! it. The follow re-reads the event log only when a stat of the log or the
+//! session's transcript, taken on the backoff of [`super::live`], shows a
+//! write.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -22,16 +29,13 @@ use agent_tui::timeline::{key_bar, Playback, Scrubber};
 use ways_agent_core::spend::{self, Group};
 use ways_core::introspection::SessionIntrospection;
 
+use super::live::{Follow, SAMPLE_TICK};
 use super::model::{ActiveWay, Frame, Outcome};
 use super::report::Reports;
 use super::table;
 use super::why::{self, WhyIndex};
 use super::fires_tab::Fires;
 use super::picker::{draw_picker, Picker};
-
-/// How often a live timeline reads the event log again (ADR-154 §3); the
-/// stat check keeps an unchanged log cheap.
-const LIVE_REFRESH: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum View {
@@ -80,8 +84,9 @@ pub(crate) struct Replay {
     pub(crate) from_log: bool,
     /// Way bodies by file, read once.
     pub(crate) bodies: HashMap<String, Option<String>>,
-    /// The live source's (length, mtime) at the last read.
-    sig: (u64, u64),
+    /// A live session's event log and transcript under stat, on the
+    /// backoff; a replay read from the log while live has one.
+    pub(crate) follow: Option<Follow>,
     /// Now, in Unix seconds, for how long ago the newest frame fired.
     pub(crate) now: u64,
     table: TableState,
@@ -108,7 +113,7 @@ impl Replay {
             why: None,
             from_log: false,
             bodies: HashMap::new(),
-            sig: (0, 0),
+            follow: None,
             now: agent_fmt::when::now_secs(),
             table: TableState::default(),
             list: ListState::default(),
@@ -142,7 +147,8 @@ impl Replay {
         r.spend = session_spend(content, session_id);
         r.fires.set(super::semantic_fires(content, session_id));
         if live {
-            r.sig = events_signature();
+            let transcript = ways_core::paths::claude_dir().find_transcript(Some(&r.project), session_id);
+            r.follow = Some(Follow::session(transcript));
         }
         Ok(r)
     }
@@ -168,6 +174,17 @@ impl Replay {
     /// Frame indexes where a compaction window starts.
     fn window_starts(&self) -> Vec<usize> {
         self.frames.windows(2).enumerate().filter(|(_, p)| p[0].window != p[1].window).map(|(i, _)| i + 1).collect()
+    }
+
+    /// Frame indexes where the subagent switch held ways back (#786).
+    fn suppressed_at(&self) -> Vec<usize> {
+        self.frames.iter().enumerate().filter(|(_, f)| !f.suppressed.is_empty()).map(|(i, _)| i).collect()
+    }
+
+    /// How many dispatches and agents the switch held ways back from in
+    /// the whole session: the summary's count.
+    fn suppressed_total(&self) -> usize {
+        self.frames.iter().map(|f| f.suppressed.len()).sum()
     }
 
     fn ways_len(&self) -> usize {
@@ -279,7 +296,8 @@ impl Replay {
 
     fn tick_every(&self) -> Option<Duration> {
         if self.play.is_live() {
-            Some(LIVE_REFRESH)
+            // The follow's stat is due on its backoff; the tick asks for it.
+            self.follow.as_ref().is_none_or(Follow::watching).then_some(SAMPLE_TICK)
         } else if self.play.playing() {
             Some(self.play.frame_time())
         } else {
@@ -287,12 +305,14 @@ impl Replay {
         }
     }
 
-    /// Play a frame on, or read a live session again. The event log's
-    /// text when it changed and was read.
+    /// Play a frame on, or, live, state the event log when its stat is
+    /// due and read it again when it was written. The event log's text when
+    /// it was read.
     fn tick(&mut self) -> Option<String> {
         if self.play.is_live() {
             self.now = agent_fmt::when::now_secs();
-            self.from_log.then(|| self.refresh()).flatten()
+            let wrote = self.follow.as_mut().is_some_and(Follow::poll);
+            (wrote && self.from_log).then(|| self.refresh())
         } else {
             self.travel(|p| {
                 p.tick();
@@ -301,15 +321,10 @@ impl Replay {
         }
     }
 
-    /// Read the live session again when the event log changed: new frames,
-    /// the newest shown while following, and the why index read afresh.
-    /// The log's text when it changed.
-    fn refresh(&mut self) -> Option<String> {
-        let sig = events_signature();
-        if sig == self.sig {
-            return None;
-        }
-        self.sig = sig;
+    /// Read the live session again, the event log having been written:
+    /// new frames, the newest shown while following, and the why index
+    /// read afresh. The log's text.
+    fn refresh(&mut self) -> String {
         // At launch the transcript may hold no model turn yet, so the window
         // read then is the 200K default; a later read corrects it. Only an
         // upgrade is taken: a real window never shrinks mid-session.
@@ -324,7 +339,7 @@ impl Replay {
             self.judged = super::frames::has_verdicts(&events);
             self.take_frames(frames);
         }
-        Some(content)
+        content
     }
 
     /// The frames read again: the newest shown while following, the
@@ -369,24 +384,9 @@ pub(super) fn reselect_by_anchor(frame: &Frame, anchor_id: &str, anchor_epoch: u
     frame.ways.iter().rposition(|w| w.epoch_fired <= anchor_epoch).unwrap_or(0)
 }
 
-/// The stat signature of the event sources: their combined length and the
-/// newest mtime. A change means new events to read.
-fn events_signature() -> (u64, u64) {
-    let mut len = 0u64;
-    let mut mtime = 0u64;
-    for p in ways_core::paths::events_log_sources() {
-        if let Ok(meta) = std::fs::metadata(&p) {
-            len = len.saturating_add(meta.len());
-            if let Ok(d) = meta.modified().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other)) {
-                mtime = mtime.max(d.as_secs());
-            }
-        }
-    }
-    (len, mtime)
-}
-
-/// Opens a session the picker chose.
-pub(crate) type Opener = Box<dyn Fn(&str) -> Result<Replay, String>>;
+/// Opens a session the picker chose; following it when the flag says it
+/// is live.
+pub(crate) type Opener = Box<dyn Fn(&str, bool) -> Result<Replay, String>>;
 
 /// The tabs of the screen, in the order a digit picks them.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -430,9 +430,28 @@ impl Introspect {
         Introspect { palette, shape, tab: Tab::Sessions, picker: Some(picker), replay: None, reports, open, msg: String::new() }
     }
 
+    /// The picker with `replay` open on the timeline, as `ways session live`
+    /// opens it: Esc goes back to the list.
+    pub(crate) fn opened(mut self, replay: Replay) -> Introspect {
+        self.replay = Some(replay);
+        self.tab = Tab::Timeline;
+        self
+    }
+
     pub(crate) fn showing(replay: Replay, reports: Reports, palette: Palette, shape: Shape) -> Introspect {
-        let open = Box::new(|_: &str| Err("no picker".into()));
+        let open = Box::new(|_: &str, _: bool| Err("no picker".into()));
         Introspect { palette, shape, tab: Tab::Timeline, picker: None, replay: Some(replay), reports, open, msg: String::new() }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn picker_mut(&mut self) -> Option<&mut Picker> {
+        self.picker.as_mut()
+    }
+
+    /// Whether `r` takes the screen's tick on the tab shown: a replay
+    /// plays on its timeline, a live one follows from every tab.
+    fn ticks(&self, r: &Replay) -> bool {
+        self.tab == Tab::Timeline || r.play.is_live()
     }
 
     /// The tabs shown: the sessions tab only with a picker.
@@ -519,7 +538,7 @@ impl Screen for Introspect {
                         self.tab = Tab::Timeline;
                         return true;
                     }
-                    match (self.open)(&id) {
+                    match (self.open)(&id, p.selected_live()) {
                         Ok(r) => {
                             self.replay = Some(r);
                             self.tab = Tab::Timeline;
@@ -557,16 +576,25 @@ impl Screen for Introspect {
     }
 
     /// A replay plays only while its timeline is shown; a live one reads
-    /// the log on every tab, so the fires and spend tabs keep up.
+    /// the log on every tab, so the fires and spend tabs keep up. The list
+    /// states its transcripts only while it is shown.
     fn tick_every(&self) -> Option<Duration> {
-        self.replay.as_ref().filter(|r| self.tab == Tab::Timeline || r.play.is_live()).and_then(Replay::tick_every)
+        let replay = self.replay.as_ref().filter(|r| self.ticks(r)).and_then(Replay::tick_every);
+        let list = self.picker.as_ref().filter(|_| self.tab == Tab::Sessions).and_then(Picker::tick_every);
+        replay.into_iter().chain(list).min()
     }
 
     fn tick(&mut self) {
-        if let Some(r) = &mut self.replay {
-            if let Some(content) = r.tick() {
-                self.reports.reload(&content);
+        if self.tab == Tab::Sessions {
+            if let Some(p) = &mut self.picker {
+                p.tick();
             }
+        }
+        if !self.replay.as_ref().is_some_and(|r| self.ticks(r)) {
+            return;
+        }
+        if let Some(content) = self.replay.as_mut().and_then(Replay::tick) {
+            self.reports.reload(&content);
         }
     }
 }
@@ -618,6 +646,11 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
             metrics.push((2, Span::styled(format!(" · {blocked} judged out"), theme::muted())));
         }
     }
+    // The session's suppressions, counted as the JSON summary counts them.
+    let suppressed = r.suppressed_total();
+    if suppressed > 0 {
+        metrics.push((2, Span::styled(format!(" · ⊝ {suppressed} suppressed"), theme::warn())));
+    }
     if r.play.is_live() {
         if r.play.following() {
             metrics.push((0, Span::styled("  ● LIVE", theme::ok().add_modifier(Modifier::BOLD))));
@@ -662,7 +695,8 @@ fn draw_replay(f: &mut Draw, r: &mut Replay, tab_line: Line<'static>, shape: Sha
     f.render_widget(Paragraph::new(tab_line), bar);
     f.render_widget(Paragraph::new(header(r, head.width)), head);
     let marks = r.window_starts();
-    f.render_widget(Scrubber { len: r.play.len(), pos: r.play.pos(), marks: &marks }, scrub);
+    let notes = r.suppressed_at();
+    f.render_widget(Scrubber { len: r.play.len(), pos: r.play.pos(), marks: &marks, notes: &notes }, scrub);
     match r.view {
         View::Timeline => draw_timeline(f, r, body),
         View::Why => draw_why(f, r, body),

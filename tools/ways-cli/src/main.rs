@@ -350,7 +350,8 @@ enum SessionCommand {
     },
     /// Follow the current session's way firings as they happen
     ///
-    /// The replay screens, following the newest frame on a tick. Defaults to
+    /// The replay screen opened on it, following the newest frame as the
+    /// session writes, with the project's sessions behind it. Defaults to
     /// the most recent session in the current project.
     Live {
         /// Session ID to monitor (default: most recent in the current project)

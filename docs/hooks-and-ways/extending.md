@@ -170,7 +170,7 @@ Switching names a session: `--session <id>`, or the session the command runs in 
 
 Both switches withhold the ways stashed for a Task dispatch and every hook that runs inside a subagent. A teammate whose own hooks do not identify it as a subagent is covered at dispatch only.
 
-Each suppression is logged as an `injection_suppressed` event, once per Task dispatch and once per agent, with the switch that applied. A suppressed hook logs no fire or near-miss events, so the tune reports see nothing to misread; the timeline does not show these events yet.
+Each suppression is logged as an `injection_suppressed` event, once per Task dispatch and once per agent, with the switch that applied. A suppressed hook logs no fire or near-miss events, so the tune reports see nothing to misread. The session timeline marks each suppression, and `ways session replay --json` counts them in `summary.suppressed`.
 
 ### Creating a new domain
 

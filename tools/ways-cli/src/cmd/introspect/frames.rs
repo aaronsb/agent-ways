@@ -7,7 +7,7 @@ use crate::cmd::render;
 use crate::session;
 use agent_fmt::when::parse_utc_iso;
 
-use super::model::{ActiveWay, Frame, Outcome, WayEvent};
+use super::model::{ActiveWay, Frame, Outcome, Suppression, WayEvent};
 
 // ── Frame construction ────────────────────────────────────────
 
@@ -131,6 +131,7 @@ pub(super) fn build_frames(
         // against its threshold, read once the frame's fires are in.
         let mut fired_now: Vec<&str> = Vec::new();
         let mut judged: Vec<&WayEvent> = Vec::new();
+        let mut suppressed: Vec<Suppression> = Vec::new();
 
         for ev in cluster {
             match ev.event.as_str() {
@@ -204,6 +205,14 @@ pub(super) fn build_frames(
                         });
                 }
                 "way_judged" if !ev.way.is_empty() && matches!(ev.verdict.as_str(), "block" | "would_block") => judged.push(ev),
+                // #786: the switch held a subagent's ways back. It is a mark
+                // on the frame, not an event note, so `new_events` reads as
+                // it did before the timeline knew of it.
+                "injection_suppressed" => suppressed.push(Suppression {
+                    switch: ev.switch.clone(),
+                    lane: ev.lane.clone(),
+                    agent: Some(ev.agent.clone()).filter(|a| !a.is_empty()),
+                }),
                 _ => {}
             }
         }
@@ -254,6 +263,7 @@ pub(super) fn build_frames(
             token_position_k: token_k,
             ways,
             new_events,
+            suppressed,
             window,
         });
     }
@@ -335,6 +345,9 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
                 p_yes: v["p_yes"].as_str().unwrap_or("").to_string(),
                 verdict: v["verdict"].as_str().unwrap_or("").to_string(),
                 ancestor: v["ancestor"].as_str().unwrap_or("").to_string(),
+                switch: v["switch"].as_str().unwrap_or("").to_string(),
+                lane: v["lane"].as_str().unwrap_or("").to_string(),
+                agent: v["agent"].as_str().unwrap_or("").to_string(),
             })
         })
         .collect();
@@ -392,6 +405,9 @@ mod tests {
             p_yes: String::new(),
             verdict: String::new(),
             ancestor: String::new(),
+            switch: String::new(),
+            lane: String::new(),
+            agent: String::new(),
         };
         // Window 1: origin session_start + two fires. A second session_start
         // (a compaction) opens window 2, which starts fresh with one fire.
@@ -434,6 +450,9 @@ mod tests {
             p_yes: String::new(),
             verdict: String::new(),
             ancestor: String::new(),
+            switch: String::new(),
+            lane: String::new(),
+            agent: String::new(),
         };
         let events = vec![
             ev("2026-01-01T00:00:00Z", "d/a"),
@@ -463,6 +482,7 @@ mod tests {
                 p_yes: String::new(),
                 verdict: String::new(),
                 ancestor: String::new(),
+                ..Default::default()
             })
             .collect();
         let frames = build_frames(&events, &[], &HashMap::new(), 50);
@@ -480,6 +500,7 @@ mod tests {
             p_yes: if event == "way_judged" { "0.050".into() } else { String::new() },
             verdict: verdict.into(),
             ancestor: String::new(),
+            ..Default::default()
         }
     }
 
@@ -585,6 +606,9 @@ mod tests {
             p_yes: String::new(),
             verdict: String::new(),
             ancestor: String::new(),
+            switch: String::new(),
+            lane: String::new(),
+            agent: String::new(),
         };
         // A way fires in window 1; after a compaction, it only *re-discloses* (no
         // fresh fire) in window 2 — as a mature window mostly does. It must still show

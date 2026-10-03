@@ -167,11 +167,13 @@ impl Playback {
 
 /// The position in a timeline as a track: played in the accent, the rest
 /// in the rule colour, `marks` (frame indexes, such as where a window
-/// starts) as ticks, the position as a dot, and `pos/len` at the right.
+/// starts) as ticks, `notes` (frames that carry something to look at) as
+/// warnings, the position as a dot, and `pos/len` at the right.
 pub struct Scrubber<'a> {
     pub len: usize,
     pub pos: usize,
     pub marks: &'a [usize],
+    pub notes: &'a [usize],
 }
 
 impl Scrubber<'_> {
@@ -186,9 +188,12 @@ impl Scrubber<'_> {
             let cell = |i: usize| if self.len <= 1 { 0 } else { i * (track - 1) / (self.len - 1) };
             let head = cell(self.pos.min(self.len.saturating_sub(1)));
             let marks: Vec<usize> = self.marks.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
+            let notes: Vec<usize> = self.notes.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
             for x in 0..track {
                 let (glyph, style) = if x == head {
                     ("●", theme::accent().add_modifier(Modifier::BOLD))
+                } else if notes.contains(&x) {
+                    ("⊝", theme::warn())
                 } else if marks.contains(&x) {
                     ("┼", theme::muted())
                 } else if x < head {
@@ -309,12 +314,16 @@ mod tests {
     #[test]
     fn the_scrubber_puts_the_first_frame_left_the_last_right_and_marks_between() {
         set(Palette::terminal(ColorDepth::TrueColor));
-        let at = |pos| glyphs(&Scrubber { len: 5, pos, marks: &[2] }.line(14));
+        let at = |pos| glyphs(&Scrubber { len: 5, pos, marks: &[2], notes: &[] }.line(14));
         assert_eq!(at(0), "●───┼───── 1/5");
         assert_eq!(at(4), "━━━━┼━━━━● 5/5");
         assert_eq!(at(2), "━━━━●───── 3/5", "the position hides a mark under it");
-        assert_eq!(glyphs(&Scrubber { len: 0, pos: 0, marks: &[] }.line(8)), "●─── 0/0");
-        assert_eq!(glyphs(&Scrubber { len: 3, pos: 1, marks: &[] }.line(3)), " 2/3", "no room, no track");
+        assert_eq!(glyphs(&Scrubber { len: 0, pos: 0, marks: &[], notes: &[] }.line(8)), "●─── 0/0");
+        assert_eq!(glyphs(&Scrubber { len: 3, pos: 1, marks: &[], notes: &[] }.line(3)), " 2/3", "no room, no track");
+        // A note shows over a mark in the same cell, and under the position.
+        let noted = |pos| glyphs(&Scrubber { len: 5, pos, marks: &[2], notes: &[2, 3] }.line(14));
+        assert_eq!(noted(0), "●───⊝─⊝─── 1/5");
+        assert_eq!(noted(3), "━━━━⊝━●─── 4/5");
     }
 
     #[test]
