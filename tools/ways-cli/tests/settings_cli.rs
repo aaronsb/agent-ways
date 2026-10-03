@@ -818,3 +818,20 @@ fn the_language_is_en_auto_or_a_locale_a_way_carries() {
     // Another key of the section has no options.
     assert!(json(&f, &["settings", "get", "ways.default_scope", "--json"]).get("options").is_none());
 }
+
+#[test]
+fn a_profile_s_model_stays_text_because_its_list_needs_the_network() {
+    let f = Fx::new();
+    let agent = f.root.join("xdg/config/agent-ways/agent.yaml");
+    let (out, _, _) = f.run(&["settings", "help", "gate.profiles.anthropic.model"]);
+    assert!(out.contains("text (the choices could not be listed: model list needs the network; run `ways agent models`)"), "{out}");
+    // Any model id is taken; one that is no id is refused.
+    assert_eq!(f.run(&["settings", "set", "gate.profiles.anthropic.model", "claude-sonnet-5-5"]), (String::new(), String::new(), 0));
+    assert!(std::fs::read_to_string(&agent).unwrap().contains("claude-sonnet-5-5"));
+    assert_eq!(f.run(&["settings", "set", "gate.profiles.anthropic.model", "not a model"]).2, 3);
+    // `options` is null: a computed choice whose source could not answer, so no picker.
+    let v = json(&f, &["settings", "get", "gate.profiles.anthropic.model", "--json"]);
+    assert_eq!(v["options"], serde_json::Value::Null, "{v}");
+    assert!(v.as_object().unwrap().contains_key("options"));
+    assert_eq!(v["value"], "claude-sonnet-5-5");
+}

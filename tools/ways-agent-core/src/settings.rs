@@ -80,6 +80,7 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "gate.profiles.*.model",
         path: &["profiles", "*", "model"],
+        kind: Kind::ChoiceOf { options: model_ids, multi: false },
         default: DefaultValue::Fn(|b| shipped_field(b, "model")),
         check: Some(check_model),
         doc: "The model a profile calls.",
@@ -207,6 +208,14 @@ fn profile_names(layers: &[Layer]) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// The models a profile may name. A provider's list comes only from its
+/// API (`ways agent models`) and nothing keeps a copy, so the settings load,
+/// which must not touch the network, cannot answer: the key stays text and
+/// its help says why. A cached list would make this answer offline.
+fn model_ids(_layers: &[Layer]) -> Result<Vec<String>, String> {
+    Err("model list needs the network; run `ways agent models`".into())
+}
+
 fn check_model(v: &Value) -> Result<(), String> {
     match v.as_str() {
         Some(m) if profile::valid_model_id(m) => Ok(()),
@@ -263,5 +272,19 @@ mod tests {
         assert_eq!(engine.kind.describe(&layers), "one of openrouter, ok");
         // The hook path loads one file on its own and keeps the value.
         assert!(user("engine: nope\n")[0].findings.is_empty());
+    }
+
+    #[test]
+    fn a_model_is_text_while_no_list_is_kept_offline() {
+        let model = KEYS.iter().find(|k| k.name == "gate.profiles.*.model").unwrap();
+        let layers = user("");
+        assert_eq!(model.kind.choices(Some(&layers)), Choices::Unavailable("model list needs the network; run `ways agent models`".into()));
+        assert_eq!(
+            model.kind.describe(&layers),
+            "text (the choices could not be listed: model list needs the network; run `ways agent models`)"
+        );
+        // Text, still held to a model id's shape.
+        assert!(model.parse_cli("anthropic/claude-x", &layers).is_ok());
+        assert!(model.check_value(&Value::from("a b")).is_err());
     }
 }
