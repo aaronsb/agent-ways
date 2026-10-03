@@ -67,7 +67,7 @@ The settings a tuner reaches for, and why:
 | `gate.profiles.<p>.max_candidates` | 8 | Higher judges more of a busy prompt's candidates, at about 0.1 s each. |
 | `gate.profiles.<p>.price_in_per_mtok`, `price_out_per_mtok` | unset | To price calls to a model whose provider reports no cost. |
 
-A profile name agent-ways does not ship is a profile of your own. It must set `provider` and `model`, and takes the other fields from the shipped profile of that provider. Each profile is its own unit: one that fails the schema or does not build is left out, with a line on stderr, and the others load. If the left-out profile is the engine, the gate is off until it is fixed.
+A profile name agent-ways does not ship is a profile of your own. It must set `provider` and `model`, and takes the other fields from the shipped profile of that provider. Each profile is its own unit: a change that fails the schema or does not build is dropped, with a line on stderr, and the others load. A shipped profile then runs as shipped, whether or not it is the engine. A profile of your own is left out, and if it is the engine, the gate is off until it is fixed.
 
 ```
 ways settings set gate.mode shadow

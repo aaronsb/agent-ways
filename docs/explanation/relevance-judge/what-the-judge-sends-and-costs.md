@@ -42,7 +42,7 @@ A key is a file, `$XDG_CONFIG_HOME/agent-ways/keys/<provider>`, mode 0600 inside
 
 The hook never reads a key; it only asks whether a key file exists. The agent reads the key to judge. The `ways agent` commands read it to check it (`key add`, `key rotate`, `key check`), to report it (`key status`), and to list Anthropic's models (`models`), and `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY` override the file for them. Every agent started by a hook or by `ways agent load` gets a cleared environment and reads only the key file; only `ways-agent serve` run directly from a shell inherits the variables. A key exported for Claude Code itself therefore never turns the gate on and is never used for judging.
 
-A key is used for judging only after a check against the profile's model has passed. `key add` and `key rotate` check the key before storing it, unless `--no-check` is given. The result is recorded under `$XDG_STATE_HOME/agent-ways/agent/key-check-<provider>.json`. Changing the key file or the profile's model makes the record stale: the next judged prompt starts a new check in the background and falls back until it passes. `ways agent key check` runs the check at once.
+A key is used for judging only after a check against the profile's model has passed. `key add` and `key rotate` check the key before storing it; `key add --no-check` stores it unchecked. The result is recorded under `$XDG_STATE_HOME/agent-ways/agent/key-check-<provider>.json`. Changing the key file or the profile's model makes the record stale: the next judged prompt starts a new check in the background and falls back until it passes. `ways agent key check` runs the check at once.
 
 ## The agent process
 

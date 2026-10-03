@@ -135,7 +135,7 @@ Before the agent, in the hook:
 
 | Reason | Meaning | What happens |
 |---|---|---|
-| `config: …` | `agent.yaml` does not parse, `gate.mode` is invalid, or the engine's own profile does not build | Gate off, nothing sent until the file is fixed. The hook prints the error on stderr. A profile that is not the engine and does not build is left out instead, with a stderr line, and the gate runs. |
+| `config: …` | `agent.yaml` does not parse, `gate.mode` is invalid, or the engine is a profile of your own that does not build | Gate off, nothing sent until the file is fixed. The hook prints the error on stderr. Any other change that does not build is dropped with a stderr line, and the gate runs: a shipped profile as shipped, a profile of your own left out. |
 | `agent_missing` | The `ways-agent` binary was not found beside `ways`, in `~/.claude/bin`, or on `PATH` | Counts as a failed start. |
 | `agent_start: …` | The agent was started but did not listen within 1.5 s | Starts are not retried for 5 minutes. |
 | `agent_start_backoff` | A start failed in the last 5 minutes | `ways agent load` clears the back-off. |
