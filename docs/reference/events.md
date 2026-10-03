@@ -45,7 +45,7 @@ A way was shown to the agent for the first time in its session.
 | `way`, `domain`, `trigger`, `scope`, `project`, `session` | Common fields |
 | `token_position` | Session token count at the fire |
 | `model`, `agent_id` | Common fields |
-| `fire_score` | Semantic fires only: the calibrated score that fired the way |
+| `fire_score` | Semantic fires only: the score that decided the fire (the summed share for a late-interaction fire, the calibrated `g(s)` for a single-vector one) |
 | `surface` | Semantic fires only: a snippet of the text that was matched |
 | `matched_span` | Keyword, command and file fires only: the text the pattern matched |
 | `parent`, `tree_depth`, `epoch_distance` | Ways inside a tree: the parent id, depth, and epochs since the parent fired |

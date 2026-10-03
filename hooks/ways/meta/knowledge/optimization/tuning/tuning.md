@@ -7,7 +7,7 @@ refire: 0.15
 <!-- epistemic: convention -->
 # Locale Alias Audit
 
-`ways tune locale` is the **acceptance gate** for adopter-run localization (ADR-139). It runs only in **localized mode** (a non-English `output_language`); in English mode there is nothing to audit and it returns clean. It measures embedding health against the multilingual model and does not write thresholds — there are no per-way thresholds to write; firing is global (τ_s / τ_k on the calibrated g(s), ADR-156 — see engine-reference.md), and stub quality is fixed by re-authoring, not by moving gates.
+`ways tune locale` is the **acceptance gate** for adopter-run localization (ADR-139). It runs only in **localized mode** (a non-English `ways.language`); in English mode there is nothing to audit and it returns clean. It measures embedding health against the multilingual model and does not write thresholds — there are no per-way thresholds to write; firing is global (τ_s / τ_k on the calibrated g(s), ADR-156 — see engine-reference.md), and stub quality is fixed by re-authoring, not by moving gates.
 
 English is the **source of truth.** Each way's English frontmatter is embedded into the multilingual corpus as the per-way **anchor**, and every localized alias is scored *against the root* — not against sibling translations. A cluster of mutually-agreeing bad translations cannot self-certify; each stands or falls by its alignment to English.
 
@@ -60,4 +60,4 @@ Diagnostic, not prescriptive. Read the values:
 
 - knowledge/optimization(meta) — broader vocabulary tuning and sparsity principles
 - knowledge/authoring/locale-stubs(meta) — the locale stub file and its coordinate-alias model
-- the design note `adopter-localization-lifecycle-and-tuning` — the root-anchored model in full
+- ADR-183 — the root-anchored model in full

@@ -37,7 +37,7 @@ Ways are contextual guidance that discloses when triggered by:
 (shown)-[:TRIGGER, threshold met]->(shown)                          // re-inject to course-correct
 ```
 
-Disclosure isn't once-and-done. Each (way, session) pair stamps the epoch it fired; a per-way decay curve lowers its suppression threshold as the session grows (context size, epoch distance), so a way that fired early becomes eligible to re-inject when it matches again. Re-disclosure course-corrects drift over long sessions — it isn't verbatim repetition. Multiple ways can fire per prompt. Project-local wins over global for same name.
+Disclosure isn't once-and-done. Each agent keeps its own record of when a way fired (main at the session root, each subagent under `agents/<id>/`); after a fire the way waits out its `refire:` fraction of the context window, then becomes eligible to re-inject when it matches again. Re-disclosure course-corrects drift over long sessions — it isn't verbatim repetition. Multiple ways can fire per prompt. Project-local wins over global for same name.
 
 ## Locations
 
@@ -45,13 +45,13 @@ Three way roots (ADR-143) — don't confuse *reading* one with *authoring* in it
 
 - **Framework ways (read-only projection):** `~/.claude/hooks/ways/{domain}/{wayname}/{wayname}.md`
   — a symlink into the app source at `$XDG_DATA_HOME/agent-ways`. Readable here, but
-  **don't author durably in it**: the app dir is replaced wholesale on update, so edits are lost. Change these in a dev checkout and reproject (see `docs/development.md`).
+  **don't author durably in it**: `ways update` pulls the app dir with an autostash, so edits there conflict with upstream. Change these in a dev checkout and reproject (see `docs/development.md`).
 - **Your own ways (user scope, survives updates):** `$XDG_CONFIG_HOME/agent-ways/ways/{domain}/{wayname}/{wayname}.md`
 - **Project ways:** `$PROJECT/.claude/ways/{domain}/{wayname}/{wayname}.md` — override global ways at the same path
 - Disable domains: `$XDG_CONFIG_HOME/agent-ways/config.yaml` → `disabled_domains: [domain]`
 - Ways can nest: `{domain}/{parent}/{child}/{child}.md` for progressive disclosure
 - When a parent way fires, its in-domain children become eligible on weaker signal: the child's semantic bar drops from `τ_s` to `(τ_s × parent_threshold_multiplier).max(parent_boost_floor)` = `max(0.5×0.8, 0.30) = 0.40` by default (multiplier boosts, floor caps) — domain context is established
-- Tree disclosure metrics are tracked per-session (parent, depth, epoch distance, sibling coverage)
+- Tree disclosure metrics are tracked per agent (parent, depth, epoch distance, sibling coverage)
 - Think strategies are multi-turn ways that steer reasoning across several turns (auto-detected, opt-out)
 
 ## See Also

@@ -10,7 +10,7 @@ Turns an English-only ways install into a localized one (ADR-139). English is th
 **source of truth**; a localization is a derivation, validated against the English
 root. This skill is the operator-facing orchestrator for the lifecycle in
 `docs/explanation/localization/` (scenario `01.011.E`) — interview, consent,
-translate, tune, switch. The mechanics live in the design note
+translate, tune, switch. The mechanics live in ADR-183,
 `docs/architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md`; don't restate them.
 
 The app source (the language registry, the embedder's Makefile, the docs) lives in
