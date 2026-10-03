@@ -40,35 +40,33 @@ pub(crate) fn count_siblings(way_id: &str, project_dir: &str, session_id: &str) 
         None => return (0, 0),
     };
 
+    let bases = crate::paths::ways_roots(Some(Path::new(project_dir)));
     let mut total = 0u32;
     let mut fired = 0u32;
-
-    let bases = crate::paths::ways_roots(Some(Path::new(project_dir)));
-
-    for base in &bases {
-        let parent_dir = base.join(parent_path);
-        if !parent_dir.is_dir() {
-            continue;
-        }
-        if let Ok(entries) = std::fs::read_dir(&parent_dir) {
-            for entry in entries.flatten() {
-                if !entry.file_type().is_ok_and(|ft| ft.is_dir()) {
-                    continue;
-                }
-                let sib_name = entry.file_name().to_string_lossy().to_string();
-                let sib_id = format!("{parent_path}/{sib_name}");
-                // Check it has a way file
-                if session::resolve_way_file(&sib_id, project_dir).is_some() {
-                    total += 1;
-                    if session::way_is_shown(&sib_id, session_id) {
-                        fired += 1;
-                    }
-                }
+    // One count per sibling id, whatever number of roots carry a copy.
+    for sib_id in sibling_ids(&bases, parent_path) {
+        if session::resolve_way_file(&sib_id, project_dir).is_some() {
+            total += 1;
+            if session::way_is_shown(&sib_id, session_id) {
+                fired += 1;
             }
         }
     }
 
     (total, fired)
+}
+
+/// The distinct sibling ids (`parent_path/<dir>`) found under `parent_path` in
+/// any of `roots`.
+fn sibling_ids(roots: &[std::path::PathBuf], parent_path: &str) -> std::collections::BTreeSet<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root.join(parent_path)) else { continue };
+        for entry in entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())) {
+            ids.insert(format!("{parent_path}/{}", entry.file_name().to_string_lossy()));
+        }
+    }
+    ids
 }
 
 /// Get a human-readable version string from git describe.
@@ -250,7 +248,20 @@ pub(crate) unsafe fn libc_getuid() -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::render_update_status;
+    use super::{render_update_status, sibling_ids};
+
+    #[test]
+    fn a_sibling_in_two_roots_is_one_sibling() {
+        let base = std::env::temp_dir().join(format!("ways-sibs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (a, b) = (base.join("a"), base.join("b"));
+        for d in [a.join("fx/shared/kid"), b.join("fx/shared/kid"), b.join("fx/shared/other")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let ids: Vec<String> = sibling_ids(&[a, b], "fx/shared").into_iter().collect();
+        assert_eq!(ids, vec!["fx/shared/kid", "fx/shared/other"]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn native_behind_advises_ways_update() {
