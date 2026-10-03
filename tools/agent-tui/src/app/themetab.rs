@@ -15,7 +15,7 @@ impl App {
     }
 
     pub(super) fn on_theme_tab(&self) -> bool {
-        self.tab == self.theme_tab()
+        self.pane.is_none() && self.tab == self.theme_tab()
     }
 
     /// Unsaved edits in the theme editor.

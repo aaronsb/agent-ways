@@ -10,10 +10,13 @@
 //! commands, and the tree it builds is the content of the tree-and-detail
 //! screen.
 //!
-//! An application of another shape, such as attend-chat, runs on
-//! [`screen`] with the same terminal handling and draws with the shared
-//! parts: the text entry ([`input`]), a feed of boxed entries ([`feed`]),
-//! tabs and chip rows ([`strip`]) and wrapping ([`wrap`]).
+//! A screen that is not a tree, such as attend-chat, is a [`Pane`] inside
+//! the same shell ([`App::with_pane`]): the shell keeps the tab bar, the
+//! bottom bar and its footer, the mouse, the exit guard and the key help;
+//! the pane draws between the bars with the shared parts: the text entry
+//! ([`input`]), a feed of boxed entries ([`feed`]), chip rows ([`strip`])
+//! and wrapping ([`wrap`]). A screen that needs none of the shell runs on
+//! [`screen`] with the same terminal handling.
 //!
 //! Dependency direction: applications depend on this crate; it depends on
 //! `agent-theme` and ratatui only. Nothing on a hook path links it into
@@ -39,6 +42,7 @@ pub use adapter::{Adapter, Unwired, Write};
 pub use app::flow;
 pub use app::theme;
 pub use app::term::{clear_job_group, kill_group, kill_job_group, register_job_group, restore, Signals, TermGuard};
+pub use app::pane::{binding_conflicts, Binding, Keyed, Pane, PaneTab, Tone};
 pub use app::{App, Session, Themes};
 /// The ratatui this crate draws with, so an application names its types
 /// (key events, buffers) without a second dependency to keep in step.

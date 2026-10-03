@@ -259,7 +259,7 @@ impl App {
     /// guard the caller holds turns it off with the rest.
     pub fn run(mut self, term: &mut DefaultTerminal, signals: &Signals) -> io::Result<Session> {
         let mut captured = false;
-        let (mut last_tick, mut last_watch) = (Instant::now(), Instant::now());
+        let (mut last_tick, mut last_watch, mut last_pane) = (Instant::now(), Instant::now(), Instant::now());
         loop {
             if let Some(sig) = signals.caught() {
                 signals.take_up();
@@ -286,7 +286,8 @@ impl App {
                     self.stop_run("stopped: the terminal hung up");
                     return Ok(self.session(Some(HANGUP)));
                 }
-                Ok(Some(Event::Key(k))) if k.kind == KeyEventKind::Press && !self.key(k) => {
+                // A repeat is a key too: holding Backspace in a text entry.
+                Ok(Some(Event::Key(k))) if k.kind != KeyEventKind::Release && !self.key(k) => {
                     // A check still running ends with the screen.
                     self.stop_run("stopped: the screen closed");
                     return Ok(self.session(None));
@@ -296,7 +297,12 @@ impl App {
             }
             // Timed, not on an idle poll: a moving mouse sends events all the
             // time and would otherwise starve both.
-            if self.applying() {
+            if let Some(every) = self.pane_tick_every() {
+                if last_pane.elapsed() >= every {
+                    self.tick();
+                    last_pane = Instant::now();
+                }
+            } else if self.applying() {
                 if last_tick.elapsed() >= TICK {
                     self.tick();
                     last_tick = Instant::now();

@@ -185,7 +185,9 @@ impl App {
                             self.open_review(first);
                         }
                         // Only theme edits are unsaved: their review is the editor.
-                        None => self.switch_tab(self.theme_tab()),
+                        None if self.theme_dirty() => self.switch_tab(self.theme_tab()),
+                        // A pane's work has no review: back to it.
+                        None => {}
                     }
                 }
                 KeyCode::Char('D') => self.mode = Mode::Guard { confirm: true },
@@ -200,6 +202,7 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.mode = Mode::Guard { confirm: false },
                 _ => self.mode = Mode::Guard { confirm: true },
             },
+            Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
             Mode::Browse => return self.browse(k),
         }
@@ -412,6 +415,7 @@ impl App {
             return;
         }
         match &mut self.mode {
+            Mode::Browse if self.pane.is_some() => self.pane_mouse(m),
             Mode::Browse if self.tab == self.roots.len() => self.theme_mouse(m),
             Mode::Browse => {
                 if let Some(k) = wheel {

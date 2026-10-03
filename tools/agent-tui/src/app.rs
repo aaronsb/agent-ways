@@ -7,6 +7,8 @@
 mod apply;
 pub mod flow;
 mod keys;
+pub mod pane;
+mod paneshell;
 mod pick;
 mod render;
 mod response;
@@ -147,6 +149,8 @@ struct Hits {
     /// The theme editor's sliders, each with its channel, and its hex field.
     sliders: Vec<(Rect, usize)>,
     hex: Rect,
+    /// A pane's area between the bars.
+    pane: Rect,
 }
 
 /// A reading action in flight: its label, its command line, and what it
@@ -250,6 +254,9 @@ pub struct App {
     /// A check ended while the tree could not be read again: the next
     /// watch reads it, keeping the check's outcome on the bottom bar.
     owed: bool,
+    /// The content of a screen that is not a tree ([`pane::Pane`]): its
+    /// tabs are the tab bar's, and there is no theme tab.
+    pane: Option<Box<dyn pane::Pane>>,
 }
 
 impl App {
@@ -281,7 +288,34 @@ impl App {
             owed: false,
             themes: Themes::new(None, agent_theme::ColorDepth::TrueColor, None),
             drag: None,
+            pane: None,
         }
+    }
+
+    /// A shell over `pane` instead of a tree: the pane's tabs on the tab
+    /// bar, its content between the bars, its keys on the footer.
+    pub fn with_pane(title: impl Into<String>, pane: impl pane::Pane) -> Self {
+        let mut app = App::new(title, Vec::new());
+        app.pane = Some(Box::new(pane));
+        app.msg.clear();
+        app
+    }
+
+    /// The pane, as the application's own type.
+    pub fn pane_ref<P: pane::Pane>(&self) -> Option<&P> {
+        let p: &dyn std::any::Any = self.pane.as_deref()?;
+        p.downcast_ref()
+    }
+
+    /// The pane, as the application's own type, to change.
+    pub fn pane_mut<P: pane::Pane>(&mut self) -> Option<&mut P> {
+        let p: &mut dyn std::any::Any = self.pane.as_deref_mut()?;
+        p.downcast_mut()
+    }
+
+    /// Whether the terminal reports the mouse.
+    pub fn mouse_on(&self) -> bool {
+        self.mouse
     }
 
     /// What applies the tree's changes and queued commands.
@@ -375,6 +409,9 @@ impl App {
     /// One tick of a running apply. A finished run is closed out on the tick
     /// after its last state, so the last glyph is seen.
     pub fn tick(&mut self) {
+        if let Some(p) = &mut self.pane {
+            p.tick();
+        }
         self.tick_reading();
         self.open_held();
         let Mode::Review { run: Some(run), .. } = &mut self.mode else { return };
@@ -489,7 +526,7 @@ impl App {
     /// Quit, or ask first when anything is pending in any tab or the theme
     /// editor holds unsaved edits.
     fn quit(&mut self) -> bool {
-        if self.pending() == 0 && !self.theme_dirty() {
+        if self.pending() == 0 && !self.theme_dirty() && self.pane_unsaved().is_none() {
             return false;
         }
         self.mode = Mode::Guard { confirm: false };
@@ -549,6 +586,9 @@ impl App {
         tree::revert_all(&mut self.roots);
         self.queue.clear();
         self.themes.editor = None;
+        if let Some(p) = &mut self.pane {
+            p.discard();
+        }
     }
 
     /// The tab's rows, or with a filter the matches of every tab.

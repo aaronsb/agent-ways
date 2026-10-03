@@ -97,7 +97,7 @@ impl App {
     /// one previewed or edited. With background=fill, every cell left on the
     /// terminal's default gets the theme's.
     pub fn draw(&mut self, f: &mut Frame) {
-        theme::set(self.themes.palette(self.shown_theme()));
+        theme::set(self.pane_palette().unwrap_or_else(|| self.themes.palette(self.shown_theme())));
         self.draw_frame(f);
         theme::fill(f.buffer_mut());
     }
@@ -112,6 +112,10 @@ impl App {
         self.hits.discard_tabs.clear();
         self.hits.sliders.clear();
         self.hits.hex = Rect::default();
+        self.hits.pane = Rect::default();
+        if self.pane.is_some() {
+            return self.draw_pane_frame(f);
+        }
         // Review keeps the browser's layout; the tree and the detail show what is pending.
         // A response opened over review keeps review under it.
         let review = match &self.mode {
@@ -405,15 +409,23 @@ impl App {
 
     /// The quit prompt over the tree: every tab with pending items and its
     /// count, then the choices.
-    fn draw_guard(&mut self, f: &mut Frame, area: Rect) {
+    pub(super) fn draw_guard(&mut self, f: &mut Frame, area: Rect) {
         let mut tabs: Vec<(&str, usize, String)> =
             self.roots.iter().enumerate().map(|(i, r)| (r.name.as_str(), self.pending_in(i), String::new())).filter(|t| t.1 > 0).collect();
         // Unsaved theme edits are listed last, as the theme tab is.
         if let Some(e) = self.themes.editor.as_ref().filter(|e| e.dirty()) {
             tabs.push(("theme", 1, format!("  edits to {}", e.theme.name)));
         }
+        // A pane's unsaved work, under the screen's title.
+        let unsaved = self.pane_unsaved();
+        let reviewable = !tabs.is_empty();
+        if let Some(what) = &unsaved {
+            tabs.push((self.title.as_str(), 1, format!("  {what}")));
+        }
         let total: usize = tabs.iter().map(|t| t.1).sum();
-        let mut lines = vec![Line::raw(""), Line::from(Span::styled(format!(" {total} unsaved in {} tabs", tabs.len()), theme::changed()))];
+        // A pane's work alone is in no tab.
+        let heading = if reviewable { format!(" {total} unsaved in {} tabs", tabs.len()) } else { format!(" {total} unsaved") };
+        let mut lines = vec![Line::raw(""), Line::from(Span::styled(heading, theme::changed()))];
         lines.extend(tabs.iter().map(|(name, n, note)| Line::from(vec![Span::raw(format!("   {name:<12}")), Span::styled(format!("●{n}"), theme::changed()), Span::styled(note.clone(), theme::hint())])));
         lines.push(Line::raw(""));
         let name = tabs.first().map_or("", |t| t.0).to_string();
@@ -422,7 +434,12 @@ impl App {
         f.render_widget(Clear, r);
         f.render_widget(Paragraph::new(lines.clone()).block(pane("quit with unsaved changes").border_style(theme::modal_border())), r);
         let row = Rect { y: inner.y + lines.len() as u16, height: 1, ..inner }.intersection(inner);
-        let buttons = [(Btn::Back, "Back (Esc)".into()), (Btn::Review, format!("Review {name} (r)")), (Btn::Quit, "Quit and discard all (D)".into())];
+        let mut buttons = vec![(Btn::Back, "Back (Esc)".to_string())];
+        // Nothing in a pane is reviewed: back to it, or quit.
+        if reviewable {
+            buttons.push((Btn::Review, format!("Review {name} (r)")));
+        }
+        buttons.push((Btn::Quit, "Quit and discard all (D)".into()));
         f.render_widget(Paragraph::new(button_row(self.shape, row, Some(Btn::Back), &buttons, &mut self.hits.buttons)), row);
     }
 
@@ -473,7 +490,7 @@ impl App {
     /// The bottom line, built like the status line's first line: a mode
     /// lozenge, then flat parts between thin rules. A confirm draws its
     /// answers as lozenges and records them as click targets.
-    fn draw_status(&mut self, f: &mut Frame, area: Rect) {
+    pub(super) fn draw_status(&mut self, f: &mut Frame, area: Rect) {
         let sh = self.shape;
         let mode = |label: &str, g: Ground| sh.lozenge(&[Seg::on(format!(" {label} "), g).bold()]);
         let input = |text: String| Span::raw(format!(" {text}▏ "));
@@ -585,6 +602,7 @@ impl App {
                 spans.extend(mode("unsaved", Ground::Warn));
                 spans.push(hint("  s save · d discard · Esc back to the editor"));
             }
+            Mode::Browse | Mode::Help { .. } if self.pane.is_some() => spans.extend(self.pane_status(area)),
             Mode::Browse | Mode::Help { .. } if self.on_theme_tab() => {
                 spans.extend(self.theme_status(sh));
                 spans.push(msg);
@@ -595,7 +613,9 @@ impl App {
             }
             Mode::Guard { .. } => {
                 spans.extend(mode("quit", Ground::Warn));
-                spans.push(hint("  Esc back · r review · D quit and discard all"));
+                // A pane's work alone has nothing to review.
+                let review = self.pending() > 0 || self.theme_dirty();
+                spans.push(hint(if review { "  Esc back · r review · D quit and discard all" } else { "  Esc back · D quit and discard all" }));
             }
             _ => {
                 spans.extend(mode(if self.filter.is_empty() { "browse" } else { "filter" }, Ground::Accent));
@@ -651,15 +671,9 @@ impl App {
         if actions.is_empty() {
             return None;
         }
-        let mut spans = Vec::new();
-        for (i, (a, k)) in actions.iter().zip(tree::action_keys(actions)).enumerate() {
-            if i > 0 {
-                spans.push(Span::styled(" · ", theme::hint()));
-            }
-            spans.push(Span::styled(k.map_or(String::new(), |k| format!("{k} ")), theme::accent()));
-            spans.push(Span::styled(a.label.clone(), theme::hint()));
-        }
-        Some(spans)
+        // The one footer look, which a pane's bindings share.
+        let keys: Vec<String> = tree::action_keys(actions).iter().map(|k| k.map_or(String::new(), String::from)).collect();
+        Some(super::pane::footer_spans(keys.iter().map(String::as_str).zip(actions.iter().map(|a| a.label.as_str()))))
     }
 
     /// Save, Discard or Back over the editor, Back focused.
