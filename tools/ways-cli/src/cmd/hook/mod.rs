@@ -44,11 +44,26 @@ pub fn run(event: HookEvent) -> Result<()> {
         event,
         HookEvent::Stop | HookEvent::SessionStart | HookEvent::TasksActive
     );
-    if injects && !scan::enabled_for(project) {
+    let config = crate::config::Config::load(&project_dir);
+    if injects && !config.enabled {
         return Ok(());
     }
 
-    match input.request(event) {
+    let request = input.request(event);
+    // A Task naming a defined agent injects nothing, whatever the switches say.
+    if let Request::Task { subagent_type: Some(t), .. } = &request {
+        if subagent::is_defined_agent(t, std::path::Path::new(&project_dir), &crate::paths::projection_root()) {
+            return Ok(());
+        }
+    }
+    if let Some(lane) = subagent_lane(&request, common.agent_id.is_some()) {
+        if let Some(switch) = subagent_switch(config.subagents, request_session(&request)) {
+            suppress(&request, lane, switch, common.agent_id.as_deref(), &project_dir);
+            return Ok(());
+        }
+    }
+
+    match request {
         Request::Skip => Ok(()),
         Request::Prompt { session, query } => {
             let response = response::read(&session);
@@ -61,15 +76,7 @@ pub fn run(event: HookEvent) -> Result<()> {
             scan::command(&command, description.as_deref(), &session, project, transcript)
         }
         Request::File { session, path } => scan::file(&path, &session, project, transcript),
-        Request::Task { session, query, team, subagent_type } => {
-            let defined = subagent_type.as_deref().is_some_and(|t| {
-                subagent::is_defined_agent(t, std::path::Path::new(&project_dir), &crate::paths::projection_root())
-            });
-            if defined {
-                return Ok(());
-            }
-            scan::task(&query, &session, project, team.as_deref())
-        }
+        Request::Task { session, query, team, .. } => scan::task(&query, &session, project, team.as_deref()),
         Request::PostTool { session, hook_event } => {
             // As in the scan lanes: fired ways read the model and the refire
             // window from the invoking agent's transcript.
@@ -98,6 +105,7 @@ pub fn run(event: HookEvent) -> Result<()> {
             if let Some(sid) = &session {
                 crate::cmd::reset::clear_session(sid);
             }
+            session::prune_subagent_switches(SUBAGENT_SWITCH_MAX_AGE);
             session::log_event(&[
                 ("event", "session_start"),
                 ("project", common.project.as_deref().unwrap_or("unknown")),
@@ -114,6 +122,91 @@ pub fn run(event: HookEvent) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// How long a session's subagent switch outlives its last change. A session
+/// that runs longer than this with ways off for its subagents switches again.
+const SUBAGENT_SWITCH_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
+
+/// The lane a request injects into a subagent or teammate through, or `None`
+/// for the main agent's own lanes and for session upkeep. The Task dispatch
+/// and SubagentStart serve the dispatched agent; any other injecting request
+/// that carries an `agent_id` comes from inside one.
+fn subagent_lane(request: &Request, from_subagent: bool) -> Option<&'static str> {
+    match request {
+        Request::Task { .. } => Some("task"),
+        Request::SubagentStart { .. } => Some("subagent_start"),
+        _ if !from_subagent => None,
+        Request::Prompt { .. } => Some("prompt"),
+        Request::State { .. } => Some("state"),
+        Request::Command { .. } => Some("command"),
+        Request::File { .. } => Some("file"),
+        Request::PostTool { .. } => Some("post_tool"),
+        Request::Queued { .. } => Some("queued"),
+        Request::Stop { .. } | Request::SessionStart { .. } | Request::TasksActive { .. } | Request::Skip => None,
+    }
+}
+
+fn request_session(request: &Request) -> Option<&str> {
+    match request {
+        Request::Prompt { session, .. }
+        | Request::State { session, .. }
+        | Request::Command { session, .. }
+        | Request::File { session, .. }
+        | Request::Task { session, .. }
+        | Request::PostTool { session, .. }
+        | Request::Queued { session, .. }
+        | Request::Stop { session, .. }
+        | Request::SubagentStart { session }
+        | Request::TasksActive { session } => Some(session),
+        Request::SessionStart { session } => session.as_deref(),
+        Request::Skip => None,
+    }
+}
+
+/// Which switch, if any, keeps ways out of subagents here: the session's own
+/// (`ways session subagents off`), then the project's or the user's
+/// `subagents: false` (`configured`).
+fn subagent_switch(configured: bool, session: Option<&str>) -> Option<&'static str> {
+    if session.is_some_and(session::subagents_off) {
+        return Some("session");
+    }
+    (!configured).then_some("config")
+}
+
+/// Drop what would have reached the subagent and log the suppression: the
+/// dispatch ran with injection switched off, whether or not a way would have
+/// matched. A Task dispatch logs once per dispatch; hooks from inside a
+/// subagent log once per agent.
+fn suppress(request: &Request, lane: &str, switch: &str, agent: Option<&str>, project_dir: &str) {
+    let Some(session_id) = request_session(request) else { return };
+    match request {
+        // A stash written before the switch went off is claimed and dropped,
+        // so a later SubagentStart cannot inject it.
+        Request::SubagentStart { session } => {
+            subagent::discard(session);
+            return;
+        }
+        Request::Task { .. } => {}
+        _ => {
+            if !session::first_suppression_for(session_id, agent.unwrap_or("unknown")) {
+                return;
+            }
+        }
+    }
+    let mut fields = vec![
+        ("event", "injection_suppressed"),
+        ("reason", "subagents_off"),
+        ("switch", switch),
+        ("lane", lane),
+        ("scope", "subagent"),
+        ("project", project_dir),
+        ("session", session_id),
+    ];
+    if let Some(agent) = agent {
+        fields.push(("agent", agent));
+    }
+    session::log_event(&fields);
 }
 
 /// Print the hook envelope when there is visible context to inject.

@@ -402,6 +402,59 @@ pub fn detect_team(session_id: &str) -> Option<String> {
     std::fs::read_to_string(&path).ok().map(|s| s.trim().to_string())
 }
 
+// ── Subagent switch (#768) ──────────────────────────────────────
+
+/// The marker that switches ways off for one session's subagents and
+/// teammates, keyed by the parent's session id, which subagent hooks report.
+/// It lives under the durable state root, outside the session directory that
+/// compaction and `ways session reset` clear, so a long workflow keeps it.
+fn subagents_off_marker(session_id: &str) -> PathBuf {
+    crate::paths::state_root().join("subagent-switch").join(session_id)
+}
+
+/// Whether this session switched ways off for its subagents and teammates.
+pub fn subagents_off(session_id: &str) -> bool {
+    is_plain_session_id(session_id) && subagents_off_marker(session_id).exists()
+}
+
+/// Switch ways off (`false`) or back on (`true`) for one session's subagents
+/// and teammates. Holds until switched back.
+pub fn set_subagents(session_id: &str, on: bool) -> std::io::Result<()> {
+    let marker = subagents_off_marker(session_id);
+    if on {
+        match std::fs::remove_file(&marker) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    } else {
+        ensure_parent(&marker);
+        std::fs::write(&marker, "")
+    }
+}
+
+/// Remove session switches untouched for longer than `max_age`. Only
+/// `ways session subagents on` removes one otherwise, so a session that ended
+/// switched off, a mistyped `--session`, and the old id a `/clear` leaves
+/// behind would each keep a file forever. Run at SessionStart.
+pub fn prune_subagent_switches(max_age: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(crate::paths::state_root().join("subagent-switch")) else { return };
+    for entry in entries.flatten() {
+        let stale = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > max_age);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Record a suppressed injection once per agent: a subagent's tool calls each
+/// run the hooks, and one line says the whole agent ran without ways. Returns
+/// whether this call is the first for the agent.
+pub fn first_suppression_for(session_id: &str, agent: &str) -> bool {
+    let marker = session_dir(session_id).join("suppressed").join(agent);
+    ensure_parent(&marker);
+    std::fs::OpenOptions::new().write(true).create_new(true).open(&marker).is_ok()
+}
+
 /// Check if a way's scope field matches the current scope.
 pub fn scope_matches(scope_field: &str, current_scope: &str) -> bool {
     if scope_field.is_empty() {

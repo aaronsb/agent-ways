@@ -148,6 +148,30 @@ disabled_domains:
 
 All ways in disabled domains are silently skipped everywhere. The domain still appears in the Available Ways table but its ways won't fire. Domain-level disable is the right tool for "never anywhere"; project-scope per-way disable is the right tool for "not in this project."
 
+### Keeping ways out of subagents
+
+Some workflows run their agents without ways, so injection does not bias what they produce. The main agent keeps its ways either way; only the agents it dispatches are affected.
+
+For every session in a project, set `subagents: false` in the project's `.claude/ways.yaml` (or in the user config for every project):
+
+```yaml
+subagents: false
+```
+
+For one session, for example before launching a workflow or a swarm:
+
+```
+ways session subagents off     # this session's dispatched agents get no ways
+ways session subagents on      # back to the configured setting
+ways session subagents --json  # which switch is in effect
+```
+
+Switching names a session: `--session <id>`, or the session the command runs in when Claude Code sets `CLAUDE_CODE_SESSION_ID`. The session switch lives outside the session's state, so it holds through compaction and `ways session reset` until switched back. `/clear` starts a new session id without it, and a switch untouched for 30 days is pruned.
+
+Both switches withhold the ways stashed for a Task dispatch and every hook that runs inside a subagent. A teammate whose own hooks do not identify it as a subagent is covered at dispatch only.
+
+Each suppression is logged as an `injection_suppressed` event, once per Task dispatch and once per agent, with the switch that applied. A suppressed hook logs no fire or near-miss events, so the tune reports see nothing to misread; the timeline does not show these events yet.
+
 ### Creating a new domain
 
 Create a subdirectory under `~/.claude/hooks/ways/` with your domain name. Add way directories inside it. The macro table generator and all check scripts will discover them automatically.

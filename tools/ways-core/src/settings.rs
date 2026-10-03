@@ -17,7 +17,7 @@ pub const FILE: &str = "config";
 /// The list is explicit so a hook names each section it loads, through
 /// `load-sections`, never a whole-file `load-all`.
 pub const HOOK_SECTIONS: &[&str] =
-    &["ways", "ways.switch", "ways.domains", "matching", "install.targets", "install.secret_path_deny", "ways.project"];
+    &["ways", "ways.switch", "ways.subagents", "ways.domains", "matching", "install.targets", "install.secret_path_deny", "ways.project"];
 
 /// The fallback unit is the section (ADR-503 §4), so each switch that turns
 /// something off is a section of its own: a bad value elsewhere can never
@@ -38,6 +38,14 @@ const SECTIONS: &[SectionSpec] = &[
         per_entry: false, entry: None, repair: None,
         columns: None,
         doc: "Whether ways run at all; false in a project's .claude/ways.yaml switches them off there.",
+    },
+    SectionSpec {
+        name: "ways.subagents",
+        file: FILE,
+        top: &["subagents"],
+        per_entry: false, entry: None, repair: None,
+        columns: None,
+        doc: "Whether subagents and teammates get ways; the main agent's ways are unaffected.",
     },
     SectionSpec {
         name: "ways.domains",
@@ -126,6 +134,17 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("true"),
         doc: "Whether hooks inject ways at all.",
         long: "Set false in a project's .claude/ways.yaml to switch ways off for that project: hooks inject nothing there (ADR-184).",
+        ..BASE
+    },
+    KeySpec {
+        name: "ways.subagents",
+        section: "ways.subagents",
+        fail_closed: Some(closed_off),
+        path: &["subagents"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        doc: "Whether subagents and teammates get ways.",
+        long: "Set false in a project's .claude/ways.yaml to inject nothing into the agents that project's sessions dispatch; the main agent keeps its ways. `ways session subagents off` does the same for one session (#768).",
         ..BASE
     },
     KeySpec {

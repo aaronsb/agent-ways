@@ -3,11 +3,11 @@ agent-tui frame 100x30
 |┌ ways settings — ~/proj · this project ──────────────┐┌detail─────────────────────────────────────┐|
 |│ ▾ settings                    value                 ││ways.language                              │|
 |│     enabled                   true                  ││                                           │|
-|│▌    language                  auto                  ││Output language: en, auto, or a language   │|
-|│     default_scope             agent                 ││code.                                      │|
-|│     disabled_domains          []                    ││                                           │|
-|│ ▸ project · way               enabled               ││en and auto keep the English corpus. A     │|
-|│                                                     ││specific code, set by the ways-localize    │|
+|│     subagents                 true                  ││Output language: en, auto, or a language   │|
+|│▌    language                  auto                  ││code.                                      │|
+|│     default_scope             agent                 ││                                           │|
+|│     disabled_domains          []                    ││en and auto keep the English corpus. A     │|
+|│ ▸ project · way               enabled               ││specific code, set by the ways-localize    │|
 |│                                                     ││skill, switches the build, matcher and     │|
 |│                                                     ││tuner to that language (ADR-139).          │|
 |│                                                     ││                                           │|
@@ -52,23 +52,23 @@ styles
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
-  4   1-1   Cyan - BOLD|REVERSED
-  4   2-53  - - BOLD|REVERSED
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
+  5   1-1   Cyan - BOLD|REVERSED
+  5   2-53  - - BOLD|REVERSED
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7   2-10  - - BOLD
-  7  11-16  - - DIM
-  7  32-38  - - DIM
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
+  8   2-10  - - BOLD
+  8  11-16  - - DIM
+  8  32-38  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM

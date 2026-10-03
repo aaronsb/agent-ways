@@ -98,6 +98,10 @@ pub struct Config {
     /// Project-scope master switch (ADR-184 item 6). `false` in a project's
     /// `ways.yaml` makes the scan inject nothing there.
     pub enabled: bool,
+    /// Whether subagents and teammates get ways (#768). `false` in a project's
+    /// or the user's `ways.yaml` leaves the main agent's ways on and injects
+    /// nothing into the agents it dispatches.
+    pub subagents: bool,
     /// Default scope for ways without explicit scope
     pub default_scope: String,
     /// Output language (e.g., "en", "ja", "auto")
@@ -188,6 +192,7 @@ impl Default for Config {
             targets: None,
             target_config: None,
             enabled: true,
+            subagents: true,
             default_scope: "agent".to_string(),
             language: "auto".to_string(),
             disabled_domains: Vec::new(),
@@ -371,6 +376,9 @@ impl Config {
         }
         if let Some(v) = doc.get("enabled").and_then(|v| v.as_bool()) {
             self.enabled = v;
+        }
+        if let Some(v) = doc.get("subagents").and_then(|v| v.as_bool()) {
+            self.subagents = v;
         }
     }
 
@@ -833,18 +841,18 @@ mod tests {
     #[test]
     fn an_unparseable_file_fails_closed_for_its_scope() {
         // "Whole file fails closed" (#713): nothing the file says applies,
-        // readable or not, and every switch its scope holds is off.
+        // readable or not, and every switch its scope holds, the subagent switch among them, is off.
         let closed = |text: &str, scope| checked_text(text, None, scope, crate::settings::HOOK_SECTIONS).unwrap();
         let broken = "enabled: true\nlanguage: es\nways:\n  itops/incident: false\nx: [\n";
         // Project: ways are off for the project.
-        assert_eq!(closed(broken, LayerScope::Project), serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, secret_path_deny: true}").unwrap());
+        assert_eq!(closed(broken, LayerScope::Project), serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, subagents: false, secret_path_deny: true}").unwrap());
         // User: off, no projection target, the deny baseline merged.
         assert_eq!(
             closed(broken, LayerScope::User),
-            serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, targets: [], secret_path_deny: true}").unwrap()
+            serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, subagents: false, targets: [], secret_path_deny: true}").unwrap()
         );
         // A target's file: its keys, which do not include targets.
-        assert_eq!(closed(broken, LayerScope::Target), serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, secret_path_deny: true}").unwrap());
+        assert_eq!(closed(broken, LayerScope::Target), serde_yaml::from_str::<serde_yaml::Value>("{enabled: false, subagents: false, secret_path_deny: true}").unwrap());
         let mut cfg = Config::default();
         apply_project(&mut cfg, broken);
         assert!(!cfg.enabled);

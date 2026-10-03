@@ -27,6 +27,7 @@ pub mod settings;
 pub mod settings_merge;
 pub mod show;
 pub mod stats;
+pub mod subagents;
 pub mod status;
 pub mod suggest;
 pub mod target;

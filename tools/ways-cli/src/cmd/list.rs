@@ -274,14 +274,14 @@ fn session_is_live_in(
 
 /// Why auto-detection found nothing, so the caller can say which of the two
 /// it was rather than always blaming missing markers.
-enum NoSession {
+pub(crate) enum NoSession {
     /// No state dirs at all — no way has fired yet anywhere.
     NoMarkers,
     /// State dirs exist, but none of them has a transcript still on disk.
     AllOrphaned,
 }
 
-fn detect_session() -> Result<String, NoSession> {
+pub(crate) fn detect_session() -> Result<String, NoSession> {
     let sessions_root = crate::session::sessions_root();
     let sessions_root = Path::new(&sessions_root);
     let projects_root = crate::cmd::context::projects_root();

@@ -53,6 +53,12 @@ fn claim_oldest(stash_dir: &Path) -> Option<Stash> {
     Some(serde_json::from_str(&text).unwrap_or_default())
 }
 
+/// Claim the oldest stash and drop it: a subagent starting while ways are
+/// off for subagents gets nothing, and the stash must not reach the next one.
+pub fn discard(session_id: &str) {
+    let _ = claim_oldest(&session::session_dir(session_id).join("subagent-stash"));
+}
+
 /// SubagentStart: the context to inject, empty when there is none.
 pub fn inject(session_id: &str, project_dir: &str) -> anyhow::Result<String> {
     let Some(stash) = claim_oldest(&session::session_dir(session_id).join("subagent-stash")) else {
