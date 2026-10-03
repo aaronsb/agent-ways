@@ -4,8 +4,15 @@
 use super::*;
 
 impl App {
-    /// Handle one key. False ends the session.
+    /// Handle one key. False ends the session. A response held while
+    /// something was open opens once the key leaves the screen browsing.
     pub fn key(&mut self, k: KeyEvent) -> bool {
+        let on = self.key_event(k);
+        self.open_held();
+        on
+    }
+
+    fn key_event(&mut self, k: KeyEvent) -> bool {
         if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
             // A running apply finishes its write steps, which are quick; a
             // command in flight takes a second ^C to stop. Anything pending
@@ -382,6 +389,11 @@ impl App {
     /// During text, secret or filter entry and a confirm, only the confirm's
     /// answers respond.
     pub fn mouse(&mut self, m: MouseEvent) {
+        self.mouse_event(m);
+        self.open_held();
+    }
+
+    fn mouse_event(&mut self, m: MouseEvent) {
         let at = Position::new(m.column, m.row);
         let wheel = match m.kind {
             MouseEventKind::ScrollUp => Some(KeyCode::Up),
@@ -614,7 +626,8 @@ impl App {
     /// An action was chosen: ask for its argument, or stage it at once.
     pub(super) fn pick(&mut self, path: Vec<usize>, action: usize) {
         let a = &tree::get(&self.roots, &path).actions[action];
-        if a.reads && matches!(a.arg, Arg::None) {
+        // One that asks first is confirmed and queued like any other.
+        if a.reads && !a.confirm && matches!(a.arg, Arg::None) {
             return self.read_now(&path, action, "");
         }
         match a.arg.clone() {
@@ -650,10 +663,10 @@ impl App {
 
     /// Build the queued command; ask first when the action needs confirming.
     /// A reading action with a typed argument runs at once, as one without
-    /// does.
+    /// does, unless it asks first.
     pub(super) fn stage(&mut self, path: &[usize], action: usize, text: &str, stdin: Option<SecretBuf>) {
         let a = &tree::get(&self.roots, path).actions[action];
-        if a.reads && matches!(a.arg, Arg::Text(_)) {
+        if a.reads && !a.confirm && matches!(a.arg, Arg::Text(_)) {
             return self.read_now(path, action, text);
         }
         let mut queued = Queued::new(tree::key(&self.roots, path), a.label.clone(), a.render(text), a.confirm);

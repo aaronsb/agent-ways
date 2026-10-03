@@ -216,6 +216,9 @@ pub struct Run {
     pub rows: Vec<RRow>,
     /// The command in flight, while a run step waits on it.
     job: Option<Box<dyn Job>>,
+    /// The command that failed on its own, not stopped: its label, its
+    /// command line and what it printed.
+    pub printed: Option<(String, String, Option<crate::adapter::Printed>)>,
 }
 
 impl Run {
@@ -239,7 +242,7 @@ impl Run {
             work: Work::Write(file, paths),
         });
         let runs = commands.into_iter().map(|c| Step { text: format!("run {c}"), state: St::Pending, error: None, shown: None, work: Work::Run });
-        Run { tab, steps: writes.chain(runs).collect(), outcome: Outcome::Running, applied: 0, rows: review_rows(roots, queue, tab), job: None }
+        Run { tab, steps: writes.chain(runs).collect(), outcome: Outcome::Running, applied: 0, rows: review_rows(roots, queue, tab), job: None, printed: None }
     }
 
     pub fn finished(&self) -> bool {
@@ -334,6 +337,12 @@ impl Run {
                             // Still running: the step stays as it is.
                             None => return,
                             Some(r) => {
+                                // What a failed command printed, kept before
+                                // the job goes, for the error modal.
+                                if r.is_err() {
+                                    let item = &queue.items()[q];
+                                    self.printed = Some((item.label.clone(), item.command.clone(), job.printed()));
+                                }
                                 self.job = None;
                                 r.map(|()| {
                                     queue.remove(q);

@@ -439,6 +439,12 @@ fn a_check_ending_under_an_open_menu_marks_the_tree_unread() {
     assert_eq!(app.message(), "check: killed");
     assert_eq!(slow.reloads.get(), 0, "nothing is read under the open overlay");
     assert_eq!(app.stamp, None, "the next watch reads the tree");
+    // Closing the help opens the check's error, held under it; closing
+    // that leaves the screen browsing, where the owed read happens.
+    press(&mut app, &[KeyCode::Esc]);
+    assert!(matches!(app.mode, Mode::Response(_)), "the held error opens as the help closes");
+    app.watch();
+    assert_eq!(slow.reloads.get(), 0, "nothing is read under the modal either");
     press(&mut app, &[KeyCode::Esc]);
     app.watch();
     assert_eq!(app.message(), "check: killed", "the owed reload keeps the check's outcome");

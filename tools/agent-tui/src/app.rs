@@ -424,6 +424,13 @@ impl App {
                 self.msg = msg;
                 self.mode = Mode::Review { tab, run: None, discard: false };
                 self.focus_failure(tab);
+                // A command that failed on its own: what it printed, over review.
+                let error: Result<(), String> = Err(run.error(i));
+                if let Some((label, command, printed)) = run.printed {
+                    if let Some(s) = response::Shown::of(&label, &command, tree::Response::Write, &error, printed) {
+                        self.show_response(s);
+                    }
+                }
             }
             _ => {
                 self.failure = None;

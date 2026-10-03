@@ -262,11 +262,13 @@ pub struct Action {
 
 /// What an action's command answers with (#778). It decides how the outcome
 /// of a reading action shows: on the bottom bar, or in a modal with what the
-/// command printed. A queued action's outcome shows in review.
+/// command printed. A queued action's outcome shows in review, and a failed
+/// one in the error modal over it, whatever its kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Response {
-    /// A change: the bottom bar says it ended; a failure opens the error
-    /// modal, with the exit code and what the command printed.
+    /// A change: the bottom bar says it ended. A failure opens the error
+    /// modal, with the exit code and what the command printed: at once for
+    /// a [`Action::reads`] action, over review for a queued one.
     #[default]
     Write,
     /// A pass or a fail, with the command's text either way.

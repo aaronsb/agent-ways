@@ -113,11 +113,17 @@ impl App {
         self.hits.sliders.clear();
         self.hits.hex = Rect::default();
         // Review keeps the browser's layout; the tree and the detail show what is pending.
-        if let Mode::Review { tab, .. } = &self.mode {
-            let tab = *tab;
+        // A response opened over review keeps review under it.
+        let review = match &self.mode {
+            Mode::Review { tab, .. } => Some(*tab),
+            Mode::Response(s) => s.back,
+            _ => None,
+        };
+        if let Some(tab) = review {
             self.draw_tabs(f, bar, tab, true);
             self.draw_review_tree(f, left, tab);
             self.draw_review_detail(f, right, tab);
+            self.draw_response(f, main);
             return self.draw_status(f, status);
         }
         if self.on_theme_tab() {
@@ -136,7 +142,7 @@ impl App {
                     self.draw_menu_items(f, main, title, items, sel);
                 }
                 Mode::ThemeUnsaved => self.draw_unsaved(f, main),
-                Mode::Response(_) => self.draw_open_response(f, main),
+                Mode::Response(_) => self.draw_response(f, main),
                 _ => {}
             }
             return self.draw_status(f, status);
@@ -182,7 +188,7 @@ impl App {
                 let p = p.clone();
                 self.draw_pick(f, main, &p);
             }
-            Mode::Response(_) => self.draw_open_response(f, main),
+            Mode::Response(_) => self.draw_response(f, main),
             _ => {}
         }
         self.draw_status(f, status);
@@ -607,10 +613,13 @@ impl App {
                 } else {
                     spans.push(hint(if self.mouse { "mouse on (m)" } else { "mouse off (m)" }));
                 }
-                // A row's actions take the place of the opening hint; a
-                // message said since comes first, so it is never cut off.
+                // A row's actions take the place of the opening hint when
+                // both do not fit; a message said since comes first, so it
+                // is never cut off.
                 let here = self.footer_actions();
-                if self.msg != crate::app::HINT || here.is_none() {
+                let room = area.width.saturating_sub(cta.as_ref().map_or(0, |c| width(c)));
+                let fits = |here: &[Span]| width(&spans) + msg.width() as u16 + width(&[theme::sep()]) + width(here) <= room;
+                if self.msg != crate::app::HINT || here.as_deref().is_none_or(fits) {
                     spans.push(msg);
                 }
                 if let Some(here) = here {
@@ -707,16 +716,6 @@ pub const KEYS: &[&str] = &[
 ];
 
 impl App {
-    /// The open response modal, its scroll held to what was drawn.
-    fn draw_open_response(&mut self, f: &mut Frame, area: Rect) {
-        let Mode::Response(s) = &self.mode else { return };
-        let s = s.clone();
-        let scroll = self.draw_response(f, area, &s);
-        if let Mode::Response(s) = &mut self.mode {
-            s.scroll = scroll;
-        }
-    }
-
     /// The keys, then the shown tab's help as the adapter's own `--help`
     /// prints it, scrolled `scroll` lines.
     fn draw_help(&mut self, f: &mut Frame, area: Rect, scroll: u16) {
