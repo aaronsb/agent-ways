@@ -14,12 +14,13 @@ use super::agents::Agents;
 use super::model::{ActiveWay, Fate, Frame};
 use crate::cmd::render::{self, PIN_SYMBOLS};
 
-/// The Agent column's width in a table `inner` cells wide: its widest
-/// name, from the header's five cells to sixteen (`general-purpose` whole),
-/// while Way keeps eighteen. Narrower, Agent gives up cells to eight, then
-/// Way, to its twelve. At 80 columns Agent has ten and Way eighteen.
-pub(super) fn agent_width(ways: &[ActiveWay], agents: &Agents, inner: usize) -> u16 {
-    let widest = ways.iter().map(|w| agent_fmt::visible_len(&agents.label(&w.agent))).max().unwrap_or(0);
+/// The Agent column's width in a table `inner` cells wide: the widest name
+/// of the session's agents, so it holds still across frames, from the
+/// header's five cells to sixteen, while Way keeps eighteen. Narrower,
+/// Agent gives up cells to eight, then Way, to its twelve. At 80 columns
+/// Agent has ten and Way eighteen.
+pub(super) fn agent_width(agents: &Agents, inner: usize) -> u16 {
+    let widest = agents.widest();
     let room = inner.saturating_sub(HIGHLIGHT + WAY_KEEP + FIXED + GAPS).max(AGENT_MIN);
     widest.clamp(5, AGENT_MAX).min(room) as u16
 }
@@ -100,20 +101,35 @@ pub(super) fn way_width(inner: usize, agent_w: u16) -> usize {
     inner.saturating_sub(HIGHLIGHT + agent_w as usize + FIXED + GAPS).max(WAY_MIN)
 }
 
-/// An agent's name in its colour, cut to the column: a workflow member
-/// keeps the end of its label (`wf·…:judge`), any other the start.
+/// An agent's name in its colour, cut to `width` display cells: a
+/// workflow member keeps the end of its label (`wf·…:judge`), any other the
+/// start (`code-revi…`), and a disambiguating short id stays whole
+/// (`gene…·a3897`).
 pub(super) fn agent_cell(agents: &Agents, id: &str, width: u16) -> Line<'static> {
-    let label = agents.label(id);
     let w = width as usize;
-    let text = match label.strip_prefix("wf·") {
-        Some(l) if label.chars().count() > w => {
-            let keep = w.saturating_sub(4);
-            let chars: Vec<char> = l.chars().collect();
-            format!("wf·…{}", chars[chars.len().saturating_sub(keep)..].iter().collect::<String>())
-        }
-        _ => agent_fmt::truncate_visible(&label, w),
+    let (base, suffix) = agents.parts(id);
+    let suffix = suffix.map(|s| format!("·{s}")).unwrap_or_default();
+    let room = w.saturating_sub(agent_fmt::visible_len(&suffix)).max(2);
+    let base = match base.strip_prefix("wf·") {
+        Some(l) if agent_fmt::visible_len(&base) > room => format!("wf·…{}", tail_cells(l, room.saturating_sub(4))),
+        _ => agent_fmt::truncate_visible(&base, room),
     };
-    Line::styled(text, agents.style(id))
+    Line::styled(agent_fmt::truncate_visible(&format!("{base}{suffix}"), w), agents.style(id))
+}
+
+/// The end of `s` in at most `cells` display cells.
+fn tail_cells(s: &str, cells: usize) -> String {
+    let mut out: Vec<char> = Vec::new();
+    let mut used = 0;
+    for c in s.chars().rev() {
+        let cw = agent_fmt::visible_len(c.encode_utf8(&mut [0; 4]));
+        if used + cw > cells {
+            break;
+        }
+        used += cw;
+        out.push(c);
+    }
+    out.iter().rev().collect()
 }
 
 

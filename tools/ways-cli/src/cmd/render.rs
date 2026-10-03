@@ -50,10 +50,11 @@ const INDENT: usize = 2;
 /// column, inter-column gaps included. It's the reservation the ceiling clamp
 /// leaves for the trailing columns — *not* a hard bound: the Trigger and
 /// Re-disclose cells pad but never truncate (`{:<}` / `pad_visible`), so a
-/// long trigger (`embed:bash:multi`) can overflow its column and push the block past this width. Header and rows stay
-/// mutually aligned for content that fits; over-width content drifts equally in
-/// both. (Pre-existing behaviour; documented here because the reservation reads
-/// like a guarantee otherwise.)
+/// long trigger (`embed:bash:multi`) can overflow its column and push the
+/// block past this width. Header and rows stay mutually aligned for content
+/// that fits; over-width content drifts equally in both. (Pre-existing
+/// behaviour; documented here because the reservation reads like a guarantee
+/// otherwise.)
 const TRAILING_W: usize = COL_GAP + EPOCH_W + COL_GAP + DIST_W + COL_GAP + TRIG_W
     + COL_GAP + PIN_W + COL_GAP + RD_W + COL_GAP + AGENT_W;
 

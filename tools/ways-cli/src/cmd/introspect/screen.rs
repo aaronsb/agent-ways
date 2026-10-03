@@ -830,9 +830,9 @@ impl Pane for Sessions {
              following it when it is being written to. On the timeline ←→ step a\n\
              frame, space plays or follows, Enter or Tab opens why the selected way\n\
              fired, and f widens the table to every matched way. A way's mark and\n\
-             colour say what happened to it: green fired, ↩ re-disclosed, blue its\n\
-             check fired, ◌ shadow-judged, ⊘ judged out, ◷ held by its refire\n\
-             window, ⊟ over the context cap; bold is this frame. A click on the\n\
+             colour say what happened to it: the ok colour fired, ↩ re-disclosed,\n\
+             the info colour its check fired, ◌ shadow-judged, ⊘ judged out, ◷ held\n\
+             by its refire window, ⊟ over the context cap; bold is this frame. A click on the\n\
              track seeks there. `ways session replay --json` prints the timeline."
                 .into(),
         )
@@ -1074,7 +1074,7 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
         // The injected rows, then, in the matched view, the rows the judge,
         // the refire window or the context cap kept out: the order
         // `Frame::ways` keeps.
-        let agent_w = table::agent_width(&shown.ways, &r.agents, inner_w);
+        let agent_w = table::agent_width(&r.agents, inner_w);
         let mut rows = table::rows(fr, &r.agents, agent_w, r.window_k, inner_w);
         let way_w = table::way_width(inner_w, agent_w);
         let withheld = || shown.ways.iter().filter(|w| !w.outcome.injected());
@@ -1150,6 +1150,12 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
                 Span::raw(format!("{bullet} ")),
                 Span::styled(format!("e{:>ew$} ", w.epoch_fired), theme::muted()),
                 table::way_name(w, usize::MAX),
+                // A way several agents fired is a row each: name whose.
+                if w.agent.is_empty() || w.agent == super::frames::MAIN {
+                    Span::raw("")
+                } else {
+                    Span::styled(format!(" · {}", r.agents.label(&w.agent)), r.agents.style(&w.agent))
+                },
             ]))
         })
         .collect();

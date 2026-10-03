@@ -35,6 +35,10 @@ pub(crate) struct Meta {
 pub(crate) struct Agents {
     order: Vec<String>,
     meta: HashMap<String, Meta>,
+    /// Each subagent's name: its base, and a short id where another agent
+    /// of the session has the same base, so the two read apart without
+    /// colour.
+    names: HashMap<String, (String, Option<String>)>,
 }
 
 impl Agents {
@@ -47,7 +51,21 @@ impl Agents {
                 order.push(id.to_string());
             }
         }
-        Agents { order, meta }
+        let bases: Vec<String> = order.iter().map(|id| base_label(meta.get(id), id)).collect();
+        let names = order
+            .iter()
+            .zip(&bases)
+            .map(|(id, b)| {
+                let shared = bases.iter().filter(|o| *o == b).count() > 1;
+                (id.clone(), (b.clone(), shared.then(|| id.chars().take(5).collect())))
+            })
+            .collect();
+        Agents { order, meta, names }
+    }
+
+    /// The widest name of the session's agents, `main` included.
+    pub(crate) fn widest(&self) -> usize {
+        self.order.iter().map(|id| agent_fmt::visible_len(&self.label(id))).max().unwrap_or(0).max(MAIN.len())
     }
 
     /// The agents of `events`, named from the subagent transcripts beside
@@ -63,17 +81,22 @@ impl Agents {
     }
 
     /// How the Agent column names it: `main`; a workflow member as `wf·`
-    /// and its label; a subagent by its type; else a short id.
+    /// and its label; a subagent by its type (`general-purpose` as
+    /// `general`); else a short id. Two agents of one base add `·` and the
+    /// first five characters of their id.
     pub(crate) fn label(&self, id: &str) -> String {
+        match self.parts(id) {
+            (base, Some(suffix)) => format!("{base}·{suffix}"),
+            (base, None) => base,
+        }
+    }
+
+    /// The label's base and its disambiguating suffix, if any.
+    pub(crate) fn parts(&self, id: &str) -> (String, Option<String>) {
         if id == MAIN || id.is_empty() {
-            return id.to_string();
+            return (id.to_string(), None);
         }
-        match self.meta.get(id) {
-            Some(Meta { workflow_label: Some(l), .. }) if !l.is_empty() => format!("wf·{l}"),
-            Some(Meta { workflow_label: Some(_), .. }) => format!("wf·{}", short_id(id)),
-            Some(m) if !m.agent_type.is_empty() => m.agent_type.clone(),
-            _ => short_id(id),
-        }
+        self.names.get(id).cloned().unwrap_or_else(|| (base_label(self.meta.get(id), id), None))
     }
 
     /// Main muted; each subagent a categorical colour from agent-identity,
@@ -92,6 +115,22 @@ impl Agents {
             None => Style::new(),
         }
     }
+}
+
+/// An agent's name before any suffix.
+fn base_label(meta: Option<&Meta>, id: &str) -> String {
+    match meta {
+        Some(Meta { workflow_label: Some(l), .. }) if !l.is_empty() => format!("wf·{l}"),
+        Some(Meta { workflow_label: Some(_), .. }) => format!("wf·{}", short_id(id)),
+        Some(m) if m.agent_type == "general-purpose" => "general".to_string(),
+        Some(m) if !m.agent_type.is_empty() => m.agent_type.clone(),
+        _ => short_id(id),
+    }
+}
+
+/// Text from a meta file, without control characters: it reaches a cell.
+fn clean(s: Option<&str>) -> String {
+    s.unwrap_or("").chars().filter(|c| !c.is_control()).collect()
 }
 
 /// A subagent id as a few characters: a named agent's name
@@ -127,11 +166,11 @@ fn read_dir_meta(dir: &Path, workflow: bool, out: &mut HashMap<String, Meta>) {
         let Some(id) = name.strip_prefix("agent-").and_then(|n| n.strip_suffix(".meta.json")) else { continue };
         let Ok(text) = std::fs::read_to_string(e.path()) else { continue };
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
-        let agent_type = v["agentType"].as_str().unwrap_or("").to_string();
+        let agent_type = clean(v["agentType"].as_str());
         let workflow = workflow || agent_type == "workflow-subagent";
         out.insert(
             crate::session::agent_key(id),
-            Meta { agent_type, workflow_label: workflow.then(|| v["description"].as_str().unwrap_or("").to_string()) },
+            Meta { agent_type, workflow_label: workflow.then(|| clean(v["description"].as_str())) },
         );
     }
 }
@@ -166,11 +205,35 @@ mod tests {
         let wf = session.join("subagents/workflows/wf_x");
         std::fs::create_dir_all(&wf).unwrap();
         std::fs::write(session.join("subagents/agent-ab.meta.json"), r#"{"agentType":"Explore"}"#).unwrap();
-        std::fs::write(wf.join("agent-ac.meta.json"), r#"{"agentType":"workflow-subagent","description":"audit:front-door"}"#).unwrap();
+        // Control characters in a label are dropped as it is read.
+        std::fs::write(wf.join("agent-ac.meta.json"), r#"{"agentType":"workflow-subagent","description":"audit:\u0007front-door\n"}"#).unwrap();
+        // An id `agent_key` hashes: one longer than 64 characters.
+        let long = "a".repeat(70);
+        std::fs::write(session.join(format!("subagents/agent-{long}.meta.json")), r#"{"agentType":"code-reviewer"}"#).unwrap();
         let a = Agents::read(&[], Some(&tmp.join("s1.jsonl")));
         let _ = std::fs::remove_dir_all(&tmp);
         assert_eq!(a.label("ab"), "Explore");
         assert_eq!(a.label("ac"), "wf·audit:front-door");
         assert_eq!(a.agent_type("ac"), Some("workflow-subagent"));
+        let key = crate::session::agent_key(&long);
+        assert!(key.starts_with('h') && key.len() == 17, "{key}");
+        assert_eq!(a.label(&key), "code-reviewer");
+    }
+
+    /// `general-purpose` reads `general`; two agents of one name add a
+    /// short id, so they read apart without colour.
+    #[test]
+    fn agents_sharing_a_name_add_a_short_id() {
+        let gp = || Meta { agent_type: "general-purpose".into(), workflow_label: None };
+        let meta = HashMap::from([
+            ("a3897aaaaaaaaaaaa".to_string(), gp()),
+            ("a51c0bbbbbbbbbbbb".to_string(), gp()),
+            ("a0000cccccccccccc".to_string(), Meta { agent_type: "Explore".into(), workflow_label: None }),
+        ]);
+        let a = Agents::new(&[fire("a3897aaaaaaaaaaaa"), fire("a51c0bbbbbbbbbbbb"), fire("a0000cccccccccccc")], meta);
+        assert_eq!(a.label("a3897aaaaaaaaaaaa"), "general·a3897");
+        assert_eq!(a.label("a51c0bbbbbbbbbbbb"), "general·a51c0");
+        assert_eq!(a.label("a0000cccccccccccc"), "Explore");
+        assert_eq!(a.widest(), 13);
     }
 }
