@@ -434,6 +434,11 @@ mod tests {
         assert_eq!(field(verdicts[0], "verdict"), "pass");
         assert_eq!(field(verdicts[1], "verdict"), "block");
         assert_eq!(field(verdicts[1], "p_yes"), "0.050");
+        // Each verdict names the agent judged (#814): main where the hook
+        // named none. No test sets CLAUDE_AGENT_ID; a runner that does gets
+        // its agent's key.
+        let agent = if std::env::var_os("CLAUDE_AGENT_ID").is_none() { "main".to_string() } else { crate::session::current_agent() };
+        assert!(verdicts.iter().all(|v| field(v, "agent_id") == agent), "{verdicts:?}");
     }
 
     fn calls_in(events: &[Vec<(String, String)>]) -> Vec<Vec<(String, String)>> {

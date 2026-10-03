@@ -57,7 +57,7 @@ impl Agents {
             .zip(&bases)
             .map(|(id, b)| {
                 let shared = bases.iter().filter(|o| *o == b).count() > 1;
-                (id.clone(), (b.clone(), shared.then(|| id.chars().take(5).collect())))
+                (id.clone(), (b.clone(), shared.then(|| suffix_of(id))))
             })
             .collect();
         Agents { order, meta, names }
@@ -115,6 +115,21 @@ impl Agents {
             None => Style::new(),
         }
     }
+}
+
+/// Five characters that tell an agent from another of its name: after the
+/// leading `a` (an id) or `h` (an `agent_key` hash) when the rest is hex, a
+/// named id's hex tail (`a<name>-<16 hex>`), else the id's first five.
+fn suffix_of(id: &str) -> String {
+    let hex = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_hexdigit());
+    let rest = match id.rsplit_once('-') {
+        Some((_, tail)) if hex(tail) => tail,
+        _ => match id.strip_prefix('a').or_else(|| id.strip_prefix('h')) {
+            Some(r) if hex(r) => r,
+            _ => id,
+        },
+    };
+    rest.chars().take(5).collect()
 }
 
 /// An agent's name before any suffix.
@@ -231,9 +246,12 @@ mod tests {
             ("a0000cccccccccccc".to_string(), Meta { agent_type: "Explore".into(), workflow_label: None }),
         ]);
         let a = Agents::new(&[fire("a3897aaaaaaaaaaaa"), fire("a51c0bbbbbbbbbbbb"), fire("a0000cccccccccccc")], meta);
-        assert_eq!(a.label("a3897aaaaaaaaaaaa"), "general·a3897");
-        assert_eq!(a.label("a51c0bbbbbbbbbbbb"), "general·a51c0");
+        assert_eq!(a.label("a3897aaaaaaaaaaaa"), "general·3897a");
+        assert_eq!(a.label("a51c0bbbbbbbbbbbb"), "general·51c0b");
         assert_eq!(a.label("a0000cccccccccccc"), "Explore");
         assert_eq!(a.widest(), 13);
+        assert_eq!(suffix_of("h0123456789abcdef"), "01234");
+        assert_eq!(suffix_of("akernel-td-0a616d306c8e1ad9"), "0a616");
+        assert_eq!(suffix_of("odd.id"), "odd.i");
     }
 }
