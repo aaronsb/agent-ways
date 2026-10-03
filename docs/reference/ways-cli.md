@@ -12,16 +12,18 @@ Bare `ways` prints this help, under the banner on a terminal. When the relevance
 
 `ways settings`, `ways session`, `ways projects`, `ways agent` and `ways target` open a full-screen view when run bare on a terminal. Each screen is a view over commands that print the same data with `--json`. A table's bottom border names its command, with the scope the screen is showing, so an agent can read what the operator sees. In a pipe, each prints its help or its default listing instead.
 
-All screens share these keys:
+The session and projects screens share these keys:
 
 | Key | Does |
 |---|---|
 | `1`-`9` | Show that tab. A click on a tab shows it too. |
 | `?` or F1 | Open the key help for the screen and the current tab. Any other key closes it. |
 | `m` | Turn mouse capture on or off. With it off, the terminal selects text and a middle-click pastes. With it on, Shift-drag selects text in most terminals. |
-| `q`, Esc, ^C | Quit. With unsaved work, the screen asks first. Esc first leaves an inner view, such as a filter or the why page. |
+| `q`, Esc, ^C | Quit. Esc first leaves an inner view, such as a filter or the why page. |
 
-While a text field has the keyboard, such as a filter or a value being edited, the shell's letter and digit keys take Alt: `M-1`-`M-9` for tabs and `M-m` for the mouse. The footer shows the form in effect.
+While the projects filter has the keyboard, these keys take Alt: `M-1`-`M-9` for tabs and `M-m` for the mouse, and F1 opens the key help. The footer shows the form in effect.
+
+The settings screens have their own keys, listed under [settings screens](#settings-screens). Their key help opens with `?` only, and in a filter or an edit every key, Alt chords included, is typed into the field.
 
 ## `ways status`
 
@@ -95,7 +97,7 @@ Each tab is a tree of settings on the left and the selected key's detail on the 
 | `w` or ^S | Review this tab's pending items, read-only. In the review, `a` applies the tab, `X` discards it, Tab goes to the next tab and Esc goes back. |
 | `X` | Discard this tab's pending items, after a y/n confirm. |
 
-In the tree, yellow marks a changed value, blue a value that differs from its default, grey a read-only row and orange a queued action. `[a]` marks a row with actions and `!` a lint finding.
+In the tree, colour marks a row's state: a changed value, a value that differs from its default, a read-only row, a queued action. The `?` help names the colours of the theme in use. `[a]` marks a row with actions and `!` a lint finding.
 
 Some tabs have keys of their own, which the footer names. On the ways tab, `s` sets up agent-ways in a project, and `p` switches between this project's and all projects' switched-off ways. On the install tab, `t` activates a target, `A` adds one and `p` shows a target's plan (see [`ways target`](#ways-target)). On the theme tab, ↑↓ previews a theme and Enter uses it.
 
@@ -171,7 +173,7 @@ What the judge does, what it sends and how to watch it are explained in [the rel
 
 **Tells you:** The judge's provider calls with their tokens and cost in USD, as a total and one row per day. `--by month`, `session` or `project` groups them otherwise. `--project <path>` keeps one project's calls, matched as [`ways session`](#ways-session) matches a project, and `--since <YYYY-MM-DD>` and `--session <id>` narrow further. `--json` prints the total, all four groupings and `covers_since`, with `cost_usd` null for a group whose calls all have unknown cost.
 
-The hook logs each call as one `judge_call` event in `events.jsonl`, beside the `way_judged` events the call produced. OpenRouter reports each call's cost, and a request a provider refuses with a 4xx costs nothing. An Anthropic call is priced from its tokens at the profile's `price_in_per_mtok` and `price_out_per_mtok`, which apply as a pair. When those are unset, it is priced at Claude Haiku 4.5's list price for that model. A call that returned no usage, such as one that hit its deadline, or one with no price for its model, has unknown cost: it is counted apart and never summed as zero. The events log keeps its newest 24 MiB, so older calls drop out; when that bounds the query, the text ends with the date of the earliest judge call the log still holds.
+The hook logs each call as one `judge_call` event in `events.jsonl`, beside the `way_judged` events the call produced. OpenRouter reports each call's cost, and a request a provider refuses with a 4xx other than 408 costs nothing. An Anthropic call is priced from its tokens at the profile's `price_in_per_mtok` and `price_out_per_mtok`, which apply as a pair. When those are unset, it is priced at Claude Haiku 4.5's list price for that model. A call that returned no usage, such as one that hit its deadline, or one with no price for its model, has unknown cost: it is counted apart and never summed as zero. The events log keeps its newest 24 MiB, so older calls drop out; when that bounds the query, the text ends with the date of the earliest judge call the log still holds.
 
 ```
 ways agent cost                          # spend per day
@@ -228,7 +230,7 @@ Bare `ways projects` on a terminal opens the projects screen. In a pipe it runs 
 
 **When:** Seeing which ways fired in a session and why, following the current session as ways fire, switching ways off for a session's subagents, or clearing a session's state.
 
-**Run from:** The project directory, which scopes the sessions to that project and the paths under it. An agent's worktree in `.claude/worktrees/` counts toward its project; `/a/foo-bar` is not part of `/a/foo`. The tune commands and `ways agent cost --project` match a project the same way. A relative `--project`, such as `.`, is resolved against the working directory. With no `--session`, the default session is the newest at the project itself, else the newest under it. `--project <dir>` picks another project and `--all` takes every project. When the current project cannot be detected, the command fails rather than reading every project.
+**Run from:** The project directory, which scopes the sessions to that project and the paths under it. An agent's worktree in `.claude/worktrees/` counts toward its project; `/a/foo-bar` is not part of `/a/foo`. The tune commands and `ways agent cost --project` match a project the same way. A relative `--project`, such as `.`, is resolved against the working directory. With no `--session`, the default session is the newest at the project itself, else the newest under it. `--project <dir>` picks another project on `replay`, `live`, `list`, `dump` and `fires`, and `--all` takes every project on `replay`, `list`, `dump` and `fires`. `ways` and `subagents` take neither: they read the current session or `--session`. On `reset`, `--all` means every session's state. When the current project cannot be detected, the command fails rather than reading every project.
 
 **Tells you:** Depends on the verb.
 
@@ -300,7 +302,7 @@ A session whose transcript Claude Code wrote within the last two minutes is live
 | Enter | Open the session on the timeline: `follow` on a live one, `replay` otherwise. A click on the selected row does the same. |
 | PgUp PgDn Home End | Move by a page or to an end. |
 
-Liveness comes from `stat` alone, never a read of the transcript. The list stats each transcript once when it is built, then re-stats each on its own interval: 2s after a write, doubling while it stays quiet, up to 60s. A transcript last written more than a day ago is not re-stated while the list is open.
+Liveness comes from `stat` alone, never a read of the transcript. The list stats each transcript once when it is built, then re-stats each on its own interval: 2s after a write, doubling while it stays quiet, up to 60s. A transcript last written more than a day ago is not checked again while the list is open.
 
 #### Timeline tab
 
@@ -682,7 +684,7 @@ ways uninstall --yes --purge   # also your config and state
 
 ## Plumbing
 
-The hooks call these. They are hidden from `ways --help` and from shell completion, and their names stay fixed because processes that do not reload with the binary call them ([ADR-507](../architecture/platform/ADR-507-the-ways-commands-regroup-into-operator-commands-and-six-groups-names-another-process-calls-stay-fixed.md)). They are safe to call by hand when testing a way or a custom hook.
+The hooks call these. They are hidden from `ways --help`, and their names stay fixed because processes that do not reload with the binary call them ([ADR-507](../architecture/platform/ADR-507-the-ways-commands-regroup-into-operator-commands-and-six-groups-names-another-process-calls-stay-fixed.md)). They are safe to call by hand when testing a way or a custom hook.
 
 | Command | Used by |
 |---|---|

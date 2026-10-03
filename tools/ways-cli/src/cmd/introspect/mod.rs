@@ -427,7 +427,7 @@ fn fires_report(content: &str, session_id: &str, max_score: Option<f64>, limit: 
         max_score.map(|c| format!(" · ≤ {c:.2}")).unwrap_or_default(),
     );
     for f in rows.into_iter().take(shown) {
-        let mark = if f.redisclosed { "↻" } else { " " };
+        let mark = if f.redisclosed { "↩" } else { " " };
         let _ = writeln!(out, "  {:.3} {mark} {:<44}  {}", f.score, f.way, f.surface);
     }
     if shown < total {
@@ -479,6 +479,21 @@ mod fires_tests {
         assert!(matched.contains("2 kept out by the relevance judge in this session:\n  P(yes) 0.05 < 0.30  d/b\n  P(yes) 0.05 < 0.30  d/b/c (with d/b)\n"), "{matched}");
         let none = fires_report(LOG, "other", None, None, true);
         assert!(none.contains("No semantic fires") && none.contains("No way was kept out"), "{none}");
+    }
+
+    /// The text marks a re-disclosure `↩`, as the screen does; the JSON
+    /// carries it as `redisclosed`.
+    #[test]
+    fn a_re_disclosure_is_marked_as_the_screen_marks_it() {
+        let log = concat!(
+            r#"{"event":"way_fired","session":"s","ts":"2026-01-01T00:00:00Z","way":"d/a","trigger":"semantic:embedding:en","fire_score":"0.410","surface":"prompt"}"#, "\n",
+            r#"{"event":"way_redisclosed","session":"s","ts":"2026-01-01T00:09:00Z","way":"d/a","trigger":"semantic:embedding:en","fire_score":"0.520","surface":"again"}"#, "\n",
+        );
+        let text = fires_report(log, "s", None, None, false);
+        assert!(text.contains("  0.410   d/a") && text.contains("  0.520 ↩ d/a"), "{text}");
+        assert!(!text.contains('↻'), "{text}");
+        let j = fires_json(log, "s", None, None, false);
+        assert_eq!(j["fires"][1]["redisclosed"], true, "{j}");
     }
 
     /// The JSON form carries what the text does, as data: the fires lowest

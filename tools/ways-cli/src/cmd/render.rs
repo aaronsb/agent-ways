@@ -46,7 +46,8 @@ const AGENT_W: usize = 12;
 const COL_GAP: usize = 2;
 const INDENT: usize = 2;
 /// The room the token gauge leaves after its bar for its label,
-/// ` 100% (1000K / 1000K)`, so the gauge line fits the terminal.
+/// ` 100% (1000K / 1000K)`, so the gauge line fits the terminal. The bar
+/// keeps at least 10 cells, so below about 33 columns the line still wraps.
 const GAUGE_LABEL_W: usize = 21;
 
 /// Nominal visible width of the fixed Epoch…Agent block that trails the Way
@@ -743,17 +744,29 @@ mod tests {
             Fired { token_k: 900, window_k: 120 },
             Fired { token_k: 960, window_k: 400 },
         ];
+        // Mid-session, ways ahead of the cursor spread the forecast over a
+        // real zoom: its arrows, markers and scale labels are drawn.
+        let mid = [
+            Fired { token_k: 500, window_k: 40 },
+            Fired { token_k: 520, window_k: 120 },
+            Fired { token_k: 540, window_k: 400 },
+        ];
         for width in [80, 100, 160] {
             let layout = Layout::for_id_width_in(3, width);
-            let pos = compute_bar_positions_in(&ways, 1000, layout.bar_width);
-            let unique = unique_positions(&pos);
-            let mut out = String::new();
-            write_token_timeline(&mut out, &ways, &unique, 1000, 1000, &layout);
-            assert!(out.contains("100% (1000K / 1000K)"), "{out}");
-            assert!(out.contains("approaching = near threshold"), "{out}");
-            for line in out.lines() {
-                let w = agent_fmt::visible_len(line);
-                assert!(w <= width, "{w} columns at {width}: {line:?}");
+            for (ways, current, gauge) in [(&ways, 1000, "100% (1000K / 1000K)"), (&mid, 550, "55% (550K / 1000K)")] {
+                let pos = compute_bar_positions_in(ways, 1000, layout.bar_width);
+                let unique = unique_positions(&pos);
+                let mut out = String::new();
+                write_token_timeline(&mut out, ways, &unique, current, 1000, &layout);
+                assert!(out.contains(gauge), "{out}");
+                assert!(out.contains("approaching = near threshold"), "{out}");
+                if current == 550 {
+                    assert!(out.contains("Forecast") && out.contains("550K") && out.contains('^'), "{out}");
+                }
+                for line in out.lines() {
+                    let w = agent_fmt::visible_len(line);
+                    assert!(w <= width, "{w} columns at {width}: {line:?}");
+                }
             }
         }
     }
