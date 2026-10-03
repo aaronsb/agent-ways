@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| session   1 timeline   2 fires   3 spend   4 stats   5 precision               |
+| 1 timeline    2 fires    3 spend    4 stats    5 precision                     |
 |Fire precision · 0 flagged · off-class ≥ 50% over ≥ 5 sessions                  |
 |┌ 2 ways fired in /home/dev/proj ──────────────────────────────────────────────┐|
 |│ Way                                Flag          Sess Off Irrel Off trigger  │|
@@ -23,14 +23,13 @@ agent-tui frame 80x25
 |│                                                                              │|
 |└ ways tune precision --json --project /home/dev/proj ─────────────────────────┘|
 |remedy insufficient sample                                                      |
-| precision   ↑↓ select  q quit                                                  |
+| precision  mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · 1-9 tabs    |
 styles
-  0   0-8   White Blue -
-  0  10-21  White DarkGray DIM
-  0  23-31  White DarkGray DIM
-  0  33-41  White DarkGray DIM
-  0  43-51  White DarkGray DIM
-  0  53-65  Black Cyan BOLD
+  0   0-11  White Blue -
+  0  14-22  White Blue -
+  0  25-33  White Blue -
+  0  36-44  White Blue -
+  0  47-59  Black Cyan BOLD
   1   0-13  - - BOLD
   1  14-61  - - DIM
   2   0-0   - - DIM
@@ -85,7 +84,11 @@ styles
  22  54-79  - - DIM
  23   0-6   - - DIM
  24   0-10  Black Cyan BOLD
- 24  13-14  Cyan - BOLD
- 24  15-21  - - DIM|ITALIC
- 24  24-24  Cyan - BOLD
- 24  25-29  - - DIM|ITALIC
+ 24  12-43  - - DIM|ITALIC
+ 24  44-46  - - DIM
+ 24  47-48  Cyan - -
+ 24  49-55  - - DIM|ITALIC
+ 24  56-58  Cyan - -
+ 24  59-67  - - DIM|ITALIC
+ 24  68-71  Cyan - -
+ 24  72-75  - - DIM|ITALIC

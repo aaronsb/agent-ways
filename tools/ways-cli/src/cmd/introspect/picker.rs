@@ -6,13 +6,12 @@
 use std::time::Duration;
 
 use agent_tui::ratatui::crossterm::event::KeyCode;
-use agent_tui::ratatui::layout::{Alignment, Constraint, Layout};
+use agent_tui::ratatui::layout::{Alignment, Constraint, Position, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
 use agent_tui::ratatui::text::{Line, Span};
 use agent_tui::ratatui::widgets::{Cell, HighlightSpacing, Paragraph, Row, Table, TableState};
 use agent_tui::ratatui::Frame as Draw;
-use agent_tui::theme::{self, Ground, Shape};
-use agent_tui::timeline::key_bar;
+use agent_tui::theme;
 
 use crate::cmd::screen_host::pane;
 use super::live::{Clock, Sampler, Stat, SAMPLE_TICK};
@@ -32,6 +31,8 @@ pub(crate) struct Picker {
     /// The session the screen was opened from (`CLAUDE_CODE_SESSION_ID`).
     pub(crate) own: Option<String>,
     table: TableState,
+    /// Where the last frame drew the list.
+    area: Rect,
 }
 
 impl Picker {
@@ -40,7 +41,7 @@ impl Picker {
     pub(crate) fn new(mut sessions: Vec<SessionInfo>, scope: String) -> Picker {
         sessions.reverse();
         let sampler = Sampler::idle(sessions.len());
-        Picker { sessions, scope, sel: 0, sampler, own: None, table: TableState::default() }
+        Picker { sessions, scope, sel: 0, sampler, own: None, table: TableState::default(), area: Rect::default() }
     }
 
     /// State each session's transcript now, and re-state it on its backoff
@@ -68,6 +69,12 @@ impl Picker {
             KeyCode::End | KeyCode::Char('G') => last,
             _ => self.sel,
         };
+    }
+
+    /// A click on a row selects it; true when it was the selected row,
+    /// which a click opens.
+    pub(crate) fn click(&mut self, at: Position) -> bool {
+        agent_tui::hit::row_at(self.area, at, 1, self.table.offset()).is_some_and(|i| agent_tui::hit::pick(&mut self.sel, i, self.sessions.len()))
     }
 
     /// Put the cursor on session `id`, when it is listed.
@@ -109,9 +116,8 @@ fn title(p: &Picker, width: usize) -> String {
     format!("{head}{scope}{tail}")
 }
 
-pub(crate) fn draw_picker(f: &mut Draw, p: &mut Picker, tab_line: Line<'static>, shape: Shape, msg: &str) {
-    let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
-    f.render_widget(Paragraph::new(tab_line), bar);
+/// The list in `main`, the area between the shell's bars.
+pub(crate) fn draw_picker(f: &mut Draw, p: &mut Picker, main: Rect) {
     // The counts first: a long scope is cut at its end, never a count.
     let title = title(p, main.width.saturating_sub(2) as usize);
     if p.sessions.is_empty() {
@@ -175,23 +181,5 @@ pub(crate) fn draw_picker(f: &mut Draw, p: &mut Picker, tab_line: Line<'static>,
         p.table.select(Some(p.sel));
         f.render_stateful_widget(t, main, &mut p.table);
     }
-    let right = if msg.is_empty() {
-        let mut spans = Vec::new();
-        // When the selected session's transcript was last written, live or not.
-        if let Some(at) = p.sampler.last_write(p.sel) {
-            let ago = agent_fmt::when::ago(p.sampler.now().saturating_sub(at) / 1000);
-            if p.sampler.live(p.sel) {
-                spans.push(Span::styled(format!("{LIVE_MARK} live · written {ago} · "), theme::ok()));
-            } else {
-                spans.push(Span::styled(format!("written {ago} · "), theme::muted()));
-            }
-        }
-        spans.push(Span::styled(format!("{}/{}", (p.sel + 1).min(p.sessions.len()), p.sessions.len()), theme::muted()));
-        spans
-    } else {
-        vec![Span::styled(msg.to_string(), theme::err().add_modifier(Modifier::BOLD))]
-    };
-    let enter = if p.selected_live() { "follow" } else { "replay" };
-    let keys = [("↑↓", "select"), ("⏎", enter), ("q", "quit")];
-    f.render_widget(Paragraph::new(key_bar(shape, "pick", Ground::Accent, &keys, right, status.width)), status);
+    p.area = main;
 }

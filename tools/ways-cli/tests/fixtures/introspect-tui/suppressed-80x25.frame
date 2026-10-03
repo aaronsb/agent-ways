@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| session   1 timeline   2 fires   3 spend   4 stats   5 precision               |
+| 1 timeline    2 fires    3 spend    4 stats    5 precision                     |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                    |
 |epoch 2 · 200K ctx · 1 ways · window 1/1 · 2026-07-03 16:53 · ⊝ 3 suppressed    |
 |━━━━━━━━━━━━━━━━━━━━━━━━━●─────────────────────────────────────────────────⊝ 2/4|
@@ -23,14 +23,13 @@ agent-tui frame 80x25
 |│● 1 re-disclose now  │ 40K interval                                           │|
 |│⊝ suppressed: dispatch (session switch), agent a7f3c2 (session switch)        │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-| replay   ↑↓ select  ⏎ why  ←→ frame  space play  +- 1.0s  f matched  q quit    |
+| replay  mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · ⏎ why          |
 styles
-  0   0-8   White Blue -
-  0  10-21  Black Cyan BOLD
-  0  23-31  White DarkGray DIM
-  0  33-41  White DarkGray DIM
-  0  43-51  White DarkGray DIM
-  0  53-65  White DarkGray DIM
+  0   0-11  Black Cyan BOLD
+  0  14-22  White Blue -
+  0  25-33  White Blue -
+  0  36-44  White Blue -
+  0  47-59  White Blue -
   1   0-7   - - BOLD
   1  44-59  - - DIM
   2   0-58  - - DIM
@@ -94,17 +93,11 @@ styles
  22  79-79  - - DIM
  23   0-79  - - DIM
  24   0-7   Black Cyan BOLD
- 24  10-11  Cyan - BOLD
- 24  12-18  - - DIM|ITALIC
- 24  21-21  Cyan - BOLD
- 24  22-25  - - DIM|ITALIC
- 24  28-29  Cyan - BOLD
- 24  30-35  - - DIM|ITALIC
- 24  38-42  Cyan - BOLD
- 24  43-47  - - DIM|ITALIC
- 24  50-51  Cyan - BOLD
- 24  52-56  - - DIM|ITALIC
- 24  59-59  Cyan - BOLD
- 24  60-67  - - DIM|ITALIC
- 24  70-70  Cyan - BOLD
- 24  71-75  - - DIM|ITALIC
+ 24   9-40  - - DIM|ITALIC
+ 24  41-43  - - DIM
+ 24  44-45  Cyan - -
+ 24  46-52  - - DIM|ITALIC
+ 24  53-55  Cyan - -
+ 24  56-64  - - DIM|ITALIC
+ 24  65-66  Cyan - -
+ 24  67-69  - - DIM|ITALIC

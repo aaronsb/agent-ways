@@ -1,13 +1,13 @@
 agent-tui frame 80x25
-| 1 timeline    2 fires    3 spend    4 stats    5 precision                     |
+| 1 sessions    2 timeline    3 fires    4 spend    5 stats    6 precision       |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                    |
-|epoch 1 · 200K ctx · 3 ways · window 1/1 · 2026-07-03 16:52  ◆ matched          |
-|●─────────────────────────────────────────────────────────────────────────── 1/2|
+|epoch 1 · 200K ctx · 2 ways · window 1/2 · 2026-07-03 16:52  ◇ injected         |
+|●──────────────────────────────────────────────────────────────────────────┼ 1/4|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────┐|
 |│ Way                             Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│▌softwaredev/code/testing            1      0  embed:en       ◆  ─            │|
-|│ ◌ softwaredev/delivery/commits      1      0  keyword        ●  ─            │|
-|│ ⊘ itops/incident                    1      0  judge 0.050       not injected │|
+|│ softwaredev/code/testing            1      0  embed:en       ◆  ─            │|
+|│▌softwaredev/delivery/commits        1      0  keyword        ●  ─            │|
+|│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -25,15 +25,16 @@ agent-tui frame 80x25
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | replay  mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · ⏎ why          |
 styles
-  0   0-11  Black Cyan BOLD
-  0  14-22  White Blue -
-  0  25-33  White Blue -
-  0  36-44  White Blue -
-  0  47-59  White Blue -
+  0   0-11  White Blue -
+  0  14-25  Black Cyan BOLD
+  0  28-36  White Blue -
+  0  39-47  White Blue -
+  0  50-58  White Blue -
+  0  61-73  White Blue -
   1   0-7   - - BOLD
   1  44-59  - - DIM
   2   0-58  - - DIM
-  2  59-69  Cyan - BOLD
+  2  59-70  Cyan - -
   3   0-0   Cyan - BOLD
   3   1-75  - - DIM
   3  76-79  - - BOLD
@@ -44,21 +45,22 @@ styles
   5   1-78  - - BOLD
   5  79-79  - - DIM
   6   0-0   - - DIM
-  6   1-1   Cyan - BOLD|REVERSED
-  6   2-62  Green - BOLD|REVERSED
-  6  63-63  #7dd87d - BOLD|REVERSED
-  6  64-65  Green - BOLD|REVERSED
-  6  66-66  Green - BOLD|DIM|REVERSED
-  6  67-78  Green - BOLD|REVERSED
+  6   1-62  Green - BOLD
+  6  63-63  #7dd87d - BOLD
+  6  64-65  Green - BOLD
+  6  66-66  Green - BOLD|DIM
+  6  67-78  Green - BOLD
   6  79-79  - - DIM
   7   0-0   - - DIM
-  7   1-62  Green - BOLD
-  7  63-63  #5ac8fa - BOLD
-  7  64-65  Green - BOLD
-  7  66-66  Green - BOLD|DIM
-  7  67-78  Green - BOLD
+  7   1-1   Cyan - BOLD|REVERSED
+  7   2-62  Green - BOLD|REVERSED
+  7  63-63  #5ac8fa - BOLD|REVERSED
+  7  64-65  Green - BOLD|REVERSED
+  7  66-66  Green - BOLD|DIM|REVERSED
+  7  67-78  Green - BOLD|REVERSED
   7  79-79  - - DIM
-  8   0-79  - - DIM
+  8   0-0   - - DIM
+  8  79-79  - - DIM
   9   0-0   - - DIM
   9  79-79  - - DIM
  10   0-0   - - DIM

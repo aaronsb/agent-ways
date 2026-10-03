@@ -4,7 +4,7 @@
 //! [`ways_agent_core::spend`].
 
 use agent_tui::ratatui::crossterm::event::KeyCode;
-use agent_tui::ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use agent_tui::ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
 use agent_tui::ratatui::text::{Line, Span};
 use agent_tui::ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
@@ -82,6 +82,11 @@ impl Reports {
         &mut self.precision
     }
 
+    /// Whether the spend tab groups by day.
+    pub(crate) fn by_day(&self) -> bool {
+        self.spend.by == By::Day
+    }
+
     /// Which of spend, stats and precision wait to read the log.
     #[cfg(test)]
     pub(crate) fn stale(&self) -> [bool; 3] {
@@ -124,6 +129,8 @@ pub(crate) struct Spend {
     pub(crate) by: By,
     sel: usize,
     table: TableState,
+    /// Where the last frame drew the table.
+    area: Rect,
 }
 
 impl Spend {
@@ -132,7 +139,7 @@ impl Spend {
     /// filter: the log's start bounds every scope alike.
     pub(crate) fn new(calls: Vec<Call>, project: Option<&str>, scope: String) -> Spend {
         let hint = scoped("ways agent cost --json", project, "");
-        let mut s = Spend { calls: Vec::new(), covers_since: None, project: project.map(str::to_string), scope, hint, by: By::Day, sel: 0, table: TableState::default() };
+        let mut s = Spend { calls: Vec::new(), covers_since: None, project: project.map(str::to_string), scope, hint, by: By::Day, sel: 0, table: TableState::default(), area: Rect::default() };
         s.take(calls);
         s
     }
@@ -169,9 +176,12 @@ impl Spend {
         }
     }
 
-    /// The key bar's entries for this tab.
-    pub(crate) fn keys(&self) -> Vec<(&'static str, &'static str)> {
-        vec![("↑↓", "select"), ("m", if self.by == By::Day { "by month" } else { "by day" })]
+    /// A click on a group's row selects it; the total's row is not one.
+    pub(crate) fn click(&mut self, at: Position) {
+        if let Some(i) = agent_tui::hit::row_at(self.area, at, 1, self.table.offset()) {
+            let len = self.groups().len();
+            agent_tui::hit::pick(&mut self.sel, i, len);
+        }
     }
 
     pub(crate) fn draw(&mut self, f: &mut Draw, area: Rect) {
@@ -184,6 +194,7 @@ impl Spend {
         f.render_widget(Paragraph::new(Line::from(line)), head);
 
         let title = format!(" {} judge calls in {} ", self.calls.len(), self.scope);
+        self.area = body;
         let groups = self.groups();
         if groups.is_empty() {
             f.render_widget(Paragraph::new(Line::styled("no judge calls recorded", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), body);
@@ -291,6 +302,7 @@ pub(crate) struct Precision {
     hint: String,
     sel: usize,
     table: TableState,
+    area: Rect,
 }
 
 impl Precision {
@@ -298,7 +310,7 @@ impl Precision {
     /// project with `None`, at the CLI's default gates.
     pub(crate) fn new(content: &str, project: Option<&str>, scope: String) -> Precision {
         let hint = scoped("ways tune precision --json", project, "");
-        let mut p = Precision { rows: Vec::new(), project: project.map(str::to_string), scope, hint, sel: 0, table: TableState::default() };
+        let mut p = Precision { rows: Vec::new(), project: project.map(str::to_string), scope, hint, sel: 0, table: TableState::default(), area: Rect::default() };
         p.reload(content);
         p
     }
@@ -313,6 +325,13 @@ impl Precision {
         self.sel = moved(self.sel, self.rows.len(), k);
     }
 
+    /// A click on a row selects it.
+    pub(crate) fn click(&mut self, at: Position) {
+        if let Some(i) = agent_tui::hit::row_at(self.area, at, 1, self.table.offset()) {
+            agent_tui::hit::pick(&mut self.sel, i, self.rows.len());
+        }
+    }
+
     pub(crate) fn draw(&mut self, f: &mut Draw, area: Rect) {
         let [head, body, remedy] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(area);
         let flagged = self.rows.iter().filter(|r| !matches!(r.flag, Flag::Ok | Flag::LowN)).count();
@@ -325,6 +344,7 @@ impl Precision {
         ];
         f.render_widget(Paragraph::new(Line::from(line)), head);
         let title = format!(" {} ways fired in {} ", self.rows.len(), self.scope);
+        self.area = body;
         if self.rows.is_empty() {
             f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), body);
             return;
@@ -384,6 +404,7 @@ pub(crate) struct Stats {
     hint: String,
     sel: usize,
     table: TableState,
+    area: Rect,
 }
 
 impl Stats {
@@ -391,7 +412,7 @@ impl Stats {
     /// project with `None`.
     pub(crate) fn new(content: &str, project: Option<&str>, scope: String) -> Stats {
         let hint = scoped("ways tune stats --json", project, "--global");
-        let mut s = Stats { report: StatsReport::default(), project: project.map(str::to_string), scope, hint, sel: 0, table: TableState::default() };
+        let mut s = Stats { report: StatsReport::default(), project: project.map(str::to_string), scope, hint, sel: 0, table: TableState::default(), area: Rect::default() };
         s.reload(content);
         s
     }
@@ -404,6 +425,13 @@ impl Stats {
 
     pub(crate) fn key(&mut self, k: KeyCode) {
         self.sel = moved(self.sel, self.report.by_way.len(), k);
+    }
+
+    /// A click on a way's row selects it.
+    pub(crate) fn click(&mut self, at: Position) {
+        if let Some(i) = agent_tui::hit::row_at(self.area, at, 1, self.table.offset()) {
+            agent_tui::hit::pick(&mut self.sel, i, self.report.by_way.len());
+        }
     }
 
     pub(crate) fn draw(&mut self, f: &mut Draw, area: Rect) {
@@ -424,6 +452,7 @@ impl Stats {
         let [left, side] = Layout::horizontal([Constraint::Min(30), Constraint::Length(side_width)]).areas(body);
 
         let title = format!(" {} ways in {} ", r.by_way.len(), self.scope);
+        self.area = left;
         if r.by_way.is_empty() {
             f.render_widget(Paragraph::new(Line::styled("no ways fired", theme::muted())).block(pane(title).title_bottom(agent_hint(&self.hint))), left);
         } else {

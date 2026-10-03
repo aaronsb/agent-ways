@@ -1,18 +1,21 @@
 //! The `ways projects` screen (#748): the projects, most recently active
 //! first, and the selected one's detail as `show` prints it. The filter
 //! narrows the table by `search`'s shallow match. Each pane's border names
-//! the command that prints its data (ADR-507, note of 2026-10-02).
+//! the command that prints its data (ADR-507, note of 2026-10-02). It is a
+//! pane of agent-tui's shell (ADR-504 §3), which draws the bars and takes
+//! the mouse: a click selects a row, and the wheel moves the selection or
+//! scrolls the detail under it.
 
 use agent_tui::input::Input;
-use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use agent_tui::ratatui::layout::{Alignment, Constraint, Layout};
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use agent_tui::ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
 use agent_tui::ratatui::text::{Line, Span};
 use agent_tui::ratatui::widgets::{Cell, HighlightSpacing, Paragraph, Row, Table, TableState, Wrap};
 use agent_tui::ratatui::Frame as Draw;
 use agent_tui::screen::Screen;
 use agent_tui::theme::{self, Ground, Palette, Seg, Shape};
-use agent_tui::timeline::key_bar;
+use agent_tui::{App, Binding, Keyed, Pane, PaneTab, Tone};
 use anyhow::Result;
 
 use super::{ellipsize_left, list_cells, scan_all, shallow_match, show_project, Env, Project};
@@ -21,7 +24,7 @@ use crate::cmd::screen_host::{self, pane, Open};
 /// Open the screen on the terminal, or headless as `open` asks.
 pub(crate) fn open(open: &Open) -> Result<()> {
     let (palette, shape) = screen_host::look(screen_host::depth_of(open.depth.as_deref())?);
-    screen_host::show(Projects::new(&Env::user(), palette, shape), open)
+    screen_host::show(Projects::new(&Env::user(), palette, shape).into_app(), open)
 }
 
 /// One project: what the table and the detail show of it.
@@ -31,7 +34,8 @@ struct Entry {
     detail: Vec<String>,
 }
 
-pub(crate) struct Projects {
+/// The projects screen's state: the pane the shell hosts.
+pub(crate) struct ProjectsPane {
     palette: Palette,
     shape: Shape,
     entries: Vec<Entry>,
@@ -45,10 +49,12 @@ pub(crate) struct Projects {
     /// The detail pane's first line shown; back to the top on a new selection.
     scroll: u16,
     table: TableState,
+    /// Where the last frame drew the table and the detail.
+    hits: (Rect, Rect),
 }
 
-impl Projects {
-    pub(crate) fn new(env: &Env, palette: Palette, shape: Shape) -> Projects {
+impl ProjectsPane {
+    fn new(env: &Env, palette: Palette, shape: Shape) -> ProjectsPane {
         let entries: Vec<Entry> = scan_all(env)
             .into_iter()
             .map(|project| {
@@ -64,7 +70,7 @@ impl Projects {
             })
             .collect();
         let shown = (0..entries.len()).collect();
-        Projects { palette, shape, entries, shown, sel: 0, filter: Input::new(), editing: false, scroll: 0, table: TableState::default() }
+        ProjectsPane { palette, shape, entries, shown, sel: 0, filter: Input::new(), editing: false, scroll: 0, table: TableState::default(), hits: Default::default() }
     }
 
     fn selected(&self) -> Option<&Entry> {
@@ -119,31 +125,42 @@ impl Projects {
     }
 }
 
-impl Screen for Projects {
+impl Pane for ProjectsPane {
     fn palette(&self) -> Palette {
         self.palette
     }
 
-    fn draw(&mut self, f: &mut Draw) {
-        // The table takes its rows, up to 45% of the body; the detail the rest.
-        let body = f.area().height.saturating_sub(2);
-        let table_h = (self.shown.len() as u16 + 3).clamp(3, (body * 45 / 100).max(3));
-        let [top, list, detail, status] =
-            Layout::vertical([Constraint::Length(1), Constraint::Length(table_h), Constraint::Min(5), Constraint::Length(1)]).areas(f.area());
+    /// No tabs: the bar names the screen and the filter, as a trailer.
+    fn tabs(&mut self) -> Vec<PaneTab> {
+        Vec::new()
+    }
 
+    fn tab(&mut self) -> usize {
+        0
+    }
+
+    fn set_tab(&mut self, _: usize) {}
+
+    fn trailer(&mut self) -> Vec<Span<'static>> {
         let mut bar = self.shape.lozenge(&[Seg::on(" projects ", Ground::AccentDim)]);
         if self.editing || !self.filter.is_empty() {
             bar.push(Span::styled("  / ", theme::accent()));
             if self.editing {
-                let used: usize = bar.iter().map(Span::width).sum();
-                let rows = self.filter.rows(top.width.saturating_sub(used as u16).max(1), theme::body());
+                let rows = self.filter.rows(u16::MAX, theme::body());
                 bar.extend(rows.into_iter().next().map(|l| l.spans).unwrap_or_default());
             } else {
                 bar.push(Span::styled(self.filter.text().to_string(), theme::body()));
             }
         }
-        f.render_widget(Paragraph::new(Line::from(bar)), top);
+        bar
+    }
 
+    fn draw(&mut self, f: &mut Draw, area: Rect) {
+        // The table takes its rows, up to 45% of the body; the detail the rest.
+        let body = area.height;
+        let table_h = (self.shown.len() as u16 + 3).clamp(3, (body * 45 / 100).max(3));
+        let [list, detail] = Layout::vertical([Constraint::Length(table_h), Constraint::Min(5)]).areas(area);
+        self.hits = (list, detail);
         let title = self.list_command();
         if self.shown.is_empty() {
             let none = if self.filter.is_empty() { "No projects found." } else { "No matching projects found." };
@@ -199,21 +216,9 @@ impl Screen for Projects {
         }
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((self.scroll, 0)).block(block), detail);
 
-        let count = vec![Span::styled(format!("{}/{}", (self.sel + 1).min(self.shown.len()), self.shown.len()), theme::muted())];
-        let (mode, keys): (&str, Vec<(&str, &str)>) = if self.editing {
-            ("filter", vec![("↑↓", "select"), ("⏎", "keep"), ("esc", "clear")])
-        } else if self.filter.is_empty() {
-            ("projects", vec![("↑↓", "select"), ("J/K", "detail"), ("/", "filter"), ("q", "quit")])
-        } else {
-            ("projects", vec![("↑↓", "select"), ("J/K", "detail"), ("/", "filter"), ("esc", "clear"), ("q", "quit")])
-        };
-        f.render_widget(Paragraph::new(key_bar(self.shape, mode, Ground::Accent, &keys, count, status.width)), status);
     }
 
-    fn key(&mut self, k: KeyEvent) -> bool {
-        if k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
-            return false;
-        }
+    fn key(&mut self, k: KeyEvent) -> Keyed {
         if self.editing {
             match k.code {
                 KeyCode::Enter => self.editing = false,
@@ -226,38 +231,115 @@ impl Screen for Projects {
                     }
                 }
             }
-            return true;
+            return Keyed::Done;
         }
         match k.code {
-            KeyCode::Char('q') => false,
-            KeyCode::Esc if self.filter.is_empty() => false,
-            KeyCode::Esc => {
-                self.clear_filter();
-                true
-            }
-            KeyCode::Char('/') => {
-                self.editing = true;
-                true
-            }
+            KeyCode::Esc if self.filter.is_empty() => return Keyed::Pass,
+            KeyCode::Esc => self.clear_filter(),
+            KeyCode::Char('/') => self.editing = true,
             // Shift scrolls the detail; the draw keeps it in range.
-            KeyCode::Char('J') => {
-                self.scroll = self.scroll.saturating_add(1);
-                true
-            }
-            KeyCode::Char('K') => {
-                self.scroll = self.scroll.saturating_sub(1);
-                true
-            }
-            c => {
-                self.travel(match c {
-                    KeyCode::Char('k') => KeyCode::Up,
-                    KeyCode::Char('j') => KeyCode::Down,
-                    KeyCode::Char('g') => KeyCode::Home,
-                    KeyCode::Char('G') => KeyCode::End,
-                    c => c,
-                });
-                true
+            KeyCode::Char('J') => self.scroll = self.scroll.saturating_add(1),
+            KeyCode::Char('K') => self.scroll = self.scroll.saturating_sub(1),
+            c => self.travel(match c {
+                KeyCode::Char('k') => KeyCode::Up,
+                KeyCode::Char('j') => KeyCode::Down,
+                KeyCode::Char('g') => KeyCode::Home,
+                KeyCode::Char('G') => KeyCode::End,
+                c => c,
+            }),
+        }
+        Keyed::Done
+    }
+
+    /// The wheel over the detail scrolls it; elsewhere it moves the
+    /// selection, as the arrows do.
+    fn wheel_at(&mut self, up: bool, at: Position) {
+        if self.hits.1.contains(at) {
+            self.scroll = if up { self.scroll.saturating_sub(1) } else { self.scroll.saturating_add(1) };
+        } else {
+            self.travel(if up { KeyCode::Up } else { KeyCode::Down });
+        }
+    }
+
+    /// A click on a row selects it.
+    fn click(&mut self, at: Position) {
+        if let Some(i) = agent_tui::hit::row_at(self.hits.0, at, 1, self.table.offset()) {
+            if i < self.shown.len() {
+                self.select(i);
             }
         }
+    }
+
+    fn bindings(&self) -> Vec<Binding> {
+        let mut out = vec![Binding::new("↑↓", "select")];
+        if self.editing {
+            out.extend([Binding::new("⏎", "keep"), Binding::new("esc", "clear")]);
+        } else {
+            out.extend([Binding::new("J/K", "detail"), Binding::new("/", "filter")]);
+            if !self.filter.is_empty() {
+                out.push(Binding::new("esc", "clear"));
+            }
+        }
+        out.extend([
+            Binding::help("PgUp PgDn g G", "move by ten, to the first, to the last"),
+            Binding::help("click a row", "selects it; the wheel over the detail scrolls it"),
+        ]);
+        out
+    }
+
+    fn mode(&self) -> String {
+        if self.editing { "filter" } else { "projects" }.into()
+    }
+
+    /// Where the selection is in the rows the filter keeps.
+    fn status(&mut self) -> Option<(String, Tone)> {
+        Some((format!("{}/{}", (self.sel + 1).min(self.shown.len()), self.shown.len()), Tone::Back))
+    }
+
+    /// While the filter is typed, every plain key is a letter of it.
+    fn owns_text(&self) -> bool {
+        self.editing
+    }
+}
+
+/// The projects screen on the shell: [`ProjectsPane`] inside
+/// `agent_tui::App`, run on the terminal as [`Projects::into_app`] and
+/// driven headless as a [`Screen`]. It reads as the pane.
+pub(crate) struct Projects {
+    app: App,
+}
+
+impl Projects {
+    pub(crate) fn new(env: &Env, palette: Palette, shape: Shape) -> Projects {
+        Projects { app: App::with_pane("projects", ProjectsPane::new(env, palette, shape)).shape(shape) }
+    }
+
+    pub(crate) fn into_app(self) -> App {
+        self.app
+    }
+}
+
+impl std::ops::Deref for Projects {
+    type Target = ProjectsPane;
+    fn deref(&self) -> &ProjectsPane {
+        self.app.pane_ref().expect("the projects pane")
+    }
+}
+
+impl Screen for Projects {
+    fn palette(&self) -> Palette {
+        self.palette
+    }
+
+    fn draw(&mut self, f: &mut Draw) {
+        Screen::draw(&mut self.app, f);
+    }
+
+    fn key(&mut self, k: KeyEvent) -> bool {
+        Screen::key(&mut self.app, k)
+    }
+
+    fn mouse(&mut self, m: MouseEvent) {
+        Screen::mouse(&mut self.app, m);
     }
 }

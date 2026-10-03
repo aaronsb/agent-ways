@@ -18,16 +18,17 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use agent_tui::ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use agent_tui::ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
 use agent_tui::ratatui::text::{Line, Span};
 use agent_tui::ratatui::widgets::{Cell, HighlightSpacing, List, ListItem, ListState, Paragraph, Row, Table, TableState};
 use agent_tui::ratatui::Frame as Draw;
 use agent_tui::screen::Screen;
+use agent_tui::{App, Binding, Keyed, Pane, PaneTab, Tone};
 use crate::cmd::screen_host::pane;
-use agent_tui::theme::{self, Ground, Palette, Seg, Shape};
-use agent_tui::timeline::{key_bar, Playback, Scrubber};
+use agent_tui::theme::{self, Ground, Palette, Shape};
+use agent_tui::timeline::{Playback, Scrubber};
 use ways_agent_core::spend::{self, Group};
 use ways_core::introspection::SessionIntrospection;
 
@@ -97,6 +98,20 @@ pub(crate) struct Replay {
     pub(crate) now: u64,
     table: TableState,
     list: ListState,
+    /// Where the last frame drew the track, the rows and the why-fired text.
+    hits: Hits,
+}
+
+/// Where a replay's frame drew what a click or the wheel can hit.
+#[derive(Default, Clone)]
+struct Hits {
+    scrub: Rect,
+    /// The table of ways, or the why view's list of them, and the lines
+    /// each of the table's rows takes.
+    rows: Rect,
+    heights: Vec<u16>,
+    /// The why view's text.
+    text: Rect,
 }
 
 impl Replay {
@@ -124,6 +139,7 @@ impl Replay {
             now: agent_fmt::when::now_secs(),
             table: TableState::default(),
             list: ListState::default(),
+            hits: Hits::default(),
         };
         r.follow_newest();
         r
@@ -273,6 +289,114 @@ impl Replay {
             let model = SessionIntrospection::from_session(&self.session_id, &self.project, self.window_k);
             self.why = Some(why::build_why_index(&model));
         }
+    }
+
+    /// Whether the why-fired reader is open, where Esc goes back to the
+    /// timeline rather than to the sessions.
+    fn reading(&self) -> bool {
+        self.view == View::Why
+    }
+
+    /// The bottom bar's lozenge and its ground: what the replay is doing.
+    fn mode(&self) -> (&'static str, Ground) {
+        match (self.view, self.play.is_live(), self.play.following(), self.play.playing()) {
+            (View::Why, ..) => ("why", Ground::Accent),
+            (_, true, true, _) => ("live", Ground::Ok),
+            (_, true, false, _) => ("paused", Ground::Warn),
+            (_, false, _, true) => ("playing", Ground::Ok),
+            _ => ("replay", Ground::Accent),
+        }
+    }
+
+    /// The replay's keys, as its bar showed them, then the rest for the
+    /// key help.
+    fn bindings(&self) -> Vec<Binding> {
+        let mut keys = match self.view {
+            View::Timeline => vec![Binding::new("↑↓", "select"), Binding::new("⏎", "why"), Binding::new("←→", "frame")],
+            View::Why => vec![Binding::new("↑↓", "way"), Binding::new("j/k", "read"), Binding::new("←→", "frame")],
+        };
+        if self.view == View::Timeline {
+            if self.play.is_live() {
+                keys.push(Binding::new("space", if self.play.following() { "pause" } else { "follow" }));
+            } else {
+                keys.push(Binding::new("space", if self.play.playing() { "pause" } else { "play" }));
+                keys.push(Binding::new("+-", self.play.speed_label()));
+            }
+        } else {
+            keys.push(Binding::new("esc", "timeline"));
+        }
+        keys.push(Binding::new("f", if self.matched { "injected" } else { "matched" }));
+        if self.spend.is_some() {
+            keys.push(Binding::new("$", if self.cost { "tokens" } else { "cost" }));
+        }
+        match self.view {
+            View::Timeline => keys.extend([
+                Binding::help("Tab", "why the selected way fired"),
+                Binding::help("Home End", "the first frame, the newest (live: follow again)"),
+                Binding::help("PgUp PgDn", "move the selection by ten"),
+                Binding::help("click the track", "seeks to that frame; the wheel there steps one"),
+                Binding::help("click a row", "selects it; a click on the selected row opens why it fired"),
+            ]),
+            View::Why => keys.extend([
+                Binding::help("PgUp PgDn g G", "read by a page, to the top, to the end"),
+                Binding::help("click a way", "shows why it fired; the wheel over the text reads on"),
+            ]),
+        }
+        keys
+    }
+
+    /// A click: on the track, seek to the frame drawn there, the newest
+    /// following again as End does; on a row, select it, and on the
+    /// selected row open why it fired.
+    fn click(&mut self, at: Position) {
+        if self.hits.scrub.contains(at) {
+            let marks = (self.play.len(), self.play.pos());
+            let s = Scrubber { len: marks.0, pos: marks.1, marks: &[], notes: &[] };
+            if let Some(to) = s.frame_at(self.hits.scrub.width, at.x - self.hits.scrub.x) {
+                if to + 1 >= self.play.len() {
+                    self.travel(Playback::end);
+                } else {
+                    self.travel(|p| p.go(to));
+                }
+            }
+            return;
+        }
+        let hit = match self.view {
+            View::Timeline => agent_tui::hit::row_in(self.hits.rows, at, 1, self.table.offset(), &self.hits.heights),
+            View::Why => agent_tui::hit::row_at(self.hits.rows, at, 0, self.list.offset()),
+        };
+        let Some(i) = hit else { return };
+        if i >= self.ways_len() {
+            return;
+        }
+        if i < self.sel {
+            self.stop_following();
+        }
+        let mut sel = self.sel;
+        let again = agent_tui::hit::pick(&mut sel, i, self.ways_len());
+        if sel != self.sel {
+            self.sel = sel;
+            self.scroll = 0;
+        }
+        if again && self.view == View::Timeline {
+            self.open_why();
+        }
+    }
+
+    /// The wheel: on the track a frame back or on; over the why-fired text
+    /// a line; elsewhere the selection, as the arrows move it.
+    fn wheel(&mut self, up: bool, at: Position) {
+        let press = |c| KeyEvent::new(c, KeyModifiers::NONE);
+        let key = if self.hits.scrub.contains(at) {
+            if up { KeyCode::Left } else { KeyCode::Right }
+        } else if self.view == View::Why && self.hits.text.contains(at) {
+            if up { KeyCode::Char('k') } else { KeyCode::Char('j') }
+        } else if up {
+            KeyCode::Up
+        } else {
+            KeyCode::Down
+        };
+        self.key(press(key));
     }
 
     fn key(&mut self, k: KeyEvent) -> Step {
@@ -454,11 +578,12 @@ impl Tab {
     }
 }
 
-/// The introspect screens: the picker when there is one, the session it
-/// opened, and the spend over the scope.
-pub(crate) struct Introspect {
+/// The introspect screens as a pane of agent-tui's shell (ADR-504 §3):
+/// the picker when there is one, the session it opened, and the reports
+/// over the scope. The shell draws the tabs and the bottom bar, and takes
+/// the mouse, the key help and quitting.
+pub(crate) struct Sessions {
     palette: Palette,
-    shape: Shape,
     pub(crate) tab: Tab,
     picker: Option<Picker>,
     pub(crate) replay: Option<Replay>,
@@ -467,24 +592,7 @@ pub(crate) struct Introspect {
     msg: String,
 }
 
-impl Introspect {
-    pub(crate) fn picking(picker: Picker, open: Opener, reports: Reports, palette: Palette, shape: Shape) -> Introspect {
-        Introspect { palette, shape, tab: Tab::Sessions, picker: Some(picker), replay: None, reports, open, msg: String::new() }
-    }
-
-    /// The picker with `replay` open on the timeline, as `ways session live`
-    /// opens it: Esc goes back to the list.
-    pub(crate) fn opened(mut self, replay: Replay) -> Introspect {
-        self.replay = Some(replay);
-        self.tab = Tab::Timeline;
-        self
-    }
-
-    pub(crate) fn showing(replay: Replay, reports: Reports, palette: Palette, shape: Shape) -> Introspect {
-        let open = Box::new(|_: &str, _: bool| Err("no picker".into()));
-        Introspect { palette, shape, tab: Tab::Timeline, picker: None, replay: Some(replay), reports, open, msg: String::new() }
-    }
-
+impl Sessions {
     #[cfg(test)]
     pub(crate) fn picker_mut(&mut self) -> Option<&mut Picker> {
         self.picker.as_mut()
@@ -498,15 +606,9 @@ impl Introspect {
     }
 
     /// The tabs shown: the sessions tab only with a picker.
-    fn tabs(&self) -> Vec<Tab> {
+    fn shown_tabs(&self) -> Vec<Tab> {
         let all = [Tab::Sessions, Tab::Timeline, Tab::Fires, Tab::Spend, Tab::Stats, Tab::Precision];
         all.into_iter().filter(|t| *t != Tab::Sessions || self.picker.is_some()).collect()
-    }
-
-    /// The tab line, each tab named with the digit that picks it.
-    fn bar(&self) -> Line<'static> {
-        let views: Vec<(String, bool)> = self.tabs().iter().enumerate().map(|(i, t)| (format!("{} {}", i + 1, t.name()), *t == self.tab)).collect();
-        tabs(self.shape, &views)
     }
 
     /// Esc on a tab: back to the picker, or out when there is none.
@@ -518,110 +620,211 @@ impl Introspect {
             false
         }
     }
+
+    /// Open the session selected in the picker on the timeline, as Enter
+    /// and a click on the selected row do.
+    fn open_selected(&mut self) {
+        let Some(p) = &mut self.picker else { return };
+        let Some(id) = p.sessions.get(p.sel).map(|s| s.id.clone()) else { return };
+        // The session already open is shown as it was left, live now if
+        // the list says it is being written to.
+        if let Some(r) = self.replay.as_mut().filter(|r| r.session_id == id) {
+            if p.selected_live() {
+                if let Some(content) = r.wake() {
+                    self.reports.reload(&content);
+                }
+            }
+            self.tab = Tab::Timeline;
+            return;
+        }
+        match (self.open)(&id, p.selected_live()) {
+            Ok(r) => {
+                self.replay = Some(r);
+                self.tab = Tab::Timeline;
+                self.msg.clear();
+            }
+            Err(e) => self.msg = e,
+        }
+    }
+
+    /// A key on a list tab other than the picker's.
+    fn list_key(&mut self, c: KeyCode) {
+        match (self.tab, &mut self.replay) {
+            (Tab::Spend, _) => self.reports.spend().key(c),
+            (Tab::Stats, _) => self.reports.stats().key(c),
+            (Tab::Precision, _) => self.reports.precision().key(c),
+            (Tab::Fires, Some(r)) => r.fires.key(c),
+            _ => {}
+        }
+    }
 }
 
-impl Screen for Introspect {
+impl Pane for Sessions {
     fn palette(&self) -> Palette {
         self.palette
     }
 
-    fn draw(&mut self, f: &mut Draw) {
-        let (shape, bar, back) = (self.shape, self.bar(), self.picker.is_some());
+    fn tabs(&mut self) -> Vec<PaneTab> {
+        self.shown_tabs().into_iter().map(|t| PaneTab::new(t.name())).collect()
+    }
+
+    fn tab(&mut self) -> usize {
+        self.shown_tabs().iter().position(|t| *t == self.tab).unwrap_or(0)
+    }
+
+    fn set_tab(&mut self, i: usize) {
+        if let Some(t) = self.shown_tabs().get(i) {
+            self.tab = *t;
+        }
+    }
+
+    fn draw(&mut self, f: &mut Draw, area: Rect) {
         match (self.tab, &mut self.replay, &mut self.picker) {
-            (Tab::Sessions, _, Some(p)) => draw_picker(f, p, bar, shape, &self.msg),
-            (Tab::Timeline, Some(r), _) => draw_replay(f, r, bar, shape),
-            (Tab::Fires, Some(r), _) => r.fires.draw(f, &r.session_id, bar, shape, back),
-            (tab @ (Tab::Spend | Tab::Stats | Tab::Precision), ..) => {
-                let [top, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
-                f.render_widget(Paragraph::new(bar), top);
-                let mut keys = vec![("↑↓", "select")];
-                match tab {
-                    Tab::Spend => {
-                        self.reports.spend().draw(f, body);
-                        keys = self.reports.spend().keys();
-                    }
-                    Tab::Stats => self.reports.stats().draw(f, body),
-                    _ => self.reports.precision().draw(f, body),
-                }
-                if back {
-                    keys.push(("esc", "sessions"));
-                }
-                keys.push(("q", "quit"));
-                f.render_widget(Paragraph::new(key_bar(shape, tab.name(), Ground::Accent, &keys, Vec::new(), status.width)), status);
-            }
+            (Tab::Sessions, _, Some(p)) => draw_picker(f, p, area),
+            (Tab::Timeline, Some(r), _) => draw_replay(f, r, area),
+            (Tab::Fires, Some(r), _) => r.fires.draw(f, &r.session_id, area),
+            (Tab::Spend, ..) => self.reports.spend().draw(f, area),
+            (Tab::Stats, ..) => self.reports.stats().draw(f, area),
+            (Tab::Precision, ..) => self.reports.precision().draw(f, area),
             // A session tab before a session is open.
             (tab, ..) => {
-                let [top, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
-                f.render_widget(Paragraph::new(bar), top);
                 let hint = Line::styled("no session open: pick one on the sessions tab", theme::muted());
-                f.render_widget(Paragraph::new(hint).block(pane(format!(" {} ", tab.name()))), body);
-                let keys = [("esc", "sessions"), ("q", "quit")];
-                f.render_widget(Paragraph::new(key_bar(shape, tab.name(), Ground::Accent, &keys, Vec::new(), status.width)), status);
+                f.render_widget(Paragraph::new(hint).block(pane(format!(" {} ", tab.name()))), area);
             }
         }
     }
 
-    fn key(&mut self, k: KeyEvent) -> bool {
-        if k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
-            return false;
-        }
-        if let KeyCode::Char(d @ '1'..='9') = k.code {
-            if let Some(t) = self.tabs().get(d as usize - '1' as usize) {
-                self.tab = *t;
-            }
-            return true;
-        }
+    /// The keys the shell leaves: a digit, `q`, `?` and `m` are its own,
+    /// and Esc it takes when the pane passes it, as on the sessions tab or
+    /// a session opened without one.
+    fn key(&mut self, k: KeyEvent) -> Keyed {
+        let done = |on: bool| if on { Keyed::Done } else { Keyed::Pass };
         match (self.tab, &mut self.replay, &mut self.picker) {
             (Tab::Sessions, _, Some(p)) => match k.code {
-                KeyCode::Esc | KeyCode::Char('q') => false,
+                KeyCode::Esc => Keyed::Pass,
                 KeyCode::Enter => {
-                    let Some(id) = p.sessions.get(p.sel).map(|s| s.id.clone()) else { return true };
-                    // The session already open is shown as it was left, live
-                    // now if the list says it is being written to.
-                    if let Some(r) = self.replay.as_mut().filter(|r| r.session_id == id) {
-                        if p.selected_live() {
-                            if let Some(content) = r.wake() {
-                                self.reports.reload(&content);
-                            }
-                        }
-                        self.tab = Tab::Timeline;
-                        return true;
-                    }
-                    match (self.open)(&id, p.selected_live()) {
-                        Ok(r) => {
-                            self.replay = Some(r);
-                            self.tab = Tab::Timeline;
-                            self.msg.clear();
-                        }
-                        Err(e) => self.msg = e,
-                    }
-                    true
+                    self.open_selected();
+                    Keyed::Done
                 }
                 c => {
                     p.key(c);
-                    true
+                    Keyed::Done
                 }
             },
             (Tab::Timeline, Some(r), _) => match r.key(k) {
-                Step::Stay => true,
-                Step::Quit => false,
-                Step::Back => self.back(),
+                Step::Stay => Keyed::Done,
+                Step::Quit => Keyed::Pass,
+                Step::Back => done(self.back()),
             },
-            (tab, replay, _) => match k.code {
-                KeyCode::Char('q') => false,
-                KeyCode::Esc => self.back(),
+            (..) => match k.code {
+                KeyCode::Esc => done(self.back()),
                 c => {
-                    match (tab, replay) {
-                        (Tab::Spend, _) => self.reports.spend().key(c),
-                        (Tab::Stats, _) => self.reports.stats().key(c),
-                        (Tab::Precision, _) => self.reports.precision().key(c),
-                        (Tab::Fires, Some(r)) => r.fires.key(c),
-                        _ => {}
-                    }
-                    true
+                    self.list_key(c);
+                    Keyed::Done
                 }
             },
         }
+    }
+
+    /// The wheel moves a list's selection as the arrows do; on the
+    /// timeline's track it steps a frame, and over the why-fired text it
+    /// reads on.
+    fn wheel_at(&mut self, up: bool, at: Position) {
+        let arrow = if up { KeyCode::Up } else { KeyCode::Down };
+        match (self.tab, &mut self.replay, &mut self.picker) {
+            (Tab::Sessions, _, Some(p)) => p.key(arrow),
+            (Tab::Timeline, Some(r), _) => r.wheel(up, at),
+            _ => self.list_key(arrow),
+        }
+    }
+
+    /// A click on a row selects it, and on the selected row acts as Enter:
+    /// the picker opens the session, the timeline its why-fired page. A
+    /// click on the timeline's track seeks to the frame drawn there.
+    fn click(&mut self, at: Position) {
+        match (self.tab, &mut self.replay, &mut self.picker) {
+            (Tab::Sessions, _, Some(p)) => {
+                if p.click(at) {
+                    self.open_selected();
+                }
+            }
+            (Tab::Timeline, Some(r), _) => r.click(at),
+            (Tab::Fires, Some(r), _) => r.fires.click(at),
+            (Tab::Spend, ..) => self.reports.spend().click(at),
+            (Tab::Stats, ..) => self.reports.stats().click(at),
+            (Tab::Precision, ..) => self.reports.precision().click(at),
+            _ => {}
+        }
+    }
+
+    fn bindings(&self) -> Vec<Binding> {
+        let back = self.picker.is_some();
+        let mut out = match (self.tab, &self.replay, &self.picker) {
+            (Tab::Sessions, _, Some(p)) => {
+                let enter = if p.selected_live() { "follow" } else { "replay" };
+                vec![
+                    Binding::new("↑↓", "select"),
+                    Binding::new("⏎", enter),
+                    Binding::help("PgUp PgDn Home End", "move by a page or to an end"),
+                    Binding::help("click a row", "selects it; a click on the selected row opens it"),
+                ]
+            }
+            (Tab::Timeline, Some(r), _) => r.bindings(),
+            (Tab::Spend, ..) => {
+                let by = if self.reports.by_day() { "by month" } else { "by day" };
+                vec![Binding::new("↑↓", "select"), Binding::new("m", by), Binding::help("click a row", "selects it")]
+            }
+            (Tab::Fires | Tab::Stats | Tab::Precision, ..) => vec![Binding::new("↑↓", "select"), Binding::help("click a row", "selects it")],
+            _ => Vec::new(),
+        };
+        let leaves = !(self.tab == Tab::Sessions || (self.tab == Tab::Timeline && self.replay.as_ref().is_some_and(Replay::reading)));
+        if back && leaves {
+            out.push(Binding::new("esc", "sessions"));
+        }
+        out
+    }
+
+    fn mode(&self) -> String {
+        match (self.tab, &self.replay, &self.picker) {
+            (Tab::Sessions, _, Some(_)) => "pick".into(),
+            (Tab::Timeline, Some(r), _) => r.mode().0.into(),
+            (tab, ..) => tab.name().into(),
+        }
+    }
+
+    fn mode_ground(&self) -> Ground {
+        match (self.tab, &self.replay) {
+            (Tab::Timeline, Some(r)) => r.mode().1,
+            _ => Ground::Accent,
+        }
+    }
+
+    /// The picker's error, or where its selection is and when its session
+    /// was last written; the fires tab's place in its list.
+    fn status(&mut self) -> Option<(String, Tone)> {
+        match (self.tab, &self.replay, &self.picker) {
+            (Tab::Sessions, _, Some(_)) if !self.msg.is_empty() => Some((self.msg.clone(), Tone::Err)),
+            (Tab::Sessions, _, Some(p)) => Some((picker_status(p), Tone::Back)),
+            (Tab::Fires, Some(r), _) => Some((r.fires.place(), Tone::Back)),
+            _ => None,
+        }
+    }
+
+    /// `m` is the spend tab's, which groups by month; the mouse takes M-m
+    /// there.
+    fn takes_key(&self, k: KeyEvent) -> bool {
+        self.tab == Tab::Spend && k.code == KeyCode::Char('m') && k.modifiers == KeyModifiers::NONE
+    }
+
+    fn help(&self) -> Option<String> {
+        Some(
+            "Sessions lists the sessions in scope; Enter opens one on the timeline,\n\
+             following it when it is being written to. On the timeline ←→ step a\n\
+             frame, space plays or follows, Enter or Tab opens why the selected way\n\
+             fired, and f widens the table to every matched way. A click on the\n\
+             track seeks there. `ways session replay --json` prints the timeline."
+                .into(),
+        )
     }
 
     /// A replay plays only while its timeline is shown; a live one reads
@@ -649,16 +852,101 @@ impl Screen for Introspect {
     }
 }
 
-
-/// The tab line: the screen, then each tab, the shown one in the accent.
-fn tabs(shape: Shape, views: &[(String, bool)]) -> Line<'static> {
-    let mut spans = shape.lozenge(&[Seg::on(" session ", Ground::AccentDim)]);
-    for (name, on) in views {
-        spans.push(Span::raw(" "));
-        let seg = if *on { Seg::on(format!(" {name} "), Ground::Accent).bold() } else { Seg::faded(format!(" {name} ")) };
-        spans.extend(shape.lozenge(&[seg]));
+/// The picker's message: when the selected session's transcript was last
+/// written, live or not, and where the selection is.
+fn picker_status(p: &Picker) -> String {
+    let place = format!("{}/{}", (p.sel + 1).min(p.sessions.len()), p.sessions.len());
+    match p.sampler.last_write(p.sel) {
+        Some(at) => {
+            let ago = agent_fmt::when::ago(p.sampler.now().saturating_sub(at) / 1000);
+            if p.sampler.live(p.sel) {
+                format!("{} live · written {ago} · {place}", super::picker::LIVE_MARK)
+            } else {
+                format!("written {ago} · {place}")
+            }
+        }
+        None => place,
     }
-    Line::from(spans)
+}
+
+/// The session screen on the shell: [`Sessions`] inside `agent_tui::App`.
+/// The terminal runs [`Introspect::into_app`]; the headless `--snap` and
+/// the tests drive the same shell as a [`Screen`]. It reads as the pane.
+pub(crate) struct Introspect {
+    app: App,
+}
+
+impl Introspect {
+    fn of(pane: Sessions, shape: Shape) -> Introspect {
+        Introspect { app: App::with_pane("session", pane).shape(shape) }
+    }
+
+    pub(crate) fn picking(picker: Picker, open: Opener, reports: Reports, palette: Palette, shape: Shape) -> Introspect {
+        Introspect::of(Sessions { palette, tab: Tab::Sessions, picker: Some(picker), replay: None, reports, open, msg: String::new() }, shape)
+    }
+
+    /// The picker with `replay` open on the timeline, as `ways session live`
+    /// opens it: Esc goes back to the list.
+    pub(crate) fn opened(mut self, replay: Replay) -> Introspect {
+        self.replay = Some(replay);
+        self.tab = Tab::Timeline;
+        self
+    }
+
+    pub(crate) fn showing(replay: Replay, reports: Reports, palette: Palette, shape: Shape) -> Introspect {
+        let open = Box::new(|_: &str, _: bool| Err("no picker".into()));
+        Introspect::of(Sessions { palette, tab: Tab::Timeline, picker: None, replay: Some(replay), reports, open, msg: String::new() }, shape)
+    }
+
+    /// The shell, to run on the terminal.
+    pub(crate) fn into_app(self) -> App {
+        self.app
+    }
+
+    /// The shell, as it stands.
+    #[cfg(test)]
+    pub(crate) fn app(&self) -> &App {
+        &self.app
+    }
+}
+
+impl std::ops::Deref for Introspect {
+    type Target = Sessions;
+    fn deref(&self) -> &Sessions {
+        self.app.pane_ref().expect("the session screen's pane")
+    }
+}
+
+impl std::ops::DerefMut for Introspect {
+    fn deref_mut(&mut self) -> &mut Sessions {
+        self.app.pane_mut().expect("the session screen's pane")
+    }
+}
+
+impl Screen for Introspect {
+    fn palette(&self) -> Palette {
+        self.palette
+    }
+
+    fn draw(&mut self, f: &mut Draw) {
+        Screen::draw(&mut self.app, f);
+    }
+
+    fn key(&mut self, k: KeyEvent) -> bool {
+        Screen::key(&mut self.app, k)
+    }
+
+    fn mouse(&mut self, m: MouseEvent) {
+        Screen::mouse(&mut self.app, m);
+    }
+
+    fn tick_every(&self) -> Option<Duration> {
+        Screen::tick_every(&self.app)
+    }
+
+    fn tick(&mut self) {
+        Screen::tick(&mut self.app);
+    }
 }
 
 /// `2026-07-03T16:52:00Z` as `2026-07-03 16:52`.
@@ -738,51 +1026,19 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
     ]
 }
 
-fn draw_replay(f: &mut Draw, r: &mut Replay, tab_line: Line<'static>, shape: Shape) {
-    let [bar, head, scrub, body, status] =
-        Layout::vertical([Constraint::Length(1), Constraint::Length(2), Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
+fn draw_replay(f: &mut Draw, r: &mut Replay, area: Rect) {
+    let [head, scrub, body] = Layout::vertical([Constraint::Length(2), Constraint::Length(1), Constraint::Min(3)]).areas(area);
     let n = r.ways_len();
     r.sel = r.sel.min(n.saturating_sub(1));
-    f.render_widget(Paragraph::new(tab_line), bar);
     f.render_widget(Paragraph::new(header(r, head.width)), head);
     let marks = r.window_starts();
     let notes = r.suppressed_at();
     f.render_widget(Scrubber { len: r.play.len(), pos: r.play.pos(), marks: &marks, notes: &notes }, scrub);
+    r.hits = Hits { scrub, ..Hits::default() };
     match r.view {
         View::Timeline => draw_timeline(f, r, body),
         View::Why => draw_why(f, r, body),
     }
-
-    let (mode, ground) = match (r.view, r.play.is_live(), r.play.following(), r.play.playing()) {
-        (View::Why, ..) => ("why", Ground::Accent),
-        (_, true, true, _) => ("live", Ground::Ok),
-        (_, true, false, _) => ("paused", Ground::Warn),
-        (_, false, _, true) => ("playing", Ground::Ok),
-        _ => ("replay", Ground::Accent),
-    };
-    let speed = r.play.speed_label();
-    let mut keys: Vec<(&str, &str)> = match r.view {
-        View::Timeline => vec![("↑↓", "select"), ("⏎", "why"), ("←→", "frame")],
-        View::Why => vec![("↑↓", "way"), ("j/k", "read"), ("←→", "frame")],
-    };
-    if r.view == View::Timeline {
-        if r.play.is_live() {
-            keys.push(("space", if r.play.following() { "pause" } else { "follow" }));
-        } else {
-            keys.push(("space", if r.play.playing() { "pause" } else { "play" }));
-            keys.push(("+-", speed));
-        }
-        // Tab opens the why view too; `⏎ why` already names it, and the
-        // bar has no room at 80 columns to say it twice.
-    } else {
-        keys.push(("esc", "timeline"));
-    }
-    keys.push(("f", if r.matched { "injected" } else { "matched" }));
-    if r.spend.is_some() {
-        keys.push(("$", if r.cost { "tokens" } else { "cost" }));
-    }
-    keys.push(("q", "quit"));
-    f.render_widget(Paragraph::new(key_bar(shape, mode, ground, &keys, Vec::new(), status.width)), status);
 }
 
 fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
@@ -813,6 +1069,9 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
             w.id = format!("{}{}", w.outcome.mark(), w.id);
         }
         let mut rows = table::rows(&marked, r.window_k, inner_w);
+        // A way whose check fired takes a second line.
+        let heights: Vec<u16> =
+            fr.ways.iter().map(|w| 1 + u16::from(w.check_fires > 0)).chain(shown.ways.iter().filter(|w| w.outcome == Outcome::Blocked).map(|_| 1)).collect();
         rows.extend(shown.ways.iter().filter(|w| w.outcome == Outcome::Blocked).map(|w| blocked_row(w, shown.epoch)));
         let t = Table::new(rows, table::WIDTHS)
             .header(table::header())
@@ -826,6 +1085,8 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
         *r.table.offset_mut() = 0;
         r.table.select(Some(r.sel));
         f.render_stateful_widget(t, ways, &mut r.table);
+        r.hits.rows = ways;
+        r.hits.heights = heights;
     }
     if ctx_h > 0 {
         let lines: Vec<Line> = ctx.into_iter().map(|(_, l)| l).collect();
@@ -899,5 +1160,7 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
     }
     f.render_stateful_widget(list, left, &mut r.list);
     f.render_widget(Paragraph::new(lines).scroll((r.scroll as u16, 0)).block(pane(Line::from(title))), right);
+    r.hits.rows = left;
+    r.hits.text = right;
 }
 

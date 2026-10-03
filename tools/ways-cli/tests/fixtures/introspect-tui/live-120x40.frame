@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| session   1 timeline   2 fires   3 spend   4 stats   5 precision                                                       |
+| 1 timeline    2 fires    3 spend    4 stats    5 precision                                                             |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
 |epoch 1 · 200K ctx · 1 ways · window 2/2 · 2026-07-03 17:52  ◇ injected  ● LIVE · 6s ago                                |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 4/4|
@@ -38,14 +38,13 @@ agent-tui frame 120x40
 |│··································································································● forecast 31K → 61K│|
 |│+ ⎯ compaction · window 2 ⎯, ↻ softwaredev/delivery/commits                                                           │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| live   ↑↓ select  ⏎ why  ←→ frame  space pause  f matched  q quit                                                      |
+| live  mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause · f matched · 1-9 tabs    |
 styles
-  0   0-8   White Blue -
-  0  10-21  Black Cyan BOLD
-  0  23-31  White DarkGray DIM
-  0  33-41  White DarkGray DIM
-  0  43-51  White DarkGray DIM
-  0  53-65  White DarkGray DIM
+  0   0-11  Black Cyan BOLD
+  0  14-22  White Blue -
+  0  25-33  White Blue -
+  0  36-44  White Blue -
+  0  47-59  White Blue -
   1   0-7   - - BOLD
   1  44-59  - - DIM
   2   0-58  - - DIM
@@ -137,15 +136,19 @@ styles
  37 119-119 - - DIM
  38   0-119 - - DIM
  39   0-5   Black Green BOLD
- 39   8-9   Cyan - BOLD
- 39  10-16  - - DIM|ITALIC
- 39  19-19  Cyan - BOLD
- 39  20-23  - - DIM|ITALIC
- 39  26-27  Cyan - BOLD
- 39  28-33  - - DIM|ITALIC
- 39  36-40  Cyan - BOLD
- 39  41-46  - - DIM|ITALIC
- 39  49-49  Cyan - BOLD
- 39  50-57  - - DIM|ITALIC
- 39  60-60  Cyan - BOLD
- 39  61-65  - - DIM|ITALIC
+ 39   7-38  - - DIM|ITALIC
+ 39  39-41  - - DIM
+ 39  42-43  Cyan - -
+ 39  44-50  - - DIM|ITALIC
+ 39  51-53  Cyan - -
+ 39  54-62  - - DIM|ITALIC
+ 39  63-64  Cyan - -
+ 39  65-70  - - DIM|ITALIC
+ 39  71-73  Cyan - -
+ 39  74-81  - - DIM|ITALIC
+ 39  82-87  Cyan - -
+ 39  88-95  - - DIM|ITALIC
+ 39  96-97  Cyan - -
+ 39  98-107 - - DIM|ITALIC
+ 39 108-111 Cyan - -
+ 39 112-115 - - DIM|ITALIC

@@ -13,7 +13,7 @@ use agent_tui::theme::{self, Palette, Shape};
 /// to the real key handler and a frame printed in the test kit's format.
 #[derive(Debug, Default, Clone)]
 pub struct Open {
-    /// Key tokens (`agent_tui::testkit::parse_keys`).
+    /// Key and mouse tokens (`agent_tui::testkit::parse_events`).
     pub keys: Vec<String>,
     /// `WxH`: print the frame at that size.
     pub snap: Option<String>,
@@ -55,16 +55,19 @@ pub(crate) fn look(depth: ColorDepth) -> (Palette, Shape) {
     (Palette { painter }, shape)
 }
 
-/// Show a screen: on the terminal until it closes, or headless.
-pub(crate) fn show(mut screen: impl agent_tui::screen::Screen, open: &Open) -> Result<()> {
+/// Show a screen on agent-tui's shell: on the terminal until it closes,
+/// or headless, its key and mouse script played through the real
+/// handlers with a frame drawn before each event.
+pub(crate) fn show(mut app: agent_tui::App, open: &Open) -> Result<()> {
     if !open.headless() {
-        if let Some(sig) = agent_tui::screen::run_screen(&mut screen)? {
+        let session = agent_tui::run(app)?;
+        if let Some(sig) = session.signal {
             // The terminal is restored; end as the signal would have.
             std::process::exit(128 + sig);
         }
         return Ok(());
     }
-    let keys = agent_tui::testkit::parse_keys(open.keys.iter().flat_map(|k| k.split_whitespace())).map_err(|e| anyhow::anyhow!("--keys: {e}"))?;
+    let events = agent_tui::testkit::parse_events(open.keys.iter().flat_map(|k| k.split_whitespace())).map_err(|e| anyhow::anyhow!("--keys: {e}"))?;
     let size = match &open.snap {
         Some(size) => Some(
             size.split_once('x')
@@ -74,19 +77,13 @@ pub(crate) fn show(mut screen: impl agent_tui::screen::Screen, open: &Open) -> R
         ),
         None => None,
     };
-    for k in keys {
-        // A frame before each key, as the terminal draws one before it
-        // reads the next and as the settings shell's `--keys` does: what a
-        // key does can depend on what was drawn, such as a page's height.
-        if let Some((w, h)) = size {
-            let _ = agent_tui::testkit::render_screen(&mut screen, w, h);
-        }
-        if !agent_tui::screen::Screen::key(&mut screen, k) {
-            break;
-        }
-    }
+    // A frame before each event, as the terminal draws one before it reads
+    // the next and as the settings shell's `--keys` does: what an event
+    // does can depend on what was drawn, such as a page's height or where
+    // a row sits for a click.
+    agent_tui::testkit::play(&mut app, &events, size);
     if let Some((w, h)) = size {
-        print!("{}", agent_tui::testkit::frame(&agent_tui::testkit::render_screen(&mut screen, w, h)));
+        print!("{}", agent_tui::testkit::frame(&agent_tui::testkit::render(&mut app, w, h)));
     }
     Ok(())
 }

@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| session   1 sessions   2 timeline   3 fires   4 spend   5 stats   6 precision                                          |
+| 1 sessions    2 timeline    3 fires    4 spend    5 stats    6 precision                                               |
 |┌ 3 sessions in /home/dev/proj · 2 live ───────────────────────────────────────────────────────────────────────────────┐|
 |│   Session      Date             Project                                            Events  Ways Duration Transcript  │|
 |│ ● 8f3a2c1d-5e6 2026-07-03 16:52 proj                                                   10     9      18s this session│|
@@ -38,15 +38,14 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| pick   ↑↓ select  ⏎ follow  q quit                                                       ● live · written 40s ago · 2/3|
+| pick  ● live · written 40s ago · 2/3 │ mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · ⏎ follow · 1-9 tabs     |
 styles
-  0   0-8   White Blue -
-  0  10-21  Black Cyan BOLD
-  0  23-34  White DarkGray DIM
-  0  36-44  White DarkGray DIM
-  0  46-54  White DarkGray DIM
-  0  56-64  White DarkGray DIM
-  0  66-78  White DarkGray DIM
+  0   0-11  Black Cyan BOLD
+  0  14-25  White Blue -
+  0  28-36  White Blue -
+  0  39-47  White Blue -
+  0  50-58  White Blue -
+  0  61-73  White Blue -
   1   0-0   - - DIM
   1   1-39  Blue - BOLD|DIM
   1  40-119 - - DIM
@@ -133,11 +132,14 @@ styles
  37 119-119 - - DIM
  38   0-119 - - DIM
  39   0-5   Black Cyan BOLD
- 39   8-9   Cyan - BOLD
- 39  10-16  - - DIM|ITALIC
- 39  19-19  Cyan - BOLD
- 39  20-26  - - DIM|ITALIC
- 39  29-29  Cyan - BOLD
- 39  30-34  - - DIM|ITALIC
- 39  90-116 Green - -
- 39 117-119 - - DIM
+ 39   7-39  - - DIM
+ 39  40-71  - - DIM|ITALIC
+ 39  72-74  - - DIM
+ 39  75-76  Cyan - -
+ 39  77-83  - - DIM|ITALIC
+ 39  84-86  Cyan - -
+ 39  87-95  - - DIM|ITALIC
+ 39  96-97  Cyan - -
+ 39  98-106 - - DIM|ITALIC
+ 39 107-110 Cyan - -
+ 39 111-114 - - DIM|ITALIC

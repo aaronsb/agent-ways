@@ -134,7 +134,9 @@ fn the_list_marks_the_session_being_written_to() {
     let row = |id: &str| picker.lines().find(|l| l.contains(id)).unwrap_or("").to_string();
     assert!(row("bbbbbbbb").contains("● bbbbbbbb") && row("bbbbbbbb").contains("this session"), "{picker}");
     assert!(!row("aaaaaaaa").contains('●') && row("aaaaaaaa").contains("gone"), "{picker}");
-    assert!(picker.contains("⏎ follow") && picker.contains("● live · written"), "{picker}");
+    // The bottom bar, wide enough for its message, the mouse and the keys.
+    let bar = fx.snap_as(&["session", "replay", "--depth", "none", "--snap", "160x12"], Some(NEW));
+    assert!(bar.contains("⏎ follow") && bar.contains("● live · written"), "{bar}");
 
     let (out, err, code) = fx.run(&["session", "list", "--json"]);
     assert_eq!(code, 0, "{err}");
@@ -209,4 +211,21 @@ fn without_a_terminal_the_screens_say_so_and_json_needs_none() {
     let (out, err, code) = fx.run(&["session", "list"]);
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("Transcript") && out.contains("bbbbbbbb-000"), "{out}");
+}
+
+/// The mouse through the real binary (#739): a click selects the older
+/// session, a second click on it opens it, and a click on the track's
+/// left end seeks to the first frame.
+#[test]
+fn clicks_open_a_session_and_seek_its_track() {
+    let fx = Fx::new();
+    let picker = fx.snap(&["session", "replay", "--depth", "none", "--keys", "click:5,4", "--snap", "100x12"]);
+    let row = |f: &str, id: &str| f.lines().find(|l| l.contains(id)).unwrap_or("").to_string();
+    assert!(row(&picker, "aaaaaaaa").contains('▌'), "one click selects the row: {picker}");
+    let opened = fx.snap(&["session", "replay", "--depth", "none", "--keys", "click:5,4 click:5,4 end click:0,3", "--snap", "100x20"]);
+    assert!(opened.contains(&format!("Session {OLD}")), "{opened}");
+    assert!(opened.contains(" 1/"), "the click on the track's start seeks the first frame: {opened}");
+    let (_, err, code) = fx.run(&["session", "replay", "--keys", "click:5", "--snap", "100x12"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("COLUMN,ROW"), "{err}");
 }

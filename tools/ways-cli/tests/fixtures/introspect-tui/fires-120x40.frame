@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| session   1 timeline   2 fires   3 spend   4 stats   5 precision                                                       |
+| 1 timeline    2 fires    3 spend    4 stats    5 precision                                                             |
 |Session 8f3a2c1d-5e6  lowest score first · ↻ a re-disclosure                                                            |
 |┌ 2 semantic fires ────────────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│ Score   Way                                             Surface                                                      │|
@@ -38,14 +38,13 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |└ ways session fires --json ───────────────────────────────────────────────────────────────────────────────────────────┘|
-| fires   ↑↓ select  q quit                                                                                           2/2|
+| fires  2/2 │ mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select · 1-9 tabs                                          |
 styles
-  0   0-8   White Blue -
-  0  10-21  White DarkGray DIM
-  0  23-31  Black Cyan BOLD
-  0  33-41  White DarkGray DIM
-  0  43-51  White DarkGray DIM
-  0  53-65  White DarkGray DIM
+  0   0-11  White Blue -
+  0  14-22  Black Cyan BOLD
+  0  25-33  White Blue -
+  0  36-44  White Blue -
+  0  47-59  White Blue -
   1   0-7   - - BOLD
   1  20-59  - - DIM
   2   0-0   - - DIM
@@ -131,8 +130,12 @@ styles
  38   1-27  Blue - BOLD|DIM
  38  28-119 - - DIM
  39   0-6   Black Cyan BOLD
- 39   9-10  Cyan - BOLD
- 39  11-17  - - DIM|ITALIC
- 39  20-20  Cyan - BOLD
- 39  21-25  - - DIM|ITALIC
- 39 117-119 - - DIM
+ 39   8-13  - - DIM
+ 39  14-45  - - DIM|ITALIC
+ 39  46-48  - - DIM
+ 39  49-50  Cyan - -
+ 39  51-57  - - DIM|ITALIC
+ 39  58-60  Cyan - -
+ 39  61-69  - - DIM|ITALIC
+ 39  70-73  Cyan - -
+ 39  74-77  - - DIM|ITALIC

@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| session   1 timeline   2 fires   3 spend   4 stats   5 precision               |
+| 1 timeline    2 fires    3 spend    4 stats    5 precision                     |
 |Judge spend by day · the log holds calls from 2026-06-30                        |
 |┌ 3 judge calls in /home/dev/proj ─────────────────────────────────────────────┐|
 |│ Day        Calls     Input   Output     Cache Tokens                  Cost   │|
@@ -23,14 +23,13 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |└ ways agent cost --json --project /home/dev/proj ─────────────────────────────┘|
-| spend   ↑↓ select  m by month  q quit                                          |
+| spend  mouse on (M-m; Shift-drag selects) │ ? keys · ↑↓ select · m by month    |
 styles
-  0   0-8   White Blue -
-  0  10-21  White DarkGray DIM
-  0  23-31  White DarkGray DIM
-  0  33-41  Black Cyan BOLD
-  0  43-51  White DarkGray DIM
-  0  53-65  White DarkGray DIM
+  0   0-11  White Blue -
+  0  14-22  White Blue -
+  0  25-33  Black Cyan BOLD
+  0  36-44  White Blue -
+  0  47-59  White Blue -
   1   0-17  - - BOLD
   1  18-55  - - DIM
   2   0-0   - - DIM
@@ -84,9 +83,11 @@ styles
  23   1-49  Blue - BOLD|DIM
  23  50-79  - - DIM
  24   0-6   Black Cyan BOLD
- 24   9-10  Cyan - BOLD
- 24  11-17  - - DIM|ITALIC
- 24  20-20  Cyan - BOLD
- 24  21-29  - - DIM|ITALIC
- 24  32-32  Cyan - BOLD
- 24  33-37  - - DIM|ITALIC
+ 24   8-41  - - DIM|ITALIC
+ 24  42-44  - - DIM
+ 24  45-46  Cyan - -
+ 24  47-53  - - DIM|ITALIC
+ 24  54-56  Cyan - -
+ 24  57-65  - - DIM|ITALIC
+ 24  66-67  Cyan - -
+ 24  68-75  - - DIM|ITALIC

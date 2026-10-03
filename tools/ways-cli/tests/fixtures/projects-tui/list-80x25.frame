@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│  Recent first prompts:                                                       │|
 |│    › port the parser to rust                                                 │|
 |└────────────────────────────────────────────────────────────────────── more ↓ ┘|
-| projects   ↑↓ select  J/K detail  / filter  q quit                          2/3|
+| projects  2/3 │ mouse on (m; Shift-drag selects) │ ? keys · ↑↓ select          |
 styles
   0   0-9   White Blue -
   1   0-0   - - DIM
@@ -79,12 +79,10 @@ styles
  23  71-78  Blue - BOLD|DIM
  23  79-79  - - DIM
  24   0-9   Black Cyan BOLD
- 24  12-13  Cyan - BOLD
- 24  14-20  - - DIM|ITALIC
- 24  23-25  Cyan - BOLD
- 24  26-32  - - DIM|ITALIC
- 24  35-35  Cyan - BOLD
- 24  36-42  - - DIM|ITALIC
- 24  45-45  Cyan - BOLD
- 24  46-50  - - DIM|ITALIC
- 24  77-79  - - DIM
+ 24  11-16  - - DIM
+ 24  17-48  - - DIM|ITALIC
+ 24  49-51  - - DIM
+ 24  52-53  Cyan - -
+ 24  54-60  - - DIM|ITALIC
+ 24  61-63  Cyan - -
+ 24  64-69  - - DIM|ITALIC

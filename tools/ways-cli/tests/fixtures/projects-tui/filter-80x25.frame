@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│    › set up the repo                                                         │|
 |│                                                                              │|
 |└────────────────────────────────────────────────────────────────────── more ↓ ┘|
-| filter   ↑↓ select  ⏎ keep  esc clear                                       1/1|
+| filter  1/1 │ mouse on (M-m; Shift-drag selects) │ F1 keys · ↑↓ select · ⏎ keep|
 styles
   0   0-9   White Blue -
   0  10-13  Cyan - -
@@ -81,10 +81,12 @@ styles
  23  71-78  Blue - BOLD|DIM
  23  79-79  - - DIM
  24   0-7   Black Cyan BOLD
- 24  10-11  Cyan - BOLD
- 24  12-18  - - DIM|ITALIC
- 24  21-21  Cyan - BOLD
- 24  22-26  - - DIM|ITALIC
- 24  29-31  Cyan - BOLD
- 24  32-37  - - DIM|ITALIC
- 24  77-79  - - DIM
+ 24   9-14  - - DIM
+ 24  15-48  - - DIM|ITALIC
+ 24  49-51  - - DIM
+ 24  52-54  Cyan - -
+ 24  55-61  - - DIM|ITALIC
+ 24  62-64  Cyan - -
+ 24  65-73  - - DIM|ITALIC
+ 24  74-75  Cyan - -
+ 24  76-79  - - DIM|ITALIC
