@@ -403,6 +403,14 @@ fn a_profile_s_model_is_one_of_the_cached_list_of_its_provider() {
     assert_eq!(f.run(&["settings", "set", "gate.profiles.mine.model", "claude-sonnet-5-5"]).2, 3);
     let (out, _, _) = f.run(&["settings", "emit", "gate"]);
     assert!(out.contains("# gate.profiles.anthropic.model: one of claude-haiku-4-5, claude-sonnet-5-5\n"), "{out}");
+    // The pattern as written is no instance: set and get refuse it, and no
+    // profile named `*` is written.
+    for args in [["settings", "set", "gate.profiles.*.model", "zzz-not-listed"], ["settings", "get", "gate.profiles.*.model", "--json"]] {
+        let (_, err, code) = f.run(&args);
+        assert_eq!(code, 2, "{args:?}: {err}");
+        assert!(err.contains("name the instance, e.g. gate.profiles.anthropic.model"), "{err}");
+    }
+    assert!(!std::fs::read_to_string(&agent).unwrap_or_default().contains('*'));
     // The pattern key's help names no one provider.
     let (out, _, _) = f.run(&["settings", "help", "gate.profiles.*.model"]);
     assert!(out.contains("text (the choices could not be listed: the list depends on the profile's provider)"), "{out}");

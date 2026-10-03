@@ -480,6 +480,9 @@ impl KeySpec {
         let mut out = Vec::new();
         for (p, s) in self.path.iter().zip(path) {
             if *p == "*" {
+                if s.is_empty() || s == "*" {
+                    return None;
+                }
                 out.push(s.clone());
             } else if p != s {
                 return None;
@@ -502,7 +505,12 @@ fn match_parts(pat: &[&str], parts: &[&str], out: &mut Vec<String>) -> bool {
             }
             for take in 1..=parts.len() - rest {
                 let mut trial = out.clone();
-                trial.push(parts[..take].join("."));
+                let name = parts[..take].join(".");
+                // `*` typed in a key is the pattern, not an instance's name.
+                if name.is_empty() || parts[..take].contains(&"*") {
+                    continue;
+                }
+                trial.push(name);
                 if match_parts(&pat[1..], &parts[take..], &mut trial) {
                     *out = trial;
                     return true;

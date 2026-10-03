@@ -148,7 +148,17 @@ pub(super) fn layers_for(file: Option<&Path>, project: Option<&Path>) -> Result<
 }
 
 pub(super) fn lookup(reg: &Registry, key: &str) -> Result<Bound, Failure> {
-    reg.lookup(key).ok_or_else(|| fail(exit::USAGE, format!("unknown key {key}; `ways settings list` names the keys")))
+    reg.lookup(key).ok_or_else(|| {
+        // A pattern typed as it is written stands for no instance.
+        let stands = reg.keys().find(|(_, k)| k.is_pattern() && k.name == key);
+        match stands {
+            Some((_, k)) => {
+                let eg = k.name.replacen('*', k.instances.first().copied().unwrap_or("<name>"), 1);
+                fail(exit::USAGE, format!("{key} is a pattern, not a key; name the instance, e.g. {eg}"))
+            }
+            None => fail(exit::USAGE, format!("unknown key {key}; `ways settings list` names the keys")),
+        }
+    })
 }
 
 /// A value as `get` and `list` print it: text bare, anything else as JSON.
