@@ -38,14 +38,14 @@ styles
   0  59-69  White Blue -
   0  72-80  Black Cyan BOLD
   1   0-0   - - DIM
-  1   1-8   Blue - BOLD|DIM
+  1   1-8   LightBlue - BOLD|DIM
   1   9-55  - - DIM
-  1  56-60  Blue - BOLD|DIM
+  1  56-60  LightBlue - BOLD|DIM
   1  61-99  - - DIM
   2   0-0   - - DIM
   2   2-3   Green - -
   2  21-27  - - DIM
-  2  28-36  Blue - -
+  2  28-36  LightBlue - -
   2  37-37  - Black -
   2  38-38  - Gray -
   2  39-39  - Cyan -
@@ -59,7 +59,7 @@ styles
   2  99-99  - - DIM
   3   0-0   - - DIM
   3  21-27  - - DIM
-  3  28-36  Blue - -
+  3  28-36  LightBlue - -
   3  37-37  - Black -
   3  38-38  - Gray -
   3  39-39  - Cyan -
@@ -74,7 +74,7 @@ styles
   4   1-1   Cyan - BOLD|REVERSED
   4   2-20  - - BOLD|REVERSED
   4  21-27  - - BOLD|DIM|REVERSED
-  4  28-36  Blue - BOLD|REVERSED
+  4  28-36  LightBlue - BOLD|REVERSED
   4  37-37  - Black BOLD|REVERSED
   4  38-38  - Gray BOLD|REVERSED
   4  39-43  - DarkGray BOLD|REVERSED
@@ -84,7 +84,7 @@ styles
   4  99-99  - - DIM
   5   0-0   - - DIM
   5  21-27  - - DIM
-  5  28-36  Blue - -
+  5  28-36  LightBlue - -
   5  37-37  - Black -
   5  38-39  - Gray -
   5  40-40  - LightBlue -
@@ -93,7 +93,7 @@ styles
   5  99-99  - - DIM
   6   0-0   - - DIM
   6  21-27  - - DIM
-  6  28-36  Blue - -
+  6  28-36  LightBlue - -
   6  37-37  - Black -
   6  38-38  - White -
   6  39-40  - Gray -
@@ -105,7 +105,7 @@ styles
   6  99-99  - - DIM
   7   0-0   - - DIM
   7  21-27  - - DIM
-  7  28-36  Blue - -
+  7  28-36  LightBlue - -
   7  37-37  - Black -
   7  38-38  - Gray -
   7  39-40  - DarkGray -
@@ -116,7 +116,7 @@ styles
   7  99-99  - - DIM
   8   0-0   - - DIM
   8  21-27  - - DIM
-  8  28-36  Blue - -
+  8  28-36  LightBlue - -
   8  37-37  - Black -
   8  38-39  - Gray -
   8  40-40  - LightBlue -
@@ -128,7 +128,7 @@ styles
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  21-27  - - DIM
-  9  28-36  Blue - -
+  9  28-36  LightBlue - -
   9  37-37  - Gray -
   9  38-38  - Black -
   9  39-39  - Cyan -

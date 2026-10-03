@@ -42,7 +42,7 @@ agent-tui frame 120x40
 styles
   0   0-9   White Blue -
   1   0-0   - - DIM
-  1   1-27  Blue - BOLD|DIM
+  1   1-27  LightBlue - BOLD|DIM
   1  28-119 - - DIM
   2   0-0   - - DIM
   2   1-118 - - BOLD
@@ -57,7 +57,7 @@ styles
   5 119-119 - - DIM
   6   0-119 - - DIM
   7   0-0   - - DIM
-  7   1-39  Blue - BOLD|DIM
+  7   1-39  LightBlue - BOLD|DIM
   7  40-119 - - DIM
   8   0-0   - - DIM
   8   1-18  Cyan - -

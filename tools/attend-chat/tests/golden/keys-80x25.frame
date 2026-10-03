@@ -32,65 +32,65 @@ styles
   0  27-37  White Blue -
   0  40-41  Cyan - -
   0  42-51  White Blue -
-  1   0-0   Blue - -
-  1   1-39  Blue - BOLD
-  1  40-79  Blue - -
-  2   0-0   Blue - -
+  1   0-0   LightBlue - -
+  1   1-39  LightBlue - BOLD
+  1  40-79  LightBlue - -
+  2   0-0   LightBlue - -
   2   1-17  Cyan - -
-  2  79-79  Blue - -
-  3   0-0   Blue - -
+  2  79-79  LightBlue - -
+  3   0-0   LightBlue - -
   3   1-17  Cyan - -
-  3  79-79  Blue - -
-  4   0-0   Blue - -
+  3  79-79  LightBlue - -
+  4   0-0   LightBlue - -
   4   1-17  Cyan - -
-  4  79-79  Blue - -
-  5   0-0   Blue - -
+  4  79-79  LightBlue - -
+  5   0-0   LightBlue - -
   5   1-17  Cyan - -
-  5  79-79  Blue - -
-  6   0-0   Blue - -
+  5  79-79  LightBlue - -
+  6   0-0   LightBlue - -
   6   1-17  Cyan - -
-  6  79-79  Blue - -
-  7   0-0   Blue - -
+  6  79-79  LightBlue - -
+  7   0-0   LightBlue - -
   7   1-17  Cyan - -
-  7  79-79  Blue - -
-  8   0-0   Blue - -
+  7  79-79  LightBlue - -
+  8   0-0   LightBlue - -
   8   1-17  Cyan - -
-  8  79-79  Blue - -
-  9   0-0   Blue - -
+  8  79-79  LightBlue - -
+  9   0-0   LightBlue - -
   9   1-17  Cyan - -
-  9  79-79  Blue - -
- 10   0-0   Blue - -
+  9  79-79  LightBlue - -
+ 10   0-0   LightBlue - -
  10   1-17  Cyan - -
- 10  79-79  Blue - -
- 11   0-0   Blue - -
+ 10  79-79  LightBlue - -
+ 11   0-0   LightBlue - -
  11   1-17  Cyan - -
- 11  79-79  Blue - -
- 12   0-0   Blue - -
+ 11  79-79  LightBlue - -
+ 12   0-0   LightBlue - -
  12   1-17  Cyan - -
- 12  79-79  Blue - -
- 13   0-0   Blue - -
+ 12  79-79  LightBlue - -
+ 13   0-0   LightBlue - -
  13   1-17  Cyan - -
- 13  79-79  Blue - -
- 14   0-0   Blue - -
+ 13  79-79  LightBlue - -
+ 14   0-0   LightBlue - -
  14   1-17  Cyan - -
- 14  79-79  Blue - -
- 15   0-0   Blue - -
+ 14  79-79  LightBlue - -
+ 15   0-0   LightBlue - -
  15   1-17  Cyan - -
- 15  79-79  Blue - -
- 16   0-0   Blue - -
- 16  79-79  Blue - -
- 17   0-0   Blue - -
+ 15  79-79  LightBlue - -
+ 16   0-0   LightBlue - -
+ 16  79-79  LightBlue - -
+ 17   0-0   LightBlue - -
  17   1-10  - - BOLD
- 17  79-79  Blue - -
- 18   0-0   Blue - -
- 18  79-79  Blue - -
- 19   0-0   Blue - -
- 19  79-79  Blue - -
- 20   0-0   Blue - -
- 20  79-79  Blue - -
- 21   0-0   Blue - -
- 21  79-79  Blue - -
- 22   0-79  Blue - -
+ 17  79-79  LightBlue - -
+ 18   0-0   LightBlue - -
+ 18  79-79  LightBlue - -
+ 19   0-0   LightBlue - -
+ 19  79-79  LightBlue - -
+ 20   0-0   LightBlue - -
+ 20  79-79  LightBlue - -
+ 21   0-0   LightBlue - -
+ 21  79-79  LightBlue - -
+ 22   0-79  LightBlue - -
  23   1-7   Cyan - BOLD
  23   9-14  LightYellow - -
  23  16-21  LightCyan - -

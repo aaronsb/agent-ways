@@ -4,11 +4,11 @@ agent-tui frame 80x25
 |epoch 3 · 200K ctx · 3 ways · window 1/2  ◇ injected · 1 judged out             |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●────────────────────────┼ 3/4|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────┐|
-|│ Way                             Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│ softwaredev/delivery/commits        1      2  keyword        ●  ● now        │|
-|│   ✓ check (1 fires, decay=0.50                                               │|
-|│ softwaredev/docs/adr                2      1  file           ◆  ◐ 85%        │|
-|│▌softwaredev/code/testing            3      0  embed:en       ■  ─            │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
+|│ …/delivery/commits       main       1      2  keyword        ●  ● now        │|
+|│   ✓ ×1 decay 0.50        main                                                │|
+|│ softwaredev/docs/adr     main       2      1  file           ◆  ◐ 85%        │|
+|│▌↩ …/code/testing         main       3      0  embed:en       ■  ─            │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -21,7 +21,7 @@ agent-tui frame 80x25
 |│███████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░ 66% (132K / 200K)│|
 |│● 1 re-disclose now  ◐ 1 approaching  ○ 1 distant  │ 30–80K intervals         │|
 |│··············◆·································■········ forecast 132K → 179K│|
-|│+ ↻ softwaredev/code/testing                                                  │|
+|│+ ↩ softwaredev/code/testing                                                  │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | playing  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause  |
 styles
@@ -57,26 +57,34 @@ styles
   5   1-78  - - BOLD
   5  79-79  #434c5e - -
   6   0-0   #434c5e - -
+  6   2-19  #8cafd1 - -
+  6  27-31  #7c8baa - -
   6  41-45  #ff8994 - -
   6  63-63  #5ac8fa - -
   6  66-70  #a3be8c - -
   6  79-79  #434c5e - -
   7   0-0   #434c5e - -
-  7   2-31  #7c8baa - -
+  7   2-24  #7c8baa - -
+  7  27-31  #7c8baa - -
   7  79-79  #434c5e - -
   8   0-0   #434c5e - -
+  8   2-21  #a3be8c - -
+  8  27-31  #7c8baa - -
   8  41-45  #e49b71 - BOLD
   8  63-63  #7dd87d - -
   8  66-70  #e49b71 - BOLD
   8  79-79  #434c5e - -
   9   0-0   #434c5e - -
-  9   1-40  #c99fc1 #3f3f4e BOLD
+  9   1-17  #c99fc1 #3f3f4e BOLD
+  9  18-26  - #3f3f4e BOLD
+  9  27-31  #7c8baa #3f3f4e BOLD
+  9  32-40  - #3f3f4e BOLD
   9  41-45  #a3be8c #3f3f4e BOLD
-  9  46-62  #c99fc1 #3f3f4e BOLD
+  9  46-62  - #3f3f4e BOLD
   9  63-63  #ff6b6b #3f3f4e BOLD
-  9  64-65  #c99fc1 #3f3f4e BOLD
+  9  64-65  - #3f3f4e BOLD
   9  66-66  #7c8baa #3f3f4e BOLD
-  9  67-78  #c99fc1 #3f3f4e BOLD
+  9  67-78  - #3f3f4e BOLD
   9  79-79  #434c5e - -
  10   0-0   #434c5e - -
  10  79-79  #434c5e - -

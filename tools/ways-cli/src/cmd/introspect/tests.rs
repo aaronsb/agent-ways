@@ -20,9 +20,10 @@ use agent_tui::theme::{Palette, Shape};
 use agent_tui::timeline::Playback;
 use ways_core::introspection::{CriteriaMap, FiredWay, IntrospectionSummary, JoinConfidence, MatchCriteria, MatchDetail, SessionIntrospection, Turn, WayMeta};
 
+use super::agents::{Agents, Meta as AgentMeta};
 use super::frames::{build_frames, has_verdicts};
 use super::live::{Follow, Probe, SAMPLE_TICK};
-use super::model::WayEvent;
+use super::model::{Outcome, WayEvent};
 use super::report::{Reports, Spend};
 use super::picker::Picker;
 use super::screen::{reselect_by_anchor, session_spend, Introspect, Replay};
@@ -49,6 +50,9 @@ fn ev(ts: &str, event: &str, way: &str, trigger: &str) -> WayEvent {
         switch: String::new(),
         lane: String::new(),
         agent: String::new(),
+        agent_id: String::new(),
+        kind: String::new(),
+        reason: String::new(),
     }
 }
 
@@ -311,9 +315,9 @@ fn anchor_keeps_the_same_way_or_the_nearest_earlier_one() {
     let f = &r.frames[2].shown(false);
     let ids: Vec<&str> = f.ways.iter().map(|w| w.id.as_str()).collect();
     assert_eq!(ids, ["softwaredev/delivery/commits", "softwaredev/docs/adr", "softwaredev/code/testing"]);
-    assert_eq!(reselect_by_anchor(f, "softwaredev/docs/adr", 2), 1, "still active: the same way");
-    assert_eq!(reselect_by_anchor(f, "gone/way", 2), 1, "gone: the last way fired at or before epoch 2");
-    assert_eq!(reselect_by_anchor(f, "gone/way", 0), 0, "nothing earlier: the first row");
+    assert_eq!(reselect_by_anchor(f, "softwaredev/docs/adr", "main", 2), 1, "still active: the same way");
+    assert_eq!(reselect_by_anchor(f, "gone/way", "main", 2), 1, "gone: the last way fired at or before epoch 2");
+    assert_eq!(reselect_by_anchor(f, "gone/way", "main", 0), 0, "nothing earlier: the first row");
 }
 
 /// A session id that is not ASCII is shortened by characters, not bytes.
@@ -363,7 +367,7 @@ fn a_live_refresh_keeps_the_why_reader_where_it_was() {
     s.pane_mut().replay.as_mut().unwrap().take_frames(replay(true).frames);
     let after = text(&render(&mut s, 80, 25));
     assert!(after.contains("why it fired 6–"), "the reader went back to the top: {after}");
-    assert!(after.contains("• e3 softwaredev/code/t"), "the why index is still there: {after}");
+    assert!(after.contains("• e3 ↩ softwaredev/code"), "the why index is still there: {after}");
 }
 
 #[test]
@@ -1235,7 +1239,7 @@ fn a_click_on_a_live_track_pauses_and_the_end_follows() {
 fn a_click_on_a_way_selects_it_and_a_second_opens_why() {
     let mut s = showing(replay(false), terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Right, KeyCode::Right]);
-    let check = at(&mut s, "✓ check");
+    let check = at(&mut s, "✓ ×");
     click(&mut s, check);
     assert!(selected(&mut s).contains("softwaredev/delivery/commits"), "the check's line is its way's row");
     click(&mut s, check);
@@ -1330,4 +1334,226 @@ fn mouse_golden_frames() {
         g.check(&format!("clicked-{w}x{h}"), &render(&mut s, w, h));
     }
     g.finish();
+}
+
+/// #814: main and two subagents fire one way, a Task subagent of a known
+/// type and a workflow member, and the way's check fires in the subagent.
+/// Each agent's fire is a row of its own, named.
+fn agents_replay() -> Replay {
+    let by = |e: WayEvent, agent: &str| WayEvent { agent_id: agent.into(), ..e };
+    let events = vec![
+        ev("2026-07-03T16:52:00Z", "session_start", "", ""),
+        by(ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/code/testing", "semantic:embedding:en"), "main"),
+        by(ev("2026-07-03T16:53:00Z", "way_fired", "softwaredev/docs/adr", "file"), "main"),
+        by(ev("2026-07-03T16:53:01Z", "way_fired", "softwaredev/docs/adr", "file"), "a1b2c3d4e5f6a7b8c"),
+        by(ev("2026-07-03T16:53:02Z", "way_fired", "softwaredev/docs/adr", "keyword"), "a9e8d7c6b5a4f3e2d"),
+        by(ev("2026-07-03T16:53:03Z", "check_fired", "softwaredev/docs/adr", ""), "a1b2c3d4e5f6a7b8c"),
+    ];
+    let meta = HashMap::from([
+        ("a1b2c3d4e5f6a7b8c".to_string(), AgentMeta { agent_type: "code-reviewer".into(), workflow_label: None }),
+        ("a9e8d7c6b5a4f3e2d".to_string(), AgentMeta { agent_type: "workflow-subagent".into(), workflow_label: Some("audit:judge".into()) }),
+    ]);
+    let agents = Agents::new(&events, meta);
+    let mut r = replay_of(events, false);
+    r.agents = agents;
+    r
+}
+
+#[test]
+fn main_and_a_subagent_firing_one_way_are_a_row_each_named() {
+    let r = agents_replay();
+    let f = r.frames.last().unwrap();
+    let rows: Vec<(&str, &str, u64)> = f.ways.iter().map(|w| (w.id.as_str(), w.agent.as_str(), w.check_fires)).collect();
+    assert_eq!(
+        rows,
+        [
+            ("softwaredev/code/testing", "main", 0),
+            ("softwaredev/docs/adr", "main", 0),
+            ("softwaredev/docs/adr", "a1b2c3d4e5f6a7b8c", 1),
+            ("softwaredev/docs/adr", "a9e8d7c6b5a4f3e2d", 0),
+        ],
+        "one row per agent, main first; the check counts against its agent"
+    );
+    // The session note names the way once, when it first fired.
+    assert_eq!(f.new_events.iter().filter(|e| e.starts_with("softwaredev/docs/adr (")).count(), 1, "{:?}", f.new_events);
+    // Agent takes its widest name, `wf·audit:judge`; where Way is down to
+    // eighteen it shrinks, to eight at the least.
+    assert_eq!(super::table::agent_width(&r.agents, 118), 14);
+    assert_eq!(super::table::agent_width(&r.agents, 78), 10);
+    assert_eq!(super::table::agent_width(&r.agents, 40), 8);
+    let mut s = showing(r, terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Right]);
+    let t = text(&render(&mut s, 120, 40));
+    let row = |agent: &str| t.lines().any(|l| l.contains("softwaredev/docs/adr") && l.contains(agent));
+    assert!(row(" main "), "{t}");
+    assert!(row("code-reviewer"), "{t}");
+    assert!(row("wf·audit:judge"), "{t}");
+    assert!(t.lines().any(|l| l.contains("✓ ×1 decay 0.50") && l.contains("code-reviewer")), "the check sub-row names its agent: {t}");
+    // At 80 columns the way keeps its leaf, a workflow member its label's end.
+    let t = text(&render(&mut s, 80, 25));
+    assert!(t.contains("…/docs/adr          code-revi…"), "{t}");
+    assert!(t.contains("wf·…:judge"), "{t}");
+    assert!(t.contains("  ✓ ×1 decay 0.50"), "{t}");
+}
+
+#[test]
+fn agents_golden_frames() {
+    let mut g = goldens();
+    let mut s = showing(agents_replay(), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Right]);
+    check(&mut g, "agents", &mut s);
+    g.finish();
+}
+
+/// A frame with every fate a way's row shows: fired, re-disclosed, its
+/// check fired, shadow-judged, judged out, held by its refire window and
+/// over the context cap.
+fn outcomes_replay() -> Replay {
+    let t = "2026-07-03T16:55:00Z";
+    let held = |way: &str, reason: &str| WayEvent { kind: "way".into(), reason: reason.into(), ..ev(t, "way_suppressed", way, "keyword") };
+    let shadow = |way: &str| WayEvent { verdict: "would_block".into(), ..ev(t, "way_judged", way, "") };
+    let events = vec![
+        ev("2026-07-03T16:52:00Z", "session_start", "", ""),
+        ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/code/testing", "semantic:embedding:en"),
+        ev("2026-07-03T16:52:02Z", "way_fired", "softwaredev/delivery/commits", "keyword"),
+        ev("2026-07-03T16:53:00Z", "way_fired", "softwaredev/docs/adr", "file"),
+        ev("2026-07-03T16:53:01Z", "check_fired", "softwaredev/docs/adr", ""),
+        ev(t, "way_redisclosed", "softwaredev/code/testing", "semantic:embedding:en"),
+        shadow("softwaredev/delivery/review"),
+        ev(t, "way_fired", "softwaredev/delivery/review", "keyword"),
+        ev(t, "way_judged", "itops/incident", ""),
+        held("softwaredev/delivery/commits", "refire"),
+        held("meta/knowledge", "context_cap"),
+        WayEvent { kind: "check".into(), reason: "refire".into(), ..ev(t, "way_suppressed", "softwaredev/docs/adr", "bash") },
+    ];
+    replay_of(events, false)
+}
+
+#[test]
+fn each_fate_has_its_mark_and_the_matched_view_shows_the_held_rows() {
+    use super::model::{Fate, Outcome};
+    let r = outcomes_replay();
+    let f = r.frames.last().unwrap();
+    let fates: Vec<(&str, Fate)> = f.ways.iter().map(|w| (w.id.as_str(), Fate::of(w))).collect();
+    assert_eq!(
+        fates,
+        [
+            ("softwaredev/delivery/commits", Fate::Injected),
+            ("softwaredev/docs/adr", Fate::CheckFired),
+            ("softwaredev/code/testing", Fate::Redisclosed),
+            ("softwaredev/delivery/review", Fate::WouldBlock),
+            ("itops/incident", Fate::Blocked),
+            ("meta/knowledge", Fate::CapHeld),
+            ("softwaredev/delivery/commits", Fate::RefireHeld),
+        ],
+        "a check's own suppression is not a row"
+    );
+    assert_eq!(f.shown(false).ways.iter().filter(|w| !w.outcome.injected()).count(), 0, "the default view is what was injected");
+    assert_eq!(f.ways.iter().filter(|w| w.outcome == Outcome::RefireHeld).count(), 1);
+    let mut s = showing(r, terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Right, KeyCode::Right, KeyCode::Char('f')]);
+    let t = text(&render(&mut s, 120, 40));
+    for mark in ["↩ softwaredev/code/testing", "◌ softwaredev/delivery/review", "⊘ itops/incident", "◷ softwaredev/delivery/commits", "⊟ meta/knowledge"] {
+        assert!(t.contains(mark), "{mark}: {t}");
+    }
+}
+
+#[test]
+fn outcomes_golden_frames() {
+    let mut g = goldens();
+    let mut s = showing(outcomes_replay(), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Right, KeyCode::Right, KeyCode::Char('f')]);
+    check(&mut g, "outcomes", &mut s);
+    g.finish();
+}
+
+#[test]
+fn a_long_way_id_keeps_its_trailing_segments() {
+    use super::table::keep_tail;
+    assert_eq!(keep_tail("softwaredev/docs/adr", 20), "softwaredev/docs/adr");
+    assert_eq!(keep_tail("softwaredev/docs/adr", 18), "…/docs/adr");
+    assert_eq!(keep_tail("softwaredev/code/supplychain/repoaudit", 18), "…/repoaudit");
+    assert_eq!(keep_tail("a/averyveryverylongleaf", 8), "…ongleaf");
+}
+
+/// #818 logs a check's agent: two agents' fires of one check count apart.
+#[test]
+fn two_agents_checks_of_one_way_count_apart() {
+    let by = |e: WayEvent, agent: &str| WayEvent { agent_id: agent.into(), ..e };
+    let events = vec![
+        by(ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), "main"),
+        by(ev("2026-07-03T16:52:02Z", "way_fired", "softwaredev/docs/adr", "file"), "a1b2c3d4e5f6a7b8c"),
+        by(ev("2026-07-03T16:52:03Z", "check_fired", "softwaredev/docs/adr", ""), "main"),
+        by(ev("2026-07-03T16:52:04Z", "check_fired", "softwaredev/docs/adr", ""), "a1b2c3d4e5f6a7b8c"),
+        by(ev("2026-07-03T16:52:05Z", "check_fired", "softwaredev/docs/adr", ""), "a1b2c3d4e5f6a7b8c"),
+    ];
+    let frames = build_frames(&events, &[], &HashMap::new(), 50);
+    let counts: Vec<(&str, u64)> = frames[0].ways.iter().map(|w| (w.agent.as_str(), w.check_fires)).collect();
+    assert_eq!(counts, [("main", 1), ("a1b2c3d4e5f6a7b8c", 2)]);
+}
+
+/// A verdict names its agent: only that agent's fire of the way is marked,
+/// and its blocked row names the agent. A verdict that names none (logs
+/// before the field) marks every fire of the way in its frame, as before.
+#[test]
+fn a_verdict_marks_only_its_agents_row() {
+    let sub = "a1b2c3d4e5f6a7b8c";
+    let by = |e: WayEvent, agent: &str| WayEvent { agent_id: agent.into(), ..e };
+    let verdict = |way: &str, v: &str, agent: &str| WayEvent { verdict: v.into(), agent_id: agent.into(), ..ev("2026-07-03T16:52:02Z", "way_judged", way, "") };
+    let events = vec![
+        by(ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), "main"),
+        verdict("softwaredev/docs/adr", "would_block", sub),
+        by(ev("2026-07-03T16:52:02Z", "way_fired", "softwaredev/docs/adr", "file"), sub),
+        verdict("itops/incident", "block", sub),
+    ];
+    let f = &build_frames(&events, &[], &HashMap::new(), 50)[0];
+    let rows: Vec<(&str, &str, Outcome)> = f.ways.iter().map(|w| (w.id.as_str(), w.agent.as_str(), w.outcome)).collect();
+    assert_eq!(
+        rows,
+        [
+            ("softwaredev/docs/adr", "main", Outcome::Injected),
+            ("softwaredev/docs/adr", sub, Outcome::WouldBlock),
+            ("itops/incident", sub, Outcome::Blocked),
+        ]
+    );
+    let meta = HashMap::from([(sub.to_string(), AgentMeta { agent_type: "code-reviewer".into(), workflow_label: None })]);
+    let agents = Agents::new(&events, meta);
+    let mut r = replay_of(events, false);
+    r.agents = agents;
+    let mut s = showing(r, terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('f')]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.lines().any(|l| l.contains("⊘ itops/incident") && l.contains("code-reviewer")), "{t}");
+
+    // Before the field, a shadow verdict marks every fire of its way.
+    let legacy: Vec<WayEvent> = vec![
+        by(ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), "main"),
+        verdict("softwaredev/docs/adr", "would_block", ""),
+        by(ev("2026-07-03T16:52:02Z", "way_fired", "softwaredev/docs/adr", "file"), sub),
+    ];
+    let f = &build_frames(&legacy, &[], &HashMap::new(), 50)[0];
+    assert!(f.ways.iter().all(|w| w.outcome == Outcome::WouldBlock));
+}
+
+/// A check that does not name its agent counts against the agent that last
+/// fired its way, and after a compaction against main.
+#[test]
+fn a_check_without_an_agent_counts_against_the_last_firer() {
+    let sub = "a1b2c3d4e5f6a7b8c";
+    let by = |e: WayEvent, agent: &str| WayEvent { agent_id: agent.into(), ..e };
+    let events = vec![
+        ev("2026-07-03T16:52:00Z", "session_start", "", ""),
+        by(ev("2026-07-03T16:52:01Z", "way_fired", "softwaredev/docs/adr", "file"), "main"),
+        by(ev("2026-07-03T16:52:02Z", "way_fired", "softwaredev/docs/adr", "file"), sub),
+        ev("2026-07-03T16:52:03Z", "check_fired", "softwaredev/docs/adr", ""),
+        ev("2026-07-03T17:52:00Z", "session_start", "", ""),
+        ev("2026-07-03T17:52:01Z", "check_fired", "softwaredev/docs/adr", ""),
+        by(ev("2026-07-03T17:52:02Z", "way_fired", "softwaredev/docs/adr", "file"), "main"),
+    ];
+    let frames = build_frames(&events, &[], &HashMap::new(), 50);
+    let counts = |f: &super::model::Frame| f.ways.iter().map(|w| (w.agent.clone(), w.check_fires)).collect::<Vec<_>>();
+    assert_eq!(counts(&frames[0]), [("main".to_string(), 0), (sub.to_string(), 1)]);
+    let last = frames.last().unwrap();
+    assert_eq!(last.window, 2);
+    assert_eq!(counts(last), [("main".to_string(), 1)], "after the boundary the bare check is main's");
 }

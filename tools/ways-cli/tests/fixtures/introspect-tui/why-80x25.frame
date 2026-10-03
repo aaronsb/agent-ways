@@ -6,7 +6,7 @@ agent-tui frame 80x25
 |┌ ways · epoch ──────────┐┌ why it fired 1–18/24 ──────────────────────────────┐|
 |│ • e1 softwaredev/delive││softwaredev/code/testing                            │|
 |│ · e2 softwaredev/docs/a││/ways/softwaredev/code/testing/testing.md           │|
-|│▌• e3 softwaredev/code/t││                                                    │|
+|│▌• e3 ↩ softwaredev/code││                                                    │|
 |│                        ││Trigger  embed:en  (score 0.71)                     │|
 |│                        ││Criteria                                            │|
 |│                        ││  vocabulary: test tdd unit golden fixture assert   │|
@@ -40,24 +40,26 @@ styles
   3  51-75  - - DIM
   3  76-79  - - BOLD
   4   0-0   - - DIM
-  4   1-14  Blue - BOLD|DIM
+  4   1-14  LightBlue - BOLD|DIM
   4  15-26  - - DIM
-  4  27-48  Blue - BOLD|DIM
+  4  27-48  LightBlue - BOLD|DIM
   4  49-79  - - DIM
   5   0-0   - - DIM
   5   4-6   - - DIM
+  5   7-24  LightBlue - -
   5  25-26  - - DIM
   5  27-50  - - BOLD
   5  79-79  - - DIM
   6   0-0   - - DIM
   6   4-6   - - DIM
+  6   7-24  Green - -
   6  25-67  - - DIM
   6  79-79  - - DIM
   7   0-0   - - DIM
   7   1-1   Cyan - BOLD|REVERSED
   7   2-3   - - BOLD|REVERSED
   7   4-6   - - BOLD|DIM|REVERSED
-  7   7-24  - - BOLD|REVERSED
+  7   7-24  Cyan - BOLD|REVERSED
   7  25-26  - - DIM
   7  79-79  - - DIM
   8   0-0   - - DIM

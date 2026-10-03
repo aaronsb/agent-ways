@@ -287,6 +287,7 @@ fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> Blocked {
             (false, Mode::Enforce) => "block",
             (false, _) => "would_block",
         };
+        let agent = crate::session::current_agent();
         let fields: Vec<(String, String)> = [
             ("event", "way_judged"),
             ("way", &v.id),
@@ -303,6 +304,9 @@ fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> Blocked {
             ("scope", log.scope),
             ("project", log.project_dir),
             ("session", log.session_id),
+            // The agent judged, as fires and checks record it (#818), so the
+            // timeline marks that agent's row (#814).
+            ("agent_id", &agent),
         ]
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -430,6 +434,11 @@ mod tests {
         assert_eq!(field(verdicts[0], "verdict"), "pass");
         assert_eq!(field(verdicts[1], "verdict"), "block");
         assert_eq!(field(verdicts[1], "p_yes"), "0.050");
+        // Each verdict names the agent judged (#814): main where the hook
+        // named none. No test sets CLAUDE_AGENT_ID; a runner that does gets
+        // its agent's key.
+        let agent = if std::env::var_os("CLAUDE_AGENT_ID").is_none() { "main".to_string() } else { crate::session::current_agent() };
+        assert!(verdicts.iter().all(|v| field(v, "agent_id") == agent), "{verdicts:?}");
     }
 
     fn calls_in(events: &[Vec<(String, String)>]) -> Vec<Vec<(String, String)>> {

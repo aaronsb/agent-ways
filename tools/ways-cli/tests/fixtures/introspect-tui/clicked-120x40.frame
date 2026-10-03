@@ -4,9 +4,9 @@ agent-tui frame 120x40
 |epoch 1 · 200K ctx · 2 ways · window 1/2 · 2026-07-03 16:52  ◇ injected                                                 |
 |●──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼ 1/4|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│ softwaredev/code/testing                                                    1      0  embed:en       ◆  ─            │|
-|│▌softwaredev/delivery/commits                                                1      0  keyword        ●  ─            │|
+|│ Way                                                              Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
+|│ softwaredev/code/testing                                         main       1      0  embed:en       ◆  ─            │|
+|│▌softwaredev/delivery/commits                                     main       1      0  keyword        ●  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -54,25 +54,36 @@ styles
   3   1-115 - - DIM
   3 116-119 - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-119 - - DIM
   5   0-0   - - DIM
   5   1-118 - - BOLD
   5 119-119 - - DIM
   6   0-0   - - DIM
-  6   1-102 Green - BOLD
+  6   1-1   - - BOLD
+  6   2-25  Green - BOLD
+  6  26-66  - - BOLD
+  6  67-71  - - BOLD|DIM
+  6  72-80  - - BOLD
+  6  81-85  Green - BOLD
+  6  86-102 - - BOLD
   6 103-103 #7dd87d - BOLD
-  6 104-105 Green - BOLD
-  6 106-106 Green - BOLD|DIM
-  6 107-118 Green - BOLD
+  6 104-105 - - BOLD
+  6 106-106 - - BOLD|DIM
+  6 107-118 - - BOLD
   6 119-119 - - DIM
   7   0-0   - - DIM
   7   1-1   Cyan - BOLD|REVERSED
-  7   2-102 Green - BOLD|REVERSED
+  7   2-29  Green - BOLD|REVERSED
+  7  30-66  - - BOLD|REVERSED
+  7  67-71  - - BOLD|DIM|REVERSED
+  7  72-80  - - BOLD|REVERSED
+  7  81-85  Green - BOLD|REVERSED
+  7  86-102 - - BOLD|REVERSED
   7 103-103 #5ac8fa - BOLD|REVERSED
-  7 104-105 Green - BOLD|REVERSED
-  7 106-106 Green - BOLD|DIM|REVERSED
-  7 107-118 Green - BOLD|REVERSED
+  7 104-105 - - BOLD|REVERSED
+  7 106-106 - - BOLD|DIM|REVERSED
+  7 107-118 - - BOLD|REVERSED
   7 119-119 - - DIM
   8   0-0   - - DIM
   8 119-119 - - DIM
@@ -124,7 +135,7 @@ styles
  31 119-119 - - DIM
  32   0-119 - - DIM
  33   0-0   - - DIM
- 33   1-9   Blue - BOLD|DIM
+ 33   1-9   LightBlue - BOLD|DIM
  33  10-119 - - DIM
  34   0-0   - - DIM
  34   1-102 Green - -

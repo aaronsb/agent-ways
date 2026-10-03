@@ -21,6 +21,13 @@ pub(crate) struct WayEvent {
     pub(super) switch: String,
     pub(super) lane: String,
     pub(super) agent: String,
+    /// The agent a fire, re-disclosure or check was delivered to: `main`,
+    /// or the subagent's id. Empty where the event does not record it.
+    pub(super) agent_id: String,
+    /// On a `way_suppressed` event: `way` or `check`, and the reason
+    /// (`refire` or `context_cap`).
+    pub(super) kind: String,
+    pub(super) reason: String,
 }
 
 /// Ways held back from a subagent by the subagent switch (#768, #786):
@@ -62,6 +69,13 @@ pub(crate) enum Outcome {
     Blocked,
     /// Injected, but in shadow mode the judge would have kept it out.
     WouldBlock,
+    /// Matched again inside its refire window and not shown again
+    /// (`way_suppressed`, reason `refire`). Like a block, it injected
+    /// nothing and shows only in its frame.
+    RefireHeld,
+    /// Matched but withheld by the context cap (`way_suppressed`, reason
+    /// `context_cap`); only in its frame.
+    CapHeld,
 }
 
 impl Outcome {
@@ -72,15 +86,49 @@ impl Outcome {
             Outcome::Injected => "injected",
             Outcome::Blocked => "blocked",
             Outcome::WouldBlock => "would_block",
+            Outcome::RefireHeld => "refire_suppressed",
+            Outcome::CapHeld => "context_cap",
         }
     }
 
-    /// The row mark the screens draw before the way's id; none when injected.
-    pub(crate) fn mark(self) -> &'static str {
-        match self {
-            Outcome::Injected => "",
-            Outcome::Blocked => "⊘ ",
-            Outcome::WouldBlock => "◌ ",
+    /// Whether the way reached the session: a shadow would-block did.
+    pub(crate) fn injected(self) -> bool {
+        matches!(self, Outcome::Injected | Outcome::WouldBlock)
+    }
+}
+
+/// What happened to a way, as its row shows it: [`Fate::of`] picks one,
+/// and `table::look` gives each its mark and colour, so the two agree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Fate {
+    /// Fired and injected.
+    Injected,
+    /// Its latest injection was a re-disclosure.
+    Redisclosed,
+    /// Injected, and its check has fired since.
+    CheckFired,
+    /// Injected; the judge, in shadow, would have kept it out.
+    WouldBlock,
+    /// The judge kept it out.
+    Blocked,
+    /// The refire window held it back.
+    RefireHeld,
+    /// The context cap withheld it.
+    CapHeld,
+}
+
+impl Fate {
+    /// A withheld row's outcome names it; an injected row's shadow verdict
+    /// comes first, then a re-disclosure, then a check.
+    pub(crate) fn of(w: &ActiveWay) -> Fate {
+        match w.outcome {
+            Outcome::Blocked => Fate::Blocked,
+            Outcome::RefireHeld => Fate::RefireHeld,
+            Outcome::CapHeld => Fate::CapHeld,
+            Outcome::WouldBlock => Fate::WouldBlock,
+            Outcome::Injected if w.by_redisclosure => Fate::Redisclosed,
+            Outcome::Injected if w.check_fires > 0 => Fate::CheckFired,
+            Outcome::Injected => Fate::Injected,
         }
     }
 }
@@ -102,6 +150,13 @@ pub(crate) struct ActiveWay {
     /// On a row blocked with its ancestor, the ancestor whose P(yes) it
     /// shows; empty otherwise.
     pub(crate) ancestor: String,
+    /// The agent the way was injected into: `main` or a subagent's id. A
+    /// way several agents fired is a row per agent. Empty on a blocked row
+    /// whose verdict did not record its agent.
+    pub(crate) agent: String,
+    /// Whether its latest injection was a re-disclosure rather than a
+    /// fire; unlike `is_redisclosed`, it holds past the frame it happened in.
+    pub(crate) by_redisclosure: bool,
 }
 
 impl WayRow for ActiveWay {
@@ -111,6 +166,7 @@ impl WayRow for ActiveWay {
     fn trigger(&self) -> &str { &self.trigger }
     fn check_fires(&self) -> u64 { self.check_fires }
     fn refire_threshold_k(&self) -> u64 { self.refire_threshold_k }
+    fn agent_id(&self) -> &str { &self.agent }
 }
 
 /// A single frame in the replay.
@@ -120,8 +176,9 @@ pub(crate) struct Frame {
     pub(crate) timestamp: String,
     pub(crate) elapsed_secs: u64,
     pub(crate) token_position_k: u64,
-    /// The injected ways in (epoch fired, id) order, then the candidates the
-    /// judge blocked in this frame, by id. [`Frame::shown`] filters them.
+    /// The injected ways in (epoch fired, id, agent) order, then the
+    /// candidates the judge blocked or the refire window or context cap held
+    /// back in this frame, by id. [`Frame::shown`] filters them.
     pub(crate) ways: Vec<ActiveWay>,
     pub(crate) new_events: Vec<String>,
     /// Ways the subagent switch held back in this frame, in log order.
@@ -136,11 +193,12 @@ pub(crate) struct Frame {
 impl Frame {
     /// This frame as one view shows it: the injected ways (a shadow
     /// would-block was injected, so it stays), or with `matched` every
-    /// matched candidate, the judge-blocked ones too.
+    /// matched candidate, the ones the judge, the refire window or the
+    /// context cap kept out too.
     pub(crate) fn shown(&self, matched: bool) -> Frame {
         let mut f = self.clone();
         if !matched {
-            f.ways.retain(|w| w.outcome != Outcome::Blocked);
+            f.ways.retain(|w| w.outcome.injected());
         }
         f
     }

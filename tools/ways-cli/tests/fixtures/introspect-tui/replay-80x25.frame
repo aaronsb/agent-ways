@@ -4,11 +4,11 @@ agent-tui frame 80x25
 |epoch 3 · 200K ctx · 3 ways · window 1/2  ◇ injected · 1 judged out             |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●────────────────────────┼ 3/4|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────┐|
-|│ Way                             Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│ softwaredev/delivery/commits        1      2  keyword        ●  ● now        │|
-|│   ✓ check (1 fires, decay=0.50                                               │|
-|│ softwaredev/docs/adr                2      1  file           ◆  ◐ 85%        │|
-|│▌softwaredev/code/testing            3      0  embed:en       ■  ─            │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
+|│ …/delivery/commits       main       1      2  keyword        ●  ● now        │|
+|│   ✓ ×1 decay 0.50        main                                                │|
+|│ softwaredev/docs/adr     main       2      1  file           ◆  ◐ 85%        │|
+|│▌↩ …/code/testing         main       3      0  embed:en       ■  ─            │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -21,7 +21,7 @@ agent-tui frame 80x25
 |│███████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░ 66% (132K / 200K)│|
 |│● 1 re-disclose now  ◐ 1 approaching  ○ 1 distant  │ 30–80K intervals         │|
 |│··············◆·································■········ forecast 132K → 179K│|
-|│+ ↻ softwaredev/code/testing                                                  │|
+|│+ ↩ softwaredev/code/testing                                                  │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | replay  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space play      |
 styles
@@ -40,32 +40,40 @@ styles
   3  51-75  - - DIM
   3  76-79  - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-79  - - DIM
   5   0-0   - - DIM
   5   1-78  - - BOLD
   5  79-79  - - DIM
   6   0-0   - - DIM
+  6   2-19  LightBlue - -
+  6  27-31  - - DIM
   6  41-45  Red - -
   6  63-63  #5ac8fa - -
   6  66-70  Green - -
   6  79-79  - - DIM
   7   0-0   - - DIM
-  7   2-31  - - DIM
+  7   2-24  - - DIM
+  7  27-31  - - DIM
   7  79-79  - - DIM
   8   0-0   - - DIM
+  8   2-21  Green - -
+  8  27-31  - - DIM
   8  41-45  Yellow - BOLD
   8  63-63  #7dd87d - -
   8  66-70  Yellow - BOLD
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9   1-40  Cyan - BOLD|REVERSED
+  9   1-17  Cyan - BOLD|REVERSED
+  9  18-26  - - BOLD|REVERSED
+  9  27-31  - - BOLD|DIM|REVERSED
+  9  32-40  - - BOLD|REVERSED
   9  41-45  Green - BOLD|REVERSED
-  9  46-62  Cyan - BOLD|REVERSED
+  9  46-62  - - BOLD|REVERSED
   9  63-63  #ff6b6b - BOLD|REVERSED
-  9  64-65  Cyan - BOLD|REVERSED
-  9  66-66  Cyan - BOLD|DIM|REVERSED
-  9  67-78  Cyan - BOLD|REVERSED
+  9  64-65  - - BOLD|REVERSED
+  9  66-66  - - BOLD|DIM|REVERSED
+  9  67-78  - - BOLD|REVERSED
   9  79-79  - - DIM
  10   0-0   - - DIM
  10  79-79  - - DIM
@@ -83,7 +91,7 @@ styles
  16  79-79  - - DIM
  17   0-79  - - DIM
  18   0-0   - - DIM
- 18   1-9   Blue - BOLD|DIM
+ 18   1-9   LightBlue - BOLD|DIM
  18  10-79  - - DIM
  19   0-0   - - DIM
  19   1-60  Yellow - BOLD

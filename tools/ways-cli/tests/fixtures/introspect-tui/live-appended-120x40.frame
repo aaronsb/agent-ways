@@ -4,8 +4,8 @@ agent-tui frame 120x40
 |epoch 1 · 200K ctx · 1 ways · window 2/2 · 2026-07-03 17:52  ◇ injected  ● LIVE · 6s ago                                |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 4/4|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│▌softwaredev/delivery/commits                                                1      0  keyword        ●  ─            │|
+|│ Way                                                              Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
+|│▌↩ softwaredev/delivery/commits                                   main       1      0  keyword        ●  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -36,7 +36,7 @@ agent-tui frame 120x40
 |│███████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 15% (31K / 200K)│|
 |│○ 1 distant  │ 30K interval                                                                                           │|
 |│··································································································● forecast 31K → 61K│|
-|│+ ⎯ compaction · window 2 ⎯, ↻ softwaredev/delivery/commits                                                           │|
+|│+ ⎯ compaction · window 2 ⎯, ↩ softwaredev/delivery/commits                                                           │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
 | live  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause · f matched · esc sessions · 1-9 tabs         |
 styles
@@ -56,19 +56,22 @@ styles
   3 115-115 Cyan - BOLD
   3 116-119 - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-119 - - DIM
   5   0-0   - - DIM
   5   1-118 - - BOLD
   5 119-119 - - DIM
   6   0-0   - - DIM
-  6   1-80  Cyan - BOLD|REVERSED
+  6   1-31  Cyan - BOLD|REVERSED
+  6  32-66  - - BOLD|REVERSED
+  6  67-71  - - BOLD|DIM|REVERSED
+  6  72-80  - - BOLD|REVERSED
   6  81-85  Green - BOLD|REVERSED
-  6  86-102 Cyan - BOLD|REVERSED
+  6  86-102 - - BOLD|REVERSED
   6 103-103 #5ac8fa - BOLD|REVERSED
-  6 104-105 Cyan - BOLD|REVERSED
-  6 106-106 Cyan - BOLD|DIM|REVERSED
-  6 107-118 Cyan - BOLD|REVERSED
+  6 104-105 - - BOLD|REVERSED
+  6 106-106 - - BOLD|DIM|REVERSED
+  6 107-118 - - BOLD|REVERSED
   6 119-119 - - DIM
   7   0-0   - - DIM
   7 119-119 - - DIM
@@ -122,7 +125,7 @@ styles
  31 119-119 - - DIM
  32   0-119 - - DIM
  33   0-0   - - DIM
- 33   1-9   Blue - BOLD|DIM
+ 33   1-9   LightBlue - BOLD|DIM
  33  10-119 - - DIM
  34   0-0   - - DIM
  34   1-101 Green - -

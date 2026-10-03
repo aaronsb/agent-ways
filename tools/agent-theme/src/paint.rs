@@ -184,7 +184,9 @@ fn terminal_role(r: Role) -> Drawn {
     match r {
         Role::Body => drawn(None, 0),
         Role::Accent => drawn(Some(Color::Ansi(6)), 0),
-        Role::Info => drawn(Some(Color::Ansi(4)), 0),
+        // Bright blue: plain blue (4) is near-black on a dark ground, where
+        // titles and info text drew all but unreadable.
+        Role::Info => drawn(Some(Color::Ansi(12)), 0),
         Role::Ok => drawn(Some(Color::Ansi(2)), 0),
         Role::Warn => drawn(Some(Color::Ansi(3)), 0),
         Role::Err => drawn(Some(Color::Ansi(1)), 0),

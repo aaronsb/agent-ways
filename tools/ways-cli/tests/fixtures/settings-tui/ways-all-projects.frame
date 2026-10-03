@@ -38,9 +38,9 @@ styles
   0  59-69  White Blue -
   0  72-80  White Blue -
   1   0-0   - - DIM
-  1   1-39  Blue - BOLD|DIM
+  1   1-39  LightBlue - BOLD|DIM
   1  40-55  - - DIM
-  1  56-61  Blue - BOLD|DIM
+  1  56-61  LightBlue - BOLD|DIM
   1  62-99  - - DIM
   2   0-0   - - DIM
   2   2-11  - - BOLD
@@ -97,7 +97,7 @@ styles
  15  15-20  - - DIM
  15  32-38  - - DIM
  15  54-55  - - DIM
- 15  56-58  Blue - BOLD|DIM
+ 15  56-58  LightBlue - BOLD|DIM
  15  59-99  - - DIM
  16   0-0   - - DIM
  16   2-12  - - BOLD
@@ -109,7 +109,7 @@ styles
  18   0-0   - - DIM
  18   1-1   Cyan - BOLD|REVERSED
  18   2-31  - - BOLD|REVERSED
- 18  32-36  Blue - BOLD|REVERSED
+ 18  32-36  LightBlue - BOLD|REVERSED
  18  37-53  - - BOLD|REVERSED
  18  54-55  - - DIM
  18  99-99  - - DIM

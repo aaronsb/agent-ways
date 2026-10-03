@@ -5,6 +5,7 @@
 //! model as JSON; `fires`, the semantic fires by score.
 //!
 //! - [`model`] — the replay data types (`WayEvent`, `ActiveWay`, `Frame`).
+//! - [`agents`] — the agents that fired each way, named.
 //! - [`scope`] — project-scope resolution and matching.
 //! - [`frames`] — frame reconstruction and event/token loading.
 //! - [`sessions`] — session enumeration, the `list` table, transcript discovery.
@@ -14,6 +15,7 @@
 //! - [`table`] — the ways table and context lines on agent-tui.
 //! - [`screen`] — the picker, timeline and why-fired screens.
 
+mod agents;
 mod dump;
 mod frames;
 mod model;

@@ -27,7 +27,7 @@ agent-tui frame 80x25
 styles
   0   0-9   White Blue -
   1   0-0   - - DIM
-  1   1-27  Blue - BOLD|DIM
+  1   1-27  LightBlue - BOLD|DIM
   1  28-79  - - DIM
   2   0-0   - - DIM
   2   1-78  - - BOLD
@@ -42,7 +42,7 @@ styles
   5  79-79  - - DIM
   6   0-79  - - DIM
   7   0-0   - - DIM
-  7   1-39  Blue - BOLD|DIM
+  7   1-39  LightBlue - BOLD|DIM
   7  40-79  - - DIM
   8   0-0   - - DIM
   8   1-18  Cyan - -
@@ -76,7 +76,7 @@ styles
  22   0-0   - - DIM
  22  79-79  - - DIM
  23   0-70  - - DIM
- 23  71-78  Blue - BOLD|DIM
+ 23  71-78  LightBlue - BOLD|DIM
  23  79-79  - - DIM
  24   0-9   Black Cyan BOLD
  24  11-16  - - DIM

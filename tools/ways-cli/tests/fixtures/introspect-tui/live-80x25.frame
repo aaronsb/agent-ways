@@ -4,8 +4,8 @@ agent-tui frame 80x25
 |epoch 1 · 200K ctx · 1 ways · window 2/2  ◇ injected  ● LIVE · 6s ago           |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 4/4|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────┐|
-|│ Way                             Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│▌softwaredev/delivery/commits        1      0  keyword        ●  ─            │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ◎  Re-disclose  │|
+|│▌↩ …/delivery/commits     main       1      0  keyword        ●  ─            │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -21,7 +21,7 @@ agent-tui frame 80x25
 |│█████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 15% (31K / 200K)│|
 |│○ 1 distant  │ 30K interval                                                   │|
 |│··························································● forecast 31K → 61K│|
-|│+ ⎯ compaction · window 2 ⎯, ↻ softwaredev/delivery/commits                   │|
+|│+ ⎯ compaction · window 2 ⎯, ↩ softwaredev/delivery/commits                   │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | live  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause       |
 styles
@@ -40,19 +40,22 @@ styles
   3  75-75  Cyan - BOLD
   3  76-79  - - BOLD
   4   0-0   - - DIM
-  4   1-17  Blue - BOLD|DIM
+  4   1-17  LightBlue - BOLD|DIM
   4  18-79  - - DIM
   5   0-0   - - DIM
   5   1-78  - - BOLD
   5  79-79  - - DIM
   6   0-0   - - DIM
-  6   1-40  Cyan - BOLD|REVERSED
+  6   1-21  Cyan - BOLD|REVERSED
+  6  22-26  - - BOLD|REVERSED
+  6  27-31  - - BOLD|DIM|REVERSED
+  6  32-40  - - BOLD|REVERSED
   6  41-45  Green - BOLD|REVERSED
-  6  46-62  Cyan - BOLD|REVERSED
+  6  46-62  - - BOLD|REVERSED
   6  63-63  #5ac8fa - BOLD|REVERSED
-  6  64-65  Cyan - BOLD|REVERSED
-  6  66-66  Cyan - BOLD|DIM|REVERSED
-  6  67-78  Cyan - BOLD|REVERSED
+  6  64-65  - - BOLD|REVERSED
+  6  66-66  - - BOLD|DIM|REVERSED
+  6  67-78  - - BOLD|REVERSED
   6  79-79  - - DIM
   7   0-0   - - DIM
   7  79-79  - - DIM
@@ -76,7 +79,7 @@ styles
  16  79-79  - - DIM
  17   0-79  - - DIM
  18   0-0   - - DIM
- 18   1-9   Blue - BOLD|DIM
+ 18   1-9   LightBlue - BOLD|DIM
  18  10-79  - - DIM
  19   0-0   - - DIM
  19   1-61  Green - -

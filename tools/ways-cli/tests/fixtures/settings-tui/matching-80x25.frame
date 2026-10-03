@@ -33,9 +33,9 @@ styles
   0  59-69  White Blue -
   0  72-79  White Blue -
   1   0-0   - - DIM
-  1   1-24  Blue - BOLD|DIM
+  1   1-24  LightBlue - BOLD|DIM
   1  25-44  - - DIM
-  1  45-50  Blue - BOLD|DIM
+  1  45-50  LightBlue - BOLD|DIM
   1  51-79  - - DIM
   2   0-0   - - DIM
   2   2-11  - - BOLD
@@ -58,7 +58,7 @@ styles
   6  43-44  - - DIM
   6  79-79  - - DIM
   7   0-0   - - DIM
-  7  26-28  Blue - -
+  7  26-28  LightBlue - -
   7  43-44  - - DIM
   7  79-79  - - DIM
   8   0-0   - - DIM
