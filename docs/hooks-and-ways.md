@@ -1,120 +1,153 @@
 # Hooks and Ways System
 
-How contextual guidance gets injected into Claude Code sessions.
+How contextual guidance gets injected into Claude Code sessions. The diagrams of the internals are in [architecture.md](architecture.md), and the fire rule with its thresholds in [engine-reference.md](hooks-and-ways/engine-reference.md).
 
 ## Hook Events
 
-Claude Code hook events drive the system. Each fires shell scripts that scan for matching ways and inject their content.
+The hooks are declared in the `hooks` block of the repo's [`settings.json`](../settings.json). `ways reconcile` three-way merges that block into the `settings.json` of each target it projects to (`~/.claude` by default, ADR-184), so edit the repo copy, not the projected one. Scripts run in the order listed.
 
-| Event | When | Scripts |
-|-------|------|---------|
-| **SessionStart** (startup) | Fresh session | `clear-markers.sh`, `check-config-updates.sh`, `check-state.sh`, `ways init`, `ways corpus` |
-| **SessionStart** (compact) | After compaction | `clear-markers.sh`, `check-state.sh` |
-| **SessionStart** (resume) | Session resume | `check-state.sh` |
-| **UserPromptSubmit** | Every user message | `check-prompt.sh`, `check-state.sh` |
-| **PreToolUse** (Edit\|Write) | Before file edit | `check-file-pre.sh` |
-| **PreToolUse** (Bash) | Before command | `check-bash-pre.sh` |
-| **PreToolUse** (Task) | Before subagent spawn | `check-task-pre.sh` |
-| **PreToolUse** (TaskCreate) | Before task creation | `mark-tasks-active.sh` |
-| **SubagentStart** | When subagent starts | `inject-subagent.sh` |
-| **SessionStart** (clear) | After `/clear` | `clear-markers.sh`, `check-state.sh`, `ways init` |
-| **Stop** | After Claude responds | `check-response.sh` |
+| Event | Matcher | Scripts |
+|-------|---------|---------|
+| **SessionStart** | `startup` | `check-setup.sh`, `clear-markers.sh`, `check-config-updates.sh`, `check-state.sh`, `ways init`, `ways corpus --if-stale --quiet`, `issues-pull.sh session-start` |
+| **SessionStart** | `compact` | `clear-markers.sh`, `check-state.sh`, `issues-pull.sh session-start` |
+| **SessionStart** | `resume` | `check-state.sh`, `issues-pull.sh session-start` |
+| **SessionStart** | `clear` | `clear-markers.sh`, `check-state.sh`, `ways init`, `issues-pull.sh session-start` |
+| **UserPromptSubmit** | | `check-prompt.sh`, `check-state.sh`, `issues-pull.sh prompt` |
+| **PreToolUse** | `Edit\|Write` | `check-file-pre.sh` |
+| **PreToolUse** | `Bash` | `check-bash-pre.sh`, `strip-session-link-pre.sh` |
+| **PreToolUse** | `TaskCreate` | `mark-tasks-active.sh` |
+| **PreToolUse** | `Task` | `check-task-pre.sh` |
+| **SubagentStart** | | `inject-subagent.sh` |
+| **PostToolUse** | `Edit\|Write\|Bash\|Task` | `check-post.sh`, `check-queued.sh` |
+| **PostToolUse** | `Bash` | `issues-pull.sh post-gh` |
+| **PostToolUseFailure** | `Edit\|Write\|Bash\|Task` | `check-post.sh` |
+| **Stop** | | `check-response.sh`, `attend-drain-stop.sh` |
+| **TaskCreated** | | `issues-task-created.sh` |
+
+`check-config-updates.sh` lives in `~/.claude/hooks/`. Every other script lives in `~/.claude/hooks/ways/`, and `ways` is `~/.claude/bin/ways`.
 
 ## What Each Script Does
 
-Each script under `hooks/ways/` is a thin adapter: it runs `ways hook <event>`, which reads Claude Code's JSON payload on stdin, makes every decision, and prints what the hook returns (ADR-504 §11). The scripts exit 0 whatever the binary returns, because a guidance hook never blocks a prompt or a tool.
+Each script that touches ways is a thin adapter: it sources `require-ways.sh` and runs `ways hook <event>`, which reads Claude Code's JSON payload on stdin, makes every decision, and prints what the hook returns (ADR-504 §11). The scripts exit 0 whatever the binary returns, because a guidance hook never blocks a prompt or a tool. `ways scan` and `ways show` are internal subcommands the dispatcher uses. They are not part of the interface.
 
-### Session Lifecycle
+Before any injecting lane runs, `ways hook` checks the switches described in [Switching ways off](#switching-ways-off).
 
-- **`clear-markers.sh`** (`ways hook session-start`) - Clears this session's state under `{SESSIONS_ROOT}/{session_id}/`, as `ways session reset --session <id> --confirm` does, and logs the session start. Scoped to the current session only: an id that is not a plain session id clears nothing.
-- **`ways init`** - If the project has a `.claude/` or `.git/` directory, writes `$PROJECT/.claude/.gitignore` and `$PROJECT/.claude/ways/_template.md` when they are missing, then seeds `MEMORY.md` (ADR-128). A fresh repo therefore gets these two files as untracked files. `.claude/.gitignore` keeps developer-local files (`settings.local.json`, `memory/`, `plans/` and similar) out of git, and `_template.md` is a starting point for writing a project way; its empty frontmatter means it never fires. Projects may commit or ignore either file. `ways init` does not overwrite them once they exist.
-- **`ways corpus --if-stale --quiet`** - Regenerates the embedding corpus if way files have changed since last build.
-- **`check-config-updates.sh`** - Checks if the config is behind upstream. Checks the app source in `$XDG_DATA_HOME/agent-ways` against `aaronsb/agent-ways`; legacy layouts are not checked. The network call (`git fetch`) is rate-limited to once per hour; update notices fire every session when behind. See the [Updating](#updating) section of the README for scenario details and how to control this behavior.
+### Session lifecycle
 
-### Trigger Evaluation
+- **`clear-markers.sh`** (`ways hook session-start`) - Clears this session's state under `{SESSIONS_ROOT}/{session_id}/`, as `ways session reset --session <id> --confirm` does, prunes subagent switches older than 30 days, and logs `session_start`. An id that is not a plain session id clears nothing.
+- **`check-setup.sh`** - Prints a setup notice when `~/.claude/bin/ways` is missing, since every other ways hook is inert without it.
+- **`ways init`** - If the project has a `.claude/` or `.git/` directory, writes `$PROJECT/.claude/.gitignore` and `$PROJECT/.claude/ways/_template.md` when they are missing, then seeds `MEMORY.md` (ADR-128). A fresh repo therefore gets these two files as untracked files. `.claude/.gitignore` keeps developer-local files (`settings.local.json`, `memory/`, `plans/` and similar) out of git, and `_template.md` is a starting point for writing a project way. Its empty frontmatter means it never fires. `ways init` does not overwrite either file.
+- **`ways corpus --if-stale --quiet`** - Regenerates the embedding corpus if way files have changed since the last build.
+- **`check-config-updates.sh`** - Checks the app source in `$XDG_DATA_HOME/agent-ways` against `aaronsb/agent-ways`. The `git fetch` is rate-limited to once per hour, and the notice shows every session while the install is behind. See [Updating](../README.md#updating) in the README.
 
-These scripts fire on **PreToolUse** — before the tool executes, not after. This is a critical design choice: guidance must arrive while Claude can still act on it. A commit format reminder after the commit is too late. Security guidance after the file edit is too late. The "Pre" in PreToolUse means Claude sees the way content and can adjust its behavior before the action happens.
+### Trigger evaluation
 
-- **`check-prompt.sh`** (`ways hook prompt`) - Matches the user prompt, embedding it with Claude's previous response that the Stop hook recorded. The `ways` binary handles all matching: file walking, frontmatter extraction, pattern + semantic matching, scope/precondition gating, parent threshold lowering, session markers, macro dispatch, and content output.
-- **`check-bash-pre.sh`** - Scans ways for `commands:` patterns. Tests the command about to run. Also checks `pattern:` against the command description.
-- **`check-file-pre.sh`** - Scans ways for `files:` patterns. Tests the file path about to be edited.
-- **`check-state.sh`** - Evaluates `trigger:` fields (context-threshold, file-exists, session-start). See [State Triggers](#state-triggers).
+The PreToolUse lanes run before the tool executes, so guidance arrives while Claude can still act on it. A commit format reminder after the commit is too late.
 
-All trigger evaluation scripts respect the `scope:` frontmatter field - ways without `agent` scope are skipped.
+- **`check-prompt.sh`** (`ways hook prompt`) - Matches the user prompt, embedded together with Claude's previous response that the Stop hook recorded. The surviving candidates go to the [relevance gate](#relevance-gate-and-the-ways-agent) before they are shown. A prompt that is a harness envelope (a task notification, a system reminder, a skill body) bumps the epoch and is not matched.
+- **`check-state.sh`** (`ways hook state`) - Shows `core.md` when its marker is missing, then evaluates `trigger:` fields. See [State triggers](#state-triggers).
+- **`check-bash-pre.sh`** (`ways hook command`) - Three channels: `commands:` against the command, `pattern:` against the tool's description, and a semantic lane over the command, its description and Claude's prose since the last human turn (ADR-155 §4, ADR-191). `*.check.md` checks are scored on the same surface. This lane has no judge and logs no near-misses. ADR-188, still proposed, would retire its semantic lane.
+- **`check-file-pre.sh`** (`ways hook file`) - Tests `files:` patterns against the path about to be edited. Regex only.
 
-### Subagent Injection
+All lanes respect the `scope:` field and the `when:` preconditions.
 
-- **`check-task-pre.sh`** (`ways hook task`) - PreToolUse:Task hook (Phase 1). Reads the Task tool's `prompt` parameter, runs inline matching for `scope: subagent` ways. A Task naming an agent with its own definition (project, user or plugin) is skipped. Writes matched way paths to `{SESSIONS_ROOT}/{session_id}/subagent-stash/`. Never blocks Task creation.
-- **`inject-subagent.sh`** (`ways hook subagent-start`) - SubagentStart hook (Phase 2). Reads the oldest stash file, claims it atomically, emits way content as JSON `hookSpecificOutput.additionalContext`. Bypasses markers entirely - subagents get fresh context regardless of what the parent triggered. A macro rendered here runs with `WAYS_SCOPE=subagent` (see [Macros](hooks-and-ways/macros.md)).
+### Post-tool lanes
 
-### State Management
+- **`check-post.sh`** (`ways hook post-tool`) - Runs on PostToolUse and PostToolUseFailure. Each way's `postcheck.sh` is fed the hook payload, and a way whose postcheck exits 0 is shown through the same refire check and context budget as a predictive fire (ADR-123 Decision 5). A project-local postcheck runs only in a trusted project.
+- **`check-queued.sh`** (`ways hook queued`) - Messages the operator types while Claude is working are queued and never reach UserPromptSubmit. This lane gathers the queued messages newer than the session's scan mark into one surface, matches it like a prompt (relevance gate included, epoch not bumped), and advances the mark (ADR-161). It runs for the main agent only, since queued messages go to it.
 
-- **`mark-tasks-active.sh`** - Creates `{SESSIONS_ROOT}/{session_id}/tasks-active`. Silences the context-threshold nag.
-- **`check-response.sh`** (`ways hook stop`) - Records Claude's last response, raw and cut to 2,000 bytes, in `{SESSIONS_ROOT}/{session_id}/response-context.json`. The next `check-prompt.sh` embeds it with the prompt (never keyword-matches it), so ways can trigger on what Claude discussed, not just what the user asked (ADR-155 §3). A turn that ends without text clears the record.
+### Subagent injection
 
-### Way Display
+- **`check-task-pre.sh`** (`ways hook task`) - Phase 1. Matches the Task tool's `prompt` against ways with `subagent` scope (and `teammate` scope too when the Task names a team) and writes the matched ids to `{SESSIONS_ROOT}/{session_id}/subagent-stash/{ts}.json`. A Task naming an agent with its own definition (project, user or plugin `agents/*.md`) is skipped. Never blocks Task creation.
+- **`inject-subagent.sh`** (`ways hook subagent-start`) - Phase 2. Claims the oldest stash and emits its ways as `hookSpecificOutput.additionalContext`, whatever the parent has been shown. Each fire is recorded under the subagent's own id, so the subagent's later hooks follow their own refire windows. A macro rendered here runs with `WAYS_SCOPE=subagent` (see [Macros](hooks-and-ways/macros.md)).
 
-The `ways` binary (`ways scan` / `ways show`) handles all way display: domain disable list, session markers, macro dispatch, content output (stripping frontmatter), and marker creation. Per-way `macro.sh` scripts still run as shell commands, but orchestration is in Rust.
+### State management
+
+- **`check-response.sh`** (`ways hook stop`) - Records Claude's last response, raw and cut to 2,000 bytes, in `{SESSIONS_ROOT}/{session_id}/response-context.json`. The next prompt scan embeds it with the prompt and never keyword-matches it, so ways can trigger on what Claude discussed (ADR-155 §3). A turn that ends without text clears the record.
+- **`mark-tasks-active.sh`** (`ways hook tasks-active`) - Writes `{SESSIONS_ROOT}/{session_id}/tasks-active`. Nothing reads the marker today. It is kept as the hook point should a way need it again.
+
+### Other hooks in the block
+
+- **`strip-session-link-pre.sh`** - Denies a `git commit` or `gh pr|issue` command that would publish a Claude Code session link as a trailer or footer line (ADR-167).
+- **`attend-drain-stop.sh`** - Runs `attend inbox --drain --format hook` at the end of each turn, delivering pending peer messages (ADR-172). Does nothing when `attend` is not installed.
+- **`issues-pull.sh`** / **`issues-task-created.sh`** - Mirror GitHub issues into the session's task list and reject unprefixed duplicates of mirrored issues (ADR-180).
 
 ## Session Lifecycle
 
 ```mermaid
 sequenceDiagram
     participant CC as Claude Code
+    participant SU as check-setup.sh
     participant CM as clear-markers.sh
+    participant CU as check-config-updates.sh
     participant CS as check-state.sh
-    participant WI as ways init
-    participant WC as ways corpus
-    participant Ctx as Claude Context
+    participant WI as ways init / ways corpus
+    participant IP as issues-pull.sh
+    participant Ctx as Claude context
 
     rect rgba(66, 165, 245, 0.15)
-        Note over CC,Ctx: Session Start (startup)
-        CC->>CM: SessionStart:startup
-        CM->>CM: rm {SESSIONS_ROOT}/{session_id}/*
-        CC->>CS: SessionStart:startup
-        CS->>Ctx: core guidance + state-triggered ways
-        CC->>WI: SessionStart:startup
-        WI->>WI: create .claude/.gitignore + .claude/ways/_template.md if missing
-        CC->>WC: SessionStart:startup
-        WC->>WC: regenerate corpus if stale
+        Note over CC,Ctx: SessionStart startup
+        CC->>SU: notice if the ways binary is missing
+        CC->>CM: ways hook session-start
+        CM->>CM: clear {SESSIONS_ROOT}/{session_id}/, prune subagent switches, log session_start
+        CC->>CU: compare the app source with upstream (hourly fetch)
+        CC->>CS: ways hook state
+        CS->>Ctx: core.md + state-triggered ways
+        CC->>WI: .claude scaffold if missing, corpus if stale
+        CC->>IP: mirror open issues into tasks
     end
 
     rect rgba(255, 152, 0, 0.15)
-        Note over CC,Ctx: After Compaction
-        CC->>CM: SessionStart:compact
-        CM->>CM: rm {SESSIONS_ROOT}/{session_id}/*
-        CC->>CS: SessionStart:compact
-        CS->>Ctx: core guidance (fresh)
+        Note over CC,Ctx: SessionStart compact
+        CC->>CM: ways hook session-start
+        CC->>CS: ways hook state
+        CS->>Ctx: core.md again
+        CC->>IP: mirror open issues into tasks
+    end
+
+    rect rgba(102, 187, 106, 0.15)
+        Note over CC,Ctx: SessionStart resume (state is kept)
+        CC->>CS: ways hook state
+        CC->>IP: mirror open issues into tasks
+    end
+
+    rect rgba(171, 71, 188, 0.15)
+        Note over CC,Ctx: SessionStart clear
+        CC->>CM: ways hook session-start
+        CC->>CS: ways hook state
+        CS->>Ctx: core.md again
+        CC->>WI: ways init
+        CC->>IP: mirror open issues into tasks
     end
 ```
 
 ## Way Scope
 
-The `scope:` frontmatter field controls where a way fires. There are three scopes, reflecting the three types of Claude Code sessions:
+The `scope:` frontmatter field controls where a way fires. There are three scopes, reflecting the three kinds of Claude Code agents:
 
 | Scope | Session type | Detection |
 |-------|-------------|-----------|
-| `agent` | Your main session | Default (no marker file) |
-| `teammate` | Named agent in a coordinated team | `{SESSIONS_ROOT}/{session_id}/teammate` exists |
+| `agent` | Your main session | Default (no teammate marker) |
+| `teammate` | Named agent in a coordinated team | A `teammate` marker in the agent's state directory |
 | `subagent` | Quick Task tool delegate | Spawned via Task without `team_name` |
 
 Ways declare which scopes they apply to:
 
 ```yaml
-scope: agent                     # Main session only (default if omitted)
+scope: agent                     # Main session only (the default if omitted)
 scope: teammate                  # Team members only
 scope: agent, teammate           # Both, but not quick delegates
 scope: agent, subagent           # Main + delegates, not teammates
 scope: agent, teammate, subagent # Everyone
 ```
 
-### Scope Detection
+A way without `scope:` takes `ways.default_scope`, which is `agent` unless configured.
 
-Scope detection is handled by the `ways` binary. It checks for a teammate marker file — if one exists, the scope is `teammate`; otherwise `agent`. Subagent scope is determined at injection time by `check-task-pre.sh`, not by the running session itself.
+### Scope detection
 
-The teammate marker is created by `inject-subagent.sh` during Phase 2 of the two-phase injection. It persists for the teammate's entire session lifetime and contains the team name (used for telemetry).
+The `ways` binary reads the scope from the teammate marker: present means `teammate`, absent means `agent`. Subagent scope is decided at dispatch by `check-task-pre.sh`, not by the running agent. `inject-subagent.sh` writes the teammate marker in the teammate's own state directory during Phase 2, so the main agent's scope is untouched. The marker holds the team name for telemetry.
 
-### What Gets Gated
+### What gets gated
 
 | Way | Scope | Why |
 |-----|-------|-----|
@@ -122,20 +155,19 @@ The teammate marker is created by `inject-subagent.sh` during Phase 2 of the two
 | `meta/subagents` | `agent` | Delegation guidance is irrelevant to agents that are themselves delegated work |
 | `collaboration/teams` | `teammate` | Coordination norms only make sense for team members |
 
-Subagent injection bypasses the marker system entirely. A way can fire for the parent (marker-gated) AND separately for each subagent or teammate (no markers). The parent's way guidance doesn't automatically transfer because the Task prompt is a compact delegation — the scope system bridges this gap.
+Firing state is kept per agent, so a way can fire for the parent and separately for each subagent or teammate. The parent's guidance does not transfer on its own because the Task prompt is a compact delegation, and the scope system bridges that gap.
 
 See [teams.md](hooks-and-ways/teams.md) for the full team coordination model.
 
 ## Way Matching Modes
 
-Each way declares how it should be matched in its YAML frontmatter. There are two lanes and they are additive-OR: a way with both a `pattern:` and a `description:` + `vocabulary:` can fire from either.
+Each way declares how it should be matched in its frontmatter. The lanes are additive-OR: a way with both a `pattern:` and a `description:` + `vocabulary:` can fire from either.
 
-- **Keyword lane** — the regex `pattern:` (matched against the user prompt), plus the deterministic `commands:` and `files:` triggers on the tool surfaces.
-- **Semantic lane** — the prompt is embedded and scored by cosine against the way's alias (`description` + `vocabulary`); the cosine is mapped to a relevance probability by a calibrated logistic and compared to a global threshold.
+- **Keyword lane** - the regex `pattern:` against the prompt, plus the deterministic `commands:` and `files:` triggers on the tool surfaces.
+- **Semantic lane** - on the prompt, queued and task surfaces, the ADR-160 late-interaction matcher: the surface is split into sentences, each way is ranked by its best chunk and must win a share of the chunks it matches, and the chunk it won must be corroborated by the way's own body. When the surface is too short to chunk, or the engine is missing, the single-vector calibrated gate decides instead (ADR-156). The bash surface uses the single-vector gate only.
+- **Relevance gate** - on the prompt and queued surfaces, what the two lanes fired is judged by a hosted model before it is shown (ADR-196).
 
-The exact fire rule, thresholds, and calibration are stated once in
-[hooks-and-ways/engine-reference.md](hooks-and-ways/engine-reference.md) — the
-single source of truth. The summary below must agree with it.
+The exact fire rule, thresholds and calibration are stated once in [hooks-and-ways/engine-reference.md](hooks-and-ways/engine-reference.md).
 
 ```mermaid
 flowchart TD
@@ -149,118 +181,91 @@ flowchart TD
     W -->|"description: + vocabulary:"| S
 
     subgraph RX ["Keyword lane"]
-        R[Regex Match]:::regex
-        R --> RP["pattern: → user prompt"]:::regex
-        R --> RC["commands: → bash command"]:::regex
+        R[Regex match]:::regex
+        R --> RP["pattern: → prompt, queued, task"]:::regex
+        R --> RD["pattern: → Bash description"]:::regex
+        R --> RC["commands: → Bash command"]:::regex
         R --> RF["files: → file path"]:::regex
     end
 
     subgraph SM ["Semantic lane"]
-        S[Embedding Scorer]:::semantic
-        S --> BM["way-embed → cosine s<br/>g(s)=σ(a·s+b) → probability"]:::semantic
+        S[Embedding]:::semantic
+        S --> LI["late-interaction<br/>≥ 2 sentence chunks"]:::semantic
+        S --> SV["single vector g(s) ≥ τ_s<br/>fallback, and the Bash surface"]:::semantic
     end
 
     RP --> GATE{"g(s) ≥ τ_k ?<br/>floor gate<br/>(fails open / pattern_strict bypasses)"}:::decision
-    GATE -->|"yes"| FIRE[Fire Way]:::result
-    RC -->|"regex match"| FIRE
-    RF -->|"regex match"| FIRE
-    BM -->|"g(s) ≥ τ_s"| FIRE
+    GATE -->|yes| J
+    LI -->|"prompt, queued"| J
+    SV -->|"prompt, queued"| J
+    J{"Relevance judge<br/>P(yes) ≥ 0.3"}:::decision
+    J -->|pass| FIRE[Inject]:::result
+    LI -->|task| FIRE
+    SV -->|"task, Bash"| FIRE
+    RD --> FIRE
+    RC --> FIRE
+    RF --> FIRE
 ```
 
-Matching is **additive** — the keyword and semantic lanes are OR'd. A gated keyword never shadows a semantic fire: the semantic lane is checked first and the gated verdict is only reported if nothing cleared `τ_s`.
+A gated keyword never shadows a semantic fire: the semantic lane is checked first, and the keyword veto is reported only when nothing cleared it.
 
 ### Pattern
 
 ```yaml
-pattern: commit|push          # matched against user prompt
-commands: git\ commit         # matched against bash commands
+pattern: commit|push          # matched against the prompt
+commands: git\ commit         # matched against Bash commands
 files: \.env$|config\.json    # matched against file paths
 ```
 
-Fast and precise. Most ways use this. Keyword matching is **case-insensitive** (ADR-157): the pattern is compiled case-insensitively so a lowercase pattern matches the uppercase acronyms users type (`\bssh\b` → `SSH`). The prompt text keeps its original case — only code fences and URLs are stripped — so write patterns in lowercase and mean the concept. See [engine-reference.md](hooks-and-ways/engine-reference.md).
+Fast and precise. Keyword matching is case-insensitive (ADR-157): the pattern is compiled case-insensitively, so a lowercase pattern matches the acronyms users type (`\bssh\b` matches `SSH`). The prompt keeps its original case, with only code fences and URLs stripped. Write patterns in lowercase and mean the concept.
 
-The prompt `pattern:` hit is **floor-gated**: it fires only when the way's calibrated probability also clears the keyword floor `τ_k` on at least one model lane, so a lexical coincidence can't drag in an unrelated prompt. Two carve-outs let the author's explicit trigger stand: the gate **fails open** when there is genuinely no calibrated signal (the engine didn't run, the way isn't embeddable, or no calibration is loaded), and `pattern_strict: true` forces an unconditional keyword fire by design (`scan/mod.rs` `match_prompt`).
+The prompt `pattern:` hit is floor-gated: it fires only when the way's calibrated probability also clears the keyword floor `τ_k`, so a lexical coincidence can't drag in an unrelated prompt. It fails open when there is no calibrated signal, and `pattern_strict: true` makes it unconditional.
 
-### Semantic Matching
+### Semantic matching
 
 ```yaml
 description: "API design, REST endpoints, request handling"
 vocabulary: api endpoint route handler middleware
 ```
 
-There is **no** `embed_threshold` frontmatter field and **no** per-way threshold — firing is decided by global thresholds in probability space (see below).
-
-Embedding-only engine, built into the `ways` binary:
+There is no per-way threshold field. Firing is decided by global settings (see [engine-reference.md](hooks-and-ways/engine-reference.md)).
 
 | Model | How it works |
 |-------|-------------|
-| **EN** | `all-MiniLM-L6-v2` sentence embeddings via the `way-embed` binary + GGUF model. Pre-computed 384-dim vectors in the corpus. Cosine similarity against all ways (~20ms). |
-| **Multilingual** | 768-dim model for localized mode. Routes native-language queries through locale-stub aliases without per-language stemmer wiring. |
+| **EN** | `all-MiniLM-L6-v2` sentence embeddings via the `way-embed` binary and a GGUF model, 384-dim. Serves late-interaction and the EN single-vector lane. |
+| **Multilingual** | 768-dim model, loaded in localized mode only (ADR-139). Serves the single-vector fallback, so a native-language prompt that late-interaction handles is matched on the English corpus. |
 
-The embedding model is a hard dependency of `ways`. `make setup` fetches the binary and GGUF model on four supported platforms.
-
-**Embedding engine** (ADR-108, ADR-125): Semantic similarity captures concepts that lexical scoring would miss — "SSH agent" and "AI agent" share the same English stem but have distant embedding vectors, and the multilingual variant routes native-language queries through locale-stub aliases without per-language stemmer wiring.
-
-#### Calibration and the fire rule
-
-A raw cosine is not the firing signal. ADR-156 maps each model's cosine `s` to a
-**relevance probability** with a per-model logistic `g(s) = σ(a·s + b)`, fit at
-corpus-generation from a committed probe corpus and stored in
-`embed-manifest.json` (deployed EN `AUC ≈ 0.955`, multi `AUC ≈ 0.941`). A fit is
-rejected unless its slope `a > 0` and it clears an `AUC_FLOOR` of 0.70; a bad fit
-is not written, and scan then degrades (keyword fails open, semantic silent)
-rather than trust it.
-
-A way **fires** when `g(s) ≥ τ_s ∨ (keyword_match ∧ g(s) ≥ τ_k)`, with global
-`τ_s = 0.5` (`semantic_fire_probability`) and `τ_k = 0.15`
-(`keyword_floor_probability`). The two thresholds are **independent** — a leaky
-keyword is tightened by raising `τ_k` without touching the semantic bar `τ_s`.
-Because calibration makes the boundary comparable across ways, one global
-probability suffices where per-way cosine thresholds were once needed.
-
-**Parent-boost.** When an ancestor way has already been shown this session, an
-in-domain child's semantic bar is lowered from `τ_s` to
-`(τ_s × parent_threshold_multiplier).max(parent_boost_floor)` — by default
-`max(0.5 × 0.8, 0.30) = 0.40`. Both keys are live: the multiplier (0.8) lowers
-the child's bar; the floor (0.30) stops cascading boosts from reaching the noise
-band. `τ_k` is not parent-boosted.
-
-The authoritative statement of all of the above, with source line citations, is
-[hooks-and-ways/engine-reference.md](hooks-and-ways/engine-reference.md).
+The embedding engine is a hard dependency of `ways`. `make setup` fetches the binary and the English model on four supported platforms.
 
 #### Setup
 
 ```bash
-# Install the ways binary and set up corpus + embedding model
-make setup      # builds ways, downloads model, generates corpus
-make test       # smoke tests (lint, match, graph)
-make test-sim   # 8 integration scenarios
-
-# Check engine status
-ways status
+make setup      # builds ways, downloads the model, generates the corpus
+make test       # lint, smoke, unit, simulation, ADR, statusline and hook tests
+ways status     # engine status
 ```
 
-Model location: `${XDG_CACHE_HOME:-~/.cache}/agent-ways/user/minilm-l6-v2.gguf`
-Corpus: `${XDG_CACHE_HOME:-~/.cache}/agent-ways/user/ways-corpus.jsonl`
+The model, `ways-corpus.jsonl`, `ways-corpus-en.jsonl`, `ways-corpus-multi.jsonl` and `embed-manifest.json` live in `${XDG_CACHE_HOME:-~/.cache}/agent-ways/user/`. The corpus covers all three way roots: the project's `.claude/ways/`, your own `$XDG_CONFIG_HOME/agent-ways/ways/`, and the shipped ways under `~/.claude/hooks/ways/`. A higher root shadows the same id below it (ADR-143).
 
-Both user-scope (`~/.claude/hooks/ways/`) and project-scope (`.claude/ways/`) corpora are scanned. They share the same model file.
+## Relevance Gate and the Ways Agent
 
-#### Calibrating from telemetry
+On the prompt and queued lanes, the ways about to be shown are sent in one request to a hosted yes/no judge, together with the last turn (ADR-196). In `enforce` mode a blocked way is not shown, leaves no marker, and keeps its refire budget. In `shadow` mode every verdict is logged and nothing is blocked. Ways with `pattern_strict: true` are not judged, and a failure fails open.
 
-Once a corpus has been firing for a while, two commands audit and calibrate the embedding match against observed behavior rather than guesswork (ADR-134).
+The judge runs in the **ways agent**, one resident daemon per user on a Unix socket (ADR-502). Hooks start it on demand, and it exits when idle or when its binary is replaced. It holds the provider key and does judging and key custody only. Matching stays in the hook's `ways` process.
 
 ```bash
-# Audit fire relevance — flag ways landing in off-domain sessions
-ways tune precision
+ways agent key            # add, check, rotate or remove a provider key
+ways agent status         # engine, requests, fallbacks, latency
+ways agent cost           # what the judge has cost, from the event log
+ways settings set gate.mode shadow      # enforce | shadow | off
+ways settings set gate.engine <profile> # anthropic | openrouter | your own
 ```
 
-`ways tune precision` is a report-only relevance audit. For each way it estimates how often its fires landed *off-class* — in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate plus a flag. **mis-targeted** is a narrow way repeatedly firing into the same wrong kind of session (remedy: narrow its vocabulary, tighten its `pattern:`, or change the trigger channel, then re-measure — there is no per-way threshold to move; a globally leaky keyword is tightened by raising `τ_k`); **cross-cutting** is a way that fires broadly by design, e.g. meta/todos ways (remedy: scope by trigger — never auto-narrow vocabulary). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
-
-Cadence has no tuning command: `ways tune-curves` was removed in ADR-159. It suggested a legacy ADR-123 `half_life` (a `curve:` block the schema no longer recognizes) — superseded by `refire:`, a fraction of the context window (ADR-126) authored directly on each way. Telemetry-driven cadence tuning is the deferred ADR-134 auto-tune, which targets `refire:`.
+Without a key file the gate is off. What the judge sees, its threshold, cap and cost are covered in [the relevance judge](explanation/relevance-judge/relevance-judge-the-model.md).
 
 ## State Triggers
 
-Evaluated by `check-state.sh` on every UserPromptSubmit. Unlike pattern-based ways, these fire based on session conditions.
+Evaluated by `check-state.sh` on SessionStart and every UserPromptSubmit. They fire on session conditions rather than content.
 
 ### context-threshold
 
@@ -269,9 +274,7 @@ trigger: context-threshold
 threshold: 75
 ```
 
-Estimates transcript size since last compaction (~4 chars/token, ~155K token window = ~620K chars). Fires when `transcript_bytes > 620K * threshold%`.
-
-**Special behavior**: Does not use the standard marker system. Repeats on every prompt until a `{SESSIONS_ROOT}/{session_id}/tasks-active` marker exists (created by `mark-tasks-active.sh` when `TaskCreate` is used).
+Fires when the context in use reaches `threshold` percent. The percentage is the API-reported token count from the transcript divided by the resolved model context window, the same figure `ways context` shows (ADR-166). A prompt that is a harness envelope does not count as a turn here. The way is shown through the usual marker and re-discloses on its own `refire:` cadence.
 
 ### file-exists
 
@@ -280,7 +283,7 @@ trigger: file-exists
 path: .claude/ways/*.md
 ```
 
-Fires once (standard marker) if the glob pattern matches any file relative to the project directory.
+Fires when the glob matches any file relative to the project directory, then follows its `refire:` cadence.
 
 ### session-start
 
@@ -288,83 +291,13 @@ Fires once (standard marker) if the glob pattern matches any file relative to th
 trigger: session-start
 ```
 
-Fires once per session, on the first state scan after the session's markers were cleared (startup, compact, clear). It does not ride the refire curve on later prompts.
+Fires once per marker reset: on the first state scan after the session's markers were cleared (startup, compact, clear). It does not ride the refire cadence on later prompts.
 
-## Once-Per-Session Gating
+## Disclosure Cadence
 
-Most ways fire once then go silent for the rest of the session.
+A way that fires stamps a marker at `{SESSIONS_ROOT}/{session_id}/ways/{way_id}/.marker.{agent_id}` holding the agent's token position. A later match is withheld until the agent has consumed the way's `refire:` fraction of its context window since that stamp (ADR-126), and is then re-disclosed. A withheld match is logged as `way_suppressed` with reason `refire`. A way that does not fit in the hook's 10,000-character budget is logged with reason `context_cap` and is not recorded as fired. Markers are cleared on SessionStart startup, compact and clear.
 
-```mermaid
-stateDiagram-v2
-    classDef notShown fill:#C62828,stroke:#B71C1C,color:#fff,font-weight:bold
-    classDef shown fill:#2E7D32,stroke:#1B5E20,color:#fff,font-weight:bold
-
-    [*] --> NotShown
-    NotShown --> Shown : trigger match → output + create marker
-    Shown --> Shown : trigger match → no-op
-
-    state "not_shown (no marker)" as NotShown:::notShown
-    state "shown (marker exists)" as Shown:::shown
-
-    note right of NotShown : {SESSIONS_ROOT}/{session_id}/ways/{way_path}/.marker
-    note right of Shown : Cleared on SessionStart (startup & compact)
-```
-
-**Exceptions**:
-- Context-threshold triggers bypass this system entirely - they repeat until the tasks-active marker exists.
-- Subagent injection (`inject-subagent.sh`) bypasses markers completely - each subagent gets fresh way content.
-
-## The Context-Threshold Nag
-
-The `meta/todos` way uses context-threshold to ensure task lists exist before compaction.
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant CC as Claude Code
-    participant CS as check-state.sh
-    participant MT as mark-tasks-active.sh
-    participant Ctx as Claude Context
-
-    rect rgba(244, 67, 54, 0.12)
-        Note over U,Ctx: Context > 75%, no task list
-        U->>CC: (any prompt)
-        CC->>CS: UserPromptSubmit
-        CS->>CS: transcript_bytes > 465K?
-        Note right of CS: YES
-        CS->>CS: {SESSIONS_ROOT}/{session}/tasks-active exists?
-        Note right of CS: NO
-        CS->>Ctx: "Context checkpoint. Create tasks now."
-    end
-
-    rect rgba(244, 67, 54, 0.12)
-        Note over U,Ctx: Still no task list — nags again
-        U->>CC: (any prompt)
-        CC->>CS: UserPromptSubmit
-        CS->>CS: transcript_bytes > 465K?
-        Note right of CS: YES
-        CS->>CS: {SESSIONS_ROOT}/{session}/tasks-active exists?
-        Note right of CS: NO
-        CS->>Ctx: "Context checkpoint. Create tasks now."
-    end
-
-    rect rgba(76, 175, 80, 0.15)
-        Note over U,Ctx: Claude creates tasks — nag stops
-        CC->>CC: TaskCreate (tool call)
-        CC->>MT: PreToolUse:TaskCreate
-        MT->>MT: touch {SESSIONS_ROOT}/{session}/tasks-active
-    end
-
-    rect rgba(76, 175, 80, 0.15)
-        Note over U,Ctx: Subsequent prompts — silence
-        U->>CC: (any prompt)
-        CC->>CS: UserPromptSubmit
-        CS->>CS: transcript_bytes > 465K?
-        Note right of CS: YES
-        CS->>CS: {SESSIONS_ROOT}/{session}/tasks-active exists?
-        Note right of CS: YES — skip
-    end
-```
+State is kept per agent. A subagent's fires, token position and window come from its own transcript, so its cadence does not move the main agent's. The state machine is drawn in [architecture.md](architecture.md#disclosure-cadence).
 
 ## Full Data Flow
 
@@ -374,78 +307,89 @@ sequenceDiagram
     participant CC as Claude Code
     participant CP as check-prompt.sh
     participant CS as check-state.sh
-    participant CB as check-bash-pre.sh
-    participant CF as check-file-pre.sh
+    participant WA as ways agent
+    participant CB as check-bash-pre / check-file-pre
     participant CT as check-task-pre.sh
     participant IS as inject-subagent.sh
-    participant MA as mark-tasks-active.sh
-    participant CR as check-response.sh
-    participant Ctx as Claude Context
+    participant PQ as check-post / check-queued
+    participant CR as check-response / attend-drain-stop
+    participant Ctx as Claude context
 
     rect rgba(21, 101, 192, 0.12)
-        Note over U,Ctx: User sends message
+        Note over U,Ctx: User sends a message
         U->>CC: prompt
-        par Prompt Triggers
+        par Prompt triggers
             CC->>CP: UserPromptSubmit
-            CP->>CP: ways scan prompt (regex/semantic, scope: agent)
-            CP->>Ctx: way content (if not already shown)
-        and State Triggers
+            CP->>CP: match prompt + last response (scope: agent)
+            CP->>WA: Judge(candidates)
+            WA-->>CP: verdicts
+            CP->>Ctx: ways that passed, outside their refire window
+        and State triggers
             CC->>CS: UserPromptSubmit
-            CS->>CS: evaluate triggers (scope: agent)
-            CS->>Ctx: context-threshold nag (if applicable)
+            CS->>Ctx: core.md if unshown, state ways that fire
         end
     end
 
     rect rgba(106, 27, 154, 0.12)
         Note over U,Ctx: Claude uses tools
-        alt Bash command
-            CC->>CB: PreToolUse:Bash
-            CB->>CB: scan commands: patterns (scope: agent)
-            CB->>Ctx: matching way content
-        else File edit
-            CC->>CF: PreToolUse:Edit|Write
-            CF->>CF: scan files: patterns (scope: agent)
-            CF->>Ctx: matching way content
+        alt Bash command or file edit
+            CC->>CB: PreToolUse
+            CB->>Ctx: matching ways and checks
         else Subagent spawn
             CC->>CT: PreToolUse:Task
-            CT->>CT: scan task prompt (scope: subagent)
-            CT->>CT: stash matched way paths
-        else Task creation
-            CC->>MA: PreToolUse:TaskCreate
-            MA->>MA: touch tasks-active marker
+            CT->>CT: skip if a defined agent or subagents are off
+            CT->>CT: match the Task prompt, write a stash
         end
+        CC->>PQ: PostToolUse
+        PQ->>Ctx: postcheck fires
+        PQ->>WA: queued operator messages, matched then judged
+        PQ->>Ctx: ways that passed
     end
 
     rect rgba(0, 105, 92, 0.12)
         Note over U,Ctx: Subagent starts (if Task was used)
         CC->>IS: SubagentStart
-        IS->>IS: read stash → emit way content
-        IS->>Ctx: additionalContext (subagent sees ways)
+        IS->>Ctx: stashed ways (the subagent's context)
     end
 
     rect rgba(230, 81, 0, 0.12)
         Note over U,Ctx: Claude finishes responding
         CC->>CR: Stop
-        CR->>CR: read the last response from the transcript
         CR->>CR: write {SESSIONS_ROOT}/{session}/response-context.json
-        Note right of CR: Embedded with the next prompt
+        CR->>Ctx: pending attend peer messages
     end
 ```
 
 ## Telemetry
 
-Firing activity is logged to `$XDG_STATE/agent-ways/events.jsonl` — one JSON object per line. Beyond the `way_fired`/`way_redisclosed` cadence events, two signals feed the precision and recall tuning above (ADR-134):
+Firing activity is logged to `$XDG_STATE_HOME/agent-ways/events.jsonl`, one JSON object per line. The events are:
 
-- **`fire_score`** — recorded on `way_fired` events for **first-fires only** (not redisclosures): the calibrated probability `g(s)` that cleared the threshold and admitted the way to the session. It is a recall/precision telemetry signal that feeds the **deferred** ADR-134 auto-tune — **not** the source of the `g(s)` calibration, which is fit at corpus-generation from the committed `calibration_probes.jsonl` (`ways-cli/src/cmd/corpus.rs`), never from this runtime stream.
-- **`way_nearmiss`** — emitted when a way scored within `near_miss_margin` *below* its effective semantic threshold `τ_s` but did **not** fire (`τ_s - margin ≤ p < τ_s`). Score fields: `prob_en`, `prob_multi`, `tau_s`, `margin`; plus `trigger`, `query_tokens`, and the `way_fired`-convention identity fields (`event`, `way`, `corpus_id`, `domain`, `scope`, `project`, `session`). This is a recall signal — it measures the likely false silences a `τ_s` drop would recover (`scan/mod.rs` `log_near_miss`).
+| Event | Emitted when |
+|---|---|
+| `session_start` | `ways hook session-start` runs |
+| `way_fired`, `way_redisclosed` | a way is shown for the first time, or again after its refire window |
+| `way_suppressed` | a way or check matched but was held back (`refire` or `context_cap`) |
+| `way_nearmiss` | a way's single-vector probability landed within `near_miss_margin` below `τ_s` and it did not fire |
+| `way_keyword_gated` | a `pattern:` hit was vetoed by the keyword floor `τ_k` |
+| `way_judged`, `judge_call`, `gate_capped`, `gate_fallback` | the relevance gate's verdicts, provider calls, cap overflows and fallbacks |
+| `injection_suppressed` | a lane was skipped because ways are switched off for subagents |
+| `check_fired` | a `*.check.md` check was shown |
 
-- **`way_suppressed`** — emitted when a way or check matched but was not shown. `reason` is `refire` when its refire curve (ADR-126) still holds it back, or `context_cap` when the hook's `additionalContext` had no room left under Claude Code's 10,000-character cap. A way withheld for `context_cap` is not recorded as fired, so its refire curve does not start. Refire rows are deduplicated to one per way per fire window (keyed on the way's last-fire tick); `context_cap` rows log every time. Fields: `kind` (`way` or `check`), `way`, `domain`, `trigger`, `reason`, `scope`, `project`, `session`, `agent_id`. `ways session` shows these as rows with `suppressed` set and counts them in `suppressed_candidates`, never in `total_fires` (`show/mod.rs` `log_way_suppressed`).
+Every field is listed in [reference/events.md](reference/events.md). `ways session` (`ways`, `fires`, `replay`, `live`, `dump`) and `ways tune stats` read the log, and `ways agent cost` sums the judge's spend.
 
-`near_miss_margin` (default `0.05`) is a purely-logging config knob — it never changes firing — parsed from the ways config YAML alongside `semantic_fire_probability` and `keyword_floor_probability` (`config.rs`).
+`fire_score` on `way_fired` is the deciding score of the semantic channel that fired: the summed softmax share for `semantic:late-interaction:en`, the calibrated probability `g(s)` for `semantic:embedding:*`. Read it by `trigger`, since the two are on different scales. It is recorded on first fires only, and it is not the source of the `g(s)` calibration, which is fit at corpus generation from the committed probe corpus.
 
-The near-miss and fire-score streams grow the log faster than fires alone, so its size is **bounded**: `log_event` tail-compacts `events.jsonl` once it exceeds `MAX_EVENTS_BYTES` (~32 MiB), keeping the most recent `KEEP_EVENTS_BYTES` (~24 MiB, cut at a line boundary, written atomically via temp + rename). The ~8 MiB gap provides hysteresis so the rewrite is rare, not per-append. Compaction is lossy only on the oldest events; readers are unaffected (`session.rs`).
+`near_miss_margin` (default `0.05`) only controls logging. The log is bounded: once `events.jsonl` exceeds about 32 MiB, `log_event` keeps the most recent 24 MiB, cut at a line boundary and written atomically. Readers holding the old file keep reading it intact.
 
-ADR-134 ("Empirical auto-tuning from fire and near-miss telemetry") is Accepted. One slice — the gated `--apply` that would auto-write a tuned threshold — is deferred until the `fire_score` population accumulates enough to validate against, tracked as GitHub issue #123.
+### Calibrating from telemetry
+
+```bash
+ways tune precision   # flag ways landing in off-domain sessions
+```
+
+`ways tune precision` is a report-only relevance audit (ADR-134 Decision 3). For each way it estimates how often its fires landed off-class, in sessions whose activity (judged by the parent family of the ways that co-fired) never touched the way's own domain, and reports an irrelevance rate and a flag. **mis-targeted** is a narrow way repeatedly firing into the same wrong kind of session: narrow its vocabulary, tighten its `pattern:`, or change the trigger channel, then re-measure. There is no per-way threshold to move. **cross-cutting** is a way that fires broadly by design, such as `meta/todos`: scope it by trigger, and never auto-narrow its vocabulary. Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
+
+Cadence has no tuning command. `refire:` is authored on each way (ADR-126). The threshold auto-tune of ADR-134 is deferred until enough `fire_score` data accumulates (issue #123), and that data now mixes two scales.
 
 ## Macros
 
@@ -458,45 +402,37 @@ macro: append    # macro output after static content
 
 Macros generate dynamic content. Examples:
 - `documentation/adr/macro.sh` - Tri-state detection: no tooling, tooling available, tooling installed
-- `softwaredev/code/quality/macro.sh` - Scans for long files in the project, outputs priority list
+- `softwaredev/code/quality/macro.sh` - Scans for long files in the project, outputs a priority list
 - `softwaredev/delivery/github/macro.sh` - Detects solo vs team project, adjusts PR guidance
 
-**Security**: Project-local macros only run if the project is listed in `~/.claude/trusted-project-macros`.
+**Security**: project-local macros and postchecks run only if the project is listed in `~/.claude/trusted-project-macros`.
 
 ## Project-Local Ways
 
-Projects can override or add ways at `$PROJECT/.claude/ways/{domain}/{way}/{way}.md`. Project-local takes precedence over global. Same-path ways share a marker, so only one fires.
+Ways resolve through three roots, highest first: the project's `$PROJECT/.claude/ways/`, your own `$XDG_CONFIG_HOME/agent-ways/ways/`, and the shipped ways at `~/.claude/hooks/ways/` (ADR-143). A way at the same id in a higher root shadows the lower ones, for matching and for rendering, and one marker per id and agent covers whichever copy fired. See the [lookup diagram](architecture.md#project-local-override).
 
-```mermaid
-flowchart TD
-    classDef project fill:#E65100,stroke:#BF360C,color:#fff
-    classDef global fill:#1565C0,stroke:#0D47A1,color:#fff
-    classDef marker fill:#00695C,stroke:#004D40,color:#fff
-    classDef result fill:#2E7D32,stroke:#1B5E20,color:#fff
+## Switching Ways Off
 
-    T["Trigger fires for softwaredev/delivery/github"] --> PL
+Several switches turn ways off at different reaches. Each is checked by `ways hook` before a lane runs, except the domain and per-way switches, which are checked when a way is shown.
 
-    PL{"$PROJECT/.claude/ways/<br/>softwaredev/delivery/github/github.md<br/>exists?"}
-    PL -->|yes| USE_P["Use project-local way"]:::project
-    PL -->|no| GL{"~/.claude/hooks/ways/<br/>softwaredev/delivery/github/github.md<br/>exists?"}:::global
-    GL -->|yes| USE_G["Use global way"]:::global
-    GL -->|no| SKIP["No output"]
+| Switch | Reach | Where it is set |
+|---|---|---|
+| `ways.enabled: false` | Every injecting hook in a project, or everywhere. Session upkeep (clearing, the response record) still runs (ADR-184). | `enabled:` in the project's `.claude/ways.yaml`, the user `config.yaml`, or a target's `config.yaml` |
+| `ways.subagents: false` | Every lane that injects into a subagent or teammate. The main agent keeps its ways. Logged as `injection_suppressed`. | `subagents:` in the same files |
+| `ways session subagents off` | The same, for one session, until switched back on | `$XDG_STATE_HOME/agent-ways/subagent-switch/<session_id>` |
+| Defined agent | A Task whose `subagent_type` has its own `agents/<name>.md` (project, user or plugin) gets nothing, whatever the switches say | The agent definition itself |
+| `ways.disabled_domains` | Every way under the listed domains | `disabled_domains:` in any of the config files |
+| `ways.project.<id>: false` | One way, in one project (ADR-131) | `ways:` map in the project's `.claude/ways.yaml` only |
 
-    USE_P --> MK["Shared marker:<br/>{SESSIONS_ROOT}/{session}/softwaredev-github"]:::marker
-    USE_G --> MK
-    MK --> OUT["Output way content"]:::result
+The config files layer in this order, each overriding the one before: the user `$XDG_CONFIG_HOME/agent-ways/config.yaml`, the current target's `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml`, then the project's `.claude/ways.yaml`. A session switch for subagents applies even when the config says `subagents: true`.
+
+```bash
+ways settings set ways.enabled false            # --project for this project's .claude/ways.yaml
+ways settings set ways.subagents false
+ways settings set ways.disabled_domains ea,itops
+ways settings set ways.project.itops/incident false
+ways session subagents off                      # this session only; `on` to undo
 ```
-
-## Domain Enable/Disable
-
-`$XDG_CONFIG_HOME/agent-ways/config.yaml` controls which domains are active:
-
-```yaml
-disabled_domains:
-  - itops
-```
-
-Checked by `ways scan` before outputting any way.
 
 ## Testing
 
@@ -504,7 +440,7 @@ Three test layers verify the matching and injection pipeline. See [tests/README.
 
 | Layer | Command | What it tests |
 |-------|---------|---------------|
-| **Smoke** | `make test` | Lint (0 errors), match (sample queries), graph (node/edge count) |
+| **Make** | `make test` | Lint, smoke (match, graph), Rust unit tests, simulation, ADR, statusline and hook tests |
 | **Simulation** | `make test-sim` | 8 integration scenarios: matching, idempotency, commands, files, checks, disclosure, scope, epochs |
 | **Activation** | `read and run the activation test at tests/way-activation-test.md` | Live hook pipeline: regex, embedding semantic match, negative control, subagent injection |
 

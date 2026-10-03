@@ -52,46 +52,38 @@ flowchart TD
     classDef policy fill:#FF9800,stroke:#E65100,color:#fff
     classDef ref fill:#2196F3,stroke:#1565C0,color:#fff
     classDef machine fill:#4CAF50,stroke:#2E7D32,color:#fff
+    classDef guide fill:#9C27B0,stroke:#6A1B9A,color:#fff
 
     subgraph GUIDE ["Guide Layer (human prose)"]
-        direction TB
-        R[rationale.md]
-        CD[context-decay.md]
-        CDF[context-decay-formal-foundations.md]
-        M[matching.md]
-        MA[macros.md]
-        E[extending.md]
-        IT[itops.md]
-        ME[meta.md]
+        G1["docs/hooks-and-ways/*.md<br/>see the Reading Order below"]
     end
 
     subgraph GOV ["Policy Source (governance chain)"]
-        direction TB
         SD["governance/policies/*.md"]
     end
 
     subgraph REF ["Reference Layer (human-machine bridge)"]
-        HW["hooks-and-ways.md<br/>(diagrams, mechanics, data flow)"]
+        HW["hooks-and-ways.md<br/>(hooks, mechanics, switches)"]
+        AR["architecture.md<br/>(diagrams)"]
+        ER["hooks-and-ways/engine-reference.md<br/>(fire rule, source-cited)"]
     end
 
     subgraph MAC ["Machine Layer (LLM prompts)"]
-        direction TB
-        W1["hooks/ways/softwaredev/*/{name}.md"]
-        W2["hooks/ways/itops/*/{name}.md"]
-        W3["hooks/ways/meta/*/{name}.md"]
-        M1["*/macro.sh"]
+        W1["hooks/ways/{domain}/.../{name}.md"]
+        M1["*/macro.sh · */postcheck.sh"]
     end
 
-    POL:::policy
-    REF:::ref
-    MAC:::machine
+    class G1 guide
+    class SD policy
+    class HW,AR,ER ref
+    class W1,M1 machine
 ```
 
 | Layer | Location | Read by | Purpose |
 |-------|----------|---------|---------|
 | Guide | `docs/hooks-and-ways/*.md` | Humans | Rationale, 5W1H, how-to guides |
 | Policy source | `governance/policies/*.md` | Governance chain | Source docs that ways compile from |
-| Reference | `docs/hooks-and-ways.md` | Humans + Claude | System mechanics, diagrams, data flow |
+| Reference | `docs/hooks-and-ways.md`, `docs/architecture.md`, `docs/hooks-and-ways/engine-reference.md` | Humans + Claude | System mechanics, diagrams, the fire rule |
 | Machine | `hooks/ways/*/{name}.md` | Claude (via hooks) | Terse, directive, context-optimized guidance |
 
 ## Ways, Rules, and Skills
@@ -136,11 +128,11 @@ flowchart LR
 |--|-----------|----------|------------|
 | **Nature** | Static preferences | Event-driven policy | Specific capabilities |
 | **Job** | "Always do X" | "Right now, remember Z" | "Here's how to do Y" |
-| **Trigger** | Startup or file-path glob | Tool use, keywords, embedding match, state | User intent (Claude decides) |
+| **Trigger** | Startup or file-path glob | Tool use, keywords, embedding match, state, then a relevance judge on prompts | User intent (Claude decides) |
 | **Conditional on** | Directory tree (`paths:`) | Actions, commands, prompts, state | Semantic similarity to description |
 | **Cross-cutting** | Needs duplicate paths or broad globs | Single way, fires on semantic match | N/A (intent-based) |
 | **Dynamic content** | No | Yes (shell macros) | No |
-| **Session-gating** | No (always loaded when matched) | Yes (once per session, marker-gated) | No (always available) |
+| **Session-gating** | No (always loaded when matched) | Yes (marker-gated, re-disclosed on a refire cadence, per agent) | No (always available) |
 | **Scope filtering** | No | Yes (agent/teammate/subagent) | No |
 | **Compliance claims** | No | Yes (zero-token provenance.yaml sidecars) | No |
 | **Tool restrictions** | No | No | Yes (`allowed-tools`) |
@@ -161,7 +153,7 @@ flowchart LR
 They layer naturally:
 
 1. **Rules** set baseline preferences (loaded at startup or on file access)
-2. **Ways** inject governance at tool boundaries (fired by events, once per session)
+2. **Ways** inject governance at tool boundaries (fired by events, re-disclosed as the session grows)
 3. **Skills** provide specific workflows (pulled by intent when needed)
 
 A skill for rotating an AWS key works better when the security way has already established "never commit secrets, always verify credentials," and a rule has already set "all infrastructure code must pass `tfsec`." Each layer adds a different kind of value.
@@ -241,7 +233,7 @@ If you want to add or modify ways:
 If you're running agent teams:
 1. **[teams.md](teams.md)** — scope detection, coordination norms, the three-scope model
 2. **[stats.md](stats.md)** — observability, interpreting the telemetry
-3. **[meta.md](meta.md)** — the meta ways (teams, memory, todos, tracking)
+3. **[meta.md](meta.md)** — an index of the meta domain: the ways about the system itself and about working with Claude
 
 If you care about compliance claims:
 1. **[provenance.md](provenance.md)** — the full chain from control framework to agent context

@@ -7,7 +7,7 @@ refire: 0.15
 
 Detailed guidance discloses itself when triggered, by keywords, tool or file use, semantic match, or session state. Guidance re-injects as the session grows, on a per-way decay curve, so it can course-correct later turns.
 
-Ways are organized by domain: `~/.claude/hooks/ways/{domain}/{way}/{way}.md`
+Ways are organized by domain as `{domain}/{way}/{way}.md`. Write your own ways under `$XDG_CONFIG_HOME/agent-ways/ways/`, and a project's under its `.claude/ways/`. The shipped ways in `~/.claude/hooks/ways/` are replaced on update.
 
 Just work naturally. No need to request guidance upfront.
 
