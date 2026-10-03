@@ -885,16 +885,7 @@ mod tests {
     }
 
     fn tempdir_like() -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "attend-chat-keys-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        p
+        crate::test_dir::unique("keys")
     }
 
     #[test]
