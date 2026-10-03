@@ -17,7 +17,12 @@ use ways_agent::profile::{self, Provider, UserLayer};
 use ways_agent::report;
 
 #[derive(Parser)]
-#[command(name = "ways-agent", version, about = "The ways agent: relevance judging and key custody for agent-ways")]
+#[command(
+    name = "ways-agent",
+    version,
+    about = "The ways agent: relevance judging and key custody for agent-ways",
+    after_help = "The engine is the setting gate.engine: `ways settings set gate.engine <profile>` (`ways settings help gate.engine` lists the profiles). Unset, the gate takes the first shipped profile whose provider has a key, anthropic before openrouter, so adding a key does not switch it; `ways agent status` says which applies."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -26,6 +31,10 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Add, check, rotate or remove a provider API key.
+    ///
+    /// A key does not choose the engine: that is the setting gate.engine,
+    /// `ways settings set gate.engine <profile>`. Unset, the gate takes the
+    /// first shipped profile whose provider has a key, anthropic first.
     Key {
         #[command(subcommand)]
         action: KeyAction,
@@ -181,7 +190,7 @@ fn agent_status(start: bool) -> Result<ExitCode> {
     };
     println!("ways-agent {} (pid {}), up {}s, socket {}", status.version, status.pid, status.uptime_s, ways_agent::protocol::socket_path().display());
     match (&status.engine, &status.model, status.mode) {
-        (Some(e), Some(m), Some(mode)) => println!("engine {e} ({m}), mode {}", mode.as_str()),
+        (Some(e), Some(m), Some(mode)) => println!("engine {e} ({}; {m}), mode {}", engine_origin(e), mode.as_str()),
         _ => println!("gate off: no engine named and no key found"),
     }
     let pct = |v: Option<u64>| v.map(|ms| format!("{ms} ms")).unwrap_or_else(|| "—".into());
@@ -236,10 +245,42 @@ fn key_add(provider: Provider, from_file: Option<PathBuf>, check: bool, rotate: 
     }
     let Some(result) = result else {
         println!("not checked: the agent checks it on first use, and gates only once it passes");
+        engine_note(provider);
         return Ok(ExitCode::SUCCESS);
     };
     println!("check: {result}");
+    engine_note(provider);
     Ok(if result.is_valid() { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+}
+
+/// After a key is stored: the engine in effect, and when its provider is
+/// not `provider`, the setting that switches to it. Adding a key never
+/// switches the engine by itself.
+fn engine_note(provider: Provider) {
+    let (user, settings) = match current_settings() {
+        Ok(s) => s,
+        Err(e) => return println!("engine: {e:#}; `ways settings help gate.engine` lists the profiles"),
+    };
+    let Some(s) = settings else { return };
+    let set = user.engine.is_some();
+    println!("engine in effect: {} ({})", s.engine, origin(set));
+    if s.profile.provider != provider {
+        println!("to judge with {provider}: ways settings set gate.engine {provider}");
+    }
+}
+
+/// Whether the engine `engine` was set in agent.yaml or picked by key order.
+fn engine_origin(engine: &str) -> &'static str {
+    let set = UserLayer::load_with_findings(&profile::user_layer_path()).is_ok_and(|(u, _)| u.engine.as_deref() == Some(engine));
+    origin(set)
+}
+
+fn origin(set: bool) -> &'static str {
+    if set {
+        "set"
+    } else {
+        "picked: first key"
+    }
 }
 
 fn key_check(only: Option<&str>) -> Result<ExitCode> {
