@@ -133,7 +133,6 @@ fn ensure_parent(path: &Path) {
 
 // ── Way markers ─────────────────────────────────────────────────
 
-/// Check if a way has been shown this session.
 /// Check if a way has been shown for the current agent.
 /// Subagent markers use agent_id — a subagent firing a way does NOT
 /// prevent the main agent (or other subagents) from also getting it.
@@ -146,34 +145,138 @@ pub fn stamp_way_marker(way_id: &str, session_id: &str, token_position: u64) {
     let path = way_marker_path(way_id, session_id);
     ensure_parent(&path);
     let scope = detect_scope(session_id);
-    let agent_id = current_agent_id().unwrap_or_else(|| "main".to_string());
-    let _ = std::fs::write(&path, format!("{token_position}\t{scope}\t{agent_id}"));
+    let _ = std::fs::write(&path, format!("{token_position}\t{scope}\t{}", current_agent()));
 }
 
 fn way_marker_path(way_id: &str, session_id: &str) -> PathBuf {
-    let agent_id = current_agent_id().unwrap_or_else(|| "main".to_string());
     session_dir(session_id)
         .join("ways")
         .join(way_id)
-        .join(format!(".marker.{agent_id}"))
+        .join(format!(".marker.{}", current_agent()))
 }
 
-/// Read CLAUDE_AGENT_ID from the environment (set by Claude Code for subagents).
-fn current_agent_id() -> Option<String> {
-    std::env::var("CLAUDE_AGENT_ID").ok().filter(|s| !s.is_empty())
+// ── Agent identity (#815) ───────────────────────────────────────
+
+/// The id the top-level agent's state is keyed by.
+pub const MAIN_AGENT: &str = "main";
+
+/// The agent this process serves. Claude Code reports a subagent's id only as
+/// `agent_id` in the hook payload, and `ways hook` exports it as
+/// `CLAUDE_AGENT_ID` for this reader and the macros it runs. Only an unset or
+/// empty value is the main agent; any other value is keyed by [`agent_key`].
+pub fn current_agent() -> String {
+    std::env::var("CLAUDE_AGENT_ID")
+        .ok()
+        .filter(|a| !a.is_empty())
+        .map_or_else(|| MAIN_AGENT.to_string(), |a| agent_key(&a))
+}
+
+/// Longest agent id used as a path component as it stands. Claude Code's ids
+/// are 17 to 30 characters.
+const MAX_AGENT_ID: usize = 64;
+
+/// The key a reported agent id is stored under. A plain id of at most
+/// [`MAX_AGENT_ID`] characters is its own key. Any other id (one with a
+/// separator or a leading dot, an over-long one, or the literal `main`) is
+/// keyed by `h` and the 16-hex FNV-1a hash of its bytes. Hashing rather than
+/// falling back to `main` keeps such an agent's state its own, and keeps the
+/// key short and safe as a path component. The mapping is idempotent.
+pub fn agent_key(raw: &str) -> String {
+    if raw != MAIN_AGENT && raw.len() <= MAX_AGENT_ID && is_plain_session_id(raw) {
+        raw.to_string()
+    } else {
+        format!("h{:016x}", agent_identity::identity::fnv1a_64(raw.as_bytes()))
+    }
+}
+
+/// The directory holding the current agent's firing state: engagement, way
+/// tokens, way epochs, the epoch counter, and check fires. Subagent hooks
+/// report the parent's session id, so without this every agent in a session
+/// would share them.
+pub fn agent_state_dir(session_id: &str) -> PathBuf {
+    agent_state_dir_for(session_id, &current_agent())
+}
+
+/// [`agent_state_dir`] for a named agent. The main agent keeps the session
+/// root, so state written before per-agent keying reads as the main agent's;
+/// a subagent's state lives under `agents/<agent_id>/`.
+pub fn agent_state_dir_for(session_id: &str, agent: &str) -> PathBuf {
+    let dir = session_dir(session_id);
+    if agent == MAIN_AGENT {
+        dir
+    } else {
+        dir.join("agents").join(agent)
+    }
+}
+
+/// The agents with firing state in a session: `main` first, then each
+/// subagent under `agents/`, by id.
+pub fn agents_in(session_id: &str) -> Vec<String> {
+    let mut subagents: Vec<String> = std::fs::read_dir(session_dir(session_id).join("agents"))
+        .map(|d| {
+            d.flatten()
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    subagents.sort();
+    std::iter::once(MAIN_AGENT.to_string()).chain(subagents).collect()
+}
+
+/// One agent's recorded state, for readers outside its hooks (`ways session
+/// ways`): its epoch counter, a way's token position and check fires, and its
+/// current token position.
+pub struct AgentState<'a> {
+    pub session_id: &'a str,
+    pub agent: &'a str,
+}
+
+impl AgentState<'_> {
+    fn value(&self, parts: &[&str]) -> u64 {
+        let mut path = agent_state_dir_for(self.session_id, self.agent);
+        for p in parts {
+            path.push(p);
+        }
+        read_u64_path(&path)
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.value(&["epoch"])
+    }
+
+    pub fn way_tokens(&self, way_id: &str) -> u64 {
+        self.value(&["way-tokens", way_id, ".value"])
+    }
+
+    pub fn check_fires(&self, way_id: &str) -> u64 {
+        self.value(&["check-fires", way_id, ".value"])
+    }
+
+    /// The agent's token position now, from its own transcript; 0 when none.
+    pub fn token_position(&self) -> u64 {
+        transcript_in(
+            &ways_core::paths::claude_dir(),
+            None,
+            &crate::util::project_dir(),
+            self.session_id,
+            self.agent,
+        )
+        .map_or(0, |t| token_position_of(&t))
+    }
 }
 
 // ── Epochs ──────────────────────────────────────────────────────
 
 /// Read the current epoch for a session.
 pub fn get_epoch(session_id: &str) -> u64 {
-    let path = session_dir(session_id).join("epoch");
+    let path = agent_state_dir(session_id).join("epoch");
     read_u64_path(&path)
 }
 
 /// Bump the epoch counter, returning the new value.
 pub fn bump_epoch(session_id: &str) -> u64 {
-    let path = session_dir(session_id).join("epoch");
+    let path = agent_state_dir(session_id).join("epoch");
     ensure_parent(&path);
     let next = read_u64_path(&path) + 1;
     let _ = std::fs::write(&path, next.to_string());
@@ -182,14 +285,14 @@ pub fn bump_epoch(session_id: &str) -> u64 {
 
 /// Stamp when a way was last shown (epoch).
 pub fn stamp_way_epoch(way_id: &str, session_id: &str, epoch: u64) {
-    let path = session_dir(session_id).join("way-epochs").join(way_id).join(".value");
+    let path = agent_state_dir(session_id).join("way-epochs").join(way_id).join(".value");
     ensure_parent(&path);
     let _ = std::fs::write(&path, epoch.to_string());
 }
 
 /// Get the epoch when a way was last shown.
 pub fn get_way_epoch(way_id: &str, session_id: &str) -> u64 {
-    let path = session_dir(session_id).join("way-epochs").join(way_id).join(".value");
+    let path = agent_state_dir(session_id).join("way-epochs").join(way_id).join(".value");
     read_u64_path(&path)
 }
 
@@ -202,52 +305,116 @@ pub fn epoch_distance(way_id: &str, session_id: &str) -> u64 {
 
 // ── Token position (ADR-123/126 re-disclosure) ──────────────────────
 
-/// Read this session's token position from its transcript: the hook's own
-/// `transcript_path` when it names this session, else the session-id lookup.
-pub fn get_token_position(session_id: &str) -> u64 {
-    let project_dir = crate::util::project_dir();
-    token_position_in(
+/// The current agent's own transcript, the one file its token position,
+/// refire window and fire's model are read from. For the main agent: the
+/// hook's `transcript_path` when it names this session, else the session-id
+/// lookup. For a subagent: its `agent-<id>.jsonl` under the session's
+/// `subagents/` directory. The parent's transcript never stands in for a
+/// subagent's.
+pub fn current_transcript(session_id: &str) -> Option<PathBuf> {
+    transcript_in(
         &ways_core::paths::claude_dir(),
         crate::cmd::show::firing_transcript(),
-        &project_dir,
+        &crate::util::project_dir(),
         session_id,
+        &current_agent(),
     )
 }
 
-/// [`get_token_position`] against an explicit config dir and hook
-/// transcript, for tests.
-fn token_position_in(
+/// [`current_transcript`] against an explicit config dir, hook transcript
+/// and agent, for tests.
+pub(crate) fn transcript_in(
     claude: &claude_sessions::ClaudeDir,
     hook_transcript: Option<&str>,
     project_dir: &str,
     session_id: &str,
-) -> u64 {
-    let transcript = hook_transcript
-        .map(PathBuf::from)
-        .filter(|t| t.file_stem().is_some_and(|s| s == session_id) && t.is_file())
-        .or_else(|| claude.find_transcript(Some(project_dir), session_id));
-    let transcript = match transcript {
-        Some(t) => t,
-        None => return 0,
-    };
+    agent: &str,
+) -> Option<PathBuf> {
+    if agent == MAIN_AGENT {
+        session_transcript(claude, hook_transcript, project_dir, session_id)
+    } else {
+        subagent_transcript(claude, hook_transcript, project_dir, session_id, agent)
+    }
+}
 
-    // The newest turn that reports usage; a zero-usage synthetic turn does not
-    // reset the position.
-    std::fs::read_to_string(&transcript)
+/// The current agent's token position, read from [`current_transcript`]; 0
+/// when there is none.
+pub fn get_token_position(session_id: &str) -> u64 {
+    current_transcript(session_id).map_or(0, |t| token_position_of(&t))
+}
+
+/// The newest turn that reports usage; a zero-usage synthetic turn does not
+/// reset the position.
+fn token_position_of(transcript: &Path) -> u64 {
+    std::fs::read_to_string(transcript)
         .ok()
         .and_then(|c| claude_sessions::usage::last_context_tokens(&c))
         .unwrap_or(0)
 }
 
-/// Read the token position when a way was last shown.
-pub fn get_token_position_for_way(way_id: &str, session_id: &str) -> u64 {
-    let path = session_dir(session_id).join("way-tokens").join(way_id).join(".value");
-    read_u64_path(&path)
+#[cfg(test)]
+fn token_position_in(
+    claude: &claude_sessions::ClaudeDir,
+    hook_transcript: Option<&str>,
+    project_dir: &str,
+    session_id: &str,
+    agent: &str,
+) -> u64 {
+    transcript_in(claude, hook_transcript, project_dir, session_id, agent).map_or(0, |t| token_position_of(&t))
+}
+
+/// The session's own transcript: the hook's when its stem is the session id,
+/// else the session-id lookup.
+fn session_transcript(
+    claude: &claude_sessions::ClaudeDir,
+    hook_transcript: Option<&str>,
+    project_dir: &str,
+    session_id: &str,
+) -> Option<PathBuf> {
+    hook_transcript
+        .map(PathBuf::from)
+        .filter(|t| t.file_stem().is_some_and(|s| s == session_id) && t.is_file())
+        .or_else(|| claude.find_transcript(Some(project_dir), session_id))
+}
+
+/// A subagent's transcript. Claude Code writes a Task subagent's to
+/// `<session>/subagents/agent-<id>.jsonl` and a workflow agent's to
+/// `<session>/subagents/workflows/<run>/agent-<id>.jsonl`, beside the
+/// session's own `<session>.jsonl`. Claude Code's hooks reference says a
+/// hook's `transcript_path` always names the main session's transcript, so
+/// the first branch below does not fire today; it keeps the lookup right if
+/// a hook ever names the subagent's own file.
+fn subagent_transcript(
+    claude: &claude_sessions::ClaudeDir,
+    hook_transcript: Option<&str>,
+    project_dir: &str,
+    session_id: &str,
+    agent: &str,
+) -> Option<PathBuf> {
+    let file = format!("agent-{agent}.jsonl");
+    if let Some(t) = hook_transcript
+        .map(PathBuf::from)
+        .filter(|t| t.file_name().is_some_and(|n| n == file.as_str()) && t.is_file())
+    {
+        return Some(t);
+    }
+    let subagents = session_transcript(claude, hook_transcript, project_dir, session_id)?
+        .with_extension("")
+        .join("subagents");
+    let direct = subagents.join(&file);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    std::fs::read_dir(subagents.join("workflows"))
+        .ok()?
+        .flatten()
+        .map(|run| run.path().join(&file))
+        .find(|p| p.is_file())
 }
 
 /// Stamp the token position when a way was last shown.
 pub fn stamp_way_tokens(way_id: &str, session_id: &str, position: u64) {
-    let path = session_dir(session_id).join("way-tokens").join(way_id).join(".value");
+    let path = agent_state_dir(session_id).join("way-tokens").join(way_id).join(".value");
     ensure_parent(&path);
     let _ = std::fs::write(&path, position.to_string());
 }
@@ -359,7 +526,7 @@ mod context_window_tests {
 
 /// Get and increment fire count for a check.
 pub fn bump_check_fires(way_id: &str, session_id: &str) -> u64 {
-    let path = session_dir(session_id).join("check-fires").join(way_id).join(".value");
+    let path = agent_state_dir(session_id).join("check-fires").join(way_id).join(".value");
     ensure_parent(&path);
     let count = read_u64_path(&path) + 1;
     let _ = std::fs::write(&path, count.to_string());
@@ -368,7 +535,7 @@ pub fn bump_check_fires(way_id: &str, session_id: &str) -> u64 {
 
 /// Get current fire count without incrementing.
 pub fn get_check_fires(way_id: &str, session_id: &str) -> u64 {
-    let path = session_dir(session_id).join("check-fires").join(way_id).join(".value");
+    let path = agent_state_dir(session_id).join("check-fires").join(way_id).join(".value");
     read_u64_path(&path)
 }
 
@@ -388,7 +555,7 @@ pub fn core_is_shown(session_id: &str) -> bool {
 
 /// Detect execution scope: "agent" or "teammate".
 pub fn detect_scope(session_id: &str) -> String {
-    let path = session_dir(session_id).join("teammate");
+    let path = agent_state_dir(session_id).join("teammate");
     if path.exists() {
         "teammate".to_string()
     } else {
@@ -398,7 +565,7 @@ pub fn detect_scope(session_id: &str) -> String {
 
 /// Read team name from teammate marker.
 pub fn detect_team(session_id: &str) -> Option<String> {
-    let path = session_dir(session_id).join("teammate");
+    let path = agent_state_dir(session_id).join("teammate");
     std::fs::read_to_string(&path).ok().map(|s| s.trim().to_string())
 }
 
@@ -713,8 +880,8 @@ pub fn list_fired_ways(session_id: &str) -> Vec<String> {
 }
 
 /// List all way IDs that have epoch stamps in a session.
-pub fn list_way_epochs(session_id: &str) -> Vec<(String, u64)> {
-    let epochs_dir = session_dir(session_id).join("way-epochs");
+pub fn list_way_epochs(session_id: &str, agent: &str) -> Vec<(String, u64)> {
+    let epochs_dir = agent_state_dir_for(session_id, agent).join("way-epochs");
     let ids = collect_way_ids(&epochs_dir, &epochs_dir);
     ids.into_iter()
         .map(|id| {
@@ -812,9 +979,47 @@ mod token_position_tests {
             let d = root.join(".claude/projects").join(dir);
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(d.join(format!("{sid}.jsonl")), format!("{line}\n{synthetic}\n")).unwrap();
-            assert_eq!(token_position_in(&claude, None, project, sid), 42000, "{project}");
+            assert_eq!(token_position_in(&claude, None, project, sid, MAIN_AGENT), 42000, "{project}");
         }
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A subagent reads its position from its own transcript, in either
+    /// layout Claude Code writes, and never from the parent's.
+    #[test]
+    fn subagents_read_their_own_transcript() {
+        let root = std::env::temp_dir().join(format!("ways-tokpos-sub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let claude = claude_sessions::ClaudeDir::at(root.join(".claude"));
+        let turn = |n: u64| {
+            format!(r#"{{"type":"assistant","message":{{"usage":{{"input_tokens":{n},"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#)
+                + "\n"
+        };
+        let project = "/srv/p";
+        let dir = root.join(".claude/projects/-srv-p");
+        let subagents = dir.join("sess/subagents");
+        std::fs::create_dir_all(subagents.join("workflows/wf_1")).unwrap();
+        std::fs::write(dir.join("sess.jsonl"), turn(90_000)).unwrap();
+        std::fs::write(subagents.join("agent-atask.jsonl"), turn(30_000)).unwrap();
+        std::fs::write(subagents.join("workflows/wf_1/agent-awf.jsonl"), turn(20_000)).unwrap();
+
+        assert_eq!(token_position_in(&claude, None, project, "sess", MAIN_AGENT), 90_000);
+        assert_eq!(token_position_in(&claude, None, project, "sess", "atask"), 30_000);
+        assert_eq!(token_position_in(&claude, None, project, "sess", "awf"), 20_000);
+        // The parent's transcript named by the hook still leads to the subagent's.
+        let parent = dir.join("sess.jsonl");
+        assert_eq!(token_position_in(&claude, parent.to_str(), project, "sess", "atask"), 30_000);
+        // No transcript of its own: zero, not the parent's position.
+        assert_eq!(token_position_in(&claude, None, project, "sess", "agone"), 0);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// The main agent's state stays at the session root, where state written
+    /// before per-agent keying lives; a subagent's goes under `agents/<id>`.
+    #[test]
+    fn main_keeps_the_legacy_state_root() {
+        assert_eq!(agent_state_dir_for("s", MAIN_AGENT), session_dir("s"));
+        assert_eq!(agent_state_dir_for("s", "a1"), session_dir("s").join("agents").join("a1"));
     }
 }
 

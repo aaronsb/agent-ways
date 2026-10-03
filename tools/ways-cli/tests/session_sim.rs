@@ -1214,6 +1214,13 @@ fn scenario_18_token_position_finds_an_underscore_project() {
 /// `agent`, from inside a subagent; return stdout.
 #[cfg(unix)]
 fn hook_command(home: &Path, state: &Path, project: &Path, session: &str, agent: Option<&str>) -> String {
+    hook_bash(home, state, project, session, agent, "git commit -m x")
+}
+
+/// Run `ways hook command` for `command` as the main agent or, with `agent`,
+/// from inside a subagent; return stdout.
+#[cfg(unix)]
+fn hook_bash(home: &Path, state: &Path, project: &Path, session: &str, agent: Option<&str>, command: &str) -> String {
     use std::io::Write;
     let mut child = ways_cmd(home, &home.join(".cache"), state)
         .args(["hook", "command"])
@@ -1224,7 +1231,7 @@ fn hook_command(home: &Path, state: &Path, project: &Path, session: &str, agent:
         .expect("Failed to run ways hook command");
     let agent_field = agent.map(|a| format!(r#","agent_id":"{a}""#)).unwrap_or_default();
     let payload = format!(
-        r#"{{"session_id":"{session}"{agent_field},"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":"git commit -m x"}}}}"#
+        r#"{{"session_id":"{session}"{agent_field},"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":"{command}"}}}}"#
     );
     child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
     let out = child.wait_with_output().unwrap();
@@ -1360,6 +1367,295 @@ fn scenario_subagent_switch_keeps_ways_from_subagents_only() {
     assert!(!switches.join("sim-old-switch").exists(), "a 40-day-old switch is pruned");
     assert!(switches.join("sim-new-switch").exists(), "a fresh one stays");
 
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+// ── Scenario: firing state is kept per agent (#815) ────────────
+
+/// A home with way `agentdomain/w` (fires on `git commit`, and on a
+/// delegation that says "deploy") and way
+/// `agentdomain/dep`, whose check fires on `npm install` and pulls the way in
+/// the first time each agent sees it. Everything reaches subagents. Returns
+/// (base, home, state, project).
+#[cfg(unix)]
+fn per_agent_fixture(tag: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    let base = std::env::temp_dir().join(format!("ways-sim-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let project = base.join("project");
+    std::fs::create_dir_all(project.join(".claude")).unwrap();
+    let ways = home.join(".claude/hooks/ways/agentdomain");
+    std::fs::create_dir_all(ways.join("w")).unwrap();
+    std::fs::write(
+        ways.join("w/w.md"),
+        "---\ndescription: test way w\npattern: \\bdeploy\\b\npattern_strict: true\ncommands: ^git\\ commit\nscope: agent, subagent\nrefire: 0.15\n---\n# Marker w\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(ways.join("dep")).unwrap();
+    std::fs::write(
+        ways.join("dep/dep.md"),
+        "---\ndescription: dependency audit\nscope: agent, subagent\nrefire: 0.15\n---\n# Marker dep\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ways.join("dep/dep.check.md"),
+        "---\ndescription: dependency install check\ncommands: ^npm\\ install\nscope: agent, subagent\n---\n## anchor\n\nAudit first.\n\n## check\n\n- [ ] Package is maintained\n",
+    )
+    .unwrap();
+    let state = base.join("state");
+    (base, home, state, project)
+}
+
+/// The `check_fired` rows for `session`, as (agent_id, fire_count).
+#[cfg(unix)]
+fn check_fires_logged(state: &Path, session: &str) -> Vec<(String, String)> {
+    let log = std::fs::read_to_string(state.join("agent-ways/events.jsonl")).unwrap_or_default();
+    log.lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "check_fired" && v["session"] == session)
+        .map(|v| {
+            (
+                v["agent_id"].as_str().unwrap_or("").to_string(),
+                v["fire_count"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_per_agent_refire_window() {
+    let (base, home, state, project) = per_agent_fixture("agent-refire");
+    let s = format!("sim-agent-refire-{}", std::process::id());
+    clean_markers(&s);
+    let root = Path::new(&sessions_root()).join(&s);
+    let engagement = root.join("way-engagement/agentdomain__w.json");
+
+    // Main fires the way; a second match inside its refire window is suppressed.
+    assert!(hook_command(&home, &state, &project, &s, None).contains("# Marker w"));
+    let main_window = std::fs::read(&engagement).expect("main's engagement at the session root");
+    assert_eq!(hook_command(&home, &state, &project, &s, None), "");
+
+    // A subagent in the same session gets the way: main's fire does not hold it back.
+    assert!(
+        hook_command(&home, &state, &project, &s, Some("asub1")).contains("# Marker w"),
+        "the subagent was refire-suppressed by main's fire"
+    );
+    assert_eq!(hook_command(&home, &state, &project, &s, Some("asub1")), "", "the subagent keeps its own window");
+    assert!(root.join("agents/asub1/way-engagement/agentdomain__w.json").is_file());
+
+    // The subagent's fire leaves main's window as it was.
+    assert_eq!(std::fs::read(&engagement).unwrap(), main_window, "main's refire window changed");
+    assert_eq!(hook_command(&home, &state, &project, &s, None), "");
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_per_agent_check_decay() {
+    let (base, home, state, project) = per_agent_fixture("agent-check");
+    let s = format!("sim-agent-check-{}", std::process::id());
+    clean_markers(&s);
+
+    // Agent A fires the check twice.
+    hook_bash(&home, &state, &project, &s, Some("aaa"), "npm install left-pad");
+    hook_bash(&home, &state, &project, &s, Some("aaa"), "npm install right-pad");
+    assert_eq!(check_fires_logged(&state, &s), vec![("aaa".into(), "1".into()), ("aaa".into(), "2".into())]);
+
+    // Agent B's first check fire counts only its own fires: decay 1/1, not 1/3.
+    hook_bash(&home, &state, &project, &s, Some("abb"), "npm install left-pad");
+    assert_eq!(check_fires_logged(&state, &s).last(), Some(&("abb".into(), "1".into())));
+    let fires = |agent: &str| {
+        let p = Path::new(&sessions_root()).join(&s).join("agents").join(agent).join("check-fires/agentdomain/dep/.value");
+        std::fs::read_to_string(p).unwrap_or_default()
+    };
+    assert_eq!((fires("aaa").as_str(), fires("abb").as_str()), ("2", "1"));
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_legacy_session_state_reads_as_mains() {
+    let (base, home, state, project) = per_agent_fixture("agent-legacy");
+    let s = format!("sim-agent-legacy-{}", std::process::id());
+    clean_markers(&s);
+
+    // A check count an older binary wrote at the session root.
+    let legacy = Path::new(&sessions_root()).join(&s).join("check-fires/agentdomain/dep/.value");
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::write(&legacy, "3").unwrap();
+
+    // A subagent starts from zero; main continues from the legacy count.
+    hook_bash(&home, &state, &project, &s, Some("anew"), "npm install left-pad");
+    hook_bash(&home, &state, &project, &s, None, "npm install left-pad");
+    assert_eq!(
+        check_fires_logged(&state, &s),
+        vec![("anew".into(), "1".into()), ("main".into(), "4".into())]
+    );
+    assert_eq!(std::fs::read_to_string(&legacy).unwrap().trim(), "4");
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Run `ways hook <event>` with a raw payload; return stdout.
+#[cfg(unix)]
+fn hook_raw(home: &Path, state: &Path, project: &Path, event: &str, payload: &str) -> String {
+    use std::io::Write;
+    let mut child = ways_cmd(home, &home.join(".cache"), state)
+        .args(["hook", event])
+        .env("CLAUDE_PROJECT_DIR", project)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to run ways hook");
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_per_agent_epoch() {
+    let (base, home, state, project) = per_agent_fixture("agent-epoch");
+    let s = format!("sim-agent-epoch-{}", std::process::id());
+    clean_markers(&s);
+
+    hook_bash(&home, &state, &project, &s, None, "ls");
+    assert_epoch(&s, 1);
+    for _ in 0..3 {
+        hook_bash(&home, &state, &project, &s, Some("asub"), "ls");
+    }
+    // The subagent's tool calls advance its own epoch, not main's.
+    assert_epoch(&s, 1);
+    let sub = std::fs::read_to_string(Path::new(&sessions_root()).join(&s).join("agents/asub/epoch")).unwrap();
+    assert_eq!(sub.trim(), "3");
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_subagent_start_records_injected_ways() {
+    let (base, home, state, project) = per_agent_fixture("agent-inject");
+    let s = format!("sim-agent-inject-{}", std::process::id());
+    clean_markers(&s);
+    let root = Path::new(&sessions_root()).join(&s);
+    let start = |agent: &str| {
+        hook_raw(
+            &home, &state, &project, "subagent-start",
+            &format!(r#"{{"session_id":"{s}","agent_id":"{agent}","agent_type":"general-purpose","hook_event_name":"SubagentStart"}}"#),
+        )
+    };
+
+    // Main dispatches; the subagent starts with the way injected.
+    hook_task(&home, &state, &project, &s);
+    assert!(start("ainj").contains("# Marker w"));
+    assert!(root.join("agents/ainj/way-engagement/agentdomain__w.json").is_file());
+    assert!(root.join("ways/agentdomain/w/.marker.ainj").is_file());
+    // Its first matching command does not deliver the way a second time.
+    assert_eq!(hook_command(&home, &state, &project, &s, Some("ainj")), "");
+    // Main's state is untouched: main still gets the way.
+    assert!(hook_command(&home, &state, &project, &s, None).contains("# Marker w"));
+
+    // A teammate's scope marker lands in its own state, not main's.
+    hook_raw(
+        &home, &state, &project, "task",
+        &format!(r#"{{"session_id":"{s}","hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{{"prompt":"deploy the service","team_name":"red"}}}}"#),
+    );
+    start("atm");
+    assert_eq!(std::fs::read_to_string(root.join("agents/atm/teammate")).unwrap().trim(), "red");
+    assert!(!root.join("teammate").exists(), "main's scope stays agent");
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_session_ways_lists_rows_per_agent() {
+    let (base, home, state, project) = per_agent_fixture("agent-list");
+    let s = format!("sim-agent-list-{}", std::process::id());
+    clean_markers(&s);
+
+    // Main fires w; a subagent fires w and, through its check, dep.
+    hook_command(&home, &state, &project, &s, None);
+    hook_command(&home, &state, &project, &s, Some("alist"));
+    hook_bash(&home, &state, &project, &s, Some("alist"), "npm install left-pad");
+
+    let out = ways_cmd(&home, &home.join(".cache"), &state)
+        .args(["session", "ways", "--session", &s, "--json"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let rows: Vec<(String, Option<String>, u64)> = json["ways"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| {
+            (
+                w["id"].as_str().unwrap().to_string(),
+                w["agent_id"].as_str().map(str::to_string),
+                w["check_fires"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("agentdomain/w".into(), None, 0),
+            ("agentdomain/w".into(), Some("alist".into()), 0),
+            ("agentdomain/dep".into(), Some("alist".into()), 1),
+        ],
+        "main's row first and unlabelled, then the subagent's rows: {json}"
+    );
+    assert_eq!(json["ways_fired"], 2, "distinct ways, not rows");
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_queued_messages_are_main_agents_only() {
+    let (base, home, state, project) = per_agent_fixture("agent-queued");
+    let s = format!("sim-agent-queued-{}", std::process::id());
+    clean_markers(&s);
+    // Main's transcript holds an operator message queued mid-turn.
+    let transcript = base.join("main.jsonl");
+    std::fs::write(
+        &transcript,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-03T12:00:00Z","content":"deploy the service now"}"#.to_string() + "\n",
+    )
+    .unwrap();
+    let mark = Path::new(&sessions_root()).join(&s).join("queued-scan-mark");
+    let post_tool = |agent: Option<&str>| {
+        let agent_field = agent.map(|a| format!(r#","agent_id":"{a}""#)).unwrap_or_default();
+        hook_raw(
+            &home, &state, &project, "queued",
+            &format!(
+                r#"{{"session_id":"{s}"{agent_field},"transcript_path":"{}","hook_event_name":"PostToolUse","tool_name":"Bash"}}"#,
+                transcript.display()
+            ),
+        )
+    };
+
+    // A subagent's PostToolUse names main's transcript; it must not consume the message.
+    assert_eq!(post_tool(Some("aq")), "");
+    assert!(!mark.exists(), "the subagent advanced main's queued-scan mark");
+    // Main's next PostToolUse scans it and the way fires for main.
+    assert!(post_tool(None).contains("# Marker w"));
+    assert_eq!(std::fs::read_to_string(&mark).unwrap().trim(), "2026-10-03T12:00:00Z");
+
+    clean_markers(&s);
     let _ = std::fs::remove_dir_all(&base);
 }
 

@@ -66,7 +66,7 @@ ${CYAN}What it does (1.0 XDG layout):${RESET}
 
 ${CYAN}Already have a pre-1.0 in-place clone at ~/.claude?${RESET}
   Migrate it to the 1.0 layout — see
-  ${UPSTREAM_URL}/blob/main/docs/migration-1.0.md
+  ${UPSTREAM_URL}/blob/ways-v1.8.3/docs/migration-1.0.md
 
 HELP
 }
@@ -200,7 +200,7 @@ print_projection_stopped() {
   echo -e "    ${CYAN}ways reconcile${RESET}            # link the projected roots"
   echo -e "    ${CYAN}ways reconcile --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
   echo "  If ~/.claude is itself a git clone of agent-ways (pre-1.0), do not use --force;"
-  echo "  see docs/migration-1.0.md."
+  echo "  see ${UPSTREAM_URL}/blob/ways-v1.8.3/docs/migration-1.0.md"
 }
 
 # Put the built binaries on PATH (~/.local/bin). Symlinks into the stable app dir.

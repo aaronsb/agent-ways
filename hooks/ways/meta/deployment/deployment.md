@@ -44,9 +44,9 @@ cargo build --release --manifest-path /tmp/ways-migrator/tools/ways-cli/Cargo.to
 /tmp/ways-migrator/tools/target/release/ways migrate --execute     # relocate the clone to $XDG_DATA, build the projection
 ```
 
-Migration is gated and backs up first. See `docs/migration-1.0.md` for the full walkthrough.
+Migration is gated and backs up first. See https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md for the full walkthrough.
 
-An un-migrated install is **not read**: `paths.rs` resolves the 1.0 locations only (ADR-506). `ways reconcile` stops at the real directories an in-place clone has at the projection roots, and `ways update` needs the app source in `$XDG_DATA_HOME`. Point the user at `docs/migration-1.0.md`.
+An un-migrated install is **not read**: `paths.rs` resolves the 1.0 locations only (ADR-506). `ways reconcile` stops at the real directories an in-place clone has at the projection roots, and `ways update` needs the app source in `$XDG_DATA_HOME`. Point the user at https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md.
 
 ## Why this way exists
 
@@ -56,4 +56,4 @@ The first touch for many adopters is `curl … | bash`, often with *a Claude rea
 
 - skills(meta) — skills are one of the projected roots
 - `docs/development.md` — the same projection model, from a contributor's seat (install vs dev checkout vs sandbox)
-- `docs/migration-1.0.md` — the `ways migrate` walkthrough, run from the `ways-v1.8.3` tag
+- https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md — the `ways migrate` walkthrough, run from the `ways-v1.8.3` tag

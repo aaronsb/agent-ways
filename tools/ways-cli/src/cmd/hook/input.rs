@@ -84,8 +84,8 @@ impl HookInput {
     pub fn common(&self, env_project: Option<String>) -> Common {
         Common {
             session: self.text("/session_id"),
-            // Names marker files, so held to the session id's rule.
-            agent_id: self.text("/agent_id").filter(|a| crate::session::is_plain_session_id(a)),
+            // Names marker files and state directories, so stored by its key.
+            agent_id: self.text("/agent_id").map(|a| crate::session::agent_key(&a)),
             project: env_project.filter(|p| !p.is_empty()).or_else(|| self.text("/cwd")),
             transcript: self.text("/transcript_path"),
         }
@@ -175,9 +175,19 @@ mod tests {
         assert_eq!(input.common(Some("/srv/env".into())).project.as_deref(), Some("/srv/env"));
         assert_eq!(input.common(Some(String::new())).project.as_deref(), Some("/srv/cwd"));
         assert_eq!(HookInput::parse("not json").common(None), Common::default());
-        // The agent id names marker files: one that is not plain is absent.
-        let odd = HookInput::parse(r#"{"session_id":"s1","agent_id":"/../"}"#);
-        assert_eq!(odd.common(None).agent_id, None);
+        // The agent id names marker files: one that is not plain, is over-long,
+        // or is the literal `main` is kept as a hashed key, never as main.
+        let key = |id: &str| {
+            HookInput::parse(&format!(r#"{{"session_id":"s1","agent_id":"{id}"}}"#)).common(None).agent_id.unwrap()
+        };
+        let long = "a".repeat(65);
+        for odd in ["/../", "main", long.as_str()] {
+            let k = key(odd);
+            assert!(k.starts_with('h') && k.len() == 17 && k != "main", "{odd} -> {k}");
+            assert_eq!(crate::session::agent_key(&k), k, "the key is stable");
+        }
+        assert_ne!(key("main"), key("/../"));
+        assert_eq!(key(&"a".repeat(64)), "a".repeat(64));
     }
 
     #[test]

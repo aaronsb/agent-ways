@@ -170,7 +170,7 @@ update:
 
 # transition: removed by #717 (ADR-506)
 sync-to-home:
-	@echo "'make sync-to-home' was removed; see docs/migration-1.0.md." >&2
+	@echo "'make sync-to-home' was removed; see https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md" >&2
 	@exit 1
 
 # Force-rebuild every binary `ways update` is responsible for refreshing.

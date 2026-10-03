@@ -85,6 +85,12 @@ pub fn run(event: HookEvent) -> Result<()> {
             Ok(())
         }
         Request::Queued { session, transcript } => {
+            // Operator messages are queued to the main agent, and a subagent's
+            // hook names main's transcript and shares the session's scan mark,
+            // so only the main agent's tool calls scan them.
+            if common.agent_id.is_some() {
+                return Ok(());
+            }
             // A transcript not yet readable, or a failed scan, injects nothing:
             // this lane rides every tool call and must stay quiet.
             let _ = scan::messages(&session, project, Some(&transcript));

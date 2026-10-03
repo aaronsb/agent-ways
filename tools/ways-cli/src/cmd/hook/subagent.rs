@@ -64,14 +64,16 @@ pub fn inject(session_id: &str, project_dir: &str) -> anyhow::Result<String> {
     let Some(stash) = claim_oldest(&session::session_dir(session_id).join("subagent-stash")) else {
         return Ok(String::new());
     };
-    // A teammate's own hooks read this marker for the rest of its session.
+    // A teammate's own hooks read this marker for the rest of its session. It
+    // sits in the teammate's own state directory, so main's scope is untouched.
     if stash.is_teammate {
-        let dir = session::session_dir(session_id);
+        let dir = session::agent_state_dir(session_id);
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join("teammate"), format!("{}\n", stash.team_name))?;
     }
     let scope = if stash.is_teammate { "teammate" } else { "subagent" };
     let mut context = String::new();
+    let agent_id = session::current_agent();
     for (i, out) in render_ways(&stash.ways, |way| show::subagent_way(way, session_id, scope)) {
         let way = &stash.ways[i];
         context.push_str(&out);
@@ -87,6 +89,11 @@ pub fn inject(session_id: &str, project_dir: &str) -> anyhow::Result<String> {
             ("project", project_dir),
             ("session", session_id),
         ];
+        // A payload without an agent id leaves the field out: the fire is a
+        // subagent's, so `main` would be wrong.
+        if agent_id != session::MAIN_AGENT {
+            fields.push(("agent_id", agent_id.as_str()));
+        }
         if !stash.team_name.is_empty() {
             fields.push(("team", stash.team_name.as_str()));
         }
