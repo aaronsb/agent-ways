@@ -41,11 +41,10 @@ fn marker_cmd(marker: &str) -> Vec<String> {
     ]
 }
 
-/// Like `marker_cmd`, but also prints the directory it ran in. The line can
-/// wrap in a narrow pane, so read it back through `unwrapped`.
+/// Prints only the directory it ran in: a marker printed first would be what
+/// a long cwd's wrapped rows scroll off the pane. The line can wrap, so read
+/// it back through `unwrapped`.
 fn cwd_cmd() -> Vec<String> {
-    // The cwd line alone: a marker printed first would be what a long cwd's
-    // wrapped rows scroll off the pane.
     vec!["/bin/sh".into(), "-c".into(), "echo \"cwd=[$(pwd -P)]\"; read -r line".into()]
 }
 
