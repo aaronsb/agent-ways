@@ -247,17 +247,27 @@ static FIRING_CONTEXT: OnceLock<FiringContext> = OnceLock::new();
 
 fn firing_context(session_id: &str, project_dir: &str) -> &'static FiringContext {
     FIRING_CONTEXT.get_or_init(|| {
-        firing_context_from(session::current_transcript(session_id).as_deref(), session_id, project_dir)
+        let is_main = session::current_agent() == session::MAIN_AGENT;
+        firing_context_from(session::current_transcript(session_id).as_deref(), is_main, session_id, project_dir)
     })
 }
 
 /// [`firing_context`] with the agent's own transcript given: the window and
-/// model come from the file the token position is read from.
-fn firing_context_from(transcript: Option<&Path>, session_id: &str, project_dir: &str) -> FiringContext {
+/// model come from the file the token position is read from. Only the main
+/// agent falls back to the session and project lookups. For a subagent both
+/// would read another agent's transcript (the session id is the parent's), so
+/// a subagent without a detected window of its own takes the resolver's
+/// default, which honors `CLAUDE_CONTEXT_WINDOW`.
+fn firing_context_from(
+    transcript: Option<&Path>,
+    is_main: bool,
+    session_id: &str,
+    project_dir: &str,
+) -> FiringContext {
     resolve_firing_context(
         transcript.and_then(|t| crate::cmd::context::get_context_for_transcript(&t.to_string_lossy()).ok()),
-        || crate::cmd::context::get_context_for_session(session_id).ok(),
-        || crate::cmd::context::get_context(Some(project_dir)).ok(),
+        || is_main.then(|| crate::cmd::context::get_context_for_session(session_id).ok()).flatten(),
+        || is_main.then(|| crate::cmd::context::get_context(Some(project_dir)).ok()).flatten(),
     )
 }
 
@@ -1246,12 +1256,16 @@ mod tests {
 
         let own = session::transcript_in(&claude, parent.to_str(), "/srv/p", "sess", "asub");
         assert_eq!(own.as_deref(), Some(dir.join("sess/subagents/agent-asub.jsonl").as_path()));
-        let ctx = firing_context_from(own.as_deref(), "sess", "/srv/p");
+        let ctx = firing_context_from(own.as_deref(), false, "sess", "/srv/p");
         assert_eq!((ctx.model.as_deref(), ctx.window), (Some("claude-haiku-4-5"), 200_000));
         // The main agent, given the same hook transcript, reads the parent's.
         let main = session::transcript_in(&claude, parent.to_str(), "/srv/p", "sess", session::MAIN_AGENT);
-        let ctx = firing_context_from(main.as_deref(), "sess", "/srv/p");
+        let ctx = firing_context_from(main.as_deref(), true, "sess", "/srv/p");
         assert_eq!((ctx.model.as_deref(), ctx.window), (Some("claude-opus-4-8"), 1_000_000));
+        // A subagent with no transcript yet takes no session lookup: no model,
+        // and the resolver's default window.
+        let none = firing_context_from(None, false, "sess", "/srv/p");
+        assert_eq!((none.model, none.window), (None, ways_core::context_window::resolve(None).tokens));
         std::fs::remove_dir_all(&root).ok();
     }
 }

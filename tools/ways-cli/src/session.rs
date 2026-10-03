@@ -380,8 +380,10 @@ fn session_transcript(
 /// A subagent's transcript. Claude Code writes a Task subagent's to
 /// `<session>/subagents/agent-<id>.jsonl` and a workflow agent's to
 /// `<session>/subagents/workflows/<run>/agent-<id>.jsonl`, beside the
-/// session's own `<session>.jsonl`. The hook's `transcript_path` is taken
-/// when it already names the subagent's file.
+/// session's own `<session>.jsonl`. Claude Code's hooks reference says a
+/// hook's `transcript_path` always names the main session's transcript, so
+/// the first branch below does not fire today; it keeps the lookup right if
+/// a hook ever names the subagent's own file.
 fn subagent_transcript(
     claude: &claude_sessions::ClaudeDir,
     hook_transcript: Option<&str>,

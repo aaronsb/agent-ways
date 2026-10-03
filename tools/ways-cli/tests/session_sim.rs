@@ -1617,7 +1617,43 @@ fn scenario_session_ways_lists_rows_per_agent() {
         ],
         "main's row first and unlabelled, then the subagent's rows: {json}"
     );
-    assert_eq!(json["ways_fired"], 3);
+    assert_eq!(json["ways_fired"], 2, "distinct ways, not rows");
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_queued_messages_are_main_agents_only() {
+    let (base, home, state, project) = per_agent_fixture("agent-queued");
+    let s = format!("sim-agent-queued-{}", std::process::id());
+    clean_markers(&s);
+    // Main's transcript holds an operator message queued mid-turn.
+    let transcript = base.join("main.jsonl");
+    std::fs::write(
+        &transcript,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-03T12:00:00Z","content":"deploy the service now"}"#.to_string() + "\n",
+    )
+    .unwrap();
+    let mark = Path::new(&sessions_root()).join(&s).join("queued-scan-mark");
+    let post_tool = |agent: Option<&str>| {
+        let agent_field = agent.map(|a| format!(r#","agent_id":"{a}""#)).unwrap_or_default();
+        hook_raw(
+            &home, &state, &project, "queued",
+            &format!(
+                r#"{{"session_id":"{s}"{agent_field},"transcript_path":"{}","hook_event_name":"PostToolUse","tool_name":"Bash"}}"#,
+                transcript.display()
+            ),
+        )
+    };
+
+    // A subagent's PostToolUse names main's transcript; it must not consume the message.
+    assert_eq!(post_tool(Some("aq")), "");
+    assert!(!mark.exists(), "the subagent advanced main's queued-scan mark");
+    // Main's next PostToolUse scans it and the way fires for main.
+    assert!(post_tool(None).contains("# Marker w"));
+    assert_eq!(std::fs::read_to_string(&mark).unwrap().trim(), "2026-10-03T12:00:00Z");
 
     clean_markers(&s);
     let _ = std::fs::remove_dir_all(&base);

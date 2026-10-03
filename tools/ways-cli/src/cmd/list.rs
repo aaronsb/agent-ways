@@ -150,7 +150,7 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
         agent_theme::paint(agent_theme::Style::new().bold(), "Session"),
         agent_theme::paint(
             agent_theme::Role::Muted,
-            format!("epoch {current_epoch} · {context_window_k}K ctx · {} ways fired", ways.len())
+            format!("epoch {current_epoch} · {context_window_k}K ctx · {} ways fired", distinct_ways(&ways))
         )
     );
     let _ = writeln!(out);
@@ -230,6 +230,12 @@ fn collect_fired_ways(
         }
     }
     ways
+}
+
+/// How many distinct ways fired, whichever agents fired them. The rows are
+/// per (agent, way), so a way two agents fired is one way and two rows.
+fn distinct_ways(ways: &[FiredWay]) -> usize {
+    ways.iter().map(|w| w.id.as_str()).collect::<std::collections::HashSet<_>>().len()
 }
 
 struct MetricEntry {
@@ -426,7 +432,7 @@ fn json_output(ways: &[FiredWay], current_epoch: u64, current_tokens_k: u64, con
         "current_epoch": current_epoch,
         "current_tokens_k": current_tokens_k,
         "context_window_k": context_window_k,
-        "ways_fired": entries.len(),
+        "ways_fired": distinct_ways(ways),
         "ways": entries,
     });
     let mut output = output;
