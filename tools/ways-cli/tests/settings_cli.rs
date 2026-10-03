@@ -760,3 +760,28 @@ fn fix_all_reports_a_key_no_section_owns() {
     assert!(err.contains("mdoe"), "{err}");
     assert_eq!(f.run(&["settings", "lint"]).2, 3);
 }
+
+fn json(f: &Fx, args: &[&str]) -> serde_json::Value {
+    serde_json::from_str(&f.run(args).0).unwrap()
+}
+
+#[test]
+fn the_active_theme_is_one_of_the_installed_themes() {
+    let f = Fx::new();
+    let (_, err, code) = f.run(&["settings", "set", "theme.active", "mine"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("expected one of terminal, agent-ways, nord,") && err.contains("found 'mine'"), "{err}");
+    assert!(!f.user().exists());
+    assert_eq!(f.run(&["settings", "set", "theme.active", "nord"]).2, 0);
+    // A theme file of the user's own becomes a choice.
+    let theme = include_str!("../../agent-theme/themes/nord.theme").replace("THEME_NAME=\"nord\"", "THEME_NAME=\"mine\"");
+    f.write(&f.root.join("xdg/config/agent-ways/themes/mine.theme"), &theme);
+    assert_eq!(f.run(&["settings", "set", "theme.active", "mine"]).2, 0);
+    let v = json(&f, &["settings", "get", "theme.active", "--json"]);
+    let options = v["options"].as_array().unwrap();
+    assert_eq!(options[0], "terminal");
+    assert_eq!(options.last().unwrap(), "mine");
+    assert_eq!(v["value"], "mine");
+    // The other theme key is unchanged: no options.
+    assert!(json(&f, &["settings", "get", "theme.shape", "--json"]).get("options").is_none());
+}

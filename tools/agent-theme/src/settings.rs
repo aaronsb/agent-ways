@@ -6,6 +6,7 @@
 //! Declarations only: this module reads no file.
 
 use agent_settings::schema::{DefaultValue, Kind, KeySpec, Scope, SectionSpec};
+use agent_settings::Layer;
 use serde_yaml::Value;
 
 /// The file kind the section lives in: ways' `config.yaml`.
@@ -33,7 +34,7 @@ pub const ACTIVE: KeySpec = KeySpec {
     section: "theme",
     file: FILE,
     path: &["theme", "active"],
-    kind: Kind::Text,
+    kind: Kind::ChoiceOf { options: theme_names, multi: false },
     default: DefaultValue::Yaml("terminal"),
     instances: &[],
     scope: Scope::User,
@@ -56,6 +57,21 @@ pub const SHAPE: KeySpec = KeySpec {
     ..ACTIVE
 };
 
+/// The themes `theme.active` may name: the terminal's own colours, the
+/// bundled themes, then each theme file in the user's themes directory. A
+/// file that does not parse names nothing a screen could draw, so it is
+/// left out. The list is read from the machine, not from the layers.
+fn theme_names(_layers: &[Layer]) -> Result<Vec<String>, String> {
+    let set = crate::ThemeSet::load(crate::bundled::user_dir().as_deref());
+    let mut out = vec![crate::TERMINAL.to_string()];
+    for (t, _) in set.list() {
+        if !out.contains(&t.name) {
+            out.push(t.name.clone());
+        }
+    }
+    Ok(out)
+}
+
 /// A theme name as a theme file names itself: lowercase letters, digits
 /// and `-`.
 pub fn check_theme_name(v: &Value) -> Result<(), String> {
@@ -77,5 +93,17 @@ mod tests {
         assert!(SHAPE.check_value(&Value::from("flame")).is_ok());
         assert!(SHAPE.check_value(&Value::from("star")).is_err());
         assert_eq!(SHAPE.section, "theme");
+    }
+
+    #[test]
+    fn the_active_theme_is_one_of_terminal_and_the_bundled_themes() {
+        let names = theme_names(&[]).unwrap();
+        assert_eq!(names[0], "terminal");
+        for (stem, _) in crate::BUNDLED {
+            assert!(names.iter().any(|n| n == stem), "{stem} missing from {names:?}");
+        }
+        let mut sorted = names.clone();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len());
     }
 }
