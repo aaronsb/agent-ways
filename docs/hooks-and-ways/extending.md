@@ -148,6 +148,26 @@ disabled_domains:
 
 All ways in disabled domains are silently skipped everywhere. The domain still appears in the Available Ways table but its ways won't fire. Domain-level disable is the right tool for "never anywhere"; project-scope per-way disable is the right tool for "not in this project."
 
+### Keeping ways out of subagents and teammates
+
+Some workflows run their agents without ways, so injection does not bias what they produce. The main agent keeps its ways either way; only the agents it dispatches are affected.
+
+For every session in a project, set `subagents: false` in the project's `.claude/ways.yaml` (or in the user config for every project):
+
+```yaml
+subagents: false
+```
+
+For one session, for example before launching a workflow or a swarm, switch it from the session itself:
+
+```
+ways session subagents off     # this session's subagents and teammates get no ways
+ways session subagents on      # back to the project's setting
+ways session subagents --json  # which switch is in effect
+```
+
+A suppressed injection is logged as an `injection_suppressed` event, once per dispatched agent, so the session reports read a switched-off workflow as switched off.
+
 ### Creating a new domain
 
 Create a subdirectory under `~/.claude/hooks/ways/` with your domain name. Add way directories inside it. The macro table generator and all check scripts will discover them automatically.

@@ -1207,3 +1207,111 @@ fn scenario_18_token_position_finds_an_underscore_project() {
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+// ── Scenario: ways switched off for subagents (#768) ───────────
+
+/// Run `ways hook command` for `git commit` as the main agent or, with
+/// `agent`, from inside a subagent; return stdout.
+#[cfg(unix)]
+fn hook_command(home: &Path, state: &Path, project: &Path, session: &str, agent: Option<&str>) -> String {
+    use std::io::Write;
+    let mut child = ways_cmd(home, &home.join(".cache"), state)
+        .args(["hook", "command"])
+        .env("CLAUDE_PROJECT_DIR", project)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to run ways hook command");
+    let agent_field = agent.map(|a| format!(r#","agent_id":"{a}""#)).unwrap_or_default();
+    let payload = format!(
+        r#"{{"session_id":"{session}"{agent_field},"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":"git commit -m x"}}}}"#
+    );
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// Run `ways hook task` for a delegation that names the way's keyword.
+#[cfg(unix)]
+fn hook_task(home: &Path, state: &Path, project: &Path, session: &str) {
+    use std::io::Write;
+    let mut child = ways_cmd(home, &home.join(".cache"), state)
+        .args(["hook", "task"])
+        .env("CLAUDE_PROJECT_DIR", project)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to run ways hook task");
+    let payload = format!(
+        r#"{{"session_id":"{session}","hook_event_name":"PreToolUse","tool_name":"Task","tool_input":{{"prompt":"deploy the service"}}}}"#
+    );
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    assert!(child.wait_with_output().unwrap().status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_subagent_switch_keeps_ways_from_subagents_only() {
+    let base = std::env::temp_dir().join(format!("ways-sim-subagents-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let state = base.join("state");
+    let project = base.join("project");
+    std::fs::create_dir_all(project.join(".claude")).unwrap();
+    // A way that reaches the main agent and subagents alike.
+    let dir = home.join(".claude/hooks/ways/subdomain/w");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("w.md"),
+        "---\ndescription: test way w\npattern: \\bdeploy\\b\npattern_strict: true\ncommands: ^git\\ commit\nscope: agent, subagent\nrefire: 0.15\n---\n# Marker w\n",
+    )
+    .unwrap();
+    let events = || std::fs::read_to_string(state.join("agent-ways/events.jsonl")).unwrap_or_default();
+    let suppressed = |log: &str| log.lines().filter(|l| l.contains("\"injection_suppressed\"")).count();
+
+    let stashes = |session: &str| {
+        std::fs::read_dir(Path::new(&sessions_root()).join(session).join("subagent-stash")).map_or(0, |d| d.count())
+    };
+
+    // Switched on (the default): a subagent's command fires the way, and a
+    // dispatch stashes ways for the subagent it starts.
+    let s1 = format!("sim-sub1-{}", std::process::id());
+    clean_markers(&s1);
+    assert!(hook_command(&home, &state, &project, &s1, Some("a1")).contains("# Marker w"));
+    hook_task(&home, &state, &project, &s1);
+    assert_eq!(stashes(&s1), 1);
+
+    // The session switch: the subagent gets nothing, the main agent keeps its way,
+    // and the suppression is logged once per agent.
+    let s2 = format!("sim-sub2-{}", std::process::id());
+    clean_markers(&s2);
+    let off = ways_cmd(&home, &home.join(".cache"), &state)
+        .args(["session", "subagents", "off", "--session", &s2, "--json"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(off.status.success(), "{}", String::from_utf8_lossy(&off.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&off.stdout).unwrap();
+    assert_eq!((report["subagents"].as_str(), report["switch"].as_str()), (Some("off"), Some("session")));
+    assert_eq!(hook_command(&home, &state, &project, &s2, Some("a2")), "");
+    assert_eq!(hook_command(&home, &state, &project, &s2, Some("a2")), "");
+    assert_eq!(suppressed(&events()), 1, "one line per agent");
+    let line = events().lines().find(|l| l.contains("injection_suppressed")).unwrap().to_string();
+    assert!(line.contains("\"switch\":\"session\"") && line.contains("\"agent\":\"a2\""), "{line}");
+    assert!(hook_command(&home, &state, &project, &s2, None).contains("# Marker w"), "the main agent keeps its ways");
+    hook_task(&home, &state, &project, &s2);
+    assert_eq!(stashes(&s2), 0, "a dispatch stashes nothing");
+    assert!(events().lines().any(|l| l.contains("injection_suppressed") && l.contains("\"lane\":\"task\"")));
+
+    // The project setting does the same for every session in the project.
+    std::fs::write(project.join(".claude/ways.yaml"), "subagents: false\n").unwrap();
+    let s3 = format!("sim-sub3-{}", std::process::id());
+    clean_markers(&s3);
+    assert_eq!(hook_command(&home, &state, &project, &s3, Some("a3")), "");
+    assert!(events().lines().any(|l| l.contains("injection_suppressed") && l.contains("\"switch\":\"project\"")));
+    assert!(hook_command(&home, &state, &project, &s3, None).contains("# Marker w"));
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+

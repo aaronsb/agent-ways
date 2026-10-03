@@ -402,6 +402,44 @@ pub fn detect_team(session_id: &str) -> Option<String> {
     std::fs::read_to_string(&path).ok().map(|s| s.trim().to_string())
 }
 
+// ── Subagent switch (#768) ──────────────────────────────────────
+
+/// The marker that switches ways off for one session's subagents and
+/// teammates. Subagent hooks report the parent's session id, so the parent's
+/// directory is where they find it.
+fn subagents_off_marker(session_id: &str) -> PathBuf {
+    session_dir(session_id).join("subagents-off")
+}
+
+/// Whether this session switched ways off for its subagents and teammates.
+pub fn subagents_off(session_id: &str) -> bool {
+    is_plain_session_id(session_id) && subagents_off_marker(session_id).exists()
+}
+
+/// Switch ways off (`false`) or back on (`true`) for one session's subagents
+/// and teammates. Holds until switched back or the session's state is cleared.
+pub fn set_subagents(session_id: &str, on: bool) -> std::io::Result<()> {
+    let marker = subagents_off_marker(session_id);
+    if on {
+        match std::fs::remove_file(&marker) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    } else {
+        ensure_parent(&marker);
+        std::fs::write(&marker, "")
+    }
+}
+
+/// Record a suppressed injection once per agent: a subagent's tool calls each
+/// run the hooks, and one line says the whole agent ran without ways. Returns
+/// whether this call is the first for the agent.
+pub fn first_suppression_for(session_id: &str, agent: &str) -> bool {
+    let marker = session_dir(session_id).join("suppressed").join(agent);
+    ensure_parent(&marker);
+    std::fs::OpenOptions::new().write(true).create_new(true).open(&marker).is_ok()
+}
+
 /// Check if a way's scope field matches the current scope.
 pub fn scope_matches(scope_field: &str, current_scope: &str) -> bool {
     if scope_field.is_empty() {

@@ -23,6 +23,21 @@ ways session ways --sort name          # sort alphabetically instead of by epoch
 ways session ways --json               # machine-readable output
 ```
 
+### `ways session subagents`
+
+**When:** Before launching a workflow or swarm whose agents should run without ways, or to check whether a session's subagents get them.
+
+**Run from:** The project — auto-detects the current session; `--session <id>` names one.
+
+**Tells you:** Whether this session's subagents and teammates get ways, and which switch decides it: the session's own, the `subagents:` setting in the project or user `ways.yaml`, or the default (on). The main agent's ways are unaffected.
+
+```
+ways session subagents                 # report
+ways session subagents off             # switch off for this session
+ways session subagents on              # switch back on
+ways session subagents --json          # {session, subagents, switch, session_switch, project_setting, project}
+```
+
 ---
 
 ### `ways status`
