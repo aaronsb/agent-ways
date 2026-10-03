@@ -3,13 +3,12 @@
 //! lists them.
 
 use agent_tui::ratatui::crossterm::event::KeyCode;
-use agent_tui::ratatui::layout::{Alignment, Constraint, Layout};
+use agent_tui::ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
 use agent_tui::ratatui::text::{Line, Span};
 use agent_tui::ratatui::widgets::{Cell, HighlightSpacing, Paragraph, Row, Table, TableState};
 use agent_tui::ratatui::Frame as Draw;
-use agent_tui::theme::{self, Ground, Shape};
-use agent_tui::timeline::key_bar;
+use agent_tui::theme;
 
 use super::report::agent_hint;
 use crate::cmd::screen_host::pane;
@@ -21,6 +20,8 @@ pub(crate) struct Fires {
     list: Vec<SemanticFire>,
     sel: usize,
     table: TableState,
+    /// Where the last frame drew the table.
+    area: Rect,
 }
 
 impl Fires {
@@ -45,11 +46,22 @@ impl Fires {
         };
     }
 
-    /// Draw the tab for `session`. `back` says Esc returns to a sessions
-    /// tab; without one it ends the screen, and the bar names `q` alone.
-    pub(crate) fn draw(&mut self, f: &mut Draw, session: &str, tab_line: Line<'static>, shape: Shape, back: bool) {
-        let [bar, head, body, status] = Layout::vertical([Constraint::Length(1), Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
-        f.render_widget(Paragraph::new(tab_line), bar);
+    /// A click on a row selects it.
+    pub(crate) fn click(&mut self, at: Position) {
+        if let Some(i) = agent_tui::hit::row_at(self.area, at, 1, self.table.offset()) {
+            agent_tui::hit::pick(&mut self.sel, i, self.list.len());
+        }
+    }
+
+    /// Where the selection is: `2/9`.
+    pub(crate) fn place(&self) -> String {
+        format!("{}/{}", (self.sel + 1).min(self.list.len()), self.list.len())
+    }
+
+    /// Draw the tab for `session` in `area`, between the shell's bars.
+    pub(crate) fn draw(&mut self, f: &mut Draw, session: &str, area: Rect) {
+        let [head, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(area);
+        self.area = body;
         f.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled("Session ", Style::new().add_modifier(Modifier::BOLD)),
@@ -89,12 +101,5 @@ impl Fires {
                 .highlight_spacing(HighlightSpacing::Always);
             f.render_stateful_widget(t, body, &mut self.table);
         }
-        let right = vec![Span::styled(format!("{}/{}", (self.sel + 1).min(self.list.len()), self.list.len()), theme::muted())];
-        let mut keys = vec![("↑↓", "select")];
-        if back {
-            keys.push(("esc", "sessions"));
-        }
-        keys.push(("q", "quit"));
-        f.render_widget(Paragraph::new(key_bar(shape, "fires", Ground::Accent, &keys, right, status.width)), status);
     }
 }

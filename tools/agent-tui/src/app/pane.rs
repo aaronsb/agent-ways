@@ -137,11 +137,20 @@ pub trait Pane: Any {
     /// Draw the area between the tab bar and the bottom bar.
     fn draw(&mut self, f: &mut Frame, area: Rect);
 
-    /// A key the shell did not take.
+    /// A key the shell did not take. The shell takes F1, its Alt chords
+    /// (Alt+1-9 for a tab, Alt+m for the mouse) on every pane, and beside
+    /// a pane that owns no text its plain forms too: `?`, `q`, `m` and the
+    /// digits. A pane binds none of these.
     fn key(&mut self, k: KeyEvent) -> Keyed;
 
     /// The mouse wheel over the pane: `up` toward older content.
     fn wheel(&mut self, _up: bool) {}
+
+    /// The mouse wheel at `at`, inside the pane's area, for a pane whose
+    /// parts scroll apart; [`Pane::wheel`] by default.
+    fn wheel_at(&mut self, up: bool, _at: Position) {
+        self.wheel(up);
+    }
 
     /// A left click at `at`, inside the pane's area.
     fn click(&mut self, _at: Position) {}
@@ -153,6 +162,13 @@ pub trait Pane: Any {
     fn mode(&self) -> String {
         "browse".into()
     }
+
+    /// The lozenge's ground: the accent, or a state's own colour, such as
+    /// a live view's ok and a paused one's warning.
+    fn mode_ground(&self) -> theme::Ground {
+        theme::Ground::Accent
+    }
+
 
     /// The bottom bar's message and how it reads, asked each frame.
     fn status(&mut self) -> Option<(String, Tone)> {

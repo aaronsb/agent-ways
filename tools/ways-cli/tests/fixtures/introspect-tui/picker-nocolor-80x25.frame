@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| session   1 sessions   2 timeline   3 fires   4 spend   5 stats   6 precision  |
+| 1 sessions    2 timeline    3 fires    4 spend    5 stats    6 precision       |
 |┌ 3 sessions in /home/dev/proj ────────────────────────────────────────────────┐|
 |│   Session      Date             Project    Events  Ways Duration Transcript  │|
 |│▌  8f3a2c1d-5e6 2026-07-03 16:52 proj           10     9      18s yes         │|
@@ -23,15 +23,14 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│                                                                              │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-| pick   ↑↓ select  ⏎ replay  q quit                                          1/3|
+| pick  1/3 │ mouse on (m) │ ? keys · ↑↓ select · ⏎ replay · 1-9 tabs            |
 styles
-  0   0-8   - - REVERSED
-  0  10-21  - - BOLD|REVERSED
-  0  23-34  - - REVERSED
-  0  36-44  - - REVERSED
-  0  46-54  - - REVERSED
-  0  56-64  - - REVERSED
-  0  66-78  - - REVERSED
+  0   0-11  - - BOLD|REVERSED
+  0  14-25  - - REVERSED
+  0  28-36  - - REVERSED
+  0  39-47  - - REVERSED
+  0  50-58  - - REVERSED
+  0  61-73  - - REVERSED
   1   0-0   - - DIM
   1   1-30  - - BOLD|DIM
   1  31-79  - - DIM
@@ -82,10 +81,10 @@ styles
  22  79-79  - - DIM
  23   0-79  - - DIM
  24   0-5   - - BOLD|REVERSED
- 24   8-9   - - BOLD
- 24  10-16  - - DIM|ITALIC
- 24  19-19  - - BOLD
- 24  20-26  - - DIM|ITALIC
- 24  29-29  - - BOLD
- 24  30-34  - - DIM|ITALIC
- 24  77-79  - - DIM
+ 24   7-12  - - DIM
+ 24  13-24  - - DIM|ITALIC
+ 24  25-27  - - DIM
+ 24  30-36  - - DIM|ITALIC
+ 24  40-48  - - DIM|ITALIC
+ 24  51-59  - - DIM|ITALIC
+ 24  64-67  - - DIM|ITALIC

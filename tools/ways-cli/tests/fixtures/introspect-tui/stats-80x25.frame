@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| session   1 timeline   2 fires   3 spend   4 stats   5 precision               |
+| 1 timeline    2 fires    3 spend    4 stats    5 precision                     |
 |Usage · 2 sessions · 3 fires · 0 re-disclosures · 2026-07-03 → 2026-07-03       |
 |┌ 2 ways in /home/dev/proj ────────────────────┐┌ how they fired ──────────────┐|
 |│ Way                                     Fires││Channel                       │|
@@ -23,14 +23,13 @@ agent-tui frame 80x25
 |│                                              ││                              │|
 |│                                              ││                              │|
 |└ ways tune stats --json --project /home/dev/pr┘└──────────────────────────────┘|
-| stats   ↑↓ select  q quit                                                      |
+| stats  mouse on (m) │ ? keys · ↑↓ select · 1-9 tabs                            |
 styles
-  0   0-8   White Blue -
-  0  10-21  White DarkGray DIM
-  0  23-31  White DarkGray DIM
-  0  33-41  White DarkGray DIM
-  0  43-51  Black Cyan BOLD
-  0  53-65  White DarkGray DIM
+  0   0-11  White Blue -
+  0  14-22  White Blue -
+  0  25-33  White Blue -
+  0  36-44  Black Cyan BOLD
+  0  47-59  White Blue -
   1   0-4   - - BOLD
   1   5-72  - - DIM
   2   0-0   - - DIM
@@ -110,7 +109,11 @@ styles
  23   1-46  Blue - BOLD|DIM
  23  47-79  - - DIM
  24   0-6   Black Cyan BOLD
- 24   9-10  Cyan - BOLD
- 24  11-17  - - DIM|ITALIC
- 24  20-20  Cyan - BOLD
- 24  21-25  - - DIM|ITALIC
+ 24   8-19  - - DIM|ITALIC
+ 24  20-22  - - DIM
+ 24  23-24  Cyan - -
+ 24  25-31  - - DIM|ITALIC
+ 24  32-34  Cyan - -
+ 24  35-43  - - DIM|ITALIC
+ 24  44-47  Cyan - -
+ 24  48-51  - - DIM|ITALIC

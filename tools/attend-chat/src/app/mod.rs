@@ -23,7 +23,7 @@ use agent_tui::feed::{Entry, FeedState};
 use agent_tui::input::Input;
 use agent_tui::ratatui::buffer::Cell;
 use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
-use agent_tui::ratatui::layout::Rect;
+use agent_tui::ratatui::layout::{Position, Rect};
 use agent_tui::ratatui::text::Span;
 use agent_tui::ratatui::Frame;
 use agent_tui::screen::Screen;
@@ -84,6 +84,26 @@ struct World {
     instances: SnapshotCache,
 }
 
+/// A chip of the helper row, and what a click on it completes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Chip {
+    Agent(String),
+    Group(String),
+    Slash(String),
+    Sub(String),
+}
+
+/// Where the last frame drew what a click can hit: the feed, the compose
+/// box's text and the first of its rows shown, the width its text wraps
+/// at, and each chip of the helper row.
+#[derive(Debug, Clone, Default)]
+struct Hits {
+    feed: Rect,
+    compose: (Rect, usize),
+    text_width: u16,
+    chips: Vec<(Rect, Chip)>,
+}
+
 /// The chat's state: the messages, the compose box, the shown channel.
 pub struct ChatPane {
     signals: Vec<Signal>,
@@ -128,6 +148,7 @@ pub struct ChatPane {
     /// The time the last tick saw, to notice the local day changing: the
     /// feed's times are relative to the day (`HH:MM` today, a date before).
     day_seen: Option<SystemTime>,
+    hits: Hits,
 }
 
 impl ChatPane {
@@ -156,6 +177,7 @@ impl ChatPane {
             dry_run: false,
             draws: 0,
             day_seen: None,
+            hits: Hits::default(),
         }
     }
 
@@ -329,6 +351,36 @@ impl ChatPane {
         self.dirty = true;
     }
 
+    /// A click on a chip of the helper row: complete what is being typed
+    /// to it, as Tab would, the cursor at the end.
+    fn complete(&mut self, chip: Chip) {
+        let text = self.input.text().to_string();
+        let sigil = if matches!(chip, Chip::Group(_)) { '#' } else { '@' };
+        let (next, cursor) = match chip {
+            Chip::Slash(name) => crate::slash::apply_slash_completion(&name),
+            Chip::Agent(name) | Chip::Group(name) => {
+                match crate::legend::find_trailing_mention(&text).filter(|m| m.prefix.ends_with(sigil)) {
+                    Some(m) => crate::legend::apply_completion(&text, &m, &name),
+                    None => {
+                        let sep = if text.is_empty() || text.ends_with(char::is_whitespace) { "" } else { " " };
+                        let out = format!("{text}{sep}{sigil}{name} ");
+                        let n = out.chars().count();
+                        (out, n)
+                    }
+                }
+            }
+            Chip::Sub(name) => {
+                let head = if text.ends_with(char::is_whitespace) { text.as_str() } else { text.trim_end_matches(|c: char| !c.is_whitespace()) };
+                let out = format!("{head}{name} ");
+                let n = out.chars().count();
+                (out, n)
+            }
+        };
+        self.input.set(next, cursor);
+        self.tab_cycle = None;
+        self.dirty = true;
+    }
+
     /// The time frames show times against.
     fn now(&self) -> SystemTime {
         match self.clock {
@@ -448,6 +500,30 @@ impl Pane for ChatPane {
         self.scroll_by(up, WHEEL_ROWS);
     }
 
+    /// A click on a message selects it and brings it whole into view; on
+    /// the compose box's text it puts the cursor there; on a chip of the
+    /// helper row it completes what is being typed to it.
+    fn click(&mut self, at: Position) {
+        self.dirty = true;
+        if self.hits.feed.contains(at) {
+            if let Some(i) = self.feed.entry_at(at.y - self.hits.feed.y) {
+                self.feed.reveal(i);
+            }
+            return;
+        }
+        let (text, start) = self.hits.compose;
+        let with_prompt = Rect { x: text.x.saturating_sub(2), width: text.width + 2, ..text };
+        if with_prompt.contains(at) {
+            let col = at.x.saturating_sub(text.x) as usize;
+            self.input.click(self.hits.text_width, start + (at.y - text.y) as usize, col);
+            self.tab_cycle = None;
+            return;
+        }
+        if let Some((_, chip)) = self.hits.chips.iter().find(|(r, _)| r.contains(at)).cloned() {
+            self.complete(chip);
+        }
+    }
+
     fn bindings(&self) -> Vec<Binding> {
         vec![
             Binding::new("Enter", "send"),
@@ -456,6 +532,7 @@ impl Pane for ChatPane {
             Binding::help("S-Enter M-Enter", "new line"),
             Binding::help("← → Home End", "move the cursor"),
             Binding::help("Bksp Del", "edit"),
+            Binding::help("click a message", "selects it; in the compose box it places the cursor; a chip completes it"),
         ]
     }
 
@@ -639,6 +716,10 @@ impl Screen for Chat {
 
     fn key(&mut self, k: KeyEvent) -> bool {
         self.app.key(k)
+    }
+
+    fn mouse(&mut self, m: MouseEvent) {
+        self.app.mouse(m);
     }
 
     fn tick_every(&self) -> Option<Duration> {

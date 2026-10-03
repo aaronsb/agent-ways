@@ -541,7 +541,7 @@ fn split(line: &str) -> Result<Vec<String>, String> {
 pub struct Open {
     pub tab: Option<String>,
     pub project: Option<PathBuf>,
-    /// Key tokens to feed the real key handler, headless (`agent_tui::testkit::parse_keys`).
+    /// Key and mouse tokens to feed the real handlers, headless (`agent_tui::testkit::parse_events`).
     pub keys: Vec<String>,
     /// `WxH`: print the frame at that size, headless, in the test kit's format.
     pub snap: Option<String>,
@@ -607,7 +607,7 @@ pub fn open(o: &Open) -> Out {
         }
         return Ok(());
     }
-    let keys = agent_tui::testkit::parse_keys(o.keys.iter().flat_map(|k| k.split_whitespace())).map_err(|e| fail(exit::USAGE, format!("--keys: {e}")))?;
+    let events = agent_tui::testkit::parse_events(o.keys.iter().flat_map(|k| k.split_whitespace())).map_err(|e| fail(exit::USAGE, format!("--keys: {e}")))?;
     let size = match &o.snap {
         Some(size) => Some(
             size.split_once('x')
@@ -617,21 +617,28 @@ pub fn open(o: &Open) -> Out {
         ),
         None => None,
     };
-    for k in keys {
-        // A frame before each key, as a terminal draws one before it reads
-        // the next: what a key does can depend on what was drawn, such as
-        // how far a modal's text scrolls, so a snapshot shows what the
-        // terminal would.
+    use agent_tui::ratatui::crossterm::event::{Event, KeyCode};
+    for e in events {
+        // A frame before each event, as a terminal draws one before it
+        // reads the next: what a key does can depend on what was drawn,
+        // such as how far a modal's text scrolls, and a click lands on what
+        // the frame put there, so a snapshot shows what the terminal would.
         if let Some((w, h)) = size {
             let _ = agent_tui::testkit::render(&mut app, w, h);
         }
-        // A secret never comes from an argument: it would sit in argv and
-        // the process list. A key script stops at a masked entry.
-        if app.masked() && matches!(k.code, agent_tui::ratatui::crossterm::event::KeyCode::Char(_)) {
-            return Err(fail(exit::USAGE, "--keys cannot type into a masked entry: a secret is never an argument"));
-        }
-        if !app.key(k) {
-            break;
+        match e {
+            Event::Key(k) => {
+                // A secret never comes from an argument: it would sit in argv
+                // and the process list. A key script stops at a masked entry.
+                if app.masked() && matches!(k.code, KeyCode::Char(_)) {
+                    return Err(fail(exit::USAGE, "--keys cannot type into a masked entry: a secret is never an argument"));
+                }
+                if !app.key(k) {
+                    break;
+                }
+            }
+            Event::Mouse(m) => app.mouse(m),
+            _ => {}
         }
         agent_tui::testkit::finish_apply(&mut app);
     }

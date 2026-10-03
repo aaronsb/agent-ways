@@ -186,15 +186,33 @@ pub struct Scrubber<'a> {
 }
 
 impl Scrubber<'_> {
+    /// The `pos/len` label at the right end.
+    fn label(&self) -> String {
+        format!(" {}/{}", if self.len == 0 { 0 } else { self.pos + 1 }, self.len)
+    }
+
+    /// The track's columns in a scrubber `width` wide: what the label leaves.
+    fn track(&self, width: u16) -> usize {
+        (width as usize).saturating_sub(self.label().chars().count())
+    }
+
+    /// The cell of a `track` a frame falls in: the first frame at the left
+    /// end, the last at the right.
+    fn cell(&self, i: usize, track: usize) -> usize {
+        if self.len <= 1 || track == 0 {
+            0
+        } else {
+            i * (track - 1) / (self.len - 1)
+        }
+    }
+
     /// The line the scrubber draws in `width` columns.
     pub fn line(&self, width: u16) -> Line<'static> {
-        let label = format!(" {}/{}", if self.len == 0 { 0 } else { self.pos + 1 }, self.len);
-        let track = (width as usize).saturating_sub(label.chars().count());
+        let label = self.label();
+        let track = self.track(width);
         let mut spans = Vec::new();
         if track > 0 {
-            // The cell a frame falls in: the first frame at the left end,
-            // the last at the right.
-            let cell = |i: usize| if self.len <= 1 { 0 } else { i * (track - 1) / (self.len - 1) };
+            let cell = |i: usize| self.cell(i, track);
             let head = cell(self.pos.min(self.len.saturating_sub(1)));
             let marks: Vec<usize> = self.marks.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
             let notes: Vec<usize> = self.notes.iter().filter(|m| **m < self.len).map(|m| cell(*m)).collect();
@@ -215,6 +233,27 @@ impl Scrubber<'_> {
         }
         spans.push(Span::styled(label, Style::new().add_modifier(Modifier::BOLD)));
         Line::from(spans)
+    }
+}
+
+impl Scrubber<'_> {
+    /// The frame whose cell is at column `x` of a scrubber `width` wide, the
+    /// nearest frame to the cell: a click on the track seeks there. `None`
+    /// on the `pos/len` label or with no frames.
+    pub fn frame_at(&self, width: u16, x: u16) -> Option<usize> {
+        let track = self.track(width);
+        let x = x as usize;
+        if self.len == 0 || x >= track {
+            return None;
+        }
+        if self.len == 1 || track == 1 {
+            return Some(0);
+        }
+        // The first frame drawn in the cell, or with none there the nearest:
+        // one of the two frames either side of the inverse of the cell map.
+        let cell = |i: usize| self.cell(i, track);
+        let near = x * (self.len - 1) / (track - 1);
+        (near.saturating_sub(1)..=(near + 2).min(self.len - 1)).min_by_key(|&f| (cell(f).abs_diff(x), f))
     }
 }
 
@@ -247,6 +286,28 @@ mod tests {
     use super::*;
     use crate::theme::{set, Palette};
     use agent_theme::ColorDepth;
+
+    /// A click on the track seeks to the frame drawn in that cell: the
+    /// ends are the first and last frames, and every frame's own cell
+    /// leads back to it.
+    #[test]
+    fn a_column_of_the_track_is_the_frame_drawn_there() {
+        for len in [1usize, 2, 7, 40, 300] {
+            let s = Scrubber { len, pos: 0, marks: &[], notes: &[] };
+            let width = 60u16;
+            let track = width as usize - format!(" 1/{len}").chars().count();
+            assert_eq!(s.frame_at(width, 0), Some(0));
+            assert_eq!(s.frame_at(width, track as u16 - 1), Some(len - 1), "len {len}");
+            assert_eq!(s.frame_at(width, track as u16), None, "the label");
+            for i in 0..len {
+                let cell = if len <= 1 { 0 } else { i * (track - 1) / (len - 1) };
+                let back = s.frame_at(width, cell as u16).unwrap();
+                let again = if len <= 1 { 0 } else { back * (track - 1) / (len - 1) };
+                assert_eq!(again, cell, "len {len} frame {i}: its cell seeks a frame drawn in the same cell");
+            }
+        }
+        assert_eq!(Scrubber { len: 0, pos: 0, marks: &[], notes: &[] }.frame_at(40, 0), None);
+    }
 
     #[test]
     fn a_replay_plays_to_the_end_and_stops() {

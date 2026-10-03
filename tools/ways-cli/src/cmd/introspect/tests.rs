@@ -177,6 +177,12 @@ fn press(s: &mut Introspect, keys: &[KeyCode]) -> bool {
     keys.iter().all(|k| s.key(KeyEvent::new(*k, KeyModifiers::NONE)))
 }
 
+/// The bottom bar, wide enough for every key the footer shows: the
+/// shell's footer drops keys from the end where they do not fit.
+fn footer(s: &mut Introspect) -> String {
+    agent_tui::testkit::rows(&render(s, 200, 25)).pop().expect("a bar")
+}
+
 fn goldens() -> Goldens {
     Goldens::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/introspect-tui"))
 }
@@ -272,11 +278,11 @@ fn playing_moves_a_frame_per_tick_and_stops_at_the_last() {
     assert_eq!(s.tick_every(), Some(std::time::Duration::from_millis(1000)));
     press(&mut s, &[KeyCode::Char('+')]);
     assert_eq!(s.tick_every(), Some(std::time::Duration::from_millis(500)));
-    let n = s.replay.as_ref().unwrap().frames.len();
+    let n = s.pane().replay.as_ref().unwrap().frames.len();
     for _ in 0..n + 2 {
         s.tick();
     }
-    let r = s.replay.as_ref().unwrap();
+    let r = s.pane().replay.as_ref().unwrap();
     assert_eq!(r.play.pos(), n - 1);
     assert!(!r.play.playing());
 }
@@ -333,15 +339,15 @@ fn a_live_cursor_follows_the_newest_way_until_the_reader_looks_back() {
     let mut live = replay(true);
     live.take_frames(first(2));
     let mut s = showing(live, terminal(), Shape::PLAIN);
-    s.replay.as_mut().unwrap().take_frames(first(3));
+    s.pane_mut().replay.as_mut().unwrap().take_frames(first(3));
     assert!(sel(&mut s).contains("softwaredev/code/testing"), "follows the newest: {}", sel(&mut s));
     press(&mut s, &[KeyCode::Up]);
-    s.replay.as_mut().unwrap().take_frames(first(3));
+    s.pane_mut().replay.as_mut().unwrap().take_frames(first(3));
     assert!(sel(&mut s).contains("softwaredev/docs/adr"), "looking back holds the cursor: {}", sel(&mut s));
     assert!(text(&render(&mut s, 120, 40)).contains("LIVE paused"));
     press(&mut s, &[KeyCode::End]);
     assert!(text(&render(&mut s, 120, 40)).contains("● LIVE"));
-    s.replay.as_mut().unwrap().take_frames(first(3));
+    s.pane_mut().replay.as_mut().unwrap().take_frames(first(3));
     assert!(sel(&mut s).contains("softwaredev/code/testing"), "End resumes the follow: {}", sel(&mut s));
 }
 
@@ -354,7 +360,7 @@ fn a_live_refresh_keeps_the_why_reader_where_it_was() {
     press(&mut s, &[KeyCode::Char('j'); 5]);
     let before = frame(&render(&mut s, 80, 25));
     assert!(before.contains("why it fired 6–"), "{before}");
-    s.replay.as_mut().unwrap().take_frames(replay(true).frames);
+    s.pane_mut().replay.as_mut().unwrap().take_frames(replay(true).frames);
     let after = text(&render(&mut s, 80, 25));
     assert!(after.contains("why it fired 6–"), "the reader went back to the top: {after}");
     assert!(after.contains("• e3 softwaredev/code/t"), "the why index is still there: {after}");
@@ -519,18 +525,18 @@ fn the_header_gives_the_judges_spend_and_dollar_toggles_tokens_and_cost() {
     r.spend = session_spend(&log, SESSION);
     let mut s = showing(r, terminal(), Shape::PLAIN);
     let t = text(&render(&mut s, 80, 25));
-    assert!(t.contains("judge ×2 · 1.2K tokens") && t.contains("$ cost"), "{t}");
+    assert!(t.contains("judge ×2 · 1.2K tokens") && footer(&mut s).contains("$ cost"), "{t}");
     press(&mut s, &[KeyCode::Char('$')]);
     let t = text(&render(&mut s, 80, 25));
-    assert!(t.contains("judge ×2 · $0.0200 + 1 unknown") && t.contains("$ tokens"), "{t}");
+    assert!(t.contains("judge ×2 · $0.0200 + 1 unknown") && footer(&mut s).contains("$ tokens"), "{t}");
 
     assert!(session_spend(&log, "absent").is_none());
     let mut quiet = showing(replay(false), terminal(), Shape::PLAIN);
     let t = text(&render(&mut quiet, 80, 25));
-    assert!(!t.contains("judge ") && !t.contains("$ cost"), "no calls, no spend: {t}");
+    assert!(!t.contains("judge ") && !footer(&mut quiet).contains("$ cost"), "no calls, no spend: {t}");
     // `$` before the first call leaves the figure in tokens once one comes.
     press(&mut quiet, &[KeyCode::Char('$')]);
-    let r = quiet.replay.as_mut().unwrap();
+    let r = quiet.pane_mut().replay.as_mut().unwrap();
     assert!(!r.cost, "$ does nothing without spend");
     r.spend = session_spend(&log, SESSION);
     assert!(text(&render(&mut quiet, 80, 25)).contains("judge ×2 · 1.2K tokens"));
@@ -608,14 +614,14 @@ fn digits_pick_the_tabs_and_esc_goes_back_to_the_picker() {
 fn the_key_bar_names_esc_only_with_a_sessions_tab() {
     let mut p = picker(terminal());
     press(&mut p, &[KeyCode::Enter, KeyCode::Char('3')]);
-    assert!(text(&render(&mut p, 80, 25)).contains("esc sessions"));
+    assert!(footer(&mut p).contains("esc sessions"));
     press(&mut p, &[KeyCode::Char('4')]);
-    assert!(text(&render(&mut p, 80, 25)).contains("esc sessions"));
+    assert!(footer(&mut p).contains("esc sessions"));
     let mut d = showing(replay(false), terminal(), Shape::PLAIN);
     press(&mut d, &[KeyCode::Char('2')]);
-    assert!(!text(&render(&mut d, 80, 25)).contains("esc"));
+    assert!(!footer(&mut d).contains("esc"));
     press(&mut d, &[KeyCode::Char('3')]);
-    assert!(!text(&render(&mut d, 80, 25)).contains("esc"));
+    assert!(!footer(&mut d).contains("esc"));
 }
 
 /// A replay plays only while its timeline is shown; a live one keeps
@@ -642,7 +648,7 @@ fn a_fires_refresh_keeps_the_selection_on_its_fire() {
     let mut s = showing(r, terminal(), Shape::PLAIN);
     press(&mut s, &[KeyCode::Char('2'), KeyCode::Down]);
     assert!(selected(&mut s).contains("0.500"));
-    s.replay.as_mut().unwrap().fires.set(vec![fire(0.3, "c"), fire(0.4, "a"), fire(0.5, "b")]);
+    s.pane_mut().replay.as_mut().unwrap().fires.set(vec![fire(0.3, "c"), fire(0.4, "a"), fire(0.5, "b")]);
     assert!(selected(&mut s).contains("0.500   b"), "{}", selected(&mut s));
 }
 
@@ -701,7 +707,7 @@ fn the_spend_tab_groups_the_scopes_judge_calls_by_day_or_month() {
     let mut d = Introspect::showing(replay(false), with_spend(slashed), terminal(), Shape::PLAIN);
     press(&mut d, &[KeyCode::Char('3')]);
     assert!(text(&render(&mut d, 120, 40)).contains("3 judge calls"));
-    press(&mut s, &[KeyCode::Char('m')]);
+    press(&mut s, &[KeyCode::Char('d')]);
     let t = text(&render(&mut s, 120, 40));
     assert!(t.contains("Judge spend by month") && t.contains("2026-07 ") && !t.contains("2026-07-01"), "{t}");
 }
@@ -710,7 +716,7 @@ fn the_spend_tab_groups_the_scopes_judge_calls_by_day_or_month() {
 fn tab_golden_frames() {
     let mut g = goldens();
     let mut f = showing(judged_replay(), terminal(), Shape::PLAIN);
-    f.replay.as_mut().unwrap().fires.set(vec![
+    f.pane_mut().replay.as_mut().unwrap().fires.set(vec![
         super::SemanticFire { score: 0.405, way: "softwaredev/docs/adr".into(), surface: "record the decision".into(), redisclosed: true },
         super::SemanticFire { score: 0.612, way: "softwaredev/code/testing".into(), surface: "add a unit test for the parser".into(), redisclosed: false },
     ]);
@@ -821,10 +827,10 @@ fn a_report_reload_keeps_the_cursor_on_its_way() {
         .map(|i| serde_json::json!({"event": "way_fired", "ts": "2026-07-05T00:00:00Z", "session": format!("n{i}"), "project": PROJECT, "way": "softwaredev/delivery/commits", "trigger": "bash", "scope": "agent"}).to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    s.reports.reload(&format!("{}\n{more}", usage_log()));
-    assert_eq!(s.reports.stale(), [true; 3], "nothing read until a tab is drawn");
+    s.pane_mut().reports.reload(&format!("{}\n{more}", usage_log()));
+    assert_eq!(s.pane_mut().reports.stale(), [true; 3], "nothing read until a tab is drawn");
     let t = selected(&mut s);
-    assert_eq!(s.reports.stale(), [true, false, true], "drawing stats read only stats");
+    assert_eq!(s.pane_mut().reports.stale(), [true, false, true], "drawing stats read only stats");
     assert!(t.contains("softwaredev/delivery/commits") && t.contains(" 4"), "now first, still selected: {t}");
 }
 
@@ -941,7 +947,7 @@ fn the_list_marks_live_sessions_and_this_session() {
 fn a_long_scope_keeps_the_live_count_in_view() {
     let mut s = live_picker(Rc::new(Cell::new(0)), fixed_now());
     let scope = format!("/var/folders/{}/proj", "x".repeat(120));
-    if let Some(p) = s.picker_mut() {
+    if let Some(p) = s.pane_mut().picker_mut() {
         p.scope = scope;
     }
     let t = text(&render(&mut s, 80, 10));
@@ -996,7 +1002,7 @@ fn a_live_replay_follows_on_the_backoff() {
         }
         s.tick();
     }
-    let f = s.replay.as_ref().unwrap().follow.as_ref().unwrap();
+    let f = s.pane().replay.as_ref().unwrap().follow.as_ref().unwrap();
     // Stated at 2, 6, 14 and 30 seconds; the write at 20 seen at 30, and
     // the floor again: 32, 36.
     assert_eq!(f.stats(), 7);
@@ -1058,7 +1064,7 @@ fn live_golden_frames() {
     let mut f = live_picker(Rc::new(Cell::new(0)), fixed_now());
     press(&mut f, &[KeyCode::Enter]);
     let all = replay(true).frames;
-    f.replay.as_mut().unwrap().take_frames(all);
+    f.pane_mut().replay.as_mut().unwrap().take_frames(all);
     check(&mut g, "live-appended", &mut f);
     // Suppressions: the frame of a dispatch and an agent held back.
     let mut s = showing(suppressed_replay(), terminal(), Shape::PLAIN);
@@ -1086,14 +1092,14 @@ fn a_quiet_replay_goes_live_when_its_session_is_written() {
             now.set(now.get() + 1_000);
             s.tick();
         }
-        assert!(!s.replay.as_ref().unwrap().play.is_live());
-        assert_eq!(s.replay.as_ref().unwrap().follow.as_ref().unwrap().stats(), 2, "one stat at open, one a minute on");
+        assert!(!s.pane().replay.as_ref().unwrap().play.is_live());
+        assert_eq!(s.pane().replay.as_ref().unwrap().follow.as_ref().unwrap().stats(), 2, "one stat at open, one a minute on");
         probe.set(Probe { len: 2, mtime_ms: now.get() });
         for _ in 0..60 {
             now.set(now.get() + 1_000);
             s.tick();
         }
-        let r = s.replay.as_ref().unwrap();
+        let r = s.pane().replay.as_ref().unwrap();
         assert!(r.play.is_live(), "the write woke it");
         assert_eq!(r.play.following(), following, "{keys:?}");
         let t = text(&render(&mut s, 120, 40));
@@ -1147,4 +1153,181 @@ fn the_suppression_count_drops_before_the_judged_out_count() {
     assert!(narrow.contains("◇ injected · 1 judged out") && !narrow.contains("suppressed"), "{narrow}");
     let wide = head(&mut s, 120);
     assert!(wide.contains("⊝ 1 suppressed") && wide.contains("1 judged out"), "{wide}");
+}
+
+// ── The mouse (#739) ────────────────────────────────────────────
+
+use agent_tui::ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use agent_tui::testkit::{find, parse_events, play};
+
+fn mouse(s: &mut Introspect, kind: MouseEventKind, (column, row): (u16, u16)) {
+    render(s, 120, 40);
+    s.mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE });
+}
+
+fn click(s: &mut Introspect, at: (u16, u16)) {
+    mouse(s, MouseEventKind::Down(MouseButton::Left), at);
+}
+
+/// Where `needle` is drawn at 120x40.
+fn at(s: &mut Introspect, needle: &str) -> (u16, u16) {
+    find(&render(s, 120, 40), needle).unwrap_or_else(|| panic!("{needle} is not drawn"))
+}
+
+/// A click on a session's row selects it; a click on the selected row
+/// opens it on the timeline, as Enter does.
+#[test]
+fn a_click_selects_a_session_and_a_second_opens_it() {
+    let mut s = picker(terminal());
+    let row = at(&mut s, "1b2c3d4e-000");
+    click(&mut s, row);
+    assert_eq!(s.pane_mut().picker_mut().unwrap().sel, 1);
+    assert_eq!(s.pane().tab, super::screen::Tab::Sessions, "one click selects");
+    let first = at(&mut s, "8f3a2c1d-5e6");
+    click(&mut s, first);
+    click(&mut s, first);
+    assert!(text(&render(&mut s, 120, 40)).contains(&format!("Session {SESSION}")), "the second click opens it");
+    // A click on a tab shows it.
+    let tab = at(&mut s, "1 sessions");
+    click(&mut s, tab);
+    assert_eq!(s.pane().tab, super::screen::Tab::Sessions);
+}
+
+/// A click on the track seeks to the frame drawn there; the wheel over it
+/// steps a frame, and over the table moves the selection.
+#[test]
+fn a_click_on_the_track_seeks_and_the_wheel_steps() {
+    let mut s = showing(replay(false), terminal(), Shape::PLAIN);
+    let (_, y) = at(&mut s, " 1/4");
+    click(&mut s, (0, y));
+    assert_eq!(s.pane().replay.as_ref().unwrap().play.pos(), 0);
+    click(&mut s, (60, y));
+    assert_eq!(s.pane().replay.as_ref().unwrap().play.pos(), 2, "the middle of the track");
+    let end = at(&mut s, " 3/4").0 - 1;
+    click(&mut s, (end, y));
+    assert_eq!(s.pane().replay.as_ref().unwrap().play.pos(), 3, "the right end is the last frame");
+    mouse(&mut s, MouseEventKind::ScrollUp, (10, y));
+    assert_eq!(s.pane().replay.as_ref().unwrap().play.pos(), 2, "the wheel up the track steps back");
+    // Over the table the wheel moves the selection, as the arrows do.
+    let before = selected(&mut s);
+    let (_, row) = at(&mut s, "softwaredev/docs/adr");
+    mouse(&mut s, MouseEventKind::ScrollDown, (10, row));
+    assert_ne!(selected(&mut s), before);
+}
+
+/// Seeking to the newest frame of a live session follows it again, as
+/// End does; an earlier frame pauses the follow.
+#[test]
+fn a_click_on_a_live_track_pauses_and_the_end_follows() {
+    let mut s = showing(replay(true), terminal(), Shape::PLAIN);
+    let (_, y) = at(&mut s, " 4/4");
+    click(&mut s, (0, y));
+    assert!(!s.pane().replay.as_ref().unwrap().play.following());
+    let end = at(&mut s, " 1/4").0 - 1;
+    click(&mut s, (end, y));
+    let p = &s.pane().replay.as_ref().unwrap().play;
+    assert!(p.following() && p.pos() == 3, "{p:?}");
+}
+
+/// A click on a way's row selects it, a check's second line included; a
+/// second click opens why it fired; there a click on a way selects it.
+#[test]
+fn a_click_on_a_way_selects_it_and_a_second_opens_why() {
+    let mut s = showing(replay(false), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Right, KeyCode::Right]);
+    let check = at(&mut s, "✓ check");
+    click(&mut s, check);
+    assert!(selected(&mut s).contains("softwaredev/delivery/commits"), "the check's line is its way's row");
+    click(&mut s, check);
+    assert!(text(&render(&mut s, 120, 40)).contains("why it fired"), "the second click opens why");
+    let adr = at(&mut s, "softwaredev/docs/adr");
+    click(&mut s, adr);
+    assert!(selected(&mut s).contains("softwaredev/docs/adr"));
+    assert!(text(&render(&mut s, 120, 40)).contains("why it fired"), "the why view stays open");
+}
+
+/// The report tabs select a row on a click; the total is not a row.
+#[test]
+fn a_click_selects_a_report_row() {
+    let mut s = Introspect::showing(replay(false), with_spend(Spend::new(spend_calls(), Some(PROJECT), PROJECT.into())), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('3')]);
+    let older = at(&mut s, "2026-07-01");
+    click(&mut s, older);
+    assert!(selected(&mut s).contains("2026-07-01"), "{}", selected(&mut s));
+    let total = at(&mut s, "total");
+    click(&mut s, total);
+    assert!(selected(&mut s).contains("2026-07-01"), "the total is not a row to select");
+}
+
+/// `d` on the spend tab groups by day or month; `m` turns the mouse on or
+/// off there as on every tab, and the bar names it the same way.
+#[test]
+fn on_the_spend_tab_d_is_the_grouping_and_m_the_mouse() {
+    let mut s = Introspect::showing(replay(false), with_spend(Spend::new(spend_calls(), Some(PROJECT), PROJECT.into())), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Char('3')]);
+    let bar = footer(&mut s);
+    assert!(bar.contains("mouse on (m)") && bar.contains("d by month"), "{bar}");
+    press(&mut s, &[KeyCode::Char('d')]);
+    assert!(text(&render(&mut s, 120, 40)).contains("Judge spend by month"));
+    assert!(s.app().mouse_on());
+    press(&mut s, &[KeyCode::Char('m')]);
+    assert!(!s.app().mouse_on(), "m is the mouse on the spend tab too");
+    assert!(footer(&mut s).contains("mouse off (m)"), "{}", footer(&mut s));
+    s.key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
+    assert!(s.app().mouse_on(), "and M-m everywhere");
+}
+
+/// Past the first page of ways, a row stays under the pointer: a click
+/// selects a row halfway down the view and a second click on it opens why
+/// it fired. In the why view's list likewise a click selects the way under
+/// it, which stays there.
+#[test]
+fn a_double_click_past_the_first_page_opens_why() {
+    // Thirty ways, so the table at 80x25 scrolls.
+    let mut events = vec![ev("2026-07-03T16:52:00Z", "session_start", "", "")];
+    for i in 0..30 {
+        events.push(ev(&format!("2026-07-03T16:52:{:02}Z", i + 1), "way_fired", &format!("w/way{i:02}"), "keyword"));
+    }
+    let mut s = showing(replay_of(events, false), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::End]);
+    for _ in 0..29 {
+        press(&mut s, &[KeyCode::Down]);
+    }
+    let size = |s: &mut Introspect| render(s, 80, 25);
+    let page = text(&size(&mut s));
+    assert!(page.contains("w/way29  ") && !page.contains("w/way00  "), "past the first page: {page}");
+    // A row halfway down the view.
+    let target = "w/way20";
+    let (x, y) = find(&size(&mut s), target).expect("the row");
+    s.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    let after = size(&mut s);
+    assert_eq!(find(&after, target), Some((x, y)), "the row stays under the pointer");
+    s.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    let why = text(&size(&mut s));
+    assert!(why.contains("why it fired"), "the second click opens why: {why}");
+    // In the why list, a click on another way leaves it where it was.
+    let other = "e1 w/way12";
+    let (x, y) = find(&size(&mut s), other).expect("the way in the list");
+    s.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    assert_eq!(find(&size(&mut s), other), Some((x, y)), "the way stays under the pointer");
+    assert!(selected80(&mut s).contains(other));
+}
+
+fn selected80(s: &mut Introspect) -> String {
+    text(&render(s, 80, 25)).lines().find(|l| l.contains('▌')).unwrap_or("").to_string()
+}
+
+/// The mouse as a `--keys` script drives it: click the second session,
+/// click the first twice to open it, click the track's start, wheel down
+/// the table.
+#[test]
+fn mouse_golden_frames() {
+    let mut g = goldens();
+    let mut s = picker(terminal());
+    let script = parse_events(["click:5,4", "click:5,3", "click:5,3", "click:0,3", "wheel:down@10,7"]).unwrap();
+    assert!(play(&mut s, &script, Some((80, 25))));
+    for (w, h) in SIZES {
+        g.check(&format!("clicked-{w}x{h}"), &render(&mut s, w, h));
+    }
+    g.finish();
 }

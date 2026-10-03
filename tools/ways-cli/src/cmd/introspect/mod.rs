@@ -98,7 +98,7 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
             Introspect::picking(picker, opener, reports, palette, shape)
         }
     };
-    show(screen, open)
+    show(screen.into_app(), open)
 }
 
 /// The sessions in `scope`, newest first, their transcripts found and
@@ -195,7 +195,7 @@ pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result
                 }
                 None => Introspect::showing(r, reports, palette, shape),
             };
-            show(screen, open)
+            show(screen.into_app(), open)
         }
         Err(_) => {
             println!("No events for the current session yet.");

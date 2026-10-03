@@ -676,3 +676,79 @@ fn golden_the_feed_paged_back() {
     g.check("scrolled-back-80x25", &testkit::render_screen(&mut c, 80, 25));
     g.finish();
 }
+
+// ── Clicks in the pane (#739) ───────────────────────────────────
+
+fn left(c: &mut Chat, (x, y): (u16, u16)) {
+    testkit::render_screen(c, 80, 25);
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+}
+
+/// A click on a message cut off at the top of the feed selects it and
+/// scrolls it whole into view; its box is drawn in the accent.
+#[test]
+fn a_click_on_a_message_selects_it_and_brings_it_into_view() {
+    let mut c = chat();
+    let buf = testkit::render_screen(&mut c, 80, 18);
+    let rows = testkit::rows(&buf);
+    // The feed's first row inside its border: part of an older message.
+    let top = rows.iter().position(|r| r.starts_with('╭')).expect("the feed") as u16 + 1;
+    assert_eq!(c.scroll(), 0);
+    testkit::render_screen(&mut c, 80, 18);
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), 10, top));
+    assert!(c.scroll() > 0, "scrolled back to show the message whole: {rows:#?}");
+    let after = testkit::rows(&testkit::render_screen(&mut c, 80, 18));
+    assert!(after[top as usize].contains('╭'), "the message's box starts at the top: {after:?}");
+}
+
+/// A click in the compose box puts the cursor on the character under it;
+/// a click on the prompt, at the start.
+#[test]
+fn a_click_in_the_compose_box_places_the_cursor() {
+    let mut c = chat();
+    typed(&mut c, "hello there");
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "> hello").expect("the compose box");
+    left(&mut c, (x + 2 + 6, y));
+    assert_eq!(c.input().cursor(), 6, "on the t of there");
+    left(&mut c, (x, y));
+    assert_eq!(c.input().cursor(), 0, "the prompt is the start");
+    left(&mut c, (x + 40, y));
+    assert_eq!(c.input().cursor(), 11, "past the text: its end");
+    typed(&mut c, "!");
+    assert_eq!(c.input().text(), "hello there!");
+}
+
+/// A click on a chip of the helper row completes what is being typed to
+/// it: a channel after `#`, an agent after `@`, a slash command.
+#[test]
+fn a_click_on_a_chip_completes_it() {
+    let mut c = chat();
+    typed(&mut c, "ship it #de");
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let helper = rows.len() - 2;
+    let x = rows[helper].find("#deploy").map(|b| rows[helper][..b].chars().count() as u16).expect("the chip");
+    left(&mut c, (x, helper as u16));
+    assert_eq!(c.input().text(), "ship it #deploy ");
+    assert_eq!(c.input().cursor(), "ship it #deploy ".chars().count());
+
+    let mut c = chat();
+    typed(&mut c, "/he");
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let helper = rows.len() - 2;
+    let x = rows[helper].find("/help").map(|b| rows[helper][..b].chars().count() as u16).expect("the chip");
+    left(&mut c, (x, helper as u16));
+    assert_eq!(c.input().text(), "/help ");
+}
+
+/// The mouse as a `--keys` script drives it: the mouse on, a click on the
+/// first message, a click in the compose box after typing.
+#[test]
+fn golden_clicks_in_the_feed_and_the_compose_box() {
+    let mut g = goldens();
+    let mut c = chat();
+    let script = testkit::parse_events(["alt-m", "text:hello", "click:6,3", "click:5,20"]).unwrap();
+    assert!(testkit::play(&mut c, &script, Some((80, 25))));
+    g.check("clicked-feed-compose-80x25", &testkit::render_screen(&mut c, 80, 25));
+    g.finish();
+}

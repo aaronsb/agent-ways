@@ -21,13 +21,16 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
   Alt+m                     mouse on or off; off at the start, so the terminal
                             selects text and middle-click pastes
   F1                        the keys
-  mouse (on)                click a tab to show it; the wheel scrolls the messages;
-                            Shift-drag selects text in most terminals
+  mouse (on)                click a tab to show it, a message to select it, the
+                            compose box to place the cursor, a chip to complete it;
+                            the wheel scrolls the messages; Shift-drag selects
+                            text in most terminals
 
   The colours follow the agent-ways theme (`ways settings theme`).
 
   --snap WxH     print one frame at W by H in agent-tui's frame format, headless
-  --keys KEYS    keys for --snap, space separated (`text:hi enter tab esc alt-1` …);
+  --keys KEYS    keys for --snap, space separated (`text:hi enter tab esc alt-1` …),
+                 and the mouse: `click:COL,ROW`, `wheel:up@COL,ROW` (from 0, top left);
                  a dry run: Enter sends nothing to the bus and runs no slash command
   --depth DEPTH  colour depth: truecolor, 256, 16 or none; the terminal's by default
 ";
@@ -76,22 +79,10 @@ fn parse_args(args: &[String]) -> Args {
     out
 }
 
-/// `alt-<c>`, which the shared key script has no form for, then the
-/// test kit's tokens.
-fn keys(tokens: &[String]) -> Vec<agent_tui::ratatui::crossterm::event::KeyEvent> {
-    use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let mut out = Vec::new();
-    for t in tokens {
-        if let Some(c) = t.strip_prefix("alt-").filter(|c| c.chars().count() == 1) {
-            out.push(KeyEvent::new(KeyCode::Char(c.chars().next().expect("one character")), KeyModifiers::ALT));
-            continue;
-        }
-        match testkit::parse_keys([t.as_str()]) {
-            Ok(k) => out.extend(k),
-            Err(e) => usage(&format!("--keys: {e}")),
-        }
-    }
-    out
+/// The test kit's script: keys, `alt-<c>`, and the mouse (`click:C,R`,
+/// `wheel:up@C,R`).
+fn events(tokens: &[String]) -> Vec<agent_tui::ratatui::crossterm::event::Event> {
+    testkit::parse_events(tokens.iter().map(String::as_str)).unwrap_or_else(|e| usage(&format!("--keys: {e}")))
 }
 
 fn main() {
@@ -139,12 +130,7 @@ fn main() {
         // A frame before each key, as the terminal draws one before it
         // reads the next: what a key does can depend on what was drawn,
         // such as a page's height.
-        for k in keys(&args.keys) {
-            testkit::render_screen(&mut chat, w, h);
-            if !chat.key(k) {
-                break;
-            }
-        }
+        testkit::play(&mut chat, &events(&args.keys), Some((w, h)));
         let frame = testkit::frame(&testkit::render_screen(&mut chat, w, h));
         let _ = std::io::stdout().write_all(frame.as_bytes());
         std::process::exit(0);

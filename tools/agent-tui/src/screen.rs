@@ -13,7 +13,7 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind, MouseEvent};
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::app::term::{kill_job_group, restore, Signals, HANGUP, POLL};
@@ -29,6 +29,11 @@ pub trait Screen {
 
     /// Handle a key, pressed or repeated. False ends the session.
     fn key(&mut self, k: KeyEvent) -> bool;
+
+    /// A mouse event. [`run_screen`] never turns the mouse on, so on the
+    /// terminal only a screen that hosts [`crate::App`] hears one; the test
+    /// kit's scripts send them to any screen ([`crate::testkit::play`]).
+    fn mouse(&mut self, _m: MouseEvent) {}
 
     /// How often [`Screen::tick`] runs; `None` never.
     fn tick_every(&self) -> Option<Duration> {

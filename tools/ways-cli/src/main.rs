@@ -48,7 +48,7 @@ enum Commands {
         /// The project whose .claude/ways.yaml the screens read and write
         #[arg(long)]
         project: Option<PathBuf>,
-        /// Test only: feed this key script to the screens, headless; repeatable. It cannot type into a masked entry
+        /// Test only: feed this key and mouse script (`click:COL,ROW`, `wheel:up@COL,ROW`) to the screens, headless; repeatable. It cannot type into a masked entry
         #[arg(long, hide = true, action = clap::ArgAction::Append, allow_hyphen_values = true)]
         keys: Vec<String>,
         /// Print the frame at WIDTHxHEIGHT, headless, in the test kit's frame format
@@ -306,7 +306,7 @@ enum SessionCommand {
         /// With --json, also the ways the relevance judge kept out
         #[arg(long, requires = "json")]
         matched: bool,
-        /// Feed these keys to the screens, headless (tokens as `ways settings --keys`)
+        /// Feed these keys and clicks to the screens, headless (tokens as `ways settings --keys`)
         #[arg(long, hide = true, num_args = 1..)]
         keys: Vec<String>,
         /// Print the screens at WIDTHxHEIGHT in the test kit's frame format, headless
@@ -360,7 +360,7 @@ enum SessionCommand {
         /// Scope to this project path (default: current project)
         #[arg(long)]
         project: Option<String>,
-        /// Feed these keys to the screens, headless (tokens as `ways settings --keys`)
+        /// Feed these keys and clicks to the screens, headless (tokens as `ways settings --keys`)
         #[arg(long, hide = true, num_args = 1..)]
         keys: Vec<String>,
         /// Print the screens at WIDTHxHEIGHT in the test kit's frame format, headless
