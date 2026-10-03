@@ -480,6 +480,9 @@ fn a_command_in_flight_keeps_the_screen_live_and_a_second_ctrl_c_stops_it() {
     assert!(app.message().contains("stopped at step 1 of 1: stopped by ^C"), "{}", app.message());
     assert_eq!(slow.reloads.get(), 1, "a failed command is followed by a read of the files");
     assert_eq!(app.queued().len(), 1, "the command stays queued");
+    assert!(matches!(app.mode, Mode::Review { run: None, .. }), "a stop opens no response modal: the bar says why");
+    press(&mut app, &[KeyCode::Esc]);
+    assert!(matches!(app.mode, Mode::Browse), "and nothing was held to open later");
 }
 
 #[test]

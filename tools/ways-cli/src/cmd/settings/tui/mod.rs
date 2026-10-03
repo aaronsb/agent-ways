@@ -605,7 +605,23 @@ pub fn open(o: &Open) -> Out {
         return Ok(());
     }
     let keys = agent_tui::testkit::parse_keys(o.keys.iter().flat_map(|k| k.split_whitespace())).map_err(|e| fail(exit::USAGE, format!("--keys: {e}")))?;
+    let size = match &o.snap {
+        Some(size) => Some(
+            size.split_once('x')
+                .and_then(|(w, h)| Some((w.parse::<u16>().ok()?, h.parse::<u16>().ok()?)))
+                .filter(|(w, h)| *w > 0 && *h > 0)
+                .ok_or_else(|| fail(exit::USAGE, format!("--snap {size}: WIDTHxHEIGHT, such as 100x30")))?,
+        ),
+        None => None,
+    };
     for k in keys {
+        // A frame before each key, as a terminal draws one before it reads
+        // the next: what a key does can depend on what was drawn, such as
+        // how far a modal's text scrolls, so a snapshot shows what the
+        // terminal would.
+        if let Some((w, h)) = size {
+            let _ = agent_tui::testkit::render(&mut app, w, h);
+        }
         // A secret never comes from an argument: it would sit in argv and
         // the process list. A key script stops at a masked entry.
         if app.masked() && matches!(k.code, agent_tui::ratatui::crossterm::event::KeyCode::Char(_)) {
@@ -616,15 +632,8 @@ pub fn open(o: &Open) -> Out {
         }
         agent_tui::testkit::finish_apply(&mut app);
     }
-    match &o.snap {
-        Some(size) => {
-            let (w, h) = size
-                .split_once('x')
-                .and_then(|(w, h)| Some((w.parse::<u16>().ok()?, h.parse::<u16>().ok()?)))
-                .filter(|(w, h)| *w > 0 && *h > 0)
-                .ok_or_else(|| fail(exit::USAGE, format!("--snap {size}: WIDTHxHEIGHT, such as 100x30")))?;
-            print!("{}", agent_tui::testkit::frame(&agent_tui::testkit::render(&mut app, w, h)));
-        }
+    match size {
+        Some((w, h)) => print!("{}", agent_tui::testkit::frame(&agent_tui::testkit::render(&mut app, w, h))),
         None => print!("{}", app.summary()),
     }
     Ok(())

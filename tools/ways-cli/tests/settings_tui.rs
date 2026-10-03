@@ -422,6 +422,26 @@ exit 1
 }
 
 #[test]
+fn a_key_script_scrolls_a_response_as_the_terminal_would() {
+    // A check that prints more than the modal holds. A headless run draws
+    // before each key, as the terminal does, so End stops at the last page
+    // and one Up after it moves the view.
+    let fx = Fx::new();
+    fx.file(".config/agent-ways/keys/anthropic", "sk-ant-fixture");
+    let lines: String = (1..=40).map(|i| format!("echo 'line {i}'\n")).collect();
+    fx.file("runner.sh", &format!("#!/bin/sh\n{lines}"));
+    executable(&fx.path("runner.sh"));
+    let runner = fx.path("runner.sh");
+    let env = [("WAYS_SETTINGS_RUNNER", runner.as_path())];
+    let check = "/ text:keys.anthropic enter end enter a down down enter";
+    let end = glyphs(&fx.snap_with("gate", &format!("{check} end"), "100x30", "16", &env));
+    let up = glyphs(&fx.snap_with("gate", &format!("{check} end up"), "100x30", "16", &env));
+    assert!(end.contains("exit 0") && end.contains("line 40"), "End reaches the last line:\n{end}");
+    assert!(!up.contains("exit 0") && up.contains("line 40"), "one Up after End moves off it at once:\n{up}");
+    assert_ne!(end, up);
+}
+
+#[test]
 fn keys_may_come_before_the_other_flags() {
     let fx = Fx::new();
     let (out, err, code) = fx.run(&["settings", "matching", "--keys", "down", "--snap", "80x12", "--depth", "16"]);

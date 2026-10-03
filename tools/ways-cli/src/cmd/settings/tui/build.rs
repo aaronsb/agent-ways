@@ -75,15 +75,22 @@ pub(super) fn home_as_tilde(text: &str, home: &str) -> String {
     if home.is_empty() || home == "/" {
         return text.to_string();
     }
-    // A character that would make the match part of a longer name.
-    let joins = |c: char| c.is_alphanumeric() || "._-~".contains(c);
+    // A character that would make the match part of a longer name. After
+    // it, a `.` joins only when a name goes on past it (`/home/al.bak`); a
+    // `.` that ends a sentence, like `,` or `)`, is a boundary.
+    let joins = |c: char| c.is_alphanumeric() || "_-~".contains(c);
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find(home) {
         let before = rest[..at].chars().last().or_else(|| out.chars().last());
-        let after = rest[at + home.len()..].chars().next();
+        let mut after = rest[at + home.len()..].chars();
+        let continues = match after.next() {
+            Some('.') => after.next().is_some_and(|c| joins(c) || c == '.'),
+            Some(c) => joins(c),
+            None => false,
+        };
         out.push_str(&rest[..at]);
-        if before.is_some_and(|c| joins(c) || c == '/') || after.is_some_and(joins) {
+        if before.is_some_and(|c| joins(c) || c == '.' || c == '/') || continues {
             out.push_str(home);
         } else {
             out.push('~');

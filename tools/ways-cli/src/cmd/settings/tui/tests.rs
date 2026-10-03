@@ -826,5 +826,9 @@ fn home_shows_as_tilde_only_where_it_is_a_whole_path() {
     assert_eq!(t("/home/al.bak/x"), "/home/al.bak/x");
     assert_eq!(t("/mnt/home/al/x"), "/mnt/home/al/x", "a path that only contains it");
     assert_eq!(t("'/home/al/a b'"), "'~/a b'");
+    // Punctuation after it ends the path.
+    assert_eq!(t("found in /home/al."), "found in ~.");
+    assert_eq!(t("(/home/al), /home/al, /home/al;"), "(~), ~, ~;");
+    assert_eq!(t("/home/al..x"), "/home/al..x");
     assert_eq!(super::build::home_as_tilde("/home/al/x", "/"), "/home/al/x");
 }

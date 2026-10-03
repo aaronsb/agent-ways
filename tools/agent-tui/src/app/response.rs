@@ -71,16 +71,21 @@ pub(crate) struct Shown {
     /// before the first draw. The draw owns it: only the draw knows how the
     /// text wraps.
     max: usize,
-    /// The text wrapped at a width, kept while the width holds.
-    wrapped: Option<(usize, Vec<Line<'static>>)>,
+    /// The text wrapped at the widths last drawn: two, since text taller
+    /// than the screen is measured at the modal's width and then drawn at
+    /// the screen's, and one slot would wrap both on every frame.
+    wrapped: Vec<(usize, Vec<Line<'static>>)>,
+    /// How many times the text was wrapped.
+    wraps: usize,
     /// The review tab it opened over, which closing it goes back to.
     pub(crate) back: Option<usize>,
 }
 
 /// The rows a page key moves.
 const PAGE: usize = 10;
-/// The most lines of output kept, and the most characters of one line: a
-/// command that prints without end cannot fill memory or stall the draw.
+/// The most lines of output kept, half from the head and half from the
+/// tail, and the most characters of one line: a command that prints
+/// without end cannot fill memory or stall the draw.
 const MAX_LINES: usize = 2000;
 const MAX_LINE: usize = 1000;
 
@@ -123,10 +128,14 @@ impl Shown {
                 Err(e) => plain(e),
             }),
         }
+        // Past the cap, the head and the tail: a summary a command prints
+        // last, as lint does, stays.
         if lines.len() > MAX_LINES {
-            let more = lines.len() - MAX_LINES;
-            lines.truncate(MAX_LINES);
-            lines.push(format!("… {more} more line{} not shown", if more == 1 { "" } else { "s" }));
+            let gone = lines.len() - MAX_LINES;
+            let tail = lines.split_off(lines.len() - MAX_LINES / 2);
+            lines.truncate(MAX_LINES / 2);
+            lines.push(format!("… {gone} line{} not shown", if gone == 1 { "" } else { "s" }));
+            lines.extend(tail);
         }
         for l in &mut lines {
             if let Some((cut, _)) = l.char_indices().nth(MAX_LINE) {
@@ -146,7 +155,7 @@ impl Shown {
                 lines.extend([String::new(), exit]);
             }
         }
-        Some(Shown { label: label.to_string(), command: command.to_string(), verdict, lines, scroll: 0, max: usize::MAX, wrapped: None, back: None })
+        Some(Shown { label: label.to_string(), command: command.to_string(), verdict, lines, scroll: 0, max: usize::MAX, wrapped: Vec::new(), wraps: 0, back: None })
     }
 
     /// One key: scroll, or close. False closes the modal.
@@ -178,10 +187,18 @@ impl Shown {
     /// The text wrapped to `width` columns, wrapped again only when the
     /// width changes.
     fn wrapped(&mut self, width: usize) -> &[Line<'static>] {
-        if self.wrapped.as_ref().is_none_or(|(w, _)| *w != width) {
-            self.wrapped = Some((width, crate::wrap::wrap_lines(&self.text(), width)));
-        }
-        &self.wrapped.as_ref().expect("just wrapped").1
+        let i = match self.wrapped.iter().position(|(w, _)| *w == width) {
+            Some(i) => i,
+            None => {
+                if self.wrapped.len() == 2 {
+                    self.wrapped.remove(0);
+                }
+                self.wraps += 1;
+                self.wrapped.push((width, crate::wrap::wrap_lines(&self.text(), width)));
+                self.wrapped.len() - 1
+            }
+        };
+        &self.wrapped[i].1
     }
 }
 
@@ -220,6 +237,10 @@ fn plain(text: &str) -> String {
     let mut col = 0;
     let mut st = St::Text;
     for c in text.chars() {
+        // A newline ends a stray ESC or a sequence left open, and stays.
+        if c == '\n' {
+            st = St::Text;
+        }
         st = match st {
             St::Esc => match c {
                 '[' => St::Csi,
@@ -389,10 +410,12 @@ mod tests {
 
     #[test]
     fn output_past_the_caps_is_cut_and_says_so() {
-        let text: String = (1..=MAX_LINES + 5).map(|i| format!("{i}\n")).collect();
+        let text: String = (1..=MAX_LINES + 5).map(|i| format!("{i}\n")).chain(["summary: 3 findings\n".to_string()]).collect();
         let s = Shown::of("r", "r", Response::Report, &Ok(()), printed(0, &text, "")).unwrap();
         assert_eq!(s.lines.len(), MAX_LINES + 1);
-        assert_eq!(s.lines.last().unwrap(), "… 5 more lines not shown");
+        assert_eq!((s.lines[0].as_str(), s.lines[MAX_LINES / 2 - 1].as_str()), ("1", "1000"), "the head");
+        assert_eq!(s.lines[MAX_LINES / 2], "… 6 lines not shown");
+        assert_eq!(s.lines.last().unwrap(), "summary: 3 findings", "the tail, with the summary a command prints last");
         let s = Shown::of("r", "r", Response::Report, &Ok(()), printed(0, &"x".repeat(MAX_LINE + 50), "")).unwrap();
         assert_eq!(s.lines[0].chars().count(), MAX_LINE + 1);
         assert!(s.lines[0].ends_with('…'));
@@ -413,6 +436,9 @@ mod tests {
         // A carriage return writes over the line from its start; CRLF ends it.
         assert_eq!(plain("progress 10%\rprogress 100%\r\nnext\r\n"), "progress 100%\nnext\n");
         assert_eq!(plain("abcdef\rXY"), "XYcdef");
+        // A newline after a stray ESC, or in a sequence left open, survives.
+        assert_eq!(plain(&format!("a{E}\nb")), "a\nb");
+        assert_eq!(plain(&format!("a{E}[12\nb{E}]0;never ended\nc")), "a\nb\nc");
         // A tab is four spaces; a bell and a backspace are dropped.
         assert_eq!(plain("a\tb\u{7}\u{8}"), "a    b");
     }
@@ -585,6 +611,19 @@ mod tests {
         let text = screen(&mut a, 100, 30);
         // The exit line went off the bottom; the line above the first came in.
         assert!(text.contains("probe check line 36") && !text.contains("exit 0"), "{text}");
+    }
+
+    #[test]
+    fn text_taller_than_the_screen_is_wrapped_once_per_width_not_per_frame() {
+        let mut a = app_of(60, 90);
+        a.pick(vec![0], 0);
+        let _ = screen(&mut a, 120, 30);
+        let first = shown(&a).wraps;
+        assert!(first > 0);
+        for _ in 0..3 {
+            let _ = screen(&mut a, 120, 30);
+        }
+        assert_eq!(shown(&a).wraps, first, "a second draw at the same size wraps nothing");
     }
 
     #[test]
