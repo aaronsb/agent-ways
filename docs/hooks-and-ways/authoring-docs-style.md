@@ -10,19 +10,23 @@ works.
 ## The current model — the paragraph every engine doc must agree with
 
 > A way has two lanes. The **keyword lane** is the regex `pattern:` field. The
-> **semantic lane** embeds the prompt and takes cosine `s` against the way's alias
-> (`description` + `vocabulary`). ADR-156 maps that cosine to a **relevance
-> probability** with a per-model logistic `g(s) = σ(a·s + b)`, fit at
-> corpus-generation from a committed probe corpus and stored in
-> `embed-manifest.json` (EN AUC ≈ 0.955). A way **fires** when
-> `g(s) ≥ τ_s  ∨  (keyword_match ∧ g(s) ≥ τ_k)`, with global
-> `τ_s = 0.5` (`semantic_fire_probability`) and `τ_k = 0.15`
-> (`keyword_floor_probability`), which are **independent**. The keyword lane is
-> **floor-gated**: a pattern hit only fires when the semantic probability already
-> clears `τ_k`, so a keyword can't drag in an unrelated prompt *when calibration is
-> loaded*. With no calibrated signal the keyword lane fails open (fires unconditionally),
-> which is also what `pattern_strict: true` forces by design.
-> `pattern_strict: true` bypasses the gate (unconditional keyword fire).
+> **semantic lane** is matched by **late interaction** (ADR-160): the prompt is split
+> into chunks, each chunk is scored against every way's alias (`description` +
+> `vocabulary`), and a way is admitted on its summed softmax share or its peak chunk
+> cosine, then confirmed against its own body. When the prompt is too sparse to chunk,
+> or late interaction cannot run, the single-vector path is the fallback: one cosine
+> `s` against the alias. ADR-156 maps cosine to a **relevance probability** with a
+> per-model logistic `g(s) = σ(a·s + b)`, fit at corpus-generation from a committed
+> probe corpus and stored in `embed-manifest.json`. On that path a way **fires** when
+> `g(s) ≥ τ_s  ∨  (keyword_match ∧ g(s) ≥ τ_k)`, with global `τ_s = 0.5`
+> (`semantic_fire_probability`) and `τ_k = 0.15` (`keyword_floor_probability`), which
+> are **independent**. The keyword lane is **floor-gated**: a pattern hit fires only
+> when the semantic probability clears `τ_k`, so a keyword cannot drag in an unrelated
+> prompt when calibration is loaded. With no calibrated signal the keyword lane fails
+> open, and `pattern_strict: true` bypasses the floor by design. After matching, the
+> **relevance gate** (ADR-196), when `gate.mode` is `enforce`, asks a judge model
+> whether each prompt-lane match is relevant and withholds the ones it scores under
+> the profile threshold; `shadow` mode only logs the verdict.
 
 If a doc says anything that contradicts that paragraph, the doc is wrong.
 

@@ -32,141 +32,80 @@ The worked example below shows this loop in action during an actual way creation
 
 ## The Problem
 
-Ways use embedding-based semantic scoring to decide whether a user's prompt is relevant to a particular domain of guidance. Each way has a vocabulary (terms it cares about) and a description; the prompt is embedded and scored by cosine `s` against that alias, and `s` is mapped through a calibrated logistic `g(s) = σ(a·s + b)` into a relevance probability. A way fires when that probability clears the global semantic bar `τ_s` (0.5), or — on a `pattern:` keyword hit — the lower keyword floor `τ_k` (0.15). There is no per-way threshold to set; the cutoffs are global and live in probability space. See [engine-reference.md](engine-reference.md) for the full rule.
+Each way has a description and a vocabulary, which together form its alias in embedding space. The matcher scores a prompt against every alias, maps the score through a per-model calibration into a relevance probability, and fires the ways that clear the global bar. A `pattern:` hit fires on a lower floor. There is no per-way threshold to set; the only levers are the vocabulary, the description and the pattern. [engine-reference.md](engine-reference.md) gives the rule, and [matching.md](matching.md) the matcher. After the match, the relevance gate (ADR-196), when it is on, asks a small model whether each prompt-lane match is relevant and can withhold it; that shows up as a `way_judged` event with `verdict: block`, not as a low score.
 
-Getting the vocabulary right matters: a way that fires too eagerly drowns the user in irrelevant guidance; a way that never fires is dead weight.
-
-With 50+ ways in the system, vocabulary space gets crowded. Adding terms to one way can accidentally create overlap with another. The only way to know is to test. What follows is information-retrieval evaluation in miniature — a test collection with relevance judgments, tuned precision-first; [matching.md](matching.md#what-this-actually-is) traces that lineage.
+Getting the vocabulary right matters: a way that fires too eagerly drowns the session in irrelevant guidance, and a way that never fires is dead weight. With 150+ ways in the corpus, vocabulary space gets crowded, and adding terms to one way can create overlap with another. The only way to know is to test. What follows is information-retrieval evaluation in miniature: a test collection with relevance judgments, tuned precision-first. [matching.md](matching.md#what-this-actually-is) traces that lineage.
 
 ## How Test Prompts Get Written
 
-The scoring process depends on realistic test prompts — but who writes them?
+Claude writes the test prompts by modeling how the operator would phrase the need. It knows what the way is for, from its description and the conversation that led to it, and turns that into the different ways a person would ask.
 
-In this system, Claude generates test prompts by modeling how the human operator would naturally phrase their intent. This is the key mechanism: Claude knows what the way is *for* (from the description and the conversation that led to creating it), and translates that into the variety of ways a human might ask for that thing.
+For `softwaredev/delivery/commits`, which covers commit messages and conventional-commit prefixes, that gives prompts like:
 
-For example, the `meta/project-health` way exists so that when a user wonders about upstream Claude Code changes, the right guidance appears. Claude generates test prompts by thinking: "if I were a human who wanted to know what changed upstream, what would I actually type?"
+- "write the commit message for this" (direct)
+- "what prefix should this commit use, feat or fix" (uses the domain's words)
+- "squash these into one commit before I push" (adjacent task, same domain)
 
-That produces prompts like:
-- "what's new in claude code recently" (casual, direct)
-- "have we drifted from upstream claude code" (conceptual, uses domain language)
-- "are our ADRs current with what we've shipped" (inward-facing, about self-assessment)
-- "run project pulse" (direct tool invocation)
+And negative prompts, ones that sound related but belong elsewhere:
 
-And negative prompts by thinking: "what would a human type that sounds vaguely related but should *not* trigger this way?"
+- "add error handling to the parser function" (code task)
+- "how do I create a new way" (meta, about authoring)
 
-- "how do I create a new way" (meta, but about authoring, not project health)
-- "add error handling to the parser function" (code task, nothing to do with upstream)
-
-This matters because **vocabulary gaps hide in the space between how the author thinks about the concept and how the user phrases their need**. The author writes `reconcile drift stale` thinking about ADR status. The user types "are our ADRs current with what we've shipped." Those are the same intent expressed in completely different words. Claude bridges this gap by generating prompts from the user's perspective, not the author's.
-
-This is also why scoring is done iteratively during way creation rather than after the fact. The conversation that produces the way — where the human explains what they want and why — is exactly the context Claude needs to generate authentic test prompts. If scoring is deferred to a separate QA step, that conversational context is lost.
+**Vocabulary gaps hide between how the author thinks about the concept and how the user phrases the need.** The author writes `conventional prefix scope` thinking about the format; the user types "should this be feat or fix". Generating prompts from the user's side closes that gap. It is also why scoring happens while the way is written: the conversation that produces the way is the context needed to write authentic prompts.
 
 ## The Tool
 
-The `ways` binary includes embedding-based semantic scoring as a built-in subcommand (see [ADR-108](../architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) for the embedding engine, [ADR-111](../architecture/platform/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) for the consolidation, and [ADR-125](../architecture/ways/ADR-125-authored-disclosure-graph-and-removal-of-bm25.md) for the embedding-only decision). It scores a prompt against the entire way corpus using cosine similarity and ranks the results.
+`ways author match "<prompt>"` scores one prompt against every way in the corpus and ranks them. It shows the live late-interaction matcher (ADR-160) per candidate: peak chunk cosine, summed share, body-confirm, and whether the way fired. When the prompt is too sparse to chunk, or late interaction is unavailable, it falls back to the single-vector view: one cosine per model (EN, Multi), ranked. The fire path falls back the same way.
 
-```bash
-# Score a prompt against all ways (query is positional; there is no --threshold flag)
-ways author match "what's new in claude code recently"
+The corpus is what gets scored, so run `ways corpus` after every edit to a description or vocabulary, before matching again.
 
-# Output: the live late-interaction matcher (ADR-160) per candidate: peak chunk
-# cosine, summed share, body-confirm, and whether it fired. When the prompt is too
-# sparse to chunk, it falls back to the single-vector view, as the fire path does.
-
-# A way fires when its calibrated probability g(s) clears the global bar τ_s (0.5)
-# on the semantic lane, or τ_k (0.15) on a keyword-gated pattern hit — see
-# engine-reference.md.
-```
-
-The `/ways-tests` skill wraps this with higher-level operations: scoring all ways against a prompt (and surfacing the calibrated `g(s)` alongside the cosine), analyzing vocabulary gaps, checking for cross-way overlap, and validating frontmatter.
+The `/ways-tests` skill wraps this with higher-level procedures: scoring one way or all ways, vocabulary gaps, tree structure, crowding and budget. Some of its modes map to a command; the rest are steps it carries out over command output.
 
 ## The Process: A Worked Example
 
-This walkthrough shows the loop for the `meta/project-health` way, which provides guidance on managing the project's relationship to upstream Claude Code releases. The scores are illustrative of the calibrated presentation — a **Cosine** column (the embedding input), the **g(s)** probability it maps to under the EN model (`a ≈ 26.7`, `b ≈ −7.8`; see [engine-reference.md](engine-reference.md)), and the **Fire** decision against the global semantic bar `τ_s = 0.5`.
+Scoring `softwaredev/delivery/commits` with `ways author match`, single-vector view, EN cosine. Columns trimmed.
 
-### Step 1: Write the way with initial vocabulary
-
-The vocabulary was chosen by thinking about what a user would say when they want to check upstream changes or review project health. There is no threshold field — firing is decided by the global `τ_s` / `τ_k`, so only the vocabulary and description are tuned:
-
-```yaml
-vocabulary: >
-  upstream changelog release version claude-code update
-  adr status reconcile drift stale dormant
-  project pulse health review audit
-  what's new recently changed since last
-  relevance feature gap opportunity
-```
-
-### Step 2: Score against target prompts
-
-These are prompts that *should* trigger the way:
+### Step 1: Score the target prompts
 
 ```
-── Target Prompts (should match) ──────────────────────────────────
+$ ways author match "write the commit message for this"
+  softwaredev/delivery/commits     0.5170  — git commit messages, branch naming, …
+  softwaredev/delivery             0.3668  — Shipping code — commits, pull requests, …
+  meta/trust/delegation            0.3384  — sending email, posting chat messages, …
 
-  Prompt                                            Cosine  g(s)   Fire
-  "what's new in claude code recently"              0.462   0.988  YES
-  "are our ADRs current with what we've shipped"    0.289   0.478  no   ← problem
-  "check if upstream features matter for our config"0.371   0.891  YES
-  "run project pulse"                               0.330   0.733  YES
+$ ways author match "what prefix should this commit use, feat or fix"
+  softwaredev/delivery/commits     0.5486  — git commit messages, branch naming, …
+  softwaredev/delivery/release     0.3950  — software releases, the changelog, …
+  softwaredev/code/quality/versioning  0.3846  — version-numbered identifiers, …
+
+$ ways author match "squash these into one commit before I push"
+  softwaredev/delivery/commits     0.5206  — git commit messages, branch naming, …
+  softwaredev/delivery             0.3845  — Shipping code — commits, pull requests, …
 ```
 
-The second prompt — "are our ADRs current with what we've shipped" — missed. Its cosine mapped to `g(s) = 0.478`, just under the semantic bar `τ_s = 0.5`.
+The target ranks first on every prompt, about 0.13 to 0.15 above the next way. That gap matters more than the absolute score: it means the prompt belongs to this way and no other.
 
-### Step 3: Diagnose the miss
-
-`g(s) = 0.478` sits inside the near-miss band (within `near_miss_margin`, 0.05, below `τ_s`) — a hair short, exactly the kind of false silence the empirical telemetry below is built to surface. The prompt's "current" and "shipped" didn't appear in the vocabulary, and the only overlapping term was "adr" — not enough cosine to push `g(s)` over the bar. The embedding engine (ADR-125) is more forgiving for paraphrase than term-overlap scoring would have been, but the underlying lesson stands: vocabulary tuned for what *users actually say* outperforms vocabulary tuned for the topic in the author's head.
-
-This is the kind of gap that's invisible when you write the vocabulary by thinking about the *topic* — you think "ADR reconciliation" and write `reconcile drift stale`. But a user says "are our ADRs current with what we've shipped" using completely different words for the same concept.
-
-### Step 4: Fix the vocabulary
-
-Added four terms: `shipped`, `implemented`, `current`, `behind`.
-
-### Step 5: Re-score and verify no regressions
+### Step 2: Score the negative prompts
 
 ```
-── Target Prompts (should match) ──────────────────────────────────
+$ ways author match "add error handling to the parser function"
+  softwaredev/code/errors          0.4012  — error handling — exceptions, …
+  softwaredev/code/security/injection  0.2840  — injection prevention — …
 
-  Prompt                                              Cosine  g(s)   Fire
-  "what's new in claude code recently"                0.462   0.988  YES
-  "are our ADRs current with what we've shipped"      0.351   0.826  YES  ← fixed
-  "check if upstream features matter for our config"  0.368   0.885  YES
-  "run project pulse"                                 0.326   0.719  YES
-  "have we drifted from upstream claude code"         0.455   0.986  YES
-  "what claude code releases since our last commit"   0.480   0.993  YES
-
-── Negative Prompts (should NOT match) ─────────────────────────────
-
-  "add error handling to the parser function"         0.071   0.003  no
-  "write unit tests for the auth module"              0.089   0.005  no
-  "refactor the database connection pool"             0.064   0.003  no
-  "how do I create a new way"                         0.243   0.212  no
-  "fix the CSS layout on mobile"                      0.038   0.001  no
+$ ways author match "how do I create a new way"
+  meta/knowledge                   0.2955  — how ways and progressive disclosure work …
+  documentation/adr-context        0.2807  — planning how to implement a feature, …
 ```
 
-The miss is fixed (`g(s)` 0.478 → 0.826). All other target prompts still fire. All negative prompts still correctly reject. The nearest false-positive candidate — "how do I create a new way" at `g(s) = 0.212` — sits below `τ_s` and would fire only if it also matched a `pattern:` keyword (it's above the keyword floor `τ_k` but there is no pattern here to trip it).
+`softwaredev/delivery/commits` does not appear near the top of either. The negatives went to the ways that own them.
 
-### Step 6: Check cross-way isolation
+### Step 3: Fix a miss, then re-score
 
-The final check: does this way compete with other ways for the same prompts? The cross-way ranking shows the calibrated `g(s)` for every way against one prompt, decided against the single global `τ_s = 0.5` — there is no per-way threshold column, because there is no per-way threshold:
+When a target prompt ranks the way low, or a neighbour sits within a few hundredths of it, find the words in the prompt that the vocabulary lacks and add the ones users actually say. Run `ways corpus`, then re-score every target and every negative. A fix that pulls a negative prompt toward the way is a regression.
 
-```
-=== Cross-Way Ranking: "what's new in claude code recently" ===
+### Step 4: Check the neighbours
 
-  Cosine  g(s)   Fire  Way
-  ──────  ─────  ────  ───
-  0.462   0.988  YES   meta/project-health          ← target (semantic lane)
-  0.245   0.223  no    documentation/docstrings
-  0.221   0.130  no    softwaredev/code/quality
-  0.216   0.116  no    softwaredev/code/supplychain/sourceaudit
-  0.198   0.075  no    softwaredev/code/security
-  0.205   0.091  no    documentation/standards
-  0.212   0.104  no    softwaredev/delivery/github
-  ...
-```
-
-Clean win. The target way scores `g(s) = 0.988`; the next closest scores 0.223 — well below `τ_s`. No overlap, no competition.
+`ways author siblings softwaredev/delivery/commits` scores the way against every other way. A sibling that sits close on many prompts is competing for the same space; sharpen the two vocabularies apart, or confirm the co-fire is intended (below).
 
 ## What to Look For
 
@@ -201,11 +140,11 @@ The natural instinct when a way misses a prompt is to add more vocabulary. When 
 
 The system's defense against this is **sparsity**: each way should occupy a narrow, distinct region of the scoring space with minimal overlap against other ways. The goal isn't to maximize any single way's score. It's to maximize the *distance between ways* — so that for any given prompt, at most one or two ways fire, and it's obvious which one is the right one.
 
-This is why the cross-way ranking check (Step 6 in the worked example) matters more than the individual scores. A way that clears `τ_s` on its target prompt and has clean separation from every other way is healthier than a way that scores high but overlaps with three neighbors.
+This is why the neighbour check (Step 4 in the worked example) and the gap to the next way matter more than the individual scores. A way that clears `τ_s` on its target prompt and has clean separation from every other way is healthier than a way that scores high but overlaps with three neighbors.
 
 Concretely:
 
-- **Narrow vocabularies are better than broad ones.** 15 precise terms beat 40 general terms. "upstream", "changelog", "drift" are specific to project-health. "update", "check", "status" are shared by many domains.
+- **Narrow vocabularies are better than broad ones.** 15 precise terms beat 40 general terms. "conventional", "prefix", "squash" are specific to commits. "update", "check", "status" are shared by many domains.
 - **Don't chase every synonym.** If "shipped" fixes a miss, add it. But don't then add "deployed", "released", "landed", "merged", "delivered" — each one increases the surface area for false matches against delivery/release or delivery/github.
 - **The two levers are vocabulary and pattern — both measured through the calibration, neither a per-way threshold.** Sharpen or widen the `vocabulary` to move the semantic lane; add or tighten the `pattern:` regex for the keyword lane. When a way fires correctly but also fires weakly on unrelated prompts, the remedy is to narrow the vocabulary, not to reach for a knob that no longer exists. (A keyword that leaks *globally* is the `τ_k` floor's job, not the way's — see the remedy loop in [authoring-docs-style.md](authoring-docs-style.md).)
 - **Accept some misses.** A way that fires for 90% of relevant prompts with zero false positives is better than one that fires for 100% but also fires for 5% of irrelevant prompts. The 0 FP constraint is hard; recall is soft.
@@ -220,17 +159,16 @@ Rather than writing a third way that combines both concerns (more content to mai
 
 This is a deliberate vocabulary manipulation — the opposite of sharpening. You're *reducing* the distance between two ways for specific prompts where both are genuinely needed. The key discipline is that the shared terms should be narrow: "pull request", "ship", "PR" — not broad terms like "code" or "deploy" that would create accidental overlap on unrelated prompts.
 
-The `/ways-tests crowding` command distinguishes these cases. When it reports two ways co-firing, it flags whether the overlap looks accidental (similar scores on a prompt neither should own) or intentional (both score well on a prompt both should serve). The worked example's cross-way ranking shows this: a "healthy co-fire" is when two ways both match but serve complementary purposes.
+`/ways-tests crowding "<prompt>"` is a manual procedure in the skill, not a command: run `ways author match` for the prompt, group the ways scoring within 0.05 of each other, and cross-check them with `ways author siblings` and `ways author tree <tree> --jaccard`. Overlap on a prompt neither way should own is accidental; sharpen the vocabularies apart. Two ways scoring well on a prompt both should serve is intentional co-fire.
 
 ## Tools Reference
 
 | Command | Purpose |
 |---------|---------|
-| `/ways-tests score <way> "prompt"` | Score one way, with automatic cross-way context |
-| `/ways-tests score-all "prompt"` | Rank all ways against a prompt |
-| `/ways-tests suggest <way>` | Analyze vocabulary gaps (body terms missing from vocabulary) |
-| `/ways-tests crowding "prompt"` | Detect vocabulary overlap across all ways |
-| `ways author lint` | Validate way frontmatter (`--check` for CI) |
+| `ways author match "prompt"` | Rank all ways against a prompt |
+| `ways author suggest <way-file>` | Vocabulary candidates: body terms missing from the vocabulary |
+| `ways author lint <path>` | Validate way frontmatter (`--check` for CI) |
+| `ways corpus` | Rebuild the corpus after editing a description or vocabulary |
 | `ways tune locale` | Audit locale alias fidelity + discrimination (per-way, across all languages) |
 | `ways tune locale --way <path>` | Filter the audit to a single way or subtree |
 | `ways tune precision` | Heuristic relevance audit: flag ways firing into off-domain sessions (`--min-sessions`, `--flag-threshold`, `--project`, `--way`, `--json`) — ADR-134 Decision 3 |
@@ -241,12 +179,15 @@ See the [ways-tests skill](/skills/ways-tests/SKILL.md) for the testing skill an
 
 ## Empirical Signals: Tuning From What Actually Fired
 
-The worked example above tunes a way against prompts you write by hand. But once a way ships, the firing engine itself becomes the evidence. [ADR-134](../architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) extends the telemetry in `$XDG_STATE/agent-ways/events.jsonl` so that hand-tuning gets a record to revise from — three report-first signals:
+The worked example tunes a way against prompts written by hand. Once a way ships, the event log is the evidence ([ADR-134](../architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md)). Four events carry the signals; [the event log](../reference/events.md) lists their fields.
 
-- **Near-misses.** When a way's calibrated probability lands in the band just below the semantic bar — `τ_s − near_miss_margin ≤ g(s) < τ_s`, `near_miss_margin` default 0.05 (a live config key, `config.rs`) — but nothing fires, the matcher logs a `way_nearmiss` event. It carries `prob_en`, `prob_multi`, `tau_s`, `margin`, `trigger`, `query_tokens` (plus `way`, `corpus_id`, `domain`, `scope`, `project`, `session`) — the already-computed probabilities against the *same* global `τ_s` the fire path uses, no per-lane thresholds and no new embedding work (`scan/mod.rs`). These are the false silences the precision-first discipline can't otherwise see — a way that consistently lands just under the bar on prompts whose sessions then do that way's kind of work is a candidate to widen, the recall counterpart to the 0-FP constraint.
-- **Fire scores.** A `way_fired` event carries `fire_score`: the calibrated probability `g(s)` that cleared `τ_s`, recorded on first-fires only (not redisclosures, and `None`/absent for deterministic keyword fires) — `show/mod.rs`. This is the fire-score population that `tune-precision` reads and that feeds the **deferred** ADR-134 auto-tune; the `g(s)` calibration itself is fit at corpus-generation from the committed `calibration_probes.jsonl`, **not** from this stream.
-- **Gated keywords.** When a `pattern:` hit is vetoed because `g(s)` sat below `τ_k` on every model lane (ADR-155), the matcher logs a `way_keyword_gated` event carrying the `matched_span` — the per-alternation evidence that calibrates `keyword_floor_probability` and drives the pattern-hygiene rework before any tightening.
+- **`way_nearmiss`**: a semantic probability landed within `near_miss_margin` (default 0.05) under the fire bar and nothing fired. These are the false silences a precision-first discipline cannot otherwise see. A way that keeps landing just under the bar on prompts whose sessions then do its kind of work is a candidate to widen.
+- **`fire_score`** on `way_fired` and `way_redisclosed`: the calibrated probability that fired a semantic match, with the `surface` it matched. Keyword, command and file fires carry none. `ways tune precision` reads these. The calibration itself is fit at corpus build from the committed `calibration_probes.jsonl`, not from this stream.
+- **`way_keyword_gated`**: a `pattern:` hit vetoed by the keyword floor, with the `matched_span`. It shows which alternation of a pattern keeps matching the wrong prompts.
+- **`way_judged`** with `verdict: block` or `would_block`: the relevance gate judged a match irrelevant. A way the judge blocks often is matching prompts it should not; narrow its vocabulary rather than relying on the gate.
 
-`ways tune precision` reads the fire stream and reports, per way, an off-class irrelevance rate — how often its fires landed in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain. It distinguishes **mis-targeted** (a narrow way repeatedly firing into the same wrong kind of session — remedy: narrow the vocabulary or change the trigger channel; there is no per-way threshold to raise) from **cross-cutting** (a way that fires broadly by design, e.g. `meta/todos` — remedy: scope by trigger, *never* auto-narrow vocabulary). Like `ways tune locale`'s fidelity audit, these are diagnostic flags, not verdicts.
+`ways tune precision` reports, per way, how often its fires landed in sessions whose other activity never touched the way's domain. It separates a **mis-targeted** way (narrow it, or change its trigger channel) from a **cross-cutting** one (scope it by trigger; never narrow it automatically). Its output is a diagnostic flag, not a verdict. [stats.md](stats.md) covers it with `ways tune stats`.
 
-A practitioner note: `events.jsonl` growth is bounded. `log_event` tail-compacts the file when it exceeds ~32 MiB, retaining the most recent ~24 MiB at a line boundary via atomic temp+rename — lossy on the oldest events, but readers always see a complete file (`session.rs`).
+### Plotting the raw score distributions
+
+`scripts/signal-report.py` scores a battery of prompts against every way with the single-vector matcher and plots signal (the expected way) against noise (every other way) per model, with a per-prompt chart of the expected way against its top competitor. It shows the raw cosine bands the calibration is fit against; it does not show the fire decision. It writes `scores.csv` and two PNGs to `--out DIR` (default `./signal-analysis`). Pass `--prompts FILE` for your own battery, one `{"lang", "expected_way", "prompt"}` object per line. For the per-way remedy loop, use `tools/scripts/probe-measure.py` instead.

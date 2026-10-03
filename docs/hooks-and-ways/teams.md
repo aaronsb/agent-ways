@@ -73,7 +73,7 @@ When a team spawns, the team name propagates through the entire way-firing pipel
 Task tool (team_name param) → stash file → marker file → detect_team() → log events
 ```
 
-Every way that fires for a teammate logs the team name alongside the usual fields (way, domain, trigger, scope). The stats tool can then group activity by team — useful for understanding which teams triggered which ways and how much.
+Every way that fires for a teammate logs the team name in a `team` field on its `way_fired` event, beside the usual fields. `ways tune stats` does not group by team; count fires per team from the log with `jq -r 'select(.event=="way_fired" and .team) | .team' "$(ways events-log-path)" | sort | uniq -c`. See [the event log](../reference/events.md).
 
 ## Working With Teams
 
@@ -87,4 +87,4 @@ The teams feature is currently in beta. Enable it by setting the environment var
 }
 ```
 
-in your `settings.json`. When the flag isn't set, no teammate markers are created, no team-scoped ways fire, and the stats show only agent and subagent scopes. The system degrades cleanly — no errors, no missing data, just the pre-teams world.
+in your `settings.json`. When the flag isn't set, no teammate markers are created, no team-scoped ways fire, and the event log shows only agent and subagent scopes. The system degrades cleanly — no errors, no missing data, just the pre-teams world.

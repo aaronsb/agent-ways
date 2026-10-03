@@ -71,7 +71,7 @@ The mechanism in short form: **task hierarchy preservation under redirection.** 
 
 ### Why this observation exists
 
-The 2026-03-17 entry above established a baseline: ways-Claude vs vanilla-Claude on the same task, with ways winning on context cost (~200k vs ~275k), redirection count (minimal vs constant), and qualitative supertask coherence. Plan task F1 in [the ADR-123 implementation plan](../../todo-adr-123-firing-dynamics.md) asks to reproduce that observation against the new unified-engine stack before flipping ADR-123 from Draft to Accepted. This section closes that loop.
+The 2026-03-17 entry above established a baseline: ways-Claude vs vanilla-Claude on the same task, with ways winning on context cost (~200k vs ~275k), redirection count (minimal vs constant), and qualitative supertask coherence. Plan task F1 in the ADR-123 implementation plan (a working file, not kept) asks to reproduce that observation against the new unified-engine stack before flipping ADR-123 from Draft to Accepted. This section closes that loop.
 
 This re-observation has an intentionally *different shape* from 2026-03-17. There is no vanilla control run. Instead, the supertask was the ADR-123 work itself, driven from a new-session continuance prompt, with the operator watching rather than steering. What the observation tests is whether the new stack preserves the task-hierarchy-under-detour property that made the original observation matter — not whether it does so more than vanilla Claude on the same contrived benchmark.
 
