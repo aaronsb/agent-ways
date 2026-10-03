@@ -27,7 +27,7 @@ ok()    { printf '\033[0;32m[ ok ] %s\033[0m\n' "$1"; }
 is_excluded() {
   case "$1" in
     */llama.cpp/*|*/build/*|tools/target/*) return 0 ;;
-    # Screenshot fixtures: their /home/dev/... project paths are synthetic
+    # Screenshot fixtures: their home-style project paths are synthetic
     # display values written into fixture logs, never read from disk.
     docs/images/*/tools/*) return 0 ;;
     *) return 1 ;;
