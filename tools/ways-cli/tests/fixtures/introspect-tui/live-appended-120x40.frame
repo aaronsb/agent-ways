@@ -4,8 +4,8 @@ agent-tui frame 120x40
 |epoch 1 · 200K ctx · 1 ways · window 2/2 · 2026-07-03 17:52  ◇ injected  ● LIVE · 6s ago                                |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 4/4|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│▌softwaredev/delivery/commits                                                1      0  keyword        ●  ─            │|
+|│ Way                                                              Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│▌↩ softwaredev/delivery/commits                                   main       1      0  keyword        ●  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -62,13 +62,16 @@ styles
   5   1-118 - - BOLD
   5 119-119 - - DIM
   6   0-0   - - DIM
-  6   1-80  Cyan - BOLD|REVERSED
+  6   1-31  Cyan - BOLD|REVERSED
+  6  32-66  - - BOLD|REVERSED
+  6  67-71  - - BOLD|DIM|REVERSED
+  6  72-80  - - BOLD|REVERSED
   6  81-85  Green - BOLD|REVERSED
-  6  86-102 Cyan - BOLD|REVERSED
+  6  86-102 - - BOLD|REVERSED
   6 103-103 #5ac8fa - BOLD|REVERSED
-  6 104-105 Cyan - BOLD|REVERSED
-  6 106-106 Cyan - BOLD|DIM|REVERSED
-  6 107-118 Cyan - BOLD|REVERSED
+  6 104-105 - - BOLD|REVERSED
+  6 106-106 - - BOLD|DIM|REVERSED
+  6 107-118 - - BOLD|REVERSED
   6 119-119 - - DIM
   7   0-0   - - DIM
   7 119-119 - - DIM

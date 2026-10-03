@@ -1,6 +1,6 @@
 //! The replay's ways table and its context lines on agent-tui: the columns
-//! `ways session ways` prints (Way, Epoch, Dist, Trigger, the pin, Re-disclosure)
-//! as ratatui rows, and the token gauge, forecast and re-disclosure zones
+//! `ways session ways` prints (Way, Agent, Epoch, Dist, Trigger, the pin,
+//! Re-disclose) as ratatui rows, and the token gauge, forecast and re-disclosure zones
 //! below them. The values and their colours come from `cmd::render`, the
 //! same as `ways session ways`; only the drawing differs.
 
@@ -10,18 +10,70 @@ use agent_tui::ratatui::text::{Line, Span};
 use agent_tui::ratatui::widgets::{Cell, Row};
 use agent_tui::theme;
 
-use super::model::{ActiveWay, Frame};
+use super::agents::Agents;
+use super::model::{ActiveWay, Fate, Frame};
 use crate::cmd::render::{self, PIN_SYMBOLS};
 
+/// The Agent column's width in a table `inner` cells wide: its widest
+/// name, from the header's five cells to sixteen (`general-purpose` whole),
+/// while Way keeps eighteen. Narrower, Agent gives up cells to eight, then
+/// Way, to its twelve. At 80 columns Agent has ten and Way eighteen.
+pub(super) fn agent_width(ways: &[ActiveWay], agents: &Agents, inner: usize) -> u16 {
+    let widest = ways.iter().map(|w| agent_fmt::visible_len(&agents.label(&w.agent))).max().unwrap_or(0);
+    let room = inner.saturating_sub(HIGHLIGHT + WAY_KEEP + FIXED + GAPS).max(AGENT_MIN);
+    widest.clamp(5, AGENT_MAX).min(room) as u16
+}
+
+const WAY_MIN: usize = 12;
+const WAY_KEEP: usize = 18;
+const AGENT_MIN: usize = 8;
+const AGENT_MAX: usize = 16;
+/// Epoch, Dist, Trigger, the pin and Re-disclose.
+const FIXED: usize = 5 + 5 + 13 + 1 + 13;
+/// Two cells between each of the seven columns.
+const GAPS: usize = 6 * 2;
+/// The selection mark's column.
+const HIGHLIGHT: usize = 1;
+
 /// The table's column widths, Way taking what is left.
-pub(super) const WIDTHS: [Constraint; 6] = [
-    Constraint::Min(12),
-    Constraint::Length(5),
-    Constraint::Length(5),
-    Constraint::Length(13),
-    Constraint::Length(1),
-    Constraint::Length(13),
-];
+pub(super) fn widths(agent: u16) -> [Constraint; 7] {
+    [
+        Constraint::Min(WAY_MIN as u16),
+        Constraint::Length(agent),
+        Constraint::Length(5),
+        Constraint::Length(5),
+        Constraint::Length(13),
+        Constraint::Length(1),
+        Constraint::Length(13),
+    ]
+}
+
+/// Each fate's mark before a way's name and the name's colour: the one
+/// table both come from, so they agree. Without colour the mark carries
+/// it; a fired way has none, and a check's fire has its `✓ check` line.
+pub(super) fn look(fate: Fate) -> (&'static str, Style) {
+    match fate {
+        Fate::Injected => ("", theme::ok()),
+        Fate::Redisclosed => ("↩ ", theme::accent()),
+        Fate::CheckFired => ("", theme::info()),
+        Fate::WouldBlock => ("◌ ", theme::warn()),
+        Fate::Blocked => ("⊘ ", theme::err()),
+        Fate::RefireHeld => ("◷ ", theme::muted()),
+        Fate::CapHeld => ("⊟ ", theme::hot()),
+    }
+}
+
+/// A way's name with its fate's mark, in its fate's colour.
+pub(super) fn way_name(w: &ActiveWay) -> Span<'static> {
+    let (mark, style) = look(Fate::of(w));
+    Span::styled(format!("{mark}{}", w.id), style)
+}
+
+/// An agent's name in its colour, cut to the column.
+pub(super) fn agent_cell(agents: &Agents, id: &str, width: u16) -> Line<'static> {
+    Line::styled(agent_fmt::truncate_visible(&agents.label(id), width as usize), agents.style(id))
+}
+
 
 /// An agent-theme style as the frame's palette draws it.
 fn ink(s: agent_theme::Style) -> Style {
@@ -30,7 +82,7 @@ fn ink(s: agent_theme::Style) -> Style {
 
 pub(super) fn header() -> Row<'static> {
     let right = |t: &'static str| Cell::from(Line::from(t).alignment(Alignment::Right));
-    Row::new(vec![Cell::from("Way"), right("Epoch"), right("Dist"), Cell::from("Trigger"), Cell::from("\u{2316}"), Cell::from("Re-disclosure")])
+    Row::new(vec![Cell::from("Way"), Cell::from("Agent"), right("Epoch"), right("Dist"), Cell::from("Trigger"), Cell::from("\u{2316}"), Cell::from("Re-disclose")])
         .style(Style::new().add_modifier(Modifier::BOLD))
 }
 
@@ -51,10 +103,11 @@ pub(super) fn clusters(ways: &[ActiveWay], window_k: u64, bar: usize) -> (Vec<Op
     (pos, unique)
 }
 
-/// One row per active way of `frame`: two lines when its check has fired.
-/// A way new in this frame is green and bold, one re-disclosed the accent
-/// in bold.
-pub(super) fn rows(frame: &Frame, window_k: u64, bar: usize) -> Vec<Row<'static>> {
+/// One row per active way of `frame` and agent that fired it: two lines
+/// when its check has fired, the second naming the agent the check counted
+/// against. The name takes its fate's mark and colour ([`look`]); a way
+/// fired or re-disclosed in this frame is bold.
+pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, bar: usize) -> Vec<Row<'static>> {
     let (pos, unique) = clusters(&frame.ways, window_k, bar);
     frame
         .ways
@@ -64,21 +117,18 @@ pub(super) fn rows(frame: &Frame, window_k: u64, bar: usize) -> Vec<Row<'static>
             let distance = frame.epoch.saturating_sub(w.epoch_fired);
             let (next, next_style) = render::next_cell(w, frame.epoch, frame.token_position_k);
             let pin = pos.get(i).copied().flatten().map_or(Span::raw(" "), |p| pin(render::cluster_of(p, &unique)));
-            let mut way = vec![Line::raw(w.id.clone())];
+            let mut way = vec![Line::from(way_name(w))];
+            let mut agent = vec![agent_cell(agents, &w.agent, agent_w)];
             if w.check_fires > 0 {
                 let decay = 1.0 / (w.check_fires as f64 + 1.0);
                 way.push(Line::styled(format!("  ✓ check ({} fires, decay={decay:.2})", w.check_fires), theme::muted()));
+                agent.push(agent_cell(agents, &w.agent, agent_w));
             }
             let height = way.len() as u16;
-            let style = if w.is_new {
-                theme::ok().add_modifier(Modifier::BOLD)
-            } else if w.is_redisclosed {
-                theme::accent().add_modifier(Modifier::BOLD)
-            } else {
-                Style::new()
-            };
+            let style = if w.is_new || w.is_redisclosed { Style::new().add_modifier(Modifier::BOLD) } else { Style::new() };
             Row::new(vec![
                 Cell::from(way),
+                Cell::from(agent),
                 Cell::from(Line::from(w.epoch_fired.to_string()).alignment(Alignment::Right)),
                 Cell::from(Line::styled(distance.to_string(), ink(render::distance_style(distance, frame.epoch))).alignment(Alignment::Right)),
                 Cell::from(render::format_trigger(&w.trigger)),

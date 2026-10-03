@@ -4,8 +4,8 @@ agent-tui frame 80x25
 |epoch 1 · 200K ctx · 1 ways · window 2/2  ◇ injected  ● LIVE · 6s ago           |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 4/4|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────┐|
-|│ Way                             Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│▌softwaredev/delivery/commits        1      0  keyword        ●  ─            │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│▌↩ softwaredev/delivery/  main       1      0  keyword        ●  ─            │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -47,13 +47,16 @@ styles
   5   1-78  - - BOLD
   5  79-79  - - DIM
   6   0-0   - - DIM
-  6   1-40  Cyan - BOLD|REVERSED
+  6   1-24  Cyan - BOLD|REVERSED
+  6  25-26  - - BOLD|REVERSED
+  6  27-31  - - BOLD|DIM|REVERSED
+  6  32-40  - - BOLD|REVERSED
   6  41-45  Green - BOLD|REVERSED
-  6  46-62  Cyan - BOLD|REVERSED
+  6  46-62  - - BOLD|REVERSED
   6  63-63  #5ac8fa - BOLD|REVERSED
-  6  64-65  Cyan - BOLD|REVERSED
-  6  66-66  Cyan - BOLD|DIM|REVERSED
-  6  67-78  Cyan - BOLD|REVERSED
+  6  64-65  - - BOLD|REVERSED
+  6  66-66  - - BOLD|DIM|REVERSED
+  6  67-78  - - BOLD|REVERSED
   6  79-79  - - DIM
   7   0-0   - - DIM
   7  79-79  - - DIM

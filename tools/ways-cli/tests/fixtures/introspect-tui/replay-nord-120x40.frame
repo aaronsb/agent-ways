@@ -4,11 +4,11 @@ agent-tui frame 120x40
 |epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ◇ injected · 1 judged out                                  |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│ softwaredev/delivery/commits                                                1      2  keyword        ●  ● now        │|
-|│   ✓ check (1 fires, decay=0.50)                                                                                      │|
-|│ softwaredev/docs/adr                                                        2      1  file           ◆  ◐ 85%        │|
-|│▌softwaredev/code/testing                                                    3      0  embed:en       ■  ─            │|
+|│ Way                                                              Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│ softwaredev/delivery/commits                                     main       1      2  keyword        ●  ● now        │|
+|│   ✓ check (1 fires, decay=0.50)                                  main                                                │|
+|│ softwaredev/docs/adr                                             main       2      1  file           ◆  ◐ 85%        │|
+|│▌↩ softwaredev/code/testing                                       main       3      0  embed:en       ■  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -72,26 +72,34 @@ styles
   5   1-118 - - BOLD
   5 119-119 #434c5e - -
   6   0-0   #434c5e - -
+  6   2-29  #8cafd1 - -
+  6  67-71  #7c8baa - -
   6  81-85  #ff8994 - -
   6 103-103 #5ac8fa - -
   6 106-110 #a3be8c - -
   6 119-119 #434c5e - -
   7   0-0   #434c5e - -
-  7   2-71  #7c8baa - -
+  7   2-64  #7c8baa - -
+  7  67-71  #7c8baa - -
   7 119-119 #434c5e - -
   8   0-0   #434c5e - -
+  8   2-21  #a3be8c - -
+  8  67-71  #7c8baa - -
   8  81-85  #e49b71 - BOLD
   8 103-103 #7dd87d - -
   8 106-110 #e49b71 - BOLD
   8 119-119 #434c5e - -
   9   0-0   #434c5e - -
-  9   1-80  #c99fc1 #3f3f4e BOLD
+  9   1-27  #c99fc1 #3f3f4e BOLD
+  9  28-66  - #3f3f4e BOLD
+  9  67-71  #7c8baa #3f3f4e BOLD
+  9  72-80  - #3f3f4e BOLD
   9  81-85  #a3be8c #3f3f4e BOLD
-  9  86-102 #c99fc1 #3f3f4e BOLD
+  9  86-102 - #3f3f4e BOLD
   9 103-103 #ff6b6b #3f3f4e BOLD
-  9 104-105 #c99fc1 #3f3f4e BOLD
+  9 104-105 - #3f3f4e BOLD
   9 106-106 #7c8baa #3f3f4e BOLD
-  9 107-118 #c99fc1 #3f3f4e BOLD
+  9 107-118 - #3f3f4e BOLD
   9 119-119 #434c5e - -
  10   0-0   #434c5e - -
  10 119-119 #434c5e - -

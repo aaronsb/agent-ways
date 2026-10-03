@@ -26,6 +26,7 @@ use agent_tui::ratatui::widgets::{Cell, HighlightSpacing, List, ListItem, ListSt
 use agent_tui::ratatui::Frame as Draw;
 use agent_tui::screen::Screen;
 use agent_tui::{App, Binding, Keyed, Pane, PaneTab, Tone};
+use crate::cmd::render;
 use crate::cmd::screen_host::pane;
 use agent_tui::theme::{self, Ground, Palette, Shape};
 use agent_tui::timeline::{Playback, Scrubber};
@@ -33,6 +34,7 @@ use ways_agent_core::spend::{self, Group};
 use ways_core::introspection::SessionIntrospection;
 
 use super::live::{Follow, SAMPLE_TICK};
+use super::agents::Agents;
 use super::model::{ActiveWay, Frame, Outcome};
 use super::report::Reports;
 use super::table;
@@ -94,6 +96,8 @@ pub(crate) struct Replay {
     pub(crate) follow: Option<Follow>,
     /// The session's transcript, the follow's to state.
     transcript: Option<std::path::PathBuf>,
+    /// The agents that fired, named for the Agent column (#814).
+    pub(crate) agents: Agents,
     /// Now, in Unix seconds, for how long ago the newest frame fired.
     pub(crate) now: u64,
     table: TableState,
@@ -136,6 +140,7 @@ impl Replay {
             bodies: HashMap::new(),
             follow: None,
             transcript: None,
+            agents: Agents::default(),
             now: agent_fmt::when::now_secs(),
             table: TableState::default(),
             list: ListState::default(),
@@ -170,6 +175,7 @@ impl Replay {
         r.spend = session_spend(content, session_id);
         r.fires.set(super::semantic_fires(content, session_id));
         r.transcript = ways_core::paths::claude_dir().find_transcript(Some(&r.project), session_id);
+        r.agents = Agents::read(&events, r.transcript.as_deref());
         r.follow = if live {
             Some(Follow::session(r.transcript.clone()))
         } else {
@@ -210,7 +216,7 @@ impl Replay {
     fn toggle_matched(&mut self) {
         let anchor = self.anchor();
         self.matched = !self.matched;
-        self.sel = anchor.map_or(0, |(id, epoch)| reselect_by_anchor(&self.shown(), &id, epoch));
+        self.sel = anchor.map_or(0, |(id, agent, epoch)| reselect_by_anchor(&self.shown(), &id, &agent, epoch));
         self.scroll = 0;
     }
 
@@ -234,10 +240,10 @@ impl Replay {
         self.shown().ways.len()
     }
 
-    /// The selected way's id and the epoch it fired at, carried across a
-    /// frame change so the cursor stays on the same way.
-    fn anchor(&self) -> Option<(String, u64)> {
-        self.shown().ways.get(self.sel.min(self.ways_len().saturating_sub(1))).map(|w| (w.id.clone(), w.epoch_fired))
+    /// The selected way's id, agent and the epoch it fired at, carried
+    /// across a frame change so the cursor stays on the same row.
+    fn anchor(&self) -> Option<(String, String, u64)> {
+        self.shown().ways.get(self.sel.min(self.ways_len().saturating_sub(1))).map(|w| (w.id.clone(), w.agent.clone(), w.epoch_fired))
     }
 
     /// Move along the timeline with `go`, keeping the selection on the
@@ -247,7 +253,7 @@ impl Replay {
         let anchor = self.anchor();
         go(&mut self.play);
         self.sel = match anchor {
-            Some((id, epoch)) => reselect_by_anchor(&self.shown(), &id, epoch),
+            Some((id, agent, epoch)) => reselect_by_anchor(&self.shown(), &id, &agent, epoch),
             None => 0,
         };
         self.follow_newest();
@@ -503,6 +509,7 @@ impl Replay {
         self.fires.set(super::semantic_fires(&content, &self.session_id));
         if !frames.is_empty() {
             self.judged = super::frames::has_verdicts(&events);
+            self.agents = Agents::read(&events, self.transcript.as_deref());
             self.take_frames(frames);
         }
         content
@@ -514,7 +521,7 @@ impl Replay {
         let anchor = self.anchor();
         self.frames = frames;
         self.play.resize(self.frames.len());
-        self.sel = anchor.map_or(0, |(id, epoch)| reselect_by_anchor(&self.shown(), &id, epoch));
+        self.sel = anchor.map_or(0, |(id, agent, epoch)| reselect_by_anchor(&self.shown(), &id, &agent, epoch));
         self.follow_newest();
         // The why index is read again in place: the reader keeps its scroll.
         // Out of the view it is dropped and read when the view opens.
@@ -536,15 +543,22 @@ pub(super) fn session_spend(content: &str, session: &str) -> Option<Group> {
 }
 
 /// The row in `frame` that best keeps an anchor across a frame change: the
-/// same row, by id and epoch, which tells a way's blocked row from its
-/// active one; else the same way; else the nearest active way that fired
+/// same row, by id, agent and epoch, which tells a way's blocked row from
+/// its active one; else the same way and agent; else the same way; else the nearest active way that fired
 /// at or before the anchor's epoch (the ways are in epoch order, so the
 /// last such row), else the first row. Epochs restart at each compaction
 /// window, so across one the id match does the work and the fallback only
 /// places the cursor.
-pub(super) fn reselect_by_anchor(frame: &Frame, anchor_id: &str, anchor_epoch: u64) -> usize {
+pub(super) fn reselect_by_anchor(frame: &Frame, anchor_id: &str, anchor_agent: &str, anchor_epoch: u64) -> usize {
     let same = |w: &&ActiveWay| w.id == anchor_id;
-    if let Some(i) = frame.ways.iter().position(|w| same(&w) && w.epoch_fired == anchor_epoch).or_else(|| frame.ways.iter().position(|w| same(&w))) {
+    let mine = |w: &&ActiveWay| same(w) && w.agent == anchor_agent;
+    if let Some(i) = frame
+        .ways
+        .iter()
+        .position(|w| mine(&w) && w.epoch_fired == anchor_epoch)
+        .or_else(|| frame.ways.iter().position(|w| mine(&w)))
+        .or_else(|| frame.ways.iter().position(|w| same(&w)))
+    {
         return i;
     }
     frame.ways.iter().rposition(|w| w.epoch_fired <= anchor_epoch).unwrap_or(0)
@@ -815,7 +829,10 @@ impl Pane for Sessions {
             "Sessions lists the sessions in scope; Enter opens one on the timeline,\n\
              following it when it is being written to. On the timeline ←→ step a\n\
              frame, space plays or follows, Enter or Tab opens why the selected way\n\
-             fired, and f widens the table to every matched way. A click on the\n\
+             fired, and f widens the table to every matched way. A way's mark and\n\
+             colour say what happened to it: green fired, ↩ re-disclosed, blue its\n\
+             check fired, ◌ shadow-judged, ⊘ judged out, ◷ held by its refire\n\
+             window, ⊟ over the context cap; bold is this frame. A click on the\n\
              track seeks there. `ways session replay --json` prints the timeline."
                 .into(),
         )
@@ -1054,18 +1071,16 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
     if shown.ways.is_empty() {
         f.render_widget(Paragraph::new(Line::styled("no ways fired yet", theme::muted())).block(pane(title)), ways);
     } else {
-        // The injected rows with their outcome marks, then, in the matched
-        // view, the rows the judge blocked: the order `Frame::ways` keeps.
-        let mut marked = fr.clone();
-        for w in &mut marked.ways {
-            w.id = format!("{}{}", w.outcome.mark(), w.id);
-        }
-        let mut rows = table::rows(&marked, r.window_k, inner_w);
+        // The injected rows, then, in the matched view, the rows the judge,
+        // the refire window or the context cap kept out: the order
+        // `Frame::ways` keeps.
+        let agent_w = table::agent_width(&shown.ways, &r.agents, inner_w);
+        let mut rows = table::rows(fr, &r.agents, agent_w, r.window_k, inner_w);
+        let withheld = || shown.ways.iter().filter(|w| !w.outcome.injected());
         // A way whose check fired takes a second line.
-        let heights: Vec<u16> =
-            fr.ways.iter().map(|w| 1 + u16::from(w.check_fires > 0)).chain(shown.ways.iter().filter(|w| w.outcome == Outcome::Blocked).map(|_| 1)).collect();
-        rows.extend(shown.ways.iter().filter(|w| w.outcome == Outcome::Blocked).map(|w| blocked_row(w, shown.epoch)));
-        let t = Table::new(rows, table::WIDTHS)
+        let heights: Vec<u16> = fr.ways.iter().map(|w| 1 + u16::from(w.check_fires > 0)).chain(withheld().map(|_| 1)).collect();
+        rows.extend(withheld().map(|w| withheld_row(w, &r.agents, agent_w, shown.epoch)));
+        let t = Table::new(rows, table::widths(agent_w))
             .header(table::header())
             .column_spacing(2)
             .block(pane(title))
@@ -1097,21 +1112,24 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
     }
 }
 
-/// A candidate the judge blocked, in the table's columns: judged in this
-/// frame, its P(yes) where the trigger goes, and nothing to re-disclose,
-/// for it injected nothing. A way blocked with its ancestor names it.
-fn blocked_row(w: &ActiveWay, epoch: u64) -> Row<'static> {
-    let right = |t: String| Cell::from(Line::from(t).alignment(Alignment::Right));
+/// A candidate kept out in this frame, in the table's columns: its name
+/// marked and coloured by what kept it out, its trigger (a judged way's
+/// P(yes)), and nothing to re-disclose, for it injected nothing. A way
+/// blocked with its ancestor names it.
+fn withheld_row(w: &ActiveWay, agents: &Agents, agent_w: u16, epoch: u64) -> Row<'static> {
+    let muted = |t: String| Span::styled(t, theme::muted());
+    let right = |t: String| Cell::from(Line::from(muted(t)).alignment(Alignment::Right));
     let with = if w.ancestor.is_empty() { String::new() } else { format!(" (with {})", w.ancestor) };
+    let trigger = if w.outcome == Outcome::Blocked { format!("{} {}", w.trigger, w.p_yes) } else { render::format_trigger(&w.trigger) };
     Row::new(vec![
-        Cell::from(format!("{}{}{with}", w.outcome.mark(), w.id)),
+        Cell::from(Line::from(vec![table::way_name(w), muted(with)])),
+        Cell::from(table::agent_cell(agents, &w.agent, agent_w)),
         right(w.epoch_fired.to_string()),
         right(epoch.saturating_sub(w.epoch_fired).to_string()),
-        Cell::from(format!("{} {}", w.trigger, w.p_yes)),
+        Cell::from(muted(trigger)),
         Cell::from(" "),
-        Cell::from("not injected"),
+        Cell::from(muted("not injected".into())),
     ])
-    .style(theme::muted())
 }
 
 fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
@@ -1127,11 +1145,10 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
             // A filled bullet marks a way the model has a record of on this
             // channel; a judge-blocked way's channel is `judge`.
             let bullet = if facet(&w.id, &w.trigger).is_some() { "•" } else { "·" };
-            let id = format!("{}{}", w.outcome.mark(), w.id);
             ListItem::new(Line::from(vec![
                 Span::raw(format!("{bullet} ")),
                 Span::styled(format!("e{:>ew$} ", w.epoch_fired), theme::muted()),
-                if w.outcome == Outcome::Blocked { Span::styled(id, theme::muted()) } else { Span::raw(id) },
+                table::way_name(w),
             ]))
         })
         .collect();

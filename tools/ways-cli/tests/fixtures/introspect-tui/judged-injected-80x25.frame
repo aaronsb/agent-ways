@@ -4,9 +4,9 @@ agent-tui frame 80x25
 |epoch 1 · 200K ctx · 2 ways · window 1/1  ◇ injected · 1 judged out             |
 |●─────────────────────────────────────────────────────────────────────────── 1/2|
 |┌ ways at epoch 1 ─────────────────────────────────────────────────────────────┐|
-|│ Way                             Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│▌softwaredev/code/testing            1      0  embed:en       ◆  ─            │|
-|│ ◌ softwaredev/delivery/commits      1      0  keyword        ●  ─            │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│▌softwaredev/code/testin  main       1      0  embed:en       ◆  ─            │|
+|│ ◌ softwaredev/delivery/  main       1      0  keyword        ●  ─            │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -46,18 +46,29 @@ styles
   5  79-79  - - DIM
   6   0-0   - - DIM
   6   1-1   Cyan - BOLD|REVERSED
-  6   2-62  Green - BOLD|REVERSED
+  6   2-24  Green - BOLD|REVERSED
+  6  25-26  - - BOLD|REVERSED
+  6  27-31  - - BOLD|DIM|REVERSED
+  6  32-40  - - BOLD|REVERSED
+  6  41-45  Green - BOLD|REVERSED
+  6  46-62  - - BOLD|REVERSED
   6  63-63  #7dd87d - BOLD|REVERSED
-  6  64-65  Green - BOLD|REVERSED
-  6  66-66  Green - BOLD|DIM|REVERSED
-  6  67-78  Green - BOLD|REVERSED
+  6  64-65  - - BOLD|REVERSED
+  6  66-66  - - BOLD|DIM|REVERSED
+  6  67-78  - - BOLD|REVERSED
   6  79-79  - - DIM
   7   0-0   - - DIM
-  7   1-62  Green - BOLD
+  7   1-1   - - BOLD
+  7   2-24  Yellow - BOLD
+  7  25-26  - - BOLD
+  7  27-31  - - BOLD|DIM
+  7  32-40  - - BOLD
+  7  41-45  Green - BOLD
+  7  46-62  - - BOLD
   7  63-63  #5ac8fa - BOLD
-  7  64-65  Green - BOLD
-  7  66-66  Green - BOLD|DIM
-  7  67-78  Green - BOLD
+  7  64-65  - - BOLD
+  7  66-66  - - BOLD|DIM
+  7  67-78  - - BOLD
   7  79-79  - - DIM
   8   0-0   - - DIM
   8  79-79  - - DIM

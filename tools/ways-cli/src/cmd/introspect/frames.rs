@@ -69,8 +69,13 @@ pub(super) fn build_frames(
         refire_cache.get(way_id).copied().unwrap_or(fallback_refire_k)
     };
     let mut frames: Vec<Frame> = Vec::new();
-    let mut active_ways: HashMap<String, ActiveWay> = HashMap::new();
-    let mut check_fires: HashMap<String, u64> = HashMap::new();
+    // A way is a row per agent that fired it (#814): each agent has its
+    // own context, so main and a subagent firing one way are two rows.
+    let mut active_ways: HashMap<(String, String), ActiveWay> = HashMap::new();
+    let mut check_fires: HashMap<(String, String), u64> = HashMap::new();
+    // The agent that last fired each way: a check event that does not name
+    // its agent counts against it.
+    let mut last_agent: HashMap<String, String> = HashMap::new();
     let mut epoch: u64 = 0;
     let mut window: u64 = 1;
 
@@ -105,6 +110,7 @@ pub(super) fn build_frames(
         if boundary {
             active_ways.clear();
             check_fires.clear();
+            last_agent.clear();
             window += 1;
             epoch = 0;
         }
@@ -129,43 +135,56 @@ pub(super) fn build_frames(
 
         // Ways fired or re-disclosed in this frame, and the judge's verdicts
         // against its threshold, read once the frame's fires are in.
-        let mut fired_now: Vec<&str> = Vec::new();
+        let mut fired_now: Vec<(&str, String)> = Vec::new();
         let mut judged: Vec<&WayEvent> = Vec::new();
+        let mut held: Vec<&WayEvent> = Vec::new();
         let mut suppressed: Vec<Suppression> = Vec::new();
 
         for ev in cluster {
             match ev.event.as_str() {
                 "way_fired" => {
                     if !ev.way.is_empty() {
-                        fired_now.push(&ev.way);
-                        let existing = active_ways.get(&ev.way);
-                        if existing.is_none() {
+                        let key = (ev.way.clone(), fired_by(ev));
+                        fired_now.push((&ev.way, key.1.clone()));
+                        last_agent.insert(ev.way.clone(), key.1.clone());
+                        // The note names a way new to the session, whichever
+                        // agent fired it; the row is new to its agent.
+                        if !active_ways.keys().any(|(w, _)| *w == ev.way) {
                             new_events.push(format!(
                                 "{} ({})",
                                 ev.way,
                                 render::format_trigger(&ev.trigger)
                             ));
                         }
-                        active_ways.insert(ev.way.clone(), ActiveWay {
+                        let is_new = !active_ways.contains_key(&key);
+                        active_ways.insert(key.clone(), ActiveWay {
                             id: ev.way.clone(),
                             trigger: ev.trigger.clone(),
                             epoch_fired: epoch,
                             token_pos: token_k * 1000,
-                            check_fires: check_fires.get(&ev.way).copied().unwrap_or(0),
-                            is_new: existing.is_none(),
+                            check_fires: check_fires.get(&key).copied().unwrap_or(0),
+                            is_new,
                             is_redisclosed: false,
                             refire_threshold_k: refire_for(&ev.way),
                             outcome: Outcome::Injected,
                             p_yes: String::new(),
                             ancestor: String::new(),
+                            agent: key.1,
+                            by_redisclosure: false,
                         });
                     }
                 }
                 "check_fired" => {
                     if !ev.check.is_empty() {
-                        let count = check_fires.entry(ev.check.clone()).or_insert(0);
+                        let agent = if ev.agent_id.is_empty() {
+                            last_agent.get(&ev.check).cloned().unwrap_or_else(|| MAIN.to_string())
+                        } else {
+                            ev.agent_id.clone()
+                        };
+                        let key = (ev.check.clone(), agent);
+                        let count = check_fires.entry(key.clone()).or_insert(0);
                         *count += 1;
-                        if let Some(w) = active_ways.get_mut(&ev.check) {
+                        if let Some(w) = active_ways.get_mut(&key) {
                             w.check_fires = *count;
                         }
                         new_events.push(format!("✓ check {}", ev.check));
@@ -173,17 +192,21 @@ pub(super) fn build_frames(
                 }
                 "way_redisclosed" if !ev.way.is_empty() => {
                     new_events.push(format!("↻ {}", ev.way));
-                    fired_now.push(&ev.way);
+                    let key = (ev.way.clone(), fired_by(ev));
+                    fired_now.push((&ev.way, key.1.clone()));
+                    last_agent.insert(ev.way.clone(), key.1.clone());
+                    let checks = check_fires.get(&key).copied().unwrap_or(0);
                     // A redisclosure means the way is active (re-injected). Update it
                     // if present; otherwise ADD it — after a compaction-window reset a
                     // still-active way first reappears via redisclosure, not a fresh
                     // fire, and must repopulate the window or it looks empty.
                     active_ways
-                        .entry(ev.way.clone())
+                        .entry(key.clone())
                         .and_modify(|w| {
                             w.epoch_fired = epoch;
                             w.token_pos = token_k * 1000;
                             w.is_redisclosed = true;
+                            w.by_redisclosure = true;
                             w.is_new = false;
                             // A new injection: this frame's verdict, if any,
                             // marks it below, not the last one's.
@@ -195,16 +218,21 @@ pub(super) fn build_frames(
                             trigger: ev.trigger.clone(),
                             epoch_fired: epoch,
                             token_pos: token_k * 1000,
-                            check_fires: check_fires.get(&ev.way).copied().unwrap_or(0),
+                            check_fires: checks,
                             is_new: false,
                             is_redisclosed: true,
                             refire_threshold_k: refire_for(&ev.way),
                             outcome: Outcome::Injected,
                             p_yes: String::new(),
                             ancestor: String::new(),
+                            agent: key.1,
+                            by_redisclosure: true,
                         });
                 }
                 "way_judged" if !ev.way.is_empty() && matches!(ev.verdict.as_str(), "block" | "would_block") => judged.push(ev),
+                // #814: a way matched and held back, by its refire window or
+                // the context cap. A check's own suppression is not a row.
+                "way_suppressed" if !ev.way.is_empty() && ev.kind == "way" => held.push(ev),
                 // #786: the switch held a subagent's ways back. It is a mark
                 // on the frame, not an event note, so `new_events` reads as
                 // it did before the timeline knew of it.
@@ -226,14 +254,23 @@ pub(super) fn build_frames(
         let mut blocked: Vec<ActiveWay> = Vec::new();
         for ev in judged {
             if ev.verdict == "would_block" {
-                match active_ways.get_mut(&ev.way) {
-                    Some(w) if fired_now.contains(&ev.way.as_str()) => {
+                // The verdict marks this frame's fires of the way: its
+                // agent's, where the verdict names one.
+                let mut marked = false;
+                for (way, agent) in &fired_now {
+                    if *way != ev.way || !(ev.agent_id.is_empty() || ev.agent_id == *agent) {
+                        continue;
+                    }
+                    if let Some(w) = active_ways.get_mut(&(ev.way.clone(), agent.clone())) {
                         w.outcome = Outcome::WouldBlock;
                         w.p_yes = ev.p_yes.clone();
+                        marked = true;
                     }
-                    _ => new_events.push(format!("◌ {} (gate {}, shadow)", ev.way, ev.p_yes)),
                 }
-            } else if !blocked.iter().any(|b| b.id == ev.way) {
+                if !marked {
+                    new_events.push(format!("◌ {} (gate {}, shadow)", ev.way, ev.p_yes));
+                }
+            } else if !blocked.iter().any(|b| b.id == ev.way && b.agent == ev.agent_id) {
                 blocked.push(ActiveWay {
                     id: ev.way.clone(),
                     // The channel the why index files a judge-blocked way under.
@@ -247,13 +284,39 @@ pub(super) fn build_frames(
                     outcome: Outcome::Blocked,
                     p_yes: ev.p_yes.clone(),
                     ancestor: ev.ancestor.clone(),
+                    agent: ev.agent_id.clone(),
+                    by_redisclosure: false,
                 });
             }
         }
-        blocked.sort_by(|a, b| a.id.cmp(&b.id));
+        // A way held back is a row of its own in its frame, as a block is:
+        // it injected nothing then, whatever row it has from an earlier fire.
+        for ev in held {
+            let outcome = if ev.reason == "context_cap" { Outcome::CapHeld } else { Outcome::RefireHeld };
+            let agent = fired_by(ev);
+            if blocked.iter().any(|b| b.id == ev.way && b.agent == agent && b.outcome == outcome) {
+                continue;
+            }
+            blocked.push(ActiveWay {
+                id: ev.way.clone(),
+                trigger: ev.trigger.clone(),
+                epoch_fired: epoch,
+                token_pos: token_k * 1000,
+                check_fires: 0,
+                is_new: false,
+                is_redisclosed: false,
+                refire_threshold_k: 0,
+                outcome,
+                p_yes: String::new(),
+                ancestor: String::new(),
+                agent,
+                by_redisclosure: false,
+            });
+        }
+        blocked.sort_by(|a, b| row_order(a).cmp(&row_order(b)));
 
         let mut ways: Vec<ActiveWay> = active_ways.values().cloned().collect();
-        ways.sort_by(|a, b| (a.epoch_fired, &a.id).cmp(&(b.epoch_fired, &b.id)));
+        ways.sort_by(|a, b| (a.epoch_fired, row_order(a)).cmp(&(b.epoch_fired, row_order(b))));
         ways.extend(blocked);
 
         frames.push(Frame {
@@ -269,6 +332,20 @@ pub(super) fn build_frames(
     }
 
     frames
+}
+
+/// The top-level agent's id in the event log.
+pub(crate) const MAIN: &str = "main";
+
+/// The agent a fire or re-disclosure went to. A row written before the
+/// log recorded agents was the top-level agent's.
+fn fired_by(ev: &WayEvent) -> String {
+    if ev.agent_id.is_empty() { MAIN.to_string() } else { ev.agent_id.clone() }
+}
+
+/// Rows of one epoch in id order, and a way's rows with main's first.
+fn row_order(w: &ActiveWay) -> (&str, bool, &str) {
+    (&w.id, w.agent != MAIN, &w.agent)
 }
 
 /// Whether the relevance judge gave a verdict in this session.
@@ -348,6 +425,9 @@ pub(crate) fn load_session_events(content: &str, session_id: &str) -> Vec<WayEve
                 switch: v["switch"].as_str().unwrap_or("").to_string(),
                 lane: v["lane"].as_str().unwrap_or("").to_string(),
                 agent: v["agent"].as_str().unwrap_or("").to_string(),
+                agent_id: v["agent_id"].as_str().unwrap_or("").to_string(),
+                kind: v["kind"].as_str().unwrap_or("").to_string(),
+                reason: v["reason"].as_str().unwrap_or("").to_string(),
             })
         })
         .collect();
@@ -408,6 +488,9 @@ mod tests {
             switch: String::new(),
             lane: String::new(),
             agent: String::new(),
+            agent_id: String::new(),
+            kind: String::new(),
+            reason: String::new(),
         };
         // Window 1: origin session_start + two fires. A second session_start
         // (a compaction) opens window 2, which starts fresh with one fire.
@@ -453,6 +536,9 @@ mod tests {
             switch: String::new(),
             lane: String::new(),
             agent: String::new(),
+            agent_id: String::new(),
+            kind: String::new(),
+            reason: String::new(),
         };
         let events = vec![
             ev("2026-01-01T00:00:00Z", "d/a"),
@@ -609,6 +695,9 @@ mod tests {
             switch: String::new(),
             lane: String::new(),
             agent: String::new(),
+            agent_id: String::new(),
+            kind: String::new(),
+            reason: String::new(),
         };
         // A way fires in window 1; after a compaction, it only *re-discloses* (no
         // fresh fire) in window 2 — as a mature window mostly does. It must still show

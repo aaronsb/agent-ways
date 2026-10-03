@@ -10,6 +10,7 @@ use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
+use super::agents::Agents;
 use super::model::Suppression;
 use super::{frames, scope, sessions, Frame};
 use crate::session;
@@ -106,6 +107,15 @@ struct DumpWay {
     /// On a way blocked with its ancestor, the ancestor whose P(yes) it shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     ancestor: Option<String>,
+    /// The agent it was injected into (#814): `main` or the subagent's id;
+    /// left out on a blocked row whose verdict did not name one. A way
+    /// several agents fired is an entry per agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent: Option<String>,
+    /// The subagent's `subagent_type` from its transcript, or
+    /// `workflow-subagent` for a workflow member; left out when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_type: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -202,7 +212,9 @@ fn build_dump(content: &str, session_id: &str, matched: bool) -> Option<SessionD
 
     let near_misses = build_near_misses(content, session_id, &frames);
     let summary = build_summary(content, session_id, &frames, near_misses.len());
-    let dump_frames = frames.iter().map(to_dump_frame).collect();
+    let transcript = ways_core::paths::claude_dir().find_transcript(Some(&project), session_id);
+    let agents = Agents::read(&events, transcript.as_deref());
+    let dump_frames = frames.iter().map(|f| to_dump_frame(f, &agents)).collect();
 
     Some(SessionDump {
         session: session_id.to_string(),
@@ -214,7 +226,7 @@ fn build_dump(content: &str, session_id: &str, matched: bool) -> Option<SessionD
     })
 }
 
-fn to_dump_frame(f: &Frame) -> DumpFrame {
+fn to_dump_frame(f: &Frame, agents: &Agents) -> DumpFrame {
     let active_ways = f
         .ways
         .iter()
@@ -230,6 +242,8 @@ fn to_dump_frame(f: &Frame) -> DumpFrame {
             outcome: w.outcome.as_str(),
             p_yes: Some(w.p_yes.clone()).filter(|p| !p.is_empty()),
             ancestor: Some(w.ancestor.clone()).filter(|a| !a.is_empty()),
+            agent: Some(w.agent.clone()).filter(|a| !a.is_empty()),
+            agent_type: agents.agent_type(&w.agent).map(str::to_string),
         })
         .collect();
     DumpFrame {

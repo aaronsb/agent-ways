@@ -4,8 +4,8 @@ agent-tui frame 80x25
 |epoch 2 · 200K ctx · 1 ways · window 1/1 · 2026-07-03 16:53 · ⊝ 3 suppressed    |
 |━━━━━━━━━━━━━━━━━━━━━━━━━●─────────────────────────────────────────────────⊝ 2/4|
 |┌ ways at epoch 2 ─────────────────────────────────────────────────────────────┐|
-|│ Way                             Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│▌softwaredev/code/testing            1      1  embed:en       ●  ● now        │|
+|│ Way                      Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│▌softwaredev/code/testin  main       1      1  embed:en       ●  ● now        │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -47,7 +47,10 @@ styles
   5  79-79  - - DIM
   6   0-0   - - DIM
   6   1-1   Cyan - BOLD|REVERSED
-  6   2-40  - - BOLD|REVERSED
+  6   2-24  Green - BOLD|REVERSED
+  6  25-26  - - BOLD|REVERSED
+  6  27-31  - - BOLD|DIM|REVERSED
+  6  32-40  - - BOLD|REVERSED
   6  41-45  Red - BOLD|REVERSED
   6  46-62  - - BOLD|REVERSED
   6  63-63  #5ac8fa - BOLD|REVERSED

@@ -4,11 +4,11 @@ agent-tui frame 120x40
 |epoch 3 · 200K ctx · 3 ways · window 1/2 · 2026-07-03 16:55  ◇ injected · 1 judged out  ● LIVE paused                   |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●──────────────────────────────────────┼ 3/4|
 |┌ ways at epoch 3 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                                     Epoch   Dist  Trigger        ⌖  Re-disclosure│|
-|│▌softwaredev/delivery/commits                                                1      2  keyword        ●  ● now        │|
-|│   ✓ check (1 fires, decay=0.50)                                                                                      │|
-|│ softwaredev/docs/adr                                                        2      1  file           ◆  ◐ 85%        │|
-|│ softwaredev/code/testing                                                    3      0  embed:en       ■  ─            │|
+|│ Way                                                              Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│▌softwaredev/delivery/commits                                     main       1      2  keyword        ●  ● now        │|
+|│   ✓ check (1 fires, decay=0.50)                                  main                                                │|
+|│ softwaredev/docs/adr                                             main       2      1  file           ◆  ◐ 85%        │|
+|│ ↩ softwaredev/code/testing                                       main       3      0  embed:en       ■  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -63,7 +63,10 @@ styles
   5 119-119 - - DIM
   6   0-0   - - DIM
   6   1-1   Cyan - BOLD|REVERSED
-  6   2-80  - - BOLD|REVERSED
+  6   2-29  Blue - BOLD|REVERSED
+  6  30-66  - - BOLD|REVERSED
+  6  67-71  - - BOLD|DIM|REVERSED
+  6  72-80  - - BOLD|REVERSED
   6  81-85  Red - BOLD|REVERSED
   6  86-102 - - BOLD|REVERSED
   6 103-103 #5ac8fa - BOLD|REVERSED
@@ -73,22 +76,30 @@ styles
   6 119-119 - - DIM
   7   0-0   - - DIM
   7   1-1   - - BOLD|REVERSED
-  7   2-71  - - BOLD|DIM|REVERSED
+  7   2-64  - - BOLD|DIM|REVERSED
+  7  65-66  - - BOLD|REVERSED
+  7  67-71  - - BOLD|DIM|REVERSED
   7  72-118 - - BOLD|REVERSED
   7 119-119 - - DIM
   8   0-0   - - DIM
+  8   2-21  Green - -
+  8  67-71  - - DIM
   8  81-85  Yellow - BOLD
   8 103-103 #7dd87d - -
   8 106-110 Yellow - BOLD
   8 119-119 - - DIM
   9   0-0   - - DIM
-  9   1-80  Cyan - BOLD
+  9   1-1   - - BOLD
+  9   2-27  Cyan - BOLD
+  9  28-66  - - BOLD
+  9  67-71  - - BOLD|DIM
+  9  72-80  - - BOLD
   9  81-85  Green - BOLD
-  9  86-102 Cyan - BOLD
+  9  86-102 - - BOLD
   9 103-103 #ff6b6b - BOLD
-  9 104-105 Cyan - BOLD
-  9 106-106 Cyan - BOLD|DIM
-  9 107-118 Cyan - BOLD
+  9 104-105 - - BOLD
+  9 106-106 - - BOLD|DIM
+  9 107-118 - - BOLD
   9 119-119 - - DIM
  10   0-0   - - DIM
  10 119-119 - - DIM

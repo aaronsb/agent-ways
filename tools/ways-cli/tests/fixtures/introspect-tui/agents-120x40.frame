@@ -1,16 +1,15 @@
 agent-tui frame 120x40
 | 1 timeline    2 fires    3 spend    4 stats    5 precision                                                             |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
-|epoch 2 · 200K ctx · 1 ways · window 1/1 · 2026-07-03 16:53 · ⊝ 3 suppressed                                            |
-|━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●────────────────────────────────────────────────────────────────────────────⊝ 2/4|
+|epoch 2 · 200K ctx · 4 ways · window 1/1 · 2026-07-03 16:53                                                             |
+|━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 2/2|
 |┌ ways at epoch 2 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
-|│ Way                                                              Agent  Epoch   Dist  Trigger        ⌖  Re-disclose  │|
-|│▌softwaredev/code/testing                                         main       1      1  embed:en       ●  ● now        │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
+|│ Way                                                     Agent           Epoch   Dist  Trigger        ⌖  Re-disclose  │|
+|│▌softwaredev/code/testing                                main                1      1  embed:en       ●  ● now        │|
+|│ softwaredev/docs/adr                                    main                2      0  file           ◆  ─            │|
+|│ softwaredev/docs/adr                                    code-reviewer       2      0  file           ◆  ─            │|
+|│   ✓ check (1 fires, decay=0.50)                         code-reviewer                                                │|
+|│ softwaredev/docs/adr                                    wf·audit:judge      2      0  keyword        ◆  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -35,8 +34,9 @@ agent-tui frame 120x40
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
 |┌ context ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 32% (64K / 200K)│|
-|│● 1 re-disclose now  │ 40K interval                                                                                   │|
-|│⊝ suppressed: dispatch (session switch), agent a7f3c2 (session switch)                                                │|
+|│● 1 re-disclose now  ○ 3 distant  │ 40–80K intervals                                                                  │|
+|│·································································································◆ forecast 64K → 144K│|
+|│+ softwaredev/docs/adr (file), ✓ check softwaredev/docs/adr                                                           │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
 | replay  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space play · +- 1.0s · f matched · 1-9 tabs             |
 styles
@@ -48,11 +48,8 @@ styles
   1   0-7   - - BOLD
   1  44-59  - - DIM
   2   0-58  - - DIM
-  2  59-75  Yellow - -
-  3   0-37  Cyan - -
-  3  38-38  Cyan - BOLD
-  3  39-114 - - DIM
-  3 115-115 Yellow - -
+  3   0-114 Cyan - -
+  3 115-115 Cyan - BOLD
   3 116-119 - - BOLD
   4   0-0   - - DIM
   4   1-17  Blue - BOLD|DIM
@@ -63,8 +60,8 @@ styles
   6   0-0   - - DIM
   6   1-1   Cyan - BOLD|REVERSED
   6   2-25  Green - BOLD|REVERSED
-  6  26-66  - - BOLD|REVERSED
-  6  67-71  - - BOLD|DIM|REVERSED
+  6  26-57  - - BOLD|REVERSED
+  6  58-71  - - BOLD|DIM|REVERSED
   6  72-80  - - BOLD|REVERSED
   6  81-85  Red - BOLD|REVERSED
   6  86-102 - - BOLD|REVERSED
@@ -74,12 +71,50 @@ styles
   6 111-118 - - BOLD|REVERSED
   6 119-119 - - DIM
   7   0-0   - - DIM
+  7   1-1   - - BOLD
+  7   2-21  Green - BOLD
+  7  22-57  - - BOLD
+  7  58-71  - - BOLD|DIM
+  7  72-80  - - BOLD
+  7  81-85  Green - BOLD
+  7  86-102 - - BOLD
+  7 103-103 #7dd87d - BOLD
+  7 104-105 - - BOLD
+  7 106-106 - - BOLD|DIM
+  7 107-118 - - BOLD
   7 119-119 - - DIM
   8   0-0   - - DIM
+  8   1-1   - - BOLD
+  8   2-21  Blue - BOLD
+  8  22-57  - - BOLD
+  8  58-71  #5ac8fa - BOLD
+  8  72-80  - - BOLD
+  8  81-85  Green - BOLD
+  8  86-102 - - BOLD
+  8 103-103 #7dd87d - BOLD
+  8 104-105 - - BOLD
+  8 106-106 - - BOLD|DIM
+  8 107-118 - - BOLD
   8 119-119 - - DIM
   9   0-0   - - DIM
+  9   1-1   - - BOLD
+  9   2-55  - - BOLD|DIM
+  9  56-57  - - BOLD
+  9  58-71  #5ac8fa - BOLD
+  9  72-118 - - BOLD
   9 119-119 - - DIM
  10   0-0   - - DIM
+ 10   1-1   - - BOLD
+ 10   2-21  Green - BOLD
+ 10  22-57  - - BOLD
+ 10  58-71  #7dd87d - BOLD
+ 10  72-80  - - BOLD
+ 10  81-85  Green - BOLD
+ 10  86-102 - - BOLD
+ 10 103-103 #7dd87d - BOLD
+ 10 104-105 - - BOLD
+ 10 106-106 - - BOLD|DIM
+ 10 107-118 - - BOLD
  10 119-119 - - DIM
  11   0-0   - - DIM
  11 119-119 - - DIM
@@ -123,21 +158,22 @@ styles
  30 119-119 - - DIM
  31   0-0   - - DIM
  31 119-119 - - DIM
- 32   0-0   - - DIM
- 32 119-119 - - DIM
- 33   0-119 - - DIM
+ 32   0-119 - - DIM
+ 33   0-0   - - DIM
+ 33   1-9   Blue - BOLD|DIM
+ 33  10-119 - - DIM
  34   0-0   - - DIM
- 34   1-9   Blue - BOLD|DIM
- 34  10-119 - - DIM
+ 34   1-101 Green - -
+ 34 119-119 - - DIM
  35   0-0   - - DIM
- 35   1-101 Green - -
+ 35   1-19  Green - -
+ 35  22-52  - - DIM
  35 119-119 - - DIM
- 36   0-0   - - DIM
- 36   1-19  Green - -
- 36  20-35  - - DIM
- 36 119-119 - - DIM
+ 36   0-97  - - DIM
+ 36  98-98  #7dd87d - -
+ 36  99-119 - - DIM
  37   0-0   - - DIM
- 37   1-70  Yellow - -
+ 37   1-59  Green - BOLD
  37 119-119 - - DIM
  38   0-119 - - DIM
  39   0-7   Black Cyan BOLD
