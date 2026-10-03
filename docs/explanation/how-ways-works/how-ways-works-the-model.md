@@ -209,7 +209,7 @@ it, which is precisely why the conversation can't reveal it and the JSON dump
 
 The events are written by the same code path that does the matching, at the
 moment the decision is made — not reconstructed after the fact, not inferred from
-the transcript. The `fire_score` on a semantic fire is the exact calibrated score that cleared
+the transcript. The `fire_score` on a semantic fire is the exact score that cleared
 the bar; the near-miss probabilities are the exact values that didn't; the judge's
 `p_yes` is the exact probability it returned. This is persistence of a decision already made, not new computation
 ([[ADR-134]]). What you read back is what actually happened.

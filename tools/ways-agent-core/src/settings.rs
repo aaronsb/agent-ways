@@ -111,7 +111,7 @@ const KEYS: &[KeySpec] = &[
         kind: POSITIVE,
         default: DefaultValue::Fn(|b| shipped_field(b, "turns")),
         doc: "Conversation turns sent as context, counted back from the last.",
-        long: "",
+        long: "The hook offers at most two turns: Claude's last reply, then the prompt. A value above 2 sends those two.",
         ..BASE
     },
     KeySpec {
