@@ -95,6 +95,7 @@ cite:
     - agents/workflow-orchestrator.md
     - agents/workspace-curator.md
     - tests/fixtures
+    - docs/images/ways/tools
     - tests/adr-lint-test.sh
     - tests/adr-archive-test.sh
     - tests/adr-golden-test.sh
