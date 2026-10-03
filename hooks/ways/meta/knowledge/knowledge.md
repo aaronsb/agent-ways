@@ -17,7 +17,7 @@ refire: 0.15
 |---------------|--------------|
 | Semantic discovery ("explain code") | Tool-triggered (`git commit` → format reminder) |
 | Tool restrictions (`allowed-tools`) | File-triggered (edit `.env` → config guidance) |
-| Multi-file reference docs | Session-gated, re-injects on a decay curve |
+| Multi-file reference docs | Refire-gated, re-injects after its `refire:` fraction |
 | | Dynamic context (macro queries API) |
 
 They complement: Skills can't detect tool execution. Ways support both regex and semantic matching.
