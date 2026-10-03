@@ -43,12 +43,10 @@ fn marker_cmd(marker: &str) -> Vec<String> {
 
 /// Like `marker_cmd`, but also prints the directory it ran in. The line can
 /// wrap in a narrow pane, so read it back through `unwrapped`.
-fn cwd_cmd(marker: &str) -> Vec<String> {
-    vec![
-        "/bin/sh".into(),
-        "-c".into(),
-        format!("echo {marker}; echo \"cwd=[$(pwd -P)]\"; read -r line"),
-    ]
+fn cwd_cmd() -> Vec<String> {
+    // The cwd line alone: a marker printed first would be what a long cwd's
+    // wrapped rows scroll off the pane.
+    vec!["/bin/sh".into(), "-c".into(), "echo \"cwd=[$(pwd -P)]\"; read -r line".into()]
 }
 
 fn which(prog: &str) -> PathBuf {
@@ -133,7 +131,7 @@ fn a_cwd_with_tmux_style_syntax_is_entered_exactly() {
             cwd: Some(cwd.clone()),
             ..LaunchOptions::default()
         };
-        let s = harness.launch(&name, &opts, &cwd_cmd("cwd-ok")).unwrap();
+        let s = harness.launch(&name, &opts, &cwd_cmd()).unwrap();
         let text = s.wait_for("cwd=[", WAIT).unwrap();
         let want = format!("cwd=[{}]", cwd.canonicalize().unwrap().display());
         assert!(
