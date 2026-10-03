@@ -584,6 +584,18 @@ fn no_hint_when_no_other_project_has_ways() {
 }
 
 #[test]
+fn the_screen_watches_each_providers_model_cache() {
+    let fx = Fixture::home();
+    let ways = Ways::new(ctx_of(&fx));
+    ways.layers();
+    let watched = ways.watched.borrow().clone();
+    let dir = ways_agent_core::models::cache_dir();
+    for p in ways_agent_core::profile::Provider::ALL {
+        assert!(watched.contains(&ways_agent_core::models::cache_path(&dir, p)), "{p}: {watched:?}");
+    }
+}
+
+#[test]
 fn projects_of_one_name_are_told_apart_by_their_parent() {
     let fx = Fixture::home();
     known(&fx, "a/app", &["x/y"]);

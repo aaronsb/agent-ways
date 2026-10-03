@@ -45,6 +45,7 @@ fn choice_notes(reg: &Registry, prefix: &str, layers: Option<&[Layer]>) -> Vec<(
         return Vec::new();
     }
     // The choices come from the files, read for the canonical fragment too.
+    let canonical = layers.is_none();
     let live;
     let layers = match layers {
         Some(l) => l,
@@ -53,14 +54,23 @@ fn choice_notes(reg: &Registry, prefix: &str, layers: Option<&[Layer]>) -> Vec<(
             &live
         }
     };
-    computed.iter().map(|b| (b.spec.file, choice_note(&b.name(), b.spec.kind, layers))).collect()
+    // The canonical fragment shows each profile as shipped, so an instance's
+    // note is read as shipped too: over what the files store it would name
+    // the list of a provider the body does not show.
+    computed
+        .iter()
+        .map(|b| {
+            let over: &[Layer] = if canonical && !b.bound.is_empty() { &[] } else { layers };
+            (b.spec.file, choice_note(&b.name(), b.spec.kind, over, &b.bound))
+        })
+        .collect()
 }
 
 /// The `emit` comment of one computed choice, on one line whatever its
 /// source answered: a newline would end the comment and the rest would
 /// be read back by `apply` as settings.
-pub(super) fn choice_note(name: &str, kind: Kind, layers: &[Layer]) -> String {
-    agent_settings::schema::one_line(&format!("{name}: {}", kind.describe(layers)))
+pub(super) fn choice_note(name: &str, kind: Kind, layers: &[Layer], bound: &[String]) -> String {
+    agent_settings::schema::one_line(&format!("{name}: {}", kind.describe(layers, bound)))
 }
 
 pub(super) fn file_label(file: &str) -> &'static str {

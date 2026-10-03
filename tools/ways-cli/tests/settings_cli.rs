@@ -363,6 +363,74 @@ fn the_engine_is_one_of_the_profiles_in_effect() {
     assert_eq!(f.run(&["settings", "get", "gate.engine"]).0, "gone\n");
 }
 
+// ── the model of a profile, from the provider's cached list (#795) ──
+
+#[test]
+fn a_profile_s_model_is_one_of_the_cached_list_of_its_provider() {
+    let f = Fx::new();
+    let cache = |p: &str| f.root.join(format!("xdg/cache/agent-ways/agent/models-{p}.json"));
+    let list = |p: &str, at: u64, ids: &[&str]| {
+        let models: Vec<_> = ids.iter().map(|i| serde_json::json!({"id": i, "name": i, "input_per_mtok": null, "output_per_mtok": null})).collect();
+        f.write(&cache(p), &serde_json::json!({"provider": p, "fetched_at": at, "models": models}).to_string());
+    };
+    let key = "gate.profiles.anthropic.model";
+    // No list yet: text, with the way to fetch one, and the id shape still checked.
+    let v: serde_json::Value = serde_json::from_str(&f.run(&["settings", "get", key, "--json"]).0).unwrap();
+    assert_eq!(v["options"], serde_json::Value::Null);
+    let (out, _, _) = f.run(&["settings", "help", key]);
+    assert!(out.contains("text (the choices could not be listed: model list not fetched; run `ways agent models --provider anthropic`)"), "{out}");
+    assert_eq!(f.run(&["settings", "set", key, "claude-sonnet-5-5"]).2, 0);
+    let (_, err, code) = f.run(&["settings", "set", key, "not a model"]);
+    assert_eq!(code, 3, "{err}");
+    // A cached list, however old, is what is offered; each provider has its own.
+    list("anthropic", 1, &["claude-sonnet-5-5", "claude-haiku-4-5"]);
+    list("openrouter", 1, &["anthropic/claude-haiku-4.5", "openai/gpt-5"]);
+    let v: serde_json::Value = serde_json::from_str(&f.run(&["settings", "get", key, "--json"]).0).unwrap();
+    assert_eq!(v["options"], serde_json::json!(["claude-haiku-4-5", "claude-sonnet-5-5"]));
+    let v: serde_json::Value = serde_json::from_str(&f.run(&["settings", "get", "gate.profiles.openrouter.model", "--json"]).0).unwrap();
+    assert_eq!(v["options"], serde_json::json!(["anthropic/claude-haiku-4.5", "openai/gpt-5"]));
+    // A model the list lacks is refused with nothing written; one it has is set.
+    let agent = f.root.join("xdg/config/agent-ways/agent.yaml");
+    std::fs::remove_file(&agent).unwrap();
+    let (_, err, code) = f.run(&["settings", "set", key, "claude-opus-9"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("expected one of claude-haiku-4-5, claude-sonnet-5-5, found 'claude-opus-9'"), "{err}");
+    assert!(!agent.exists());
+    assert_eq!(f.run(&["settings", "set", key, "claude-sonnet-5-5"]).2, 0);
+    // A user profile follows its own provider, and emit notes the choices.
+    f.write(&agent, "profiles:\n  mine:\n    provider: openrouter\n    model: openai/gpt-5\n");
+    assert_eq!(f.run(&["settings", "set", "gate.profiles.mine.model", "openai/gpt-5"]).2, 0);
+    assert_eq!(f.run(&["settings", "set", "gate.profiles.mine.model", "claude-sonnet-5-5"]).2, 3);
+    let (out, _, _) = f.run(&["settings", "emit", "gate"]);
+    assert!(out.contains("# gate.profiles.anthropic.model: one of claude-haiku-4-5, claude-sonnet-5-5\n"), "{out}");
+    // The pattern as written is no instance: set and get refuse it, and no
+    // profile named `*` is written.
+    for args in [["settings", "set", "gate.profiles.*.model", "zzz-not-listed"], ["settings", "get", "gate.profiles.*.model", "--json"]] {
+        let (_, err, code) = f.run(&args);
+        assert_eq!(code, 2, "{args:?}: {err}");
+        assert!(err.contains("name the instance, e.g. gate.profiles.anthropic.model"), "{err}");
+    }
+    assert!(!std::fs::read_to_string(&agent).unwrap_or_default().contains('*'));
+    // The pattern key's help names no one provider.
+    let (out, _, _) = f.run(&["settings", "help", "gate.profiles.*.model"]);
+    assert!(out.contains("text (the choices could not be listed: the list depends on the profile's provider)"), "{out}");
+    // The canonical body shows the shipped provider, and its note follows it
+    // even when a stored patch moves that profile to another provider.
+    f.write(&agent, "profiles:\n  anthropic:\n    provider: openrouter\n    model: openai/gpt-5\n");
+    let (canon, _, _) = f.run(&["settings", "emit", "gate"]);
+    assert!(canon.contains("# gate.profiles.anthropic.model: one of claude-haiku-4-5, claude-sonnet-5-5\n") && canon.contains("    provider: anthropic\n"), "{canon}");
+    let (eff, _, _) = f.run(&["settings", "emit", "--effective", "gate"]);
+    assert!(eff.contains("# gate.profiles.anthropic.model: one of anthropic/claude-haiku-4.5, openai/gpt-5\n") && eff.contains("    provider: openrouter\n"), "{eff}");
+    f.write(&agent, "profiles:\n  mine:\n    provider: openrouter\n    model: openai/gpt-5\n");
+    // What emit prints, apply takes back unchanged.
+    let emitted = f.run(&["settings", "emit", "gate"]).0;
+    let (out, err, code) = f.run_stdin(&["settings", "apply", "--dry-run"], Some(&emitted));
+    assert_eq!(code, 0, "{out}{err}");
+    // apply checks a model against the provider's list too.
+    let (_, _, code) = f.run_stdin(&["settings", "apply", "--dry-run"], Some("profiles:\n  anthropic:\n    model: nope-1\n"));
+    assert_eq!(code, 3);
+}
+
 // ── help ───────────────────────────────────────────────────────
 
 #[test]

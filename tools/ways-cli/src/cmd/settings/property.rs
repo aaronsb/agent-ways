@@ -11,7 +11,7 @@ pub fn get(key: &str, as_json: bool, file: Option<&Path>, project: Option<&Path>
     report(&layers);
     let r = resolve(b.spec, &b.bound, &layers);
     if as_json {
-        let mut d = describe(&r, b.spec, &layers);
+        let mut d = describe(&r, b.spec, &layers, &b.bound);
         d["key"] = json!(r.name);
         println!("{}", serde_json::to_string_pretty(&d).unwrap_or_default());
     } else {
@@ -57,7 +57,7 @@ pub fn list(prefix: Option<&str>, as_json: bool, effective: bool, file: Option<&
             let file = fragment.entry(group).or_insert_with(|| json!({}));
             insert_path(file, &r.path, to_json(v));
         }
-        described.insert(r.name.clone(), describe(&r, b.spec, &layers));
+        described.insert(r.name.clone(), describe(&r, b.spec, &layers, &b.bound));
     }
     let doc = json!({ "view": if effective { "effective" } else { "stored" }, "fragment": fragment, "keys": described });
     println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_default());
@@ -70,7 +70,7 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
     let layers = live_layers(&project_dir(project));
     let v = b
         .spec
-        .parse_cli(value, &layers)
+        .parse_cli(value, &layers, &b.bound)
         .map_err(|m| fail(exit::REJECTED, format!("{key}: {m}; `ways settings help {key}`")))?;
     let (path, _) = target_file(&b, project)?;
     write_file(&path, &[(b.path(), v)])?;

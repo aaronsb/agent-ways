@@ -80,10 +80,11 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "gate.profiles.*.model",
         path: &["profiles", "*", "model"],
+        kind: Kind::ChoiceOf { options: model_ids, multi: false },
         default: DefaultValue::Fn(|b| shipped_field(b, "model")),
         check: Some(check_model),
         doc: "The model a profile calls.",
-        long: "The shipped profiles are tuned for Claude Haiku 4.5; another model scores on its own scale. `ways agent models` lists what a provider serves.",
+        long: "The shipped profiles are tuned for Claude Haiku 4.5; another model scores on its own scale. `ways agent models` lists what a provider serves and keeps the list this key offers; until it has run for the profile's provider the key takes any model id, and a list that has aged is still offered.",
         ..BASE
     },
     KeySpec {
@@ -185,7 +186,7 @@ fn shipped_field(bound: &[String], field: &str) -> Option<Value> {
 /// user layer adds under `profiles:`, in the file's order. A profile whose
 /// patch does not build, such as a new one with no model, names nothing
 /// the gate could run, so it is left out, a patched shipped one too.
-fn profile_names(layers: &[Layer]) -> Result<Vec<String>, String> {
+fn profile_names(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
     let shipped = profile::shipped();
     let mut out: Vec<String> = shipped.keys().cloned().collect();
     for l in layers.iter().filter(|l| l.file == FILE) {
@@ -205,6 +206,34 @@ fn profile_names(layers: &[Layer]) -> Result<Vec<String>, String> {
         }
     }
     Ok(out)
+}
+
+/// The models a profile may name: the cached list of the profile's
+/// provider, which `ways agent models` writes. No network I/O: a settings
+/// load must not wait on a provider. A profile whose provider is not known
+/// yet names no list, and the key takes text.
+fn model_ids(layers: &[Layer], bound: &[String]) -> Result<Vec<String>, String> {
+    model_ids_in(&crate::models::cache_dir(), layers, bound)
+}
+
+fn model_ids_in(dir: &std::path::Path, layers: &[Layer], bound: &[String]) -> Result<Vec<String>, String> {
+    if bound.is_empty() {
+        return Err("the list depends on the profile's provider".into());
+    }
+    let provider = profile_provider(layers, bound).ok_or("no provider known for this profile")?;
+    crate::models::options_in(dir, provider)
+}
+
+/// The provider a profile calls: the user layer's, else the shipped profile's.
+fn profile_provider(layers: &[Layer], bound: &[String]) -> Option<Provider> {
+    let name = bound.first()?;
+    let stored = layers
+        .iter()
+        .filter(|l| l.file == FILE)
+        .filter_map(|l| l.accepted.get("profiles")?.get(name.as_str())?.get("provider")?.as_str().map(str::to_string))
+        .next_back();
+    let provider = stored.or_else(|| shipped_field(bound, "provider")?.as_str().map(str::to_string))?;
+    Provider::parse(&provider).ok()
 }
 
 fn check_model(v: &Value) -> Result<(), String> {
@@ -244,23 +273,64 @@ mod tests {
         vec![Layer::from_text(&SCHEMA, "user", FILE, LayerScope::User, None, text)]
     }
 
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("ways-settings-models-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    #[test]
+    fn a_profile_s_models_are_its_providers_cached_list() {
+        use crate::models::{write_in, ModelInfo};
+        let m = |id: &str| ModelInfo { id: id.into(), name: id.into(), input_per_mtok: None, output_per_mtok: None };
+        let dir = scratch("opts");
+        let b = |n: &str| vec![n.to_string()];
+        let layers = user("profiles:\n  mine:\n    provider: openrouter\n    model: x/y\n");
+        // Absent: the reason names the provider's fetch command.
+        assert_eq!(
+            model_ids_in(&dir, &layers, &b("anthropic")).unwrap_err(),
+            "model list not fetched; run `ways agent models --provider anthropic`"
+        );
+        write_in(&dir, Provider::Anthropic, &[m("claude-sonnet-5-5"), m("claude-haiku-4-5")], 1).unwrap();
+        write_in(&dir, Provider::Openrouter, &[m("x/y")], 1).unwrap();
+        // The shipped profile's provider, and a user profile's own.
+        assert_eq!(model_ids_in(&dir, &layers, &b("anthropic")).unwrap(), ["claude-haiku-4-5", "claude-sonnet-5-5"]);
+        assert_eq!(model_ids_in(&dir, &layers, &b("mine")).unwrap(), ["x/y"]);
+        // A patch that moves a shipped profile to another provider follows it.
+        let moved = user("profiles:\n  anthropic:\n    provider: openrouter\n    model: x/y\n");
+        assert_eq!(model_ids_in(&dir, &moved, &b("anthropic")).unwrap(), ["x/y"]);
+        // No profile named, or one with no provider: text.
+        assert!(model_ids_in(&dir, &layers, &[]).is_err());
+        assert!(model_ids_in(&dir, &layers, &b("nosuch")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_model_key_checks_the_shape_when_no_list_is_read() {
+        let k = KEYS.iter().find(|k| k.name == "gate.profiles.*.model").unwrap();
+        let b = vec!["anthropic".to_string()];
+        assert!(k.check_value_in(&Value::from("claude-x-1"), None, &b).is_ok());
+        assert!(k.check_value_in(&Value::from("bad id!"), None, &b).is_err());
+        assert!(k.check_value_in(&Value::from(3), None, &[]).is_err());
+    }
+
     #[test]
     fn the_engine_is_a_profile_the_shipped_file_or_the_user_layer_names() {
         let engine = KEYS.iter().find(|k| k.name == "gate.engine").unwrap();
         assert_eq!(
-            engine.kind.choices(Some(&user(""))),
+            engine.kind.choices(Some(&user("")), &[]),
             Choices::Of { items: vec!["anthropic".into(), "openrouter".into()], multi: false }
         );
         let layers = user("profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n  anthropic:\n    threshold: 0.4\n");
-        assert_eq!(engine.kind.describe(&layers), "one of anthropic, openrouter, mine");
-        assert!(engine.parse_cli("mine", &layers).is_ok());
-        assert!(engine.parse_cli("openrouter", &layers).is_ok());
-        let e = engine.parse_cli("open-router", &layers).unwrap_err();
+        assert_eq!(engine.kind.describe(&layers, &[]), "one of anthropic, openrouter, mine");
+        assert!(engine.parse_cli("mine", &layers, &[]).is_ok());
+        assert!(engine.parse_cli("openrouter", &layers, &[]).is_ok());
+        let e = engine.parse_cli("open-router", &layers, &[]).unwrap_err();
         assert_eq!(e, "expected one of anthropic, openrouter, mine, found 'open-router'");
         // A profile the gate could not build is no choice: a new one with no
         // model, or a shipped one switched to another provider without one.
         let layers = user("profiles:\n  half:\n    provider: openrouter\n  anthropic:\n    provider: openrouter\n  ok:\n    provider: openrouter\n    model: x/y\n");
-        assert_eq!(engine.kind.describe(&layers), "one of openrouter, ok");
+        assert_eq!(engine.kind.describe(&layers, &[]), "one of openrouter, ok");
         // The hook path loads one file on its own and keeps the value.
         assert!(user("engine: nope\n")[0].findings.is_empty());
     }

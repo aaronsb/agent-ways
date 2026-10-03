@@ -134,7 +134,7 @@ pub(super) fn walk(
         let verdict = match b.spec.kind {
             Kind::ReadOnly => Err("read-only; it is changed by its action command".to_string()),
             Kind::Secret => Err("a secret is never set from a settings object".to_string()),
-            _ => b.spec.check_value_in(v, Some(layers)),
+            _ => b.spec.check_value_in(v, Some(layers), &b.bound),
         }
         .and_then(|_| target_file(&b, project).map(|_| ()).map_err(|f| f.message));
         match verdict {

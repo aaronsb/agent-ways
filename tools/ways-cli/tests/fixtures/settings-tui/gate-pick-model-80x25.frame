@@ -1,0 +1,125 @@
+agent-tui frame 80x25
+| 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme|
+|┌ ways settings — ~/proj ──────────────────┐┌detail────────────────────────────┐|
+|│ ▾ settings              value            ││gate.profiles.anthropic.model     │|
+|│     engine                               ││                                  │|
+|│     mode                enforce          ││The model a profile calls.        │|
+|│ ▾ profiles · setting    value            ││                                  │|
+|│   ▾ anthropic                            ││The shipped profiles are tuned for│|
+|│       provider          anthropic        ││Claude Haiku 4.5; another model   │|
+|│▌      model             claude-haiku-4-5 ││scores on its own scale. `ways    │|
+|│       thresho┌pick one: gate.profiles.anthropic.model─────────┐what a        │|
+|│       timeout│ ● claude-haiku-4-5  current                    │keeps the list│|
+|│       turns  │   claude-haiku-4-5-20251001                    │il it has run │|
+|│       max_tur│   claude-opus-4-5                              │ovider the key│|
+|│       concurr│   claude-sonnet-5-5                            │and a list    │|
+|│       max_can└────────────────────────────────────────────────┘ll offered.   │|
+|│       price_in_per_mtok                  ││                                  │|
+|│       price_out_per_mtok                 ││value    claude-haiku-4-5         │|
+|│   ▸ openrouter                           ││type     one of claude-haiku-4-5 |│|
+|│ ▸ keys · provider       key              ││claude-haiku-4-5-20251001 |       │|
+|│                                          ││claude-opus-4-5 |                 │|
+|│                                          ││claude-sonnet-5-5 (Enter picks)   │|
+|│                                          ││default  claude-haiku-4-5         │|
+|│                                          ││from     default                  │|
+|└──────────────────────────────────────────┘└──────────────────────────────────┘|
+| pick   ↑↓ choose · Enter or click sets · Esc closes                            |
+styles
+  0   0-7   White Blue -
+  0  10-21  White Blue -
+  0  24-31  Black Cyan BOLD
+  0  34-44  White Blue -
+  0  47-56  White Blue -
+  0  59-69  White Blue -
+  0  72-79  White Blue -
+  1   0-0   - - DIM
+  1   1-24  Blue - BOLD|DIM
+  1  25-44  - - DIM
+  1  45-50  Blue - BOLD|DIM
+  1  51-79  - - DIM
+  2   0-0   - - DIM
+  2   2-11  - - BOLD
+  2  26-30  - - DIM
+  2  43-44  - - DIM
+  2  45-73  - - BOLD
+  2  79-79  - - DIM
+  3   0-0   - - DIM
+  3  43-44  - - DIM
+  3  79-79  - - DIM
+  4   0-0   - - DIM
+  4  43-44  - - DIM
+  4  79-79  - - DIM
+  5   0-0   - - DIM
+  5   2-11  - - BOLD
+  5  12-21  - - DIM
+  5  26-30  - - DIM
+  5  43-44  - - DIM
+  5  79-79  - - DIM
+  6   0-0   - - DIM
+  6   2-14  - - BOLD
+  6  43-44  - - DIM
+  6  79-79  - - DIM
+  7   0-0   - - DIM
+  7  43-44  - - DIM
+  7  79-79  - - DIM
+  8   0-0   - - DIM
+  8   1-1   Cyan - BOLD|REVERSED
+  8   2-42  - - BOLD|REVERSED
+  8  43-44  - - DIM
+  8  79-79  - - DIM
+  9   0-0   - - DIM
+  9  15-15  Blue - -
+  9  16-54  Blue - BOLD
+  9  55-64  Blue - -
+  9  79-79  - - DIM
+ 10   0-0   - - DIM
+ 10  15-15  Blue - -
+ 10  64-64  Blue - -
+ 10  79-79  - - DIM
+ 11   0-0   - - DIM
+ 11  15-15  Blue - -
+ 11  16-63  - - BOLD|REVERSED
+ 11  64-64  Blue - -
+ 11  79-79  - - DIM
+ 12   0-0   - - DIM
+ 12  15-15  Blue - -
+ 12  64-64  Blue - -
+ 12  79-79  - - DIM
+ 13   0-0   - - DIM
+ 13  15-15  Blue - -
+ 13  64-64  Blue - -
+ 13  79-79  - - DIM
+ 14   0-0   - - DIM
+ 14  15-64  Blue - -
+ 14  79-79  - - DIM
+ 15   0-0   - - DIM
+ 15  43-44  - - DIM
+ 15  79-79  - - DIM
+ 16   0-0   - - DIM
+ 16  43-53  - - DIM
+ 16  79-79  - - DIM
+ 17   0-0   - - DIM
+ 17   2-15  - - BOLD
+ 17  43-53  - - DIM
+ 17  79-79  - - DIM
+ 18   0-0   - - DIM
+ 18   2-7   - - BOLD
+ 18   8-18  - - DIM
+ 18  26-28  - - DIM
+ 18  43-44  - - DIM
+ 18  79-79  - - DIM
+ 19   0-0   - - DIM
+ 19  43-44  - - DIM
+ 19  79-79  - - DIM
+ 20   0-0   - - DIM
+ 20  43-44  - - DIM
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
+ 21  43-53  - - DIM
+ 21  79-79  - - DIM
+ 22   0-0   - - DIM
+ 22  43-53  - - DIM
+ 22  79-79  - - DIM
+ 23   0-79  - - DIM
+ 24   0-5   Black Cyan BOLD
+ 24   6-51  - - DIM|ITALIC

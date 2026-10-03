@@ -136,14 +136,7 @@ pub(crate) fn error_message(body: &Value) -> String {
         .collect()
 }
 
-/// A model a provider offers, with prices per million tokens when known.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ModelInfo {
-    pub id: String,
-    pub name: String,
-    pub input_per_mtok: Option<f64>,
-    pub output_per_mtok: Option<f64>,
-}
+pub use crate::models::ModelInfo;
 
 /// The provider's model list. Anthropic's needs the key and carries no prices;
 /// OpenRouter's is public and priced.
