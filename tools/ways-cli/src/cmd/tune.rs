@@ -72,7 +72,7 @@ pub fn run(
 
     let global_dir = ways_dir
         .map(PathBuf::from)
-        .unwrap_or_else(crate::paths::projected_ways_root);
+        .unwrap_or_else(crate::paths::shipped_ways_root);
     let xdg_way = crate::paths::corpus_dir();
 
     let multi_corpus = xdg_way.join("ways-corpus-multi.jsonl");

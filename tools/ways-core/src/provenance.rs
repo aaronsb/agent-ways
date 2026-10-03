@@ -121,7 +121,7 @@ impl Claim {
 pub fn generate_manifest(ways_dir: Option<String>) -> Result<Value> {
     let root = ways_dir
         .map(PathBuf::from)
-        .unwrap_or_else(crate::paths::projected_ways_root);
+        .unwrap_or_else(crate::paths::shipped_ways_root);
 
     let (ways, with_prov, without_prov) = scan_provenance(&root)?;
 

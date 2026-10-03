@@ -857,40 +857,11 @@ pub fn core(session_id: &str) -> Result<String> {
 // ── ways show attend/<signal> ──────────────────────────────────
 
 pub fn attend(signal: &str, session_id: &str) -> Result<String> {
-    let ways_dir = crate::paths::projected_ways_root();
-
-    // Also check project-local ways
+    // Every root the engine reads, project first: the first eligible way wins.
     let project_dir = crate::util::project_dir();
-    let project_ways = std::path::PathBuf::from(&project_dir).join(".claude/ways");
+    let dirs = crate::paths::ways_roots(Some(std::path::Path::new(&project_dir)));
 
-    let dirs: Vec<&std::path::Path> = if project_ways.is_dir() {
-        vec![ways_dir.as_path(), project_ways.as_path()]
-    } else {
-        vec![ways_dir.as_path()]
-    };
-
-    // Scan for ways with trigger.type: attend and matching signal
-    let mut matched_ids: Vec<String> = Vec::new();
-
-    for dir in &dirs {
-        for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                let signals = extract_attend_signals(&content);
-                if signals.iter().any(|s| s == signal) {
-                    // Derive way ID from path relative to ways dir
-                    if let Ok(rel) = path.strip_prefix(dir) {
-                        let id = rel.with_extension("")
-                            .to_string_lossy()
-                            .replace('\\', "/");
-                        // Remove trailing /way-name if it matches parent dir name
-                        // e.g., "attend/context-pressure/context-pressure" → "attend/context-pressure"
-                        let id = normalize_way_id(&id);
-                        matched_ids.push(id);
-                    }
-                }
-            }
-        }
-    }
+    let matched_ids = attend_ids(signal, &dirs);
 
     if matched_ids.is_empty() {
         return Ok(format!("No way handles attend signal '{signal}'.\n"));
@@ -908,6 +879,30 @@ pub fn attend(signal: &str, session_id: &str) -> Result<String> {
     }
 
     Ok(output)
+}
+
+/// The ids of the ways that handle attend `signal`, in root order. A way
+/// counts only when its own file declares the signal and is the copy that
+/// resolves: a project way that drops the trigger opts out, and a shadowed
+/// copy never speaks for the way.
+fn attend_ids(signal: &str, dirs: &[std::path::PathBuf]) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for dir in dirs {
+        for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
+            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            if !extract_attend_signals(&content).iter().any(|s| s == signal) {
+                continue;
+            }
+            let Ok(rel) = path.strip_prefix(dir) else { continue };
+            // "attend/context-pressure/context-pressure" → "attend/context-pressure"
+            let id = normalize_way_id(&rel.with_extension("").to_string_lossy().replace('\\', "/"));
+            let resolved = dirs.iter().find_map(|d| session::find_way_in_dir(&d.join(&id)));
+            if resolved.as_deref() == Some(path.as_path()) && !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids
 }
 
 /// Normalize a way ID: if the last segment matches its parent dir name, collapse.
@@ -940,6 +935,31 @@ mod tests {
             transcript: String::new(),
             usage_tail: Vec::new(),
         }
+    }
+
+    fn attend_way(root: &std::path::Path, id: &str, trigger: bool) {
+        let dir = root.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fm = if trigger { "trigger:\n  type: attend\n  signals:\n    - sig\n" } else { "description: opted out\n" };
+        std::fs::write(dir.join(format!("{}.md", id.rsplit('/').next().unwrap())), format!("---\n{fm}---\nbody\n")).unwrap();
+    }
+
+    #[test]
+    fn attend_reads_the_resolving_copy_only() {
+        let base = std::env::temp_dir().join(format!("ways-attend-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (proj, ship) = (base.join("proj"), base.join("ship"));
+        // The project overrides `a/dropped` without the trigger: it opts out.
+        attend_way(&proj, "a/dropped", false);
+        attend_way(&ship, "a/dropped", true);
+        // Both roots carry `a/both`: it is listed once.
+        attend_way(&proj, "a/both", true);
+        attend_way(&ship, "a/both", true);
+        attend_way(&ship, "a/shipped", true);
+        let ids = super::attend_ids("sig", &[proj, ship]);
+        assert_eq!(ids.len(), 2, "{ids:?}");
+        assert!(ids.contains(&"a/both".to_string()) && ids.contains(&"a/shipped".to_string()), "{ids:?}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     fn ctx_model(

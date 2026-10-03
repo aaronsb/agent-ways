@@ -1,0 +1,136 @@
+//! One definition of the ways roots (#797).
+//!
+//! `ways reconcile` points the projection (`~/.claude/hooks/ways`) at a dev
+//! checkout, so the shipped ways a session reads are the checkout's, and the
+//! app copy under `$XDG_DATA` is stale. Every reader must see the projected
+//! tree and none the stale copy. Each test runs the real binary in a fixture
+//! where the projection is a symlink to a tree other than the app copy.
+
+#![cfg(unix)]
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// The marker way sits only in the projected tree; the stale way only in the
+/// app copy.
+const PROJECTED: &str = "dev/newway";
+const STALE: &str = "stale/oldway";
+
+struct Fx {
+    root: PathBuf,
+}
+
+impl Fx {
+    fn new(name: &str) -> Fx {
+        let root = std::env::temp_dir().join(format!("ways-one-roots-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let home = root.join("home");
+        for d in ["config", "cache", "state", "runtime", "proj"] {
+            std::fs::create_dir_all(home.join(d)).unwrap();
+        }
+        std::fs::create_dir_all(home.join(".claude/hooks")).unwrap();
+        let fx = Fx { root };
+        let app = fx.home().join(".local/share/agent-ways/hooks/ways");
+        let dev = fx.home().join("dev/hooks/ways");
+        Self::way(&app, STALE, "zebra");
+        Self::way(&dev, PROJECTED, "giraffe");
+        for tree in [&app, &dev] {
+            std::fs::copy(schema(), tree.join("frontmatter-schema.yaml")).unwrap();
+        }
+        std::os::unix::fs::symlink(&dev, fx.home().join(".claude/hooks/ways")).unwrap();
+        fx
+    }
+
+    fn home(&self) -> PathBuf {
+        self.root.join("home")
+    }
+
+    fn way(root: &Path, id: &str, word: &str) {
+        let leaf = id.rsplit('/').next().unwrap();
+        let dir = root.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let text = format!(
+            "---\ndescription: the {leaf} way\nvocabulary: {word}\nrefire: 0.15\npattern: {word}\nrequires: [\"Bash({leaf}:*)\"]\n---\n# {leaf}\n"
+        );
+        std::fs::write(dir.join(format!("{leaf}.md")), text).unwrap();
+    }
+
+    /// Run the binary with `args` in the fixture; stdout and stderr together.
+    fn ways(&self, args: &[&str]) -> String {
+        let home = self.home();
+        let out = Command::new(env!("CARGO_BIN_EXE_ways"))
+            .args(args)
+            .current_dir(home.join("proj"))
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", home.join("config"))
+            .env("XDG_CACHE_HOME", home.join("cache"))
+            .env("XDG_STATE_HOME", home.join("state"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env("XDG_RUNTIME_DIR", home.join("runtime"))
+            .env_remove("CLAUDE_PROJECT_DIR")
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .output()
+            .expect("run ways");
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    }
+}
+
+impl Drop for Fx {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+fn schema() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../hooks/ways/frontmatter-schema.yaml")
+}
+
+fn sees_projected_only(out: &str, what: &str) {
+    assert!(out.contains("newway"), "{what} must see the projected tree:\n{out}");
+    assert!(!out.contains("oldway"), "{what} must not see the app copy:\n{out}");
+}
+
+#[test]
+fn show_resolves_a_way_from_the_projection() {
+    let fx = Fx::new("show");
+    assert!(fx.ways(&["show", "way", PROJECTED, "--session", "s1"]).contains("# newway"));
+    assert!(!fx.ways(&["show", "way", STALE, "--session", "s1"]).contains("# oldway"));
+}
+
+#[test]
+fn scan_matches_ways_from_the_projection() {
+    let fx = Fx::new("scan");
+    let out = fx.ways(&["scan", "prompt", "--query", "giraffe zebra", "--session", "s2"]);
+    assert!(out.contains("# newway"), "scan must fire the projected way:\n{out}");
+    assert!(!out.contains("# oldway"), "scan must not fire the app copy:\n{out}");
+}
+
+#[test]
+fn lint_global_reads_the_projection() {
+    let fx = Fx::new("lint");
+    let out = fx.ways(&["author", "lint", "--global"]);
+    assert!(out.contains("scanned 1 way files"), "{out}");
+    assert!(out.contains(".claude/hooks/ways/frontmatter-schema.yaml"), "schema read through the projection:\n{out}");
+}
+
+#[test]
+fn permissions_audit_reads_the_projection() {
+    let fx = Fx::new("perm");
+    sees_projected_only(&fx.ways(&["author", "permissions", "--global"]), "permissions");
+}
+
+#[test]
+fn corpus_builds_from_the_projection() {
+    let fx = Fx::new("corpus");
+    fx.ways(&["corpus", "--quiet"]);
+    let jsonl = std::fs::read_to_string(fx.home().join("cache/agent-ways/user/ways-corpus.jsonl")).unwrap();
+    sees_projected_only(&jsonl, "corpus");
+}
+
+#[test]
+fn settings_screens_list_the_projected_ways() {
+    let fx = Fx::new("tui");
+    let out = fx.ways(&["settings", "ways", "--depth", "none", "--snap", "100x40", "--keys", "down down down down down down right"]);
+    assert!(out.contains("▸ dev"), "the settings tab must list the projected domain:\n{out}");
+    assert!(!out.contains("stale"), "the settings tab must not list the app copy:\n{out}");
+}

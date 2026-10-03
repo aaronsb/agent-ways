@@ -181,7 +181,7 @@ pub fn detect_project_dir() -> Option<String> {
 /// Load excluded path segments from frontmatter-schema.yaml.
 /// Returns empty vec if schema can't be read (non-fatal).
 pub fn load_excluded_segments() -> Vec<String> {
-    let schema_path = crate::paths::projected_ways_root().join("frontmatter-schema.yaml");
+    let schema_path = crate::paths::shipped_ways_root().join("frontmatter-schema.yaml");
     let content = match std::fs::read_to_string(&schema_path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),

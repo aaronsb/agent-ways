@@ -2,31 +2,35 @@
 
 use agent_fmt::permissions;
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 
 /// Run `ways author permissions`.
 pub fn audit(global: bool) -> Result<()> {
-    let ways_dir = crate::paths::projected_ways_root();
+    let ways_dir = crate::paths::shipped_ways_root();
     let settings_path = crate::paths::settings_json();
 
-    // Determine scan dirs (same logic as lint)
-    let mut scan_dirs = vec![ways_dir.clone()];
-    if !global {
-        let project_dir = crate::util::project_root();
-        if let Some(ref pd) = project_dir {
-            let project_ways = PathBuf::from(pd).join(".claude/ways");
-            if project_ways.is_dir() {
-                scan_dirs.push(project_ways);
-            }
-        }
-    }
+    // Every root the engine reads; --global leaves the project's out.
+    let project_dir = if global { None } else { crate::util::project_root() };
+    let project_ways = project_dir.as_deref().map(|p| Path::new(p).join(".claude/ways"));
+    let user_ways = crate::paths::user_ways_root();
+    let roots: Vec<(&str, std::path::PathBuf)> = crate::paths::ways_roots(project_dir.as_deref().map(Path::new))
+        .into_iter()
+        .map(|r| {
+            let label = if Some(&r) == project_ways.as_ref() {
+                "project:"
+            } else if r == user_ways && r != ways_dir {
+                "user:"
+            } else {
+                ""
+            };
+            (label, r)
+        })
+        .collect();
 
     // Collect (way_id, requires) pairs
     let mut requirements: Vec<(String, Vec<String>)> = Vec::new();
-    for scan_dir in &scan_dirs {
-        collect_way_requirements(scan_dir, &ways_dir, &mut requirements)?;
-    }
+    collect_requirements(&roots, &mut requirements);
 
     // Load settings.json grants
     let grants = permissions::load_settings_permissions(&settings_path);
@@ -48,37 +52,29 @@ pub fn audit(global: bool) -> Result<()> {
     Ok(())
 }
 
-/// Scan way files and collect (way_id, requires_list) pairs.
-fn collect_way_requirements(
-    dir: &Path,
-    ways_dir: &Path,
-    out: &mut Vec<(String, Vec<String>)>,
-) -> Result<()> {
-    for path in crate::scanner::md_files(dir, crate::scanner::MdKind::Ways) {
-        let path = path.as_path();
-
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        let Some((fm, _)) = crate::frontmatter::split(&content) else {
-            continue;
-        };
-
-        if let Some(reqs) = extract_requires(&fm) {
-            if !reqs.is_empty() {
-                let way_id = path
-                    .strip_prefix(ways_dir)
-                    .unwrap_or(path)
-                    .with_extension("")
-                    .display()
-                    .to_string();
-                out.push((way_id, reqs));
+/// Collect (way_id, requires_list) pairs from `roots`, in precedence order.
+/// A way is audited once, by the copy that resolves: a way in an earlier root
+/// shadows the same directory in a later one. Ids are relative to their own
+/// root, with the root's label in front (empty for the shipped root).
+fn collect_requirements(roots: &[(&str, std::path::PathBuf)], out: &mut Vec<(String, Vec<String>)>) {
+    let mut claimed: std::collections::HashSet<String> = Default::default();
+    for (label, root) in roots {
+        let mut here: Vec<String> = Vec::new();
+        for path in crate::scanner::md_files(root, crate::scanner::MdKind::Ways) {
+            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let Some((fm, _)) = crate::frontmatter::split(&content) else { continue };
+            let Ok(rel) = path.strip_prefix(root) else { continue };
+            let dir_id = rel.parent().map(crate::util::path_to_id).unwrap_or_default();
+            if claimed.contains(&dir_id) {
+                continue;
+            }
+            here.push(dir_id);
+            if let Some(reqs) = extract_requires(&fm).filter(|r| !r.is_empty()) {
+                out.push((format!("{label}{}", crate::util::path_to_id(&rel.with_extension(""))), reqs));
             }
         }
+        claimed.extend(here);
     }
-    Ok(())
 }
 
 /// Parse requires: field from frontmatter.
@@ -121,3 +117,34 @@ pub fn extract_requires(fm: &str) -> Option<Vec<String>> {
     None
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::collect_requirements;
+
+    fn way(root: &std::path::Path, id: &str, requires: &str) {
+        let leaf = id.rsplit('/').next().unwrap();
+        let dir = root.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{leaf}.md")), format!("---\ndescription: x\n{requires}---\n# x\n")).unwrap();
+    }
+
+    #[test]
+    fn ids_are_relative_to_their_root_and_shadowed_copies_are_skipped() {
+        let base = std::env::temp_dir().join(format!("ways-perm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (proj, user, ship) = (base.join("proj"), base.join("user"), base.join("ship"));
+        way(&proj, "fx/shared", "requires: [\"Bash(project:*)\"]\n");
+        way(&user, "fx/shared", "requires: [\"Bash(user:*)\"]\n");
+        way(&user, "fx/uonly", "requires: [\"Read\"]\n");
+        way(&ship, "fx/shared", "requires: [\"Bash(ship:*)\"]\n");
+        way(&ship, "fx/sonly", "requires: [\"Edit\"]\n");
+        let roots = vec![("project:", proj), ("user:", user), ("", ship)];
+        let mut out = Vec::new();
+        collect_requirements(&roots, &mut out);
+        let mut ids: Vec<&str> = out.iter().map(|(i, _)| i.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["fx/sonly/sonly", "project:fx/shared/shared", "user:fx/uonly/uonly"]);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}

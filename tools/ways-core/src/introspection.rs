@@ -684,10 +684,7 @@ pub fn build_criteria_map(roots: &[PathBuf]) -> CriteriaMap {
 
 /// The env-independent corpus in ADR-143 precedence order: user shadows core.
 pub fn default_criteria_map() -> CriteriaMap {
-    build_criteria_map(&[
-        crate::paths::user_ways_root(),
-        crate::paths::core_ways_root(),
-    ])
+    build_criteria_map(&crate::paths::ways_roots(None))
 }
 
 /// The full ADR-143 corpus for a given project: project ways shadow user, user
@@ -699,11 +696,7 @@ pub fn project_criteria_map(project: &str) -> CriteriaMap {
     if project.is_empty() {
         return default_criteria_map();
     }
-    build_criteria_map(&[
-        PathBuf::from(project).join(".claude").join("ways"),
-        crate::paths::user_ways_root(),
-        crate::paths::core_ways_root(),
-    ])
+    build_criteria_map(&crate::paths::ways_roots(Some(std::path::Path::new(project))))
 }
 
 // ── Tests ─────────────────────────────────────────────────────

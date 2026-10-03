@@ -619,42 +619,21 @@ pub fn way_disabled(way_id: &str) -> bool {
 /// Returns (path, is_project_local). User and core both report `false` (non-project),
 /// but the user root is checked first so a user way shadows a same-named core way.
 pub fn resolve_way_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, bool)> {
-    let local_dir = PathBuf::from(project_dir).join(format!(".claude/ways/{way_id}"));
-    if let Some(f) = find_way_in_dir(&local_dir) {
-        return Some((f, true));
-    }
-
-    let user_dir = crate::paths::user_ways_root().join(way_id);
-    if let Some(f) = find_way_in_dir(&user_dir) {
-        return Some((f, false));
-    }
-
-    let global_dir = crate::paths::projected_ways_root().join(way_id);
-    if let Some(f) = find_way_in_dir(&global_dir) {
-        return Some((f, false));
-    }
-
-    None
+    resolve_in_roots(way_id, project_dir, find_way_in_dir)
 }
 
 /// Resolve a way ID to its check file path. Precedence: project > user > core.
 pub fn resolve_check_file(way_id: &str, project_dir: &str) -> Option<(PathBuf, bool)> {
-    let local_dir = PathBuf::from(project_dir).join(format!(".claude/ways/{way_id}"));
-    if let Some(f) = find_check_in_dir(&local_dir) {
-        return Some((f, true));
-    }
+    resolve_in_roots(way_id, project_dir, find_check_in_dir)
+}
 
-    let user_dir = crate::paths::user_ways_root().join(way_id);
-    if let Some(f) = find_check_in_dir(&user_dir) {
-        return Some((f, false));
-    }
-
-    let global_dir = crate::paths::projected_ways_root().join(way_id);
-    if let Some(f) = find_check_in_dir(&global_dir) {
-        return Some((f, false));
-    }
-
-    None
+/// The first root, in `paths::ways_roots` order, whose `way_id` directory
+/// `find` resolves; the flag says it was the project's own root.
+fn resolve_in_roots(way_id: &str, project_dir: &str, find: fn(&Path) -> Option<PathBuf>) -> Option<(PathBuf, bool)> {
+    let project_root = PathBuf::from(project_dir).join(".claude/ways");
+    crate::paths::ways_roots(Some(Path::new(project_dir)))
+        .into_iter()
+        .find_map(|root| find(&root.join(way_id)).map(|f| (f, root == project_root)))
 }
 
 /// The way file in a way's directory: its first `.md` that opens with
