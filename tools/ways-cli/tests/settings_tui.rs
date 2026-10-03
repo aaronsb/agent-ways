@@ -527,5 +527,13 @@ fn golden_frames() {
     planned.file("work-claude/settings.json", "{}\n");
     g.check_text("install-plan-report", &planned.snap("install", "p text:~/work-claude enter", "100x30", "16"));
     g.check_text("install-plan-error", &fx.snap("install", "p text:~/elsewhere enter", "100x30", "16"));
+    // A queued command that fails in an apply: the error over review, with
+    // what it printed, through a stand-in for the binary.
+    let failing = Fx::new();
+    failing.file("runner.sh", "#!/bin/sh\necho 'adding ~/x as a target'\necho 'target add: ~/x is not a Claude config directory' >&2\nexit 2\n");
+    executable(&failing.path("runner.sh"));
+    let env = [("WAYS_SETTINGS_RUNNER", failing.path("runner.sh"))];
+    let env: Vec<(&str, &Path)> = env.iter().map(|(k, v)| (*k, v.as_path())).collect();
+    g.check_text("install-apply-error", &failing.snap_with("install", "a down enter text:/tmp/x enter y w a", "100x30", "16", &env));
     g.finish();
 }

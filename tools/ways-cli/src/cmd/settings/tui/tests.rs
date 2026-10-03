@@ -815,3 +815,16 @@ fn child_does_not_wait_on_a_process_out_of_the_group() {
 fn a_stop_does_not_wait_on_a_process_that_left_the_group() {
     let _ = std::fs::remove_dir_all(in_fixture("child_does_not_wait_on_a_process_out_of_the_group"));
 }
+
+#[test]
+fn home_shows_as_tilde_only_where_it_is_a_whole_path() {
+    let t = |s: &str| super::build::home_as_tilde(s, "/home/al");
+    assert_eq!(t("/home/al/.config/x.yaml: bad"), "~/.config/x.yaml: bad");
+    assert_eq!(t("in /home/al"), "in ~");
+    assert_eq!(t("/home/al: no"), "~: no");
+    assert_eq!(t("/home/alice/x and /home/al/y"), "/home/alice/x and ~/y", "another user's home is not this one's");
+    assert_eq!(t("/home/al.bak/x"), "/home/al.bak/x");
+    assert_eq!(t("/mnt/home/al/x"), "/mnt/home/al/x", "a path that only contains it");
+    assert_eq!(t("'/home/al/a b'"), "'~/a b'");
+    assert_eq!(super::build::home_as_tilde("/home/al/x", "/"), "/home/al/x");
+}

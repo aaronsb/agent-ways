@@ -66,11 +66,32 @@ pub fn tilde(p: &Path, home: &Path) -> String {
 
 /// Every path in `text` under the home directory, written with `~`.
 fn tilde_text(text: &str, home: &Path) -> String {
-    let h = home.display().to_string();
-    if h.is_empty() || h == "/" {
+    home_as_tilde(text, &home.display().to_string()).replace('\\', "/")
+}
+
+/// `text` with each whole `home` in it written `~`: only where it stands as
+/// a path of its own, so with home `/home/al` a `/home/alice` stays as it is.
+pub(super) fn home_as_tilde(text: &str, home: &str) -> String {
+    if home.is_empty() || home == "/" {
         return text.to_string();
     }
-    text.replace(&h, "~").replace('\\', "/")
+    // A character that would make the match part of a longer name.
+    let joins = |c: char| c.is_alphanumeric() || "._-~".contains(c);
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(home) {
+        let before = rest[..at].chars().last().or_else(|| out.chars().last());
+        let after = rest[at + home.len()..].chars().next();
+        out.push_str(&rest[..at]);
+        if before.is_some_and(|c| joins(c) || c == '/') || after.is_some_and(joins) {
+            out.push_str(home);
+        } else {
+            out.push('~');
+        }
+        rest = &rest[at + home.len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A value as the screens show it and as `set` reads it back: text bare,

@@ -199,11 +199,7 @@ impl Ways {
 
     /// A message with paths under home as `~`.
     fn short(&self, msg: &str) -> String {
-        let h = self.ctx.home.display().to_string();
-        if h.is_empty() || h == "/" {
-            return msg.to_string();
-        }
-        msg.replace(&h, "~")
+        build::home_as_tilde(msg, &self.ctx.home.display().to_string())
     }
 }
 
@@ -423,7 +419,7 @@ impl Proc {
         let home = self.home.clone();
         let text = |r: &std::sync::mpsc::Receiver<Vec<u8>>| {
             let t = String::from_utf8_lossy(&r.recv_timeout(OUTPUT_WAIT).unwrap_or_default()).into_owned();
-            if home.len() > 1 { t.replace(&home, "~") } else { t }
+            build::home_as_tilde(&t, &home)
         };
         let (stdout, stderr) = (text(&self.out), text(&self.err));
         self.printed.insert(Printed { code, stdout, stderr })
