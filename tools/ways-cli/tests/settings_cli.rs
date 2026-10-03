@@ -760,3 +760,119 @@ fn fix_all_reports_a_key_no_section_owns() {
     assert!(err.contains("mdoe"), "{err}");
     assert_eq!(f.run(&["settings", "lint"]).2, 3);
 }
+
+fn json(f: &Fx, args: &[&str]) -> serde_json::Value {
+    serde_json::from_str(&f.run(args).0).unwrap()
+}
+
+#[test]
+fn the_active_theme_is_one_of_the_installed_themes() {
+    let f = Fx::new();
+    let (_, err, code) = f.run(&["settings", "set", "theme.active", "mine"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("expected one of terminal, agent-ways, nord,") && err.contains("found 'mine'"), "{err}");
+    assert!(!f.user().exists());
+    assert_eq!(f.run(&["settings", "set", "theme.active", "nord"]).2, 0);
+    // A theme file of the user's own becomes a choice.
+    let theme = include_str!("../../agent-theme/themes/nord.theme").replace("THEME_NAME=\"nord\"", "THEME_NAME=\"mine\"");
+    f.write(&f.root.join("xdg/config/agent-ways/themes/mine.theme"), &theme);
+    assert_eq!(f.run(&["settings", "set", "theme.active", "mine"]).2, 0);
+    let v = json(&f, &["settings", "get", "theme.active", "--json"]);
+    let options = v["options"].as_array().unwrap();
+    assert_eq!(options[0], "terminal");
+    assert_eq!(options.last().unwrap(), "mine");
+    assert_eq!(v["value"], "mine");
+    // The other theme key is unchanged: no options.
+    assert!(json(&f, &["settings", "get", "theme.shape", "--json"]).get("options").is_none());
+}
+
+#[test]
+fn the_language_is_en_auto_or_an_active_language_code() {
+    let f = Fx::new();
+    let v = json(&f, &["settings", "get", "ways.language", "--json"]);
+    let options: Vec<&str> = v["options"].as_array().unwrap().iter().map(|o| o.as_str().unwrap()).collect();
+    assert_eq!(&options[..4], ["en", "auto", "ar", "de"]);
+    assert_eq!(options.iter().filter(|o| **o == "en").count(), 1, "{options:?}");
+    assert!(options.contains(&"pt-br") && options.contains(&"ja"));
+    assert_eq!(v["value"], "auto");
+    // The same list from another directory: it never depends on the cwd.
+    f.write(&f.root.join("proj/.claude/ways/p/p.md"), "---\ndescription: d\n---\n");
+    assert_eq!(json(&f, &["settings", "get", "ways.language", "--json"])["options"], v["options"]);
+    for ok in ["ja", "en", "auto", "pt-br"] {
+        assert_eq!(f.run(&["settings", "set", "ways.language", ok]).2, 0, "{ok}");
+    }
+    // A name is no code: the key's doc says code, and the files hold codes.
+    for bad in ["japanese", "日本語", "xx"] {
+        let (_, err, code) = f.run(&["settings", "set", "ways.language", bad]);
+        assert_eq!(code, 3, "{bad}: {err}");
+        assert!(err.contains(&format!("found '{bad}'")), "{err}");
+    }
+    assert!(std::fs::read_to_string(f.user()).unwrap().contains("language: pt-br"));
+    // A value written by hand that is no code loads as written and is a lint finding.
+    f.write(&f.user(), "language: japanese\n");
+    assert_eq!(f.run(&["settings", "get", "ways.language"]).0, "japanese\n");
+    assert_eq!(f.run(&["settings", "lint"]).2, 3);
+    assert!(json(&f, &["settings", "get", "ways.default_scope", "--json"]).get("options").is_none());
+}
+
+#[test]
+fn the_disabled_domains_are_picked_from_the_corpus_domains() {
+    let f = Fx::new();
+    let way = "---\ndescription: d\n---\n";
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/ea/x/x.md"), way);
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/.hidden/h.md"), way);
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/notes/note.md"), "no frontmatter\n");
+    f.write(&f.root.join("xdg/config/agent-ways/ways/itops/y/y.md"), way);
+    let v = json(&f, &["settings", "get", "ways.disabled_domains", "--json"]);
+    // Hidden directories and directories with no way are not domains.
+    assert_eq!(v["options"], serde_json::json!(["ea", "itops"]));
+    assert_eq!(v["value"], serde_json::json!([]));
+    let (out, _, _) = f.run(&["settings", "help", "ways.disabled_domains"]);
+    assert!(out.contains("a list, each one of ea, itops"), "{out}");
+    // A list, or the comma text, of domains in the list.
+    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "[ea, itops]"]).2, 0);
+    assert_eq!(json(&f, &["settings", "get", "ways.disabled_domains", "--json"])["value"], serde_json::json!(["ea", "itops"]));
+    // One outside the list refuses the whole write.
+    let before = std::fs::read_to_string(f.user()).unwrap();
+    let (_, err, code) = f.run(&["settings", "set", "ways.disabled_domains", "ea,nope"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("nope"), "{err}");
+    assert_eq!(std::fs::read_to_string(f.user()).unwrap(), before);
+}
+
+#[test]
+fn a_project_s_own_domain_is_a_choice_through_its_layer_and_a_stored_one_stays_settable() {
+    let f = Fx::new();
+    let way = "---\ndescription: d\n---\n";
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/ea/x/x.md"), way);
+    f.write(&f.root.join("proj/.claude/ways/mine/m.md"), way);
+    let p = f.root.join("proj");
+    let p = p.to_str().unwrap();
+    // The project layer lists its own domain, so `set --project` and a write
+    // from inside the project take it, and the user file's write does too:
+    // one rule, the layers' (no special case by key).
+    let v = json(&f, &["settings", "get", "ways.disabled_domains", "--json"]);
+    assert_eq!(v["options"], serde_json::json!(["ea", "mine"]));
+    let (_, err, code) = f.run(&["settings", "set", "ways.disabled_domains", "mine", "--project", p]);
+    assert_eq!(code, 0, "{err}");
+    assert!(std::fs::read_to_string(f.overlay()).unwrap().contains("mine"));
+    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "nope", "--project", p]).2, 3);
+    // From another directory the project's domain is not listed, but a
+    // stored one stays settable, and adding a listed one succeeds.
+    f.write(&f.user(), "disabled_domains: [mine]\n");
+    let other = f.root.join("home");
+    let from_other = |args: &[&str]| {
+        let mut c = f.cmd(args);
+        c.current_dir(&other).env("CLAUDE_PROJECT_DIR", &other);
+        c.output().unwrap()
+    };
+    let out = from_other(&["settings", "get", "ways.disabled_domains", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["options"], serde_json::json!(["ea"]));
+    assert!(from_other(&["settings", "set", "ways.disabled_domains", "mine,ea"]).status.success());
+    assert_eq!(from_other(&["settings", "set", "ways.disabled_domains", "mine,nope"]).status.code(), Some(3));
+    f.write(&f.user(), "disabled_domains: [mine]\n");
+    let out = from_other(&["settings", "lint"]);
+    assert_eq!(out.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("mine"), "{}", String::from_utf8_lossy(&out.stdout));
+}

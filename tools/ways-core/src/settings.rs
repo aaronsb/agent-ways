@@ -150,6 +150,7 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "ways.language",
         path: &["language"],
+        kind: Kind::ChoiceOf { options: languages, multi: false },
         default: DefaultValue::Yaml("auto"),
         doc: "Output language: en, auto, or a language code.",
         long: "en and auto keep the English corpus. A specific code, set by the ways-localize skill, switches the build, matcher and tuner to that language (ADR-139).",
@@ -168,7 +169,7 @@ const KEYS: &[KeySpec] = &[
         section: "ways.domains",
         fail_closed: Some(closed_domains),
         path: &["disabled_domains"],
-        kind: Kind::List,
+        kind: Kind::ChoiceOf { options: domains, multi: true },
         default: DefaultValue::Yaml("[]"),
         doc: "Domains switched off everywhere, such as [ea, itops].",
         long: "Every way under a listed domain stays silent. Set as a list, `[ea, itops]` or `ea,itops`.",
@@ -315,6 +316,41 @@ fn closed_domains(v: &Value) -> Option<Value> {
         _ => {}
     }
     (!names.is_empty()).then_some(Value::Sequence(names))
+}
+
+/// The values `ways.language` may take: `en` and `auto`, then the active
+/// languages of the registry, the codes a locale file may carry. Read from
+/// the registry compiled in, so it never depends on the directory.
+fn languages(_layers: &[Layer]) -> Result<Vec<String>, String> {
+    let mut out = vec!["en".to_string(), "auto".to_string()];
+    out.extend(crate::agents::get_active_languages().into_iter().filter(|l| l != "en" && l != "auto"));
+    Ok(out)
+}
+
+/// The domains `ways.disabled_domains` may name: the top-level directories
+/// of the user, shipped and projected ways roots that hold a way, as the
+/// scanner counts one (a `description:` in its frontmatter), and those of
+/// each project the layers carry (`<project>/.claude/ways.yaml` names its
+/// `.claude/ways/`), since the engine honours a project's own domain there.
+/// So the rule is the layers': a write to a project's file, and a write
+/// from inside that project, see its domains; from another directory they
+/// do not, and a stored item always stays settable.
+fn domains(layers: &[Layer]) -> Result<Vec<String>, String> {
+    let mut roots = crate::paths::ways_roots(None);
+    for l in layers.iter().filter(|l| l.file == FILE && l.scope == LayerScope::Project) {
+        if let Some(dir) = l.path.as_deref().and_then(Path::parent) {
+            roots.push(dir.join("ways"));
+        }
+    }
+    let mut found = std::collections::BTreeSet::new();
+    for root in roots.iter().filter(|r| r.is_dir()) {
+        for way in crate::scanner::scan_ways(root).unwrap_or_default() {
+            if !way.domain.starts_with('.') {
+                found.insert(way.domain);
+            }
+        }
+    }
+    Ok(found.into_iter().collect())
 }
 
 /// A per-way toggle: anything but an explicit on reads as disabled.

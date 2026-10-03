@@ -1,24 +1,24 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj · this project ──────────────┐┌detail─────────────────────────────────────┐|
-|│ ▾ settings                    value                 ││ways.language                              │|
+|│ ▾ settings                    value                 ││ways.disabled_domains                      │|
 |│     enabled                   true                  ││                                           │|
-|│     subagents                 true                  ││Output language: en, auto, or a language   │|
-|│▌    language                  auto                  ││code.                                      │|
+|│     subagents                 true                  ││Domains switched off everywhere, such as   │|
+|│     language                  auto                  ││[ea, itops].                               │|
 |│     default_scope             agent                 ││                                           │|
-|│     disabled_domains          []                    ││en and auto keep the English corpus. A     │|
-|│ ▸ project · way               enabled               ││specific code, set by the ways-localize    │|
-|│                                                     ││skill, switches the build, matcher and     │|
-|│                                                     ││tuner to that language (ADR-139).          │|
+|│▌    disabled_domains          []                    ││Every way under a listed domain stays      │|
+|│ ▸ project · way               enabled               ││silent. Set as a list, `[ea, itops]` or    │|
+|│                                                     ││`ea,itops`.                                │|
 |│                                                     ││                                           │|
-|│                                                     ││value    auto                              │|
-|│                                                     ││type     one of en | auto | ar | de | es | │|
-|│                                                     ││fr | hi | id | it | ja | ko | pl | pt-br | │|
-|│                                                     ││ru | th | tr | uk | vi | zh (Enter picks)  │|
-|│                                                     ││default  auto                              │|
-|│                                                     ││from     default                           │|
-|│                                                     ││writes   ~/.config/agent-ways/config.yaml  │|
-|│                                                     ││[ways.language]                            │|
+|│                                                     ││value    []                                │|
+|│                                                     ││type     any of itops | softwaredev (Enter │|
+|│                        ┌pick any: ways.disabled_domains─────────────────┐                        │|
+|│                        │ [x] itops                                      │                        │|
+|│                        │ [ ] softwaredev                                │                        │|
+|│                        └────────────────────────────────────────────────┘agent-ways/config.yaml  │|
+|│                                                     ││[ways.disabled_domains]                    │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| edit  auto▏  Enter set · Esc cancel  ? keys · Tab 1-9 tabs · / filters all tabs                    |
+| pick   ↑↓ move · Space or click marks · Enter sets · Esc closes                                    |
 styles
   0   0-7   Black Cyan BOLD
   0  10-21  White Blue -
@@ -46,7 +46,7 @@ styles
   2   2-11  - - BOLD
   2  32-36  - - DIM
   2  54-55  - - DIM
-  2  56-68  - - BOLD
+  2  56-76  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3  54-55  - - DIM
@@ -55,14 +55,14 @@ styles
   4  54-55  - - DIM
   4  99-99  - - DIM
   5   0-0   - - DIM
-  5   1-1   Cyan - BOLD|REVERSED
-  5   2-53  - - BOLD|REVERSED
   5  54-55  - - DIM
   5  99-99  - - DIM
   6   0-0   - - DIM
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
+  7   1-1   Cyan - BOLD|REVERSED
+  7   2-53  - - BOLD|REVERSED
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
@@ -78,28 +78,33 @@ styles
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  54-55  - - DIM
+ 11  54-64  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
  12  54-64  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-64  - - DIM
+ 13  25-25  Blue - -
+ 13  26-56  Blue - BOLD
+ 13  57-74  Blue - -
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-55  - - DIM
+ 14  25-25  Blue - -
+ 14  74-74  Blue - -
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  54-55  - - DIM
+ 15  25-25  Blue - -
+ 15  26-73  - - BOLD|REVERSED
+ 15  74-74  Blue - -
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16  54-64  - - DIM
+ 16  25-74  Blue - -
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17  54-64  - - DIM
+ 17  54-55  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
- 18  54-64  - - DIM
+ 18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
  19  54-55  - - DIM
@@ -130,4 +135,4 @@ styles
  27  99-99  - - DIM
  28   0-99  - - DIM
  29   0-5   Black Cyan BOLD
- 29  13-35  - - DIM|ITALIC
+ 29   6-63  - - DIM|ITALIC

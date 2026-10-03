@@ -1,0 +1,118 @@
+agent-tui frame 80x25
+| 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme|
+|┌ ways settings — ~/proj · this project ───┐┌detail────────────────────────────┐|
+|│ ▾ settings              value            ││ways.disabled_domains             │|
+|│     enabled             true             ││                                  │|
+|│     subagents           true             ││Domains switched off everywhere,  │|
+|│     language            auto             ││such as [ea, itops].              │|
+|│     default_scope       agent            ││                                  │|
+|│▌    disabled_domains    []               ││Every way under a listed domain   │|
+|│ ▸ project · way         enabled          ││stays silent. Set as a list, `[ea,│|
+|│                                          ││itops]` or `ea,itops`.            │|
+|│              ┌pick any: ways.disabled_domains─────────────────┐              │|
+|│              │ [x] itops                                      │              │|
+|│              │ [ ] softwaredev                                │s |           │|
+|│              └────────────────────────────────────────────────┘icks)         │|
+|│                                          ││default  []                       │|
+|│                                          ││from     default                  │|
+|│                                          ││writes                            │|
+|│                                          ││~/.config/agent-ways/config.yaml  │|
+|│                                          ││[ways.disabled_domains]           │|
+|│                                          ││                                  │|
+|│                                          ││                                  │|
+|│                                          ││                                  │|
+|│                                          ││                                  │|
+|└──────────────────────────────────────────┘└──────────────────────────────────┘|
+| pick   ↑↓ move · Space or click marks · Enter sets · Esc closes                |
+styles
+  0   0-7   Black Cyan BOLD
+  0  10-21  White Blue -
+  0  24-31  White Blue -
+  0  34-44  White Blue -
+  0  47-56  White Blue -
+  0  59-69  White Blue -
+  0  72-79  White Blue -
+  1   0-0   - - DIM
+  1   1-39  Blue - BOLD|DIM
+  1  40-44  - - DIM
+  1  45-50  Blue - BOLD|DIM
+  1  51-79  - - DIM
+  2   0-0   - - DIM
+  2   2-11  - - BOLD
+  2  26-30  - - DIM
+  2  43-44  - - DIM
+  2  45-65  - - BOLD
+  2  79-79  - - DIM
+  3   0-0   - - DIM
+  3  43-44  - - DIM
+  3  79-79  - - DIM
+  4   0-0   - - DIM
+  4  43-44  - - DIM
+  4  79-79  - - DIM
+  5   0-0   - - DIM
+  5  43-44  - - DIM
+  5  79-79  - - DIM
+  6   0-0   - - DIM
+  6  43-44  - - DIM
+  6  79-79  - - DIM
+  7   0-0   - - DIM
+  7   1-1   Cyan - BOLD|REVERSED
+  7   2-42  - - BOLD|REVERSED
+  7  43-44  - - DIM
+  7  79-79  - - DIM
+  8   0-0   - - DIM
+  8   2-10  - - BOLD
+  8  11-16  - - DIM
+  8  26-32  - - DIM
+  8  43-44  - - DIM
+  8  79-79  - - DIM
+  9   0-0   - - DIM
+  9  43-44  - - DIM
+  9  79-79  - - DIM
+ 10   0-0   - - DIM
+ 10  15-15  Blue - -
+ 10  16-46  Blue - BOLD
+ 10  47-64  Blue - -
+ 10  79-79  - - DIM
+ 11   0-0   - - DIM
+ 11  15-15  Blue - -
+ 11  64-64  Blue - -
+ 11  79-79  - - DIM
+ 12   0-0   - - DIM
+ 12  15-15  Blue - -
+ 12  16-63  - - BOLD|REVERSED
+ 12  64-64  Blue - -
+ 12  79-79  - - DIM
+ 13   0-0   - - DIM
+ 13  15-64  Blue - -
+ 13  79-79  - - DIM
+ 14   0-0   - - DIM
+ 14  43-53  - - DIM
+ 14  79-79  - - DIM
+ 15   0-0   - - DIM
+ 15  43-53  - - DIM
+ 15  79-79  - - DIM
+ 16   0-0   - - DIM
+ 16  43-50  - - DIM
+ 16  79-79  - - DIM
+ 17   0-0   - - DIM
+ 17  43-44  - - DIM
+ 17  79-79  - - DIM
+ 18   0-0   - - DIM
+ 18  43-44  - - DIM
+ 18  79-79  - - DIM
+ 19   0-0   - - DIM
+ 19  43-44  - - DIM
+ 19  79-79  - - DIM
+ 20   0-0   - - DIM
+ 20  43-44  - - DIM
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
+ 21  43-44  - - DIM
+ 21  79-79  - - DIM
+ 22   0-0   - - DIM
+ 22  43-44  - - DIM
+ 22  79-79  - - DIM
+ 23   0-79  - - DIM
+ 24   0-5   Black Cyan BOLD
+ 24   6-63  - - DIM|ITALIC
