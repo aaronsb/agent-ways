@@ -473,8 +473,6 @@ mod tests {
         eprintln!("100 sessions, {recent} within the cutoff, {BUSY} busy: {total} stats in 10 minutes (bound {bound})");
     }
 
-    /// The follow re-states the event log on the same backoff, and reports
-    /// a write once.
     /// A follow on sources quiet for two days is not cut off: it states at
     /// the ceiling and sees the session write again. A source missing at
     /// one stat is a quiet stat, and the follow goes on.
@@ -514,6 +512,8 @@ mod tests {
         assert!(Follow::waking(Some(PathBuf::from("/t")), Rc::new(|_| None), clock).is_none());
     }
 
+    /// The follow re-states the event log on the same backoff, and reports
+    /// a write once.
     #[test]
     fn the_follow_polls_on_the_backoff() {
         let t0 = 1_000 * DAY;
