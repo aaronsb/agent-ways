@@ -30,7 +30,7 @@ threat model this new authentication flow	softwaredev/architecture/threat-modeli
 run npm audit on this project	softwaredev/code/supplychain/depscan/node
 red green refactor for this feature	softwaredev/code/testing/tdd
 use a fake instead of a real network call in this unit test	softwaredev/code/testing/mocking
-the reviewer found a bug in the PR, fix it and re-review against the original scenario	softwaredev/code/testing/evaluation
+the unit test calls tick() by hand but the real loop only ticks while applying	softwaredev/code/testing/evaluation
 it passed 20 runs in a row so the race condition is fixed	softwaredev/code/testing/evaluation
 write tests for the terminal UI modal at a small terminal size	softwaredev/code/testing/evaluation/screens
 set up my ssh agent so I stop typing the passphrase	workstation/shell/sshagent

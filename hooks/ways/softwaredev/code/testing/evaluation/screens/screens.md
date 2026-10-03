@@ -1,7 +1,7 @@
 ---
-description: a visual evaluation loop for terminal UI screens; capture each screen at the terminal sizes users run, reach each state with a scripted key sequence, review every golden image diff row by row, and exercise external commands through a stand-in runner
+description: a visual evaluation loop for terminal UI screens; snapshot each screen at the terminal sizes users run, reach each state with a scripted key sequence, review every golden image diff of a screen capture row by row, and exercise external commands through a stand-in runner
 vocabulary: tui terminal ui screen screenshot snapshot capture pane frame golden image diff render layout 80x25 100x30 columns rows small terminal resize keys keypress keystroke key sequence modal popup overlay scroll wrap truncation clipped overflow stand-in runner fake command long output exit code visual
-pattern: \btui\b|\b\d{2,3}x\d{2,3}\b
+pattern: \btui\b|\b(80|100|120|132)x(24|25|30|40|43|50)\b
 scope: agent, subagent
 refire: 0.15
 ---
@@ -16,11 +16,11 @@ Capture each screen at a small terminal and at a common one, for example 80x25 a
 
 ## Reach each state with scripted keys
 
-Script the key sequence that reaches each state under test and keep it beside the golden image. The script drives the real input loop, so the program draws and ticks between keys as it does for a user. A state reached by setting fields directly can show a frame the user never sees.
+Script the key sequence that reaches each state under test and keep it beside the golden image. The script drives the real input loop, as the parent way's headless-driver rule requires.
 
 ## Review every golden diff row by row
 
-Read each changed golden image or text capture row by row and name what moved in each changed row. Every change matches an intended delta, or it is a defect to explain before the golden is accepted. Re-recording a golden to turn the check green throws the review away. A golden captured from the wrong frame approves the wrong frame, so confirm the capture shows the state its name claims.
+Read each changed golden image or text capture row by row and name what moved in each changed row. The assertions way decides whether each change is accepted. Confirm the capture shows the state its name claims.
 
 ## Stand in for external commands
 
