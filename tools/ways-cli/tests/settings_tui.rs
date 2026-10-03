@@ -507,6 +507,11 @@ fn golden_frames() {
     let mine = Fx::new();
     mine.file(".config/agent-ways/agent.yaml", "engine: mine\nprofiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n");
     g.check_text("gate-pick-engine", &mine.snap("gate", "down enter", "100x30", "16"));
+    // The multi picker, over the domains the ways roots hold: one is
+    // switched off with Space and the cursor rests on the next.
+    let domains = "down down down down down enter space down";
+    g.check_text("ways-pick-domains", &fx.snap("ways", domains, "100x30", "16"));
+    g.check_text("ways-pick-domains-80x25", &fx.snap("ways", domains, "80x25", "16"));
     // A chosen theme at truecolor: its roles, and the editor's swatches.
     g.check_text("theme-nord-truecolor", &fx.snap("theme", "down down enter 1", "100x30", "truecolor"));
     // A project way with a macro: its switch above, what it is below.

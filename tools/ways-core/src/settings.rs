@@ -169,7 +169,7 @@ const KEYS: &[KeySpec] = &[
         section: "ways.domains",
         fail_closed: Some(closed_domains),
         path: &["disabled_domains"],
-        kind: Kind::List,
+        kind: Kind::ChoiceOf { options: domains, multi: true },
         default: DefaultValue::Yaml("[]"),
         doc: "Domains switched off everywhere, such as [ea, itops].",
         long: "Every way under a listed domain stays silent. Set as a list, `[ea, itops]` or `ea,itops`.",
@@ -358,6 +358,27 @@ fn languages(layers: &[Layer]) -> Result<Vec<String>, String> {
     let mut out = vec!["en".to_string(), "auto".to_string()];
     out.extend(found.into_iter().filter(|l| l != "en" && l != "auto"));
     Ok(out)
+}
+
+/// The domains `ways.disabled_domains` may name: the top-level directories
+/// of the ways roots that hold a way, sorted and listed once.
+fn domains(layers: &[Layer]) -> Result<Vec<String>, String> {
+    let mut found = std::collections::BTreeSet::new();
+    for root in ways_roots(layers) {
+        let Ok(rd) = std::fs::read_dir(&root) else { continue };
+        for entry in rd.flatten() {
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else { continue };
+            let dir = entry.path();
+            // `metadata` follows a linked domain directory.
+            if name.starts_with('.') || !dir.metadata().is_ok_and(|m| m.is_dir()) {
+                continue;
+            }
+            if crate::scanner::md_files(&dir, crate::scanner::MdKind::Ways).next().is_some() {
+                found.insert(name);
+            }
+        }
+    }
+    Ok(found.into_iter().collect())
 }
 
 /// A per-way toggle: anything but an explicit on reads as disabled.

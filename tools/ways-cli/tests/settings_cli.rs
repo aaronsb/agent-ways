@@ -835,3 +835,32 @@ fn a_profile_s_model_stays_text_because_its_list_needs_the_network() {
     assert!(v.as_object().unwrap().contains_key("options"));
     assert_eq!(v["value"], "claude-sonnet-5-5");
 }
+
+#[test]
+fn the_disabled_domains_are_picked_from_the_corpus_domains() {
+    let f = Fx::new();
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/ea/x/x.md"), "---\ndescription: d\n---\n");
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/.hidden/h.md"), "x\n");
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/empty/note.txt"), "x\n");
+    f.write(&f.root.join("xdg/config/agent-ways/ways/itops/y/y.md"), "---\ndescription: d\n---\n");
+    f.write(&f.root.join("proj/.claude/ways/mine/m.md"), "---\ndescription: d\n---\n");
+    f.write(&f.overlay(), "enabled: true\n");
+    let v = json(&f, &["settings", "get", "ways.disabled_domains", "--json"]);
+    assert_eq!(v["options"], serde_json::json!(["ea", "itops", "loc", "mine"]));
+    assert_eq!(v["value"], serde_json::json!([]));
+    let (out, _, _) = f.run(&["settings", "help", "ways.disabled_domains"]);
+    assert!(out.contains("a list, each one of ea, itops, loc, mine"), "{out}");
+    // A list, or the comma text, of domains in the list.
+    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "[ea, itops]"]).2, 0);
+    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "ea,mine"]).2, 0);
+    assert_eq!(json(&f, &["settings", "get", "ways.disabled_domains", "--json"])["value"], serde_json::json!(["ea", "mine"]));
+    // One outside the list refuses the whole write.
+    let before = std::fs::read_to_string(f.user()).unwrap();
+    let (_, err, code) = f.run(&["settings", "set", "ways.disabled_domains", "ea,nope"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("nope"), "{err}");
+    assert_eq!(std::fs::read_to_string(f.user()).unwrap(), before);
+    // A domain written by hand that no root holds loads and still silences it.
+    f.write(&f.user(), "disabled_domains: [gone]\n");
+    assert_eq!(json(&f, &["settings", "get", "ways.disabled_domains", "--json"])["value"], serde_json::json!(["gone"]));
+}
