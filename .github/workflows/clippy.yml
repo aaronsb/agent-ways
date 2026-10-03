@@ -33,6 +33,9 @@ jobs:
         run: rustc --version
       - name: clippy
         id: clippy
+        # `shell: bash` runs with pipefail; the default `bash -e` would take
+        # tee's status and pass on any clippy failure.
+        shell: bash
         run: |
           cargo clippy --manifest-path tools/Cargo.toml --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
       - name: Upload log on failure

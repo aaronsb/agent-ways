@@ -253,7 +253,7 @@ test: lint test-smoke test-unit test-sim test-adr test-statusline test-hooks
 
 lint:
 	@echo "Linting Rust workspace..."
-	@cargo clippy --manifest-path tools/Cargo.toml -- -D warnings
+	@cargo clippy --manifest-path tools/Cargo.toml --workspace --all-targets -- -D warnings
 	@echo "Lint passed."
 
 test-smoke: ways
