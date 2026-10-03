@@ -3,17 +3,17 @@ agent-tui frame 100x30
 |┌ ways settings — ~/proj · this project ──────────────┐┌detail─────────────────────────────────────┐|
 |│ ▾ settings                    value                 ││ways.project.api.dual                      │|
 |│     enabled                   true                  ││                                           │|
-|│     language                  auto                  ││value    true                              │|
-|│     default_scope             agent                 ││type     bool (Enter toggles)              │|
-|│     disabled_domains          []                    ││default  true                              │|
-|│ ▾ project · way               enabled               ││from     default                           │|
-|│   ▾ this project                                    ││writes   ~/proj/.claude/ways.yaml          │|
-|│     ▾ api                                           ││[ways.project.api/dual]                    │|
+|│     subagents                 true                  ││value    true                              │|
+|│     language                  auto                  ││type     bool (Enter toggles)              │|
+|│     default_scope             agent                 ││default  true                              │|
+|│     disabled_domains          []                    ││from     default                           │|
+|│ ▾ project · way               enabled               ││writes   ~/proj/.claude/ways.yaml          │|
+|│   ▾ this project                                    ││[ways.project.api/dual]                    │|
+|│     ▾ api                                           ││                                           │|
 |│▌        dual                  true                  ││                                           │|
 |│   ▾ shipped                                         ││                                           │|
 |│     ▸ itops                                         ││                                           │|
-|│     ▸ softwaredev                                   ││                                           │|
-|│                                                     │└───────────────────────────────────────────┘|
+|│     ▸ softwaredev                                   │└───────────────────────────────────────────┘|
 |│                                                     │┌way────────────────────────────────────────┐|
 |│                                                     ││Two modes for every endpoint, read and     │|
 |│                                                     ││write.                                     │|
@@ -61,26 +61,25 @@ styles
   6  54-64  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
-  7   2-10  - - BOLD
-  7  11-16  - - DIM
-  7  32-38  - - DIM
   7  54-64  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   2-17  - - BOLD
+  8   2-10  - - BOLD
+  8  11-16  - - DIM
+  8  32-38  - - DIM
   8  54-64  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9   2-10  - - BOLD
+  9   2-17  - - BOLD
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10   1-1   Cyan - BOLD|REVERSED
- 10   2-53  - - BOLD|REVERSED
+ 10   2-10  - - BOLD
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11   2-12  - - BOLD
+ 11   1-1   Cyan - BOLD|REVERSED
+ 11   2-53  - - BOLD|REVERSED
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
@@ -88,10 +87,11 @@ styles
  12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13   2-18  - - BOLD
+ 13   2-12  - - BOLD
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
+ 14   2-18  - - BOLD
  14  54-99  - - DIM
  15   0-0   - - DIM
  15  54-55  - - DIM

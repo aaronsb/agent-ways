@@ -3,11 +3,11 @@ agent-tui frame 100x30
 |┌ ways settings — ~/proj · this project ──────────────┐┌detail─────────────────────────────────────┐|
 |│▌▾ settings                    value                 ││ways · settings                            │|
 |│     enabled                   true                  ││                                           │|
-|│     language                  auto                  ││The tab's own keys.                        │|
-|│     default_scope             agent                 ││                                           │|
-|│     disabled_domains          []                    ││4 entries, 0 changed                       │|
+|│     subagents                 true                  ││The tab's own keys.                        │|
+|│     language                  auto                  ││                                           │|
+|│     default_scope             agent                 ││5 entries, 0 changed                       │|
+|│     disabled_domains          []                    ││                                           │|
 |│ ▸ project · way               enabled               ││                                           │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -64,12 +64,12 @@ styles
   6  56-75  #7c8baa - -
   6  99-99  #434c5e - -
   7   0-0   #434c5e - -
-  7   2-10  - - BOLD
-  7  11-16  #7c8baa - -
-  7  32-38  #7c8baa - -
   7  54-55  #434c5e - -
   7  99-99  #434c5e - -
   8   0-0   #434c5e - -
+  8   2-10  - - BOLD
+  8  11-16  #7c8baa - -
+  8  32-38  #7c8baa - -
   8  54-55  #434c5e - -
   8  99-99  #434c5e - -
   9   0-0   #434c5e - -

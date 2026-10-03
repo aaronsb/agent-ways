@@ -397,6 +397,22 @@ enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Switch ways off or on for this session's subagents and teammates
+    ///
+    /// Without on or off, reports which switch is in effect: this session's,
+    /// the project's or user's `subagents:` setting, or the default (on).
+    /// Holds until switched back or the session's state is cleared.
+    Subagents {
+        /// on or off; omit to report
+        #[arg(value_parser = ["on", "off"])]
+        state: Option<String>,
+        /// Session ID (if omitted, auto-detects current session)
+        #[arg(long)]
+        session: Option<String>,
+        /// Machine-readable JSON output
+        #[arg(long)]
+        json: bool,
+    },
     /// Clear session markers when ways stop firing or fire wrongly
     ///
     /// Reset session state when ways stop firing or fire incorrectly. Clears
@@ -1124,6 +1140,7 @@ fn run() -> Result<()> {
                 cmd::introspect::fires(session.as_deref(), project.as_deref(), all, max_score, limit, matched, json)
             }
             SessionCommand::Reset { session, all, confirm } => cmd::reset::run(session.as_deref(), all, confirm),
+            SessionCommand::Subagents { state, session, json } => cmd::subagents::run(state.as_deref(), session.as_deref(), json),
         },
         Commands::Author { action } => match action {
             AuthorCommand::Lint { path, schema, check, fix, all, global } => cmd::lint::run(path, schema, check, fix, all, global),
