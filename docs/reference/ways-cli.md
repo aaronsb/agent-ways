@@ -57,10 +57,16 @@ ways status --json
 | `lint` | Check the settings files against the schema. Exits 3 with findings. |
 | `apply` | Write a settings object (YAML or JSON, from stdin or `--file`) and answer with a JSON report. `--dry-run` writes nothing. |
 | `fix <section>` | Rewrite one section of a file from canonical. |
+| `theme list` | List the themes: name, source (`bundled`, `user`, or `override` for a user file with a bundled name) and the active one. `--json` adds each one's label and file. |
+| `theme copy <from> <to>` | Copy any theme, bundled or yours, to a new user theme file `<to>`. |
+| `theme rename <old> <new>` | Rename a user theme: its file and its `THEME_NAME`. `theme.active` follows when it named the theme. |
+| `theme delete <name>` | Delete a user theme's file. When it was the active theme, `theme.active` falls back to `terminal` and the output says so. |
 
 `get`, `list` and `lint` take `--file <path>` to read one file alone instead of the live layers. The exit codes are 0 done, 2 usage error or unknown key, 3 rejected, 4 overridden by a higher layer, and 5 write failed.
 
 A key whose value comes from a list computed from the files, such as `gate.engine` (the shipped profiles and your own), lists its choices in `help`, as an `options` array in `get --json` and `list --json`, and as a comment in `emit`. `set` and `apply` refuse a value outside the list with exit 3, and `lint` reports one written by hand.
+
+A theme is a file in `$XDG_CONFIG_HOME/agent-ways/themes` (ADR-504). The bundled themes and `terminal` are copied, never renamed or deleted: `theme rename` and `theme delete` refuse them with exit 3. A new name is refused with exit 3 when it is empty, holds a path separator or a space, starts with a dot, is not lowercase letters, digits and `-`, or is taken by a bundled or user theme. An unknown theme exits 2. `theme copy`, `rename` and `delete` print what they did on one line and the file on the next; `--json` prints `action`, the names, `file`, `active` and `active_moved`. The theme tab runs the same operations.
 
 ```
 ways settings list                                   # every key in effect
@@ -71,6 +77,9 @@ ways settings unset ways.project.itops/incident      # back on
 ways settings set gate.engine openrouter
 ways settings set gate.mode shadow
 ways settings emit                                   # the canonical file, with comments
+ways settings theme copy nord arctic                 # a user theme to edit, from a bundled one
+ways settings theme rename arctic glacier
+ways settings theme delete glacier
 ```
 
 ### Settings screens
@@ -99,7 +108,20 @@ Each tab is a tree of settings on the left and the selected key's detail on the 
 
 In the tree, colour marks a row's state: a changed value, a value that differs from its default, a read-only row, a queued action. The `?` help lists the states. `[a]` marks a row with actions and `!` a lint finding.
 
-Some tabs have keys of their own, which the footer names. On the ways tab, `s` sets up agent-ways in a project, and `p` switches between this project's and all projects' switched-off ways. On the install tab, `t` activates a target, `A` adds one and `p` shows a target's plan (see [`ways target`](#ways-target)). On the theme tab, ↑↓ previews a theme and Enter uses it.
+Some tabs have keys of their own, which the footer names. On the ways tab, `s` sets up agent-ways in a project, and `p` switches between this project's and all projects' switched-off ways. On the install tab, `t` activates a target, `A` adds one and `p` shows a target's plan (see [`ways target`](#ways-target)).
+
+On the theme tab, ↑↓ previews a theme, Enter uses it and `e` edits it (a bundled one through a copy you name). `a` opens the theme's actions:
+
+| Action | Does |
+|---|---|
+| new | A user theme from the agent-ways palette, under a name you type. |
+| copy | A user theme from this one, under a name you type, then opened in the editor. Offered for every theme. |
+| rename | Rename a user theme; the active choice follows. Not offered for a bundled theme. |
+| delete | Delete a user theme after a y/n. When it was active, `terminal` becomes active and the bar says so. Not offered for a bundled theme. |
+| edit | The slot editor; ^S writes the file. |
+| shape | Cycle the lozenge shape. |
+
+A refused name keeps the prompt open with the reason in the bar. Theme files are written at once and never go through the review. `ways settings theme` runs the same copy, rename and delete from the command line.
 
 **The model picker.** Enter on a choice key opens a picker. `gate.profiles.<profile>.model` offers the models the provider serves once [`ways agent models`](#ways-agent) has fetched and cached the list. Until then the key takes any model id as text.
 
