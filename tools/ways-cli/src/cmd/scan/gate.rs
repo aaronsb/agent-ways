@@ -237,7 +237,10 @@ fn run(
         Ok(Reply::Fallback { reason, call, .. }) => {
             // An agent older than #741 sends no call; its reason says whether
             // it reached the provider.
-            let reached = ["deadline", "transport", "provider_", "answer"].iter().any(|p| reason.starts_with(p));
+            // `deadline` alone is a provider timeout; `deadline: …` is the
+            // agent running out of time before it called.
+            let reached = reason == "deadline"
+                || ["transport", "provider_", "answer"].iter().any(|p| reason.starts_with(p));
             match call {
                 Some(call) => log_call(&call, Some(&reason), log),
                 None if reached => {
@@ -486,7 +489,13 @@ mod tests {
     #[test]
     fn no_call_is_logged_when_none_was_made() {
         let s = settings(Mode::Enforce);
-        for reply in [Err("agent_absent".to_string()), Ok(Reply::Fallback { reason: "no_key".into(), latency_ms: 0, call: None })] {
+        // `deadline: before call`: the agent ran out of time waiting for a
+        // slot and never called the provider, so no call of unknown cost.
+        for reply in [
+            Err("agent_absent".to_string()),
+            Ok(Reply::Fallback { reason: "no_key".into(), latency_ms: 0, call: None }),
+            Ok(Reply::Fallback { reason: "deadline: before call".into(), latency_ms: 2000, call: None }),
+        ] {
             let events = Events::default();
             let sink = recorder(&events);
             run(&pending(), "q", None, &s, &log(&sink), |_, _| reply);
