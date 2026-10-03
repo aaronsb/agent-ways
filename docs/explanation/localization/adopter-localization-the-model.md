@@ -4,6 +4,7 @@ domain: ways
 mode: explanation
 related:
   - "[[ADR-139]]"
+  - "[[ADR-183]]"
   - "[[01.010.E]]"
   - "[[01.011.E]]"
   - "[[01.012.E]]"
@@ -14,8 +15,8 @@ aliases: []
 # Adopter localization — the model
 
 This is the **explanation** companion to [[ADR-139]] (the decision to shelve
-maintainer-maintained i18n and make localization adopter-run) and the design note
-*Adopter localization lifecycle and tuning* (the mechanics). The ADR argues *why*;
+maintainer-maintained i18n and make localization adopter-run) and the evidence record
+[[ADR-183]] (the tuning mechanics). The ADR argues *why*;
 these pages show *how the system behaves* for a real adopter — from a fresh install,
 through switching languages, to the steady state.
 
@@ -50,34 +51,35 @@ flowchart TD
   once by the `ways-localize` skill, that flips the flag and builds the localized layer
   on top of the unchanged English root.
 
-## Two flags, one bridge
+## Two flags, and the operator between them
 
 Localization touches **two** different configs, and conflating them is the most common
 confusion:
 
 | Flag | Lives in | Means | Written by | Read by |
 |---|---|---|---|---|
-| `language` | Claude Code `settings.json` | CC's **response** language | the operator (or ways-localize, as a courtesy) | the detection nudge (trigger) |
-| `language` | agent-ways `config.yaml` | ways **intl mode** | **`ways-localize`** | corpus build · matcher · tuning |
+| `language` | Claude Code `settings.json` | CC's **response** language | the operator, or ways-localize as its last step | Claude Code |
+| `language` | agent-ways `config.yaml` (`ways.language`) | ways **intl mode** | **`ways-localize`** | corpus build · matcher · tuning |
 
-The **nudge bridges them**: when CC is set to Spanish but ways is still in English mode,
-ways is under-serving the operator — and says so. Setting CC to Spanish must never, by
-itself, trigger a 127 MB model download and a translate-everything pass; localization is
-deliberate, consented work. The flag ways acts on is its own.
+Nothing connects them automatically. Setting CC to Spanish changes how Claude answers
+and leaves ways in English mode. It must never, by itself, trigger a 127 MB model
+download and a translate-everything pass; localization is deliberate, consented work.
+The operator bridges the two by asking for ways in their language, which triggers the
+`ways-localize` skill ([[01.011.E]]).
 
 ## The English root never moves
 
 Whatever the mode, **English is the source of truth.** A localization is a *derivation*
 validated against the English root, never a co-equal sibling — that is what keeps a
 multilingual install from becoming a free-for-all with no fixed meaning. The mechanics
-(root-anchored fidelity, the `output_language` gate, the match-compute saving) are in
-[[01.013.E]] and the design note.
+(root-anchored fidelity, the mode gate, the match-compute saving) are in
+[[01.013.E]] and [[ADR-183]].
 
 ## The scenarios
 
 | # | Scenario | The thing it shows |
 |---|----------|--------------------|
 | [[01.010.E]] | The English-native install | The default path — nothing to flag, nothing to do |
-| [[01.011.E]] | The language switch | CC in Spanish → nudge → consented ways-localize → satisfied |
+| [[01.011.E]] | The language switch | Operator asks → consent → ways-localize → localized |
 | [[01.012.E]] | Steady-state authoring | English root + one localization, maintained together |
 | [[01.013.E]] | The mode gate | The mechanism: one flag, two modes, root-anchored tuning |

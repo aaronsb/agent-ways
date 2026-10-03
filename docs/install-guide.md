@@ -93,7 +93,7 @@ ways update --ref main   # return to the release channel
 
 attend's config files keep their paths and are now read through the settings schema. `ways settings lint` names any old form by file and line, and `ways settings fix attend.<section>` repairs most of them. [attend's configuration page](attend-and-monitor/configuration.md) says how each retired form reads now, including the `+name:` and `-name:` sensor prefixes. The `claude-projects` script is now `ways projects`, with the same subcommands.
 
-**A pre-1.0 in-place clone** (`~/.claude` *is* the agent-ways git repo). Do not `git pull` it. The migrator ships only at the `ways-v1.8.3` tag; its [migration guide](https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md) at that tag has the steps. [Install topologies](explanation/install-topologies/) records how the layout got here.
+**A pre-1.0 in-place clone** (`~/.claude` *is* the agent-ways git repo). Do not `git pull` it. The migrator ships only at the `ways-v1.8.3` tag; its [migration guide](https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md) at that tag has the steps.
 
 ## Scenario: you want a fork
 

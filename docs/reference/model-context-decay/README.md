@@ -2,6 +2,8 @@
 
 Empirical benchmarks for context degradation across models. These numbers inform the ways system's token-gated re-disclosure intervals.
 
+> Dated evidence: these figures are from the Claude 4.6 model card (March 2026) and are not updated for later models. ADR-104 cites them as the evidence for token-gated re-disclosure.
+
 ## Source Data
 
 Benchmarks from Anthropic's Claude 4.6 model card (March 2026).
@@ -70,7 +72,7 @@ The interval is **window-relative and per-way**, not a single global threshold. 
 | `normal` | 0.15 | the standard load-bearing cadence |
 | `frequent` | 0.05 | re-fires on each fresh occurrence of its trigger |
 
-A way needing finer shaping declares an explicit `curve:` block instead (ADR-123); `refire:` wins when both are present. An early design proposed a flat 25%-of-window global constant (retired ADR-104); it was superseded by these per-way presets. See `docs/hooks-and-ways/engine-reference.md` and ADR-126. <!-- adr-cite-ignore -->
+`refire:` is the only cadence field; the `curve:` block was removed in ADR-159. An early design proposed a flat 25%-of-window global constant (retired ADR-104); it was superseded by these per-way presets. See `docs/hooks-and-ways/engine-reference.md` and ADR-126. <!-- adr-cite-ignore -->
 
 ### Token Budget Consideration
 

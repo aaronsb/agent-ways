@@ -208,7 +208,7 @@ def write_csv(scores: list[Score], outdir: Path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prompts", type=Path, help="JSONL with {lang, expected_way?, prompt} per line")
-    ap.add_argument("--out", type=Path, default=Path.home() / ".claude/docs/signal-analysis")
+    ap.add_argument("--out", type=Path, default=Path("signal-analysis"))
     ap.add_argument("--en-threshold", type=float, default=0.40)
     ap.add_argument("--multi-threshold", type=float, default=0.55)
     args = ap.parse_args()

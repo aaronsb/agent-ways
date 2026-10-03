@@ -457,7 +457,7 @@ fn print_human(r: &StatsReport, days: Option<u32>, project_filter: Option<&str>)
         }
         t.print();
         if models.iter().any(|(m, _)| m == UNSTAMPED) {
-            println!("  {UNSTAMPED}: rows written before the model field existed.");
+            println!("  {UNSTAMPED}: rows with no model: written before the field existed, or ways delivered at subagent dispatch.");
         }
         println!();
 

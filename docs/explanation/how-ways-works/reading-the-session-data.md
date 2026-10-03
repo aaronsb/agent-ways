@@ -76,6 +76,7 @@ that surfaces near-misses; the screen omits them.
 ```
 ways session replay --json                   # most recent session in scope
 ways session replay --session <id> --json    # a specific session
+ways session replay --json --matched         # also the ways the judge kept out
 ```
 
 The output is one JSON object with four parts:
@@ -83,8 +84,8 @@ The output is one JSON object with four parts:
 | Field | Contents |
 |-------|----------|
 | top-level | `session`, `project`, `context_window_k` |
-| `summary` | epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, the trigger breakdown, and the top ways by fire count |
-| `frames` | the turn-by-turn timeline — each frame has its epoch, timestamp, token position, the cumulative set of active ways (with per-way trigger, fire epoch, check count, and new / re-disclosed flags), and a `new_events` list of what changed that turn |
+| `summary` | epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, the trigger breakdown, the top ways by fire count, `gate` (the relevance gate's work: judged, passed, blocked, would-block, unjudged, fallbacks by reason, gate latency, and the blocked ways) and `suppressed` (ways withheld from subagents, by switch) |
+| `frames` | the turn-by-turn timeline — each frame has its epoch, timestamp, token position, the cumulative set of active ways (with per-way trigger, fire epoch, check count, and new / re-disclosed flags), and a `new_events` list of what changed that turn. With `--matched`, the ways the judge blocked appear here too. |
 | `near_misses` | every way that scored close but didn't fire — with its English and multilingual relevance probabilities (`prob_en` / `prob_multi`), the semantic threshold `τ_s` it fell short of, the margin, and the epoch it occurred in |
 
 The `summary` is the at-a-glance shape of the session — the five numbers that open
@@ -106,6 +107,9 @@ ways session replay --session <id> --json | jq '.summary.trigger_breakdown'
 # What fired turn by turn — just the changes, not the running totals
 ways session replay --session <id> --json \
   | jq '.frames[] | select(.new_events|length>0) | {epoch, token_position_k, new_events}'
+
+# What did the relevance judge keep out?
+ways session replay --session <id> --json | jq '.summary.gate | {judged, blocked, blocked_ways}'
 
 # Which ways almost fired most often? (tuning candidates)
 ways session replay --session <id> --json \
@@ -145,7 +149,7 @@ A few readings that turn raw fields into judgement:
 ## Where this fits
 
 The event log is the *telemetry* layer — fine-grained, per-fire, recent (it
-tail-compacts past ~32 MiB, so it forgets its oldest tail). It records *what fired*,
+is size-capped, so it forgets its oldest events; see [the event log](../../reference/events.md)). It records *what fired*,
 not *what was understood*. What was understood is kept in the repository's own
 artifacts — ADRs, ways, issues, commit messages — and `ways init` seeds Claude
 Code's auto-memory to route project knowledge there ([[ADR-128]]). `ways session`

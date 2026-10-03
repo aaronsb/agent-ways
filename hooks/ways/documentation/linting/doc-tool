@@ -31,7 +31,7 @@ from pathlib import Path
 
 # Vendored-tool version (ADR-177). Bump when this tool changes — way macros
 # compare it against the installed template to tell stale from customized.
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.1.0"
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -246,14 +246,42 @@ def cmd_lint(args) -> int:
     return subprocess.run(cmd).returncode
 
 
-def _next_serial(domain: str, digits: dict) -> int:
-    """Next free 3-digit serial within a domain's band, scanning the catalog.
+def _historic_serials(band: int) -> set:
+    """Serials of `band` that any catalog page has ever carried, from git history.
 
-    Mirrors `adr new`'s next-number logic, but over catalog ids (DD.NNN.P)
-    rather than ADR numbers — so authors never compute an id by hand.
+    ADR-302: an id is assigned once and never reused, so a page that was deleted
+    or renumbered still owns its serial. `git log -G` limits the scan to commits
+    that added or removed an `id:` line, so the cost is one pass over a handful
+    of diffs. ADR files under docs/architecture are excluded: they quote example
+    ids. Outside a git checkout this returns an empty set and allocation falls
+    back to the live catalog. A shallow clone sees only partial history, so
+    a serial retired before its cut-off can be reissued there.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(doclint.REPO), "log", "-p", "--format=",
+             "-G", "^id: [0-9]", "--", "docs", ":!docs/architecture"],
+            capture_output=True, text=True, timeout=60)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return set()
+    if out.returncode != 0:
+        return set()
+    seen = set()
+    for m in re.finditer(r"^[-+]id: (\d{2})\.(\d{3})\.[A-Z]\b", out.stdout, re.M):
+        if int(m.group(1)) == band:
+            seen.add(int(m.group(2)))
+    return seen
+
+
+def _next_serial(domain: str, digits: dict) -> int:
+    """Next serial within a domain's band: one past the highest ever used.
+
+    Serials are domain-scoped and never reused (ADR-302), so this is max+1 over
+    the live catalog *and* every serial a page has carried in git history, not
+    the first gap: deleting or renumbering a page must not free its serial.
     """
     band = digits[domain]
-    used = set()
+    used = _historic_serials(band)
     for p in doclint.iter_catalog_pages():
         node = doclint.build_doc_node(p, digits)
         if node is None or node.domain != domain:
@@ -261,10 +289,7 @@ def _next_serial(domain: str, digits: dict) -> int:
         m = doclint.ID_RE.match(node.key or "")
         if m and int(m.group(1)) == band:
             used.add(int(m.group(2)))
-    n = 1
-    while n in used:
-        n += 1
-    return n
+    return max(used, default=0) + 1
 
 
 def cmd_new(args) -> int:

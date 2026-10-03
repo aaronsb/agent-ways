@@ -1,111 +1,62 @@
 # Adding a compliance claim to a way
 
-A way can carry a **claim** that its guidance is *designed* to address a specific control
-(NIST 800-53, OWASP, ISO 27001, SOC 2, CIS, IEEE). A claim is a control-*design*
-assertion — not evidence the control operates. For the model and its honest scope, see
-[governance.md](../governance.md) and
-[ADR-200](../architecture/governance/ADR-200-compliance-claims-and-session-derived-findings.md).
-This page is the how-to: author a claim and check it.
+A way can carry a **claim** that its guidance is *designed* to address a specific control (NIST 800-53, OWASP, ISO 27001, SOC 2, CIS, IEEE). A claim is a design assertion, not evidence that the control operates. This page shows how to write one and check it. [governance.md](../governance.md) is the reference for the fields and every `ways-audit` command, and [ADR-200](../architecture/governance/ADR-200-compliance-claims-and-session-derived-findings.md) explains the model.
 
 ## Where a claim lives
 
-A claim is a **`provenance.yaml` sidecar** in the way's own directory, beside `{name}.md`
-(ADR-110). The runtime never reads it — way frontmatter is stripped before injection, so
-a claim reaches the agent's context **never**: zero tokens, zero latency. It exists for
-the compliance tooling and for humans.
+A claim is a `provenance.yaml` file in the way's own directory, beside `{name}.md` (ADR-110). The runtime never reads it, so a claim costs the agent's context nothing. It exists for the compliance tooling and for people.
 
 ```
-hooks/ways/softwaredev/delivery/commits/
-├── commits.md            # the way (guidance + matching frontmatter)
-├── commits.check.md      # optional re-fire check
-└── provenance.yaml       # the compliance claim  ← add this
+softwaredev/delivery/commits/
+├── commits.md            # the way
+├── commits.check.md      # optional check
+└── provenance.yaml       # the claim  ← add this
 ```
+
+Claims are optional. A way without one runs identically. Operational ways such as `meta/todos` and `meta/memory` are not derived from a policy and should not carry one; a claim that cannot be defended is worse than none.
 
 ## Write the sidecar
 
 ```yaml
-# hooks/ways/softwaredev/delivery/commits/provenance.yaml
 policy:
   - uri: governance/policies/code-lifecycle.md
     type: governance-doc
 controls:
   - id: NIST SP 800-53 CM-3 (Configuration Change Control)
     justifications:
-      - Conventional commit types classify changes by nature
-      - Atomic commits make each change independently reviewable
+      - Conventional commit types (feat/fix/refactor) classify changes by nature
+      - Atomic single-concern commits make each change independently reviewable
     satisfied_when: >
-      Commits in the session follow the conventional-commit format with a type
-      prefix and are scoped to a single logical change.
+      Commits created in the session carry a conventional-commit type prefix,
+      each covers a single logical change, and the message body states the
+      rationale for the change.
   - id: SOC 2 CC8.1 (Change Management)
     justifications:
       - Type prefix and scope create structured change records
 verified: 2026-02-05
 rationale: >
-  Conventional commits create structured change records with type classification,
-  implementing auditable change control.
+  Conventional commits create structured change records with type
+  classification and justification.
 ```
 
-### Fields
-
-| Field | Purpose |
-|-------|---------|
-| `policy[].uri` | Source policy document — relative path (same repo) or `github://org/repo/path` (cross-repo) |
-| `policy[].type` | Classification: `adr`, `governance-doc`, `regulatory-framework`, `control-spec` |
-| `controls[].id` | The control this way *claims* to be designed for |
-| `controls[].justifications[]` | How the guidance is meant to address the control — assertions, not evidence |
-| `controls[].satisfied_when` | *(optional)* the **determination criterion** — what observable session behavior would let a classifier mark this control *satisfied* / *other-than-satisfied* (ADR-200 §1, ADR-201). A control with one can carry an outcome-tier finding; without one, only a process-tier finding (that the way fired) |
-| `verified` | Date the claim's authoring was last reviewed (not an assessment date) |
-| `rationale` | Summary of how the way's guidance compiles the cited controls into practice |
-
-A way without a `provenance.yaml` runs identically at runtime — claims are optional and
-additive. Operational ways (`meta/todos`, `meta/memory`) aren't policy-derived and
-shouldn't carry one; forcing a claim where none is honest is the anti-pattern.
+1. Under `policy`, point `uri` at the policy document the way derives from: a relative path, or `github://org/repo/path` for a policy kept in another repository.
+2. Under `controls`, name each control by an ID you can defend, and check that the control means what you think it means. An unchecked citation is itself a claim.
+3. For each control, write `justifications`: how the guidance is designed to address it.
+4. Add `satisfied_when`: the session behavior that would show the control was met. Without it the control can never be assessed on outcome.
+5. Set `verified` to today's date and write a one-paragraph `rationale`.
 
 ## Check it
 
-`ways-audit` reads the sidecars directly and builds its view **in memory** — there
-is no persisted manifest and no separate scripts (the former `governance.sh` /
-`provenance-scan.py` were consolidated into the binary, ADR-111):
+`ways-audit` reads the project's `.claude/ways/` when you run it inside a project, and the shipped ways with `--global`.
 
 ```bash
+ways-audit lint                                 # fields present, policy URIs resolve
 ways-audit trace softwaredev/delivery/commits   # the chain for one way
 ways-audit report                               # which ways carry a claim
-ways-audit lint                                 # validate: URIs resolve, fields present
-ways-audit report --json                        # machine-readable
-ways-audit assemble --json                      # the finding dataset for these claims
+ways-audit assemble --json                      # the finding records for these claims
 ```
 
 ## Keep it honest
 
-- A `justification` is an **assertion** about how the guidance is *designed* to address
-  the control — not proof it did. Substantiating a claim needs a session-derived
-  **finding** (SOC 2 Type II). `ways-audit assemble` builds the finding *record* — the
-  claim's `satisfied_when` criterion beside the firing evidence — but leaves the
-  determination **empty**: whether the control is *satisfied* is a classifier's call
-  ([ADR-201](../architecture/governance/ADR-201-findings-assembled-as-classifier-ready-assessment-records.md)),
-  and that classifier is a separate, out-of-scope system. Assembly is not assessment.
+- A `justification` says how the guidance is designed to address the control, not that it did. Showing that it did takes a session-derived **finding**. `ways-audit assemble` builds the finding record, the `satisfied_when` criterion beside the firing evidence, and leaves the determination empty for a separate assessor ([ADR-201](../architecture/governance/ADR-201-findings-assembled-as-classifier-ready-assessment-records.md)).
 - Read `ways-audit report` coverage as *claims made*, not *conformance achieved*.
-- Point a claim at a control you can defend by ID — and verify the control means what you
-  think, because an unchecked citation is itself a claim.
-
-## Cross-repo
-
-Policy documents and ways often live in separate repositories:
-
-```
-compliance-repo/              your-claude-config/
-├── docs/architecture/        └── hooks/ways/softwaredev/delivery/commits/
-│   ├── ADR-150.md               ├── commits.md
-│   └── ADR-200.md               └── provenance.yaml   (policy uri → ADR-150)
-└── controls-catalog.md
-```
-
-A claim references its policy by `uri`; `ways-audit` resolves those URIs and builds
-the cross-repo view at query time. Nothing is persisted between the repos, so the two
-sides stay decoupled.
-
----
-
-*Informally:* the way is compiled guidance and the sidecar is the note saying which
-standard it was compiled to address. The note is an assertion — only a finding turns it
-into evidence.

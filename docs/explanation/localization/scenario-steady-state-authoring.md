@@ -45,7 +45,7 @@ flowchart LR
 - **The English root is authored normally.** Writing or editing a way means writing
   English `description`+`vocabulary` — exactly as on an English install. The 17×
   all-languages stub tax is gone ([[ADR-139]], Phase A); the root is just English.
-- **One localization, not eighteen.** Because `output_language` is `es`, the steady
+- **One localization, not eighteen.** Because ways' `language` is `es`, the steady
   state is the root **plus Spanish** — the single active language — regenerated for the
   new or changed way. Not a matrix of every language the project ever shipped; only
   what this adopter actually uses.

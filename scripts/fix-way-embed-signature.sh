@@ -12,7 +12,7 @@
 # upgrade `cp`-ing a new binary over the old path), macOS's Code Signing Monitor
 # can hold a stale cached cdhash for that inode that no longer matches the file
 # content, and kills the process at launch. See
-#   docs/explanation/troubleshooting-embedding-engine.md
+#   docs/how-to/fix-way-embed-sigkill-macos.md
 #
 # Fix: re-sign the binary in place. That rewrites the signature (and the file),
 # which invalidates the stale cache and lets the next exec re-evaluate cleanly.
@@ -39,12 +39,14 @@ if ! command -v codesign >/dev/null 2>&1; then
     exit 2
 fi
 
-# Re-sign every way-embed binary present in bin/ (the invoked `way-embed` plus
-# the platform-tagged copy `make setup` produces). Globbing keeps this correct
-# if the platform tag ever changes (e.g. darwin-x86_64).
+# Re-sign the engine copy that `ways` invokes ($XDG_CACHE_HOME/agent-ways/user,
+# paths::way_embed) and every way-embed binary in the app's bin/ (the plain
+# name plus the platform-tagged copy). Globbing keeps this correct if the
+# platform tag ever changes (e.g. darwin-x86_64).
+ENGINE="${XDG_CACHE_HOME:-$HOME/.cache}/agent-ways/user/way-embed"
 shopt -s nullglob
 signed=0
-for bin in bin/way-embed bin/way-embed-*; do
+for bin in "$ENGINE" bin/way-embed bin/way-embed-*; do
     [ -f "$bin" ] || continue
     echo "Re-signing $bin ..."
     codesign --force --sign - "$bin"
@@ -52,19 +54,21 @@ for bin in bin/way-embed bin/way-embed-*; do
 done
 
 if [ "$signed" -eq 0 ]; then
-    echo "No way-embed binary found in bin/ — run 'make setup' first." >&2
+    echo "No way-embed binary found at $ENGINE or in bin/ — run 'ways update' first." >&2
     exit 2
 fi
 
 # Verify the invoked binary now launches (the exec that was being SIGKILL'd).
-echo "Verifying bin/way-embed launches ..."
-if ! bin/way-embed --version >/dev/null 2>&1; then
-    echo "ERROR: bin/way-embed still fails to launch after re-signing." >&2
+INVOKED="$ENGINE"
+[ -f "$INVOKED" ] || INVOKED=bin/way-embed
+echo "Verifying $INVOKED launches ..."
+if ! "$INVOKED" --version >/dev/null 2>&1; then
+    echo "ERROR: $INVOKED still fails to launch after re-signing." >&2
     echo "  Inspect the crash report for the real reason:" >&2
     echo "    ls -t ~/Library/Logs/DiagnosticReports/way-embed-*.ips | head -1" >&2
     exit 1
 fi
-echo "  ok: $(bin/way-embed --version)"
+echo "  ok: $("$INVOKED" --version)"
 
 # Regenerate the corpus with embeddings so semantic matching is live again.
 echo "Regenerating corpus ..."

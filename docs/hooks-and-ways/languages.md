@@ -4,8 +4,8 @@ Ways runs in one of two **modes**, decided by a single switch. English is the
 **source of truth**; localization is *adopter-run* — a non-English speaker opts in and
 the framework translates itself, validated against the English root (ADR-139). This
 page is the reference; the lifecycle and rationale live in
-`docs/explanation/localization/` (`01.009.E`–`01.013.E`) and the design note
-`docs/architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md`.
+[the localization explanation pages](../explanation/localization/adopter-localization-the-model.md) (`01.009.E`–`01.013.E`) and the evidence record
+[ADR-183](../architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md).
 
 ## The two modes
 
@@ -16,11 +16,10 @@ The switch is the resolved `Config.language`:
 | **English** (default) | `language` is `en` / `auto` / unset | English corpus + English (384-dim) matching only. The 127MB multilingual model is **never downloaded or loaded**. No locale tuning. The intl pipeline is dormant — zero cost. |
 | **Localized** | `language` is a specific non-English code (e.g. `es`) | The multilingual corpus is built with the English root as anchor, the 768-dim multilingual lane runs as a *second* lane, and `ways tune locale --lang` audits the localization. |
 
-Both modes match by the same rule — embed the prompt, take cosine against the way's
-alias, map it through the per-model logistic `g(s)`, and fire on the global `τ_s` / `τ_k`
-(see `engine-reference.md`). The difference is the model, not the method.
+Both modes match by the same rule (see [matching.md](matching.md) and
+[engine-reference.md](engine-reference.md)). The difference is the model, not the method.
 
-### Setting the switch — two configs, one bridge
+### Setting the switch — two configs
 
 There are **two** different language settings; conflating them is the common mistake:
 
@@ -29,13 +28,11 @@ There are **two** different language settings; conflating them is the common mis
 | `language` in `~/.config/agent-ways/config.yaml` | the **ways** intl mode + the output-language directive | `ways-localize` |
 | `language` in Claude Code `settings.json` (a NAME, e.g. `"spanish"`) | Claude Code's **response** language | the operator (or `ways-localize`) |
 
-The *effective* switch is the user-scope `config.yaml language` (default `auto`) —
-the layer `ways-localize` writes. Merely setting Claude Code's `settings.json language`
-does **not** localize ways; that is deliberate work the `ways-localize` skill performs.
-
-When the two disagree — Claude Code is non-English but ways is still English — the
-`meta/localize` session-start macro surfaces the `ways-localize` recommendation, and
-self-silences once they match.
+The *effective* switch is the user-scope `config.yaml language` (default `auto`;
+`ways.language` in `ways settings`), the layer `ways-localize` writes. Setting Claude
+Code's `settings.json language` alone does nothing to ways, and nothing reports the
+mismatch. To localize ways, the operator asks for it, which invokes the
+`ways-localize` skill.
 
 ## Localizing — the `ways-localize` skill
 
@@ -59,7 +56,7 @@ skill (`skills/ways-localize/`) and scenario `01.011.E`.
 | all-MiniLM-L6-v2 | `minilm-l6-v2.gguf` | 21MB | English lane (384-dim) — always present |
 | paraphrase-multilingual-MiniLM-L12-v2 | `multilingual-minilm-l12-v2-q8.gguf` | 127MB | Multilingual lane (768-dim, 52 langs) — **on-demand**, localized mode only |
 
-`make setup` fetches only the English model. The multilingual model is fetched by
+An install fetches only the English model. The multilingual model is fetched by
 `ways-localize` (or `make -C tools/way-embed model-multilingual`) when an adopter
 localizes — English installs never pay for it.
 
@@ -128,4 +125,4 @@ ways tune language --json   # machine-readable (resolved_language, models, local
 - **ADR-139** — adopter-run localization (the two modes, the shelve, root-anchoring)
 - **ADR-125** — the coordinate-alias model (`description`+`vocabulary` as embedding-space alias)
 - **ADR-107** — original locale support and the dual-model approach (superseded in part)
-- `docs/architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md` — the mechanics
+- [ADR-183](../architecture/ways/ADR-183-single-language-localization-tuning-the-english-anchor-as-a-peer.md) — the tuning mechanics (evidence record)

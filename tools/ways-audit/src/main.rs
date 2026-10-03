@@ -98,7 +98,7 @@ fn main() -> Result<()> {
         None
     };
 
-    let manifest = provenance::generate_manifest(ways_dir)?;
+    let manifest = provenance::generate_manifest(ways_dir.clone())?;
     let json = cli.json;
 
     match cli.command {
@@ -110,7 +110,12 @@ fn main() -> Result<()> {
         Command::Stale { days } => audit::stale(&manifest, days, json),
         Command::Active => audit::active(&manifest, json),
         Command::Matrix => matrix::run(&manifest, json),
-        Command::Lint => lint::run(&manifest, json),
+        Command::Lint => {
+            // A project's ways resolve their relative policy URIs against the
+            // project root: <root>/.claude/ways → <root>.
+            let project_root = ways_dir.as_deref().map(std::path::Path::new).and_then(|d| d.parent()?.parent());
+            lint::run(&manifest, project_root, json)
+        }
         Command::Assemble { way, write } => {
             findings::assemble(&manifest, way.as_deref(), write, json)
         }

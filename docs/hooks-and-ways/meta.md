@@ -1,105 +1,55 @@
 # Meta Ways
 
-Guidance for the system that manages guidance. These ways govern how ways themselves are created, how skills differ from ways, how sub-agents are delegated to, and how work state persists across context boundaries.
+The `meta` domain holds guidance about the system itself and about how Claude works with the human: how ways and skills are written, how work is delegated, how state survives compaction, and how trust is handled. This page lists the top-level meta ways. The way files under `hooks/ways/meta/` are the source; `ways session ways` shows which fired in a session, and `ways author graph` exports the whole tree.
 
-## Knowledge
+| Way | Covers | Fires on |
+|-----|--------|----------|
+| `attend/*` | Responding to attend signals: a finished build, context pressure, an overdue reflection | attend signals |
+| `choices` | Putting real decisions to the human as explicit choices | prompt pattern ("which option", "let me decide") |
+| `compaction-checkpoint` | Summarizing and checking in with the human before compaction | context 85% full |
+| `deployment` | How agent-ways installs, updates and reconciles into `~/.claude` | prompt pattern (agent-ways, `ways update`, `~/.claude`) |
+| `develop` | Routing a piece of work through the development loop and the `/develop` skill | prompt pattern ("how should we approach") |
+| `goals` | When to set a `/goal` and what goal mode changes | semantic |
+| `governance` | Citing the real controls behind a practice | semantic |
+| `introspection` | Looking back over the session at pull-request time for guidance worth keeping | `gh pr create`, prompt pattern |
+| `knowledge` | The ways system: ways, skills and hooks, domains, matching. Children cover authoring, frontmatter, refire, trees, the keyword lane, locale stubs and vocabulary tuning. | prompt pattern ("ways"), editing way files |
+| `memory` | The persistent memory files: what to record and when | context 80% full, "save to memory", editing memory files |
+| `skills` | House conventions for writing Claude Code skills | prompt pattern (`SKILL.md`, "author a skill") |
+| `start` | Recognizing session start and routing to `/start` | prompt pattern ("pick up where we left off") |
+| `subagents` | When to delegate to a sub-agent, writing the brief, what comes back | prompt pattern ("subagent", "delegate") |
+| `think` | Structured reasoning for hard decisions and the `/think` skill | prompt pattern ("trade-off", "I'm stuck") |
+| `todos` | Capturing unfinished work as tasks before compaction | context 75% full with no task list |
+| `trust/*` | Trust between Claude and the human: earned autonomy, acting through the human's accounts, whose voice to write in, long-form prose | semantic, prompt pattern |
+| `workflows` | When to reach for the Workflow tool for multi-agent orchestration | prompt pattern ("fan out", "pipeline") |
+| `wrap` | Recognizing session end and routing to `/wrap` | prompt pattern ("wrap up") |
 
-**Triggers**: Prompt mentions "way", "ways", "knowledge", "guidance", "context injection"; editing `.claude/ways/*.md`
+## Ways and skills
 
-This is the self-referential way - it explains the ways system itself. It fires when someone is creating or modifying ways, ensuring they have the full specification at hand.
-
-Covers:
-- Way file format and all frontmatter fields
-- Matching lanes: regex keyword and calibrated semantic (see [engine-reference.md](engine-reference.md))
-- State triggers (context-threshold, file-exists, session-start)
-- The marker state machine
-- Project-local way creation and override semantics
-- Domain enable/disable via `config.yaml` (global, user scope)
-- Per-way enable/disable via `.claude/ways.yaml` (project scope, ADR-131) — `ways settings set ways.project.<name> false`
-
-The knowledge way also draws the line between **ways** and **skills**:
+The `knowledge` way draws the line between the two:
 
 | | Skills | Ways |
 |--|--------|------|
 | **Discovery** | Semantic (Claude decides) | Triggered (patterns, tools, state) |
-| **Activation** | Claude matches user intent to description | Hook event fires, pattern matches |
-| **Use case** | Specialized knowledge domains | Workflow guardrails, conventions |
+| **Activation** | Claude matches user intent to the description | A hook event fires and a trigger matches |
+| **Use case** | Specialized procedures | Workflow guardrails, conventions |
 | **Can detect** | User intent | Tool execution, file edits, session state |
 
-They complement each other. Skills handle "the user wants to do X" (intent). Ways handle "Claude is about to do Y" (action). A skill can't detect that `git commit` is about to run. A way can't determine that the user's vague request is really about API design.
+They complement each other. Skills handle "the user wants to do X". Ways handle "Claude is about to do Y". A skill cannot see that `git commit` is about to run; a way cannot tell that a vague request is really about API design.
 
-## Skills
+## Sub-agents
 
-**Triggers**: Prompt mentions "skill", "SKILL.md", "skill creation", "author a skill", "claude code skill"
-
-Guides the creation of SKILL.md files - the mechanism for teaching Claude specialized capabilities that it discovers and applies automatically.
-
-Key distinctions from ways:
-- Skills live in `~/.claude/skills/` or `.claude/skills/` (not under `hooks/ways/`)
-- Skills are discovered by semantic matching against the `description:` field
-- Skills can restrict their tool access via `allowed-tools:`
-- Skills can override the model via `model:`
-
-The way provides the SKILL.md structure (frontmatter fields, progressive disclosure for large skills), location precedence (Enterprise > Personal > Project > Plugin), and guidance on writing effective descriptions - the description is how Claude decides when to use the skill, so it needs to capture both what the skill does and when it should be applied.
-
-## Sub-Agents
-
-**Triggers**: Prompt mentions "subagent", "delegate", "spawn agent", "review PR", "plan task", "organize docs"
-
-Documents the available sub-agent types and when to delegate to them:
+The `subagents` way covers delegating to the agents shipped in `agents/`:
 
 | Agent | Purpose |
 |-------|---------|
-| requirements-analyst | Capture complex requirements as GitHub issues |
-| system-architect | Draft ADRs, evaluate design trade-offs |
+| requirements-analyst | Capture requirements as GitHub issues |
+| system-architect | Draft ADRs and evaluate design trade-offs |
 | task-planner | Plan multi-branch implementations |
 | code-reviewer | Review PRs for quality and SOLID compliance |
-| workflow-orchestrator | Coordinate project phases |
-| workspace-curator | Organize docs/ and .claude/ structure |
+| workflow-orchestrator | Coordinate the ADR-driven workflow |
+| workspace-curator | Organize `docs/` and `.claude/` |
+| skeptic | Try to refute a finished deliverable's claims from primary sources, read-only |
 
-The key principle: sub-agents are for **delegation of token-intensive work**, not every action. A code review that requires reading a 500-line diff benefits from a dedicated agent with fresh context. A simple file search does not.
+Sub-agents are for delegating token-heavy work, such as reviewing a long diff with fresh context, not for every action.
 
-The way covers context passing (include specific file paths and line ranges, state what you want back) and anti-patterns (don't delegate routine tasks, don't use agents for quick questions).
-
-## Todos
-
-**Triggers**: State trigger at 75% context threshold
-
-The enforcement mechanism for task list continuity across compaction. This way is unusual in two respects:
-
-1. **It's a state trigger**, not a pattern match. It fires based on how full the context window is, not what the user said.
-2. **It repeats** until the condition is resolved. Most ways re-disclose on a slow `refire:` cadence; this one nags on every prompt until `TaskCreate` is used.
-
-The rationale: compaction is the biggest risk to work continuity. When the context window fills up, Claude Code compresses the conversation history. If there's no task list, the compressed context may lose track of what was being worked on, what's been completed, and what remains.
-
-The way fires at 75% to give Claude time to create the task list before compaction occurs (typically at ~90-95%). The repeating behavior exists because earlier versions fired once and Claude routinely ignored it - a single system-reminder is easy to deprioritize when focused on a task.
-
-The nag stops when `TaskCreate` is used, which triggers a `PreToolUse:TaskCreate` hook that creates a marker file. This is the only way in the system with this repeat-until-resolved behavior.
-
-## Teams
-
-**Triggers**: `session-start` (scope: teammate only)
-
-The coordination handbook for team members. When a teammate's session begins, this way fires once and injects the norms that keep a multi-agent team from stepping on itself:
-
-- Check TaskList after completing each task to find next work
-- Use SendMessage to report progress and blockers to the lead
-- Mark tasks completed via TaskUpdate — don't just say you're done
-- Prefer Edit over Write to reduce merge conflicts with other teammates
-- Read before editing — another teammate may have changed the file
-- Don't commit to git unless the task explicitly says to
-- Don't stall silently — message the lead immediately if blocked
-
-These norms exist because teammates are long-lived and collaborative, unlike subagents which do one thing and exit. Coordination failures in a team compound: one teammate that stalls silently or overwrites another's work can derail the whole effort.
-
-The way is gated to `scope: teammate` — the main agent never sees it, and quick subagents don't need it.
-
-See [teams.md](teams.md) for the full three-scope model and detection mechanism.
-
-## Memory
-
-**Triggers**: `session-start` (scope: agent only)
-
-The memory checkpoint way fires at session start to remind the agent about MEMORY.md — the persistent memory that survives across conversations. It's gated to `scope: agent` because only the main session should read and write MEMORY.md. If three teammates all tried to update it simultaneously, the file would get corrupted.
-
-This way works in tandem with the todos way: todos handles in-session task continuity, memory handles cross-session knowledge continuity.
+Team coordination for teammates is the `collaboration/teams` way; see [teams.md](teams.md).

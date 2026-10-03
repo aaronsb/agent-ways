@@ -476,7 +476,7 @@ enum AuthorCommand {
         /// Scope: agent, subagent, teammate (comma-separated)
         #[arg(long, default_value = "agent")]
         scope: String,
-        /// Create in global ways (~/.claude/hooks/ways/) instead of project-local
+        /// Create in your own ways ($XDG_CONFIG_HOME/agent-ways/ways/) instead of project-local
         #[arg(long)]
         global: bool,
     },

@@ -188,7 +188,7 @@ pub(super) fn lint_file(
         *warnings += 1;
     }
 
-    // ADR-126: fire-bearing ways should carry a `refire:` field. Fire
+    // ADR-126: fire-bearing ways must carry a `refire:` field. Fire
     // eligibility (which frontmatter fields count as firing channels) is
     // declared in `frontmatter::FIRE_BEARING_FIELDS` so adding a new channel
     // flows through automatically. Check files and attend signal handlers
@@ -197,13 +197,18 @@ pub(super) fn lint_file(
     let has_refire = has_field(&fm_str, "refire");
     let is_fire_bearing =
         !is_check && !is_attend && crate::frontmatter::fires_on_something(&fm_str);
+    // The firing gate resolves the cadence before the first fire and refuses
+    // a way without one (show::fireable), so the way never reaches the main
+    // agent. Only the Task lane, which stashes on match for a subagent without
+    // consulting the gate, can still inject it.
     if is_fire_bearing && !has_refire {
         eprintln!(
-            "  WARNING: {rel} — no `refire:` field (ADR-126). \
-             Fire-bearing way will never re-disclose after first fire. \
+            "  ERROR: {rel} — no `refire:` field (ADR-126). \
+             The firing gate refuses it, so it never reaches the agent \
+             (only a Task dispatch to a subagent bypasses the gate). \
              Add `refire: <fraction|preset>` (e.g., `refire: 0.15` or `refire: normal`)."
         );
-        *warnings += 1;
+        *errors += 1;
     }
 
     // The legacy `curve:` field was retired (ADR-159); a stray `curve:` block

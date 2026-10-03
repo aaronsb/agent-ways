@@ -1,158 +1,153 @@
 # Extending the System
 
-How to create new ways, override existing ones, and manage domains. Writing a way is externalization of tacit knowledge applied to agent guidance: a norm the team carries in its head — "the way we do it around here" — made explicit, then compiled for a context window.
+How to write a way, where to put it, and how to switch ways and domains off. Writing a way is externalization of tacit knowledge applied to agent guidance: a norm the team carries in its head, "the way we do it around here", made explicit and sized for a context window.
 
-## Creating a Way
+## Where ways live
 
-1. Create a directory: `~/.claude/hooks/ways/{domain}/{wayname}/`
-2. Add `{wayname}.md` with YAML frontmatter and guidance content
-3. Optionally add `macro.sh` for dynamic content
-4. Optionally add a `provenance.yaml` sidecar claiming the controls the way is designed for (see [provenance.md](provenance.md))
+A session reads ways from three roots, in this order:
 
-No configuration files to update. No registration step. The discovery scripts scan for `{wayname}.md` files automatically.
+| Root | Path | Who writes it |
+|------|------|---------------|
+| Project | `<project>/.claude/ways/` | The project, checked into its repo |
+| Personal | `$XDG_CONFIG_HOME/agent-ways/ways/` (usually `~/.config/agent-ways/ways/`) | You, for every project (ADR-143) |
+| Shipped | `~/.claude/hooks/ways/` | agent-ways. Read-only. |
+
+```mermaid
+flowchart LR
+    P["Project<br/>.claude/ways/"] --> U["Personal<br/>$XDG_CONFIG_HOME/agent-ways/ways/"] --> S["Shipped<br/>~/.claude/hooks/ways/"]
+    S -. "symlink into the app;<br/>ways update replaces it" .-> A["$XDG_DATA_HOME/agent-ways/hooks/ways"]
+```
+
+A way's id is its path under the root, such as `softwaredev/code/testing`. When two roots hold the same id, the earlier root wins: a project way overrides your personal way, and your personal way overrides the shipped one. Only the winning copy fires.
+
+Do not author in `~/.claude/hooks/ways/`. It is a symlink into the app's own copy under `$XDG_DATA_HOME/agent-ways`, and `ways update` replaces it.
+
+## Creating a way
+
+A way is a directory holding `{wayname}.md`: YAML frontmatter, then the guidance. Optional files beside it are `macro.sh` for dynamic content (see [macros.md](macros.md)) and a `provenance.yaml` sidecar that claims the controls the way serves (see [provenance.md](provenance.md)). There is no registration step.
+
+1. **Scaffold.** `ways author template <domain>/<wayname> -d "what this way covers" -V "words users would say"` writes the file. Run inside a project, it writes to the project's `.claude/ways/`. With `--global`, or outside a project, it writes to your personal root.
+2. **Edit.** Write the description, vocabulary and body. Add `pattern:`, `commands:`, `files:` or `trigger:` if the way should fire on those.
+3. **Lint.** `ways author lint <path>` checks the frontmatter against the schema. Fix every error.
+4. **Rebuild the corpus.** `ways corpus` re-embeds the ways. The semantic matcher reads the corpus, not the files, so an edit to `description:` or `vocabulary:` does nothing until the rebuild. A new session runs `ways corpus --if-stale`, which rebuilds when a way file is newer than the corpus.
+5. **Check the match.** `ways author match "a prompt that should fire it"` shows how the live matcher scores the prompt against every way. Try prompts that should fire it and prompts that should not.
+
+### `refire:` is required
+
+Every way that fires on something needs a `refire:` field. That covers any way with `description:` and `vocabulary:`, `pattern:`, `commands:`, `files:` or `trigger:`. The firing gate resolves the way's cadence before its first fire and refuses a way without one, so a way with no `refire:` never reaches the agent, not even once. The one exception is the Task lane: a way that matches a Task prompt is stashed for the subagent without passing the gate. `ways author lint` reports a missing `refire:` as an error. The scaffolder writes `refire: 0.15`.
+
+`refire:` takes a fraction of the context window (`0.15`) or a preset name (`once`, `rare`, `normal`, `frequent`). It sets how long a way stays quiet after it fires before it may disclose again. See [context-decay.md](context-decay.md) for the model behind it. Check files and attend handlers are exempt; they ride on their parent way or on a signal.
 
 ### Choosing a matching mode
 
 | If your trigger is... | Use |
 |----------------------|-----|
 | Specific keywords or commands | `pattern:`, `commands:`, or `files:` (regex) |
-| A broad concept users describe variously | `description:` + `vocabulary:` (embedding semantic matching) |
+| A broad concept users describe in different words | `description:` + `vocabulary:` (semantic matching) |
 | A session condition, not content | `trigger:` with `context-threshold`, `file-exists`, or `session-start` |
 
-Matching is additive-OR — the semantic and keyword lanes are independent, and a way can carry both a `pattern:` and `description:` + `vocabulary:`. The semantic lane fires when the calibrated relevance probability `g(s)` clears `τ_s` (`semantic_fire_probability`, 0.5); the keyword lane is **floor-gated** — a `pattern:` hit fires only when `g(s)` also clears the lower floor `τ_k` (`keyword_floor_probability`, 0.15), so a bare keyword can't drag in an unrelated prompt. The keyword lane fails open (fires unconditionally) when there's no calibrated signal, and `pattern_strict: true` bypasses the gate by design. See [engine-reference.md](engine-reference.md) for the exact fire rule. Semantic matching uses embeddings; `ways author match` shows how a prompt matches, and it is a subcommand of the unified `ways` binary.
+The lanes are independent, and a way can carry a `pattern:` and a `description:` + `vocabulary:` together. A keyword hit still has to clear a low semantic floor, so a bare word cannot pull in an unrelated prompt; `pattern_strict: true` skips that floor. When a relevance judge is configured (`gate.mode=enforce`), a matched way on the prompt lane can still be judged irrelevant and withheld. [matching.md](matching.md) and [engine-reference.md](engine-reference.md) give the exact rules.
 
 ### Writing effective guidance
 
-The way content is injected into Claude's context window. Every token counts. Write for a language model, not a wiki:
+The way content goes into Claude's context window, so every token costs something. Write for a language model, not a wiki:
 
-- **Be directive**: "Use conventional commits" not "It is recommended to use conventional commits"
-- **Be specific**: Include the exact format, pattern, or command
-- **Be brief**: If it takes more than ~40 lines, consider whether all of it is needed every time
-- **Use tables**: They're dense and scannable
-- **Skip preambles**: Don't explain what the way is - just deliver the guidance
+- **Be directive**: "Use conventional commits", not "It is recommended to use conventional commits"
+- **Be specific**: include the exact format, pattern, or command
+- **Be brief**: past about 40 lines, ask whether all of it is needed every time; past 10,000 characters lint fails the way
+- **Use tables**: they are dense and scannable
+- **Skip preambles**: deliver the guidance, not a description of it
 
 ### Voice and framing
 
-The mechanical advice above covers *what* to put in a way. This section is about *how* it reads — because the framing shapes how the guidance gets applied.
+**Include the why, not just the what.** "Use conventional commits" is a rule. "Use conventional commits; the release tooling parses them to generate changelogs" is a rule with its reason. An agent that knows the reason applies the rule with better judgment at the edges.
 
-**Include the why, not just the what.** "Use conventional commits" is a rule. "Use conventional commits — the release tooling parses them to generate changelogs" is a rule with context. An agent that understands the reason behind a directive applies it with better judgment at the edges. This is the difference between compliance and alignment.
+**Write as a collaborator, not a commander.** "Run the tests before committing" is an instruction. "We run tests before committing to catch regressions early" is a shared practice. The inclusive framing carries intent that a bare directive does not, and an agent that understands "we do this because we care about X" makes better calls.
 
-**Write as a collaborator, not a commander.** There's a meaningful difference between "Run the tests before committing" and "We run tests before committing to catch regressions early." The first is an instruction to be followed. The second is a shared practice to be maintained. The inclusive framing — *we*, *our*, *let's* — creates alignment around a common goal rather than a power dynamic between instructor and executor.
+**Write for a reader with no history.** The agent arrives with no memory of earlier sessions. The injected ways are its whole understanding of how work is done here. If the guidance only makes sense with context the agent will never have, rewrite it.
 
-This isn't sentimental. It's functional. An agent that understands "we do this because we care about X" makes better judgment calls than one that's just been told "do this." The *we* carries intent that directives alone don't.
-
-**Write for the innie.** Your agent arrives with no memory of previous sessions, no context about why things are the way they are, and a set of injected instructions that constitute their entire understanding of how work gets done here. Every session is a new hire. That's the audience for every way you write. If the guidance only makes sense with context they'll never have, it needs rewriting.
-
-**Respect the reader.** Governance that talks down to the governed is governance that gets routed around. Ways that explain their reasoning get better adherence than ways that just assert authority. This is true for humans reading policy docs and it's true for language models reading injected context.
+**Respect the reader.** Guidance that explains its reasoning gets better adherence than guidance that asserts authority. That holds for people reading policy and for models reading injected context.
 
 ### Testing a way
 
-Use `/ways-tests` to validate matching quality without trial-and-error:
+`ways author match` is the main check. The `/ways-tests` skill wraps the authoring commands for vocabulary work:
 
 ```
-/ways-tests score <way> "sample prompt"       # test one way against a prompt
-/ways-tests score-all "sample prompt"         # rank all ways — check for false positives
-/ways-tests suggest <way>                     # find vocabulary gaps
-/ways-tests lint <way>                        # validate frontmatter
+ways author match "sample prompt"     # every way against one prompt
+ways author suggest <way-file>        # vocabulary candidates from the body
+ways author siblings <way>            # how close the way sits to its siblings
+ways author lint <path>               # frontmatter
 ```
 
-For semantic ways, `/ways-tests suggest` analyzes the way body text and recommends vocabulary additions. Not all suggestions should be added — body terms like "code" or "use" don't discriminate between ways. Add terms that are *domain-specific* words users would say.
+Take only the suggested vocabulary that discriminates. Body words like "code" or "use" match everything. Add the domain words users actually say. [scoring-and-testing.md](scoring-and-testing.md) walks through tuning.
 
-To verify the live system, include the way's keywords in a prompt and check that it fires (appears in system-reminder). Run `ways session ways` to see which ways have fired in the current session.
+To check the live system, send a prompt that should fire the way, then run `ways session ways` to list the ways fired in the current session.
 
-## Progressive Disclosure with Sub-Ways
+## Progressive disclosure with sub-ways
 
-Ways can nest: `{domain}/{parent}/{child}/{child}.md`. Each level adds context only when the conversation goes deeper into that topic. This keeps token cost proportional to relevance.
-
-**Example: the knowledge domain**
+Ways nest: `{domain}/{parent}/{child}/{child}.md`. Each level adds context only when the conversation goes deeper into that topic, which keeps token cost in line with relevance.
 
 ```
-meta/knowledge/knowledge.md                 — fires on "ways" (overview, ~60 lines)
+meta/knowledge/knowledge.md                 — fires on "ways" (overview)
 meta/knowledge/authoring/authoring.md       — fires when editing way files (format spec)
 meta/knowledge/authoring/*/                 — children on refire, the keyword lane, trees, frontmatter fields, locale stubs
-meta/knowledge/optimization/optimization.md — fires on "optimize vocabulary" (tuning workflow + live health via macro)
+meta/knowledge/optimization/optimization.md — fires on vocabulary tuning (workflow plus live health via macro)
 ```
 
-If you just ask "what are ways?" you get the 60-line overview. The authoring spec and optimization workflow never load. But if you start editing a way file, the authoring way fires automatically. Its children load when the work turns to their topic, such as setting a way's refire cadence or splitting a way into a tree. If you discuss vocabulary tuning, the optimization way fires and its macro injects a live health dashboard of all ways.
+Asking "what are ways?" gets the overview. The authoring spec loads when you start editing a way file, and its children load when the work turns to their topic. Parent ways orient; child ways add depth. Each child has its own trigger, so it loads only when its sub-topic is active.
 
-**Design principle**: Parent ways provide orientation. Child ways provide depth. Each child has its own trigger — pattern, semantic, file, or command — so it only loads when that specific sub-topic is active.
+A sub-way with `macro: prepend` can inject current state. The optimization way's macro runs `ways author suggest` across the semantic ways and includes the results, so the agent gets the workflow and the data together.
 
-**Macros for live state**: A sub-way with `macro: prepend` can run a script that injects current state. The optimization way does this — its macro runs `ways author suggest` across all semantic ways and includes the results. The agent gets both the workflow guidance and the data it needs, without constructing any ad-hoc code.
+## Project ways
 
-This pattern is self-improving: the tools that analyze the system (`ways author suggest`, `/ways-tests`) are themselves documented in ways that fire when you use them. You optimize ways by talking about optimizing ways.
-
-## Project-Local Ways
-
-Projects can add or override ways at `$PROJECT/.claude/ways/{domain}/{way}/{way}.md`.
-
-### Adding project-specific guidance
+Project ways live at `<project>/.claude/ways/{domain}/{way}/{way}.md` and follow the same rules as the other roots.
 
 ```
 myproject/.claude/ways/
 └── myproject/
-    ├── api/api.md           # "Our API uses GraphQL, not REST"
-    ├── deployment/deployment.md    # "Deploy via Terraform in us-east-1"
-    └── testing/testing.md       # "We use Vitest, not Jest"
+    ├── api/api.md                 # "Our API uses GraphQL, not REST"
+    ├── deployment/deployment.md   # "Deploy via Terraform in us-east-1"
+    └── testing/testing.md         # "We use Vitest, not Jest"
 ```
 
-These are discovered alongside global ways and follow the same matching rules.
+To replace a shipped way for one project, give the project way the same id. `.claude/ways/softwaredev/code/testing/testing.md` replaces the shipped `softwaredev/code/testing` in that project.
 
-### Overriding global ways
+A project way's `macro.sh` runs only when the project is trusted: add its path, one per line, to `~/.claude/trusted-project-macros`.
 
-A project-local way with the same domain/name path as a global way takes precedence. They share a single marker, so only the project-local version fires.
+## Switching ways off
 
-Example: If a project has `.claude/ways/softwaredev/code/testing/testing.md`, it replaces `~/.claude/hooks/ways/softwaredev/code/testing/testing.md` for that project.
+### One way in one project
 
-### Macros in project-local ways
-
-Project-local macros require explicit trust. Add the project path to `~/.claude/trusted-project-macros` (one path per line) to enable macro execution for that project.
-
-## Managing Ways and Domains
-
-### Disabling a single way for one project (ADR-131)
-
-Use `ways settings set` from inside the project:
+From inside the project:
 
 ```
 ways settings set ways.project.itops/incident false
-ways settings list ways.project           # see what's disabled in this project
+ways settings list ways.project           # what is off in this project
 ways settings unset ways.project.itops/incident
 ```
 
-That writes `{project}/.claude/ways.yaml`:
+That writes the project's `.claude/ways.yaml`:
 
 ```yaml
 ways:
   itops/incident: false
 ```
 
-Per-way toggles are **project-scope only** — there is no global per-way disable. The default state is enabled, so a project with no `ways.yaml` (or no `ways:` block in it) behaves exactly as today.
+Per-way switches are project-scope only. There is no global per-way switch. A way is on unless a project turns it off.
 
-Equivalent long-form, reserved for future per-way overrides:
+### A whole domain
 
-```yaml
-ways:
-  itops/incident:
-    enabled: false
+```
+ways settings set ways.disabled_domains '[itops, ea]'
 ```
 
-### Disabling an entire domain (global)
+That writes `disabled_domains:` in `$XDG_CONFIG_HOME/agent-ways/config.yaml`; add `--project` to set it for one project. Every way in a listed domain stays silent. Use a domain switch for "never anywhere" and a per-way switch for "not in this project".
 
-Add the domain to `disabled_domains` in `$XDG_CONFIG_HOME/agent-ways/config.yaml`:
+### Ways in subagents
 
-```yaml
-disabled_domains:
-  - itops
-  - experimental
-```
+Some workflows run their agents without ways, so injection does not bias what they produce. The main agent keeps its ways; only the agents it dispatches are affected.
 
-All ways in disabled domains are silently skipped everywhere. The domain still appears in the Available Ways table but its ways won't fire. Domain-level disable is the right tool for "never anywhere"; project-scope per-way disable is the right tool for "not in this project."
-
-### Keeping ways out of subagents
-
-Some workflows run their agents without ways, so injection does not bias what they produce. The main agent keeps its ways either way; only the agents it dispatches are affected.
-
-For every session in a project, set `subagents: false` in the project's `.claude/ways.yaml` (or in the user config for every project):
+For every session in a project, set `subagents: false` in the project's `.claude/ways.yaml`, or in the user config for every project:
 
 ```yaml
 subagents: false
@@ -166,14 +161,10 @@ ways session subagents on      # back to the configured setting
 ways session subagents --json  # which switch is in effect
 ```
 
-Switching names a session: `--session <id>`, or the session the command runs in when Claude Code sets `CLAUDE_CODE_SESSION_ID`. The session switch lives outside the session's state, so it holds through compaction and `ways session reset` until switched back. `/clear` starts a new session id without it, and a switch untouched for 30 days is pruned.
+The command acts on `--session <id>`, or on the session it runs in when Claude Code sets `CLAUDE_CODE_SESSION_ID`. The session switch lives outside the session's state, so it holds through compaction and `ways session reset`. `/clear` starts a new session id without it, and a switch untouched for 30 days is pruned.
 
-Both switches withhold the ways stashed for a Task dispatch and every hook that runs inside a subagent. A teammate whose own hooks do not identify it as a subagent is covered at dispatch only.
+Both switches withhold the ways stashed for a Task dispatch and every hook that runs inside a subagent. A teammate whose own hooks do not identify it as a subagent is covered at dispatch only. Each suppression is logged as an `injection_suppressed` event, once per Task dispatch and once per agent. See [the events catalog](../reference/events.md).
 
-Each suppression is logged as an `injection_suppressed` event, once per Task dispatch and once per agent, with the switch that applied. A suppressed hook logs no fire or near-miss events, so the tune reports see nothing to misread. The session timeline marks each suppression, and `ways session replay --json` counts them in `summary.suppressed`.
+## Creating a domain
 
-### Creating a new domain
-
-Create a subdirectory under `~/.claude/hooks/ways/` with your domain name. Add way directories inside it. The macro table generator and all check scripts will discover them automatically.
-
-Domains are organizational - they group related ways and allow bulk enable/disable. Choose domain names that reflect the concern area (not the trigger mechanism).
+A domain is a top-level directory in a ways root. Create it in your personal root or the project's `.claude/ways/`, add way directories inside, and rebuild the corpus. Name domains for the concern they cover, not for how they trigger; the domain is the unit `ways.disabled_domains` switches off.

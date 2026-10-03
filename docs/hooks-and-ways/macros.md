@@ -75,13 +75,15 @@ This is invoked by `ways show core` during SessionStart and referenced by `core.
 
 ## Security Model
 
-### Global macros
+### Shipped and personal macros
 
-Macros in `~/.claude/hooks/ways/` always execute. The user controls this directory, so trust is implicit.
+Macros in the shipped ways (`~/.claude/hooks/ways/`) and in your personal root (`$XDG_CONFIG_HOME/agent-ways/ways/`) always execute. You installed the one and wrote the other, so trust is implicit.
 
 ### Project-local macros
 
-Macros in `$PROJECT/.claude/ways/` are potentially untrusted (a cloned repo could include malicious scripts). These only execute if the project path is explicitly listed in `~/.claude/trusted-project-macros`.
+Macros in `$PROJECT/.claude/ways/` are potentially untrusted (a cloned repo could include malicious scripts). These only execute if the project path is explicitly listed in `~/.claude/trusted-project-macros`, one path per line.
+
+A way's `requires:` field (ADR-116) is separate: it declares the tool permissions the way's macro needs, and `ways author permissions` compares those against the grants in `settings.json`. It does not make a project's macros trusted. `ways author permissions` reports `trusted-project-macros` as deprecated in favour of `requires:`, but the runtime still reads it, and it is the only switch that lets a project's macros run.
 
 If a project-local macro exists but the project isn't trusted, the way outputs a note:
 > **Note**: Project-local macro skipped (add /path/to/project to ~/.claude/trusted-project-macros to enable)
