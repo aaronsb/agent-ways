@@ -163,7 +163,7 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
 name = "attend"
-version = "0.15.2"
+version = "0.15.3"
 dependencies = [
  "agent-fmt",
  "agent-identity",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "attend-chat"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "agent-fmt",
  "agent-identity",
@@ -2012,7 +2012,7 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "ways"
-version = "1.32.0"
+version = "1.33.0"
 dependencies = [
  "agent-fmt",
  "agent-identity",
@@ -2039,7 +2039,7 @@ dependencies = [
 
 [[package]]
 name = "ways-agent"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "agent-fmt",
  "agent-settings",
@@ -2072,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "ways-audit"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "agent-fmt",
  "agent-theme",
