@@ -872,6 +872,59 @@ enum SettingsCommand {
         #[arg(long)]
         project: Option<PathBuf>,
     },
+    /// The theme tab on a terminal; list, copy, rename and delete themes
+    ///
+    /// Alone, the screens on the theme tab. Its actions copy any theme to a
+    /// new user theme file, and rename or delete a user theme; a bundled
+    /// theme is never renamed or deleted. theme.active follows a rename, and
+    /// falls back to terminal when the active theme is deleted.
+    #[command(args_conflicts_with_subcommands = true)]
+    Theme {
+        #[command(subcommand)]
+        action: Option<ThemeCommand>,
+        /// The project whose .claude/ways.yaml the screens read and write
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Test only: as `ways settings --keys`
+        #[arg(long, hide = true, action = clap::ArgAction::Append, allow_hyphen_values = true)]
+        keys: Vec<String>,
+        /// Print the frame at WIDTHxHEIGHT, headless
+        #[arg(long, hide = true)]
+        snap: Option<String>,
+        /// The colour depth to draw at: truecolor, 256, 16 or none
+        #[arg(long, hide = true)]
+        depth: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ThemeCommand {
+    /// The themes on offer, their source and the active one
+    List {
+        /// Each theme's name, label, source, file and whether it is active
+        #[arg(long)]
+        json: bool,
+    },
+    /// Copy a theme, bundled or the user's, to a new user theme file
+    Copy {
+        from: String,
+        to: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Rename a user theme's file and name; theme.active follows
+    Rename {
+        from: String,
+        to: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a user theme's file; theme.active falls back to terminal when it named it
+    Delete {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1108,6 +1161,15 @@ fn run() -> Result<()> {
                 Some(SettingsCommand::Lint { file, project }) => st::lint(file.as_deref(), project.as_deref()),
                 Some(SettingsCommand::Apply { file, dry_run, project }) => st::apply(file.as_deref(), dry_run, project.as_deref()),
                 Some(SettingsCommand::Fix { section, project }) => st::fix(&section, project.as_deref()),
+                Some(SettingsCommand::Theme { action: None, project, keys, snap, depth }) => {
+                    st::tui::open(&st::tui::Open { tab: Some("theme".into()), project, keys, snap, depth })
+                }
+                Some(SettingsCommand::Theme { action: Some(op), .. }) => match op {
+                    ThemeCommand::List { json } => st::themes::list(json),
+                    ThemeCommand::Copy { from, to, json } => st::themes::run(st::themes::Op::Copy { from: &from, to: &to }, json),
+                    ThemeCommand::Rename { from, to, json } => st::themes::run(st::themes::Op::Rename { from: &from, to: &to }, json),
+                    ThemeCommand::Delete { name, json } => st::themes::run(st::themes::Op::Delete { name: &name }, json),
+                },
             })
         }
         Commands::Target { action: None } => bare_group("target", || settings_screen("install")),

@@ -29,6 +29,7 @@ pub fn help_text(topic: Option<&str>) -> Result<String, Failure> {
         let _ = writeln!(out, "  apply                write a settings object from stdin or --file; answers in JSON");
         let _ = writeln!(out, "  lint                 check the files; exit 3 with findings");
         let _ = writeln!(out, "  fix <section>        repair what the section's findings point at; a switch stays off");
+        let _ = writeln!(out, "  theme list|copy|rename|delete   theme files: copy any theme, rename or delete a user one");
         let _ = writeln!(out, "  help <key|section>   what a key or section does\n");
         let _ = writeln!(out, "exit codes: 0 done, 2 usage or unknown key, 3 rejected, 4 overridden by a higher layer, 5 write failed\n");
         let _ = writeln!(out, "sections:");
