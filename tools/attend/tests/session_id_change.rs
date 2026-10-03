@@ -145,7 +145,9 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     f.set_session_id("sess-restart-new");
     let run = f.run();
     run.wait_for("the adoption", Duration::from_secs(20), |_| {
-        f.marker("sess-restart-new").exists() && !f.marker(&old).exists()
+        f.marker("sess-restart-new").exists()
+            && !f.marker(&old).exists()
+            && std::fs::read_to_string(&registry).is_ok_and(|r| r.contains("sess-restart-new") && !r.contains(&old))
     });
     let reg = std::fs::read_to_string(&registry).unwrap();
     assert!(reg.contains("sess-restart-new") && !reg.contains(&old), "{reg}");
