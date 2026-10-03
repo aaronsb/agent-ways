@@ -9,7 +9,7 @@ refire: 0.15
 <!-- epistemic: heuristic -->
 # Task List Checkpoint
 
-You have no active task list and context is filling up. But first — is there actually unfinished work? If the current task is nearly done or the session is wrapping up naturally, you don't need a task list just because context is high. The point of a task list is to survive compaction with enough detail to resume, not to document completed work.
+Context is filling up. If the task list already holds the current work, keep it current and move on. If not, first ask whether there is actually unfinished work. If the current task is nearly done or the session is wrapping up naturally, you don't need a task list just because context is high. The point of a task list is to survive compaction with enough detail to resume, not to document completed work.
 
 If there *is* work in progress that would be lost to compaction, capture it now.
 
@@ -28,9 +28,9 @@ For each task, capture:
 - Next steps with enough specifics to resume without the conversation history
 - Key decisions already made (so they don't get re-debated)
 
-Mark the in-flight task as `in_progress`. This creates the tasks-active marker and stops this checkpoint from repeating.
+Mark the in-flight task as `in_progress`.
 
-This repeats every prompt until you create a task list or the session ends.
+This checkpoint returns as the session keeps growing, on its refire cadence, whether or not a task list exists.
 
 ## See Also
 

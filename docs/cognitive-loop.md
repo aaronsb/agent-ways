@@ -18,13 +18,13 @@ agent-ways is the composition of mechanisms that address these failures together
 
 ## The governing principle: substrate separation
 
-The most important thing to understand is that agent-ways treats Claude's reasoning capacity as **the expensive substrate**, and everything else as **cheap substrates**. Deterministic computation runs in shell scripts, compiled binaries, file I/O, and tool invocations. Reasoning runs in inference. The design principle is:
+The most important thing to understand is that agent-ways treats Claude's reasoning capacity as **the expensive substrate**, and everything else as **cheaper substrates**. Deterministic computation runs in shell scripts, compiled binaries, file I/O, and tool invocations. Reasoning runs in inference, and one small, bounded inference runs outside Claude's context window. The design principle is:
 
 > *Do the cheap work in a cheap substrate so the expensive substrate can think about things that matter.*
 
 This pattern runs through every layer of the system:
 
-- **Way scoring** is a compiled Rust binary doing embedding math. Claude never decides which ways are relevant; a tiny program does it before Claude sees anything.
+- **Way matching** is a compiled Rust binary doing embedding math. Claude never decides which ways are relevant. The matcher proposes candidates before Claude sees anything, and on the prompt lanes a small hosted model (the relevance judge, [ADR-196](architecture/ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md)) answers yes or no for each one. The judge runs in the ways agent, a per-user daemon, never in Claude's context, and its cost is capped in candidates, input and time. On any failure the matcher's decision stands, and `gate.mode: off` removes it. [The relevance judge](explanation/relevance-judge/relevance-judge-the-model.md) gives the limits.
 - **Event logging** is the `ways` binary appending one JSON line per fire or near-miss to a file, with no inference involved. Claude doesn't record anything manually.
 - **Sensor observation** (the awareness layer) is a background script emitting stdout lines when state transitions are worth surfacing. The heavy lifting of turning raw events into discrete observations happens entirely below Claude's token budget.
 
@@ -35,6 +35,7 @@ The visual shape of this separation:
 ```mermaid
 flowchart LR
     classDef cheap fill:#2E7D32,stroke:#1B5E20,color:#fff
+    classDef bounded fill:#E65100,stroke:#BF360C,color:#fff
     classDef expensive fill:#C62828,stroke:#B71C1C,color:#fff
     classDef delivery fill:#6A1B9A,stroke:#4A148C,color:#fff
 
@@ -43,13 +44,18 @@ flowchart LR
         Sensors["sensors<br/>(file, git, context, peers)"]:::cheap
         Attend["attend<br/>(salience, insistence, state)"]:::cheap
         Matcher["ways matcher<br/>(embedding)"]:::cheap
-        Gate["disclosure gate<br/>(ADR-123 habituation)"]:::cheap
+        Gate["refire gate<br/>(ADR-126)"]:::cheap
         Log["event log<br/>(events.jsonl)"]:::cheap
+    end
+
+    subgraph Bounded["<b>bounded inference</b> — outside Claude's context"]
+        Judge["ways agent → relevance judge<br/>(capped, fails open)"]:::bounded
     end
 
     subgraph Del["delivery"]
         direction LR
         Monitor["Monitor<br/>(async notifications)"]:::delivery
+        Drain["Stop-hook inbox drain<br/>(turn boundary)"]:::delivery
         Hooks["hooks<br/>(sync injections)"]:::delivery
     end
 
@@ -59,23 +65,26 @@ flowchart LR
 
     Sensors --> Attend
     Attend --> Monitor
-    Matcher --> Gate
+    Attend --> Drain
+    Matcher --> Judge
+    Judge --> Gate
     Gate --> Hooks
 
     Monitor --> Claude
+    Drain --> Claude
     Hooks --> Claude
 
-    Gate -->|"fires, near-misses"| Log
-    Claude -->|"invokes ways show"| Matcher
+    Gate -->|"fires, near-misses, verdicts"| Log
+    Claude -->|"invokes ways show"| Gate
 ```
 
-Almost every box on the left runs in a substrate that costs nothing to operate. Claude occupies one box on the right. That ratio is the whole design.
+Almost every box on the left runs in a substrate that costs nothing to operate. The judge costs a small, capped amount per prompt and never touches Claude's context. Claude occupies one box on the right. That ratio is the whole design.
 
 ## Ways for steering
 
 [Ways](hooks-and-ways/README.md) are the reactive guidance layer. A way is a markdown file with YAML frontmatter and a prose body. The frontmatter declares when the way should fire (on a user prompt pattern, on a tool call, on a session event, on a context threshold), and the body is the guidance Claude reads when the way fires.
 
-Ways are triggered by **hook events** that Claude Code emits on its own loop: `UserPromptSubmit`, `PreToolUse`, `Stop`, `SessionStart`, `PostCompact`, and `context-threshold`. A hook fires, a shell script runs, the script asks the `ways` binary which ways match the current context, and matched way bodies are injected into Claude's next turn as additional context.
+Ways are triggered by **hook events** that Claude Code emits on its own loop: `SessionStart` (including after compaction), `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart` and `Stop`. A hook fires, a shell script runs `ways hook <event>`, the binary decides which ways match the current context, and the matched way bodies are injected as additional context. Session conditions such as context usage are **state triggers**, evaluated by the state hook on session start and on every prompt.
 
 Ways are **premises, not rules**. They give Claude *reasoning to work from*, not instructions to follow. The distinction matters because rules scale poorly — a rule that says "always X" becomes a rule you have to remember and a rule Claude has to apply even when X doesn't make sense. A premise says "here's what you should know to reason well about this situation," and Claude's reasoning does the rest. Premises compose because reasoning composes; rules don't, because rules collide.
 
@@ -83,20 +92,20 @@ A typical way looks like:
 
 ```yaml
 ---
-name: commit-message-format
-description: Guide Claude in writing commit messages when invoking git commit
-trigger:
-  type: PreToolUse
-  commands: git commit
+description: git commit messages, branch naming, conventional commits, atomic changes
+vocabulary: commit message branch conventional feat fix refactor scope atomic squash amend stash rebase cherry
+pattern: push.{0,30}(remote|origin|upstream)
+commands: git\ commit
+refire: 0.15
+scope: agent, subagent
 ---
+# Git Commits Way
 
-When writing a commit message:
-
-- Lead with the why, not the what (the diff shows the what)
-- First line under 70 characters
-- Separate subject from body with a blank line
-- Use imperative mood ("Add feature" not "Added feature")
+## Conventional Commit Format
+...
 ```
+
+This is the frontmatter of the shipped `softwaredev/delivery/commits` way. `description` and `vocabulary` drive semantic matching, `pattern` matches prompt text, `commands` matches the Bash command, `refire` sets how much of the context window must pass before it can re-disclose, and `scope` says which agents get it.
 
 When Claude is about to run `git commit`, the `PreToolUse` hook fires, the matcher finds this way, and the body is injected into Claude's context right before the tool call. Claude reads the premises, writes a good message, runs the commit. No one had to encode rules; the way provided the reasoning.
 
@@ -110,37 +119,27 @@ The naive approach would be: at session start, inject every way that's possibly 
 2. **Attention dilution.** Claude reads what's nearest the current conversation most carefully. Guidance injected at startup becomes guidance buried under forty turns of later content. See [hooks-and-ways/context-decay.md](hooks-and-ways/context-decay.md) for the formal model.
 3. **Habituation.** If every way fires on every possible trigger, Claude's context becomes a soup of guidance that doesn't map to what's happening right now.
 
-**Progressive disclosure** ([ADR-105](architecture/ways/ADR-105-progressive-disclosure-for-way-trees.md)) and **token-gated re-disclosure** ([ADR-123](architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md)) address this together. The rules:
+**Progressive disclosure** ([ADR-105](architecture/ways/ADR-105-progressive-disclosure-for-way-trees.md)) and **window-relative re-disclosure** ([ADR-126](architecture/ways/ADR-126-window-relative-refire.md)) address this together. The rules:
 
 - Ways only fire when their triggers match the current situation, never speculatively
 - Once a way has fired, it is marked as "disclosed" and will not fire again until its re-disclosure cooldown expires
-- The cooldown is measured in *tokens of context consumed since the disclosure* — not wall-clock, not turns, tokens
+- The cooldown is measured in *tokens of context consumed since the disclosure*, as a fraction of the model's context window — not wall-clock, not turns, tokens
+- Each agent keeps its own cooldowns: a subagent's disclosures do not silence the main agent's, or the reverse
 - When the cooldown has passed and the trigger fires again, the way re-surfaces fresh
 
-This is *habituation* in the biological sense. The first mention of something is fully attended to. Repeated mentions become background. If the signal disappears for long enough and returns, it becomes fresh again. Claude's attention budget is managed by the cheap substrate (the disclosure gate) so that Claude's reasoning gets each signal at the right level of prominence.
+This is *habituation* in the biological sense. The first mention of something is fully attended to. Repeated mentions become background. If the signal disappears for long enough and returns, it becomes fresh again. Claude's attention budget is managed by the cheap substrate (the refire gate) so that Claude's reasoning gets each signal at the right level of prominence.
 
 The mental model: **ways are a rate-limited stream of premises**. Claude does not read them all at once; Claude reads them as the situation calls for them, with the understanding that anything already disclosed is still in context unless compaction has happened.
 
 ## Empirical tuning: letting telemetry revise the thresholds
 
-The thresholds, half-lives, and vocabularies above were all set by authorial judgment. **Empirical auto-tuning** ([ADR-134](architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md)) closes the loop by feeding the matcher's own firing record back into those settings. This is optional operational tooling, not part of the per-turn loop — but it is what keeps the precision-first discipline honest over time.
-
-Two signals accumulate in `$XDG_STATE/agent-ways/events.jsonl`, both written by the cheap substrate at fire time:
-
-- **`way_nearmiss` events** — a *recall* signal. When a way's calibrated relevance probability `g(s)` falls short of the semantic fire threshold τ_s (its effective value after any parent-boost) by no more than `near_miss_margin` (default 0.05) but does not fire, the matcher records the would-be miss (`prob_en`, `prob_multi`, `tau_s`, `margin`, `trigger`, `query_tokens`). The probabilities are already computed; this is persistence, not new work. False silences — the way that *should* have fired — were structurally invisible before this; now they are measurable.
-- **`fire_score` on `way_fired` events** — the calibrated relevance probability `g(s)` that cleared the semantic threshold τ_s, recorded on first-fires only (never on re-disclosures, whose score reflects the re-triggering prompt). This is the population the deferred ADR-134 threshold auto-tune would work from.
-
-One report-only subcommand reads this record:
-
-- **`ways tune precision`** is a heuristic relevance audit. For each way it estimates how often its fires landed off-class — in sessions whose activity (judged by the parent-family of the ways that co-fired) never touched the way's own domain — and reports an irrelevance rate. A narrow way repeatedly firing into the same wrong kind of session is flagged **mis-targeted** (remedy: narrow vocabulary or change trigger channel — there is no per-way threshold to raise); a way that fires broadly by design (e.g. `meta/todos`) is flagged **cross-cutting** and the vocabulary-narrowing remedy is suppressed — those are scoped by trigger, never auto-narrowed. Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
-
-Both report by default. Vocabulary is never auto-applied — it re-shapes the embedding neighborhood and stays authorial. The threshold apply slice is deferred until the `fire_score` population accumulates (tracked as issue #123); it would adjust the global `semantic_fire_probability` (τ_s, default 0.5) in the ways config, which is also where `keyword_floor_probability` (τ_k) and `near_miss_margin` live. See [engine-reference.md](hooks-and-ways/engine-reference.md) for the fire rule and the current config keys.
+The thresholds, refire fractions and vocabularies above were set by authorial judgment. [ADR-134](architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md) feeds the matcher's own record back into them: fires, near-misses and the judge's verdicts accumulate in `$XDG_STATE/agent-ways/events.jsonl`, and `ways tune precision` reports which ways keep firing into the wrong kind of session. Vocabulary is never auto-applied, and the threshold auto-tune is deferred. The loop is described in [hooks-and-ways.md](hooks-and-ways.md#telemetry) and the fire rule in [engine-reference.md](hooks-and-ways/engine-reference.md).
 
 ## Memory across sessions: the event log and repo artifacts
 
 Ways handle the *current* session. Two things persist across sessions: the event log, which records what fired, and the repository's own artifacts, which record what was understood.
 
-The **event log** (`$XDG_STATE/agent-ways/events.jsonl`) is the durable record of ways activity. A SessionStart hook appends a `session_start` line when a session begins, the `ways` binary appends a `way_fired` or `way_nearmiss` line at each fire or near-miss, and every writer and reader resolves the file through one path (`ways events-log-path`, [ADR-153](architecture/ways/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md)). It survives compaction and the end of a session. `ways session` reads it together with the Claude Code session transcripts to answer which ways fired on which turn and why: `list` enumerates sessions, `replay` steps through one on screen (or writes its timeline as JSON with `--json`), `live` follows the current session as ways fire, `dump` writes its reconstruction as JSON for an agent, and `fires` lists its fires with their scores, lowest first ([ADR-154](architecture/ways/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md)). The log records activity, not content: it does not hold what Claude reasoned about.
+The **event log** (`$XDG_STATE/agent-ways/events.jsonl`) is the durable record of ways activity. A SessionStart hook appends a `session_start` line when a session begins, the `ways` binary appends a line at each fire, near-miss, suppression and judge verdict, and every writer and reader resolves the file through one path (`ways events-log-path`, [ADR-153](architecture/ways/ADR-153-session-introspection-substrate-correlating-fired-ways-to-turns.md)). It survives compaction and the end of a session. `ways session` reads it together with the Claude Code session transcripts to answer which ways fired on which turn and why: `list` enumerates sessions, `replay` steps through one on screen (or writes its timeline as JSON with `--json`), `live` follows the current session as ways fire, `dump` writes its reconstruction as JSON for an agent, and `fires` lists its fires with their scores, lowest first ([ADR-154](architecture/ways/ADR-154-rethink-think-and-non-interactive-introspection-one-model-three-front-ends.md)). The log records activity, not content: it does not hold what Claude reasoned about.
 
 **What was understood** persists in the repository, not in a session-side store. Decisions go into ADRs, working knowledge into ways, open work into GitHub issues, and change history into commit messages and PR descriptions. Claude Code's auto-memory (`MEMORY.md`) loads at every session start, so `ways init` seeds it with routing guidance that sends project knowledge to those artifacts and keeps memory for short cross-project facts about the user ([ADR-128](architecture/practice/ADR-128-memory-as-repo-portable-ways-seed-routing-over-accumulated-snapshots.md)). Those artifacts travel with the repository, pass review and lint, and are read by teammates and CI as well as by later sessions.
 
@@ -163,6 +162,8 @@ The **awareness layer** ([ADR-113](architecture/attend/ADR-113-attend-active-awa
 
 Claude invokes `Monitor` with `attend` as the command at session start. `attend` runs for the session's lifetime, writing observations to stdout as they become worth emitting. Each line becomes a notification Claude reads asynchronously between turns. When the session ends, `Monitor` terminates `attend`, which flushes state to disk so the next session can restore it.
 
+Peer messages have a second path. While Claude is working, a Stop hook drains pending messages at the end of each turn (`attend inbox --drain`, [ADR-172](architecture/attend/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md)). While Claude is idle, the `Monitor` poller wakes it. Both record what was delivered in one shared set, so a message arrives once.
+
 The awareness layer honors substrate separation rigorously:
 
 - **Sensors operate below the token layer.** A file-compare sensor hashes current state, compares to prior, and emits only if the state changed. 99.9% of the time it emits nothing. Only transitions become tokens.
@@ -172,7 +173,7 @@ The awareness layer honors substrate separation rigorously:
 Two delivery paths compose cleanly:
 
 - **`Monitor` notification only** — default for most observations. Claude reads the one-line note, integrates it, acts or dismisses. No ways involvement.
-- **`Monitor` notification + affordance → `ways show attend/<signal>`** — for high-salience observations. `attend` formats the notification with an explicit `ways show` command Claude can invoke if deeper guidance is warranted. If Claude invokes it, the ways system runs the matcher and disclosure gate normally and injects the matched way body.
+- **`Monitor` notification + affordance → `ways show attend/<signal>`** — for high-salience observations. `attend` formats the notification with an explicit `ways show` command Claude can invoke if deeper guidance is warranted. If Claude invokes it, the ways system shows that way's body.
 
 Claude retains agency at every step. `attend` suggests; Claude decides. The awareness layer informs, never overrides.
 
@@ -204,7 +205,7 @@ sequenceDiagram
         M-->>C: notification delivered async
         C->>C: read, recognize stakes, decide to engage
         C->>W: ways show attend/<signal>
-        W->>W: matcher + ADR-123 disclosure gate
+        W->>W: render the way, record the fire
         W-->>C: way body injected
         C->>C: integrate guidance, act
     end
@@ -227,7 +228,7 @@ flowchart TB
     W["<b>Wake</b><br/>core ways injected<br/>memory seed checked<br/>attend state restored"]:::cheap
     P["<b>Perception</b><br/>sensors observe<br/>environment + self"]:::cheap
     D["<b>Delivery</b><br/>Monitor delivers<br/>async notifications<br/>hooks deliver<br/>sync injections"]:::cheap
-    At["<b>Attention</b><br/>disclosure gate<br/>salience scoring<br/>habituation"]:::cheap
+    At["<b>Attention</b><br/>relevance judge<br/>refire gate<br/>salience scoring"]:::mixed
     R["<b>Reasoning</b><br/>Claude integrates<br/>observations +<br/>guidance"]:::expensive
     Ac["<b>Action</b><br/>tools, edits,<br/>responses"]:::expensive
     Ca["<b>Capture</b><br/>fires logged<br/>decisions recorded<br/>in repo artifacts"]:::cheap
@@ -252,17 +253,17 @@ Stage by stage:
 
 - **Wake.** A new session begins. SessionStart hooks inject the core ways, and `ways init` checks the memory seed. `attend` is invoked via `Monitor` at session start and restores its prior state from disk. Claude reads the orientation context and begins working.
 - **Perception.** `attend` runs its sensors in the background, watching Claude's context state, workspace files, peer sessions, and approaching consequences. Most observations are silent; only state transitions worth surfacing reach stdout.
-- **Delivery.** Two paths operate in parallel. `Monitor` delivers `attend`'s stdout lines as asynchronous notifications. Hooks deliver synchronous way injections at event boundaries (`UserPromptSubmit`, `PreToolUse`, etc.). Both paths land on Claude's attention surface.
-- **Attention.** The disclosure gate ([ADR-123](architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md)) applies habituation rules. Recently-disclosed ways are suppressed or re-surfaced tersely. Fresh signals get full weight. The cheap substrate decides what reaches Claude's reasoning in what form.
+- **Delivery.** `Monitor` delivers `attend`'s stdout lines as asynchronous notifications, and a Stop hook drains pending peer messages at the turn boundary. Hooks deliver synchronous way injections at event boundaries (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, etc.). All of them land on Claude's attention surface.
+- **Attention.** On the prompt lanes the relevance judge drops candidates that do not fit the turn. The refire gate ([ADR-126](architecture/ways/ADR-126-window-relative-refire.md)) holds back ways disclosed too recently for this agent. Fresh signals get full weight. Deterministic code and one bounded judge call decide what reaches Claude's reasoning.
 - **Reasoning.** Claude integrates observations and guidance into its working model and decides what to do.
 - **Action.** Claude acts — edits files, runs tools, responds to the user.
-- **Capture.** Every fire and near-miss this turn is logged to the event log. As context fills, the context-pressure guidance prompts Claude to commit work and record decisions in repo artifacts. The event log is cheap telemetry; offline, that record drives the empirical tuning of thresholds and half-lives (ADR-134) without touching the loop.
+- **Capture.** Every fire and near-miss this turn is logged to the event log. As context fills, the context-pressure guidance prompts Claude to commit work and record decisions in repo artifacts. The event log is cheap telemetry; offline, that record drives the empirical tuning of thresholds (ADR-134) without touching the loop.
 - **Consolidation.** When context fills, compaction distills the working window. The event log, the repo artifacts, and `attend`'s state survive the pass. The next turn begins with a compressed but coherent working context.
 - **Back to Wake.** At the next session, the loop restarts with the updated state as its foundation.
 
 The loop is **turn-driven, not time-driven**. Each Claude turn is a tick. Between turns, the cheap substrate (sensors, scripts, the event log) keeps running. When the next turn arrives, Claude wakes into a richer context than the turn before — not because time passed, but because observations accumulated and were filtered by the cheap substrates into summary form.
 
-Every stage of the loop has an appropriate substrate. Only the Reasoning and Action stages use inference. Everything else runs in deterministic code: shell scripts, a Rust binary, file I/O, tool invocations. This is what makes the whole system affordable to run continuously for a full workday — the cost is bounded by what Claude actually reasons about, not by what the system observes.
+Every stage of the loop has an appropriate substrate. Reasoning and Action use Claude's inference. Attention spends one small judge call per prompt, outside Claude's context, capped in candidates, input and time, and switchable off. Everything else runs in deterministic code: shell scripts, a Rust binary, file I/O, tool invocations. This is what makes the whole system affordable to run continuously for a full workday — the cost is bounded by what Claude actually reasons about plus a fixed per-prompt judge budget, not by what the system observes.
 
 ## What this isn't
 
@@ -278,13 +279,18 @@ Worth naming explicitly, because the architecture can be misread if these aren't
 
 Ordered roughly by how specific the topic is to your interest:
 
+**If you want the same pipeline observed from a running session:**
+- [How ways works](explanation/how-ways-works/how-ways-works-the-model.md) — what you can watch happen, and how to read the session data
+
 **If you want the theoretical framing:**
 - [Design note: cognitive loop and awareness layer](architecture/practice/ADR-600-cognitive-loop-and-the-awareness-layer.md) — reads the system as an active-inference loop and names the invariants the ADRs preserve
 - [hooks-and-ways/rationale.md](hooks-and-ways/rationale.md) — the rationale for the ways system
 - [hooks-and-ways/context-decay.md](hooks-and-ways/context-decay.md) — the attention-decay model underlying progressive disclosure
 
 **If you want to understand specific decisions:**
-- [ADR-123](architecture/ways/ADR-123-firing-dynamics-progression-axis-unification.md) — firing dynamics, including token-gated re-disclosure
+- [ADR-126](architecture/ways/ADR-126-window-relative-refire.md) — re-disclosure as a fraction of the context window
+- [ADR-160](architecture/ways/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md) — late-interaction matching
+- [ADR-196](architecture/ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md) and [ADR-502](architecture/platform/ADR-502-the-ways-agent-one-resident-daemon-per-user-for-search-judging-and-key-custody.md) — the relevance judge and the ways agent that runs it
 - [ADR-105](architecture/ways/ADR-105-progressive-disclosure-for-way-trees.md) — progressive disclosure for way trees
 - [ADR-108](architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) — embedding-based way matching
 - [ADR-128](architecture/practice/ADR-128-memory-as-repo-portable-ways-seed-routing-over-accumulated-snapshots.md) — memory routing: project knowledge belongs in repo artifacts

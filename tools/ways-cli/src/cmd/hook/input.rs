@@ -29,7 +29,7 @@ pub enum HookEvent {
     SubagentStart,
     /// SessionStart: clear this session's state (clear-markers.sh).
     SessionStart,
-    /// PreToolUse TaskCreate: silence the context-threshold nag (mark-tasks-active.sh).
+    /// PreToolUse TaskCreate: write the tasks-active marker (mark-tasks-active.sh). Nothing reads it today.
     TasksActive,
 }
 
