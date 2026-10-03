@@ -198,6 +198,20 @@ fn a_change_applied_in_the_screens_writes_the_bytes_set_writes() {
     assert!(tui.read(".config/agent-ways/config.yaml").unwrap().starts_with("# my settings, by hand\nsemantic_fire_probability: 0.5  # tuned\n"));
 }
 
+/// The multi picker, driven by keys through Enter and applied: the file
+/// holds the list `ways settings set` writes.
+#[test]
+fn a_multi_pick_applied_in_the_screens_writes_the_list_set_writes() {
+    let (cli, tui) = (Fx::new(), Fx::new());
+    let (_, err, code) = cli.run(&["settings", "set", "ways.disabled_domains", "itops,softwaredev"]);
+    assert_eq!(code, 0, "{err}");
+    let left = tui.drive("ways", "down down down down down enter space down space enter w a");
+    assert_eq!(left, "nothing pending\n");
+    let written = tui.read(".config/agent-ways/config.yaml");
+    assert_eq!(written, cli.read(".config/agent-ways/config.yaml"));
+    assert!(written.unwrap().contains("itops"));
+}
+
 /// An attend user file with comments, which both writers must keep.
 const ATTEND: &str = "# my attend settings\nengagement:\n  decay_per_minute: 0.1  # tuned\n";
 

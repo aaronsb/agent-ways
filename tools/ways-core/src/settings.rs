@@ -318,63 +318,25 @@ fn closed_domains(v: &Value) -> Option<Value> {
     (!names.is_empty()).then_some(Value::Sequence(names))
 }
 
-/// The ways roots a machine reads: the projected core ways, the shipped
-/// copy behind them, the user's own, and the `.claude/ways/` beside each
-/// project layer in `layers`. A root linked twice is listed once.
-fn ways_roots(layers: &[Layer]) -> Vec<PathBuf> {
-    let mut roots = vec![crate::paths::projected_ways_root(), crate::paths::core_ways_root(), crate::paths::user_ways_root()];
-    for l in layers.iter().filter(|l| l.scope == LayerScope::Project) {
-        if let Some(dir) = l.path.as_deref().and_then(Path::parent) {
-            roots.push(dir.join("ways"));
-        }
-    }
-    let mut seen: Vec<PathBuf> = Vec::new();
-    roots.retain(|r| {
-        let Ok(real) = r.canonicalize() else { return false };
-        let new = !seen.contains(&real);
-        seen.push(real);
-        new
-    });
-    roots
-}
-
-/// The values `ways.language` may take: `en` and `auto`, then each locale
-/// a way carries, as a `{way}.{lang}.md` override or a `.locales.jsonl`
-/// stub, the locales the language report counts as covered.
-fn languages(layers: &[Layer]) -> Result<Vec<String>, String> {
-    let mut found = std::collections::BTreeSet::new();
-    for root in ways_roots(layers) {
-        for path in crate::scanner::files(&root) {
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-            if name.ends_with(".locales.jsonl") {
-                for e in crate::frontmatter::parse_locales_jsonl(&path).unwrap_or_default() {
-                    found.insert(e.lang);
-                }
-            } else if let Some(lang) = crate::util::extract_locale_from_filename(name) {
-                found.insert(lang);
-            }
-        }
-    }
+/// The values `ways.language` may take: `en` and `auto`, then the active
+/// languages of the registry, the codes a locale file may carry. Read from
+/// the registry compiled in, so it never depends on the directory.
+fn languages(_layers: &[Layer]) -> Result<Vec<String>, String> {
     let mut out = vec!["en".to_string(), "auto".to_string()];
-    out.extend(found.into_iter().filter(|l| l != "en" && l != "auto"));
+    out.extend(crate::agents::get_active_languages().into_iter().filter(|l| l != "en" && l != "auto"));
     Ok(out)
 }
 
 /// The domains `ways.disabled_domains` may name: the top-level directories
-/// of the ways roots that hold a way, sorted and listed once.
-fn domains(layers: &[Layer]) -> Result<Vec<String>, String> {
+/// of the user, shipped and projected ways roots that hold a way, as the
+/// scanner counts one (a `description:` in its frontmatter). The project's
+/// own ways are left out, so the list does not change with the directory.
+fn domains(_layers: &[Layer]) -> Result<Vec<String>, String> {
     let mut found = std::collections::BTreeSet::new();
-    for root in ways_roots(layers) {
-        let Ok(rd) = std::fs::read_dir(&root) else { continue };
-        for entry in rd.flatten() {
-            let Some(name) = entry.file_name().to_str().map(str::to_string) else { continue };
-            let dir = entry.path();
-            // `metadata` follows a linked domain directory.
-            if name.starts_with('.') || !dir.metadata().is_ok_and(|m| m.is_dir()) {
-                continue;
-            }
-            if crate::scanner::md_files(&dir, crate::scanner::MdKind::Ways).next().is_some() {
-                found.insert(name);
+    for root in crate::paths::ways_roots(None) {
+        for way in crate::scanner::scan_ways(&root).unwrap_or_default() {
+            if !way.domain.starts_with('.') {
+                found.insert(way.domain);
             }
         }
     }

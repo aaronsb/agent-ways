@@ -12,13 +12,13 @@ agent-tui frame 100x30
 |│                                                     ││tuner to that language (ADR-139).          │|
 |│                                                     ││                                           │|
 |│                                                     ││value    auto                              │|
-|│                                                     ││type     one of en | auto (Enter picks)    │|
+|│                                                     ││type     one of en | auto | ar | de | es | │|
+|│                                                     ││fr | hi | id | it | ja | ko | pl | pt-br | │|
+|│                                                     ││ru | th | tr | uk | vi | zh (Enter picks)  │|
 |│                                                     ││default  auto                              │|
 |│                                                     ││from     default                           │|
 |│                                                     ││writes   ~/.config/agent-ways/config.yaml  │|
 |│                                                     ││[ways.language]                            │|
-|│                                                     ││                                           │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -87,19 +87,19 @@ styles
  13  54-64  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-64  - - DIM
+ 14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  54-64  - - DIM
+ 15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
  16  54-64  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17  54-55  - - DIM
+ 17  54-64  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
- 18  54-55  - - DIM
+ 18  54-64  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
  19  54-55  - - DIM

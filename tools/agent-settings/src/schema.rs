@@ -59,8 +59,10 @@ pub enum Kind {
     Choice(&'static [&'static str]),
     /// One of a list computed when the settings load (with `multi`, a list
     /// of them). The owning crate supplies the list from the layers it is
-    /// given, as a [`DefaultValue::Fn`] reads its base. A source that cannot
-    /// answer leaves the key accepting text, and its help says why.
+    /// given, as a [`DefaultValue::Fn`] reads its base, and from the machine
+    /// where the list lives there (installed themes, the language registry).
+    /// A source that cannot answer leaves the key accepting text, and its
+    /// help says why.
     ChoiceOf { options: Options, multi: bool },
     Text,
     Path,
@@ -129,6 +131,10 @@ impl Kind {
     }
 
     /// Whether a value of this kind is a list of choices.
+    pub fn is_multi(&self) -> bool {
+        self.multi()
+    }
+
     fn multi(&self) -> bool {
         matches!(self, Kind::ChoiceOf { multi: true, .. })
     }
@@ -152,6 +158,12 @@ impl Kind {
     /// Check a stored value against the type, and a choice against the
     /// choices over `layers`.
     pub fn check_in(&self, v: &Value, layers: Option<&[Layer]>) -> Result<(), String> {
+        self.check_in_keeping(v, layers, &[])
+    }
+
+    /// [`Kind::check_in`], where the items of a multi choice in `keep`, such
+    /// as those already stored, pass though no longer in the list.
+    fn check_in_keeping(&self, v: &Value, layers: Option<&[Layer]>, keep: &[String]) -> Result<(), String> {
         match self {
             Kind::Bool => v.as_bool().map(|_| ()).ok_or_else(|| format!("expected a bool, found {}", show(v))),
             Kind::Int { min, max } => {
@@ -172,7 +184,7 @@ impl Kind {
                 }
                 Ok(())
             }
-            Kind::Choice(_) | Kind::ChoiceOf { .. } => check_choice(v, &self.choices(layers), self.multi()),
+            Kind::Choice(_) | Kind::ChoiceOf { .. } => check_choice(v, &self.choices(layers), self.multi(), keep),
             Kind::Text | Kind::Path => v.as_str().map(|_| ()).ok_or_else(|| format!("expected text, found {}", show(v))),
             Kind::List => match v {
                 Value::Sequence(s) if s.iter().all(|i| i.is_string()) => Ok(()),
@@ -194,6 +206,11 @@ impl Kind {
     /// Parse a command-line value into a typed value. Errors name the type.
     /// A choice is checked against the choices over `layers`.
     pub fn parse_cli(&self, s: &str, layers: Option<&[Layer]>) -> Result<Value, String> {
+        self.parse_cli_keeping(s, layers, &[])
+    }
+
+    /// [`Kind::parse_cli`], keeping the items of a multi choice in `keep`.
+    pub fn parse_cli_keeping(&self, s: &str, layers: Option<&[Layer]>, keep: &[String]) -> Result<Value, String> {
         let v = match self {
             Kind::Bool | Kind::Toggle => match s {
                 "true" | "on" | "yes" => Value::Bool(true),
@@ -221,7 +238,7 @@ impl Kind {
             Kind::ReadOnly => return Err("read-only; it is changed by its action command".into()),
             Kind::Secret => return Err("a secret is entered on stdin to its own command, never as an argument".into()),
         };
-        self.check_in(&v, layers)?;
+        self.check_in_keeping(&v, layers, keep)?;
         Ok(v)
     }
 }
@@ -237,7 +254,7 @@ pub fn one_line(s: &str) -> String {
 /// The one check of a choice, fixed or computed: the shape, then each item
 /// against the list. A list that was not read, or could not be, checks the
 /// shape alone.
-fn check_choice(v: &Value, choices: &Choices, multi: bool) -> Result<(), String> {
+fn check_choice(v: &Value, choices: &Choices, multi: bool, keep: &[String]) -> Result<(), String> {
     let listed = |items: &[String]| items.join(", ");
     let picked: Vec<&str> = match (v, multi) {
         (Value::String(s), false) => vec![s.as_str()],
@@ -251,7 +268,7 @@ fn check_choice(v: &Value, choices: &Choices, multi: bool) -> Result<(), String>
         }
     };
     let Choices::Of { items, .. } = choices else { return Ok(()) };
-    match picked.iter().find(|p| !items.iter().any(|i| i == *p)) {
+    match picked.iter().find(|p| !items.iter().any(|i| i == *p) && !(multi && keep.iter().any(|k| k == *p))) {
         None => Ok(()),
         Some(_) if !multi => Err(format!("expected one of {}, found {}", listed(items), show(v))),
         Some(bad) => Err(format!("'{bad}' is not one of {}", listed(items))),
@@ -357,10 +374,29 @@ impl KeySpec {
         Ok(())
     }
 
+    /// The strings each layer of this key's file stores under its path.
+    fn stored_items(&self, layers: &[Layer]) -> Vec<String> {
+        let mut out = Vec::new();
+        for l in layers.iter().filter(|l| l.file == self.file) {
+            let mut at = l.accepted.get(self.path.first().copied().unwrap_or(""));
+            for k in self.path.iter().skip(1) {
+                at = at.and_then(|v| v.get(*k));
+            }
+            if let Some(Value::Sequence(seq)) = at {
+                out.extend(seq.iter().filter_map(Value::as_str).map(str::to_string));
+            }
+        }
+        out
+    }
+
     /// Parse a command-line value: the type, a choice against the choices
     /// over `layers`, then the key's own check.
     pub fn parse_cli(&self, s: &str, layers: &[Layer]) -> Result<Value, String> {
-        let v = self.kind.parse_cli(s, Some(layers))?;
+        // A multi choice keeps what a layer already stores, so one entry
+        // that has left the list never blocks adding another; lint still
+        // reports it.
+        let keep = if self.kind.is_multi() { self.stored_items(layers) } else { Vec::new() };
+        let v = self.kind.parse_cli_keeping(s, Some(layers), &keep)?;
         if let Some(c) = self.check {
             c(&v)?;
         }

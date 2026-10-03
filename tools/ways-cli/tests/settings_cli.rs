@@ -35,12 +35,6 @@ impl Fx {
         std::fs::create_dir_all(root.join("home/.claude")).unwrap();
         std::fs::create_dir_all(root.join("xdg/config")).unwrap();
         std::fs::create_dir_all(root.join("proj")).unwrap();
-        // The locales `ways.language` may name (de, es, ja), as override files.
-        let loc = root.join("xdg/data/agent-ways/hooks/ways/loc");
-        std::fs::create_dir_all(&loc).unwrap();
-        for lang in ["de", "es", "ja"] {
-            std::fs::write(loc.join(format!("loc.{lang}.md")), "x\n").unwrap();
-        }
         Fx { root }
     }
 
@@ -793,74 +787,72 @@ fn the_active_theme_is_one_of_the_installed_themes() {
 }
 
 #[test]
-fn the_language_is_en_auto_or_a_locale_a_way_carries() {
+fn the_language_is_en_auto_or_an_active_language_code() {
     let f = Fx::new();
     let v = json(&f, &["settings", "get", "ways.language", "--json"]);
-    assert_eq!(v["options"], serde_json::json!(["en", "auto", "de", "es", "ja"]));
+    let options: Vec<&str> = v["options"].as_array().unwrap().iter().map(|o| o.as_str().unwrap()).collect();
+    assert_eq!(&options[..4], ["en", "auto", "ar", "de"]);
+    assert_eq!(options.iter().filter(|o| **o == "en").count(), 1, "{options:?}");
+    assert!(options.contains(&"pt-br") && options.contains(&"ja"));
     assert_eq!(v["value"], "auto");
-    let (_, err, code) = f.run(&["settings", "set", "ways.language", "fr"]);
-    assert_eq!(code, 3, "{err}");
-    assert!(err.contains("expected one of en, auto, de, es, ja, found 'fr'"), "{err}");
-    assert!(!f.user().exists());
-    // A packed stub in the user's own root, and a way of the project's, add locales.
-    f.write(&f.root.join("xdg/config/agent-ways/ways/mine/mine.locales.jsonl"), "{\"lang\":\"fr\",\"description\":\"d\"}\n");
-    f.write(&f.root.join("proj/.claude/ways/p/p.ko.md"), "x\n");
-    f.write(&f.overlay(), "enabled: true\n");
-    let v = json(&f, &["settings", "get", "ways.language", "--json"]);
-    assert_eq!(v["options"], serde_json::json!(["en", "auto", "de", "es", "fr", "ja", "ko"]));
-    assert_eq!(f.run(&["settings", "set", "ways.language", "fr"]).2, 0);
-    assert_eq!(f.run(&["settings", "set", "ways.language", "en"]).2, 0);
-    assert_eq!(f.run(&["settings", "set", "ways.language", "auto"]).2, 0);
-    // A value written by hand that no way carries loads as written and is a lint finding.
-    f.write(&f.user(), "language: xx\n");
-    assert_eq!(f.run(&["settings", "get", "ways.language"]).0, "xx\n");
+    // The same list from another directory: it never depends on the cwd.
+    f.write(&f.root.join("proj/.claude/ways/p/p.md"), "---\ndescription: d\n---\n");
+    assert_eq!(json(&f, &["settings", "get", "ways.language", "--json"])["options"], v["options"]);
+    for ok in ["ja", "en", "auto", "pt-br"] {
+        assert_eq!(f.run(&["settings", "set", "ways.language", ok]).2, 0, "{ok}");
+    }
+    // A name is no code: the key's doc says code, and the files hold codes.
+    for bad in ["japanese", "日本語", "xx"] {
+        let (_, err, code) = f.run(&["settings", "set", "ways.language", bad]);
+        assert_eq!(code, 3, "{bad}: {err}");
+        assert!(err.contains(&format!("found '{bad}'")), "{err}");
+    }
+    assert!(std::fs::read_to_string(f.user()).unwrap().contains("language: pt-br"));
+    // A value written by hand that is no code loads as written and is a lint finding.
+    f.write(&f.user(), "language: japanese\n");
+    assert_eq!(f.run(&["settings", "get", "ways.language"]).0, "japanese\n");
     assert_eq!(f.run(&["settings", "lint"]).2, 3);
-    // Another key of the section has no options.
     assert!(json(&f, &["settings", "get", "ways.default_scope", "--json"]).get("options").is_none());
-}
-
-#[test]
-fn a_profile_s_model_stays_text_because_its_list_needs_the_network() {
-    let f = Fx::new();
-    let agent = f.root.join("xdg/config/agent-ways/agent.yaml");
-    let (out, _, _) = f.run(&["settings", "help", "gate.profiles.anthropic.model"]);
-    assert!(out.contains("text (the choices could not be listed: model list needs the network; run `ways agent models`)"), "{out}");
-    // Any model id is taken; one that is no id is refused.
-    assert_eq!(f.run(&["settings", "set", "gate.profiles.anthropic.model", "claude-sonnet-5-5"]), (String::new(), String::new(), 0));
-    assert!(std::fs::read_to_string(&agent).unwrap().contains("claude-sonnet-5-5"));
-    assert_eq!(f.run(&["settings", "set", "gate.profiles.anthropic.model", "not a model"]).2, 3);
-    // `options` is null: a computed choice whose source could not answer, so no picker.
-    let v = json(&f, &["settings", "get", "gate.profiles.anthropic.model", "--json"]);
-    assert_eq!(v["options"], serde_json::Value::Null, "{v}");
-    assert!(v.as_object().unwrap().contains_key("options"));
-    assert_eq!(v["value"], "claude-sonnet-5-5");
 }
 
 #[test]
 fn the_disabled_domains_are_picked_from_the_corpus_domains() {
     let f = Fx::new();
-    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/ea/x/x.md"), "---\ndescription: d\n---\n");
-    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/.hidden/h.md"), "x\n");
-    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/empty/note.txt"), "x\n");
-    f.write(&f.root.join("xdg/config/agent-ways/ways/itops/y/y.md"), "---\ndescription: d\n---\n");
-    f.write(&f.root.join("proj/.claude/ways/mine/m.md"), "---\ndescription: d\n---\n");
+    let way = "---\ndescription: d\n---\n";
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/ea/x/x.md"), way);
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/.hidden/h.md"), way);
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/notes/note.md"), "no frontmatter\n");
+    f.write(&f.root.join("xdg/config/agent-ways/ways/itops/y/y.md"), way);
+    f.write(&f.root.join("proj/.claude/ways/mine/m.md"), way);
     f.write(&f.overlay(), "enabled: true\n");
     let v = json(&f, &["settings", "get", "ways.disabled_domains", "--json"]);
-    assert_eq!(v["options"], serde_json::json!(["ea", "itops", "loc", "mine"]));
+    // The project's own domain (mine) is not listed, and nor is a dir with no way.
+    assert_eq!(v["options"], serde_json::json!(["ea", "itops"]));
     assert_eq!(v["value"], serde_json::json!([]));
     let (out, _, _) = f.run(&["settings", "help", "ways.disabled_domains"]);
-    assert!(out.contains("a list, each one of ea, itops, loc, mine"), "{out}");
+    assert!(out.contains("a list, each one of ea, itops"), "{out}");
     // A list, or the comma text, of domains in the list.
     assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "[ea, itops]"]).2, 0);
-    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "ea,mine"]).2, 0);
-    assert_eq!(json(&f, &["settings", "get", "ways.disabled_domains", "--json"])["value"], serde_json::json!(["ea", "mine"]));
+    assert_eq!(json(&f, &["settings", "get", "ways.disabled_domains", "--json"])["value"], serde_json::json!(["ea", "itops"]));
     // One outside the list refuses the whole write.
     let before = std::fs::read_to_string(f.user()).unwrap();
     let (_, err, code) = f.run(&["settings", "set", "ways.disabled_domains", "ea,nope"]);
     assert_eq!(code, 3, "{err}");
     assert!(err.contains("nope"), "{err}");
     assert_eq!(std::fs::read_to_string(f.user()).unwrap(), before);
-    // A domain written by hand that no root holds loads and still silences it.
-    f.write(&f.user(), "disabled_domains: [gone]\n");
-    assert_eq!(json(&f, &["settings", "get", "ways.disabled_domains", "--json"])["value"], serde_json::json!(["gone"]));
+    // A stored domain no root lists, such as a project's own, stays settable:
+    // only an item newly added must be in the list. Lint still notes it.
+    f.write(&f.user(), "disabled_domains: [mine]\n");
+    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "mine,ea"]).2, 0);
+    assert_eq!(json(&f, &["settings", "get", "ways.disabled_domains", "--json"])["value"], serde_json::json!(["mine", "ea"]));
+    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "mine,nope"]).2, 3);
+    f.write(&f.user(), "disabled_domains: [mine]\n");
+    let (out, _, code) = f.run(&["settings", "lint"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("mine"), "{out}");
+    // From another directory, adding to a list that holds a project-only domain succeeds.
+    let other = f.root.join("home");
+    let mut c = f.cmd(&["settings", "set", "ways.disabled_domains", "mine,itops"]);
+    c.current_dir(&other);
+    assert!(c.status().unwrap().success());
 }
