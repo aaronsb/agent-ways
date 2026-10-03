@@ -66,24 +66,7 @@ impl App {
                     _ => self.mode = Mode::ThemeMenu { sel },
                 }
             }
-            Mode::ThemeName { op, mut buf } => match k.code {
-                KeyCode::Esc => self.msg = "cancelled".into(),
-                KeyCode::Enter => self.theme_named(op, buf),
-                KeyCode::Backspace => {
-                    buf.pop();
-                    self.mode = Mode::ThemeName { op, buf };
-                }
-                KeyCode::Char(c) => {
-                    buf.push(c);
-                    self.mode = Mode::ThemeName { op, buf };
-                }
-                _ => self.mode = Mode::ThemeName { op, buf },
-            },
-            Mode::ThemeDelete { name } => match k.code {
-                KeyCode::Char('y' | 'Y') => self.theme_delete(&name),
-                KeyCode::Char('n' | 'N') | KeyCode::Esc => self.msg = "kept".into(),
-                _ => self.mode = Mode::ThemeDelete { name },
-            },
+            m @ (Mode::Name { .. } | Mode::ItemDelete { .. }) => self.prompt_key(m, k),
             Mode::ThemeUnsaved => self.unsaved_key(k),
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),
@@ -459,7 +442,7 @@ impl App {
                 }
             }
             Mode::Review { run: Some(_), .. } => {}
-            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ThemeDelete { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
+            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ItemDelete { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
                 if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
                     let answer = match (self.owns_text() && matches!(self.mode, Mode::Guard { .. }), yes) {
                         (true, true) => KeyCode::Enter,

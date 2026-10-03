@@ -573,12 +573,18 @@ pub fn tab_names() -> Vec<&'static str> {
     TABS.iter().map(|t| t.name).chain(["theme"]).collect()
 }
 
+/// The themes on offer, with the active choice as `layers` resolve it: the
+/// theme tab's state, and what `ways settings theme` acts on.
+pub fn themes(ways: &Ways, layers: &[Layer], depth: ColorDepth) -> Themes {
+    let active = ways.value("theme.active", layers).and_then(|v| v.as_str().map(str::to_string));
+    Themes::new(ways.ctx.themes.clone(), depth, active).home(ways.ctx.home.clone())
+}
+
 pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Failure> {
     let layers = ways.layers();
     let roots = ways.build(&layers);
-    let active = ways.value("theme.active", &layers).and_then(|v| v.as_str().map(str::to_string));
     let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::PLAIN);
-    let themes = Themes::new(ways.ctx.themes.clone(), depth, active).home(ways.ctx.home.clone());
+    let themes = themes(&ways, &layers, depth);
     let title = title(&ways.ctx, None);
     let names = tab_names();
     let at = match tab {

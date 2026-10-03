@@ -32,7 +32,9 @@ pub enum Source {
 
 #[derive(Debug, Default)]
 pub struct ThemeSet {
-    entries: Vec<(Theme, Source)>,
+    /// Each theme, its source, and for a user theme the file it was read
+    /// from, whose stem need not be its name.
+    entries: Vec<(Theme, Source, Option<PathBuf>)>,
     /// Files that failed to load, as (file, errors). Their themes are absent.
     pub rejected: Vec<(String, Vec<ThemeError>)>,
 }
@@ -43,7 +45,7 @@ impl ThemeSet {
         let mut set = ThemeSet::default();
         for (stem, src) in BUNDLED {
             match parse(src) {
-                Ok(t) => set.entries.push((t, Source::Bundled)),
+                Ok(t) => set.entries.push((t, Source::Bundled, None)),
                 Err(e) => set.rejected.push((format!("bundled:{stem}"), e)),
             }
         }
@@ -67,29 +69,34 @@ impl ThemeSet {
             let file = path.display().to_string();
             let loaded = std::fs::read_to_string(&path).map_err(|e| vec![ThemeError::whole(e.to_string())]).and_then(|s| parse(&s));
             match loaded {
-                Ok(t) => set.insert(t),
+                Ok(t) => set.insert(t, path),
                 Err(e) => set.rejected.push((file, e)),
             }
         }
         set
     }
 
-    fn insert(&mut self, t: Theme) {
-        match self.entries.iter_mut().find(|(b, _)| b.name == t.name) {
+    fn insert(&mut self, t: Theme, file: PathBuf) {
+        match self.entries.iter_mut().find(|(b, _, _)| b.name == t.name) {
             Some(slot) => {
                 let src = if slot.1 == Source::Bundled { Source::Override } else { slot.1 };
-                *slot = (t, src);
+                *slot = (t, src, Some(file));
             }
-            None => self.entries.push((t, Source::User)),
+            None => self.entries.push((t, Source::User, Some(file))),
         }
     }
 
     pub fn list(&self) -> impl Iterator<Item = (&Theme, Source)> {
-        self.entries.iter().map(|(t, s)| (t, *s))
+        self.entries.iter().map(|(t, s, _)| (t, *s))
     }
 
     pub fn get(&self, name: &str) -> Option<&Theme> {
-        self.entries.iter().find(|(t, _)| t.name == name).map(|(t, _)| t)
+        self.entries.iter().find(|(t, _, _)| t.name == name).map(|(t, _, _)| t)
+    }
+
+    /// The file a user theme was read from; none for a bundled one.
+    pub fn file(&self, name: &str) -> Option<&Path> {
+        self.entries.iter().find(|(t, _, _)| t.name == name).and_then(|(_, _, f)| f.as_deref())
     }
 }
 

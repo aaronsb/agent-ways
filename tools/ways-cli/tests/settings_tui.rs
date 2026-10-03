@@ -319,6 +319,149 @@ fn the_old_active_theme_file_is_not_read() {
     assert!(f.lines().any(|l| l.contains("● terminal")) && !f.lines().any(|l| l.contains("● dracula")), "{f}");
 }
 
+// ── copy, rename and delete: the screens and the CLI (#851) ─────
+
+const THEMES: &str = ".config/agent-ways/themes";
+
+#[test]
+fn the_cli_copies_a_bundled_theme_as_the_screens_do() {
+    let (cli, tui) = (Fx::new(), Fx::new());
+    let (out, err, code) = cli.run(&["settings", "theme", "copy", "nord", "arctic"]);
+    assert_eq!((code, out.as_str()), (0, "copied nord to arctic\n~/.config/agent-ways/themes/arctic.theme\n"), "{err}");
+    // terminal, agent-ways, nord: the copy action on the third row, named.
+    let f = glyphs(&tui.snap("theme", "down down a down enter text:arctic enter", "100x30", "16"));
+    assert!(f.contains("┌ edit arctic ") && f.contains("copied nord to arctic; editing it"), "the copy opens in the editor:\n{f}");
+    let file = format!("{THEMES}/arctic.theme");
+    assert!(cli.read(&file).unwrap().contains("THEME_NAME=\"arctic\""));
+    assert_eq!(cli.read(&file), tui.read(&file), "both ways in write the same file");
+}
+
+#[test]
+fn the_cli_renames_the_active_theme_and_the_choice_follows() {
+    let fx = Fx::new();
+    assert_eq!(fx.run(&["settings", "theme", "copy", "dracula", "night"]).2, 0);
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "night"]).2, 0);
+    let (out, err, code) = fx.run(&["settings", "theme", "rename", "night", "vampire", "--json"]);
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!((v["action"].as_str(), v["from"].as_str(), v["to"].as_str()), (Some("rename"), Some("night"), Some("vampire")));
+    assert_eq!((v["active"].as_str(), v["active_moved"].as_bool()), (Some("vampire"), Some(true)));
+    assert!(v["file"].as_str().unwrap().ends_with("/.config/agent-ways/themes/vampire.theme"), "{v}");
+    assert!(fx.read(&format!("{THEMES}/night.theme")).is_none());
+    assert!(fx.read(&format!("{THEMES}/vampire.theme")).unwrap().contains("THEME_NAME=\"vampire\""));
+    assert_eq!(fx.run(&["settings", "get", "theme.active"]).0, "vampire\n");
+    // A rename of a theme that is not active leaves the choice alone.
+    assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "spare"]).2, 0);
+    let (out, _, _) = fx.run(&["settings", "theme", "rename", "spare", "extra", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!((v["active"].as_str(), v["active_moved"].as_bool()), (Some("vampire"), Some(false)));
+}
+
+#[test]
+fn deleting_the_active_theme_falls_back_to_terminal_and_says_so() {
+    let fx = Fx::new();
+    assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "mine"]).2, 0);
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "mine"]).2, 0);
+    let (out, err, code) = fx.run(&["settings", "theme", "delete", "mine"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "deleted mine; it was the active theme, so terminal is active now\n~/.config/agent-ways/themes/mine.theme\n");
+    assert_eq!(fx.run(&["settings", "get", "theme.active"]).0, "terminal\n");
+    // The screens: y/n first, then the same fallback. The cursor opens on
+    // mine, the active theme; its menu is new, copy, rename, delete.
+    let tui = Fx::new();
+    assert_eq!(tui.run(&["settings", "theme", "copy", "nord", "mine"]).2, 0);
+    assert_eq!(tui.run(&["settings", "set", "theme.active", "mine"]).2, 0);
+    let ask = glyphs(&tui.snap("theme", "a down down down enter", "100x30", "16"));
+    assert!(ask.contains("delete theme mine?"), "{ask}");
+    let f = glyphs(&tui.snap("theme", "a down down down enter y", "200x30", "16"));
+    assert!(f.contains("it was the active theme, so terminal is active now"), "{f}");
+    assert!(tui.read(&format!("{THEMES}/mine.theme")).is_none());
+    assert_eq!(tui.run(&["settings", "get", "theme.active"]).0, "terminal\n");
+}
+
+#[test]
+fn the_cli_refuses_bundled_taken_bad_and_missing_names() {
+    let fx = Fx::new();
+    assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "mine"]).2, 0);
+    let cases: &[(&[&str], i32, &str)] = &[
+        (&["delete", "nord"], 3, "nord is a bundled theme, which is never deleted; copy it to change it"),
+        (&["rename", "terminal", "plain"], 3, "terminal is a bundled theme, which is never renamed; copy it to change it"),
+        (&["copy", "nord", "dracula"], 3, "`dracula` is taken by a bundled theme"),
+        (&["rename", "mine", "nord"], 3, "`nord` is taken by a bundled theme"),
+        (&["copy", "dracula", "mine"], 3, "`mine` is taken by a user theme"),
+        (&["copy", "nord", "../evil"], 3, "`../evil`: a theme name has no path separator"),
+        (&["copy", "nord", ""], 3, "a theme name cannot be empty"),
+        (&["copy", "nord", "Loud"], 3, "`Loud`: a theme name is lowercase letters, digits and -"),
+        (&["delete", "gone"], 2, "no theme named `gone`; `ways settings theme list` names the themes"),
+        (&["copy", "nord", "--", "-x"], 3, "`-x`: a theme name does not start with -"),
+        (&["copy", "nord", "con"], 3, "`con`: a theme name is not one Windows reserves (con, prn, aux, nul, com1-9, lpt1-9)"),
+        (&["copy", "nord", "lpt1"], 3, "`lpt1`: a theme name is not one Windows reserves (con, prn, aux, nul, com1-9, lpt1-9)"),
+    ];
+    for (args, want, msg) in cases {
+        let mut a = vec!["settings", "theme"];
+        a.extend_from_slice(args);
+        let (out, err, code) = fx.run(&a);
+        assert_eq!((code, err.as_str(), out.as_str()), (*want, format!("ways settings: {msg}\n").as_str(), ""), "{args:?}");
+    }
+    let mut files: Vec<_> = std::fs::read_dir(fx.path(THEMES)).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    files.sort();
+    assert_eq!(files, ["mine.theme"], "nothing else was written or removed");
+}
+
+#[test]
+fn a_file_that_is_no_loaded_theme_is_never_overwritten() {
+    let fx = Fx::new();
+    fx.file(&format!("{THEMES}/precious.theme"), "not a theme\n");
+    let (out, err, code) = fx.run(&["settings", "theme", "copy", "nord", "precious"]);
+    assert_eq!((code, err.as_str(), out.as_str()), (3, "ways settings: `precious` is taken by a file that holds no theme of that name\n", ""));
+    assert_eq!(fx.read(&format!("{THEMES}/precious.theme")).as_deref(), Some("not a theme\n"));
+    // The screens refuse it the same way and keep the prompt open.
+    let f = glyphs(&fx.snap("theme", "down down a down enter text:precious enter", "200x30", "16"));
+    assert!(f.contains("rejected: `precious` is taken by a file that holds no theme of that name"), "{f}");
+    assert_eq!(fx.read(&format!("{THEMES}/precious.theme")).as_deref(), Some("not a theme\n"));
+}
+
+#[test]
+fn rename_and_delete_follow_the_file_a_theme_was_read_from() {
+    let fx = Fx::new();
+    assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "bar"]).2, 0);
+    let text = fx.read(&format!("{THEMES}/bar.theme")).unwrap();
+    std::fs::remove_file(fx.path(&format!("{THEMES}/bar.theme"))).unwrap();
+    fx.file(&format!("{THEMES}/foo.theme"), &text);
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "bar"]).2, 0);
+    let (_, err, code) = fx.run(&["settings", "theme", "rename", "bar", "baz"]);
+    assert_eq!(code, 0, "{err}");
+    let mut files: Vec<_> = std::fs::read_dir(fx.path(THEMES)).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    files.sort();
+    assert_eq!(files, ["baz.theme"], "foo.theme, where bar lived, is gone");
+    assert_eq!(fx.run(&["settings", "get", "theme.active"]).0, "baz\n");
+    // Delete, the same way round.
+    fx.file(&format!("{THEMES}/foo.theme"), &text);
+    let (out, err, code) = fx.run(&["settings", "theme", "delete", "bar"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, "deleted bar\n~/.config/agent-ways/themes/foo.theme\n");
+    assert!(fx.read(&format!("{THEMES}/foo.theme")).is_none());
+}
+
+#[test]
+fn the_cli_lists_the_themes_with_their_source() {
+    let fx = Fx::new();
+    assert_eq!(fx.run(&["settings", "theme", "copy", "nord", "mine"]).2, 0);
+    assert_eq!(fx.run(&["settings", "set", "theme.active", "mine"]).2, 0);
+    let (out, _, code) = fx.run(&["settings", "theme", "list"]);
+    assert_eq!(code, 0);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.first().map(|l| l.split_whitespace().collect::<Vec<_>>()), Some(vec!["terminal", "bundled"]));
+    assert_eq!(lines.last().map(|l| l.split_whitespace().collect::<Vec<_>>()), Some(vec!["mine", "user", "active"]));
+    let (out, _, _) = fx.run(&["settings", "theme", "list", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let mine = v.as_array().unwrap().iter().find(|t| t["name"] == "mine").unwrap();
+    assert_eq!((mine["source"].as_str(), mine["active"].as_bool()), (Some("user"), Some(true)));
+    assert!(mine["file"].as_str().unwrap().ends_with("/themes/mine.theme"));
+    let nord = v.as_array().unwrap().iter().find(|t| t["name"] == "nord").unwrap();
+    assert_eq!((nord["source"].as_str(), nord["file"].is_null()), (Some("bundled"), true));
+}
+
 // ── a broken file fails closed and takes no write ──────────────
 
 const BROKEN: &str = "near_miss_margin: 0.2\nmatching: [unclosed\n";
@@ -555,6 +698,16 @@ fn golden_frames() {
     let domains = "down down down down down enter space down";
     g.check_text("ways-pick-domains", &fx.snap("ways", domains, "100x30", "16"));
     g.check_text("ways-pick-domains-80x25", &fx.snap("ways", domains, "80x25", "16"));
+    // The named-item flow on a user theme, the active one (#851): its menu,
+    // a copy's name prompt with a refused name, and the delete y/n.
+    let user = Fx::new();
+    assert_eq!(user.run(&["settings", "theme", "copy", "nord", "mine"]).2, 0);
+    assert_eq!(user.run(&["settings", "set", "theme.active", "mine"]).2, 0);
+    g.check_text("theme-menu-user", &user.snap("theme", "a", "100x30", "16"));
+    g.check_text("theme-copy-taken", &user.snap("theme", "a down enter text:nord enter", "100x30", "16"));
+    for size in ["100x30", "80x25"] {
+        g.check_text(&format!("theme-delete-{size}"), &user.snap("theme", "a down down down enter", size, "16"));
+    }
     // A chosen theme at truecolor: its roles, and the editor's swatches.
     g.check_text("theme-nord-truecolor", &fx.snap("theme", "down down enter 1", "100x30", "truecolor"));
     // A project way with a macro: its switch above, what it is below.

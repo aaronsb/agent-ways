@@ -1,0 +1,194 @@
+agent-tui frame 80x25
+| 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme|
+|┌ themes ──────────────────────────────────┐┌theme─────────────────────────────┐|
+|│   terminal         dark                  ││mine                              │|
+|│   agent-ways       dark                  ││mine · dark · background terminal │|
+|│   nord             dark                  ││                                  │|
+|│   catppuccin-mocha dark                  ││source    user  ~/.config/agent-wa│|
+|│   dracula          dark                  ││          ys/themes/mine.theme    │|
+|│   gruvbox-dark     dark                  ││active    yes                     │|
+|│   tokyonight-night dark                  ││saves to  ~/.config/agent-ways/the│|
+|│   paper            light                 ││          mes                     │|
+|│▌● mine             dark   user           ││shape     plain (a: shape cycles i│|
+|│                                          ││          t)                      │|
+|│                                          ││                                  │|
+|│                                          ││slots                             │|
+|│                                          ││  bg     #2e3440   info   #81a1c1 │|
+|│                                          ││  fg     #d8dee9   ok     #a3be8c │|
+|│                                          ││  dim    #4c566a   warn   #d08770 │|
+|│                                          ││  subtle #3b4252   err    #bf616a │|
+|│                                          ││  accent #b48ead   alt    #88c0d0 │|
+|│                                          ││                                  │|
+|│                                          ││contrast  ok                      │|
+|│                                          ││distinct  ok, err/warn ΔE 0.084   │|
+|│                                          ││                                  │|
+|└──────────────────────────────────────────┘└──────────────────────────────────┘|
+| confirm  delete theme mine?   y delete   n keep                                |
+styles
+  0   0-7   White Blue -
+  0  10-21  White Blue -
+  0  24-31  White Blue -
+  0  34-44  White Blue -
+  0  47-56  White Blue -
+  0  59-69  White Blue -
+  0  72-79  Black Cyan BOLD
+  1   0-0   - - DIM
+  1   1-8   LightBlue - BOLD|DIM
+  1   9-44  - - DIM
+  1  45-49  LightBlue - BOLD|DIM
+  1  50-79  - - DIM
+  2   0-0   - - DIM
+  2  21-27  - - DIM
+  2  28-36  LightBlue - -
+  2  37-37  - Black -
+  2  38-38  - Gray -
+  2  39-39  - Cyan -
+  2  40-40  - Blue -
+  2  41-41  - Green -
+  2  42-42  - Yellow -
+  2  43-44  - - DIM
+  2  45-48  - - BOLD
+  2  79-79  - - DIM
+  3   0-0   - - DIM
+  3  21-27  - - DIM
+  3  28-36  LightBlue - -
+  3  37-37  - Black -
+  3  38-38  - Gray -
+  3  39-39  - Cyan -
+  3  40-40  - LightBlue -
+  3  41-41  - DarkGray -
+  3  42-42  - Yellow -
+  3  43-77  - - DIM
+  3  79-79  - - DIM
+  4   0-0   - - DIM
+  4  21-27  - - DIM
+  4  28-36  LightBlue - -
+  4  37-37  - Black -
+  4  38-38  - Gray -
+  4  39-42  - DarkGray -
+  4  43-44  - - DIM
+  4  79-79  - - DIM
+  5   0-0   - - DIM
+  5  21-27  - - DIM
+  5  28-36  LightBlue - -
+  5  37-37  - Black -
+  5  38-39  - Gray -
+  5  40-40  - LightBlue -
+  5  41-42  - Gray -
+  5  43-54  - - DIM
+  5  79-79  - - DIM
+  6   0-0   - - DIM
+  6  21-27  - - DIM
+  6  28-36  LightBlue - -
+  6  37-37  - Black -
+  6  38-38  - White -
+  6  39-40  - Gray -
+  6  41-41  - Cyan -
+  6  42-42  - Yellow -
+  6  43-44  - - DIM
+  6  79-79  - - DIM
+  7   0-0   - - DIM
+  7  21-27  - - DIM
+  7  28-36  LightBlue - -
+  7  37-37  - Black -
+  7  38-38  - Gray -
+  7  39-40  - DarkGray -
+  7  41-42  - Yellow -
+  7  43-54  - - DIM
+  7  55-57  Green - -
+  7  79-79  - - DIM
+  8   0-0   - - DIM
+  8  21-27  - - DIM
+  8  28-36  LightBlue - -
+  8  37-37  - Black -
+  8  38-39  - Gray -
+  8  40-40  - LightBlue -
+  8  41-41  - DarkGray -
+  8  42-42  - Yellow -
+  8  43-54  - - DIM
+  8  79-79  - - DIM
+  9   0-0   - - DIM
+  9  21-27  - - DIM
+  9  28-36  LightBlue - -
+  9  37-37  - Gray -
+  9  38-38  - Black -
+  9  39-39  - Cyan -
+  9  40-40  - LightBlue -
+  9  41-41  - Green -
+  9  42-42  - Red -
+  9  43-44  - - DIM
+  9  79-79  - - DIM
+ 10   0-0   - - DIM
+ 10   1-1   Cyan - BOLD|REVERSED
+ 10   2-3   Green - BOLD|REVERSED
+ 10   4-20  - - BOLD|REVERSED
+ 10  21-27  - - BOLD|DIM|REVERSED
+ 10  28-36  LightBlue - BOLD|REVERSED
+ 10  37-37  - Black BOLD|REVERSED
+ 10  38-38  - Gray BOLD|REVERSED
+ 10  39-42  - DarkGray BOLD|REVERSED
+ 10  43-54  - - DIM
+ 10  79-79  - - DIM
+ 11   0-0   - - DIM
+ 11  43-44  - - DIM
+ 11  79-79  - - DIM
+ 12   0-0   - - DIM
+ 12  43-44  - - DIM
+ 12  79-79  - - DIM
+ 13   0-0   - - DIM
+ 13  43-44  - - DIM
+ 13  45-49  - - BOLD
+ 13  79-79  - - DIM
+ 14   0-0   - - DIM
+ 14  43-44  - - DIM
+ 14  45-45  - Black -
+ 14  46-53  - - DIM
+ 14  62-62  - DarkGray -
+ 14  63-70  - - DIM
+ 14  79-79  - - DIM
+ 15   0-0   - - DIM
+ 15  43-44  - - DIM
+ 15  45-45  - Gray -
+ 15  46-53  - - DIM
+ 15  62-62  - DarkGray -
+ 15  63-70  - - DIM
+ 15  79-79  - - DIM
+ 16   0-0   - - DIM
+ 16  43-44  - - DIM
+ 16  45-45  - DarkGray -
+ 16  46-53  - - DIM
+ 16  62-62  - DarkGray -
+ 16  63-70  - - DIM
+ 16  79-79  - - DIM
+ 17   0-0   - - DIM
+ 17  43-44  - - DIM
+ 17  45-45  - DarkGray -
+ 17  46-53  - - DIM
+ 17  62-62  - DarkGray -
+ 17  63-70  - - DIM
+ 17  79-79  - - DIM
+ 18   0-0   - - DIM
+ 18  43-44  - - DIM
+ 18  45-45  - DarkGray -
+ 18  46-53  - - DIM
+ 18  62-62  - Gray -
+ 18  63-70  - - DIM
+ 18  79-79  - - DIM
+ 19   0-0   - - DIM
+ 19  43-44  - - DIM
+ 19  79-79  - - DIM
+ 20   0-0   - - DIM
+ 20  43-54  - - DIM
+ 20  55-56  Green - -
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
+ 21  43-54  - - DIM
+ 21  55-75  Green - -
+ 21  79-79  - - DIM
+ 22   0-0   - - DIM
+ 22  43-44  - - DIM
+ 22  79-79  - - DIM
+ 23   0-79  - - DIM
+ 24   0-8   Black Yellow BOLD
+ 24  30-39  White Red BOLD
+ 24  41-48  Black Green BOLD

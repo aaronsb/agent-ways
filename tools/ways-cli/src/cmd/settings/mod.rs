@@ -16,6 +16,7 @@ mod help;
 mod maintain;
 mod object;
 mod property;
+pub mod themes;
 pub mod tui;
 
 pub use help::{help, help_text};
