@@ -55,7 +55,7 @@ impl Fx {
         std::fs::write(dir.join(format!("{leaf}.md")), text).unwrap();
     }
 
-    /// Run `ways args…` in the fixture; stdout and stderr together.
+    /// Run the binary with `args` in the fixture; stdout and stderr together.
     fn ways(&self, args: &[&str]) -> String {
         let home = self.home();
         let out = Command::new(env!("CARGO_BIN_EXE_ways"))
