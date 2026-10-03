@@ -59,7 +59,7 @@ impl Ctx {
         let xdg_config = ways_core::paths::xdg_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
         Ctx {
             project: project_dir(project),
-            corpus: ways_core::paths::core_ways_root(),
+            corpus: ways_core::paths::shipped_ways_root(),
             user_ways: ways_core::paths::user_ways_root(),
             themes: agent_theme::user_dir(),
             claude_config_dir: std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(PathBuf::from),

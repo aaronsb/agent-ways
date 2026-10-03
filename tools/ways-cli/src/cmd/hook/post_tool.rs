@@ -36,11 +36,15 @@ pub struct Root {
 /// project root's postchecks run only when the project is listed in
 /// `paths::trusted_project_macros()`, the gate project macros pass.
 pub fn roots(project_dir: &str) -> Vec<Root> {
-    vec![
-        Root { dir: Path::new(project_dir).join(".claude/ways"), runs: show::is_project_trusted(project_dir) },
-        Root { dir: crate::paths::user_ways_root(), runs: true },
-        Root { dir: crate::paths::projected_ways_root(), runs: true },
-    ]
+    let project_root = Path::new(project_dir).join(".claude/ways");
+    let trusted = show::is_project_trusted(project_dir);
+    crate::paths::ways_roots(Some(Path::new(project_dir)))
+        .into_iter()
+        .map(|dir| {
+            let runs = if dir == project_root { trusted } else { true };
+            Root { dir, runs }
+        })
+        .collect()
 }
 
 /// Every executable `postcheck.sh` under `roots`, one per way id: a way in an

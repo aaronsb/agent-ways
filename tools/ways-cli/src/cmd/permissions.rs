@@ -2,25 +2,17 @@
 
 use agent_fmt::permissions;
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 
 /// Run `ways author permissions`.
 pub fn audit(global: bool) -> Result<()> {
-    let ways_dir = crate::paths::projected_ways_root();
+    let ways_dir = crate::paths::shipped_ways_root();
     let settings_path = crate::paths::settings_json();
 
-    // Determine scan dirs (same logic as lint)
-    let mut scan_dirs = vec![ways_dir.clone()];
-    if !global {
-        let project_dir = crate::util::project_root();
-        if let Some(ref pd) = project_dir {
-            let project_ways = PathBuf::from(pd).join(".claude/ways");
-            if project_ways.is_dir() {
-                scan_dirs.push(project_ways);
-            }
-        }
-    }
+    // Every root the engine reads; --global leaves the project's out.
+    let project_dir = if global { None } else { crate::util::project_root() };
+    let scan_dirs = crate::paths::ways_roots(project_dir.as_deref().map(Path::new));
 
     // Collect (way_id, requires) pairs
     let mut requirements: Vec<(String, Vec<String>)> = Vec::new();

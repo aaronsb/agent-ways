@@ -857,17 +857,9 @@ pub fn core(session_id: &str) -> Result<String> {
 // ── ways show attend/<signal> ──────────────────────────────────
 
 pub fn attend(signal: &str, session_id: &str) -> Result<String> {
-    let ways_dir = crate::paths::projected_ways_root();
-
-    // Also check project-local ways
+    // Every root the engine reads, project first: the first eligible way wins.
     let project_dir = crate::util::project_dir();
-    let project_ways = std::path::PathBuf::from(&project_dir).join(".claude/ways");
-
-    let dirs: Vec<&std::path::Path> = if project_ways.is_dir() {
-        vec![ways_dir.as_path(), project_ways.as_path()]
-    } else {
-        vec![ways_dir.as_path()]
-    };
+    let dirs = crate::paths::ways_roots(Some(std::path::Path::new(&project_dir)));
 
     // Scan for ways with trigger.type: attend and matching signal
     let mut matched_ids: Vec<String> = Vec::new();

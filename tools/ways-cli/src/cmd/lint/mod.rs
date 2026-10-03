@@ -69,7 +69,7 @@ pub fn run(
         std::process::exit(2);
     }
 
-    let home_ways_dir = crate::paths::projected_ways_root();
+    let home_ways_dir = crate::paths::shipped_ways_root();
 
     // Determine the corpus to lint:
     // 1. Explicit path arg wins

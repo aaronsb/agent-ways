@@ -1,6 +1,6 @@
 //! Session metrics, git operations, and side-effectful display functions.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use crate::session;
@@ -43,10 +43,7 @@ pub(crate) fn count_siblings(way_id: &str, project_dir: &str, session_id: &str) 
     let mut total = 0u32;
     let mut fired = 0u32;
 
-    let bases = [
-        PathBuf::from(project_dir).join(".claude/ways"),
-        crate::paths::projected_ways_root(),
-    ];
+    let bases = crate::paths::ways_roots(Some(Path::new(project_dir)));
 
     for base in &bases {
         let parent_dir = base.join(parent_path);

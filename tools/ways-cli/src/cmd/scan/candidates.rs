@@ -21,23 +21,16 @@ pub(crate) fn collect_candidates(project_dir: &str) -> Vec<WayCandidate> {
     // Canonical paths already collected, across every root (see `WayRoots`).
     let mut seen_paths: HashSet<PathBuf> = HashSet::new();
 
-    // Project-local first. The corpus namespaces project ways as
-    // `{encode_project_key(project_dir)}/{id}`; we compute the identical prefix
+    // Roots arrive in precedence order, each shadowing the ids of the ones
+    // before it. The project root's ways are namespaced in the corpus as
+    // `{encode_project_key(project_dir)}/{id}`; the same prefix is computed
     // here so the embedding lookup (best_en/best_multi) finds them (Bug B fix).
-    if roots.project.is_dir() {
-        let prefix = project_corpus_prefix(project_dir);
-        collect_from_dir(Walk { dir: &roots.project, corpus_prefix: &prefix, kind: Kind::Ways, foreign_roots: &roots.foreign_to(&roots.project) }, &mut candidates, &HashSet::new(), &mut seen, &mut seen_paths);
-    }
-
-    // User ways ($XDG_CONFIG/agent-ways/ways) — bare ids; drop any project shadows.
-    if roots.user.is_dir() {
+    // Every other root keeps bare ids.
+    for root in &roots.all {
         let claimed = seen.clone();
-        collect_from_dir(Walk { dir: &roots.user, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&roots.user) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
+        let prefix = if *root == roots.project { project_corpus_prefix(project_dir) } else { String::new() };
+        collect_from_dir(Walk { dir: root, corpus_prefix: &prefix, kind: Kind::Ways, foreign_roots: &roots.foreign_to(root) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
     }
-
-    // Core ways — bare ids; drop any project- or user-claimed id.
-    let claimed = seen.clone();
-    collect_from_dir(Walk { dir: &roots.core, corpus_prefix: "", kind: Kind::Ways, foreign_roots: &roots.foreign_to(&roots.core) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
 
     sort_by_tree_id(&mut candidates);
     candidates
@@ -63,28 +56,28 @@ fn sort_by_tree_id(candidates: &mut [WayCandidate]) {
 /// second sighting collapses onto the first by path. A link that resolves
 /// outside every root (a dotfiles checkout, say) keeps its walked id as before.
 struct WayRoots {
+    /// Where the project's own ways live (it may not exist).
     project: PathBuf,
-    user: PathBuf,
-    core: PathBuf,
+    /// Every root that exists, in precedence order: `paths::ways_roots`.
+    all: Vec<PathBuf>,
 }
 
 impl WayRoots {
     fn resolve(project_dir: &str) -> Self {
         Self {
             project: PathBuf::from(project_dir).join(".claude/ways"),
-            user: crate::paths::user_ways_root(),
-            core: crate::paths::projected_ways_root(),
+            all: ways_core::paths::ways_roots(Some(Path::new(project_dir))),
         }
     }
 
-    /// Canonical paths of every root other than `own` (existing ones only). Two
-    /// roots that resolve to the same directory are one root, so neither is
-    /// foreign to the other — otherwise every file in both would be skipped.
+    /// Canonical paths of every root other than `own`. Two roots that resolve
+    /// to the same directory are one root, so neither is foreign to the other
+    /// — otherwise every file in both would be skipped.
     fn foreign_to(&self, own: &Path) -> Vec<PathBuf> {
         let own_canon = canonical(own);
-        [&self.project, &self.user, &self.core]
-            .into_iter()
-            .filter(|r| *r != own && r.is_dir())
+        self.all
+            .iter()
+            .filter(|r| *r != own)
             .map(|r| canonical(r))
             .filter(|c| *c != own_canon)
             .collect()
@@ -97,18 +90,11 @@ pub(crate) fn collect_checks(project_dir: &str) -> Vec<WayCandidate> {
     let roots = WayRoots::resolve(project_dir);
     let mut seen_paths: HashSet<PathBuf> = HashSet::new();
 
-    if roots.project.is_dir() {
-        let prefix = project_corpus_prefix(project_dir);
-        collect_from_dir(Walk { dir: &roots.project, corpus_prefix: &prefix, kind: Kind::Checks, foreign_roots: &roots.foreign_to(&roots.project) }, &mut candidates, &HashSet::new(), &mut seen, &mut seen_paths);
-    }
-
-    if roots.user.is_dir() {
+    for root in &roots.all {
         let claimed = seen.clone();
-        collect_from_dir(Walk { dir: &roots.user, corpus_prefix: "", kind: Kind::Checks, foreign_roots: &roots.foreign_to(&roots.user) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
+        let prefix = if *root == roots.project { project_corpus_prefix(project_dir) } else { String::new() };
+        collect_from_dir(Walk { dir: root, corpus_prefix: &prefix, kind: Kind::Checks, foreign_roots: &roots.foreign_to(root) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
     }
-
-    let claimed = seen.clone();
-    collect_from_dir(Walk { dir: &roots.core, corpus_prefix: "", kind: Kind::Checks, foreign_roots: &roots.foreign_to(&roots.core) }, &mut candidates, &claimed, &mut seen, &mut seen_paths);
 
     sort_by_tree_id(&mut candidates);
     candidates
@@ -376,7 +362,7 @@ mod tests {
         std::fs::create_dir_all(core.join("dom/alpha")).unwrap();
         std::fs::write(core.join("dom/alpha/alpha.md"), LF).unwrap();
         std::os::unix::fs::symlink(&core, &user).unwrap();
-        let roots = WayRoots { project: base.join("absent"), user: user.clone(), core: core.clone() };
+        let roots = WayRoots { project: base.join("absent"), all: vec![user.clone(), core.clone()] };
         assert!(roots.foreign_to(&user).is_empty());
         assert!(roots.foreign_to(&core).is_empty());
 
