@@ -18,5 +18,7 @@ pub mod sessions;
 pub mod signal;
 pub mod slash;
 pub mod tabs;
+#[cfg(test)]
+mod test_dir;
 pub mod theme;
 pub mod watcher;

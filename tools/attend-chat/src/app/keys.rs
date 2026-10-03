@@ -885,20 +885,7 @@ mod tests {
     }
 
     fn tempdir_like() -> std::path::PathBuf {
-        // A counter as well as the clock: two tests starting in one clock
-        // tick would otherwise share a directory and each other's groups.
-        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let p = std::env::temp_dir().join(format!(
-            "attend-chat-keys-test-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        p
+        crate::test_dir::unique("keys")
     }
 
     #[test]
