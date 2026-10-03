@@ -229,17 +229,14 @@ pub(crate) fn firing_transcript() -> Option<&'static str> {
 #[derive(Clone, Debug, PartialEq)]
 struct FiringContext {
     window: u64,
-    /// The model the invoking agent is running, or `None` when the transcript
-    /// the hook named did not yield one.
+    /// The model the invoking agent is running, or `None` when its own
+    /// transcript ([`session::current_transcript`]) did not yield one.
     ///
-    /// Only that transcript may supply it. The session-id lookup resolves
-    /// `<project>/<session_id>.jsonl`, which for a subagent hook is the
-    /// *parent's* transcript (subagent hooks report the parent's session id),
-    /// and the project heuristic may land on a sibling session; either would
-    /// stamp a fire with a model it did not run under, and a wrong model is
-    /// worse than an absent one. `None` therefore also covers every fire made
-    /// without `--transcript`: dry runs, the task/SubagentStart lane, hooks
-    /// that predate the flag.
+    /// Only that transcript may supply it. Subagent hooks report the parent's
+    /// session id, so the session-id lookup would read the *parent's*
+    /// transcript for a subagent, and the project heuristic may land on a
+    /// sibling session; either would stamp a fire with a model it did not run
+    /// under, and a wrong model is worse than an absent one.
     model: Option<String>,
 }
 
@@ -250,19 +247,24 @@ static FIRING_CONTEXT: OnceLock<FiringContext> = OnceLock::new();
 
 fn firing_context(session_id: &str, project_dir: &str) -> &'static FiringContext {
     FIRING_CONTEXT.get_or_init(|| {
-        resolve_firing_context(
-            firing_transcript()
-                .and_then(|t| crate::cmd::context::get_context_for_transcript(t).ok()),
-            || crate::cmd::context::get_context_for_session(session_id).ok(),
-            || crate::cmd::context::get_context(Some(project_dir)).ok(),
-        )
+        firing_context_from(session::current_transcript(session_id).as_deref(), session_id, project_dir)
     })
+}
+
+/// [`firing_context`] with the agent's own transcript given: the window and
+/// model come from the file the token position is read from.
+fn firing_context_from(transcript: Option<&Path>, session_id: &str, project_dir: &str) -> FiringContext {
+    resolve_firing_context(
+        transcript.and_then(|t| crate::cmd::context::get_context_for_transcript(&t.to_string_lossy()).ok()),
+        || crate::cmd::context::get_context_for_session(session_id).ok(),
+        || crate::cmd::context::get_context(Some(project_dir)).ok(),
+    )
 }
 
 /// Choose the window a firing way's `refire:` fraction resolves against, and
 /// the model the fire is stamped with.
 ///
-/// Window candidates in order: the hook's own `transcript_path` (`explicit`),
+/// Window candidates in order: the agent's own transcript (`explicit`),
 /// the session-pinned lookup, then the project heuristic. A candidate
 /// contributes its window only when it detected one — a transcript with no
 /// assistant turn yet returns `Ok` carrying a defaulted window, and accepting
@@ -366,10 +368,10 @@ fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
     // default is never mistaken for a detection. `EnvOverride` counts as
     // detected, keeping CLAUDE_CONTEXT_WINDOW authoritative on this path.
     //
-    // The hook's own `transcript_path` (when the lane passed `--transcript`)
-    // comes first: it names the invoking agent's transcript directly, and the
-    // same read yields the model id the event is stamped with. Resolved once
-    // per process and shared by every way this invocation fires.
+    // The invoking agent's own transcript (`session::current_transcript`)
+    // comes first: the token position is read from it too, and the same read
+    // yields the model id the event is stamped with. Resolved once per process
+    // and shared by every way this invocation fires.
     let fm = frontmatter::parse(&way_file)?;
     let firing = firing_context(session_id, &project_dir);
     let curve = fm.resolved_curve(firing.window).ok_or_else(|| {
@@ -429,10 +431,11 @@ fn render_way(
 /// A way as a subagent receives it at SubagentStart (`ways hook
 /// subagent-start`): disable-checked, resolved across the project, user and
 /// core roots, and rendered as [`way_scored`] renders it, but with no scope
-/// check, refire gate or fire record. The matching `ways scan task` already
-/// chose the way for the subagent's scope (`subagent` or `teammate`, exported
-/// to its macro as `WAYS_SCOPE`), and the subagent starts with fresh context
-/// whatever the parent session has already been shown. Empty when disabled or
+/// check or refire gate. The matching `ways scan task` already chose the way
+/// for the subagent's scope (`subagent` or `teammate`, exported to its macro
+/// as `WAYS_SCOPE`), and the subagent starts with fresh context whatever the
+/// parent session has already been shown. The fire is recorded under the
+/// subagent's own state (see [`record_injected`]). Empty when disabled or
 /// missing.
 pub fn subagent_way(id: &str, session_id: &str, scope: &str) -> Result<String> {
     let project_dir = crate::util::project_dir();
@@ -446,7 +449,31 @@ pub fn subagent_way(id: &str, session_id: &str, scope: &str) -> Result<String> {
     let content = std::fs::read_to_string(&way_file)?;
     let body = static_way_body(&content);
     let run = MacroRun { session_id, project_dir: &project_dir, scope };
-    Ok(render_way(&body, &content, &way_file, is_project_local, &run))
+    let output = render_way(&body, &content, &way_file, is_project_local, &run);
+    if !output.is_empty() {
+        record_injected(id, session_id, &way_file, &project_dir);
+    }
+    Ok(output)
+}
+
+/// Record a way injected at SubagentStart as fired for the subagent: its
+/// engagement, marker, token position and epoch, as [`way_scored`] records a
+/// fire. Without it the subagent's first match would deliver the way again.
+/// The tick is the subagent's token position, 0 before its transcript exists.
+/// Skipped when the payload named no agent: the fire is not main's.
+fn record_injected(id: &str, session_id: &str, way_file: &Path, project_dir: &str) {
+    if session::current_agent() == session::MAIN_AGENT {
+        return;
+    }
+    let Ok(fm) = frontmatter::parse(way_file) else { return };
+    let Some(curve) = fm.resolved_curve(firing_context(session_id, project_dir).window) else { return };
+    let tick = session::get_token_position(session_id);
+    let lock = session::lock_engagement(id, session_id);
+    session::record_way_fire(id, session_id, &curve, tick);
+    drop(lock);
+    session::stamp_way_marker(id, session_id, tick);
+    session::stamp_way_tokens(id, session_id, tick);
+    session::stamp_way_epoch(id, session_id, session::get_epoch(session_id));
 }
 
 /// Whether [`way_scored`] would show this way now, budget aside: not disabled,
@@ -1198,5 +1225,33 @@ mod tests {
         assert!(b.admit(&"x".repeat(6_000)));
         assert!(b.admit(&"x".repeat(4_000)), "exactly at the cap fits");
         assert!(!b.admit("x"));
+    }
+
+    /// The hook names the parent's transcript, but a subagent's window and
+    /// model come from its own file, the one its token position is read from.
+    #[test]
+    fn a_subagent_fires_against_its_own_window_and_model() {
+        let root = std::env::temp_dir().join(format!("ways-firing-sub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let claude = claude_sessions::ClaudeDir::at(root.join(".claude"));
+        let turn = |model: &str| {
+            format!(r#"{{"type":"assistant","message":{{"model":"{model}","usage":{{"input_tokens":5000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#)
+                + "\n"
+        };
+        let dir = root.join(".claude/projects/-srv-p");
+        std::fs::create_dir_all(dir.join("sess/subagents")).unwrap();
+        let parent = dir.join("sess.jsonl");
+        std::fs::write(&parent, turn("claude-opus-4-8")).unwrap();
+        std::fs::write(dir.join("sess/subagents/agent-asub.jsonl"), turn("claude-haiku-4-5")).unwrap();
+
+        let own = session::transcript_in(&claude, parent.to_str(), "/srv/p", "sess", "asub");
+        assert_eq!(own.as_deref(), Some(dir.join("sess/subagents/agent-asub.jsonl").as_path()));
+        let ctx = firing_context_from(own.as_deref(), "sess", "/srv/p");
+        assert_eq!((ctx.model.as_deref(), ctx.window), (Some("claude-haiku-4-5"), 200_000));
+        // The main agent, given the same hook transcript, reads the parent's.
+        let main = session::transcript_in(&claude, parent.to_str(), "/srv/p", "sess", session::MAIN_AGENT);
+        let ctx = firing_context_from(main.as_deref(), "sess", "/srv/p");
+        assert_eq!((ctx.model.as_deref(), ctx.window), (Some("claude-opus-4-8"), 1_000_000));
+        std::fs::remove_dir_all(&root).ok();
     }
 }
