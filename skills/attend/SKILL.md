@@ -88,7 +88,7 @@ Always wrap the message in double quotes to prevent shell metacharacter expansio
 
 ### Channels
 
-Named channels for shared signal routing (ADR-173). Channels are dynamic — join and leave as needed.
+Named channels for shared signal routing (ADR-173; the old `focus` verbs are removed). Channels are dynamic — join and leave as needed.
 
 ```bash
 attend channels                      # list all channels, joined ones marked
@@ -107,7 +107,6 @@ Named presets that reconfigure channel membership.
 
 ```bash
 attend scene private                 # leave all channels (project only)
-attend scene open                    # join the shared "open" group
 attend scenes                        # list available scenes
 ```
 

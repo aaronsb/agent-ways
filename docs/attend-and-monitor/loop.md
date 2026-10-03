@@ -25,7 +25,7 @@ Before the loop begins, `cmd_run_with_catchup` builds up the context it needs:
 5. **Engagement state** — apply ADR-123 action-potential parameters to every slot. Refractory behavior is per-sensor but the parameters are shared.
 6. **State restore** — if `$XDG_CACHE_HOME/attend/state/<session-id>.state` exists from a previous run, import the saved seen-signals and disclosed thresholds so a restart is continuous. A run started after `/clear` first moves the old session id's state to the new one (see [`delivery.md`](delivery.md#when-the-session-id-changes)).
 7. **Banner** — print a startup line unless the fingerprint (version + commit + sensor list + focus) matches the last one written to `_last_banner`, in which case print `[attend] restarted (unchanged)` to keep noisy Monitors quiet.
-8. **Governors** — build the event lane's `DisclosureGovernor` from the configured cooldown, rate window and maximum per window, and the message lane's permissive one (3 seconds, 30 per 60 seconds).
+8. **Governors** — build the event lane's `DisclosureGovernor` from the configured cooldown, rate window and maximum per window, and the message lane's permissive one (limits in [`delivery.md`](delivery.md#the-monitor-line)).
 9. **Priority queue** — push every sensor slot into a `BinaryHeap<ScheduledSensor>` keyed by `fire_at`.
 10. **Timers** — record startup `Instant`s for checkpoint, cleanup, and self-reload checks.
 
@@ -164,8 +164,8 @@ After all due sensors are polled, the ready ones split by lane, and each lane as
 
 | | Event lane | Message lane |
 |---|---|---|
-| Cooldown between disclosures | `governor.base_cooldown` (default 15 s) | 3 s |
-| Disclosures per window | `governor.max_per_window` per `governor.rate_window` (default 3 per 120 s) | 30 per 60 s |
+| Cooldown between disclosures | `governor.base_cooldown` (default 15 s) | fixed, see [`delivery.md`](delivery.md#the-monitor-line) |
+| Disclosures per window | `governor.max_per_window` per `governor.rate_window` (default 3 per 120 s) | fixed, see [`delivery.md`](delivery.md#the-monitor-line) |
 
 If the lane's governor permits, the loop builds a batch:
 
@@ -237,7 +237,7 @@ All of these tick inside the same single-threaded loop using `Instant::now()` co
 | Sensor base_interval | per-sensor (default 30–60s) | Ceiling — rest-state polling frequency |
 | Event governor cooldown | `governor.base_cooldown` (default 15s) | Minimum gap between event-lane disclosures |
 | Event governor rate window | `governor.rate_window` (default 120s) | Rolling window for the event-lane rate limit |
-| Message governor | 3s cooldown, 30 per 60s | The message lane's limits |
+| Message governor | fixed ([`delivery.md`](delivery.md#the-monitor-line)) | The message lane's limits |
 | Absolute refractory | `engagement.absolute_refractory` (default 60s) | Full suppression after burst — the `Curve::ActionPotential` hard gate |
 | Multiplier half-life | derived from `engagement.decay_per_minute` (default 0.1 → ~395s) | Exponential half-life of the relative-refractory multiplier's decay back toward 1.0 (ADR-123) |
 

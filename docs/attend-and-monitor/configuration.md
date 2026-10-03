@@ -109,7 +109,7 @@ sensors:
       - Bash(ways:*)
 ```
 
-The `governor` block governs the event lane. The message lane (`peers`, `keepwarm`) uses a fixed permissive governor, 3 seconds between batches and up to 30 a minute, with no keys (see [`delivery.md`](delivery.md)).
+The `governor` block governs the event lane. The message lane (`peers`, `keepwarm`) uses a fixed permissive governor with no keys (see [`delivery.md`](delivery.md#the-monitor-line)).
 
 ## Section reference
 
@@ -275,13 +275,16 @@ $ attend permissions audit
 
   Sensor          Requires       Status
   ──────────────────────────────────────
-  build-watcher   Bash(cargo:*)  MISSING
+  +build-watcher  Bash(cargo:*)  MISSING
   context         Read           granted
   disclosure      Bash(ways:*)   granted
   git             Bash(git:*)    granted
   keepwarm        Bash(ways:*)   granted
   peers           Read           granted
   processes       Bash(ps:*)     granted
+
+  1 missing permission(s). Add to settings.json:
+    "Bash(cargo:*)"
 ```
 
 Use this to confirm your config will actually work before launching attend — a sensor that requires a permission you haven't granted will silently emit nothing.

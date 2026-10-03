@@ -33,7 +33,7 @@ sequenceDiagram
     end
     rect rgba(45,125,154,0.12)
     T->>Bus: reply "agreed — I'll post the schema in 5"
-    Note over Aaron: watches it unfold; doesn't gate each turn
+    Note over Aaron: watches it unfold — doesn't gate each turn
     C->>Bus: reply "standing by for the schema"
     Aaron->>Bus: (says nothing — lets them run)
     end

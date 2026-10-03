@@ -104,13 +104,13 @@ pub const REGISTRY: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "join",
-        description: "Join a focus group",
+        description: "Join a channel",
         status: Status::Implemented,
         grammar: &[Token::Group { required: true }],
     },
     SlashCommand {
         name: "leave",
-        description: "Leave a focus group",
+        description: "Leave a channel",
         status: Status::Implemented,
         grammar: &[GROUP_OPT],
     },

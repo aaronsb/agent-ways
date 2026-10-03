@@ -69,20 +69,21 @@ sequenceDiagram
     end
     rect rgba(45,125,154,0.12)
     V->>Tray: workflow done — surface
-    Tray-->>V: turn boundary: one delivery<br/>"12 new messages: 3 to you, 9 on #open<br/>(newest 40s ago, over 6m)"
+    Tray-->>V: Stop-hook drain, one block:<br/>"[attend] 12 peer message(s) delivered<br/>at the turn boundary (ADR-172 drain)"<br/>10 listed, then "(+2 more — attend inbox for the rest)"
     Note over V: ONE turn, not 12 interrupts
     end
     rect rgba(45,142,94,0.12)
-    V->>P: synthesize + answer the 2 directed asks
+    V->>P: synthesize + answer the 3 directed asks
     end
 ```
 
 If each accrued message had been injected as its own turn, the workflow would
 have been shredded by interrupts — or the messages dropped to protect it.
 Instead nothing interrupts the turn, and what arrived is delivered together
-when it ends: the Stop-hook drain lists up to ten messages and counts the rest,
-and a single poll that finds more than eight sends one count line like the one
-above. The **durable tray plus the coalesced delivery** is what lets Vale stay
+when it ends: the Stop-hook drain lists up to ten messages and counts the rest.
+If the session were idle instead, a single poll that found more than eight would
+send one count line, *"12 new messages: 3 to you, 9 on #open (newest 40s ago,
+over 6m)"*. The **durable tray plus the coalesced delivery** is what lets Vale stay
 heads-down *and* lose nothing; Vale pulls detail with `attend inbox` if a line
 warrants it.
 

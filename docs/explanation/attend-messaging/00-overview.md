@@ -25,7 +25,7 @@ Attend carries two kinds of traffic, and they want opposite handling.
 flowchart TD
     X[Something happens] --> Q{Authored by a person or agent<br/>to communicate?}
     Q -->|"yes — @Name, #group, #open"| M[MESSAGE lane<br/>durable · dedup-only · wall-clock stamped]
-    Q -->|"no — git, process, peer-presence"| E[EVENT lane<br/>salience + refractory + governor]
+    Q -->|"no — git, process, peer-presence"| E[EVENT lane<br/>threshold + refractory + governor]
     M --> MT[lands in a recipient's tray / room ledger<br/>never aged out · kept while its project lives]
     E --> ET[coalesced · aged by wall-clock · may drop]
 
@@ -48,7 +48,7 @@ flowchart TD
   `@Name` / `#group` / `#open`. A colleague chose to say this. It must be
   **delivered, once, and survive a brief absence.**
 - **Environmental events** — git churned, a peer appeared, a process started.
-  The phone ringing. These are *noise* by design; the whole salience /
+  The phone ringing. These are *noise* by design; the whole threshold /
   refractory / governor stack exists to **suppress** most of them so a session
   is only woken for something that moved.
 

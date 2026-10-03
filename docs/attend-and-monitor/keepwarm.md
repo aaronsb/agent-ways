@@ -15,7 +15,7 @@ attend keepwarm off         # disarm
 attend keepwarm status      # the card below; also what bare `attend keepwarm` prints
 ```
 
-These verbs act on the Claude session that runs them, so run them from inside the session (the agent's Bash tool, or `!` in the prompt). Outside a session they print `no Claude session owns this process, nothing to warm` and exit 1. The sensor itself runs inside `attend run`, so attend must be running under Monitor for anything to wake.
+These verbs act on the Claude session that runs them, so run them from inside the session (the agent's Bash tool, or `!` in the prompt). Outside a session they print `keepwarm: no Claude session owns this process, nothing to warm` and exit 1. The sensor itself runs inside `attend run`, so attend must be running under Monitor for anything to wake.
 
 **Auto-arm.** When the sensor sees a paid cold write (below) on a context of at least 50k tokens, it arms three hours on its own if no window already covers them. A session that has paid one rewrite has shown it comes back, and the second rewrite is not paid that day.
 
@@ -80,7 +80,7 @@ session     1 cold write paid, $1.64
 | `state` | `warm` with the time left on the cache hour, `COLD` with the time since the last request, or no request yet |
 | `cold cost` | what rewriting the current context would cost, and what one warm turn costs |
 | `keepwarm` | `on` with the window left and the next wake; `stopped` with the reason; or `off` |
-| `break-even` | how many wakes cost the same as one rewrite, and how much idle time that covers |
+| `break-even` | how many wakes cost the same as one rewrite, and how much idle time that covers; left out for a model with no price |
 | `session` | the cold writes this session has paid and their total |
 
 `attend status` shows the `keepwarm` line on its own.

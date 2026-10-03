@@ -31,7 +31,7 @@ sequenceDiagram
     rect rgba(217,119,6,0.12)
     C->>Bus: send --to /api "what's the 401 body shape?"
     Bus-->>T: notify (directed → you, magnitude high)
-    Note over T: heads-down; the question waits in Tamsin's tray
+    Note over T: heads-down — the question waits in Tamsin's tray
     end
     rect rgba(45,142,94,0.12)
     T->>Bus: reply "{error, code} — code is a stable enum"

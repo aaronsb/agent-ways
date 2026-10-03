@@ -22,7 +22,7 @@ From top to bottom:
 - **The tab strip.** `1 merged`, then `2 #open`, then one tab per channel in name order. Each channel tab leads with the channel's glyph in its colour. The foreground channel's description follows the strip.
 - **The message feed.** Each message has a chip on the left: the sender's name (the same persona name the Monitor line and the drain use, such as `Elio`, or the username for a human), the basename of the sender's working directory, and a third line with the glyphs of the channels the sender is in and the time. The body wraps beside the chip.
 - **The compose box.** A `>` prompt, and in its lower right corner the destination flag: where Enter would send the line as typed.
-- **The helper row.** Known agents as `@Name` chips while the line is empty or addressed; channels while a `#` is being typed; slash commands and their arguments while a `/` is being typed.
+- **The helper row.** Known participants as `@Name` chips (agents, and humans such as `@aaron`) while the line is empty or addressed; channels while a `#` is being typed; slash commands and their arguments while a `/` is being typed.
 - **The bottom bar.** The mode, the mouse state, and the main keys. Command results and errors appear here for a few seconds.
 
 The merged tab shows every channel and the human's own tray in one stream. A channel tab shows only that channel. Messages are not threaded or faded: the feed is chronological, and a message stays until `/clear` or the end of the session.
@@ -70,7 +70,7 @@ A line that starts with `/` runs a command. The helper row completes the command
 | `/purge [#name]` | delete a channel's history on disk, keeping the last 90 seconds and any message a live session has not yet read |
 | `/clear` | clear the feed on screen |
 
-`#open` cannot be left, dissolved or kicked from. Its history can be purged.
+`#open` cannot be joined, left, dissolved, kicked from, invited to or described: every session is already in it. Its history can be purged.
 
 ![completing /channels: the helper row offers list, create and describe](../images/attend/attend-chat-slash.png)
 
@@ -91,7 +91,7 @@ A line that starts with `/` runs a command. The helper row completes the command
 
 **The mouse is off at start.** With capture off, the terminal owns the mouse: dragging selects text to copy, and middle-click pastes into the compose box. Alt-m gives the mouse to the screen. Then a click on a tab shows it, a click on a message selects it and scrolls it fully into view, a click in the compose box places the cursor, a click on a helper chip completes it, and the wheel scrolls the feed. Shift-drag still selects text in most terminals.
 
-**Quitting with a draft.** Esc or Ctrl-C quits at once when the compose box is empty. With a draft in it, a prompt names the draft and offers Back (Esc) or Quit and discard all (D, then Enter). Anything else keeps typing into the draft.
+**Quitting with a draft.** Esc or Ctrl-C quits at once when the compose box is empty. With a draft in it, a prompt names the draft and offers Back (Esc) or Quit and discard all (D). Esc or Enter goes back. D arms the discard; then Enter or Ctrl-C quits and Esc disarms. Characters and editing keys go on typing into the draft, and after an armed D the D is typed too. Other keys, such as Tab or PgUp, leave the prompt as it is.
 
 ![the quit prompt over a draft](../images/attend/attend-chat-guard.png)
 

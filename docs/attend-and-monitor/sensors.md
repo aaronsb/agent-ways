@@ -26,7 +26,7 @@ Attend ships six built-in sensors. Three are modules of the attend crate and alw
 | **disclosure** | tokens since attend last taught the messaging contract | 60s / 20s | 5.0 | event |
 | **keepwarm** | idle time against the prompt-cache hour | 60s / 60s | 3.0 | message |
 
-Every sensor polls faster (toward its minimum interval) while it sees change and slower (toward its base interval) when quiet. Event-lane sensors pass through the action-potential refractory and the strict governor ([`engagement.md`](engagement.md)). Message-lane sensors skip the refractory and use the permissive governor ([`delivery.md`](delivery.md#the-monitor-line)).
+Every sensor polls faster (toward its minimum interval) while it sees change and slower (toward its base interval) when quiet. Event-lane sensors pass through the action-potential refractory and the strict governor ([`engagement.md`](engagement.md)). Message-lane sensors skip the refractory and use the message lane's permissive governor ([`delivery.md`](delivery.md#the-monitor-line)).
 
 When a sensor discloses, its events print to stdout only if its accumulated magnitude has reached 3.0 (medium priority) or 5.0 (high). Below that they go to stderr, and if another sensor in the same batch did print, one `[attend] also: N quiet event(s) from …` line counts them.
 
@@ -36,14 +36,14 @@ The sensor that watches the session itself rather than the world (ADR-113). Each
 
 **Tier crossings.** Crossing into a tier emits once per session:
 
-| % used | Magnitude | Message |
+| % used | Magnitude | Gist of the message |
 |---|---|---|
-| 50% | 1.5 | halfway through the context window — keep going, or scope the next stages |
+| 50% | 1.5 | halfway; keep going if on track, scope the next stages if barely started |
 | 65% | 3.0 | agent-ways will capture todos (75%) and memory (80%) shortly |
-| 83% | 4.0 | compaction checkpoint fires at 85% — finish the current task and sync |
-| 90% | 5.0 | stop or compact right now — quality degrades past here |
+| 83% | 4.0 | the compaction checkpoint fires at 85%; finish the current task and sync |
+| 90% | 5.0 | stop or compact now; quality degrades past here, and auto-compact is off |
 
-When the burn rate is known, the line adds it and, below 90%, the minutes left to 90%. The 90% line also names the way to read: ``Use `ways show attend context-pressure --session $CLAUDE_SESSION_ID` for reflection guidance``.
+The line reads `context at N% — <message>`. When the burn rate is known it adds `(burning V%/min`, and below 90% also `, ~M min to critical` when that estimate is under an hour. The 90% line also names the way to read: ``Use `ways show attend context-pressure --session $CLAUDE_SESSION_ID` for reflection guidance``.
 
 **Velocity spikes.** Burning more than 2% a minute with more than 5 points of change since the previous reading emits `context velocity spike: X% in last N min (V%/min)` at 2.0.
 
@@ -77,7 +77,7 @@ Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads 
 | same-project peer changed status (working, waiting) | 1.5 |
 | same-project peer crossed 80% context | 2.0 |
 
-**Messages.** Each poll scans the project tray, `_broadcast/` and every joined channel, and emits every unseen message. Base magnitudes are 7.0 for a message sent to the project, 5.0 for a channel and 4.0 for `#open`. The base is multiplied by how often the same peer has written within `engagement.peer_activity_window` (default 900 s): ×1.0 for the first message, ×1.75 for the second, ×2.5 from the third. The boost raises priority; it never suppresses a message. More than 8 messages in one poll become one count line. [`delivery.md`](delivery.md) covers the line format, the cold start and the Stop-hook drain.
+**Messages.** Each poll scans the project tray, `_broadcast/` and every joined channel, and emits every unseen message. Base magnitudes are 7.0 for a message sent to the project, 5.0 for a channel and 4.0 for `#open`, raised by the per-peer boost ([`engagement.md`](engagement.md#per-peer-boost)). More than 8 messages in one poll become one count line. [`delivery.md`](delivery.md) covers the line format, the cold start and the Stop-hook drain.
 
 The whole sensor rides the message lane, so session events skip the refractory too. That is a known limitation of ADR-136, which chose lanes per sensor rather than per observation.
 
@@ -106,12 +106,12 @@ go, npm, yarn, pnpm, tsc,
 mvn, gradle, pip, pip3
 ```
 
-A watched tool that is not also on the tracked list produces no events. `sensors.processes.watch` replaces the default; it is not merged, and an empty list turns enrichment off:
+`sensors.processes.watch` replaces the default; it is not merged, and an empty list turns enrichment off. It cannot add a tool to the tracked list: a watched tool that is not tracked (`yarn`, `tsc`, `clang` among the defaults) produces no events at all unless a focus keyword matches it. To enrich only Rust and C builds:
 
 ```yaml
 sensors:
   processes:
-    watch: [cargo, rustc, mix, zig]
+    watch: [cargo, rustc, make, cmake, ninja, gcc, g++]
 ```
 
 ### Exit codes through a marker file

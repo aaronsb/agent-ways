@@ -165,3 +165,7 @@ Concretely:
 - **Hard rename without aliases.** Rejected: CLI-is-contract
   (ADR-124) — scripts, hooks, and muscle memory built on `focus`
   must not break on a vocabulary decision.
+
+## Amendment (2026-10-03): the `focus` alias is removed
+
+Decision 3 kept `focus` as a deprecated alias. The alias window has closed: commit d2def1d2 deleted the `attend focus` subtree and the `--focus` and `--broadcast` send flags. `attend focus …` now fails with `unrecognized subcommand`, and `tools/attend/tests/legacy_removed.rs` asserts the rejection. The verbs are `attend join`, `attend leave`, `attend channels`, `attend dissolve` and `attend send --channel`. The rejected alternative "Hard rename without aliases" describes where the surface ended up after the window.

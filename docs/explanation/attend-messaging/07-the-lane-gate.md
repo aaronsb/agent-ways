@@ -47,7 +47,7 @@ stateDiagram-v2
   of work routed to a recipient, and a dropped one means the work silently
   never happens. It must be **delivered, once, and survive a brief absence.**
 - **No → event lane.** The world moved. Useful, but *noise by design* — the
-  whole salience / refractory / governor stack exists to **suppress** most of
+  whole threshold / refractory / governor stack exists to **suppress** most of
   it so a session is only woken for something that actually matters.
 
 In the code the lane is chosen per sensor, not per observation: everything
@@ -77,9 +77,9 @@ stateDiagram-v2
     }
 
     state "EVENT LANE — best-effort" as EventLane {
-        [*] --> Salience : loud enough, fresh enough?
-        Salience --> Decayed : stale / sub-threshold
-        Salience --> Refractory : did this sensor just fire a burst?
+        [*] --> Threshold : accumulated magnitude over the sensor's threshold?
+        Threshold --> Decayed : sub-threshold, decays away
+        Threshold --> Refractory : did this sensor just fire a burst?
         Refractory --> Held : suppressed during the refractory window
         Refractory --> Governor : clear
         Governor --> Held : rate window full — hold
@@ -87,7 +87,7 @@ stateDiagram-v2
         Held --> Decayed : ages out while held
         Disclosed --> [*]
         Decayed --> [*]
-        note right of Salience
+        note right of Threshold
             Designed to drop. A stale observation
             is simply less worth a wake-up than a
             fresh one.
@@ -103,7 +103,7 @@ stateDiagram-v2
     class Deduped process
     class Digested process
     class Surfaced store
-    class Salience gate
+    class Threshold gate
     class Refractory process
     class Governor process
     class Disclosed store
