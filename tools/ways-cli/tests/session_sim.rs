@@ -1302,6 +1302,32 @@ fn scenario_subagent_switch_keeps_ways_from_subagents_only() {
     assert!(hook_command(&home, &state, &project, &s2, None).contains("# Marker w"), "the main agent keeps its ways");
     hook_task(&home, &state, &project, &s2);
     assert_eq!(stashes(&s2), 0, "a dispatch stashes nothing");
+
+    // Compaction clears the session's state; the switch survives it.
+    let compact = ways_cmd(&home, &home.join(".cache"), &state)
+        .args(["session", "reset", "--session", &s2, "--confirm"])
+        .output()
+        .unwrap();
+    assert!(compact.status.success());
+    assert_eq!(hook_command(&home, &state, &project, &s2, Some("a2b")), "", "still off after the state is cleared");
+
+    // Switching needs a named session: --session, or the one this process runs in.
+    let guess = ways_cmd(&home, &home.join(".cache"), &state)
+        .args(["session", "subagents", "off"])
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(!guess.status.success(), "no guessed session is switched");
+    let own = ways_cmd(&home, &home.join(".cache"), &state)
+        .args(["session", "subagents", "on", "--json"])
+        .env("CLAUDE_CODE_SESSION_ID", &s2)
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&own.stdout).unwrap();
+    assert_eq!((report["session"].as_str(), report["subagents"].as_str()), (Some(s2.as_str()), Some("on")));
+    assert!(hook_command(&home, &state, &project, &s2, Some("a2c")).contains("# Marker w"));
     assert!(events().lines().any(|l| l.contains("injection_suppressed") && l.contains("\"lane\":\"task\"")));
 
     // The project setting does the same for every session in the project.
@@ -1309,7 +1335,7 @@ fn scenario_subagent_switch_keeps_ways_from_subagents_only() {
     let s3 = format!("sim-sub3-{}", std::process::id());
     clean_markers(&s3);
     assert_eq!(hook_command(&home, &state, &project, &s3, Some("a3")), "");
-    assert!(events().lines().any(|l| l.contains("injection_suppressed") && l.contains("\"switch\":\"project\"")));
+    assert!(events().lines().any(|l| l.contains("injection_suppressed") && l.contains("\"switch\":\"config\"")));
     assert!(hook_command(&home, &state, &project, &s3, None).contains("# Marker w"));
 
     let _ = std::fs::remove_dir_all(&base);

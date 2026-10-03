@@ -44,13 +44,20 @@ pub fn run(event: HookEvent) -> Result<()> {
         event,
         HookEvent::Stop | HookEvent::SessionStart | HookEvent::TasksActive
     );
-    if injects && !scan::enabled_for(project) {
+    let config = crate::config::Config::load(&project_dir);
+    if injects && !config.enabled {
         return Ok(());
     }
 
     let request = input.request(event);
+    // A Task naming a defined agent injects nothing, whatever the switches say.
+    if let Request::Task { subagent_type: Some(t), .. } = &request {
+        if subagent::is_defined_agent(t, std::path::Path::new(&project_dir), &crate::paths::projection_root()) {
+            return Ok(());
+        }
+    }
     if let Some(lane) = subagent_lane(&request, common.agent_id.is_some()) {
-        if let Some(switch) = subagent_switch(project, request_session(&request)) {
+        if let Some(switch) = subagent_switch(config.subagents, request_session(&request)) {
             suppress(&request, lane, switch, common.agent_id.as_deref(), &project_dir);
             return Ok(());
         }
@@ -69,15 +76,7 @@ pub fn run(event: HookEvent) -> Result<()> {
             scan::command(&command, description.as_deref(), &session, project, transcript)
         }
         Request::File { session, path } => scan::file(&path, &session, project, transcript),
-        Request::Task { session, query, team, subagent_type } => {
-            let defined = subagent_type.as_deref().is_some_and(|t| {
-                subagent::is_defined_agent(t, std::path::Path::new(&project_dir), &crate::paths::projection_root())
-            });
-            if defined {
-                return Ok(());
-            }
-            scan::task(&query, &session, project, team.as_deref())
-        }
+        Request::Task { session, query, team, .. } => scan::task(&query, &session, project, team.as_deref()),
         Request::PostTool { session, hook_event } => {
             // As in the scan lanes: fired ways read the model and the refire
             // window from the invoking agent's transcript.
@@ -162,19 +161,18 @@ fn request_session(request: &Request) -> Option<&str> {
 
 /// Which switch, if any, keeps ways out of subagents here: the session's own
 /// (`ways session subagents off`), then the project's or the user's
-/// `subagents: false`.
-fn subagent_switch(project: Option<&str>, session: Option<&str>) -> Option<&'static str> {
+/// `subagents: false` (`configured`).
+fn subagent_switch(configured: bool, session: Option<&str>) -> Option<&'static str> {
     if session.is_some_and(session::subagents_off) {
         return Some("session");
     }
-    let dir = project.map_or_else(crate::util::project_dir, str::to_string);
-    (!crate::config::Config::load(&dir).subagents).then_some("project")
+    (!configured).then_some("config")
 }
 
-/// Drop what would have reached the subagent and log the suppression, so the
-/// reports read a switched-off workflow as switched off, not as unmatched.
-/// A Task dispatch logs once per dispatch; hooks from inside a subagent log
-/// once per agent.
+/// Drop what would have reached the subagent and log the suppression: the
+/// dispatch ran with injection switched off, whether or not a way would have
+/// matched. A Task dispatch logs once per dispatch; hooks from inside a
+/// subagent log once per agent.
 fn suppress(request: &Request, lane: &str, switch: &str, agent: Option<&str>, project_dir: &str) {
     let Some(session_id) = request_session(request) else { return };
     match request {

@@ -25,17 +25,17 @@ ways session ways --json               # machine-readable output
 
 ### `ways session subagents`
 
-**When:** Before launching a workflow or swarm whose agents should run without ways, or to check whether a session's subagents get them.
+**When:** Before launching a workflow or swarm whose agents should run without ways, or to check whether a session's dispatched agents get them.
 
-**Run from:** The project — auto-detects the current session; `--session <id>` names one.
+**Run from:** The project. Switching names a session: `--session <id>`, or the session the command runs in (`CLAUDE_CODE_SESSION_ID`). A report without either auto-detects the current session.
 
-**Tells you:** Whether this session's subagents and teammates get ways, and which switch decides it: the session's own, the `subagents:` setting in the project or user `ways.yaml`, or the default (on). The main agent's ways are unaffected.
+**Tells you:** Whether this session's subagents get ways, and which switch decides it: the session's own, the `subagents:` setting in the project or user `ways.yaml`, or the default (on). The main agent's ways are unaffected. The session switch holds through compaction and `ways session reset`.
 
 ```
 ways session subagents                 # report
 ways session subagents off             # switch off for this session
 ways session subagents on              # switch back on
-ways session subagents --json          # {session, subagents, switch, session_switch, project_setting, project}
+ways session subagents --json          # {session, subagents, switch, session_switch, configured, project}
 ```
 
 ---

@@ -405,10 +405,11 @@ pub fn detect_team(session_id: &str) -> Option<String> {
 // ── Subagent switch (#768) ──────────────────────────────────────
 
 /// The marker that switches ways off for one session's subagents and
-/// teammates. Subagent hooks report the parent's session id, so the parent's
-/// directory is where they find it.
+/// teammates, keyed by the parent's session id, which subagent hooks report.
+/// It lives under the durable state root, outside the session directory that
+/// compaction and `ways session reset` clear, so a long workflow keeps it.
 fn subagents_off_marker(session_id: &str) -> PathBuf {
-    session_dir(session_id).join("subagents-off")
+    crate::paths::state_root().join("subagent-switch").join(session_id)
 }
 
 /// Whether this session switched ways off for its subagents and teammates.
@@ -417,7 +418,7 @@ pub fn subagents_off(session_id: &str) -> bool {
 }
 
 /// Switch ways off (`false`) or back on (`true`) for one session's subagents
-/// and teammates. Holds until switched back or the session's state is cleared.
+/// and teammates. Holds until switched back.
 pub fn set_subagents(session_id: &str, on: bool) -> std::io::Result<()> {
     let marker = subagents_off_marker(session_id);
     if on {
