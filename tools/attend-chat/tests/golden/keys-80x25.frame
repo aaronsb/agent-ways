@@ -1,8 +1,8 @@
 agent-tui frame 80x25
 | 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                             |
 |╭──────────────────────────────────────────────────────────────────────────────╮|
-|│ │ beta             │ production at 15:00                                     │|
 |│ ┌keys · ↑↓ scroll · any other key closes───────────────────────────────────┐ │|
+|│ │F1               keys                                                     │ │|
 |│ │Enter            send                                                     │ │|
 |│ │Tab              complete                                                 │ │|
 |│ │PgUp PgDn        scroll                                                   │ │|
@@ -10,20 +10,20 @@ agent-tui frame 80x25
 |│ │← → Home End     move the cursor                                          │ │|
 |│ │Bksp Del         edit                                                     │ │|
 |│ │M-1-9            tabs                                                     │ │|
-|│ │F1               keys                                                     │ │|
 |│ │M-m              mouse on or off (off lets the terminal select text)      │ │|
+|│ │Shift-drag       selects text while the mouse is on, in most terminals    │ │|
+|│ │middle-click     pastes only while the mouse is off                       │ │|
 |│ │Esc ^C           quit; asks first over unsaved work                       │ │|
 |│ │click            a tab shows it; the wheel scrolls                        │ │|
 |│ │                                                                          │ │|
 |│ │help: chat                                                                │ │|
-|│ │Enter sends to the shown channel; merged sends to #open. @name or #channel│ │|
-|╰─│at the start addresses the message; Tab completes them, and on an empty   │─╯|
-|╭─│line shows the next tab. /help lists the slash commands. `attend inbox`   │─╮|
+|╰─│Enter sends to the shown channel; merged sends to #open. @name or #channel│─╯|
+|╭─│at the start addresses the message; Tab completes them, and on an empty   │─╮|
+|│ │line shows the next tab. /help lists the slash commands. `attend inbox`   │ │|
 |│ │and `attend send` are the same bus outside the screen.                    │ │|
-|│ └──────────────────────────────────────────────────────────────────────────┘ │|
-|╰──────────────────────────────────────────────────────────────────────────────╯|
+|╰─└──────────────────────────────────────────────────────────────────────────┘─╯|
 | @Laszlo @aaron @Wells                                                          |
-| chat  mouse on (M-m) │ Enter send · Tab complete · PgUp PgDn scroll            |
+| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
 styles
   0   0-9   Black Cyan BOLD
   0  12-13  Blue - BOLD
@@ -34,14 +34,14 @@ styles
   0  42-51  White Blue -
   1   0-79  - - DIM
   2   0-0   - - DIM
-  2   2-2   - - DIM
-  2   4-7   - - DIM
-  2  21-21  - - DIM
+  2   2-2   Blue - -
+  2   3-41  Blue - BOLD
+  2  42-77  Blue - -
   2  79-79  - - DIM
   3   0-0   - - DIM
   3   2-2   Blue - -
-  3   3-41  Blue - BOLD
-  3  42-77  Blue - -
+  3   3-19  Cyan - -
+  3  77-77  Blue - -
   3  79-79  - - DIM
   4   0-0   - - DIM
   4   2-2   Blue - -
@@ -100,15 +100,16 @@ styles
  14  79-79  - - DIM
  15   0-0   - - DIM
  15   2-2   Blue - -
+ 15   3-19  Cyan - -
  15  77-77  Blue - -
  15  79-79  - - DIM
  16   0-0   - - DIM
  16   2-2   Blue - -
- 16   3-12  - - BOLD
  16  77-77  Blue - -
  16  79-79  - - DIM
  17   0-0   - - DIM
  17   2-2   Blue - -
+ 17   3-12  - - BOLD
  17  77-77  Blue - -
  17  79-79  - - DIM
  18   0-1   - - DIM
@@ -124,18 +125,23 @@ styles
  20  77-77  Blue - -
  20  79-79  Cyan - -
  21   0-0   Cyan - -
- 21   2-77  Blue - -
+ 21   2-2   Blue - -
+ 21  77-77  Blue - -
  21  79-79  Cyan - -
- 22   0-79  Cyan - -
+ 22   0-1   Cyan - -
+ 22   2-77  Blue - -
+ 22  78-79  Cyan - -
  23   1-7   Cyan - BOLD
  23   9-14  LightYellow - -
  23  16-21  LightCyan - -
  24   0-5   Black Cyan BOLD
- 24   7-20  - - DIM|ITALIC
- 24  21-23  - - DIM
- 24  24-29  Cyan - -
- 24  30-36  - - DIM|ITALIC
- 24  37-40  Cyan - -
- 24  41-51  - - DIM|ITALIC
- 24  52-61  Cyan - -
- 24  62-67  - - DIM|ITALIC
+ 24   7-21  - - DIM|ITALIC
+ 24  22-24  - - DIM
+ 24  25-27  Cyan - -
+ 24  28-34  - - DIM|ITALIC
+ 24  35-40  Cyan - -
+ 24  41-47  - - DIM|ITALIC
+ 24  48-51  Cyan - -
+ 24  52-62  - - DIM|ITALIC
+ 24  63-72  Cyan - -
+ 24  73-78  - - DIM|ITALIC

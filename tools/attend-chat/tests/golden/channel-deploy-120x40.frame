@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                                                                                             #deploy  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @aaron @Wells                                                                                                  |
-| chat  mouse on (M-m) │ Enter send · Tab complete · PgUp PgDn scroll · M-1-9 tabs · F1 keys                             |
+| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · M-1-9 tabs                            |
 styles
   0   0-9   White Blue -
   0  12-13  Blue - BOLD
@@ -137,15 +137,15 @@ styles
  38   9-14  LightYellow - -
  38  16-21  LightCyan - -
  39   0-5   Black Cyan BOLD
- 39   7-20  - - DIM|ITALIC
- 39  21-23  - - DIM
- 39  24-29  Cyan - -
- 39  30-36  - - DIM|ITALIC
- 39  37-40  Cyan - -
- 39  41-51  - - DIM|ITALIC
- 39  52-61  Cyan - -
- 39  62-70  - - DIM|ITALIC
- 39  71-76  Cyan - -
- 39  77-83  - - DIM|ITALIC
- 39  84-86  Cyan - -
- 39  87-90  - - DIM|ITALIC
+ 39   7-21  - - DIM|ITALIC
+ 39  22-24  - - DIM
+ 39  25-27  Cyan - -
+ 39  28-34  - - DIM|ITALIC
+ 39  35-40  Cyan - -
+ 39  41-47  - - DIM|ITALIC
+ 39  48-51  Cyan - -
+ 39  52-62  - - DIM|ITALIC
+ 39  63-72  Cyan - -
+ 39  73-81  - - DIM|ITALIC
+ 39  82-87  Cyan - -
+ 39  88-91  - - DIM|ITALIC

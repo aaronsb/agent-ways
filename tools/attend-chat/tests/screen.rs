@@ -510,21 +510,55 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
 }
 
-/// Alt+m is the shell's mouse toggle beside a text entry, where m types;
-/// the bottom bar says which way it is.
+/// The chat starts with the mouse off, so the terminal selects text and
+/// middle-click pastes. Alt+m is the shell's toggle beside a text entry,
+/// where m types; the bottom bar says which way it is, and how to select
+/// while it is on.
 #[test]
-fn golden_alt_m_turns_the_mouse_off_and_m_types() {
+fn golden_alt_m_turns_the_mouse_on_and_m_types() {
     let mut g = goldens();
     let mut c = chat();
-    assert!(c.app().mouse_on(), "the shell reports the mouse by default");
+    assert!(!c.app().mouse_on(), "a chat starts with the terminal's own mouse");
     drawn(&mut c, &[alt('m')], 80, 25);
-    assert!(!c.app().mouse_on());
+    assert!(c.app().mouse_on());
     assert!(c.input().is_empty(), "Alt+m types nothing");
-    g.check("mouse-off-80x25", &testkit::render_screen(&mut c, 80, 25));
+    g.check("mouse-on-80x25", &testkit::render_screen(&mut c, 80, 25));
     drawn(&mut c, &[key(KeyCode::Char('m'))], 80, 25);
     assert_eq!(c.input().text(), "m", "a plain m is text");
-    assert!(!c.app().mouse_on());
+    assert!(c.app().mouse_on());
     g.finish();
+}
+
+/// With the mouse on, a middle click pastes nothing; the bar says how to
+/// paste.
+#[test]
+fn a_middle_click_says_how_to_paste() {
+    let mut c = chat();
+    drawn(&mut c, &[alt('m')], 80, 25);
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Middle), 10, 20));
+    assert!(c.input().is_empty());
+    let bar = testkit::rows(&testkit::render_screen(&mut c, 120, 25)).pop().expect("a bar");
+    assert!(bar.contains("middle-click pastes with the mouse off"), "{bar}");
+}
+
+/// Typing on past an accidental Esc: the guard opens over the draft, and
+/// the keys that follow go into the draft instead of answering it. "Did
+/// you" would otherwise arm the quit on D and confirm it on y.
+#[test]
+fn typing_on_after_esc_keeps_the_draft() {
+    let mut c = chat();
+    drawn(&mut c, &chars("half a thought"), 80, 25);
+    assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25));
+    assert!(c.app().guarding());
+    assert!(drawn(&mut c, &chars(" Did you see the deploy?"), 80, 25), "the chat stays open");
+    assert!(!c.app().guarding());
+    assert_eq!(c.input().text(), "half a thought Did you see the deploy?");
+    // Straight into "Did", with no space first: D arms the quit, and the
+    // next character disarms it and is typed. Only the D is not.
+    assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25));
+    assert!(drawn(&mut c, &chars("Did you"), 80, 25), "the chat stays open");
+    assert!(!c.app().guarding());
+    assert_eq!(c.input().text(), "half a thought Did you see the deploy?id you");
 }
 
 #[test]

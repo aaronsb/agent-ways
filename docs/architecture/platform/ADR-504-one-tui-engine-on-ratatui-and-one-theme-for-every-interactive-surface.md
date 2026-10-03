@@ -289,4 +289,21 @@ The settings shell (`App`) holds a tree of settings, a queue of edits and comman
 
 ## Note (2026-10-02): a screen that is not a tree is a pane inside `App`
 
-This revises the note above for attend-chat (#749). The shell's conventions are the tab bar, the bottom bar with a footer read from declarations, the mouse with its capture toggle, the exit guard, the key help and the response modal. None of them needs the settings tree, so `App` hosts a screen that has none: `App::with_pane` takes a `Pane`, which lists its tabs, draws the area between the bars, handles the keys the shell leaves it, and declares its keys as `Binding`s that the footer and the key help both read. The tree, the queue and the apply stay as they were, and a pane app has no theme tab. A pane that owns text, such as a compose box, types every plain key, so the shell's keys take their Alt form beside it: Alt+1-9 for a tab, Alt+m for the mouse, F1 for the keys, and Esc and Ctrl-C quit, asking first over unsaved work. attend-chat is the first pane. `ways session` stays on `Screen` until it is moved; as a pane it would get the mouse (#739) from the shell.
+This revises the note above for attend-chat (#749). The operator accepted the reversal on 2026-10-03.
+
+The shell's conventions are the tab bar, the bottom bar with a footer read from declarations, the mouse with its capture toggle, the exit guard, the key help, the response modal and the picker. None of them needs the settings tree, so `App` hosts a screen that has none. `App::with_pane` takes a `Pane`, which does the following:
+
+- lists its tabs;
+- draws the area between the bars;
+- handles the keys the shell leaves it;
+- declares its keys as `Binding`s, which the footer and the key help both read, with the help key first;
+- opens the response modal or a picker through `Pane::take_open`, the picker's choice coming back through `Pane::picked`;
+- chooses whether the mouse starts captured.
+
+The tree, the queue and the apply stay as they were, and a pane app has no theme tab. The pane's tick, the shell's tick during an apply or a reading, and the file watch each run on their own schedule.
+
+A pane that owns text, such as a compose box, types every plain key, so the shell's keys take their Alt form beside it: Alt+1-9 for a tab and Alt+m for the mouse. F1 opens the keys. Esc and Ctrl-C quit, asking first over unsaved work. The exit guard there answers only its own keys (`D` then `y` quits, Esc and Enter go back), and any other character closes it and is typed, so typing on past an accidental Esc loses nothing.
+
+A chat starts with the mouse off, so the terminal selects text and middle-click pastes. The shell captures clicks, the wheel and drags, but not bare moves.
+
+End state: screens that are not a tree move onto panes as they are touched. attend-chat is the first; `ways session` is next (#739), which gives it the mouse from the shell. Until the tree itself is a pane, `App` has two paths, one for the tree and one for a pane (#805). Bracketed paste for a pane's text entry is #806.

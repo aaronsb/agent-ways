@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @aaron @Wells                                                          |
-| chat  available: /help /whois /peers /join /leave /dissolve /channels /invite /|
+| available: /help /whois /peers /join /leave /dissolve /channels /invite /kick …|
 styles
   0   0-9   Black Cyan BOLD
   0  12-13  Blue - BOLD
@@ -109,4 +109,3 @@ styles
  23   1-7   Cyan - BOLD
  23   9-14  LightYellow - -
  23  16-21  LightCyan - -
- 24   0-5   Black Cyan BOLD

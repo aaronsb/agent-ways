@@ -18,9 +18,11 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
   Left / Right / Home / End move cursor
   Backspace / Delete        edit
   PgUp / PgDn               scroll the messages
-  Alt+m                     mouse on or off (off lets the terminal select text)
+  Alt+m                     mouse on or off; off at the start, so the terminal
+                            selects text and middle-click pastes
   F1                        the keys
-  mouse                     click a tab to show it; the wheel scrolls the messages
+  mouse (on)                click a tab to show it; the wheel scrolls the messages;
+                            Shift-drag selects text in most terminals
 
   The colours follow the agent-ways theme (`ways settings theme`).
 

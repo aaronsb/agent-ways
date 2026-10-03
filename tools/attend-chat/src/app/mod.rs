@@ -481,6 +481,13 @@ impl Pane for ChatPane {
         true
     }
 
+    /// Off at the start: what people copy from a chat (a message, a path,
+    /// a command's output) is the terminal's selection, and middle-click
+    /// pastes into the compose box. Alt+m gives the shell the mouse.
+    fn mouse_default(&self) -> bool {
+        false
+    }
+
     fn unsaved(&self) -> Option<String> {
         (!self.input.is_empty()).then(|| "a draft in the compose box".to_string())
     }
@@ -639,6 +646,7 @@ impl Screen for Chat {
     }
 
     fn tick(&mut self) {
+        self.app.tick_pane();
         self.app.tick();
     }
 }
