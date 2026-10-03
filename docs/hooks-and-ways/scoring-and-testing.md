@@ -117,7 +117,7 @@ When a target prompt ranks the way low, or a neighbour sits within a few hundred
 
 ### Warning signs
 
-- **Narrow miss**: A target prompt lands in the near-miss band — `g(s)` within `near_miss_margin` (0.05) below `τ_s`. It may fail on slightly different phrasing.
+- **Narrow miss**: A target prompt lands in the near-miss band — `g(s)` within `near_miss_margin` below `τ_s`. It may fail on slightly different phrasing.
 - **Overlap cluster**: Two ways both match the same prompt within ~0.05 cosine of each other. They're competing for the same semantic space.
 - **False dominance**: Another way scores higher than the target for a prompt the target should own.
 - **Vocabulary bleed**: Adding terms to fix one gap creates unexpected matches elsewhere.
@@ -181,12 +181,12 @@ See the [ways-tests skill](/skills/ways-tests/SKILL.md) for the testing skill an
 
 The worked example tunes a way against prompts written by hand. Once a way ships, the event log is the evidence ([ADR-134](../architecture/ways/ADR-134-empirical-auto-tuning-from-fire-and-near-miss-telemetry.md)). Four events carry the signals; [the event log](../reference/events.md) lists their fields.
 
-- **`way_nearmiss`**: a semantic probability landed within `near_miss_margin` (default 0.05) under the fire bar and nothing fired. These are the false silences a precision-first discipline cannot otherwise see. A way that keeps landing just under the bar on prompts whose sessions then do its kind of work is a candidate to widen.
+- **`way_nearmiss`**: a semantic probability landed within `near_miss_margin` under the fire bar and nothing fired. These are the false silences a precision-first discipline cannot otherwise see. A way that keeps landing just under the bar on prompts whose sessions then do its kind of work is a candidate to widen.
 - **`fire_score`** on `way_fired` and `way_redisclosed`: the calibrated probability that fired a semantic match, with the `surface` it matched. Keyword, command and file fires carry none. `ways tune precision` reads these. The calibration itself is fit at corpus build from the committed `calibration_probes.jsonl`, not from this stream.
 - **`way_keyword_gated`**: a `pattern:` hit vetoed by the keyword floor, with the `matched_span`. It shows which alternation of a pattern keeps matching the wrong prompts.
 - **`way_judged`** with `verdict: block` or `would_block`: the relevance gate judged a match irrelevant. A way the judge blocks often is matching prompts it should not; narrow its vocabulary rather than relying on the gate.
 
-`ways tune precision` reports, per way, how often its fires landed in sessions whose other activity never touched the way's domain. It separates a **mis-targeted** way (narrow it, or change its trigger channel) from a **cross-cutting** one (scope it by trigger; never narrow it automatically). Its output is a diagnostic flag, not a verdict. [stats.md](stats.md) covers it with `ways tune stats`.
+`ways tune precision` turns these into a per-way relevance flag; [stats.md](stats.md#auditing-the-telemetry) explains how to read it.
 
 ### Plotting the raw score distributions
 

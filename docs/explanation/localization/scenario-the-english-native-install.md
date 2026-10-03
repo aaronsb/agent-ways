@@ -33,7 +33,7 @@ sequenceDiagram
     end
     rect rgba(45,142,94,0.12)
     Op->>CC: start a session
-    Note over W: English matching; no localization check runs
+    Note over W: English matching, no localization check runs
     end
 ```
 

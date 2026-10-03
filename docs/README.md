@@ -12,7 +12,7 @@ Map of the documentation tree. For the project overview, see the [main README](.
 | [hooks-and-ways.md](hooks-and-ways.md) | Reference: hook lifecycle, state management, session gating |
 | [architecture.md](architecture.md) | System architecture diagrams (Mermaid) for the ways mechanics |
 | [architecture/](architecture/) | Agent Decision Records (managed by `docs/scripts/adr`): decisions, specs, and evidence records (surveys, audits, explorations; the former design notes, ADR-309) |
-| [explanation/](explanation/) | Diátaxis explanation pages — conceptual walkthroughs grounded in real scenarios (install topologies, localization, attend messaging, and [how ways works](explanation/how-ways-works/how-ways-works-the-model.md) — the observable companion to cognitive-loop.md) |
+| [explanation/](explanation/) | Diátaxis explanation pages — conceptual walkthroughs grounded in real scenarios (localization, attend messaging, and [how ways works](explanation/how-ways-works/how-ways-works-the-model.md) — the observable companion to cognitive-loop.md) |
 
 ## Guides vs Reference
 

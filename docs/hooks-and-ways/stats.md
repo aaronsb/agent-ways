@@ -56,7 +56,7 @@ By model:
   claude-opus-5-5  3952           4380
   (unstamped)       474              0
   unknown           457              1
-  (unstamped): rows written before the model field existed.
+  (unstamped): rows with no model: written before the field existed, or ways delivered at subagent dispatch.
 
 Ways per hook invocation:
   Channel    Invocations    1   2   3  4+ Max
@@ -89,7 +89,7 @@ The full report also has "Top ways by model", the top ten ways with one column p
 
 **Check fires** counts checks shown, by parent way.
 
-`--json` adds `by_scope`, `by_way_model`, `by_check`, `check_avg_distance`, `check_anchored` and `redisclose_avg_token_distance`, which the text report leaves out. `ways projects` lists sessions per project.
+`--json` adds `by_scope`, `by_way_model`, `by_check`, `check_avg_distance` and `check_anchored`, which the text report leaves out. `ways projects` lists sessions per project.
 
 ### What the stats do not tell you
 
@@ -113,7 +113,7 @@ The near-miss band is set by `near_miss_margin` (default 0.05) in the ways confi
 
 | File | Purpose |
 |------|---------|
-| `$XDG_STATE_HOME/agent-ways/events.jsonl` | Event log, cut to its newest 24 MiB when it passes 32 MiB |
+| `$XDG_STATE_HOME/agent-ways/events.jsonl` | Event log; [the event log](../reference/events.md) gives its fields and size cap |
 | `/tmp/.claude-config-update-state-{uid}` | Update check cache |
 | `{sessions root}/{session}/ways/{way id}/.marker.{agent}` | Fire markers, per session and agent |
 | `{sessions root}/{session}/teammate` | Teammate scope marker, holding the team name |

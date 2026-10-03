@@ -14,7 +14,7 @@ The `ways` binary appends one JSON object per line to `$XDG_STATE_HOME/agent-way
 
 Every value is a string, numbers included. Every line has `ts` (UTC, ISO 8601) and `event`. A field is left out when it has no value; an empty string means the value was computed and was empty.
 
-When the file passes 32 MiB, the next write cuts it to its most recent 24 MiB at a line boundary. `judge_call` lines from the dropped part are kept, so judge spend history survives the cut.
+A write that finds the file past 32 MiB compacts it to its most recent 24 MiB, cut at a line boundary. `judge_call` lines from the dropped part are carried forward, so judge spend history survives. When the carried lines leave too little to free, the compaction is skipped until the file has grown further, so the file can sit above 32 MiB for a while.
 
 ## Common fields
 
@@ -69,7 +69,7 @@ A way or check matched and was not shown.
 
 ### `way_nearmiss`
 
-A semantic score landed within `near_miss_margin` (default 0.05) under the fire threshold. These are the likely false silences.
+A semantic score landed within `near_miss_margin` under the fire threshold (see [stats.md](../hooks-and-ways/stats.md#auditing-the-telemetry) for the setting). These are the likely false silences.
 
 | Field | Meaning |
 |-------|---------|
@@ -153,7 +153,7 @@ The gate could not judge, so nothing was blocked. The gate fails open.
 
 | Field | Meaning |
 |-------|---------|
-| `reason` | Why: a timeout, a transport or provider error, an agent error, or `config: …` when the gate settings do not parse (that line has no other fields) |
+| `reason` | Why: a timeout, a transport or provider error, an agent error, or `config: …` when the gate settings do not parse. A `config:` line carries no latency or candidate count. |
 | `gate_ms`, `candidates` | Gate latency and ways that went unjudged |
 | `hook`, `scope`, `project`, `session` | Common fields |
 
@@ -173,7 +173,7 @@ More ways matched than the profile's `max_candidates` (default 8). The rest went
 |-----------|---------|
 | `keyword` | A `pattern:` matched the prompt |
 | `semantic:embedding:en`, `semantic:embedding:multi` | Prompt matched by the single-vector semantic matcher, English or multilingual model |
-| `semantic:late-interaction:en`, `semantic:late-interaction:multi` | Prompt matched by the late-interaction matcher (ADR-160) |
+| `semantic:late-interaction:en` | Prompt matched by the late-interaction matcher (ADR-160); always recorded with `:en` |
 | `semantic:bash:en`, `semantic:bash:multi` | A shell command's text matched a way's description semantically |
 | `bash` | A `commands:` pattern matched a shell command |
 | `file` | A `files:` pattern matched a file being edited |
@@ -183,6 +183,7 @@ More ways matched than the profile's `max_candidates` (default 8). The rest went
 | `check-pull` | A check fired before its parent way, so the parent was shown with it |
 | `postcheck` | A way requested by a post-tool check script |
 | `attend:<signal>` | An attend signal handler |
+| `unknown` | A way shown by `ways show way` with no `--trigger` |
 
 `ways tune stats` groups these into lanes: `keyword` and the prompt semantic triggers are the prompt lane, `semantic:bash:*` joins `bash`, and the rest group by the text before the first colon.
 

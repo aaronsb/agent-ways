@@ -96,7 +96,7 @@ If you're actively *developing* agent-ways (not just carrying a few custom ways)
 
 ## Legacy: the subdirectory topology
 
-Pre-1.0, the way to keep an existing `~/.claude` untouched was the **subdirectory topology** (ADR-140): clone into `~/.claude/agent-ways` and project it with a copy script that has since been removed. Native projection now *is* that story — a fresh install already keeps your config intact — so the subdirectory topology is **superseded**. If you're on it, the migrator at the `ways-v1.8.3` tag moves you to the native projection ([guide](migration-1.0.md)). (The conceptual history lives in [docs/explanation/install-topologies/](explanation/install-topologies/), kept as a record of how the model evolved.)
+Pre-1.0, the way to keep an existing `~/.claude` untouched was the **subdirectory topology** (ADR-140): clone into `~/.claude/agent-ways` and project it with a copy script that has since been removed. Native projection now *is* that story — a fresh install already keeps your config intact — so the subdirectory topology is **superseded**. If you're on it, the migrator at the `ways-v1.8.3` tag moves you to the native projection ([guide](migration-1.0.md)).
 
 ## After installing
 

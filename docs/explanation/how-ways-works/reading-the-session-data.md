@@ -149,7 +149,7 @@ A few readings that turn raw fields into judgement:
 ## Where this fits
 
 The event log is the *telemetry* layer — fine-grained, per-fire, recent (it
-tail-compacts past ~32 MiB, so it forgets its oldest tail). It records *what fired*,
+is size-capped, so it forgets its oldest events; see [the event log](../../reference/events.md)). It records *what fired*,
 not *what was understood*. What was understood is kept in the repository's own
 artifacts — ADRs, ways, issues, commit messages — and `ways init` seeds Claude
 Code's auto-memory to route project knowledge there ([[ADR-128]]). `ways session`
