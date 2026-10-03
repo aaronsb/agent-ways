@@ -156,7 +156,7 @@ flowchart LR
     Judge -->|block| Blocked["not shown, no marker"]:::other
     State --> Refire
     Post --> Refire
-    Refire{"Inside the refire window,<br/>or over the 10,000-char budget?"}:::gate
+    Refire{"Inside the refire window,<br/>or over the 10,000-char budget?<br/>(no budget on the state lane)"}:::gate
     Refire -->|no| Out["inject, stamp the per-agent marker"]:::output
     Refire -->|yes| Supp["way_suppressed"]:::other
 
@@ -237,12 +237,14 @@ flowchart LR
 
     Way["{name}.md<br/>scope: ?"]
 
-    Way -->|"scope: agent"| AG["Main agent only<br/>prompt, state, command, file, post-tool lanes"]:::agent
-    Way -->|"scope: subagent"| SB["Subagents only<br/>task stash → subagent-start"]:::sub
+    Way -->|"scope: agent"| AG["Not a teammate<br/>the main agent's lanes, and a plain<br/>subagent's own tool lanes"]:::agent
+    Way -->|"scope: subagent"| SB["Subagents, through the stash only<br/>task → subagent-start"]:::sub
     Way -->|"scope: agent, subagent"| BOTH["Both paths<br/>(most shipped ways)"]:::both
     Way -->|"scope: teammate"| TM["Teammates<br/>task stash with a team name"]:::team
     Way -->|"no scope field"| DEF["ways.default_scope<br/>(agent unless configured)"]:::agent
 ```
+
+A running agent's scope is `teammate` when its state directory holds the teammate marker, and `agent` otherwise (`session::detect_scope`). A plain subagent is therefore `agent` scope on its own tool lanes (command, file, post-tool), so a `scope: agent` way can fire inside it. `scope: subagent` is matched only on the Task prompt and reaches the subagent through the SubagentStart stash. Ways are on for subagents by default. The subagent switches (`ways.subagents: false`, `ways session subagents off`) turn off every lane that would inject into one.
 
 ### Parallel Subagent Handling
 
@@ -321,7 +323,7 @@ flowchart LR
     end
 
     Cand["collect_candidates<br/>project .claude/ways<br/>> user $XDG_CONFIG_HOME/agent-ways/ways<br/>> core ~/.claude/hooks/ways<br/>(a higher root shadows the same id, tree order)"]:::scan
-    Pre["scope · when: preconditions"]:::scan
+    Pre["scope · when: preconditions<br/>(disabled domains and ways already dropped)"]:::scan
 
     Prompt --> Cand
     Queued --> Cand
@@ -351,7 +353,7 @@ flowchart LR
     Show -->|held| WS["way_suppressed"]:::silent
 ```
 
-The bash semantic lane uses the single-vector scores only. The file lane is regex only. Disabled domains and ways are checked when a way is shown.
+The bash semantic lane uses the single-vector scores only. The file lane is regex only. Disabled domains and ways are dropped when the candidates are collected, so they never boost a child or take a judge slot, and they are checked again when a way is shown.
 
 ## Semantic Matching
 
@@ -416,7 +418,7 @@ flowchart LR
 
     Scan -->|"way_nearmiss · way_keyword_gated"| EV
     Gate -->|"way_judged · judge_call<br/>gate_capped · gate_fallback"| EV
-    Show -->|"way_fired (+ fire_score) · way_redisclosed<br/>way_suppressed · check_fired"| EV
+    Show -->|"way_fired · way_redisclosed<br/>(+ fire_score on semantic fires)<br/>way_suppressed · check_fired"| EV
     Hook -->|"session_start · injection_suppressed"| EV
 
     EV[("$XDG_STATE_HOME/agent-ways/events.jsonl<br/>tail-compacted at ~32 MiB")]:::log

@@ -19,7 +19,7 @@ The hooks are declared in the `hooks` block of the repo's [`settings.json`](../s
 | **PreToolUse** | `Task` | `check-task-pre.sh` |
 | **SubagentStart** | | `inject-subagent.sh` |
 | **PostToolUse** | `Edit\|Write\|Bash\|Task` | `check-post.sh`, `check-queued.sh` |
-| **PostToolUse** | `Bash` | `issues-pull.sh post-gh` |
+| **PostToolUse** | `Bash`, if `Bash(gh issue *)` | `issues-pull.sh post-gh` |
 | **PostToolUseFailure** | `Edit\|Write\|Bash\|Task` | `check-post.sh` |
 | **Stop** | | `check-response.sh`, `attend-drain-stop.sh` |
 | **TaskCreated** | | `issues-task-created.sh` |
@@ -30,7 +30,7 @@ The hooks are declared in the `hooks` block of the repo's [`settings.json`](../s
 
 Each script that touches ways is a thin adapter: it sources `require-ways.sh` and runs `ways hook <event>`, which reads Claude Code's JSON payload on stdin, makes every decision, and prints what the hook returns (ADR-504 §11). The scripts exit 0 whatever the binary returns, because a guidance hook never blocks a prompt or a tool. `ways scan` and `ways show` are internal subcommands the dispatcher uses. They are not part of the interface.
 
-Before any injecting lane runs, `ways hook` checks the switches described in [Switching ways off](#switching-ways-off).
+Before any injecting lane runs, `ways hook` checks the switches described in [Switching ways off](#switching-ways-off). Ways are on for subagents by default: a subagent's own tool calls run the same lanes as the main agent's.
 
 ### Session lifecycle
 
@@ -127,32 +127,32 @@ The `scope:` frontmatter field controls where a way fires. There are three scope
 
 | Scope | Session type | Detection |
 |-------|-------------|-----------|
-| `agent` | Your main session | Default (no teammate marker) |
+| `agent` | Any agent that is not a teammate: your main session, and a quick subagent's own tool lanes | No teammate marker |
 | `teammate` | Named agent in a coordinated team | A `teammate` marker in the agent's state directory |
-| `subagent` | Quick Task tool delegate | Spawned via Task without `team_name` |
+| `subagent` | Quick Task tool delegate, reached only through the SubagentStart stash | Matched on the Task prompt by `check-task-pre.sh` |
 
 Ways declare which scopes they apply to:
 
 ```yaml
-scope: agent                     # Main session only (the default if omitted)
+scope: agent                     # Non-teammates on their own lanes (the default if omitted)
 scope: teammate                  # Team members only
-scope: agent, teammate           # Both, but not quick delegates
-scope: agent, subagent           # Main + delegates, not teammates
-scope: agent, teammate, subagent # Everyone
+scope: agent, teammate           # Every agent's own lanes, no stash at dispatch
+scope: agent, subagent           # Non-teammates, plus the stash at dispatch
+scope: agent, teammate, subagent # Everyone, plus the stash at dispatch
 ```
 
 A way without `scope:` takes `ways.default_scope`, which is `agent` unless configured.
 
 ### Scope detection
 
-The `ways` binary reads the scope from the teammate marker: present means `teammate`, absent means `agent`. Subagent scope is decided at dispatch by `check-task-pre.sh`, not by the running agent. `inject-subagent.sh` writes the teammate marker in the teammate's own state directory during Phase 2, so the main agent's scope is untouched. The marker holds the team name for telemetry.
+The `ways` binary reads the scope from the teammate marker: present means `teammate`, absent means `agent` (`session::detect_scope`). A running plain subagent is therefore `agent` scope on its own PreToolUse and PostToolUse lanes, and a `scope: agent` way can fire there. `subagent` scope applies only at dispatch, when `check-task-pre.sh` matches the Task prompt and writes the stash. `inject-subagent.sh` writes the teammate marker in the teammate's own state directory during Phase 2, so the main agent's scope is untouched. The marker holds the team name for telemetry.
 
 ### What gets gated
 
 | Way | Scope | Why |
 |-----|-------|-----|
 | `meta/memory` | `agent` | Prevents concurrent MEMORY.md writes from multiple teammates |
-| `meta/subagents` | `agent` | Delegation guidance is irrelevant to agents that are themselves delegated work |
+| `meta/subagents` | `agent` | Keeps delegation guidance out of teammates and out of the Task stash. A plain subagent's own tool lanes can still fire it |
 | `collaboration/teams` | `teammate` | Coordination norms only make sense for team members |
 
 Firing state is kept per agent, so a way can fire for the parent and separately for each subagent or teammate. The parent's guidance does not transfer on its own because the Task prompt is a compact delegation, and the scope system bridges that gap.
@@ -164,7 +164,7 @@ See [teams.md](hooks-and-ways/teams.md) for the full team coordination model.
 Each way declares how it should be matched in its frontmatter. The lanes are additive-OR: a way with both a `pattern:` and a `description:` + `vocabulary:` can fire from either.
 
 - **Keyword lane** - the regex `pattern:` against the prompt, plus the deterministic `commands:` and `files:` triggers on the tool surfaces.
-- **Semantic lane** - on the prompt, queued and task surfaces, the ADR-160 late-interaction matcher: the surface is split into sentences, each way is ranked by its best chunk and must win a share of the chunks it matches, and the chunk it won must be corroborated by the way's own body. When the surface is too short to chunk, or the engine is missing, the single-vector calibrated gate decides instead (ADR-156). The bash surface uses the single-vector gate only.
+- **Semantic lane** - on the prompt, queued and task surfaces, the ADR-160 late-interaction matcher: the surface is split into sentences, each way is ranked by its best chunk and must either win a share of the chunks or match one chunk strongly, and the chunk it won must be corroborated by the way's own body. When the surface is too short to chunk, or the engine is missing, the single-vector calibrated gate decides instead (ADR-156). The bash surface uses the single-vector gate only.
 - **Relevance gate** - on the prompt and queued surfaces, what the two lanes fired is judged by a hosted model before it is shown (ADR-196).
 
 The exact fire rule, thresholds and calibration are stated once in [hooks-and-ways/engine-reference.md](hooks-and-ways/engine-reference.md).
@@ -195,7 +195,8 @@ flowchart TD
     end
 
     RP --> GATE{"g(s) ≥ τ_k ?<br/>floor gate<br/>(fails open / pattern_strict bypasses)"}:::decision
-    GATE -->|yes| J
+    GATE -->|"yes: prompt, queued"| J
+    GATE -->|"yes: task"| FIRE
     LI -->|"prompt, queued"| J
     SV -->|"prompt, queued"| J
     J{"Relevance judge<br/>P(yes) ≥ 0.3"}:::decision
@@ -233,7 +234,7 @@ There is no per-way threshold field. Firing is decided by global settings (see [
 | Model | How it works |
 |-------|-------------|
 | **EN** | `all-MiniLM-L6-v2` sentence embeddings via the `way-embed` binary and a GGUF model, 384-dim. Serves late-interaction and the EN single-vector lane. |
-| **Multilingual** | 768-dim model, loaded in localized mode only (ADR-139). Serves the single-vector fallback, so a native-language prompt that late-interaction handles is matched on the English corpus. |
+| **Multilingual** | 768-dim model, loaded in localized mode only (ADR-139). It serves only the single-vector fallback. A prompt long enough to split into sentences is matched by late-interaction against the English corpus. |
 
 The embedding engine is a hard dependency of `ways`. `make setup` fetches the binary and the English model on four supported platforms.
 
@@ -377,7 +378,7 @@ Firing activity is logged to `$XDG_STATE_HOME/agent-ways/events.jsonl`, one JSON
 
 Every field is listed in [reference/events.md](reference/events.md). `ways session` (`ways`, `fires`, `replay`, `live`, `dump`) and `ways tune stats` read the log, and `ways agent cost` sums the judge's spend.
 
-`fire_score` on `way_fired` is the deciding score of the semantic channel that fired: the summed softmax share for `semantic:late-interaction:en`, the calibrated probability `g(s)` for `semantic:embedding:*`. Read it by `trigger`, since the two are on different scales. It is recorded on first fires only, and it is not the source of the `g(s)` calibration, which is fit at corpus generation from the committed probe corpus.
+`fire_score` on `way_fired` is the deciding score of the semantic channel that fired: the summed softmax share for `semantic:late-interaction:en`, the calibrated probability `g(s)` for `semantic:embedding:*`. Read it by `trigger`, since the two are on different scales. It is recorded on every semantic fire, first fires and re-disclosures alike (filter on `event` to isolate first placements), and it is not the source of the `g(s)` calibration, which is fit at corpus generation from the committed probe corpus.
 
 `near_miss_margin` (default `0.05`) only controls logging. The log is bounded: once `events.jsonl` exceeds about 32 MiB, `log_event` keeps the most recent 24 MiB, cut at a line boundary and written atomically. Readers holding the old file keep reading it intact.
 
@@ -413,10 +414,11 @@ Ways resolve through three roots, highest first: the project's `$PROJECT/.claude
 
 ## Switching Ways Off
 
-Several switches turn ways off at different reaches. Each is checked by `ways hook` before a lane runs, except the domain and per-way switches, which are checked when a way is shown.
+Several switches turn ways off at different reaches. Each is checked by `ways hook` before a lane runs, except the domain and per-way switches, which drop ways when the candidates are collected (so a disabled way never boosts a child or takes a judge slot) and are checked again when a way is shown.
 
 | Switch | Reach | Where it is set |
 |---|---|---|
+| `ways target disable <dir>` | Everything for that target: the hooks block and the links are withdrawn, so no ways hook runs at all | The target's `settings.json` and projection (see the [install guide](install-guide.md)) |
 | `ways.enabled: false` | Every injecting hook in a project, or everywhere. Session upkeep (clearing, the response record) still runs (ADR-184). | `enabled:` in the project's `.claude/ways.yaml`, the user `config.yaml`, or a target's `config.yaml` |
 | `ways.subagents: false` | Every lane that injects into a subagent or teammate. The main agent keeps its ways. Logged as `injection_suppressed`. | `subagents:` in the same files |
 | `ways session subagents off` | The same, for one session, until switched back on | `$XDG_STATE_HOME/agent-ways/subagent-switch/<session_id>` |

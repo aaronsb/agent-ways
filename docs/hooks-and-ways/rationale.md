@@ -157,9 +157,9 @@ The matching channels, in practice:
 | Regex | < 1ms | High for known patterns | Most ways — keywords, commands, file paths |
 | Embedding, single vector | ~20ms | Good for semantic neighborhood | Short prompts, Bash descriptions, and the fallback when late-interaction cannot run |
 | Embedding, late-interaction | one batched embed of the prompt's sentences plus a body check | Built for long, multi-topic prompts | The prompt, queued and task surfaces |
-| Relevance judge | about 0.6 s plus 0.1 s per candidate, 2 s deadline | Removes fires the turn does not call for | Prompt and queued surfaces, at most 8 candidates |
+| Relevance judge | one hosted model call per prompt, under a deadline | Removes fires the turn does not call for | Prompt and queued surfaces, a capped number of candidates |
 
-The judge is the one place the system spends inference on detection. It was added because a probe of live fires found about nine in ten injections off-topic for the turn (ADR-195). It keeps the thesis intact: matching still decides *when* guidance can arrive, and the judge only removes candidates, outside Claude's context, failing open when it cannot answer.
+The judge is the one place the system spends inference on detection. It was added because a probe of live fires found about nine in ten injections off-topic for the turn (ADR-195). It keeps the thesis intact: matching still decides *when* guidance can arrive, and the judge only removes candidates, outside Claude's context, failing open when it cannot answer. Its limits and cost are in [the relevance judge](../explanation/relevance-judge/relevance-judge-the-model.md).
 
 ## What's Durable Here
 

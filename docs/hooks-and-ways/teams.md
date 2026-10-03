@@ -32,7 +32,7 @@ Each way declares which scopes it applies to via the `scope:` frontmatter field:
 
 ```yaml
 ---
-scope: agent              # Only fires for the main session
+scope: agent              # Fires for any non-teammate agent on its own lanes, the main session included
 scope: teammate           # Only fires for team members
 scope: agent, teammate    # Fires for both, but not quick subagents
 scope: agent, subagent    # Fires for main session and delegates, not teammates

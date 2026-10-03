@@ -46,7 +46,7 @@ A `pattern:` regex hit fires when `prob_en ≥ τ_k ∨ prob_multi ≥ τ_k`, th
 
 These operating points are hand-set and uncalibrated. The fired score, logged as `fire_score`, is the summed share.
 
-**Fallback: single vector.** `run` returns `None` when the surface yields fewer than 2 chunks, or the EN binary, corpus or model is missing. The way then fires when `prob_en ≥ τ_s` (channel `semantic:embedding:en`) or `prob_multi ≥ τ_s` (`semantic:embedding:multi`), where τ_s is `EffectiveThresholds.semantic` after parent-boost. The fired score is `g(s)`.
+**Fallback: single vector.** `run` returns `None` when the surface yields fewer than 2 chunks, when the EN binary, corpus or model is missing, or when a `way-embed` call fails during chunk matching or body confirmation. The way then fires when `prob_en ≥ τ_s` (channel `semantic:embedding:en`) or `prob_multi ≥ τ_s` (`semantic:embedding:multi`), where τ_s is `EffectiveThresholds.semantic` after parent-boost. The fired score is `g(s)`.
 
 Late-interaction reads only the EN corpus. On a localized install the multilingual lane therefore decides only on fallback surfaces.
 
@@ -75,7 +75,7 @@ Parent-boost changes τ_s, so it applies where τ_s decides: the single-vector f
 
 ## From fire to injection
 
-After matching, every lane orders its hits (`scan/order.rs` `order_hits`) and shows them through `show::way_scored`, which checks the domain and per-way switches, the way's refire window (ADR-126), and the hook's 10,000-character budget (`HOOK_CONTEXT_CAP`). On the prompt and queued surfaces the relevance gate sits between ordering and showing.
+After matching, every lane orders its hits (`scan/order.rs` `order_hits`) and shows them through `show::way_scored`, which checks the domain and per-way switches (already applied once in `collect_candidates`), the way's refire window (ADR-126), and, on the matching and post-tool lanes, the hook's 10,000-character budget (`HOOK_CONTEXT_CAP`). The state lane runs without a budget (`scan::state`). On the prompt and queued surfaces the relevance gate sits between ordering and showing.
 
 ## Relevance gate — `scan/gate.rs` `apply`
 

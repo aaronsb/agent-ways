@@ -48,7 +48,7 @@ Fire-bearing ways should carry a `refire:` field: a fraction of the session's co
 ## Other
 
 - `macro:` - `prepend` or `append` to run `macro.sh` for dynamic context
-- `scope:` - `agent`, `subagent`, `teammate` (comma-separated, default: agent)
+- `scope:` - `agent`, `subagent`, `teammate` (comma-separated, default: agent). `agent` means any agent that is not a teammate, so it also fires on a plain subagent's own tool calls. `subagent` reaches a subagent only through the Task stash at dispatch. `teammate` fires for team members.
 
 ## See Also
 

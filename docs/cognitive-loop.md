@@ -24,7 +24,7 @@ The most important thing to understand is that agent-ways treats Claude's reason
 
 This pattern runs through every layer of the system:
 
-- **Way matching** is a compiled Rust binary doing embedding math. Claude never decides which ways are relevant. The matcher proposes candidates before Claude sees anything, and on the prompt lanes a small hosted model (the relevance judge, [ADR-196](architecture/ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md)) answers yes or no for each one. The judge runs in the ways agent, a per-user daemon, never in Claude's context, and its cost is capped: at most 8 candidates per request, one turn of at most 1,200 characters, a 2-second deadline, and on any failure the matcher's decision stands. `gate.mode: off` removes it.
+- **Way matching** is a compiled Rust binary doing embedding math. Claude never decides which ways are relevant. The matcher proposes candidates before Claude sees anything, and on the prompt lanes a small hosted model (the relevance judge, [ADR-196](architecture/ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md)) answers yes or no for each one. The judge runs in the ways agent, a per-user daemon, never in Claude's context, and its cost is capped in candidates, input and time. On any failure the matcher's decision stands, and `gate.mode: off` removes it. [The relevance judge](explanation/relevance-judge/relevance-judge-the-model.md) gives the limits.
 - **Event logging** is the `ways` binary appending one JSON line per fire or near-miss to a file, with no inference involved. Claude doesn't record anything manually.
 - **Sensor observation** (the awareness layer) is a background script emitting stdout lines when state transitions are worth surfacing. The heavy lifting of turning raw events into discrete observations happens entirely below Claude's token budget.
 
@@ -49,7 +49,7 @@ flowchart LR
     end
 
     subgraph Bounded["<b>bounded inference</b> — outside Claude's context"]
-        Judge["ways agent → relevance judge<br/>(≤ 8 candidates, fails open)"]:::bounded
+        Judge["ways agent → relevance judge<br/>(capped, fails open)"]:::bounded
     end
 
     subgraph Del["delivery"]

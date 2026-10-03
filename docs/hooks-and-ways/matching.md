@@ -59,7 +59,7 @@ Three channels decide whether a way fires. They run additively — any one firin
 
 ```mermaid
 flowchart TD
-    Q[User prompt / tool input]
+    Q[Prompt, queued messages or Task prompt]
     Q --> Reg{pattern regex match?}
     Q --> RED[reduce: prompt + last response<br/>by sentence salience]
     RED --> CH{≥ 2 sentence chunks<br/>and EN engine present?}
@@ -74,9 +74,12 @@ flowchart TD
     Reg -- match --> GATE{g s ≥ τ_k?<br/>or pattern_strict / no signal}
     GATE -- yes --> F1[Fire: keyword]
 
-    F1 --> J{Relevance judge<br/>prompt and queued lanes}
-    F2 --> J
-    F3 --> J
+    F1 -- prompt, queued --> J{Relevance judge}
+    F2 -- prompt, queued --> J
+    F3 -- prompt, queued --> J
+    F1 -- task --> ST[Subagent stash]
+    F2 -- task --> ST
+    F3 -- task --> ST
     J -- pass --> IN[Inject]
     J -- block --> BL[Not shown, keeps its refire budget]
 ```
@@ -87,7 +90,7 @@ flowchart TD
 
 On the prompt and queued lanes, whatever channels 1 and 2 fire then goes to the [relevance gate](../hooks-and-ways.md#relevance-gate-and-the-ways-agent), which can block it.
 
-**Channel 3 — state triggers.** Not content-based. `trigger: context-threshold` fires when the context in use reaches the configured percentage; `file-exists` fires when a glob matches; `session-start` fires once per session. See the [State Triggers](#state-triggers) section.
+**Channel 3 — state triggers.** Not content-based. `trigger: context-threshold` fires when the context in use reaches the configured percentage; `file-exists` fires when a glob matches; `session-start` fires once per marker reset (startup, compact, clear). See the [State Triggers](#state-triggers) section.
 
 ## Progressive Disclosure (Session Subgraph)
 
