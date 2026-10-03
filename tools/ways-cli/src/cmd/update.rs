@@ -361,7 +361,20 @@ fn source_versions(app: &Path) -> Vec<(String, String)> {
 /// The version a binary reports: the second word of `--version`, as in
 /// `attend 0.15.1 (47d7a97)`.
 fn installed_version(bin: &Path) -> Option<String> {
-    let out = Command::new(bin).arg("--version").output().ok().filter(|o| o.status.success())?;
+    // A binary just written, here or by a parallel process, can refuse to exec
+    // with ETXTBSY while another fork still holds its write handle; it clears
+    // in milliseconds, so a few short retries tell it apart from a broken binary.
+    const ETXTBSY: i32 = 26;
+    let mut tries = 0;
+    let out = loop {
+        match Command::new(bin).arg("--version").output() {
+            Err(e) if cfg!(unix) && e.raw_os_error() == Some(ETXTBSY) && tries < 5 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            r => break r.ok().filter(|o| o.status.success())?,
+        }
+    };
     String::from_utf8_lossy(&out.stdout).split_whitespace().nth(1).map(str::to_string)
 }
 
