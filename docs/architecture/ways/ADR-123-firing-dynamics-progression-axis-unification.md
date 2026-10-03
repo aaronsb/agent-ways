@@ -375,6 +375,6 @@ The ADR's Open Questions section is preserved above for the historical record. T
 - **Validation test for attend parameter conversion:** live session observation (the Phase F re-observation) rather than side-by-side simulation or golden trace. The conversion formula's correctness was validated by the fact that attend's cadence behavior matched pre-refactor expectations in a real workload.
 - **Epsilon for "event has decayed out of burst consideration":** deferred to empirical tuning via `ways tune`. Current default in `Curve::ActionPotential` is left at the ADR's first-guess value and will be revisited once the event log accumulates enough token-position-enriched fires for `ways tune-curves` to suggest per-way values.
 
-## Amendment (2026-10-03): the attend outward gate was not built
+## Amendment (2026-10-03): the attend outward gate was removed
 
 The follow-up item above that names the attend sensor-peers outward-gate application, and its link to `docs/attend-and-monitor/salience.md`, are superseded. ADR-136 moved peer messages to a message lane with no salience gate, so the per-signal gate in sensor-peers was removed, and `salience.md` was deleted with it. The link in that item no longer resolves. The engine described here still drives the ways outward gate and the attend event-lane refractory.
