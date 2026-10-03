@@ -65,17 +65,27 @@ pub(crate) fn show(mut screen: impl agent_tui::screen::Screen, open: &Open) -> R
         return Ok(());
     }
     let keys = agent_tui::testkit::parse_keys(open.keys.iter().flat_map(|k| k.split_whitespace())).map_err(|e| anyhow::anyhow!("--keys: {e}"))?;
+    let size = match &open.snap {
+        Some(size) => Some(
+            size.split_once('x')
+                .and_then(|(w, h)| Some((w.parse::<u16>().ok()?, h.parse::<u16>().ok()?)))
+                .filter(|(w, h)| *w > 0 && *h > 0)
+                .ok_or_else(|| anyhow::anyhow!("--snap {size}: WIDTHxHEIGHT, such as 100x30"))?,
+        ),
+        None => None,
+    };
     for k in keys {
+        // A frame before each key, as the terminal draws one before it
+        // reads the next and as the settings shell's `--keys` does: what a
+        // key does can depend on what was drawn, such as a page's height.
+        if let Some((w, h)) = size {
+            let _ = agent_tui::testkit::render_screen(&mut screen, w, h);
+        }
         if !agent_tui::screen::Screen::key(&mut screen, k) {
             break;
         }
     }
-    if let Some(size) = &open.snap {
-        let (w, h) = size
-            .split_once('x')
-            .and_then(|(w, h)| Some((w.parse::<u16>().ok()?, h.parse::<u16>().ok()?)))
-            .filter(|(w, h)| *w > 0 && *h > 0)
-            .ok_or_else(|| anyhow::anyhow!("--snap {size}: WIDTHxHEIGHT, such as 100x30"))?;
+    if let Some((w, h)) = size {
         print!("{}", agent_tui::testkit::frame(&agent_tui::testkit::render_screen(&mut screen, w, h)));
     }
     Ok(())
