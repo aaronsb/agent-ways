@@ -3,6 +3,7 @@ contract: adr/v1
 kind: decision
 verb: add
 capability: config
+amends: [ADR-503#decision]
 basis:
   - operator: aaronsb
     level: directed
@@ -35,6 +36,11 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "Mask by default (Recommended)"
+    via: session 2026-10-03, selected from agent-written options on redaction defaults for audit logs
+    covers: [redaction-default]
 observable:
   - 'run: with attend not installed, a tool-audit ways sensor writes every tool call and result of the main agent and its subagents, Read and Grep included, to one JSONL file, in sequence, with no gaps'
   - 'run: ways sensors fire tool-audit/bash-policy --section tool_call against an endpoint that never answers is killed at its timeout, and the hook returned before it'
@@ -42,6 +48,8 @@ observable:
   - 'see: three rules matching one record dispatch three times, and a consumer that fails leaves the other two delivered'
   - 'run: hyperfine by the ADR-504 §11 method on ways hook sensors with a PreToolUse Read fixture and no ways sensor files shows a median within 2 ms of ways --version'
   - 'run: the same measurement with 20 ways sensor files and a warm compiled index, one async rule selecting tool_call, shows a median within 5 ms of ways --version'
+  - 'run: interrupt a reply mid-turn under a recording ways sensor and check whether a Stop event reached ways; the result decides how §3 reads an interrupted reply'
+  - 'run: remove a project from ways.project_sensors, and the next hook event in that project dispatches nothing from its project sensor files'
   - 'see: the ways settings sensors tab lists a ways sensor''s rules with their dispatched, timed out, dropped and spooled counts, and toggling one writes enabled: to the user file'
 status: proposed
 date: 2026-10-03
@@ -91,7 +99,7 @@ The project directory is not `.claude/ways/sensors/`, because `.claude/ways/` is
 
 ways adds one hook entry for sensors, `ways hook sensors`, which reads the event name from the payload. It is wired with matcher `*` on PreToolUse, PostToolUse and PostToolUseFailure, and on UserPromptSubmit, Stop, SubagentStart, SubagentStop, SessionStart, SessionEnd and PreCompact. The existing entries and their scans stay as they are, so every record comes from this one entry and none is spooled twice.
 
-The fast path comes first. ways compiles its sensor files into an index in its cache root, keyed by each file's path, size and modification time, holding the sections each enabled rule selects. The hook stats the sensor directories, reads the index, and exits before any other work when no enabled rule selects the event's section. It rebuilds the index only when a key changed. It loads no settings section, way corpus or session record on that path.
+The fast path comes first. ways compiles its sensor files into an index in its cache root, keyed by the path, size and modification time of each sensor file and of ways' user `config.yaml`, which holds the `ways.project_sensors` allow-list (§7). Removing a project from that list changes the key and rebuilds the index, so a project sensor never outlives its trust. The index holds the sections each enabled rule selects. The hook stats the sensor directories, reads the index, and exits before any other work when no enabled rule selects the event's section. It rebuilds the index only when a key changed. It loads no settings section, way corpus or session record on that path.
 
 The latency budget, measured by ADR-504 §11's method against `ways --version` on the same machine:
 - **no rule selects the section:** median within 2 ms;
@@ -119,7 +127,7 @@ A fixed, documented vocabulary of what can be selected, each with a stable JSON 
 
 Every record carries the session id, `agent_id` and agent type, a timestamp, the project, and a per-session sequence number. `assistant_response` holds text blocks only: thinking is excluded, and tool use is represented by its `tool_call` records.
 
-Some of the session stays out of reach even with this wiring. A reply the user interrupts reaches no Stop hook, so its text is read from the transcript at the next Stop or at SessionEnd. A session killed without SessionEnd produces no `session_end`, and the gap shows in the sequence numbers. Thinking is never exported.
+Some of the session stays out of reach even with this wiring. Whether a reply the user interrupts reaches a Stop hook is unverified. No primary source settles it, and it is tested before an export relies on it (an observable below). If it does not, the reply's text is read from the transcript at the next Stop or at SessionEnd. A session killed without SessionEnd produces no `session_end`, and the gap shows in the sequence numbers. Thinking is never exported.
 
 ### 4. Rules fan out
 
@@ -135,7 +143,7 @@ Any number of rules, in one file or many, can match the same record. Each match 
 
 - **Hand-off:** the hook appends the record to a per-session spool in ways' state root and returns. A detached `ways sensors dispatch --session <id>` process drains the spool. The hook starts it when no dispatcher holds the session's lock, and it exits after the spool stays empty for an idle period or at `session_end`. Dispatch is off the hook path, and a hook process exiting right after the hand-off loses nothing.
 - **Watchdog:** every dispatch has a timeout, set per rule. On expiry the watchdog kills the dispatch: a command's whole process group, or an HTTP request at connect or read. The timeout is recorded.
-- **Blocking toggle:** `mode: blocking` makes the hook dispatch that rule itself and wait, for a consumer that must see the record before the agent goes on. All blocking rules matching one hook event dispatch in parallel under one shared deadline: the largest of their timeouts, capped at 10 s. One hook event therefore waits at most 10 s, whatever the number of records or rules, well inside Claude Code's hook timeout. On expiry every unfinished blocking dispatch is killed and the session continues.
+- **Blocking toggle:** `mode: blocking` makes the hook dispatch that rule itself and wait, for a consumer that must see the record before the agent goes on. All blocking rules matching one hook event dispatch in parallel under one shared deadline: the largest of their timeouts, capped at 10 s. One hook event therefore waits at most 10 s, whatever the number of records or rules, well inside Claude Code's hook timeout. Each rule is still killed at its own timeout. The shared deadline only bounds how long the hook waits for the group, and on expiry every unfinished blocking dispatch is killed and the session continues.
 - **Bounded backlog:** each rule's queue is capped. Past the cap, records are spooled (under `delivery: at_least_once`) or dropped and counted.
 - **Visible failures:** timeouts, kills, refusals and drops are counted per rule, logged as events, and shown in `ways status` and the sensors tab.
 
@@ -157,7 +165,8 @@ A ways sensor never edits or blocks a tool call. A blocking rule only delays, wi
 
 ### 9. Managed and tested from both surfaces
 
-- **Keys:** every rule field has a key, `ways.sensors.<sensor>.rules.<rule>.<field>`, and every sensor field `ways.sensors.<sensor>.<field>`, reachable through `ways settings get|set|unset|help|list --json`. ways declares these keys in its own schema, and `set` writes the sensor's file at the chosen layer (ADR-403 §5).
+- **Keys:** every rule field has a key, `ways.sensors.<sensor>.rules.<rule>.<field>`, and every sensor field `ways.sensors.<sensor>.<field>`, reachable through `ways settings get|set|unset|help|list --json`. ways declares these key shapes in its own schema, and `set` writes the sensor's file at the chosen layer.
+- **ADR-503 amended:** as ADR-403 §5 does for attend's sensors, this amends ADR-503's Decision for ways' own registry. Its §1 build-time composition gains `ways.sensors` sections discovered at runtime, one per ways sensor file. Its §3 layers gain a shipped layer below the user layer for those keys. Its §8 write target, one path per file kind through `file_of`, becomes the sensor's own file at the layer being written. The rest of ADR-503 stays in force.
 - **Sensors tab:** shows `ways.sensors` beside `attend.sensors`: the tab's single `prefix` in `tools/ways-cli/src/cmd/settings/tui/build.rs` becomes a list, and the `ways` tab skips `ways.sensors`. It lists each ways sensor's rules with sections, condition, target, mode, timeout, the off-machine flag and live counts. It toggles a rule or a sensor live, and edits rules in a form validated against the spec.
 - **Files:** `ways sensors copy|rename|delete`, the same named-item flow the theme tab uses (ADR-504 §10). Shipped files can be copied but not renamed or deleted.
 - **Testing:**
