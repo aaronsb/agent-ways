@@ -72,8 +72,14 @@ pub fn run(manifest: &Value, json_out: bool) -> Result<()> {
             for p in policies {
                 if let Some(uri) = p["uri"].as_str() {
                     if !uri.starts_with("github://") && !uri.starts_with("http") {
-                        let full = ways_core::paths::projection_root().join(uri);
-                        if !full.exists() {
+                        // A relative URI names a file in the app (where the
+                        // shipped governance/ lives since ADR-142), in the
+                        // ~/.claude projection, or under the directory lint
+                        // runs from (a separate compliance repo's root).
+                        let found = [ways_core::paths::data_root(), ways_core::paths::projection_root(), std::path::PathBuf::from(".")]
+                            .iter()
+                            .any(|base| base.join(uri).exists());
+                        if !found {
                             errors.push((
                                 way_id.clone(),
                                 format!("policy URI not found: {uri}"),
