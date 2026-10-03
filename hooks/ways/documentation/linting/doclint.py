@@ -344,15 +344,22 @@ def check_orphans(doc_nodes: list, nav_pages):
 
 
 def check_duplicate_ids(doc_nodes: list):
+    """Two pages may not share a DD.NNN identity (ADR-302).
+
+    Serials are domain-scoped and the mode pole is a mutable view, so
+    01.020.E and 01.020.R are the same id and a real clash.
+    """
     by_id = {}
     for n in doc_nodes:
         if n.key and not n.key.startswith("?"):
-            by_id.setdefault(n.key, []).append(n)
-    for cid, group in by_id.items():
+            m = ID_RE.match(n.key)
+            ident = f"{m.group(1)}.{m.group(2)}" if m else n.key
+            by_id.setdefault(ident, []).append(n)
+    for ident, group in by_id.items():
         if len(group) > 1:
             for n in group:
-                mates = ", ".join(sorted(g.rel for g in group if g is not n))
-                n.issues.append(("error", f"duplicate catalog id {cid} (also on: {mates})"))
+                mates = ", ".join(sorted(f"{g.rel} ({g.key})" for g in group if g is not n))
+                n.issues.append(("error", f"duplicate catalog id {ident} (also on: {mates})"))
 
 
 def _retired_scan_files():
