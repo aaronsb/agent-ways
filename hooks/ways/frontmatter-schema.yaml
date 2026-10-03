@@ -56,8 +56,9 @@ way:
         the cadence to today's model, or a preset name (once, rare, normal,
         frequent, or any custom name defined in config.refire_presets) that
         tracks the project's current tuning. Fire-bearing ways must carry
-        this field: the runtime refuses a way without it, so the way never
-        fires, and lint reports its absence as an error.
+        this field: the firing gate refuses a way without it, so the way never
+        reaches the agent (only a Task dispatch to a subagent bypasses the
+        gate), and lint reports its absence as an error.
 
         The legacy `curve:` block (ADR-123) is no longer recognized by the
         schema — lint flags it as unknown/foreign, and existing ways were

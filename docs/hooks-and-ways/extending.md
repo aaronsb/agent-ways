@@ -34,7 +34,7 @@ A way is a directory holding `{wayname}.md`: YAML frontmatter, then the guidance
 
 ### `refire:` is required
 
-Every way that fires on something needs a `refire:` field. That covers any way with `description:` and `vocabulary:`, `pattern:`, `commands:`, `files:` or `trigger:`. The runtime resolves the way's cadence before its first fire and refuses a way without one, so a way with no `refire:` never fires at all, not even once. `ways author lint` reports it as an error. The scaffolder writes `refire: 0.15`.
+Every way that fires on something needs a `refire:` field. That covers any way with `description:` and `vocabulary:`, `pattern:`, `commands:`, `files:` or `trigger:`. The firing gate resolves the way's cadence before its first fire and refuses a way without one, so a way with no `refire:` never reaches the agent, not even once. The one exception is the Task lane: a way that matches a Task prompt is stashed for the subagent without passing the gate. `ways author lint` reports a missing `refire:` as an error. The scaffolder writes `refire: 0.15`.
 
 `refire:` takes a fraction of the context window (`0.15`) or a preset name (`once`, `rare`, `normal`, `frequent`). It sets how long a way stays quiet after it fires before it may disclose again. See [context-decay.md](context-decay.md) for the model behind it. Check files and attend handlers are exempt; they ride on their parent way or on a signal.
 

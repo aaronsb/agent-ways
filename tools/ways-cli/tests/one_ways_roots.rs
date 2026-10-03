@@ -134,3 +134,54 @@ fn settings_screens_list_the_projected_ways() {
     assert!(out.contains("▸ dev"), "the settings tab must list the projected domain:\n{out}");
     assert!(!out.contains("stale"), "the settings tab must not list the app copy:\n{out}");
 }
+
+impl Fx {
+    /// Run the binary in the fixture and return its exit code.
+    fn ways_status(&self, args: &[&str]) -> Option<i32> {
+        let home = self.home();
+        Command::new(env!("CARGO_BIN_EXE_ways"))
+            .args(args)
+            .current_dir(home.join("proj"))
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", home.join("config"))
+            .env("XDG_CACHE_HOME", home.join("cache"))
+            .env("XDG_STATE_HOME", home.join("state"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env("XDG_RUNTIME_DIR", home.join("runtime"))
+            .env_remove("CLAUDE_PROJECT_DIR")
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .output()
+            .expect("run ways")
+            .status
+            .code()
+    }
+}
+
+#[test]
+fn template_global_writes_the_personal_root_not_the_projection() {
+    let fx = Fx::new("template");
+    let out = fx.ways(&["author", "template", "mine/newone", "-d", "a personal way", "--global"]);
+    let personal = fx.home().join("config/agent-ways/ways/mine/newone/newone.md");
+    assert!(personal.is_file(), "template --global must write {}:\n{out}", personal.display());
+    assert!(
+        !fx.home().join("dev/hooks/ways/mine").exists(),
+        "template --global must not write through the shipped projection:\n{out}"
+    );
+    assert!(
+        !fx.home().join(".local/share/agent-ways/hooks/ways/mine").exists(),
+        "template --global must not write into the app copy:\n{out}"
+    );
+}
+
+#[test]
+fn lint_check_fails_a_fire_bearing_way_without_refire() {
+    let fx = Fx::new("norefire");
+    let root = fx.home().join("config/agent-ways/ways");
+    let dir = root.join("mine/bare");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("bare.md"), "---\ndescription: a bare way\nvocabulary: bare\npattern: \\bbare\\b\n---\n# bare\n").unwrap();
+    let path = root.to_str().unwrap();
+    let out = fx.ways(&["author", "lint", path]);
+    assert!(out.contains("ERROR") && out.contains("no `refire:` field"), "{out}");
+    assert_eq!(fx.ways_status(&["author", "lint", "--check", path]), Some(1), "{out}");
+}
