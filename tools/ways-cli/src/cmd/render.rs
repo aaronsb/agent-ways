@@ -49,9 +49,8 @@ const INDENT: usize = 2;
 /// Nominal visible width of the fixed Epoch…Agent block that trails the Way
 /// column, inter-column gaps included. It's the reservation the ceiling clamp
 /// leaves for the trailing columns — *not* a hard bound: the Trigger and
-/// Re-disclosure cells pad but never truncate (`{:<}` / `pad_visible`), so a
-/// long trigger (`embed:bash:multi`) or a verbose re-disclosure string can
-/// overflow its column and push the block past this width. Header and rows stay
+/// Re-disclose cells pad but never truncate (`{:<}` / `pad_visible`), so a
+/// long trigger (`embed:bash:multi`) can overflow its column and push the block past this width. Header and rows stay
 /// mutually aligned for content that fits; over-width content drifts equally in
 /// both. (Pre-existing behaviour; documented here because the reservation reads
 /// like a guarantee otherwise.)
@@ -208,7 +207,7 @@ pub fn write_table_header_with(out: &mut String, layout: &Layout) {
     let head = format!(
         "{way:<way_w$}{g}{ep:>ep_w$}{g}{di:>di_w$}{g}{tr:<tr_w$}{g}{pin:^pin_w$}{g}{rd:<rd_w$}{g}Agent",
         way = "Way", ep = "Epoch", di = "Dist", tr = "Trigger",
-        pin = "\u{2316}", rd = "Re-disclosure",
+        pin = "\u{2316}", rd = "Re-disclose",
         way_w = layout.way_col, ep_w = EPOCH_W, di_w = DIST_W,
         tr_w = TRIG_W, pin_w = PIN_W, rd_w = RD_W,
     );
@@ -527,8 +526,10 @@ pub fn predict_next<W: WayRow>(
     paint(style, text)
 }
 
-/// The Re-disclosure cell's text and style: when a way will next
-/// re-disclose against its own curve.
+/// The Re-disclose cell's text and style: when a way will next
+/// re-disclose against its own curve. Every form fits the column's
+/// [`RD_W`] cells: `● now`, `◐ 80%`, `↩ epoch 43` for the epoch its check
+/// re-discloses it at, `↩ suppressed` when that is past reach.
 pub fn next_cell<W: WayRow>(
     w: &W,
     current_epoch: u64,
@@ -558,9 +559,9 @@ pub fn next_cell<W: WayRow>(
         let next_epoch = w.epoch_fired() + needed_distance;
         if epoch_distance < needed_distance {
             if needed_distance > 500 {
-                return (format!("check ~{} (suppressed)", fmt_epoch(next_epoch)), muted);
+                return ("↩ suppressed".into(), muted);
             }
-            return (format!("check at epoch ~{next_epoch}"), muted);
+            return (format!("↩ epoch {}", short_epoch(next_epoch)), muted);
         }
     }
 
@@ -581,13 +582,13 @@ pub fn format_trigger(trigger: &str) -> String {
     }
 }
 
-pub fn fmt_epoch(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1e}", n as f64)
-    } else if n >= 10_000 {
-        format!("{}K", n / 1000)
-    } else {
-        format!("e{n}")
+/// An epoch in at most five characters: in full below 100,000, else in
+/// thousands, or millions past that.
+fn short_epoch(n: u64) -> String {
+    match n {
+        0..=99_999 => n.to_string(),
+        100_000..=9_999_999 => format!("{}K", n / 1000),
+        _ => format!("{}M", (n / 1_000_000).min(9999)),
     }
 }
 
@@ -629,6 +630,49 @@ mod tests {
         let mut plain = String::new();
         write_way_row_with(&mut plain, &MockWay { id: "adr", depth: 0 }, 9, 0, &[None], &[], 0, "", "", &layout);
         assert!(!plain.contains(&format!("{}{on}", agent_theme::RESET)));
+    }
+
+    /// A way with the fields the Re-disclose cell reads.
+    struct Due {
+        epoch: u64,
+        checks: u64,
+        token_k: u64,
+    }
+
+    impl WayRow for Due {
+        fn id(&self) -> &str { "d/w" }
+        fn epoch_fired(&self) -> u64 { self.epoch }
+        fn token_pos(&self) -> u64 { self.token_k * 1000 }
+        fn trigger(&self) -> &str { "keyword" }
+        fn check_fires(&self) -> u64 { self.checks }
+        fn refire_threshold_k(&self) -> u64 { 100 }
+    }
+
+    /// Every form of the Re-disclose cell fits its column: the check's
+    /// epoch at the largest epochs, `↩ suppressed`, and the percentages.
+    #[test]
+    fn every_re_disclose_cell_fits_its_column() {
+        let cell = |w: Due, epoch: u64, tokens_k: u64| next_cell(&w, epoch, tokens_k).0;
+        // Two check fires put the next one epoch on; nine put it the
+        // farthest short of suppression, 288 on.
+        let mut cells = vec![
+            cell(Due { epoch: 5, checks: 2, token_k: 0 }, 5, 0),
+            cell(Due { epoch: 99_000, checks: 9, token_k: 0 }, 99_000, 0),
+            cell(Due { epoch: 9_999_000, checks: 9, token_k: 0 }, 9_999_000, 0),
+            cell(Due { epoch: u64::MAX - 1000, checks: 9, token_k: 0 }, u64::MAX - 1000, 0),
+            cell(Due { epoch: 5, checks: 40, token_k: 0 }, 5, 0),
+            cell(Due { epoch: 5, checks: 0, token_k: 0 }, 5, 67),
+            cell(Due { epoch: 5, checks: 0, token_k: 0 }, 5, 99),
+            cell(Due { epoch: 5, checks: 0, token_k: 0 }, 5, 100),
+        ];
+        assert_eq!(cells[0], "↩ epoch 6");
+        assert_eq!(cells[1], "↩ epoch 99288");
+        assert_eq!(cells[4], "↩ suppressed");
+        assert_eq!(cells[5], "◔ 67%");
+        cells.push(cell(Due { epoch: 5, checks: 0, token_k: 0 }, 6, 10));
+        for c in &cells {
+            assert!(agent_fmt::visible_len(c) <= RD_W, "{c:?} is wider than {RD_W}");
+        }
     }
 
     #[test]
