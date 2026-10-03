@@ -586,6 +586,49 @@ pub fn resolve(spec: &KeySpec, bound: &[String], layers: &[Layer]) -> Resolved {
     Resolved { name, path, value, default, layer: from }
 }
 
+/// Check each stored value of a computed choice against its list over all
+/// `layers`, adding a finding to the layer that holds a value the list
+/// lacks. A load checks one file on its own, so it cannot; `lint` and the
+/// screens read these. The value still loads: the finding reports it and
+/// drops nothing.
+pub fn check_choices<'a>(keys: impl IntoIterator<Item = &'a KeySpec>, layers: &mut [Layer]) {
+    let mut found: Vec<(usize, Finding)> = Vec::new();
+    for k in keys.into_iter().filter(|k| matches!(k.kind, crate::schema::Kind::ChoiceOf { .. })) {
+        for (i, l) in layers.iter().enumerate().filter(|(_, l)| l.file == k.file && l.scope.admits(k.scope)) {
+            for b in bindings(k, std::slice::from_ref(l)) {
+                let (name, path) = k.bind(&b);
+                let Some(v) = l.get(&path) else { continue };
+                let Err(why) = k.check_value_in(v, Some(layers)) else { continue };
+                // `fix` repairs what a load drops; this value loads, so `set` is the repair.
+                let message = format!("{why}; `ways settings set {name} <choice>` repairs it");
+                let line = l
+                    .path
+                    .as_ref()
+                    .and_then(|p| std::fs::read(p).ok())
+                    .and_then(|t| Doc::parse(&String::from_utf8_lossy(&t)).ok())
+                    .and_then(|d| d.line_of(&path));
+                found.push((
+                    i,
+                    Finding {
+                        file: l.path.clone(),
+                        line,
+                        section: Some(k.section.to_string()),
+                        unit: None,
+                        key: Some(path.join(".")),
+                        message,
+                        fallback: false,
+                        repair: None,
+                        closed: false,
+                    },
+                ));
+            }
+        }
+    }
+    for (i, f) in found {
+        layers[i].findings.push(f);
+    }
+}
+
 /// Every binding of a key: its declared instances plus any a layer sets.
 pub fn bindings(spec: &KeySpec, layers: &[Layer]) -> Vec<Vec<String>> {
     if !spec.is_pattern() {
@@ -864,6 +907,31 @@ mod tests {
             assert_eq!(get(&l, "sensors"), yaml("{a: {enabled: false}, b: {enabled: false}}"));
             assert_eq!(get(&l, "cleanup"), yaml("{enabled: false}"));
         }
+    }
+
+    #[test]
+    fn a_stored_value_a_computed_choice_lacks_is_a_finding_that_drops_nothing() {
+        // The choices: `auto`, then every preset the layers name.
+        fn presets(layers: &[Layer]) -> Result<Vec<String>, String> {
+            let mut out = vec!["auto".to_string()];
+            for l in layers {
+                if let Some(Value::Mapping(m)) = l.accepted.get("presets") {
+                    out.extend(m.keys().filter_map(Value::as_str).map(str::to_string));
+                }
+            }
+            Ok(out)
+        }
+        let keys = [KeySpec { kind: Kind::ChoiceOf { options: presets, multi: false }, ..BASE }];
+        let mut layers = vec![
+            layer("user", LayerScope::User, "language: rare\npresets:\n  rare: 0.3\n"),
+            layer("project", LayerScope::Project, "language: gone\n"),
+        ];
+        check_choices(&keys, &mut layers);
+        assert!(layers[0].findings.is_empty(), "a preset another section of the file names");
+        let f = &layers[1].findings[0];
+        assert_eq!((f.key.as_deref(), f.fallback, f.section.as_deref()), (Some("language"), false, Some("general")));
+        assert_eq!(f.message, "expected one of auto, rare, found 'gone'; `ways settings set general.language <choice>` repairs it");
+        assert_eq!(layers[1].get(&["language".into()]), Some(&Value::String("gone".into())), "the value still loads");
     }
 
     #[test]

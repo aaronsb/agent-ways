@@ -48,9 +48,10 @@ const KEYS: &[KeySpec] = &[
         name: "gate.engine",
         section: "gate",
         path: &["engine"],
+        kind: Kind::ChoiceOf { options: profile_names, multi: false },
         instances: &[],
         doc: "The profile the gate uses.",
-        long: "Unset: the first shipped profile whose provider has a key (anthropic, then openrouter). `ways agent key check` checks the key against the profile's model.",
+        long: "A shipped profile or one of your own under gate.profiles. Unset: the first shipped profile whose provider has a key (anthropic, then openrouter); adding a key never switches it, and `ways agent status` says which applies. `ways agent key check` checks the key against the profile's model.",
         ..BASE
     },
     KeySpec {
@@ -180,6 +181,21 @@ fn shipped_field(bound: &[String], field: &str) -> Option<Value> {
     serde_yaml::to_value(p).ok()?.get(field).cloned()
 }
 
+/// The profiles `gate.engine` may name: the shipped ones, then each the
+/// user layer adds under `profiles:`, in the file's order.
+fn profile_names(layers: &[Layer]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = profile::shipped().into_keys().collect();
+    for l in layers.iter().filter(|l| l.file == FILE) {
+        let Some(Value::Mapping(m)) = l.accepted.get("profiles") else { continue };
+        for name in m.keys().filter_map(Value::as_str) {
+            if !out.iter().any(|o| o == name) {
+                out.push(name.to_string());
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn check_model(v: &Value) -> Result<(), String> {
     match v.as_str() {
         Some(m) if profile::valid_model_id(m) => Ok(()),
@@ -206,4 +222,31 @@ pub static SCHEMA: Schema = Schema {
 /// The layers the agent's keys resolve through: the user layer.
 pub fn layers() -> Vec<Layer> {
     vec![Layer::read(&SCHEMA, "user", FILE, LayerScope::User, &profile::user_layer_path())]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_settings::Choices;
+
+    fn user(text: &str) -> Vec<Layer> {
+        vec![Layer::from_text(&SCHEMA, "user", FILE, LayerScope::User, None, text)]
+    }
+
+    #[test]
+    fn the_engine_is_a_profile_the_shipped_file_or_the_user_layer_names() {
+        let engine = KEYS.iter().find(|k| k.name == "gate.engine").unwrap();
+        assert_eq!(
+            engine.kind.choices(Some(&user(""))),
+            Choices::Of { items: vec!["anthropic".into(), "openrouter".into()], multi: false }
+        );
+        let layers = user("profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n  anthropic:\n    threshold: 0.4\n");
+        assert_eq!(engine.kind.describe(&layers), "one of anthropic, openrouter, mine");
+        assert!(engine.parse_cli("mine", &layers).is_ok());
+        assert!(engine.parse_cli("openrouter", &layers).is_ok());
+        let e = engine.parse_cli("open-router", &layers).unwrap_err();
+        assert_eq!(e, "expected one of anthropic, openrouter, mine, found 'open-router'");
+        // The hook path loads one file on its own and keeps the value.
+        assert!(user("engine: nope\n")[0].findings.is_empty());
+    }
 }

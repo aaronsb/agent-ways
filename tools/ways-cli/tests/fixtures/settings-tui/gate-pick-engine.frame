@@ -2,7 +2,7 @@ agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj ─────────────────────────────┐┌detail─────────────────────────────────────┐|
 |│ ▾ settings                    value                 ││gate.engine                                │|
-|│▌    engine                                          ││                                           │|
+|│▌    engine                    mine                  ││                                           │|
 |│     mode                      enforce               ││The profile the gate uses.                 │|
 |│ ▸ profiles · setting          value                 ││                                           │|
 |│ ▸ keys · provider             key                   ││A shipped profile or one of your own under │|
@@ -11,12 +11,13 @@ agent-tui frame 100x30
 |│                                                     ││(anthropic, then openrouter); adding a key │|
 |│                                                     ││never switches it, and `ways agent status` │|
 |│                                                     ││says which applies. `ways agent key check` │|
-|│                                                     ││checks the key against the profile's model.│|
-|│                                                     ││                                           │|
-|│                                                     ││value                                      │|
-|│                                                     ││type     one of anthropic | openrouter     │|
-|│                                                     ││(Enter picks)                              │|
-|│                                                     ││from     default                           │|
+|│                        ┌pick one: gate.engine───────────────────────────┐nst the profile's model.│|
+|│                        │   anthropic                                    │                        │|
+|│                        │   openrouter                                   │                        │|
+|│                        │ ● mine      current                            │hropic | openrouter |   │|
+|│                        └────────────────────────────────────────────────┘                        │|
+|│                                                     ││from     user ·                            │|
+|│                                                     ││~/.config/agent-ways/agent.yaml            │|
 |│                                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
 |│                                                     ││[gate.engine]                              │|
 |│                                                     ││                                           │|
@@ -26,9 +27,8 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
-|│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| edit  anthropic▏  Enter set · Esc cancel  ? keys · Tab 1-9 tabs · / filters all tabs               |
+| pick   ↑↓ choose · Enter or click sets · Esc closes                                                |
 styles
   0   0-7   White Blue -
   0  10-21  White Blue -
@@ -84,28 +84,34 @@ styles
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12  54-55  - - DIM
+ 12  25-25  Blue - -
+ 12  26-46  Blue - BOLD
+ 12  47-74  Blue - -
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-55  - - DIM
+ 13  25-25  Blue - -
+ 13  74-74  Blue - -
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-64  - - DIM
+ 14  25-25  Blue - -
+ 14  74-74  Blue - -
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15  54-64  - - DIM
+ 15  25-25  Blue - -
+ 15  26-73  - - BOLD|REVERSED
+ 15  74-74  Blue - -
  15  99-99  - - DIM
  16   0-0   - - DIM
- 16  54-55  - - DIM
+ 16  25-74  Blue - -
  16  99-99  - - DIM
  17   0-0   - - DIM
  17  54-64  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
- 18  54-64  - - DIM
+ 18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
- 19  54-55  - - DIM
+ 19  54-64  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
  20  54-55  - - DIM
@@ -133,4 +139,4 @@ styles
  27  99-99  - - DIM
  28   0-99  - - DIM
  29   0-5   Black Cyan BOLD
- 29  18-40  - - DIM|ITALIC
+ 29   6-51  - - DIM|ITALIC

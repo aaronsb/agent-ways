@@ -107,7 +107,15 @@ pub(super) fn live_layers(project: &Path) -> Vec<Layer> {
     let mut out = ways_core::settings::layers(project);
     out.extend(ways_agent_core::settings::layers());
     out.extend(attend_config::layers(project));
-    out
+    with_choices(out)
+}
+
+/// `layers` with a finding for each stored value a computed choice does not
+/// list, which a load, reading one file on its own, cannot check.
+pub(super) fn with_choices(mut layers: Vec<Layer>) -> Vec<Layer> {
+    let reg = registry();
+    agent_settings::load::check_choices(reg.keys().map(|(_, k)| k), &mut layers);
+    layers
 }
 
 /// One file read on its own (`--file`): `agent.yaml` is the agent kind, a
@@ -129,7 +137,7 @@ pub(super) fn file_layers(path: &Path) -> Result<Vec<Layer>, Failure> {
         let scope = if name == "ways.yaml" { LayerScope::Project } else { LayerScope::User };
         Layer::read(&ways_core::settings::SCHEMA, "file", ways_core::settings::FILE, scope, path)
     };
-    Ok(vec![layer])
+    Ok(with_choices(vec![layer]))
 }
 
 pub(super) fn layers_for(file: Option<&Path>, project: Option<&Path>) -> Result<Vec<Layer>, Failure> {
@@ -166,13 +174,31 @@ pub(super) fn layer_label(r: &Resolved, layers: &[Layer]) -> (String, Option<Str
     }
 }
 
-pub(super) fn describe(r: &Resolved, layers: &[Layer]) -> serde_json::Value {
+/// A key's value as `get --json` and `list --json` describe it. A computed
+/// choice adds the choices in effect; every other key's object is as it was.
+pub(super) fn describe(r: &Resolved, spec: &agent_settings::KeySpec, layers: &[Layer]) -> serde_json::Value {
     let (layer, file) = layer_label(r, layers);
-    json!({
+    let mut d = json!({
         "value": r.value.as_ref().map(to_json),
         "default": r.default.as_ref().map(to_json),
         "layer": layer,
         "file": file,
+    });
+    if let Some(o) = options_json(spec, layers) {
+        d["options"] = o;
+    }
+    d
+}
+
+/// The choices of a computed choice in effect, as JSON: the list, or
+/// `null` when its source could not answer. `None` for any other kind.
+pub(super) fn options_json(spec: &agent_settings::KeySpec, layers: &[Layer]) -> Option<serde_json::Value> {
+    if !matches!(spec.kind, Kind::ChoiceOf { .. }) {
+        return None;
+    }
+    Some(match spec.kind.choices(Some(layers)) {
+        agent_settings::Choices::Of { items, .. } => json!(items),
+        _ => serde_json::Value::Null,
     })
 }
 

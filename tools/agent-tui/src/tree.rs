@@ -10,7 +10,9 @@ pub enum Kind {
     Bool,
     Float { min: f64, max: f64 },
     Int { min: i64, max: i64 },
-    Choice(Vec<String>),
+    /// One of `options`, or with `multi` a list of them, shown as
+    /// `[a, b]`. The picker edits both.
+    Choice { options: Vec<String>, multi: bool },
     Text,
     /// Shown, never edited here; `doc` says which command changes it.
     ReadOnly,
@@ -108,11 +110,18 @@ impl Setting {
                 "true" | "false" => Ok(s.to_string()),
                 _ => Err("true or false".into()),
             },
-            Kind::Choice(opts) => {
-                if opts.iter().any(|o| o == s) {
+            Kind::Choice { options, multi: false } => {
+                if options.iter().any(|o| o == s) {
                     Ok(s.to_string())
                 } else {
-                    Err(format!("one of: {}", opts.join(", ")))
+                    Err(format!("one of: {}", options.join(", ")))
+                }
+            }
+            Kind::Choice { options, multi: true } => {
+                let picked = list_items(s);
+                match picked.iter().find(|p| !options.contains(p)) {
+                    None => Ok(list_value(&picked)),
+                    Some(bad) => Err(format!("{bad} is not one of: {}", options.join(", "))),
                 }
             }
             Kind::Text => Ok(s.to_string()),
@@ -120,6 +129,19 @@ impl Setting {
             Kind::Secret => Err("secret: entered masked, never stored here".into()),
         }
     }
+}
+
+/// The items of a list value: `[a, b]` as the screens show it, or `a, b`
+/// as typed.
+pub fn list_items(value: &str) -> Vec<String> {
+    let v = value.trim();
+    let inner = v.strip_prefix('[').and_then(|v| v.strip_suffix(']')).unwrap_or(v);
+    inner.split(',').map(|i| i.trim().to_string()).filter(|i| !i.is_empty()).collect()
+}
+
+/// A list value as the screens show it.
+pub fn list_value(items: &[String]) -> String {
+    format!("[{}]", items.join(", "))
 }
 
 /// A node is a group, a setting, or both: a way is a setting (enabled) that
@@ -687,7 +709,7 @@ mod tests {
             "",
             vec![
                 Node::leaf("tau_s", "", Setting::new(Kind::Float { min: 0.0, max: 1.0 }, "0.5", "default")),
-                Node::leaf("scope", "", Setting::new(Kind::Choice(vec!["agent".into()]), "agent", "user")),
+                Node::leaf("scope", "", Setting::new(Kind::Choice { options: vec!["agent".into()], multi: false }, "agent", "user")),
             ],
         )]
     }

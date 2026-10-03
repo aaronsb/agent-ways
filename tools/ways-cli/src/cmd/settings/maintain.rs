@@ -15,7 +15,12 @@ pub fn emit(prefix: Option<&str>, effective: bool, project: Option<&Path>) -> Ou
         return Err(fail(exit::USAGE, format!("no key under {prefix}; `ways settings help` lists the sections")));
     }
     let files = reg.emit(prefix, layers.as_deref());
+    let notes = choice_notes(&reg, prefix, layers.as_deref());
     let many = files.len() > 1;
+    // A key with no value emits no fragment; its note still says the choices.
+    for (_, note) in notes.iter().filter(|(f, _)| !files.iter().any(|(e, _)| e == f)) {
+        println!("# {note}");
+    }
     for (i, (file, v)) in files.iter().enumerate() {
         if many {
             if i > 0 {
@@ -23,9 +28,32 @@ pub fn emit(prefix: Option<&str>, effective: bool, project: Option<&Path>) -> Ou
             }
             println!("# {}", file_label(file));
         }
+        for (_, note) in notes.iter().filter(|(f, _)| f == file) {
+            println!("# {note}");
+        }
         print!("{}", serde_yaml::to_string(v).unwrap_or_default());
     }
     Ok(())
+}
+
+/// A comment line per computed choice under `prefix`, by file kind: the
+/// choices in effect, which the fragment's values cannot show. A key with
+/// no value is still noted, since naming one of them is how it is set.
+fn choice_notes(reg: &Registry, prefix: &str, layers: Option<&[Layer]>) -> Vec<(&'static str, String)> {
+    let computed: Vec<_> = reg.concrete(prefix, layers.unwrap_or(&[])).into_iter().filter(|b| matches!(b.spec.kind, Kind::ChoiceOf { .. })).collect();
+    if computed.is_empty() {
+        return Vec::new();
+    }
+    // The choices come from the files, read for the canonical fragment too.
+    let live;
+    let layers = match layers {
+        Some(l) => l,
+        None => {
+            live = live_layers(&project_dir(None));
+            &live
+        }
+    };
+    computed.iter().map(|b| (b.spec.file, format!("{}: {}", b.name(), b.spec.kind.describe(layers)))).collect()
 }
 
 pub(super) fn file_label(file: &str) -> &'static str {
