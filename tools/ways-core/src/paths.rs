@@ -198,6 +198,25 @@ pub fn projected_ways_root() -> PathBuf {
     projection_root().join("hooks").join("ways")
 }
 
+/// The shipped ways as the engine reads them: the projection, or the app
+/// copy itself before the projection exists (a fresh install builds the
+/// corpus first).
+pub fn shipped_ways_root() -> PathBuf {
+    let projected = projected_ways_root();
+    if projected.is_dir() { projected } else { core_ways_root() }
+}
+
+/// The ways roots a session reads, in the engine's order: the project's
+/// `.claude/ways/` when `project` is given and has one, the user's own, then
+/// the shipped ways. Only roots that exist are listed.
+pub fn ways_roots(project: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = project.map(|p| p.join(".claude/ways")).into_iter().collect();
+    roots.push(user_ways_root());
+    roots.push(shipped_ways_root());
+    roots.retain(|r| r.is_dir());
+    roots
+}
+
 /// The trusted-project-macros list: `~/.claude/trusted-project-macros`. The
 /// projects whose own macros may run; `ways show` reads it and `ways
 /// author permissions` reports it.

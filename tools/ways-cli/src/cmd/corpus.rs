@@ -31,8 +31,7 @@ pub fn run(
 
     // The shipped ways: the projection the scanner reads, or the app itself
     // before the projection exists (a fresh install builds the corpus first).
-    let projected = crate::paths::projected_ways_root();
-    let default_core = if projected.is_dir() { projected } else { crate::paths::core_ways_root() };
+    let default_core = crate::paths::shipped_ways_root();
     let global_dir = ways_dir.as_ref().map(PathBuf::from).unwrap_or_else(|| default_core.clone());
 
     // The engine dir holds the way-embed binary + GGUF models — always canonical.

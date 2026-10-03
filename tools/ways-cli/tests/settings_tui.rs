@@ -198,6 +198,40 @@ fn a_change_applied_in_the_screens_writes_the_bytes_set_writes() {
     assert!(tui.read(".config/agent-ways/config.yaml").unwrap().starts_with("# my settings, by hand\nsemantic_fire_probability: 0.5  # tuned\n"));
 }
 
+/// The multi picker, driven by keys through Enter and applied: the file
+/// holds the list `ways settings set` writes.
+#[test]
+fn a_multi_pick_applied_in_the_screens_writes_the_list_set_writes() {
+    let (cli, tui) = (Fx::new(), Fx::new());
+    let (_, err, code) = cli.run(&["settings", "set", "ways.disabled_domains", "itops,softwaredev"]);
+    assert_eq!(code, 0, "{err}");
+    let left = tui.drive("ways", "down down down down down enter space down space enter w a");
+    assert_eq!(left, "nothing pending\n");
+    let written = tui.read(".config/agent-ways/config.yaml");
+    assert_eq!(written, cli.read(".config/agent-ways/config.yaml"));
+    assert!(written.unwrap().contains("itops"));
+}
+
+/// A project's own domain is offered by its layer and picked in the screens:
+/// the file written holds it, as `set` writes it.
+#[test]
+fn the_project_s_own_domain_is_picked_into_disabled_domains() {
+    let fx = Fx::new();
+    fx.file("proj/.claude/ways/mine/mine.md", "---\ndescription: the mine way\nvocabulary: mine\n---\n");
+    fx.file("proj/.claude/ways.yaml", "enabled: true\n");
+    // itops, mine, softwaredev: the cursor on mine after one down.
+    let left = fx.drive("ways", "down down down down down enter down space enter w a");
+    assert_eq!(left, "nothing pending\n");
+    let cli = Fx::new();
+    cli.file("proj/.claude/ways/mine/mine.md", "---\ndescription: the mine way\nvocabulary: mine\n---\n");
+    cli.file("proj/.claude/ways.yaml", "enabled: true\n");
+    let (_, err, code) = cli.run(&["settings", "set", "ways.disabled_domains", "mine"]);
+    assert_eq!(code, 0, "{err}");
+    let written = fx.read(".config/agent-ways/config.yaml");
+    assert_eq!(written, cli.read(".config/agent-ways/config.yaml"));
+    assert!(written.unwrap().contains("mine"));
+}
+
 /// An attend user file with comments, which both writers must keep.
 const ATTEND: &str = "# my attend settings\nengagement:\n  decay_per_minute: 0.1  # tuned\n";
 
@@ -507,6 +541,11 @@ fn golden_frames() {
     let mine = Fx::new();
     mine.file(".config/agent-ways/agent.yaml", "engine: mine\nprofiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n");
     g.check_text("gate-pick-engine", &mine.snap("gate", "down enter", "100x30", "16"));
+    // The multi picker, over the domains the ways roots hold: one is
+    // switched off with Space and the cursor rests on the next.
+    let domains = "down down down down down enter space down";
+    g.check_text("ways-pick-domains", &fx.snap("ways", domains, "100x30", "16"));
+    g.check_text("ways-pick-domains-80x25", &fx.snap("ways", domains, "80x25", "16"));
     // A chosen theme at truecolor: its roles, and the editor's swatches.
     g.check_text("theme-nord-truecolor", &fx.snap("theme", "down down enter 1", "100x30", "truecolor"));
     // A project way with a macro: its switch above, what it is below.
