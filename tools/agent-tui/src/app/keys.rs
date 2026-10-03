@@ -27,6 +27,11 @@ impl App {
                 }
                 return true;
             }
+            // Beside text, ^C again while the quit is armed confirms it.
+            if matches!(self.mode, Mode::Guard { confirm: true }) && self.owns_text() {
+                self.discard_all();
+                return false;
+            }
             if matches!(self.mode, Mode::Guard { .. }) {
                 return true;
             }
@@ -456,7 +461,12 @@ impl App {
             Mode::Review { run: Some(_), .. } => {}
             Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ThemeDelete { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
                 if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
-                    self.key(press(KeyCode::Char(if yes { 'y' } else { 'n' })));
+                    let answer = match (self.owns_text() && matches!(self.mode, Mode::Guard { .. }), yes) {
+                        (true, true) => KeyCode::Enter,
+                        (true, false) => KeyCode::Esc,
+                        (false, yes) => KeyCode::Char(if yes { 'y' } else { 'n' }),
+                    };
+                    self.key(press(answer));
                 }
             }
             Mode::Review { discard: false, .. } => {

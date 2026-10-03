@@ -548,6 +548,13 @@ impl App {
                 spans.push(Span::raw(format!(" discard {} pending in {}?  ", self.pending_in(*t), self.roots[*t].name)));
                 answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y discard ", Ground::Err), (false, " n keep ", Ground::Ok)]);
             }
+            // Beside text, y and n would be typing: Enter quits, Esc goes back.
+            Mode::Guard { confirm: true } if self.owns_text() => {
+                spans.extend(mode("confirm", Ground::Warn));
+                let what = self.pane_unsaved().unwrap_or_else(|| "the unsaved work".into());
+                spans.push(Span::raw(format!(" quit and drop {what}?  ")));
+                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " Enter quit ", Ground::Err), (false, " Esc back ", Ground::Ok)]);
+            }
             Mode::Guard { confirm: true } => {
                 spans.extend(mode("confirm", Ground::Warn));
                 spans.push(Span::raw(format!(" quit and discard all {} pending?  ", self.pending())));
@@ -615,7 +622,12 @@ impl App {
                 spans.extend(mode("quit", Ground::Warn));
                 // A pane's work alone has nothing to review.
                 let review = self.pending() > 0 || self.theme_dirty();
-                spans.push(hint(if review { "  Esc back · r review · D quit and discard all" } else { "  Esc back · D quit and discard all" }));
+                spans.push(hint(match (review, self.owns_text()) {
+                    (true, _) => "  Esc back · r review · D quit and discard all",
+                    // Beside text, letters keep typing; D arms and Enter confirms.
+                    (false, true) => "  Esc back · D then Enter quits and discards · typing goes on",
+                    (false, false) => "  Esc back · D quit and discard all",
+                }));
             }
             _ => {
                 spans.extend(mode(if self.filter.is_empty() { "browse" } else { "filter" }, Ground::Accent));

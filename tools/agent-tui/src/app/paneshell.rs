@@ -256,21 +256,34 @@ impl App {
     }
 
     /// The exit guard beside a pane that owns text, where keystrokes are in
-    /// flight when it opens: `D` then `y` quits and drops the work, Esc and
-    /// Enter go back to it, and any other character closes the guard and is
-    /// typed into the pane, so typing on past an Esc loses nothing. Armed,
-    /// any key but `y` disarms it.
+    /// flight when it opens. `D` arms the quit and Enter (or ^C again)
+    /// confirms it; no letter does, since letters are typing. Unarmed, Esc
+    /// and Enter go back to the work, and a character or an editing key
+    /// closes the guard and acts on the work. Armed, Esc disarms it, and a
+    /// character or an editing key types the arming `D` first, then acts:
+    /// typing on past an Esc reaches the draft as typed.
     pub(super) fn guard_beside_text(&mut self, k: KeyEvent, confirm: bool) -> bool {
-        let printable = matches!(k.code, KeyCode::Char(_)) && !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let edits = plain
+            && matches!(
+                k.code,
+                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End
+            );
         match (confirm, k.code) {
-            (true, KeyCode::Char('y' | 'Y')) => {
+            (true, KeyCode::Enter) => {
                 self.discard_all();
                 return false;
             }
-            (false, KeyCode::Char('D')) => self.mode = Mode::Guard { confirm: true },
+            (true, KeyCode::Esc) => self.mode = Mode::Guard { confirm: false },
+            (true, _) if edits => {
+                // Back to typing: the D that armed the quit was typing too.
+                self.pane_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
+                return self.pane_key(k);
+            }
+            (true, _) => self.mode = Mode::Guard { confirm: true },
+            (false, KeyCode::Char('D')) if plain => self.mode = Mode::Guard { confirm: true },
             (false, KeyCode::Esc | KeyCode::Enter) => {}
-            _ if printable => return self.pane_key(k),
-            (true, _) => self.mode = Mode::Guard { confirm: false },
+            (false, _) if edits => return self.pane_key(k),
             (false, _) => self.mode = Mode::Guard { confirm: false },
         }
         true
@@ -483,8 +496,35 @@ mod tests {
             assert!(a.key(k(KeyCode::Char(c), KeyModifiers::NONE)), "{c} keeps the screen open");
         }
         assert!(!a.guarding());
-        assert_eq!(two(&a).keys, 6, "all but the D reached the pane");
+        assert_eq!(two(&a).keys, 7, "the arming D reached the pane too, before the i");
         assert!(two(&a).dirty);
+        // No letter confirms beside text: D then y types "Dy".
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
+        assert!(a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)));
+        assert_eq!(two(&a).keys, 9);
+        // Esc disarms, typing nothing; D then Enter quits, as does ^C armed.
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(a.guarding() && two(&a).keys == 9);
+        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
+        assert!(!a.key(k(KeyCode::Char('c'), KeyModifiers::CONTROL)), "^C again while armed quits");
+        assert!(!two(&a).dirty);
+    }
+
+    /// Unarmed, an editing key closes the guard and acts on the work.
+    #[test]
+    fn beside_text_an_editing_key_closes_the_guard() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").dirty = true;
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(a.key(k(KeyCode::Backspace, KeyModifiers::NONE)));
+        assert!(!a.guarding());
+        assert_eq!(two(&a).keys, 1);
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
+        assert!(!a.key(k(KeyCode::Enter, KeyModifiers::NONE)), "D then Enter quits");
     }
 
     #[test]

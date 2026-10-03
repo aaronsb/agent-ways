@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @aaron @Wells                                                          |
-| quit   Esc back · D then Enter quits and discards · typing goes on             |
+| confirm  quit and drop a draft in the compose box?   Enter quit   Esc back     |
 styles
   0   0-9   Black Cyan BOLD
   0  12-13  Blue - BOLD
@@ -120,5 +120,6 @@ styles
  23   1-7   Cyan - BOLD
  23   9-14  LightYellow - -
  23  16-21  LightCyan - -
- 24   0-5   Black Yellow BOLD
- 24   6-66  - - DIM|ITALIC
+ 24   0-8   Black Yellow BOLD
+ 24  53-64  White Red BOLD
+ 24  66-75  Black Green BOLD

@@ -302,7 +302,7 @@ The shell's conventions are the tab bar, the bottom bar with a footer read from 
 
 The tree, the queue and the apply stay as they were, and a pane app has no theme tab. The pane's tick, the shell's tick during an apply or a reading, and the file watch each run on their own schedule.
 
-A pane that owns text, such as a compose box, types every plain key, so the shell's keys take their Alt form beside it: Alt+1-9 for a tab and Alt+m for the mouse. F1 opens the keys. Esc and Ctrl-C quit, asking first over unsaved work. The exit guard there answers only its own keys (`D` then `y` quits, Esc and Enter go back), and any other character closes it and is typed, so typing on past an accidental Esc loses nothing.
+A pane that owns text, such as a compose box, types every plain key, so the shell's keys take their Alt form beside it: Alt+1-9 for a tab and Alt+m for the mouse. F1 opens the keys. Esc and Ctrl-C quit, asking first over unsaved work. The exit guard there takes no letter as an answer, since letters are typing. `D` arms the quit, and Enter, or Ctrl-C again, confirms it. Unarmed, Esc and Enter go back to the work, and a character or an editing key (Backspace, Delete, the arrows, Home, End) closes the guard and acts on the work. Armed, Esc disarms it, and a character or an editing key first types the arming `D` and then acts. So keys typed after an accidental Esc reach the draft as typed. The settings guard keeps `D` then `y`.
 
 A chat starts with the mouse off, so the terminal selects text and middle-click pastes. The shell captures clicks, the wheel and drags, but not bare moves.
 

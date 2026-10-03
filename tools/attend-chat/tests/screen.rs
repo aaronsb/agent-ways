@@ -541,24 +541,42 @@ fn a_middle_click_says_how_to_paste() {
     assert!(bar.contains("middle-click pastes with the mouse off"), "{bar}");
 }
 
-/// Typing on past an accidental Esc: the guard opens over the draft, and
-/// the keys that follow go into the draft instead of answering it. "Did
-/// you" would otherwise arm the quit on D and confirm it on y.
-#[test]
-fn typing_on_after_esc_keeps_the_draft() {
+/// Typing on past an accidental Esc reaches the draft as typed: the guard
+/// opens, and the keys that follow go into the draft instead of answering
+/// it. `text` is typed after "half a thought" and an Esc.
+fn typed_past_esc(text: &str) -> Chat {
     let mut c = chat();
     drawn(&mut c, &chars("half a thought"), 80, 25);
     assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25));
     assert!(c.app().guarding());
-    assert!(drawn(&mut c, &chars(" Did you see the deploy?"), 80, 25), "the chat stays open");
+    assert!(drawn(&mut c, &chars(text), 80, 25), "the chat stays open");
     assert!(!c.app().guarding());
-    assert_eq!(c.input().text(), "half a thought Did you see the deploy?");
-    // Straight into "Did", with no space first: D arms the quit, and the
-    // next character disarms it and is typed. Only the D is not.
+    c
+}
+
+/// D arms the quit; the i after it types the D, then itself.
+#[test]
+fn did_you_after_esc_keeps_every_character() {
+    assert_eq!(typed_past_esc("Did you").input().text(), "half a thoughtDid you");
+    assert_eq!(typed_past_esc(" Did you see the deploy?").input().text(), "half a thought Did you see the deploy?");
+}
+
+/// D then y would have confirmed the quit; beside text no letter does.
+#[test]
+fn dylan_here_after_esc_keeps_the_draft_and_the_chat() {
+    assert_eq!(typed_past_esc("Dylan here").input().text(), "half a thoughtDylan here");
+}
+
+/// An editing key closes the guard and edits the draft.
+#[test]
+fn backspace_after_esc_edits_the_draft() {
+    let mut c = chat();
+    drawn(&mut c, &chars("half a thought"), 80, 25);
     assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25));
-    assert!(drawn(&mut c, &chars("Did you"), 80, 25), "the chat stays open");
+    assert!(drawn(&mut c, &[key(KeyCode::Backspace), key(KeyCode::Left)], 80, 25), "the chat stays open");
     assert!(!c.app().guarding());
-    assert_eq!(c.input().text(), "half a thought Did you see the deploy?id you");
+    assert_eq!(c.input().text(), "half a though");
+    assert_eq!(c.input().cursor(), "half a thoug".len());
 }
 
 #[test]
@@ -616,7 +634,8 @@ fn golden_esc_over_a_draft_asks_first() {
     assert!(drawn(&mut c, &[KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)], 80, 25), "^C asks too");
     assert!(c.app().guarding());
     assert!(drawn(&mut c, &[key(KeyCode::Char('D'))], 80, 25));
-    assert!(!drawn(&mut c, &[key(KeyCode::Char('y'))], 80, 25), "quit and discard");
+    g.check("guard-armed-80x25", &testkit::render_screen(&mut c, 80, 25));
+    assert!(!drawn(&mut c, &[key(KeyCode::Enter)], 80, 25), "D then Enter quits and drops the draft");
     g.finish();
 }
 
