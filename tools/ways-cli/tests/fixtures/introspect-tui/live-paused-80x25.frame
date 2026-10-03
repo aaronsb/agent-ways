@@ -21,7 +21,7 @@ agent-tui frame 80x25
 |│███████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░ 66% (132K / 200K)│|
 |│● 1 re-disclose now  ◐ 1 approaching  ○ 1 distant  │ 30–80K intervals         │|
 |│··············◆·································■········ forecast 132K → 179K│|
-|│+ ↻ softwaredev/code/testing                                                  │|
+|│+ ↩ softwaredev/code/testing                                                  │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | paused  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space follow    |
 styles

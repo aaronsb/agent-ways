@@ -21,7 +21,7 @@ agent-tui frame 80x25
 |│█████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 15% (31K / 200K)│|
 |│○ 1 distant  │ 30K interval                                                   │|
 |│··························································● forecast 31K → 61K│|
-|│+ ⎯ compaction · window 2 ⎯, ↻ softwaredev/delivery/commits                   │|
+|│+ ⎯ compaction · window 2 ⎯, ↩ softwaredev/delivery/commits                   │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | live  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause       |
 styles

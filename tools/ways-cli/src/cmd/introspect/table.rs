@@ -266,7 +266,10 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
         }
     }
     if !frame.new_events.is_empty() {
-        out.push((2, Line::styled(format!("+ {}", frame.new_events.join(", ")), theme::ok().add_modifier(Modifier::BOLD))));
+        // The notes keep `↻` in JSON; the screen draws the re-disclosure
+        // mark the rows use, which the terminal fonts have.
+        let notes: Vec<String> = frame.new_events.iter().map(|e| e.strip_prefix("↻ ").map_or_else(|| e.clone(), |w| format!("↩ {w}"))).collect();
+        out.push((2, Line::styled(format!("+ {}", notes.join(", ")), theme::ok().add_modifier(Modifier::BOLD))));
     }
     // #786: the subagent switch held ways back here, one mark each.
     if !frame.suppressed.is_empty() {
