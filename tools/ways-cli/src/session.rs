@@ -492,6 +492,7 @@ pub fn log_event(fields: &[(&str, &str)]) {
 /// under concurrent compaction (last rename wins; a bounded window of events may
 /// be lost, but no line is ever torn). Oldest events are dropped — telemetry
 /// tuning cares about recent behavior, and the cap holds a year-plus of history.
+/// `judge_call` lines in the dropped head are carried ahead of the tail (#750).
 /// On any failure the original file is left intact and the temp is removed.
 fn compact_log_tail(path: &std::path::Path, keep_bytes: u64) -> std::io::Result<()> {
     let data = std::fs::read(path)?;
@@ -507,9 +508,30 @@ fn compact_log_tail(path: &std::path::Path, keep_bytes: u64) -> std::io::Result<
         None => data.len(), // single huge line / no boundary: drop it all
     };
 
+    // The judge's spend history must outlive the cut (#750): `ways agent cost`
+    // reads `judge_call` lines from this file, so the ones in the dropped head
+    // are carried ahead of the kept tail. A call is ~300 bytes, so a year of
+    // heavy use adds a few MiB. Carried lines sit in the head region on the
+    // next compaction and are carried again, never duplicated.
+    let mut out: Vec<u8> = Vec::new();
+    for line in data[..start].split(|&b| b == b'\n') {
+        if is_judge_call(line) {
+            out.extend_from_slice(line);
+            out.push(b'\n');
+        }
+    }
+    out.extend_from_slice(&data[start..]);
+
     // The shared writer's temp is unique per process and call, so two
     // concurrent compactions never write the same file and publish a torn tail.
-    agent_settings::writer::write_atomic(path, &data[start..])
+    agent_settings::writer::write_atomic(path, &out)
+}
+
+/// A whole `judge_call` event line (substring prefilter, then a real parse).
+fn is_judge_call(line: &[u8]) -> bool {
+    const NEEDLE: &[u8] = b"judge_call";
+    line.windows(NEEDLE.len()).any(|w| w == NEEDLE)
+        && serde_json::from_slice::<serde_json::Value>(line).is_ok_and(|v| v.get("event").and_then(|e| e.as_str()) == Some("judge_call"))
 }
 
 // ── Domain disable check ────────────────────────────────────────
@@ -787,6 +809,37 @@ mod compaction_tests {
         assert_eq!(*lines.last().unwrap(), "{\"n\":999}");
         assert!(!after.contains("{\"n\":0}"), "oldest events dropped");
 
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn compaction_keeps_judge_calls_so_spend_still_counts_them() {
+        let path = std::env::temp_dir().join(format!("ways-evt-judge-{}.jsonl", std::process::id()));
+        let judge = |ts: &str| format!("{{\"event\":\"judge_call\",\"ts\":\"{ts}\",\"session\":\"s\",\"project\":\"/p\",\"input_tokens\":\"10\",\"output_tokens\":\"1\",\"cost_usd\":\"0.0100\",\"cost_source\":\"provider\"}}\n");
+        let filler = |s: &mut String| {
+            for i in 0..500 {
+                s.push_str(&format!("{{\"event\":\"way_fired\",\"n\":\"{i}\"}}\n"));
+            }
+        };
+        // Two old judge calls buried in filler that the cut drops.
+        let mut content = judge("2026-01-05T10:00:00Z");
+        filler(&mut content);
+        content.push_str(&judge("2026-01-06T10:00:00Z"));
+        filler(&mut content);
+        content.push_str(&judge("2026-10-01T10:00:00Z"));
+        std::fs::write(&path, &content).unwrap();
+
+        compact_log_tail(&path, 2000).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.len() < content.len(), "filler is cut");
+
+        let calls = ways_agent_core::spend::parse_log(&after);
+        assert_eq!(calls.len(), 3, "all three judge calls survive");
+        assert_eq!(ways_agent_core::spend::covers_since(&calls).as_deref(), Some("2026-01-05T10:00:00Z"));
+
+        // A second compaction carries them again without duplicating.
+        compact_log_tail(&path, 2000).unwrap();
+        assert_eq!(ways_agent_core::spend::parse_log(&std::fs::read_to_string(&path).unwrap()).len(), 3);
         let _ = std::fs::remove_file(&path);
     }
 
