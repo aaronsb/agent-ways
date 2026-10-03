@@ -150,7 +150,10 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     let reg = std::fs::read_to_string(&registry).unwrap();
     assert!(reg.contains("sess-restart-new") && !reg.contains(&old), "{reg}");
     assert!(reg.contains("instance: alpha"), "the slot name carries over: {reg}");
-    assert!(f.ok(&["channels", "--joined"]).contains("#side"));
+    // The marker moves before the channel membership does, so wait for it.
+    run.wait_for("the channel membership", Duration::from_secs(20), |_| {
+        f.ok(&["channels", "--joined"]).contains("#side")
+    });
     f.put("@side", "other-1-side", "SIDE-AFTER", Duration::ZERO);
     run.wait_for("the channel message", Duration::from_secs(20), |r| r.output().contains("SIDE-AFTER"));
     assert!(!run.output().contains("EARLY-OPEN"), "nothing seen is shown again: {}", run.output());
