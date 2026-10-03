@@ -84,7 +84,7 @@ flowchart LR
     R[("ways roots<br>project · user · core")]:::store
     A["ways-agent<br>judge daemon, holds the key"]:::core
     P["hosted provider<br>Anthropic or OpenRouter"]:::external
-    M["ways-mcp<br>registered as agent-ways"]:::core
+    M["ways-mcp<br>registered as agent-ways<br>ways_status"]:::core
     AT["attend<br>sensor loop"]:::compute
     B[("message bus<br>signal files · channels")]:::store
     CH["attend-chat<br>you, on the bus"]:::outside
@@ -99,19 +99,18 @@ flowchart LR
     CC -->|Monitor, Stop hook| AT
     CC -->|MCP tools| M
     AT <--> B
-    M <--> B
     CH <--> B
-    AU -->|reads claims| R
+    AU -->|"project or core root,<br>events.jsonl"| R
 ```
 
-The judge is the only part that sends conversation text off your machine, and only when you have stored a provider key. [docs/architecture.md](docs/architecture.md) has the hook flow, the per-agent state and the matching pipeline in depth.
+The judge is the only part that sends conversation text off your machine, and only when you have stored a provider key. [docs/architecture.md](docs/architecture.md) draws the hook flow, the matching pipeline and the [per-agent disclosure state machine](docs/architecture.md#disclosure-cadence).
 
 | Component | What it does | Docs |
 |---|---|---|
 | `ways` | The CLI and the hook engine. Every hook script calls it to match ways, track session state and inject guidance. It also carries install, update, settings and authoring commands. | [CLI reference](docs/reference/ways-cli.md) |
 | `way-embed` | The embedding engine (C++, llama.cpp) for semantic matching. It is optional: without it, only `pattern:`, `commands:` and `files:` triggers fire. | [Matching](docs/hooks-and-ways/matching.md), [finishing an install](docs/finish-install.md) |
 | `ways-agent` | A resident per-user daemon that holds your provider key and runs the relevance judge. The hook starts it on first use. | [Relevance judge](docs/explanation/relevance-judge/), [ADR-502](docs/architecture/platform/ADR-502-the-ways-agent-one-resident-daemon-per-user-for-search-judging-and-key-custody.md) |
-| `ways-mcp` | The agent-ways MCP server, registered with Claude Code as `agent-ways`. It hosts attend and later modules. | [ADR-501](docs/architecture/platform/ADR-501-the-agent-ways-mcp-server-one-server-for-attend-keepalive-and-later-modules-inbound-through-channels.md) |
+| `ways-mcp` | The agent-ways MCP server, registered with Claude Code as `agent-ways`. Today it hosts one read-only tool, `ways_status`. ADR-501 plans attend and keepalive modules on it. | [ADR-501](docs/architecture/platform/ADR-501-the-agent-ways-mcp-server-one-server-for-attend-keepalive-and-later-modules-inbound-through-channels.md) |
 | `attend` | The awareness layer: sensors for git state, peer sessions and process activity, surfaced into a running session as notifications. | [Attend and Monitor](docs/attend-and-monitor/README.md) |
 | `attend-chat` | A terminal chat that puts you on the same signal bus the agents use. | [`attend chat`](docs/attend-and-monitor/tui.md) |
 | `ways-audit` | Reports on the compliance claims ways carry: coverage, control traces, provenance lint. | [Governance](docs/governance.md) |
@@ -180,11 +179,11 @@ A way fires when matched, then **re-discloses on its `refire:` cadence** (a frac
 
 Matching has two channels: regex patterns for known keywords/commands/files, and [sentence-embedding](docs/architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) semantic scoring (all-MiniLM-L6-v2). See [matching.md](docs/hooks-and-ways/matching.md) for the full strategy. The judge sends text from your conversation to a hosted model; the [install guide](docs/install-guide.md#the-relevance-judge) says what and gives the commands.
 
-`ways session` opens the session screen. Its timeline tab lists each way once per agent that fired it, with the epoch, the distance back, the trigger and the re-disclosure forecast. A mark and colour on each way say what happened to it: injected, re-disclosed (`↩`), injected though the judge in shadow mode would have kept it out (`◌`), kept out by the judge (`⊘`), matched again inside its refire window (`◷`), or withheld by the context cap (`⊟`). `ways session ways` prints the current session's list as text.
+`ways session` opens the session screen. Its timeline tab lists each way once per agent that fired it, with the epoch, the distance back, the trigger and the re-disclosure forecast, and marks what happened to each way: injected, re-disclosed, or kept out by the judge. `ways session ways` prints the current session's list as text.
 
 <img src="docs/images/ways/session-timeline.png" alt="The ways session timeline at epoch 9 of a 200K-token session, matched view: an Agent column naming main, code-reviewer, a workflow member, two general-purpose subagents and one by id; ways marked as injected, re-disclosed, shadow-flagged, judge-blocked with P(yes) 0.050, held by the context cap and held in the refire window; a check line showing five fires and decay 0.17; and the context gauge at 29% with a forecast of re-disclosures between 58K and 104K tokens" width="800" />
 
-The [CLI reference](docs/reference/ways-cli.md#timeline-tab) gives the full legend.
+The [CLI reference](docs/reference/ways-cli.md#timeline-tab) explains each column and mark.
 
 For the complete system guide — trigger flow, state machines, the pipeline from principle to implementation — see **[docs/hooks-and-ways/README.md](docs/hooks-and-ways/README.md)**.
 
@@ -203,7 +202,7 @@ ways settings set ways.disabled_domains itops,ea
 ways settings set gate.mode shadow
 ```
 
-User settings live in `$XDG_CONFIG_HOME/agent-ways/config.yaml`, except the `gate.*` keys, which live in `agent.yaml` beside it, and the `attend.*` keys, which live in `$XDG_CONFIG_HOME/attend/config.yaml`. A project can set its own in `.claude/ways.yaml`. `ways settings help <key>` names each key's file. The file form of the `disabled_domains` example:
+User settings live in `$XDG_CONFIG_HOME/agent-ways/config.yaml`, except the `gate.*` keys, which live in `agent.yaml` beside it, and the `attend.*` keys, which live in `$XDG_CONFIG_HOME/attend/config.yaml`. A project overlays its own: ways keys in `.claude/ways.yaml`, attend keys in `.claude/attend.yaml`. `ways settings help <key>` names each key's file. The file form of the `disabled_domains` example:
 
 ```yaml
 disabled_domains:
@@ -387,7 +386,7 @@ At session start, `check-config-updates.sh` flags when the app source is behind 
 | [docs/reference/events.md](docs/reference/events.md) | Every event in `events.jsonl` and its fields |
 | [docs/install-guide.md](docs/install-guide.md) | Installing over an existing `~/.claude`, forks, previous installs, the relevance judge |
 | [docs/governance.md](docs/governance.md) | Reference: compilation chain, provenance mechanics |
-| [docs/architecture.md](docs/architecture.md) | Architecture diagrams: runtime roots, hook flow, per-agent state, matching |
+| [docs/architecture.md](docs/architecture.md) | Architecture diagrams: runtime roots, hook flow, disclosure cadence, matching |
 | [docs/architecture/](docs/architecture/) | Agent Decision Records |
 | [governance/](governance/) | Governance traceability and reporting |
 | [docs/README.md](docs/README.md) | Full documentation map |
