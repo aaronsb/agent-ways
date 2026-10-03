@@ -57,6 +57,6 @@ pub fn run(state: Option<&str>, session: Option<&str>, json: bool) -> Result<()>
         "project" => format!("`subagents: false` in {project}/.claude/ways.yaml or the user config"),
         _ => "the default".to_string(),
     };
-    println!("ways for subagents of {session_id}: {state} ({why})");
+    println!("subagents of {session_id} get ways: {state} ({why})");
     Ok(())
 }
