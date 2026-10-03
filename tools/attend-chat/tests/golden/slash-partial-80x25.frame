@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-|  1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                            |
+| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                             |
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ │ beta             │ production at 15:00                                     │|
 |│ │ ▽ 13:55          │                                                         │|
@@ -23,15 +23,15 @@ agent-tui frame 80x25
 |│                                                                              │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | /help /whois /peers /join /leave /dissolve /channels /invite /kick /purge /clea|
-| /channels [list|create|describe] — List · create · describe channels           |
+| chat  /channels [list|create|describe] — List · create · describe channels     |
 styles
-  0   1-10  Black Cyan BOLD
-  0  13-14  Blue - BOLD
-  0  15-23  White Blue -
-  0  26-27  Red - -
-  0  28-38  White Blue -
-  0  41-42  Cyan - -
-  0  43-52  White Blue -
+  0   0-9   Black Cyan BOLD
+  0  12-13  Blue - BOLD
+  0  14-22  White Blue -
+  0  25-26  Red - -
+  0  27-37  White Blue -
+  0  40-41  Cyan - -
+  0  42-51  White Blue -
   1   0-79  - - DIM
   2   0-0   - - DIM
   2   2-2   - - DIM
@@ -116,4 +116,5 @@ styles
  23  62-66  Cyan - -
  23  68-73  Cyan - -
  23  75-79  Cyan - -
- 24   1-68  - - DIM
+ 24   0-5   Black Cyan BOLD
+ 24   7-74  - - DIM

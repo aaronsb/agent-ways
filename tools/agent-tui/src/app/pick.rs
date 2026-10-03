@@ -26,6 +26,9 @@ pub(crate) struct Pick {
     pub(crate) marked: Vec<bool>,
     /// The value it was opened on.
     pub(crate) was: String,
+    /// A pane's picker: the id its choice goes back under, and its title.
+    /// `None` for a setting's.
+    pub(crate) pane: Option<(String, String)>,
 }
 
 impl Pick {
@@ -40,7 +43,25 @@ impl Pick {
         options.extend(unknown);
         let marked: Vec<bool> = options.iter().map(|o| held.contains(o)).collect();
         let sel = marked.iter().position(|m| *m).unwrap_or(0);
-        Pick { path, options, known, multi, sel, marked, was: value.to_string() }
+        Pick { path, options, known, multi, sel, marked, was: value.to_string(), pane: None }
+    }
+
+    /// A picker a pane opened: `chosen` marked, the choice going back to
+    /// the pane under `id`.
+    pub(crate) fn for_pane(id: String, title: String, options: Vec<String>, multi: bool, chosen: &[String]) -> Pick {
+        let marked: Vec<bool> = options.iter().map(|o| chosen.contains(o)).collect();
+        let sel = marked.iter().position(|m| *m).unwrap_or(0);
+        let known = options.len();
+        Pick { path: Vec::new(), options, known, multi, sel, marked, was: String::new(), pane: Some((id, title)) }
+    }
+
+    /// The options picked: the one under the cursor, or the marked ones in
+    /// order.
+    pub(crate) fn values(&self) -> Vec<String> {
+        if !self.multi {
+            return vec![self.options[self.sel].clone()];
+        }
+        self.options.iter().zip(&self.marked).filter(|(_, m)| **m).map(|(o, _)| o.clone()).collect()
     }
 
     /// The value the picker sets: the option under the cursor, or the
@@ -115,6 +136,9 @@ impl App {
     /// Set the picked value on the setting the picker was opened on. A
     /// rejected value keeps the picker open, and the bottom bar says why.
     fn pick_set(&mut self, p: Pick) {
+        if let Some((id, _)) = &p.pane {
+            return self.pane_picked(id, p.values());
+        }
         let v = p.value();
         if v == p.was {
             self.msg = "unchanged".into();
@@ -127,7 +151,11 @@ impl App {
 
     /// The popup, its rows recorded as click targets as the action menu's are.
     pub(super) fn draw_pick(&mut self, f: &mut Frame, area: Rect, p: &Pick) {
-        let title = format!("{}: {}", if p.multi { "pick any" } else { "pick one" }, tree::label(&self.roots, &p.path));
+        let what = match &p.pane {
+            Some((_, title)) => title.clone(),
+            None => tree::label(&self.roots, &p.path),
+        };
+        let title = format!("{}: {what}", if p.multi { "pick any" } else { "pick one" });
         self.draw_menu_items(f, area, title, p.items(), p.sel);
     }
 }

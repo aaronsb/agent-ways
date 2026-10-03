@@ -1,10 +1,11 @@
-//! Drawing the chat: one frame in the palette the chat holds. Every
-//! colour is either a theme role, through `agent_tui::theme`, or an
+//! Drawing the chat: the pane between the shell's bars, and the channel
+//! tabs the shell draws on its tab bar, in the palette the chat holds.
+//! Every colour is either a theme role, through `agent_tui::theme`, or an
 //! identity colour, through [`color_for`]; nothing here picks a colour of
 //! its own.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 
 use agent_tui::feed::{Entry, Feed};
 use agent_tui::ratatui::layout::{Constraint, Layout, Rect};
@@ -12,11 +13,12 @@ use agent_tui::ratatui::style::{Modifier, Style};
 use agent_tui::ratatui::text::{Line, Span};
 use agent_tui::ratatui::widgets::{Block, BorderType, Padding, Paragraph};
 use agent_tui::ratatui::Frame;
-use agent_tui::strip::{prefix_match, tab_seg, target};
+use agent_tui::strip::{prefix_match, target};
+use agent_tui::PaneTab;
 use agent_tui::theme::{self, Ground};
 use agent_tui::wrap::str_width;
 
-use super::{status_slot, Chat, Clock, STATUS_ASSERT};
+use super::{ChatPane, Clock};
 use crate::attach;
 use crate::chip::{chip_for, color_for, CHIP_WIDTH};
 use crate::groups::KnownGroup;
@@ -29,16 +31,9 @@ use crate::tabs::{self, Tab};
 /// The most rows the compose box grows to before it scrolls.
 const INPUT_ROWS: usize = 10;
 
-/// One frame. The screen runner has set the palette ([`Screen::palette`])
-/// and fills the theme's ground after.
-///
-/// [`Screen::palette`]: agent_tui::screen::Screen::palette
-pub(super) fn draw(chat: &mut Chat, f: &mut Frame) {
-    draw_frame(chat, f);
-}
-
-fn draw_frame(chat: &mut Chat, f: &mut Frame) {
-    let area = f.area();
+/// The pane in `area`, between the shell's tab bar and its bottom bar.
+/// The shell has set the palette and fills the theme's ground after.
+pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let fg = chat.normal_tab();
     let text = chat.input.text().to_string();
     let attachments = attach::existing_attachments(&text);
@@ -49,52 +44,46 @@ fn draw_frame(chat: &mut Chat, f: &mut Frame) {
     let rows = chat.input.rows(inner, theme::body());
     let shown = rows.len().clamp(1, INPUT_ROWS);
     let input_h = shown as u16 + 3 + u16::from(!attachments.is_empty());
-    let [strip, feed, compose, helper, status] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(3),
-        Constraint::Length(input_h),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let [feed, compose, helper] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(1)]).areas(area);
 
-    let partial = find_trailing_mention(&text).filter(|m| m.sigil == Sigil::Group).map(|m| m.partial.to_string());
     let groups = chat.world().groups.clone();
-    draw_strip(chat, f, strip, &groups, &fg, partial.as_deref());
     draw_feed(chat, f, feed, &fg);
     draw_compose(chat, f, compose, rows, &attachments, &fg);
     draw_helper(chat, f, helper, &text, &groups);
-    draw_status(chat, f, status, &text);
 }
 
-/// The tab strip (#393): merged pinned at slot zero, then `#open` and the
-/// named channels, each a tab in the shell's look, numbered for Alt+N and
-/// led by the channel's glyph in its identity colour, so the strip doubles
-/// as the channel legend. A `#partial` being typed marks the tabs it
-/// completes to. The foreground channel's description follows, set back
-/// (#404).
-fn draw_strip(chat: &Chat, f: &mut Frame, area: Rect, groups: &[KnownGroup], fg: &Tab, partial: Option<&str>) {
+/// The channel tabs (#393) the shell draws on its tab bar: merged pinned at
+/// slot zero, then `#open` and the named channels, numbered for Alt+N and
+/// led by the channel's glyph in its identity colour, so the bar doubles as
+/// the channel legend. A `#partial` being typed marks the tabs it completes
+/// to.
+pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
     let depth = chat.palette.depth();
-    let mut spans = vec![Span::raw(" ")];
-    spans.extend(chat.shape.lozenge(&[tab_seg(" 1 merged ", *fg == Tab::Merged)]));
-    for (i, k) in groups.iter().enumerate() {
-        let active = matches!(fg, Tab::Channel(g) if *g == k.group.name);
+    let text = chat.input.text().to_string();
+    let partial = find_trailing_mention(&text).filter(|m| m.sigil == Sigil::Group).map(|m| m.partial.to_string());
+    let mut out = vec![PaneTab::new("merged")];
+    for k in &chat.world().groups {
         let mut glyph = Style::new().fg(color_for(k.group.palette, depth));
         if k.is_base || k.group.style.bold {
             glyph = glyph.add_modifier(Modifier::BOLD);
         }
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(format!("{} ", k.group.glyph), glyph));
-        let mut seg = tab_seg(format!(" {} #{} ", i + 2, k.group.name), active);
-        seg.style = target(seg.style, prefix_match(&k.group.name, partial));
-        spans.extend(chat.shape.lozenge(&[seg]));
+        out.push(
+            PaneTab::new(format!("#{}", k.group.name))
+                .lead(vec![Span::styled(format!("{} ", k.group.glyph), glyph)])
+                .target(prefix_match(&k.group.name, partial.as_deref())),
+        );
     }
-    if let Tab::Channel(g) = fg {
-        if let Some(desc) = groups.iter().find(|k| k.group.name == *g).and_then(|k| k.membership.description.as_deref()) {
-            spans.push(Span::styled(format!("  — {desc}"), theme::muted()));
-        }
+    out
+}
+
+/// What the shown channel is for, set back after the tabs (#404).
+pub(super) fn trailer(chat: &mut ChatPane) -> Vec<Span<'static>> {
+    let Tab::Channel(g) = chat.normal_tab() else { return Vec::new() };
+    let groups = &chat.world().groups;
+    match groups.iter().find(|k| k.group.name == g).and_then(|k| k.membership.description.as_deref()) {
+        Some(desc) => vec![Span::styled(format!("  — {desc}"), theme::muted())],
+        None => Vec::new(),
     }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// The time a cell shows: one format across every attend surface
@@ -114,7 +103,7 @@ fn when(clock: Clock, ts: u64) -> String {
 /// One message as a feed entry: the sender's chip (name, scope, then the
 /// channel glyphs of the sender's memberships and the time) beside the
 /// body, with a chip per attached file that exists now (#390).
-fn entry(chat: &Chat, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGroup>>) -> Entry {
+fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGroup>>) -> Entry {
     let depth = chat.palette.depth();
     let world = chat.world.as_ref().expect("the world is read before the feed");
     let chip = chip_for(&s.from, &s.project, &s.cwd, depth, &world.instances);
@@ -148,7 +137,7 @@ fn entry(chat: &Chat, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGroup>>)
 
 /// A chip per attached file: its name on the rule's ground, so a file
 /// reads as an object rather than text.
-fn attachment_line(chat: &Chat, files: &[String]) -> Line<'static> {
+fn attachment_line(chat: &ChatPane, files: &[String]) -> Line<'static> {
     // No-break spaces inside a chip: wrapping moves a chip whole and keeps
     // its padding at the end of a row.
     let glyph = if agent_identity::is_rich(chat.palette.depth()) { "⎘\u{a0}" } else { "file:\u{a0}" };
@@ -162,7 +151,7 @@ fn attachment_line(chat: &Chat, files: &[String]) -> Line<'static> {
 
 /// The feed of the foreground tab (#393): merged shows the whole stream,
 /// a channel tab its own traffic and local notices.
-fn draw_feed(chat: &mut Chat, f: &mut Frame, area: Rect, fg: &Tab) {
+fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
     if chat.entries.is_none() {
         chat.world();
         let groups = &chat.world.as_ref().expect("just read").groups;
@@ -188,7 +177,7 @@ fn draw_feed(chat: &mut Chat, f: &mut Frame, area: Rect, fg: &Tab) {
 /// attachment chips when the buffer names files, and on the last row the
 /// destination flag (#392), where Enter would send it, hidden while a
 /// slash command is composed.
-fn draw_compose(chat: &Chat, f: &mut Frame, area: Rect, rows: Vec<Line<'static>>, files: &[String], fg: &Tab) {
+fn draw_compose(chat: &ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'static>>, files: &[String], fg: &Tab) {
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(theme::accent()).padding(Padding::horizontal(1));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -224,7 +213,7 @@ fn draw_compose(chat: &Chat, f: &mut Frame, area: Rect, rows: Vec<Line<'static>>
 /// the agent legend, the channel legend, the slash commands, a level of
 /// subcommands, or a free token's hint. Names Tab would complete to are
 /// marked.
-fn draw_helper(chat: &mut Chat, f: &mut Frame, area: Rect, text: &str, groups: &[KnownGroup]) {
+fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str, groups: &[KnownGroup]) {
     let depth = chat.palette.depth();
     let mut chips: Vec<Span<'static>> = Vec::new();
     match helper::derive(text) {
@@ -273,18 +262,4 @@ fn command_chips(items: Vec<slash::LegendChip>) -> Vec<Span<'static>> {
         .into_iter()
         .map(|c| Span::styled(c.label, target(if c.ready { theme::accent() } else { theme::muted() }, c.target)))
         .collect()
-}
-
-/// The status line (#398, #400): a fresh result asserts itself, an error
-/// in the error role; past [`STATUS_ASSERT`] the help of a command being
-/// typed, or the last result, set back.
-fn draw_status(chat: &Chat, f: &mut Frame, area: Rect, text: &str) {
-    let fresh = chat.status_set_at.is_some_and(|t: Instant| t.elapsed() < STATUS_ASSERT);
-    let (line, how) = status_slot(fresh, chat.status_is_error, slash::contextual_help(text), &chat.status);
-    let style = match how {
-        Some(true) => theme::err(),
-        Some(false) => theme::body(),
-        None => theme::muted(),
-    };
-    f.render_widget(Paragraph::new(Line::from(vec![Span::raw(" "), Span::styled(line, style)])), area);
 }

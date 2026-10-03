@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-|  1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                                                                    |
+| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                                                                     |
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                                                                 │|
 |│ │ Laszlo           │ starting the theme port; the legend moves first                                                 │|
@@ -38,15 +38,15 @@ agent-tui frame 120x40
 |│                                                                                                               #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @aaron @Wells                                                                                                  |
-|                                                                                                                        |
+| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · M-1-9 tabs                            |
 styles
-  0   1-10  Black Cyan BOLD
-  0  13-14  Blue - BOLD
-  0  15-23  White Blue -
-  0  26-27  Red - -
-  0  28-38  White Blue -
-  0  41-42  Cyan - -
-  0  43-52  White Blue -
+  0   0-9   Black Cyan BOLD
+  0  12-13  Blue - BOLD
+  0  14-22  White Blue -
+  0  25-26  Red - -
+  0  27-37  White Blue -
+  0  40-41  Cyan - -
+  0  42-51  White Blue -
   1   0-119 - - DIM
   2   0-0   - - DIM
   2   2-21  - - DIM
@@ -169,3 +169,16 @@ styles
  38   1-7   Cyan - BOLD
  38   9-14  LightYellow - -
  38  16-21  LightCyan - -
+ 39   0-5   Black Cyan BOLD
+ 39   7-21  - - DIM|ITALIC
+ 39  22-24  - - DIM
+ 39  25-27  Cyan - -
+ 39  28-34  - - DIM|ITALIC
+ 39  35-40  Cyan - -
+ 39  41-47  - - DIM|ITALIC
+ 39  48-51  Cyan - -
+ 39  52-62  - - DIM|ITALIC
+ 39  63-72  Cyan - -
+ 39  73-81  - - DIM|ITALIC
+ 39  82-87  Cyan - -
+ 39  88-91  - - DIM|ITALIC

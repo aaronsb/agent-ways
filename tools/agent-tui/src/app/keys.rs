@@ -27,6 +27,11 @@ impl App {
                 }
                 return true;
             }
+            // Beside text, ^C again while the quit is armed confirms it.
+            if matches!(self.mode, Mode::Guard { confirm: true }) && self.owns_text() {
+                self.discard_all();
+                return false;
+            }
             if matches!(self.mode, Mode::Guard { .. }) {
                 return true;
             }
@@ -176,6 +181,7 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {}
                 _ => self.mode = Mode::DiscardTab { tab },
             },
+            Mode::Guard { confirm } if self.owns_text() => return self.guard_beside_text(k, confirm),
             Mode::Guard { confirm: false } => match k.code {
                 KeyCode::Char('r') => {
                     self.clear_filter();
@@ -185,7 +191,9 @@ impl App {
                             self.open_review(first);
                         }
                         // Only theme edits are unsaved: their review is the editor.
-                        None => self.switch_tab(self.theme_tab()),
+                        None if self.theme_dirty() => self.switch_tab(self.theme_tab()),
+                        // A pane's work has no review: back to it.
+                        None => {}
                     }
                 }
                 KeyCode::Char('D') => self.mode = Mode::Guard { confirm: true },
@@ -197,9 +205,10 @@ impl App {
                     self.discard_all();
                     return false;
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.mode = Mode::Guard { confirm: false },
-                _ => self.mode = Mode::Guard { confirm: true },
+                // Any key but y disarms it: D has to be followed by y.
+                _ => self.mode = Mode::Guard { confirm: false },
             },
+            Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
             Mode::Browse => return self.browse(k),
         }
@@ -412,6 +421,7 @@ impl App {
             return;
         }
         match &mut self.mode {
+            Mode::Browse if self.pane.is_some() => self.pane_mouse(m),
             Mode::Browse if self.tab == self.roots.len() => self.theme_mouse(m),
             Mode::Browse => {
                 if let Some(k) = wheel {
@@ -451,7 +461,12 @@ impl App {
             Mode::Review { run: Some(_), .. } => {}
             Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ThemeDelete { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
                 if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
-                    self.key(press(KeyCode::Char(if yes { 'y' } else { 'n' })));
+                    let answer = match (self.owns_text() && matches!(self.mode, Mode::Guard { .. }), yes) {
+                        (true, true) => KeyCode::Enter,
+                        (true, false) => KeyCode::Esc,
+                        (false, yes) => KeyCode::Char(if yes { 'y' } else { 'n' }),
+                    };
+                    self.key(press(answer));
                 }
             }
             Mode::Review { discard: false, .. } => {

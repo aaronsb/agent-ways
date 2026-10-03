@@ -8,22 +8,22 @@ agent-tui frame 80x25
 |│ ╭──────────────────╮                                                         │|
 |│ │ aaron            │ the shell this ran under: /bin/sh                       │|
 |│ │ aaron            │  file: sh                                               │|
-|│ │ 13:58            │                                                         │|
-|│ ╰──────────────────╯                                                         │|
-|│                                                                              │|
-|│ ╭──────────────────╮                                                         │|
-|│ │ Laszlo           │ a longer message, so the feed shows how a body wraps    │|
-|│ │ alpha            │ beside its chip when it runs past the width of the row  │|
-|│ │ 13:59            │ it is given                                             │|
+|│ │┌quit with unsaved changes───────────────────────────────────────────────┐  │|
+|│ ╰│                                                                        │  │|
+|│  │ 1 unsaved                                                              │  │|
+|│ ╭│   chat        ●1  a draft in the compose box                           │  │|
+|│ ││                                                                        │  │|
+|│ ││  › Back (Esc)      Quit and discard all (D)                            │  │|
+|│ │└────────────────────────────────────────────────────────────────────────┘  │|
 |│ ╰──────────────────╯                                                         │|
 |│                                                                              │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
-|│ > /                                                                          │|
-|│                                                                              │|
+|│ > half a thought                                                             │|
+|│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
-| /help /whois /peers /join /leave /dissolve /channels /invite /kick /purge /clea|
-| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
+| @Laszlo @aaron @Wells                                                          |
+| quit   Esc back · D then Enter quits and discards · typing goes on             |
 styles
   0   0-9   Black Cyan BOLD
   0  12-13  Blue - BOLD
@@ -65,31 +65,42 @@ styles
   8  79-79  - - DIM
   9   0-0   - - DIM
   9   2-2   - - DIM
-  9   4-8   - - DIM
-  9  21-21  - - DIM
+  9   3-3   Blue - -
+  9   4-28  Blue - BOLD
+  9  29-76  Blue - -
   9  79-79  - - DIM
  10   0-0   - - DIM
- 10   2-21  - - DIM
+ 10   2-2   - - DIM
+ 10   3-3   Blue - -
+ 10  76-76  Blue - -
  10  79-79  - - DIM
  11   0-0   - - DIM
+ 11   3-3   Blue - -
+ 11   4-13  Yellow - BOLD
+ 11  76-76  Blue - -
  11  79-79  - - DIM
  12   0-0   - - DIM
- 12   2-21  - - DIM
+ 12   2-2   - - DIM
+ 12   3-3   Blue - -
+ 12  19-20  Yellow - BOLD
+ 12  21-48  - - DIM|ITALIC
+ 12  76-76  Blue - -
  12  79-79  - - DIM
  13   0-0   - - DIM
  13   2-2   - - DIM
- 13   4-9   Cyan - BOLD
- 13  21-21  - - DIM
+ 13   3-3   Blue - -
+ 13  76-76  Blue - -
  13  79-79  - - DIM
  14   0-0   - - DIM
  14   2-2   - - DIM
- 14   4-8   - - DIM
- 14  21-21  - - DIM
+ 14   3-3   Blue - -
+ 14   5-18  White Blue BOLD
+ 14  21-48  White Red -
+ 14  76-76  Blue - -
  14  79-79  - - DIM
  15   0-0   - - DIM
  15   2-2   - - DIM
- 15   4-8   - - DIM
- 15  21-21  - - DIM
+ 15   3-76  Blue - -
  15  79-79  - - DIM
  16   0-0   - - DIM
  16   2-21  - - DIM
@@ -100,30 +111,14 @@ styles
  19   0-79  Cyan - -
  20   0-0   Cyan - -
  20   2-3   Cyan - -
- 20   5-5   - - REVERSED
+ 20  18-18  - - REVERSED
  20  79-79  Cyan - -
  21   0-0   Cyan - -
+ 21  71-77  White Blue -
  21  79-79  Cyan - -
  22   0-79  Cyan - -
- 23   1-5   Cyan - -
- 23   7-12  Cyan - -
- 23  14-19  Cyan - -
- 23  21-25  Cyan - -
- 23  27-32  Cyan - -
- 23  34-42  Cyan - -
- 23  44-52  Cyan - -
- 23  54-60  Cyan - -
- 23  62-66  Cyan - -
- 23  68-73  Cyan - -
- 23  75-79  Cyan - -
- 24   0-5   Black Cyan BOLD
- 24   7-21  - - DIM|ITALIC
- 24  22-24  - - DIM
- 24  25-27  Cyan - -
- 24  28-34  - - DIM|ITALIC
- 24  35-40  Cyan - -
- 24  41-47  - - DIM|ITALIC
- 24  48-51  Cyan - -
- 24  52-62  - - DIM|ITALIC
- 24  63-72  Cyan - -
- 24  73-78  - - DIM|ITALIC
+ 23   1-7   Cyan - BOLD
+ 23   9-14  LightYellow - -
+ 23  16-21  LightCyan - -
+ 24   0-5   Black Yellow BOLD
+ 24   6-66  - - DIM|ITALIC
