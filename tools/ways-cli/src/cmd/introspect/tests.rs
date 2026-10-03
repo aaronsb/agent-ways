@@ -1003,10 +1003,10 @@ fn a_live_replay_follows_on_the_backoff() {
         s.tick();
     }
     let f = s.pane().replay.as_ref().unwrap().follow.as_ref().unwrap();
-    // Stated at 2, 6, 14 and 30 seconds; the write at 20 seen at 30, and
-    // the floor again: 32, 36.
-    assert_eq!(f.stats(), 7);
-    assert_eq!(f.backoff().interval(), std::time::Duration::from_secs(8));
+    // Stated at 2, 6, 11 and 16 seconds, then the follow's 5s ceiling; the
+    // write at 20 seen at 21, and the floor again: 23, 27, 32, 37.
+    assert_eq!(f.stats(), 10);
+    assert_eq!(f.backoff().interval(), super::live::FOLLOW_MAX);
 }
 
 /// A session whose ways the subagent switch held back: a dispatch and an

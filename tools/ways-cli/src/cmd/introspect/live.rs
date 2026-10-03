@@ -8,10 +8,12 @@
 //! transcript last written longer ago than the cutoff is not re-stated at
 //! all while the screen is open, so a month of old sessions costs one stat
 //! each. A replay that follows a live session samples the event log and
-//! the session's transcript on the same backoff, so an idle follow costs no
-//! more than the list. A replay of a quiet session within the cutoff
-//! watches its transcript the same way, and follows once it is written.
-//! A replay's stream is one file or two, so it is never cut off.
+//! the session's transcript on the same backoff under a lower ceiling: it
+//! is one stream the operator is reading, so a write after a quiet spell
+//! shows within seconds (#808). A replay of a quiet session within the
+//! cutoff watches its transcript on the list's ceiling, and follows once
+//! it is written. A replay's stream is one file or two, so it is never
+//! cut off.
 //!
 //! The clock and the stat are passed in, so a test counts the stats a
 //! schedule makes without waiting on a real one.
@@ -28,8 +30,14 @@ pub(crate) const LIVE_WINDOW: Duration = Duration::from_secs(120);
 /// The re-stat interval right after a write.
 pub(crate) const RESTAT_MIN: Duration = Duration::from_secs(2);
 
-/// The ceiling the interval doubles to while a file stays quiet.
+/// The ceiling the interval doubles to while a file stays quiet: the
+/// list's, and a quiet replay's watch.
 pub(crate) const RESTAT_MAX: Duration = Duration::from_secs(60);
+
+/// The ceiling of a live replay's follow. The list stats many files and
+/// backs off far; a follow stats one stream the operator is reading, so a
+/// write after a quiet spell is drawn within this, plus a tick (#808).
+pub(crate) const FOLLOW_MAX: Duration = Duration::from_secs(5);
 
 /// A file last written longer ago than this is not re-stated while the
 /// screen is open: its first stat is enough to show its age.
@@ -84,6 +92,8 @@ pub(crate) fn is_live(mtime_ms: u64, now_ms: u64) -> bool {
 pub(crate) struct Backoff {
     last: Option<Probe>,
     interval_ms: u64,
+    /// The interval doubles to this while the file stays quiet.
+    ceiling_ms: u64,
     next_ms: Option<u64>,
     /// A replay's schedule: never cut off, and a file missing at one stat
     /// is a quiet stat, not the end of the schedule.
@@ -96,7 +106,13 @@ impl Backoff {
     /// the ceiling: a file quiet for an hour starts at the ceiling.
     pub(crate) fn start(probe: Option<Probe>, now: u64) -> Backoff {
         let age = probe.map_or(0, |p| now.saturating_sub(p.mtime_ms));
-        let mut b = Backoff { last: probe, interval_ms: age.clamp(ms(RESTAT_MIN), ms(RESTAT_MAX)), next_ms: None, endless: false };
+        let mut b = Backoff {
+            last: probe,
+            interval_ms: age.clamp(ms(RESTAT_MIN), ms(RESTAT_MAX)),
+            ceiling_ms: ms(RESTAT_MAX),
+            next_ms: None,
+            endless: false,
+        };
         b.schedule(now);
         b
     }
@@ -132,7 +148,7 @@ impl Backoff {
     /// stated again.
     pub(crate) fn observe(&mut self, probe: Option<Probe>, now: u64) -> bool {
         let wrote = probe.is_some() && probe != self.last;
-        self.interval_ms = if wrote { ms(RESTAT_MIN) } else { (self.interval_ms * 2).min(ms(RESTAT_MAX)) };
+        self.interval_ms = if wrote { ms(RESTAT_MIN) } else { (self.interval_ms * 2).min(self.ceiling_ms) };
         if probe.is_some() || !self.endless {
             self.last = probe;
         }
@@ -240,11 +256,13 @@ pub(crate) struct Follow {
 
 impl Follow {
     /// Following starts at the floor, as after a write: it was opened on a
-    /// session being written to, however long the source sat quiet.
+    /// session being written to, however long the source sat quiet. It
+    /// backs off to [`FOLLOW_MAX`], not the list's ceiling.
     pub(crate) fn new(probe: Rc<dyn Fn() -> Option<Probe>>, clock: Clock) -> Follow {
         let now = clock();
         let mut backoff = Backoff::start(probe(), now);
         backoff.interval_ms = ms(RESTAT_MIN);
+        backoff.ceiling_ms = ms(FOLLOW_MAX);
         Follow { backoff: backoff.endless(now), probe, clock, stats: 1 }
     }
 
@@ -499,7 +517,7 @@ mod tests {
             assert!(f.watching(), "cut off at {sec}");
         }
         assert_eq!(seen.len(), 1, "the write once, not the file coming back: {seen:?}");
-        assert!((200..=260).contains(&seen[0]), "{seen:?}");
+        assert!((200..=200 + FOLLOW_MAX.as_secs()).contains(&seen[0]), "{seen:?}");
 
         // A watch starts at its source's age and is not cut off either; a
         // transcript past the cutoff, or none, gets no watch.
@@ -535,10 +553,57 @@ mod tests {
                 changes.push(sec);
             }
         }
-        // Due at 2, 6, 14, 30 (2+4+8+16) from t0; the write at 20 is seen
-        // at 30, and the interval starts again from the floor: 32, 36.
-        assert_eq!(changes, [30]);
-        assert_eq!(f.stats(), 1 + 6);
-        assert_eq!(f.backoff().interval(), Duration::from_secs(8));
+        // Due at 2, 6, 11, 16, 21 (2+4, then the follow's 5s ceiling) from
+        // t0; the write at 20 is seen at 21, and the interval starts again
+        // from the floor: 23, 27, 32, 37.
+        assert_eq!(changes, [21]);
+        assert_eq!(f.stats(), 1 + 9);
+        assert_eq!(f.backoff().interval(), FOLLOW_MAX);
+    }
+
+    /// After two minutes idle, a followed replay draws a write within the
+    /// follow's ceiling, while the list's schedule on the same quiet file
+    /// has backed off to the minute and a quiet replay's watch stays on
+    /// the list's ceiling (#808).
+    #[test]
+    fn a_follow_idle_two_minutes_sees_a_write_within_its_ceiling() {
+        let t0 = 1_000 * DAY;
+        let w = World::new(t0);
+        w.write("/t", t0);
+        let stat = w.stat();
+        let follow_stat = stat.clone();
+        let mut f = Follow::new(Rc::new(move || follow_stat(Path::new("/t"))), w.clock());
+        let mut s = Sampler::new(vec![Some(PathBuf::from("/t"))], stat, w.clock());
+        let mut watch = Follow::watch(Rc::new(move || Some(Probe { len: 1, mtime_ms: t0 - 3600 * S })), w.clock());
+        for _ in 0..120 {
+            w.now.set(w.now.get() + ms(SAMPLE_TICK));
+            assert!(!f.poll(), "quiet");
+            s.sample();
+            watch.poll();
+        }
+        assert_eq!(f.backoff().interval(), FOLLOW_MAX, "the follow stops at its own ceiling");
+        assert_eq!(s.watch[0].interval(), RESTAT_MAX, "the list backs off to the minute");
+        assert_eq!(watch.backoff().interval(), RESTAT_MAX, "a quiet replay's watch keeps the list's ceiling");
+
+        // Each second of a ceiling-long window, the screen ticking once a
+        // second: the write is drawn within the follow's ceiling wherever
+        // it lands in the stat schedule.
+        for _ in 0..FOLLOW_MAX.as_secs() {
+            w.now.set(w.now.get() + ms(SAMPLE_TICK));
+            f.poll();
+            let written = w.now.get();
+            w.write("/t", written);
+            let drawn = (1..=60u64).find(|_| {
+                w.now.set(w.now.get() + ms(SAMPLE_TICK));
+                f.poll()
+            });
+            let drawn = drawn.expect("the write is drawn");
+            assert!(drawn <= FOLLOW_MAX.as_secs(), "drawn {drawn}s after the write; ceiling {FOLLOW_MAX:?}");
+            // Back to idle at the ceiling before the next write.
+            for _ in 0..120 {
+                w.now.set(w.now.get() + ms(SAMPLE_TICK));
+                f.poll();
+            }
+        }
     }
 }
