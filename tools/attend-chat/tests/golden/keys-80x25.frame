@@ -1,27 +1,27 @@
 agent-tui frame 80x25
 | 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                             |
-|╭──────────────────────────────────────────────────────────────────────────────╮|
-|│ ┌keys · ↑↓ scroll · any other key closes───────────────────────────────────┐ │|
-|│ │F1               keys                                                     │ │|
-|│ │Enter            send                                                     │ │|
-|│ │Tab              complete                                                 │ │|
-|│ │PgUp PgDn        scroll                                                   │ │|
-|│ │S-Enter M-Enter  new line                                                 │ │|
-|│ │← → Home End     move the cursor                                          │ │|
-|│ │Bksp Del         edit                                                     │ │|
-|│ │M-1-9            tabs                                                     │ │|
-|│ │M-m              mouse on or off (off lets the terminal select text)      │ │|
-|│ │Shift-drag       selects text while the mouse is on, in most terminals    │ │|
-|│ │middle-click     pastes only while the mouse is off                       │ │|
-|│ │Esc ^C           quit; asks first over unsaved work                       │ │|
-|│ │click            a tab shows it; the wheel scrolls                        │ │|
-|│ │                                                                          │ │|
-|│ │help: chat                                                                │ │|
-|╰─│Enter sends to the shown channel; merged sends to #open. @name or #channel│─╯|
-|╭─│at the start addresses the message; Tab completes them, and on an empty   │─╮|
-|│ │line shows the next tab. /help lists the slash commands. `attend inbox`   │ │|
-|│ │and `attend send` are the same bus outside the screen.                    │ │|
-|╰─└──────────────────────────────────────────────────────────────────────────┘─╯|
+|┌keys · ↑↓ scroll · any other key closes───────────────────────────────────────┐|
+|│F1               keys                                                         │|
+|│Enter            send                                                         │|
+|│Tab              complete                                                     │|
+|│PgUp PgDn        scroll                                                       │|
+|│S-Enter M-Enter  new line                                                     │|
+|│← → Home End     move the cursor                                              │|
+|│Bksp Del         edit                                                         │|
+|│click a message  selects it; in the compose box it places the cursor; a chip c│|
+|│M-1-9            tabs                                                         │|
+|│M-m              mouse on or off (off lets the terminal select text)          │|
+|│Shift-drag       selects text while the mouse is on, in most terminals        │|
+|│middle-click     pastes only while the mouse is off                           │|
+|│Esc ^C           quit; asks first over unsaved work                           │|
+|│click            a tab shows it; the wheel scrolls                            │|
+|│                                                                              │|
+|│help: chat                                                                    │|
+|│Enter sends to the shown channel; merged sends to #open. @name or #channel    │|
+|│at the start addresses the message; Tab completes them, and on an empty       │|
+|│line shows the next tab. /help lists the slash commands. `attend inbox`       │|
+|│and `attend send` are the same bus outside the screen.                        │|
+|└──────────────────────────────────────────────────────────────────────────────┘|
 | @Laszlo @aaron @Wells                                                          |
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
 styles
@@ -32,105 +32,65 @@ styles
   0  27-37  White Blue -
   0  40-41  Cyan - -
   0  42-51  White Blue -
-  1   0-79  - - DIM
-  2   0-0   - - DIM
-  2   2-2   Blue - -
-  2   3-41  Blue - BOLD
-  2  42-77  Blue - -
-  2  79-79  - - DIM
-  3   0-0   - - DIM
-  3   2-2   Blue - -
-  3   3-19  Cyan - -
-  3  77-77  Blue - -
-  3  79-79  - - DIM
-  4   0-0   - - DIM
-  4   2-2   Blue - -
-  4   3-19  Cyan - -
-  4  77-77  Blue - -
-  4  79-79  - - DIM
-  5   0-0   - - DIM
-  5   2-2   Blue - -
-  5   3-19  Cyan - -
-  5  77-77  Blue - -
-  5  79-79  - - DIM
-  6   0-0   - - DIM
-  6   2-2   Blue - -
-  6   3-19  Cyan - -
-  6  77-77  Blue - -
-  6  79-79  - - DIM
-  7   0-0   - - DIM
-  7   2-2   Blue - -
-  7   3-19  Cyan - -
-  7  77-77  Blue - -
-  7  79-79  - - DIM
-  8   0-0   - - DIM
-  8   2-2   Blue - -
-  8   3-19  Cyan - -
-  8  77-77  Blue - -
-  8  79-79  - - DIM
-  9   0-0   - - DIM
-  9   2-2   Blue - -
-  9   3-19  Cyan - -
-  9  77-77  Blue - -
-  9  79-79  - - DIM
- 10   0-0   - - DIM
- 10   2-2   Blue - -
- 10   3-19  Cyan - -
- 10  77-77  Blue - -
- 10  79-79  - - DIM
- 11   0-0   - - DIM
- 11   2-2   Blue - -
- 11   3-19  Cyan - -
- 11  77-77  Blue - -
- 11  79-79  - - DIM
- 12   0-0   - - DIM
- 12   2-2   Blue - -
- 12   3-19  Cyan - -
- 12  77-77  Blue - -
- 12  79-79  - - DIM
- 13   0-0   - - DIM
- 13   2-2   Blue - -
- 13   3-19  Cyan - -
- 13  77-77  Blue - -
- 13  79-79  - - DIM
- 14   0-0   - - DIM
- 14   2-2   Blue - -
- 14   3-19  Cyan - -
- 14  77-77  Blue - -
- 14  79-79  - - DIM
- 15   0-0   - - DIM
- 15   2-2   Blue - -
- 15   3-19  Cyan - -
- 15  77-77  Blue - -
- 15  79-79  - - DIM
- 16   0-0   - - DIM
- 16   2-2   Blue - -
- 16  77-77  Blue - -
- 16  79-79  - - DIM
- 17   0-0   - - DIM
- 17   2-2   Blue - -
- 17   3-12  - - BOLD
- 17  77-77  Blue - -
- 17  79-79  - - DIM
- 18   0-1   - - DIM
- 18   2-2   Blue - -
- 18  77-77  Blue - -
- 18  78-79  - - DIM
- 19   0-1   Cyan - -
- 19   2-2   Blue - -
- 19  77-77  Blue - -
- 19  78-79  Cyan - -
- 20   0-0   Cyan - -
- 20   2-2   Blue - -
- 20  77-77  Blue - -
- 20  79-79  Cyan - -
- 21   0-0   Cyan - -
- 21   2-2   Blue - -
- 21  77-77  Blue - -
- 21  79-79  Cyan - -
- 22   0-1   Cyan - -
- 22   2-77  Blue - -
- 22  78-79  Cyan - -
+  1   0-0   Blue - -
+  1   1-39  Blue - BOLD
+  1  40-79  Blue - -
+  2   0-0   Blue - -
+  2   1-17  Cyan - -
+  2  79-79  Blue - -
+  3   0-0   Blue - -
+  3   1-17  Cyan - -
+  3  79-79  Blue - -
+  4   0-0   Blue - -
+  4   1-17  Cyan - -
+  4  79-79  Blue - -
+  5   0-0   Blue - -
+  5   1-17  Cyan - -
+  5  79-79  Blue - -
+  6   0-0   Blue - -
+  6   1-17  Cyan - -
+  6  79-79  Blue - -
+  7   0-0   Blue - -
+  7   1-17  Cyan - -
+  7  79-79  Blue - -
+  8   0-0   Blue - -
+  8   1-17  Cyan - -
+  8  79-79  Blue - -
+  9   0-0   Blue - -
+  9   1-17  Cyan - -
+  9  79-79  Blue - -
+ 10   0-0   Blue - -
+ 10   1-17  Cyan - -
+ 10  79-79  Blue - -
+ 11   0-0   Blue - -
+ 11   1-17  Cyan - -
+ 11  79-79  Blue - -
+ 12   0-0   Blue - -
+ 12   1-17  Cyan - -
+ 12  79-79  Blue - -
+ 13   0-0   Blue - -
+ 13   1-17  Cyan - -
+ 13  79-79  Blue - -
+ 14   0-0   Blue - -
+ 14   1-17  Cyan - -
+ 14  79-79  Blue - -
+ 15   0-0   Blue - -
+ 15   1-17  Cyan - -
+ 15  79-79  Blue - -
+ 16   0-0   Blue - -
+ 16  79-79  Blue - -
+ 17   0-0   Blue - -
+ 17   1-10  - - BOLD
+ 17  79-79  Blue - -
+ 18   0-0   Blue - -
+ 18  79-79  Blue - -
+ 19   0-0   Blue - -
+ 19  79-79  Blue - -
+ 20   0-0   Blue - -
+ 20  79-79  Blue - -
+ 21   0-0   Blue - -
+ 21  79-79  Blue - -
+ 22   0-79  Blue - -
  23   1-7   Cyan - BOLD
  23   9-14  LightYellow - -
  23  16-21  LightCyan - -

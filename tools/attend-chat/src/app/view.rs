@@ -18,7 +18,7 @@ use agent_tui::PaneTab;
 use agent_tui::theme::{self, Ground};
 use agent_tui::wrap::str_width;
 
-use super::{ChatPane, Clock};
+use super::{Chip, ChatPane, Clock, Hits};
 use crate::attach;
 use crate::chip::{chip_for, color_for, CHIP_WIDTH};
 use crate::groups::KnownGroup;
@@ -47,6 +47,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let [feed, compose, helper] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(1)]).areas(area);
 
     let groups = chat.world().groups.clone();
+    chat.hits = Hits { text_width: inner, ..Hits::default() };
     draw_feed(chat, f, feed, &fg);
     draw_compose(chat, f, compose, rows, &attachments, &fg);
     draw_helper(chat, f, helper, &text, &groups);
@@ -169,15 +170,17 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
     let inner = block.inner(area);
     f.render_widget(block, area);
     chat.feed_rows = inner.height;
+    chat.hits.feed = inner;
     let entries = chat.entries.as_deref().unwrap_or_default();
-    f.render_stateful_widget(Feed::new(entries).label_width(CHIP_WIDTH).border(theme::rule()).generation(chat.generation), inner, &mut chat.feed);
+    let feed = Feed::new(entries).label_width(CHIP_WIDTH).border(theme::rule()).selected(theme::accent()).generation(chat.generation);
+    f.render_stateful_widget(feed, inner, &mut chat.feed);
 }
 
 /// The compose box: `> ` then the buffer with its cursor, a row of
 /// attachment chips when the buffer names files, and on the last row the
 /// destination flag (#392), where Enter would send it, hidden while a
 /// slash command is composed.
-fn draw_compose(chat: &ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'static>>, files: &[String], fg: &Tab) {
+fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'static>>, files: &[String], fg: &Tab) {
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(theme::accent()).padding(Padding::horizontal(1));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -189,6 +192,8 @@ fn draw_compose(chat: &ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'stat
     let room = (text_h as usize).saturating_sub(usize::from(!files.is_empty())).clamp(1, INPUT_ROWS);
     let cursor_row = rows.iter().position(|l| l.spans.iter().any(|s| s.style.add_modifier.contains(Modifier::REVERSED))).unwrap_or(0);
     let start = cursor_row.saturating_sub(room - 1);
+    // The text's rows after the prompt, and the first of them shown.
+    chat.hits.compose = (Rect { x: inner.x + 2, y: inner.y, width: inner.width.saturating_sub(2), height: room.min(rows.len()) as u16 }, start);
     let mut lines: Vec<Line<'static>> = Vec::new();
     for (i, row) in rows.into_iter().enumerate().skip(start).take(room) {
         let prompt = if i == 0 { "> " } else { "  " };
@@ -216,9 +221,12 @@ fn draw_compose(chat: &ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'stat
 fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str, groups: &[KnownGroup]) {
     let depth = chat.palette.depth();
     let mut chips: Vec<Span<'static>> = Vec::new();
+    // What a click on each chip completes to, in the chips' order.
+    let mut picks: Vec<Chip> = Vec::new();
     match helper::derive(text) {
         HelperMode::Agents(p) => {
             for k in &chat.world().known {
+                picks.push(Chip::Agent(k.nickname.clone()));
                 let mut st = Style::new().fg(color_for(k.palette, depth));
                 if k.style.bold {
                     st = st.add_modifier(Modifier::BOLD);
@@ -231,6 +239,7 @@ fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str, group
         }
         HelperMode::Groups(p) => {
             for k in groups {
+                picks.push(Chip::Group(k.group.name.clone()));
                 let mut st = Style::new().fg(color_for(k.group.palette, depth));
                 // The base channel is always bold: the commons (ADR-124 §4).
                 if k.is_base || k.group.style.bold {
@@ -242,15 +251,33 @@ fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str, group
                 chips.push(Span::styled(format!("{} #{}", k.group.glyph, k.group.name), target(st, prefix_match(&k.group.name, p.as_deref()))));
             }
         }
-        HelperMode::Slash(p) => chips = command_chips(slash::legend(p.as_deref())),
-        HelperMode::SubCommands { choices, partial } => chips = command_chips(slash::sub_legend(choices, partial.as_deref())),
+        HelperMode::Slash(p) => {
+            let legend = slash::legend(p.as_deref());
+            picks = legend.iter().map(|c| Chip::Slash(c.label.trim_start_matches('/').to_string())).collect();
+            chips = command_chips(legend);
+        }
+        HelperMode::SubCommands { choices, partial } => {
+            let legend = slash::sub_legend(choices, partial.as_deref());
+            picks = legend.iter().map(|c| Chip::Sub(c.label.clone())).collect();
+            chips = command_chips(legend);
+        }
         HelperMode::FreeText(hint) => chips.push(Span::styled(hint.to_string(), theme::hint())),
     }
     let mut spans = vec![Span::raw(" ")];
+    let mut x = area.x + 1;
     for (i, c) in chips.into_iter().enumerate() {
         if i > 0 {
             spans.push(Span::raw(" "));
+            x += 1;
         }
+        let w = c.width() as u16;
+        if let Some(pick) = picks.get(i) {
+            let r = Rect { x, y: area.y, width: w, height: 1 }.intersection(area);
+            if !r.is_empty() {
+                chat.hits.chips.push((r, pick.clone()));
+            }
+        }
+        x = x.saturating_add(w);
         spans.push(c);
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
