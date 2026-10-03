@@ -117,15 +117,32 @@ verb: add
 capability: adr
 basis:
   - operator: <name>
-    level: guided
-    said: "<their words, quoted>"
+    level: guided            # authored | directed | guided, see below
+    said: "<their words, quoted verbatim>"
     via: <where they said it>
+  - evidence: "<a finding, measurement or audit, with where it came from>"
+  - standard: <a named standard or specification>
+  - upstream: <an upstream project's decision or behaviour>
+  - precedent: ADR-NNN      # a record this decision rests on
+observable:                  # optional (ADR-307): what to see, run or try when it holds
+  - 'see: <what a person can observe>'
+  - 'run: <a command whose result shows it>'
 agent:
   name: <agent>
   model: <model>
 status: proposed
 date: <YYYY-MM-DD>
 ---
+
+The `level` on an operator basis says who made the call:
+
+| Level | The operator | The decision is |
+|---|---|---|
+| `authored` | wrote the record | the operator's, recorded in the agent corpus |
+| `directed` | made the call, and the agent wrote it up | the operator's, written by the agent |
+| `guided` | gave direction or a constraint, and the agent decided within it | the agent's |
+
+One record can carry several operator entries at different levels: a call the operator made is `directed`, and a constraint the agent decided within is `guided`. Quote written words verbatim, typos included, and mark spoken ones `paraphrase: true`. `observable` is a frontmatter list, not a body section.
 
 # ADR-NNN: Decision Title
 
