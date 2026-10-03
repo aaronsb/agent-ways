@@ -150,6 +150,7 @@ const KEYS: &[KeySpec] = &[
     KeySpec {
         name: "ways.language",
         path: &["language"],
+        kind: Kind::ChoiceOf { options: languages, multi: false },
         default: DefaultValue::Yaml("auto"),
         doc: "Output language: en, auto, or a language code.",
         long: "en and auto keep the English corpus. A specific code, set by the ways-localize skill, switches the build, matcher and tuner to that language (ADR-139).",
@@ -315,6 +316,48 @@ fn closed_domains(v: &Value) -> Option<Value> {
         _ => {}
     }
     (!names.is_empty()).then_some(Value::Sequence(names))
+}
+
+/// The ways roots a machine reads: the projected core ways, the shipped
+/// copy behind them, the user's own, and the `.claude/ways/` beside each
+/// project layer in `layers`. A root linked twice is listed once.
+fn ways_roots(layers: &[Layer]) -> Vec<PathBuf> {
+    let mut roots = vec![crate::paths::projected_ways_root(), crate::paths::core_ways_root(), crate::paths::user_ways_root()];
+    for l in layers.iter().filter(|l| l.scope == LayerScope::Project) {
+        if let Some(dir) = l.path.as_deref().and_then(Path::parent) {
+            roots.push(dir.join("ways"));
+        }
+    }
+    let mut seen: Vec<PathBuf> = Vec::new();
+    roots.retain(|r| {
+        let Ok(real) = r.canonicalize() else { return false };
+        let new = !seen.contains(&real);
+        seen.push(real);
+        new
+    });
+    roots
+}
+
+/// The values `ways.language` may take: `en` and `auto`, then each locale
+/// a way carries, as a `{way}.{lang}.md` override or a `.locales.jsonl`
+/// stub, the locales the language report counts as covered.
+fn languages(layers: &[Layer]) -> Result<Vec<String>, String> {
+    let mut found = std::collections::BTreeSet::new();
+    for root in ways_roots(layers) {
+        for path in crate::scanner::files(&root) {
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            if name.ends_with(".locales.jsonl") {
+                for e in crate::frontmatter::parse_locales_jsonl(&path).unwrap_or_default() {
+                    found.insert(e.lang);
+                }
+            } else if let Some(lang) = crate::util::extract_locale_from_filename(name) {
+                found.insert(lang);
+            }
+        }
+    }
+    let mut out = vec!["en".to_string(), "auto".to_string()];
+    out.extend(found.into_iter().filter(|l| l != "en" && l != "auto"));
+    Ok(out)
 }
 
 /// A per-way toggle: anything but an explicit on reads as disabled.

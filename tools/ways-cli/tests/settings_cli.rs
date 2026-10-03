@@ -35,6 +35,12 @@ impl Fx {
         std::fs::create_dir_all(root.join("home/.claude")).unwrap();
         std::fs::create_dir_all(root.join("xdg/config")).unwrap();
         std::fs::create_dir_all(root.join("proj")).unwrap();
+        // The locales `ways.language` may name (de, es, ja), as override files.
+        let loc = root.join("xdg/data/agent-ways/hooks/ways/loc");
+        std::fs::create_dir_all(&loc).unwrap();
+        for lang in ["de", "es", "ja"] {
+            std::fs::write(loc.join(format!("loc.{lang}.md")), "x\n").unwrap();
+        }
         Fx { root }
     }
 
@@ -784,4 +790,31 @@ fn the_active_theme_is_one_of_the_installed_themes() {
     assert_eq!(v["value"], "mine");
     // The other theme key is unchanged: no options.
     assert!(json(&f, &["settings", "get", "theme.shape", "--json"]).get("options").is_none());
+}
+
+#[test]
+fn the_language_is_en_auto_or_a_locale_a_way_carries() {
+    let f = Fx::new();
+    let v = json(&f, &["settings", "get", "ways.language", "--json"]);
+    assert_eq!(v["options"], serde_json::json!(["en", "auto", "de", "es", "ja"]));
+    assert_eq!(v["value"], "auto");
+    let (_, err, code) = f.run(&["settings", "set", "ways.language", "fr"]);
+    assert_eq!(code, 3, "{err}");
+    assert!(err.contains("expected one of en, auto, de, es, ja, found 'fr'"), "{err}");
+    assert!(!f.user().exists());
+    // A packed stub in the user's own root, and a way of the project's, add locales.
+    f.write(&f.root.join("xdg/config/agent-ways/ways/mine/mine.locales.jsonl"), "{\"lang\":\"fr\",\"description\":\"d\"}\n");
+    f.write(&f.root.join("proj/.claude/ways/p/p.ko.md"), "x\n");
+    f.write(&f.overlay(), "enabled: true\n");
+    let v = json(&f, &["settings", "get", "ways.language", "--json"]);
+    assert_eq!(v["options"], serde_json::json!(["en", "auto", "de", "es", "fr", "ja", "ko"]));
+    assert_eq!(f.run(&["settings", "set", "ways.language", "fr"]).2, 0);
+    assert_eq!(f.run(&["settings", "set", "ways.language", "en"]).2, 0);
+    assert_eq!(f.run(&["settings", "set", "ways.language", "auto"]).2, 0);
+    // A value written by hand that no way carries loads as written and is a lint finding.
+    f.write(&f.user(), "language: xx\n");
+    assert_eq!(f.run(&["settings", "get", "ways.language"]).0, "xx\n");
+    assert_eq!(f.run(&["settings", "lint"]).2, 3);
+    // Another key of the section has no options.
+    assert!(json(&f, &["settings", "get", "ways.default_scope", "--json"]).get("options").is_none());
 }

@@ -12,7 +12,7 @@ agent-tui frame 100x30
 |│                                                     ││tuner to that language (ADR-139).          │|
 |│                                                     ││                                           │|
 |│                                                     ││value    auto                              │|
-|│                                                     ││type     text (Enter edits)                │|
+|│                                                     ││type     one of en | auto (Enter picks)    │|
 |│                                                     ││default  auto                              │|
 |│                                                     ││from     default                           │|
 |│                                                     ││writes   ~/.config/agent-ways/config.yaml  │|
