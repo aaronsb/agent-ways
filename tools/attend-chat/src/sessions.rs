@@ -57,19 +57,9 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
-    use std::path::PathBuf;
 
-    fn tempdir_like() -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "attend-chat-sessions-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&p).unwrap();
-        p
+    fn tempdir_like() -> std::path::PathBuf {
+        crate::test_dir::unique("sessions")
     }
 
     fn write_session(dir: &std::path::Path, id: &str, cwd: &str) {

@@ -367,16 +367,7 @@ mod tests {
         );
     }
 
-    fn tempdir_like() -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "attend-chat-test-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&p).unwrap();
-        p
+    fn tempdir_like() -> std::path::PathBuf {
+        crate::test_dir::unique("signal")
     }
 }
