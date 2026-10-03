@@ -1,6 +1,8 @@
 # ways CLI: renamed commands
 
-The commands were regrouped with no aliases kept ([ADR-507](../architecture/platform/ADR-507-the-ways-commands-regroup-into-operator-commands-and-six-groups-names-another-process-calls-stay-fixed.md)). An old name now fails with a usage error. Commands not listed here kept their names.
+The commands were regrouped with no aliases kept ([ADR-507](../architecture/platform/ADR-507-the-ways-commands-regroup-into-operator-commands-and-six-groups-names-another-process-calls-stay-fixed.md)). An old name now fails with a usage error. Commands not listed here kept their names; `show`, `scan` and `manifest` kept theirs but are hidden from `ways --help`.
+
+The rename shipped in ways 1.31. This page is removed after ways 1.34, when the table moves to the release notes.
 
 | Old | New |
 |---|---|
