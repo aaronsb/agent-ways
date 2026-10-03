@@ -623,7 +623,7 @@ fn back_to_this_project_is_refused_while_an_edit_elsewhere_is_pending() {
     let here = section(project_group(&r), "shipped").children[0].children[0].setting.clone().unwrap().store.unwrap();
     let e = ways.view("projects", &[&here, &elsewhere]).expect_err("the edit to work/other would be dropped");
     assert_eq!(e, "1 pending change to other projects' ways.yaml would be dropped; review and apply, or undo, it first");
-    assert_eq!(ways.title("ways").unwrap(), format!(" ways settings — ~/work/current · all projects "), "the view stays");
+    assert_eq!(ways.title("ways").unwrap(), " ways settings — ~/work/current · all projects ", "the view stays");
     assert!(ways.view("projects", &[&here]).is_ok(), "an edit to this project's file shows in both views");
     assert_eq!(ways.title("ways").unwrap(), " ways settings — ~/work/current · this project ");
     assert_eq!(ways.title("matching"), None, "only the ways tab has views");
