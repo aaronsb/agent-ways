@@ -1343,7 +1343,8 @@ fn scenario_subagent_switch_keeps_ways_from_subagents_only() {
     std::fs::create_dir_all(&switches).unwrap();
     std::fs::write(switches.join("sim-old-switch"), "").unwrap();
     std::fs::write(switches.join("sim-new-switch"), "").unwrap();
-    assert!(Command::new("touch").args(["-d", "40 days ago"]).arg(switches.join("sim-old-switch")).status().unwrap().success());
+    let forty_days_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 24 * 3600);
+    std::fs::File::options().write(true).open(switches.join("sim-old-switch")).unwrap().set_modified(forty_days_ago).unwrap();
     {
         use std::io::Write;
         let mut child = ways_cmd(&home, &home.join(".cache"), &state)
