@@ -24,4 +24,6 @@ curl -fsSL https://claude.ai/install.sh | bash
 
 The [Claude Code setup guide](https://code.claude.com/docs/en/setup) lists the other install methods and covers authentication.
 
-**Only for a source build:** when no prebuilt binary fits your platform, the installer builds from source. That needs `cargo` (Rust 1.89 or later, from [rustup](https://rustup.rs/)), and `way-embed` needs cmake and a C++ compiler. `make deps` in the app dir installs cmake and the compiler. See [Finishing an install](finish-install.md).
+**Log in to `gh`:** run `gh auth login`. The installer downloads the prebuilt binaries through `gh`.
+
+**Only for a source build:** when `gh` is missing or not logged in, or no prebuilt binary fits your platform, the installer builds from source. That needs `cargo` (Rust 1.89 or later, from [rustup](https://rustup.rs/)), and `way-embed` needs cmake and a C++ compiler. `make deps` in the app dir installs cmake and the compiler. See [Finishing an install](finish-install.md).

@@ -90,13 +90,13 @@ Runs on **Linux** and **macOS**. The installer needs `git`, `jq` and `make`, and
 | `jq` | JSON in hook scripts and macros | **Must install** |
 | `make` | Drives the build and the binary downloads | Usually pre-installed with a build toolchain |
 | `python3` | The `adr` and `doc` tools, chart-tool, the bash-bound guard | Stdlib only, no pip packages |
-| [`gh`](https://cli.github.com/) | GitHub API (issue sync, repo macros) | Recommended; features degrade without it |
-| `cargo` | Source build of a suite binary | Only when no prebuilt binary fits your platform |
-| `cmake`, C++ compiler | Source build of `way-embed` | Only when no prebuilt binary fits your platform; `make deps` installs them |
+| [`gh`](https://cli.github.com/), logged in | Downloads the prebuilt binaries; issue sync, repo macros | Run `gh auth login`. Without it every binary builds from source |
+| `cargo` | Source build of a suite binary | When `gh` is missing or logged out, or no prebuilt fits your platform |
+| `cmake`, C++ compiler | Source build of `way-embed` | Same as `cargo`; `make deps` installs them |
 
-`make setup` acquires each suite binary in this order: keep a working one in `bin/`, download the prebuilt release, build from source with `cargo`. Standard utilities (`bash`, `awk`, `sed`, `grep`, `find`, `timeout`, `tr`, `sort`, `wc`, `date`) are assumed present via coreutils.
+`make setup` acquires each suite binary in this order: keep a working one in `bin/`, download the prebuilt release through `gh`, build from source with `cargo`. Standard utilities (`bash`, `awk`, `sed`, `grep`, `find`, `timeout`, `tr`, `sort`, `wc`, `date`) are assumed present via coreutils.
 
-`make setup` also fetches the embedding engine and its model. If that step fails, the install still completes and ways fall back to keyword and pattern matching. [Finishing an install](docs/finish-install.md) walks through turning semantic matching on.
+`make setup` also fetches the embedding engine and its model. If that step fails, the install still completes, and [Finishing an install](docs/finish-install.md) walks through turning semantic matching on.
 
 **Platform install guides:**
 [macOS (Homebrew)](docs/prerequisites-macos.md) · [Arch Linux](docs/prerequisites-arch.md) · [Debian / Ubuntu](docs/prerequisites-debian.md) · [Fedora / RHEL](docs/prerequisites-fedora.md)
@@ -129,15 +129,15 @@ To remove it, `ways uninstall` lists what it would do: withdraw from `~/.claude`
 `core.md` loads at session start with behavioral guidance, operational rules, and a dynamic ways index. Then, as you work:
 
 1. **UserPromptSubmit** matches your message against every way, by keyword and by embedding.
-2. The **relevance judge** reviews the prompt's matches when you have stored a provider key. In `enforce` mode a way it judges irrelevant is held back; in `shadow` mode it only logs its verdicts; `off` skips it. With no key the judge is off and every matched way is injected.
-3. Matched ways are **injected** into the conversation.
+2. The **relevance judge** reviews those matches when you have stored a provider key. In `enforce` mode a way it judges irrelevant is held back; in `shadow` mode it only logs its verdicts; `off` skips it.
+3. The ways that pass are **injected** into the conversation.
 4. **PreToolUse** matches commands and file edits *before they execute* and injects the ways they trigger.
 5. **SubagentStart** injects relevant ways into subagents spawned via the Agent tool.
-6. **PostToolUse** runs a way's postchecks after an edit or command. **Stop** records Claude's last reply so the next prompt is matched against it too.
+6. **PostToolUse** runs a way's postchecks after an edit or command, and matches any message you queued while Claude was working; those matches go through the judge like a prompt's. **Stop** records Claude's last reply so the next prompt is matched against it too.
 
 A way fires when matched, then **re-discloses on its `refire:` cadence** (a fraction of the context window, ADR-126) as its salience decays. Marker files track the first fire and drive that re-disclosure state machine; they don't permanently block re-triggering.
 
-Matching has two channels: regex patterns for known keywords/commands/files, and [sentence-embedding](docs/architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) semantic scoring (all-MiniLM-L6-v2). See [matching.md](docs/hooks-and-ways/matching.md) for the full strategy. The judge sends your prompt to a hosted model. [What the judge sends and costs](docs/explanation/relevance-judge/what-the-judge-sends-and-costs.md) gives the detail, and the [install guide](docs/install-guide.md#the-relevance-judge) gives the commands.
+Matching has two channels: regex patterns for known keywords/commands/files, and [sentence-embedding](docs/architecture/ways/ADR-108-embedding-based-way-matching-with-all-minilm-l6-v2.md) semantic scoring (all-MiniLM-L6-v2). See [matching.md](docs/hooks-and-ways/matching.md) for the full strategy. The judge sends text from your conversation to a hosted model; the [install guide](docs/install-guide.md#the-relevance-judge) says what and gives the commands.
 
 `ways session ways` shows the live session state — which ways fired, when (epoch), how far back (distance), what triggered them, tree relationships, check decay curves, and a re-disclosure forecast showing when distant ways will re-fire as context fills:
 
@@ -156,7 +156,7 @@ ways settings set ways.disabled_domains itops,ea
 ways settings set gate.mode shadow
 ```
 
-User settings live in `$XDG_CONFIG_HOME/agent-ways/config.yaml`; a project can set its own in `.claude/ways.yaml`. The file form of the example above:
+User settings live in `$XDG_CONFIG_HOME/agent-ways/config.yaml`, except the `gate.*` keys, which live in `agent.yaml` beside it. A project can set its own in `.claude/ways.yaml`. `ways settings help <key>` names each key's file. The file form of the `disabled_domains` example:
 
 ```yaml
 disabled_domains:
@@ -319,7 +319,7 @@ ways update --ref REF    # pin to a branch, tag or commit and build from source
 ways update --ref main   # return to the release channel
 ```
 
-`ways update` pulls the app source, prefers prebuilt binaries over a source build, regenerates the corpus, relinks, reprojects `~/.claude` (`ways reconcile`), and ends with the judge key check. Use it rather than `make setup`, which skips binaries that already exist and would leave you on the old build. Re-running the installer one-liner does the same and is idempotent.
+`ways update` pulls the app source, prefers prebuilt binaries over a source build, regenerates the corpus, relinks, reprojects `~/.claude` (`ways reconcile`), and ends with the judge key check. Re-running the installer one-liner does the same and is idempotent. The [install guide](docs/install-guide.md#scenario-a-previous-agent-ways-install) covers the flags and older installs.
 
 A fork fetches and merges upstream in the app dir (`git fetch upstream && git merge upstream/main`), then runs `make update-binaries && ways reconcile`. The corpus rebuilds itself at the next session start.
 

@@ -36,9 +36,9 @@ Open an issue. Include which hook or way is involved, your OS/shell, and any err
 
 **Hooks and macros** are bash. Keep them portable (macOS bash 3.2 compatible — no `declare -A`, no `mapfile`, no `grep -P`), use `shellcheck` if available, and keep scripts under 200 lines where possible. Hook scripts should be thin dispatchers to the `ways` binary.
 
-**Prose in `hooks/ways/core.md`** loads into every session, so its register is held to plain construction: `scripts/check-register.sh` fails on antithesis, significance clauses and the other shapes it lists (ADR-178), and the pre-commit hook runs it. Way prose follows the same style. After rewording markdown, `scripts/check-facts.sh` lists counts, paths, links and identifiers that dropped out.
+**Prose in `hooks/ways/core.md`** loads into every session, so its register is held to plain construction: `scripts/check-register.sh` fails on antithesis, significance clauses and the other shapes it lists (ADR-178). [development.md](docs/development.md#checks) lists it with the other checks and says how to enable the pre-commit hook that runs it. Way prose follows the same style. After rewording markdown, `scripts/check-facts.sh` lists counts, paths, links and identifiers that dropped out.
 
-**The `ways` binary** is Rust (`tools/ways-cli/`). Run `make test` before submitting changes; it runs `make lint` (clippy, warnings as errors) and the unit, simulation, hook and tool suites. See [ADR-111](docs/architecture/platform/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) for the consolidation rationale.
+**The `ways` binary** is Rust (`tools/ways-cli/`). Run `make test` before submitting changes; [development.md](docs/development.md#checks) says what it runs. See [ADR-111](docs/architecture/platform/ADR-111-unified-ways-cli-single-binary-tool-consolidation.md) for the consolidation rationale.
 
 ## Clippy and Rust toolchain drift
 

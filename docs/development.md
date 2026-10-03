@@ -16,7 +16,7 @@
 git clone https://github.com/aaronsb/agent-ways ~/src/agent-ways   # or your fork
 cd ~/src/agent-ways
 make setup     # every suite binary into bin/, way-embed, the model, the corpus
-make test      # lint + smoke + unit + sim + adr + statusline + hooks
+make test      # every suite; see Checks below
 ```
 
 There is no `Cargo.toml` at the repo root. The Rust workspace is `tools/Cargo.toml`, so cargo commands take `--manifest-path tools/Cargo.toml`:
@@ -26,15 +26,15 @@ cargo build --release --manifest-path tools/Cargo.toml -p ways
 cargo test --manifest-path tools/Cargo.toml --workspace
 ```
 
-`cargo build` writes `tools/target/release/<name>`. The Makefile targets link that into `bin/<name>`, which is what the projection and the `PATH` links point at. Building from source needs Rust 1.89 or later; `scripts/check-rust.sh` checks this before every source build.
+`cargo build` writes `tools/target/release/<name>`. A Makefile source build symlinks `bin/<name>` to that file (on Linux and macOS), and the projection and the `PATH` links point at `bin/<name>`.
 
 ## Workspace crates
 
-Each suite binary in `tools/suite-bins` is a crate of the same name (`ways` is `tools/ways-cli`). The rest are libraries and dev tools.
+Each suite binary in `tools/suite-bins` is a package of the same name, so `-p <name>` builds it. The `ways` package lives in `tools/ways-cli`. The rest are libraries and dev tools.
 
 | Crate | Kind | What it holds |
 |---|---|---|
-| `ways-cli` | binary `ways` | The CLI and every hook entry point (`ways hook <event>`) |
+| `ways` (`tools/ways-cli`) | binary | The CLI and every hook entry point (`ways hook <event>`) |
 | `ways-core` | library | Way discovery, frontmatter, paths, config |
 | `ways-audit` | binary | Compliance claims and findings (ADR-151, ADR-200) |
 | `ways-agent` | binary | The resident daemon: relevance judge and key custody (ADR-196, ADR-502) |
@@ -56,7 +56,7 @@ Each suite binary in `tools/suite-bins` is a crate of the same name (`ways` is `
 ## Build plumbing
 
 - `tools/suite-bins` lists the suite binaries. The Makefile builds and links each one, `scripts/install.sh` puts each on `PATH`, and each has a `build-<name>.yml` release workflow. Add a binary here and it joins all three.
-- `make <name>` keeps a working `bin/<name>`, else runs `tools/scripts/download-prebuilt.sh <name>`, else builds with cargo. The downloader picks the newest `<name>-v*` release for your platform and verifies its checksum; `<NAME>_RELEASE` (for example `WAYS_AUDIT_RELEASE`) pins a tag. Its logic lives in `tools/scripts/prebuilt-lib.sh`.
+- `make <name>` keeps a working `bin/<name>`, else runs `tools/scripts/download-prebuilt.sh <name>`, else builds with cargo. The downloader needs a logged-in `gh`. It picks the newest `<name>-v*` release for your platform and checks it against the release's `checksums.txt`, installing with a warning when the release has none; `<NAME>_RELEASE` (for example `WAYS_AUDIT_RELEASE`) pins a tag. Its logic lives in `tools/scripts/prebuilt-lib.sh`.
 - `make <name>-rebuild` forces a source build. `make update-binaries` rebuilds every suite binary and `way-embed`.
 - `make deps` installs cmake, a C++ compiler and git through the system package manager, with `sudo`. Only `way-embed` needs them.
 
@@ -66,10 +66,18 @@ Each suite binary in `tools/suite-bins` is a crate of the same name (`ways` is `
 |---|---|
 | `make lint` | clippy on the workspace, warnings as errors |
 | `make test` | lint, then the smoke, unit, simulation, ADR tool, statusline and hook suites |
-| `scripts/check-register.sh` | `hooks/ways/core.md` has none of the register shapes ADR-178 bans; `--corpus` adds an advisory report over every way. The pre-commit hook runs it |
+| `scripts/check-register.sh` | `hooks/ways/core.md` has none of the register shapes ADR-178 bans; `--corpus` adds an advisory report over every way |
 | `scripts/check-facts.sh [REV]` | Counts, paths, identifiers, headings and links that left a markdown file you reworded. Advisory |
 | `scripts/check-portability.sh` | CRLF endings, non-portable shebangs, hard-coded home paths |
-| `scripts/check-rust.sh` | Rust 1.89 or later before a source build |
+| `scripts/check-rust.sh` | Rust 1.89 or later; every source build runs it first |
+
+`hooks/pre-commit` scans staged files for secrets and runs `check-portability.sh` and `check-register.sh`. Git does not run it until you link it in your clone:
+
+```bash
+ln -s ../../hooks/pre-commit .git/hooks/pre-commit
+```
+
+It needs `python3`, `bc` and a `grep` with `-P` (GNU grep; on macOS, `brew install grep` and put its gnubin first on `PATH`).
 
 To look at a screen without a terminal of your own:
 
@@ -103,13 +111,13 @@ See `tools/tui-harness/README.md` for every command.
    ways reconcile --source ~/src/agent-ways --dest ~/.claude
    ```
 
-   This projects hooks, ways, skills and agents from the dev tree. Binaries are projected from `<source>/bin/`, so run `make ways-rebuild` (or `make update-binaries`) in the dev checkout first; a bare `cargo build` leaves `bin/` on the old binary. Revert by reconciling from the app: `ways reconcile --source $XDG_DATA_HOME/agent-ways --dest ~/.claude`.
+   This projects hooks, ways, skills and agents from the dev tree. Binaries are projected from `<source>/bin/`. After `make ways-rebuild` (or `make update-binaries`), `bin/<name>` is a symlink into `tools/target/release/`, so later `cargo build --release` runs reach the projection too. A `bin/<name>` that `make setup` downloaded stays the prebuilt until you run a `-rebuild` target. Revert by reconciling from the app: `ways reconcile --source $XDG_DATA_HOME/agent-ways --dest ~/.claude`.
 
 3. **Worktree (parallel branches).** `git worktree add` from your standalone clone, never from `$XDG_DATA/agent-ways`. A worktree hung off the app dir ties your branches to the install, and a reinstall that replaces the app dir orphans it.
 
 ## Conventions
 
-- **ADR-driven:** architectural changes get an ADR first (`docs/scripts/adr new …`); reference the ADR number in the branch and commits. Status flips to `Accepted` when the implementation lands, not when the ADR is written.
+- **ADR-driven:** architectural changes get an ADR first (`docs/scripts/adr new …`); reference the ADR number in the branch and commits. Status flips to `Accepted` once the implementation lands.
 - **Branch → PR → review → merge.** Even solo. The `code-reviewer` pass has caught real "the code claims X but does Y" bugs that green tests didn't.
 - **Releases are per component, in two steps** (ADR-150). `make cut-release COMPONENT=<name> LEVEL=patch|minor|major` opens a version-bump PR. After it merges, `make publish-release COMPONENT=<name> PUSH=1` tags it, and CI builds the platform artifacts and the GitHub Release. Components are the six suite binaries. The `release` skill walks through it.
 - **Paths have one location.** `paths::cache_root()` and `events_log()` resolve to the XDG location only; the pre-1.0 fallbacks were removed (ADR-506). Do not add a read of an old name or path for compatibility.

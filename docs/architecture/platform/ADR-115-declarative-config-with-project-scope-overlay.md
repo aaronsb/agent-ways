@@ -153,3 +153,7 @@ Appended after acceptance; nothing above is changed. attend's settings moved ont
 The overlay's `+name:` (add a sensor) and `-name:` (switch one off) prefixes are retired with no compatibility reader (ADR-506). A sensor of your own is any name with a `script`, and `name: {enabled: false}` switches a sensor off in a project. The layering itself (user file, then the project's `.claude/attend.yaml`, over the defaults) is unchanged.
 
 An old prefixed entry is a finding that closes its file's `sensors:` section: every built-in sensor and every sensor that file names reads off, and nothing else in the section is read, until the name is edited by hand. `ways settings fix` refuses to repair a name. This was the coordinator's decision in the review of PR #733: a `-name:` entry may be an off-switch the schema cannot read, so it fails closed, following the "whole file fails closed" rule in the ADR-503 addendum. The release notes in `docs/migration-1.0.md` say how to move each form by hand.
+
+## Note, 2026-10-03: where the release notes went
+
+Appended; nothing above is changed. `docs/migration-1.0.md` was deleted, and the attend part of its release notes was never in the copy kept at the `ways-v1.8.3` tag. [attend's configuration page](../../attend-and-monitor/configuration.md) now says how each retired form reads and how to rewrite it.

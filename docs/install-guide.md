@@ -45,9 +45,9 @@ Claude Code relocated through `CLAUDE_CONFIG_DIR` is a second config directory. 
 
 The judge decides which of the ways matched on your prompt are injected ([ADR-196](architecture/ways/ADR-196-a-yes-no-relevance-gate-on-way-injection-judged-by-a-hosted-model.md)). It runs in `ways-agent`, a per-user daemon that holds the key, and it calls a hosted model.
 
-**What leaves your machine.** On each prompt that matches at least one way, `ways-agent` sends one request to the provider whose key you stored: Anthropic (`api.anthropic.com`) or OpenRouter (`openrouter.ai`). With the shipped profiles the request carries your prompt and, for each matched way (up to eight), its path in the ways tree and its `description`. Claude's last reply is added only when a profile sets `turns` to 2 or more. The session id and project path are never sent, and the key check sends no conversation text. Ways matched on commands and file edits are never judged. [What the judge sends and costs](explanation/relevance-judge/what-the-judge-sends-and-costs.md) gives the detail.
+**What leaves your machine.** For each prompt, and each message you queue while Claude works, that matches at least one way, `ways-agent` sends one request to the provider whose key you stored: Anthropic (`api.anthropic.com`) or OpenRouter (`openrouter.ai`). With the shipped profiles the request carries that text and, for each matched way, its path in the ways tree and its `description`. Ways matched on commands and file edits are never judged. [What the judge sends and costs](explanation/relevance-judge/what-the-judge-sends-and-costs.md) lists every field, what is never sent, and the cost.
 
-**Defaults.** The judge runs once a key file is stored, and its mode defaults to `enforce`: a way it judges irrelevant is held back. With no key the gate is off and every matched way is injected. If a call fails, the matcher's decision stands. Only the key file counts: the agent never reads `$ANTHROPIC_API_KEY` or `$OPENROUTER_API_KEY`.
+**Defaults.** The judge runs once a stored key passes its check, and its mode defaults to `enforce`: a way it judges irrelevant is held back. With no key the gate is off and every matched way is injected. If a call fails, the matcher's decision stands. Only the key file counts: an agent started by a hook never reads `$ANTHROPIC_API_KEY` or `$OPENROUTER_API_KEY`.
 
 **Setup.** The installer and `ways update` end by checking each stored key with a call that costs nothing. When none passes, they say so and, on a terminal, offer to add an Anthropic or OpenRouter key; the installer reads that answer from `/dev/tty`, so it works under `curl … | bash`. Off a terminal they print the fix instead. `ways --help` repeats the warning until the judge works or you turn it off.
 
@@ -58,7 +58,7 @@ ways settings set gate.mode shadow         # judge and log, block nothing
 ways settings set gate.mode off            # no calls at all
 ```
 
-`shadow` still calls and bills the provider. Only `gate.mode off` or removing the key (`ways agent key remove`) stops the calls.
+`shadow` still calls and bills the provider. Only `gate.mode off` or removing the key (`ways agent key remove`) stops the calls. The `gate.*` settings live in `$XDG_CONFIG_HOME/agent-ways/agent.yaml`.
 
 ## Scenario: you already have a `~/.claude` you value
 
@@ -91,7 +91,7 @@ ways update --ref main   # return to the release channel
 | `${XDG_CONFIG_HOME:-$HOME/.config}/ways/config.yaml` | Copy its keys into `agent-ways/config.yaml`; a key already there wins. Do not `mv` it over that file, which holds your `targets:`. |
 | `~/.claude/.claude-upstream` | Nothing reads it. Delete it. |
 
-attend's config files keep their paths and are now read through the settings schema. `ways settings lint` names any old form by file and line, and `ways settings fix attend.<section>` repairs most of them. The `claude-projects` script is now `ways projects`, with the same subcommands.
+attend's config files keep their paths and are now read through the settings schema. `ways settings lint` names any old form by file and line, and `ways settings fix attend.<section>` repairs most of them. [attend's configuration page](attend-and-monitor/configuration.md) says how each retired form reads now, including the `+name:` and `-name:` sensor prefixes. The `claude-projects` script is now `ways projects`, with the same subcommands.
 
 **A pre-1.0 in-place clone** (`~/.claude` *is* the agent-ways git repo). Do not `git pull` it. The migrator ships only at the `ways-v1.8.3` tag; its [migration guide](https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md) at that tag has the steps. [Install topologies](explanation/install-topologies/) records how the layout got here.
 
@@ -130,7 +130,7 @@ If you're actively *developing* agent-ways, use a standalone dev checkout instea
 
 ## What gets downloaded
 
-`make setup` acquires binaries and the embedding model. Downloaded artifacts live in XDG locations, outside `~/.claude/`. The suite binaries, `way-embed` and the model are checked against a SHA-256 checksum.
+`make setup` acquires binaries and the embedding model. Downloads go through `gh`, so it must be installed and logged in (`gh auth login`); without it every binary builds from source. Downloaded artifacts live in XDG locations, outside `~/.claude/`. A suite binary or `way-embed` is checked against the release's `checksums.txt` when the release has one, and installs with a warning when it does not. The model is checked against a SHA-256 pinned in `tools/way-embed/download-model.sh`.
 
 | Artifact | Location | Source | Required |
 |----------|----------|--------|----------|
