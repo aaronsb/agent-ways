@@ -124,6 +124,8 @@ zero dependencies, and matches the project's existing poll style. Rejected:
 select that `attend-chat` solved only by bringing in an async runtime; its
 large-tree advantage does not apply to two append-only files.
 
+> **Amendment (2026-10-02).** The fixed ~100–250 ms refresh is replaced by a stat backoff, on the operator's direction in #780 (PR #796; `tools/ways-cli/src/cmd/introspect/live.rs`). The stat gate and the rejection of `notify` stand. A followed replay states the event log and the session's transcript 2 s after a write, doubling while quiet to a 60 s ceiling. A replay of a quiet session watches its transcript on the same backoff and goes live on the first write. The sessions list states each transcript the same way and stops re-stating one last written more than a day ago. A replay's own stream is never cut off. Replay and live are one view; `introspect live` opens it following.
+
 ### 4. Command surface and scoping semantics
 
 The surfaces unify under a single **`ways introspect <mode>`** command (ADR-111

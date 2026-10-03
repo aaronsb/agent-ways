@@ -1066,3 +1066,85 @@ fn live_golden_frames() {
     check(&mut g, "suppressed", &mut s);
     g.finish();
 }
+
+/// A replay opened on a quiet session watches its transcript and goes live
+/// on the first write: paused when the reader is on an earlier frame,
+/// following when on the newest.
+#[test]
+fn a_quiet_replay_goes_live_when_its_session_is_written() {
+    for (keys, following) in [(vec![KeyCode::Right], false), (vec![KeyCode::End], true)] {
+        let now = fixed_now();
+        let probe = Rc::new(Cell::new(Probe { len: 1, mtime_ms: NOW_MS - 3_600_000 }));
+        let (n, p) = (now.clone(), probe.clone());
+        let mut r = replay(false);
+        r.follow = Some(Follow::watch(Rc::new(move || Some(p.get())), Rc::new(move || n.get())));
+        let mut s = showing(r, terminal(), Shape::PLAIN);
+        press(&mut s, &keys);
+        assert_eq!(s.tick_every(), Some(SAMPLE_TICK), "a quiet replay watches its transcript");
+        // Quiet an hour: the watch states once a minute.
+        for _ in 0..90 {
+            now.set(now.get() + 1_000);
+            s.tick();
+        }
+        assert!(!s.replay.as_ref().unwrap().play.is_live());
+        assert_eq!(s.replay.as_ref().unwrap().follow.as_ref().unwrap().stats(), 2, "one stat at open, one a minute on");
+        probe.set(Probe { len: 2, mtime_ms: now.get() });
+        for _ in 0..60 {
+            now.set(now.get() + 1_000);
+            s.tick();
+        }
+        let r = s.replay.as_ref().unwrap();
+        assert!(r.play.is_live(), "the write woke it");
+        assert_eq!(r.play.following(), following, "{keys:?}");
+        let t = text(&render(&mut s, 120, 40));
+        let want = if following { "● LIVE ·" } else { "● LIVE paused" };
+        assert!(t.contains(want), "{t}");
+    }
+}
+
+/// Enter on a row the list marks live, its session open in a replay that
+/// was quiet when it opened, shows that replay live.
+#[test]
+fn enter_on_a_live_row_wakes_the_replay_it_left() {
+    let now = fixed_now();
+    let written = Rc::new(Cell::new(NOW_MS - 3_600_000));
+    let w = written.clone();
+    let stat: super::live::Stat = Rc::new(move |p: &Path| (p.file_name()?.to_str()? == SESSION).then(|| Probe { len: w.get(), mtime_ms: w.get() }));
+    let mut s = sessions();
+    for x in &mut s {
+        x.transcript_path = Some(std::path::PathBuf::from(format!("/t/{}", x.id)));
+    }
+    let n = now.clone();
+    let p = Picker::new(s, PROJECT.into()).watching(stat, Rc::new(move || n.get()));
+    let open = Box::new(|_: &str, live: bool| Ok(replay(live)));
+    let mut s = Introspect::picking(p, open, no_spend(), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Enter]);
+    assert!(!text(&render(&mut s, 120, 40)).contains("LIVE"), "opened quiet");
+    press(&mut s, &[KeyCode::Esc]);
+    written.set(now.get() + 1_000);
+    for _ in 0..61 {
+        now.set(now.get() + 1_000);
+        s.tick();
+    }
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("· 1 live") && t.contains("⏎ follow"), "{t}");
+    press(&mut s, &[KeyCode::Enter]);
+    let t = text(&render(&mut s, 120, 40));
+    assert!(t.contains("● LIVE paused") && t.contains("1/4"), "the replay as it was left, live now: {t}");
+    press(&mut s, &[KeyCode::End]);
+    assert!(text(&render(&mut s, 120, 40)).contains("● LIVE ·"));
+}
+
+/// At 80 columns the suppression count goes before the judged-out count.
+#[test]
+fn the_suppression_count_drops_before_the_judged_out_count() {
+    let mut events = session_events();
+    events.push(WayEvent { ts: "2026-07-03T16:55:02Z".into(), event: "injection_suppressed".into(), switch: "session".into(), lane: "task".into(), ..Default::default() });
+    let mut s = showing(replay_of(events, false), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::Right, KeyCode::Right]);
+    let head = |s: &mut Introspect, w| text(&render(s, w, 25)).lines().nth(2).unwrap_or("").to_string();
+    let narrow = head(&mut s, 80);
+    assert!(narrow.contains("◇ injected · 1 judged out") && !narrow.contains("suppressed"), "{narrow}");
+    let wide = head(&mut s, 120);
+    assert!(wide.contains("⊝ 1 suppressed") && wide.contains("1 judged out"), "{wide}");
+}

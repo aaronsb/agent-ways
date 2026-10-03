@@ -9,7 +9,9 @@
 //! all while the screen is open, so a month of old sessions costs one stat
 //! each. A replay that follows a live session samples the event log and
 //! the session's transcript on the same backoff, so an idle follow costs no
-//! more than the list.
+//! more than the list. A replay of a quiet session within the cutoff
+//! watches its transcript the same way, and follows once it is written.
+//! A replay's stream is one file or two, so it is never cut off.
 //!
 //! The clock and the stat are passed in, so a test counts the stats a
 //! schedule makes without waiting on a real one.
@@ -83,6 +85,9 @@ pub(crate) struct Backoff {
     last: Option<Probe>,
     interval_ms: u64,
     next_ms: Option<u64>,
+    /// A replay's schedule: never cut off, and a file missing at one stat
+    /// is a quiet stat, not the end of the schedule.
+    endless: bool,
 }
 
 impl Backoff {
@@ -91,16 +96,24 @@ impl Backoff {
     /// the ceiling: a file quiet for an hour starts at the ceiling.
     pub(crate) fn start(probe: Option<Probe>, now: u64) -> Backoff {
         let age = probe.map_or(0, |p| now.saturating_sub(p.mtime_ms));
-        let mut b = Backoff { last: probe, interval_ms: age.clamp(ms(RESTAT_MIN), ms(RESTAT_MAX)), next_ms: None };
+        let mut b = Backoff { last: probe, interval_ms: age.clamp(ms(RESTAT_MIN), ms(RESTAT_MAX)), next_ms: None, endless: false };
         b.schedule(now);
         b
     }
 
     fn schedule(&mut self, now: u64) {
         self.next_ms = match self.last {
+            _ if self.endless => Some(now + self.interval_ms),
             Some(p) if now.saturating_sub(p.mtime_ms) <= ms(RESTAT_CUTOFF) => Some(now + self.interval_ms),
             _ => None,
         };
+    }
+
+    /// The same schedule, never cut off: a replay's.
+    fn endless(mut self, now: u64) -> Backoff {
+        self.endless = true;
+        self.schedule(now);
+        self
     }
 
     /// Whether a stat is due at `now`.
@@ -120,7 +133,9 @@ impl Backoff {
     pub(crate) fn observe(&mut self, probe: Option<Probe>, now: u64) -> bool {
         let wrote = probe.is_some() && probe != self.last;
         self.interval_ms = if wrote { ms(RESTAT_MIN) } else { (self.interval_ms * 2).min(ms(RESTAT_MAX)) };
-        self.last = probe;
+        if probe.is_some() || !self.endless {
+            self.last = probe;
+        }
         self.schedule(now);
         wrote
     }
@@ -213,8 +228,9 @@ impl Sampler {
     }
 }
 
-/// A replay that follows a live session: the event log's stat on the
-/// backoff, and the probe and clock it runs on.
+/// A replay's sources under stat on the backoff, and the probe and clock it
+/// runs on: a live session's event log and transcript, which it follows,
+/// or a quiet session's transcript, which it watches for a write.
 pub(crate) struct Follow {
     backoff: Backoff,
     probe: Rc<dyn Fn() -> Option<Probe>>,
@@ -229,8 +245,28 @@ impl Follow {
         let now = clock();
         let mut backoff = Backoff::start(probe(), now);
         backoff.interval_ms = ms(RESTAT_MIN);
-        backoff.schedule(now);
+        Follow { backoff: backoff.endless(now), probe, clock, stats: 1 }
+    }
+
+    /// Watching a quiet source: its first interval is its age between the
+    /// floor and the ceiling, so an idle watch costs a stat a minute at
+    /// most, as its row on the list does.
+    pub(crate) fn watch(probe: Rc<dyn Fn() -> Option<Probe>>, clock: Clock) -> Follow {
+        let now = clock();
+        let backoff = Backoff::start(probe(), now).endless(now);
         Follow { backoff, probe, clock, stats: 1 }
+    }
+
+    /// A watch on a quiet session's transcript, which a write wakes; none
+    /// when there is no transcript or it was last written before the cutoff,
+    /// as the list does not re-state it either.
+    pub(crate) fn waking(transcript: Option<PathBuf>, stat: Stat, clock: Clock) -> Option<Follow> {
+        let path = transcript?;
+        let first = stat(&path)?;
+        if clock().saturating_sub(first.mtime_ms) > ms(RESTAT_CUTOFF) {
+            return None;
+        }
+        Some(Follow::watch(Rc::new(move || stat(&path)), clock))
     }
 
     /// A session's sources as one probe: the event log's, which hold its
@@ -439,6 +475,45 @@ mod tests {
 
     /// The follow re-states the event log on the same backoff, and reports
     /// a write once.
+    /// A follow on sources quiet for two days is not cut off: it states at
+    /// the ceiling and sees the session write again. A source missing at
+    /// one stat is a quiet stat, and the follow goes on.
+    #[test]
+    fn a_follow_on_sources_quiet_two_days_still_sees_a_write() {
+        let t0 = 1_000 * DAY;
+        let now = Rc::new(Cell::new(t0));
+        let probe: Rc<Cell<Option<Probe>>> = Rc::new(Cell::new(Some(Probe { len: 1, mtime_ms: t0 - 2 * DAY })));
+        let (n, p) = (now.clone(), probe.clone());
+        let mut f = Follow::new(Rc::new(move || p.get()), Rc::new(move || n.get()));
+        assert!(f.watching());
+        let mut seen = Vec::new();
+        for sec in 1..=300u64 {
+            now.set(t0 + sec * S);
+            match sec {
+                100 => probe.set(None),
+                110 => probe.set(Some(Probe { len: 1, mtime_ms: t0 - 2 * DAY })),
+                200 => probe.set(Some(Probe { len: 2, mtime_ms: t0 + sec * S })),
+                _ => {}
+            }
+            if f.poll() {
+                seen.push(sec);
+            }
+            assert!(f.watching(), "cut off at {sec}");
+        }
+        assert_eq!(seen.len(), 1, "the write once, not the file coming back: {seen:?}");
+        assert!((200..=260).contains(&seen[0]), "{seen:?}");
+
+        // A watch starts at its source's age and is not cut off either; a
+        // transcript past the cutoff, or none, gets no watch.
+        let stat_at = |mtime: u64| -> Stat { Rc::new(move |_| Some(Probe { len: 1, mtime_ms: mtime })) };
+        let clock: Clock = Rc::new(move || t0);
+        let w = Follow::waking(Some(PathBuf::from("/t")), stat_at(t0 - 3600 * S), clock.clone()).expect("an hour quiet: watched");
+        assert_eq!(w.backoff().interval(), RESTAT_MAX);
+        assert!(Follow::waking(Some(PathBuf::from("/t")), stat_at(t0 - 2 * DAY), clock.clone()).is_none());
+        assert!(Follow::waking(None, stat_at(t0), clock.clone()).is_none());
+        assert!(Follow::waking(Some(PathBuf::from("/t")), Rc::new(|_| None), clock).is_none());
+    }
+
     #[test]
     fn the_follow_polls_on_the_backoff() {
         let t0 = 1_000 * DAY;

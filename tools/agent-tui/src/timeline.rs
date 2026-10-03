@@ -128,6 +128,15 @@ impl Playback {
         }
     }
 
+    /// The source has started writing: a replay becomes live. At the newest
+    /// frame it follows; reviewing an earlier one, it stays there, paused,
+    /// until the end or the toggle resumes the follow.
+    pub fn go_live(&mut self) {
+        self.playing = false;
+        self.following = self.pos >= self.last();
+        self.live = true;
+    }
+
     pub fn faster(&mut self) {
         self.speed = (self.speed + 1).min(SPEEDS.len() - 1);
     }
@@ -305,6 +314,25 @@ mod tests {
         assert_eq!(p.speed_label(), "2.0s");
         assert_eq!(Playback::replay(1).with_speed_ms(50).speed_label(), "0.1s", "faster than every speed is the fastest");
         assert_eq!(Playback::replay(1).with_speed_ms(5000).speed_label(), "2.0s", "slower than every speed is the slowest");
+    }
+
+    #[test]
+    fn a_replay_goes_live_following_at_the_end_and_paused_before_it() {
+        let mut at_end = Playback::replay(3);
+        at_end.end();
+        at_end.go_live();
+        assert!(at_end.is_live() && at_end.following());
+        at_end.resize(4);
+        assert_eq!(at_end.pos(), 3, "a frame appended is followed");
+
+        let mut back = Playback::replay(3);
+        back.toggle();
+        back.go_live();
+        assert!(back.is_live() && !back.following() && !back.playing(), "reviewing frame 1: paused");
+        back.resize(4);
+        assert_eq!(back.pos(), 0);
+        back.end();
+        assert!(back.following() && back.pos() == 3, "End resumes the follow");
     }
 
     fn glyphs(l: &Line) -> String {
