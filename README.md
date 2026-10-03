@@ -100,7 +100,7 @@ flowchart LR
     CC -->|MCP tools| M
     AT <--> B
     CH <--> B
-    AU -->|"project or core root,<br>events.jsonl"| R
+    AU -->|"project or core root"| R
 ```
 
 The judge is the only part that sends conversation text off your machine, and only when you have stored a provider key. [docs/architecture.md](docs/architecture.md) draws the hook flow, the matching pipeline and the [per-agent disclosure state machine](docs/architecture.md#disclosure-cadence).
