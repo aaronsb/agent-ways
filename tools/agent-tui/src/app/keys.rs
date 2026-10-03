@@ -176,6 +176,7 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {}
                 _ => self.mode = Mode::DiscardTab { tab },
             },
+            Mode::Guard { confirm } if self.owns_text() => return self.guard_beside_text(k, confirm),
             Mode::Guard { confirm: false } => match k.code {
                 KeyCode::Char('r') => {
                     self.clear_filter();
@@ -199,8 +200,8 @@ impl App {
                     self.discard_all();
                     return false;
                 }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.mode = Mode::Guard { confirm: false },
-                _ => self.mode = Mode::Guard { confirm: true },
+                // Any key but y disarms it: D has to be followed by y.
+                _ => self.mode = Mode::Guard { confirm: false },
             },
             Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),

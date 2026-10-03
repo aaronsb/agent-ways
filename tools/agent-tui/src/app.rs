@@ -26,7 +26,7 @@ use std::io;
 use std::time::Duration;
 
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    self, DisableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
     MouseEventKind,
 };
 use ratatui::crossterm::execute;
@@ -296,6 +296,7 @@ impl App {
     /// bar, its content between the bars, its keys on the footer.
     pub fn with_pane(title: impl Into<String>, pane: impl pane::Pane) -> Self {
         let mut app = App::new(title, Vec::new());
+        app.mouse = pane.mouse_default();
         app.pane = Some(Box::new(pane));
         app.msg.clear();
         app
@@ -409,9 +410,6 @@ impl App {
     /// One tick of a running apply. A finished run is closed out on the tick
     /// after its last state, so the last glyph is seen.
     pub fn tick(&mut self) {
-        if let Some(p) = &mut self.pane {
-            p.tick();
-        }
         self.tick_reading();
         self.open_held();
         let Mode::Review { run: Some(run), .. } = &mut self.mode else { return };

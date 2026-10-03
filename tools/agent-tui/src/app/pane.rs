@@ -98,6 +98,20 @@ pub enum Keyed {
     Pass,
 }
 
+/// What a pane asks the shell to open over it ([`Pane::take_open`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Open {
+    /// Text to read, scrolled in the response modal. `command` is the
+    /// command line that prints the same text, which the modal names, so
+    /// the screen stays a view over a command.
+    Report { label: String, command: String, text: String },
+    /// A failure, in the response modal as an error.
+    Error { label: String, command: String, text: String },
+    /// A picker over `options`, `chosen` marked; what is picked comes back
+    /// through [`Pane::picked`] under `id`. Esc closes it with nothing.
+    Pick { id: String, title: String, options: Vec<String>, multi: bool, chosen: Vec<String> },
+}
+
 /// What an application supplies for a screen that is not a tree. `Any`
 /// lets the application reach its own pane back through
 /// [`crate::App::pane_ref`].
@@ -149,6 +163,22 @@ pub trait Pane: Any {
     fn owns_text(&self) -> bool {
         false
     }
+
+    /// Whether the shell reports the mouse when the screen opens. With it
+    /// on, the terminal's own selection and middle-click paste need Shift
+    /// or the toggle; a pane people copy text from may start with it off.
+    fn mouse_default(&self) -> bool {
+        true
+    }
+
+    /// Something to open over the pane: the response modal or a picker.
+    /// The shell asks after each key, click and tick that reaches the pane.
+    fn take_open(&mut self) -> Option<Open> {
+        None
+    }
+
+    /// The picker opened under `id` set `values`.
+    fn picked(&mut self, _id: &str, _values: Vec<String>) {}
 
     /// Work that quitting would lose, named for the exit guard.
     fn unsaved(&self) -> Option<String> {

@@ -254,12 +254,120 @@ fn hung_up() -> bool {
     false
 }
 
+/// Mouse reporting for clicks, the wheel and drags, without the any-motion
+/// mode crossterm's `EnableMouseCapture` adds: no screen here needs a bare
+/// move, and with it every move of the mouse is an event and a frame.
+/// `DisableMouseCapture` turns this off with the rest.
+#[derive(Debug, Clone, Copy)]
+pub struct EnableButtonMouse;
+
+impl ratatui::crossterm::Command for EnableButtonMouse {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        // Press and release, then drags, in the SGR encoding.
+        f.write_str(concat!(ratatui::crossterm::csi!("?1000h"), ratatui::crossterm::csi!("?1002h"), ratatui::crossterm::csi!("?1006h")))
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        ratatui::crossterm::Command::execute_winapi(&ratatui::crossterm::event::EnableMouseCapture)
+    }
+
+    #[cfg(windows)]
+    fn is_ansi_code_supported(&self) -> bool {
+        false
+    }
+}
+
+/// One periodic job of the run loop: when it last ran.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Clock {
+    last: Instant,
+}
+
+impl Clock {
+    fn new(now: Instant) -> Clock {
+        Clock { last: now }
+    }
+
+    /// How long until it is due every `every`; zero when it is.
+    fn left(&self, every: Duration, now: Instant) -> Duration {
+        every.saturating_sub(now.duration_since(self.last))
+    }
+
+    /// Whether it is due at `now`, taking it when it is.
+    fn take(&mut self, every: Duration, now: Instant) -> bool {
+        if now.duration_since(self.last) >= every {
+            self.last = now;
+            return true;
+        }
+        false
+    }
+
+    /// Not running: its first run comes a whole period after it starts.
+    fn idle(&mut self, now: Instant) {
+        self.last = now;
+    }
+}
+
+/// The run loop's three periodic jobs, each on its own clock: the pane's
+/// tick, the shell's tick while an apply or a reading runs, and the watch
+/// for files changed on disk while none does. One never waits on another.
+pub(crate) struct Schedule {
+    pane: Clock,
+    shell: Clock,
+    watch: Clock,
+}
+
+/// What is due on one pass of the loop.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Due {
+    pub(crate) pane: bool,
+    pub(crate) shell: bool,
+    pub(crate) watch: bool,
+}
+
+impl Schedule {
+    pub(crate) fn new(now: Instant) -> Schedule {
+        Schedule { pane: Clock::new(now), shell: Clock::new(now), watch: Clock::new(now) }
+    }
+
+    /// How long to wait for input before the next job is due, at most
+    /// [`POLL`], so a signal is seen in time.
+    pub(crate) fn wait(&self, pane: Option<Duration>, busy: bool, now: Instant) -> Duration {
+        let mut wait = POLL;
+        if let Some(every) = pane {
+            wait = wait.min(self.pane.left(every, now));
+        }
+        wait.min(if busy { self.shell.left(TICK, now) } else { self.watch.left(WATCH, now) })
+    }
+
+    /// The jobs due at `now`, taken. `pane` is how often the pane ticks,
+    /// `None` never; `busy` whether an apply or a reading runs.
+    pub(crate) fn due(&mut self, pane: Option<Duration>, busy: bool, now: Instant) -> Due {
+        let pane = match pane {
+            Some(every) => self.pane.take(every, now),
+            None => {
+                self.pane.idle(now);
+                false
+            }
+        };
+        let (shell, watch) = if busy {
+            self.watch.idle(now);
+            (self.shell.take(TICK, now), false)
+        } else {
+            self.shell.idle(now);
+            (false, self.watch.take(WATCH, now))
+        };
+        Due { pane, shell, watch }
+    }
+}
+
 impl App {
     /// Run until quit or a signal. Mouse capture follows `self.mouse`; the
     /// guard the caller holds turns it off with the rest.
     pub fn run(mut self, term: &mut DefaultTerminal, signals: &Signals) -> io::Result<Session> {
         let mut captured = false;
-        let (mut last_tick, mut last_watch, mut last_pane) = (Instant::now(), Instant::now(), Instant::now());
+        let mut schedule = Schedule::new(Instant::now());
         loop {
             if let Some(sig) = signals.caught() {
                 signals.take_up();
@@ -268,15 +376,16 @@ impl App {
             }
             if self.mouse != captured {
                 if self.mouse {
-                    execute!(io::stdout(), EnableMouseCapture)?;
+                    execute!(io::stdout(), EnableButtonMouse)?;
                 } else {
                     execute!(io::stdout(), DisableMouseCapture)?;
                 }
                 captured = self.mouse;
             }
+            let wait = schedule.wait(self.pane_tick_every(), self.applying(), Instant::now());
             // A terminal that can no longer be drawn on or read from has hung
             // up: end as on SIGHUP.
-            let event = match term.draw(|f| self.draw(f)).and_then(|_| event::poll(POLL)) {
+            let event = match term.draw(|f| self.draw(f)).and_then(|_| event::poll(wait)) {
                 Ok(true) => event::read().map(Some),
                 Ok(false) => Ok(None),
                 Err(e) => Err(e),
@@ -295,26 +404,78 @@ impl App {
                 Ok(Some(Event::Mouse(m))) => self.mouse(m),
                 Ok(_) => {}
             }
-            // Timed, not on an idle poll: a moving mouse sends events all the
-            // time and would otherwise starve both.
-            if let Some(every) = self.pane_tick_every() {
-                if last_pane.elapsed() >= every {
-                    self.tick();
-                    last_pane = Instant::now();
-                }
-            } else if self.applying() {
-                if last_tick.elapsed() >= TICK {
-                    self.tick();
-                    last_tick = Instant::now();
-                }
-            } else if last_watch.elapsed() >= WATCH {
+            // Timed, not on an idle poll: input arriving all the time would
+            // otherwise starve them.
+            let due = schedule.due(self.pane_tick_every(), self.applying(), Instant::now());
+            if due.pane {
+                self.tick_pane();
+            }
+            if due.shell {
+                self.tick();
+            }
+            if due.watch {
                 self.watch();
-                last_watch = Instant::now();
             }
         }
     }
 
     fn session(self, signal: Option<i32>) -> Session {
         Session { roots: self.roots, queue: self.queue, signal }
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::*;
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    /// A pane ticking every 100ms while an apply runs (the shell's tick is
+    /// 150ms): each is due on its own clock, neither riding the other's.
+    #[test]
+    fn a_pane_and_an_apply_tick_on_their_own_clocks() {
+        let t0 = Instant::now();
+        let mut s = Schedule::new(t0);
+        let pane = Some(ms(100));
+        assert_eq!(s.due(pane, true, t0 + ms(100)), Due { pane: true, shell: false, watch: false });
+        assert_eq!(s.due(pane, true, t0 + ms(150)), Due { pane: false, shell: true, watch: false });
+        assert_eq!(s.due(pane, true, t0 + ms(200)), Due { pane: true, shell: false, watch: false });
+    }
+
+    /// The watch runs while a pane ticks and nothing is applying.
+    #[test]
+    fn the_watch_runs_beside_a_ticking_pane() {
+        let t0 = Instant::now();
+        let mut s = Schedule::new(t0);
+        let (mut ticked, mut watched) = (0, 0);
+        for i in 1..=12 {
+            let d = s.due(Some(ms(100)), false, t0 + ms(100 * i));
+            ticked += usize::from(d.pane);
+            watched += usize::from(d.watch);
+        }
+        assert_eq!((ticked, watched), (12, 1));
+    }
+
+    /// A pane that never ticks is not ticked while an apply runs.
+    #[test]
+    fn a_pane_with_no_tick_is_never_due() {
+        let t0 = Instant::now();
+        let mut s = Schedule::new(t0);
+        for i in 1..=20 {
+            assert!(!s.due(None, true, t0 + ms(50 * i)).pane);
+        }
+    }
+
+    /// The loop waits for input only until the soonest job is due, and
+    /// never past POLL, so a signal is seen in time.
+    #[test]
+    fn the_wait_is_until_the_soonest_job() {
+        let t0 = Instant::now();
+        let s = Schedule::new(t0);
+        assert_eq!(s.wait(Some(ms(40)), false, t0 + ms(10)), ms(30));
+        assert_eq!(s.wait(None, true, t0 + ms(100)), ms(50));
+        assert_eq!(s.wait(None, false, t0), POLL);
     }
 }

@@ -42,7 +42,7 @@ pub use adapter::{Adapter, Unwired, Write};
 pub use app::flow;
 pub use app::theme;
 pub use app::term::{clear_job_group, kill_group, kill_job_group, register_job_group, restore, Signals, TermGuard};
-pub use app::pane::{binding_conflicts, Binding, Keyed, Pane, PaneTab, Tone};
+pub use app::pane::{binding_conflicts, Binding, Keyed, Open, Pane, PaneTab, Tone};
 pub use app::{App, Session, Themes};
 /// The ratatui this crate draws with, so an application names its types
 /// (key events, buffers) without a second dependency to keep in step.
