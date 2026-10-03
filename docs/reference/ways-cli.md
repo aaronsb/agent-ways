@@ -97,7 +97,7 @@ Each tab is a tree of settings on the left and the selected key's detail on the 
 | `w` or ^S | Review this tab's pending items, read-only. In the review, `a` applies the tab, `X` discards it, Tab goes to the next tab and Esc goes back. |
 | `X` | Discard this tab's pending items, after a y/n confirm. |
 
-In the tree, colour marks a row's state: a changed value, a value that differs from its default, a read-only row, a queued action. The `?` help names the colours of the theme in use. `[a]` marks a row with actions and `!` a lint finding.
+In the tree, colour marks a row's state: a changed value, a value that differs from its default, a read-only row, a queued action. The `?` help lists the states. `[a]` marks a row with actions and `!` a lint finding.
 
 Some tabs have keys of their own, which the footer names. On the ways tab, `s` sets up agent-ways in a project, and `p` switches between this project's and all projects' switched-off ways. On the install tab, `t` activates a target, `A` adds one and `p` shows a target's plan (see [`ways target`](#ways-target)). On the theme tab, ↑↓ previews a theme and Enter uses it.
 
@@ -370,7 +370,7 @@ A click on the scrubber seeks to that frame, and the wheel there steps one.
 
 #### Fires tab
 
-![the fires tab: five semantic fires, lowest score first](../images/ways/session-fires.png)
+![the fires tab: six semantic fires, lowest score first](../images/ways/session-fires.png)
 
 Each semantic fire of the session as score, way and the surface it matched, lowest score first, so a fire on the wrong text stands out. `↩` marks a re-disclosure. Keyword and state fires carry no score and are not listed. ↑↓ selects a row.
 
