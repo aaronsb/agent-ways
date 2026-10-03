@@ -143,9 +143,8 @@ The beauty of this dual role is that it's self-calibrating. A system that captur
 The implementation uses deliberately simple detection mechanisms:
 
 - **Regex matching** for keywords, commands, and file patterns
-- **Sentence-embedding cosine similarity** for semantic similarity
-
-The matching pipeline uses a lightweight embedding model (all-MiniLM-L6-v2) for cosine-similarity scoring. It runs in milliseconds — the embedding engine scores all ways in a single batch call (~20ms).
+- **Sentence-embedding similarity** for semantic matching, with a lightweight model (all-MiniLM-L6-v2). A multi-sentence prompt is split into sentences and each way must win the sentence it matches and be corroborated by its own body (late-interaction, ADR-160).
+- **A yes/no relevance judge** on the prompt lanes: a small hosted model checks each candidate against the turn before it is shown (ADR-196).
 
 This simplicity is a feature, not a limitation. It's evidence of a design principle: **well-calibrated timing beats sophisticated detection**.
 
@@ -156,13 +155,17 @@ The matching channels, in practice:
 | Mechanism | Latency | Accuracy | When We Use It |
 |-----------|---------|----------|----------------|
 | Regex | < 1ms | High for known patterns | Most ways — keywords, commands, file paths |
-| Embedding | ~20ms | Good for semantic neighborhood | Ways where exact keywords aren't predictable |
+| Embedding, single vector | ~20ms | Good for semantic neighborhood | Short prompts, Bash descriptions, and the fallback when late-interaction cannot run |
+| Embedding, late-interaction | one batched embed of the prompt's sentences plus a body check | Built for long, multi-topic prompts | The prompt, queued and task surfaces |
+| Relevance judge | one hosted model call per prompt, under a deadline | Removes fires the turn does not call for | Prompt and queued surfaces, a capped number of candidates |
+
+The judge is the one place the system spends inference on detection. It was added because a probe of live fires found about nine in ten injections off-topic for the turn (ADR-195). It keeps the thesis intact: matching still decides *when* guidance can arrive, and the judge only removes candidates, outside Claude's context, failing open when it cannot answer. Its limits and cost are in [the relevance judge](../explanation/relevance-judge/relevance-judge-the-model.md).
 
 ## What's Durable Here
 
 The system does two separable jobs, and they age differently as models improve:
 
-**Scheduling** — re-disclosing guidance because its influence fades over token distance — compensates for a measurable deficiency of current models (the forgetting curve applied to in-context instructions). Deficiencies get fixed. As effective attention improves, expect the tuned half-lives to lengthen and re-fires to get rarer; calibration from telemetry (ADR-134) exists to recalibrate this per model generation. The mechanism degrades gracefully — its cost trends toward zero as it becomes less necessary.
+**Scheduling** — re-disclosing guidance because its influence fades over token distance — compensates for a measurable deficiency of current models (the forgetting curve applied to in-context instructions). Deficiencies get fixed. As effective attention improves, expect the refire fractions to grow and re-fires to get rarer; calibration from telemetry (ADR-134) exists to recalibrate this per model generation. The mechanism degrades gracefully — its cost trends toward zero as it becomes less necessary.
 
 **Routing** — delivering local norms just-in-time, matched to the action at hand — answers a structural problem, not a deficiency. No future model ships knowing this team's conventions; that information must either be front-loaded (paying context cost every session for guidance mostly irrelevant to the task) or retrieved at the moment of relevance. Better models don't change that trade. The ablation evidence confirms it: the approval-seeking behavior appears in every model tier, because its cause is missing information, not weak attention.
 

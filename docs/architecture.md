@@ -1,262 +1,363 @@
 # Ways System Architecture
 
-Visual documentation of the ways trigger system.
+Diagrams of the ways trigger system: what runs on each hook event, how a way is matched and admitted, and what state the engine keeps. The prose here is kept to what a diagram needs. The fire rule with its thresholds is stated once in [engine-reference.md](hooks-and-ways/engine-reference.md), the hook table and the switches in [hooks-and-ways.md](hooks-and-ways.md), and the event log fields in [reference/events.md](reference/events.md).
+
+Two names recur below:
+
+- `{SESSIONS_ROOT}` is `$XDG_RUNTIME_DIR/claude-sessions`, or `/tmp/.claude-sessions-{uid}` where that variable is unset (`%LOCALAPPDATA%/claude-ways/sessions` on Windows). `{SESSIONS_ROOT}/{session_id}/` holds one session's state.
+- Firing state is kept **per agent**. The main agent's engagement, way tokens, way epochs, epoch counter and check fires sit at the session root. A subagent's sit under `{SESSIONS_ROOT}/{session_id}/agents/{agent_id}/`, and its token position, context window and model are read from its own transcript. Way markers are per agent too: `ways/{way_id}/.marker.{agent_id}`, with `main` for the main agent. A way shown to a subagent therefore does not silence it for the main agent, or the reverse.
+
+## Where the runtime lives
+
+| Root | Path | Holds |
+|---|---|---|
+| App | `$XDG_DATA_HOME/agent-ways` | The source checkout, the built binaries, and the shipped ways under `hooks/ways/`. Replaced on update. |
+| Projection | `~/.claude` (and each extra target) | `hooks/ways`, `skills`, `agents`, `commands` and each binary under `bin/` are linked (or copied) from the app. `ways reconcile` three-way merges the repo's `settings.json` hooks block into the target's `settings.json` (ADR-142, ADR-184). |
+| User config | `$XDG_CONFIG_HOME/agent-ways` | `config.yaml`, your own ways under `ways/`, the judge settings in `agent.yaml`, and per-target `targets/<key>/config.yaml`. Survives updates. |
+| State | `$XDG_STATE_HOME/agent-ways` | `events.jsonl`, and the per-session subagent switches under `subagent-switch/`. |
+| Cache | `$XDG_CACHE_HOME/agent-ways/user` | The embedding corpora (`ways-corpus-en.jsonl`, `ways-corpus-multi.jsonl`), `embed-manifest.json` with the calibration, and the GGUF models. Regenerable. |
+| Session | `{SESSIONS_ROOT}/{session_id}` | Markers, per-agent firing state, the subagent stash, the last response. Cleared on SessionStart startup, compact and clear. |
 
 ## How a Session Flows
 
-A typical session from the user's perspective, showing how events trigger way injections at each step:
+A session from the user's side, showing which lane each injection comes from:
 
 ```mermaid
 sequenceDiagram
-    participant U as 👤 User
-    participant C as 🤖 Claude
-    participant W as ⚡ Ways System
-    participant S as 🔧 Subagent
+    participant U as User
+    participant C as Claude Code
+    participant W as ways hook
+    participant G as Ways agent (judge)
+    participant S as Subagent
 
-    Note over U,S: Session starts — core guidance loads
+    Note over U,S: SessionStart - check-state.sh shows core.md and the session-start ways
 
     rect rgba(21, 101, 192, 0.15)
-        Note over U,C: User describes their task
-        U->>C: "Let's fix the auth bug and<br/>add tests for the login flow"
-        W-->>C: 🔑 Security way injected (keyword: auth)
-        W-->>C: 🧪 Testing way injected (keyword: tests)
-        W-->>C: 🐛 Debugging way injected (keyword: bug)
-        Note right of C: Claude now has security, testing,<br/>and debugging guidance in context
+        Note over U,G: Prompt lane
+        U->>C: "Let's fix the auth bug and add tests"
+        C->>W: UserPromptSubmit → ways hook prompt
+        W->>W: match (late-interaction, g(s) fallback, keyword floor τ_k)
+        W->>G: judge the candidates (at most 8, with the last turn)
+        G-->>W: P(yes) per way
+        W-->>C: inject ways with P(yes) ≥ 0.3
+        Note right of W: a blocked way leaves no marker and keeps its refire budget
     end
 
     rect rgba(106, 27, 154, 0.15)
-        Note over C,W: Claude uses tools — ways intercept before execution
-        C->>W: about to run: git log --oneline auth/
-        Note right of W: No way matches → command proceeds
-        C->>W: about to edit: src/auth/login.ts
-        W-->>C: ⚙️ Config way injected (PreToolUse: file match)
-        Note right of C: Guidance arrives before the edit happens
+        Note over C,W: Tool lanes, before the tool runs
+        C->>W: PreToolUse:Bash → ways hook command (git log auth/)
+        Note right of W: no way matches, the command proceeds
+        C->>W: PreToolUse:Edit → ways hook file (config/auth.yaml)
+        W-->>C: config way, before the edit happens
     end
 
     rect rgba(0, 105, 92, 0.15)
-        Note over C,S: Claude delegates to a subagent
-        C->>W: about to spawn: Task("Review auth<br/>for security vulnerabilities")
-        W-->>W: Stash matched ways (PreToolUse:Task)
-        C->>S: Subagent starts
-        W-->>S: 🔑 Security way injected (SubagentStart)
-        W-->>S: 🐛 Debugging way injected (SubagentStart)
-        Note right of S: Subagent has its own way context
-        S-->>C: Review findings
+        Note over C,W: Post-tool lanes, after the tool runs
+        C->>W: PostToolUse → ways hook post-tool, ways hook queued
+        W->>W: postcheck.sh scripts request reactive fires
+        W->>G: operator messages queued mid-turn, matched and judged like a prompt
+        W-->>C: fired ways
     end
 
     rect rgba(230, 81, 0, 0.15)
-        Note over C,W: Macro tailors guidance to project context
-        C->>W: about to run: gh pr create
-        W->>W: macro.sh → queries GitHub API
-        W-->>C: 🔀 GitHub way injected (PreToolUse:Bash)<br/>"Team project (4 contributors) — PR recommended"
-        Note right of C: Claude sees team context before<br/>the command executes
+        Note over C,S: Delegation
+        C->>W: PreToolUse:Task → ways hook task (match, write stash)
+        C->>S: subagent starts
+        W-->>S: SubagentStart → ways hook subagent-start injects the stashed ways
+        Note right of S: the subagent keeps its own markers and refire state
+        S-->>C: findings
     end
 
     rect rgba(21, 101, 192, 0.15)
-        Note over U,C: User continues — ways stay quiet
-        U->>C: "Now let's also check the tests"
-        Note right of W: Testing way already shown → silent
-        Note right of C: No new injections — markers prevent repeats
+        Note over U,W: A later prompt on the same topic
+        U->>C: "Now check the tests again"
+        Note right of W: testing way inside its refire window → way_suppressed (refire)
+        Note right of W: re-disclosed once its refire fraction of the window has passed
     end
 
-    Note over U,S: ↻ This cycle continues until context fills up
-
     rect rgba(198, 40, 40, 0.15)
-        Note over U,S: Auto-compact triggers — all markers cleared, ways reset
-        W->>W: clear-markers.sh → rm /tmp/.claude-sessions/{session_id}/*
-        W-->>C: Core guidance reloads (fresh session state)
-        Note right of C: All ways can fire again on next match
+        Note over U,S: Auto-compact
+        C->>W: SessionStart:compact → ways hook session-start
+        W->>W: clear {SESSIONS_ROOT}/{session_id}/
+        W-->>C: core.md again from the state scan
+        Note right of C: every way can fire again on its next match
     end
 ```
 
 ## Hook Flow
 
-How ways get triggered during a Claude Code session:
+Every script under `hooks/ways/` that touches ways is a thin adapter for one `ways hook <event>` call (ADR-504 §11). The other hooks in the same `settings.json` block are shown in grey.
 
 ```mermaid
-flowchart TB
+flowchart LR
     classDef event fill:#1565C0,stroke:#0D47A1,color:#fff
     classDef script fill:#6A1B9A,stroke:#4A148C,color:#fff
-    classDef match fill:#00695C,stroke:#004D40,color:#fff
     classDef gate fill:#E65100,stroke:#BF360C,color:#fff
     classDef output fill:#2E7D32,stroke:#1B5E20,color:#fff
-    classDef silent fill:#78909C,stroke:#546E7A,color:#fff
+    classDef other fill:#78909C,stroke:#546E7A,color:#fff
 
-    subgraph Session["Claude Code Session"]
-        SS[SessionStart]:::event --> Core["ways show core<br/>Dynamic table + core.md"]:::script
+    SS["SessionStart<br/>startup · compact · resume · clear"]:::event
+    UP[UserPromptSubmit]:::event
+    PB["PreToolUse<br/>Bash"]:::event
+    PF["PreToolUse<br/>Edit, Write"]:::event
+    PT["PreToolUse<br/>Task"]:::event
+    PC["PreToolUse<br/>TaskCreate"]:::event
+    SA[SubagentStart]:::event
+    PO["PostToolUse<br/>Edit, Write, Bash, Task"]:::event
+    PX["PostToolUseFailure<br/>Edit, Write, Bash, Task"]:::event
+    ST[Stop]:::event
+    TC[TaskCreated]:::event
 
-        UP[UserPromptSubmit]:::event --> CP["check-prompt.sh → ways scan<br/>Regex · Embedding"]:::script
+    CM["clear-markers.sh → ways hook session-start<br/>(startup, compact, clear)"]:::script
+    CS["check-state.sh → ways hook state"]:::script
+    CP["check-prompt.sh → ways hook prompt"]:::script
+    CB["check-bash-pre.sh → ways hook command"]:::script
+    CF["check-file-pre.sh → ways hook file"]:::script
+    CT["check-task-pre.sh → ways hook task"]:::script
+    MT["mark-tasks-active.sh → ways hook tasks-active"]:::script
+    IS["inject-subagent.sh → ways hook subagent-start"]:::script
+    PP["check-post.sh → ways hook post-tool"]:::script
+    QQ["check-queued.sh → ways hook queued"]:::script
+    CR["check-response.sh → ways hook stop"]:::script
 
-        subgraph PreTool["PreToolUse"]
-            Bash[Bash tool]:::event --> CB["check-bash-pre.sh"]:::script
-            EditW[Edit/Write tool]:::event --> CF["check-file-pre.sh"]:::script
-            Task[Task tool]:::event --> CT["check-task-pre.sh"]:::script
-        end
+    SS --> CM
+    SS --> CS
+    UP --> CP
+    UP --> CS
+    PB --> CB
+    PF --> CF
+    PT --> CT
+    PC --> MT
+    SA --> IS
+    PO --> PP
+    PX --> PP
+    PO --> QQ
+    ST --> CR
 
-        SA[SubagentStart]:::event --> IS["inject-subagent.sh"]:::script
-    end
+    On{"Switched on?<br/>ways.enabled · subagent switches<br/>· defined agent"}:::gate
+    CS --> On
+    CP --> On
+    CB --> On
+    CF --> On
+    CT --> On
+    IS --> On
+    PP --> On
+    QQ --> On
 
-    CP --> Check{Marker?}:::gate
-    CB --> Check
-    CF --> Check
+    On -->|prompt, queued, command, file| Match["Matcher<br/>keyword · semantic"]:::gate
+    On -->|state| State["core.md · state triggers"]:::gate
+    On -->|post-tool| Post["postcheck.sh exits 0"]:::gate
+    On -->|task| TaskM["Matcher on the Task prompt<br/>scope: subagent"]:::gate
+    On -->|subagent-start| Claim["claim the oldest stash"]:::gate
 
-    Check -->|No| Output["Output way content<br/>Create marker"]:::output
-    Check -->|Yes| Silent["No-op"]:::silent
+    Match -->|prompt, queued| Judge{"Relevance judge<br/>ways agent socket"}:::gate
+    Match -->|command, file| Refire
+    Judge -->|pass| Refire
+    Judge -->|block| Blocked["not shown, no marker"]:::other
+    State --> Refire
+    Post --> Refire
+    Refire{"Inside the refire window,<br/>or over the 10,000-char budget?<br/>(no budget on the state lane)"}:::gate
+    Refire -->|no| Out["inject, stamp the per-agent marker"]:::output
+    Refire -->|yes| Supp["way_suppressed"]:::other
 
-    CT -->|"scope: subagent"| Stash["Write stash file"]:::output
-    IS -->|read stash| Emit["Emit way content<br/>(bypass markers)"]:::output
+    TaskM --> Stash[("{SESSIONS_ROOT}/{sid}/subagent-stash/")]:::output
+    Stash -.-> Claim
+    Claim --> Emit["emit fresh, record the fire<br/>under the subagent's id"]:::output
+
+    CM --> Clear["clear {SESSIONS_ROOT}/{sid}/,<br/>log session_start"]:::output
+    CR --> Rec["record the last response"]:::output
+    MT --> TA["write tasks-active (dormant)"]:::other
+
+    SS -.-> O1["check-setup.sh · check-config-updates.sh<br/>· ways init · ways corpus --if-stale"]:::other
+    SS -.-> O2["issues-pull.sh"]:::other
+    UP -.-> O2
+    PO -.->|Bash| O2
+    PB -.-> O3["strip-session-link-pre.sh"]:::other
+    ST -.-> O4["attend-drain-stop.sh"]:::other
+    TC -.-> O5["issues-task-created.sh"]:::other
 ```
+
+`check-setup.sh`, `check-config-updates.sh`, `ways init` and `ways corpus --if-stale` run on `startup` only (`ways init` also on `clear`). `check-queued.sh` scans for the main agent only, because operator messages are queued to it.
 
 ## Subagent Injection
 
-Two-phase stash pattern bridges the gap between Task prompt visibility and SubagentStart injection:
+A Task prompt is visible on PreToolUse:Task, but the subagent only exists at SubagentStart. A stash file bridges the two:
 
 ```mermaid
 sequenceDiagram
-    participant A as Main Agent
-    participant CT as check-task-pre.sh
-    participant S as Stash File
+    participant A as Main agent
     participant CC as Claude Code
-    participant IS as inject-subagent.sh
+    participant CT as check-task-pre.sh (ways hook task)
+    participant S as Stash dir
+    participant IS as inject-subagent.sh (ways hook subagent-start)
     participant SA as Subagent
 
     rect rgba(21, 101, 192, 0.15)
-        Note over A,CT: Phase 1: PreToolUse:Task
-        A->>CC: Task(prompt: "Review PR for security...")
+        Note over A,S: Phase 1 - PreToolUse:Task
+        A->>CC: Task(prompt: "Review the PR for security issues")
         CC->>CT: PreToolUse:Task
-        CT->>CT: Scan ways with scope: subagent
-        CT->>CT: Match prompt against patterns
-        CT->>S: Write matched way paths
-        Note right of S: /tmp/.claude-subagent-stash-{sid}/{ts}.json
+        alt subagent_type names a defined agent
+            Note right of CT: project, user or plugin agents/*.md - no stash
+        else ways switched off for subagents (session, project or user)
+            CT->>CT: log injection_suppressed, no stash
+        else
+            CT->>CT: keyword and late-interaction match over the Task prompt (scope: subagent)
+            CT->>S: write {ts}.json with the matched way ids
+            Note right of S: {SESSIONS_ROOT}/{sid}/subagent-stash/{ts}.json
+        end
     end
 
     rect rgba(106, 27, 154, 0.15)
-        Note over CC,SA: Phase 2: SubagentStart
-        CC->>SA: Spawn subagent
+        Note over CC,SA: Phase 2 - SubagentStart
+        CC->>SA: spawn subagent
         CC->>IS: SubagentStart
-        IS->>S: Read + claim oldest stash
-        IS->>IS: Emit way content (no markers)
-        IS->>SA: additionalContext
-        Note right of SA: Subagent sees way guidance
-        IS->>S: Delete consumed stash
+        IS->>S: claim the oldest stash (rename, read, delete)
+        alt ways switched off for subagents
+            Note right of IS: the claimed stash is discarded
+        else
+            IS->>IS: if a teammate, write the teammate marker in its agent dir
+            IS->>IS: render each way, record the fire under the subagent's id
+            IS->>SA: additionalContext
+        end
     end
 ```
 
+The stashed ways are emitted whatever the parent has already been shown. Each fire is then recorded under the subagent's own id, so the subagent's later hooks follow their own refire windows.
+
 ### Scope Filtering
 
-The `scope` field controls where ways inject:
+The `scope` field controls where a way can inject:
 
 ```mermaid
 flowchart LR
     classDef agent fill:#1565C0,stroke:#0D47A1,color:#fff
     classDef sub fill:#6A1B9A,stroke:#4A148C,color:#fff
     classDef both fill:#00695C,stroke:#004D40,color:#fff
-    classDef skip fill:#78909C,stroke:#546E7A,color:#fff
+    classDef team fill:#E65100,stroke:#BF360C,color:#fff
 
     Way["{name}.md<br/>scope: ?"]
 
-    Way -->|"scope: agent"| AG["Agent only<br/>check-prompt / bash / file"]:::agent
-    Way -->|"scope: subagent"| SB["Subagent only<br/>check-task-pre → inject"]:::sub
-    Way -->|"scope: agent, subagent"| BOTH["Both paths<br/>(default for all built-in ways)"]:::both
-    Way -->|"no scope field"| DEF["Agent only<br/>(backward compatible)"]:::agent
+    Way -->|"scope: agent"| AG["Not a teammate<br/>the main agent's lanes, and a plain<br/>subagent's own tool lanes"]:::agent
+    Way -->|"scope: subagent"| SB["Subagents, through the stash only<br/>task → subagent-start"]:::sub
+    Way -->|"scope: agent, subagent"| BOTH["Both paths<br/>(most shipped ways)"]:::both
+    Way -->|"scope: teammate"| TM["Teammates<br/>task stash with a team name"]:::team
+    Way -->|"no scope field"| DEF["ways.default_scope<br/>(agent unless configured)"]:::agent
 ```
+
+A running agent's scope is `teammate` when its state directory holds the teammate marker, and `agent` otherwise (`session::detect_scope`). A plain subagent is therefore `agent` scope on its own tool lanes (command, file, post-tool), so a `scope: agent` way can fire inside it. `scope: subagent` is matched only on the Task prompt and reaches the subagent through the SubagentStart stash. Ways are on for subagents by default. The subagent switches (`ways.subagents: false`, `ways session subagents off`) turn off every lane that would inject into one.
 
 ### Parallel Subagent Handling
 
-Multiple Task tools in one message create separate stash files consumed in FIFO order:
+Several Task calls in one message write separate stash files, consumed oldest first. Each SubagentStart claims its file by renaming it, so two subagents never take the same stash.
 
 ```mermaid
 sequenceDiagram
     participant CT as check-task-pre.sh
-    participant S as Stash Dir
+    participant S as Stash dir
     participant IS as inject-subagent.sh
 
     rect rgba(21, 101, 192, 0.12)
-        CT->>S: Write {ts1}.json (Task A)
-        CT->>S: Write {ts2}.json (Task B)
+        CT->>S: write {ts1}.json (Task A)
+        CT->>S: write {ts2}.json (Task B)
     end
 
     rect rgba(106, 27, 154, 0.12)
-        IS->>S: Read {ts1}.json (oldest) → Subagent A
-        IS->>S: Read {ts2}.json (oldest) → Subagent B
+        IS->>S: claim {ts1}.json (oldest) → Subagent A
+        IS->>S: claim {ts2}.json (oldest) → Subagent B
     end
 
-    Note over S: Empty after both consumed
+    Note over S: empty after both are claimed
 ```
 
-## Way State Machine
+## Disclosure Cadence
 
-Each (way, session) pair has exactly two states:
+Each (way, agent) pair in a session moves through these states. A way's `refire:` value is a fraction of the agent's context window (ADR-126): `once` 1.0, `rare` 0.4, `normal` 0.15, `frequent` 0.05, or a number.
 
 ```mermaid
 stateDiagram-v2
     classDef notShown fill:#C62828,stroke:#B71C1C,color:#fff,font-weight:bold
     classDef shown fill:#2E7D32,stroke:#1B5E20,color:#fff,font-weight:bold
+    classDef eligible fill:#E65100,stroke:#BF360C,color:#fff,font-weight:bold
 
-    [*] --> NotShown: Session starts
+    state "NotShown (no marker)" as NotShown
+    state "Shown (marker holds token_pos)" as Shown
+    state "Eligible again" as Eligible
 
-    NotShown: not_shown
-    NotShown: No marker file exists
+    [*] --> NotShown
+    NotShown --> Shown: match, judge pass, fits the budget
+    NotShown --> NotShown: judge block (way_judged), no marker
+    NotShown --> NotShown: no room (way_suppressed context_cap)
+    Shown --> Shown: match inside the window (way_suppressed refire)
+    Shown --> Eligible: refire × window tokens consumed
+    Eligible --> Shown: match, judge pass, fits (way_redisclosed)
+    Eligible --> Eligible: judge block or no room
+    Shown --> NotShown: SessionStart compact or clear
+    Eligible --> NotShown: SessionStart compact or clear
 
-    Shown: shown
-    Shown: Marker file exists
-
-    NotShown --> Shown: Trigger match → output + create marker
-    Shown --> Shown: Trigger match → no-op (idempotent)
-
-    Shown --> [*]: Session ends (markers in /tmp)
-
-    state "not_shown" as NotShown:::notShown
-    state "shown" as Shown:::shown
+    class NotShown notShown
+    class Shown shown
+    class Eligible eligible
 ```
 
-**Exception**: Subagent injection bypasses this state machine entirely. Ways injected via `inject-subagent.sh` are emitted without marker checks.
+The marker is `{SESSIONS_ROOT}/{session_id}/ways/{way_id}/.marker.{agent_id}`. The judge runs on the prompt and queued lanes only, so the judge-block edges apply there. A `session-start` state way shows once per marker reset rather than on a refire window.
 
 ## Trigger Matching
 
-How prompts and tool use get matched to ways:
+How prompts and tool input reach a way:
 
 ```mermaid
 flowchart LR
     classDef input fill:#1565C0,stroke:#0D47A1,color:#fff
     classDef scan fill:#6A1B9A,stroke:#4A148C,color:#fff
     classDef match fill:#00695C,stroke:#004D40,color:#fff
+    classDef gate fill:#E65100,stroke:#BF360C,color:#fff
     classDef output fill:#2E7D32,stroke:#1B5E20,color:#fff
+    classDef silent fill:#78909C,stroke:#546E7A,color:#fff
 
     subgraph Input
-        Prompt["User prompt<br/>(masked: fences/URLs stripped)"]:::input
-        Cmd["Bash command"]:::input
+        Prompt["User prompt<br/>(fences and URLs masked)"]:::input
+        Queued["Queued operator messages"]:::input
+        Cmd["Bash command + description<br/>+ prose since the last human turn"]:::input
         File["File path"]:::input
+        TaskP["Task prompt"]:::input
     end
 
-    subgraph Scan["Recursive Scan"]
-        Find["find */{name}.md"]:::scan
-        Extract["Extract frontmatter:<br/>pattern, commands, files, scope"]:::scan
-    end
+    Cand["collect_candidates<br/>project .claude/ways<br/>> user $XDG_CONFIG_HOME/agent-ways/ways<br/>> core ~/.claude/hooks/ways<br/>(a higher root shadows the same id, tree order)"]:::scan
+    Pre["scope · when: preconditions<br/>(disabled domains and ways already dropped)"]:::scan
 
-    subgraph Match["Regex Match"]
-        KW["pattern: regex"]:::match
-        CM["commands: pattern"]:::match
-        FL["files: pattern"]:::match
-    end
+    Prompt --> Cand
+    Queued --> Cand
+    Cmd --> Cand
+    File --> Cand
+    TaskP --> Cand
+    Cand --> Pre
 
-    Prompt --> Find
-    Cmd --> Find
-    File --> Find
+    Pre --> KW["pattern: on prompt, queued, task"]:::match
+    Pre --> DIR["commands: on the command<br/>pattern: on the description<br/>files: on the path"]:::match
+    Pre --> SEM["semantic<br/>late-interaction or g(s) fallback"]:::match
 
-    Find --> Extract
-    Extract --> KW
-    Extract --> CM
-    Extract --> FL
+    KW --> Floor{"g(s) ≥ τ_k?<br/>fails open · pattern_strict bypasses"}:::gate
+    Floor -->|no| KG["way_keyword_gated"]:::silent
+    Floor -->|yes| Hits
+    DIR --> Hits
+    SEM --> Hits
 
-    KW -->|match| Out["ways show<br/>(marker-gated output)"]:::output
-    CM -->|match| Out
-    FL -->|match| Out
+    Hits["order_hits"]:::scan
+    Hits -->|task| Stash[("subagent stash")]:::output
+    Hits -->|prompt, queued| Judge{"relevance judge"}:::gate
+    Hits -->|command, file| Show
+    Judge -->|pass| Show
+    Judge -->|block| JB["way_judged block"]:::silent
+    Show{"disabled? refire window?<br/>context budget?"}:::gate
+    Show -->|admitted| Out["additionalContext"]:::output
+    Show -->|held| WS["way_suppressed"]:::silent
 ```
+
+The bash semantic lane uses the single-vector scores only. The file lane is regex only. Disabled domains and ways are dropped when the candidates are collected, so they never boost a child or take a judge slot, and they are checked again when a way is shown.
 
 ## Semantic Matching
 
-Ways with `description:` fields use a three-tier scoring engine:
+The semantic channel on the prompt, queued and task surfaces is the ADR-160 late-interaction matcher. The single-vector calibrated gate (ADR-156) decides only when late-interaction cannot run. Its probabilities are computed on every scan, because the keyword floor and near-miss logging read them on both paths.
 
 ```mermaid
 flowchart TB
@@ -264,160 +365,153 @@ flowchart TB
     classDef process fill:#6A1B9A,stroke:#4A148C,color:#fff
     classDef check fill:#E65100,stroke:#BF360C,color:#fff
     classDef yes fill:#2E7D32,stroke:#1B5E20,color:#fff
-    classDef no fill:#C62828,stroke:#B71C1C,color:#fff
+    classDef side fill:#78909C,stroke:#546E7A,color:#fff
 
-    subgraph Input
-        Prompt["User prompt"]:::input
-        Corpus["ways-corpus.jsonl<br/>(pre-computed embedding vectors)"]:::input
+    Red["reduce_for_embed<br/>prompt + last response, sentence salience<br/>(ADR-130, ADR-155)"]:::input
+    Chunk{"≥ 2 sentence chunks<br/>and the EN engine present?"}:::check
+    Red --> Chunk
+
+    subgraph LI["Late-interaction (ADR-160), EN corpus only"]
+        Batch["embed every chunk in one way-embed batch<br/>vs ways-corpus-en.jsonl"]:::process
+        Rank["per way: peak cosine over chunks<br/>per chunk: softmax share over the top 8 (τ 0.08)"]:::process
+        Admit{"summed share ≥ 0.15<br/>or peak ≥ 0.50?"}:::check
+        Confirm{"won chunk vs the way's body<br/>≥ 0.35?"}:::check
+        Batch --> Rank --> Admit -->|yes| Confirm
     end
 
-    subgraph Embedding["Embedding (ADR-108, ADR-125)"]
-        Embed["way-embed match<br/>all-MiniLM-L6-v2"]:::process
-        Cosine["Cosine similarity<br/>vs 384-dim pre-computed vectors"]:::process
-        EmbedResult["similarity ≥ embed_threshold?"]:::check
+    subgraph SV["Single vector (ADR-156)"]
+        Vec["one vector per model<br/>EN, plus multilingual when localized"]:::process
+        Cal["g(s) = σ(a·s + b)<br/>fit stored in embed-manifest.json"]:::process
+        Tau{"g(s) ≥ τ_s?<br/>0.5, or 0.40 with parent boost"}:::check
+        Vec --> Cal --> Tau
     end
 
-    Prompt --> Embed --> Cosine --> EmbedResult
-    EmbedResult -->|Yes| Match["MATCH"]:::yes
-    EmbedResult -->|No| NoMatch["No match"]:::no
-    Corpus --> Embed
+    Chunk -->|yes| Batch
+    Chunk -->|"no (fallback)"| Tau
+    Red --> Vec
+    Confirm -->|yes| F1["FIRE<br/>semantic:late-interaction:en"]:::yes
+    Tau -->|yes| F2["FIRE<br/>semantic:embedding:en or :multi"]:::yes
+    Cal -.->|"g(s) within 0.05 below τ_s"| NM["way_nearmiss"]:::side
+    Cal -.-> KF["keyword floor τ_k"]:::side
 ```
 
-| Engine | Accuracy | Timing | Requirements |
-|--------|----------|--------|-------------|
-| **Embedding** | 98.4% (63/64) | ~20ms | `way-embed` binary + GGUF model (21MB) |
+The late-interaction operating points are hand-set and uncalibrated. Parent boost lowers `τ_s`, so it has no effect when late-interaction decides. On a localized install the multilingual lane can fire only on the fallback path. [engine-reference.md](hooks-and-ways/engine-reference.md) states the rule with its sources.
 
-The embedding model is a hard dependency of `ways`. See ADR-125 for the authored disclosure graph model and the single-tier decision.
+## Relevance Gate and the Ways Agent
+
+On the prompt and queued lanes, the ways the matcher would show are sent in one request to a hosted yes/no judge before any fire is recorded (ADR-196). The judge runs in the **ways agent**, one resident daemon per user on a Unix socket of mode 0600 (ADR-502). A hook starts it on demand. It exits when idle, and when its binary is replaced. It holds the provider key, so hooks never read one, and it does judging and key custody only. Matching stays in the `ways` process. `ways agent status` reports the running agent, `ways agent key` manages keys, and `ways settings` sets `gate.mode` (`enforce`, `shadow`, `off`) and `gate.engine`. No key file means no gate.
+
+What the judge sees, its threshold, cap, timeout, cost and failure behaviour are explained in [the relevance judge](explanation/relevance-judge/relevance-judge-the-model.md).
 
 ## Telemetry & Tuning
-
-The matcher computes a score for every way on every prompt. Fires are recorded; so are the *near-misses* — ways that scored just under threshold and stayed silent. Both feed back into how the engine is tuned. This closes the loop ADR-134 opened: hand-set thresholds and half-lives become things the system can revise from its own experience.
 
 ```mermaid
 flowchart LR
     classDef match fill:#6A1B9A,stroke:#4A148C,color:#fff
     classDef log fill:#1565C0,stroke:#0D47A1,color:#fff
-    classDef tune fill:#00695C,stroke:#004D40,color:#fff
-    classDef apply fill:#E65100,stroke:#BF360C,color:#fff
+    classDef read fill:#00695C,stroke:#004D40,color:#fff
 
-    Scan["match_prompt<br/>Fired · NearMiss · NoMatch"]:::match
+    Scan["scan lanes"]:::match
+    Gate["relevance gate"]:::match
+    Show["way_scored / subagent-start"]:::match
+    Hook["ways hook"]:::match
 
-    Scan -->|fired| WF["way_fired<br/>(+ fire_score on first-fires)"]:::log
-    Scan -->|"within near_miss_margin"| NM["way_nearmiss<br/>(recall signal)"]:::log
+    Scan -->|"way_nearmiss · way_keyword_gated"| EV
+    Gate -->|"way_judged · judge_call<br/>gate_capped · gate_fallback"| EV
+    Show -->|"way_fired · way_redisclosed<br/>(+ fire_score on semantic fires)<br/>way_suppressed · check_fired"| EV
+    Hook -->|"session_start · injection_suppressed"| EV
 
-    WF --> EV[("$XDG_STATE/agent-ways/events.jsonl<br/>bounded ~24–32 MiB")]:::log
-    NM --> EV
+    EV[("$XDG_STATE_HOME/agent-ways/events.jsonl<br/>tail-compacted at ~32 MiB")]:::log
 
-    EV --> TP["ways tune precision<br/>off-class irrelevance audit"]:::tune
-
-    TP -->|report-only| Remedy["flag: mis-targeted / cross-cutting"]:::apply
+    EV --> R1["ways session<br/>ways · fires · replay · live · dump"]:::read
+    EV --> R2["ways tune precision · ways tune stats"]:::read
+    EV --> R3["ways agent cost"]:::read
 ```
 
-### Telemetry events
-
-Two events in `$XDG_STATE/agent-ways/events.jsonl` carry the tuning signal:
-
-- `way_fired` now records `fire_score` — the embedding score that cleared threshold — on **first-fires only** (not on `way_redisclosed`). It feeds future `embed_threshold` tuning.
-- `way_nearmiss` is emitted when a way scores within `near_miss_margin` *below* its effective threshold but does not fire. The scores already exist; this is persistence, not new computation. Fields: `score_en`, `score_multi`, `thr_en`, `thr_multi`, `margin`, `trigger`, `query_tokens`. It is a recall signal — the first measure of likely *false silences*, the ways that should have fired and didn't.
-
-`near_miss_margin` (default `0.05`) is parsed from the ways config YAML alongside `default_embed_threshold` and `default_multi_embed_threshold`. It caps near-miss volume: only the band just under threshold logs.
-
-The log grows faster with near-misses, so its growth is bounded. `log_event` tail-compacts `events.jsonl` once it crosses ~32 MiB, keeping the most recent ~24 MiB (cut at a line boundary, written to a temp file and atomically renamed). The oldest events are lost; readers are unaffected — a reader holding the pre-compaction file keeps reading it intact.
-
-### Tuning commands
-
-- **`ways tune precision`** (ADR-134 Decision 3) — a heuristic relevance audit of fire telemetry, report-only. For each way it estimates how often its fires landed *off-class*: in sessions whose activity — judged by the parent-family of the ways that co-fired — never touched the way's own domain. It reports an irrelevance rate and a flag: **mis-targeted** (a narrow way repeatedly firing into the same wrong kind of session; remedy: raise `embed_threshold`, narrow vocabulary, or change trigger channel) vs **cross-cutting** (a way that fires broadly by design, e.g. `meta/todos`; remedy: scope by trigger — vocabulary is *never* auto-narrowed). Flags: `--min-sessions` (default 5), `--flag-threshold` (default 0.5), `--project`, `--way`, `--json`.
-
-ADR-134 is **Accepted**. One slice — the `embed_threshold`-gated `--apply`, driven by accumulated `fire_score` data — is deferred and data-gated (GitHub issue #123).
+`fire_score` is the deciding score of the semantic channel that fired: the summed share for late-interaction, `g(s)` for the single-vector path. The `trigger` field says which. The tuning loop is described in [hooks-and-ways.md](hooks-and-ways.md#telemetry), and every event's fields in [reference/events.md](reference/events.md).
 
 ## Macro Injection
 
-Ways with `macro: prepend|append` run dynamic scripts that query live state:
+Ways with `macro: prepend|append` run a script that queries live state when the way is shown:
 
 ```mermaid
 sequenceDiagram
-    participant Hook as check-*.sh
-    participant Show as ways show
+    participant Lane as scan lane
+    participant Show as way_scored
     participant Macro as macro.sh
-    participant Way as {name}.md
-    participant Out as Output
+    participant Out as additionalContext
 
-    Hook->>Show: waypath, session_id
+    Lane->>Show: way id, session, trigger, budget
 
     rect rgba(198, 40, 40, 0.12)
-        Show->>Show: Check marker
-        alt Marker exists
-            Show-->>Hook: (silent return)
+        Show->>Show: refire check for this agent
+        alt inside the refire window
+            Show-->>Lane: nothing (way_suppressed refire)
+        else static body does not fit the budget
+            Show-->>Lane: nothing (way_suppressed context_cap)
         end
     end
 
     rect rgba(21, 101, 192, 0.15)
-        Note over Show,Way: No marker — first time this session
-        Show->>Way: Read frontmatter
-
         alt macro: prepend
-            rect rgba(106, 27, 154, 0.12)
-                Show->>Macro: Execute script
-                Note right of Macro: e.g. query GitHub API,<br/>scan files, check tooling
-                Macro-->>Out: Dynamic context
-            end
-            Show->>Way: Strip frontmatter
-            Way-->>Out: Static guidance
+            Show->>Macro: run (project macros only in trusted projects)
+            Macro-->>Out: dynamic context
+            Show-->>Out: static body
         else macro: append
-            Show->>Way: Strip frontmatter
-            Way-->>Out: Static guidance
-            rect rgba(106, 27, 154, 0.12)
-                Show->>Macro: Execute script
-                Macro-->>Out: Dynamic context
-            end
+            Show-->>Out: static body
+            Show->>Macro: run
+            Macro-->>Out: dynamic context
         else no macro
-            Show->>Way: Strip frontmatter
-            Way-->>Out: Static guidance
+            Show-->>Out: static body
         end
     end
 
     rect rgba(46, 125, 50, 0.15)
-        Show->>Show: Create marker
-        Note right of Show: Way won't fire again this session
+        Show->>Show: lock, re-check refire, admit to the budget
+        Show->>Show: record the fire, stamp the marker and token position
+        Note right of Show: eligible again after the refire fraction of the window
     end
 ```
+
+A project-local macro runs only if the project is listed in `~/.claude/trusted-project-macros`.
 
 ## Directory Structure
 
 ```
-~/.claude/hooks/ways/
-├── core.md                     # Base guidance (loads at startup)
-├── macro.sh                    # Generates Available Ways table
+$XDG_DATA_HOME/agent-ways/hooks/ways/      # shipped ways, projected as ~/.claude/hooks/ways/
+├── core.md                     # base guidance, shown by the state scan
+├── macro.sh                    # core.md's macro: the Available Ways table
+├── require-ways.sh             # shared by the adapters: runs ~/.claude/bin/ways hook <event>
 │
-├── check-prompt.sh             # UserPromptSubmit → dispatches to `ways scan prompt`
-├── check-bash-pre.sh           # PreToolUse:Bash → scan commands
-├── check-file-pre.sh           # PreToolUse:Edit|Write → scan files
-├── check-task-pre.sh           # PreToolUse:Task → stash for subagent
-├── check-state.sh              # UserPromptSubmit → state triggers
-├── check-response.sh           # Stop → extract topics for next turn
+├── clear-markers.sh            # SessionStart → ways hook session-start
+├── check-state.sh              # SessionStart, UserPromptSubmit → ways hook state
+├── check-prompt.sh             # UserPromptSubmit → ways hook prompt
+├── check-bash-pre.sh           # PreToolUse:Bash → ways hook command
+├── check-file-pre.sh           # PreToolUse:Edit|Write → ways hook file
+├── check-task-pre.sh           # PreToolUse:Task → ways hook task
+├── mark-tasks-active.sh        # PreToolUse:TaskCreate → ways hook tasks-active (dormant marker)
+├── inject-subagent.sh          # SubagentStart → ways hook subagent-start
+├── check-post.sh               # PostToolUse, PostToolUseFailure → ways hook post-tool
+├── check-queued.sh             # PostToolUse → ways hook queued
+├── check-response.sh           # Stop → ways hook stop
 │
-├── inject-subagent.sh          # SubagentStart → emit stashed ways (JSON hookSpecificOutput)
-├── clear-markers.sh            # SessionStart → reset session state
-├── mark-tasks-active.sh        # PreToolUse:TaskCreate → context nag gate
-├── issues-pull.sh              # SessionStart|UserPromptSubmit|PostToolUse:gh issue → gh-tasks pull + whisper (ADR-180)
+├── check-setup.sh              # SessionStart:startup → notice when the ways binary is missing
+├── strip-session-link-pre.sh   # PreToolUse:Bash → deny publishing a session link (ADR-167)
+├── attend-drain-stop.sh        # Stop → attend inbox --drain (ADR-172)
+├── issues-pull.sh              # SessionStart, UserPromptSubmit, PostToolUse:Bash → gh-tasks pull (ADR-180)
 ├── issues-task-created.sh      # TaskCreated → reject unprefixed duplicates of mirrored issues (ADR-180)
+├── check-bash-bound.py         # Bash guard (ADR-181), shipped but not wired
 │
-├── softwaredev/                # Domain: software development
-│   ├── commits/commits.md       #   git commit format
-│   ├── testing/testing.md       #   test practices
-│   ├── security/security.md     #   auth, secrets, vulnerabilities
-│   ├── github/                  #   PR workflow
-│   │   ├── github.md
-│   │   └── macro.sh             #   detects solo vs team
-│   └── ...                      #   18 ways total
-├── itops/                       # Domain: IT operations
-│   └── ...                      #   4 ways
-└── meta/                        # Domain: meta-system
-    └── ...                      #   5 ways
+└── {domain}/{way}/{way}.md     # softwaredev, meta, documentation, ea, workstation, data, itops, ...
+    ├── macro.sh                #   optional dynamic content
+    ├── postcheck.sh            #   optional reactive firing on PostToolUse
+    └── {child}/{child}.md      #   ways nest for progressive disclosure
 
-$PROJECT/.claude/ways/           # Project-local overrides
-└── {domain}/{wayname}/{wayname}.md  # Same structure, takes precedence
+$XDG_CONFIG_HOME/agent-ways/ways/          # your own ways, same layout, survive updates
+$PROJECT/.claude/ways/                     # project ways, same layout, highest precedence
 ```
+
+`check-config-updates.sh` sits one level up, in `hooks/`.
 
 ### Script Relationships
 
@@ -425,80 +519,87 @@ $PROJECT/.claude/ways/           # Project-local overrides
 flowchart LR
     classDef trigger fill:#1565C0,stroke:#0D47A1,color:#fff
     classDef shared fill:#6A1B9A,stroke:#4A148C,color:#fff
-    classDef output fill:#2E7D32,stroke:#1B5E20,color:#fff
-    classDef stash fill:#E65100,stroke:#BF360C,color:#fff
     classDef util fill:#00695C,stroke:#004D40,color:#fff
+    classDef ext fill:#E65100,stroke:#BF360C,color:#fff
+    classDef other fill:#78909C,stroke:#546E7A,color:#fff
 
-    WAYS["ways binary<br/>(scan + show + session)"]:::shared --> EMB["Embedding<br/>(all-MiniLM-L6-v2)"]:::util
+    AD["check-*.sh · clear-markers.sh<br/>inject-subagent.sh · mark-tasks-active.sh"]:::trigger
+    RW["require-ways.sh<br/>ways hook &lt;event&gt;"]:::shared
+    AD --> RW
+    RW --> HOOK["ways hook"]:::shared
 
-    CP["check-prompt.sh"]:::trigger --> WAYS
-    CB["check-bash-pre.sh"]:::trigger --> WAYS
-    CF["check-file-pre.sh"]:::trigger --> WAYS
-    CS["check-state.sh"]:::trigger --> WAYS
+    HOOK --> SCAN["scan lanes"]:::shared
+    HOOK --> SHOW["show"]:::shared
+    HOOK --> SESS["session state<br/>{SESSIONS_ROOT}"]:::shared
+    SCAN --> EMB["way-embed<br/>(subprocess, EN and multilingual GGUF)"]:::util
+    SCAN --> AGENT["ways agent<br/>(Unix socket, judge + key custody)"]:::util
+    AGENT --> API["provider API<br/>Anthropic or OpenRouter"]:::ext
+    SHOW --> MAC["macro.sh · postcheck.sh"]:::util
 
-    CT["check-task-pre.sh"]:::trigger --> ST[("stash file")]:::stash
-    ST --> IS["inject-subagent.sh"]:::output
+    IP["issues-pull.sh · issues-task-created.sh"]:::other --> GT["gh-tasks"]:::other
+    AS["attend-drain-stop.sh"]:::other --> AT["attend inbox"]:::other
+    SL["strip-session-link-pre.sh"]:::other --> DENY["PreToolUse deny"]:::other
 ```
 
 ## Multi-Trigger Semantics
 
-What happens when multiple triggers fire:
+What happens when one prompt matches several ways:
 
 ```mermaid
 flowchart TB
     classDef prompt fill:#1565C0,stroke:#0D47A1,color:#fff
     classDef pattern fill:#6A1B9A,stroke:#4A148C,color:#fff
-    classDef way fill:#00695C,stroke:#004D40,color:#fff
     classDef gate fill:#E65100,stroke:#BF360C,color:#fff
     classDef output fill:#2E7D32,stroke:#1B5E20,color:#fff
     classDef silent fill:#78909C,stroke:#546E7A,color:#fff
 
     Prompt["'Let's review the PR and fix the bug'"]:::prompt
 
-    Prompt --> KW1["pattern: github|pr"]:::pattern
-    Prompt --> KW2["pattern: debug|bug"]:::pattern
-    Prompt --> KW3["pattern: review"]:::pattern
+    Prompt --> KW1["github: pattern match"]:::pattern
+    Prompt --> KW2["debugging: pattern match"]:::pattern
+    Prompt --> KW3["quality: semantic fire"]:::pattern
 
-    KW1 -->|match| GH["github way"]:::way
-    KW2 -->|match| DB["debugging way"]:::way
-    KW3 -->|match| QA["quality way"]:::way
+    KW1 --> F1{"g(s) ≥ τ_k?"}:::gate
+    KW2 --> F2{"g(s) ≥ τ_k?"}:::gate
+    F1 -->|no| G1["way_keyword_gated"]:::silent
 
-    GH --> M1{Marker?}:::gate
-    DB --> M2{Marker?}:::gate
-    QA --> M3{Marker?}:::gate
+    F1 -->|yes| ORD["order_hits<br/>fixed admission order"]:::gate
+    F2 -->|yes| ORD
+    KW3 --> ORD
 
-    M1 -->|No| O1["✓ Output"]:::output
-    M2 -->|No| O2["✓ Output"]:::output
-    M3 -->|No| O3["✓ Output"]:::output
-
-    M1 -->|Yes| S1["✗ Silent"]:::silent
-    M2 -->|Yes| S2["✗ Silent"]:::silent
-    M3 -->|Yes| S3["✗ Silent"]:::silent
+    ORD --> J{"relevance judge<br/>one request, at most 8"}:::gate
+    J -->|block| B["way_judged block"]:::silent
+    J -->|pass| R{"per way: inside the refire window?"}:::gate
+    R -->|yes| S["way_suppressed refire"]:::silent
+    R -->|no| C{"fits the 10,000-char budget?"}:::gate
+    C -->|no| S2["way_suppressed context_cap"]:::silent
+    C -->|yes| O["shown"]:::output
 ```
 
-Each way has its own marker - multiple ways can fire from one prompt, and each re-discloses on its own `refire:` cadence (ADR-126) as its salience decays, rather than re-firing on every prompt.
+Each way keeps its own marker, so several ways can fire from one prompt and each re-discloses on its own `refire:` cadence. A child that fired only because its parent fired earlier in the same scan is withheld when that parent is not shown.
 
 ## Project-Local Override
 
 ```mermaid
 flowchart TB
     classDef proj fill:#E65100,stroke:#BF360C,color:#fff
-    classDef global fill:#1565C0,stroke:#0D47A1,color:#fff
+    classDef user fill:#6A1B9A,stroke:#4A148C,color:#fff
+    classDef core fill:#1565C0,stroke:#0D47A1,color:#fff
     classDef marker fill:#00695C,stroke:#004D40,color:#fff
     classDef skip fill:#78909C,stroke:#546E7A,color:#fff
 
-    subgraph Scan["Way Lookup Order"]
-        P["1. Project: $PROJECT/.claude/ways/"]:::proj
-        G["2. Global: ~/.claude/hooks/ways/"]:::global
-    end
+    T["way id softwaredev/delivery/github"] --> P
+    P{"1. Project<br/>$PROJECT/.claude/ways/"}:::proj
+    P -->|found| UseP["project way"]:::proj
+    P -->|not found| U{"2. User<br/>$XDG_CONFIG_HOME/agent-ways/ways/"}:::user
+    U -->|found| UseU["user way"]:::user
+    U -->|not found| C{"3. Core<br/>~/.claude/hooks/ways/<br/>→ $XDG_DATA_HOME/agent-ways/hooks/ways/"}:::core
+    C -->|found| UseC["shipped way"]:::core
+    C -->|not found| Skip["no way"]:::skip
 
-    P -->|found| Use["Use project way"]:::proj
-    P -->|not found| G
-    G -->|found| UseG["Use global way"]:::global
-    G -->|not found| Skip["No match"]:::skip
-
-    Use --> Mark["Single marker<br/>(by waypath)"]:::marker
-    UseG --> Mark
+    UseP --> Mark["one marker per id and agent<br/>{SESSIONS_ROOT}/{sid}/ways/softwaredev/delivery/github/.marker.{agent_id}"]:::marker
+    UseU --> Mark
+    UseC --> Mark
 ```
 
-Project ways take precedence. Only one marker per waypath regardless of source.
+The first root that has the id shadows it in every root below (ADR-143), for matching and for rendering alike. Project macros and postchecks run only if the project is listed in `~/.claude/trusted-project-macros`.
