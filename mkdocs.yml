@@ -1,0 +1,92 @@
+# The agent-ways manual, published to GitHub Pages by .github/workflows/pages.yml.
+# Pages come from docs/; the ways section is generated from hooks/ways/ at build
+# time by scripts/docs-site/gen_ways.py, and the nav comes from
+# scripts/docs-site/nav.md. Local preview: make site-serve.
+site_name: agent-ways
+site_description: Contextual ways of working for Claude Code, disclosed by hooks
+site_url: https://aaronsb.github.io/agent-ways/
+repo_url: https://github.com/aaronsb/agent-ways
+repo_name: aaronsb/agent-ways
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+exclude_docs: |
+  scripts/
+  __pycache__/
+  *.py
+  adr.yaml
+
+theme:
+  name: material
+  logo: images/agent-ways-logo.svg
+  favicon: images/agent-ways-logo.svg
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.prune
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.view
+
+hooks:
+  - scripts/docs-site/links.py
+
+plugins:
+  - search
+  - gen-files:
+      scripts:
+        - scripts/docs-site/gen_nav.py
+        - scripts/docs-site/gen_ways.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+validation:
+  links:
+    # scripts/docs-site/links.py rewrites links into the rest of the repo to
+    # GitHub URLs; what remains unresolved is a link to a missing file.
+    not_found: info
+    unrecognized_links: info
