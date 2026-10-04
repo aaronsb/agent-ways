@@ -11,6 +11,7 @@ they are not published as pages.
 """
 
 import functools
+import logging
 import os
 import re
 from pathlib import Path, PurePosixPath
@@ -27,6 +28,7 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 INLINE_CODE = re.compile(r"(`+).+?\1")
 WIKILINK = re.compile(r"\[\[(ADR-\d+|\d{2}\.\d{3}(?:\.[A-Z])?)\]\]")
 EXCLUDED = {"adr.yaml"}
+log = logging.getLogger("mkdocs.hooks.links")
 
 
 def way_page(path):
@@ -77,7 +79,7 @@ def resolve(href, source, page):
 def catalog():
     """Wikilink key to file: `ADR-136` from record file names, `04.002.E` from `id:` frontmatter."""
     keys = {}
-    for f in DOCS.rglob("*.md"):
+    for f in sorted(DOCS.rglob("*.md")):
         m = re.match(r"(ADR-\d+)-", f.name)
         if m:
             keys[m.group(1)] = f
@@ -93,10 +95,9 @@ def catalog():
 def resolve_wikilink(key, page):
     """A markdown link for a wikilink key, or the key unchanged when nothing carries it."""
     target = catalog().get(key)
-    if target is None:
-        return key
-    published = site_path(target)
+    published = site_path(target) if target is not None else None
     if published is None:
+        log.warning("wikilink [[%s]] matches no published page", key)
         return key
     return f"[{key}]({os.path.relpath(published, page.parent).replace(os.sep, '/')})"
 
@@ -138,6 +139,11 @@ def rewrite(markdown, source, page):
             line = "".join(pieces) + sub_links(line[pos:])
         out.append(line)
     return "".join(out)
+
+
+def on_pre_build(config):
+    """MkDocs hook: re-read the catalog on each build, so `mkdocs serve` sees new and renamed records."""
+    catalog.cache_clear()
 
 
 @event_priority(-100)

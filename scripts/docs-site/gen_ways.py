@@ -22,7 +22,7 @@ import mkdocs_gen_files
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from links import REPO, ROOT, WAYS, fence_states, rewrite, way_page  # noqa: E402
+from links import REPO, ROOT, WAYS, catalog, fence_states, rewrite, way_page  # noqa: E402
 
 OUT = Path("ways")
 
@@ -175,7 +175,10 @@ def corpus_nav(domains):
     for d in domains:
         lines.append(f"* [{DOMAIN_LABELS.get(d.name, d.name.capitalize())}]({d.name}/index.md)")
         lines += nav_entries(d, 1)
-    lines += ["* [Core (every session)](core.md)", "* [Skills catalog](skills-catalog.md)"]
+    labels = {"core.md": "Core (every session)"}
+    for f in sorted(WAYS.glob("*.md")):
+        if not is_empty(f):
+            lines.append(f"* [{labels.get(f.name, way_label(f))}]({f.name})")
     return "\n".join(lines) + "\n"
 
 
@@ -216,6 +219,7 @@ def corpus_index(domains):
 
 
 def main():
+    catalog.cache_clear()
     for src in sorted(WAYS.rglob("*.md")):
         if "__pycache__" in src.parts or is_empty(src):
             continue
