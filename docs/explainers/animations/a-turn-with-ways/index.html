@@ -98,18 +98,18 @@ function typed(node, full, t, a, b) { node.textContent = full.slice(0, Math.roun
 // Each beat: [start, end, title, caption]. The caption is what a narrator would say.
 const BEATS = [
   [0, 7, 'A turn with agent-ways', 'Guidance reaches Claude at the moment it applies, and sessions stay aware of each other between turns.'],
-  [7, 15, 'Session start', 'SessionStart: the state hook shows core.md, the base posture and the table of available ways. Every other way waits until something makes it relevant.'],
+  [7, 15, 'Session start', 'SessionStart: the state hook shows core.md, the base posture and the table of available ways. Most other ways wait until something makes them relevant.'],
   [15, 24, 'A prompt arrives', 'UserPromptSubmit: the ways binary embeds the prompt, with Claude’s last reply, and runs two lanes over the corpus: keyword patterns and semantic relevance.'],
-  [24, 31, 'Two lanes, one rule', 'A way fires when g(s) ≥ τs, or when its pattern hit and g(s) ≥ τk. A keyword alone can’t drag in an unrelated prompt.'],
-  [31, 38, 'The relevance judge', 'The ways agent sends each candidate’s path and description to a small hosted model for a yes or no, outside Claude’s context. On any failure the matcher’s decision stands.'],
+  [24, 31, 'Two lanes, one rule', 'For a one-sentence prompt like this, a way fires when g(s) ≥ τs, or on a pattern hit with g(s) ≥ τk. Longer prompts are matched sentence by sentence.'],
+  [31, 38, 'The relevance judge', 'With a provider key set, the ways agent sends the prompt and each candidate’s path and description to a small hosted model for a yes or no. On any failure the matcher’s decision stands.'],
   [38, 44, 'Injected, and stamped', 'Admitted ways reach Claude as hook context. github’s macro runs first and prepends live repo state. Each fire is stamped with the agent’s position in its window.'],
-  [44, 52, 'Tool calls match too', 'PreToolUse: a Bash command is matched against each way’s commands pattern, with no judge on this lane. git commit brings in commits.'],
+  [44, 52, 'Tool calls match too', 'PreToolUse: the Bash command is matched against commands patterns and a semantic lane, with no judge on this lane. git commit brings in commits.'],
   [52, 58, 'Already shown, so held', 'gh pr create matches github, but github fired moments ago. Until its refire fraction of the window passes, it is held.'],
   [58, 66, 'Subagents get their own', 'Dispatching a subagent: its task is matched against ways scoped to subagents, and SubagentStart injects them. The subagent keeps its own fire record.'],
   [66, 72, 'The turn ends', 'Stop: Claude’s reply is recorded for the next prompt’s matching, and the attend drain checks for peer messages. None are pending, so the turn ends.'],
   [72, 82, 'Re-disclosure', 'As the window fills, a fired way decays. After its refire fraction (0.15 of the window here) a new match re-injects it to course-correct.'],
   [82, 90, 'Many sessions, one bus', 'attend runs under Monitor in each session. Sensors watch context, git, peers and processes, and surface only what is worth a notification.'],
-  [90, 98, 'A busy session hears at the boundary', 'Session A sends a message. Session B is mid-turn, so the Stop hook delivers it when B’s turn ends; nothing is dropped.'],
+  [90, 98, 'A busy session hears at the boundary', 'Session A sends a message. Session B is mid-turn, so its Stop hook delivers the message at the turn boundary and B’s turn continues with it.'],
   [98, 108, 'The person is on the bus too', 'In attend-chat the person reads the same messages and writes to the sessions. An idle session is woken by its Monitor line.'],
   [108, 120, 'Two kinds of delivery', 'Ways: guidance at the moment of action, through hooks. Attend: awareness between turns, through Monitor and the turn boundary.'],
 ];
@@ -167,11 +167,11 @@ txt(TV, 84, 248, 'Claude Code · session A', { size: 22, weight: 600 });
 txt(TV, 84, 274, 'main agent', { size: 16, font: MONO, fill: C.muted });
 // Matcher panel
 box(TV, 640, 210, 640, 600);
-txt(TV, 664, 248, 'ways · matcher (Rust, no inference)', { size: 22, weight: 600 });
+txt(TV, 664, 248, 'ways · matcher (local embedder, no LLM)', { size: 22, weight: 600 });
 // Corpus panel
 box(TV, 1320, 210, 540, 600);
 txt(TV, 1344, 248, 'the corpus · about 150 ways', { size: 22, weight: 600 });
-txt(TV, 1344, 274, 'hooks/ways/  ·  {domain}/{way}/{way}.md', { size: 15, font: MONO, fill: C.muted });
+txt(TV, 1344, 274, 'hooks/ways/  ·  paths shortened', { size: 15, font: MONO, fill: C.muted });
 const CORPUS = [
   ['core', 'core.md'], ['github', 'delivery/github'], ['commits', 'delivery/commits'], ['merge', 'delivery/merge'],
   ['subagents', 'meta/subagents'], ['quality', 'code/quality'], ['mermaid', 'documentation/mermaid'], ['security', 'code/security'],
@@ -267,7 +267,7 @@ const rule = txt(M, 960, 686, 'fire ⇔ g(s) ≥ τs  ∨  (pattern hit ∧ g(s)
 const J = g(TV);
 box(J, 664, 706, 592, 90, { fill: '#141c14', stroke: '#3f6212', r: 10 });
 txt(J, 684, 736, 'ways agent · relevance judge', { size: 19, weight: 600, fill: C.lime });
-txt(J, 684, 760, 'path + description only · ≤8 candidates · 2 s · fails open', { size: 14, font: MONO, fill: C.muted });
+txt(J, 684, 760, 'the prompt + path and description · ≤8 · 2 s · fails open', { size: 14, font: MONO, fill: C.muted });
 const judgeOut = txt(J, 684, 786, '', { size: 16, font: MONO });
 // Commands lane (replaces the prompt lanes during the tool beats)
 const CMD = g(TV);
@@ -299,7 +299,7 @@ txt(stashBox, 684, 394, 'commits    subagent scope · no match  –', { size: 17
 txt(stashBox, 684, 426, 'subagents  agent scope only           –', { size: 17, font: MONO, fill: C.muted });
 const drainBox = g(TV);
 box(drainBox, 664, 290, 592, 200, { fill: '#10161d', r: 8 });
-txt(drainBox, 684, 324, 'Stop hooks, in order', { size: 17, font: MONO, fill: C.muted });
+txt(drainBox, 684, 324, 'Stop hooks', { size: 17, font: MONO, fill: C.muted });
 txt(drainBox, 684, 362, 'check-response.sh', { size: 18, font: MONO, fill: C.em });
 txt(drainBox, 684, 390, 'records the reply for the next prompt’s embed', { size: 16, fill: C.muted });
 txt(drainBox, 684, 430, 'attend inbox --drain --format hook', { size: 18, font: MONO, fill: C.amber });
@@ -369,13 +369,13 @@ const chatInput = txt(chat, 1324, 560, '', { size: 18, font: MONO, fill: C.human
 // Bus
 const bus = g(MV);
 el('rect', { x: 60, y: 650, width: 1800, height: 64, rx: 32, fill: '#13171d', stroke: '#92400e', 'stroke-width': 1.5 }, bus);
-txt(bus, 960, 690, 'the attend bus · signal files per session, _broadcast, @channels', { size: 18, font: MONO, fill: C.amber, anchor: 'middle' });
+txt(bus, 960, 690, 'the attend bus · project trays, _broadcast, @channels', { size: 18, font: MONO, fill: C.amber, anchor: 'middle' });
 [sA.cx, sB.cx, 1580].forEach(x => el('line', { x1: x, x2: x, y1: 590, y2: 650, stroke: '#92400e', 'stroke-width': 2, 'stroke-dasharray': '4 4' }, bus));
 const lanes = g(MV);
 txt(lanes, 60, 780, 'DELIVERY', { size: 15, font: MONO, fill: C.muted });
 const laneBusy = txt(lanes, 60, 820, 'busy session → Stop hook drains at the turn boundary', { size: 20, font: MONO, fill: C.text });
 const laneIdle = txt(lanes, 60, 860, 'idle session → the peers sensor’s Monitor line wakes it', { size: 20, font: MONO, fill: C.text });
-const laneSeen = txt(lanes, 60, 900, 'both record delivery in one seen-set: each message arrives once', { size: 20, font: MONO, fill: C.muted });
+const laneSeen = txt(lanes, 60, 900, 'both record delivery in one seen-set: at most once per session', { size: 20, font: MONO, fill: C.muted });
 const packets = g(MV);
 function packet(color, path, a, b) {
   const c = el('circle', { r: 11, fill: color }, packets);
@@ -386,6 +386,7 @@ const PK = [
   packet(C.amber, [[sA.cx, 682], [1580, 682], [1580, 590]], 92.5, 94),
   packet(C.human, [[1580, 590], [1580, 682], [sB.cx, 682], [sB.cx, 590]], 101.5, 103.2),
   packet(C.em, [[sB.cx, 590], [sB.cx, 682], [1580, 682], [1580, 590]], 105, 106.5),
+  packet(C.em, [[sB.cx, 682], [sA.cx, 682], [sA.cx, 590]], 105.4, 106.8),
 ];
 function along(path, k) {
   const segs = [];
@@ -408,9 +409,9 @@ function endCol(x, color, head, lines) {
   lines.forEach((l, i) => txt(gg, x + 30, 380 + i * 52, l, { size: 22, fill: C.text }));
   return gg;
 }
-const end1 = endCol(60, C.em, 'ways', ['guidance at the moment of action', 'hooks: SessionStart, prompt, tools, Stop', 'keyword + semantic lanes, one rule', 'a yes/no judge outside the context', 'stamped per agent, re-disclosed later']);
-const end2 = endCol(680, C.amber, 'attend', ['awareness between turns', 'sensors under Monitor in each session', 'messages on one bus, never dropped', 'Stop-hook drain when busy', 'Monitor line when idle']);
-const end3 = endCol(1300, C.human, 'the person', ['on the same bus as the sessions', 'attend-chat to read and write', 'steers by prompt, or by message', 'every session hears it once', '']);
+const end1 = endCol(60, C.em, 'ways', ['guidance at the moment of action', 'hooks: SessionStart, prompt, tools, Stop', 'keyword + semantic lanes, one rule', 'an optional yes/no judge, outside', 'stamped per agent, re-disclosed later']);
+const end2 = endCol(680, C.amber, 'attend', ['awareness between turns', 'sensors under Monitor in each session', 'messages are not lost to a busy turn', 'Stop-hook drain when busy', 'Monitor line when idle']);
+const end3 = endCol(1300, C.human, 'the person', ['on the same bus as the sessions', 'attend-chat to read and write', 'steers by prompt, or by message', 'each session hears a message at most once', '']);
 
 // ── render one frame ─────────────────────────────────────────────────────────
 function render(t) {
@@ -553,9 +554,12 @@ function render(t) {
   sA.state.textContent = t < 91 ? 'turn running · pushing the api change' : 'idle';
   set(sA.state, { fill: t < 91 ? C.em : C.muted });
   const bBusy = t < 96.5;
-  sB.state.textContent = bBusy ? 'turn running · editing the form' : (t >= 103.2 && t < 106.5 ? 'woken by its Monitor line' : 'idle');
-  set(sB.state, { fill: bBusy ? C.em : (t >= 103.2 && t < 106.5 ? C.amber : C.muted) });
+  const bCont = t >= 96.5 && t < 99.5;
+  sB.state.textContent = bBusy ? 'turn running · editing the form' : bCont ? 'turn continues with A’s message' : (t >= 103.2 && t < 106.5 ? 'woken by its Monitor line' : 'idle');
+  set(sB.state, { fill: bBusy || bCont ? C.em : (t >= 103.2 && t < 106.5 ? C.amber : C.muted) });
   sA.line1.textContent = t >= 90.5 ? '$ attend send "api auth change is pushed"' : '';
+  sA.line3.textContent = t >= 106.8 ? 'peers: B (web): on it, rebasing now' : '';
+  set(sA.line3, { fill: C.amber });
   sB.line1.textContent = t >= 93.5 && t < 96.5 ? 'queued: B is mid-turn' : (t >= 96.5 ? '[attend] 1 peer message at the turn boundary' : '');
   sB.line2.textContent = t >= 96.5 ? 'A (api): api auth change is pushed' : '';
   // The wake: the peers sensor's Monitor line, then B's reply.
@@ -566,7 +570,7 @@ function render(t) {
   const chatSeq = [
     [94, 'A (api) → #open: api auth change is pushed', C.text],
     [101, 'you → @B: rebase on A’s change', C.human],
-    [106.5, 'B (web) → you: on it, rebasing now', C.text],
+    [106.5, 'B (web) → #open: on it, rebasing now', C.text],
   ];
   chatLines.forEach((l, i) => {
     const row = chatSeq[i];
