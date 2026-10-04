@@ -6,7 +6,7 @@
 #   ways update | ways reconcile | ways uninstall | make cut-release
 
 .DEFAULT_GOAL := help
-.PHONY: setup link relink install update sync-to-home update-binaries clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
+.PHONY: site site-serve setup link relink install update sync-to-home update-binaries clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -61,6 +61,8 @@ help:
 	@echo "  make test-multilingual  Verify multilingual way matching (18 languages)"
 	@echo "  make test-live TIER=1  Live install fixture in Docker (ADR-186; FLAVOR=branch|release)"
 	@echo "  make docs         Regenerate docs/cli/attend.md from the clap definition"
+	@echo "  make site         Build the manual (docs/ + ways) into site/ with MkDocs"
+	@echo "  make site-serve   Preview the manual at http://127.0.0.1:8000 with live reload"
 	@echo "  make cut-release  Open a version-bump PR for a component (COMPONENT=ways LEVEL=patch)"
 	@echo "  make publish-release  After the bump PR merges: tag + publish (COMPONENT=ways [PUSH=1])"
 	@echo "  make clean        Remove build artifacts"
@@ -229,6 +231,22 @@ docs: attend
 	@./tools/target/release/gen-docs > docs/cli/attend.md
 	@echo "Wrote docs/cli/attend.md ($$(wc -l < docs/cli/attend.md) lines)"
 
+# The manual published to GitHub Pages (.github/workflows/pages.yml). MkDocs runs
+# from a venv under .venv-docs so the build needs only python3.
+DOCS_VENV := .venv-docs
+DOCS_ENV := DISABLE_MKDOCS_2_WARNING=true
+
+$(DOCS_VENV)/bin/mkdocs: scripts/docs-site/requirements.txt
+	python3 -m venv $(DOCS_VENV)
+	$(DOCS_VENV)/bin/pip install --quiet -r scripts/docs-site/requirements.txt
+	@touch $@
+
+site: $(DOCS_VENV)/bin/mkdocs
+	$(DOCS_ENV) $(DOCS_VENV)/bin/mkdocs build
+
+site-serve: $(DOCS_VENV)/bin/mkdocs
+	$(DOCS_ENV) $(DOCS_VENV)/bin/mkdocs serve --watch hooks/ways --watch scripts/docs-site
+
 # Internal: post-build advisory printed after every attend / attend-
 # chat (re)build. Suggests `make purge-attend-state` for operators
 # updating from older attends whose on-disk state schema may have
@@ -348,7 +366,7 @@ clean:
 	$(MAKE) -C tools/way-embed clean
 	cargo clean --manifest-path tools/ways-cli/Cargo.toml 2>/dev/null || true
 	cargo clean --manifest-path tools/Cargo.toml 2>/dev/null || true
-	rm -rf dist/
+	rm -rf dist/ site/
 
 # Wipe all attend / attend-chat runtime cache state under
 # $XDG_CACHE_HOME/attend/ (~/.cache/attend/ by default). Recovery target only — NEVER a dependency of

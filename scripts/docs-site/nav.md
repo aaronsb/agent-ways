@@ -1,0 +1,30 @@
+<!-- Site navigation, read by mkdocs-literate-nav. A link to a directory
+     (ending in /) lists that directory's pages automatically. -->
+* Manual
+    * [Overview](README.md)
+    * [The cognitive loop](cognitive-loop.md)
+    * [Install](install-guide.md)
+    * [Finish the install](finish-install.md)
+    * Prerequisites
+        * [macOS](prerequisites-macos.md)
+        * [Arch](prerequisites-arch.md)
+        * [Debian](prerequisites-debian.md)
+        * [Fedora](prerequisites-fedora.md)
+    * [Hooks and ways](hooks-and-ways/)
+    * [How-to](how-to/)
+    * [Governance](governance.md)
+    * [Vocabulary](vocabulary.md)
+    * [Development](development.md)
+* [Attend](attend-and-monitor/)
+* Reference
+    * [Hooks and ways](hooks-and-ways.md)
+    * [Architecture diagrams](architecture.md)
+    * [attend CLI](cli/attend.md)
+    * [ways CLI](reference/ways-cli.md)
+    * [ways CLI renames](reference/ways-cli-renames.md)
+    * [Events](reference/events.md)
+    * [Status line](reference/statusline.md)
+* [Explanation](explanation/)
+* [Decisions](architecture/)
+* [Research](research/)
+* [Ways](ways/)

@@ -86,3 +86,7 @@ htmlcov/
 *~
 .idea/
 .vscode/
+
+# --- MkDocs manual (make site) ---
+/site/
+/.venv-docs/

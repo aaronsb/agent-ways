@@ -1,0 +1,59 @@
+name: Publish manual
+
+# Builds the MkDocs manual (docs/ plus the ways corpus) and deploys it to
+# GitHub Pages when a component release tag is pushed (ways-v1.34.0,
+# attend-v0.15.3, ...), so the site tracks released content. Pull requests
+# that touch the site's sources build without deploying, so a broken page
+# fails the PR. The github-pages environment allows deploys from these tags.
+on:
+  push:
+    tags: ["*-v[0-9]*"]
+  pull_request:
+    paths:
+      - docs/**
+      - hooks/ways/**
+      - mkdocs.yml
+      - scripts/docs-site/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: true
+
+env:
+  DISABLE_MKDOCS_2_WARNING: "true"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/docs-site/requirements.txt
+      - run: pip install -r scripts/docs-site/requirements.txt
+      - run: mkdocs build
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

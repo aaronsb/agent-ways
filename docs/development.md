@@ -58,6 +58,7 @@ Each suite binary in `tools/suite-bins` is a package of the same name, so `-p <n
 - `tools/suite-bins` lists the suite binaries. The Makefile builds and links each one, `scripts/install.sh` puts each on `PATH`, and each has a `build-<name>.yml` release workflow. Add a binary here and it joins all three.
 - `make <name>` keeps a working `bin/<name>`, else runs `tools/scripts/download-prebuilt.sh <name>`, else builds with cargo. The downloader needs a logged-in `gh`. It picks the newest `<name>-v*` release for your platform and checks it against the release's `checksums.txt`, installing with a warning when the release has none; `<NAME>_RELEASE` (for example `WAYS_AUDIT_RELEASE`) pins a tag. Its logic lives in `tools/scripts/prebuilt-lib.sh`.
 - `make <name>-rebuild` forces a source build. `make update-binaries` rebuilds every suite binary and `way-embed`.
+- `make site` builds the published manual into `site/`, and `make site-serve` previews it with live reload. MkDocs renders `docs/`, with the nav taken from `scripts/docs-site/nav.md`. `scripts/docs-site/gen_ways.py` adds a page for every way under `hooks/ways/`, and `scripts/docs-site/links.py` points repository links outside the site at GitHub. `.github/workflows/pages.yml` deploys the site to GitHub Pages when a component release tag is pushed, and builds it without deploying on pull requests that touch these sources.
 - `make deps` installs cmake, a C++ compiler and git through the system package manager, with `sudo`. Only `way-embed` needs them.
 
 ## Checks

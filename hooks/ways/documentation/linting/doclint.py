@@ -23,7 +23,9 @@ Portability (this is the canonical, multi-repo tool, not a single project's copy
 - **Catalog membership is opt-in.** A `docs/` page is a catalog node only if it
   declares catalog frontmatter (`id`/`domain`/`mode`). Un-declared prose is
   ignored, so a repo can adopt the catalog gradually instead of all-at-once.
-- **mkdocs nav is optional.** No `mkdocs.yml` → the orphan check is skipped.
+- **mkdocs nav is optional.** No `mkdocs.yml`, or one without a `nav:` key (an
+  auto-generated nav, or one supplied by a plugin such as literate-nav) → the
+  orphan check is skipped.
 - **The retired-range guard is opt-in.** Set `legacy: {retired: true}` in
   `adr.yaml` to fail on references into a vacated pre-domain range. Set
   `legacy: {defining_adr: ADR-NNN}` to exempt the ADR that vacated the range (it
@@ -260,7 +262,11 @@ def build_adr_node(path: Path) -> Node:
 # ============================================================================
 
 def collect_nav_pages():
-    """Doc paths (relative to docs/) referenced by mkdocs nav, or None if no nav."""
+    """Doc paths (relative to docs/) referenced by mkdocs nav, or None if no nav.
+
+    A mkdocs.yml without a `nav:` key leaves the nav to MkDocs or a plugin, so
+    there is no list to check pages against.
+    """
     if not MKDOCS_YML.exists():
         return None
 
@@ -270,6 +276,9 @@ def collect_nav_pages():
         "tag:yaml.org,2002:python/", lambda loader, suffix, node: None)
     with open(MKDOCS_YML) as f:
         cfg = yaml.load(f, Loader=_Loader)
+
+    if "nav" not in cfg:
+        return None
 
     pages = set()
 
