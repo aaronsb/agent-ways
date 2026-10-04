@@ -10,7 +10,10 @@ repo_name: aaronsb/agent-ways
 edit_uri: edit/main/docs/
 
 docs_dir: docs
+# docs/README.md is the file map for readers browsing on GitHub; the site's
+# home is docs/index.md.
 exclude_docs: |
+  /README.md
   scripts/
   __pycache__/
   *.py
@@ -18,8 +21,11 @@ exclude_docs: |
 
 theme:
   name: material
-  logo: images/agent-ways-logo.svg
-  favicon: images/agent-ways-logo.svg
+  logo: images/agent-ways-mark.svg
+  favicon: images/agent-ways-mark.svg
+  # Inter from Google Fonts; code uses self-hosted Monoid (docs/stylesheets/extra.css).
+  font:
+    text: Inter
   palette:
     - media: "(prefers-color-scheme)"
       toggle:
@@ -27,29 +33,43 @@ theme:
         name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to system preference
   features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.instant.prefetch
     - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.path
     - navigation.sections
     - navigation.indexes
     - navigation.prune
     - navigation.top
     - navigation.footer
+    - toc.follow
     - search.suggest
     - search.highlight
+    - search.share
     - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+    - content.footnote.tooltips
     - content.action.view
+
+extra_css:
+  - stylesheets/extra.css
 
 hooks:
   - scripts/docs-site/links.py
@@ -64,6 +84,7 @@ plugins:
       nav_file: SUMMARY.md
 
 markdown_extensions:
+  - abbr
   - admonition
   - attr_list
   - def_list
@@ -76,11 +97,17 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.tasklist:
       custom_checkbox: true
 
