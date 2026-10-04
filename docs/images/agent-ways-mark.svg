@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="180 140 240 160" width="240" height="160">
+  <defs>
+    <!-- Clipping path to the rounded frame -->
+    <clipPath id="frame">
+      <rect width="600" height="400" rx="12"/>
+    </clipPath>
+    <!-- Glow effect for bright nodes -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Subtle glow for W edges -->
+    <filter id="edgeglow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+    <!-- W edges (per-segment color) -->
+    <g stroke-width="7" filter="url(#edgeglow)" stroke-linecap="round">
+      <!-- Left arm: tip (red) → valley → center (green) -->
+      <line x1="195" y1="160" x2="215" y2="200" stroke="#ef4444"/>
+      <line x1="215" y1="200" x2="230" y2="245" stroke="#f97316"/>
+      <line x1="230" y1="245" x2="240" y2="280" stroke="#f59e0b"/>
+      <line x1="240" y1="280" x2="255" y2="250" stroke="#eab308"/>
+      <line x1="255" y1="250" x2="270" y2="220" stroke="#84cc16"/>
+      <line x1="270" y1="220" x2="285" y2="195" stroke="#22c55e"/>
+      <line x1="285" y1="195" x2="300" y2="180" stroke="#10b981"/>
+
+      <!-- Right arm: center (green) → valley → tip (red) -->
+      <line x1="300" y1="180" x2="315" y2="195" stroke="#10b981"/>
+      <line x1="315" y1="195" x2="330" y2="220" stroke="#22c55e"/>
+      <line x1="330" y1="220" x2="345" y2="250" stroke="#84cc16"/>
+      <line x1="345" y1="250" x2="360" y2="280" stroke="#eab308"/>
+      <line x1="360" y1="280" x2="370" y2="245" stroke="#f59e0b"/>
+      <line x1="370" y1="245" x2="385" y2="200" stroke="#f97316"/>
+      <line x1="385" y1="200" x2="405" y2="160" stroke="#ef4444"/>
+    </g>
+    <!-- W nodes (per-node color, glowing) -->
+    <g filter="url(#glow)">
+      <!-- Left arm: tip → center -->
+      <circle cx="195" cy="160" r="9.5" fill="#ef4444"/>
+      <circle cx="215" cy="200" r="8.55" fill="#f97316"/>
+      <circle cx="230" cy="245" r="7.6" fill="#f59e0b"/>
+      <circle cx="240" cy="280" r="10.45" fill="#eab308"/>
+      <circle cx="255" cy="250" r="7.6" fill="#84cc16"/>
+      <circle cx="270" cy="220" r="8.55" fill="#22c55e"/>
+      <circle cx="285" cy="195" r="8.55" fill="#10b981"/>
+
+      <!-- Center peak -->
+      <circle cx="300" cy="180" r="11.4" fill="#10b981"/>
+
+      <!-- Right arm: center → tip -->
+      <circle cx="315" cy="195" r="8.55" fill="#10b981"/>
+      <circle cx="330" cy="220" r="8.55" fill="#22c55e"/>
+      <circle cx="345" cy="250" r="7.6" fill="#84cc16"/>
+      <circle cx="360" cy="280" r="10.45" fill="#eab308"/>
+      <circle cx="370" cy="245" r="7.6" fill="#f59e0b"/>
+      <circle cx="385" cy="200" r="8.55" fill="#f97316"/>
+      <circle cx="405" cy="160" r="9.5" fill="#ef4444"/>
+    </g>
+
+
+</svg>

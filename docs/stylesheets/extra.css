@@ -1,0 +1,75 @@
+/* agent-ways manual: palette drawn from the logo (a GitHub-dark field behind a
+   W that runs red to amber to emerald), Monoid for code, and layout for the
+   home page. Loaded by mkdocs.yml (extra_css). */
+
+/* Monoid, self-hosted (MIT, docs/assets/fonts/monoid/LICENSE). */
+@font-face { font-family: "Monoid"; src: url("../assets/fonts/monoid/monoid-regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Monoid"; src: url("../assets/fonts/monoid/monoid-bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Monoid"; src: url("../assets/fonts/monoid/monoid-italic.woff2") format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+:root { --md-code-font: "Monoid", ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Palette. */
+:root {
+  --aw-ink: #0d1117;
+  --aw-emerald: #10b981;
+  --aw-emerald-deep: #047857;
+  --aw-amber: #f59e0b;
+}
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color: var(--aw-ink);
+  --md-primary-fg-color--light: #1f2733;
+  --md-primary-fg-color--dark: #010409;
+  --md-primary-bg-color: #e6edf3;
+  --md-primary-bg-color--light: #e6edf3b3;
+}
+[data-md-color-accent="custom"] {
+  --md-accent-fg-color: var(--aw-emerald);
+  --md-accent-fg-color--transparent: #10b9811a;
+  --md-accent-bg-color: #fff;
+}
+/* links: deep emerald on light, emerald on dark */
+[data-md-color-scheme="default"] { --md-typeset-a-color: var(--aw-emerald-deep); }
+[data-md-color-scheme="slate"] {
+  --md-typeset-a-color: #34d399;
+  --md-default-bg-color: #0d1117;
+  --md-default-bg-color--light: #0d1117b3;
+  --md-code-bg-color: #161b22;
+  --md-footer-bg-color: #010409;
+  --md-footer-bg-color--dark: #010409;
+}
+/* thin gradient rule under the header, the W's red to green ramp */
+.md-header { box-shadow: none; }
+.md-tabs { border-bottom: 2px solid transparent;
+  border-image: linear-gradient(90deg,#ef4444,#f59e0b,#84cc16,#10b981,#84cc16,#f59e0b,#ef4444) 1; }
+/* header mark sized for its shape (wide, not square) */
+.md-header__button.md-logo img { height: 1.6rem; width: auto; }
+
+/* typography: tighter headings, readable measure */
+.md-typeset h1 { font-weight: 700; letter-spacing: -0.02em; color: var(--md-default-fg-color); }
+.md-typeset h2 { font-weight: 600; letter-spacing: -0.01em; }
+.md-typeset h2, .md-typeset h3 { margin-top: 1.8em; }
+/* code: rounded blocks, inline code tinted */
+.md-typeset pre > code { border-radius: 6px; }
+.md-typeset .highlight { border-radius: 6px; }
+.md-typeset :not(pre) > code { border-radius: 4px; padding: 0.05em 0.35em; }
+/* tables: zebra and rounded */
+.md-typeset table:not([class]) { border-radius: 6px; overflow: hidden; font-size: .72rem; }
+.md-typeset table:not([class]) tbody tr:nth-child(even) { background: var(--md-default-fg-color--lightest); }
+.md-typeset table:not([class]) th { background: var(--md-default-fg-color--lightest); }
+/* home grid cards hover accent */
+.md-typeset .grid.cards > ul > li:hover, .md-typeset .grid > .card:hover { border-color: var(--aw-emerald); }
+/* home hero */
+.aw-hero { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.1fr); gap: 2rem; align-items: center; margin: 1rem 0 2.5rem; }
+.aw-hero__art { border-radius: 12px; box-shadow: 0 10px 30px #0006; }
+.aw-hero h1 { font-size: 2.6rem; margin: 0 0 .6rem; }
+.aw-hero p { font-size: .9rem; }
+@media screen and (max-width: 60em) { .aw-hero { grid-template-columns: 1fr; } }
+/* buttons: emerald, not header ink (ink-on-ink vanishes in dark) */
+.md-typeset .md-button { color: var(--md-typeset-a-color); border-color: currentColor; border-radius: 6px; }
+.md-typeset .md-button--primary { background: var(--aw-emerald-deep); border-color: var(--aw-emerald-deep); color: #fff; }
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary { background: var(--aw-emerald); border-color: var(--aw-emerald); color: var(--aw-ink); }
+.md-typeset .md-button:hover { background: var(--aw-emerald); border-color: var(--aw-emerald); color: var(--aw-ink); }
+[data-md-color-scheme="slate"] .aw-hero__art { outline: 1px solid #30363d; }
+/* four cards: 2x2 rather than 3+1 */
+.md-typeset .grid.aw-2up { grid-template-columns: repeat(2, minmax(0,1fr)); }
+@media screen and (max-width: 45em) { .md-typeset .grid.aw-2up { grid-template-columns: 1fr; } }
