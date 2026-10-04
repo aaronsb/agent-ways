@@ -472,7 +472,7 @@ function render(t) {
     const fires = b.v >= 0.5 || (kwHit && b.v >= 0.15);
     let fill = C.dim;
     if (t >= 25.5) fill = fires ? C.em : '#3a2a2a';
-    if (t >= 33 && b.id === 'merge') fill = C.red;                    // the judge said no
+    if (t >= 34.3 && b.id === 'merge') fill = C.red;                    // the judge said no
     set(b.bar, { fill });
   });
   set(tauK, { opacity: vis(t, 24.5, 200) });
@@ -511,7 +511,7 @@ function render(t) {
   badge('core', 'fired', C.em, 10.5);
   badge('github', 'fired', C.em, 39);
   badge('subagents', 'fired', C.em, 39.3);
-  badge('merge', 'judged no', C.red, 33.8, 44);
+  badge('merge', 'judged no', C.red, 34.3, 44);
   badge('commits', 'fired', C.em, 47.5);
   if (t >= 54 && t < 58) badge('github', 'held', C.amber, 54);
   if (t >= 78.5) badge('github', 're-fired', C.em, 78.5);
@@ -608,6 +608,7 @@ let playing = !recording && !params.has('t');
 let last = null;
 function show(t) {
   now = clamp(t, 0, DURATION);
+  if (!playing && now < DURATION && playBtn.textContent === 'Replay') playBtn.textContent = 'Play';
   render(now);
   scrub.value = now;
   clock.textContent = `${fmt(now)} / ${fmt(DURATION)}`;
@@ -631,6 +632,7 @@ playBtn.textContent = playing ? 'Pause' : 'Play';
 // The contract scripts/explainer/record.mjs relies on.
 window.__duration = DURATION;
 window.__seek = t => show(t);
+window.__fonts = ['Inter', 'Monoid'];
 show(now);
 if (!recording) requestAnimationFrame(tick);
 </script>

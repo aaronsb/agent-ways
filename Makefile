@@ -258,6 +258,7 @@ explainer-video:
 	node scripts/explainer/record.mjs docs/explainers/animations/$(EXPLAINER)/index.html
 
 explainer-stills:
+	@test -n "$(T)" || { echo 'usage: make explainer-stills T=5,20,40 [EXPLAINER=<name>]'; exit 2; }
 	node scripts/explainer/record.mjs docs/explainers/animations/$(EXPLAINER)/index.html --stills $(T)
 
 # Internal: post-build advisory printed after every attend / attend-

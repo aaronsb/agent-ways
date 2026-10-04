@@ -13,8 +13,9 @@ A page is an explainer when its whole state is a function of one clock:
 | `?record=1` | Hides the page's own controls and fills a 1920×1080 viewport |
 | `?t=<seconds>` | Opens paused at that moment |
 | `?embed` | Drops the page margins, for an iframe in the manual |
+| `window.__fonts` | Optional list of web font families; the recorder stops if any did not load |
 
-Time is an input, so a render is frame-exact and repeatable: no screen capture, no dropped frames, and a still at second 42 always shows the same thing. Keep randomness seeded, and don't use CSS animations or transitions, which run on their own clock.
+Time is an input, so a render is frame-exact and repeatable (given the same fonts, which `window.__fonts` enforces): no screen capture, no dropped frames, and a still at second 42 always shows the same thing. Keep randomness seeded, and don't use CSS animations or transitions, which run on their own clock.
 
 `a-turn-with-ways/index.html` is the worked example. Its beats are one table of `[start, end, title, caption]`, and `render(t)` sets every element's attributes from `t`.
 

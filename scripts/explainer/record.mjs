@@ -21,55 +21,75 @@ import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const WIDTH = 1920;
 const HEIGHT = 1080;
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const USAGE = 'usage: record.mjs <page.html> [--out FILE|DIR] [--fps N] [--stills t1,t2,...]';
 
 function parseArgs(argv) {
   const args = { page: null, out: null, fps: 30, stills: null, chromium: process.env.CHROMIUM || 'chromium' };
+  const value = (flag, v) => {
+    if (!v) throw new Error(`${flag} needs a value\n${USAGE}`);
+    return v;
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--out') args.out = argv[++i];
-    else if (a === '--fps') args.fps = Number(argv[++i]);
-    else if (a === '--stills') args.stills = argv[++i].split(',').map(Number);
-    else if (a === '--chromium') args.chromium = argv[++i];
+    if (a === '--out') args.out = value(a, argv[++i]);
+    else if (a === '--fps') args.fps = Number(value(a, argv[++i]));
+    else if (a === '--stills') args.stills = value(a, argv[++i]).split(',').map(Number);
+    else if (a === '--chromium') args.chromium = value(a, argv[++i]);
     else if (!args.page) args.page = a;
     else throw new Error(`unexpected argument: ${a}`);
   }
-  if (!args.page) throw new Error('usage: record.mjs <page.html> [--out FILE|DIR] [--fps N] [--stills t1,t2,...]');
+  if (!args.page) throw new Error(USAGE);
+  if (!Number.isInteger(args.fps) || args.fps <= 0) throw new Error(`--fps must be a positive integer, got ${args.fps}`);
+  if (args.stills?.some(t => !Number.isFinite(t) || t < 0)) throw new Error('--stills takes comma-separated times in seconds, e.g. 5,20.5,40');
   const name = path.basename(path.dirname(path.resolve(args.page)));
-  args.out ??= args.stills ? path.join('build', 'explainers', `${name}-stills`) : path.join('build', 'explainers', `${name}.mp4`);
+  args.out ??= path.join(REPO, 'build', 'explainers', args.stills ? `${name}-stills` : `${name}.mp4`);
   return args;
 }
 
-// Start Chromium and return the browser's DevTools WebSocket URL.
-async function launch(chromium) {
-  const profile = mkdtempSync(path.join(tmpdir(), 'explainer-chromium-'));
+// Start Chromium. `ready` resolves to the browser's DevTools WebSocket URL;
+// `exited` resolves when the process is gone, whether it ran or failed to spawn.
+function launch(chromium, profile) {
   const proc = spawn(chromium, [
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
     '--hide-scrollbars', '--force-device-scale-factor=1', '--font-render-hinting=none',
     '--no-first-run', '--no-default-browser-check', '--allow-file-access-from-files', 'about:blank',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const exited = new Promise(resolve => { proc.on('exit', resolve); proc.on('error', resolve); });
   let buffered = '';
-  const url = await new Promise((resolve, reject) => {
+  const ready = new Promise((resolve, reject) => {
     proc.stderr.on('data', chunk => {
       buffered += chunk;
       const m = buffered.match(/DevTools listening on (ws:\/\/\S+)/);
       if (m) resolve(m[1]);
     });
+    proc.on('error', err => reject(new Error(`cannot start ${chromium} (${err.code}); set CHROMIUM or pass --chromium`)));
     proc.on('exit', code => reject(new Error(`chromium exited (${code}) before DevTools came up:\n${buffered}`)));
   });
-  return { proc, url, profile };
+  return { proc, ready, exited };
 }
 
 // A minimal DevTools protocol client: one socket, calls matched by id.
 async function connect(url) {
   const ws = new WebSocket(url);
-  await once(ws, 'open');
+  await new Promise((resolve, reject) => {
+    ws.addEventListener('open', resolve, { once: true });
+    ws.addEventListener('error', () => reject(new Error(`cannot connect to DevTools at ${url}`)), { once: true });
+  });
   let nextId = 1;
   const pending = new Map();
   const waiters = [];
+  // A closed socket means Chromium is gone: fail every outstanding call and wait.
+  ws.addEventListener('close', () => {
+    const err = new Error('DevTools connection closed (did chromium crash?)');
+    for (const p of pending.values()) p.reject(err);
+    pending.clear();
+    for (const w of waiters.splice(0)) w.reject(err);
+  });
   ws.addEventListener('message', ev => {
     const msg = JSON.parse(ev.data);
     if (msg.id && pending.has(msg.id)) {
@@ -81,20 +101,25 @@ async function connect(url) {
     }
   });
   const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+    if (ws.readyState !== WebSocket.OPEN) return reject(new Error('DevTools connection closed (did chromium crash?)'));
     const id = nextId++;
     pending.set(id, { resolve, reject });
     ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
   });
-  const event = method => new Promise(resolve => waiters.push({ method, resolve }));
+  const event = method => new Promise((resolve, reject) => waiters.push({ method, resolve, reject }));
   return { ws, send, event };
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const pageUrl = pathToFileURL(path.resolve(args.page)).href + '?record=1';
-  const { proc, url, profile } = await launch(args.chromium);
-  const cdp = await connect(url);
+  const profile = mkdtempSync(path.join(tmpdir(), 'explainer-chromium-'));
+  const browser = launch(args.chromium, profile);
+  let cdp = null;
+  let ff = null;
+  let complete = false;
   try {
+    cdp = await connect(await browser.ready);
     const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
     const call = (method, params) => cdp.send(method, params, sessionId);
@@ -111,6 +136,11 @@ async function main() {
     await loaded;
     const duration = await evaluate('document.fonts.ready.then(() => window.__duration)');
     if (typeof duration !== 'number' || !(duration > 0)) throw new Error('page does not expose window.__duration; is it an explainer?');
+    // A web font that failed to load falls back silently, so the render would
+    // not match the last one. Refuse rather than record the fallback.
+    const missing = await evaluate(`Promise.all((window.__fonts || []).map(f =>
+      document.fonts.load('16px "' + f + '"').then(faces => (faces.length ? null : f), () => f))).then(r => r.filter(Boolean))`);
+    if (missing.length) throw new Error(`fonts did not load (offline?): ${[...new Set(missing)].join(', ')}`);
 
     // Seek, then wait one animation frame so the screenshot sees the new state.
     const frameAt = async (t, format) => {
@@ -122,31 +152,51 @@ async function main() {
     if (args.stills) {
       mkdirSync(args.out, { recursive: true });
       for (const t of args.stills) {
-        const file = path.join(args.out, `t${String(t).padStart(6, '0')}.png`);
+        const file = path.join(args.out, `t${t.toFixed(2).padStart(9, '0')}.png`);  // sorts in time order
         writeFileSync(file, await frameAt(t, 'png'));
         console.log('wrote', file);
       }
+      complete = true;
       return;
     }
 
     mkdirSync(path.dirname(args.out), { recursive: true });
-    const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(args.fps), '-vcodec', 'mjpeg', '-i', '-',
+    ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(args.fps), '-vcodec', 'mjpeg', '-i', '-',
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-preset', 'slow', '-movflags', '+faststart', args.out],
       { stdio: ['pipe', 'inherit', 'inherit'] });
+    ff.stdin.on('error', () => {});  // a dead ffmpeg surfaces through ffDone
+    // Settles when ffmpeg is gone for any reason; an early exit rejects so a
+    // pending write cannot wait on 'drain' forever.
+    const ffDone = new Promise((resolve, reject) => {
+      ff.on('error', err => reject(new Error(`cannot start ffmpeg (${err.code})`)));
+      ff.on('close', code => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`))));
+    });
+    ffDone.catch(() => {});
+    let finishing = false;
+    const ffEarly = ffDone.then(() => { if (!finishing) throw new Error('ffmpeg exited before the last frame'); });
+    ffEarly.catch(() => {});
     const total = Math.round(duration * args.fps);
     for (let i = 0; i < total; i++) {
-      const buf = await frameAt(i / args.fps, 'jpeg');
-      if (!ff.stdin.write(buf)) await once(ff.stdin, 'drain');
+      const buf = await Promise.race([frameAt(i / args.fps, 'jpeg'), ffEarly]);
+      if (!ff.stdin.write(buf)) await Promise.race([once(ff.stdin, 'drain'), ffEarly]);
       if (i % (args.fps * 10) === 0) console.log(`frame ${i}/${total}`);
     }
+    finishing = true;
     ff.stdin.end();
-    const [code] = await once(ff, 'close');
-    if (code !== 0) throw new Error(`ffmpeg exited ${code}`);
+    await ffDone;
+    complete = true;
     console.log(`wrote ${args.out} (${duration}s at ${args.fps} fps)`);
   } finally {
-    cdp.ws.close();
-    proc.kill('SIGTERM');
-    await once(proc, 'exit').catch(() => {});
+    if (ff && ff.exitCode === null && ff.signalCode === null) ff.kill('SIGKILL');
+    if (ff && !complete) rmSync(args.out, { force: true });  // no truncated MP4
+    // Browser.close shuts Chromium down in order, so its child processes stop
+    // writing to the profile before the main process exits. SIGTERM is the fallback.
+    const running = () => browser.proc.exitCode === null && browser.proc.signalCode === null;
+    if (cdp && running()) await Promise.race([cdp.send('Browser.close').catch(() => {}), new Promise(r => setTimeout(r, 2000))]);
+    cdp?.ws.close();
+    const stopped = await Promise.race([browser.exited.then(() => true), new Promise(r => setTimeout(r, 5000, false))]);
+    if (!stopped && running()) browser.proc.kill('SIGTERM');
+    await browser.exited;
     rmSync(profile, { recursive: true, force: true });
   }
 }

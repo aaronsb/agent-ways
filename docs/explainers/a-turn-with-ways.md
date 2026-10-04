@@ -7,7 +7,7 @@ hide:
 
 Two minutes, in fourteen beats. The animation follows one Claude Code turn as the hooks see it: core at session start, a prompt matched by the keyword and semantic lanes, the relevance judge, tool calls and a subagent dispatch, the end of the turn, and re-disclosure as the context window fills. Then it widens to two sessions and a person on the attend bus, showing how a message reaches a busy session and an idle one.
 
-<div style="position: relative; width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden;">
+<div style="position: relative; width: 100%; height: 0; padding-top: calc(56.25% + 48px); border-radius: 8px; overflow: hidden;">
 <iframe src="../animations/a-turn-with-ways/index.html?embed" title="Animated explainer: a turn with agent-ways" style="position: absolute; inset: 0; width: 100%; height: 100%; border: 0;" loading="lazy" allowfullscreen></iframe>
 </div>
 
