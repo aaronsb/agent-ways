@@ -27,4 +27,12 @@ Space plays or pauses, and the timeline jumps to any beat. Adding `?t=` and a nu
 
 ## As a video
 
+The same two minutes on YouTube, for sharing or for a reader without JavaScript.
+
+<div style="position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden;">
+<iframe src="https://www.youtube-nocookie.com/embed/Ma4sDBPJVvU" title="A turn with agent-ways (video)" style="position: absolute; inset: 0; width: 100%; height: 100%; border: 0;" loading="lazy" allow="encrypted-media; picture-in-picture; fullscreen" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+</div>
+
+[Watch on YouTube](https://youtu.be/Ma4sDBPJVvU)
+
 `make explainer-video` renders the animation to `build/explainers/a-turn-with-ways.mp4` (1080p, 30 fps). [Making explainers](authoring.md) covers the recorder and how to build a new one.
