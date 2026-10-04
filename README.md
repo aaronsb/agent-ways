@@ -382,7 +382,7 @@ At session start, `check-config-updates.sh` flags when the app source is behind 
 
 ## Documentation
 
-The **[agent-ways manual](https://aaronsb.github.io/agent-ways/)** publishes these docs as a site, organized by system: Ways, Attend, the corpus, and the project. The paths below are the same pages in the repository.
+The **[agent-ways manual](https://aaronsb.github.io/agent-ways/)** publishes these docs as a site, organized by system: Ways, Attend, the corpus, and the project. The paths below are their sources in the repository.
 
 | Path | What's there |
 |------|-------------|
