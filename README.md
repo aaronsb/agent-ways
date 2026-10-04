@@ -9,12 +9,19 @@
 ![GitHub issues](https://img.shields.io/github/issues/aaronsb/agent-ways)
 ![License](https://img.shields.io/github/license/aaronsb/agent-ways)
 ![Last commit](https://img.shields.io/github/last-commit/aaronsb/agent-ways)
+[![Manual](https://img.shields.io/badge/manual-aaronsb.github.io%2Fagent--ways-10b981)](https://aaronsb.github.io/agent-ways/)
 
 Organizational socialization for AI coding agents. Ways encode *"the way we do it around here"* — the local norms an agent cannot know because it was never told them — and deliver them the way human teams actually transmit norms: situated, at the moment of relevant action, just before tools execute.
 
 An LLM session cannot internalize norms — no weight updates, no carried memory; every session is a new hire. So the system re-enacts socialization mechanically, on a spaced schedule that substitutes for the memory the agent does not have. In one sentence: *procedural memory for coding agents, maintained by spaced repetition.* Every project-coined term here maps to an established concept — the [vocabulary reference](docs/vocabulary.md) is the index.
 
 > **Current status:** Agent Ways ships with full support for [Claude Code](https://code.claude.com/docs). Support for additional CLI-based coding agents is in development.
+
+<p align="center">
+  <a href="https://youtu.be/Ma4sDBPJVvU"><img src="https://img.youtube.com/vi/Ma4sDBPJVvU/maxresdefault.jpg" alt="Video: A turn with agent-ways, a two-minute animated explainer on YouTube" width="720" /></a>
+  <br />
+  <sub><b>A turn with agent-ways</b> (2 min): one Claude Code turn as the hooks see it, then two sessions and a person on the attend bus. <a href="https://youtu.be/Ma4sDBPJVvU">Watch on YouTube</a> or play the <a href="https://aaronsb.github.io/agent-ways/explainers/a-turn-with-ways/">interactive version</a>.</sub>
+</p>
 
 ```mermaid
 sequenceDiagram
@@ -374,6 +381,8 @@ A fork fetches and merges upstream in the app dir (`git fetch upstream && git me
 At session start, `check-config-updates.sh` flags when the app source is behind upstream (`aaronsb/agent-ways`), fetching at most once per hour. A fork or a non-GitHub origin gets no nudge. There is no off switch yet that survives the next `ways reconcile`: deleting the script or its `settings.json` entry is undone by reconcile ([#816](https://github.com/aaronsb/agent-ways/issues/816)).
 
 ## Documentation
+
+The **[agent-ways manual](https://aaronsb.github.io/agent-ways/)** publishes these docs as a site, organized by system: Ways, Attend, the corpus, and the project. The paths below are the same pages in the repository.
 
 | Path | What's there |
 |------|-------------|
