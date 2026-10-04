@@ -17,6 +17,7 @@
         * [Install](install-guide.md)
         * [Finish the install](finish-install.md)
     * [The cognitive loop](cognitive-loop.md)
+    * [A turn with agent-ways](explainers/a-turn-with-ways.md)
     * [Vocabulary](vocabulary.md)
     * [Status line](reference/statusline.md)
 * Ways
@@ -94,6 +95,7 @@
 * Project
     * [Development](development.md)
     * [Writing about the matching engine](hooks-and-ways/authoring-docs-style.md)
+    * [Making explainers](explainers/authoring.md)
     * Decisions
         * [Index](architecture/INDEX.md)
         * [Ways](architecture/ways/)

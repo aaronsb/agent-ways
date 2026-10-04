@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A turn with agent-ways</title>
+<!--
+  An animated explainer: one Claude Code turn with ways, then several
+  sessions and a person on the attend bus.
+
+  Every element's state is a function of one clock, so the page can be
+  scrubbed, linked to a moment (?t=42), and rendered frame by frame to video
+  (?record=1, driven by scripts/explainer/record.mjs). The contract is in
+  docs/explainers/authoring.md.
+
+  Example prompts, scores and session names are illustrative; thresholds,
+  hook names, commands and way triggers are the shipped ones.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+@font-face { font-family: "Monoid"; src: url("../../../assets/fonts/monoid/monoid-regular.woff2") format("woff2"); font-weight: 400; }
+@font-face { font-family: "Monoid"; src: url("../../../assets/fonts/monoid/monoid-bold.woff2") format("woff2"); font-weight: 700; }
+:root { color-scheme: dark; --ink: #0d1117; --text: #e6edf3; --muted: #8b949e; --rule: #30363d; --em: #10b981; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ink); color: var(--text); font: 15px/1.5 Inter, system-ui, sans-serif; }
+body { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px; }
+.frame { width: 100%; max-width: 1280px; aspect-ratio: 16 / 9; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+#stage { display: block; width: 100%; height: 100%; }
+.controls { width: 100%; max-width: 1280px; display: flex; align-items: center; gap: 12px; }
+button { font: 600 14px Inter, sans-serif; color: var(--ink); background: var(--em); border: 0; border-radius: 6px; padding: 8px 16px; min-width: 84px; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid #f59e0b; outline-offset: 2px; }
+input[type=range] { flex: 1; accent-color: var(--em); min-width: 0; }
+#clock { font: 13px Monoid, ui-monospace, monospace; color: var(--muted); white-space: nowrap; }
+.note { width: 100%; max-width: 1280px; color: var(--muted); font-size: 13px; margin: 0; }
+body.embed { padding: 0; gap: 6px; overflow: hidden; }
+body.embed .frame { max-width: none; border-radius: 0; border: 0; }
+body.embed .controls { max-width: none; padding: 0 12px; }
+body.embed .note { display: none; }
+body.record { padding: 0; gap: 0; }
+body.record .frame { width: 1920px; height: 1080px; max-width: none; border: 0; border-radius: 0; }
+body.record .controls, body.record .note { display: none; }
+</style>
+</head>
+<body>
+<div class="frame"><svg id="stage" viewBox="0 0 1920 1080" role="img" aria-labelledby="stage-title"><title id="stage-title">Animated explainer: how agent-ways delivers guidance during one Claude Code turn, and how several sessions and a person coordinate through attend.</title></svg></div>
+<div class="controls">
+  <button id="play" type="button">Pause</button>
+  <input id="scrub" type="range" min="0" max="1" step="0.01" value="0" aria-label="Timeline">
+  <span id="clock">0:00</span>
+</div>
+<p class="note">Space plays or pauses; drag the timeline to any beat. Prompts, scores and session names are illustrative; hook names, thresholds, commands and way triggers are the shipped ones.</p>
+
+<script>
+'use strict';
+// ── helpers ──────────────────────────────────────────────────────────────────
+const NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('stage');
+const C = {
+  ink: '#0d1117', panel: '#161b22', panel2: '#1c2330', rule: '#30363d', text: '#e6edf3', muted: '#8b949e', dim: '#484f58',
+  em: '#10b981', emDeep: '#047857', amber: '#f59e0b', red: '#ef4444', lime: '#84cc16', human: '#c4b5fd',
+};
+const SANS = 'Inter, system-ui, sans-serif';
+const MONO = 'Monoid, ui-monospace, Menlo, monospace';
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const ease = x => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const lerp = (a, b, k) => a + (b - a) * k;
+// Visible between a and b, fading over f seconds at each end.
+const vis = (t, a, b, f = 0.6) => Math.min(ease(prog(t, a, a + f)), 1 - ease(prog(t, b - f, b)));
+function el(tag, attrs = {}, parent = svg, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  parent.appendChild(e);
+  return e;
+}
+const set = (e, attrs) => { for (const k in attrs) e.setAttribute(k, attrs[k]); };
+const g = (parent = svg, attrs = {}) => el('g', attrs, parent);
+function txt(parent, x, y, s, { size = 22, font = SANS, fill = C.text, anchor = 'start', weight = 400 } = {}) {
+  return el('text', { x, y, 'font-family': font, 'font-size': size, fill, 'text-anchor': anchor, 'font-weight': weight }, parent, s);
+}
+function box(parent, x, y, w, h, { fill = C.panel, stroke = C.rule, r = 10, sw = 1.5 } = {}) {
+  return el('rect', { x, y, width: w, height: h, rx: r, fill, stroke, 'stroke-width': sw }, parent);
+}
+// A labelled pill; returns { g, rect, label } so callers can recolour it.
+function pill(parent, x, y, w, label, { h = 40, size = 18, font = MONO, fill = C.panel2, stroke = C.rule, color = C.text } = {}) {
+  const gg = g(parent);
+  const rect = box(gg, x, y, w, h, { fill, stroke, r: h / 2 });
+  const t = txt(gg, x + w / 2, y + h / 2 + size * 0.36, label, { size, font, fill: color, anchor: 'middle' });
+  return { g: gg, rect, label: t, x, y, w, h };
+}
+// Text that appears character by character between a and b.
+function typed(node, full, t, a, b) { node.textContent = full.slice(0, Math.round(full.length * prog(t, a, b))); }
+
+// ── the timeline ─────────────────────────────────────────────────────────────
+// Each beat: [start, end, title, caption]. The caption is what a narrator would say.
+const BEATS = [
+  [0, 7, 'A turn with agent-ways', 'Guidance reaches Claude at the moment it applies, and sessions stay aware of each other between turns.'],
+  [7, 15, 'Session start', 'SessionStart: the state hook shows core.md, the base posture and the table of available ways. Every other way waits until something makes it relevant.'],
+  [15, 24, 'A prompt arrives', 'UserPromptSubmit: the ways binary embeds the prompt, with Claude’s last reply, and runs two lanes over the corpus: keyword patterns and semantic relevance.'],
+  [24, 31, 'Two lanes, one rule', 'A way fires when g(s) ≥ τs, or when its pattern hit and g(s) ≥ τk. A keyword alone can’t drag in an unrelated prompt.'],
+  [31, 38, 'The relevance judge', 'The ways agent sends each candidate’s path and description to a small hosted model for a yes or no, outside Claude’s context. On any failure the matcher’s decision stands.'],
+  [38, 44, 'Injected, and stamped', 'Admitted ways reach Claude as hook context. github’s macro runs first and prepends live repo state. Each fire is stamped with the agent’s position in its window.'],
+  [44, 52, 'Tool calls match too', 'PreToolUse: a Bash command is matched against each way’s commands pattern, with no judge on this lane. git commit brings in commits.'],
+  [52, 58, 'Already shown, so held', 'gh pr create matches github, but github fired moments ago. Until its refire fraction of the window passes, it is held.'],
+  [58, 66, 'Subagents get their own', 'Dispatching a subagent: its task is matched against ways scoped to subagents, and SubagentStart injects them. The subagent keeps its own fire record.'],
+  [66, 72, 'The turn ends', 'Stop: Claude’s reply is recorded for the next prompt’s matching, and the attend drain checks for peer messages. None are pending, so the turn ends.'],
+  [72, 82, 'Re-disclosure', 'As the window fills, a fired way decays. After its refire fraction (0.15 of the window here) a new match re-injects it to course-correct.'],
+  [82, 90, 'Many sessions, one bus', 'attend runs under Monitor in each session. Sensors watch context, git, peers and processes, and surface only what is worth a notification.'],
+  [90, 98, 'A busy session hears at the boundary', 'Session A sends a message. Session B is mid-turn, so the Stop hook delivers it when B’s turn ends; nothing is dropped.'],
+  [98, 108, 'The person is on the bus too', 'In attend-chat the person reads the same messages and writes to the sessions. An idle session is woken by its Monitor line.'],
+  [108, 120, 'Two kinds of delivery', 'Ways: guidance at the moment of action, through hooks. Attend: awareness between turns, through Monitor and the turn boundary.'],
+];
+const DURATION = BEATS[BEATS.length - 1][1];
+
+// ── persistent chrome: header, beat title, caption ──────────────────────────
+const defs = el('defs');
+const ramp = el('linearGradient', { id: 'ramp', x1: 0, x2: 1, y1: 0, y2: 0 }, defs);
+[['0', C.red], ['0.3', C.amber], ['0.6', C.lime], ['1', C.em]].forEach(([o, c]) => el('stop', { offset: o, 'stop-color': c }, ramp));
+el('rect', { x: 0, y: 0, width: 1920, height: 1080, fill: C.ink });
+for (let x = 40; x < 1920; x += 40) for (let y = 120; y < 960; y += 40) el('circle', { cx: x, cy: y, r: 1, fill: '#1b2128' });
+const brand = g();
+// The W mark from the logo, as nodes on a polyline.
+const W = [[0, 0], [14, 34], [28, 68], [42, 34], [56, 12], [70, 34], [84, 68], [98, 34], [112, 0]];
+el('polyline', { points: W.map(([x, y]) => `${60 + x * 0.42},${38 + y * 0.42}`).join(' '), fill: 'none', stroke: 'url(#ramp)', 'stroke-width': 3, 'stroke-linejoin': 'round' }, brand);
+txt(brand, 120, 66, 'agent-ways', { size: 26, weight: 600 });
+const beatTitle = txt(svg, 1860, 66, '', { size: 30, weight: 600, anchor: 'end' });
+const beatCount = txt(svg, 1860, 96, '', { size: 16, font: MONO, fill: C.muted, anchor: 'end' });
+el('rect', { x: 0, y: 112, width: 1920, height: 3, fill: 'url(#ramp)' });
+const captionBg = el('rect', { x: 0, y: 958, width: 1920, height: 122, fill: '#0a0e13' });
+const caption = el('text', { x: 960, y: 1012, 'font-family': SANS, 'font-size': 31, fill: C.text, 'text-anchor': 'middle' });
+const caption2 = el('text', { x: 960, y: 1052, 'font-family': SANS, 'font-size': 31, fill: C.text, 'text-anchor': 'middle' });
+// Split a caption into two balanced lines at a word boundary.
+function setCaption(s, alpha) {
+  const words = s.split(' ');
+  let best = [s, ''];
+  if (s.length > 80) {
+    let line = '';
+    for (let i = 0; i < words.length; i++) {
+      line += (i ? ' ' : '') + words[i];
+      if (line.length >= s.length / 2) { best = [line, words.slice(i + 1).join(' ')]; break; }
+    }
+  }
+  caption.textContent = best[0]; caption2.textContent = best[1];
+  if (!best[1]) caption.setAttribute('y', 1030); else caption.setAttribute('y', 1010);
+  caption.setAttribute('opacity', alpha); caption2.setAttribute('opacity', alpha);
+}
+
+// ── scene 0: title ───────────────────────────────────────────────────────────
+const sTitle = g();
+txt(sTitle, 960, 500, 'A turn with agent-ways', { size: 84, weight: 700, anchor: 'middle' });
+txt(sTitle, 960, 566, 'ways, attend, and the person in the loop', { size: 34, fill: C.muted, anchor: 'middle' });
+const titleW = el('polyline', { points: W.map(([x, y]) => `${960 - 112 * 1.2 + x * 2.4},${200 + y * 2.4}`).join(' '), fill: 'none', stroke: 'url(#ramp)', 'stroke-width': 8, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, sTitle);
+const titleNodes = W.map(([x, y]) => el('circle', { cx: 960 - 112 * 1.2 + x * 2.4, cy: 200 + y * 2.4, r: 9, fill: C.ink, stroke: C.em, 'stroke-width': 3 }, sTitle));
+
+// ── the turn view: hook rail, session, matcher, corpus, context bar ─────────
+const TV = g();
+// Hook rail
+txt(TV, 60, 160, 'HOOK EVENTS', { size: 15, font: MONO, fill: C.muted });
+const HOOKS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'SubagentStart', 'PostToolUse', 'Stop'];
+const hookPills = HOOKS.map((h, i) => pill(TV, 220 + i * 275, 134, 258, h, { size: 18 }));
+// Session panel
+box(TV, 60, 210, 540, 600);
+txt(TV, 84, 248, 'Claude Code · session A', { size: 22, weight: 600 });
+txt(TV, 84, 274, 'main agent', { size: 16, font: MONO, fill: C.muted });
+// Matcher panel
+box(TV, 640, 210, 640, 600);
+txt(TV, 664, 248, 'ways · matcher (Rust, no inference)', { size: 22, weight: 600 });
+// Corpus panel
+box(TV, 1320, 210, 540, 600);
+txt(TV, 1344, 248, 'the corpus · about 150 ways', { size: 22, weight: 600 });
+txt(TV, 1344, 274, 'hooks/ways/  ·  {domain}/{way}/{way}.md', { size: 15, font: MONO, fill: C.muted });
+const CORPUS = [
+  ['core', 'core.md'], ['github', 'delivery/github'], ['commits', 'delivery/commits'], ['merge', 'delivery/merge'],
+  ['subagents', 'meta/subagents'], ['quality', 'code/quality'], ['mermaid', 'documentation/mermaid'], ['security', 'code/security'],
+  ['testing', 'code/testing'], ['adr', 'documentation/adr'], ['memory', 'meta/memory'], ['attend', 'environment/attend'],
+];
+const corpus = {};
+CORPUS.forEach(([id, path], i) => {
+  const x = 1344 + (i % 2) * 254, y = 300 + Math.floor(i / 2) * 78;
+  const gg = g(TV);
+  const rect = box(gg, x, y, 238, 62, { fill: C.panel2, r: 8 });
+  const name = txt(gg, x + 14, y + 27, id, { size: 19, font: MONO, weight: 700 });
+  const sub = txt(gg, x + 14, y + 50, path, { size: 13, font: MONO, fill: C.muted });
+  const badge = txt(gg, x + 226, y + 27, '', { size: 14, font: MONO, anchor: 'end', weight: 700 });
+  corpus[id] = { rect, name, sub, badge, cx: x + 119, cy: y + 31 };
+});
+// Context bar
+const ctxLabel = txt(TV, 1860, 852, '', { size: 15, font: MONO, fill: C.muted, anchor: 'end' });
+box(TV, 60, 866, 1800, 36, { fill: C.panel, r: 6 });
+const ctxFill = el('rect', { x: 61, y: 867, width: 0, height: 34, rx: 5, fill: '#1f2a37' }, TV);
+const ctxMarks = g(TV);
+const CTX_X = 61, CTX_W = 1798;
+// Markers placed in the window: [id, token fraction, time it lands, colour, label above]
+function mark(id, frac, color, label) {
+  const gg = g(ctxMarks);
+  const x = CTX_X + CTX_W * frac;
+  el('rect', { x: x - 2, y: 862, width: 4, height: 44, rx: 2, fill: color }, gg);
+  txt(gg, x, 930, label, { size: 14, font: MONO, fill: color, anchor: 'middle' });
+  return { g: gg, x };
+}
+
+// ── session feed items ───────────────────────────────────────────────────────
+const feed = g(TV);
+const human = g(feed);
+box(human, 84, 300, 492, 92, { fill: '#1d1a2e', stroke: '#4c3f7a', r: 12 });
+txt(human, 104, 330, 'person', { size: 15, font: MONO, fill: C.human });
+const humanText = txt(human, 104, 368, '', { size: 21, fill: C.text });
+const PROMPT = 'let’s get this reviewed and open a PR';
+function toolChip(y, tool, cmd) {
+  const gg = g(feed);
+  box(gg, 84, y, 492, 64, { fill: C.panel2, r: 10 });
+  txt(gg, 104, y + 26, tool, { size: 15, font: MONO, fill: C.muted });
+  const c = txt(gg, 104, y + 50, cmd, { size: 19, font: MONO });
+  return { g: gg, c };
+}
+const chipCommit = toolChip(420, 'Bash', 'git commit -m "fix: …"');
+const chipPr = toolChip(500, 'Bash', 'gh pr create --fill');
+const chipAgent = toolChip(580, 'Agent', 'general-purpose: check CI on the PR');
+// Subagent mini panel
+const sub = g(TV);
+box(sub, 104, 660, 472, 130, { fill: '#121820', stroke: C.emDeep, r: 10 });
+txt(sub, 124, 690, 'subagent · general-purpose', { size: 18, weight: 600 });
+txt(sub, 124, 714, 'its own fire record', { size: 14, font: MONO, fill: C.muted });
+const subGot = txt(sub, 124, 760, '', { size: 17, font: MONO, fill: C.em });
+const turnEnd = txt(TV, 330, 790, '', { size: 18, font: MONO, fill: C.muted, anchor: 'middle' });
+
+// ── matcher internals ────────────────────────────────────────────────────────
+const M = g(TV);
+txt(M, 664, 300, 'keyword lane · pattern:', { size: 17, font: MONO, fill: C.muted });
+const KW = [
+  ['github', 'github|…|\\bprs?\\b|…', true],
+  ['subagents', 'review.{0,30}\\bpr\\b|…', true],
+  ['merge', 'land (this|it)|ship (it|this)|…', false],
+];
+const kwRows = KW.map(([id, pat, hit], i) => {
+  const y = 330 + i * 34;
+  const n = txt(M, 664, y, id, { size: 17, font: MONO, weight: 700 });
+  const p = txt(M, 790, y, pat, { size: 16, font: MONO, fill: C.muted });
+  const r = txt(M, 1256, y, '', { size: 17, font: MONO, anchor: 'end', weight: 700 });
+  return { n, p, r, hit };
+});
+txt(M, 664, 462, 'semantic lane · g(s) = σ(a·s + b)', { size: 17, font: MONO, fill: C.muted });
+const SEM = [['github', 0.86], ['merge', 0.58], ['subagents', 0.33], ['commits', 0.24], ['mermaid', 0.03]];
+const BAR_X = 800, BAR_W = 440, BAR_Y = 480;
+const semBars = SEM.map(([id, v], i) => {
+  const y = BAR_Y + i * 30;
+  txt(M, 664, y + 17, id, { size: 17, font: MONO });
+  el('rect', { x: BAR_X, y, width: BAR_W, height: 22, rx: 4, fill: '#10161d' }, M);
+  const bar = el('rect', { x: BAR_X, y, width: 0, height: 22, rx: 4, fill: C.dim }, M);
+  const val = txt(M, BAR_X + 8, y + 16, '', { size: 14, font: MONO, fill: C.text });
+  return { id, v, bar, val, y };
+});
+const thresh = (v, label, color) => {
+  const x = BAR_X + BAR_W * v;
+  const gg = g(M);
+  el('line', { x1: x, x2: x, y1: BAR_Y - 6, y2: BAR_Y + 5 * 30, stroke: color, 'stroke-width': 2, 'stroke-dasharray': '5 4' }, gg);
+  txt(gg, x, BAR_Y + 5 * 30 + 18, label, { size: 15, font: MONO, fill: color, anchor: 'middle' });
+  return gg;
+};
+const tauK = thresh(0.15, 'τk 0.15', C.amber);
+const tauS = thresh(0.5, 'τs 0.50', C.em);
+const rule = txt(M, 960, 686, 'fire ⇔ g(s) ≥ τs  ∨  (pattern hit ∧ g(s) ≥ τk)', { size: 18, font: MONO, anchor: 'middle', fill: C.text });
+// Judge
+const J = g(TV);
+box(J, 664, 706, 592, 90, { fill: '#141c14', stroke: '#3f6212', r: 10 });
+txt(J, 684, 736, 'ways agent · relevance judge', { size: 19, weight: 600, fill: C.lime });
+txt(J, 684, 760, 'path + description only · ≤8 candidates · 2 s · fails open', { size: 14, font: MONO, fill: C.muted });
+const judgeOut = txt(J, 684, 786, '', { size: 16, font: MONO });
+// Commands lane (replaces the prompt lanes during the tool beats)
+const CMD = g(TV);
+box(CMD, 664, 290, 592, 220, { fill: '#10161d', r: 8 });
+txt(CMD, 684, 322, 'command lane · commands:  (no judge here)', { size: 17, font: MONO, fill: C.muted });
+const cmdRows = [
+  ['commits', 'git\\ commit'], ['github', '^gh\\ |^gh$'], ['quality', '—'],
+].map(([id, pat], i) => {
+  const y = 362 + i * 40;
+  const n = txt(CMD, 684, y, id, { size: 18, font: MONO, weight: 700 });
+  txt(CMD, 830, y, pat, { size: 17, font: MONO, fill: C.muted });
+  const r = txt(CMD, 1236, y, '', { size: 17, font: MONO, anchor: 'end', weight: 700 });
+  return { n, r };
+});
+const cmdNow = txt(CMD, 684, 488, '', { size: 17, font: MONO, fill: C.text });
+const macroBox = g(TV);
+box(macroBox, 84, 420, 492, 70, { fill: '#121a17', stroke: C.emDeep, r: 10 });
+txt(macroBox, 104, 448, 'github · macro: prepend', { size: 17, font: MONO, fill: C.em });
+txt(macroBox, 104, 474, 'macro.sh runs at fire time: live repo state', { size: 16, fill: C.muted });
+const heldBox = g(TV);
+box(heldBox, 664, 620, 592, 70, { fill: '#1d170c', stroke: '#92400e', r: 8 });
+txt(heldBox, 684, 650, 'github: held', { size: 17, font: MONO, fill: C.amber, weight: 700 });
+txt(heldBox, 684, 676, 'shown this window; refire 0.15 not yet reached', { size: 16, fill: C.muted });
+const stashBox = g(TV);
+box(stashBox, 664, 290, 592, 160, { fill: '#10161d', r: 8 });
+txt(stashBox, 684, 322, 'task prompt vs ways with scope: subagent → stash', { size: 17, font: MONO, fill: C.muted });
+txt(stashBox, 684, 362, 'github     subagent scope · matches   ✓', { size: 17, font: MONO, fill: C.em });
+txt(stashBox, 684, 394, 'commits    subagent scope · no match  –', { size: 17, font: MONO, fill: C.muted });
+txt(stashBox, 684, 426, 'subagents  agent scope only           –', { size: 17, font: MONO, fill: C.muted });
+const drainBox = g(TV);
+box(drainBox, 664, 290, 592, 200, { fill: '#10161d', r: 8 });
+txt(drainBox, 684, 324, 'Stop hooks, in order', { size: 17, font: MONO, fill: C.muted });
+txt(drainBox, 684, 362, 'check-response.sh', { size: 18, font: MONO, fill: C.em });
+txt(drainBox, 684, 390, 'records the reply for the next prompt’s embed', { size: 16, fill: C.muted });
+txt(drainBox, 684, 430, 'attend inbox --drain --format hook', { size: 18, font: MONO, fill: C.amber });
+txt(drainBox, 684, 458, 'nothing pending → the turn ends', { size: 16, fill: C.muted });
+
+const refireBox = g(TV);
+box(refireBox, 664, 290, 592, 260, { fill: '#10161d', r: 8 });
+txt(refireBox, 684, 324, 'refire gate · per agent, counted in tokens', { size: 17, font: MONO, fill: C.muted });
+txt(refireBox, 684, 364, 'github stamped at   80k', { size: 18, font: MONO });
+txt(refireBox, 684, 396, 'refire 0.15 × 1M  = 150k', { size: 18, font: MONO });
+txt(refireBox, 684, 428, 'eligible again at  230k', { size: 18, font: MONO, fill: C.amber });
+const refireNow = txt(refireBox, 684, 476, '', { size: 18, font: MONO });
+const refireOut = txt(refireBox, 684, 512, '', { size: 18, font: MONO, fill: C.em });
+
+// Flying chips: a small pill that travels from (x0,y0) to (x1,y1) between a and b.
+const fliers = g();
+function flier(label, color, from, to, a, b) {
+  const gg = g(fliers);
+  const w = 14 * label.length + 28;
+  const rect = box(gg, -w / 2, -18, w, 36, { fill: C.ink, stroke: color, r: 18, sw: 2 });
+  txt(gg, 0, 6, label, { size: 16, font: MONO, fill: color, anchor: 'middle' });
+  return { gg, from, to, a, b };
+}
+const FLY = [
+  flier('core', C.em, [corpus.core.cx, corpus.core.cy], [CTX_X + CTX_W * 0.02, 884], 10, 12.5),
+  flier('prompt', C.human, [330, 392], [960, 290], 18.5, 20),
+  flier('github', C.em, [960, 760], [CTX_X + CTX_W * 0.08, 884], 39, 41),
+  flier('subagents', C.em, [960, 760], [CTX_X + CTX_W * 0.085, 884], 39.3, 41.3),
+  flier('commits', C.em, [960, 400], [CTX_X + CTX_W * 0.12, 884], 47.5, 49.5),
+  flier('github', C.em, [960, 370], [340, 760], 61.5, 63.5),
+  flier('github', C.em, [corpus.github.cx, corpus.github.cy], [CTX_X + CTX_W * 0.52, 884], 78.5, 80.5),
+];
+
+// ── the multi-session view ───────────────────────────────────────────────────
+const MV = g();
+function sessionPanel(x, name, dir) {
+  const gg = g(MV);
+  box(gg, x, 170, 560, 420);
+  txt(gg, x + 24, 210, name, { size: 24, weight: 600 });
+  txt(gg, x + 24, 236, dir, { size: 15, font: MONO, fill: C.muted });
+  const mon = pill(gg, x + 24, 256, 290, 'Monitor · attend run', { h: 34, size: 15, stroke: '#92400e', color: C.amber });
+  // Offsets sized to each label, since Monoid sets wide.
+  const SENSOR_X = [0, 100, 160, 240, 360];
+  const sensors = ['context', 'git', 'peers', 'processes', 'keepwarm'].map((s, i) => {
+    const sx = x + 34 + SENSOR_X[i];
+    const dot = el('circle', { cx: sx, cy: 326, r: 8, fill: C.dim }, gg);
+    txt(gg, sx + 14, 332, s, { size: 13, font: MONO, fill: C.muted });
+    return dot;
+  });
+  const state = txt(gg, x + 24, 380, '', { size: 18, font: MONO });
+  const inbox = g(gg);
+  const line1 = txt(inbox, x + 24, 430, '', { size: 16, font: MONO, fill: C.amber });
+  const line2 = txt(inbox, x + 24, 460, '', { size: 18, fill: C.text });
+  const line3 = txt(inbox, x + 24, 500, '', { size: 16, font: MONO, fill: C.em });
+  const line4 = txt(inbox, x + 24, 530, '', { size: 18, fill: C.text });
+  return { g: gg, sensors, state, line1, line2, line3, line4, cx: x + 280 };
+}
+const sA = sessionPanel(60, 'Claude Code · session A', '~/src/api');
+const sB = sessionPanel(680, 'Claude Code · session B', '~/src/web');
+// attend-chat panel
+const chat = g(MV);
+box(chat, 1300, 170, 560, 420, { fill: '#15131f', stroke: '#4c3f7a' });
+txt(chat, 1324, 210, 'attend-chat · the person', { size: 24, weight: 600, fill: C.human });
+txt(chat, 1324, 236, 'a terminal on the same bus', { size: 15, font: MONO, fill: C.muted });
+const chatLines = [0, 1, 2, 3].map(i => txt(chat, 1324, 300 + i * 56, '', { size: 18, font: MONO }));
+const chatInput = txt(chat, 1324, 560, '', { size: 18, font: MONO, fill: C.human });
+// Bus
+const bus = g(MV);
+el('rect', { x: 60, y: 650, width: 1800, height: 64, rx: 32, fill: '#13171d', stroke: '#92400e', 'stroke-width': 1.5 }, bus);
+txt(bus, 960, 690, 'the attend bus · signal files per session, _broadcast, @channels', { size: 18, font: MONO, fill: C.amber, anchor: 'middle' });
+[sA.cx, sB.cx, 1580].forEach(x => el('line', { x1: x, x2: x, y1: 590, y2: 650, stroke: '#92400e', 'stroke-width': 2, 'stroke-dasharray': '4 4' }, bus));
+const lanes = g(MV);
+txt(lanes, 60, 780, 'DELIVERY', { size: 15, font: MONO, fill: C.muted });
+const laneBusy = txt(lanes, 60, 820, 'busy session → Stop hook drains at the turn boundary', { size: 20, font: MONO, fill: C.text });
+const laneIdle = txt(lanes, 60, 860, 'idle session → the peers sensor’s Monitor line wakes it', { size: 20, font: MONO, fill: C.text });
+const laneSeen = txt(lanes, 60, 900, 'both record delivery in one seen-set: each message arrives once', { size: 20, font: MONO, fill: C.muted });
+const packets = g(MV);
+function packet(color, path, a, b) {
+  const c = el('circle', { r: 11, fill: color }, packets);
+  return { c, path, a, b };
+}
+const PK = [
+  packet(C.amber, [[sA.cx, 590], [sA.cx, 682], [sB.cx, 682], [sB.cx, 590]], 91.5, 93.5),
+  packet(C.amber, [[sA.cx, 682], [1580, 682], [1580, 590]], 92.5, 94),
+  packet(C.human, [[1580, 590], [1580, 682], [sB.cx, 682], [sB.cx, 590]], 101.5, 103.2),
+  packet(C.em, [[sB.cx, 590], [sB.cx, 682], [1580, 682], [1580, 590]], 105, 106.5),
+];
+function along(path, k) {
+  const segs = [];
+  let total = 0;
+  for (let i = 1; i < path.length; i++) { const d = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]); segs.push(d); total += d; }
+  let rest = k * total;
+  for (let i = 0; i < segs.length; i++) {
+    if (rest <= segs[i]) { const f = segs[i] ? rest / segs[i] : 0; return [lerp(path[i][0], path[i + 1][0], f), lerp(path[i][1], path[i + 1][1], f)]; }
+    rest -= segs[i];
+  }
+  return path[path.length - 1];
+}
+
+// ── closing view ─────────────────────────────────────────────────────────────
+const END = g();
+function endCol(x, color, head, lines) {
+  const gg = g(END);
+  box(gg, x, 250, 560, 520, { fill: C.panel, stroke: color });
+  txt(gg, x + 30, 310, head, { size: 34, weight: 700, fill: color });
+  lines.forEach((l, i) => txt(gg, x + 30, 380 + i * 52, l, { size: 22, fill: C.text }));
+  return gg;
+}
+const end1 = endCol(60, C.em, 'ways', ['guidance at the moment of action', 'hooks: SessionStart, prompt, tools, Stop', 'keyword + semantic lanes, one rule', 'a yes/no judge outside the context', 'stamped per agent, re-disclosed later']);
+const end2 = endCol(680, C.amber, 'attend', ['awareness between turns', 'sensors under Monitor in each session', 'messages on one bus, never dropped', 'Stop-hook drain when busy', 'Monitor line when idle']);
+const end3 = endCol(1300, C.human, 'the person', ['on the same bus as the sessions', 'attend-chat to read and write', 'steers by prompt, or by message', 'every session hears it once', '']);
+
+// ── render one frame ─────────────────────────────────────────────────────────
+function render(t) {
+  const beat = BEATS.findIndex(([a, b]) => t >= a && t < b);
+  const bi = beat < 0 ? BEATS.length - 1 : beat;
+  const [ba, bb, title, cap] = BEATS[bi];
+  set(beatTitle, { opacity: bi === 0 ? 0 : vis(t, ba, bb, 0.4) });
+  beatTitle.textContent = title;
+  beatCount.textContent = bi === 0 ? '' : `${bi} / ${BEATS.length - 1}`;
+  setCaption(cap, vis(t, ba, bb, 0.4));
+
+  // Title
+  set(sTitle, { opacity: vis(t, -1, 7) });
+  const lit = Math.floor(prog(t, 0.6, 3.5) * W.length);
+  titleNodes.forEach((n, i) => set(n, { fill: i < lit ? C.em : C.ink }));
+  set(titleW, { 'stroke-dasharray': 1400, 'stroke-dashoffset': 1400 * (1 - ease(prog(t, 0.3, 3))) });
+
+  // Turn view
+  set(TV, { opacity: vis(t, 6.5, 82.5) });
+  // When each hook event is lit: [[start, end], ...] per event.
+  const hookActive = [
+    [[7.5, 14.5]],
+    [[18, 44], [76, 80.5]],                    // the prompt, then a later prompt in the re-disclosure beat
+    [[44.5, 50], [51.8, 57], [58.2, 61]],      // git commit, gh pr create, the Agent dispatch
+    [[61, 64]],
+    [[50, 51.5], [57, 57.8]],                  // after each Bash call
+    [[66.5, 72]],
+  ];
+  hookPills.forEach((h, i) => {
+    const on = hookActive[i].some(([a, b]) => t >= a && t < b);
+    set(h.rect, { fill: on ? C.emDeep : C.panel2, stroke: on ? C.em : C.rule });
+    set(h.label, { fill: on ? '#fff' : C.muted });
+  });
+
+  // Session feed
+  set(human, { opacity: vis(t, 15.2, 200) });
+  typed(humanText, PROMPT, t, 15.5, 18);
+  set(chipCommit.g, { opacity: vis(t, 44.2, 200) });
+  set(chipPr.g, { opacity: vis(t, 51.8, 200) });
+  set(chipAgent.g, { opacity: vis(t, 58.2, 200) });
+  set(sub, { opacity: vis(t, 59, 200) });
+  subGot.textContent = t >= 63.5 ? 'SubagentStart injected: github' : '';
+  turnEnd.textContent = t >= 69.5 && t < 72 ? '— turn ends —' : '';
+
+  // Matcher: prompt lanes 18–44, commands 44–58, stash 58–66, drain 66–72
+  set(M, { opacity: vis(t, 18.2, 44) });
+  kwRows.forEach((r, i) => {
+    const shown = t >= 20 + i * 0.6;
+    r.r.textContent = shown ? (r.hit ? 'hit' : '—') : '';
+    set(r.r, { fill: r.hit ? C.amber : C.dim });
+    set(r.n, { fill: shown && r.hit ? C.amber : C.text });
+  });
+  semBars.forEach((b, i) => {
+    const k = ease(prog(t, 21.5 + i * 0.3, 23.5 + i * 0.3));
+    set(b.bar, { width: BAR_W * b.v * k });
+    b.val.textContent = k > 0.95 ? b.v.toFixed(2) : '';
+    const kwHit = KW.some(([id, , hit]) => id === b.id && hit);
+    const fires = b.v >= 0.5 || (kwHit && b.v >= 0.15);
+    let fill = C.dim;
+    if (t >= 25.5) fill = fires ? C.em : '#3a2a2a';
+    if (t >= 33 && b.id === 'merge') fill = C.red;                    // the judge said no
+    set(b.bar, { fill });
+  });
+  set(tauK, { opacity: vis(t, 24.5, 200) });
+  set(tauS, { opacity: vis(t, 24.2, 200) });
+  set(rule, { opacity: vis(t, 25, 200) });
+  set(J, { opacity: vis(t, 31, 44) });
+  const verdicts = [['github', 'yes', C.em], ['subagents', 'yes', C.em], ['merge', 'no', C.red]];
+  const nV = Math.floor(prog(t, 32, 35) * 3.999);
+  judgeOut.textContent = '';
+  verdicts.slice(0, nV).forEach(([id, v], i) => { judgeOut.textContent += (i ? '   ' : '') + `${id}: ${v}`; });
+
+  set(CMD, { opacity: vis(t, 44.2, 58) });
+  cmdNow.textContent = t < 51.8 ? '$ git commit -m "fix: …"' : '$ gh pr create --fill';
+  cmdRows.forEach((r, i) => {
+    let res = '';
+    if (i === 0 && t >= 45.5 && t < 51.8) res = 'match';
+    if (i === 1 && t >= 53) res = 'match';
+    r.r.textContent = res;
+    set(r.r, { fill: i === 1 ? C.amber : C.em });
+  });
+  set(macroBox, { opacity: vis(t, 38.6, 44) });
+  set(heldBox, { opacity: vis(t, 54, 58) });
+  set(stashBox, { opacity: vis(t, 59.5, 66) });
+  set(drainBox, { opacity: vis(t, 66.6, 72) });
+  set(refireBox, { opacity: vis(t, 72.6, 82) });
+  refireNow.textContent = t >= 76 ? 'a later prompt matches github at 520k' : '';
+  refireOut.textContent = t >= 78 ? '520k ≥ 230k → re-disclosed' : '';
+
+  // Corpus badges
+  const fired = (id, at) => t >= at;
+  const badge = (id, label, color, at, until = 999) => {
+    if (t >= at && t < until) { corpus[id].badge.textContent = label; set(corpus[id].badge, { fill: color }); set(corpus[id].rect, { stroke: color }); return true; }
+    return false;
+  };
+  Object.values(corpus).forEach(c => { c.badge.textContent = ''; set(c.rect, { stroke: C.rule }); });
+  badge('core', 'fired', C.em, 10.5);
+  badge('github', 'fired', C.em, 39);
+  badge('subagents', 'fired', C.em, 39.3);
+  badge('merge', 'judged no', C.red, 33.8, 44);
+  badge('commits', 'fired', C.em, 47.5);
+  if (t >= 54 && t < 58) badge('github', 'held', C.amber, 54);
+  if (t >= 78.5) badge('github', 're-fired', C.em, 78.5);
+
+  // Context window: fill grows with the session; marks land as fliers arrive.
+  const fill = t < 72 ? lerp(0.03, 0.14, prog(t, 7, 72)) : lerp(0.14, 0.62, ease(prog(t, 72, 77)));
+  set(ctxFill, { width: CTX_W * fill });
+  ctxLabel.textContent = `main agent context window · ${Math.round(fill * 1000)}k of 1M tokens · illustrative`;
+  ctxMarks.innerHTML = '';
+  if (t >= 12.5) mark('core', 0.02, C.em, 'core');
+  if (t >= 41) { mark('gh', 0.08, C.em, 'github'); mark('sa', 0.093, C.em, ''); }
+  if (t >= 49.5) mark('cm', 0.12, C.em, 'commits');
+  if (t >= 73) {
+    // The refire bracket: 0.15 of the window after github's fire.
+    const x0 = CTX_X + CTX_W * 0.08, x1 = CTX_X + CTX_W * 0.23;
+    const k = ease(prog(t, 73, 75));
+    const gg = g(ctxMarks);
+    el('line', { x1: x0, x2: lerp(x0, x1, k), y1: 856, y2: 856, stroke: C.amber, 'stroke-width': 3 }, gg);
+    el('line', { x1: x1, x2: x1, y1: 848, y2: 864, stroke: C.amber, 'stroke-width': 3, opacity: k }, gg);
+    txt(gg, (x0 + x1) / 2, 842, 'github refire: 0.15 × window', { size: 14, font: MONO, fill: C.amber, anchor: 'middle' }).setAttribute('opacity', k);
+  }
+  if (t >= 80.5) mark('gh2', 0.52, C.em, 'github again');
+
+  // Fliers
+  FLY.forEach(f => {
+    const k = prog(t, f.a, f.b);
+    const on = t >= f.a && t < f.b;
+    const e = ease(k);
+    const x = lerp(f.from[0], f.to[0], e), y = lerp(f.from[1], f.to[1], e) - Math.sin(Math.PI * e) * 60;
+    set(f.gg, { transform: `translate(${x},${y})`, opacity: on ? 1 : 0 });
+  });
+
+  // Multi-session view
+  set(MV, { opacity: vis(t, 82.3, 108.5) });
+  [sA, sB].forEach((s, si) => s.sensors.forEach((d, i) => {
+    const phase = (t * (0.6 + i * 0.17) + si * 0.4 + i * 0.31) % 1;
+    const pulse = t >= 84 && phase < 0.18;
+    set(d, { fill: pulse ? C.amber : C.dim, r: pulse ? 10 : 8 });
+  }));
+  sA.state.textContent = t < 91 ? 'turn running · pushing the api change' : 'idle';
+  set(sA.state, { fill: t < 91 ? C.em : C.muted });
+  const bBusy = t < 96.5;
+  sB.state.textContent = bBusy ? 'turn running · editing the form' : (t >= 103.2 && t < 106.5 ? 'woken by its Monitor line' : 'idle');
+  set(sB.state, { fill: bBusy ? C.em : (t >= 103.2 && t < 106.5 ? C.amber : C.muted) });
+  sA.line1.textContent = t >= 90.5 ? '$ attend send "api auth change is pushed"' : '';
+  sB.line1.textContent = t >= 93.5 && t < 96.5 ? 'queued: B is mid-turn' : (t >= 96.5 ? '[attend] 1 peer message at the turn boundary' : '');
+  sB.line2.textContent = t >= 96.5 ? 'A (api): api auth change is pushed' : '';
+  // The wake: the peers sensor's Monitor line, then B's reply.
+  sB.line3.textContent = t >= 103.2 ? 'peers: message from you: rebase on A’s change' : '';
+  set(sB.line3, { fill: C.amber });
+  sB.line4.textContent = t >= 104 ? '$ attend reply "on it, rebasing now"' : '';
+  set(sB.line4, { 'font-family': MONO, fill: C.em, 'font-size': 16 });
+  const chatSeq = [
+    [94, 'A (api) → #open: api auth change is pushed', C.text],
+    [101, 'you → @B: rebase on A’s change', C.human],
+    [106.5, 'B (web) → you: on it, rebasing now', C.text],
+  ];
+  chatLines.forEach((l, i) => {
+    const row = chatSeq[i];
+    l.textContent = row && t >= row[0] ? row[1] : '';
+    if (row) set(l, { fill: row[2] });
+  });
+  typed(chatInput, '> @B rebase on A’s change', t, 99, 101);
+  if (t >= 101) chatInput.textContent = '>';
+  PK.forEach(p => {
+    const on = t >= p.a && t < p.b;
+    const [x, y] = along(p.path, ease(prog(t, p.a, p.b)));
+    set(p.c, { cx: x, cy: y, opacity: on ? 1 : 0 });
+  });
+  set(laneBusy, { fill: t >= 93.5 && t < 98 ? C.amber : C.text });
+  set(laneIdle, { fill: t >= 101.5 && t < 104 ? C.amber : C.text });
+  set(lanes, { opacity: vis(t, 88, 200) });
+
+  // Close
+  set(END, { opacity: vis(t, 108.3, 999) });
+  [end1, end2, end3].forEach((c, i) => set(c, { opacity: ease(prog(t, 108.6 + i * 0.6, 109.4 + i * 0.6)) }));
+}
+
+// ── clock, controls, and the recording contract ──────────────────────────────
+const params = new URLSearchParams(location.search);
+const recording = params.has('record');
+if (recording) document.body.classList.add('record');
+if (params.has('embed')) document.body.classList.add('embed');
+const playBtn = document.getElementById('play');
+const scrub = document.getElementById('scrub');
+const clock = document.getElementById('clock');
+scrub.max = DURATION;
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+let now = Number(params.get('t')) || 0;
+let playing = !recording && !params.has('t');
+let last = null;
+function show(t) {
+  now = clamp(t, 0, DURATION);
+  render(now);
+  scrub.value = now;
+  clock.textContent = `${fmt(now)} / ${fmt(DURATION)}`;
+}
+function tick(ts) {
+  if (playing) {
+    if (last != null) show(now + (ts - last) / 1000);
+    if (now >= DURATION) { playing = false; playBtn.textContent = 'Replay'; }
+  }
+  last = ts;
+  requestAnimationFrame(tick);
+}
+playBtn.addEventListener('click', () => {
+  if (now >= DURATION) show(0);
+  playing = !playing;
+  playBtn.textContent = playing ? 'Pause' : 'Play';
+});
+scrub.addEventListener('input', () => { show(Number(scrub.value)); });
+document.addEventListener('keydown', e => { if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); playBtn.click(); } });
+playBtn.textContent = playing ? 'Pause' : 'Play';
+// The contract scripts/explainer/record.mjs relies on.
+window.__duration = DURATION;
+window.__seek = t => show(t);
+show(now);
+if (!recording) requestAnimationFrame(tick);
+</script>
+</body>
+</html>

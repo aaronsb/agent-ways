@@ -6,7 +6,7 @@
 #   ways update | ways reconcile | ways uninstall | make cut-release
 
 .DEFAULT_GOAL := help
-.PHONY: site site-serve setup link relink install update sync-to-home update-binaries clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
+.PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -63,6 +63,8 @@ help:
 	@echo "  make docs         Regenerate docs/cli/attend.md from the clap definition"
 	@echo "  make site         Build the manual (docs/ + ways) into site/ with MkDocs"
 	@echo "  make site-serve   Preview the manual at http://127.0.0.1:8000 with live reload"
+	@echo "  make explainer-video [EXPLAINER=name]  Render docs/explainers/animations/<name> to build/explainers/<name>.mp4"
+	@echo "  make explainer-stills EXPLAINER=name T=5,20,40  PNG stills of an explainer at those seconds"
 	@echo "  make cut-release  Open a version-bump PR for a component (COMPONENT=ways LEVEL=patch)"
 	@echo "  make publish-release  After the bump PR merges: tag + publish (COMPONENT=ways [PUSH=1])"
 	@echo "  make clean        Remove build artifacts"
@@ -246,6 +248,17 @@ site: $(DOCS_VENV)/bin/mkdocs
 
 site-serve: $(DOCS_VENV)/bin/mkdocs
 	$(DOCS_ENV) $(DOCS_VENV)/bin/mkdocs serve --watch hooks/ways --watch scripts/docs-site
+
+# Animated explainers (docs/explainers/animations/<name>/index.html) rendered to video by
+# scripts/explainer/record.mjs: node, chromium and ffmpeg, no npm packages.
+# Output lands in build/explainers/, which git ignores.
+EXPLAINER ?= a-turn-with-ways
+
+explainer-video:
+	node scripts/explainer/record.mjs docs/explainers/animations/$(EXPLAINER)/index.html
+
+explainer-stills:
+	node scripts/explainer/record.mjs docs/explainers/animations/$(EXPLAINER)/index.html --stills $(T)
 
 # Internal: post-build advisory printed after every attend / attend-
 # chat (re)build. Suggests `make purge-attend-state` for operators
