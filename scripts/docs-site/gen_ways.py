@@ -11,6 +11,8 @@ names. Relative links in a way body are resolved by links.py. Each page shows th
 body; the body is rendered unchanged.
 """
 
+import html
+import re
 import sys
 from pathlib import Path
 
@@ -18,7 +20,7 @@ import mkdocs_gen_files
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
-from links import REPO, ROOT, WAYS, rewrite, way_page  # noqa: E402
+from links import REPO, ROOT, WAYS, fence_states, rewrite, way_page  # noqa: E402
 
 OUT = Path("ways")
 
@@ -41,29 +43,40 @@ FIELD_ORDER = [
 
 def split_frontmatter(text):
     """Return (frontmatter dict, body) for a markdown file with optional YAML frontmatter."""
-    if not text.startswith("---\n"):
-        return {}, text
-    end = text.find("\n---", 4)
-    if end == -1:
+    m = re.match(r"---\n(.*?)^---[ \t]*$\n?", text, re.S | re.M)
+    if not m:
         return {}, text
     try:
-        meta = yaml.safe_load(text[4:end]) or {}
+        meta = yaml.safe_load(m.group(1)) or {}
     except yaml.YAMLError:
         meta = {}
-    body = text[end + 4 :].lstrip("\n")
+    body = text[m.end() :].lstrip("\n")
     return (meta if isinstance(meta, dict) else {}), body
+
+
+def h1_index(lines):
+    """Index of the first H1 outside code blocks, or None."""
+    for i, (line, in_code) in enumerate(fence_states(lines)):
+        if not in_code and line.startswith("# "):
+            return i
+    return None
 
 
 def title_for(src, body):
     """The body's first H1, or a title derived from the file name."""
-    for line in body.splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
+    lines = body.splitlines()
+    i = h1_index(lines)
+    if i is not None:
+        return lines[i][2:].strip()
     return src.stem.replace(".check", " (check)").replace("-", " ").title()
 
 
 def frontmatter_block(meta):
-    """A collapsed admonition listing the way's frontmatter as a table."""
+    """A collapsed admonition listing the way's frontmatter as a table.
+
+    Values are emitted as escaped <code> elements; a pipe becomes &#124; so it
+    neither splits the table row nor shows a backslash inside a regex.
+    """
     if not meta:
         return ""
     keys = [k for k in FIELD_ORDER if k in meta]
@@ -73,8 +86,10 @@ def frontmatter_block(meta):
         value = meta[key]
         if isinstance(value, (list, dict)):
             value = yaml.safe_dump(value, default_flow_style=True, width=10_000).strip()
-        cell = str(value).replace("|", "\\|").replace("\n", " ")
-        rows.append(f"    | `{key}` | `{cell}` |" if key != "description" else f"    | `{key}` | {cell} |")
+        cell = html.escape(str(value).replace("\n", " ")).replace("|", "&#124;")
+        if key != "description":
+            cell = f"<code>{cell}</code>"
+        rows.append(f"    | `{key}` | {cell} |")
     table = "\n".join(["    | Field | Value |", "    |---|---|", *rows])
     return f'??? info "Frontmatter"\n\n{table}\n\n'
 
@@ -87,9 +102,9 @@ def render(src):
     rel = src.relative_to(ROOT)
     header = f"<small>Source: [`{rel}`]({REPO}/blob/main/{rel})</small>\n\n{frontmatter_block(meta)}"
     lines = body.splitlines()
-    for i, line in enumerate(lines):
-        if line.startswith("# "):
-            return "\n".join(lines[: i + 1] + ["", header] + lines[i + 1 :]) + "\n"
+    i = h1_index(lines)
+    if i is not None:
+        return "\n".join(lines[: i + 1] + ["", header] + lines[i + 1 :]) + "\n"
     return f"# {title}\n\n{header}{body}"
 
 

@@ -366,7 +366,7 @@ clean:
 	$(MAKE) -C tools/way-embed clean
 	cargo clean --manifest-path tools/ways-cli/Cargo.toml 2>/dev/null || true
 	cargo clean --manifest-path tools/Cargo.toml 2>/dev/null || true
-	rm -rf dist/ site/
+	rm -rf dist/ site/ $(DOCS_VENV)/
 
 # Wipe all attend / attend-chat runtime cache state under
 # $XDG_CACHE_HOME/attend/ (~/.cache/attend/ by default). Recovery target only — NEVER a dependency of

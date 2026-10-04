@@ -24,6 +24,7 @@
     * [ways CLI renames](reference/ways-cli-renames.md)
     * [Events](reference/events.md)
     * [Status line](reference/statusline.md)
+    * [Model context decay](reference/model-context-decay/README.md)
 * [Explanation](explanation/)
 * [Decisions](architecture/)
 * [Research](research/)

@@ -3,8 +3,9 @@ name: Publish manual
 # Builds the MkDocs manual (docs/ plus the ways corpus) and deploys it to
 # GitHub Pages when a component release tag is pushed (ways-v1.34.0,
 # attend-v0.15.3, ...), so the site tracks released content. Pull requests
-# that touch the site's sources build without deploying, so a broken page
-# fails the PR. The github-pages environment allows deploys from these tags.
+# that touch the site's sources build without deploying; a generator or config
+# error fails the PR, and unresolved links are reported in the build log. The
+# github-pages environment allows deploys from these tags.
 on:
   push:
     tags: ["*-v[0-9]*"]
@@ -20,9 +21,10 @@ on:
 permissions:
   contents: read
 
+# A PR build is superseded by the next push; a deploy in flight is never cut off.
 concurrency:
   group: pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DISABLE_MKDOCS_2_WARNING: "true"
