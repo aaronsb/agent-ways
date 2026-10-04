@@ -90,3 +90,6 @@ htmlcov/
 # --- MkDocs manual (make site) ---
 /site/
 /.venv-docs/
+
+# --- Rendered explainer videos and stills (make explainer-video) ---
+/build/
