@@ -182,6 +182,14 @@ _The ways method, way authoring, the development loop_
 | [ADR-603](./practice/ADR-603-cypress-survey-what-a-node-routed-seed-teaches-a-hook-disclosed-corpus.md) | Cypress survey: what a node-routed seed teaches a hook-disclosed corpus | accepted |
 | [ADR-604](./practice/ADR-604-ways-defer-to-external-system-enforcement.md) | Ways defer to external system enforcement | accepted |
 
+## Ways engine
+_The ways engine, continued after the full 100-199 band: matching, disclosure and the corpus_
+
+| ADR | Title | Status |
+|-----|-------|--------|
+| [ADR-700](./engine/ADR-700-body-content-score-geometry-and-corpus-growth-in-way-routing-a-measured-exploration.md) | Body content, score geometry and corpus growth in way routing: a measured exploration | proposed |
+| [ADR-701](./engine/ADR-701-ways-as-an-authored-graph-neighbourhood-matching-lookup-on-request-and-a-learning-loop-from-run-logs.md) | Ways as an authored graph: neighbourhood matching, lookup on request, and a learning loop from run logs | proposed |
+
 ## Archived
 
 <details><summary>4 archived ADRs — no longer part of the active set; kept for history</summary>
