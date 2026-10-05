@@ -62,12 +62,16 @@ status: proposed
 date: 2026-10-05
 deciders:
   - aaronsb
-amends: [ADR-125#1]
+amends: [ADR-125#1, ADR-110#2]
 related:
   - ADR-105
   - ADR-110
   - ADR-126
   - ADR-127
+  - ADR-131
+  - ADR-143
+  - ADR-302
+  - ADR-310
   - ADR-156
   - ADR-160
   - ADR-188
@@ -82,10 +86,10 @@ related:
 
 ## Summary
 
-- **Decided:** the ways engine treats the corpus as an authored graph held in files. Directory nesting stays the primary parent edge, an optional `parents:` frontmatter field adds further parents, and See Also stays the reference edge in the body. A precomputed, section-chunked body corpus sits beside the alias corpus. Disabled ways are masked before any competition. Calibrated cosine keeps deciding whether a way fires, while ranking and the judge see relative scores: share, margin and a hubness-corrected score. A four-level degradation contract fixes what runs when parts are missing. The daemon's search service holds both corpora. `ways-mcp` gains lookup on request. Every scan logs its ranked candidates, so run logs become the evaluation set and the source of tuning: derived parameters refit automatically, and authored changes arrive as pull requests. Fusing the body score into ranking waits on an evaluation with real prompts.
-- **Trades away:** a second corpus to build and keep complete (about 4.7 vectors per way), more state in the daemon, one more frontmatter field, and more logging per scan. A small routing gain from body fusion stays unused until real prompts confirm it.
-- **One-way?** No. Every element is additive and optional. A way without `parents:` behaves as today, and with the daemon absent the hook runs today's matcher.
-- **Probes:** *Confident (non-breaking):* existing way files, configurations and installs keep working unchanged, and nothing new is required of a way author. *Not confident (multi-parent-disable):* a way that sits under both an enabled and a disabled domain stays enabled.
+- **Decided:** the ways engine treats the corpus as an authored graph held in files and indexed at build. Each way carries a UUID minted at creation. Authors write edges by name in frontmatter (`parents:`, `related:`), with directory nesting as the default parent. The build resolves names to UUIDs, checks three integrity rules, computes each way's enabled state from node and subtree toggles, and writes an index that adds each way's nearest semantic neighbours. A precomputed, section-chunked body corpus sits beside the alias corpus. Disabled ways are masked before any competition. Calibrated cosine keeps deciding whether a way fires, while ranking and the judge see relative scores: share, margin and a hubness-corrected score. A four-level degradation contract fixes what runs when parts are missing. The daemon's search service holds both corpora. `ways-mcp` gains lookup on request. Every scan logs its ranked candidates, so run logs become the evaluation set and the source of tuning: derived parameters refit automatically, and authored changes arrive as pull requests. Fusing the body score into ranking waits on an evaluation with real prompts.
+- **Trades away:** a second corpus to build and keep complete (about 4.7 vectors per way), more state in the daemon, three frontmatter fields and the lint that guards them, and more logging per scan. A small routing gain from body fusion stays unused until real prompts confirm it.
+- **One-way?** No. Every element is additive and optional. A way without the new fields behaves as today, path ids stay accepted, and with the daemon absent the hook runs today's matcher.
+- **Probes:** *Confident (non-breaking):* existing way files, configurations and installs keep working unchanged, and nothing new is required of a way author. *Not confident (multi-parent-disable):* a way that sits under both an enabled and a disabled domain stays enabled, and a toggle on the way itself overrides both.
 - **Inversion:** between scoring a flat list of ways independently and holding the graph in a database the engine owns. The decision keeps files as the only source of truth and builds every graph structure, vector and parameter as a derived index that can be rebuilt.
 
 ## Context
@@ -98,17 +102,43 @@ agent-ways is moving toward knowledge work beyond software, which means more dom
 
 ## Decision
 
-### 1. The graph is authored in files
+### 1. The graph is authored in files and indexed at build
 
-- A node is a way file. Its identity stays its path id.
-- **Parent edges.** The directory is the default parent. An optional `parents:` frontmatter field lists further parents by way id as a single-line list. The parent boost (ADR-105) reads it, which keeps frontmatter to fields the matcher reads (ADR-110 §3). This section amends ADR-125 §1 by adding authored extra parents to its edge set.
-- **Reference edges** stay the body See Also section (ADR-110 §2). They are visible to the model and need no frontmatter.
-- **Node text.** A directory may carry a short description of the class of ways under it (#664). The route from the domain root to a way, each node described, is part of how a way is presented.
-- **Parent edges stay acyclic,** so ancestors stay defined for the boost and for disabling. Reference edges may form cycles. Lint refuses a parent cycle.
-- **Symlinks are not edges.** Lint refuses a symlink inside a ways root, because the scanner would read a linked way as a second node and symlinks are not portable across platforms and git settings. `parents:` covers the same need.
-- **Disabling with several parents.** A way is enabled when any of its parent paths is enabled.
-- **Basenames stay unique** across a ways root, as ADR-110 §7 requires, and lint enforces it.
-- The graph export, ancestor sets and masks are derived at corpus build. None is authoritative.
+**Identity.** Each way carries a `uuid:` frontmatter field, minted by the template when the way is created and never changed. The same UUID in two roots means the project or user way overrides the core way (ADR-143). The same UUID twice within one root is an error, which catches a way duplicated to start a new one. People address ways by name or path; the CLI resolves them and writes UUIDs.
+
+**Edges authored in frontmatter.** Authors write edges by name, as `[[name]]` links:
+
+```yaml
+uuid: 7f3c9a1e-…
+parents: ["[[itops]]"]
+related: ["[[threat-modeling]]"]
+```
+
+- The directory is the default parent. `parents:` adds further parents. Parent edges stay acyclic, so ancestors stay defined for the parent boost (ADR-105) and for enabling.
+- `related:` holds reference edges and may form cycles. The body See Also section stays as prose the model reads; lint checks that it agrees with `related:`. This amends ADR-110 §2. Both fields feed matching, which keeps frontmatter to fields the matcher reads (ADR-110 §3).
+- A bare name is the way's basename, unique within a root. Resolution runs project, then user, then core, the precedence overrides use.
+- A directory may carry a short description of the class of ways under it (#664). The route from the domain root to a way, each node described, is part of how a way is presented.
+- Symlinks inside a ways root are refused by lint: the scanner would read a linked way as a second node, and symlinks are not portable across platforms and git settings.
+
+**Integrity is three rules,** checked by `ways author lint` and again at corpus build:
+
+1. Every way has a UUID, unique within its root.
+2. Every edge resolves to a way.
+3. Parent edges are acyclic.
+
+Lint fails the author on any violation. Corpus build degrades and reports: a dangling edge is dropped, a duplicate UUID keeps the first file found, and `ways status` names what was dropped. A new rule joins these only when its violation is a real defect.
+
+**Renames are detected through the previous index.** When a `[[name]]` stops resolving and the previous index maps that name to a UUID now found under another name, the build resolves the edge, reports the rename, and lint offers to rewrite the link.
+
+**Enabling and disabling.** A toggle names a way and lives in configuration, outside the way file. A node toggle affects that way only, as ADR-131's per-way toggles do today. A subtree toggle affects the way and its descendants and uses ADR-131's reserved mapping form (`{enabled: false, scope: subtree}`); a `disabled_domains` entry is a subtree toggle on a domain root. The effective state is computed once at build, from roots to leaves:
+
+1. An explicit toggle on the way itself decides.
+2. Otherwise a way with no parents is enabled.
+3. Otherwise a way is enabled when any of its parents is enabled.
+
+A project toggle overrides a user toggle on the same way. Reference edges carry no state. `ways status` and `ways author tree` show each way's effective state and the toggle or parent that decided it. `ways disable <name> --subtree` writes a subtree toggle.
+
+**The index.** Corpus build writes the graph index, extending `ways-graph.jsonl` (ADR-110 §4): nodes keyed by UUID with name, path, root, domain and effective state; authored edges with their source (directory or frontmatter); and computed edges to each way's nearest semantic neighbours by vector distance, above a floor. The index, ancestor sets and masks are derived and rebuildable. None is authoritative. This section amends ADR-125 §1 by adding authored extra parents, typed frontmatter edges, stable identity and computed neighbour edges to its graph.
 
 ### 2. Two corpora
 
@@ -152,7 +182,7 @@ The daemon's search service (ADR-502 §2, #668) holds the alias corpus, the body
 
 - `ways_search(query)`: candidates with route, share, margin and matched section
 - `ways_read(id)`
-- `ways_neighbors(id, edge types)`
+- `ways_neighbors(id, edge types)`: authored parent and related edges and computed semantic neighbours, each labelled with its kind
 
 A pull always returns the way, including inside its re-disclosure suppression window (ADR-126), where injection would hold it back. A pull needs no judge, because the agent chose it. A pulled way stamps disclosure, so injection does not repeat it on the next turn. Each pull is logged as `way_pulled`. A pull inside the suppression window is logged as an out-of-band read, with `out_of_band: true` and the epoch distance since the last disclosure.
 
@@ -163,6 +193,7 @@ A pull always returns the way, including inside its re-disclosure suppression wi
 - Prompt text stays out of the event log. When the operator opts in, a local consumer of the ways sensor (ADR-199) carries it to an evaluation store on the machine.
 - **Derived parameters refit automatically:** calibration, hubness penalties and band bounds.
 - **Authored content changes arrive as pull requests:** vocabulary, body text, `parents:` and See Also edges, drafted by `ways tune` and `ways suggest` from repeated near-misses and confusions.
+- Pairs of ways that are semantic neighbours in the index with no authored edge between them are proposed as a missing edge or a boundary to sharpen.
 - Judge verdicts are weak labels. Fitting and evaluation hold out by session or date.
 
 ### 9. Evaluation travels with the corpus
@@ -171,13 +202,13 @@ Each new way ships with two golden prompts, one direct and one situational. Lint
 
 ### 10. Compatibility
 
-No field becomes required. `parents:` and directory descriptions are optional. Configuration keys keep their meaning. The body corpus is a new file beside the existing ones, and a binary that does not know it ignores it. Installs without the daemon run at level 2, which is today's behaviour.
+No field becomes required at runtime. A way without `uuid:` gets a deterministic UUIDv5 derived from its root-relative path at build, and lint warns until the field is written; a one-time pass writes UUIDs into the shipped ways, and the manifest maps each old path id to its UUID, so existing toggles, `disabled_domains` entries and logged events keep resolving. `parents:`, `related:` and directory descriptions are optional. Configuration keys keep their meaning, and a node toggle written today keeps affecting that way only. The body corpus is a new file beside the existing ones, and a binary that does not know it ignores it. Installs without the daemon run at level 2, which is today's behaviour.
 
 ### Increments
 
 1. Mask disabled ways before competition; log the top 5 candidates and the level on every scan.
-2. Lint: unique basenames, no symlinks in ways roots; rename the two colliding basenames.
-3. `parents:` in the schema, the graph build, the parent boost and the disable rule.
+2. Identity and integrity: `uuid:` in the schema and the template, the one-time minting pass and the path-to-UUID map; lint for the three integrity rules, unique basenames and symlinks; rename the two colliding basenames.
+3. `parents:` and `related:` in the schema; name resolution, rename detection and the graph index with semantic neighbours; the parent boost over all parents; node and subtree toggles and the effective-state report.
 4. Build the body corpus and its manifest; body confirmation reads it.
 5. Daemon search service holding both corpora (#668), with level reporting.
 6. Hubness penalty, share and margin; judge presentation with route, band and matched section.
@@ -210,8 +241,10 @@ No field becomes required. `parents:` and directory descriptions are optional. C
 
 ## Alternatives Considered
 
-- **Hold the graph in a database.** Rejected: the corpus is small, authored and reviewed, and a database adds a service, migrations and a second source of truth.
-- **A graph defined only by frontmatter links, independent of directories.** Rejected for now: way ids, project overrides, domain disabling, the parent boost and telemetry all key on the path, and moving them is a migration across the CLI, telemetry and configuration. `parents:` gives multiple parents without it.
+- **Hold the graph in a database.** Rejected: the corpus is small, authored and reviewed, and a database adds a service, migrations and a second source of truth. The graph needs a primary key, references that resolve and one check constraint, and lint at authoring and build time enforces them on files, as `adr lint` does for the record corpus (ADR-310) and doclint for the documentation graph (ADR-302). Concurrent writers, transactions and live queries, which a database is for, do not occur: writes arrive through pull requests and queries run on the derived index.
+- **A graph defined only by frontmatter links, independent of directories.** Not adopted: with UUID identity most of the graph already comes from frontmatter, and keeping directories as the default parent leaves every existing way, toggle and override working with no edges written.
+- **Readable slugs as ids.** Rejected: a copied way keeps its slug, so lint cannot tell an intended override from an accidental duplicate. A UUID minted by the template makes that distinction by root.
+- **Paths as ids, as today.** Rejected: a move breaks toggles, splits telemetry and would break every edge pointing at the way.
 - **Relative symlinks as edges.** Rejected: the scanner reads a linked way as a second node, and symlinks break under some platforms and git settings.
 - **Body text in place of the alias.** Rejected by ADR-127 and ADR-700 §1.
 - **Maximum or reciprocal-rank fusion of alias and body.** Rejected by ADR-700 §1: both lose to the alias alone.
