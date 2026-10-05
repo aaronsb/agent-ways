@@ -48,6 +48,10 @@ basis:
     level: guided
     said: "I am thinking forward to implementation, and I don't think this is a breaking change to use of agent-ways once it eventually is built and published"
     via: chat, session 796c50d0, 2026-10-05
+  - operator: aaronsb
+    level: directed
+    said: "in the mcp, lookup on request, if requested within the redsclosure supress envelope if it was a normal way injection shouldn't refuse to present the way. it would be helpful to log it as an out of band read though"
+    via: chat, session 796c50d0, 2026-10-05
   - evidence: ADR-700
   - precedent: ADR-125
   - precedent: ADR-502
@@ -62,6 +66,7 @@ amends: [ADR-125#1]
 related:
   - ADR-105
   - ADR-110
+  - ADR-126
   - ADR-127
   - ADR-156
   - ADR-160
@@ -149,12 +154,12 @@ The daemon's search service (ADR-502 §2, #668) holds the alias corpus, the body
 - `ways_read(id)`
 - `ways_neighbors(id, edge types)`
 
-A pulled way stamps disclosure, so injection does not repeat it on the next turn. A pull needs no judge, because the agent chose it. Each pull is logged as `way_pulled`.
+A pull always returns the way, including inside its re-disclosure suppression window (ADR-126), where injection would hold it back. A pull needs no judge, because the agent chose it. A pulled way stamps disclosure, so injection does not repeat it on the next turn. Each pull is logged as `way_pulled`. A pull inside the suppression window is logged as an out-of-band read, with `out_of_band: true` and the epoch distance since the last disclosure.
 
 ### 8. Run logs as the learning corpus
 
 - Every scan logs its top 5 candidates with alias score, body score, share, margin and level.
-- Pulled and injected disclosures are told apart. A pull of a way injection did not fire on that turn is a recall miss.
+- Pulled and injected disclosures are told apart. A pull of a way injection did not fire on that turn is a recall miss. An out-of-band read is evidence that the way's `refire:` fraction is longer than the work needs.
 - Prompt text stays out of the event log. When the operator opts in, a local consumer of the ways sensor (ADR-199) carries it to an evaluation store on the machine.
 - **Derived parameters refit automatically:** calibration, hubness penalties and band bounds.
 - **Authored content changes arrive as pull requests:** vocabulary, body text, `parents:` and See Also edges, drafted by `ways tune` and `ways suggest` from repeated near-misses and confusions.
