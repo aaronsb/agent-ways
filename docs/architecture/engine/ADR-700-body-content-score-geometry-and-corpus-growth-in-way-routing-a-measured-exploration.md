@@ -190,6 +190,32 @@ Added 2026-10-05 from `experiments/content-corpus/region.py` and `results-region
 - No signal changes the corpus-growth slope.
 - Not tested: multi-vector regions, a trained domain classifier, and a reader of the described route. #664's own proposal, the route as judge input, is a separate question this measures nothing about.
 
+### 12. The share gate drops most expected ways on multi-topic surfaces
+
+Added 2026-10-05 from `experiments/content-corpus/recall.py` and `results-recall.md`, on the 310 joined-prompt surfaces of §10 (620 expected ways), with the Python port of the late-interaction matcher. The new admission modes exist only in the port.
+
+| Stage where an expected way stops, shipped settings | Ways |
+|---|---|
+| not in a chunk's top 8 | 70 (11%) |
+| share below 0.15 and peak below 0.50 | 248 (40%) |
+| 6-survivor cap | 0 |
+| confirm below 0.35 | 52 (8%) |
+| fired | 250 (40%) |
+
+- Share divides a way's summed mass by the number of chunks, so a chunk's own winner needs 0.30 of that chunk's mass on a two-chunk surface and 0.45 on three. 241 of the 248 gated ways peak on their own prompt's chunk, and 105 are that chunk's top-ranked way.
+- 329 of the 332 golden prompts form one chunk alone, so a single prompt never reaches late interaction; the single-vector path decides it.
+- Raising top-K lowers recall, the cap never binds, normalising share by topic count changes nothing, and lowering the peak gate to 0.40 adds 1.10 irrelevant admissions per surface.
+
+| Admission | recall after confirm | change, 95% interval | candidates per surface to the judge (irrelevant) |
+|---|---|---|---|
+| shipped | 0.403 | | 1.05 (0.20) |
+| each chunk's top-ranked way, or peak ≥ 0.50 | 0.503 | +0.100 [+0.076, +0.125] | 1.53 (0.47) |
+| best single-chunk mass ≥ 0.20, or peak ≥ 0.50 | 0.526 | +0.122 [+0.098, +0.148] | 1.70 (0.57) |
+
+- Either change raises recall by 10 to 12 points and sends the judge 46 to 62% more candidates, with confirmations per surface rising from 1.37 to about 2.6.
+- Only 64% of expected ways are the top-ranked way of their own chunk, so recall above about 0.66 after admission needs better ranking within a chunk, not looser gates.
+- Evidence on prompts that split into several chunks rests on three golden prompts.
+
 ## Limits
 
 - Prompts are model-written. A labelled set of real prompts from session transcripts was not built; reading transcripts for it needs the operator's explicit approval.
