@@ -128,7 +128,8 @@ Per-domain counts are small.
 - `body_confirm` embeds up to 8 body sentences per survivor on every multi-sentence prompt.
 - `scanner.rs` walks the ways tree with `follow_links(true)`, so a symlinked way directory would be scanned as a second way.
 - Two basenames repeat, against ADR-110 §7: `documentation.md` and `prompt.md`.
-- The event log holds 79,097 events from 2026-07-01 to 2026-10-05, including 26,466 `way_fired` with `fire_score`, 7,455 `way_nearmiss` with `margin`, and 726 `way_judged` with `p_yes` and `verdict`. It records neither prompt text nor the ranked candidate list.
+- When first read on 2026-10-05 the event log held 79,097 events from 2026-07-01 to 2026-10-05, including 26,466 `way_fired` with `fire_score`, 7,455 `way_nearmiss` with `margin`, and 726 `way_judged` with `p_yes` and `verdict`. It records neither prompt text nor the ranked candidate list.
+- The event log's size cap (`KEEP_EVENTS_BYTES`, 24 MiB in `session.rs`) deletes the oldest lines permanently. Later on 2026-10-05 the same file held 59,916 lines starting 2026-08-13: about six weeks of history were dropped during the day. At October's volume of 3,000 to 8,000 events a day the cap keeps about two weeks.
 
 ### 9. Choosing a region first does not beat flat competition
 
