@@ -1,6 +1,6 @@
 //! Shared helpers for the tmux-backed integration tests.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 /// Whether this test should run. Skips with a message when tmux is absent,
@@ -74,7 +74,9 @@ impl Drop for Scratch {
 
 #[allow(dead_code)] // not every test binary uses it
 pub fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    // Read at run time: a test binary reused from another checkout keeps the
+    // path it was built at.
+    std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into()))
         .join("tests/fixtures")
         .join(name)
 }
