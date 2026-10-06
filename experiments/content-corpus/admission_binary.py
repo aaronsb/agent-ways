@@ -11,14 +11,17 @@ port. This script runs both on the same surfaces and compares them.
         --ways tools/target/release/ways [--mode share|chunk_top|both] [--text] \
         experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
 
-Smoke run: add `--quick` to run a small fixed subset of the golden rows (every
-multi-chunk row plus every 12th single-chunk row) instead of the full set; it
-finishes in a fraction of the time and still compares binary against port on
-both the main and the multi-chunk surfaces. Use the full set for any number you
-mean to cite.
+Smoke run: add `--quick`. The surfaces are built from the full golden set as
+usual, then cut to a fixed slice (every 8th main surface and every auxiliary
+one), so the quick surfaces are a strict subset of the full run's. The match,
+the port and the binary run only on the slice, so cost drops in proportion, and
+both the main and the multi-chunk surfaces are still compared. Use the full run
+for any number you mean to cite. Pass both golden files so the multi-chunk
+rows are present:
 
     OUT=/tmp/adm-out experiments/content-corpus/admission_binary.py --quick \
-        --ways tools/target/release/ways tests/routing-golden.tsv
+        --ways tools/target/release/ways \
+        experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
 
 The engine, `way-embed`, is resolved once, before anything runs, as the binary
 resolves it (ways-core paths::way_embed): $XDG_CACHE_HOME/agent-ways/user/way-embed
@@ -72,6 +75,7 @@ import recall as R  # noqa: E402
 import run  # noqa: E402
 
 O = run.OUT
+QUICK_STEP = 8  # --quick keeps every 8th main surface
 PY_POINT = {"share": R.SHIPPED, "chunk_top": R.PICKS["top1"]}
 TEXT_ROW = re.compile(r"^\s{2}(\S+)\s+([\d.]+)\s+([\d.]+)\s+(\S+)\s+(fired ✓|< gate|< cap|< confirm)\s")
 
@@ -226,13 +230,6 @@ def show(name, m):
           f"  irr adm/s {m['irr_adm_per']:.2f}  irr fired/s {m['irr_fired_per']:.2f}")
 
 
-def quick_subset(golden):
-    """Fixed smoke subset: every multi-chunk row, plus every 12th of the rest."""
-    multi = [g for g in golden if len(C.chunk_surface(C.as_sentence(g[0]))) >= 2]
-    rest = [g for g in golden if g not in multi]
-    return multi + rest[::12]
-
-
 def positive_control(mode, rows, allsurf):
     """A zero must be a measurement. The binary returns rows only for surfaces
     of 2+ chunks; every one of them must have rows, and at least one must carry
@@ -273,11 +270,12 @@ def main():
     alias = [json.loads(l) for l in (O / "alias.jsonl").read_text().splitlines()]
     ids = [x["id"] for x in alias]
     golden = C.load_golden(a.golden, set(ids))
-    if a.quick:
-        golden = quick_subset(golden)
     import random
     surfaces = R.own_confirm_surfaces(golden, random.Random(R.SEED))
     aux, _, _ = R.multi_chunk_surfaces(golden, random.Random(R.SEED + 2))
+    n_full = len(surfaces) + len(aux)
+    if a.quick:
+        surfaces = surfaces[::QUICK_STEP]
     allsurf = surfaces + aux
     chunks, spans = [], []
     for s in allsurf:
@@ -286,7 +284,8 @@ def main():
     per = C.match_batch(chunks)
     for s, (lo, hi) in zip(allsurf, spans):
         s["rows"] = per[lo:hi]
-    print(f"{len(golden)} golden rows; {len(surfaces)} main surfaces, {len(aux)} auxiliary")
+    print(f"{len(golden)} golden rows; {len(surfaces)} main surfaces, {len(aux)} auxiliary"
+          + (f" (quick: {len(allsurf)} of {n_full} surfaces)" if a.quick else ""))
     bodies = {w: C.chunk_body(run.way_file(w).read_text()) for w in ids}
     py, conf = port(allsurf, bodies)
 
