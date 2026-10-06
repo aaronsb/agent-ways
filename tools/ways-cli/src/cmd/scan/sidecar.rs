@@ -124,7 +124,9 @@ pub(crate) fn decode(bytes: &[u8]) -> Option<Sidecar> {
     let way_count = r.u32()? as usize;
     let vector_count = r.u32()? as usize;
     let model = r.str()?;
-    let mut index = HashMap::with_capacity(way_count);
+    // No capacity from the header: a corrupt count must fail on the bytes it
+    // does not have, not allocate what it claims.
+    let mut index = HashMap::new();
     let mut row = 0usize;
     for _ in 0..way_count {
         let id = r.str()?;
@@ -307,6 +309,47 @@ mod tests {
         v2[8] = 2;
         assert!(decode(&v2).is_none(), "another version");
         assert!(decode(b"not a sidecar at all").is_none());
+    }
+
+    /// A corrupt header must read as absent, never allocate what it claims.
+    /// way_count is the u32 after magic, version and dim.
+    #[test]
+    fn a_huge_way_count_reads_as_absent() {
+        let mut bytes = encode("m", 3, &sample()).unwrap();
+        bytes[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(decode(&bytes).is_none());
+        let mut bytes = encode("m", 3, &sample()).unwrap();
+        bytes[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
+        bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(decode(&bytes).is_none(), "huge dim and vector count");
+    }
+
+    /// Fuzz-style: every truncation and many random byte mutations decode to
+    /// `None` or a sidecar, never a panic or an abort. A mutation inside the
+    /// vector payload is still a valid file, so only the header region is
+    /// required to be rejected when it changes a length.
+    #[test]
+    fn decode_never_panics_on_damaged_input() {
+        let bytes = encode("minilm-l6-v2.gguf:5", 3, &sample()).unwrap();
+        for n in 0..bytes.len() {
+            assert!(decode(&bytes[..n]).is_none(), "truncated to {n}");
+        }
+        // xorshift, fixed seed: reproducible.
+        let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for _ in 0..20_000 {
+            let mut b = bytes.clone();
+            for _ in 0..(1 + next() % 4) {
+                let i = (next() % b.len() as u64) as usize;
+                b[i] = next() as u8;
+            }
+            let _ = decode(&b);
+        }
     }
 
     #[test]
