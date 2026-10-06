@@ -678,6 +678,9 @@ const KEEP_EVENTS_BYTES: u64 = 24 * 1024 * 1024;
 /// then accumulate until a compaction frees at least half the MAX-KEEP gap. The
 /// file is bounded by KEEP + judge history + MAX-KEEP/2 + that accumulation.
 const MIN_FREED_BYTES: u64 = (MAX_EVENTS_BYTES - KEEP_EVENTS_BYTES) / 2;
+/// Days of events the live file holds. Older lines move to the dated archives
+/// (ADR-701 §2); `ways.event_retention_days` governs those archives, not this.
+const LIVE_EVENT_DAYS: u32 = 90;
 
 /// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl — see paths::events_log).
 pub fn log_event(fields: &[(&str, &str)]) {
@@ -695,8 +698,8 @@ pub fn log_event_with(fields: &[(&str, &str)], extra: &[(&str, serde_json::Value
 
 /// Append one event to `events_file`, stamped `now`.
 ///
-/// With `rotate` set, the age rotation runs first, before this event is
-/// written: the log's newest line is then a real earlier event, which anchors
+/// With `rotate` set (the archive retention in days), the age rotation and the
+/// archive expiry run first, before this event is written: the log's newest line is then a real earlier event, which anchors
 /// the cutoff (see [`rotate_log_by_age`]). Rotating after the append would let
 /// the event, stamped by a clock that ran ahead, pull the cutoff past history
 /// the retention should keep.
@@ -704,9 +707,9 @@ fn log_event_to(events_file: &std::path::Path, now: u64, rotate: Option<u32>, fi
     if let Some(stats_dir) = events_file.parent() {
         let _ = std::fs::create_dir_all(stats_dir);
     }
-    if let Some(retention_days) = rotate {
-        // Age rotation (ADR-701 §2): one winner a day across processes.
-        rotate_if_due(events_file, now, retention_days);
+    if let Some(archive_days) = rotate {
+        // Age rotation and archive expiry (ADR-701 §2): one winner a day across processes.
+        rotate_if_due(events_file, now, archive_days);
     }
 
     let mut obj = serde_json::Map::new();
@@ -732,7 +735,7 @@ fn log_event_to(events_file: &std::path::Path, now: u64, rotate: Option<u32>, fi
     // window of events, acceptable for a telemetry log, but never tears a line.
     if let Ok(meta) = std::fs::metadata(events_file) {
         if meta.len() > MAX_EVENTS_BYTES {
-            let _ = compact_log_tail(events_file, KEEP_EVENTS_BYTES, MIN_FREED_BYTES);
+            let _ = compact_log_tail(events_file, now, KEEP_EVENTS_BYTES, MIN_FREED_BYTES);
         }
     }
 }
@@ -745,8 +748,10 @@ fn log_event_to(events_file: &std::path::Path, now: u64, rotate: Option<u32>, fi
 /// be lost, but no line is ever torn). Oldest events are dropped — telemetry
 /// tuning cares about recent behavior, and the cap holds a year-plus of history.
 /// `judge_call` lines in the dropped head are carried ahead of the tail (#750).
+/// The rest of the dropped head is appended to the archive for the day of `now`
+/// first, and durably; when that fails nothing is removed (ADR-701 §2).
 /// On any failure the original file is left intact and the temp is removed.
-fn compact_log_tail(path: &std::path::Path, keep_bytes: u64, min_freed: u64) -> std::io::Result<()> {
+fn compact_log_tail(path: &std::path::Path, now: u64, keep_bytes: u64, min_freed: u64) -> std::io::Result<()> {
     let data = std::fs::read(path)?;
     let keep = keep_bytes as usize;
     if data.len() <= keep {
@@ -766,16 +771,20 @@ fn compact_log_tail(path: &std::path::Path, keep_bytes: u64, min_freed: u64) -> 
     // heavy use adds a few MiB. Carried lines sit in the head region on the
     // next compaction and are carried again, never duplicated.
     let mut out: Vec<u8> = Vec::new();
-    for line in data[..start].split(|&b| b == b'\n') {
-        if is_judge_call(line) {
-            out.extend_from_slice(line);
-            out.push(b'\n');
+    let mut removed: Vec<u8> = Vec::new();
+    for line in data[..start].split_inclusive(|&b| b == b'\n') {
+        let dest = if is_judge_call(line) { &mut out } else { &mut removed };
+        dest.extend_from_slice(line);
+        if !line.ends_with(b"\n") {
+            dest.push(b'\n');
         }
     }
     out.extend_from_slice(&data[start..]);
     if ((data.len() - out.len()) as u64) < min_freed {
         return Ok(()); // would not pay for the rewrite
     }
+    // The archive first: a failure here stands the pass down with the log intact.
+    archive_removed(path, now, &removed)?;
 
     // The shared writer's temp is unique per process and call, so two
     // concurrent compactions never write the same file and publish a torn tail.
@@ -797,14 +806,24 @@ fn rotation_due_today(now: u64) -> bool {
     CHECKED_DAY.swap(day, Ordering::Relaxed) != day
 }
 
+/// Append lines about to leave `path` to the dated archive beside it. Callers
+/// remove nothing from the log unless this returns `Ok`.
+fn archive_removed(path: &std::path::Path, now: u64, removed: &[u8]) -> std::io::Result<()> {
+    match path.parent() {
+        Some(dir) => ways_core::event_archive::append(dir, now, removed),
+        None => Ok(()),
+    }
+}
+
 /// Rotate the event log by age if no process has claimed today's slot.
 ///
 /// The slot is a file named for the day, made with `create_new`, so exactly one
 /// of any number of parallel hooks wins it. Claim files for earlier days are
 /// removed, and so are claims for days still to come: those only exist after
 /// the clock ran ahead and was set back, and would otherwise block rotation
-/// until the calendar caught up. Returns whether lines were dropped.
-fn rotate_if_due(path: &std::path::Path, now: u64, retention_days: u32) -> bool {
+/// until the calendar caught up. The slot's winner also deletes archives older
+/// than `archive_days`. Returns whether lines left the live log.
+fn rotate_if_due(path: &std::path::Path, now: u64, archive_days: u32) -> bool {
     let Some(dir) = path.parent() else { return false };
     let mine = format!("{ROTATE_LOCK_PREFIX}{}", now / DAY_SECS);
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -819,10 +838,12 @@ fn rotate_if_due(path: &std::path::Path, now: u64, retention_days: u32) -> bool 
     if std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(&mine)).is_err() {
         return false; // claimed today already, here or by a parallel hook
     }
-    rotate_log_by_age(path, now, retention_days).unwrap_or(false)
+    ways_core::event_archive::expire(dir, now, archive_days);
+    rotate_log_by_age(path, now, LIVE_EVENT_DAYS).unwrap_or(false)
 }
 
-/// Drop event lines older than `retention_days` from `path` (ADR-701 §2).
+/// Move event lines older than `retention_days` out of `path` and into the
+/// dated archive beside it (ADR-701 §2).
 ///
 /// The cutoff is `min(now, newest line's ts) - retention`. Anchoring to the log
 /// keeps a clock that ran ahead from aging out real history: the newest line is
@@ -838,8 +859,9 @@ fn rotate_if_due(path: &std::path::Path, now: u64, retention_days: u32) -> bool 
 /// `O_APPEND` and take no lock, so after the survivors are published, whatever
 /// the old file gained since is appended to the new one. Before publishing, the
 /// handle's file is compared with the path's: a size compaction that replaced
-/// the log meanwhile makes the rotation stand down. Returns whether any line
-/// was dropped.
+/// the log meanwhile makes the rotation stand down. The expired lines are
+/// archived, durably, before the log is replaced; an archive failure is an
+/// error and the log is left as it was. Returns whether any line was moved.
 fn rotate_log_by_age(path: &std::path::Path, now: u64, retention_days: u32) -> std::io::Result<bool> {
     rotate_log_by_age_hooked(path, now, retention_days, &mut || {})
 }
@@ -857,8 +879,7 @@ fn rotate_log_by_age_hooked(path: &std::path::Path, now: u64, retention_days: u3
     let anchor = newest_ts(&f)?.map_or(now, |n| n.min(now));
     let cutoff = anchor.saturating_sub(u64::from(retention_days.max(1)) * DAY_SECS);
     let Some(split) = split_expired(&f, cutoff)? else { return Ok(false) };
-    // `split.expired` is where a dated archive of the removed lines would be written.
-    let mut out = split.kept;
+    let (mut out, expired) = (split.kept, split.expired);
     // Everything from `current_from` on is current; copy it up to the handle's own length.
     let mut pos = split.current_from;
     loop {
@@ -872,6 +893,7 @@ fn rotate_log_by_age_hooked(path: &std::path::Path, now: u64, retention_days: u3
     if !same_file(&f, path) {
         return Ok(false);
     }
+    archive_removed(path, now, &expired)?;
     agent_settings::writer::write_atomic(path, &out)?;
     // Appends that landed on the old file while the new one was written.
     (&f).seek(SeekFrom::Start(pos))?;
@@ -917,7 +939,6 @@ struct Split {
     /// Head lines that survive (judge calls, lines with no readable ts).
     kept: Vec<u8>,
     /// The lines that expire.
-    #[allow(dead_code)]
     expired: Vec<u8>,
     /// Byte offset of the first current line.
     current_from: u64,
@@ -1428,7 +1449,7 @@ mod compaction_tests {
         let before = std::fs::metadata(&path).unwrap().len();
 
         // Keep ~2 KB → far below the file size, so it must compact.
-        compact_log_tail(&path, 2000, 0).unwrap();
+        compact_log_tail(&path, NOW, 2000, 0).unwrap();
 
         let after = std::fs::read_to_string(&path).unwrap();
         let after_len = after.len() as u64;
@@ -1464,7 +1485,7 @@ mod compaction_tests {
         content.push_str(&judge("2026-10-01T10:00:00Z"));
         std::fs::write(&path, &content).unwrap();
 
-        compact_log_tail(&path, 2000, 0).unwrap();
+        compact_log_tail(&path, NOW, 2000, 0).unwrap();
         let after = std::fs::read_to_string(&path).unwrap();
         assert!(after.len() < content.len(), "filler is cut");
 
@@ -1473,7 +1494,7 @@ mod compaction_tests {
         assert_eq!(ways_agent_core::spend::covers_since(&calls).as_deref(), Some("2026-01-05T10:00:00Z"));
 
         // A second compaction carries them again without duplicating.
-        compact_log_tail(&path, 2000, 0).unwrap();
+        compact_log_tail(&path, NOW, 2000, 0).unwrap();
         assert_eq!(ways_agent_core::spend::parse_log(&std::fs::read_to_string(&path).unwrap()).len(), 3);
         let _ = std::fs::remove_file(&path);
     }
@@ -1492,7 +1513,7 @@ mod compaction_tests {
             content.push_str(&format!("{{\"event\":\"way_fired\",\"n\":\"{i}\"}}\n"));
             std::fs::write(&path, &content).unwrap();
             let before = std::fs::read(&path).unwrap();
-            compact_log_tail(&path, keep, min_freed).unwrap();
+            compact_log_tail(&path, NOW, keep, min_freed).unwrap();
             assert_eq!(std::fs::read(&path).unwrap(), before, "no rewrite while it frees too little");
         }
 
@@ -1501,7 +1522,7 @@ mod compaction_tests {
             content.push_str(&format!("{{\"event\":\"way_fired\",\"n\":\"{i}\"}}\n"));
         }
         std::fs::write(&path, &content).unwrap();
-        compact_log_tail(&path, keep, min_freed).unwrap();
+        compact_log_tail(&path, NOW, keep, min_freed).unwrap();
         let after = std::fs::read_to_string(&path).unwrap();
         assert!(after.len() < content.len(), "compacted once it pays");
         assert_eq!(ways_agent_core::spend::parse_log(&after).len(), 50, "every judge call kept");
@@ -1513,7 +1534,7 @@ mod compaction_tests {
         let path = std::env::temp_dir().join(format!("ways-evt-small-{}.jsonl", std::process::id()));
         let content = "{\"n\":1}\n{\"n\":2}\n";
         std::fs::write(&path, content).unwrap();
-        compact_log_tail(&path, 1024 * 1024, 0).unwrap();
+        compact_log_tail(&path, NOW, 1024 * 1024, 0).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
         let _ = std::fs::remove_file(&path);
     }
@@ -1525,7 +1546,7 @@ mod compaction_tests {
         // for a line-oriented log), leaving an empty file rather than a partial.
         let path = std::env::temp_dir().join(format!("ways-evt-blob-{}.jsonl", std::process::id()));
         std::fs::write(&path, "x".repeat(5000)).unwrap();
-        compact_log_tail(&path, 1000, 0).unwrap();
+        compact_log_tail(&path, NOW, 1000, 0).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
         let _ = std::fs::remove_file(&path);
     }
@@ -1539,11 +1560,101 @@ mod compaction_tests {
             content.push_str(&format!("{{\"n\":{i}}}\n"));
         }
         std::fs::write(&path, &content).unwrap();
-        compact_log_tail(&path, 1500, 0).unwrap();
+        compact_log_tail(&path, NOW, 1500, 0).unwrap();
         let once = std::fs::read_to_string(&path).unwrap();
-        compact_log_tail(&path, 1500, 0).unwrap();
+        compact_log_tail(&path, NOW, 1500, 0).unwrap();
         let twice = std::fs::read_to_string(&path).unwrap();
         assert_eq!(once, twice, "second compaction is a no-op");
         let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use ways_core::event_archive::{archive_path, archives, read_source};
+
+    const NOW: u64 = 1_800_000_000;
+    const DAY: u64 = 86_400;
+
+    fn line(event: &str, age_days: u64, tag: &str) -> String {
+        format!("{{\"ts\":\"{}\",\"event\":\"{event}\",\"tag\":\"{tag}\"}}\n", agent_fmt::when::utc_iso(NOW - age_days * DAY))
+    }
+
+    fn state(tag: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let d = std::env::temp_dir().join(format!("ways-arch-sess-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        (d.clone(), d.join("events.jsonl"))
+    }
+
+    #[test]
+    fn rotation_archives_the_expired_lines_and_the_live_file_loses_them() {
+        let (dir, log) = state("rot");
+        std::fs::write(&log, format!("{}{}{}", line("way_fired", 200, "old1"), line("way_fired", 150, "old2"), line("way_fired", 0, "now"))).unwrap();
+        assert!(rotate_log_by_age(&log, NOW, 90).unwrap());
+        let archived = read_source(&archive_path(&dir, NOW)).unwrap();
+        assert_eq!(archived, format!("{}{}", line("way_fired", 200, "old1"), line("way_fired", 150, "old2")), "oldest first, byte for byte");
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), line("way_fired", 0, "now"));
+    }
+
+    #[test]
+    fn a_failed_archive_write_makes_rotation_stand_down_and_remove_nothing() {
+        let (dir, log) = state("rot-fail");
+        let body = format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"));
+        std::fs::write(&log, &body).unwrap();
+        std::fs::create_dir(archive_path(&dir, NOW)).unwrap(); // the archive cannot be opened
+        assert!(rotate_log_by_age(&log, NOW, 90).is_err());
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), body, "the live file is untouched");
+    }
+
+    #[test]
+    fn the_size_cap_archives_its_dropped_head_and_keeps_judge_calls_live() {
+        let (dir, log) = state("cap");
+        let mut body = String::new();
+        for i in 0..50 {
+            body.push_str(&line("way_fired", 5, &format!("n{i:02}")));
+            if i == 3 {
+                body.push_str(&line("judge_call", 5, "judge"));
+            }
+        }
+        std::fs::write(&log, &body).unwrap();
+        compact_log_tail(&log, NOW, 1500, 0).unwrap();
+        let live = std::fs::read_to_string(&log).unwrap();
+        let archived = read_source(&archive_path(&dir, NOW)).unwrap();
+        assert!(live.contains("judge") && !archived.contains("judge"), "judge_call stays in the live file");
+        assert!(live.contains("n49") && !live.contains("n00"), "the live file keeps the tail");
+        assert!(archived.starts_with(&line("way_fired", 5, "n00")), "the head went to the archive:\n{archived}");
+        // Archived head then live tail is the original order, with nothing lost or doubled.
+        let rejoined: Vec<&str> = archived.lines().chain(live.lines().filter(|l| !l.contains("judge"))).collect();
+        let original: Vec<&str> = body.lines().filter(|l| !l.contains("judge")).collect();
+        assert_eq!(rejoined, original);
+    }
+
+    #[test]
+    fn a_failed_archive_write_makes_the_size_cap_stand_down() {
+        let (dir, log) = state("cap-fail");
+        let mut body = String::new();
+        for i in 0..50 {
+            body.push_str(&line("way_fired", 5, &format!("n{i:02}")));
+        }
+        std::fs::write(&log, &body).unwrap();
+        std::fs::create_dir(archive_path(&dir, NOW)).unwrap();
+        assert!(compact_log_tail(&log, NOW, 1500, 0).is_err());
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), body, "nothing was removed");
+    }
+
+    #[test]
+    fn the_daily_pass_expires_archives_past_the_retention_and_never_the_live_log() {
+        let (dir, log) = state("expire");
+        std::fs::write(&log, line("way_fired", 0, "now")).unwrap();
+        ways_core::event_archive::append(&dir, NOW - 400 * DAY, b"ancient\n").unwrap();
+        ways_core::event_archive::append(&dir, NOW - 30 * DAY, b"recent\n").unwrap();
+        rotate_if_due(&log, NOW, 365);
+        assert_eq!(archives(&dir), [archive_path(&dir, NOW - 30 * DAY)]);
+        assert!(log.exists());
+        // A one-day retention still leaves the live log alone.
+        rotate_if_due(&log, NOW + DAY, 1);
+        assert!(archives(&dir).is_empty() && log.exists());
     }
 }
