@@ -56,7 +56,8 @@ pub fn archives(dir: &Path) -> Vec<PathBuf> {
 /// so a failing archive costs little. The lock is held across the length read,
 /// the write, the fsync and any truncation, so a failed write can only cut back
 /// its own bytes and never another process's durable member. The file is
-/// removed on failure only when this call created it and it is empty again.
+/// never removed: an empty archive is harmless, and unlinking could strand a
+/// process waiting on its lock.
 /// The directory is synced after every write. An empty `removed` writes nothing.
 pub fn append(dir: &Path, now: u64, removed: &[u8]) -> std::io::Result<()> {
     if removed.is_empty() {
@@ -66,11 +67,7 @@ pub fn append(dir: &Path, now: u64, removed: &[u8]) -> std::io::Result<()> {
     let path = archive_path(dir, now);
     let mut opts = std::fs::OpenOptions::new();
     opts.append(true);
-    let (mut f, created) = match opts.clone().create_new(true).open(&path) {
-        Ok(f) => (f, true),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (opts.open(&path)?, false),
-        Err(e) => return Err(e),
-    };
+    let mut f = opts.create(true).open(&path)?;
     f.lock()?;
 
     let written = (|| {
@@ -85,9 +82,6 @@ pub fn append(dir: &Path, now: u64, removed: &[u8]) -> std::io::Result<()> {
         }
         result
     })();
-    if written.is_err() && created && f.metadata().is_ok_and(|m| m.len() == 0) {
-        let _ = std::fs::remove_file(&path);
-    }
     drop(f); // releases the lock
     #[cfg(unix)]
     if let Ok(d) = std::fs::File::open(dir) {
@@ -96,15 +90,23 @@ pub fn append(dir: &Path, now: u64, removed: &[u8]) -> std::io::Result<()> {
     written
 }
 
-/// Delete archives whose day is more than `retention_days` before `now`.
-/// Names that are not archives, and `events.jsonl` itself, are never touched.
-/// Returns how many files were removed.
+/// The most archives one [`expire`] pass deletes. Normal operation writes at
+/// most one day-file a day, so a backlog drains over a few passes, while a clock
+/// left ahead (which drags the log's anchor forward with it) costs a couple of
+/// files per real day and not the whole history.
+pub const MAX_EXPIRED_PER_PASS: usize = 2;
+
+/// Delete the oldest archives whose day is more than `retention_days` before
+/// `now`, at most [`MAX_EXPIRED_PER_PASS`]. Names that are not archives, and
+/// `events.jsonl` itself, are never touched. Returns how many files were removed.
 pub fn expire(dir: &Path, now: u64, retention_days: u32) -> usize {
     let cutoff = (now / DAY_SECS * DAY_SECS).saturating_sub(u64::from(retention_days.max(1)) * DAY_SECS);
-    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
     let mut removed = 0;
-    for e in entries.flatten() {
-        if archive_day(&e.file_name().to_string_lossy()).is_some_and(|day| day < cutoff) && std::fs::remove_file(e.path()).is_ok() {
+    for path in archives(dir) {
+        if removed == MAX_EXPIRED_PER_PASS || !path.file_name().and_then(|n| archive_day(&n.to_string_lossy())).is_some_and(|day| day < cutoff) {
+            break; // oldest first: nothing after a surviving file is past the cutoff
+        }
+        if std::fs::remove_file(&path).is_ok() {
             removed += 1;
         }
     }

@@ -786,7 +786,21 @@ fn compact_log_tail(path: &std::path::Path, now: u64, keep_bytes: u64, min_freed
 /// One handle serves the read and the carry: after the rename, whatever the old
 /// file gained since is appended to the new one. Callers hold the log lock.
 fn compact_log_tail_with(path: &std::path::Path, now: u64, keep_bytes: u64, min_freed: u64, ceiling: u64) -> std::io::Result<()> {
+    compact_log_tail_hooked(path, now, keep_bytes, min_freed, ceiling, &mut || {})
+}
+
+/// [`compact_log_tail_with`] with `before_publish` run once the new contents
+/// are built and before the file is checked and replaced, for tests that need
+/// something to happen in that window.
+fn compact_log_tail_hooked(path: &std::path::Path, now: u64, keep_bytes: u64, min_freed: u64, ceiling: u64, before_publish: &mut dyn FnMut()) -> std::io::Result<()> {
     use std::io::{Read, Seek, SeekFrom, Write};
+    // Size and marker first: a failing archive must not cost a read of the whole
+    // file on every append.
+    let size = std::fs::metadata(path)?.len();
+    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    if size <= keep_bytes || (size <= ceiling && archive_failed_today(dir, now)) {
+        return Ok(()); // nothing to cut, or retry tomorrow
+    }
     let f = std::fs::File::open(path)?;
     let mut data = Vec::new();
     (&f).read_to_end(&mut data)?;
@@ -794,11 +808,7 @@ fn compact_log_tail_with(path: &std::path::Path, now: u64, keep_bytes: u64, min_
     if data.len() <= keep {
         return Ok(());
     }
-    let dir = path.parent().unwrap_or(std::path::Path::new("."));
     let over_ceiling = data.len() as u64 > ceiling;
-    if archive_failed_today(dir, now) && !over_ceiling {
-        return Ok(()); // retry tomorrow
-    }
     // Start `keep` bytes from the end, then advance past the next newline so we
     // never retain a partial leading line.
     let cut = data.len() - keep;
@@ -825,6 +835,7 @@ fn compact_log_tail_with(path: &std::path::Path, now: u64, keep_bytes: u64, min_
     if ((data.len() - out.len()) as u64) < min_freed {
         return Ok(()); // would not pay for the rewrite
     }
+    before_publish();
     if !same_file(&f, path) {
         return Ok(());
     }
@@ -916,10 +927,11 @@ fn rotate_if_due(path: &std::path::Path, now: u64, archive_days: u32) -> bool {
             }
         }
     }
+    // The lock first, so a busy log does not spend today's slot.
+    let Some(_lock) = try_log_lock(dir) else { return false };
     if std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(&mine)).is_err() {
         return false; // claimed today already, here or by a parallel hook
     }
-    let Some(_lock) = try_log_lock(dir) else { return false };
     // Expiry anchors to the log like the rotation cutoff: a clock that ran
     // ahead must not delete archives. With no readable line there is no anchor
     // and nothing expires.
@@ -1832,5 +1844,64 @@ mod archive_tests {
         std::fs::create_dir(archive_path(&dir, NOW)).unwrap();
         assert!(compact_log_tail_with(&log, NOW, 1500, 0, 10_000_000).is_err());
         assert_eq!(std::fs::read_to_string(&log).unwrap(), body);
+    }
+
+    #[test]
+    fn events_appended_during_a_compaction_are_carried_over() {
+        let (_dir, log) = state("cap-carry");
+        std::fs::write(&log, numbered(100)).unwrap();
+        let late = line("way_fired", 0, "late");
+        let target = log.clone();
+        let mut hook = move || append_jsonl_line(&target, late.trim_end());
+        compact_log_tail_hooked(&log, NOW, 500, 0, CEILING_EVENTS_BYTES, &mut hook).unwrap();
+        let live = std::fs::read_to_string(&log).unwrap();
+        assert!(live.contains("late") && live.contains("n0099") && !live.contains("n0000"), "{live}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failing_archive_costs_no_read_of_the_log_once_marked() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, log) = state("no-read");
+        std::fs::write(&log, numbered(50)).unwrap();
+        mark_archive_failed(&dir, NOW);
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::File::open(&log).is_ok() {
+            return; // running as a user the mode does not bind
+        }
+        let r = compact_log_tail(&log, NOW, 1500, 0);
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(r.is_ok(), "the marker and the size decide before the file is opened: {r:?}");
+    }
+
+    #[test]
+    fn a_busy_lock_does_not_spend_the_days_rotation_slot() {
+        let (dir, log) = state("slot");
+        std::fs::write(&log, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
+        let held = try_log_lock(&dir).unwrap();
+        assert!(!rotate_if_due(&log, NOW, 365));
+        let claimed = |d: &std::path::Path| std::fs::read_dir(d).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(ROTATE_LOCK_PREFIX));
+        assert!(!claimed(&dir), "the slot is still open");
+        drop(held);
+        assert!(rotate_if_due(&log, NOW, 365), "and the day's rotation runs when the lock frees");
+    }
+
+    /// A clock left ahead is logged, so the next day's anchor is ahead too.
+    /// Expiry then bites, but only a file or two per daily pass.
+    #[test]
+    fn a_clock_left_ahead_costs_at_most_two_archives_a_day() {
+        let (dir, log) = state("ahead");
+        std::fs::write(&log, line("way_fired", 0, "now")).unwrap();
+        for age in [30u64, 20, 10, 5, 2] {
+            ways_core::event_archive::append(&dir, NOW - age * DAY, b"x\n").unwrap();
+        }
+        log_event_to(&log, NOW + 400 * DAY, Some(365), &[("event", "ahead")], &[]);
+        // The rotation itself archives the real line the jump aged out; count the planted ones.
+        let planted = || archives(&dir).into_iter().filter(|a| *a < archive_path(&dir, NOW + DAY)).count();
+        assert_eq!(planted(), 5, "day one: the anchor is a real line");
+        rotate_if_due(&log, NOW + 401 * DAY, 365);
+        assert_eq!(planted(), 3, "day two: the oldest two at most");
+        rotate_if_due(&log, NOW + 402 * DAY, 365);
+        assert_eq!(planted(), 1);
     }
 }
