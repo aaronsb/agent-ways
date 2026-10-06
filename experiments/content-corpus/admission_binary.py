@@ -11,6 +11,22 @@ port. This script runs both on the same surfaces and compares them.
         --ways tools/target/release/ways [--mode share|chunk_top|both] [--text] \
         experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
 
+Smoke run: add `--quick` to run a small fixed subset of the golden rows (every
+multi-chunk row plus every 12th single-chunk row) instead of the full set; it
+finishes in a fraction of the time and still compares binary against port on
+both the main and the multi-chunk surfaces. Use the full set for any number you
+mean to cite.
+
+    OUT=/tmp/adm-out experiments/content-corpus/admission_binary.py --quick \
+        --ways tools/target/release/ways tests/routing-golden.tsv
+
+The binary needs `way-embed`. It is resolved as the binary resolves it: the
+`--way-embed PATH` flag, else $XDG_CACHE_HOME/agent-ways/user/way-embed, else
+the app bin ($XDG_DATA_HOME/agent-ways/bin), else ~/.claude/bin. If none exists
+the script exits 2 naming the paths it tried. It also exits 2 when the binary
+returns no rows for any surface, or its late interaction (confirm) ran on no
+surface: a recall table over all-empty results would read as recall 0.000.
+
 Surfaces are recall.py's: confirm.py's 310 main surfaces (seed 11) and the 93
 auxiliary surfaces built around the multi-sentence golden prompts (seed 13).
 
@@ -56,7 +72,28 @@ TEXT_ROW = re.compile(r"^\s{2}(\S+)\s+([\d.]+)\s+([\d.]+)\s+(\S+)\s+(fired ✓|<
 
 # ── the binary's environment ─────────────────────────────────────────────────
 
-def binenv(mode, explicit):
+def die(msg):
+    print(f"admission_binary: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def find_way_embed(flag):
+    """The way-embed the binary would use: the flag, the cache dir, the app bin,
+    then ~/.claude/bin. Returns the first that exists (a link must resolve)."""
+    data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    if flag:  # an explicit choice is not silently replaced by a fallback
+        if not Path(flag).exists():
+            die(f"--way-embed {flag} does not exist")
+        return Path(flag).resolve()
+    tried = [run.CACHE / "way-embed", data / "agent-ways" / "bin" / "way-embed", run.EMBED]
+    for c in tried:
+        if c.exists():
+            return c.resolve()
+    die("way-embed not found; tried " + ", ".join(str(c) for c in tried)
+        + ". Build it or pass --way-embed PATH; without it every surface returns no rows.")
+
+
+def binenv(mode, explicit, embed):
     """A scratch HOME/XDG tree whose corpus is $OUT/alias.jsonl. With
     `explicit` false and mode share, config.yaml names no admission key, as an
     older binary expects."""
@@ -68,10 +105,15 @@ def binenv(mode, explicit):
     link = home / ".claude" / "hooks" / "ways"
     if not link.is_symlink():
         link.symlink_to(run.WAYS)
-    for name in ("minilm-l6-v2.gguf", "way-embed"):
+    if not run.MODEL.exists():
+        die(f"model not found: {run.MODEL}")
+    for name, src in (("minilm-l6-v2.gguf", run.MODEL), ("way-embed", embed)):
         dst = cache / name
+        if dst.is_symlink() or dst.exists():
+            dst.unlink()  # a link left by an earlier run may dangle
+        dst.symlink_to(src)
         if not dst.exists():
-            dst.symlink_to(run.CACHE / name)
+            die(f"link target missing: {dst} -> {src}")
     shutil.copyfile(O / "alias.jsonl", cache / "ways-corpus-en.jsonl")
     for stale in ("embed-manifest.json", "ways-body-en.bin"):
         (cache / stale).unlink(missing_ok=True)  # no sidecar: confirm per call
@@ -159,6 +201,8 @@ def metrics(decisions, allsurf, which):
         irr_adm += sum(R.label(w, s["expected"]) == "irrelevant" for w in adm)
         irr_fired += sum(R.label(w, s["expected"]) == "irrelevant" for w in fired)
     n = len(sel)
+    if not exp:  # no surfaces, or none with an expected way: every ratio is n/a
+        return {"n": n, "exp": 0}
     return {"n": n, "exp": exp, "rec_adm": adm_rel / exp, "rec_fired": fired_rel / exp,
             "adm_per": n_adm / n, "fired_per": n_fired / n,
             "irr_adm_per": irr_adm / n, "irr_fired_per": irr_fired / n,
@@ -166,14 +210,41 @@ def metrics(decisions, allsurf, which):
 
 
 def show(name, m):
+    if not m["exp"]:
+        print(f"  {name:28} n {m['n']:3d}  n/a (0 expected)")
+        return
     print(f"  {name:28} n {m['n']:3d}  rec adm {m['rec_adm']:.3f}  rec fired {m['rec_fired']:.3f}"
           f" ({m['fired_rel']}/{m['exp']})  adm/s {m['adm_per']:.2f}  fired/s {m['fired_per']:.2f}"
           f"  irr adm/s {m['irr_adm_per']:.2f}  irr fired/s {m['irr_fired_per']:.2f}")
 
 
+def quick_subset(golden):
+    """Fixed smoke subset: every multi-chunk row, plus every 12th of the rest."""
+    multi = [g for g in golden if len(C.chunk_surface(C.as_sentence(g[0]))) >= 2]
+    rest = [g for g in golden if g not in multi]
+    return multi + rest[::12]
+
+
+def positive_control(mode, rows, allsurf):
+    """A zero must be a measurement: the binary returned rows, and its late
+    interaction (a confirm score or an admission) ran on at least one surface."""
+    nonempty = sum(bool(r) for r in rows)
+    late = sum(any(x["confirm"] is not None or x["admitted"] for x in r) for r in rows)
+    if nonempty == 0:
+        die(f"mode {mode}: the binary returned no rows on 0 of {len(allsurf)} surfaces; "
+            "is way-embed or the corpus missing? refusing to report recall")
+    if late == 0:
+        die(f"mode {mode}: late interaction ran on 0 of {len(allsurf)} surfaces "
+            f"({nonempty} returned rows); refusing to report recall")
+    print(f"  control: rows on {nonempty}/{len(allsurf)} surfaces, "
+          f"late interaction on {late}/{len(allsurf)}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ways", required=True)
+    ap.add_argument("--way-embed", help="way-embed to link into the scratch cache")
+    ap.add_argument("--quick", action="store_true", help="smoke run on a small fixed golden subset")
     ap.add_argument("--mode", default="both", choices=["share", "chunk_top", "both"])
     ap.add_argument("--text", action="store_true", help="parse the table, not --json")
     ap.add_argument("--explicit", action="store_true",
@@ -181,10 +252,13 @@ def main():
     ap.add_argument("golden", nargs="+")
     a = ap.parse_args()
     ways = str(Path(a.ways).resolve())
+    embed = find_way_embed(a.way_embed)
 
     alias = [json.loads(l) for l in (O / "alias.jsonl").read_text().splitlines()]
     ids = [x["id"] for x in alias]
     golden = C.load_golden(a.golden, set(ids))
+    if a.quick:
+        golden = quick_subset(golden)
     import random
     surfaces = R.own_confirm_surfaces(golden, random.Random(R.SEED))
     aux, _, _ = R.multi_chunk_surfaces(golden, random.Random(R.SEED + 2))
@@ -204,8 +278,9 @@ def main():
     binary = {}
     report = {}
     for mode in modes:
-        env, empty = binenv(mode, a.explicit)
+        env, empty = binenv(mode, a.explicit, embed)
         rows = run_binary(ways, allsurf, env, empty, a.text)
+        positive_control(mode, rows, allsurf)
         dec_b, dec_p, diffs, conf_bad, n_conf = [], [], [], [], 0
         for si, (s, rs) in enumerate(zip(allsurf, rows)):
             ranked, _, adm, _ = py[mode][si]
