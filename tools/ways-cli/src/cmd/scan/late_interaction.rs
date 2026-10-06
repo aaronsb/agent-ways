@@ -26,7 +26,7 @@
 //! strict corroboration — the two take opposite stances on purpose (ADR-160).
 //!
 //! **Body sidecar (ADR-701 §6, §7).** When the corpus build's section sidecar
-//! covers every enabled way at the alias corpus's content hashes, the match
+//! covers every enabled way the alias corpus holds at its content hashes, the match
 //! pass also returns each chunk's vector (`way-embed match --vectors`) and
 //! confirmation is the max cosine of the won chunk against the way's section
 //! vectors, or its alias vector for a way with no sections. No further
@@ -270,13 +270,13 @@ fn ms(t: std::time::Instant) -> f64 {
 }
 
 /// ADR-701 §7: the body sidecar in `corpus_dir`, only when it was built with
-/// the installed model and covers every way in `enabled` at the alias corpus's
-/// content hashes (the manifest's `way_hashes`).
+/// the installed model and covers every way in `enabled` that the alias
+/// corpus holds, at its content hashes (the manifest's `way_hashes`).
 fn complete_sidecar(corpus_dir: &Path, enabled: &HashMap<String, PathBuf>) -> Option<Sidecar> {
     let sc = sidecar::read(&corpus_dir.join(sidecar::FILE))?;
     let model = sidecar::model_id(corpus_dir)?;
     let alias = sidecar::alias_hashes(&corpus_dir.join("embed-manifest.json"));
-    sc.covers(&model, enabled.keys().map(String::as_str), &alias).then_some(sc)
+    sc.check(&model, enabled.keys().map(String::as_str), &alias).is_ok().then_some(sc)
 }
 
 /// How stage 5 confirms a survivor: against the body sidecar with the match

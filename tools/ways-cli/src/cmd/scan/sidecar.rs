@@ -33,8 +33,10 @@
 //!
 //! The corpus manifest (`embed-manifest.json`) records `way_hashes`, each alias
 //! corpus way's content hash. A scan uses the sidecar only when its model id is
-//! the installed model's and every enabled way has a record whose hash equals
-//! the manifest's. Anything less and the scan behaves exactly as without it.
+//! the installed model's and every enabled way the alias corpus holds has a
+//! record whose hash equals the manifest's. An enabled way the alias corpus
+//! lacks (a worktree's or an unregistered project's) cannot win a chunk and
+//! does not count. Anything less and the scan behaves exactly as without it.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -209,20 +211,81 @@ pub(crate) fn alias_hashes_from(manifest: &serde_json::Value) -> HashMap<String,
         .unwrap_or_default()
 }
 
+/// Why a scan confirms per call instead of against the sidecar (ADR-701 §7).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Fallback {
+    /// No sidecar file, or one that does not parse.
+    Absent,
+    /// The last corpus build did not produce a sidecar; its reason.
+    BuildFailed(String),
+    /// The sidecar was built for another model, embedder or chunker.
+    ModelMismatch,
+    /// The manifest records no per-way hashes to check against.
+    NoHashes,
+    /// Enabled ways the alias corpus holds but the sidecar lacks, or holds at
+    /// another content hash.
+    Incomplete { missing: Vec<String>, stale: Vec<String> },
+}
+
+impl std::fmt::Display for Fallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let list = |ids: &[String]| {
+            let shown: Vec<&str> = ids.iter().take(3).map(String::as_str).collect();
+            let more = ids.len().saturating_sub(3);
+            if more > 0 { format!("{} and {more} more", shown.join(", ")) } else { shown.join(", ") }
+        };
+        match self {
+            Fallback::Absent => write!(f, "absent; run `ways corpus`"),
+            Fallback::BuildFailed(why) => write!(f, "build failed: {why}"),
+            Fallback::ModelMismatch => write!(f, "built for another model or way-embed; run `ways corpus`"),
+            Fallback::NoHashes => write!(f, "the manifest has no way hashes; run `ways corpus`"),
+            Fallback::Incomplete { missing, stale } => {
+                let mut parts = Vec::new();
+                if !missing.is_empty() {
+                    parts.push(format!("missing {}", list(missing)));
+                }
+                if !stale.is_empty() {
+                    parts.push(format!("stale {}", list(stale)));
+                }
+                write!(f, "incomplete ({}); run `ways corpus`", parts.join("; "))
+            }
+        }
+    }
+}
+
 impl Sidecar {
-    /// ADR-701 §7: true when the sidecar was built with `model` and every id in
-    /// `enabled` has a record at the alias corpus's content hash. A way missing
-    /// from either side, or recorded at another hash, makes it incomplete.
-    pub(crate) fn covers<'a>(
+    /// ADR-701 §7: `Ok` when the sidecar was built with `model` and every way
+    /// in `enabled` that the alias corpus holds (`alias`, the manifest's
+    /// `way_hashes`) has a record at the same content hash. An enabled way the
+    /// alias corpus lacks cannot win a chunk, so it does not count.
+    pub(crate) fn check<'a>(
         &self,
         model: &str,
         enabled: impl IntoIterator<Item = &'a str>,
         alias: &HashMap<String, u64>,
-    ) -> bool {
-        self.model == model
-            && enabled.into_iter().all(|id| {
-                matches!((alias.get(id), self.index.get(id)), (Some(a), Some((h, _, _))) if a == h)
-            })
+    ) -> Result<(), Fallback> {
+        if self.model != model {
+            return Err(Fallback::ModelMismatch);
+        }
+        if alias.is_empty() {
+            return Err(Fallback::NoHashes);
+        }
+        let (mut missing, mut stale) = (Vec::new(), Vec::new());
+        for id in enabled {
+            let Some(want) = alias.get(id) else { continue };
+            match self.index.get(id) {
+                None => missing.push(id.to_string()),
+                Some((h, _, _)) if h != want => stale.push(id.to_string()),
+                Some(_) => {}
+            }
+        }
+        if missing.is_empty() && stale.is_empty() {
+            Ok(())
+        } else {
+            missing.sort();
+            stale.sort();
+            Err(Fallback::Incomplete { missing, stale })
+        }
     }
 
     /// Max cosine of `v` over the way's section vectors. `None` when the way
@@ -365,8 +428,8 @@ mod tests {
     #[test]
     fn covers_every_enabled_way_at_the_alias_hashes() {
         let sc = decode(&encode("m", 3, &sample()).unwrap()).unwrap();
-        assert!(sc.covers("m", ["a/one", "b", "c/three"], &alias()));
-        assert!(sc.covers("m", ["a/one"], &alias()), "a disabled way need not be enabled");
+        assert!(sc.check("m", ["a/one", "b", "c/three"], &alias()).is_ok());
+        assert!(sc.check("m", ["a/one"], &alias()).is_ok(), "a disabled way need not be enabled");
     }
 
     #[test]
@@ -374,9 +437,18 @@ mod tests {
         let mut ways = sample();
         ways.remove(2);
         let sc = decode(&encode("m", 3, &ways).unwrap()).unwrap();
-        assert!(!sc.covers("m", ["a/one", "b", "c/three"], &alias()));
+        assert_eq!(sc.check("m", ["a/one", "b", "c/three"], &alias()), Err(Fallback::Incomplete { missing: vec!["c/three".into()], stale: vec![] }));
         // The missing way is disabled: the rest is complete.
-        assert!(sc.covers("m", ["a/one", "b"], &alias()));
+        assert!(sc.check("m", ["a/one", "b"], &alias()).is_ok());
+    }
+
+    /// An enabled way the alias corpus does not hold (a worktree's or an
+    /// unregistered project's way) cannot win a chunk, so it does not make the
+    /// sidecar incomplete.
+    #[test]
+    fn an_enabled_way_absent_from_the_alias_corpus_does_not_disable_the_sidecar() {
+        let sc = decode(&encode("m", 3, &sample()).unwrap()).unwrap();
+        assert!(sc.check("m", ["a/one", "b", "-home-me-proj/local/way"], &alias()).is_ok());
     }
 
     #[test]
@@ -384,14 +456,14 @@ mod tests {
         let mut ways = sample();
         ways[0].hash = 0xdead;
         let sc = decode(&encode("m", 3, &ways).unwrap()).unwrap();
-        assert!(!sc.covers("m", ["a/one", "b"], &alias()));
+        assert_eq!(sc.check("m", ["a/one", "b"], &alias()), Err(Fallback::Incomplete { missing: vec![], stale: vec!["a/one".into()] }));
     }
 
     #[test]
     fn incomplete_when_the_model_changed_or_the_manifest_has_no_hashes() {
         let sc = decode(&encode("m", 3, &sample()).unwrap()).unwrap();
-        assert!(!sc.covers("other", ["a/one"], &alias()));
-        assert!(!sc.covers("m", ["a/one"], &HashMap::new()));
+        assert_eq!(sc.check("other", ["a/one"], &alias()), Err(Fallback::ModelMismatch));
+        assert_eq!(sc.check("m", ["a/one"], &HashMap::new()), Err(Fallback::NoHashes));
     }
 
     #[test]

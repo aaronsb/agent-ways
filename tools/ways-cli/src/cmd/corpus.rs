@@ -1487,7 +1487,7 @@ mod tests {
         let hashes = way_hashes(&sources);
         assert_eq!(hashes["a/prose"], json!(sidecar::hash_hex(sidecar::content_hash(prose.as_bytes()))));
         let alias = sidecar::alias_hashes_from(&json!({ "way_hashes": hashes }));
-        assert!(sc.covers("minilm-l6-v2.gguf:5", ["a/prose", "b/table"], &alias));
+        assert!(sc.check("minilm-l6-v2.gguf:5", ["a/prose", "b/table"], &alias).is_ok());
         let leftovers: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .flatten()
