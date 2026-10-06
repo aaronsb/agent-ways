@@ -583,4 +583,36 @@ mod tests {
         assert!(model_id(&dir, &dir.join("absent")).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The sidecar replaces its path: a write never goes through a link, and
+    /// a write that cannot stage leaves the old bytes.
+    #[cfg(unix)]
+    #[test]
+    fn write_replaces_the_sidecar_atomically() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("ways-sidecar-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target.bin");
+        std::fs::write(&target, "old").unwrap();
+        let path = dir.join(FILE);
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        write(&path, b"new").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"old", "written through the link");
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 2, "staging left behind: {names:?}");
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let can_stage = std::fs::File::create(dir.join("probe")).is_ok();
+        let res = write(&path, b"newer");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if can_stage {
+            eprintln!("SKIPPED write_replaces_the_sidecar_atomically (read-only half): directory modes do not bind this user (root?)");
+        } else {
+            assert!(res.is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
