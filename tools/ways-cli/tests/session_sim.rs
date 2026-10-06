@@ -1659,3 +1659,84 @@ fn scenario_queued_messages_are_main_agents_only() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+
+// ── ADR-701 §2: event-log rotation runs from a real scan ───────
+
+#[test]
+fn scenario_event_log_rotates_old_lines_on_a_scan() {
+    let s = Session::new("rot");
+    let home = sim_root().join("home-rot");
+    let _ = std::fs::remove_dir_all(&home);
+    let ways_link = home.join(".claude/hooks/ways");
+    std::fs::create_dir_all(ways_link.parent().unwrap()).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(fixture_ways_dir(), &ways_link).unwrap();
+    #[cfg(windows)]
+    copy_dir_all(&fixture_ways_dir(), &ways_link).unwrap();
+
+    let state = home.join(".local/state/agent-ways");
+    let log = state.join("events.jsonl");
+
+    // A first scan writes a current line, which anchors the cutoff to real time.
+    s.scan_prompt_with_home("how do I write a unit test for this module", &home);
+    assert_marker_exists("testdomain/parent/child", &s.id);
+
+    // Put an old line at the head and release today's claim, as the next day would.
+    let current = std::fs::read_to_string(&log).unwrap();
+    std::fs::write(&log, format!("{{\"ts\":\"2001-01-01T00:00:00Z\",\"event\":\"way_fired\",\"way\":\"ancient/way\"}}\n{current}")).unwrap();
+    for e in std::fs::read_dir(&state).unwrap().flatten() {
+        if e.file_name().to_string_lossy().starts_with("events.rotated-") {
+            std::fs::remove_file(e.path()).unwrap();
+        }
+    }
+
+    // A second scan fires another way: the event rotates the old line out first.
+    s.scan_prompt_with_home("refactor extract method decompose this function", &home);
+    assert_marker_exists("testdomain/parent/child2", &s.id);
+
+    let got = std::fs::read_to_string(&log).unwrap();
+    assert!(!got.contains("ancient/way"), "the old line is rotated out:\n{got}");
+    assert!(got.contains("testdomain/parent/child2") && got.contains("testdomain/parent/child\""), "the scans' own events are kept:\n{got}");
+    let claimed = std::fs::read_dir(&state)
+        .unwrap()
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().starts_with("events.rotated-"));
+    assert!(claimed, "today's rotation claim is on disk");
+
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+// ── ADR-701 §1: a project prefix toggle excludes the ways under it ─────
+
+#[test]
+fn scenario_prefix_toggle_excludes_ways_and_a_way_toggle_overrides_it() {
+    let s = Session::new("prefix");
+    let project = sim_root().join("project-prefix");
+    let _ = std::fs::remove_dir_all(&project);
+    std::fs::create_dir_all(project.join(".claude")).unwrap();
+    let scan = |query: &str| {
+        s.cmd()
+            .args(["scan", "prompt", "--query", query, "--session", &s.id, "--project"])
+            .arg(&project)
+            .env("CLAUDE_PROJECT_DIR", &project)
+            .current_dir(&project)
+            .env("PWD", &project)
+            .output()
+            .expect("Failed to run ways scan prompt");
+    };
+
+    std::fs::write(project.join(".claude/ways.yaml"), "ways:\n  testdomain/*: false\n").unwrap();
+    scan("how do I write a unit test for this module");
+    assert_marker_absent("testdomain/parent/child", &s.id);
+
+    // An explicit toggle on the way itself overrides the prefix.
+    std::fs::write(
+        project.join(".claude/ways.yaml"),
+        "ways:\n  testdomain/*: false\n  testdomain/parent/child: true\n",
+    )
+    .unwrap();
+    scan("how do I write a unit test for this module");
+    assert_marker_exists("testdomain/parent/child", &s.id);
+
+    let _ = std::fs::remove_dir_all(&project);
+}

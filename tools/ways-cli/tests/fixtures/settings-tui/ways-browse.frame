@@ -7,13 +7,13 @@ agent-tui frame 100x30
 |│     language                  auto                  ││in its .claude/ways.yaml. Each entry falls │|
 |│     default_scope             agent                 ││back alone.                                │|
 |│     disabled_domains          []                    ││                                           │|
-|│▌▾ project · way               enabled               ││2 entries, 0 changed                       │|
+|│     event_retention_days      90                    ││2 entries, 0 changed                       │|
+|│▌▾ project · way               enabled               ││                                           │|
 |│   ▾ this project                                    ││                                           │|
 |│       (no project ways)       none · ways init      ││                                           │|
 |│   ▾ shipped                                         ││                                           │|
 |│     ▸ itops                                         ││                                           │|
-|│     ▸ softwaredev                                   ││                                           │|
-|│                                                     │└───────────────────────────────────────────┘|
+|│     ▸ softwaredev                                   │└───────────────────────────────────────────┘|
 |│                                                     │┌ways───────────────────────────────────────┐|
 |│                                                     ││3 ways, 0 switched off as loaded.          │|
 |│                                                     ││                                           │|
@@ -64,24 +64,23 @@ styles
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   1-1   Cyan - BOLD|REVERSED
-  8   2-10  - - BOLD|REVERSED
-  8  11-16  - - BOLD|DIM|REVERSED
-  8  17-31  - - BOLD|REVERSED
-  8  32-38  - - BOLD|DIM|REVERSED
-  8  39-53  - - BOLD|REVERSED
   8  54-75  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9   2-17  - - BOLD
+  9   1-1   Cyan - BOLD|REVERSED
+  9   2-10  - - BOLD|REVERSED
+  9  11-16  - - BOLD|DIM|REVERSED
+  9  17-31  - - BOLD|REVERSED
+  9  32-38  - - BOLD|DIM|REVERSED
+  9  39-53  - - BOLD|REVERSED
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10  32-47  - - DIM
+ 10   2-17  - - BOLD
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11   2-12  - - BOLD
+ 11  32-47  - - DIM
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
@@ -89,10 +88,11 @@ styles
  12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13   2-18  - - BOLD
+ 13   2-12  - - BOLD
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
+ 14   2-18  - - BOLD
  14  54-99  - - DIM
  15   0-0   - - DIM
  15  54-55  - - DIM

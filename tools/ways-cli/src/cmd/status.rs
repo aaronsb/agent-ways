@@ -91,6 +91,7 @@ pub fn run(json_output: bool) -> Result<()> {
     let disabled = crate::config::global().disabled_domains.clone();
     // ADR-131: project-scope per-way toggles
     let disabled_ways: Vec<String> = crate::config::global().disabled_ways().to_vec();
+    let enabled_ways: Vec<String> = crate::config::global().enabled_ways().to_vec();
     // ADR-503 §4: a section that fell back is reported here as well as on
     // the stderr of the command that loaded it, which a hook hides.
     let settings_findings = settings_findings();
@@ -136,6 +137,7 @@ pub fn run(json_output: bool) -> Result<()> {
             "output_language": output_language,
             "disabled_domains": disabled,
             "disabled_ways": disabled_ways,
+            "enabled_ways": enabled_ways,
             "settings_findings": settings_findings,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -247,7 +249,11 @@ pub fn run(json_output: bool) -> Result<()> {
             println!("Disabled domains: {}", disabled.join(", "));
         }
         if !disabled_ways.is_empty() {
-            println!("Disabled ways:    {} (project scope, ADR-131)", disabled_ways.join(", "));
+            println!("Disabled ways:    {} (project scope, ADR-131; `dir/*` covers every way under it)", disabled_ways.join(", "));
+            let on = &enabled_ways;
+            if !on.is_empty() {
+                println!("Enabled by name:  {} (overrides a disabled prefix, ADR-701)", on.join(", "));
+            }
         }
         if !settings_findings.is_empty() {
             println!("Settings:  {} finding(s); `ways settings lint` lists them, `ways settings fix <section>` repairs one", settings_findings.len());

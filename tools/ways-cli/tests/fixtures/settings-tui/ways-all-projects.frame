@@ -7,20 +7,20 @@ agent-tui frame 100x30
 |│     language                  auto                  ││type     bool (Enter toggles)              │|
 |│     default_scope             agent                 ││default  true                              │|
 |│     disabled_domains          []                    ││from     project ·                         │|
-|│ ▾ project · way               enabled               ││~/Projects/gateway/.claude/ways.yaml       │|
-|│   ▾ this project                                    ││writes                                     │|
-|│     ▸ api                                           ││~/Projects/gateway/.claude/ways.yaml       │|
-|│   ▾ shipped                                         ││[ways.project.api/rate-limit]              │|
+|│     event_retention_days      90                    ││~/Projects/gateway/.claude/ways.yaml       │|
+|│ ▾ project · way               enabled               ││writes                                     │|
+|│   ▾ this project                                    ││~/Projects/gateway/.claude/ways.yaml       │|
+|│     ▸ api                                           ││[ways.project.api/rate-limit]              │|
+|│   ▾ shipped                                         ││                                           │|
 |│     ▸ itops                                         ││                                           │|
-|│     ▸ softwaredev                                   ││                                           │|
-|│   ▾ other projects                                  │└───────────────────────────────────────────┘|
-|│     ▾ gateway · way           enabled               │┌way────────────────────────────────────────┐|
-|│       ▾ api                                         ││the rate-limit way of Projects/gateway     │|
-|│           auth                true                  ││                                           │|
-|│▌          rate-limit          false                 ││from       another project                 │|
-|│       ▸ deploy                                      ││root       ~/Projects/gateway/.claude/ways │|
-|│     ▸ notes · way             enabled               ││file       api/rate-limit/rate-limit.md    │|
-|│                                                     ││vocabulary rate-limit                      │|
+|│     ▸ softwaredev                                   │└───────────────────────────────────────────┘|
+|│   ▾ other projects                                  │┌way────────────────────────────────────────┐|
+|│     ▾ gateway · way           enabled               ││the rate-limit way of Projects/gateway     │|
+|│       ▾ api                                         ││                                           │|
+|│           auth                true                  ││from       another project                 │|
+|│▌          rate-limit          false                 ││root       ~/Projects/gateway/.claude/ways │|
+|│       ▸ deploy                                      ││file       api/rate-limit/rate-limit.md    │|
+|│     ▸ notes · way             enabled               ││vocabulary rate-limit                      │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -64,21 +64,20 @@ styles
   7  54-64  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   2-10  - - BOLD
-  8  11-16  - - DIM
-  8  32-38  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9   2-17  - - BOLD
+  9   2-10  - - BOLD
+  9  11-16  - - DIM
+  9  32-38  - - DIM
   9  54-61  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10   2-10  - - BOLD
+ 10   2-17  - - BOLD
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11   2-12  - - BOLD
+ 11   2-10  - - BOLD
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
@@ -86,44 +85,45 @@ styles
  12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13   2-18  - - BOLD
+ 13   2-12  - - BOLD
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14   2-19  - - BOLD
+ 14   2-18  - - BOLD
  14  54-99  - - DIM
  15   0-0   - - DIM
- 15   2-14  - - BOLD
- 15  15-20  - - DIM
- 15  32-38  - - DIM
+ 15   2-19  - - BOLD
  15  54-55  - - DIM
  15  56-58  LightBlue - BOLD|DIM
  15  59-99  - - DIM
  16   0-0   - - DIM
- 16   2-12  - - BOLD
+ 16   2-14  - - BOLD
+ 16  15-20  - - DIM
+ 16  32-38  - - DIM
  16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
+ 17   2-12  - - BOLD
  17  54-55  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
- 18   1-1   Cyan - BOLD|REVERSED
- 18   2-31  - - BOLD|REVERSED
- 18  32-36  LightBlue - BOLD|REVERSED
- 18  37-53  - - BOLD|REVERSED
  18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
- 19   2-15  - - BOLD
+ 19   1-1   Cyan - BOLD|REVERSED
+ 19   2-31  - - BOLD|REVERSED
+ 19  32-36  LightBlue - BOLD|REVERSED
+ 19  37-53  - - BOLD|REVERSED
  19  54-55  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20   2-12  - - BOLD
- 20  13-18  - - DIM
- 20  32-38  - - DIM
+ 20   2-15  - - BOLD
  20  54-55  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
+ 21   2-12  - - BOLD
+ 21  13-18  - - DIM
+ 21  32-38  - - DIM
  21  54-55  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM

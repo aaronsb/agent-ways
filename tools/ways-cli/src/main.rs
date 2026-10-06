@@ -485,13 +485,18 @@ enum AuthorCommand {
     ///
     /// Diagnose how a query matches ways under the live late-interaction matcher
     /// (ADR-160): peak · share · body-confirm · fired, per candidate — the tool
-    /// for authoring a way against how it actually fires.
+    /// for authoring a way against how it actually fires. Ways compete as they do
+    /// in a prompt scan in agent scope (toggles, scope, `when:`); `--all` competes
+    /// every way.
     Match {
         /// The query string to match
         query: String,
         /// Project directory (for project-local ways; default: current)
         #[arg(long)]
         project: Option<String>,
+        /// Compete every way, ignoring scope, `when:` and toggles
+        #[arg(long)]
+        all: bool,
     },
     /// Analyze a progressive-disclosure tree
     Tree {
@@ -1211,7 +1216,7 @@ fn run() -> Result<()> {
             AuthorCommand::Template { path, description, vocabulary, scope, global } => {
                 cmd::template::run(path, description, vocabulary, scope, global)
             }
-            AuthorCommand::Match { query, project } => cmd::match_cmd::run_late(query, project.as_deref()),
+            AuthorCommand::Match { query, project, all } => cmd::match_cmd::run_late(query, project.as_deref(), all),
             AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
             AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),

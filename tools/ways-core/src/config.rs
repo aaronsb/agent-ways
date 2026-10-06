@@ -119,6 +119,10 @@ pub struct Config {
     /// per-way knobs to user-scope `apply_yaml` would have to also touch
     /// this field, which sits right next to a load-bearing doc comment.
     pub(crate) disabled_ways: Vec<String>,
+    /// Ways and prefixes the project switched on by name (`way: true`). Read
+    /// only through [`Config::way_disabled`], where an explicit entry overrides
+    /// a broader prefix (ADR-701 §1). Project scope only, like `disabled_ways`.
+    pub(crate) enabled_ways: Vec<String>,
     /// Parent-boost multiplier: a child way's effective semantic fire
     /// probability is multiplied by this value when any ancestor way has fired
     /// in the session. Values <1.0 make children fire more easily once their
@@ -151,6 +155,8 @@ pub struct Config {
     /// Default 0.05: a narrow band that captures genuine near-fires without
     /// flooding the log with deep misses.
     pub near_miss_margin: f64,
+    /// Days of history the telemetry event log keeps (ADR-701 §2). Default 90.
+    pub event_retention_days: u32,
     /// Refire presets (ADR-126). Each value is a fraction of the session
     /// context window. At fire evaluation time, a way's `refire: <name>`
     /// resolves by looking up the preset here and multiplying by the
@@ -197,11 +203,13 @@ impl Default for Config {
             language: "auto".to_string(),
             disabled_domains: Vec::new(),
             disabled_ways: Vec::new(),
+            enabled_ways: Vec::new(),
             parent_threshold_multiplier: 0.8,
             parent_boost_floor: 0.30,
             semantic_fire_probability: 0.5,
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
+            event_retention_days: 90,
             refire_presets,
             secret_path_deny: true,
         }
@@ -212,6 +220,26 @@ impl Config {
     /// Public read accessor for the project-scope disable list (ADR-131).
     pub fn disabled_ways(&self) -> &[String] {
         &self.disabled_ways
+    }
+
+    /// Ways and prefixes the project switched on by name; they override a
+    /// broader disabled prefix (ADR-701 §1).
+    pub fn enabled_ways(&self) -> &[String] {
+        &self.enabled_ways
+    }
+
+    /// Whether the project switched `way_id` off (ADR-131, ADR-701 §1).
+    ///
+    /// A toggle key is either a way id or a path prefix ending in `/*`, which
+    /// covers every way under that directory. The most specific toggle wins: a
+    /// toggle on the way itself beats any prefix, and a longer prefix beats a
+    /// shorter one. So `a/b/*: false` with `a/b/c: true` leaves `a/b/c` on.
+    /// A way with no toggle is on.
+    pub fn way_disabled(&self, way_id: &str) -> bool {
+        way_toggled_off(
+            self.enabled_ways.iter().map(|k| (k.as_str(), true)).chain(self.disabled_ways.iter().map(|k| (k.as_str(), false))),
+            way_id,
+        )
     }
 
     /// The effective projection targets (ADR-184). With no `targets` key the
@@ -364,6 +392,9 @@ impl Config {
         if let Some(v) = doc.get("near_miss_margin").and_then(|v| v.as_f64()) {
             self.near_miss_margin = v;
         }
+        if let Some(v) = doc.get("event_retention_days").and_then(|v| v.as_u64()) {
+            self.event_retention_days = v as u32; // the schema holds 1..=3650
+        }
         if let Some(m) = doc.get("refire_presets").and_then(|v| v.as_mapping()) {
             for (k, v) in m {
                 if let (Some(name), Some(fraction)) = (k.as_str(), v.as_f64()) {
@@ -390,7 +421,9 @@ impl Config {
     ///     meta/introspection:                # long-form
     ///       enabled: false
     ///
-    /// Anything that evaluates to enabled=false is collected into `disabled_ways`.
+    /// Anything that evaluates to enabled=false is collected into `disabled_ways`;
+    /// an explicit enabled=true into `enabled_ways`, so it can override a prefix.
+    /// A key ending in `/*` is a path prefix (ADR-701 §1, see `way_disabled`).
     /// Unknown sub-keys on the long-form (threshold overrides, etc.) are ignored
     /// — reserved for future use per ADR-131.
     fn apply_project_ways_overlay_value(&mut self, doc: &serde_yaml::Value) {
@@ -399,20 +432,47 @@ impl Config {
         };
         for (k, v) in ways {
             let Some(name) = k.as_str() else { continue };
-            let disabled = match v {
-                serde_yaml::Value::Bool(b) => !*b, // shorthand: `way: false` means disabled
+            // `Some(true)` is an explicit enable, `Some(false)` an explicit disable;
+            // anything else (no `enabled` key, a non-boolean) states nothing.
+            let enabled = match v {
+                serde_yaml::Value::Bool(b) => Some(*b), // shorthand: `way: false` means disabled
                 serde_yaml::Value::Mapping(m) => m
                     .get(serde_yaml::Value::String("enabled".to_string()))
-                    .and_then(|v| v.as_bool())
-                    .map(|b| !b)
-                    .unwrap_or(false),
-                _ => false,
+                    .and_then(|v| v.as_bool()),
+                _ => None,
             };
-            if disabled && !self.disabled_ways.iter().any(|w| w == name) {
-                self.disabled_ways.push(name.to_string());
+            let list = match enabled {
+                Some(false) => &mut self.disabled_ways,
+                Some(true) => &mut self.enabled_ways,
+                None => continue,
+            };
+            if !list.iter().any(|w| w == name) {
+                list.push(name.to_string());
             }
         }
     }
+}
+
+/// Whether a set of project toggles switches `way_id` off. Each toggle is
+/// `(key, enabled)`, where the key is a way id or a `dir/*` prefix. The most
+/// specific toggle wins: a toggle on the way itself beats any prefix, and a
+/// longer prefix beats a shorter one; a prefix covers the way at its own path
+/// and every way under it. No matching toggle leaves the way on. The settings
+/// screens call this too, so what they show is what a session does.
+pub fn way_toggled_off<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> bool {
+    let mut best: Option<(usize, bool)> = None; // (specificity, disabled)
+    for (key, enabled) in toggles {
+        let rank = match key.strip_suffix("/*") {
+            None if key == way_id => usize::MAX,
+            None => continue,
+            Some(dir) if way_id == dir || (way_id.len() > dir.len() + 1 && way_id.starts_with(dir) && way_id.as_bytes()[dir.len()] == b'/') => dir.len(),
+            Some(_) => continue,
+        };
+        if best.is_none_or(|(r, _)| rank > r) {
+            best = Some((rank, !enabled));
+        }
+    }
+    best.is_some_and(|(_, disabled)| disabled)
 }
 
 fn home_dir() -> PathBuf {
@@ -652,6 +712,88 @@ mod tests {
         let mut cfg = Config::default();
         cfg.apply_yaml("ways:\n  itops/incident: false\n");
         assert!(cfg.disabled_ways.is_empty());
+    }
+
+    // ── ADR-701 §1: path-prefix toggles ────────────────────────────
+
+    fn project_cfg(yaml: &str) -> Config {
+        let mut cfg = Config::default();
+        cfg.apply_project_ways_overlay(yaml);
+        cfg
+    }
+
+    #[test]
+    fn event_retention_defaults_to_ninety_days_and_is_settable() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.event_retention_days, 90);
+        cfg.apply_yaml("event_retention_days: 30\n");
+        assert_eq!(cfg.event_retention_days, 30);
+        let mut bad = Config::default();
+        bad.apply_yaml("event_retention_days: 0\n");
+        assert_eq!(bad.event_retention_days, 90, "a value outside 1..3650 falls back");
+    }
+
+    #[test]
+    fn a_project_file_cannot_set_the_event_retention() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "event_retention_days: 1\n");
+        assert_eq!(cfg.event_retention_days, 90, "retention is machine-wide, user scope only");
+    }
+
+    #[test]
+    fn an_explicit_enable_on_the_prefix_dir_beats_the_prefix() {
+        let cfg = project_cfg("ways:\n  a/b/*: false\n  a/b: true\n");
+        assert!(!cfg.way_disabled("a/b"));
+        assert!(cfg.way_disabled("a/b/c"));
+    }
+
+    #[test]
+    fn prefix_toggle_disables_every_way_under_it() {
+        let cfg = project_cfg("ways:\n  softwaredev/code/supplychain/*: false\n");
+        assert!(cfg.way_disabled("softwaredev/code/supplychain/npm"));
+        assert!(cfg.way_disabled("softwaredev/code/supplychain/npm/lockfiles"));
+        assert!(!cfg.way_disabled("softwaredev/code/quality"), "a sibling stays on");
+        assert!(!cfg.way_disabled("softwaredev/code/supplychainx"), "the prefix ends at a path boundary");
+        assert!(cfg.way_disabled("softwaredev/code/supplychain"), "the prefix covers the way at its own path too");
+    }
+
+    #[test]
+    fn explicit_enable_overrides_a_disabled_prefix() {
+        let cfg = project_cfg(
+            "ways:\n  softwaredev/code/supplychain/*: false\n  softwaredev/code/supplychain/npm: true\n",
+        );
+        assert!(!cfg.way_disabled("softwaredev/code/supplychain/npm"));
+        assert!(cfg.way_disabled("softwaredev/code/supplychain/pip"));
+    }
+
+    #[test]
+    fn explicit_disable_overrides_an_enabled_prefix() {
+        let cfg = project_cfg(
+            "ways:\n  softwaredev/code/*: true\n  softwaredev/code/quality:\n    enabled: false\n",
+        );
+        assert!(cfg.way_disabled("softwaredev/code/quality"));
+        assert!(!cfg.way_disabled("softwaredev/code/testing"));
+    }
+
+    #[test]
+    fn the_longer_prefix_wins_between_prefixes() {
+        let cfg = project_cfg("ways:\n  a/*: false\n  a/b/*: true\n");
+        assert!(cfg.way_disabled("a/x"));
+        assert!(!cfg.way_disabled("a/b/c"));
+    }
+
+    #[test]
+    fn exact_toggle_still_works_without_prefixes() {
+        let cfg = project_cfg("ways:\n  itops/incident: false\n");
+        assert!(cfg.way_disabled("itops/incident"));
+        assert!(!cfg.way_disabled("itops/other"));
+    }
+
+    #[test]
+    fn user_scope_yaml_never_supplies_prefix_toggles() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("ways:\n  a/*: false\n");
+        assert!(!cfg.way_disabled("a/b"), "per-way toggles are project scope only (ADR-131)");
     }
 
     #[test]
