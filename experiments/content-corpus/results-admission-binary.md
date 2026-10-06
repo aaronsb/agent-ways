@@ -9,7 +9,7 @@ The corpus, way files, vocabulary, calibration and thresholds are as they are on
 - **Binary.** `tools/target/release/ways` built from this branch. The setting is `matching.admission`: `share` (the default, today's rule) or `chunk_top`. Both keep the peak co-gate at 0.50, take survivors by peak up to 6, and body-confirm them unchanged.
 - **Port.** `recall.py`'s `evaluate`. `share` is its shipped point (K 8, share 0.15, peak 0.50, cap 6, share / n_chunks). `chunk_top` is its `top1` pick (each chunk's top-ranked way, or peak ≥ 0.50, cap 6).
 - **Surfaces.** `recall.py`'s: 310 main surfaces of two or three golden prompts, one chunk per prompt (seed 11), and 93 auxiliary surfaces built around the 3 golden prompts that split into two chunks (seed 13). Golden files: `golden-synthetic.tsv` and `tests/routing-golden.tsv`, 332 rows.
-- **The binary's run.** `admission_binary.py` runs `ways author match --all --project EMPTY --json SURFACE` under a scratch HOME and XDG tree. Its corpus is `$OUT/alias.jsonl`, its ways are this checkout's `hooks/ways`, and its `config.yaml` sets `admission:`. There is no body sidecar, so confirmation is per call, as in the port. `--all` competes every way, as the port does. `--json` lists every candidate with the matcher's admitted and fired decision. The diagnostic now takes its admitted set from the same `admit` function as `late_interaction::run`, cap included.
+- **The binary's run.** `admission_binary.py` runs `ways author match --all --project EMPTY --json SURFACE` under a scratch HOME and XDG tree. Its corpus is `$OUT/alias.jsonl`, its ways are this checkout's `hooks/ways`, and its `config.yaml` sets `admission:`. There is no body sidecar, so confirmation is per call, as in the port. `--all` competes every way, as the port does. `--json` lists every candidate with the matcher's admitted, capped and fired decision. The diagnostic and `late_interaction::run` take their survivors from one function, `rank_and_admit` (mask, rank, admit, cap).
 - **Comparison.** Per surface, the admitted set and the fired set from the binary against the port's, and every body-confirm value the binary printed against the port's, within 0.001.
 - **Labels and metrics** as in `results-recall.md`: *relevant* is an expected way, *related* an ancestor or descendant of one, *irrelevant* anything else. Recall after confirm is what reaches the judge. Irrelevant fired per surface is what the judge has to reject.
 
@@ -24,15 +24,15 @@ The corpus, way files, vocabulary, calibration and thresholds are as they are on
 | Peak | max cosine over chunks, first chunk wins a tie | the same | yes |
 | Share | Σ softmax mass over each chunk's top 8 at τ 0.08, / n_chunks | the same (`chunks` mode) | yes |
 | Rule | `share ≥ 0.15` or `peak ≥ 0.50`; `chunk_top`: a chunk's first row, or `peak ≥ 0.50` | `share ≥ S` or `peak ≥ P`; `top1`: share 1.0 for any chunk's first row | yes |
-| Cap | sort by peak, keep 6 | the same | yes; ties in peak order by hash-map order in Rust and by insertion order in Python, never seen to matter |
+| Cap | sort by peak, keep 6 | the same | yes; Rust breaks peak ties by way id, Python by insertion order; no tie at the cap was seen |
 | Confirm | body sidecar when complete, else won chunk against `chunk_body` sentences, max | won chunk against `chunk_body` sentences, max, one batched call | yes: no sidecar in the scratch tree |
 | Diagnostic | before this branch: top 20 by share, admitted without the cap | — | the old text table hid one admit (below) |
 
-## Step 1: today's binary against the port
+## Today's binary against the port, before any change
 
 Before any Rust change, the `ways-graph` binary's text table (`--all`, top 20 by share) against the port at the shipped point: 402 of 403 surfaces had the same admitted and fired sets, and all 508 body-confirm values agreed within 0.001. The one difference was the table, not the matcher: on auxiliary surface 389, `softwaredev/code/supplychain/depscan` is admitted on its peak (0.533) with a share of 0.009 and ranks below 20th by share, so the table never lists it. `--json` lists every candidate. Recall matched `results-recall.md` exactly: 0.487 admitted, 0.403 after confirm, auxiliary 0.307 / 0.281.
 
-## Step 3: both modes through the binary
+## Both modes through the binary
 
 Binary against port, every surface:
 
@@ -85,7 +85,8 @@ Lost. chunk_top drops a way that passed the share gate without winning a chunk a
 ## Gates
 
 - **Routing golden** (`tests/test-routing-golden.sh`): 40/40 top-1, 3/3 `none` rows below 0.30, the same in both modes. The test scores single prompts with `way-embed match` and never runs late interaction, so admission cannot change it.
-- **Share-mode output.** The new binary's `author match` text against the `ways-graph` binary's on all 403 surfaces: identical on 398 with no key and on 398 with `admission: share`. Every difference was two rows with the same printed share in swapped order. The `ways-graph` binary run twice against itself differed on 6 surfaces in the same way: `aggregate` sorts by share and breaks ties in hash-map order, which changes on each run. The decisions were identical on every surface.
+- **Share-mode decisions.** The new binary's `author match` table against the `ways-graph` binary's on all 403 surfaces, with no key and with `admission: share`: the same rows, scores and outcomes on 403 of 403 each. The text differs only in the new footer and in the order of rows with equal shares.
+- **Deterministic order.** The `ways-graph` binary sorted equal shares in hash-map order, which changes from run to run: run twice, its table differed on 6 of 403 surfaces in one measurement and 2 of 403 in another. The new binary breaks share ties and peak ties by way id. Run twice, its text and `--json` output were identical on 403 of 403 in both modes, and two full runs of `admission_binary.py` produced identical output.
 
 ## Limits
 
@@ -93,6 +94,7 @@ Lost. chunk_top drops a way that passed the share gate without winning a chunk a
 - **Confirm per call only.** An install with a complete body sidecar confirms against section vectors (ADR-701 §7). `results-confirm.md` found it keeps and rejects at about the same rates at 0.35. It was not run in either mode here.
 - **No masking.** `--all` competes every way, as the port does. A live scan masks the lane's disabled, out-of-scope and `when:`-gated ways first, and chunk_top reads chunk winners after that masking.
 - **The judge was not run.** Irrelevant fired per surface is what it would see.
+- **The fire score is still the share.** A way that `chunk_top` admits on its chunk win alone fires with a share below 0.15. Such fires rank low in `order_hits` and are the first cut by the injection budget, and `ways tune stats` sees fire scores below 0.15 that share mode never produced. This is unchanged here and is to be weighed when the default is decided.
 - **Multi-chunk prompts rest on 3 golden prompts.**
 
 ## Conclusion

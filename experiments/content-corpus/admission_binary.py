@@ -51,7 +51,7 @@ import run  # noqa: E402
 
 O = run.OUT
 PY_POINT = {"share": R.SHIPPED, "chunk_top": R.PICKS["top1"]}
-TEXT_ROW = re.compile(r"^\s{2}(\S+)\s+([\d.]+)\s+([\d.]+)\s+(\S+)\s+(fired ✓|< gate|< confirm)\s")
+TEXT_ROW = re.compile(r"^\s{2}(\S+)\s+([\d.]+)\s+([\d.]+)\s+(\S+)\s+(fired ✓|< gate|< cap|< confirm)\s")
 
 
 # ── the binary's environment ─────────────────────────────────────────────────
@@ -106,7 +106,7 @@ def parse_text(out):
         if m:
             rows.append({"id": m.group(1), "peak": float(m.group(2)), "share": float(m.group(3)),
                          "confirm": None if m.group(4) == "—" else float(m.group(4)),
-                         "admitted": m.group(5) != "< gate", "fired": m.group(5) == "fired ✓"})
+                         "admitted": m.group(5) not in ("< gate", "< cap"), "fired": m.group(5) == "fired ✓"})
     return rows
 
 
