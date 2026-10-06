@@ -113,18 +113,18 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
 
 /// A warning per per-way toggle (ADR-131) in a project overlay that names
 /// no way the project, the user or the shipped corpus has: it switches
-/// nothing, so a way renamed since it was written runs again.
+/// nothing, so a way renamed since it was written runs again. Without the
+/// shipped ways nothing is judged and nothing is printed; `ways status`
+/// says so.
 fn unmatched_toggles(l: &Layer, fallback_project: &Path) -> Vec<String> {
-    use crate::cmd::toggle_check;
-    let (Some(path), true) = (&l.path, l.file == ways_core::settings::FILE && l.scope == LayerScope::Project) else {
+    use crate::cmd::toggle_check::{self, Check};
+    let Some(path) = &l.path else { return Vec::new() };
+    let keys = toggle_check::overlay_keys(l);
+    let Check::Checked(found) = toggle_check::check(&keys, &toggle_check::project_of(path, fallback_project)) else {
         return Vec::new();
     };
-    let Some(ways) = l.accepted.get("ways").and_then(Value::as_mapping) else {
-        return Vec::new();
-    };
-    let ids = toggle_check::known_ids(&toggle_check::project_of(path, fallback_project));
     let text = String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned();
-    toggle_check::unmatched(ways.keys().filter_map(Value::as_str), &ids)
+    found
         .into_iter()
         .map(|u| {
             let at = toggle_check::line_of(&text, &u.key).map(|n| format!(":{n}")).unwrap_or_default();

@@ -1001,20 +1001,59 @@ fn a_prefix_covering_no_way_is_a_lint_warning_and_one_covering_a_way_is_not() {
 fn status_lists_a_toggle_naming_no_way_apart_from_the_disabled_ways() {
     let f = Fx::new();
     renamed_corpus(&f);
-    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  data/schema-docs: false\n  local/mine: false\n  data/*: false\n");
+    f.write(&f.overlay(), "ways:\n  data/documentation: false\n  data/schema-docs: false\n  local/mine: false\n  data/*: false\n  bogus/thing:\n    threshold: 0.5\n");
     let (out, err, _) = f.run(&["status"]);
     let line = |p: &str| out.lines().find(|l| l.starts_with(p)).unwrap_or_else(|| panic!("no {p} line in\n{out}{err}")).to_string();
     assert_eq!(line("Disabled ways:"), "Disabled ways:    data/schema-docs, local/mine, data/* (project scope, ADR-131; `dir/*` covers every way under it)");
+    // An entry that sets no `enabled` is still a key status checks, as lint does.
     assert_eq!(
         line("Toggles naming no way:"),
-        "Toggles naming no way: data/documentation (nearest: data/schema-docs) (project <ROOT>/proj/.claude/ways.yaml); they switch nothing"
+        "Toggles naming no way: data/documentation, nearest data/schema-docs; bogus/thing in <ROOT>/proj/.claude/ways.yaml switch nothing"
     );
+    let (lint, _, _) = f.run(&["settings", "lint"]);
+    let warned: Vec<&str> = lint.lines().filter(|l| l.contains("warning: names no way")).collect();
+    assert_eq!(warned.len(), 2, "{lint}");
+    assert!(warned[0].contains("ways.data/documentation:") && warned[1].contains("ways.bogus/thing:"), "{lint}");
     let (out, _, _) = f.run(&["status", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["disabled_ways"], serde_json::json!(["data/schema-docs", "local/mine", "data/*"]));
+    assert_eq!(v["toggles_checked"], true);
     assert_eq!(v["unmatched_toggles"][0]["key"], "data/documentation");
     assert_eq!(v["unmatched_toggles"][0]["nearest"], "data/schema-docs");
-    assert_eq!(v["unmatched_toggles"].as_array().unwrap().len(), 1);
+    assert_eq!(v["unmatched_toggles"][1]["key"], "bogus/thing");
+    assert_eq!(v["unmatched_toggles"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn without_the_shipped_ways_no_toggle_is_judged() {
+    let f = Fx::new();
+    // A project way and a user way, and no shipped root.
+    way(&f, &f.root.join("proj/.claude/ways"), "local/mine");
+    way(&f, &f.root.join("xdg/config/agent-ways/ways"), "mine/own");
+    assert!(!f.root.join("home/.claude/hooks/ways").exists() && !f.root.join("xdg/data/agent-ways/hooks/ways").exists());
+    f.write(&f.overlay(), "ways:\n  data/schema-docs: false\n  local/mine: false\n  gone/way: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!((out.as_str(), code), ("", 0), "{err}");
+    let (out, _, _) = f.run(&["status"]);
+    assert!(out.contains("\nWay toggles: not checked, because the shipped ways were not found\n"), "{out}");
+    assert!(!out.contains("naming no way"), "{out}");
+    assert!(out.contains("Disabled ways:    data/schema-docs, local/mine, gone/way "), "{out}");
+    let (out, _, _) = f.run(&["status", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["toggles_checked"], false);
+    assert_eq!(v["unmatched_toggles"], serde_json::json!([]));
+}
+
+#[test]
+fn a_toggle_naming_a_way_in_a_disabled_domain_is_not_flagged() {
+    let f = Fx::new();
+    renamed_corpus(&f);
+    f.write(&f.user(), "disabled_domains: [data]\n");
+    f.write(&f.overlay(), "ways:\n  data/schema-docs: false\n  data/*: false\n");
+    let (out, err, code) = f.run(&["settings", "lint"]);
+    assert_eq!((out.as_str(), code), ("", 0), "{err}");
+    let (out, _, _) = f.run(&["status"]);
+    assert!(!out.contains("naming no way") && !out.contains("not checked"), "{out}");
 }
 
 #[test]

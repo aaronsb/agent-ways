@@ -6,8 +6,12 @@
 //! accepts any key, so `ways status` and `ways settings lint` report these.
 //!
 //! The way ids are read from the roots a scan reads (`paths::ways_roots`):
-//! the project's own ways, the user's, then the shipped ways.
+//! the project's own ways, the user's, then the shipped ways. Without the
+//! shipped ways every toggle naming one would look unmatched, so nothing is
+//! judged then.
 
+use agent_settings::load::Layer;
+use agent_settings::LayerScope;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -17,6 +21,40 @@ use std::path::{Path, PathBuf};
 pub struct Unmatched {
     pub key: String,
     pub nearest: Option<String>,
+}
+
+/// What a check of a set of toggle keys found.
+#[derive(Debug, PartialEq)]
+pub enum Check {
+    /// The keys were judged; these match no way.
+    Checked(Vec<Unmatched>),
+    /// The shipped ways were not found, so the keys were not judged.
+    NoShippedWays,
+}
+
+/// Judge `keys` against the ways a session in `project` can see. No keys
+/// is a clean check, without reading any way root.
+pub fn check(keys: &[String], project: &Path) -> Check {
+    if keys.is_empty() {
+        return Check::Checked(Vec::new());
+    }
+    if !ways_core::paths::shipped_ways_root().is_dir() {
+        return Check::NoShippedWays;
+    }
+    Check::Checked(unmatched(keys.iter().map(String::as_str), &known_ids(project)))
+}
+
+/// Every key of the `ways:` map in a project-scope ways overlay, whatever
+/// it sets; empty for any other layer.
+pub fn overlay_keys(l: &Layer) -> Vec<String> {
+    if !(l.file == ways_core::settings::FILE && l.scope == LayerScope::Project) {
+        return Vec::new();
+    }
+    l.accepted
+        .get("ways")
+        .and_then(serde_yaml::Value::as_mapping)
+        .map(|m| m.keys().filter_map(|k| k.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
 }
 
 /// Every way id a session in `project` can see, across the scan's roots.
@@ -156,6 +194,12 @@ mod tests {
     fn an_existing_way_or_a_covering_prefix_is_matched() {
         let ids = ids(&["data", "data/schema-docs", "softwaredev/code/quality"]);
         assert!(unmatched(["data/schema-docs", "data/*", "softwaredev/*", "softwaredev/code/*", "data"], &ids).is_empty());
+    }
+
+    #[test]
+    fn a_prefix_covers_the_way_at_its_own_directory() {
+        let ids = ids(&["workstation/shell/shell-prompt"]);
+        assert!(unmatched(["workstation/shell/shell-prompt/*"], &ids).is_empty());
     }
 
     #[test]

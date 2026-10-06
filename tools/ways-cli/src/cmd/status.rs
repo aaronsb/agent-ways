@@ -90,16 +90,25 @@ pub fn run(json_output: bool) -> Result<()> {
 
     // config::global() — future migration: ctx.config.disabled_domains
     let disabled = crate::config::global().disabled_domains.clone();
-    // ADR-131: project-scope per-way toggles. A toggle naming no way switches
-    // nothing, so it is listed apart from the toggles in effect.
+    // ADR-131: project-scope per-way toggles. Every key of the overlay's
+    // `ways:` map is checked, as `ways settings lint` checks it; one naming
+    // no way switches nothing, so it is listed apart from those in effect.
     let project = crate::util::project_dir();
     let project_file = ways_core::settings::project_file(Path::new(&project));
-    let config = crate::config::global();
-    let ids = crate::cmd::toggle_check::known_ids(Path::new(&project));
-    let unmatched = crate::cmd::toggle_check::unmatched(
-        config.disabled_ways().iter().chain(config.enabled_ways()).map(String::as_str),
-        &ids,
+    let overlay = agent_settings::load::Layer::read(
+        &ways_core::settings::SCHEMA,
+        "project",
+        ways_core::settings::FILE,
+        agent_settings::LayerScope::Project,
+        &project_file,
     );
+    let toggle_check = crate::cmd::toggle_check::check(&crate::cmd::toggle_check::overlay_keys(&overlay), Path::new(&project));
+    let toggles_checked = toggle_check != crate::cmd::toggle_check::Check::NoShippedWays;
+    let unmatched = match toggle_check {
+        crate::cmd::toggle_check::Check::Checked(u) => u,
+        crate::cmd::toggle_check::Check::NoShippedWays => Vec::new(),
+    };
+    let config = crate::config::global();
     let in_effect = |keys: &[String]| -> Vec<String> {
         keys.iter().filter(|k| !unmatched.iter().any(|u| &u.key == *k)).cloned().collect()
     };
@@ -152,6 +161,7 @@ pub fn run(json_output: bool) -> Result<()> {
             "disabled_domains": disabled,
             "disabled_ways": disabled_ways,
             "enabled_ways": enabled_ways,
+            "toggles_checked": toggles_checked,
             "unmatched_toggles": unmatched.iter().map(|u| json!({
                 "key": u.key,
                 "nearest": u.nearest,
@@ -278,15 +288,18 @@ pub fn run(json_output: bool) -> Result<()> {
                 println!("Enabled by name:  {} (overrides a disabled prefix, ADR-701)", on.join(", "));
             }
         }
+        if !toggles_checked {
+            println!("Way toggles: not checked, because the shipped ways were not found");
+        }
         if !unmatched.is_empty() {
             let keys: Vec<String> = unmatched
                 .iter()
                 .map(|u| match &u.nearest {
-                    Some(n) => format!("{} (nearest: {n})", u.key),
+                    Some(n) => format!("{}, nearest {n}", u.key),
                     None => u.key.clone(),
                 })
                 .collect();
-            println!("Toggles naming no way: {} (project {}); they switch nothing", keys.join(", "), project_file.display());
+            println!("Toggles naming no way: {} in {} switch nothing", keys.join("; "), project_file.display());
         }
         if !settings_findings.is_empty() {
             println!("Settings:  {} finding(s); `ways settings lint` lists them, `ways settings fix <section>` repairs one", settings_findings.len());
