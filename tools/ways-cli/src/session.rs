@@ -6,6 +6,7 @@
 //! This module owns all reads and writes to session state.
 
 use std::path::{Path, PathBuf};
+use ways_core::event_archive::EVENTS;
 
 mod engagement;
 
@@ -927,7 +928,7 @@ fn rotation_due_today(now: u64) -> bool {
 /// remove nothing from the log unless this returns `Ok`.
 fn archive_removed(path: &std::path::Path, now: u64, removed: &[u8]) -> std::io::Result<()> {
     match path.parent() {
-        Some(dir) => ways_core::event_archive::append(dir, now, removed),
+        Some(dir) => ways_core::event_archive::append(dir, EVENTS, now, removed),
         None => Ok(()),
     }
 }
@@ -961,7 +962,7 @@ fn rotate_if_due(path: &std::path::Path, now: u64, archive_days: u32) -> bool {
     // ahead must not delete archives. With no readable line there is no anchor
     // and nothing expires.
     if let Some(anchor) = std::fs::File::open(path).ok().and_then(|f| newest_ts(&f).ok().flatten()) {
-        ways_core::event_archive::expire(dir, anchor.min(now), archive_days);
+        ways_core::event_archive::expire(dir, EVENTS, anchor.min(now), archive_days);
     }
     rotate_log_by_age(path, now, LIVE_EVENT_DAYS).unwrap_or(false)
 }
@@ -1717,7 +1718,7 @@ mod archive_tests {
         let (dir, log) = state("rot");
         std::fs::write(&log, format!("{}{}{}", line("way_fired", 200, "old1"), line("way_fired", 150, "old2"), line("way_fired", 0, "now"))).unwrap();
         assert!(rotate_log_by_age(&log, NOW, 90).unwrap());
-        let archived = read_source(&archive_path(&dir, NOW)).unwrap();
+        let archived = read_source(&archive_path(&dir, EVENTS, NOW)).unwrap();
         assert_eq!(archived, format!("{}{}", line("way_fired", 200, "old1"), line("way_fired", 150, "old2")), "oldest first, byte for byte");
         assert_eq!(std::fs::read_to_string(&log).unwrap(), line("way_fired", 0, "now"));
     }
@@ -1727,7 +1728,7 @@ mod archive_tests {
         let (dir, log) = state("rot-fail");
         let body = format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"));
         std::fs::write(&log, &body).unwrap();
-        std::fs::create_dir(archive_path(&dir, NOW)).unwrap(); // the archive cannot be opened
+        std::fs::create_dir(archive_path(&dir, EVENTS, NOW)).unwrap(); // the archive cannot be opened
         assert!(rotate_log_by_age(&log, NOW, 90).is_err());
         assert_eq!(std::fs::read_to_string(&log).unwrap(), body, "the live file is untouched");
     }
@@ -1745,7 +1746,7 @@ mod archive_tests {
         std::fs::write(&log, &body).unwrap();
         compact_log_tail(&log, NOW, 1500, 0).unwrap();
         let live = std::fs::read_to_string(&log).unwrap();
-        let archived = read_source(&archive_path(&dir, NOW)).unwrap();
+        let archived = read_source(&archive_path(&dir, EVENTS, NOW)).unwrap();
         assert!(live.contains("judge") && !archived.contains("judge"), "judge_call stays in the live file");
         assert!(live.contains("n49") && !live.contains("n00"), "the live file keeps the tail");
         assert!(archived.starts_with(&line("way_fired", 5, "n00")), "the head went to the archive:\n{archived}");
@@ -1763,7 +1764,7 @@ mod archive_tests {
             body.push_str(&line("way_fired", 5, &format!("n{i:02}")));
         }
         std::fs::write(&log, &body).unwrap();
-        std::fs::create_dir(archive_path(&dir, NOW)).unwrap();
+        std::fs::create_dir(archive_path(&dir, EVENTS, NOW)).unwrap();
         assert!(compact_log_tail(&log, NOW, 1500, 0).is_err());
         assert_eq!(std::fs::read_to_string(&log).unwrap(), body, "nothing was removed");
     }
@@ -1772,23 +1773,23 @@ mod archive_tests {
     fn the_daily_pass_expires_archives_past_the_retention_and_never_the_live_log() {
         let (dir, log) = state("expire");
         std::fs::write(&log, line("way_fired", 0, "now")).unwrap();
-        ways_core::event_archive::append(&dir, NOW - 400 * DAY, b"ancient\n").unwrap();
-        ways_core::event_archive::append(&dir, NOW - 30 * DAY, b"recent\n").unwrap();
+        ways_core::event_archive::append(&dir, EVENTS, NOW - 400 * DAY, b"ancient\n").unwrap();
+        ways_core::event_archive::append(&dir, EVENTS, NOW - 30 * DAY, b"recent\n").unwrap();
         rotate_if_due(&log, NOW, 365);
-        assert_eq!(archives(&dir), [archive_path(&dir, NOW - 30 * DAY)]);
+        assert_eq!(archives(&dir, EVENTS), [archive_path(&dir, EVENTS, NOW - 30 * DAY)]);
         assert!(log.exists());
         // A one-day retention still leaves the live log alone.
         rotate_if_due(&log, NOW + DAY, 1);
-        assert!(archives(&dir).is_empty() && log.exists());
+        assert!(archives(&dir, EVENTS).is_empty() && log.exists());
     }
 
     #[test]
     fn a_clock_jump_does_not_expire_archives() {
         let (dir, log) = state("clock-jump");
         std::fs::write(&log, line("way_fired", 0, "now")).unwrap();
-        ways_core::event_archive::append(&dir, NOW - 30 * DAY, b"recent\n").unwrap();
+        ways_core::event_archive::append(&dir, EVENTS, NOW - 30 * DAY, b"recent\n").unwrap();
         rotate_if_due(&log, NOW + 400 * DAY, 365);
-        assert_eq!(archives(&dir), [archive_path(&dir, NOW - 30 * DAY)], "the cutoff follows the log, not a clock that ran ahead");
+        assert_eq!(archives(&dir, EVENTS), [archive_path(&dir, EVENTS, NOW - 30 * DAY)], "the cutoff follows the log, not a clock that ran ahead");
     }
 
     fn numbered(n: usize) -> String {
@@ -1813,7 +1814,7 @@ mod archive_tests {
         for r in runs {
             let _ = r.join().unwrap();
         }
-        let archived = read_source(&archive_path(&dir, NOW)).unwrap();
+        let archived = read_source(&archive_path(&dir, EVENTS, NOW)).unwrap();
         let live = std::fs::read_to_string(&log).unwrap();
         let rejoined: Vec<&str> = archived.lines().chain(live.lines()).collect();
         assert_eq!(rejoined, body.lines().collect::<Vec<_>>(), "each line is in exactly one place, once");
@@ -1837,10 +1838,10 @@ mod archive_tests {
         let (dir, log) = state("retry");
         let body = numbered(50);
         std::fs::write(&log, &body).unwrap();
-        std::fs::create_dir(archive_path(&dir, NOW)).unwrap();
+        std::fs::create_dir(archive_path(&dir, EVENTS, NOW)).unwrap();
         assert!(compact_log_tail(&log, NOW, 1500, 0).is_err());
         // Today's marker is down: the next attempt does not even try.
-        std::fs::remove_dir(archive_path(&dir, NOW)).unwrap();
+        std::fs::remove_dir(archive_path(&dir, EVENTS, NOW)).unwrap();
         assert!(compact_log_tail(&log, NOW, 1500, 0).is_ok());
         assert_eq!(std::fs::read_to_string(&log).unwrap(), body, "no attempt was made");
         // Tomorrow it is tried again, and succeeds.
@@ -1853,7 +1854,7 @@ mod archive_tests {
     fn past_the_ceiling_with_archiving_failing_the_cap_drops_the_head_and_says_so() {
         let (dir, log) = state("ceiling");
         std::fs::write(&log, numbered(50)).unwrap();
-        std::fs::create_dir(archive_path(&dir, NOW)).unwrap();
+        std::fs::create_dir(archive_path(&dir, EVENTS, NOW)).unwrap();
         compact_log_tail_with(&log, NOW, 1500, 0, 2000).unwrap();
         let live = std::fs::read_to_string(&log).unwrap();
         assert!(!live.contains("n0000") && live.contains("n0049"), "the head went");
@@ -1868,7 +1869,7 @@ mod archive_tests {
         let (dir, log) = state("under-ceiling");
         let body = numbered(50);
         std::fs::write(&log, &body).unwrap();
-        std::fs::create_dir(archive_path(&dir, NOW)).unwrap();
+        std::fs::create_dir(archive_path(&dir, EVENTS, NOW)).unwrap();
         assert!(compact_log_tail_with(&log, NOW, 1500, 0, 10_000_000).is_err());
         assert_eq!(std::fs::read_to_string(&log).unwrap(), body);
     }
@@ -1922,11 +1923,11 @@ mod archive_tests {
         let (dir, log) = state("ahead");
         std::fs::write(&log, line("way_fired", 0, "now")).unwrap();
         for age in [30u64, 20, 10, 5, 2] {
-            ways_core::event_archive::append(&dir, NOW - age * DAY, b"x\n").unwrap();
+            ways_core::event_archive::append(&dir, EVENTS, NOW - age * DAY, b"x\n").unwrap();
         }
         log_event_to(&log, NOW + 400 * DAY, Some(365), &[("event", "ahead")], &[]);
         // The rotation itself archives the real line the jump aged out; count the planted ones.
-        let planted = || archives(&dir).into_iter().filter(|a| *a < archive_path(&dir, NOW + DAY)).count();
+        let planted = || archives(&dir, EVENTS).into_iter().filter(|a| *a < archive_path(&dir, EVENTS, NOW + DAY)).count();
         assert_eq!(planted(), 5, "day one: the anchor is a real line");
         rotate_if_due(&log, NOW + 401 * DAY, 365);
         assert_eq!(planted(), 3, "day two: the oldest two at most");
