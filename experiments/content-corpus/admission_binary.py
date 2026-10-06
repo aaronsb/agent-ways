@@ -11,6 +11,31 @@ port. This script runs both on the same surfaces and compares them.
         --ways tools/target/release/ways [--mode share|chunk_top|both] [--text] \
         experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
 
+Smoke run: add `--quick`. The surfaces are built from the full golden set as
+usual, then cut to a fixed slice (every 8th main surface and every auxiliary
+one), so the quick surfaces are a strict subset of the full run's. The match,
+the port and the binary run only on the slice, so cost drops in proportion, and
+both the main and the multi-chunk surfaces are still compared. Use the full run
+for any number you mean to cite. Pass both golden files so the multi-chunk
+rows are present:
+
+    OUT=/tmp/adm-out experiments/content-corpus/admission_binary.py --quick \
+        --ways tools/target/release/ways \
+        experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
+
+The engine, `way-embed`, is resolved once, before anything runs, as the binary
+resolves it (ways-core paths::way_embed): $XDG_CACHE_HOME/agent-ways/user/way-embed
+(an empty or relative $XDG_CACHE_HOME counts as unset), else ~/.claude/bin/way-embed,
+each a file. `--way-embed PATH` overrides. That one path serves the binary run
+(linked into the scratch cache) and the port (confirm.EMBED), so both measure
+the same engine; it is printed as `way-embed: PATH` and written to
+admission-binary.json. If none exists the script exits 2 naming the paths tried.
+
+Exit 2 also when a result would be a zero that measured nothing: any surface
+with 2+ chunks (the only ones the binary returns rows for) comes back empty;
+no surface has a confirm score; or no confirm value was compared against the
+port. A recall table over such results would read as recall 0.000.
+
 Surfaces are recall.py's: confirm.py's 310 main surfaces (seed 11) and the 93
 auxiliary surfaces built around the multi-sentence golden prompts (seed 13).
 
@@ -50,13 +75,36 @@ import recall as R  # noqa: E402
 import run  # noqa: E402
 
 O = run.OUT
+QUICK_STEP = 8  # --quick keeps every 8th main surface
 PY_POINT = {"share": R.SHIPPED, "chunk_top": R.PICKS["top1"]}
 TEXT_ROW = re.compile(r"^\s{2}(\S+)\s+([\d.]+)\s+([\d.]+)\s+(\S+)\s+(fired ✓|< gate|< cap|< confirm)\s")
 
 
 # ── the binary's environment ─────────────────────────────────────────────────
 
-def binenv(mode, explicit):
+def die(msg):
+    print(f"admission_binary: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def find_way_embed(flag):
+    """The way-embed the binary would use (ways-core paths::way_embed): the
+    cache dir, then ~/.claude/bin, each a file. A flag overrides."""
+    xdg = Path(os.environ.get("XDG_CACHE_HOME", ""))
+    cache = (xdg if xdg.is_absolute() else Path.home() / ".cache") / "agent-ways" / "user"
+    if flag:  # an explicit choice is not silently replaced by a fallback
+        if not Path(flag).exists():
+            die(f"--way-embed {flag} does not exist")
+        return Path(flag).resolve()
+    tried = [cache / "way-embed", Path.home() / ".claude" / "bin" / "way-embed"]
+    for c in tried:
+        if c.is_file():
+            return c.resolve()
+    die("way-embed not found; tried " + ", ".join(str(c) for c in tried)
+        + ". Build it or pass --way-embed PATH; without it every surface returns no rows.")
+
+
+def binenv(mode, explicit, embed):
     """A scratch HOME/XDG tree whose corpus is $OUT/alias.jsonl. With
     `explicit` false and mode share, config.yaml names no admission key, as an
     older binary expects."""
@@ -66,12 +114,18 @@ def binenv(mode, explicit):
               root / "xdg" / "config" / "agent-ways", root / "xdg" / "state", root / "empty"):
         d.mkdir(parents=True, exist_ok=True)
     link = home / ".claude" / "hooks" / "ways"
-    if not link.is_symlink():
-        link.symlink_to(run.WAYS)
-    for name in ("minilm-l6-v2.gguf", "way-embed"):
+    if link.is_symlink() or link.exists():
+        link.unlink()  # OUT may be shared: never trust a link from another checkout
+    link.symlink_to(run.WAYS)
+    if not run.MODEL.exists():
+        die(f"model not found: {run.MODEL}")
+    for name, src in (("minilm-l6-v2.gguf", run.MODEL), ("way-embed", embed)):
         dst = cache / name
+        if dst.is_symlink() or dst.exists():
+            dst.unlink()  # a link left by an earlier run may dangle
+        dst.symlink_to(src)
         if not dst.exists():
-            dst.symlink_to(run.CACHE / name)
+            die(f"link target missing: {dst} -> {src}")
     shutil.copyfile(O / "alias.jsonl", cache / "ways-corpus-en.jsonl")
     for stale in ("embed-manifest.json", "ways-body-en.bin"):
         (cache / stale).unlink(missing_ok=True)  # no sidecar: confirm per call
@@ -159,6 +213,8 @@ def metrics(decisions, allsurf, which):
         irr_adm += sum(R.label(w, s["expected"]) == "irrelevant" for w in adm)
         irr_fired += sum(R.label(w, s["expected"]) == "irrelevant" for w in fired)
     n = len(sel)
+    if not exp:  # no surfaces, or none with an expected way: every ratio is n/a
+        return {"n": n, "exp": 0}
     return {"n": n, "exp": exp, "rec_adm": adm_rel / exp, "rec_fired": fired_rel / exp,
             "adm_per": n_adm / n, "fired_per": n_fired / n,
             "irr_adm_per": irr_adm / n, "irr_fired_per": irr_fired / n,
@@ -166,14 +222,39 @@ def metrics(decisions, allsurf, which):
 
 
 def show(name, m):
+    if not m["exp"]:
+        print(f"  {name:28} n {m['n']:3d}  n/a (0 expected)")
+        return
     print(f"  {name:28} n {m['n']:3d}  rec adm {m['rec_adm']:.3f}  rec fired {m['rec_fired']:.3f}"
           f" ({m['fired_rel']}/{m['exp']})  adm/s {m['adm_per']:.2f}  fired/s {m['fired_per']:.2f}"
           f"  irr adm/s {m['irr_adm_per']:.2f}  irr fired/s {m['irr_fired_per']:.2f}")
 
 
+def positive_control(mode, rows, allsurf):
+    """A zero must be a measurement. The binary returns rows only for surfaces
+    of 2+ chunks; every one of them must have rows, and at least one must carry
+    a confirm score (late interaction ran)."""
+    multi = [si for si, s in enumerate(allsurf) if len(s["chunks"]) >= 2]
+    if not multi:
+        die(f"mode {mode}: no surface has 2+ chunks; nothing to measure")
+    empty = [si for si in multi if not rows[si]]
+    if empty:
+        die(f"mode {mode}: the binary returned no rows on {len(empty)} of {len(multi)} "
+            f"surfaces with 2+ chunks (first: s{empty[0]}); is way-embed or the corpus "
+            "missing? refusing to report recall")
+    late = sum(any(x["confirm"] is not None for x in rows[si]) for si in multi)
+    if late == 0:
+        die(f"mode {mode}: late interaction ran on 0 of {len(multi)} surfaces with 2+ chunks "
+            "(no confirm score on any row); refusing to report recall")
+    print(f"  control: rows on {len(multi)}/{len(multi)} surfaces with 2+ chunks, "
+          f"confirm scored on {late}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ways", required=True)
+    ap.add_argument("--way-embed", help="way-embed to link into the scratch cache")
+    ap.add_argument("--quick", action="store_true", help="smoke run on a small fixed golden subset")
     ap.add_argument("--mode", default="both", choices=["share", "chunk_top", "both"])
     ap.add_argument("--text", action="store_true", help="parse the table, not --json")
     ap.add_argument("--explicit", action="store_true",
@@ -181,6 +262,10 @@ def main():
     ap.add_argument("golden", nargs="+")
     a = ap.parse_args()
     ways = str(Path(a.ways).resolve())
+    embed = find_way_embed(a.way_embed)
+    C.EMBED = run.EMBED = embed  # the port measures the engine the binary runs
+    print(f"way-embed: {embed}")
+    binenv(a.mode if a.mode != "both" else "share", a.explicit, embed)  # fail fast
 
     alias = [json.loads(l) for l in (O / "alias.jsonl").read_text().splitlines()]
     ids = [x["id"] for x in alias]
@@ -188,6 +273,9 @@ def main():
     import random
     surfaces = R.own_confirm_surfaces(golden, random.Random(R.SEED))
     aux, _, _ = R.multi_chunk_surfaces(golden, random.Random(R.SEED + 2))
+    n_full = len(surfaces) + len(aux)
+    if a.quick:
+        surfaces = surfaces[::QUICK_STEP]
     allsurf = surfaces + aux
     chunks, spans = [], []
     for s in allsurf:
@@ -196,7 +284,8 @@ def main():
     per = C.match_batch(chunks)
     for s, (lo, hi) in zip(allsurf, spans):
         s["rows"] = per[lo:hi]
-    print(f"{len(golden)} golden rows; {len(surfaces)} main surfaces, {len(aux)} auxiliary")
+    print(f"{len(golden)} golden rows; {len(surfaces)} main surfaces, {len(aux)} auxiliary"
+          + (f" (quick: {len(allsurf)} of {n_full} surfaces)" if a.quick else ""))
     bodies = {w: C.chunk_body(run.way_file(w).read_text()) for w in ids}
     py, conf = port(allsurf, bodies)
 
@@ -204,8 +293,9 @@ def main():
     binary = {}
     report = {}
     for mode in modes:
-        env, empty = binenv(mode, a.explicit)
+        env, empty = binenv(mode, a.explicit, embed)
         rows = run_binary(ways, allsurf, env, empty, a.text)
+        positive_control(mode, rows, allsurf)
         dec_b, dec_p, diffs, conf_bad, n_conf = [], [], [], [], 0
         for si, (s, rs) in enumerate(zip(allsurf, rows)):
             ranked, _, adm, _ = py[mode][si]
@@ -226,6 +316,9 @@ def main():
                     n_conf += 1
                     if abs(r["confirm"] - pc[r["id"]]) > 0.0011:
                         conf_bad.append((si, r["id"], r["confirm"], pc[r["id"]]))
+        if n_conf == 0:
+            die(f"mode {mode}: no confirm value was compared against the port; "
+                "refusing to report agreement")
         binary[mode] = dec_b
         print(f"\n── mode {mode}: binary vs port ──")
         print(f"  surfaces with identical admitted and fired sets: "
@@ -271,6 +364,7 @@ def main():
             if ex[2]:
                 show_ex(*ex)
         report["mode_diff"] = {"gained": dict(gained), "lost": dict(lost), "changed": len(examples)}
+    report["way_embed"] = str(embed)
     (O / "admission-binary.json").write_text(json.dumps(report, indent=1))
 
 

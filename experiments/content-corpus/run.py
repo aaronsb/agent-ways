@@ -23,7 +23,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 WAYS = REPO / "hooks" / "ways"
-CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "agent-ways" / "user"
+_XDG = Path(os.environ.get("XDG_CACHE_HOME", ""))  # empty or relative counts as unset
+CACHE = (_XDG if _XDG.is_absolute() else Path.home() / ".cache") / "agent-ways" / "user"
 EMBED = Path.home() / ".claude" / "bin" / "way-embed"
 MODEL = CACHE / "minilm-l6-v2.gguf"
 OUT = Path(os.environ.get("OUT", "/tmp/content-corpus-out"))
