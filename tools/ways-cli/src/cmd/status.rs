@@ -316,7 +316,7 @@ fn count_ways(dir: &Path) -> (usize, usize) {
 }
 
 /// ADR-701 §7: which state body confirmation runs in, and why it dropped.
-fn sidecar_line(state: &Result<(usize, usize), crate::cmd::scan::sidecar::Fallback>) -> String {
+pub(crate) fn sidecar_line(state: &Result<(usize, usize), crate::cmd::scan::sidecar::Fallback>) -> String {
     match state {
         Ok((ways, sections)) => format!("Body sidecar: in use ({ways} ways, {sections} sections)"),
         Err(why) => format!("Body sidecar: not used, confirmation embeds per call — {why}"),

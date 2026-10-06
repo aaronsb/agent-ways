@@ -62,7 +62,10 @@ pub fn run(
     vlog(&format!("engine dir:      {}", engine_dir.display()));
     vlog(&format!("output dir:      {}", out_dir.display()));
 
-    // Staleness check: skip regen if corpus is fresh
+    // Staleness check: skip regen if corpus is fresh. A fresh corpus whose
+    // sidecar was built by another engine (a reinstalled or upgraded
+    // way-embed, a new model or chunker) rebuilds the sidecar alone.
+    let mut sidecar_only = false;
     if if_stale {
         let manifest = out_dir.join("embed-manifest.json");
         let corpus = out_dir.join("ways-corpus.jsonl");
@@ -74,10 +77,15 @@ pub fn run(
             if !is_stale(&manifest, &global_dir, &project_dir)
                 && !retry_due(&manifest, &engine, agent_fmt::when::now_secs())
             {
-                vlog("corpus is fresh — nothing to do");
-                return Ok(());
+                if !bin.as_deref().is_some_and(|b| sidecar_engine_stale(&manifest, &engine_dir, b)) {
+                    vlog("corpus is fresh — nothing to do");
+                    return Ok(());
+                }
+                vlog("corpus is fresh, sidecar built by another engine — rebuilding the sidecar");
+                sidecar_only = true;
+            } else {
+                vlog("corpus is stale — rebuilding");
             }
-            vlog("corpus is stale — rebuilding");
         }
         // Missing manifest/corpus → always regen
     }
@@ -190,6 +198,21 @@ pub fn run(
 
     w.flush()?;
     drop(w);
+
+    if sidecar_only {
+        let manifest_path = out_dir.join("embed-manifest.json");
+        if let Some(bin) = crate::paths::way_embed_in(&engine_dir) {
+            let generate = |bin: &Path, corpus: &Path, model: &Path, what: &str| {
+                run_generate(bin, corpus, model, what, verbose, &vlog)
+            };
+            if refresh_stale_sidecar(&out_dir, &engine_dir, &bin, &sources, &generate, supports_vectors(&bin), &manifest_path)? {
+                let _ = std::fs::remove_file(tmpfile);
+                log(&format!("Body sidecar rebuilt for the current engine: {}", out_dir.join(crate::cmd::scan::sidecar::FILE).display()));
+                return Ok(());
+            }
+        }
+        vlog("the way files changed since the last build — full rebuild");
+    }
 
     // A failed pass never replaces an embedded corpus (#645).
     let bin = crate::paths::way_embed_in(&engine_dir);
@@ -353,9 +376,53 @@ fn refresh_body_sidecar(
             "ways": ways,
             "sections": sections,
             "vectors": true,
+            "model_id": crate::cmd::scan::sidecar::model_id(engine_dir, bin),
         }),
         Err(why) => json!({ "file": null, "reason": why }),
     }
+}
+
+/// True when the manifest records a built sidecar whose engine fingerprint
+/// (model, way-embed binary, chunker revision; `sidecar::model_id`) differs
+/// from the current one: a reinstalled or upgraded way-embed, a new model or
+/// a new chunker. Scans then confirm per call until the sidecar is rebuilt.
+fn sidecar_engine_stale(manifest: &Path, engine_dir: &Path, bin: &Path) -> bool {
+    let Some(m) = read_manifest(manifest) else { return false };
+    if !m.get("embedded").and_then(|v| v.as_bool()).unwrap_or(true) {
+        return false;
+    }
+    let side = m.get("body_sidecar");
+    if !side.and_then(|s| s.get("file")).is_some_and(|f| f.is_string()) {
+        return false;
+    }
+    let Some(now) = crate::cmd::scan::sidecar::model_id(engine_dir, bin) else { return false };
+    side.and_then(|s| s.get("model_id")).and_then(|v| v.as_str()) != Some(now.as_str())
+}
+
+/// Rebuild only the sidecar for a corpus that is otherwise current, and record
+/// it in the manifest. `Ok(false)`, touching nothing, when the ways no longer
+/// hash as the manifest records: the corpus itself needs a rebuild.
+fn refresh_stale_sidecar(
+    out_dir: &Path,
+    engine_dir: &Path,
+    bin: &Path,
+    sources: &HashMap<String, PathBuf>,
+    generate: &GeneratePass<'_>,
+    vectors: bool,
+    manifest_path: &Path,
+) -> Result<bool> {
+    let Some(mut m) = read_manifest(manifest_path) else { return Ok(false) };
+    if m.get("way_hashes") != Some(&way_hashes(sources)) {
+        return Ok(false);
+    }
+    let side = refresh_body_sidecar(out_dir, engine_dir, bin, sources, generate, vectors);
+    if let Some(why) = side.get("reason").and_then(|r| r.as_str()) {
+        eprintln!("warning: body sidecar not built: {why}; body confirmation embeds per call");
+    }
+    m["failed_at"] = if sidecar_failed(&side) { json!(agent_fmt::when::now_secs()) } else { serde_json::Value::Null };
+    m["body_sidecar"] = side;
+    std::fs::write(manifest_path, serde_json::to_string_pretty(&m)?)?;
+    Ok(true)
 }
 
 /// Why no sidecar is built for a way-embed older than 1.2.0.
@@ -1599,6 +1666,67 @@ mod tests {
         assert!(!old.exists(), "old sidecar left when way-embed lacks --vectors");
         assert_eq!(side, json!({ "file": null, "reason": NO_VECTORS, "unsupported": true }));
         assert!(!sidecar_failed(&side));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A reinstalled or upgraded way-embed invalidates the sidecar. The stale
+    /// check sees the engine fingerprint differ from the one recorded at build
+    /// and rebuilds only the sidecar, after which a scan uses it again.
+    #[test]
+    fn a_changed_way_embed_rebuilds_the_sidecar_on_the_stale_check() {
+        use crate::cmd::scan::sidecar;
+        let dir = scratch("sidecar-engine");
+        let engine = dir.join("engine");
+        std::fs::create_dir_all(&engine).unwrap();
+        std::fs::write(engine.join(crate::paths::EN_MODEL), "model").unwrap();
+        let bin = engine.join("way-embed");
+        std::fs::write(&bin, "binary").unwrap();
+        let day_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(86_400);
+        std::fs::File::options().append(true).open(&bin).unwrap().set_modified(day_ago).unwrap();
+        let way = dir.join("w.md");
+        std::fs::write(&way, "---\ndescription: d\nvocabulary: v\n---\n# T\n\nA section long enough to embed here.\n").unwrap();
+        let sources: HashMap<String, PathBuf> = [("w".to_string(), way)].into_iter().collect();
+        let calls = RefCell::new(0);
+        let generate = |_: &Path, corpus: &Path, _: &Path, _: &str| {
+            *calls.borrow_mut() += 1;
+            let rows: Vec<String> = read(corpus)
+                .lines()
+                .map(|l| {
+                    let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+                    v["embedding"] = json!([1.0, 0.0]);
+                    v.to_string()
+                })
+                .collect();
+            std::fs::write(corpus, rows.join("\n") + "\n").unwrap();
+            Ok(Instant::now())
+        };
+
+        // A recorded build: alias hashes and a sidecar at this engine.
+        let manifest = dir.join("embed-manifest.json");
+        let side = refresh_body_sidecar(&dir, &engine, &bin, &sources, &generate, true);
+        std::fs::write(&manifest, json!({ "embedded": true, "way_hashes": way_hashes(&sources), "body_sidecar": side }).to_string()).unwrap();
+        // The corpus dir is both the engine dir and the output dir in production.
+        let state = || sidecar::state(&dir, &bin, ["w"]).map(|s| (s.way_count(), s.vector_count()));
+        std::fs::copy(engine.join(crate::paths::EN_MODEL), dir.join(crate::paths::EN_MODEL)).unwrap();
+        let state_ok = |s: &Result<(usize, usize), sidecar::Fallback>| s.is_ok();
+        assert!(!sidecar_engine_stale(&manifest, &engine, &bin), "fresh build counted stale");
+        assert_eq!(*calls.borrow(), 1);
+
+        // way-embed reinstalled: same bytes, new mtime.
+        std::fs::File::options().append(true).open(&bin).unwrap().set_modified(std::time::SystemTime::now()).unwrap();
+        assert!(sidecar_engine_stale(&manifest, &engine, &bin), "changed engine not seen");
+
+        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, &generate, true, &manifest).unwrap());
+        assert_eq!(*calls.borrow(), 2, "sidecar not rebuilt");
+        assert!(!sidecar_engine_stale(&manifest, &engine, &bin));
+        let s = state();
+        assert!(state_ok(&s), "{s:?}");
+        assert_eq!(crate::cmd::status::sidecar_line(&s), "Body sidecar: in use (1 ways, 1 sections)");
+
+        // Ways changed under an unchanged mtime check: not a sidecar-only job.
+        std::fs::write(dir.join("w.md"), "---\ndescription: d\nvocabulary: v\n---\n# T\n\nEdited text of the way body here.\n").unwrap();
+        std::fs::File::options().append(true).open(&bin).unwrap().set_modified(day_ago).unwrap();
+        assert!(!refresh_stale_sidecar(&dir, &engine, &bin, &sources, &generate, true, &manifest).unwrap(), "rebuilt a sidecar for a stale corpus");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
