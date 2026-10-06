@@ -4,6 +4,8 @@
 
 mod helpers;
 mod metrics;
+mod pull;
+pub use pull::pull;
 
 use anyhow::Result;
 use serde_json::json;
@@ -332,6 +334,13 @@ struct Fireable {
 /// Resolves a way for firing: the disable switches, its file, its scope and
 /// its refire curve. `None` when it is disabled, missing or out of scope.
 fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
+    fireable_in_scope(id, session_id, true)
+}
+
+/// [`fireable`], with the way's `scope:` check optional. A pull (ADR-701 §5)
+/// skips it: the agent named the way, so the scope that decides what injection
+/// may deliver does not decide what it may read. The disable switches still apply.
+fn fireable_in_scope(id: &str, session_id: &str, enforce_scope: bool) -> Result<Option<Fireable>> {
     let project_dir = crate::util::project_dir();
 
     // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
@@ -349,7 +358,7 @@ fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
     // Read frontmatter for scope field
     let content = std::fs::read_to_string(&way_file)?;
     let scope_field = crate::frontmatter::field_in(&content, "scope").unwrap_or_default();
-    if !session::scope_matches(&scope_field, &scope) {
+    if enforce_scope && !session::scope_matches(&scope_field, &scope) {
         return Ok(None);
     }
 
@@ -481,9 +490,19 @@ fn record_injected(id: &str, session_id: &str, way_file: &Path, project_dir: &st
     let lock = session::lock_engagement(id, session_id);
     session::record_way_fire(id, session_id, &curve, tick);
     drop(lock);
+    stamp_disclosure(id, session_id, tick);
+}
+
+/// Stamp that a way was disclosed to the session at `tick`: its marker, token
+/// position and epoch. Returns the epoch stamped. Injection and a pull
+/// (ADR-701 §5) both end here, so a pulled way reads as shown to every reader
+/// of these stamps.
+fn stamp_disclosure(id: &str, session_id: &str, tick: u64) -> u64 {
     session::stamp_way_marker(id, session_id, tick);
     session::stamp_way_tokens(id, session_id, tick);
-    session::stamp_way_epoch(id, session_id, session::get_epoch(session_id));
+    let epoch = session::get_epoch(session_id);
+    session::stamp_way_epoch(id, session_id, epoch);
+    epoch
 }
 
 /// Whether [`way_scored`] would show this way now, budget aside: not disabled,
@@ -584,12 +603,7 @@ pub fn way_scored(
     drop(lock);
     let is_redisclosure = decision.outcome.is_redisclosure();
 
-    // Stamp markers
-    session::stamp_way_marker(id, session_id, token_pos);
-    session::stamp_way_tokens(id, session_id, token_pos);
-
-    let epoch = session::get_epoch(session_id);
-    session::stamp_way_epoch(id, session_id, epoch);
+    let epoch = stamp_disclosure(id, session_id, token_pos);
 
     // Tree disclosure tracking
     let (tree_depth, parent_id, parent_epoch, epoch_from_parent) =

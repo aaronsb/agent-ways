@@ -231,6 +231,16 @@ enum Commands {
         #[command(subcommand)]
         mode: ScanCommand,
     },
+    /// Look ways up on request, as one JSON object: the machine interface the
+    /// MCP tools `ways_search`, `ways_read` and `ways_neighbors` call (ADR-701 §5)
+    #[command(hide = true)]
+    Lookup {
+        /// Project directory (default: CLAUDE_PROJECT_DIR, else the working directory)
+        #[arg(long, global = true)]
+        project: Option<PathBuf>,
+        #[command(subcommand)]
+        what: LookupCommand,
+    },
     /// Print the projection manifest — the desired state of ~/.claude derived
     /// from `git ls-files` over the projection allowlist (ADR-144). The
     /// reconciler converges ~/.claude toward this.
@@ -635,6 +645,35 @@ enum TuneCommand {
         /// Machine-readable JSON output
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum LookupCommand {
+    /// Candidates for a query on the prompt lane, with route, cosine, share and margin
+    Search {
+        query: String,
+        /// The session, for its scope
+        #[arg(long)]
+        session: Option<String>,
+        /// How many candidates to return
+        #[arg(long, default_value = "5")]
+        top: usize,
+    },
+    /// A way's body as injection delivers it, stamping disclosure for the session
+    Read {
+        /// Way id (e.g. "softwaredev/code/quality")
+        id: String,
+        /// The session to stamp; without one the body is served unstamped
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// A way's parent, children, See Also edges and nearest semantic neighbours
+    Neighbors {
+        id: String,
+        /// How many semantic neighbours to return
+        #[arg(long, default_value = "5")]
+        top: usize,
     },
 }
 
@@ -1068,6 +1107,18 @@ fn run() -> Result<()> {
             cmd::reconcile::run(source, dest, mode, dry_run, quiet, force)
         }
         Commands::Status { json } => cmd::status::run(json),
+        Commands::Lookup { project, what } => {
+            // Every reader below resolves the project as a hook would, from the
+            // environment, before the config is first read.
+            if let Some(p) = project {
+                std::env::set_var("CLAUDE_PROJECT_DIR", p);
+            }
+            cmd::lookup::emit(match what {
+                LookupCommand::Search { query, session, top } => cmd::lookup::search_json(&query, session.as_deref(), top),
+                LookupCommand::Read { id, session } => cmd::lookup::read_json(&id, session.as_deref()),
+                LookupCommand::Neighbors { id, top } => cmd::lookup::neighbors_json(&id, top),
+            })
+        }
         Commands::Scan { mode } => match mode {
             // ADR-184 item 6: a project (or user config) with `enabled: false`
             // injects nothing. Checked before any lane runs.

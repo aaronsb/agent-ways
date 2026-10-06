@@ -7,6 +7,7 @@ pub(crate) mod candidates;
 mod candidate_log;
 mod gate;
 mod late_interaction;
+pub(crate) mod lookup;
 mod lookbehind;
 mod order;
 mod reduce;
