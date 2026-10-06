@@ -160,7 +160,7 @@ A pull always returns the way, including inside its re-disclosure suppression wi
 | Sidecar missing or incomplete | keyword lane and alias matcher | embedded per call | judge if reachable |
 | No embedder | keyword lane only | none | none |
 
-The sidecar is used only when its manifest covers every enabled way at the alias corpus's content hashes; otherwise the scan uses alias scores alone. Fused and alias-only scores are never mixed in one ranking. Each scan logs which state it ran in, and `ways status` reports the current state and the reason for any drop. The daemon's search service (ADR-502 §2, #668) holds the same files when it lands; until then the hook loads them.
+The sidecar is used only when its manifest covers every enabled way the alias corpus holds, at the alias corpus's content hashes, and the installed embedder can return chunk vectors (a way absent from the alias corpus cannot win a chunk, so it never needs confirming); otherwise the scan uses alias scores alone. Fused and alias-only scores are never mixed in one ranking. Each scan logs which state it ran in, and `ways status` reports the current state and the reason for any drop. The daemon's search service (ADR-502 §2, #668) holds the same files when it lands; until then the hook loads them.
 
 ### 8. Run logs as the learning corpus
 
