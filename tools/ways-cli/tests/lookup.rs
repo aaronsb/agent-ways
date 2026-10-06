@@ -139,6 +139,11 @@ fn guide_env(name: &str) -> Env {
 impl Env {
     /// `ways hook pull`, as the PostToolUse hook on `ways_read` runs it.
     fn hook_pull(&self, id: &str, agent: Option<&str>, transcript: Option<&std::path::Path>) -> std::process::Output {
+        self.hook_pull_with(id, agent, transcript, None)
+    }
+
+    /// [`Env::hook_pull`] with the `tool_response` the payload carries.
+    fn hook_pull_with(&self, id: &str, agent: Option<&str>, transcript: Option<&std::path::Path>, response: Option<Value>) -> std::process::Output {
         use std::io::Write;
         let mut payload = serde_json::json!({
             "session_id": self.session,
@@ -147,6 +152,9 @@ impl Env {
             "tool_input": { "id": id },
             "cwd": self.project,
         });
+        if let Some(r) = response {
+            payload["tool_response"] = r;
+        }
         if let Some(a) = agent {
             payload["agent_id"] = a.into();
         }
@@ -232,6 +240,9 @@ fn a_pull_inside_the_refire_window_is_out_of_band_and_restarts_the_window() {
     assert_eq!(pulls.len(), 1);
     assert_eq!((pulls[0]["window"].as_str(), &pulls[0]["out_of_band"]), (Some("suppressed"), &Value::Bool(true)));
     assert!(pulls[0]["epoch_distance"].is_number(), "{}", pulls[0]);
+    assert_eq!(pulls[0]["token_position"], "30000", "the pull is stamped at the tick it happened at");
+    let stamp_tick = std::fs::read_to_string(env.marker("lookupdomain/guide")).unwrap();
+    assert!(stamp_tick.starts_with("30000\t"), "the marker carries the tick: {stamp_tick:?}");
     at(40_000);
     assert!(!scan(&env).contains("# Marker guide"), "T2+10k is inside the window the pull restarted (T1+20k would have refired)");
     at(50_000);
@@ -252,7 +263,41 @@ fn a_disabled_way_is_refused_with_or_without_a_session_and_the_toggle_is_named()
     }
     assert!(env.hook_pull("lookupdomain/guide", None, None).status.success());
     assert!(!env.marker("lookupdomain/guide").exists(), "a disabled way is not stamped either");
-    assert!(env.events("way_pulled").is_empty());
+    let pulls = env.events("way_pulled");
+    assert_eq!(pulls.len(), 1, "the refusal is logged");
+    assert_eq!((pulls[0]["reason"].as_str(), &pulls[0]["stamped"], pulls[0]["window"].as_str()), (Some("disabled"), &Value::Bool(false), Some("none")));
+}
+
+#[test]
+fn a_failed_read_is_not_stamped_and_is_logged_as_refused() {
+    let env = guide_env("failed");
+    for response in [serde_json::json!({ "isError": true, "content": [] }), serde_json::json!({ "error": "timed out" }), serde_json::json!({ "structuredContent": { "error": "x" } })] {
+        assert!(env.hook_pull_with("lookupdomain/guide", None, None, Some(response)).status.success());
+    }
+    assert!(!env.marker("lookupdomain/guide").exists(), "a read that failed disclosed nothing");
+    assert!(env.scan_command("git commit -m x").contains("# Marker guide"), "injection is not held back by a failed read");
+    let pulls = env.events("way_pulled");
+    assert_eq!(pulls.len(), 3);
+    for p in &pulls {
+        assert_eq!((p["reason"].as_str(), &p["stamped"], p["window"].as_str()), (Some("read failed"), &Value::Bool(false), Some("none")));
+    }
+    // A successful response stamps.
+    env.hook_pull_with("lookupdomain/guide", None, None, Some(serde_json::json!({ "isError": false, "content": [] })));
+    assert!(env.marker("lookupdomain/guide").exists());
+}
+
+#[test]
+fn a_refused_pull_is_logged_with_a_reason_and_the_model_supplied_id_is_cut_short() {
+    let env = guide_env("refused");
+    let long = format!("../{}", "a".repeat(500));
+    env.hook_pull(&long, None, None);
+    env.hook_pull("lookupdomain/nothing", None, None);
+    let pulls = env.events("way_pulled");
+    assert_eq!(pulls.len(), 2);
+    assert_eq!(pulls[0]["reason"], "invalid id");
+    assert!(pulls[0]["way"].as_str().unwrap().chars().count() <= 64, "{}", pulls[0]["way"]);
+    assert_eq!(pulls[1]["reason"], "not found");
+    assert!(pulls.iter().all(|p| p["stamped"] == false && p["window"] == "none"));
 }
 
 #[test]
@@ -283,7 +328,8 @@ fn an_id_that_leaves_the_ways_roots_is_refused_by_every_verb() {
     let escaped = format!("{}/{}/ways", sessions_root(), env.session);
     let stamped: Vec<_> = std::fs::read_dir(&escaped).map(|d| d.flatten().map(|e| e.file_name()).collect()).unwrap_or_default();
     assert!(stamped.is_empty(), "nothing was stamped for a refused id: {stamped:?}");
-    assert!(env.events("way_pulled").is_empty());
+    assert!(env.events("way_pulled").iter().all(|p| p["stamped"] == false), "every pull of these ids was refused");
+    assert!(env.events("way_pulled").iter().any(|p| p["reason"] == "outside roots"), "the link is named as such");
     assert!(env.read("lookupdomain/guide").1 == 0, "a plain id still reads");
 }
 

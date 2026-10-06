@@ -84,12 +84,19 @@ pub fn run(event: HookEvent) -> Result<()> {
             emit(&hook_event, &post_tool::scan(&raw, &session, &project_dir));
             Ok(())
         }
-        Request::Pull { session, id } => {
+        Request::Pull { session, id, failed } => {
             // The calling agent is the payload's `agent_id`, set in the
             // environment above, so the stamp lands on it and not on main.
             crate::cmd::show::set_firing_transcript(transcript);
-            // A refused id stamps nothing; the hook prints nothing either way.
-            let _ = crate::cmd::show::pull::stamp(&id, &session);
+            use crate::cmd::show::pull;
+            // A read that failed disclosed nothing, so it must not hold back
+            // injection. A refused id stamps nothing. Either is logged, and the
+            // hook prints nothing.
+            if failed {
+                pull::log_refused(&id, &session, "read failed");
+            } else if let Err(e) = pull::stamp(&id, &session) {
+                pull::log_refused(&id, &session, pull::reason_of(&e));
+            }
             Ok(())
         }
         Request::Queued { session, transcript } => {

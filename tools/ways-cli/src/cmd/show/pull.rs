@@ -13,7 +13,7 @@
 //! id is validated and its file confined to the ways roots before anything is
 //! read or written.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -30,6 +30,54 @@ pub struct Read {
     pub note: Option<String>,
 }
 
+/// A pull refused before it touched anything. `reason` is a short fixed phrase
+/// the event log can carry; `message` is for the caller and may quote the id.
+#[derive(Debug)]
+pub(crate) struct Refused {
+    pub reason: &'static str,
+    message: String,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+fn refuse(reason: &'static str, message: String) -> anyhow::Error {
+    Refused { reason, message }.into()
+}
+
+/// The reason a pull error carries, `error` for anything unplanned.
+pub(crate) fn reason_of(e: &anyhow::Error) -> &'static str {
+    e.downcast_ref::<Refused>().map_or("error", |r| r.reason)
+}
+
+/// Longest id written to the event log. The id comes from the model.
+const LOGGED_ID_CHARS: usize = 64;
+
+/// Log a pull the hook declined to stamp, with the reason.
+pub fn log_refused(id: &str, session_id: &str, reason: &str) {
+    let shown: String = id.chars().take(LOGGED_ID_CHARS).collect();
+    let project_dir = crate::util::project_dir();
+    let scope = session::detect_scope(session_id);
+    log_pulled(&Pulled {
+        id: &shown,
+        domain: "",
+        session_id,
+        project_dir: &project_dir,
+        scope: &scope,
+        tick: None,
+        window: "none",
+        out_of_band: false,
+        epoch_distance: None,
+        stamped: false,
+        reason: Some(reason),
+    });
+}
+
 /// An id is a way path: `/`-separated parts of `[A-Za-z0-9._-]`, none empty,
 /// `.` or `..`. That rules out absolute paths, `\`, and any climb out of a root.
 pub(crate) fn check_id(id: &str) -> Result<()> {
@@ -39,7 +87,7 @@ pub(crate) fn check_id(id: &str) -> Result<()> {
     if id.split('/').all(plain) {
         Ok(())
     } else {
-        bail!("`{id}` is not a way id: expected `/`-separated parts of letters, digits, `.`, `_` and `-`")
+        Err(refuse("invalid id", format!("`{id}` is not a way id: expected `/`-separated parts of letters, digits, `.`, `_` and `-`")))
     }
 }
 
@@ -48,13 +96,13 @@ pub(crate) fn check_id(id: &str) -> Result<()> {
 fn resolve(id: &str, project_dir: &str) -> Result<(PathBuf, bool)> {
     check_id(id)?;
     if let Some(why) = disabled_reason(id) {
-        bail!("way {id} is disabled: {why}");
+        return Err(refuse("disabled", format!("way {id} is disabled: {why}")));
     }
     let Some((file, local)) = session::resolve_way_file(id, project_dir) else {
-        bail!("no way named {id} in the project, user or core roots");
+        return Err(refuse("not found", format!("no way named {id} in the project, user or core roots")));
     };
     if !inside_a_root(&file, project_dir) {
-        bail!("way {id} resolves outside the ways roots");
+        return Err(refuse("outside roots", format!("way {id} resolves outside the ways roots")));
     }
     Ok((file, local))
 }
@@ -95,7 +143,7 @@ pub fn stamp(id: &str, session_id: &str) -> Result<()> {
     let Ok(Some(fireable)) = fireable_in_scope(id, session_id, false) else {
         // A way with no resolvable `refire:` is never injected, so there is no
         // repeat to prevent. The pull is still logged.
-        log_pulled(&Pulled { id, domain: &domain, session_id, project_dir: &project_dir, scope: &scope, tick: None, window: "none", out_of_band: false, epoch_distance: None, stamped: false });
+        log_pulled(&Pulled { id, domain: &domain, session_id, project_dir: &project_dir, scope: &scope, tick: None, window: "none", out_of_band: false, epoch_distance: None, stamped: false, reason: Some("no refire curve") });
         return Ok(());
     };
 
@@ -125,6 +173,7 @@ pub fn stamp(id: &str, session_id: &str) -> Result<()> {
         out_of_band,
         epoch_distance,
         stamped: true,
+        reason: None,
     });
     Ok(())
 }
@@ -153,6 +202,8 @@ struct Pulled<'a> {
     out_of_band: bool,
     epoch_distance: Option<u64>,
     stamped: bool,
+    /// Why nothing was stamped, when nothing was.
+    reason: Option<&'a str>,
 }
 
 fn log_pulled(p: &Pulled) {
@@ -170,6 +221,9 @@ fn log_pulled(p: &Pulled) {
     ];
     if let Some(t) = tick.as_deref() {
         fields.push(("token_position", t));
+    }
+    if let Some(r) = p.reason {
+        fields.push(("reason", r));
     }
     let mut extra = vec![("out_of_band", json!(p.out_of_band)), ("stamped", json!(p.stamped))];
     if let Some(d) = p.epoch_distance {

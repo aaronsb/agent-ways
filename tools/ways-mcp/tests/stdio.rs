@@ -82,6 +82,37 @@ esac
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The installed layout: `bin/ways-mcp` is a link to a binary elsewhere, and
+/// `bin/ways` sits beside the link. The server finds `ways` from the path it was
+/// launched by; resolving the link would look beside the target, where the
+/// build's own real `ways` may sit and answer differently.
+#[cfg(unix)]
+#[test]
+fn ways_is_found_beside_the_launch_link_with_no_override() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("ways-mcp-launch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_ways-mcp"), bin.join("ways-mcp")).unwrap();
+    let stub = bin.join("ways");
+    std::fs::write(&stub, "#!/bin/sh\nprintf '{\"contract\":1,\"lane\":\"en\",\"candidates\":[{\"way\":\"beside/the/link\"}]}\\n'\n").unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut child = Command::new(bin.join("ways-mcp"))
+        .env_remove("WAYS_BIN")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn ways-mcp through its link");
+    let call = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ways_search","arguments":{"query":"x"}}}"#;
+    child.stdin.take().unwrap().write_all(format!("{call}\n").as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    let reply: Value = serde_json::from_str(String::from_utf8(out.stdout).unwrap().lines().next().unwrap()).unwrap();
+    assert_eq!(reply["result"]["structuredContent"]["candidates"][0]["way"], "beside/the/link", "{reply}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A `ways` that never answers must not hold the server past the deadline: the
 /// tool call returns an error and a ping sent behind it is answered.
 #[cfg(unix)]

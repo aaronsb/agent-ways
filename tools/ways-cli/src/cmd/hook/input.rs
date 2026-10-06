@@ -56,7 +56,7 @@ pub enum Request {
     File { session: String, path: String },
     Task { session: String, query: String, team: Option<String>, subagent_type: Option<String> },
     PostTool { session: String, hook_event: String },
-    Pull { session: String, id: String },
+    Pull { session: String, id: String, failed: bool },
     Queued { session: String, transcript: String },
     Stop { session: String, transcript: String },
     SubagentStart { session: String },
@@ -78,6 +78,13 @@ impl HookInput {
     /// A non-empty string at a JSON pointer.
     fn text(&self, pointer: &str) -> Option<String> {
         self.v.pointer(pointer).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string)
+    }
+
+    /// Whether the tool's own response reports a failure: `isError: true`, or
+    /// an `error` key at the top or in its structured content.
+    fn tool_failed(&self) -> bool {
+        self.flag("/tool_response/isError")
+            || ["/tool_response/error", "/tool_response/structuredContent/error"].iter().any(|p| self.v.pointer(p).is_some())
     }
 
     fn flag(&self, pointer: &str) -> bool {
@@ -137,7 +144,7 @@ impl HookInput {
                 hook_event: self.text("/hook_event_name").unwrap_or_else(|| "PostToolUse".into()),
             },
             HookEvent::Pull => match self.text("/tool_input/id") {
-                Some(id) => Request::Pull { session, id },
+                Some(id) => Request::Pull { session, id, failed: self.tool_failed() },
                 None => Request::Skip,
             },
             HookEvent::Queued => match self.text("/transcript_path") {
@@ -264,8 +271,12 @@ mod tests {
     #[test]
     fn pull_needs_the_way_id_the_tool_was_given() {
         let raw = r#"{"session_id":"s","tool_input":{"id":"d/w"}}"#;
-        assert_eq!(req(E::Pull, raw), Request::Pull { session: "s".into(), id: "d/w".into() });
+        assert_eq!(req(E::Pull, raw), Request::Pull { session: "s".into(), id: "d/w".into(), failed: false });
         assert_eq!(req(E::Pull, r#"{"session_id":"s","tool_input":{}}"#), Request::Skip);
+        for failed in [r#"{"isError":true}"#, r#"{"error":"x"}"#, r#"{"structuredContent":{"error":"x"}}"#] {
+            let raw = format!(r#"{{"session_id":"s","tool_input":{{"id":"d/w"}},"tool_response":{failed}}}"#);
+            assert_eq!(req(E::Pull, &raw), Request::Pull { session: "s".into(), id: "d/w".into(), failed: true }, "{failed}");
+        }
     }
 
     #[test]
