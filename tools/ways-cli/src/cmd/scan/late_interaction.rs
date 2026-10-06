@@ -140,7 +140,7 @@ pub(crate) fn run_diagnostic(
     if chunks.len() < 2 {
         return None;
     }
-    let per_chunk = batch_match(&bin, &corpus, &model, &chunks)?;
+    let per_chunk = mask_to_enabled(batch_match(&bin, &corpus, &model, &chunks)?, bodies);
     let ranked = aggregate(&per_chunk, chunks.len());
 
     let mut rows = Vec::new();
@@ -186,7 +186,7 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
     }
 
     // Stage 2 (match): one batched pass, all chunks against the corpus.
-    let per_chunk = batch_match(&bin, &corpus, &model, &chunks)?;
+    let per_chunk = mask_to_enabled(batch_match(&bin, &corpus, &model, &chunks)?, bodies);
     if dbg { eprintln!("LI: per_chunk rows: {:?}", per_chunk.iter().map(|c| c.len()).collect::<Vec<_>>()); }
 
     // Stages 3+4: peak rank + per-chunk softmax-share, sorted by share desc.
@@ -291,6 +291,25 @@ fn batch_match(
         }
     }
     Some(per_chunk)
+}
+
+/// ADR-701 §1: keep only rows for ways in the enabled set before any
+/// competition. The corpus embeds every way, disabled or not, so a disabled way
+/// that wins a chunk would otherwise take softmax mass and a top-K or survivor
+/// slot from an enabled way, then be dropped later for want of a body path.
+/// `enabled` is the scan's candidate map (`body_map`): candidates are already
+/// filtered by the user-scope domain list, the project toggles and ADR-143
+/// shadowing, so its keys are exactly the corpus ids allowed to compete. Each
+/// chunk stays sorted by cosine descending, so the top-K window refills from
+/// enabled ways.
+fn mask_to_enabled(
+    mut per_chunk: Vec<Vec<(String, f64)>>,
+    enabled: &HashMap<String, PathBuf>,
+) -> Vec<Vec<(String, f64)>> {
+    for chunk in &mut per_chunk {
+        chunk.retain(|(id, _)| enabled.contains_key(id));
+    }
+    per_chunk
 }
 
 /// Stages 3+4: fold per-chunk scores into `(id, peak, share)` sorted by share.
@@ -477,6 +496,61 @@ mod tests {
         let body = "---\nvocabulary: leaked yaml words that are long enough\nmore leaked yaml text here.\n";
         let chunks = chunk_body(body);
         assert!(chunks.iter().all(|c| !c.contains("leaked")), "{chunks:?}");
+    }
+
+    fn bodies_of(ids: &[&str]) -> HashMap<String, PathBuf> {
+        ids.iter().map(|i| (i.to_string(), PathBuf::from(format!("/{i}.md")))).collect()
+    }
+
+    /// ADR-701 §1: a disabled way that wins a chunk must not take softmax mass
+    /// or a survivor slot. With it masked, every enabled way scores exactly as
+    /// if the disabled way were absent from the corpus.
+    #[test]
+    fn masking_leaves_enabled_ways_as_if_the_disabled_way_were_absent() {
+        let row = |pairs: &[(&str, f64)]| pairs.iter().map(|(i, c)| (i.to_string(), *c)).collect::<Vec<_>>();
+        // "off" is disabled and beats everything on both chunks.
+        let with_off = vec![
+            row(&[("off", 0.9), ("a", 0.6), ("b", 0.5), ("c", 0.1)]),
+            row(&[("off", 0.8), ("b", 0.55), ("a", 0.3), ("c", 0.1)]),
+        ];
+        let absent = vec![
+            row(&[("a", 0.6), ("b", 0.5), ("c", 0.1)]),
+            row(&[("b", 0.55), ("a", 0.3), ("c", 0.1)]),
+        ];
+        let enabled = bodies_of(&["a", "b", "c"]);
+
+        // Unmasked, the disabled way takes share and a ranking slot.
+        let unmasked = aggregate(&with_off, 2);
+        assert_eq!(unmasked[0].id, "off");
+
+        let masked = aggregate(&mask_to_enabled(with_off, &enabled), 2);
+        let want = aggregate(&absent, 2);
+        assert_eq!(masked.len(), want.len());
+        for (m, w) in masked.iter().zip(&want) {
+            assert_eq!(m.id, w.id);
+            assert!((m.share - w.share).abs() < 1e-12, "{}: share {} vs {}", m.id, m.share, w.share);
+            assert!((m.peak - w.peak).abs() < 1e-12);
+            assert_eq!(m.peak_chunk, w.peak_chunk);
+            // Admission is the same decision.
+            assert_eq!(m.share >= SHARE_GATE || m.peak >= PEAK_GATE, w.share >= SHARE_GATE || w.peak >= PEAK_GATE);
+        }
+        assert!(masked.iter().all(|r| r.id != "off"));
+    }
+
+    /// The eight-way softmax window refills from enabled ways: a disabled way
+    /// inside the top 8 must not shrink the competition to seven.
+    #[test]
+    fn masking_refills_the_top_k_window_with_enabled_ways() {
+        let mut chunk: Vec<(String, f64)> = vec![("off".to_string(), 0.95)];
+        let ids: Vec<String> = (0..9).map(|i| format!("w{i}")).collect();
+        for (i, id) in ids.iter().enumerate() {
+            chunk.push((id.clone(), 0.5 - i as f64 * 0.01));
+        }
+        let enabled = bodies_of(&ids.iter().map(String::as_str).collect::<Vec<_>>());
+        let masked = mask_to_enabled(vec![chunk.clone(), chunk], &enabled);
+        let ranked = aggregate(&masked, 2);
+        let scored = ranked.iter().filter(|r| r.share > 0.0).count();
+        assert_eq!(scored, TOP_K_PER_CHUNK, "eight enabled ways compete");
     }
 
     #[test]
