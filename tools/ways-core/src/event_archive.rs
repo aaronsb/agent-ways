@@ -52,41 +52,48 @@ pub fn archives(dir: &Path) -> Vec<PathBuf> {
 /// member, and make it durable. Called before the live file is rewritten:
 /// when this fails the caller removes nothing.
 ///
-/// The member is compressed in memory and written with one `write_all` to an
-/// `O_APPEND` handle, so parallel hooks cannot interleave inside one another's
-/// members. A failed write is truncated back to the length it started at.
-/// An empty `removed` writes nothing.
+/// The archive is opened and locked exclusively before anything is compressed,
+/// so a failing archive costs little. The lock is held across the length read,
+/// the write, the fsync and any truncation, so a failed write can only cut back
+/// its own bytes and never another process's durable member. The file is
+/// removed on failure only when this call created it and it is empty again.
+/// The directory is synced after every write. An empty `removed` writes nothing.
 pub fn append(dir: &Path, now: u64, removed: &[u8]) -> std::io::Result<()> {
     if removed.is_empty() {
         return Ok(());
     }
-    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    enc.write_all(removed)?;
-    let member = enc.finish()?;
-
     std::fs::create_dir_all(dir)?;
     let path = archive_path(dir, now);
-    let existed = path.exists();
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
-    let before = f.metadata()?.len();
-    let written = f.write_all(&member).and_then(|()| f.sync_all());
-    if let Err(e) = written {
-        // Best effort: leave no torn member behind.
-        let _ = f.set_len(before);
-        if !existed {
-            let _ = std::fs::remove_file(&path);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.append(true);
+    let (mut f, created) = match opts.clone().create_new(true).open(&path) {
+        Ok(f) => (f, true),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (opts.open(&path)?, false),
+        Err(e) => return Err(e),
+    };
+    f.lock()?;
+
+    let written = (|| {
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(removed)?;
+        let member = enc.finish()?;
+        let before = f.metadata()?.len();
+        let result = f.write_all(&member).and_then(|()| f.sync_all());
+        if result.is_err() {
+            // Cut back our own bytes, under the lock.
+            let _ = f.set_len(before);
         }
-        return Err(e);
+        result
+    })();
+    if written.is_err() && created && f.metadata().is_ok_and(|m| m.len() == 0) {
+        let _ = std::fs::remove_file(&path);
     }
-    drop(f);
+    drop(f); // releases the lock
     #[cfg(unix)]
-    if !existed {
-        // A new name is durable once its directory is.
-        if let Ok(d) = std::fs::File::open(dir) {
-            let _ = d.sync_all();
-        }
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
     }
-    Ok(())
+    written
 }
 
 /// Delete archives whose day is more than `retention_days` before `now`.
@@ -105,18 +112,43 @@ pub fn expire(dir: &Path, now: u64, retention_days: u32) -> usize {
 }
 
 /// The text of one event-log source: a plain file as it is, a `.gz` archive
-/// decompressed. Unreadable files give `None`. A damaged archive yields
-/// whatever decompressed before the damage.
+/// decompressed. Unreadable files give `None`. The bytes become the string
+/// without a copy when they are valid UTF-8.
+///
+/// A member that fails to decode (a torn write) gives up the lines it held
+/// before the damage, and decoding resumes at the next gzip header, so one bad
+/// member does not hide the members after it.
 pub fn read_source(path: &Path) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
-    if path.extension().is_some_and(|e| e == "gz") {
-        let mut out = Vec::new();
-        // A read error mid-stream keeps the lines before it.
-        let _ = flate2::read::MultiGzDecoder::new(&bytes[..]).read_to_end(&mut out);
-        Some(String::from_utf8_lossy(&out).into_owned())
-    } else {
-        String::from_utf8(bytes).ok()
+    let out = if path.extension().is_some_and(|e| e == "gz") { decode_members(&bytes) } else { bytes };
+    Some(String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
+}
+
+const GZIP_HEADER: [u8; 3] = [0x1f, 0x8b, 0x08];
+
+fn decode_members(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    while pos < bytes.len() {
+        let mut rest = &bytes[pos..];
+        let mut member = Vec::new();
+        let decoded = flate2::bufread::GzDecoder::new(&mut rest).read_to_end(&mut member);
+        let consumed = bytes.len() - pos - rest.len();
+        if decoded.is_ok() && consumed > 0 {
+            out.extend_from_slice(&member);
+            pos += consumed;
+            continue;
+        }
+        // Keep whole lines from the damaged member, then resume at the next header.
+        if let Some(nl) = member.iter().rposition(|&b| b == b'\n') {
+            out.extend_from_slice(&member[..=nl]);
+        }
+        match bytes[pos + 1..].windows(GZIP_HEADER.len()).position(|w| w == GZIP_HEADER) {
+            Some(off) => pos += 1 + off,
+            None => break,
+        }
     }
+    out
 }
 
 #[cfg(test)]
@@ -174,11 +206,31 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_archive_write_is_an_error_and_leaves_nothing() {
+    fn a_failed_archive_write_is_an_error_and_leaves_nothing_else_behind() {
         let d = dir("fail");
         // A directory squats on the archive's name, so it cannot be opened.
         std::fs::create_dir(archive_path(&d, NOW)).unwrap();
         assert!(append(&d, NOW, b"x\n").is_err());
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "only the squatting directory is there");
+    }
+
+    #[test]
+    fn a_torn_member_does_not_hide_the_members_after_it() {
+        let d = dir("torn");
+        let p = archive_path(&d, NOW);
+        append(&d, NOW, b"first\n").unwrap();
+        let a = std::fs::read(&p).unwrap();
+        append(&d, NOW, b"second line that is long enough to tear\n").unwrap();
+        let ab = std::fs::read(&p).unwrap();
+        append(&d, NOW, b"third\n").unwrap();
+        let abc = std::fs::read(&p).unwrap();
+        let (b, c) = (&ab[a.len()..], &abc[ab.len()..]);
+        let mut torn = a.clone();
+        torn.extend_from_slice(&b[..b.len() / 2]); // the member is cut off mid-stream
+        torn.extend_from_slice(c);
+        std::fs::write(&p, torn).unwrap();
+        let text = read_source(&p).unwrap();
+        assert_eq!(text, "first\nthird\n", "the cut line is dropped, the member after it is read");
     }
 
     #[test]
