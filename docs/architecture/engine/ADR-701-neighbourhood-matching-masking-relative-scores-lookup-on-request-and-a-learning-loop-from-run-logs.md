@@ -106,6 +106,7 @@ agent-ways is moving toward knowledge work beyond software, which means more dom
 - Every scan, on the prompt and the task lane, logs its top 5 candidates with cosine, share and margin, and once per event the lane, the basis of the scores and whether the body sidecar was used.
 - **History is archived, not deleted.** Before the size cap or the age rotation removes lines from `events.jsonl`, they are written to a compressed archive file dated by day in the same state directory. The size cap bounds only the live file.
 - `ways.event_retention_days` (user scope only, default 365) expires archive files, not live lines.
+- If archiving keeps failing (a full disk, no write permission), preservation wins until the live file reaches four times the size cap; past that the cap drops its oldest lines without archiving them and logs one `event_log_dropped` event with the byte count and the reason.
 - The readers of the event log (introspection, tuning, stats) read the archives as well as the live file.
 - Rotation claims its daily slot atomically, anchors its cutoff to the newest line already in the log, and never lets a `judge_call` line end its scan.
 
