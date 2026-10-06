@@ -154,14 +154,10 @@ pub fn run(
     // Provenance sidecar validation
     provenance::lint_provenance_sidecars(&scan_dir, &ways_dir, &mut errors)?;
 
-    // ADR-701 §3 corpus checks: errors for the core corpus, warnings for user
-    // and project roots.
-    corpus::lint_corpus(
-        &scan_dir,
-        corpus::is_core_root(&scan_dir),
-        &mut errors,
-        &mut warnings,
-    );
+    // ADR-701 §3 corpus checks, run against the ways root that holds the
+    // target: errors for the core corpus, warnings for user and project roots.
+    let project = crate::util::project_root().map(PathBuf::from);
+    corpus::lint_corpus(&scan_dir, project.as_deref(), &mut errors, &mut warnings);
 
     let label = if is_targeted { "Target" } else { "Global" };
     eprintln!(
