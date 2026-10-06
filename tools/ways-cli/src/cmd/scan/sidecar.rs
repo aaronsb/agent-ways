@@ -188,11 +188,7 @@ impl<'a> Reader<'a> {
 /// Write `bytes` to `path` through a sibling staging file, so a reader never
 /// sees a half-written sidecar.
 pub(crate) fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension(format!("bin.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    agent_settings::writer::write_atomic(path, bytes)
 }
 
 /// Read and parse the sidecar at `path`.
@@ -302,7 +298,7 @@ impl std::fmt::Display for Fallback {
             Fallback::NoEmbedder => write!(f, "way-embed not installed"),
             Fallback::Absent => write!(f, "absent; run `ways corpus`"),
             Fallback::BuildFailed(why) => write!(f, "build failed: {why}"),
-            Fallback::NoVectors => write!(f, "way-embed cannot return chunk vectors (needs 1.2.0); run `ways corpus`"),
+            Fallback::NoVectors => write!(f, "way-embed cannot return chunk vectors; upgrade way-embed to 1.2.0 or later, then run `ways corpus`"),
             Fallback::ModelMismatch => write!(f, "built for another model, way-embed or chunker; run `ways corpus`"),
             Fallback::NoHashes => write!(f, "the manifest has no way hashes; run `ways corpus`"),
             Fallback::Incomplete { missing, stale } => {
