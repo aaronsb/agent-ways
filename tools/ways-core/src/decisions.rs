@@ -302,8 +302,9 @@ impl Turn {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Join {
     /// The context already had the way. A pull by the agent that wrote the
-    /// named scan: a scan of that agent in the scan's turn, up to the pull,
-    /// fired or re-disclosed it. A pull by another agent (a subagent whose
+    /// named scan: that agent's scans in its own turn, up to the pull, fired
+    /// or re-disclosed it (or, for a scan outside such a turn, the scan
+    /// itself did). A pull by another agent (a subagent whose
     /// marker names its dispatch scan): the named scan stashed it.
     Delivered,
     /// The pull's context had not been given the way.
@@ -355,6 +356,8 @@ struct ScanInfo {
 
 /// What a later pull needs of one turn.
 struct TurnInfo {
+    /// The agent whose prompt opened the turn.
+    agent: u32,
     /// Ways the turn agent's scans fired or re-disclosed so far.
     delivered: Vec<u32>,
 }
@@ -400,6 +403,13 @@ pub struct Turns {
     scans: HashMap<Box<str>, ScanInfo>,
     turns: Vec<TurnInfo>,
     names: Names,
+    /// Agents that open turns of their own: main, and any agent seen writing
+    /// a `turn_start` scan (a teammate).
+    turn_agents: std::collections::HashSet<u32>,
+    /// The record clock: the highest ts accepted so far, and a jump of more
+    /// than [`IDLE_SECS`] seen once and not yet confirmed.
+    clock: u64,
+    jump: bool,
     last_sweep: u64,
 }
 
@@ -408,6 +418,9 @@ fn ways_with(scan: &Scan, names: &mut Names, results: &[&str]) -> Box<[u32]> {
 }
 
 const DELIVERED: &[&str] = &["fired", "redisclosed"];
+
+/// The agent id of a session's main agent.
+const MAIN: &str = "main";
 
 impl Turns {
     pub fn new() -> Self {
@@ -421,7 +434,7 @@ impl Turns {
 
     /// Take one record, handing on whatever it completes.
     pub fn push(&mut self, record: Record, emit: &mut impl FnMut(Grouped)) {
-        if let Some(now) = agent_fmt::when::parse_utc_iso(record.ts()) {
+        if let Some(now) = agent_fmt::when::parse_utc_iso(record.ts()).filter(|&t| self.advance(t)) {
             if now >= self.last_sweep + SWEEP_SECS {
                 self.last_sweep = now;
                 self.close_idle(now, emit);
@@ -436,6 +449,21 @@ impl Turns {
         }
     }
 
+    /// Whether ts `t` may drive the sweep clock. A record more than
+    /// [`IDLE_SECS`] past the clock is held back once: a lone future-dated
+    /// record would otherwise hand on every open turn at once and stall the
+    /// sweep until record time caught up. A second record past it confirms a
+    /// real gap in the log. The record itself is read either way.
+    fn advance(&mut self, t: u64) -> bool {
+        if self.clock != 0 && t > self.clock + IDLE_SECS && !self.jump {
+            self.jump = true;
+            return false;
+        }
+        self.jump = false;
+        self.clock = self.clock.max(t);
+        true
+    }
+
     fn scan(&mut self, scan: Scan, emit: &mut impl FnMut(Grouped)) {
         let now = agent_fmt::when::parse_utc_iso(&scan.ts).unwrap_or(self.last_sweep);
         let agent = self.names.id(&scan.agent);
@@ -445,12 +473,17 @@ impl Turns {
                 emit(Grouped::Turn(done.turn));
             }
             let ordinal = self.turns.len() as u32;
-            self.turns.push(TurnInfo { delivered: Vec::new() });
+            self.turns.push(TurnInfo { agent, delivered: Vec::new() });
+            self.turn_agents.insert(agent);
             let start = scan.clone();
             self.open.insert(key.clone(), Open { turn: Turn { ordinal, start, scans: Vec::new() }, agent, last: now });
             Some(key)
         } else if self.open.contains_key(&key) {
             Some(key)
+        } else if scan.agent == MAIN || self.turn_agents.contains(&agent) {
+            // An agent that opens its own turns, whose turn is not open here
+            // (idle, or begun before the window), never joins another's.
+            None
         } else {
             // No turn of its own: a nested dispatch from inside a subagent.
             // It belongs to the session's most recently active turn.
@@ -487,8 +520,8 @@ impl Turns {
         let way = self.names.find(&pull.way);
         let has = |set: &[u32]| way.is_some_and(|w| set.contains(&w));
         let delivered = if self.names.find(&pull.agent) == Some(info.agent) {
-            match info.turn {
-                Some(t) => has(&self.turns[t as usize].delivered),
+            match info.turn.map(|t| &self.turns[t as usize]).filter(|t| t.agent == info.agent) {
+                Some(t) => has(&t.delivered),
                 None => has(&info.delivered),
             }
         } else {
@@ -737,15 +770,62 @@ mod tests {
     #[test]
     fn a_nested_dispatch_is_indexed_and_its_subagent_pull_joins_it() {
         let ls = vec![
-            scan("2026-09-01T10:00:00Z", "m1", "main", true, &[]),
+            scan("2026-09-01T10:00:00Z", "m1", "main", true, &[("d/a", "fired")]),
             scan("2026-09-01T10:00:10Z", "t1", "main", false, &[("d/y", "stashed")]),
             scan("2026-09-01T10:00:30Z", "t2", "sub1", false, &[("d/z", "stashed")]),
             pull("2026-09-01T10:00:40Z", "sub2", "d/z", "t2"),
             pull("2026-09-01T10:00:50Z", "sub2", "d/y", "t2"),
+            pull("2026-09-01T10:00:55Z", "sub1", "d/a", "t2"),
         ];
         let out = grouped(lines(&ls));
         assert_eq!(turns_of(&out), [("m1", vec!["t1", "t2"])], "sub1's dispatch belongs to the session's turn, not an orphan");
-        assert_eq!(joins_of(&out), [("sub2", "d/z", Join::Delivered), ("sub2", "d/y", Join::RecallMiss)]);
+        assert_eq!(
+            joins_of(&out),
+            [("sub2", "d/z", Join::Delivered), ("sub2", "d/y", Join::RecallMiss), ("sub1", "d/a", Join::RecallMiss)],
+            "sub1's own pull naming t2 reads t2, not main's turn it was counted with"
+        );
+    }
+
+    #[test]
+    fn a_main_scan_never_joins_a_teammates_turn() {
+        // Main's turn began before the window; teammate `mate` (same session)
+        // has a turn open when main's queued-message scan q1 arrives.
+        let ls = vec![
+            scan("2026-09-01T10:00:00Z", "tm", "mate", true, &[("d/b", "fired")]),
+            scan("2026-09-01T10:00:10Z", "q1", "main", false, &[("d/q", "fired")]),
+            pull("2026-09-01T10:00:20Z", "main", "d/q", "q1"),
+            pull("2026-09-01T10:00:30Z", "main", "d/b", "q1"),
+        ];
+        let out = grouped(lines(&ls));
+        assert_eq!(turns_of(&out), [("tm", vec![])], "q1 is main's, not the teammate's");
+        assert!(out.iter().any(|g| matches!(g, Grouped::Orphan(s) if s.scan_id == "q1")));
+        assert_eq!(joins_of(&out), [("main", "d/q", Join::Delivered), ("main", "d/b", Join::RecallMiss)], "judged against main's own scan");
+    }
+
+    #[test]
+    fn a_future_dated_record_does_not_hand_on_every_open_turn() {
+        let ls = vec![
+            scan("2026-09-01T10:00:00Z", "m1", "main", true, &[]),
+            r#"{"ts":"2027-01-01T00:00:00Z","kind":"scan","scan_id":"f1","session":"f","agent":"main","turn_start":true,"project":"/p","outcomes":[]}"#.to_string(),
+            pull("2026-09-01T10:00:20Z", "main", "d/a", "m1"),
+        ];
+        let out = grouped(lines(&ls));
+        let order: Vec<&str> = out.iter().map(|g| match g { Grouped::Turn(t) => t.start.scan_id.as_str(), Grouped::Pull(_) => "pull", Grouped::Orphan(_) => "?" }).collect();
+        assert_eq!(order, ["pull", "m1", "f1"], "m1 stays open past the future-dated f1, which is still read");
+    }
+
+    #[test]
+    fn a_real_gap_in_the_log_is_confirmed_by_the_next_record() {
+        let other = |ts: &str, id: &str| format!(r#"{{"ts":"{ts}","kind":"scan","scan_id":"{id}","session":"{id}","agent":"main","turn_start":true,"project":"/p","outcomes":[]}}"#);
+        let ls = vec![
+            scan("2026-09-01T10:00:00Z", "m1", "main", true, &[]),
+            other("2026-09-03T10:00:00Z", "x1"),
+            other("2026-09-03T10:01:00Z", "y1"),
+            pull("2026-09-03T10:02:00Z", "main", "d/a", "m1"),
+        ];
+        let out = grouped(lines(&ls));
+        let order: Vec<&str> = out.iter().map(|g| match g { Grouped::Turn(t) => t.start.scan_id.as_str(), Grouped::Pull(_) => "pull", Grouped::Orphan(_) => "?" }).collect();
+        assert_eq!(order, ["m1", "pull", "x1", "y1"], "y1 confirms the two-day gap and m1 is handed on");
     }
 
     #[test]
