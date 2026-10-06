@@ -160,7 +160,9 @@ pub fn stream_log(stream: crate::event_archive::Stream) -> PathBuf {
 }
 
 /// Telemetry/event log: `$XDG_STATE/agent-ways/events.jsonl` (our telemetry).
-/// The Rust writer and every reader route through here.
+/// Readers route through here. The writer joins [`state_root`] with the
+/// stream's own live name, which [`stream_log`] also uses, so both name the
+/// same file.
 pub fn events_log() -> PathBuf {
     stream_log(crate::event_archive::EVENTS)
 }
