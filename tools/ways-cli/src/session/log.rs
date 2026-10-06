@@ -1,13 +1,16 @@
-//! The agent-ways log streams' writer: append, size compaction, daily age
-//! rotation and archiving (ADR-134 task E, ADR-701 §2).
+//! The agent-ways log streams' writer: append, size compaction, the daily
+//! pass and archiving (ADR-134 task E, ADR-701 §2). The daily pass bounds the
+//! event log by age and the decision log by turns ([`turns`]).
 //!
-//! Hooks append with `O_APPEND` and take no lock. Compaction and rotation
+//! Hooks append with `O_APPEND` and take no lock. Compaction and the daily pass
 //! rewrite the live file under a sidecar lock, archive what they remove
 //! through `ways_core::event_archive` first, and carry over appends that land
 //! while they work. Extracted from `session.rs`, which had passed the
 //! 800-line priority threshold, when ADR-701 §2 added a second stream.
 
 use ways_core::event_archive::{Stream, DECISIONS, EVENTS};
+
+mod turns;
 
 /// Append one JSONL record as a single `write` on an `O_APPEND` handle.
 ///
@@ -54,6 +57,20 @@ const LIVE_EVENT_DAYS: u32 = 90;
 /// `event_log_dropped` event, so a broken archive cannot grow the log forever.
 const CEILING_EVENTS_BYTES: u64 = 4 * MAX_EVENTS_BYTES;
 
+/// What a stream's live file holds. The daily pass moves the rest to the
+/// stream's dated archives. Each stream has its own bound (ADR-701 §2): the
+/// event log is kept by age and size, the decision log by turns.
+#[derive(Clone, Copy, Debug)]
+enum LiveBound {
+    /// Lines younger than this many days.
+    Days(u32),
+    /// The newest this many turns (see [`turns`]).
+    Turns(u64),
+}
+
+/// The event stream's daily bound.
+const EVENT_BOUND: LiveBound = LiveBound::Days(LIVE_EVENT_DAYS);
+
 // Every sidecar is named for its stream, so two streams sharing the state
 // directory never share a lock, a day's rotation slot or a failure marker.
 
@@ -84,21 +101,35 @@ pub fn log_event(fields: &[(&str, &str)]) {
 /// fields they know, so an extra nested value costs them nothing.
 pub fn log_event_with(fields: &[(&str, &str)], extra: &[(&str, serde_json::Value)]) {
     let now = agent_fmt::when::now_secs();
-    let rotate = rotation_due_today(EVENTS, now).then(|| crate::config::global().event_retention_days);
+    let rotate = rotation_due_today(EVENTS, now).then(|| (crate::config::global().event_retention_days, EVENT_BOUND));
     log_event_to(&crate::paths::state_root(), EVENTS, now, rotate, fields, extra);
 }
 
 /// Append one decision record to the decision log
 /// ($XDG_STATE/agent-ways/decisions.jsonl, see paths::decisions_log), as one
-/// line (ADR-701 §2). The record carries its own `ts`. Nothing rotates or
-/// compacts this stream yet: the event log's byte and age policy is not its
-/// policy, and retention counted in turns is a later increment.
+/// line (ADR-701 §2). The record carries its own `ts`.
+///
+/// The first record a process writes each day runs the stream's daily pass
+/// before it is appended: the live file keeps `ways.decision_retention_turns`
+/// turns and its archives expire under `ways.event_retention_days`. The event
+/// log's size cap and age bound do not apply to this stream.
 pub fn log_decision(record: &serde_json::Value) {
-    log_decision_to(&crate::paths::state_root(), record);
+    let now = agent_fmt::when::now_secs();
+    let trim = rotation_due_today(DECISIONS, now).then(|| {
+        let cfg = crate::config::global();
+        (cfg.event_retention_days, cfg.decision_retention_turns)
+    });
+    log_decision_to(&crate::paths::state_root(), now, trim, record);
 }
 
-fn log_decision_to(dir: &std::path::Path, record: &serde_json::Value) {
+/// Append `record` to the decision log in `dir`. With `trim` set (the archive
+/// retention in days and the turns the live file keeps), the daily pass runs
+/// first, as [`log_event_to`] runs the event stream's.
+fn log_decision_to(dir: &std::path::Path, now: u64, trim: Option<(u32, u64)>, record: &serde_json::Value) {
     let _ = std::fs::create_dir_all(dir);
+    if let Some((archive_days, keep_turns)) = trim {
+        rotate_if_due(dir, DECISIONS, now, archive_days, LiveBound::Turns(keep_turns));
+    }
     if let Ok(line) = serde_json::to_string(record) {
         append_jsonl_line(&dir.join(DECISIONS.live_name()), &line);
     }
@@ -108,17 +139,17 @@ fn log_decision_to(dir: &std::path::Path, record: &serde_json::Value) {
 /// is named from the stream, so a caller cannot write one stream's lines
 /// under another stream's lock and archives.
 ///
-/// With `rotate` set (the archive retention in days), the age rotation and the
-/// archive expiry run first, before this event is written. The log's newest
+/// With `rotate` set (the archive retention in days and the live bound), the
+/// daily pass and the archive expiry run first, before this event is written. The log's newest
 /// line is then a real earlier event, which anchors both cutoffs (see
 /// [`rotate_log_by_age`]). Rotating after the append would let the event,
 /// stamped by a clock that ran ahead, pull the cutoff past history the
 /// retention should keep.
-fn log_event_to(dir: &std::path::Path, stream: Stream, now: u64, rotate: Option<u32>, fields: &[(&str, &str)], extra: &[(&str, serde_json::Value)]) {
+fn log_event_to(dir: &std::path::Path, stream: Stream, now: u64, rotate: Option<(u32, LiveBound)>, fields: &[(&str, &str)], extra: &[(&str, serde_json::Value)]) {
     let _ = std::fs::create_dir_all(dir);
-    if let Some(archive_days) = rotate {
-        // Age rotation and archive expiry (ADR-701 §2): one winner a day across processes.
-        rotate_if_due(dir, stream, now, archive_days);
+    if let Some((archive_days, bound)) = rotate {
+        // The daily pass and archive expiry (ADR-701 §2): one winner a day across processes.
+        rotate_if_due(dir, stream, now, archive_days, bound);
     }
     let live = dir.join(stream.live_name());
 
@@ -345,8 +376,9 @@ fn archive_removed(path: &std::path::Path, stream: Stream, now: u64, removed: &[
     }
 }
 
-/// Rotate `stream`'s live file in `dir` by age if no process has claimed
-/// today's slot.
+/// Bring `stream`'s live file in `dir` within `bound` if no process has
+/// claimed today's slot: by age ([`rotate_log_by_age`]) or by turns
+/// ([`turns::trim_to_turns`]).
 ///
 /// The slot is a file named for the stream and the day, made with
 /// `create_new`, so exactly one of any number of parallel hooks wins it. Claim
@@ -355,7 +387,7 @@ fn archive_removed(path: &std::path::Path, stream: Stream, now: u64, removed: &[
 /// otherwise block rotation until the calendar caught up. The slot's winner
 /// also deletes the stream's archives older than `archive_days`. Returns
 /// whether lines left the live log.
-fn rotate_if_due(dir: &std::path::Path, stream: Stream, now: u64, archive_days: u32) -> bool {
+fn rotate_if_due(dir: &std::path::Path, stream: Stream, now: u64, archive_days: u32, bound: LiveBound) -> bool {
     let path = &dir.join(stream.live_name());
     let prefix = rotate_claim_prefix(stream);
     let mine = day_file(&prefix, now);
@@ -371,7 +403,10 @@ fn rotate_if_due(dir: &std::path::Path, stream: Stream, now: u64, archive_days: 
     if let Some(anchor) = std::fs::File::open(path).ok().and_then(|f| newest_ts(&f).ok().flatten()) {
         ways_core::event_archive::expire(dir, stream, anchor.min(now), archive_days);
     }
-    rotate_log_by_age(path, stream, now, LIVE_EVENT_DAYS).unwrap_or(false)
+    match bound {
+        LiveBound::Days(days) => rotate_log_by_age(path, stream, now, days).unwrap_or(false),
+        LiveBound::Turns(keep) => turns::trim_to_turns(path, stream, now, keep).unwrap_or(false),
+    }
 }
 
 /// Move event lines older than `retention_days` out of `path` and into the
@@ -582,15 +617,15 @@ mod compaction_tests {
         let p = tmp("throttle");
         let current = line("way_fired", 0, "now");
         std::fs::write(&p, format!("{}{current}", line("way_fired", 200, "old"))).unwrap();
-        assert!(rotate_if_due(p.parent().unwrap(), EVENTS, NOW, 90));
+        assert!(rotate_if_due(p.parent().unwrap(), EVENTS, NOW, 90, EVENT_BOUND));
         // An old line appears again: the day's slot is spent.
         std::fs::write(&p, format!("{}{current}", line("way_fired", 200, "old2"))).unwrap();
-        assert!(!rotate_if_due(p.parent().unwrap(), EVENTS, NOW + 60, 90));
+        assert!(!rotate_if_due(p.parent().unwrap(), EVENTS, NOW + 60, 90, EVENT_BOUND));
         assert!(std::fs::read_to_string(&p).unwrap().contains("old2"));
         // A day later it is due again, and yesterday's claim is gone.
         let later = NOW + DAY + 60;
         std::fs::write(&p, format!("{}{}", line("way_fired", 200, "old2"), line("way_fired", 0, "x"))).unwrap();
-        assert!(rotate_if_due(p.parent().unwrap(), EVENTS, later, 90));
+        assert!(rotate_if_due(p.parent().unwrap(), EVENTS, later, 90, EVENT_BOUND));
         assert!(!std::fs::read_to_string(&p).unwrap().contains("old2"));
         let claims = |d: &std::path::Path| std::fs::read_dir(d).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(&rotate_claim_prefix(EVENTS))).count();
         assert_eq!(claims(p.parent().unwrap()), 1);
@@ -601,7 +636,7 @@ mod compaction_tests {
         let p = tmp("claims");
         std::fs::write(&p, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
         let wins: usize = std::thread::scope(|s| {
-            let hs: Vec<_> = (0..8).map(|_| s.spawn(|| rotate_if_due(p.parent().unwrap(), EVENTS, NOW, 90))).collect();
+            let hs: Vec<_> = (0..8).map(|_| s.spawn(|| rotate_if_due(p.parent().unwrap(), EVENTS, NOW, 90, EVENT_BOUND))).collect();
             hs.into_iter().map(|h| usize::from(h.join().unwrap())).sum()
         });
         assert_eq!(wins, 1);
@@ -614,7 +649,7 @@ mod compaction_tests {
         let p = tmp("future");
         std::fs::write(&p, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
         std::fs::write(p.parent().unwrap().join(day_file(&rotate_claim_prefix(EVENTS), NOW + 30 * DAY)), "").unwrap();
-        assert!(rotate_if_due(p.parent().unwrap(), EVENTS, NOW, 90));
+        assert!(rotate_if_due(p.parent().unwrap(), EVENTS, NOW, 90, EVENT_BOUND));
         assert!(!std::fs::read_to_string(&p).unwrap().contains("old"));
         assert!(!p.parent().unwrap().join(day_file(&rotate_claim_prefix(EVENTS), NOW + 30 * DAY)).exists());
     }
@@ -637,7 +672,7 @@ mod compaction_tests {
         let p = tmp("skew");
         std::fs::write(&p, format!("{}{}", line("way_fired", 30, "real-30d"), line("way_fired", 0, "real-now"))).unwrap();
         // 80 days ahead, retention 90: the naive cutoff is NOW - 10 days.
-        log_event_to(p.parent().unwrap(), EVENTS, NOW + 80 * DAY, Some(90), &[("event", "skewed")], &[]);
+        log_event_to(p.parent().unwrap(), EVENTS, NOW + 80 * DAY, Some((90, EVENT_BOUND)), &[("event", "skewed")], &[]);
         let got = std::fs::read_to_string(&p).unwrap();
         assert!(got.contains("real-30d"), "history inside the retention survives a fast clock:\n{got}");
         assert!(got.contains("\"event\":\"skewed\""), "the event itself is still logged");
@@ -922,11 +957,11 @@ mod archive_tests {
         std::fs::write(&log, line("way_fired", 0, "now")).unwrap();
         ways_core::event_archive::append(&dir, EVENTS, NOW - 400 * DAY, b"ancient\n").unwrap();
         ways_core::event_archive::append(&dir, EVENTS, NOW - 30 * DAY, b"recent\n").unwrap();
-        rotate_if_due(&dir, EVENTS, NOW, 365);
+        rotate_if_due(&dir, EVENTS, NOW, 365, EVENT_BOUND);
         assert_eq!(archives(&dir, EVENTS), [archive_path(&dir, EVENTS, NOW - 30 * DAY)]);
         assert!(log.exists());
         // A one-day retention still leaves the live log alone.
-        rotate_if_due(&dir, EVENTS, NOW + DAY, 1);
+        rotate_if_due(&dir, EVENTS, NOW + DAY, 1, EVENT_BOUND);
         assert!(archives(&dir, EVENTS).is_empty() && log.exists());
     }
 
@@ -935,7 +970,7 @@ mod archive_tests {
         let (dir, log) = state("clock-jump");
         std::fs::write(&log, line("way_fired", 0, "now")).unwrap();
         ways_core::event_archive::append(&dir, EVENTS, NOW - 30 * DAY, b"recent\n").unwrap();
-        rotate_if_due(&dir, EVENTS, NOW + 400 * DAY, 365);
+        rotate_if_due(&dir, EVENTS, NOW + 400 * DAY, 365, EVENT_BOUND);
         assert_eq!(archives(&dir, EVENTS), [archive_path(&dir, EVENTS, NOW - 30 * DAY)], "the cutoff follows the log, not a clock that ran ahead");
     }
 
@@ -974,7 +1009,7 @@ mod archive_tests {
         let held = try_log_lock(&dir, EVENTS).expect("first holder");
         LOCK_PATIENCE.with(|p| p.set(std::time::Duration::ZERO));
         assert!(compact_locked(&dir, EVENTS, NOW, 500, 0, CEILING_EVENTS_BYTES).is_none());
-        assert!(!rotate_if_due(&dir, EVENTS, NOW, 365));
+        assert!(!rotate_if_due(&dir, EVENTS, NOW, 365, EVENT_BOUND));
         LOCK_PATIENCE.with(|p| p.set(std::time::Duration::from_secs(10)));
         drop(held);
         assert!(compact_locked(&dir, EVENTS, NOW, 500, 0, CEILING_EVENTS_BYTES).is_some());
@@ -1055,12 +1090,12 @@ mod archive_tests {
         std::fs::write(&log, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
         let held = try_log_lock(&dir, EVENTS).unwrap();
         LOCK_PATIENCE.with(|p| p.set(std::time::Duration::ZERO));
-        assert!(!rotate_if_due(&dir, EVENTS, NOW, 365));
+        assert!(!rotate_if_due(&dir, EVENTS, NOW, 365, EVENT_BOUND));
         LOCK_PATIENCE.with(|p| p.set(std::time::Duration::from_secs(10)));
         let claimed = |d: &std::path::Path| std::fs::read_dir(d).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(&rotate_claim_prefix(EVENTS)));
         assert!(!claimed(&dir), "the slot is still open");
         drop(held);
-        assert!(rotate_if_due(&dir, EVENTS, NOW, 365), "and the day's rotation runs when the lock frees");
+        assert!(rotate_if_due(&dir, EVENTS, NOW, 365, EVENT_BOUND), "and the day's rotation runs when the lock frees");
     }
 
     /// A clock left ahead is logged, so the next day's anchor is ahead too.
@@ -1072,13 +1107,13 @@ mod archive_tests {
         for age in [30u64, 20, 10, 5, 2] {
             ways_core::event_archive::append(&dir, EVENTS, NOW - age * DAY, b"x\n").unwrap();
         }
-        log_event_to(&dir, EVENTS, NOW + 400 * DAY, Some(365), &[("event", "ahead")], &[]);
+        log_event_to(&dir, EVENTS, NOW + 400 * DAY, Some((365, EVENT_BOUND)), &[("event", "ahead")], &[]);
         // The rotation itself archives the real line the jump aged out; count the planted ones.
         let planted = || archives(&dir, EVENTS).into_iter().filter(|a| *a < archive_path(&dir, EVENTS, NOW + DAY)).count();
         assert_eq!(planted(), 5, "day one: the anchor is a real line");
-        rotate_if_due(&dir, EVENTS, NOW + 401 * DAY, 365);
+        rotate_if_due(&dir, EVENTS, NOW + 401 * DAY, 365, EVENT_BOUND);
         assert_eq!(planted(), 3, "day two: the oldest two at most");
-        rotate_if_due(&dir, EVENTS, NOW + 402 * DAY, 365);
+        rotate_if_due(&dir, EVENTS, NOW + 402 * DAY, 365, EVENT_BOUND);
         assert_eq!(planted(), 1);
     }
 
@@ -1105,12 +1140,12 @@ mod archive_tests {
         assert!(same.is_none());
         drop((held, other));
 
-        for log in [&events, &decisions] {
-            std::fs::write(log, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
-        }
-        assert!(rotate_if_due(&dir, EVENTS, NOW, 365));
-        assert!(rotate_if_due(&dir, DECISIONS, NOW, 365), "today's events claim is not the decisions claim");
-        assert!(!rotate_if_due(&dir, DECISIONS, NOW, 365));
+        std::fs::write(&events, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
+        std::fs::write(&decisions, "{\"turn_start\":true,\"n\":1}\n{\"turn_start\":true,\"n\":2}\n").unwrap();
+        let one_turn = LiveBound::Turns(1);
+        assert!(rotate_if_due(&dir, EVENTS, NOW, 365, EVENT_BOUND));
+        assert!(rotate_if_due(&dir, DECISIONS, NOW, 365, one_turn), "today's events claim is not the decisions claim");
+        assert!(!rotate_if_due(&dir, DECISIONS, NOW, 365, one_turn));
         assert!(dir.join(day_file(&rotate_claim_prefix(EVENTS), NOW)).exists(), "the decisions sweep left today's events claim");
         assert_eq!(archives(&dir, EVENTS), [archive_path(&dir, EVENTS, NOW)]);
         assert_eq!(archives(&dir, DECISIONS), [archive_path(&dir, DECISIONS, NOW)]);
@@ -1144,7 +1179,7 @@ mod archive_tests {
     #[test]
     fn the_live_file_is_named_from_the_stream() {
         let (dir, events) = state("live-name");
-        log_event_to(&dir, DECISIONS, NOW, Some(365), &[("event", "decided")], &[]);
+        log_event_to(&dir, DECISIONS, NOW, Some((365, LiveBound::Turns(1))), &[("event", "decided")], &[]);
         let decided = std::fs::read_to_string(dir.join("decisions.jsonl")).unwrap();
         assert!(decided.contains("\"event\":\"decided\""), "{decided}");
         assert!(!events.exists(), "nothing reached events.jsonl");
@@ -1152,15 +1187,15 @@ mod archive_tests {
     }
 
     /// A decision record is one whole line in `decisions.jsonl`, appended as
-    /// given, and claims no rotation slot: the event log's policy is not the
-    /// decision log's.
+    /// given. A write with the day's pass already checked touches nothing
+    /// beside the decision log.
     #[test]
-    fn a_decision_record_is_appended_whole_and_claims_no_rotation() {
+    fn a_decision_record_is_appended_whole() {
         let (dir, events) = state("decision");
         let a = serde_json::json!({"kind": "scan", "scan_id": "a", "outcomes": [{"way": "x", "result": "fired"}]});
         let b = serde_json::json!({"kind": "scan", "scan_id": "b", "outcomes": []});
-        log_decision_to(&dir, &a);
-        log_decision_to(&dir, &b);
+        log_decision_to(&dir, NOW, None, &a);
+        log_decision_to(&dir, NOW, None, &b);
         let got: Vec<serde_json::Value> = std::fs::read_to_string(dir.join("decisions.jsonl"))
             .unwrap()
             .lines()
@@ -1199,7 +1234,7 @@ mod archive_tests {
             std::thread::sleep(std::time::Duration::from_millis(100));
             drop(inherited);
         });
-        assert!(rotate_if_due(&dir, EVENTS, NOW, 365), "the pass ran once the descriptor was released");
+        assert!(rotate_if_due(&dir, EVENTS, NOW, 365, EVENT_BOUND), "the pass ran once the descriptor was released");
         release.join().unwrap();
     }
 }
