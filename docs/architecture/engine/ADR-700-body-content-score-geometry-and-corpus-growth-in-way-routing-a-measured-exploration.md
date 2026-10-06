@@ -130,6 +130,28 @@ Per-domain counts are small.
 - Two basenames repeat, against ADR-110 §7: `documentation.md` and `prompt.md`.
 - The event log holds 79,097 events from 2026-07-01 to 2026-10-05, including 26,466 `way_fired` with `fire_score`, 7,455 `way_nearmiss` with `margin`, and 726 `way_judged` with `p_yes` and `verdict`. It records neither prompt text nor the ranked candidate list.
 
+### 9. Choosing a region first does not beat flat competition
+
+Added 2026-10-05 from `experiments/content-corpus/subtree.py` and `results-subtree.md`, on the same 314 targeted rows.
+
+| Method | top-1 | none AUC | fixed / broken vs flat | p |
+|---|---|---|---|---|
+| flat cosine | 0.656 | 0.947 | | |
+| domain first, region scored by its best way | 0.656 | 0.947 | 0 / 0 | 1.00 |
+| domain first, region scored by mean of its top 3 | 0.618 | 0.951 | 9 / 21 | 0.04 |
+| domain first, region scored by its root way | 0.599 | 0.967 | 13 / 31 | 0.01 |
+| top 3 domains by top-3 mean, then the way | 0.653 | 0.947 | 0 / 1 | 1.00 |
+| tree descent by mean of top 3 | 0.510 | 0.956 | 13 / 59 | < 0.01 |
+| way score + 0.1 × domain top-3 mean | 0.659 | 0.953 | 1 / 0 | 1.00 |
+| hubness-corrected flat | 0.678 | 0.933 | 14 / 7 | 0.19 |
+| hubness-corrected + 0.25 × domain top-3 mean | 0.682 | 0.948 | 14 / 6 | 0.12 |
+| domain given by an oracle (upper bound) | 0.771 | 0.947 | 36 / 0 | < 0.01 |
+
+- A region scored by its best way always contains the overall best way, at every level, so region-first selection scored that way reproduces flat argmax exactly. Every other region score loses, because it rewards crowded regions or penalises regions with no root way. `softwaredev` and `meta` have no root way.
+- Of the 108 flat misses, 69 pick a way in the wrong domain and 39 the wrong way inside the right domain. An oracle domain would fix 36 of the 69.
+- No region-first method changes how fast top-1 falls as the corpus grows (12.9 points from 34 to 137 ways for flat, 11 to 15 for the others, within noise).
+- The headroom the oracle shows needs a region signal independent of the way scores, such as embedded directory descriptions or a domain classifier. Those were not tested. Regions defined by authored edges were not tested either.
+
 ## Limits
 
 - Prompts are model-written. A labelled set of real prompts from session transcripts was not built; reading transcripts for it needs the operator's explicit approval.
