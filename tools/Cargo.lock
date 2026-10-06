@@ -2025,6 +2025,7 @@ dependencies = [
  "claude-sessions",
  "glob",
  "libc",
+ "memchr",
  "regex",
  "rust-stemmers",
  "sensor-trait",
