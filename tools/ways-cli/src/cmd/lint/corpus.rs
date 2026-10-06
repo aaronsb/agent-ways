@@ -83,11 +83,23 @@ fn symlinks(root: &Path, scope: &Path) -> Vec<Finding> {
     out
 }
 
+/// Whether any component of `path` below `root` is a symlink.
+fn runs_through_symlink(root: &Path, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(root) else { return false };
+    let mut cur = root.to_path_buf();
+    rel.components().any(|c| {
+        cur.push(c);
+        std::fs::symlink_metadata(&cur).is_ok_and(|m| m.file_type().is_symlink())
+    })
+}
+
 /// Way file names used more than once in the root, reported on each holder
 /// under `scope` and naming the others.
 fn repeated_basenames(own: &[WayFile], root: &Path, scope: &Path) -> Vec<Finding> {
     let mut by_stem: BTreeMap<String, Vec<&WayFile>> = BTreeMap::new();
-    for w in own {
+    // A way reached through a linked directory is a second view of a way that
+    // is already counted; the symlink finding covers it.
+    for w in own.iter().filter(|w| !runs_through_symlink(root, &w.path)) {
         let stem = w.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         by_stem.entry(stem).or_default().push(w);
     }
@@ -278,6 +290,19 @@ mod tests {
         let rels: Vec<&str> = found.iter().map(|f| f.rel.as_str()).collect();
         assert_eq!(rels, vec!["a/linked", "a/real/alias.md"]);
         assert_eq!(found[0].message, "symlinks are not allowed inside a ways root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn one_linked_directory_is_one_finding() {
+        let root = scratch("dirlink");
+        way(&root, "meta/trust/trust.md", "");
+        way(&root, "meta/trust/prose/prose.md", "");
+        way(&root, "meta/other/other.md", "");
+        std::os::unix::fs::symlink(root.join("meta/trust"), root.join("meta/trust2")).unwrap();
+
+        let found = findings(&root, &root, &[]);
+        assert_eq!(msgs(&found), vec!["meta/trust2: symlinks are not allowed inside a ways root"]);
     }
 
     #[cfg(unix)]
