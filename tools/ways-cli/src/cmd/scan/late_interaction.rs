@@ -159,7 +159,7 @@ pub(crate) fn run_diagnostic(
     }
     let sidecar = complete_sidecar(&xdg, bodies);
     let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
-    let confirmer = Confirmer::new(&bin, &model, &corpus, sidecar, matched.vectors);
+    let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors);
     let per_chunk = mask_to_enabled(matched.per_chunk, bodies);
     let ranked = aggregate(&per_chunk, chunks.len());
 
@@ -171,7 +171,7 @@ pub(crate) fn run_diagnostic(
         // reports `confirm: None`.
         let admitted = r.share >= SHARE_GATE || r.peak >= PEAK_GATE;
         let confirm = if admitted {
-            bodies.get(&r.id).and_then(|path| confirmer.confirm(&r.id, r.peak_chunk, &chunks, path))
+            bodies.get(&r.id).and_then(|path| confirmer.confirm(&r.id, r.peak_chunk, r.peak, &chunks, path))
         } else {
             None
         };
@@ -211,7 +211,7 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
     let t = std::time::Instant::now();
     let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
     if dbg { eprintln!("LI: match pass {:.1} ms", ms(t)); }
-    let confirmer = Confirmer::new(&bin, &model, &corpus, sidecar, matched.vectors);
+    let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors);
     if dbg { eprintln!("LI: confirm via {}", if confirmer.uses_sidecar() { "sidecar" } else { "per-call embedding" }); }
     let per_chunk = mask_to_enabled(matched.per_chunk, bodies);
     if dbg { eprintln!("LI: per_chunk rows: {:?}", per_chunk.iter().map(|c| c.len()).collect::<Vec<_>>()); }
@@ -253,7 +253,7 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
             if dbg { eprintln!("LI:   {} → no body path", r.id); }
             continue;
         };
-        let confirm = confirmer.confirm(&r.id, r.peak_chunk, &chunks, path)?;
+        let confirm = confirmer.confirm(&r.id, r.peak_chunk, r.peak, &chunks, path)?;
         if dbg { eprintln!("LI:   {} confirm={confirm:.3} (gate {CONFIRM_GATE})", r.id); }
         if confirm >= CONFIRM_GATE {
             fired.insert(r.id, r.share);
@@ -282,7 +282,7 @@ fn complete_sidecar(corpus_dir: &Path, enabled: &HashMap<String, PathBuf>) -> Op
 /// How stage 5 confirms a survivor: against the body sidecar with the match
 /// pass's chunk vectors, or by embedding the body per call.
 enum Confirmer<'a> {
-    Sidecar { sidecar: Sidecar, vectors: Vec<Vec<f32>>, corpus: &'a Path },
+    Sidecar { sidecar: Sidecar, vectors: Vec<Vec<f32>> },
     PerCall { bin: &'a Path, model: &'a Path },
 }
 
@@ -291,12 +291,11 @@ impl<'a> Confirmer<'a> {
     fn new(
         bin: &'a Path,
         model: &'a Path,
-        corpus: &'a Path,
         sidecar: Option<Sidecar>,
         vectors: Option<Vec<Vec<f32>>>,
     ) -> Self {
         match (sidecar, vectors) {
-            (Some(sidecar), Some(vectors)) => Confirmer::Sidecar { sidecar, vectors, corpus },
+            (Some(sidecar), Some(vectors)) => Confirmer::Sidecar { sidecar, vectors },
             _ => Confirmer::PerCall { bin, model },
         }
     }
@@ -305,13 +304,13 @@ impl<'a> Confirmer<'a> {
         matches!(self, Confirmer::Sidecar { .. })
     }
 
-    /// Confirmation score of way `id` on the chunk it won. `None` only when the
-    /// per-call subprocess fails.
-    fn confirm(&self, id: &str, won: usize, chunks: &[String], body_path: &Path) -> Option<f64> {
+    /// Confirmation score of way `id` on chunk `won`, where its alias cosine
+    /// was `peak`. `None` only when the per-call subprocess fails.
+    fn confirm(&self, id: &str, won: usize, peak: f64, chunks: &[String], body_path: &Path) -> Option<f64> {
         match self {
-            Confirmer::Sidecar { sidecar, vectors, corpus } => {
+            Confirmer::Sidecar { sidecar, vectors } => {
                 let v = vectors.get(won)?;
-                Some(sidecar_confirm(sidecar, id, v, || sidecar::alias_vector(corpus, id)))
+                Some(sidecar_confirm(sidecar, id, v, peak))
             }
             Confirmer::PerCall { bin, model } => body_confirm(bin, model, &chunks[won..=won], body_path),
         }
@@ -320,11 +319,10 @@ impl<'a> Confirmer<'a> {
 
 /// Stage 5 against the sidecar: the max cosine of the won chunk's vector over
 /// the way's section vectors. A way with no sections confirms against its
-/// alias vector (ADR-701 §6); with neither it scores 0.0 and never fires.
-fn sidecar_confirm(sc: &Sidecar, id: &str, chunk: &[f32], alias: impl FnOnce() -> Option<Vec<f32>>) -> f64 {
-    sc.max_cosine(id, chunk)
-        .or_else(|| alias().filter(|a| a.len() == chunk.len()).map(|a| sidecar::dot(&a, chunk)))
-        .unwrap_or(0.0)
+/// alias vector (ADR-701 §6). Its cosine with the won chunk is the chunk's
+/// match score, which is the way's peak, so no alias vector is read.
+fn sidecar_confirm(sc: &Sidecar, id: &str, chunk: &[f32], peak: f64) -> f64 {
+    sc.max_cosine(id, chunk).unwrap_or(peak)
 }
 
 /// Split the surface into sentence chunks, drop trivially short fragments and
@@ -769,20 +767,19 @@ mod tests {
     fn sidecar_confirm_is_the_max_cosine_over_sections() {
         let sc = sample_sidecar();
         let chunk = [0.6_f32, 0.8, 0.0];
-        let got = sidecar_confirm(&sc, "multi", &chunk, || panic!("a way with sections never reads its alias"));
+        let got = sidecar_confirm(&sc, "multi", &chunk, 0.123);
         assert!((got - 1.4 / 2f64.sqrt()).abs() < 1e-6, "{got}");
         assert!(got >= CONFIRM_GATE);
     }
 
-    /// ADR-701 §6: a way with no sections confirms against its alias vector.
+    /// ADR-701 §6: a way with no sections confirms against its alias vector,
+    /// whose cosine with the won chunk is the way's peak.
     #[test]
-    fn sidecar_confirm_falls_back_to_the_alias_for_a_sectionless_way() {
-        let sc = sample_sidecar();
-        let chunk = [0.6_f32, 0.8, 0.0];
-        let got = sidecar_confirm(&sc, "bare", &chunk, || Some(vec![0.0, 1.0, 0.0]));
-        assert!((got - 0.8).abs() < 1e-6, "{got}");
-        // No alias either: it scores 0 and never fires.
-        assert_eq!(sidecar_confirm(&sc, "bare", &chunk, || None), 0.0);
+    fn sidecar_confirm_falls_back_to_the_peak_for_a_sectionless_way() {
+        let p = Path::new("/nonexistent");
+        let c = Confirmer::new(p, p, Some(sample_sidecar()), Some(vec![vec![0.6, 0.8, 0.0]]));
+        let got = c.confirm("bare", 0, 0.42, &["c0".to_string()], p).unwrap();
+        assert!((got - 0.42).abs() < 1e-12, "{got}");
     }
 
     #[test]
@@ -811,9 +808,9 @@ mod tests {
     fn confirm_scores_the_won_chunks_vector() {
         let p = Path::new("x");
         let vectors = vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 0.0], vec![-1.0, 0.0, 0.0]];
-        let c = Confirmer::new(p, p, p, Some(sample_sidecar()), Some(vectors));
+        let c = Confirmer::new(p, p, Some(sample_sidecar()), Some(vectors));
         let chunks = vec!["c0".to_string(), "c1".to_string(), "c2".to_string()];
-        let on = |won| c.confirm("multi", won, &chunks, p).unwrap();
+        let on = |won| c.confirm("multi", won, 0.0, &chunks, p).unwrap();
         assert!((on(0) - 1.0).abs() < 1e-6);
         assert!((on(1) - 0.5f64.sqrt()).abs() < 1e-6);
         assert!(on(2).abs() < 1e-6, "best of -1, -0.707, 0");
@@ -824,9 +821,9 @@ mod tests {
     #[test]
     fn confirmer_uses_the_sidecar_only_with_vectors() {
         let p = Path::new("x");
-        assert!(Confirmer::new(p, p, p, Some(sample_sidecar()), Some(vec![vec![1.0, 0.0, 0.0]])).uses_sidecar());
-        assert!(!Confirmer::new(p, p, p, Some(sample_sidecar()), None).uses_sidecar());
-        assert!(!Confirmer::new(p, p, p, None, Some(vec![vec![1.0, 0.0, 0.0]])).uses_sidecar());
+        assert!(Confirmer::new(p, p, Some(sample_sidecar()), Some(vec![vec![1.0, 0.0, 0.0]])).uses_sidecar());
+        assert!(!Confirmer::new(p, p, Some(sample_sidecar()), None).uses_sidecar());
+        assert!(!Confirmer::new(p, p, None, Some(vec![vec![1.0, 0.0, 0.0]])).uses_sidecar());
     }
 
     /// ADR-701 §7 through the files a scan reads: the sidecar is used when it

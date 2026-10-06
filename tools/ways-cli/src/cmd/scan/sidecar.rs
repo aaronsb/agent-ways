@@ -292,7 +292,7 @@ impl Sidecar {
     /// has no sections (or no record), so the caller falls back to its alias.
     pub(crate) fn max_cosine(&self, id: &str, v: &[f32]) -> Option<f64> {
         let &(_, row, n) = self.index.get(id)?;
-        if n == 0 || v.len() != self.dim {
+        if n == 0 || self.dim == 0 || v.len() != self.dim {
             return None;
         }
         self.vectors[row * self.dim..(row + n) * self.dim]
@@ -306,16 +306,6 @@ impl Sidecar {
 /// the cosine.
 pub(crate) fn dot(a: &[f32], b: &[f32]) -> f64 {
     a.iter().zip(b).map(|(x, y)| *x as f64 * *y as f64).sum()
-}
-
-/// The alias vector of corpus id `id`, read from the alias corpus at `corpus`.
-/// Only the one line is parsed: this runs for a sectionless survivor, rarely.
-pub(crate) fn alias_vector(corpus: &Path, id: &str) -> Option<Vec<f32>> {
-    let text = std::fs::read_to_string(corpus).ok()?;
-    let key = format!("{{\"id\":{}", serde_json::to_string(id).ok()?);
-    let line = text.lines().find(|l| l.starts_with(&key))?;
-    let row: serde_json::Value = serde_json::from_str(line).ok()?;
-    row.get("embedding")?.as_array()?.iter().map(|x| x.as_f64().map(|f| f as f32)).collect()
 }
 
 #[cfg(test)]
@@ -490,18 +480,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A zero-dimension sidecar that still claims sections (a damaged or
+    /// degenerate build) scores nothing rather than panicking.
     #[test]
-    fn alias_vector_reads_one_line() {
-        let dir = std::env::temp_dir().join(format!("ways-sidecar-av-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let c = dir.join("ways-corpus-en.jsonl");
-        std::fs::write(
-            &c,
-            "{\"id\":\"a/one-more\",\"embedding\":[0.0,1.0]}\n{\"id\":\"a/one\",\"description\":\"d\",\"embedding\":[0.5,0.25]}\n",
-        )
-        .unwrap();
-        assert_eq!(alias_vector(&c, "a/one"), Some(vec![0.5, 0.25]));
-        assert_eq!(alias_vector(&c, "zzz"), None);
-        let _ = std::fs::remove_dir_all(&dir);
+    fn max_cosine_on_a_zero_dimension_sidecar_is_none() {
+        let ways = vec![WaySections { id: "z".into(), hash: 1, vectors: vec![vec![], vec![]] }];
+        let sc = decode(&encode("m", 0, &ways).unwrap()).unwrap();
+        assert!(sc.max_cosine("z", &[]).is_none());
     }
 }
