@@ -152,6 +152,23 @@ Added 2026-10-05 from `experiments/content-corpus/subtree.py` and `results-subtr
 - No region-first method changes how fast top-1 falls as the corpus grows (12.9 points from 34 to 137 ways for flat, 11 to 15 for the others, within noise).
 - The headroom the oracle shows needs a region signal independent of the way scores, such as embedded directory descriptions or a domain classifier. Those were not tested. Regions defined by authored edges were not tested either.
 
+### 10. Body confirmation from section vectors is no worse, and much faster
+
+Added 2026-10-05 from `experiments/content-corpus/confirm.py` and `results-confirm.md`: 310 surfaces of two or three joined golden prompts, run through a Python port of the late-interaction pipeline that matched `ways author match` on 30 sampled surfaces within 0.001 for peak, share and confirm. 424 candidates were admitted: 302 relevant, 106 irrelevant.
+
+| Confirmation | AUC | relevant kept at 0.35 | irrelevant rejected at 0.35 |
+|---|---|---|---|
+| first 8 prose sentences, embedded per call (today) | 0.659 | 0.828 | 0.406 |
+| all heading sections, precomputed | 0.692 | 0.834 | 0.406 |
+| sections, alias vector for a way with none | 0.697 | 0.841 | 0.406 |
+
+- The AUC difference is +0.033 with a 95% bootstrap interval of −0.019 to +0.083: no worse, not shown better. The shipped gate of 0.35 keeps the same balance with sections.
+- Two ways have no sections (`itops/policy`, `softwaredev/code/security/injection`); without the alias fallback their real matches are rejected. On the twelve ways with one section, AUC is 0.589 today and 0.690 with sections.
+- The confirm stage costs a mean of 108 ms per surface today, from about 1.4 `way-embed similarity` subprocesses at 79 ms each. With preloaded section vectors it costs under 1 ms. That saving needs the match pass to return the won chunks' vectors, which `way-embed match` does not do today; without it one embed call per surface remains.
+- Confirmation rejects about 41% of collisions either way. It is a weak filter, and the judge carries most of the precision.
+- Admission let through 302 of the 620 ways the surfaces were built to match. Late-interaction recall on multi-topic surfaces is low, before confirmation runs.
+- Two `way-embed` builds are installed and differ by about 0.002 in cosine: `~/.cache/agent-ways/user/way-embed`, which the scan resolves first, and `~/.claude/bin/way-embed`.
+
 ## Limits
 
 - Prompts are model-written. A labelled set of real prompts from session transcripts was not built; reading transcripts for it needs the operator's explicit approval.
