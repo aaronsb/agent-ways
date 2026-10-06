@@ -155,8 +155,12 @@ pub struct Config {
     /// Default 0.05: a narrow band that captures genuine near-fires without
     /// flooding the log with deep misses.
     pub near_miss_margin: f64,
-    /// Days of history the telemetry event log keeps (ADR-701 §2). Default 90.
+    /// Days an archive of the event or decision log is kept (ADR-701 §2).
+    /// Default 365.
     pub event_retention_days: u32,
+    /// Turns the live decision log holds (ADR-701 §2); older turns move to
+    /// its dated archives. Default 50,000.
+    pub decision_retention_turns: u64,
     /// Refire presets (ADR-126). Each value is a fraction of the session
     /// context window. At fire evaluation time, a way's `refire: <name>`
     /// resolves by looking up the preset here and multiplying by the
@@ -210,6 +214,7 @@ impl Default for Config {
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
             event_retention_days: 365,
+            decision_retention_turns: 50_000,
             refire_presets,
             secret_path_deny: true,
         }
@@ -402,6 +407,9 @@ impl Config {
         }
         if let Some(v) = doc.get("event_retention_days").and_then(|v| v.as_u64()) {
             self.event_retention_days = v as u32; // the schema holds 1..=3650
+        }
+        if let Some(v) = doc.get("decision_retention_turns").and_then(|v| v.as_u64()) {
+            self.decision_retention_turns = v; // the schema holds 1..=10,000,000
         }
         if let Some(m) = doc.get("refire_presets").and_then(|v| v.as_mapping()) {
             for (k, v) in m {
@@ -744,6 +752,26 @@ mod tests {
         let mut bad = Config::default();
         bad.apply_yaml("event_retention_days: 0\n");
         assert_eq!(bad.event_retention_days, 365, "a value outside 1..3650 falls back");
+    }
+
+    #[test]
+    fn decision_retention_defaults_to_fifty_thousand_turns_and_is_settable() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.decision_retention_turns, 50_000);
+        cfg.apply_yaml("decision_retention_turns: 2000\n");
+        assert_eq!(cfg.decision_retention_turns, 2000);
+        for bad_value in ["0", "-5", "10000001", "lots"] {
+            let mut bad = Config::default();
+            bad.apply_yaml(&format!("decision_retention_turns: {bad_value}\n"));
+            assert_eq!(bad.decision_retention_turns, 50_000, "{bad_value} is outside 1..=10,000,000 and falls back");
+        }
+    }
+
+    #[test]
+    fn a_project_file_cannot_set_the_decision_retention() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "decision_retention_turns: 1\n");
+        assert_eq!(cfg.decision_retention_turns, 50_000, "retention is machine-wide, user scope only");
     }
 
     #[test]

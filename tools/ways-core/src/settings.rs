@@ -73,10 +73,10 @@ const SECTIONS: &[SectionSpec] = &[
     SectionSpec {
         name: "ways.log",
         file: FILE,
-        top: &["event_retention_days"],
+        top: &["event_retention_days", "decision_retention_turns"],
         per_entry: false, entry: None, repair: None,
         columns: None,
-        doc: "How long the telemetry event log keeps history.",
+        doc: "How long the event and decision logs keep history.",
     },
     SectionSpec {
         name: "install.targets",
@@ -266,6 +266,17 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("365"),
         doc: "Days an archive file is kept after it is written.",
         long: "Machine-wide, so user scope only: a project file cannot shorten it. The live events.jsonl is bounded by size and by age, and the lines it sheds are written to events-YYYY-MM-DD.jsonl.gz beside it, named for the day of the removal. Archives older than this many days are deleted, at most once a day (ADR-701 §2). Introspection, `ways tune stats` and the tuning passes read the archives as well as the live file. events.jsonl itself is never deleted by this setting. judge_call lines stay in the live file, since `ways agent cost` sums them.",
+        ..BASE
+    },
+    KeySpec {
+        name: "ways.decision_retention_turns",
+        section: "ways.log",
+        path: &["decision_retention_turns"],
+        kind: Kind::Int { min: 1, max: 10_000_000 },
+        scope: Scope::User,
+        default: DefaultValue::Yaml("50000"),
+        doc: "Turns of decision records the live decisions.jsonl holds.",
+        long: "Machine-wide, so user scope only (ADR-701 §2). A turn is a decision record with turn_start true, together with the records after it up to the next one. Once a day, when the live file holds 10% more turns than this, its oldest turns move whole to decisions-YYYY-MM-DD.jsonl.gz beside it and the newest this many stay. Those archives expire under ways.event_retention_days.",
         ..BASE
     },
     KeySpec {
