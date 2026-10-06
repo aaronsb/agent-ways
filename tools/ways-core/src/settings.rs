@@ -348,7 +348,8 @@ fn languages(_layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
 
 /// The domains `ways.disabled_domains` may name: the top-level directories
 /// of the user, shipped and projected ways roots that hold a way, as the
-/// scanner counts one (a `description:` in its frontmatter), and those of
+/// engine counts one (a frontmatter fence; a file- or state-triggered way has
+/// no `description:`), and those of
 /// each project the layers carry (`<project>/.claude/ways.yaml` names its
 /// `.claude/ways/`), since the engine honours a project's own domain there.
 /// So the rule is the layers': a write to a project's file, and a write
@@ -363,7 +364,7 @@ fn domains(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
     }
     let mut found = std::collections::BTreeSet::new();
     for root in roots.iter().filter(|r| r.is_dir()) {
-        for way in crate::scanner::scan_ways(root).unwrap_or_default() {
+        for way in crate::scanner::scan_declared_ways(root) {
             if !way.domain.starts_with('.') {
                 found.insert(way.domain);
             }
