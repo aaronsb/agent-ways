@@ -308,6 +308,15 @@
             "command": "${HOME}/.claude/hooks/ways/issues-pull.sh post-gh"
           }
         ]
+      },
+      {
+        "matcher": "mcp__agent-ways__ways_read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${HOME}/.claude/hooks/ways/check-pull.sh"
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [

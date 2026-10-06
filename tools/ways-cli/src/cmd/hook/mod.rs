@@ -84,6 +84,21 @@ pub fn run(event: HookEvent) -> Result<()> {
             emit(&hook_event, &post_tool::scan(&raw, &session, &project_dir));
             Ok(())
         }
+        Request::Pull { session, id, failed } => {
+            // The calling agent is the payload's `agent_id`, set in the
+            // environment above, so the stamp lands on it and not on main.
+            crate::cmd::show::set_firing_transcript(transcript);
+            use crate::cmd::show::pull;
+            // A read that failed disclosed nothing, so it must not hold back
+            // injection. A refused id stamps nothing. Either is logged, and the
+            // hook prints nothing.
+            if failed {
+                pull::log_refused(&id, &session, "read failed");
+            } else if let Err(e) = pull::stamp(&id, &session) {
+                pull::log_refused(&id, &session, pull::reason_of(&e));
+            }
+            Ok(())
+        }
         Request::Queued { session, transcript } => {
             // Operator messages are queued to the main agent, and a subagent's
             // hook names main's transcript and shares the session's scan mark,
@@ -149,7 +164,7 @@ fn subagent_lane(request: &Request, from_subagent: bool) -> Option<&'static str>
         Request::File { .. } => Some("file"),
         Request::PostTool { .. } => Some("post_tool"),
         Request::Queued { .. } => Some("queued"),
-        Request::Stop { .. } | Request::SessionStart { .. } | Request::TasksActive { .. } | Request::Skip => None,
+        Request::Pull { .. } | Request::Stop { .. } | Request::SessionStart { .. } | Request::TasksActive { .. } | Request::Skip => None,
     }
 }
 
@@ -161,6 +176,7 @@ fn request_session(request: &Request) -> Option<&str> {
         | Request::File { session, .. }
         | Request::Task { session, .. }
         | Request::PostTool { session, .. }
+        | Request::Pull { session, .. }
         | Request::Queued { session, .. }
         | Request::Stop { session, .. }
         | Request::SubagentStart { session }

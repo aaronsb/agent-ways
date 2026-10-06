@@ -7,6 +7,7 @@ pub(crate) mod candidates;
 mod candidate_log;
 mod gate;
 mod late_interaction;
+pub(crate) mod lookup;
 mod lookbehind;
 mod order;
 mod reduce;
@@ -276,15 +277,14 @@ fn scan_prompt_surface(
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
 
+    let competitors = prompt_competitors(&candidates, &scope, &project_dir);
+
     // ADR-701 §2: log the top candidates with share and margin, from the rows
     // the scan already holds. Enabled ways only: `candidates` is already
     // filtered by the domain and per-way toggles.
     {
-        let enabled: std::collections::HashMap<&str, &str> = candidates
-            .iter()
-            .filter(|c| c.embeddable() && eligible(c, Lane::Prompt { scope: &scope }, &project_dir))
-            .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
-            .collect();
+        let enabled: std::collections::HashMap<&str, &str> =
+            competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
         candidate_log::log_scan_candidates(
             &embed_matches,
             &enabled,
@@ -299,7 +299,7 @@ fn scan_prompt_surface(
     // the matcher can't run (surface too sparse to chunk, engine unavailable) it
     // returns None and match_prompt uses the single-vector scores. The keyword
     // gate and near-miss telemetry keep using the single-vector batch scores.
-    let verdicts = late_interaction::run(&reduced, &body_map(candidates.iter().filter(|w| eligible(w, Lane::Prompt { scope: &scope }, &project_dir))));
+    let verdicts = late_interaction::run(&reduced, &body_map(competitors.iter().copied()));
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
     // review): the shared embed vector mixes the response context in, which
@@ -940,6 +940,13 @@ fn eligible(way: &WayCandidate, lane: Lane<'_>, project_dir: &str) -> bool {
         }
     };
     lane_ok && check_when(&way.when_project, &way.when_file_exists, project_dir)
+}
+
+/// The ways a prompt in `scope` competes: embeddable and [`eligible`] on the
+/// prompt lane. The scan's matcher, its logged candidates and a lookup's
+/// search all take their set from here, so none can drift from the others.
+pub(crate) fn prompt_competitors<'a>(candidates: &'a [WayCandidate], scope: &str, project_dir: &str) -> Vec<&'a WayCandidate> {
+    candidates.iter().filter(|c| c.embeddable() && eligible(c, Lane::Prompt { scope }, project_dir)).collect()
 }
 
 /// Map each embeddable candidate's corpus id to its `.md` path, for the
