@@ -172,7 +172,9 @@ pub fn scan(payload: &str, session_id: &str, project_dir: &str) -> String {
     let mut context = String::new();
     let mut budget = ContextBudget::hook();
     for id in requests(&checks, payload, session_id) {
-        let Ok(out) = show::way_scored(&id, session_id, "postcheck", None, None, None, Some(&mut budget)) else {
+        let Ok(show::Shown { body: out, .. }) =
+            show::way_scored(&id, session_id, "postcheck", None, None, None, Some(&mut budget))
+        else {
             continue;
         };
         if !out.is_empty() {

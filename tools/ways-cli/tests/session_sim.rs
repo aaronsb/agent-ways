@@ -1824,3 +1824,269 @@ fn scenario_session_dump_does_not_read_archives_older_than_the_session() {
 
     let _ = std::fs::remove_dir_all(&home);
 }
+
+// ── ADR-701 §2: one decision record per prompt turn ─────────────
+
+/// The `kind: scan` decision records `session` wrote to the fixture home's
+/// decision log, in order.
+fn decision_records(session: &str) -> Vec<serde_json::Value> {
+    let log = fixture_home().join(".local/state/agent-ways/decisions.jsonl");
+    std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["kind"] == "scan" && v["session"] == session)
+        .collect()
+}
+
+/// The `result` the record gives `way`, or "" when it names none.
+fn outcome_of<'r>(record: &'r serde_json::Value, way: &str) -> &'r str {
+    record["outcomes"]
+        .as_array()
+        .and_then(|o| o.iter().find(|e| e["way"] == way))
+        .and_then(|e| e["result"].as_str())
+        .unwrap_or("")
+}
+
+#[test]
+fn scenario_decision_record_names_a_fire_and_a_refire_hold_in_one_turn() {
+    let s = Session::new("decide");
+
+    // Turn 1 fires child (testing).
+    s.scan_prompt("how do I write a unit test for this module");
+    assert_marker_exists("testdomain/parent/child", &s.id);
+
+    // Turn 2 matches child again and child2 for the first time.
+    s.scan_prompt("refactor this unit test and decompose it");
+    assert_epoch(&s.id, 2);
+    assert_marker_exists("testdomain/parent/child2", &s.id);
+
+    let records = decision_records(&s.id);
+    assert_eq!(records.len(), 2, "one record per prompt scan: {records:#?}");
+    let turn2: Vec<&serde_json::Value> = records.iter().filter(|r| r["epoch"] == 2).collect();
+    assert_eq!(turn2.len(), 1, "exactly one record for turn 2: {records:#?}");
+    let r = turn2[0];
+    assert_eq!(r["surface"], "prompt");
+    assert_eq!(r["turn_start"], true);
+    assert_eq!(r["hook_event"], "UserPromptSubmit");
+    assert_eq!(r["agent"], "main");
+    assert_eq!(outcome_of(r, "testdomain/parent/child2"), "fired", "{r:#}");
+    assert_eq!(outcome_of(r, "testdomain/parent/child"), "held_refire", "{r:#}");
+    assert_eq!(outcome_of(&records[0], "testdomain/parent/child"), "fired", "{:#}", records[0]);
+
+    // The record absorbs scan_candidates: the event log no longer carries it.
+    let events = std::fs::read_to_string(fixture_home().join(".local/state/agent-ways/events.jsonl")).unwrap_or_default();
+    assert!(
+        !events.lines().any(|l| l.contains("\"scan_candidates\"") && l.contains(&s.id)),
+        "no scan_candidates event for this session"
+    );
+
+    // The last-scan marker names the turn's record.
+    let marker = std::fs::read_to_string(format!("{}/{}/last-scan", sessions_root(), s.id)).expect("last-scan marker");
+    let m: serde_json::Value = serde_json::from_str(&marker).unwrap();
+    assert_eq!(m["scan_id"], r["scan_id"]);
+    assert_eq!(m["epoch"], 2);
+}
+
+#[test]
+fn scenario_decision_records_count_an_empty_turn_and_a_task_dispatch() {
+    let s = Session::new("decide-empty");
+
+    // A prompt nothing matches is still a turn: one record, no outcomes.
+    let out = s.scan_prompt("what is the weather like on the moon tonight");
+    assert!(out.is_empty(), "nothing fires: {out:?}");
+    let records = decision_records(&s.id);
+    assert_eq!(records.len(), 1, "{records:#?}");
+    assert_eq!((records[0]["epoch"].as_u64(), records[0]["turn_start"].as_bool()), (Some(1), Some(true)));
+    assert_eq!(records[0]["outcomes"], serde_json::json!([]));
+    assert_eq!(records[0]["candidates"], serde_json::json!([]), "keyword-only: no lane ran");
+
+    // A teammate dispatch writes a task record naming what it stashed. It
+    // starts no turn and does not move the last-scan marker.
+    let marker = format!("{}/{}/last-scan", sessions_root(), s.id);
+    let before = std::fs::read_to_string(&marker).expect("last-scan marker");
+    let output = s
+        .cmd()
+        .args([
+            "scan", "task",
+            "--query", "delegate the unit test work to a teammate",
+            "--session", &s.id,
+            "--project", "/tmp/nonexistent-project",
+            "--team", "sim-team",
+        ])
+        .output()
+        .expect("Failed to run ways scan task");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let records = decision_records(&s.id);
+    assert_eq!(records.len(), 2, "one record per scan: {records:#?}");
+    let t = &records[1];
+    assert_eq!((t["surface"].as_str(), t["scope"].as_str(), t["turn_start"].as_bool()), (Some("task"), Some("teammate"), Some(false)));
+    assert_eq!(t["epoch"], 1, "a dispatch is not a turn");
+    assert_eq!(outcome_of(t, "testdomain/scoped-way"), "stashed", "{t:#}");
+    assert_eq!(std::fs::read_to_string(&marker).unwrap(), before, "only a prompt scan is the last scan");
+
+    // A dispatch that matches nothing still writes its one record.
+    let output = s
+        .cmd()
+        .args([
+            "scan", "task",
+            "--query", "what is the weather like on the moon tonight",
+            "--session", &s.id,
+            "--project", "/tmp/nonexistent-project",
+        ])
+        .output()
+        .expect("Failed to run ways scan task");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let records = decision_records(&s.id);
+    assert_eq!(records.len(), 3, "one record per scan: {records:#?}");
+    assert_eq!((records[2]["surface"].as_str(), records[2]["scope"].as_str()), (Some("task"), Some("subagent")));
+    assert_eq!(records[2]["outcomes"], serde_json::json!([]));
+
+    // A message queued mid-turn is scanned on PostToolUse: a prompt-surface
+    // record that starts no turn and becomes the last scan.
+    let transcript = sim_root().join(format!("queued-{}.jsonl", s.id));
+    std::fs::write(
+        &transcript,
+        r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-03T12:00:00Z","content":"also write a unit test"}"#.to_string() + "\n",
+    )
+    .unwrap();
+    let output = s
+        .cmd()
+        .args(["scan", "messages", "--session", &s.id, "--project", "/tmp/nonexistent-project", "--transcript"])
+        .arg(&transcript)
+        .output()
+        .expect("Failed to run ways scan messages");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let records = decision_records(&s.id);
+    assert_eq!(records.len(), 4, "one record per scan: {records:#?}");
+    let q = &records[3];
+    assert_eq!(
+        (q["surface"].as_str(), q["hook_event"].as_str(), q["turn_start"].as_bool(), q["epoch"].as_u64()),
+        (Some("prompt"), Some("PostToolUse"), Some(false), Some(1)),
+        "{q:#}"
+    );
+    assert_eq!(outcome_of(q, "testdomain/parent/child"), "fired", "{q:#}");
+    let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&marker).unwrap()).unwrap();
+    assert_eq!(m["scan_id"], q["scan_id"], "the queued scan is the last scan");
+    assert_ne!(std::fs::read_to_string(&marker).unwrap(), before);
+    let _ = std::fs::remove_file(&transcript);
+}
+
+// ── ADR-701 §2: the record names floor vetoes, near misses and the gate ──
+
+/// Install a stub engine in `engine` (the per-session corpus dir): a
+/// `way-embed` that prints `rows` for `match` and fails everything else, an
+/// English model file, a corpus naming `ids`, and a manifest carrying the
+/// test calibration g(s) = σ(10·s − 2.5).
+#[cfg(unix)]
+fn install_stub_engine(engine: &Path, ids: &[&str], rows: &[(&str, f64)]) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(engine).unwrap();
+    let printed: String = rows.iter().map(|(id, c)| format!("printf '%s\\t%s\\n' '{id}' '{c}'\n")).collect();
+    let stub = engine.join("way-embed");
+    std::fs::write(&stub, format!("#!/bin/sh\n[ \"$1\" = match ] || exit 2\n{printed}")).unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(engine.join("minilm-l6-v2.gguf"), b"stub").unwrap();
+    let corpus: String = ids
+        .iter()
+        .map(|id| format!("{}\n", serde_json::json!({"id": id, "description": "d", "vocabulary": "v", "embed_model": "en"})))
+        .collect();
+    std::fs::write(engine.join("ways-corpus-en.jsonl"), corpus).unwrap();
+    std::fs::write(
+        engine.join("embed-manifest.json"),
+        serde_json::json!({"calibration": {"en": {"a": 10.0, "b": -2.5, "auc": 1.0, "n": 0}}}).to_string(),
+    )
+    .unwrap();
+    // Run the stub once, retrying while the kernel still reports it busy
+    // (ETXTBSY: a child forked by a parallel test thread can hold the write
+    // descriptor until it execs). Once one exec succeeds no writer is left,
+    // so the scans that follow cannot hit it.
+    for attempt in 0.. {
+        match Command::new(&stub).arg("match").output() {
+            Ok(o) => {
+                assert!(o.status.success(), "the stub runs: {o:?}");
+                break;
+            }
+            Err(e) if e.raw_os_error() == Some(26) && attempt < 50 => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Err(e) => panic!("the stub engine does not run: {e}"),
+        }
+    }
+}
+
+/// Write a way at `<root>/<id>/<name>.md` firing on `pattern`, for the
+/// prompt lane and the subagent task lane.
+fn write_lane_way(root: &Path, id: &str, pattern: &str) {
+    let dir = root.join(id);
+    std::fs::create_dir_all(&dir).unwrap();
+    let name = id.rsplit('/').next().unwrap();
+    std::fs::write(
+        dir.join(format!("{name}.md")),
+        format!("---\ndescription: {name} guidance\nvocabulary: {name} words\npattern: {pattern}\nscope: agent, subagent\nrefire: 0.15\n---\n# Marker {id}\n"),
+    )
+    .unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_decision_records_name_floor_vetoes_near_misses_and_the_gate() {
+    let tag = format!("lanes-{}", std::process::id());
+    let home = sim_root().join(format!("home-{tag}"));
+    let _ = std::fs::remove_dir_all(&home);
+    let ways = home.join(".claude/hooks/ways");
+    // `gated` matches the prompt's keyword but scores under the floor
+    // (cosine 0.07 → p ≈ 0.142 < 0.15); `close` has no keyword hit and scores
+    // just under the semantic bar (cosine 0.245 → p ≈ 0.488 < 0.5).
+    write_lane_way(&ways, "lab/gated", r"\bwidget\b");
+    write_lane_way(&ways, "lab/close", r"\bzzzneverzzz\b");
+    let cache = home.join(".cache");
+    install_stub_engine(&cache.join("agent-ways/user"), &["lab/gated", "lab/close"], &[("lab/gated", 0.07), ("lab/close", 0.245)]);
+    // An agent.yaml that does not parse: the gate fails closed and says so.
+    let config = home.join(".config/agent-ways");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join("agent.yaml"), "mode: of\n").unwrap();
+    let state = home.join(".local/state");
+    let session = format!("sim-{tag}");
+    clean_markers(&session);
+
+    let run = |args: &[&str]| {
+        let out = ways_cmd(&home, &cache, &state)
+            .args(args)
+            .args(["--session", &session, "--project", "/tmp/nonexistent-project"])
+            .output()
+            .expect("Failed to run ways scan");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    };
+    run(&["scan", "prompt", "--query", "please build the widget"]);
+    run(&["scan", "task", "--query", "please build the widget"]);
+
+    let records: Vec<serde_json::Value> = std::fs::read_to_string(state.join("agent-ways/decisions.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .filter(|v: &serde_json::Value| v["session"] == session.as_str())
+        .collect();
+    assert_eq!(records.len(), 2, "one record per scan: {records:#?}");
+    for (r, surface) in records.iter().zip(["prompt", "task"]) {
+        assert_eq!(r["surface"], surface);
+        assert_eq!(r["lane"], "en", "{r:#}");
+        let ranked: Vec<&str> = r["candidates"].as_array().unwrap().iter().map(|c| c["way"].as_str().unwrap()).collect();
+        assert_eq!(ranked, ["lab/close", "lab/gated"], "{r:#}");
+        let find = |way: &str| r["outcomes"].as_array().unwrap().iter().find(|o| o["way"] == way).cloned().unwrap_or_else(|| panic!("{way} missing: {r:#}"));
+        let gated = find("lab/gated");
+        assert_eq!((gated["result"].as_str(), gated["matched_span"].as_str(), gated["floor"].as_f64()), (Some("keyword_gated"), Some("widget"), Some(0.15)), "{r:#}");
+        assert!((gated["prob_en"].as_f64().unwrap() - 0.1419).abs() < 1e-3, "{gated}");
+        let close = find("lab/close");
+        assert_eq!((close["result"].as_str(), close["tau_s"].as_f64()), (Some("near_miss"), Some(0.5)), "{r:#}");
+        assert!((close["prob_en"].as_f64().unwrap() - 0.4875).abs() < 1e-3, "{close}");
+        assert!((close["shortfall"].as_f64().unwrap() - 0.0125).abs() < 1e-3, "{close}");
+        assert_eq!(r["outcomes"].as_array().unwrap().len(), 2, "{r:#}");
+    }
+    // The prompt lane's gate failed closed on the config and the record says so.
+    let judge = &records[0]["judge"];
+    assert_eq!(judge["status"], "fallback", "{judge}");
+    assert!(judge["reason"].as_str().unwrap().starts_with("config:"), "{judge}");
+    assert!(records[1].get("judge").is_none(), "the task lane has no judge");
+
+    clean_markers(&session);
+    let _ = std::fs::remove_dir_all(&home);
+}

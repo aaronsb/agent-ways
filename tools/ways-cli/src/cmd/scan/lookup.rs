@@ -1,6 +1,6 @@
 //! scan/lookup.rs — the candidate list behind `ways_search` (ADR-701 §5).
 //!
-//! The same ranking a prompt scan logs as `scan_candidates`: the prompt lane's
+//! The same ranking a prompt scan records as its candidates: the prompt lane's
 //! single-vector rows, restricted to the ways [`eligible`] for the session's
 //! scope, with share and margin as `candidate_log` defines them. A lookup runs
 //! no judge and fires nothing; the agent chose to ask.

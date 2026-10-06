@@ -18,7 +18,7 @@ pub use engagement::{
     first_suppression_in_window, lock_engagement, record_way_fire, way_fire_outcome,
     way_refire_threshold_k, EngagementLock, FireDecision, FireOutcome, REFIRE_FLOOR,
 };
-pub use log::{log_event, log_event_with};
+pub use log::{log_decision, log_event, log_event_with};
 use log::append_jsonl_line;
 
 // ── Session directory ──────────────────────────────────────────
@@ -284,6 +284,22 @@ pub fn bump_epoch(session_id: &str) -> u64 {
     let next = read_u64_path(&path) + 1;
     let _ = std::fs::write(&path, next.to_string());
     next
+}
+
+/// The current agent's last prompt-lane scan: its decision record's `scan_id`
+/// and the epoch it ran in (ADR-701 §2). A later pull in the same turn joins
+/// to that record through it.
+pub fn last_scan_path(session_id: &str) -> PathBuf {
+    agent_state_dir(session_id).join("last-scan")
+}
+
+/// Record the last scan, published whole so a reader never sees half of it.
+/// Best-effort: a failed write loses only the join for this turn.
+pub fn write_last_scan(session_id: &str, scan_id: &str, epoch: u64) {
+    let path = last_scan_path(session_id);
+    ensure_parent(&path);
+    let body = serde_json::json!({ "scan_id": scan_id, "epoch": epoch }).to_string();
+    let _ = agent_settings::writer::write_atomic(&path, body);
 }
 
 /// Stamp when a way was last shown (epoch).

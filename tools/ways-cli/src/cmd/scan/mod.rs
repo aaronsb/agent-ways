@@ -5,6 +5,7 @@
 
 pub(crate) mod candidates;
 mod candidate_log;
+mod decision;
 mod gate;
 mod late_interaction;
 pub(crate) mod sidecar;
@@ -255,11 +256,19 @@ fn scan_prompt_surface(
         .map(|s| s.to_string())
         .unwrap_or_else(crate::util::project_dir);
 
-    if bump_epoch {
-        session::bump_epoch(session_id);
-    }
+    let epoch = if bump_epoch { session::bump_epoch(session_id) } else { session::get_epoch(session_id) };
 
     let scope = session::detect_scope(session_id);
+    // ADR-701 §2: the turn's decision record, written once at the end of the scan.
+    let mut record = decision::Record::begin(&decision::Context {
+        surface: decision::Surface::Prompt,
+        hook_event,
+        scope: &scope,
+        project: &project_dir,
+        session: session_id,
+        epoch,
+        turn_start: bump_epoch,
+    });
     let candidates = collect_candidates(&project_dir);
     let near_miss_margin = crate::config::global().near_miss_margin;
     let keyword_floor = crate::config::global().keyword_floor_probability;
@@ -289,19 +298,14 @@ fn scan_prompt_surface(
     // gate and near-miss telemetry keep using the single-vector batch scores.
     let verdicts = late_interaction::run(&reduced, &body_map(competitors.iter().copied()));
 
-    // ADR-701 §2: log the top candidates with share and margin, from the rows
-    // the scan already holds, and whether confirmation read the body sidecar.
-    // Enabled ways only: `candidates` is already filtered by the domain and
-    // per-way toggles.
+    // ADR-701 §2: record the top candidates with share and margin, from the
+    // rows the scan already holds, and whether confirmation read the body
+    // sidecar. Enabled ways only: `candidates` is already filtered by the
+    // domain and per-way toggles.
     {
         let enabled: std::collections::HashMap<&str, &str> =
             competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
-        candidate_log::log_scan_candidates(
-            &embed_matches,
-            &enabled,
-            verdicts.as_ref().is_some_and(|v| v.used_sidecar()),
-            &[("surface", "prompt"), ("scope", &scope), ("project", &project_dir), ("session", session_id), ("hook_event", hook_event)],
-        );
+        record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
     }
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
@@ -408,9 +412,11 @@ fn scan_prompt_surface(
             }
             PromptMatch::KeywordGated(kg) => {
                 log_keyword_gated(way, &kg, "prompt", &scope, &project_dir, session_id);
+                record_keyword_gated(&mut record, way, &kg);
             }
             PromptMatch::NearMiss(nm) => {
                 log_near_miss(way, &nm, "prompt", &scope, &project_dir, session_id, query);
+                record_near_miss(&mut record, way, &nm);
             }
             PromptMatch::NoMatch => {}
         }
@@ -437,18 +443,11 @@ fn scan_prompt_surface(
         hook_event,
         sink: &session::log_event,
     };
-    let mut blocked = gate::apply(&pending, query, response_context, &gate_log);
+    let mut gate = gate::apply(&pending, query, response_context, &gate_log);
 
-    let mut shown: HashSet<String> = HashSet::new();
-    for hit in &hits {
-        let (channel, matched_span, needs_parent) = &hit.payload;
-        if blocked.contains(&hit.id) {
-            continue;
-        }
-        if *needs_parent && withheld_for_parent(&hit.id, &shown, &pending, &mut blocked, &gate_log) {
-            continue;
-        }
-        let out = capture_show_way(
+    admit_hits(&hits, &mut gate, &pending, &gate_log, &mut record, |hit| {
+        let (channel, matched_span, _) = &hit.payload;
+        let shown = capture_show_way(
             &hit.id,
             session_id,
             channel,
@@ -457,19 +456,59 @@ fn scan_prompt_surface(
             Some(reduced.as_str()),
             Some(&mut budget),
         );
-        if !out.is_empty() {
-            shown.insert(hit.id.clone());
-            context.push_str(&out);
+        let delivered = !shown.body.is_empty();
+        if delivered {
+            context.push_str(&shown.body);
             context.push_str("\n\n");
             budget.charge("\n\n");
         }
-    }
+        (shown.outcome, delivered)
+    });
+    record.write();
 
     if !context.is_empty() {
         emit_hook_context(hook_event, context.trim_end());
     }
 
     Ok(())
+}
+
+/// A prompt-lane hit's payload: the channel that fired it, its matched span,
+/// and whether it fired only on this scan's parent boost.
+type PromptPayload = (String, Option<String>, bool);
+
+/// Admit the prompt lane's hits in order and record what became of each in
+/// the turn's decision record (ADR-701 §2), then how the gate ran. A way the
+/// gate blocked is skipped. A way that fired only on a parent shown in this
+/// scan is withheld when that parent was not shown. Every other way goes to
+/// `show`, which returns what `way_scored` did with it and whether its body
+/// reached the context.
+fn admit_hits(
+    hits: &[Hit<PromptPayload>],
+    gate: &mut gate::Gate,
+    pending: &[gate::Pending<'_>],
+    gate_log: &gate::LogContext<'_>,
+    record: &mut decision::Record,
+    mut show: impl FnMut(&Hit<PromptPayload>) -> (crate::cmd::show::ShowOutcome, bool),
+) {
+    let mut shown: HashSet<String> = HashSet::new();
+    for (i, hit) in hits.iter().enumerate() {
+        let (channel, _, needs_parent) = &hit.payload;
+        let result = if let Some(result) = decision::block_result(&gate.blocked, &hit.id) {
+            result
+        } else if *needs_parent && withheld_for_parent(&hit.id, &shown, pending, &mut gate.blocked, gate_log) {
+            // Withheld with a parent the judge blocked records that block.
+            decision::block_result(&gate.blocked, &hit.id).unwrap_or("withheld_for_parent")
+        } else {
+            let (outcome, delivered) = show(hit);
+            if delivered {
+                shown.insert(hit.id.clone());
+            }
+            outcome.as_str()
+        };
+        record.hit(&hit.id, i + 1, channel, hit.score, result, Some(gate));
+    }
+    record.judge(gate);
 }
 
 // ── Authoring diagnostic (task #5) ─────────────────────────────
@@ -531,7 +570,18 @@ pub fn task(
     // ADR-160: the matcher is the semantic matcher on the task surface too;
     // single-vector is the fail-safe when it can't chunk (see scan::prompt).
     let verdicts = late_interaction::run(&reduced, &body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir))));
-    // ADR-701 §2: the task lane logs its candidates too, over the ways eligible there.
+    // ADR-701 §2: the task lane writes a decision record too, its candidates
+    // drawn from the ways eligible there. A dispatch is not a turn: the epoch
+    // is the dispatching agent's, unbumped.
+    let mut record = decision::Record::begin(&decision::Context {
+        surface: decision::Surface::Task,
+        hook_event: "PreToolUse",
+        scope: task_scope,
+        project: &project_dir,
+        session: session_id,
+        epoch: session::get_epoch(session_id),
+        turn_start: false,
+    });
     {
         let lane = Lane::Task { teammate: is_teammate };
         let enabled: std::collections::HashMap<&str, &str> = candidates
@@ -539,12 +589,7 @@ pub fn task(
             .filter(|c| c.embeddable() && eligible(c, lane, &project_dir))
             .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
             .collect();
-        candidate_log::log_scan_candidates(
-            &embed_matches,
-            &enabled,
-            verdicts.as_ref().is_some_and(|v| v.used_sidecar()),
-            &[("surface", "task"), ("scope", task_scope), ("project", &project_dir), ("session", session_id)],
-        );
+        record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
     }
 
     // Payload: channel. Ordered like the other lanes before the stash is written.
@@ -580,16 +625,30 @@ pub fn task(
             }
             PromptMatch::KeywordGated(kg) => {
                 log_keyword_gated(way, &kg, "task", task_scope, &project_dir, session_id);
+                record_keyword_gated(&mut record, way, &kg);
             }
             PromptMatch::NearMiss(nm) => {
                 log_near_miss(way, &nm, "task", task_scope, &project_dir, session_id, query);
+                record_near_miss(&mut record, way, &nm);
             }
             PromptMatch::NoMatch => {}
         }
     }
 
     order_hits(&mut hits);
-    let matched: Vec<(String, String)> = hits.into_iter().map(|h| (h.id, h.payload)).collect();
+    let stashed = write_stash(&hits, session_id, is_teammate, team);
+    let result = if stashed.is_ok() { "stashed" } else { "error" };
+    for (i, hit) in hits.iter().enumerate() {
+        record.hit(&hit.id, i + 1, &hit.payload, hit.score, result, None);
+    }
+    record.write();
+    stashed
+}
+
+/// Write the task lane's matched ways to a stash file for SubagentStart to
+/// claim. Nothing is written when nothing matched.
+fn write_stash(hits: &[Hit<String>], session_id: &str, is_teammate: bool, team: Option<&str>) -> Result<()> {
+    let matched: Vec<(&str, &str)> = hits.iter().map(|h| (h.id.as_str(), h.payload.as_str())).collect();
 
     // Write stash file if any ways matched
     if !matched.is_empty() {
@@ -599,8 +658,8 @@ pub fn task(
         );
         std::fs::create_dir_all(&stash_dir)?;
 
-        let ways: Vec<&str> = matched.iter().map(|(id, _)| id.as_str()).collect();
-        let channels: Vec<&str> = matched.iter().map(|(_, ch)| ch.as_str()).collect();
+        let ways: Vec<&str> = matched.iter().map(|(id, _)| *id).collect();
+        let channels: Vec<&str> = matched.iter().map(|(_, ch)| *ch).collect();
 
         let stash = serde_json::json!({
             "ways": ways,
@@ -745,7 +804,8 @@ pub fn command(
             span.as_deref(),
             surface,
             Some(&mut budget),
-        );
+        )
+        .body;
         if !out.is_empty() {
             shown.insert(hit.id.clone());
             context.push_str(&out);
@@ -829,7 +889,7 @@ pub fn file(
     }
     order_hits(&mut hits);
     for hit in &hits {
-        let out = capture_show_way(&hit.id, session_id, "file", None, Some(hit.payload.as_str()), None, Some(&mut budget));
+        let out = capture_show_way(&hit.id, session_id, "file", None, Some(hit.payload.as_str()), None, Some(&mut budget)).body;
         if !out.is_empty() {
             context.push_str(&out);
         }
@@ -1161,6 +1221,18 @@ fn log_keyword_gated(
         ("session", session_id),
         ("token_position", &token_pos.to_string()),
     ]);
+}
+
+/// Record a keyword-gated way in the scan's decision record (ADR-701 §2), with
+/// the evidence its `way_keyword_gated` event carries.
+fn record_keyword_gated(record: &mut decision::Record, way: &WayCandidate, kg: &KeywordGated) {
+    record.keyword_gated(&way.id, &kg.matched_span, kg.prob_en, kg.prob_multi, kg.floor);
+}
+
+/// Record a near miss in the scan's decision record (ADR-701 §2), with the
+/// scores its `way_nearmiss` event carries.
+fn record_near_miss(record: &mut decision::Record, way: &WayCandidate, nm: &NearMiss) {
+    record.near_miss(&way.id, nm.prob_en, nm.prob_multi, nm.tau_s, nm.margin);
 }
 
 /// The effective semantic fire probability τ_s for a way at a given moment in a
@@ -1812,6 +1884,79 @@ mod queued_tests {
             assert_eq!(get(child[0], k), "", "{k}");
         }
         assert!(events.iter().all(|e| get(e, "way") != "p/held"));
+    }
+
+    // ── ADR-701 §2: what the prompt lane records for each hit ──
+
+    use crate::cmd::show::ShowOutcome;
+
+    fn hit(id: &str, needs_parent: bool) -> Hit<PromptPayload> {
+        Hit::scored(id, None, ("keyword".to_string(), None, needs_parent))
+    }
+
+    /// Run [`admit_hits`] over `hits` with `gate`, every shown way firing, and
+    /// return the record's outcomes keyed by way, its judge block, and the
+    /// ways `show` was asked for.
+    fn admit(hits: &[Hit<PromptPayload>], mut gate: gate::Gate) -> (serde_json::Value, Vec<String>) {
+        let sink = |_: &[(&str, &str)]| {};
+        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let mut record = decision::Record::for_test();
+        let mut asked = Vec::new();
+        admit_hits(hits, &mut gate, &[], &lc, &mut record, |h| {
+            asked.push(h.id.clone());
+            (ShowOutcome::Fired, true)
+        });
+        (record.to_json(), asked)
+    }
+
+    fn gate_of(verdicts: &[(&str, f64)], mode: ways_agent_core::profile::Mode) -> gate::Gate {
+        let sink = |_: &[(&str, &str)]| {};
+        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        gate::test_gate(verdicts, mode, &lc)
+    }
+
+    fn outcome<'v>(record: &'v serde_json::Value, way: &str) -> &'v serde_json::Value {
+        record["outcomes"].as_array().unwrap().iter().find(|o| o["way"] == way).unwrap_or_else(|| panic!("no outcome for {way}: {record}"))
+    }
+
+    #[test]
+    fn an_enforced_block_is_recorded_and_never_shown_and_a_pass_carries_its_verdict() {
+        let (r, asked) = admit(&[hit("a", false), hit("b", false)], gate_of(&[("a", 0.9), ("b", 0.05)], ways_agent_core::profile::Mode::Enforce));
+        assert_eq!(asked, ["a"], "a blocked way is never shown");
+        let a = outcome(&r, "a");
+        assert_eq!((a["result"].as_str(), a["p_yes"].as_f64(), a["verdict"].as_str(), a["rank"].as_u64()), (Some("fired"), Some(0.9), Some("pass"), Some(1)));
+        let b = outcome(&r, "b");
+        assert_eq!((b["result"].as_str(), b["p_yes"].as_f64(), b["threshold"].as_f64(), b["mode"].as_str()), (Some("judge_block"), Some(0.05), Some(0.3), Some("enforce")));
+        assert_eq!(r["judge"]["status"], "judged");
+    }
+
+    #[test]
+    fn a_shadow_would_block_is_shown_and_recorded_with_its_verdict() {
+        let (r, asked) = admit(&[hit("a", false)], gate_of(&[("a", 0.05)], ways_agent_core::profile::Mode::Shadow));
+        assert_eq!(asked, ["a"]);
+        let a = outcome(&r, "a");
+        assert_eq!((a["result"].as_str(), a["verdict"].as_str()), (Some("fired"), Some("would_block")));
+    }
+
+    #[test]
+    fn a_gate_fallback_shows_every_way_and_names_the_fallback() {
+        let g = gate::Gate { status: gate::Status::Fallback { reason: "deadline".into() }, ..Default::default() };
+        let (r, asked) = admit(&[hit("a", false), hit("b", false)], g);
+        assert_eq!(asked, ["a", "b"]);
+        assert!(["a", "b"].iter().all(|w| outcome(&r, w)["result"] == "fired" && outcome(&r, w).get("verdict").is_none()));
+        assert_eq!(r["judge"], serde_json::json!({"status": "fallback", "reason": "deadline"}));
+    }
+
+    #[test]
+    fn a_child_without_its_parent_is_withheld_and_with_it_is_shown() {
+        let (r, asked) = admit(&[hit("p/c", true)], gate::Gate::default());
+        assert!(asked.is_empty());
+        assert_eq!(outcome(&r, "p/c")["result"], "withheld_for_parent");
+
+        let (r, asked) = admit(&[hit("p", false), hit("p/c", true)], gate::Gate::default());
+        assert_eq!(asked, ["p", "p/c"]);
+        assert_eq!(outcome(&r, "p/c")["result"], "fired");
+        assert_eq!(r["judge"]["status"], "off");
     }
 }
 
