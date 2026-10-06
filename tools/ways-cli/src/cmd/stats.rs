@@ -404,18 +404,13 @@ fn json_value(r: &StatsReport) -> serde_json::Value {
 }
 
 /// The decisions section over the same window and project, `None` when no
-/// decision log exists. With `days`, the turns-per-day calendar is those days
-/// ending today; without, it spans the first to the last day with a turn.
+/// decision log exists.
 fn decisions_section(days: Option<u32>, project_filter: Option<&str>) -> Option<decisions::DecisionsReport> {
     let sources = ways_core::decisions::sources();
     if sources.is_empty() {
         return None;
     }
-    let now = agent_fmt::when::now_secs();
-    let since = days.map(|d| now.saturating_sub(u64::from(d) * 86_400));
-    let window = ways_core::decisions::Window { since: since.map(agent_fmt::when::utc_iso), until: None };
-    // `d` days ending today: today's start, back d-1 days.
-    let span = days.map(|d| ((now / 86_400).saturating_sub(u64::from(d.max(1)) - 1) * 86_400, now));
+    let (window, span) = decisions::days_window(days, agent_fmt::when::now_secs());
     Some(decisions::report(sources, window, project_filter, span))
 }
 

@@ -9,7 +9,7 @@ use agent_fmt::{Align, Table};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use ways_core::decisions::{group, Grouped, Pull, Records, Scan, Turn, Window};
+use ways_core::decisions::{group, Grouped, Join, Joined, Records, Scan, Turn, Window};
 
 const DAY_SECS: u64 = 86_400;
 
@@ -73,16 +73,16 @@ impl JudgeTally {
     }
 }
 
-/// What the window's pulls were. A served pull is a recall miss when no scan
-/// of its turn fired or re-disclosed the way; it is out of band when it came
-/// inside the way's refire window. The two overlap.
+/// What the window's pulls were. A served pull is a recall miss when its
+/// context had not been given the way ([`Join`]); it is out of band when it
+/// came inside the way's refire window. The two overlap.
 #[derive(Default, Clone, PartialEq, Debug)]
 pub(crate) struct PullTally {
     pub(crate) total: u32,
     /// Refused before anything was served: invalid id, disabled, not found.
     pub(crate) refused: u32,
     pub(crate) null_scan_id: u32,
-    /// A `scan_id` that names no scan of an open turn in the window.
+    /// A `scan_id` that names no scan in the window.
     pub(crate) unjoined: u32,
     pub(crate) recall_miss: u32,
     /// The pull's turn had already delivered the way.
@@ -174,48 +174,40 @@ impl Acc<'_> {
             return;
         }
         self.turns += 1;
-        *self.by_day.entry(t.start.ts.get(..10).unwrap_or("").to_string()).or_insert(0) += 1;
+        // A turn whose ts carries no date is counted, but has no day.
+        if let Some(day) = t.start.ts.get(..10).filter(|d| agent_fmt::when::parse_utc_iso(&format!("{d}T00:00:00Z")).is_some()) {
+            *self.by_day.entry(day.to_string()).or_insert(0) += 1;
+        }
         for s in t.all_scans() {
             self.scan(s);
         }
-        for p in &t.pulls {
-            if let Some(p) = self.served(p) {
-                if t.delivered(&p.way) {
-                    self.pulls.delivered += 1;
-                } else {
-                    self.pulls.recall_miss += 1;
-                    *self.miss_by_way.entry(p.way.clone()).or_insert(0) += 1;
-                }
-            }
-        }
     }
 
-    /// A pull with no turn. Its project is unknown, so a project filter leaves it out.
-    fn unjoined(&mut self, p: &Pull) {
-        if self.project.is_some() {
+    /// A pull, as its scan judged it. Its project is the named scan's, so a
+    /// project filter leaves out a pull that named none.
+    fn pull(&mut self, j: &Joined) {
+        if self.project.is_some() && !j.project.as_deref().is_some_and(|p| self.in_project(p)) {
             return;
         }
-        if self.served(p).is_some() {
-            if p.scan_id.is_none() {
-                self.pulls.null_scan_id += 1;
-            } else {
-                self.pulls.unjoined += 1;
-            }
-        }
-    }
-
-    /// Count a pull, and hand it back when it served the way.
-    fn served<'p>(&mut self, p: &'p Pull) -> Option<&'p Pull> {
+        let p = &j.pull;
         self.pulls.total += 1;
         if p.reason.as_deref().is_some_and(|r| r != SERVED_UNSTAMPED) {
             self.pulls.refused += 1;
-            return None;
+            return;
         }
         if p.out_of_band {
             self.pulls.out_of_band += 1;
             *self.oob_by_way.entry(p.way.clone()).or_insert(0) += 1;
         }
-        Some(p)
+        match j.join {
+            Join::Delivered => self.pulls.delivered += 1,
+            Join::RecallMiss => {
+                self.pulls.recall_miss += 1;
+                *self.miss_by_way.entry(p.way.clone()).or_insert(0) += 1;
+            }
+            Join::NoScanId => self.pulls.null_scan_id += 1,
+            Join::Unknown => self.pulls.unjoined += 1,
+        }
     }
 
     fn finish(self, span: Option<(u64, u64)>, records: u32, skipped: u32) -> DecisionsReport {
@@ -271,6 +263,16 @@ fn turns_per_day(by_day: &BTreeMap<String, u32>, span: Option<(u64, u64)>) -> Tu
     TurnsPerDay { days: n as u32, mean, median, p90 }
 }
 
+/// The window and calendar for `--days d` at Unix second `now`: the `d`
+/// calendar days ending today, from the start of the first through `now`, so
+/// every turn the window counts has a day on the calendar. Without `days`,
+/// every record, and a calendar spanning the days that had a turn.
+pub(crate) fn days_window(days: Option<u32>, now: u64) -> (Window, Option<(u64, u64)>) {
+    let Some(d) = days else { return (Window::all(), None) };
+    let start = (now / DAY_SECS).saturating_sub(u64::from(d.max(1)) - 1) * DAY_SECS;
+    (Window { since: Some(agent_fmt::when::utc_iso(start)), until: None }, Some((start, now)))
+}
+
 /// Aggregate the decision records of `sources` in `window`. `span` bounds the
 /// turns-per-day calendar; `None` spans the days that had a turn.
 pub(crate) fn report(sources: Vec<PathBuf>, window: Window, project: Option<&str>, span: Option<(u64, u64)>) -> DecisionsReport {
@@ -291,7 +293,7 @@ pub(crate) fn report(sources: Vec<PathBuf>, window: Window, project: Option<&str
                 }
                 acc.scan(&s);
             }
-            Grouped::Unjoined(p) => acc.unjoined(&p),
+            Grouped::Pull(j) => acc.pull(&j),
         },
     );
     let skipped = records.skipped() as u32;
@@ -401,7 +403,15 @@ fn head_lines(r: &DecisionsReport) -> Vec<String> {
     }
     vec![
         "Decisions (from the decision log):".to_string(),
-        format!("  Turns: {}  |  per day over {} days: mean {:.1}, median {:.1}, p90 {}", r.turns, d.days, d.mean, d.median, d.p90),
+        format!(
+            "  Turns: {}  |  per day over {} day{}: mean {:.1}, median {:.1}, p90 {}",
+            r.turns,
+            d.days,
+            if d.days == 1 { "" } else { "s" },
+            d.mean,
+            d.median,
+            d.p90
+        ),
         scans,
         String::new(),
     ]
@@ -479,10 +489,65 @@ mod tests {
     }
 
     fn run(tag: &str, project: Option<&str>) -> DecisionsReport {
+        run_window(tag, project, Window::all(), None)
+    }
+
+    fn run_window(tag: &str, project: Option<&str>, window: Window, span: Option<(u64, u64)>) -> DecisionsReport {
         let d = fixture(tag);
-        let r = report(ways_core::decisions::sources_in(&d), Window::all(), project, None);
+        let r = report(ways_core::decisions::sources_in(&d), window, project, span);
         let _ = std::fs::remove_dir_all(&d);
         r
+    }
+
+    /// A report over `live` alone, as the live file.
+    fn run_live(tag: &str, live: &[&str]) -> DecisionsReport {
+        let d = std::env::temp_dir().join(format!("ways-stats-decisions-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("decisions.jsonl"), live.join("\n") + "\n").unwrap();
+        let r = report(ways_core::decisions::sources_in(&d), Window::all(), None, None);
+        let _ = std::fs::remove_dir_all(&d);
+        r
+    }
+
+    #[test]
+    fn a_days_window_starts_where_its_calendar_does() {
+        // Two days ending 09-03 09:00: the calendar is 09-02 and 09-03, so the
+        // window starts 09-02 00:00 and leaves out s1's turns of 09-01.
+        let now = agent_fmt::when::parse_utc_iso("2026-09-03T09:00:00Z").unwrap();
+        let (window, span) = days_window(Some(2), now);
+        assert_eq!(window.since.as_deref(), Some("2026-09-02T00:00:00Z"));
+        let r = run_window("days", None, window, span);
+        assert_eq!(r.turns, 1, "b2 only");
+        assert_eq!(r.turns_per_day, TurnsPerDay { days: 2, mean: 0.5, median: 0.5, p90: 1 }, "every counted turn is on the calendar");
+        let (_, one) = days_window(Some(1), now);
+        assert_eq!(one, Some((agent_fmt::when::parse_utc_iso("2026-09-03T00:00:00Z").unwrap(), now)));
+    }
+
+    #[test]
+    fn a_turn_with_no_ts_is_counted_but_does_not_empty_the_calendar() {
+        let live = [
+            r#"{"kind":"scan","scan_id":"z0","session":"s0","agent":"main","turn_start":true,"project":"/p","outcomes":[]}"#,
+            r#"{"ts":"2026-09-01T10:00:00Z","kind":"scan","scan_id":"z1","session":"s1","agent":"main","turn_start":true,"project":"/p","outcomes":[]}"#,
+            r#"{"ts":"2026-09-02T10:00:00Z","kind":"scan","scan_id":"z2","session":"s1","agent":"main","turn_start":true,"project":"/p","outcomes":[]}"#,
+        ];
+        let r = run_live("nots", &live);
+        assert_eq!(r.turns, 3);
+        assert_eq!(r.turns_per_day, TurnsPerDay { days: 2, mean: 1.0, median: 1.0, p90: 1 });
+    }
+
+    #[test]
+    fn a_background_subagent_pull_after_the_next_prompt_is_judged_by_its_dispatch() {
+        let live = [
+            r#"{"ts":"2026-09-01T10:00:00Z","kind":"scan","scan_id":"m1","session":"s","agent":"main","turn_start":true,"project":"/p","outcomes":[{"way":"d/a","result":"fired"}]}"#,
+            r#"{"ts":"2026-09-01T10:00:10Z","kind":"scan","scan_id":"t1","session":"s","agent":"main","turn_start":false,"project":"/p","outcomes":[{"way":"d/y","result":"stashed"}]}"#,
+            r#"{"ts":"2026-09-01T10:01:00Z","kind":"scan","scan_id":"m2","session":"s","agent":"main","turn_start":true,"project":"/p","outcomes":[]}"#,
+            r#"{"ts":"2026-09-01T10:02:00Z","kind":"pull","session":"s","agent":"sub1","way":"d/y","stamped":true,"scan_id":"t1"}"#,
+            r#"{"ts":"2026-09-01T10:02:10Z","kind":"pull","session":"s","agent":"sub1","way":"d/a","stamped":true,"scan_id":"t1"}"#,
+        ];
+        let p = run_live("late", &live).pulls;
+        assert_eq!((p.total, p.delivered, p.recall_miss, p.unjoined), (2, 1, 1, 0));
+        assert_eq!(p.recall_miss_by_way, [("d/a".to_string(), 1)], "sub1 was stashed d/y; d/a only main had");
     }
 
     fn counts(r: &DecisionsReport) -> Vec<(&str, Vec<(&str, u32)>)> {

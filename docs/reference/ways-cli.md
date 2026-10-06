@@ -584,7 +584,7 @@ ways tune stats --global --json
 
 `--json` adds `by_model` (`{model: {fires, redisclosures}}`), `by_way_model` (`{way: {model: fires}}`) and `ways_per_invocation` (`{channel: {invocations, "1", "2", "3", "4+", max}}`).
 
-**Decisions:** a closing section read from the decision log and its archives (ADR-701 §2): turns per day (count, mean, median, p90), outcome counts per way, the judge's pass, block and would-block rates with fallback and capped scans, the near-miss leaders with their mean shortfall, and pulls split into recall misses, out-of-band reads, null `scan_id` and refused. `--json` carries it as `decisions` (`{present, records, skipped_lines, turns, turns_per_day, scans, orphan_scans, by_way: {way: {result: n}}, judge, near_miss_leaders, pulls}`), or `{"present": false}` when there is no decision log. [Stats and observability](../hooks-and-ways/stats.md#the-decisions-section) explains each count.
+**Decisions:** a closing section read from the decision log and its archives (ADR-701 §2): turns per day (count, mean, median, p90), outcome counts per way, the judge's pass, block and would-block rates with fallback and capped scans, the near-miss leaders with their mean shortfall, and pulls split into already delivered, recall misses, out-of-band reads, null `scan_id`, unjoined (naming a scan outside the window) and refused. `--json` carries it as `decisions` (`{present, records, skipped_lines, turns, turns_per_day, scans, orphan_scans, by_way: {way: {result: n}}, judge, near_miss_leaders, pulls}`), or `{"present": false}` when there is no decision log. [Stats and observability](../hooks-and-ways/stats.md#the-decisions-section) explains each count.
 
 ### `ways tune precision`
 
