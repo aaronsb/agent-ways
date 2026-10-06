@@ -95,19 +95,29 @@ pub fn append(dir: &Path, stream: Stream, now: u64, removed: &[u8]) -> std::io::
     if removed.is_empty() {
         return Ok(());
     }
+    append_from(dir, stream, now, &mut &removed[..])
+}
+
+/// [`append`] reading the removed bytes from `removed` as they are
+/// compressed, so a large removal costs buffers and not its size in memory.
+/// The member is written as it is encoded; on any failure, including one
+/// reading `removed`, the archive is cut back to its length before the call.
+pub fn append_from(dir: &Path, stream: Stream, now: u64, removed: &mut dyn Read) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let path = archive_path(dir, stream, now);
     let mut opts = std::fs::OpenOptions::new();
     opts.append(true);
-    let mut f = opts.create(true).open(&path)?;
+    let f = opts.create(true).open(&path)?;
     f.lock()?;
 
     let written = (|| {
-        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        enc.write_all(removed)?;
-        let member = enc.finish()?;
         let before = f.metadata()?.len();
-        let result = f.write_all(&member).and_then(|()| f.sync_all());
+        let result = (|| {
+            let mut enc = flate2::write::GzEncoder::new(std::io::BufWriter::with_capacity(64 * 1024, &f), flate2::Compression::default());
+            std::io::copy(removed, &mut enc)?;
+            enc.finish()?.flush()?;
+            f.sync_all()
+        })();
         if result.is_err() {
             // Cut back our own bytes, under the lock.
             let _ = f.set_len(before);
@@ -272,6 +282,31 @@ mod tests {
         std::fs::create_dir(archive_path(&d, EVENTS, NOW)).unwrap();
         assert!(append(&d, EVENTS, NOW, b"x\n").is_err());
         assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "only the squatting directory is there");
+    }
+
+    /// A source that fails partway leaves the archive as it was: the bytes
+    /// already encoded from it are cut back under the lock.
+    #[test]
+    fn a_source_failing_midway_leaves_the_archive_as_it_was() {
+        struct Failing(usize);
+        impl Read for Failing {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 == 0 {
+                    return Err(std::io::Error::other("source failed"));
+                }
+                let n = buf.len().min(self.0).min(4096);
+                buf[..n].fill(b'x');
+                self.0 -= n;
+                Ok(n)
+            }
+        }
+        let d = dir("source-fail");
+        append(&d, EVENTS, NOW, b"kept\n").unwrap();
+        let before = std::fs::read(archive_path(&d, EVENTS, NOW)).unwrap();
+        assert!(append_from(&d, EVENTS, NOW, &mut Failing(1 << 20)).is_err());
+        assert_eq!(std::fs::read(archive_path(&d, EVENTS, NOW)).unwrap(), before);
+        append_from(&d, EVENTS, NOW, &mut &b"streamed\n"[..]).unwrap();
+        assert_eq!(read_source(&archive_path(&d, EVENTS, NOW)).unwrap(), "kept\nstreamed\n");
     }
 
     #[test]
