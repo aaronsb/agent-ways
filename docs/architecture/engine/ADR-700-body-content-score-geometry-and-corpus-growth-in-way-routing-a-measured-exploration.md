@@ -216,6 +216,8 @@ Added 2026-10-05 from `experiments/content-corpus/recall.py` and `results-recall
 - Only 64% of expected ways are the top-ranked way of their own chunk, so recall above about 0.66 after admission needs better ranking within a chunk, not looser gates.
 - Evidence on prompts that split into several chunks rests on three golden prompts.
 
+Added 2026-10-06 from `experiments/content-corpus/admission_binary.py` and `results-admission-binary.md`: the binary now carries the top-ranked-way mode as `matching.admission: chunk_top`, with `share` the default. Run through `ways author match --json` on the 310 surfaces and the 93 multi-chunk surfaces, the binary and the port give the same admitted and fired sets on all 403 in both modes, and the same body-confirm values within 0.001. Recall after confirm is 0.403 under `share` and 0.503 under `chunk_top`, with 1.51 candidates per surface to the judge (0.46 irrelevant).
+
 ### 13. Scores and the described route do not improve the judge
 
 Added 2026-10-05 from `experiments/content-corpus/judge_ab.py` and `results-judge-ab.md`: 1,840 calls to the production judge (claude-haiku-4-5, temperature 0, the shipped prompt, tool and threshold 0.3), varying only the candidate text. Cost $2.88. Arms: A today's input; B adds share, margin and a band (ADR-700 §4 bounds); C adds the described route (#664's resolution); D adds both.
