@@ -247,7 +247,11 @@ pub fn run(json_output: bool) -> Result<()> {
             println!("Disabled domains: {}", disabled.join(", "));
         }
         if !disabled_ways.is_empty() {
-            println!("Disabled ways:    {} (project scope, ADR-131)", disabled_ways.join(", "));
+            println!("Disabled ways:    {} (project scope, ADR-131; `dir/*` covers every way under it)", disabled_ways.join(", "));
+            let on = crate::config::global().enabled_ways();
+            if !on.is_empty() {
+                println!("Enabled by name:  {} (overrides a disabled prefix, ADR-701)", on.join(", "));
+            }
         }
         if !settings_findings.is_empty() {
             println!("Settings:  {} finding(s); `ways settings lint` lists them, `ways settings fix <section>` repairs one", settings_findings.len());
