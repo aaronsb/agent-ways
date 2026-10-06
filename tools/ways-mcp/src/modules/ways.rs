@@ -16,7 +16,7 @@ impl Module for Ways {
         "The agent-ways server hosts agent-ways modules. `ways_status` reports its version, this session, \
          whether the session was launched with the server's channel flag, and which modules are live. \
          `ways_search`, `ways_read` and `ways_neighbors` look ways up on request: search ranks them for a \
-         query, read returns one and marks it disclosed so injection does not repeat it, neighbors lists \
+         query, read returns one, which the PostToolUse hook then marks disclosed so injection does not repeat it, neighbors lists \
          what surrounds one."
     }
 

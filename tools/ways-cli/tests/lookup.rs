@@ -107,11 +107,6 @@ impl Env {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
-    fn scan_prompt(&self, query: &str) {
-        let project = self.project.to_string_lossy().into_owned();
-        self.cmd(&["scan", "prompt", "--query", query, "--session", &self.session, "--project", project.as_str()]).output().unwrap();
-    }
-
     fn events(&self, event: &str) -> Vec<Value> {
         std::fs::read_to_string(self.state().join("agent-ways/events.jsonl"))
             .unwrap_or_default()

@@ -49,8 +49,8 @@ fn a_lookup_tool_returns_what_ways_lookup_prints() {
         &stub,
         r#"#!/bin/sh
 case "$*" in
-  *" read "*) printf '{"error":"way d/off is disabled"}\n'; exit 1 ;;
-  *) printf '{"lane":"en","candidates":[{"way":"d/w","route":"d > w","cosine":0.5,"share":0.9,"margin":0.1}]}\n' ;;
+  *" read "*) printf '{"contract":1,"error":"way d/off is disabled"}\n'; exit 1 ;;
+  *) printf '{"contract":1,"lane":"en","candidates":[{"way":"d/w","route":"d > w","cosine":0.5,"share":0.9,"margin":0.1}]}\n' ;;
 esac
 "#,
     )
@@ -79,5 +79,39 @@ esac
     assert_eq!(replies[1]["result"]["isError"], true);
     assert_eq!(replies[1]["result"]["structuredContent"]["error"], "way d/off is disabled");
     assert_eq!(replies[2]["result"]["isError"], true, "a missing id never reaches ways");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A `ways` that never answers must not hold the server past the deadline: the
+/// tool call returns an error and a ping sent behind it is answered.
+#[cfg(unix)]
+#[test]
+fn a_hung_lookup_times_out_and_a_ping_behind_it_is_answered() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("ways-mcp-hang-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stub = dir.join("ways");
+    std::fs::write(&stub, "#!/bin/sh\nexec sleep 60\n").unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let started = std::time::Instant::now();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ways-mcp"))
+        .env("WAYS_BIN", &stub)
+        .env("WAYS_MCP_LOOKUP_TIMEOUT_MS", "500")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn ways-mcp");
+    let input = [
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ways_read","arguments":{"id":"d/w"}}}"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
+    ];
+    child.stdin.take().unwrap().write_all((input.join("\n") + "\n").as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(20), "held for {:?}", started.elapsed());
+    let replies: Vec<Value> = String::from_utf8(out.stdout).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(replies[0]["result"]["isError"], true);
+    assert_eq!(replies[0]["result"]["structuredContent"]["error"], "the ways lookup timed out after 0.5s");
+    assert_eq!(replies[1]["id"], 2, "the ping behind it was answered");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -39,7 +39,7 @@ pub fn ensure_enabled() -> Result<()> {
     if crate::cmd::scan::enabled_for(None) {
         Ok(())
     } else {
-        bail!("ways are switched off here: `enabled: false` in this project's `.claude/ways.yaml` or in the user config")
+        bail!("this project has ways switched off: `enabled: false` in its `.claude/ways.yaml` or in the user config")
     }
 }
 
