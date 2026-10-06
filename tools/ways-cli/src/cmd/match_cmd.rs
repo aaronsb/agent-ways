@@ -106,15 +106,19 @@ fn run(query: String) -> Result<()> {
 ///
 /// The ways that compete are those a prompt scan in `agent` scope competes, so the
 /// shares match the live fire path; `unfiltered` competes every way. Admission
-/// follows `matching.admission`, as the live matcher does.
+/// follows `matching.admission` as a scan in `project` would read it (the
+/// current directory's project when none is given).
 ///
 /// `json` prints one object with every candidate, not the top 20: `reduced`,
 /// `admission`, and `rows` of `{id, peak, share, won_chunk, confirm, admitted,
-/// fired}`. When late interaction cannot run it prints `{"reduced": null, ...}`
+/// capped, fired}`. When late interaction cannot run it prints `{"reduced": null, ...}`
 /// with no rows, in place of the single-vector view.
 pub fn run_late(query: String, project: Option<&str>, unfiltered: bool, json: bool) -> Result<()> {
     let top_n = if json { usize::MAX } else { 20 };
-    let admission = crate::config::global().admission;
+    let admission = match project {
+        Some(dir) => crate::config::Config::load(dir).admission,
+        None => crate::config::global().admission,
+    };
     let diag = crate::cmd::scan::diagnose(&query, project, top_n, unfiltered, admission);
     if json {
         let (reduced, rows) = match diag {
@@ -126,7 +130,7 @@ pub fn run_late(query: String, project: Option<&str>, unfiltered: bool, json: bo
             .map(|r| {
                 serde_json::json!({
                     "id": r.id, "peak": r.peak, "share": r.share, "won_chunk": r.won_chunk,
-                    "confirm": r.confirm, "admitted": r.admitted, "fired": r.fired,
+                    "confirm": r.confirm, "admitted": r.admitted, "capped": r.capped, "fired": r.fired,
                 })
             })
             .collect();
@@ -162,13 +166,15 @@ pub fn run_late(query: String, project: Option<&str>, unfiltered: bool, json: bo
     for r in rows {
         let confirm = match r.confirm {
             Some(c) => format!("{c:.3}"),
-            None => "  —  ".to_string(), // below share gate → confirmation not run
+            None => "  —  ".to_string(), // not admitted → confirmation not run
         };
         // Annotate why a candidate did not fire, so authoring is actionable:
-        // not admitted by either gate, vs admitted (share or peak) but the body
-        // failed to corroborate the won chunk.
+        // admitted by neither the rule nor peak, passed but cut by the cap, or
+        // admitted but the body failed to corroborate the won chunk.
         let outcome = if r.fired {
             "fired ✓"
+        } else if r.capped {
+            "< cap"
         } else if !r.admitted {
             "< gate"
         } else {
@@ -183,8 +189,8 @@ pub fn run_late(query: String, project: Option<&str>, unfiltered: bool, json: bo
     }
 
     println!();
-    println!("fired ✓ = cleared both gates · '< share'/'< confirm' = fell short of that gate");
-    println!("(ranked by share, the share-gate quantity; peak is the way's strongest single-chunk cosine)");
+    println!("fired ✓ = admitted and confirmed · '< gate' = neither the admission rule nor peak · '< cap' = cut by the cap of 6 · '< confirm' = the body did not corroborate");
+    println!("(ranked by share, the summed softmax mass per chunk; peak is the way's strongest single-chunk cosine)");
     println!();
     Ok(())
 }

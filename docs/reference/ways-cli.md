@@ -474,10 +474,10 @@ Exit codes: `0` clean, `1` errors found (with `--check`), `2` the invocation was
 | `peak` | The way's strongest single-chunk cosine |
 | `share` | Softmax mass the way won across chunks, which the share gate reads |
 | `confirm` | Best match of the way's own body against the chunk it won (`—` when not admitted) |
-| `outcome` | `fired ✓`, `< gate` (not admitted: neither the admission rule nor peak, or past the cap of 6), or `< confirm` (admitted, but the body did not corroborate) |
+| `outcome` | `fired ✓`, `< gate` (admitted by neither the admission rule nor peak), `< cap` (passed, but cut by the cap of 6, highest peak first), or `< confirm` (admitted, but the body did not corroborate) |
 | `won chunk` | The surface chunk the way matched on |
 
-`--json` prints one object with every candidate rather than the top 20: `reduced`, `admission`, and `rows` of `id`, `peak`, `share`, `won_chunk`, `confirm`, `admitted` and `fired`. When late interaction cannot run, `reduced` is `null` and `rows` is empty.
+`--json` prints one object with every candidate rather than the top 20: `reduced`, `admission`, and `rows` of `id`, `peak`, `share`, `won_chunk`, `confirm`, `admitted`, `capped` and `fired`. Admission follows `matching.admission` as read for `--project`, or for the current directory. When late interaction cannot run, `reduced` is `null` and `rows` is empty.
 
 When the query is too sparse to chunk, or the embedding engine cannot run late interaction, it says so on stderr and prints the single-vector view instead, as the fire path does. There the cosines are mapped through the calibrated logistic `g(s)` and fire when `g(s) ≥ τ_s`; see [the engine reference](../hooks-and-ways/engine-reference.md).
 

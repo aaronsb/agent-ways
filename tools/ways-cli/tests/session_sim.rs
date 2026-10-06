@@ -2091,6 +2091,192 @@ fn scenario_decision_records_name_floor_vetoes_near_misses_and_the_gate() {
     let _ = std::fs::remove_dir_all(&home);
 }
 
+// ── ADR-700 §12: matching.admission reaches both scan lanes ──
+
+/// A stub engine for late interaction: `match --batch` scores each chunk by
+/// its text (a chunk naming Alpha is won by `lab/alpha` at 0.40 against seven
+/// rivals at 0.39 down to 0.33; one naming Beta by `lab/beta` at 0.45 alone),
+/// a chunk naming Gamma scores `lab/g1` to `lab/g8` at 0.60 down to 0.53,
+/// a single-query `match` scores every way at 0, and `similarity --batch`
+/// corroborates every pair at 0.9. `lab/alpha` then wins its chunk with a
+/// share of about 0.09 and a peak of 0.40: below both of today's gates.
+#[cfg(unix)]
+fn install_late_interaction_stub(engine: &Path, ids: &[&str]) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(engine).unwrap();
+    let gamma: String = (1..=8).map(|i| format!("printf '%s\\t%s\\t%s\\n' $i lab/g{i} 0.{}\n", 61 - i)).collect();
+    let rivals: String = (1..=7).map(|i| format!("printf '%s\\t%s\\t%s\\n' $i lab/r{i} 0.{}\n", 40 - i)).collect();
+    let script = format!(
+        "#!/bin/sh\n\
+         case \"$1\" in\n\
+         match)\n\
+           case \" $* \" in *\" --batch \"*)\n\
+             i=0\n\
+             while IFS= read -r line || [ -n \"$line\" ]; do\n\
+               case \"$line\" in\n\
+                 *Alpha*) printf '%s\\t%s\\t%s\\n' $i lab/alpha 0.40\n{rivals};;\n\
+                 *Beta*) printf '%s\\t%s\\t%s\\n' $i lab/beta 0.45 ;;\n\
+                 *Gamma*)\n{gamma};;\n\
+               esac\n\
+               i=$((i+1))\n\
+             done ;;\n\
+           *) for id in {ids}; do printf '%s\\t%s\\n' $id 0.0; done ;;\n\
+           esac ;;\n\
+         similarity) while IFS= read -r line; do echo 0.9; done ;;\n\
+         *) exit 2 ;;\n\
+         esac\n",
+        ids = ids.join(" "),
+    );
+    let stub = engine.join("way-embed");
+    std::fs::write(&stub, script).unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(engine.join("minilm-l6-v2.gguf"), b"stub").unwrap();
+    let corpus: String = ids
+        .iter()
+        .map(|id| format!("{}\n", serde_json::json!({"id": id, "description": "d", "vocabulary": "v", "embed_model": "en"})))
+        .collect();
+    std::fs::write(engine.join("ways-corpus-en.jsonl"), corpus).unwrap();
+    std::fs::write(
+        engine.join("embed-manifest.json"),
+        serde_json::json!({"calibration": {"en": {"a": 10.0, "b": -2.5, "auc": 1.0, "n": 0}}}).to_string(),
+    )
+    .unwrap();
+    for attempt in 0.. {
+        match Command::new(&stub).arg("similarity").stdin(std::process::Stdio::null()).output() {
+            Ok(o) => {
+                assert!(o.status.success(), "the stub runs: {o:?}");
+                break;
+            }
+            Err(e) if e.raw_os_error() == Some(26) && attempt < 50 => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Err(e) => panic!("the stub engine does not run: {e}"),
+        }
+    }
+}
+
+/// `matching.admission` in config.yaml reaches the prompt scan and the task
+/// lane: `lab/alpha` wins its own chunk below the share gate and the peak
+/// co-gate, so it fires on a two-topic surface only under chunk_top.
+#[cfg(unix)]
+#[test]
+fn scenario_admission_setting_reaches_the_prompt_and_task_lanes() {
+    let mut ids = vec!["lab/alpha".to_string(), "lab/beta".to_string()];
+    ids.extend((1..=7).map(|i| format!("lab/r{i}")));
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    for (mode, want) in [("share", false), ("chunk_top", true)] {
+        let tag = format!("admission-{mode}-{}", std::process::id());
+        let home = sim_root().join(format!("home-{tag}"));
+        let _ = std::fs::remove_dir_all(&home);
+        let ways = home.join(".claude/hooks/ways");
+        for id in &ids {
+            write_lane_way(&ways, id, r"\bzzzneverzzz\b");
+        }
+        let cache = home.join(".cache");
+        install_late_interaction_stub(&cache.join("agent-ways/user"), &ids);
+        let config = home.join(".config/agent-ways");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(config.join("config.yaml"), format!("admission: {mode}\n")).unwrap();
+        let state = home.join(".local/state");
+        let session = format!("sim-{tag}");
+        clean_markers(&session);
+        let query = "Please look at the Alpha topic now. Please look at the Beta topic too.";
+        for lane in ["prompt", "task"] {
+            let out = ways_cmd(&home, &cache, &state)
+                .args(["scan", lane, "--query", query, "--session", &session, "--project", "/tmp/nonexistent-project"])
+                .output()
+                .expect("Failed to run ways scan");
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        }
+        let records = decisions_of(&state, &session, "scan");
+        assert_eq!(records.len(), 2, "one record per lane: {records:#?}");
+        for (r, lane) in records.iter().zip(["prompt", "task"]) {
+            assert_eq!(r["surface"], lane);
+            let fired = |way: &str| {
+                r["outcomes"].as_array().unwrap().iter().any(|o| o["way"] == way && o["channel"] == "semantic:late-interaction:en")
+            };
+            assert!(fired("lab/beta"), "{mode} {lane}: beta wins its chunk on share: {r:#}");
+            assert_eq!(fired("lab/alpha"), want, "{mode} {lane}: alpha under {mode}: {r:#}");
+        }
+        clean_markers(&session);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
+/// `ways author match --project X` reads `matching.admission` from X's
+/// `.claude/ways.yaml`, not from the directory it runs in.
+#[cfg(unix)]
+#[test]
+fn scenario_author_match_reads_admission_for_its_project() {
+    let mut ids = vec!["lab/alpha".to_string(), "lab/beta".to_string()];
+    ids.extend((1..=7).map(|i| format!("lab/r{i}")));
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let tag = format!("admission-project-{}", std::process::id());
+    let home = sim_root().join(format!("home-{tag}"));
+    let _ = std::fs::remove_dir_all(&home);
+    let ways = home.join(".claude/hooks/ways");
+    for id in &ids {
+        write_lane_way(&ways, id, r"\bzzzneverzzz\b");
+    }
+    let cache = home.join(".cache");
+    install_late_interaction_stub(&cache.join("agent-ways/user"), &ids);
+    let state = home.join(".local/state");
+    let project = home.join("project-x");
+    std::fs::create_dir_all(project.join(".claude")).unwrap();
+    let query = "Please look at the Alpha topic now. Please look at the Beta topic too.";
+    let alpha = |yaml: &str| {
+        std::fs::write(project.join(".claude/ways.yaml"), yaml).unwrap();
+        let out = ways_cmd(&home, &cache, &state)
+            .args(["author", "match", "--json", "--project", project.to_str().unwrap(), query])
+            .output()
+            .expect("Failed to run ways author match");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let row = v["rows"].as_array().unwrap().iter().find(|r| r["id"] == "lab/alpha").cloned().unwrap_or_else(|| panic!("{v:#}"));
+        (v["admission"].as_str().unwrap().to_string(), row["admitted"].as_bool().unwrap())
+    };
+    assert_eq!(alpha("admission: chunk_top\n"), ("chunk_top".to_string(), true));
+    assert_eq!(alpha("admission: share\n"), ("share".to_string(), false));
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+/// The diagnostic names a way cut by the cap: eight ways peak at 0.53 or
+/// more on one chunk, so all pass the peak co-gate, six survive by peak and the
+/// two lowest read `< cap`, as does `lab/beta`, admitted on share at peak 0.45.
+#[cfg(unix)]
+#[test]
+fn scenario_author_match_labels_a_cap_cut_row() {
+    let ids: Vec<String> = ["lab/beta".to_string()].into_iter().chain((1..=8).map(|i| format!("lab/g{i}"))).collect();
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let tag = format!("admission-cap-{}", std::process::id());
+    let home = sim_root().join(format!("home-{tag}"));
+    let _ = std::fs::remove_dir_all(&home);
+    let ways = home.join(".claude/hooks/ways");
+    for id in &ids {
+        write_lane_way(&ways, id, r"\bzzzneverzzz\b");
+    }
+    let cache = home.join(".cache");
+    install_late_interaction_stub(&cache.join("agent-ways/user"), &ids);
+    let state = home.join(".local/state");
+    let query = "Please look at the Gamma topic now. Please look at the Beta topic too.";
+    let run = |json: bool| {
+        let mut cmd = ways_cmd(&home, &cache, &state);
+        cmd.args(["author", "match", query]);
+        if json {
+            cmd.arg("--json");
+        }
+        let out = cmd.output().expect("Failed to run ways author match");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let v: serde_json::Value = serde_json::from_str(&run(true)).unwrap();
+    let capped: Vec<&str> = v["rows"].as_array().unwrap().iter().filter(|r| r["capped"] == true).map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(capped, ["lab/beta", "lab/g7", "lab/g8"], "{v:#}");
+    let text = run(false);
+    let outcome = |id: &str| text.lines().find(|l| l.trim_start().starts_with(id)).unwrap_or_else(|| panic!("{id}: {text}")).to_string();
+    assert!(outcome("lab/g8").contains("< cap"), "{text}");
+    assert!(outcome("lab/g1").contains("fired"), "{text}");
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 // ── ADR-701 §2: a pull joins the decision record of its turn ──
 
 /// The decision records of one `kind` (`scan` or `pull`) that `session`
