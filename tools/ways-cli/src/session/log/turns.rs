@@ -7,11 +7,17 @@
 //! a turn index (see `cmd::scan::decision::Context`), so turns are counted
 //! from the records alone.
 
-use super::{archive_removed, mark_archive_failed, same_file, Stream};
+use super::{mark_archive_failed, same_file, Stream};
+use std::io::{BufRead, Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 
 /// The marker a turn's first record carries, as `serde_json` writes it. Inside
 /// a string value the quotes are escaped, so a quoted copy never matches.
 const TURN_START: &[u8] = b"\"turn_start\":true";
+
+/// The read buffer of a scan. The scan holds this and a few bytes more,
+/// whatever the file or its longest line.
+const SCAN_BUF: usize = 256 * 1024;
 
 /// Move the oldest turns of the decision log at `path` to the day's archive so
 /// the newest `keep` remain, once the log holds more than `keep` plus 10%. The
@@ -19,40 +25,47 @@ const TURN_START: &[u8] = b"\"turn_start\":true";
 /// least a tenth of the bound, so it is not a daily rewrite for a few turns.
 /// Returns whether anything moved.
 ///
-/// The count is a streamed substring scan, so a day with nothing to trim
-/// costs one read of the file and little memory. The cut falls at the start
-/// of a turn, so a turn is never split. The head is archived, durably, before
-/// the log is replaced; when that fails nothing is removed and today's failure
-/// marker is set. As in [`super::rotate_log_by_age`], one handle serves the
-/// scan, the copy and the carry of appends that land during the rewrite, and a
-/// log replaced meanwhile makes the trim stand down. Callers hold the log lock.
-pub(super) fn trim_to_turns(path: &std::path::Path, stream: Stream, now: u64, keep: u64) -> std::io::Result<bool> {
+/// Everything streams, so memory stays at a few buffers whatever the file's
+/// size. The count is one scan; a trim scans again to find the cut, which falls
+/// at the start of a turn, so a turn is never split. The kept turns are copied
+/// to a temp file beside the log. The head is then archived, durably, straight
+/// from the log; when that fails the temp is dropped, nothing is removed and
+/// today's failure marker is set. Only then does the temp replace the log. As
+/// in [`super::rotate_log_by_age`], one handle serves the scans, the copies and
+/// the carry of appends that land during the rewrite, and a log replaced
+/// meanwhile makes the trim stand down. Callers hold the log lock.
+pub(super) fn trim_to_turns(path: &Path, stream: Stream, now: u64, keep: u64) -> std::io::Result<bool> {
     trim_to_turns_hooked(path, stream, now, keep, &mut || {})
 }
 
-/// [`trim_to_turns`] with `before_publish` run once the survivors are read and
-/// before the file is checked and replaced, for tests that need something to
-/// happen in that window.
-fn trim_to_turns_hooked(path: &std::path::Path, stream: Stream, now: u64, keep: u64, before_publish: &mut dyn FnMut()) -> std::io::Result<bool> {
-    use std::io::{Read, Seek, SeekFrom, Write};
+/// [`trim_to_turns`] with `before_publish` run once the survivors are copied
+/// and before the file is checked and replaced, for tests that need something
+/// to happen in that window.
+fn trim_to_turns_hooked(path: &Path, stream: Stream, now: u64, keep: u64, before_publish: &mut dyn FnMut()) -> std::io::Result<bool> {
     let f = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e),
     };
-    let starts = turn_starts(&f)?;
-    let (count, keep) = (starts.len() as u64, keep.max(1));
+    let (count, keep) = (scan_turn_starts(&f, SCAN_BUF, |_, _| true)?, keep.max(1));
     if count <= keep.saturating_add(keep / 10) {
         return Ok(false);
     }
-    let cut = starts[(count - keep) as usize];
-    (&f).seek(SeekFrom::Start(0))?;
-    let mut head = vec![0; cut as usize];
-    (&f).read_exact(&mut head)?;
+    let mut cut = None;
+    scan_turn_starts(&f, SCAN_BUF, |i, at| {
+        if i == count - keep {
+            cut = Some(at);
+        }
+        cut.is_none()
+    })?;
+    let Some(cut) = cut else { return Ok(false) };
+
     // The kept turns, up to the handle's own length.
-    let (mut out, mut pos) = (Vec::new(), cut);
+    let mut staged = Staged::beside(path)?;
+    (&f).seek(SeekFrom::Start(cut))?;
+    let mut pos = cut;
     loop {
-        pos += (&f).read_to_end(&mut out)? as u64;
+        pos += std::io::copy(&mut &f, &mut staged.file)?;
         if f.metadata()?.len() <= pos {
             break;
         }
@@ -61,37 +74,120 @@ fn trim_to_turns_hooked(path: &std::path::Path, stream: Stream, now: u64, keep: 
     if !same_file(&f, path) {
         return Ok(false);
     }
-    if let Err(e) = archive_removed(path, stream, now, &head) {
-        mark_archive_failed(path.parent().unwrap_or(std::path::Path::new(".")), stream, now);
+    let dir = path.parent().unwrap_or(Path::new("."));
+    (&f).seek(SeekFrom::Start(0))?;
+    if let Err(e) = ways_core::event_archive::append_from(dir, stream, now, &mut (&f).take(cut)) {
+        mark_archive_failed(dir, stream, now);
         return Err(e);
     }
-    agent_settings::writer::write_atomic(path, &out)?;
+    staged.publish(path)?;
     // Records that landed on the old file while the new one was written.
     (&f).seek(SeekFrom::Start(pos))?;
-    let mut gained = Vec::new();
-    (&f).read_to_end(&mut gained)?;
-    if !gained.is_empty() {
-        std::fs::OpenOptions::new().append(true).open(path)?.write_all(&gained)?;
-    }
+    std::io::copy(&mut &f, &mut std::fs::OpenOptions::new().append(true).open(path)?)?;
     Ok(true)
 }
 
-/// The byte offset of every line in `f` that starts a turn, in file order.
-fn turn_starts(f: &std::fs::File) -> std::io::Result<Vec<u64>> {
-    use std::io::{BufRead, Seek, SeekFrom};
+/// Call `visit(i, offset)` for each line of `f` that starts a turn, `i`
+/// counting from 0, until `visit` returns false. Returns how many it visited.
+///
+/// The file is read `buf` bytes at a time and never a line at a time, so a
+/// long or unterminated line costs no more memory than a short one. The last
+/// few bytes of the current line are kept so a marker split across two reads
+/// is still found.
+fn scan_turn_starts(f: &std::fs::File, buf: usize, mut visit: impl FnMut(u64, u64) -> bool) -> std::io::Result<u64> {
+    const N: usize = TURN_START.len();
     (&*f).seek(SeekFrom::Start(0))?;
-    let mut reader = std::io::BufReader::with_capacity(256 * 1024, f);
-    let (mut starts, mut pos, mut line) = (Vec::new(), 0u64, Vec::new());
+    let mut reader = std::io::BufReader::with_capacity(buf, f);
+    let (mut pos, mut line_start, mut found, mut count) = (0u64, 0u64, false, 0u64);
+    // The last N-1 bytes of the current line before this read.
+    let mut tail: Vec<u8> = Vec::with_capacity(2 * N);
     loop {
-        line.clear();
-        let n = reader.read_until(b'\n', &mut line)?;
-        if n == 0 {
-            return Ok(starts);
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            return Ok(count);
         }
-        if line.windows(TURN_START.len()).any(|w| w == TURN_START) {
-            starts.push(pos);
+        let len = chunk.len();
+        let mut i = 0;
+        while i < len {
+            let end = chunk[i..].iter().position(|&b| b == b'\n').map_or(len, |j| i + j + 1);
+            let seg = &chunk[i..end];
+            if !found && marker_in(&tail, seg) {
+                found = true;
+                count += 1;
+                if !visit(count - 1, line_start) {
+                    return Ok(count);
+                }
+            }
+            if seg.ends_with(b"\n") {
+                (line_start, found) = (pos + end as u64, false);
+                tail.clear();
+            } else {
+                tail.extend_from_slice(&seg[seg.len().saturating_sub(N - 1)..]);
+                let excess = tail.len().saturating_sub(N - 1);
+                tail.drain(..excess);
+            }
+            i = end;
         }
-        pos += n as u64;
+        pos += len as u64;
+        reader.consume(len);
+    }
+}
+
+/// Whether the marker lies in `seg`, or across `tail` (the bytes of the same
+/// line just before it) and `seg`.
+fn marker_in(tail: &[u8], seg: &[u8]) -> bool {
+    const N: usize = TURN_START.len();
+    if seg.windows(N).any(|w| w == TURN_START) {
+        return true;
+    }
+    let mut joint = [0u8; 2 * N];
+    let k = seg.len().min(N - 1);
+    joint[..tail.len()].copy_from_slice(tail);
+    joint[tail.len()..tail.len() + k].copy_from_slice(&seg[..k]);
+    joint[..tail.len() + k].windows(N).any(|w| w == TURN_START)
+}
+
+/// A temp file beside the log that becomes the log on [`Staged::publish`] and
+/// is removed if it never does.
+struct Staged {
+    tmp: PathBuf,
+    file: std::fs::File,
+    published: bool,
+}
+
+impl Staged {
+    /// A fresh temp beside `path`, with `path`'s permissions. One trim of a
+    /// stream runs at a time under its lock, so a temp of this name left by an
+    /// earlier crash is stale and is truncated.
+    fn beside(path: &Path) -> std::io::Result<Self> {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let tmp = path.with_file_name(format!(".{name}.{}.trim.tmp", std::process::id()));
+        let file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&tmp)?;
+        if let Ok(meta) = std::fs::metadata(path) {
+            file.set_permissions(meta.permissions())?;
+        }
+        Ok(Staged { tmp, file, published: false })
+    }
+
+    /// Make the temp durable, rename it over `path`, and sync the directory so
+    /// the rename is durable too.
+    fn publish(mut self, path: &Path) -> std::io::Result<()> {
+        self.file.sync_all()?;
+        std::fs::rename(&self.tmp, path)?;
+        self.published = true;
+        #[cfg(unix)]
+        if let Some(dir) = path.parent().and_then(|d| std::fs::File::open(if d.as_os_str().is_empty() { Path::new(".") } else { d }).ok()) {
+            let _ = dir.sync_all();
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Staged {
+    fn drop(&mut self) {
+        if !self.published {
+            let _ = std::fs::remove_file(&self.tmp);
+        }
     }
 }
 
@@ -247,6 +343,66 @@ mod tests {
         assert!(trim_to_turns_hooked(&log, DECISIONS, NOW, KEEP, &mut hook).unwrap());
         assert_eq!(std::fs::read_to_string(&log).unwrap(), turns(5..15) + &late);
         assert_eq!(archived(&dir), turns(0..5));
+    }
+
+    /// Any read size finds the same turn starts at the same offsets, so a
+    /// marker split across two reads, or a line longer than the buffer, still
+    /// counts once.
+    #[test]
+    fn the_scan_finds_the_same_turns_whatever_its_read_size() {
+        let (_dir, log) = state("scan-sizes");
+        let long = format!("{{\"ts\":\"{}\",\"kind\":\"scan\",\"pad\":\"{}\",\"turn_start\":true}}\n", ts(), "y".repeat(5000));
+        let body = format!("{}{long}{}", turns(0..3), (3..6).map(|t| turn(t, t)).collect::<String>());
+        std::fs::write(&log, &body).unwrap();
+        let expected: Vec<(u64, u64)> = body
+            .split_inclusive('\n')
+            .scan(0u64, |at, l| {
+                let start = *at;
+                *at += l.len() as u64;
+                Some((start, l))
+            })
+            .filter(|(_, l)| l.contains("\"turn_start\":true"))
+            .enumerate()
+            .map(|(i, (start, _))| (i as u64, start))
+            .collect();
+        assert_eq!(expected.len(), 7);
+        let f = std::fs::File::open(&log).unwrap();
+        for buf in [1, 2, 7, 16, 17, 18, 100, 4096, SCAN_BUF] {
+            let mut seen = Vec::new();
+            let count = scan_turn_starts(&f, buf, |i, at| {
+                seen.push((i, at));
+                true
+            })
+            .unwrap();
+            assert_eq!((count, &seen), (7, &expected), "read size {buf}");
+        }
+        let mut stopped_at = None;
+        scan_turn_starts(&f, 7, |i, at| {
+            stopped_at = Some((i, at));
+            i < 4
+        })
+        .unwrap();
+        assert_eq!(stopped_at, Some(expected[4]), "the scan stops when the visitor says so");
+    }
+
+    /// The temp the kept turns are copied to never outlives a trim that
+    /// stands down.
+    #[test]
+    fn a_trim_that_stands_down_leaves_no_temp() {
+        let (dir, log) = state("no-temp");
+        std::fs::write(&log, turns(0..15)).unwrap();
+        std::fs::create_dir(archive_path(&dir, DECISIONS, NOW)).unwrap();
+        assert!(trim_to_turns(&log, DECISIONS, NOW, KEEP).is_err());
+        std::fs::remove_dir(archive_path(&dir, DECISIONS, NOW)).unwrap();
+        let replaced = log.clone();
+        let mut hook = move || {
+            std::fs::rename(&replaced, replaced.with_extension("old")).unwrap();
+            std::fs::write(&replaced, turns(0..15)).unwrap();
+        };
+        assert!(!trim_to_turns_hooked(&log, DECISIONS, NOW, KEEP, &mut hook).unwrap(), "the log was replaced meanwhile");
+        let names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(!names.iter().any(|n| n.ends_with(".tmp")), "{names:?}");
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), turns(0..15));
     }
 
     #[test]
