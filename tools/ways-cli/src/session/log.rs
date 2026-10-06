@@ -7,7 +7,7 @@
 //! while they work. Extracted from `session.rs`, which had passed the
 //! 800-line priority threshold, when ADR-701 §2 added a second stream.
 
-use ways_core::event_archive::{Stream, EVENTS};
+use ways_core::event_archive::{Stream, DECISIONS, EVENTS};
 
 /// Append one JSONL record as a single `write` on an `O_APPEND` handle.
 ///
@@ -86,6 +86,22 @@ pub fn log_event_with(fields: &[(&str, &str)], extra: &[(&str, serde_json::Value
     let now = agent_fmt::when::now_secs();
     let rotate = rotation_due_today(EVENTS, now).then(|| crate::config::global().event_retention_days);
     log_event_to(&crate::paths::state_root(), EVENTS, now, rotate, fields, extra);
+}
+
+/// Append one decision record to the decision log
+/// ($XDG_STATE/agent-ways/decisions.jsonl, see paths::decisions_log), as one
+/// line (ADR-701 §2). The record carries its own `ts`. Nothing rotates or
+/// compacts this stream yet: the event log's byte and age policy is not its
+/// policy, and retention counted in turns is a later increment.
+pub fn log_decision(record: &serde_json::Value) {
+    log_decision_to(&crate::paths::state_root(), record);
+}
+
+fn log_decision_to(dir: &std::path::Path, record: &serde_json::Value) {
+    let _ = std::fs::create_dir_all(dir);
+    if let Ok(line) = serde_json::to_string(record) {
+        append_jsonl_line(&dir.join(DECISIONS.live_name()), &line);
+    }
 }
 
 /// Append one event to `stream`'s live file in `dir`, stamped `now`. The file
@@ -1133,6 +1149,27 @@ mod archive_tests {
         assert!(decided.contains("\"event\":\"decided\""), "{decided}");
         assert!(!events.exists(), "nothing reached events.jsonl");
         assert!(dir.join(day_file(&rotate_claim_prefix(DECISIONS), NOW)).exists() && !dir.join(day_file(&rotate_claim_prefix(EVENTS), NOW)).exists());
+    }
+
+    /// A decision record is one whole line in `decisions.jsonl`, appended as
+    /// given, and claims no rotation slot: the event log's policy is not the
+    /// decision log's.
+    #[test]
+    fn a_decision_record_is_appended_whole_and_claims_no_rotation() {
+        let (dir, events) = state("decision");
+        let a = serde_json::json!({"kind": "scan", "scan_id": "a", "outcomes": [{"way": "x", "result": "fired"}]});
+        let b = serde_json::json!({"kind": "scan", "scan_id": "b", "outcomes": []});
+        log_decision_to(&dir, &a);
+        log_decision_to(&dir, &b);
+        let got: Vec<serde_json::Value> = std::fs::read_to_string(dir.join("decisions.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(got, [a, b]);
+        assert!(!events.exists(), "nothing reached events.jsonl");
+        let claims = std::fs::read_dir(&dir).unwrap().flatten().filter(|e| e.file_name() != "decisions.jsonl").count();
+        assert_eq!(claims, 0, "no lock, claim or marker beside the decision log");
     }
 
     /// The per-process day check is per stream. A day far from any real clock
