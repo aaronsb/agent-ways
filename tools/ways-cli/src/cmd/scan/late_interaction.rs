@@ -49,6 +49,7 @@ use std::process::{Command, Stdio};
 
 use super::reduce::split_sentences;
 use super::sidecar::{self, Sidecar};
+pub(crate) use crate::config::Admission;
 
 // ── Hand-set operating points (uncalibrated — task #5 fits these) ──
 /// Per-chunk softmax temperature. Small τ sharpens the competition so a clear
@@ -84,6 +85,7 @@ pub(crate) struct Verdicts {
 }
 
 /// One way's ranking evidence from the chunk-match stage.
+#[derive(Clone)]
 struct Ranked {
     id: String,
     /// Max cosine over chunks (specificity — the way's strongest single match).
@@ -110,9 +112,17 @@ impl Verdicts {
 // ── Authoring diagnostic (task #5 — the late-interaction `ways author match`) ──
 // The gates a way must clear to fire, exposed so the diagnostic can annotate
 // each candidate's outcome the way an author needs to read it.
-pub(crate) const DIAG_SHARE_GATE: f64 = SHARE_GATE;
 pub(crate) const DIAG_PEAK_GATE: f64 = PEAK_GATE;
 pub(crate) const DIAG_CONFIRM_GATE: f64 = CONFIRM_GATE;
+
+/// The admission rule for `mode`, as the diagnostic header and the debug
+/// trace print it.
+pub(crate) fn admission_rule(mode: Admission) -> String {
+    match mode {
+        Admission::Share => format!("share ≥ {SHARE_GATE:.2}"),
+        Admission::ChunkTop => "a chunk's top-ranked way".to_string(),
+    }
+}
 
 /// One candidate's full late-interaction evidence, for the authoring view. Unlike
 /// [`Verdicts`] (fired-only, share-only), this carries the peak, the winning chunk,
@@ -129,7 +139,8 @@ pub(crate) struct DiagRow {
     /// Body cross-similarity of the won chunk against the way's body. `None` when
     /// the way was admitted by neither gate (confirmation is not run for it).
     pub confirm: Option<f64>,
-    /// Admitted into confirmation — cleared the share gate or the peak co-gate.
+    /// Admitted into confirmation: cleared the admission rule or the peak
+    /// co-gate, and within the survivor cap.
     pub admitted: bool,
     /// Cleared admission AND body-confirm — would fire in production.
     pub fired: bool,
@@ -145,6 +156,7 @@ pub(crate) fn run_diagnostic(
     surface: &str,
     bodies: &HashMap<String, PathBuf>,
     top_n: usize,
+    admission: Admission,
 ) -> Option<Vec<DiagRow>> {
     let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
@@ -162,14 +174,15 @@ pub(crate) fn run_diagnostic(
     let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors);
     let per_chunk = mask_to_enabled(matched.per_chunk, bodies);
     let ranked = aggregate(&per_chunk, chunks.len());
+    // The live matcher's survivor set: confirmation runs for these, and a
+    // candidate outside it reports `confirm: None`.
+    let survivors: std::collections::HashSet<String> =
+        admit(ranked.iter().map(Ranked::clone).collect(), &per_chunk, admission).into_iter().map(|r| r.id).collect();
 
     let mut rows = Vec::new();
     for r in ranked.into_iter().take(top_n) {
         let won_chunk = chunks.get(r.peak_chunk).cloned().unwrap_or_default();
-        // Confirmation runs for any admitted candidate — share-gate OR peak co-gate —
-        // matching the live matcher's survivor set; a candidate admitted by neither
-        // reports `confirm: None`.
-        let admitted = r.share >= SHARE_GATE || r.peak >= PEAK_GATE;
+        let admitted = survivors.contains(&r.id);
         let confirm = if admitted {
             bodies.get(&r.id).and_then(|path| confirmer.confirm(&r.id, r.peak_chunk, r.peak, &chunks, path))
         } else {
@@ -182,9 +195,9 @@ pub(crate) fn run_diagnostic(
 }
 
 /// Run the matcher over `surface`. `bodies` maps a way's corpus id to its `.md`
-/// path (for body-confirm). Returns `None` when the matcher cannot run — the
+/// path (for body-confirm); `admission` is the stage-4 rule. Returns `None` when the matcher cannot run — the
 /// caller then falls back to the single-vector semantic gate.
-pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Verdicts> {
+pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: Admission) -> Option<Verdicts> {
     let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
     let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
@@ -219,25 +232,15 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
     // Stages 3+4: peak rank + per-chunk softmax-share, sorted by share desc.
     let ranked = aggregate(&per_chunk, chunks.len());
 
-    // Stage 4 gate: admit a way into confirmation on EITHER a sufficient
-    // softmax-share OR a decisive peak (the peak co-gate — a specific single-chunk
-    // win that share dilution would otherwise suppress on a topic-diverse surface).
-    // Body-confirm (stage 5) then carries precision for the peak-admitted case.
     if dbg {
         eprintln!("LI: top ranked (share, peak, chunk, id):");
         for r in ranked.iter().take(8) {
             eprintln!("  {:.3} share  {:.3} peak  c{}  {}", r.share, r.peak, r.peak_chunk, r.id);
         }
     }
-    let mut survivors: Vec<Ranked> = ranked
-        .into_iter()
-        .filter(|r| r.share >= SHARE_GATE || r.peak >= PEAK_GATE)
-        .collect();
-    // Confirm the strongest evidence first, bounded: peak is the specificity signal,
-    // so peak-admitted candidates are not starved by a share-desc order.
-    survivors.sort_by(|a, b| b.peak.partial_cmp(&a.peak).unwrap_or(std::cmp::Ordering::Equal));
-    survivors.truncate(MAX_WINNERS_TO_CONFIRM);
-    if dbg { eprintln!("LI: {} survivors (share ≥ {SHARE_GATE} OR peak ≥ {PEAK_GATE})", survivors.len()); }
+    // Stage 4 gate: the admission rule or the peak co-gate, by peak, capped.
+    let survivors = admit(ranked, &per_chunk, admission);
+    if dbg { eprintln!("LI: {} survivors ({} OR peak ≥ {PEAK_GATE})", survivors.len(), admission_rule(admission)); }
 
     // Stage 5: confirm each survivor against the chunk it WON (its peak chunk),
     // not the whole surface. Confirming against every surface chunk diluted a way
@@ -453,6 +456,32 @@ fn aggregate(per_chunk: &[Vec<(String, f64)>], n_chunks: usize) -> Vec<Ranked> {
         .collect();
     out.sort_by(|a, b| b.share.partial_cmp(&a.share).unwrap_or(std::cmp::Ordering::Equal));
     out
+}
+
+/// Stage 4 gate: the ways admitted into confirmation, strongest peak first.
+///
+/// A way is admitted on a decisive peak (the peak co-gate: a specific
+/// single-chunk win that share dilution would otherwise suppress on a
+/// topic-diverse surface), or by the `mode` rule:
+/// - [`Admission::Share`]: summed share / n_chunks ≥ [`SHARE_GATE`].
+/// - [`Admission::ChunkTop`]: the way is the top-ranked row of some chunk
+///   (ADR-700 §12). Share divides by the number of chunks, so a chunk's own
+///   winner needs 0.30 of its chunk's mass on two chunks and 0.45 on three;
+///   this rule admits it whatever the chunk count.
+///
+/// Survivors are confirmed strongest evidence first and bounded: peak is the
+/// specificity signal, so peak-admitted candidates are not starved by a
+/// share-desc order. Body confirmation (stage 5) carries precision.
+fn admit(ranked: Vec<Ranked>, per_chunk: &[Vec<(String, f64)>], mode: Admission) -> Vec<Ranked> {
+    let winners: std::collections::HashSet<&str> = per_chunk.iter().filter_map(|c| c.first()).map(|(id, _)| id.as_str()).collect();
+    let by_rule = |r: &Ranked| match mode {
+        Admission::Share => r.share >= SHARE_GATE,
+        Admission::ChunkTop => winners.contains(r.id.as_str()),
+    };
+    let mut survivors: Vec<Ranked> = ranked.into_iter().filter(|r| by_rule(r) || r.peak >= PEAK_GATE).collect();
+    survivors.sort_by(|a, b| b.peak.partial_cmp(&a.peak).unwrap_or(std::cmp::Ordering::Equal));
+    survivors.truncate(MAX_WINNERS_TO_CONFIRM);
+    survivors
 }
 
 /// Stage 5: mean-of-max body cross-similarity. For each surface chunk, take its
@@ -957,6 +986,77 @@ mod tests {
         let ranked = aggregate(&masked, 2);
         let scored = ranked.iter().filter(|r| r.share > 0.0).count();
         assert_eq!(scored, TOP_K_PER_CHUNK, "eight enabled ways compete");
+    }
+
+    fn rows(pairs: &[(&str, f64)]) -> Vec<(String, f64)> {
+        pairs.iter().map(|(i, c)| (i.to_string(), *c)).collect()
+    }
+
+    fn admitted(per_chunk: &[Vec<(String, f64)>], mode: Admission) -> Vec<String> {
+        admit(aggregate(per_chunk, per_chunk.len()), per_chunk, mode).into_iter().map(|r| r.id).collect()
+    }
+
+    /// A two-topic surface. "a" wins chunk 0 against seven close rivals, so its
+    /// mass there is about 0.19 and its share 0.09; its peak is 0.40. "x" wins
+    /// chunk 1 on its own.
+    fn two_topics() -> Vec<Vec<(String, f64)>> {
+        vec![
+            rows(&[("a", 0.40), ("r1", 0.39), ("r2", 0.38), ("r3", 0.37), ("r4", 0.36), ("r5", 0.35), ("r6", 0.34), ("r7", 0.33)]),
+            rows(&[("x", 0.45), ("a", 0.10)]),
+        ]
+    }
+
+    /// ADR-700 §12: a way that wins its own chunk is admitted under chunk_top
+    /// though its share is below the share gate, and is not admitted under share.
+    #[test]
+    fn chunk_top_admits_a_chunk_winner_the_share_gate_drops() {
+        let pc = two_topics();
+        let a = aggregate(&pc, 2).into_iter().find(|r| r.id == "a").unwrap();
+        assert!(a.share < SHARE_GATE && a.peak < PEAK_GATE, "share {} peak {}", a.share, a.peak);
+        assert!(admitted(&pc, Admission::ChunkTop).contains(&"a".to_string()));
+        assert!(!admitted(&pc, Admission::Share).contains(&"a".to_string()));
+    }
+
+    /// chunk_top admits chunk winners only: a runner-up peaking below 0.50 stays
+    /// out, and one peaking at 0.50 or more is admitted by the peak co-gate.
+    #[test]
+    fn chunk_top_keeps_the_peak_co_gate_and_admits_no_runner_up() {
+        let pc = two_topics();
+        let got = admitted(&pc, Admission::ChunkTop);
+        assert_eq!(got, vec!["x".to_string(), "a".to_string()], "winners only, by peak");
+        let mut pc = pc;
+        pc[1] = rows(&[("x", 0.70), ("strong", 0.55)]);
+        let got = admitted(&pc, Admission::ChunkTop);
+        assert_eq!(got, vec!["x".to_string(), "strong".to_string(), "a".to_string()]);
+    }
+
+    /// The cap holds under chunk_top: eight chunk winners, six survivors, the
+    /// six with the highest peaks.
+    #[test]
+    fn chunk_top_holds_the_cap() {
+        let pc: Vec<_> = (0..8).map(|i| rows(&[(&format!("w{i}"), 0.30 + 0.01 * i as f64), ("filler", 0.10)])).collect();
+        let got = admitted(&pc, Admission::ChunkTop);
+        assert_eq!(got.len(), MAX_WINNERS_TO_CONFIRM);
+        assert_eq!(got, ["w7", "w6", "w5", "w4", "w3", "w2"].map(String::from).to_vec());
+    }
+
+    /// Share admission as it was: share ≥ 0.15 or peak ≥ 0.50, by peak, cap 6.
+    /// "s" passes on share, "p" on peak; "a" and "q" on neither.
+    #[test]
+    fn share_admission_is_the_share_or_peak_co_gate() {
+        let pc = vec![
+            rows(&[("s", 0.45), ("q", 0.20)]),
+            rows(&[("s", 0.44), ("p", 0.43), ("q", 0.42)]),
+            rows(&[("a", 0.40), ("r1", 0.39), ("r2", 0.38), ("r3", 0.37), ("r4", 0.36), ("r5", 0.35), ("r6", 0.34), ("p", 0.60)]),
+        ];
+        let ranked = aggregate(&pc, 3);
+        let want: Vec<String> = {
+            let mut v: Vec<&Ranked> = ranked.iter().filter(|r| r.share >= SHARE_GATE || r.peak >= PEAK_GATE).collect();
+            v.sort_by(|a, b| b.peak.partial_cmp(&a.peak).unwrap());
+            v.into_iter().map(|r| r.id.clone()).collect()
+        };
+        assert_eq!(want, vec!["p".to_string(), "s".to_string()]);
+        assert_eq!(admitted(&pc, Admission::Share), want);
     }
 
     #[test]

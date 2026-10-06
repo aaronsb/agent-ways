@@ -64,6 +64,7 @@ const SECTIONS: &[SectionSpec] = &[
             "parent_threshold_multiplier",
             "parent_boost_floor",
             "near_miss_margin",
+            "admission",
             "refire_presets",
         ],
         per_entry: false, entry: None, repair: None,
@@ -243,6 +244,16 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("0.05"),
         doc: "How far below its threshold a score is logged as a near miss.",
         long: "Telemetry only (ADR-134): it never changes firing. The tuning passes read the near-miss events.",
+        ..BASE
+    },
+    KeySpec {
+        name: "matching.admission",
+        section: "matching",
+        path: &["admission"],
+        kind: Kind::Choice(&crate::config::Admission::NAMES),
+        default: DefaultValue::Yaml("share"),
+        doc: "How late interaction admits a way into body confirmation: share or chunk_top.",
+        long: "share admits a way whose summed softmax share over the surface's chunks reaches 0.15. chunk_top admits the top-ranked way of every chunk instead. Both also admit a way whose peak chunk cosine reaches 0.50, keep at most 6 by peak, and body-confirm them (ADR-700 §12). chunk_top is under evaluation (ADR-701 increment 6).",
         ..BASE
     },
     KeySpec {

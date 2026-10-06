@@ -105,10 +105,36 @@ fn run(query: String) -> Result<()> {
 /// production's fail-safe.
 ///
 /// The ways that compete are those a prompt scan in `agent` scope competes, so the
-/// shares match the live fire path; `unfiltered` competes every way.
-pub fn run_late(query: String, project: Option<&str>, unfiltered: bool) -> Result<()> {
-    const TOP_N: usize = 20;
-    let Some((reduced, rows)) = crate::cmd::scan::diagnose(&query, project, TOP_N, unfiltered) else {
+/// shares match the live fire path; `unfiltered` competes every way. Admission
+/// follows `matching.admission`, as the live matcher does.
+///
+/// `json` prints one object with every candidate, not the top 20: `reduced`,
+/// `admission`, and `rows` of `{id, peak, share, won_chunk, confirm, admitted,
+/// fired}`. When late interaction cannot run it prints `{"reduced": null, ...}`
+/// with no rows, in place of the single-vector view.
+pub fn run_late(query: String, project: Option<&str>, unfiltered: bool, json: bool) -> Result<()> {
+    let top_n = if json { usize::MAX } else { 20 };
+    let admission = crate::config::global().admission;
+    let diag = crate::cmd::scan::diagnose(&query, project, top_n, unfiltered, admission);
+    if json {
+        let (reduced, rows) = match diag {
+            Some((reduced, rows)) => (Some(reduced), rows),
+            None => (None, Vec::new()),
+        };
+        let rows: Vec<_> = rows
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id, "peak": r.peak, "share": r.share, "won_chunk": r.won_chunk,
+                    "confirm": r.confirm, "admitted": r.admitted, "fired": r.fired,
+                })
+            })
+            .collect();
+        let out = serde_json::json!({ "reduced": reduced, "admission": admission.as_str(), "rows": rows });
+        println!("{out}");
+        return Ok(());
+    }
+    let Some((reduced, rows)) = diag else {
         eprintln!(
             "late-interaction unavailable for this query (surface too sparse to chunk, \
              or the embedding engine is not set up) — showing the single-vector view.\n"
@@ -119,14 +145,14 @@ pub fn run_late(query: String, project: Option<&str>, unfiltered: bool) -> Resul
     // Hand-format: `agent_fmt::Table` shrinks columns to the terminal width when
     // piped, ellipsizing the scores to `0.5…` — useless for a diagnostic. Fixed
     // columns keep full precision; only the won-chunk (last) column is bounded.
-    let share_gate = crate::cmd::scan::DIAG_SHARE_GATE;
+    let rule = crate::cmd::scan::admission_rule(admission);
     let peak_gate = crate::cmd::scan::DIAG_PEAK_GATE;
     let confirm_gate = crate::cmd::scan::DIAG_CONFIRM_GATE;
     let fired_n = rows.iter().filter(|r| r.fired).count();
 
     println!();
     println!(
-        "late-interaction (ADR-160) · admit: share ≥ {share_gate:.2} OR peak ≥ {peak_gate:.2} · confirm ≥ {confirm_gate:.2} · {fired_n} would fire"
+        "late-interaction (ADR-160) · admit: {rule} OR peak ≥ {peak_gate:.2} · confirm ≥ {confirm_gate:.2} · {fired_n} would fire"
     );
     println!("reduced surface: {reduced}");
     println!();

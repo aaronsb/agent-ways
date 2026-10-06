@@ -507,6 +507,9 @@ enum AuthorCommand {
         /// Compete every way, ignoring scope and `when:` (toggled-off ways stay out)
         #[arg(long)]
         all: bool,
+        /// Print every candidate as one JSON object
+        #[arg(long)]
+        json: bool,
     },
     /// Analyze a progressive-disclosure tree
     Tree {
@@ -1274,7 +1277,7 @@ fn run() -> Result<()> {
             AuthorCommand::Template { path, description, vocabulary, scope, global } => {
                 cmd::template::run(path, description, vocabulary, scope, global)
             }
-            AuthorCommand::Match { query, project, all } => cmd::match_cmd::run_late(query, project.as_deref(), all),
+            AuthorCommand::Match { query, project, all, json } => cmd::match_cmd::run_late(query, project.as_deref(), all, json),
             AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
             AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),

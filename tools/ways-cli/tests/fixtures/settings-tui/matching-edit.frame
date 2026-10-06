@@ -7,8 +7,8 @@ agent-tui frame 100x30
 |│     parent_threshold_multiplier 0.8                 ││also reach.                                │|
 |│     parent_boost_floor        0.3                   ││                                           │|
 |│     near_miss_margin          0.1                   ││A pattern: hit fires only when the         │|
-|│ ▸ refire_presets · setting    value                 ││calibrated probability reaches this floor  │|
-|│                                                     ││(ADR-156). Ways opt out with               │|
+|│     admission                 share                 ││calibrated probability reaches this floor  │|
+|│ ▸ refire_presets · setting    value                 ││(ADR-156). Ways opt out with               │|
 |│                                                     ││pattern_strict: true.                      │|
 |│                                                     ││                                           │|
 |│                                                     ││value    0.15                              │|
@@ -67,12 +67,12 @@ styles
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   2-17  - - BOLD
-  8  18-27  - - DIM
-  8  32-36  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
+  9   2-17  - - BOLD
+  9  18-27  - - DIM
+  9  32-36  - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM

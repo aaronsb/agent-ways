@@ -87,6 +87,37 @@ fn expand_tilde(p: &str) -> PathBuf {
     }
 }
 
+/// How the late-interaction matcher admits a way into body confirmation
+/// (ADR-700 §12). Either way the peak co-gate (peak ≥ 0.50) also admits, the
+/// survivors are taken by peak up to the cap, and body confirmation follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Admission {
+    /// Summed softmax share / n_chunks ≥ 0.15.
+    Share,
+    /// The top-ranked way of any chunk; the share gate does not apply.
+    ChunkTop,
+}
+
+impl Admission {
+    /// The values `matching.admission` takes, as written in config.yaml.
+    pub const NAMES: [&'static str; 2] = ["share", "chunk_top"];
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "share" => Some(Admission::Share),
+            "chunk_top" => Some(Admission::ChunkTop),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Admission::Share => "share",
+            Admission::ChunkTop => "chunk_top",
+        }
+    }
+}
+
 /// Ways configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -155,6 +186,9 @@ pub struct Config {
     /// Default 0.05: a narrow band that captures genuine near-fires without
     /// flooding the log with deep misses.
     pub near_miss_margin: f64,
+    /// How the late-interaction matcher admits ways into body confirmation
+    /// (ADR-700 §12, ADR-701 increment 6). Default [`Admission::Share`].
+    pub admission: Admission,
     /// Days an archive of the event or decision log is kept (ADR-701 §2).
     /// Default 365.
     pub event_retention_days: u32,
@@ -213,6 +247,7 @@ impl Default for Config {
             semantic_fire_probability: 0.5,
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
+            admission: Admission::Share,
             event_retention_days: 365,
             decision_retention_turns: 50_000,
             refire_presets,
@@ -405,6 +440,9 @@ impl Config {
         if let Some(v) = doc.get("near_miss_margin").and_then(|v| v.as_f64()) {
             self.near_miss_margin = v;
         }
+        if let Some(v) = doc.get("admission").and_then(|v| v.as_str()).and_then(Admission::parse) {
+            self.admission = v;
+        }
         if let Some(v) = doc.get("event_retention_days").and_then(|v| v.as_u64()) {
             self.event_retention_days = v as u32; // the schema holds 1..=3650
         }
@@ -567,6 +605,7 @@ mod tests {
         assert_eq!(cfg.parent_boost_floor, 0.30);
         assert_eq!(cfg.semantic_fire_probability, 0.5);
         assert_eq!(cfg.keyword_floor_probability, 0.15);
+        assert_eq!(cfg.admission, Admission::Share);
         assert_eq!(cfg.refire_presets.get("once").copied(), Some(1.0));
         assert_eq!(cfg.refire_presets.get("rare").copied(), Some(0.4));
         assert_eq!(cfg.refire_presets.get("normal").copied(), Some(0.15));
@@ -618,6 +657,17 @@ mod tests {
         assert_eq!(cfg.semantic_fire_probability, 0.6);
         assert_eq!(cfg.keyword_floor_probability, 0.2);
         assert_eq!(cfg.parent_boost_floor, 0.25);
+    }
+
+    #[test]
+    fn admission_reads_chunk_top_and_a_bad_value_falls_the_section_back() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("admission: chunk_top\n");
+        assert_eq!(cfg.admission, Admission::ChunkTop);
+        let mut cfg = Config::default();
+        cfg.apply_yaml("admission: top1\nnear_miss_margin: 0.1\n");
+        assert_eq!(cfg.admission, Admission::Share, "an unknown mode is refused by the schema");
+        assert_eq!(cfg.near_miss_margin, 0.05, "with the rest of the matching section");
     }
 
     #[test]

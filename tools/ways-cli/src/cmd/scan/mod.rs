@@ -299,7 +299,7 @@ fn scan_prompt_surface(
     // the matcher can't run (surface too sparse to chunk, engine unavailable) it
     // returns None and match_prompt uses the single-vector scores. The keyword
     // gate and near-miss telemetry keep using the single-vector batch scores.
-    let verdicts = late_interaction::run(&reduced, &body_map(competitors.iter().copied()));
+    let verdicts = late_interaction::run(&reduced, &body_map(competitors.iter().copied()), crate::config::global().admission);
 
     // ADR-701 §2: record the top candidates with share and margin, from the
     // rows the scan already holds, and whether confirmation read the body
@@ -516,7 +516,7 @@ fn admit_hits(
 
 // ── Authoring diagnostic (task #5) ─────────────────────────────
 
-pub(crate) use late_interaction::{chunk_sections, DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE, DIAG_SHARE_GATE};
+pub(crate) use late_interaction::{admission_rule, chunk_sections, Admission, DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE};
 
 /// Run the late-interaction matcher over `query` for way authoring — the modern
 /// equivalent of the single-vector `ways author match`. Reduces the query exactly as the
@@ -529,13 +529,13 @@ pub(crate) use late_interaction::{chunk_sections, DiagRow, DIAG_CONFIRM_GATE, DI
 /// The competing set is the one a prompt scan in `agent` scope uses (toggles,
 /// scope and `when:` against `project`), so the shares match the live fire path.
 /// `unfiltered` competes every candidate instead, for seeing how a way would rank
-/// among all of them.
-pub fn diagnose(query: &str, project: Option<&str>, top_n: usize, unfiltered: bool) -> Option<(String, Vec<DiagRow>)> {
+/// among all of them. `admission` is the stage-4 rule the live matcher would use.
+pub fn diagnose(query: &str, project: Option<&str>, top_n: usize, unfiltered: bool, admission: Admission) -> Option<(String, Vec<DiagRow>)> {
     let project_dir = project.map(|s| s.to_string()).unwrap_or_else(crate::util::project_dir);
     let candidates = collect_candidates(&project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
     let bodies = body_map(diag_candidates(&candidates, &project_dir, unfiltered).into_iter());
-    let rows = late_interaction::run_diagnostic(&reduced, &bodies, top_n)?;
+    let rows = late_interaction::run_diagnostic(&reduced, &bodies, top_n, admission)?;
     Some((reduced, rows))
 }
 
@@ -572,7 +572,11 @@ pub fn task(
     let masked = mask_nonlinguistic(query);
     // ADR-160: the matcher is the semantic matcher on the task surface too;
     // single-vector is the fail-safe when it can't chunk (see scan::prompt).
-    let verdicts = late_interaction::run(&reduced, &body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir))));
+    let verdicts = late_interaction::run(
+        &reduced,
+        &body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir))),
+        crate::config::global().admission,
+    );
     // ADR-701 §2: the task lane writes a decision record too, its candidates
     // drawn from the ways eligible there. A dispatch is not a turn: the epoch
     // is the dispatching agent's, unbumped.

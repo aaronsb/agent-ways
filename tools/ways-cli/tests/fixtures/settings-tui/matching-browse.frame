@@ -5,10 +5,10 @@ agent-tui frame 100x30
 |│     semantic_fire_probability 0.5                   ││                                           │|
 |│     keyword_floor_probability 0.15                  ││The tab's own keys.                        │|
 |│     parent_threshold_multiplier 0.8                 ││                                           │|
-|│     parent_boost_floor        0.3                   ││5 entries, 0 changed                       │|
+|│     parent_boost_floor        0.3                   ││6 entries, 0 changed                       │|
 |│     near_miss_margin          0.1                   ││                                           │|
+|│     admission                 share                 ││                                           │|
 |│ ▸ refire_presets · setting    value                 ││                                           │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -67,12 +67,12 @@ styles
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   2-17  - - BOLD
-  8  18-27  - - DIM
-  8  32-36  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
+  9   2-17  - - BOLD
+  9  18-27  - - DIM
+  9  32-36  - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
