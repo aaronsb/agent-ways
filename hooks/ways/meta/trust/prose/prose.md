@@ -61,4 +61,4 @@ Two passes, in this order:
 - trust(meta) — the relational model this posture derives from
 - trust/voice(meta) — whose voice to write in, a separate question from how it reads
 - writing(writing) — structure, audience, and format for content creation
-- `documentation/markdown/density` — the postcheck that counts what you just wrote
+- markdown/density(documentation) — the postcheck that counts what you just wrote
