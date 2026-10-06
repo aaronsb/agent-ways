@@ -36,6 +36,13 @@ pub(super) struct Candidate {
 /// bare id and is the only set that competes. Ties order by id so the output is
 /// stable.
 pub(super) fn top_candidates(rows: &[(String, f64)], enabled: &HashMap<&str, &str>) -> Vec<Candidate> {
+    ranked_candidates(rows, enabled, LOGGED)
+}
+
+/// The top `limit` enabled candidates, with share and margin defined as in
+/// [`top_candidates`]: the softmax and the margin never depend on `limit`, so a
+/// lookup that asks for more rows reads the same measures the log records.
+pub(super) fn ranked_candidates(rows: &[(String, f64)], enabled: &HashMap<&str, &str>, limit: usize) -> Vec<Candidate> {
     let mut best: HashMap<&str, f64> = HashMap::new();
     for (id, cos) in rows {
         if let Some(way) = enabled.get(id.as_str()) {
@@ -53,7 +60,7 @@ pub(super) fn top_candidates(rows: &[(String, f64)], enabled: &HashMap<&str, &st
     ranked
         .iter()
         .enumerate()
-        .take(LOGGED)
+        .take(limit)
         .map(|(i, (way, cos))| Candidate {
             way: (*way).to_string(),
             cosine: *cos,

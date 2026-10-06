@@ -216,6 +216,26 @@ Added 2026-10-05 from `experiments/content-corpus/recall.py` and `results-recall
 - Only 64% of expected ways are the top-ranked way of their own chunk, so recall above about 0.66 after admission needs better ranking within a chunk, not looser gates.
 - Evidence on prompts that split into several chunks rests on three golden prompts.
 
+### 13. Scores and the described route do not improve the judge
+
+Added 2026-10-05 from `experiments/content-corpus/judge_ab.py` and `results-judge-ab.md`: 1,840 calls to the production judge (claude-haiku-4-5, temperature 0, the shipped prompt, tool and threshold 0.3), varying only the candidate text. Cost $2.88. Arms: A today's input; B adds share, margin and a band (ADR-700 §4 bounds); C adds the described route (#664's resolution); D adds both.
+
+| Set | Arm | AUC | irrelevant rejected at 0.3 | relevant lost at 0.3 |
+|---|---|---|---|---|
+| golden, 254 relevant / 724 irrelevant | A | 0.980 | 74.3% | 0.8% |
+| | B | 0.984 | 73.2% | 0.0% |
+| | C | 0.968 | 72.8% | 1.6% |
+| | D | 0.976 | 73.6% | 0.4% |
+| earlier probe's labelled real fires, 52 / 87 | A | 0.899 | 74.7% | 7.7% |
+| | B | 0.922 | 74.7% | 5.8% |
+| | C | 0.902 | 64.4% | 5.8% |
+| | D | 0.913 | 73.6% | 9.6% |
+
+- No arm rejects more irrelevant candidates than today's input. B is the only arm with a consistent small upside (fewer relevant lost; AUC +0.023 on real fires, interval −0.001 to +0.052).
+- The described route lowers AUC on the golden set (−0.012, interval −0.021 to −0.004) and rejects 10.3 points fewer irrelevant real fires (interval −18.2 to −2.4), repeating the earlier probe's finding against ancestor descriptions.
+- The judge does not echo the band: its verdict agrees with the band 68.9% of the time with the band shown and 69.7% without.
+- Today's input already scores 0.980 AUC on the golden set, which leaves little room. The real-fire set is small and model-labelled; candidates were the top 3 by cosine, not production's admitted set.
+
 ## Limits
 
 - Prompts are model-written. A labelled set of real prompts from session transcripts was not built; reading transcripts for it needs the operator's explicit approval.

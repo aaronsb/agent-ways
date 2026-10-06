@@ -10,6 +10,7 @@ pub mod judge;
 pub mod language;
 pub mod lint;
 pub mod list;
+pub mod lookup;
 pub mod manifest;
 pub mod match_cmd;
 pub mod memory_seed;

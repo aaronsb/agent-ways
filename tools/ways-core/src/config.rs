@@ -209,7 +209,7 @@ impl Default for Config {
             semantic_fire_probability: 0.5,
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
-            event_retention_days: 90,
+            event_retention_days: 365,
             refire_presets,
             secret_path_deny: true,
         }
@@ -236,10 +236,18 @@ impl Config {
     /// shorter one. So `a/b/*: false` with `a/b/c: true` leaves `a/b/c` on.
     /// A way with no toggle is on.
     pub fn way_disabled(&self, way_id: &str) -> bool {
-        way_toggled_off(
+        self.disabling_toggle(way_id).is_some()
+    }
+
+    /// The toggle key that switches `way_id` off, by the rule of
+    /// [`Config::way_disabled`]; `None` when the way is on. Callers that tell
+    /// the operator why a way is refused name this key.
+    pub fn disabling_toggle(&self, way_id: &str) -> Option<&str> {
+        winning_toggle(
             self.enabled_ways.iter().map(|k| (k.as_str(), true)).chain(self.disabled_ways.iter().map(|k| (k.as_str(), false))),
             way_id,
         )
+        .and_then(|(key, enabled)| (!enabled).then_some(key))
     }
 
     /// The effective projection targets (ADR-184). With no `targets` key the
@@ -460,7 +468,12 @@ impl Config {
 /// and every way under it. No matching toggle leaves the way on. The settings
 /// screens call this too, so what they show is what a session does.
 pub fn way_toggled_off<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> bool {
-    let mut best: Option<(usize, bool)> = None; // (specificity, disabled)
+    winning_toggle(toggles, way_id).is_some_and(|(_, enabled)| !enabled)
+}
+
+/// The most specific toggle covering `way_id`, as `(key, enabled)`.
+fn winning_toggle<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> Option<(&'a str, bool)> {
+    let mut best: Option<(usize, &'a str, bool)> = None; // (specificity, key, enabled)
     for (key, enabled) in toggles {
         let rank = match key.strip_suffix("/*") {
             None if key == way_id => usize::MAX,
@@ -468,11 +481,11 @@ pub fn way_toggled_off<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_i
             Some(dir) if way_id == dir || (way_id.len() > dir.len() + 1 && way_id.starts_with(dir) && way_id.as_bytes()[dir.len()] == b'/') => dir.len(),
             Some(_) => continue,
         };
-        if best.is_none_or(|(r, _)| rank > r) {
-            best = Some((rank, !enabled));
+        if best.is_none_or(|(r, _, _)| rank > r) {
+            best = Some((rank, key, enabled));
         }
     }
-    best.is_some_and(|(_, disabled)| disabled)
+    best.map(|(_, key, enabled)| (key, enabled))
 }
 
 fn home_dir() -> PathBuf {
@@ -723,21 +736,21 @@ mod tests {
     }
 
     #[test]
-    fn event_retention_defaults_to_ninety_days_and_is_settable() {
+    fn event_retention_defaults_to_a_year_and_is_settable() {
         let mut cfg = Config::default();
-        assert_eq!(cfg.event_retention_days, 90);
+        assert_eq!(cfg.event_retention_days, 365);
         cfg.apply_yaml("event_retention_days: 30\n");
         assert_eq!(cfg.event_retention_days, 30);
         let mut bad = Config::default();
         bad.apply_yaml("event_retention_days: 0\n");
-        assert_eq!(bad.event_retention_days, 90, "a value outside 1..3650 falls back");
+        assert_eq!(bad.event_retention_days, 365, "a value outside 1..3650 falls back");
     }
 
     #[test]
     fn a_project_file_cannot_set_the_event_retention() {
         let mut cfg = Config::default();
         apply_project(&mut cfg, "event_retention_days: 1\n");
-        assert_eq!(cfg.event_retention_days, 90, "retention is machine-wide, user scope only");
+        assert_eq!(cfg.event_retention_days, 365, "retention is machine-wide, user scope only");
     }
 
     #[test]
@@ -745,6 +758,19 @@ mod tests {
         let cfg = project_cfg("ways:\n  a/b/*: false\n  a/b: true\n");
         assert!(!cfg.way_disabled("a/b"));
         assert!(cfg.way_disabled("a/b/c"));
+    }
+
+    #[test]
+    fn disabling_toggle_names_the_key_that_wins() {
+        let cfg = project_cfg("ways:\n  a/*: false\n  a/b/*: false\n  a/b/c: false\n  a/b/d: true\n");
+        assert_eq!(cfg.disabling_toggle("a/b/c"), Some("a/b/c"), "the way's own toggle is the most specific");
+        assert_eq!(cfg.disabling_toggle("a/b/x"), Some("a/b/*"), "the longer prefix beats the shorter");
+        assert_eq!(cfg.disabling_toggle("a/z"), Some("a/*"));
+        assert_eq!(cfg.disabling_toggle("a/b/d"), None, "an explicit enable wins, so nothing disables it");
+        assert_eq!(cfg.disabling_toggle("other/w"), None);
+        for id in ["a/b/c", "a/b/x", "a/z", "a/b/d", "other/w"] {
+            assert_eq!(cfg.way_disabled(id), cfg.disabling_toggle(id).is_some(), "{id}: one rule for both");
+        }
     }
 
     #[test]

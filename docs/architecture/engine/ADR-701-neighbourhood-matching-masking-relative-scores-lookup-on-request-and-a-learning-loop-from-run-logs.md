@@ -44,6 +44,14 @@ basis:
     level: directed
     said: "1. I think archiving is better. 2. I don't have a spending limit, other than say, $50 which is far more than I think we need"
     via: chat, session 796c50d0, 2026-10-05, deciding archive over deletion for event history and the budget for the judge A/B
+  - operator: aaronsb
+    level: directed
+    said: "I think we could consider the dimensions of what is valuable to have for history - it's not really size, it's number of decisions over turns"
+    via: chat, session 796c50d0, 2026-10-05
+  - operator: aaronsb
+    level: directed
+    said: "lets record the turn based amendment"
+    via: chat, session 796c50d0, 2026-10-05
   - evidence: ADR-700
   - precedent: ADR-125
   - precedent: ADR-502
@@ -106,7 +114,11 @@ agent-ways is moving toward knowledge work beyond software, which means more dom
 - Every scan, on the prompt and the task lane, logs its top 5 candidates with cosine, share and margin, and once per event the lane, the basis of the scores and whether the body sidecar was used.
 - **History is archived, not deleted.** Before the size cap or the age rotation removes lines from `events.jsonl`, they are written to a compressed archive file dated by day in the same state directory. The size cap bounds only the live file.
 - `ways.event_retention_days` (user scope only, default 365) expires archive files, not live lines.
+- If archiving keeps failing (a full disk, no write permission), preservation wins until the live file reaches four times the size cap; past that the cap drops its oldest lines without archiving them and logs one `event_log_dropped` event with the byte count and the reason.
 - The readers of the event log (introspection, tuning, stats) read the archives as well as the live file.
+- **The unit of history is the turn.** What history is worth keeping for is the decisions made over turns, not its size in bytes. Each scan writes one decision record holding the context once (session, agent, lane, surface, turn position), its top candidates with their scores, and what became of each: fired, re-disclosed, held by the refire window, held by the keyword floor, a near miss, the judge's probability and verdict, and pulls. This record absorbs the `scan_candidates` event.
+- Decision records are kept by count of turns, not by bytes, with a default chosen from measured turns per day to cover at least a year. They are archived like the event stream when they leave the live file.
+- Tuning, stats and the learning loop of §8 read decision records. The detailed event stream stays a debugging trail for introspection, bounded by the size cap and archived as above.
 - Rotation claims its daily slot atomically, anchors its cutoff to the newest line already in the log, and never lets a `judge_call` line end its scan.
 
 ### 3. Lint
@@ -130,7 +142,7 @@ agent-ways is moving toward knowledge work beyond software, which means more dom
 - `ways_read(id)`
 - `ways_neighbors(id)`: the parent, children, See Also edges and nearest semantic neighbours from `ways author siblings`, each labelled with its kind
 
-A pull always returns the way, including inside its re-disclosure suppression window (ADR-126), where injection would hold it back. A pull needs no judge, because the agent chose it. A pulled way stamps disclosure, so injection does not repeat it on the next turn. Each pull is logged as `way_pulled`. A pull inside the suppression window is logged as an out-of-band read, with `out_of_band: true` and the epoch distance since the last disclosure.
+A pull always returns the way, including inside its re-disclosure suppression window (ADR-126), where injection would hold it back, and regardless of the way's `scope:`, since the server cannot tell which agent called it; the result names the way's scope. A pull needs no judge, because the agent chose it. A pulled way stamps disclosure for the agent that pulled it, so injection does not repeat it on that agent's next turn. The stamp is applied by a PostToolUse hook on the read tool, whose payload names the session and agent; the server itself stamps nothing. Way ids are validated as relative path segments and must resolve inside a ways root, so a way reached through a symlink is refused, consistent with §3's refusal of symlinks inside a ways root. A failed read stamps nothing, and a refused stamp is logged with its reason. A project switched off with `enabled: false` serves no pulls. Lookup resolves the project as the hooks do. Each pull is logged as `way_pulled`. A pull inside the suppression window is logged as an out-of-band read, with `out_of_band: true` and the epoch distance since the last disclosure.
 
 ### 6. Body corpus
 
@@ -148,7 +160,7 @@ A pull always returns the way, including inside its re-disclosure suppression wi
 | Sidecar missing or incomplete | keyword lane and alias matcher | embedded per call | judge if reachable |
 | No embedder | keyword lane only | none | none |
 
-The sidecar is used only when its manifest covers every enabled way at the alias corpus's content hashes; otherwise the scan uses alias scores alone. Fused and alias-only scores are never mixed in one ranking. Each scan logs which state it ran in, and `ways status` reports the current state and the reason for any drop. The daemon's search service (ADR-502 §2, #668) holds the same files when it lands; until then the hook loads them.
+The sidecar is used only when its manifest covers every enabled way the alias corpus holds, at the alias corpus's content hashes, and the installed embedder can return chunk vectors (a way absent from the alias corpus cannot win a chunk, so it never needs confirming); otherwise the scan uses alias scores alone. Fused and alias-only scores are never mixed in one ranking. Each scan logs which state it ran in, and `ways status` reports the current state and the reason for any drop. The daemon's search service (ADR-502 §2, #668) holds the same files when it lands; until then the hook loads them.
 
 ### 8. Run logs as the learning corpus
 
@@ -172,7 +184,7 @@ No field becomes required. Configuration keys keep their meaning; the prefix for
 2. Share, margin and band to the judge behind a flag; the A/B that decides the flag's default.
 3. `ways-mcp` lookup in-process, `way_pulled` and out-of-band reads.
 4. Body sidecar build; body confirmation reads it after measurement.
-5. Proposals from logs through `ways tune` and `ways suggest`; the opt-in real-prompt store through the ways sensor.
+5. Per-turn decision records with retention counted in turns; tune and stats read them. Proposals from logs through `ways tune` and `ways suggest`; the opt-in real-prompt store through the ways sensor.
 6. Gated on evaluation: body score in ranking; a hubness penalty fitted at build against the probe set; admitting each chunk's top-ranked way in late interaction (ADR-700 §12). Competition within a subtree first is dropped: region scores from way scores and independent region vectors both failed to beat flat competition (ADR-700 §9, §11).
 7. When #668 lands: the daemon's search service holds the corpora and the sidecar.
 

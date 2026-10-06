@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 use agent_fmt::{Table, Align};
 
-struct CorpusEntry {
-    id: String,
-    embedding: Vec<f32>,
+pub(crate) struct CorpusEntry {
+    pub(crate) id: String,
+    pub(crate) embedding: Vec<f32>,
 }
 
 pub fn run(id: String, threshold: f64, corpus: Option<String>, _model: Option<String>) -> Result<()> {
@@ -24,22 +24,12 @@ pub fn run(id: String, threshold: f64, corpus: Option<String>, _model: Option<St
     } else {
         // Single way vs all others
         // Try exact match, then suffix match (e.g., "code/quality" matches "softwaredev/code/quality")
-        let target = entries.iter().find(|e| e.id == id)
-            .or_else(|| entries.iter().find(|e| e.id.ends_with(&format!("/{id}"))));
-        let target = match target {
+        let target = match find_entry(&entries, &id) {
             Some(t) => t,
             None => bail!("way '{id}' not found in corpus"),
         };
 
-        let target_id = &target.id;
-        let mut scores: Vec<(&str, f64)> = entries
-            .iter()
-            .filter(|e| e.id != *target_id)
-            .map(|e| (e.id.as_str(), cosine_similarity(&target.embedding, &e.embedding) as f64))
-            .filter(|(_, s)| *s >= threshold)
-            .collect();
-
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let scores = nearest(&entries, target, threshold);
 
         if scores.is_empty() {
             eprintln!("no siblings above threshold {threshold}");
@@ -84,6 +74,26 @@ pub fn run(id: String, threshold: f64, corpus: Option<String>, _model: Option<St
     }
 
     Ok(())
+}
+
+/// Every other corpus entry at or above `threshold` cosine to `target`, best
+/// first. The one computation behind `ways author siblings` and the
+/// `ways_neighbors` lookup (ADR-701 §5).
+pub(crate) fn nearest<'a>(entries: &'a [CorpusEntry], target: &CorpusEntry, threshold: f64) -> Vec<(&'a str, f64)> {
+    let mut scores: Vec<(&str, f64)> = entries
+        .iter()
+        .filter(|e| e.id != target.id)
+        .map(|e| (e.id.as_str(), cosine_similarity(&target.embedding, &e.embedding) as f64))
+        .filter(|(_, s)| *s >= threshold)
+        .collect();
+    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scores
+}
+
+/// The corpus entry for `id`: an exact match, else a suffix match
+/// (`code/quality` finds `softwaredev/code/quality`).
+pub(crate) fn find_entry<'a>(entries: &'a [CorpusEntry], id: &str) -> Option<&'a CorpusEntry> {
+    entries.iter().find(|e| e.id == id).or_else(|| entries.iter().find(|e| e.id.ends_with(&format!("/{id}"))))
 }
 
 fn print_matrix(entries: &[CorpusEntry], threshold: f64) {
@@ -139,7 +149,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
-fn load_embeddings(path: &str) -> Result<Vec<CorpusEntry>> {
+pub(crate) fn load_embeddings(path: &str) -> Result<Vec<CorpusEntry>> {
     let content = std::fs::read_to_string(path)?;
     let mut entries = Vec::new();
 
@@ -165,6 +175,6 @@ fn load_embeddings(path: &str) -> Result<Vec<CorpusEntry>> {
     Ok(entries)
 }
 
-fn default_corpus() -> PathBuf {
+pub(crate) fn default_corpus() -> PathBuf {
     crate::paths::corpus_dir().join("ways-corpus.jsonl")
 }

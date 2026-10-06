@@ -909,6 +909,16 @@ fn the_disabled_domains_are_picked_from_the_corpus_domains() {
 }
 
 #[test]
+fn a_domain_of_description_less_ways_is_a_disabled_domains_choice() {
+    let f = Fx::new();
+    // A file-triggered way: a frontmatter fence, no `description:`.
+    f.write(&f.root.join("xdg/data/agent-ways/hooks/ways/files/w/w.md"), "---\nfiles: \\.rs$\n---\n");
+    let v = json(&f, &["settings", "get", "ways.disabled_domains", "--json"]);
+    assert_eq!(v["options"], serde_json::json!(["files"]));
+    assert_eq!(f.run(&["settings", "set", "ways.disabled_domains", "files"]).2, 0);
+}
+
+#[test]
 fn a_project_s_own_domain_is_a_choice_through_its_layer_and_a_stored_one_stays_settable() {
     let f = Fx::new();
     let way = "---\ndescription: d\n---\n";

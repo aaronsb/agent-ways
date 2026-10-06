@@ -502,7 +502,7 @@ impl Replay {
         // upgrade is taken: a real window never shrinks mid-session.
         let detected = crate::session::detect_context_window_for(&self.project, &self.session_id) / 1000;
         self.window_k = self.window_k.max(detected);
-        let content = ways_core::firing::load_events_text();
+        let content = ways_core::firing::load_events_text_for_session(&self.session_id);
         let events = super::frames::load_session_events(&content, &self.session_id);
         let frames = super::frames::reconstruct_all(&events, &self.project, &self.session_id, self.window_k * 1000);
         self.spend = session_spend(&content, &self.session_id);

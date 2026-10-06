@@ -8,6 +8,7 @@ mod candidate_log;
 mod gate;
 mod late_interaction;
 pub(crate) mod sidecar;
+pub(crate) mod lookup;
 mod lookbehind;
 mod order;
 mod reduce;
@@ -277,6 +278,8 @@ fn scan_prompt_surface(
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
 
+    let competitors = prompt_competitors(&candidates, &scope, &project_dir);
+
     // ADR-160: the chunked late-interaction matcher IS the semantic matcher. It decides
     // the semantic channel over the reduced surface (chunk → softmax-share →
     // body-confirm), computed once here and consulted per way in match_prompt.
@@ -284,18 +287,15 @@ fn scan_prompt_surface(
     // the matcher can't run (surface too sparse to chunk, engine unavailable) it
     // returns None and match_prompt uses the single-vector scores. The keyword
     // gate and near-miss telemetry keep using the single-vector batch scores.
-    let verdicts = late_interaction::run(&reduced, &body_map(candidates.iter().filter(|w| eligible(w, Lane::Prompt { scope: &scope }, &project_dir))));
+    let verdicts = late_interaction::run(&reduced, &body_map(competitors.iter().copied()));
 
     // ADR-701 §2: log the top candidates with share and margin, from the rows
     // the scan already holds, and whether confirmation read the body sidecar.
     // Enabled ways only: `candidates` is already filtered by the domain and
     // per-way toggles.
     {
-        let enabled: std::collections::HashMap<&str, &str> = candidates
-            .iter()
-            .filter(|c| c.embeddable() && eligible(c, Lane::Prompt { scope: &scope }, &project_dir))
-            .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
-            .collect();
+        let enabled: std::collections::HashMap<&str, &str> =
+            competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
         candidate_log::log_scan_candidates(
             &embed_matches,
             &enabled,
@@ -946,12 +946,19 @@ fn eligible(way: &WayCandidate, lane: Lane<'_>, project_dir: &str) -> bool {
     lane_ok && check_when(&way.when_project, &way.when_file_exists, project_dir)
 }
 
+/// The ways a prompt in `scope` competes: embeddable and [`eligible`] on the
+/// prompt lane. The scan's matcher, its logged candidates and a lookup's
+/// search all take their set from here, so none can drift from the others.
+pub(crate) fn prompt_competitors<'a>(candidates: &'a [WayCandidate], scope: &str, project_dir: &str) -> Vec<&'a WayCandidate> {
+    candidates.iter().filter(|c| c.embeddable() && eligible(c, Lane::Prompt { scope }, project_dir)).collect()
+}
+
 /// ADR-701 §7: the body sidecar a prompt scan in `project_dir` would use, as
 /// (ways, section vectors), or why it would confirm per call. For `ways status`.
 pub(crate) fn sidecar_state(project_dir: &str) -> Result<(usize, usize), sidecar::Fallback> {
     let bin = crate::paths::way_embed().ok_or(sidecar::Fallback::NoEmbedder)?;
     let candidates = collect_candidates(project_dir);
-    let enabled = body_map(candidates.iter().filter(|w| eligible(w, Lane::Prompt { scope: "agent" }, project_dir)));
+    let enabled = body_map(prompt_competitors(&candidates, "agent", project_dir).into_iter());
     let sc = sidecar::state(&crate::paths::corpus_dir(), &bin, enabled.keys().map(String::as_str))?;
     Ok((sc.way_count(), sc.vector_count()))
 }
