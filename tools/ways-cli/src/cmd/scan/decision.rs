@@ -120,6 +120,11 @@ impl Record {
         }
     }
 
+    /// The id this record is written under, which a later pull joins to.
+    pub(super) fn scan_id(&self) -> &str {
+        &self.scan_id
+    }
+
     /// The scan's top candidates. `enabled` maps a corpus id to the way's bare
     /// id for every way that may compete; `sidecar` says whether body
     /// confirmation read the body sidecar. No lane ran: no candidates.

@@ -6,7 +6,8 @@
 //! cannot tell them from main. [`stamp`] runs from the PostToolUse hook on
 //! `ways_read` (`ways hook pull`), whose payload names the calling agent, and
 //! records the disclosure for that agent as injection does, so the next scan
-//! does not repeat the way.
+//! does not repeat the way. Every pull the hook sees, stamped or refused, also
+//! writes a decision record that joins its turn's scan (ADR-701 §2).
 //!
 //! A pull needs no match, no judge and no scope, and the refire window
 //! (ADR-126) does not hold it back. The disable switches still apply, and an
@@ -206,8 +207,12 @@ struct Pulled<'a> {
     reason: Option<&'a str>,
 }
 
+/// Log a pull twice: the `way_pulled` event, the debugging trail, and a
+/// `kind: pull` decision record that joins the record of the turn the pull
+/// happened in (ADR-701 §2).
 fn log_pulled(p: &Pulled) {
     let agent_id = session::current_agent();
+    session::log_decision(&pull_record(p, &agent_id, &agent_fmt::when::now_utc_iso()));
     let tick = p.tick.map(|t| t.to_string());
     let mut fields = vec![
         ("event", "way_pulled"),
@@ -230,6 +235,33 @@ fn log_pulled(p: &Pulled) {
         extra.push(("epoch_distance", json!(d)));
     }
     session::log_event_with(&fields, &extra);
+}
+
+/// The pull's decision record, a follow-up to its turn's scan record rather
+/// than an update to it. `scan_id` is the one the calling agent's last-scan
+/// marker names, null when it has none. The epoch is recorded as the pull saw
+/// it: the command and file lanes bump it on every tool call, so it orders the
+/// pull against the agent's other stamps but does not name its turn.
+fn pull_record(p: &Pulled, agent: &str, ts: &str) -> serde_json::Value {
+    let mut r = json!({
+        "ts": ts,
+        "kind": "pull",
+        "session": p.session_id,
+        "agent": agent,
+        "epoch": session::get_epoch(p.session_id),
+        // A stamped pull records the position its stamp used. A refused one
+        // reads it here, null when the agent has no readable transcript.
+        "token_position": p.tick.or_else(|| session::read_token_position(p.session_id)),
+        "way": p.id,
+        "window": p.window,
+        "out_of_band": p.out_of_band,
+        "stamped": p.stamped,
+        "scan_id": session::read_last_scan(p.session_id),
+    });
+    if let Some(reason) = p.reason {
+        r["reason"] = reason.into();
+    }
+    r
 }
 
 #[cfg(test)]
