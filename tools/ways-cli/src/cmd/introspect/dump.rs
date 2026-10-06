@@ -135,7 +135,7 @@ struct NearMiss {
 /// Emit a session's reconstructed timeline as a single pretty-printed JSON
 /// document. With no `session`, dumps the most recent session in scope.
 pub fn replay_json(session: Option<&str>, project: Option<&str>, all: bool, matched: bool) -> Result<()> {
-    let content = ways_core::firing::load_events_text();
+    let content = ways_core::firing::load_events_text_scoped(session);
     if content.trim().is_empty() {
         println!("{{\"error\":\"no events recorded yet\"}}");
         return Ok(());
