@@ -170,6 +170,26 @@ Added 2026-10-05 from `experiments/content-corpus/confirm.py` and `results-confi
 - Admission let through 302 of the 620 ways the surfaces were built to match. Late-interaction recall on multi-topic surfaces is low, before confirmation runs.
 - Two `way-embed` builds are installed and differ by about 0.002 in cosine: `~/.cache/agent-ways/user/way-embed`, which the scan resolves first, and `~/.claude/bin/way-embed`.
 
+### 11. Region signals independent of way scores do not recover the headroom
+
+Added 2026-10-05 from `experiments/content-corpus/region.py` and `results-region.md`. Three region signals were embedded with the shipped model: directory descriptions resolved as #664 proposes (6 of 37 written for the experiment from the ways' own descriptions, without reading the golden prompts), centroids of each domain's alias vectors, and centroids of its body-section vectors.
+
+| Method | top-1 | fixed / broken vs flat | p | share of the oracle's 11.5 points |
+|---|---|---|---|---|
+| flat cosine | 0.656 | | | 0% |
+| oracle domain | 0.771 | 36 / 0 | < 0.01 | 100% |
+| best region-first (alias centroids) | 0.459 | 9 / 71 | < 0.01 | −172% |
+| best top-2 regions (hubness-corrected alias centroids) | 0.551 | 11 / 44 | < 0.01 | −92% |
+| way score + 0.1 × description similarity | 0.669 | 6 / 2 | 0.29 | 11% |
+| hubness-corrected flat | 0.678 | 14 / 7 | 0.19 | 19% |
+| hubness-corrected + 0.1 × body-centroid similarity | 0.675 | 13 / 7 | | 17% |
+
+- Each independent signal picks the right domain less often (18.5 to 57.6%) than the domain of the flat best way already is (78.0%), so every hard region choice loses.
+- The given descriptions fail as well as the written ones: `documentation` and `ea` win their own prompts 34% and 30% of the time, against 59% and 85% for flat. One vector per region does not carry enough to choose among regions.
+- The best soft bonus was chosen on the rows it is reported on, so its 11% is optimistic. On hubness-corrected scores it adds nothing.
+- No signal changes the corpus-growth slope.
+- Not tested: multi-vector regions, a trained domain classifier, and a reader of the described route. #664's own proposal, the route as judge input, is a separate question this measures nothing about.
+
 ## Limits
 
 - Prompts are model-written. A labelled set of real prompts from session transcripts was not built; reading transcripts for it needs the operator's explicit approval.
