@@ -2090,3 +2090,285 @@ fn scenario_decision_records_name_floor_vetoes_near_misses_and_the_gate() {
     clean_markers(&session);
     let _ = std::fs::remove_dir_all(&home);
 }
+
+// ── ADR-701 §2: a pull joins the decision record of its turn ──
+
+/// The decision records of one `kind` (`scan` or `pull`) that `session`
+/// wrote to `state`'s log, in order.
+#[cfg(unix)]
+fn decisions_of(state: &Path, session: &str, kind: &str) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(state.join("agent-ways/decisions.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["session"] == session && v["kind"] == kind)
+        .collect()
+}
+
+/// `ways hook prompt` for `prompt` as the main agent.
+#[cfg(unix)]
+fn hook_prompt(home: &Path, state: &Path, project: &Path, session: &str, prompt: &str) {
+    let payload = serde_json::json!({ "session_id": session, "hook_event_name": "UserPromptSubmit", "prompt": prompt });
+    hook_raw(home, state, project, "prompt", &payload.to_string());
+}
+
+/// `ways hook pull` for `id`, as the PostToolUse hook on `ways_read` runs it,
+/// from main or, with `agent`, from inside a subagent.
+#[cfg(unix)]
+fn hook_pull(home: &Path, state: &Path, project: &Path, session: &str, agent: Option<&str>, id: &str, response: Option<serde_json::Value>) {
+    let mut payload = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "PostToolUse",
+        "tool_name": "mcp__agent-ways__ways_read",
+        "tool_input": { "id": id },
+    });
+    if let Some(a) = agent {
+        payload["agent_id"] = a.into();
+    }
+    if let Some(r) = response {
+        payload["tool_response"] = r;
+    }
+    assert_eq!(hook_raw(home, state, project, "pull", &payload.to_string()), "", "the pull hook prints nothing");
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_a_pull_joins_its_turns_scan_through_the_marker_not_the_epoch() {
+    let (base, home, state, project) = per_agent_fixture("pull-join");
+    let s = format!("sim-pull-join-{}", std::process::id());
+    clean_markers(&s);
+
+    hook_prompt(&home, &state, &project, &s, "tell me about the moon");
+    let scans = decisions_of(&state, &s, "scan");
+    assert_eq!(scans.len(), 1, "{scans:#?}");
+    let scan = &scans[0];
+    assert_eq!(scan["epoch"], 1);
+
+    // A pull right after the scan, then a tool call that bumps the epoch
+    // through the command lane, then a second pull in the same turn.
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/w", None);
+    hook_bash(&home, &state, &project, &s, None, "ls");
+    assert_epoch(&s, 2);
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/w", None);
+
+    let pulls = decisions_of(&state, &s, "pull");
+    assert_eq!(pulls.len(), 2, "one record per pull: {pulls:#?}");
+    for (p, epoch) in pulls.iter().zip([1, 2]) {
+        assert_eq!(p["scan_id"], scan["scan_id"], "the pull joins the turn's scan: {p:#}");
+        assert_eq!(p["epoch"], epoch, "the epoch is recorded as the pull saw it: {p:#}");
+        assert_eq!((p["agent"].as_str(), p["way"].as_str(), p["stamped"].as_bool()), (Some("main"), Some("agentdomain/w"), Some(true)), "{p:#}");
+        assert!(p["token_position"].is_u64() && p["ts"].is_string(), "{p:#}");
+        assert!(p.get("reason").is_none(), "a stamped pull gives no reason: {p:#}");
+    }
+    assert_eq!((pulls[0]["window"].as_str(), pulls[0]["out_of_band"].as_bool()), (Some("first_fire"), Some(false)));
+    assert_eq!((pulls[1]["window"].as_str(), pulls[1]["out_of_band"].as_bool()), (Some("suppressed"), Some(true)));
+    // The event log keeps its way_pulled lines.
+    let events = std::fs::read_to_string(state.join("agent-ways/events.jsonl")).unwrap_or_default();
+    assert_eq!(events.lines().filter(|l| l.contains("\"way_pulled\"") && l.contains(&s)).count(), 2);
+
+    // The next prompt is a new turn: a pull there joins its scan.
+    hook_prompt(&home, &state, &project, &s, "and the sun");
+    let next = decisions_of(&state, &s, "scan").pop().unwrap();
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/dep", None);
+    let p = decisions_of(&state, &s, "pull").pop().unwrap();
+    assert_eq!(p["scan_id"], next["scan_id"], "{p:#}");
+    assert_ne!(p["scan_id"], scan["scan_id"]);
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_a_pull_with_no_scan_in_its_turn_joins_nothing() {
+    let (base, home, state, project) = per_agent_fixture("pull-none");
+    let s = format!("sim-pull-none-{}", std::process::id());
+    clean_markers(&s);
+
+    // No scan yet in the session.
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/w", None);
+    let p = decisions_of(&state, &s, "pull").pop().expect("a pull record");
+    assert!(p.get("scan_id").is_some_and(|v| v.is_null()), "scan_id is present and null: {p:#}");
+
+    // A scan, then a Monitor notification that starts a turn without a scan:
+    // a pull in that turn does not join the earlier turn's record.
+    hook_prompt(&home, &state, &project, &s, "tell me about the moon");
+    assert_eq!(decisions_of(&state, &s, "scan").len(), 1);
+    hook_prompt(&home, &state, &project, &s, "<task-notification>sensor line</task-notification>");
+    assert_eq!(decisions_of(&state, &s, "scan").len(), 1, "an envelope is not scanned");
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/dep", None);
+    let p = decisions_of(&state, &s, "pull").pop().unwrap();
+    assert!(p["scan_id"].is_null(), "the earlier turn's scan is not this turn's: {p:#}");
+    assert_eq!(p["epoch"], 2);
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_a_refused_pull_writes_its_record_with_the_reason() {
+    let (base, home, state, project) = per_agent_fixture("pull-refused");
+    let s = format!("sim-pull-refused-{}", std::process::id());
+    clean_markers(&s);
+
+    hook_prompt(&home, &state, &project, &s, "tell me about the moon");
+    let scan = decisions_of(&state, &s, "scan").pop().unwrap();
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/nothing", None);
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/w", Some(serde_json::json!({ "isError": true, "content": [] })));
+    let long = format!("../{}", "a".repeat(500));
+    hook_pull(&home, &state, &project, &s, None, &long, None);
+
+    let pulls = decisions_of(&state, &s, "pull");
+    assert_eq!(pulls.len(), 3, "a refused pull still writes its record: {pulls:#?}");
+    let reasons: Vec<&str> = pulls.iter().map(|p| p["reason"].as_str().unwrap_or("")).collect();
+    assert_eq!(reasons, ["not found", "read failed", "invalid id"]);
+    for p in &pulls {
+        assert_eq!((p["stamped"].as_bool(), p["window"].as_str(), p["out_of_band"].as_bool()), (Some(false), Some("none"), Some(false)), "{p:#}");
+        assert_eq!(p["scan_id"], scan["scan_id"], "a refused pull joins its turn too: {p:#}");
+    }
+    assert!(pulls[2]["way"].as_str().unwrap().chars().count() <= 64, "the model-supplied id is cut short");
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_a_subagents_pull_joins_its_dispatchs_task_scan() {
+    let (base, home, state, project) = per_agent_fixture("pull-subagent");
+    let s = format!("sim-pull-subagent-{}", std::process::id());
+    clean_markers(&s);
+    let root = Path::new(&sessions_root()).join(&s);
+    let start = |agent: &str| {
+        hook_raw(
+            &home, &state, &project, "subagent-start",
+            &format!(r#"{{"session_id":"{s}","agent_id":"{agent}","agent_type":"general-purpose","hook_event_name":"SubagentStart"}}"#),
+        )
+    };
+
+    // Main's turn scan, then a dispatch whose task scan stashes way w.
+    hook_prompt(&home, &state, &project, &s, "tell me about the moon");
+    let main_scan = decisions_of(&state, &s, "scan").pop().unwrap();
+    hook_task(&home, &state, &project, &s);
+    let task_scan = decisions_of(&state, &s, "scan").pop().unwrap();
+    assert_eq!(task_scan["surface"], "task");
+    assert!(start("asub").contains("# Marker w"));
+    let marker: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("agents/asub/last-scan")).expect("the subagent's marker")).unwrap();
+    assert_eq!(marker["scan_id"], task_scan["scan_id"]);
+
+    // The subagent's pull, after a tool call of its own, joins the task scan
+    // that dispatched it, not main's prompt scan.
+    hook_bash(&home, &state, &project, &s, Some("asub"), "ls");
+    hook_pull(&home, &state, &project, &s, Some("asub"), "agentdomain/dep", None);
+    let p = decisions_of(&state, &s, "pull").pop().unwrap();
+    assert_eq!((p["agent"].as_str(), p["epoch"].as_u64()), (Some("asub"), Some(1)), "{p:#}");
+    assert_eq!(p["scan_id"], task_scan["scan_id"], "{p:#}");
+
+    // A subagent whose dispatch stashed nothing has no marker: its pull joins
+    // nothing, and never main's scan.
+    assert_eq!(start("bsub"), "");
+    hook_pull(&home, &state, &project, &s, Some("bsub"), "agentdomain/dep", None);
+    let p = decisions_of(&state, &s, "pull").pop().unwrap();
+    assert_eq!(p["agent"], "bsub");
+    assert!(p["scan_id"].is_null(), "{p:#}");
+    assert_ne!(p["scan_id"], main_scan["scan_id"]);
+    // Main's marker is unmoved by either subagent.
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/dep", None);
+    assert_eq!(decisions_of(&state, &s, "pull").pop().unwrap()["scan_id"], main_scan["scan_id"]);
+
+    // A SubagentStart whose payload names no agent resolves to main. It
+    // claims the stash and injects, but main's marker keeps naming main's turn.
+    let main_marker = std::fs::read_to_string(root.join("last-scan")).unwrap();
+    hook_task(&home, &state, &project, &s);
+    let anon = hook_raw(&home, &state, &project, "subagent-start", &format!(r#"{{"session_id":"{s}","hook_event_name":"SubagentStart"}}"#));
+    assert!(anon.contains("# Marker w"), "the stash was claimed: {anon}");
+    assert_eq!(std::fs::read_to_string(root.join("last-scan")).unwrap(), main_marker);
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// `ways hook pull` for a refused id, with `transcript_path` naming `transcript`.
+#[cfg(unix)]
+fn hook_pull_with_transcript(home: &Path, state: &Path, project: &Path, session: &str, id: &str, transcript: &Path) {
+    let payload = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "PostToolUse",
+        "tool_name": "mcp__agent-ways__ways_read",
+        "tool_input": { "id": id },
+        "transcript_path": transcript,
+    });
+    hook_raw(home, state, project, "pull", &payload.to_string());
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_a_refused_pull_records_an_unknown_token_position_as_null() {
+    let (base, home, state, project) = per_agent_fixture("pull-tokens");
+    let s = format!("sim-pull-tokens-{}", std::process::id());
+    clean_markers(&s);
+
+    // No transcript anywhere: the position is unknown.
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/nothing", None);
+    // A transcript with no usage yet: a real 0.
+    let transcript = base.join(format!("{s}.jsonl"));
+    std::fs::write(&transcript, "{\"type\":\"user\"}\n").unwrap();
+    hook_pull_with_transcript(&home, &state, &project, &s, "agentdomain/nothing", &transcript);
+    // A transcript reporting usage: its position.
+    std::fs::write(
+        &transcript,
+        "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-5-5\",\"usage\":{\"input_tokens\":4321,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n",
+    )
+    .unwrap();
+    hook_pull_with_transcript(&home, &state, &project, &s, "agentdomain/nothing", &transcript);
+
+    let positions: Vec<serde_json::Value> = decisions_of(&state, &s, "pull").iter().map(|p| p["token_position"].clone()).collect();
+    assert_eq!(positions, [serde_json::Value::Null, serde_json::json!(0), serde_json::json!(4321)]);
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_the_way_pulled_event_keeps_its_fields() {
+    let (base, home, state, project) = per_agent_fixture("pull-event");
+    let s = format!("sim-pull-event-{}", std::process::id());
+    clean_markers(&s);
+
+    hook_prompt(&home, &state, &project, &s, "tell me about the moon");
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/w", None);
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/nothing", None);
+
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(state.join("agent-ways/events.jsonl"))
+        .unwrap()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "way_pulled" && v["session"] == s.as_str())
+        .map(|mut v| {
+            assert!(v["ts"].is_string(), "{v}");
+            v["ts"] = "<ts>".into();
+            v
+        })
+        .collect();
+    let proj = project.to_string_lossy();
+    // The event as ways-graph wrote it before pulls joined the decision log.
+    let golden = [
+        serde_json::json!({
+            "ts": "<ts>", "event": "way_pulled", "way": "agentdomain/w", "domain": "agentdomain",
+            "window": "first_fire", "scope": "agent", "project": proj, "session": s, "agent_id": "main",
+            "token_position": "0", "out_of_band": false, "stamped": true,
+        }),
+        serde_json::json!({
+            "ts": "<ts>", "event": "way_pulled", "way": "agentdomain/nothing", "domain": "",
+            "window": "none", "scope": "agent", "project": proj, "session": s, "agent_id": "main",
+            "reason": "not found", "out_of_band": false, "stamped": false,
+        }),
+    ];
+    assert_eq!(events, golden);
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
