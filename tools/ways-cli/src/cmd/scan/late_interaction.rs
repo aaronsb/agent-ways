@@ -805,6 +805,20 @@ mod tests {
         assert!(vectors.is_none(), "chunk 1 has no vector");
     }
 
+    /// Confirmation reads the vector of the chunk the way won, not a neighbour.
+    /// Chunk 0 matches section 3 exactly; chunk 1 is 45° off section 2.
+    #[test]
+    fn confirm_scores_the_won_chunks_vector() {
+        let p = Path::new("x");
+        let vectors = vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 0.0], vec![-1.0, 0.0, 0.0]];
+        let c = Confirmer::new(p, p, p, Some(sample_sidecar()), Some(vectors));
+        let chunks = vec!["c0".to_string(), "c1".to_string(), "c2".to_string()];
+        let on = |won| c.confirm("multi", won, &chunks, p).unwrap();
+        assert!((on(0) - 1.0).abs() < 1e-6);
+        assert!((on(1) - 0.5f64.sqrt()).abs() < 1e-6);
+        assert!(on(2).abs() < 1e-6, "best of -1, -0.707, 0");
+    }
+
     /// The sidecar state needs a complete sidecar and the chunk vectors; either
     /// missing is today's per-call confirmation.
     #[test]
@@ -850,6 +864,14 @@ mod tests {
 
         write_sidecar(&[("a", 0xa), ("b", 0xbb), ("off", 0xff)]);
         assert!(complete_sidecar(&dir, &enabled).is_none(), "enabled way b stale");
+
+        // Complete, but built for another model: not used.
+        let ways: Vec<_> = [("a", 0xa), ("b", 0xb)]
+            .iter()
+            .map(|(id, h)| sidecar::WaySections { id: id.to_string(), hash: *h, vectors: vec![vec![1.0, 0.0]] })
+            .collect();
+        sidecar::write(&dir.join(sidecar::FILE), &sidecar::encode("other-model:1", 2, &ways).unwrap()).unwrap();
+        assert!(complete_sidecar(&dir, &enabled).is_none(), "model id mismatch");
 
         std::fs::remove_file(dir.join(sidecar::FILE)).unwrap();
         assert!(complete_sidecar(&dir, &enabled).is_none(), "no sidecar");
