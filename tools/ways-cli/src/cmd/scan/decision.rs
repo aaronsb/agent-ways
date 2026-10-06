@@ -39,7 +39,15 @@ pub(super) struct Context<'a> {
     pub scope: &'a str,
     pub project: &'a str,
     pub session: &'a str,
-    /// True exactly when this scan bumped the epoch: a turn started.
+    /// The agent's epoch counter as this scan saw it: the value `bump_epoch`
+    /// returned when the scan bumped it, else the current one. The command
+    /// and file lanes bump it on every tool call, so it is not a turn index;
+    /// it orders a record against the agent's other epoch stamps.
+    pub epoch: u64,
+    /// True exactly when this scan bumped the epoch for a user prompt: a turn
+    /// started. Turns are counted by records with `turn_start`, never by
+    /// distinct epochs, and a later pull joins its turn through the
+    /// `scan_id` the last-scan marker names, never through the epoch.
     pub turn_start: bool,
 }
 
@@ -63,22 +71,28 @@ pub(super) struct Record {
 const BASIS: &str = "single";
 
 impl Record {
-    /// A record for a scan starting now, read from the session's state: the
-    /// current agent, its epoch (after any bump) and its token position.
+    /// A record for a scan starting now, with the current agent and its token
+    /// position read from the session's state.
     pub(super) fn begin(ctx: &Context<'_>) -> Self {
-        let session = ctx.session;
         Record::new(
             ctx,
             &scan_id(),
             &agent_fmt::when::now_utc_iso(),
             &crate::session::current_agent(),
-            crate::session::get_epoch(session),
-            crate::session::get_token_position(session),
+            crate::session::get_token_position(ctx.session),
         )
     }
 
+    /// A prompt-lane record with fixed context, for tests of what a lane records.
+    #[cfg(test)]
+    pub(super) fn for_test() -> Self {
+        let ctx = Context { surface: Surface::Prompt, hook_event: "UserPromptSubmit", scope: "agent", project: "/p", session: "s", epoch: 1, turn_start: true };
+        Record::new(&ctx, "test", "2026-10-05T00:00:00Z", "main", 0)
+    }
+
     /// [`Record::begin`] with every read given.
-    fn new(ctx: &Context<'_>, scan_id: &str, ts: &str, agent: &str, epoch: u64, token_position: u64) -> Self {
+    fn new(ctx: &Context<'_>, scan_id: &str, ts: &str, agent: &str, token_position: u64) -> Self {
+        let epoch = ctx.epoch;
         let mut head = Map::new();
         head.insert("ts".into(), ts.into());
         head.insert("kind".into(), "scan".into());
@@ -142,8 +156,10 @@ impl Record {
 
     /// A way the scan matched: its `rank` in admission order (1-based), the
     /// `channel` that fired it, its probability `p` when scored, and what
-    /// became of it. A judge block or ancestor block carries the verdict that
-    /// kept it out; any other judged way carries its `p_yes` and `verdict`.
+    /// became of it. A judge block carries the verdict that kept it out. An
+    /// ancestor block names the ancestor and carries the ancestor's verdict as
+    /// `ancestor_p_yes` and `ancestor_threshold`: the judge never saw this way.
+    /// Any other judged way carries its `p_yes` and `verdict`.
     pub(super) fn hit(&mut self, way: &str, rank: usize, channel: &str, p: Option<f64>, result: &'static str, judge: Option<&gate::Gate>) {
         let mut o = outcome(way, result);
         o.insert("rank".into(), rank.into());
@@ -153,9 +169,10 @@ impl Record {
             match g.blocked.fields(way).filter(|_| matches!(result, "judge_block" | "ancestor_block")) {
                 Some(fields) => {
                     let get = |k: &str| fields.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+                    let prefix = if result == "ancestor_block" { "ancestor_" } else { "" };
                     for k in ["p_yes", "threshold"] {
                         if let Some(v) = get(k).and_then(|v| v.parse::<f64>().ok()) {
-                            o.insert(k.into(), round(v).into());
+                            o.insert(format!("{prefix}{k}"), round(v).into());
                         }
                     }
                     if let Some(m) = get("mode") {
@@ -266,11 +283,11 @@ mod tests {
     use serde_json::json;
 
     fn ctx(surface: Surface) -> Context<'static> {
-        Context { surface, hook_event: "UserPromptSubmit", scope: "agent", project: "/p", session: "s", turn_start: true }
+        Context { surface, hook_event: "UserPromptSubmit", scope: "agent", project: "/p", session: "s", epoch: 7, turn_start: true }
     }
 
     fn record(surface: Surface) -> Record {
-        Record::new(&ctx(surface), "abc-1", "2026-10-05T00:00:00Z", "main", 7, 1234)
+        Record::new(&ctx(surface), "abc-1", "2026-10-05T00:00:00Z", "main", 1234)
     }
 
     type Events = std::cell::RefCell<Vec<Vec<(String, String)>>>;
@@ -354,7 +371,9 @@ mod tests {
         let mut r = record(Surface::Prompt);
         r.hit("p/c", 2, "keyword", None, "ancestor_block", Some(&g));
         let o = &r.to_json()["outcomes"][0];
-        assert_eq!((o["ancestor"].as_str(), o["p_yes"].as_f64()), (Some("p"), Some(0.05)));
+        assert_eq!(o["ancestor"], "p");
+        assert_eq!((o["ancestor_p_yes"].as_f64(), o["ancestor_threshold"].as_f64()), (Some(0.05), Some(0.3)));
+        assert!(o.get("p_yes").is_none() && o.get("threshold").is_none(), "the judge never saw p/c: {o}");
     }
 
     #[test]
@@ -368,7 +387,7 @@ mod tests {
 
     #[test]
     fn a_task_record_says_task() {
-        let mut r = Record::new(&Context { turn_start: false, ..ctx(Surface::Task) }, "x", "t", "main", 1, 0);
+        let mut r = Record::new(&Context { turn_start: false, epoch: 1, ..ctx(Surface::Task) }, "x", "t", "main", 0);
         r.hit("w", 1, "keyword", None, "stashed", None);
         let v = r.to_json();
         assert_eq!((v["surface"].as_str(), v["turn_start"].as_bool()), (Some("task"), Some(false)));

@@ -256,9 +256,7 @@ fn scan_prompt_surface(
         .map(|s| s.to_string())
         .unwrap_or_else(crate::util::project_dir);
 
-    if bump_epoch {
-        session::bump_epoch(session_id);
-    }
+    let epoch = if bump_epoch { session::bump_epoch(session_id) } else { session::get_epoch(session_id) };
 
     let scope = session::detect_scope(session_id);
     // ADR-701 §2: the turn's decision record, written once at the end of the scan.
@@ -268,6 +266,7 @@ fn scan_prompt_surface(
         scope: &scope,
         project: &project_dir,
         session: session_id,
+        epoch,
         turn_start: bump_epoch,
     });
     let candidates = collect_candidates(&project_dir);
@@ -446,36 +445,25 @@ fn scan_prompt_surface(
     };
     let mut gate = gate::apply(&pending, query, response_context, &gate_log);
 
-    let mut shown: HashSet<String> = HashSet::new();
-    for (i, hit) in hits.iter().enumerate() {
-        let (channel, matched_span, needs_parent) = &hit.payload;
-        let result = if let Some(result) = decision::block_result(&gate.blocked, &hit.id) {
-            result
-        } else if *needs_parent && withheld_for_parent(&hit.id, &shown, &pending, &mut gate.blocked, &gate_log) {
-            // Withheld with a parent the judge blocked records that block.
-            decision::block_result(&gate.blocked, &hit.id).unwrap_or("withheld_for_parent")
-        } else {
-            let shown_way = capture_show_way(
-                &hit.id,
-                session_id,
-                channel,
-                hit.score,
-                matched_span.as_deref(),
-                Some(reduced.as_str()),
-                Some(&mut budget),
-            );
-            let out = shown_way.body;
-            if !out.is_empty() {
-                shown.insert(hit.id.clone());
-                context.push_str(&out);
-                context.push_str("\n\n");
-                budget.charge("\n\n");
-            }
-            shown_way.outcome.as_str()
-        };
-        record.hit(&hit.id, i + 1, channel, hit.score, result, Some(&gate));
-    }
-    record.judge(&gate);
+    admit_hits(&hits, &mut gate, &pending, &gate_log, &mut record, |hit| {
+        let (channel, matched_span, _) = &hit.payload;
+        let shown = capture_show_way(
+            &hit.id,
+            session_id,
+            channel,
+            hit.score,
+            matched_span.as_deref(),
+            Some(reduced.as_str()),
+            Some(&mut budget),
+        );
+        let delivered = !shown.body.is_empty();
+        if delivered {
+            context.push_str(&shown.body);
+            context.push_str("\n\n");
+            budget.charge("\n\n");
+        }
+        (shown.outcome, delivered)
+    });
     record.write();
 
     if !context.is_empty() {
@@ -483,6 +471,44 @@ fn scan_prompt_surface(
     }
 
     Ok(())
+}
+
+/// A prompt-lane hit's payload: the channel that fired it, its matched span,
+/// and whether it fired only on this scan's parent boost.
+type PromptPayload = (String, Option<String>, bool);
+
+/// Admit the prompt lane's hits in order and record what became of each in
+/// the turn's decision record (ADR-701 §2), then how the gate ran. A way the
+/// gate blocked is skipped. A way that fired only on a parent shown in this
+/// scan is withheld when that parent was not shown. Every other way goes to
+/// `show`, which returns what `way_scored` did with it and whether its body
+/// reached the context.
+fn admit_hits(
+    hits: &[Hit<PromptPayload>],
+    gate: &mut gate::Gate,
+    pending: &[gate::Pending<'_>],
+    gate_log: &gate::LogContext<'_>,
+    record: &mut decision::Record,
+    mut show: impl FnMut(&Hit<PromptPayload>) -> (crate::cmd::show::ShowOutcome, bool),
+) {
+    let mut shown: HashSet<String> = HashSet::new();
+    for (i, hit) in hits.iter().enumerate() {
+        let (channel, _, needs_parent) = &hit.payload;
+        let result = if let Some(result) = decision::block_result(&gate.blocked, &hit.id) {
+            result
+        } else if *needs_parent && withheld_for_parent(&hit.id, &shown, pending, &mut gate.blocked, gate_log) {
+            // Withheld with a parent the judge blocked records that block.
+            decision::block_result(&gate.blocked, &hit.id).unwrap_or("withheld_for_parent")
+        } else {
+            let (outcome, delivered) = show(hit);
+            if delivered {
+                shown.insert(hit.id.clone());
+            }
+            outcome.as_str()
+        };
+        record.hit(&hit.id, i + 1, channel, hit.score, result, Some(gate));
+    }
+    record.judge(gate);
 }
 
 // ── Authoring diagnostic (task #5) ─────────────────────────────
@@ -553,6 +579,7 @@ pub fn task(
         scope: task_scope,
         project: &project_dir,
         session: session_id,
+        epoch: session::get_epoch(session_id),
         turn_start: false,
     });
     {
@@ -1857,6 +1884,79 @@ mod queued_tests {
             assert_eq!(get(child[0], k), "", "{k}");
         }
         assert!(events.iter().all(|e| get(e, "way") != "p/held"));
+    }
+
+    // ── ADR-701 §2: what the prompt lane records for each hit ──
+
+    use crate::cmd::show::ShowOutcome;
+
+    fn hit(id: &str, needs_parent: bool) -> Hit<PromptPayload> {
+        Hit::scored(id, None, ("keyword".to_string(), None, needs_parent))
+    }
+
+    /// Run [`admit_hits`] over `hits` with `gate`, every shown way firing, and
+    /// return the record's outcomes keyed by way, its judge block, and the
+    /// ways `show` was asked for.
+    fn admit(hits: &[Hit<PromptPayload>], mut gate: gate::Gate) -> (serde_json::Value, Vec<String>) {
+        let sink = |_: &[(&str, &str)]| {};
+        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let mut record = decision::Record::for_test();
+        let mut asked = Vec::new();
+        admit_hits(hits, &mut gate, &[], &lc, &mut record, |h| {
+            asked.push(h.id.clone());
+            (ShowOutcome::Fired, true)
+        });
+        (record.to_json(), asked)
+    }
+
+    fn gate_of(verdicts: &[(&str, f64)], mode: ways_agent_core::profile::Mode) -> gate::Gate {
+        let sink = |_: &[(&str, &str)]| {};
+        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        gate::test_gate(verdicts, mode, &lc)
+    }
+
+    fn outcome<'v>(record: &'v serde_json::Value, way: &str) -> &'v serde_json::Value {
+        record["outcomes"].as_array().unwrap().iter().find(|o| o["way"] == way).unwrap_or_else(|| panic!("no outcome for {way}: {record}"))
+    }
+
+    #[test]
+    fn an_enforced_block_is_recorded_and_never_shown_and_a_pass_carries_its_verdict() {
+        let (r, asked) = admit(&[hit("a", false), hit("b", false)], gate_of(&[("a", 0.9), ("b", 0.05)], ways_agent_core::profile::Mode::Enforce));
+        assert_eq!(asked, ["a"], "a blocked way is never shown");
+        let a = outcome(&r, "a");
+        assert_eq!((a["result"].as_str(), a["p_yes"].as_f64(), a["verdict"].as_str(), a["rank"].as_u64()), (Some("fired"), Some(0.9), Some("pass"), Some(1)));
+        let b = outcome(&r, "b");
+        assert_eq!((b["result"].as_str(), b["p_yes"].as_f64(), b["threshold"].as_f64(), b["mode"].as_str()), (Some("judge_block"), Some(0.05), Some(0.3), Some("enforce")));
+        assert_eq!(r["judge"]["status"], "judged");
+    }
+
+    #[test]
+    fn a_shadow_would_block_is_shown_and_recorded_with_its_verdict() {
+        let (r, asked) = admit(&[hit("a", false)], gate_of(&[("a", 0.05)], ways_agent_core::profile::Mode::Shadow));
+        assert_eq!(asked, ["a"]);
+        let a = outcome(&r, "a");
+        assert_eq!((a["result"].as_str(), a["verdict"].as_str()), (Some("fired"), Some("would_block")));
+    }
+
+    #[test]
+    fn a_gate_fallback_shows_every_way_and_names_the_fallback() {
+        let g = gate::Gate { status: gate::Status::Fallback { reason: "deadline".into() }, ..Default::default() };
+        let (r, asked) = admit(&[hit("a", false), hit("b", false)], g);
+        assert_eq!(asked, ["a", "b"]);
+        assert!(["a", "b"].iter().all(|w| outcome(&r, w)["result"] == "fired" && outcome(&r, w).get("verdict").is_none()));
+        assert_eq!(r["judge"], serde_json::json!({"status": "fallback", "reason": "deadline"}));
+    }
+
+    #[test]
+    fn a_child_without_its_parent_is_withheld_and_with_it_is_shown() {
+        let (r, asked) = admit(&[hit("p/c", true)], gate::Gate::default());
+        assert!(asked.is_empty());
+        assert_eq!(outcome(&r, "p/c")["result"], "withheld_for_parent");
+
+        let (r, asked) = admit(&[hit("p", false), hit("p/c", true)], gate::Gate::default());
+        assert_eq!(asked, ["p", "p/c"]);
+        assert_eq!(outcome(&r, "p/c")["result"], "fired");
+        assert_eq!(r["judge"]["status"], "off");
     }
 }
 
