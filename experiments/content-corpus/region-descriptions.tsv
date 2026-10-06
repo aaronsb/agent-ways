@@ -1,0 +1,10 @@
+# Authored node descriptions for region.py, for way-tree nodes that have no way of their own.
+# Written 2026-10-05 from the descriptions of the ways each node contains, without reading the golden prompts.
+# Every other node takes the description of the way in its directory (issue #664's resolution rule).
+node	description
+softwaredev	Software development: designing, writing, testing and securing code, dependency and supply-chain security, shipping it through git, pull requests and releases, and the development environment it is built in.
+meta	How the agent works with the human and on itself: the ways system and how ways are authored, skills, memory, subagents and workflows, starting and wrapping a session, goals, trust and voice, explicit choices, and structured reasoning.
+itops	IT operations on production systems: incidents and alert triage, runbooks, change proposals with approval gates, and classifying operations by risk and blast radius.
+collaboration	Working with teammates: sharing a repository's onboarding material so a colleague and their agent can pick it up.
+workstation	A developer's own machine: shell configuration, command-line tools, global git and SSH agent setup, and auditing the software installed on it over time.
+meta/knowledge/authoring	Writing ways: frontmatter fields, the keyword pattern lane, refire cadence, locale stubs, splitting a large way into a tree of parent and child ways, and keeping ways free of personal information.
