@@ -33,6 +33,7 @@ pub mod status;
 pub mod suggest;
 pub mod target;
 pub mod template;
+pub mod toggle_check;
 pub mod tree;
 pub mod tune;
 pub mod tune_precision;

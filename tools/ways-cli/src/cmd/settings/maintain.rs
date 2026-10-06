@@ -81,6 +81,8 @@ pub(super) fn file_label(file: &str) -> &'static str {
     }
 }
 
+/// Check the files. A finding exits 3; a warning is printed and leaves the
+/// exit alone, since the file is valid and loads as written.
 pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
     agent_settings::load::trace("lint");
     let layers = layers_for(file, project)?;
@@ -93,6 +95,9 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
             n += 1;
             fixable += f.lint_note().is_empty() as usize;
         }
+        for w in unmatched_toggles(l, &project_dir(project)) {
+            println!("{w}");
+        }
     }
     if n > 0 {
         let s = if n == 1 { "" } else { "s" };
@@ -104,6 +109,33 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
         return Err(fail(exit::REJECTED, format!("{n} finding{s}; {how}")));
     }
     Ok(())
+}
+
+/// A warning per per-way toggle (ADR-131) in a project overlay that names
+/// no way the project, the user or the shipped corpus has: it switches
+/// nothing, so a way renamed since it was written runs again.
+fn unmatched_toggles(l: &Layer, fallback_project: &Path) -> Vec<String> {
+    use crate::cmd::toggle_check;
+    let (Some(path), true) = (&l.path, l.file == ways_core::settings::FILE && l.scope == LayerScope::Project) else {
+        return Vec::new();
+    };
+    let Some(ways) = l.accepted.get("ways").and_then(Value::as_mapping) else {
+        return Vec::new();
+    };
+    let ids = toggle_check::known_ids(&toggle_check::project_of(path, fallback_project));
+    let text = String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned();
+    toggle_check::unmatched(ways.keys().filter_map(Value::as_str), &ids)
+        .into_iter()
+        .map(|u| {
+            let at = toggle_check::line_of(&text, &u.key).map(|n| format!(":{n}")).unwrap_or_default();
+            let hint = u.nearest.map(|n| format!("; nearest way: {n}")).unwrap_or_default();
+            format!(
+                "{}{at}: [ways.project] ways.{}: warning: names no way in the project, user or shipped ways, so it switches nothing{hint}",
+                path.display(),
+                u.key
+            )
+        })
+        .collect()
 }
 
 /// The sections `fix <arg>` covers: the section named exactly, else every
