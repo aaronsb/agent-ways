@@ -2105,6 +2105,7 @@ name = "ways-mcp"
 version = "0.1.0"
 dependencies = [
  "attend-presence",
+ "claude-sessions",
  "serde_json",
 ]
 

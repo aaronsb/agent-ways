@@ -43,6 +43,30 @@ pub fn describe() -> Value {
     }
 }
 
+/// The session a lookup tool acts for: its id and, when Claude Code's session
+/// record names one, the working directory it runs in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    pub id: String,
+    /// The session's own working directory, worktree included. `ways_status`
+    /// reports the normalized origin; ways resolve against where the session
+    /// actually works, so a project way in a managed worktree is found.
+    pub project: Option<String>,
+}
+
+/// Who this server serves, derived by process ancestry on every call (ADR-171,
+/// ADR-187 item 5). `None` when no ancestor is a Claude Code session, as under
+/// a bare shell: the tools then act without a session and say so.
+pub fn identity() -> Option<Identity> {
+    let (id, _pid) = attend_presence::session::find_own_session(std::process::id())?;
+    let project = claude_sessions::read_session_records(&claude_sessions::ClaudeDir::user().sessions_dir())
+        .into_iter()
+        .find(|r| r.session_id == id)
+        .and_then(|r| r.cwd)
+        .or_else(|| std::env::var("CLAUDE_PROJECT_DIR").ok().filter(|p| !p.is_empty()));
+    Some(Identity { id, project })
+}
+
 #[cfg(test)]
 mod tests {
     use super::has_channel_flag;

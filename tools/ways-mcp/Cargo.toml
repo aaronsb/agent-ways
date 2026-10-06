@@ -11,4 +11,5 @@ path = "src/main.rs"
 
 [dependencies]
 attend-presence = { path = "../attend-presence" }
+claude-sessions = { path = "../claude-sessions" }
 serde_json = "1"
