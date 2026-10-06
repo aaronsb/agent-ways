@@ -135,7 +135,8 @@ struct NearMiss {
 /// Emit a session's reconstructed timeline as a single pretty-printed JSON
 /// document. With no `session`, dumps the most recent session in scope.
 pub fn replay_json(session: Option<&str>, project: Option<&str>, all: bool, matched: bool) -> Result<()> {
-    let content = ways_core::firing::load_events_text_scoped(session);
+    let scope = scope::resolve_project_scope(project, all);
+    let content = ways_core::firing::load_events_text_for(session, scope.as_ref().ok().and_then(|s| s.as_deref()));
     if content.trim().is_empty() {
         println!("{{\"error\":\"no events recorded yet\"}}");
         return Ok(());
@@ -143,7 +144,7 @@ pub fn replay_json(session: Option<&str>, project: Option<&str>, all: bool, matc
 
     // Scope to the current project by default; emit a JSON error (not a bail) so
     // agent consumers get structured output even on the fail-loud path.
-    let scope = match scope::resolve_project_scope(project, all) {
+    let scope = match scope {
         Ok(s) => s,
         Err(e) => {
             println!("{{\"error\":{}}}", serde_json::to_string(&e.to_string())?);

@@ -41,18 +41,35 @@ pub fn load_events_text() -> String {
 /// `session_start`: every older source predates the session. A session with no
 /// `session_start` on record reads everything.
 pub fn load_events_text_for_session(session_id: &str) -> String {
-    load_events_text_until(|text| has_session_start(text, session_id, None))
+    load_events_text_until(|text| has_session_start(text, |v| v["session"].as_str() == Some(session_id)))
 }
 
-/// [`load_events_text_for_session`] when a session is named, all history when
-/// it is not (the most recent session in scope is then found from the log).
-pub fn load_events_text_scoped(session: Option<&str>) -> String {
-    session.map_or_else(load_events_text, load_events_text_for_session)
+/// The parsed events of one session, read as [`load_events_text_for_session`]
+/// reads them.
+pub fn load_events_for_session(session_id: &str) -> Vec<Value> {
+    events_for_session_from(&crate::paths::events_log_sources(), &mut |p| crate::event_archive::read_source(p), session_id)
+}
+
+fn events_for_session_from(sources: &[std::path::PathBuf], read: &mut dyn FnMut(&std::path::Path) -> Option<String>, session_id: &str) -> Vec<Value> {
+    let text = newest_first_text(sources, read, &|t| has_session_start(t, |v| v["session"].as_str() == Some(session_id)));
+    text.lines().filter_map(|line| serde_json::from_str(line).ok()).collect()
+}
+
+/// The text a reader needs to find and show a session: the one named, or when
+/// none is, the newest in `scope` (every project when `None`). Reading stops
+/// after the newest source holding a `session_start` at the scope's own
+/// project, since a session in a worktree under it only stands in when the
+/// project has none.
+pub fn load_events_text_for(session: Option<&str>, scope: Option<&str>) -> String {
+    match session {
+        Some(id) => load_events_text_for_session(id),
+        None => load_events_text_until(|text| has_session_start(text, |v| scope.is_none_or(|sc| { let p = v["project"].as_str().unwrap_or(""); crate::util::in_project(p, sc) && crate::util::in_project(sc, p) }))),
+    }
 }
 
 /// The text back to the newest `session_start` of `project`, oldest first.
 pub fn load_events_text_for_project_sessions(project: &str) -> String {
-    load_events_text_until(|text| has_session_start(text, "", Some(project)))
+    load_events_text_until(|text| has_session_start(text, |v| v["project"].as_str() == Some(project)))
 }
 
 /// Read the sources newest first, stopping after the first whose text
@@ -84,15 +101,12 @@ fn newest_first_text(sources: &[std::path::PathBuf], read: &mut dyn FnMut(&std::
     out
 }
 
-/// Whether `text` has a `session_start` line for `session_id` (any session
-/// when empty) and, when given, `project`.
-fn has_session_start(text: &str, session_id: &str, project: Option<&str>) -> bool {
-    text.lines().filter(|l| l.contains("session_start") && l.contains(session_id)).any(|l| {
-        let Ok(v) = serde_json::from_str::<Value>(l) else { return false };
-        v["event"].as_str() == Some("session_start")
-            && (session_id.is_empty() || v["session"].as_str() == Some(session_id))
-            && project.is_none_or(|p| v["project"].as_str() == Some(p))
-    })
+/// Whether `text` has a `session_start` event that `matches`.
+fn has_session_start(text: &str, matches: impl Fn(&Value) -> bool) -> bool {
+    text.lines()
+        .filter(|l| l.contains("session_start"))
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .any(|v| v["event"].as_str() == Some("session_start") && matches(&v))
 }
 
 /// Count `way_fired` events per way ID across the given events.
@@ -133,14 +147,34 @@ mod reader_tests {
 
     #[test]
     fn a_session_lookup_does_not_open_archives_older_than_the_session() {
-        let (text, opened) = run(&|t| has_session_start(t, "s2", None));
+        let (text, opened) = run(&|t| has_session_start(t, |v| v["session"] == "s2"));
         assert_eq!(opened, ["events.jsonl", "mid.gz"], "old.gz predates s2's start and is never opened");
         assert_eq!(text, format!("{}mid line\nlive line\n", start("s2")), "read back oldest first");
     }
 
     #[test]
+    fn parsed_session_events_do_not_open_archives_older_than_the_session() {
+        let sources: Vec<PathBuf> = ["old.gz", "mid.gz", "events.jsonl"].iter().map(PathBuf::from).collect();
+        let fire = |s: &str, way: &str| format!("{{\"event\":\"way_fired\",\"session\":\"{s}\",\"way\":\"{way}\"}}\n");
+        let texts = [
+            ("old.gz", format!("{}{}", start("s2"), fire("s2", "ghost"))),
+            ("mid.gz", format!("{}{}", start("s2"), fire("s2", "a"))),
+            ("events.jsonl", fire("s2", "b")),
+        ];
+        let mut opened = Vec::new();
+        let mut read = |p: &Path| {
+            opened.push(p.to_string_lossy().into_owned());
+            texts.iter().find(|(n, _)| Path::new(n) == p).map(|(_, t)| t.clone())
+        };
+        let events = events_for_session_from(&sources, &mut read, "s2");
+        assert_eq!(opened, ["events.jsonl", "mid.gz"]);
+        let ways: Vec<&str> = events.iter().filter_map(|e| e["way"].as_str()).collect();
+        assert_eq!(ways, ["a", "b"]);
+    }
+
+    #[test]
     fn a_session_with_no_start_on_record_reads_all_history() {
-        let (text, opened) = run(&|t| has_session_start(t, "nope", None));
+        let (text, opened) = run(&|t| has_session_start(t, |v| v["session"] == "nope"));
         assert_eq!(opened.len(), 3);
         assert!(text.starts_with(&start("s1")) && text.ends_with("live line\n"));
     }

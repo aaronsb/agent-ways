@@ -367,7 +367,7 @@ impl SessionIntrospection {
     /// the criteria that actually fired, honoring ADR-143 override precedence),
     /// then upgrade the join with the session transcript when it's present.
     pub fn from_session(session_id: &str, project: &str, window_k: u64) -> Self {
-        let events = crate::firing::load_events();
+        let events = crate::firing::load_events_for_session(session_id);
         let criteria = project_criteria_map(project);
         let mut s = Self::build(&events, session_id, project, window_k, &criteria);
         s.join_transcript(&crate::transcript::prompt_turns(project, session_id));

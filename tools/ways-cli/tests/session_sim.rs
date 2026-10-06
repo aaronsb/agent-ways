@@ -1796,3 +1796,29 @@ fn scenario_event_history_is_archived_expired_and_read_back() {
 
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn scenario_session_dump_does_not_read_archives_older_than_the_session() {
+    let home = sim_root().join("home-dump-arch");
+    let _ = std::fs::remove_dir_all(&home);
+    let state = home.join(".local/state/agent-ways");
+    std::fs::create_dir_all(&state).unwrap();
+    let fire = |ts: &str, way: &str| {
+        format!("{{\"ts\":\"{ts}\",\"event\":\"way_fired\",\"way\":\"{way}\",\"session\":\"sim-dump-arch\",\"project\":\"/tmp/p-dump\",\"trigger\":\"semantic\",\"scope\":\"agent\"}}\n")
+    };
+    let start = "{\"ts\":\"2026-10-01T10:00:00Z\",\"event\":\"session_start\",\"session\":\"sim-dump-arch\",\"project\":\"/tmp/p-dump\"}\n";
+    // An archive from before the session holds a fire for the same id: it is never read.
+    ways_core::event_archive::append(&state, 1_790_000_000, fire("2026-09-01T10:00:00Z", "ghost/way").as_bytes()).unwrap();
+    ways_core::event_archive::append(&state, 1_791_000_000, format!("{start}{}", fire("2026-10-01T10:01:00Z", "archived/way")).as_bytes()).unwrap();
+    std::fs::write(state.join("events.jsonl"), fire("2026-10-02T10:00:00Z", "live/way")).unwrap();
+
+    let out = ways_cmd(&home, &home.join(".cache"), &home.join(".local/state"))
+        .args(["session", "dump", "--session", "sim-dump-arch", "--project", "/tmp/p-dump"])
+        .output()
+        .expect("Failed to run ways session dump");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("live/way") && text.contains("archived/way"), "the session's own history is read:\n{text}");
+    assert!(!text.contains("ghost/way"), "an archive older than the session is not read:\n{text}");
+
+    let _ = std::fs::remove_dir_all(&home);
+}
