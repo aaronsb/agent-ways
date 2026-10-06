@@ -104,7 +104,7 @@ agent-ways is moving toward knowledge work beyond software, which means more dom
 
 ### 3. Lint
 
-- See Also targets resolve to a way.
+- See Also targets resolve to a way, looked up across every root a session reads (project, user, core), so a project or user way may point at a core way. Linting a subtree or a single file resolves against the ways root that contains it.
 - No symlinks inside a ways root: the scanner would read a linked way as a second way.
 - Basenames are unique within a root (ADR-110 §7); the two colliding basenames are renamed.
 - These checks are errors for the core corpus and warnings for user and project ways, so an upgrade alone turns no one's lint red.
