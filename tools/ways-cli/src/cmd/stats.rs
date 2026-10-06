@@ -6,6 +6,8 @@ use anyhow::Result;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 
+mod decisions;
+
 pub fn run(days: Option<u32>, project_filter: Option<&str>, json_output: bool, global: bool) -> Result<()> {
     // Default to project scope: CLAUDE_PROJECT_DIR > detect from cwd > global
     let detected_project = if !global && project_filter.is_none() {
@@ -15,9 +17,14 @@ pub fn run(days: Option<u32>, project_filter: Option<&str>, json_output: bool, g
     };
     let given = project_filter.map(ways_core::util::project_arg);
     let project_filter = given.as_deref().or(detected_project.as_deref());
+    let decisions = decisions_section(days, project_filter);
     if crate::paths::events_log_sources().is_empty() {
-        if !json_output {
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&json!({ "decisions": decisions::json_value(decisions.as_ref()) })).unwrap_or_default());
+        } else {
             println!("No events recorded yet. Stats will appear after ways start firing.");
+            println!();
+            decisions::print_human(decisions.as_ref());
         }
         return Ok(());
     }
@@ -26,9 +33,12 @@ pub fn run(days: Option<u32>, project_filter: Option<&str>, json_output: bool, g
     let stats = report(&content, days, project_filter);
 
     if json_output {
-        print_json(&stats);
+        let mut v = json_value(&stats);
+        v["decisions"] = decisions::json_value(decisions.as_ref());
+        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
     } else {
         print_human(&stats, days, project_filter);
+        decisions::print_human(decisions.as_ref());
     }
 
     Ok(())
@@ -393,8 +403,15 @@ fn json_value(r: &StatsReport) -> serde_json::Value {
     output
 }
 
-fn print_json(r: &StatsReport) {
-    println!("{}", serde_json::to_string_pretty(&json_value(r)).unwrap_or_default());
+/// The decisions section over the same window and project, `None` when no
+/// decision log exists.
+fn decisions_section(days: Option<u32>, project_filter: Option<&str>) -> Option<decisions::DecisionsReport> {
+    let sources = ways_core::decisions::sources();
+    if sources.is_empty() {
+        return None;
+    }
+    let (window, span) = decisions::days_window(days, agent_fmt::when::now_secs());
+    Some(decisions::report(sources, window, project_filter, span))
 }
 
 fn print_human(r: &StatsReport, days: Option<u32>, project_filter: Option<&str>) {

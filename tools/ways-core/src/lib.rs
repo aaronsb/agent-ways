@@ -16,6 +16,7 @@ pub mod agents;
 pub mod calibration;
 pub mod config;
 pub mod context_window;
+pub mod decisions;
 pub mod event_archive;
 pub mod finding;
 pub mod firing;
