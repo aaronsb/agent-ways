@@ -236,28 +236,10 @@ impl Config {
     /// shorter one. So `a/b/*: false` with `a/b/c: true` leaves `a/b/c` on.
     /// A way with no toggle is on.
     pub fn way_disabled(&self, way_id: &str) -> bool {
-        // Specificity: an exact match outranks every prefix; between prefixes,
-        // the longer one. A bad toggle value reads as disabled when the file is
-        // loaded (`closed_toggle`), so it arrives here as a disable entry.
-        let mut best: Option<(usize, bool)> = None; // (specificity, disabled)
-        let mut consider = |key: &str, disabled: bool| {
-            let rank = match key.strip_suffix("/*") {
-                None if key == way_id => usize::MAX,
-                None => return,
-                Some(dir) if way_id == dir || (way_id.len() > dir.len() + 1 && way_id.starts_with(dir) && way_id.as_bytes()[dir.len()] == b'/') => dir.len(),
-                Some(_) => return,
-            };
-            if best.is_none_or(|(r, _)| rank > r) {
-                best = Some((rank, disabled));
-            }
-        };
-        for k in &self.enabled_ways {
-            consider(k, false);
-        }
-        for k in &self.disabled_ways {
-            consider(k, true);
-        }
-        best.is_some_and(|(_, disabled)| disabled)
+        way_toggled_off(
+            self.enabled_ways.iter().map(|k| (k.as_str(), true)).chain(self.disabled_ways.iter().map(|k| (k.as_str(), false))),
+            way_id,
+        )
     }
 
     /// The effective projection targets (ADR-184). With no `targets` key the
@@ -469,6 +451,28 @@ impl Config {
             }
         }
     }
+}
+
+/// Whether a set of project toggles switches `way_id` off. Each toggle is
+/// `(key, enabled)`, where the key is a way id or a `dir/*` prefix. The most
+/// specific toggle wins: a toggle on the way itself beats any prefix, and a
+/// longer prefix beats a shorter one; a prefix covers the way at its own path
+/// and every way under it. No matching toggle leaves the way on. The settings
+/// screens call this too, so what they show is what a session does.
+pub fn way_toggled_off<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> bool {
+    let mut best: Option<(usize, bool)> = None; // (specificity, disabled)
+    for (key, enabled) in toggles {
+        let rank = match key.strip_suffix("/*") {
+            None if key == way_id => usize::MAX,
+            None => continue,
+            Some(dir) if way_id == dir || (way_id.len() > dir.len() + 1 && way_id.starts_with(dir) && way_id.as_bytes()[dir.len()] == b'/') => dir.len(),
+            Some(_) => continue,
+        };
+        if best.is_none_or(|(r, _)| rank > r) {
+            best = Some((rank, !enabled));
+        }
+    }
+    best.is_some_and(|(_, disabled)| disabled)
 }
 
 fn home_dir() -> PathBuf {

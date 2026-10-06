@@ -862,3 +862,37 @@ fn a_home_reached_through_a_symlink_shows_as_tilde_in_its_canonical_form_too() {
     assert_eq!(t(&format!("{canonical}-other/x")), format!("{canonical}-other/x"), "at a path boundary only");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
+    let fx = Fixture::home();
+    for id in ["a/one", "a/two", "b/three"] {
+        let name = id.rsplit('/').next().unwrap();
+        fx.file(&format!("corpus/{id}/{name}.md"), &format!("---\ndescription: {name}\n---\n"));
+    }
+    fx.file("work/current/.claude/ways.yaml", "ways:\n  a/*: false\n  a/two: true\n");
+    let file = fx.root.join("work/current/.claude/ways.yaml");
+    let project = agent_settings::Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, &file);
+    let ctx = Ctx {
+        project: fx.root.join("work/current"),
+        home: fx.root.clone(),
+        corpus: fx.root.join("corpus"),
+        user_ways: fx.root.join(".config/agent-ways/ways"),
+        themes: None,
+        xdg_config: fx.root.join(".config"),
+        claude_config_dir: None,
+        claude: fx.root.join(".claude"),
+    };
+    let r = Ways::new(ctx).build(&[project]);
+    let project = r[0].children.iter().find(|n| n.name == "project").unwrap();
+    let shipped = section(project, "shipped");
+    let a = shipped.children.iter().find(|n| n.name == "a").unwrap();
+    let loaded = |name: &str| a.children.iter().find(|n| n.name == name).unwrap().setting.as_ref().unwrap().loaded.clone();
+    assert_eq!(loaded("one"), "false", "off under the prefix, as a session treats it");
+    assert_eq!(loaded("two"), "true", "its own switch overrides the prefix");
+    // one is off; two (explicit on) and three are on; the prefix row is no way.
+    assert_eq!(shipped.about, "3 ways, 1 switched off as loaded.");
+    let prefixes = section(project, "prefixes");
+    assert_eq!(prefixes.children[0].children[0].setting.as_ref().unwrap().store.as_ref().unwrap().key, "ways.project.a/*");
+    assert!(project.children.iter().all(|n| n.name != "not found"), "a prefix is not a missing way");
+}

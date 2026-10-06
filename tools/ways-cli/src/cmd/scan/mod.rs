@@ -1832,7 +1832,7 @@ mod eligibility_tests {
     /// subagent-scope ways that can fire on the task lane.
     #[test]
     fn an_ineligible_by_scope_way_takes_no_share_on_the_task_lane() {
-        let cands = vec![way("agent-only", "agent", None), way("a", "subagent", None), way("b", "subagent", None)];
+        let cands = [way("agent-only", "agent", None), way("a", "subagent", None), way("b", "subagent", None)];
         let row = |v: &[(&str, f64)]| v.iter().map(|(i, c)| (i.to_string(), *c)).collect::<Vec<_>>();
         let rows = vec![
             row(&[("agent-only", 0.9), ("a", 0.6), ("b", 0.5)]),

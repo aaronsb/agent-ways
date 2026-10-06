@@ -1,23 +1,23 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme                    |
 |┌ ways settings — ~/proj · this project ──────────────┐┌detail─────────────────────────────────────┐|
-|│ ▾ settings                    value                 ││ways.event_retention_days                  │|
+|│ ▾ settings                    value                 ││ways.project                               │|
 |│     enabled                   true                  ││                                           │|
-|│     subagents                 true                  ││Days of history the event log keeps.       │|
-|│     language                  auto                  ││                                           │|
-|│     default_scope             agent                 ││Events older than this are dropped from    │|
-|│     disabled_domains          []                    ││events.jsonl, at most once a day (ADR-701  │|
-|│▌    event_retention_days      90                    ││§2). Session introspection and the tuning  │|
-|│ ▸ project · way               enabled               ││passes read this file, so keep enough for  │|
-|│                                                     ││them. judge_call lines are kept regardless,│|
-|│                                                     ││since `ways agent cost` sums them.         │|
+|│     subagents                 true                  ││Per-way switches for one project (ADR-131),│|
+|│     language                  auto                  ││in its .claude/ways.yaml. Each entry falls │|
+|│     default_scope             agent                 ││back alone.                                │|
+|│     disabled_domains          []                    ││                                           │|
+|│     event_retention_days      90                    ││2 entries, 0 changed                       │|
+|│▌▾ project · way               enabled               ││                                           │|
+|│   ▾ this project                                    ││                                           │|
+|│       (no project ways)       none · ways init      ││                                           │|
+|│   ▾ shipped                                         ││                                           │|
+|│     ▸ itops                                         ││                                           │|
+|│     ▸ softwaredev                                   │└───────────────────────────────────────────┘|
+|│                                                     │┌ways───────────────────────────────────────┐|
+|│                                                     ││3 ways, 0 switched off as loaded.          │|
 |│                                                     ││                                           │|
-|│                                                     ││value    90                                │|
-|│                                                     ││type     integer 1..=3650 (Enter edits)    │|
-|│                                                     ││default  90                                │|
-|│                                                     ││from     default                           │|
-|│                                                     ││writes   ~/.config/agent-ways/config.yaml  │|
-|│                                                     ││[ways.event_retention_days]                │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -46,7 +46,7 @@ styles
   2   2-11  - - BOLD
   2  32-36  - - DIM
   2  54-55  - - DIM
-  2  56-80  - - BOLD
+  2  56-67  - - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3  54-55  - - DIM
@@ -64,39 +64,45 @@ styles
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   1-1   Cyan - BOLD|REVERSED
-  8   2-53  - - BOLD|REVERSED
-  8  54-55  - - DIM
+  8  54-75  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9   2-10  - - BOLD
-  9  11-16  - - DIM
-  9  32-38  - - DIM
+  9   1-1   Cyan - BOLD|REVERSED
+  9   2-10  - - BOLD|REVERSED
+  9  11-16  - - BOLD|DIM|REVERSED
+  9  17-31  - - BOLD|REVERSED
+  9  32-38  - - BOLD|DIM|REVERSED
+  9  39-53  - - BOLD|REVERSED
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
+ 10   2-17  - - BOLD
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
+ 11  32-47  - - DIM
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
+ 12   2-12  - - BOLD
  12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13  54-64  - - DIM
+ 13   2-12  - - BOLD
+ 13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14  54-64  - - DIM
- 14  99-99  - - DIM
+ 14   2-18  - - BOLD
+ 14  54-99  - - DIM
  15   0-0   - - DIM
- 15  54-64  - - DIM
- 15  99-99  - - DIM
+ 15  54-55  - - DIM
+ 15  56-59  LightBlue - BOLD|DIM
+ 15  60-99  - - DIM
  16   0-0   - - DIM
- 16  54-64  - - DIM
+ 16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM
- 17  54-64  - - DIM
+ 17  54-55  - - DIM
  17  99-99  - - DIM
  18   0-0   - - DIM
  18  54-55  - - DIM
