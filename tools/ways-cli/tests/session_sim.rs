@@ -1824,3 +1824,104 @@ fn scenario_session_dump_does_not_read_archives_older_than_the_session() {
 
     let _ = std::fs::remove_dir_all(&home);
 }
+
+// ── ADR-701 §2: one decision record per prompt turn ─────────────
+
+/// The `kind: scan` decision records `session` wrote to the fixture home's
+/// decision log, in order.
+fn decision_records(session: &str) -> Vec<serde_json::Value> {
+    let log = fixture_home().join(".local/state/agent-ways/decisions.jsonl");
+    std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["kind"] == "scan" && v["session"] == session)
+        .collect()
+}
+
+/// The `result` the record gives `way`, or "" when it names none.
+fn outcome_of<'r>(record: &'r serde_json::Value, way: &str) -> &'r str {
+    record["outcomes"]
+        .as_array()
+        .and_then(|o| o.iter().find(|e| e["way"] == way))
+        .and_then(|e| e["result"].as_str())
+        .unwrap_or("")
+}
+
+#[test]
+fn scenario_decision_record_names_a_fire_and_a_refire_hold_in_one_turn() {
+    let s = Session::new("decide");
+
+    // Turn 1 fires child (testing).
+    s.scan_prompt("how do I write a unit test for this module");
+    assert_marker_exists("testdomain/parent/child", &s.id);
+
+    // Turn 2 matches child again and child2 for the first time.
+    s.scan_prompt("refactor this unit test and decompose it");
+    assert_epoch(&s.id, 2);
+    assert_marker_exists("testdomain/parent/child2", &s.id);
+
+    let records = decision_records(&s.id);
+    assert_eq!(records.len(), 2, "one record per prompt scan: {records:#?}");
+    let turn2: Vec<&serde_json::Value> = records.iter().filter(|r| r["epoch"] == 2).collect();
+    assert_eq!(turn2.len(), 1, "exactly one record for turn 2: {records:#?}");
+    let r = turn2[0];
+    assert_eq!(r["surface"], "prompt");
+    assert_eq!(r["turn_start"], true);
+    assert_eq!(r["hook_event"], "UserPromptSubmit");
+    assert_eq!(r["agent"], "main");
+    assert_eq!(outcome_of(r, "testdomain/parent/child2"), "fired", "{r:#}");
+    assert_eq!(outcome_of(r, "testdomain/parent/child"), "held_refire", "{r:#}");
+    assert_eq!(outcome_of(&records[0], "testdomain/parent/child"), "fired", "{:#}", records[0]);
+
+    // The record absorbs scan_candidates: the event log no longer carries it.
+    let events = std::fs::read_to_string(fixture_home().join(".local/state/agent-ways/events.jsonl")).unwrap_or_default();
+    assert!(
+        !events.lines().any(|l| l.contains("\"scan_candidates\"") && l.contains(&s.id)),
+        "no scan_candidates event for this session"
+    );
+
+    // The last-scan marker names the turn's record.
+    let marker = std::fs::read_to_string(format!("{}/{}/last-scan", sessions_root(), s.id)).expect("last-scan marker");
+    let m: serde_json::Value = serde_json::from_str(&marker).unwrap();
+    assert_eq!(m["scan_id"], r["scan_id"]);
+    assert_eq!(m["epoch"], 2);
+}
+
+#[test]
+fn scenario_decision_records_count_an_empty_turn_and_a_task_dispatch() {
+    let s = Session::new("decide-empty");
+
+    // A prompt nothing matches is still a turn: one record, no outcomes.
+    let out = s.scan_prompt("what is the weather like on the moon tonight");
+    assert!(out.is_empty(), "nothing fires: {out:?}");
+    let records = decision_records(&s.id);
+    assert_eq!(records.len(), 1, "{records:#?}");
+    assert_eq!((records[0]["epoch"].as_u64(), records[0]["turn_start"].as_bool()), (Some(1), Some(true)));
+    assert_eq!(records[0]["outcomes"], serde_json::json!([]));
+    assert_eq!(records[0]["candidates"], serde_json::json!([]), "keyword-only: no lane ran");
+
+    // A teammate dispatch writes a task record naming what it stashed. It
+    // starts no turn and does not move the last-scan marker.
+    let marker = format!("{}/{}/last-scan", sessions_root(), s.id);
+    let before = std::fs::read_to_string(&marker).expect("last-scan marker");
+    let output = s
+        .cmd()
+        .args([
+            "scan", "task",
+            "--query", "delegate the unit test work to a teammate",
+            "--session", &s.id,
+            "--project", "/tmp/nonexistent-project",
+            "--team", "sim-team",
+        ])
+        .output()
+        .expect("Failed to run ways scan task");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let records = decision_records(&s.id);
+    assert_eq!(records.len(), 2, "one record per scan: {records:#?}");
+    let t = &records[1];
+    assert_eq!((t["surface"].as_str(), t["scope"].as_str(), t["turn_start"].as_bool()), (Some("task"), Some("teammate"), Some(false)));
+    assert_eq!(t["epoch"], 1, "a dispatch is not a turn");
+    assert_eq!(outcome_of(t, "testdomain/scoped-way"), "stashed", "{t:#}");
+    assert_eq!(std::fs::read_to_string(&marker).unwrap(), before, "only a prompt scan is the last scan");
+}
