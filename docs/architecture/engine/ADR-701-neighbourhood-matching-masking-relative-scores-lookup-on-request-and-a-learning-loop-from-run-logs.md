@@ -58,6 +58,10 @@ basis:
 agent:
   name: claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "Which scan lanes should write decision records? Prompt and task only (Recommended). Should prompt/task way_keyword_gated and way_nearmiss events leave events.jsonl? Keep them for now (Recommended). How many turns should the live decisions file hold? 50,000 turns (Recommended)"
+    via: "session 274b9457, 2026-10-05, choice tool answers to the #12 decision-record plan"
 status: proposed
 date: 2026-10-05
 deciders:
