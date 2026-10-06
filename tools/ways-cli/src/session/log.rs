@@ -80,7 +80,7 @@ pub fn log_event(fields: &[(&str, &str)]) {
 }
 
 /// [`log_event`] with structured values beside the string fields, for an event
-/// that carries a list (`scan_candidates`). Readers key on `event` and read the
+/// that carries numbers or lists (`way_pulled`). Readers key on `event` and read the
 /// fields they know, so an extra nested value costs them nothing.
 pub fn log_event_with(fields: &[(&str, &str)], extra: &[(&str, serde_json::Value)]) {
     let now = agent_fmt::when::now_secs();
