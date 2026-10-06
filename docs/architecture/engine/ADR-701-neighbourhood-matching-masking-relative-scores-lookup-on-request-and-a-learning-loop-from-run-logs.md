@@ -40,6 +40,10 @@ basis:
     level: directed
     said: "in the mcp, lookup on request, if requested within the redsclosure supress envelope if it was a normal way injection shouldn't refuse to present the way. it would be helpful to log it as an out of band read though"
     via: chat, session 796c50d0, 2026-10-05
+  - operator: aaronsb
+    level: directed
+    said: "1. I think archiving is better. 2. I don't have a spending limit, other than say, $50 which is far more than I think we need"
+    via: chat, session 796c50d0, 2026-10-05, deciding archive over deletion for event history and the budget for the judge A/B
   - evidence: ADR-700
   - precedent: ADR-125
   - precedent: ADR-502
@@ -97,10 +101,13 @@ agent-ways is moving toward knowledge work beyond software, which means more dom
 - The project `ways:` map also accepts a path prefix, such as `softwaredev/code/supplychain/*: false`, which disables every way under it. A toggle on a way itself overrides a prefix.
 - Both corpora embed every way, disabled or not, so enabling one again needs no rebuild.
 
-### 2. Logging
+### 2. Logging and history
 
-- Every scan logs its top 5 candidates with cosine, share and margin, and whether the body sidecar was used.
-- The event log rotates by age, keeping enough history for session introspection (ADR-153) and tuning. Retention is configurable.
+- Every scan, on the prompt and the task lane, logs its top 5 candidates with cosine, share and margin, and once per event the lane, the basis of the scores and whether the body sidecar was used.
+- **History is archived, not deleted.** Before the size cap or the age rotation removes lines from `events.jsonl`, they are written to a compressed archive file dated by day in the same state directory. The size cap bounds only the live file.
+- `ways.event_retention_days` (user scope only, default 365) expires archive files, not live lines.
+- The readers of the event log (introspection, tuning, stats) read the archives as well as the live file.
+- Rotation claims its daily slot atomically, anchors its cutoff to the newest line already in the log, and never lets a `judge_call` line end its scan.
 
 ### 3. Lint
 
@@ -166,7 +173,7 @@ No field becomes required. Configuration keys keep their meaning; the prefix for
 3. `ways-mcp` lookup in-process, `way_pulled` and out-of-band reads.
 4. Body sidecar build; body confirmation reads it after measurement.
 5. Proposals from logs through `ways tune` and `ways suggest`; the opt-in real-prompt store through the ways sensor.
-6. Gated on evaluation: body score in ranking; a hubness penalty fitted at build against the probe set; competition within a subtree first.
+6. Gated on evaluation: body score in ranking; a hubness penalty fitted at build against the probe set; admitting each chunk's top-ranked way in late interaction (ADR-700 §12). Competition within a subtree first is dropped: region scores from way scores and independent region vectors both failed to beat flat competition (ADR-700 §9, §11).
 7. When #668 lands: the daemon's search service holds the corpora and the sidecar.
 
 ## Consequences
@@ -202,5 +209,6 @@ No field becomes required. Configuration keys keep their meaning; the prefix for
 - **Masks computed at corpus build.** Rejected: project toggles are only known at scan time.
 - **Automatic refit of calibration or bands from logs.** Rejected: the fire decision would drift silently and differ between installs, and the logs are biased toward what the matcher already surfaced.
 - **The body corpus only in the daemon.** Rejected: as a binary sidecar it is smaller than the alias JSON the hook already parses.
+- **Delete expired event lines, with a larger cap.** Rejected: the event history is the learning corpus of §8, the size cap had already deleted six weeks of it (ADR-700 §8), and a deleted line cannot be recovered after a clock or rotation fault.
 - **Hold the graph in a database.** Rejected: the corpus is small, authored and reviewed, and writes arrive through pull requests. ADR-702 records how its integrity is enforced on files.
 - **UUID identity, `parents:` and `related:` in this record.** Moved to ADR-702: nothing here depends on them, and at the measured move rate (12 renames since April, in four commits) they are not needed yet.
