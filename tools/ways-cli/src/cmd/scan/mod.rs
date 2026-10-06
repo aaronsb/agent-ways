@@ -946,6 +946,16 @@ fn eligible(way: &WayCandidate, lane: Lane<'_>, project_dir: &str) -> bool {
     lane_ok && check_when(&way.when_project, &way.when_file_exists, project_dir)
 }
 
+/// ADR-701 §7: the body sidecar a prompt scan in `project_dir` would use, as
+/// (ways, section vectors), or why it would confirm per call. For `ways status`.
+pub(crate) fn sidecar_state(project_dir: &str) -> Result<(usize, usize), sidecar::Fallback> {
+    let bin = crate::paths::way_embed().ok_or(sidecar::Fallback::NoEmbedder)?;
+    let candidates = collect_candidates(project_dir);
+    let enabled = body_map(candidates.iter().filter(|w| eligible(w, Lane::Prompt { scope: "agent" }, project_dir)));
+    let sc = sidecar::state(&crate::paths::corpus_dir(), &bin, enabled.keys().map(String::as_str))?;
+    Ok((sc.way_count(), sc.vector_count()))
+}
+
 /// Map each embeddable candidate's corpus id to its `.md` path, for the
 /// late-interaction matcher's body-confirmation stage (ADR-160) and as the set
 /// of ways allowed to compete.

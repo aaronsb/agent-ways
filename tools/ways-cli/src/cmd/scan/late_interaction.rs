@@ -892,8 +892,11 @@ mod tests {
         manifest(r#"{"file":"ways-body-en.bin"}"#);
         assert_eq!(state(&["a", "b"]), Err(Fallback::NoVectors), "manifest does not record --vectors");
 
-        manifest(r#"{"file":null,"reason":"way-embed < 1.2.0 lacks --vectors"}"#);
-        assert_eq!(state(&["a", "b"]), Err(Fallback::BuildFailed("way-embed < 1.2.0 lacks --vectors".into())));
+        manifest(r#"{"file":null,"reason":"way-embed < 1.2.0 lacks --vectors","unsupported":true}"#);
+        assert_eq!(state(&["a", "b"]), Err(Fallback::NoVectors), "built with a way-embed lacking --vectors");
+
+        manifest(r#"{"file":null,"reason":"body sections embedding generation failed"}"#);
+        assert_eq!(state(&["a", "b"]), Err(Fallback::BuildFailed("body sections embedding generation failed".into())));
 
         manifest(r#"{"file":"ways-body-en.bin","vectors":true}"#);
         std::fs::remove_file(dir.join(sidecar::FILE)).unwrap();

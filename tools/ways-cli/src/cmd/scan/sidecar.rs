@@ -210,6 +210,9 @@ pub(crate) struct ManifestView {
     pub vectors: bool,
     /// `body_sidecar.reason`: why the last build produced no sidecar.
     pub reason: Option<String>,
+    /// `body_sidecar.unsupported`: no sidecar because way-embed lacks
+    /// `--vectors`, an install state rather than a failure.
+    pub unsupported: bool,
 }
 
 impl ManifestView {
@@ -227,6 +230,7 @@ impl ManifestView {
             alias: alias_hashes_from(m),
             vectors: side.and_then(|s| s.get("vectors")).and_then(|v| v.as_bool()).unwrap_or(false),
             reason: side.and_then(|s| s.get("reason")).and_then(|v| v.as_str()).map(str::to_string),
+            unsupported: side.and_then(|s| s.get("unsupported")).and_then(|v| v.as_bool()).unwrap_or(false),
         }
     }
 }
@@ -239,6 +243,9 @@ pub(crate) fn state<'a>(
     enabled: impl IntoIterator<Item = &'a str>,
 ) -> Result<Sidecar, Fallback> {
     let view = ManifestView::read(&corpus_dir.join("embed-manifest.json"));
+    if view.unsupported {
+        return Err(Fallback::NoVectors);
+    }
     if let Some(why) = view.reason {
         return Err(Fallback::BuildFailed(why));
     }
@@ -267,6 +274,8 @@ pub(crate) fn alias_hashes_from(manifest: &serde_json::Value) -> HashMap<String,
 /// Why a scan confirms per call instead of against the sidecar (ADR-701 §7).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Fallback {
+    /// No way-embed binary: no embedding at all.
+    NoEmbedder,
     /// No sidecar file, or one that does not parse.
     Absent,
     /// The last corpus build did not produce a sidecar; its reason.
@@ -290,6 +299,7 @@ impl std::fmt::Display for Fallback {
             if more > 0 { format!("{} and {more} more", shown.join(", ")) } else { shown.join(", ") }
         };
         match self {
+            Fallback::NoEmbedder => write!(f, "way-embed not installed"),
             Fallback::Absent => write!(f, "absent; run `ways corpus`"),
             Fallback::BuildFailed(why) => write!(f, "build failed: {why}"),
             Fallback::NoVectors => write!(f, "way-embed cannot return chunk vectors (needs 1.2.0); run `ways corpus`"),
@@ -310,6 +320,16 @@ impl std::fmt::Display for Fallback {
 }
 
 impl Sidecar {
+    /// Ways with a record.
+    pub(crate) fn way_count(&self) -> usize {
+        self.index.len()
+    }
+
+    /// Section vectors held.
+    pub(crate) fn vector_count(&self) -> usize {
+        self.vectors.len().checked_div(self.dim).unwrap_or(0)
+    }
+
     /// ADR-701 §7: `Ok` when the sidecar was built with `model` and every way
     /// in `enabled` that the alias corpus holds (`alias`, the manifest's
     /// `way_hashes`) has a record at the same content hash. An enabled way the
