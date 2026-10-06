@@ -25,10 +25,10 @@ The deeper children below are for the bottom two rows. If someone says "let's ju
 |---|---|
 | Schema design & modeling | `data/modeling` *(forthcoming)* |
 | Migrations — numbering, idempotency, consolidation | `data/migrations` |
-| Schema docs & ER diagrams | `data/documentation` |
+| Schema docs & ER diagrams | `data/schema-docs` |
 
 ## See Also
 
 - architecture/design(softwaredev) — where a store fits in the broader system design
 - data/migrations(data) — the migration discipline, once you have a server DB
-- data/documentation(data) — generating schema reference and diagrams
+- data/schema-docs(data) — generating schema reference and diagrams

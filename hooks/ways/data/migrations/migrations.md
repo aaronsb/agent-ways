@@ -41,4 +41,4 @@ After writing the migration, verify: if you run `up` then `down`, is the schema 
 ## See Also
 
 - delivery/github(softwaredev) — a migration lands through the same PR + CI flow
-- data/documentation(data) — regenerate schema docs/diagrams after a migration
+- data/schema-docs(data) — regenerate schema docs/diagrams after a migration
