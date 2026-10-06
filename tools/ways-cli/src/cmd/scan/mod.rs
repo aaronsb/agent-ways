@@ -280,12 +280,15 @@ fn scan_prompt_surface(
     // the scan already holds. Enabled ways only: `candidates` is already
     // filtered by the domain and per-way toggles.
     {
-        let enabled: std::collections::HashMap<&str, &str> =
-            candidates.iter().filter(|c| c.embeddable()).map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
+        let enabled: std::collections::HashMap<&str, &str> = candidates
+            .iter()
+            .filter(|c| c.embeddable() && eligible(c, Lane::Prompt { scope: &scope }, &project_dir))
+            .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
+            .collect();
         candidate_log::log_scan_candidates(
             &embed_matches,
             &enabled,
-            &[("scope", &scope), ("project", &project_dir), ("session", session_id), ("hook_event", hook_event)],
+            &[("surface", "prompt"), ("scope", &scope), ("project", &project_dir), ("session", session_id), ("hook_event", hook_event)],
         );
     }
 
@@ -296,7 +299,7 @@ fn scan_prompt_surface(
     // the matcher can't run (surface too sparse to chunk, engine unavailable) it
     // returns None and match_prompt uses the single-vector scores. The keyword
     // gate and near-miss telemetry keep using the single-vector batch scores.
-    let verdicts = late_interaction::run(&reduced, &body_map(&candidates));
+    let verdicts = late_interaction::run(&reduced, &body_map(candidates.iter().filter(|w| eligible(w, Lane::Prompt { scope: &scope }, &project_dir))));
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
     // review): the shared embed vector mixes the response context in, which
@@ -319,10 +322,7 @@ fn scan_prompt_surface(
     let mut fired_ids: HashSet<String> = HashSet::new();
 
     for way in &candidates {
-        if !session::scope_matches(&way.scope, &scope) {
-            continue;
-        }
-        if !check_when(&way.when_project, &way.when_file_exists, &project_dir) {
+        if !eligible(way, Lane::Prompt { scope: &scope }, &project_dir) {
             continue;
         }
 
@@ -484,7 +484,7 @@ pub fn diagnose(query: &str, project: Option<&str>, top_n: usize) -> Option<(Str
     let project_dir = project.map(|s| s.to_string()).unwrap_or_else(crate::util::project_dir);
     let candidates = collect_candidates(&project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
-    let rows = late_interaction::run_diagnostic(&reduced, &body_map(&candidates), top_n)?;
+    let rows = late_interaction::run_diagnostic(&reduced, &body_map(candidates.iter()), top_n)?;
     Some((reduced, rows))
 }
 
@@ -515,28 +515,27 @@ pub fn task(
     let masked = mask_nonlinguistic(query);
     // ADR-160: the matcher is the semantic matcher on the task surface too;
     // single-vector is the fail-safe when it can't chunk (see scan::prompt).
-    let verdicts = late_interaction::run(&reduced, &body_map(&candidates));
+    let verdicts = late_interaction::run(&reduced, &body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir))));
+    // ADR-701 §2: the task lane logs its candidates too, over the ways eligible there.
+    {
+        let lane = Lane::Task { teammate: is_teammate };
+        let enabled: std::collections::HashMap<&str, &str> = candidates
+            .iter()
+            .filter(|c| c.embeddable() && eligible(c, lane, &project_dir))
+            .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
+            .collect();
+        candidate_log::log_scan_candidates(
+            &embed_matches,
+            &enabled,
+            &[("surface", "task"), ("scope", task_scope), ("project", &project_dir), ("session", session_id)],
+        );
+    }
 
     // Payload: channel. Ordered like the other lanes before the stash is written.
     let mut hits: Vec<Hit<String>> = Vec::new();
 
     for way in &candidates {
-        // Must have subagent or teammate scope
-        let scope = &way.scope;
-        if is_teammate {
-            if !scope.contains("subagent") && !scope.contains("teammate") {
-                continue;
-            }
-        } else if !scope.contains("subagent") {
-            continue;
-        }
-
-        // Skip state-triggered ways
-        if way.trigger.is_some() {
-            continue;
-        }
-
-        if !check_when(&way.when_project, &way.when_file_exists, &project_dir) {
+        if !eligible(way, Lane::Task { teammate: is_teammate }, &project_dir) {
             continue;
         }
 
@@ -905,14 +904,37 @@ struct NearMiss {
     margin: f64,
 }
 
+/// The surface a scan serves, which decides what may fire on it.
+#[derive(Clone, Copy)]
+enum Lane<'a> {
+    /// A user prompt, in the session's scope.
+    Prompt { scope: &'a str },
+    /// A subagent or teammate dispatch.
+    Task { teammate: bool },
+}
+
+/// Whether `way` can fire on this lane at all: scope, state trigger and `when:`
+/// preconditions. The scan loops apply it to each candidate, and the matchers
+/// take their competing set from it, so a way that cannot fire here takes no
+/// softmax share and no confirmation slot (ADR-701 §1). Toggles are already
+/// applied by `collect_candidates`.
+fn eligible(way: &WayCandidate, lane: Lane<'_>, project_dir: &str) -> bool {
+    let lane_ok = match lane {
+        Lane::Prompt { scope } => session::scope_matches(&way.scope, scope),
+        // A task scan needs subagent scope (or teammate for a team) and skips
+        // state-triggered ways.
+        Lane::Task { teammate } => {
+            (way.scope.contains("subagent") || (teammate && way.scope.contains("teammate"))) && way.trigger.is_none()
+        }
+    };
+    lane_ok && check_when(&way.when_project, &way.when_file_exists, project_dir)
+}
+
 /// Map each embeddable candidate's corpus id to its `.md` path, for the
-/// late-interaction matcher's body-confirmation stage (ADR-160).
-fn body_map(candidates: &[WayCandidate]) -> std::collections::HashMap<String, PathBuf> {
-    candidates
-        .iter()
-        .filter(|c| c.embeddable())
-        .map(|c| (c.corpus_id.clone(), c.path.clone()))
-        .collect()
+/// late-interaction matcher's body-confirmation stage (ADR-160) and as the set
+/// of ways allowed to compete.
+fn body_map<'a>(candidates: impl Iterator<Item = &'a WayCandidate>) -> std::collections::HashMap<String, PathBuf> {
+    candidates.filter(|c| c.embeddable()).map(|c| (c.corpus_id.clone(), c.path.clone())).collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1757,5 +1779,75 @@ mod queued_tests {
             assert_eq!(get(child[0], k), "", "{k}");
         }
         assert!(events.iter().all(|e| get(e, "way") != "p/held"));
+    }
+}
+
+#[cfg(test)]
+mod eligibility_tests {
+    //! ADR-701 §1: the competing set is the ways that can fire on the lane.
+    use super::*;
+
+    fn way(id: &str, scope: &str, trigger: Option<&str>) -> WayCandidate {
+        WayCandidate {
+            id: id.to_string(),
+            corpus_id: id.to_string(),
+            path: PathBuf::from(format!("/{id}.md")),
+            pattern: None,
+            pattern_strict: false,
+            commands: None,
+            files: None,
+            description: "d".into(),
+            vocabulary: "v".into(),
+            threshold: 0.0,
+            scope: scope.to_string(),
+            when_project: None,
+            when_file_exists: None,
+            trigger: trigger.map(String::from),
+            trigger_path: None,
+        }
+    }
+
+    #[test]
+    fn each_lane_admits_what_its_scan_loop_admits() {
+        let agent = way("a", "agent", None);
+        let sub = way("s", "subagent", None);
+        let team = way("t", "teammate", None);
+        let state = way("st", "subagent", Some("context-threshold"));
+        let p = Lane::Prompt { scope: "agent" };
+        assert!(eligible(&agent, p, "/p") && !eligible(&sub, p, "/p"));
+        let task = Lane::Task { teammate: false };
+        assert!(eligible(&sub, task, "/p") && !eligible(&agent, task, "/p") && !eligible(&team, task, "/p"));
+        assert!(!eligible(&state, task, "/p"), "a state-triggered way skips the task lane");
+        assert!(eligible(&team, Lane::Task { teammate: true }, "/p"));
+    }
+
+    #[test]
+    fn a_when_precondition_that_fails_makes_a_way_ineligible() {
+        let mut w = way("w", "agent", None);
+        w.when_project = Some("/definitely/not/this/project".into());
+        assert!(!eligible(&w, Lane::Prompt { scope: "agent" }, "/p"));
+    }
+
+    /// An agent-scope way that beats every chunk must not take share from the
+    /// subagent-scope ways that can fire on the task lane.
+    #[test]
+    fn an_ineligible_by_scope_way_takes_no_share_on_the_task_lane() {
+        let cands = vec![way("agent-only", "agent", None), way("a", "subagent", None), way("b", "subagent", None)];
+        let row = |v: &[(&str, f64)]| v.iter().map(|(i, c)| (i.to_string(), *c)).collect::<Vec<_>>();
+        let rows = vec![
+            row(&[("agent-only", 0.9), ("a", 0.6), ("b", 0.5)]),
+            row(&[("agent-only", 0.8), ("b", 0.55), ("a", 0.3)]),
+        ];
+        let lane = Lane::Task { teammate: false };
+        let eligible_map = body_map(cands.iter().filter(|w| eligible(w, lane, "/p")));
+        let got = late_interaction::shares_for_test(rows.clone(), &eligible_map);
+        let absent: Vec<Vec<(String, f64)>> =
+            rows.iter().map(|r| r.iter().filter(|(i, _)| i != "agent-only").cloned().collect()).collect();
+        let want = late_interaction::shares_for_test(absent, &eligible_map);
+        assert_eq!(got, want);
+        assert!(got.iter().all(|(id, _)| id != "agent-only"));
+        // With the old toggle-only set it would have competed.
+        let all = body_map(cands.iter());
+        assert!(late_interaction::shares_for_test(rows, &all).iter().any(|(id, _)| id == "agent-only"));
     }
 }

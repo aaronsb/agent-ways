@@ -86,14 +86,19 @@ pub(super) fn log_scan_candidates(
     if top.is_empty() {
         return;
     }
-    let mut fields = vec![("event", "scan_candidates"), ("lane", lane)];
+    let mut fields = vec![("event", "scan_candidates"), ("lane", lane), ("basis", BASIS)];
     fields.extend_from_slice(context);
-    crate::session::log_event_with(&fields, &[("candidates", candidates_json(&top, lane))]);
+    // `sidecar` is false until the body sidecar ships (ADR-701 §6).
+    crate::session::log_event_with(&fields, &[("sidecar", serde_json::Value::Bool(false)), ("candidates", candidates_json(&top))]);
 }
 
-/// The event's `candidates` value: one object per candidate, with the lane and
-/// `sidecar: false` (the body sidecar ships in a later increment, ADR-701 §6).
-pub(super) fn candidates_json(cands: &[Candidate], lane: &str) -> serde_json::Value {
+/// Where cosine and share come from: the single-vector rows over the whole
+/// reduced surface, not the per-chunk late-interaction scores.
+const BASIS: &str = "single";
+
+/// The event's `candidates` value: one object per candidate. Lane, basis and
+/// sidecar are properties of the scan and sit once on the event.
+pub(super) fn candidates_json(cands: &[Candidate]) -> serde_json::Value {
     let round = |v: f64| (v * 10_000.0).round() / 10_000.0;
     serde_json::Value::Array(
         cands
@@ -104,8 +109,6 @@ pub(super) fn candidates_json(cands: &[Candidate], lane: &str) -> serde_json::Va
                     "cosine": round(c.cosine),
                     "share": round(c.share),
                     "margin": c.margin.map(round),
-                    "lane": lane,
-                    "sidecar": false,
                 })
             })
             .collect(),
@@ -193,15 +196,14 @@ mod tests {
     }
 
     #[test]
-    fn json_carries_lane_and_sidecar_false() {
+    fn json_carries_the_measures_and_nothing_per_scan() {
         let got = vec![
             Candidate { way: "a".into(), cosine: 0.6, share: 0.7, margin: Some(0.1) },
             Candidate { way: "b".into(), cosine: 0.5, share: 0.3, margin: None },
         ];
-        let v = candidates_json(&got, "en");
+        let v = candidates_json(&got);
         assert_eq!(v[0]["way"], "a");
-        assert_eq!(v[0]["lane"], "en");
-        assert_eq!(v[0]["sidecar"], false);
+        assert!(v[0].get("lane").is_none() && v[0].get("sidecar").is_none());
         assert_eq!(v[0]["cosine"], 0.6);
         assert!(v[1]["margin"].is_null());
     }

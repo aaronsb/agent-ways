@@ -568,3 +568,10 @@ mod tests {
         assert!(ranked[0].share <= 1.0);
     }
 }
+
+/// Share per way after masking to `enabled`, for tests in sibling modules.
+#[cfg(test)]
+pub(super) fn shares_for_test(per_chunk: Vec<Vec<(String, f64)>>, enabled: &HashMap<String, PathBuf>) -> Vec<(String, f64)> {
+    let n = per_chunk.len();
+    aggregate(&mask_to_enabled(per_chunk, enabled), n).into_iter().map(|r| (r.id, r.share)).collect()
+}
