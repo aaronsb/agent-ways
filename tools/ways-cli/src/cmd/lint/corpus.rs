@@ -79,11 +79,12 @@ pub(super) fn broken_see_also(root: &Path) -> Vec<Finding> {
 }
 
 /// Symlinks anywhere under `root`, files and directories alike. The walk does
-/// not follow links, so each is reported once at its own path.
+/// not follow links, so each is reported once at its own path. The root itself
+/// may be a link: the projection (`~/.claude/hooks/ways`) is one.
 pub(super) fn symlinks(root: &Path) -> Vec<Finding> {
     let mut out = Vec::new();
     for entry in WalkDir::new(root).follow_links(false).into_iter().filter_map(|e| e.ok()) {
-        if entry.path_is_symlink() {
+        if entry.depth() > 0 && entry.path_is_symlink() {
             let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
             out.push(Finding {
                 rel: rel.display().to_string(),
@@ -212,6 +213,16 @@ mod tests {
         let found = symlinks(&root);
         let rels: Vec<&str> = found.iter().map(|f| f.rel.as_str()).collect();
         assert_eq!(rels, vec!["a/linked", "a/real/alias.md"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_root_is_not_a_finding() {
+        let real = scratch("linkedroot-real");
+        way(&real, "a/real/real.md", "");
+        let link = scratch("linkedroot-link").join("ways");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(symlinks(&link).is_empty());
     }
 
     #[test]
