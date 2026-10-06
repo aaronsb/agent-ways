@@ -1768,7 +1768,7 @@ fn scenario_event_history_is_archived_expired_and_read_back() {
     // and release today's claim, as the next day would.
     let current = std::fs::read_to_string(&log).unwrap();
     std::fs::write(&log, format!("{{\"ts\":\"2001-01-01T00:00:00Z\",\"event\":\"way_fired\",\"way\":\"ancient/way\"}}\n{current}")).unwrap();
-    ways_core::event_archive::append(&state, 981_000_000, b"{\"ts\":\"2001-02-01T00:00:00Z\",\"event\":\"way_fired\",\"way\":\"older/way\"}\n").unwrap();
+    ways_core::event_archive::append(&state, ways_core::event_archive::EVENTS, 981_000_000, b"{\"ts\":\"2001-02-01T00:00:00Z\",\"event\":\"way_fired\",\"way\":\"older/way\"}\n").unwrap();
     let hand_made = state.join("events-preserved-20261005.jsonl.gz");
     std::fs::write(&hand_made, b"not an archive name").unwrap();
     for e in std::fs::read_dir(&state).unwrap().flatten() {
@@ -1783,7 +1783,7 @@ fn scenario_event_history_is_archived_expired_and_read_back() {
 
     let live = std::fs::read_to_string(&log).unwrap();
     assert!(!live.contains("ancient/way"), "the old line left the live file:\n{live}");
-    let archives = ways_core::event_archive::archives(&state);
+    let archives = ways_core::event_archive::archives(&state, ways_core::event_archive::EVENTS);
     assert_eq!(archives.len(), 1, "today's archive only; the 2001 one expired: {archives:?}");
     let today = agent_fmt::when::utc_date(agent_fmt::when::now_secs());
     assert_eq!(archives[0].file_name().unwrap().to_string_lossy(), format!("events-{today}.jsonl.gz"));
@@ -1810,8 +1810,8 @@ fn scenario_session_dump_does_not_read_archives_older_than_the_session() {
     };
     let start = "{\"ts\":\"2026-10-01T10:00:00Z\",\"event\":\"session_start\",\"session\":\"sim-dump-arch\",\"project\":\"/tmp/p-dump\"}\n";
     // An archive from before the session holds a fire for the same id: it is never read.
-    ways_core::event_archive::append(&state, 1_790_000_000, fire("2026-09-01T10:00:00Z", "ghost/way").as_bytes()).unwrap();
-    ways_core::event_archive::append(&state, 1_791_000_000, format!("{start}{}", fire("2026-10-01T10:01:00Z", "archived/way")).as_bytes()).unwrap();
+    ways_core::event_archive::append(&state, ways_core::event_archive::EVENTS, 1_790_000_000, fire("2026-09-01T10:00:00Z", "ghost/way").as_bytes()).unwrap();
+    ways_core::event_archive::append(&state, ways_core::event_archive::EVENTS, 1_791_000_000, format!("{start}{}", fire("2026-10-01T10:01:00Z", "archived/way")).as_bytes()).unwrap();
     std::fs::write(state.join("events.jsonl"), fire("2026-10-02T10:00:00Z", "live/way")).unwrap();
 
     let out = ways_cmd(&home, &home.join(".cache"), &home.join(".local/state"))
