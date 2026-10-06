@@ -494,7 +494,7 @@ enum AuthorCommand {
         /// Project directory (for project-local ways; default: current)
         #[arg(long)]
         project: Option<String>,
-        /// Compete every way, ignoring scope, `when:` and toggles
+        /// Compete every way, ignoring scope and `when:` (toggled-off ways stay out)
         #[arg(long)]
         all: bool,
     },
