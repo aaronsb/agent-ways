@@ -1,9 +1,10 @@
-//! scan/candidate_log.rs — the `scan_candidates` event (ADR-701 §2, §4).
+//! scan/candidate_log.rs — a scan's ranked candidates (ADR-701 §2, §4).
 //!
-//! Every prompt-surface scan records its top candidates with cosine, share and
-//! margin, so the run logs show how a fire was won or missed and not only that
-//! it happened. The rows are the ones the scan already holds: `way-embed match
-//! --threshold 0.0` returns every way's cosine, so this adds no embedding work.
+//! Every prompt and task scan records its top candidates with cosine, share and
+//! margin in its decision record (scan/decision.rs), so the run logs show how a
+//! fire was won or missed and not only that it happened. The rows are the ones
+//! the scan already holds: `way-embed match --threshold 0.0` returns every
+//! way's cosine, so this adds no embedding work.
 //!
 //! Only enabled ways appear, and only enabled ways compete in the share: a way
 //! the project or user switched off is not a neighbour (ADR-701 §1).
@@ -81,31 +82,8 @@ pub(super) fn scan_lane(scores: &super::scoring::EmbedScores) -> Option<(&'stati
     }
 }
 
-/// Log the scan's top candidates as one `scan_candidates` event. `enabled` maps
-/// a corpus id to the way's bare id for every way that may compete. `sidecar`
-/// says whether body confirmation read the body sidecar (ADR-701 §7).
-pub(super) fn log_scan_candidates(
-    scores: &super::scoring::EmbedScores,
-    enabled: &HashMap<&str, &str>,
-    sidecar: bool,
-    context: &[(&str, &str)],
-) {
-    let Some((lane, rows)) = scan_lane(scores) else { return };
-    let top = top_candidates(rows, enabled);
-    if top.is_empty() {
-        return;
-    }
-    let mut fields = vec![("event", "scan_candidates"), ("lane", lane), ("basis", BASIS)];
-    fields.extend_from_slice(context);
-    crate::session::log_event_with(&fields, &[("sidecar", serde_json::Value::Bool(sidecar)), ("candidates", candidates_json(&top))]);
-}
-
-/// Where cosine and share come from: the single-vector rows over the whole
-/// reduced surface, not the per-chunk late-interaction scores.
-const BASIS: &str = "single";
-
-/// The event's `candidates` value: one object per candidate. Lane, basis and
-/// sidecar are properties of the scan and sit once on the event.
+/// A record's `candidates` value: one object per candidate. Lane, basis and
+/// sidecar are properties of the scan and sit once on the record.
 pub(super) fn candidates_json(cands: &[Candidate]) -> serde_json::Value {
     let round = |v: f64| (v * 10_000.0).round() / 10_000.0;
     serde_json::Value::Array(

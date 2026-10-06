@@ -244,6 +244,10 @@ fn line_count(path: &std::path::Path) -> usize {
 
 // ── In-process show capture ───────────────────────────────────
 
+use crate::cmd::show::{ShowOutcome, Shown};
+
+/// [`crate::cmd::show::way_scored`] with its error absorbed: a way that fails on
+/// the fire path shows nothing and is recorded as [`ShowOutcome::Error`].
 pub(crate) fn capture_show_way(
     id: &str,
     session_id: &str,
@@ -252,9 +256,9 @@ pub(crate) fn capture_show_way(
     matched_span: Option<&str>,
     surface: Option<&str>,
     budget: Option<&mut ContextBudget>,
-) -> String {
+) -> Shown {
     crate::cmd::show::way_scored(id, session_id, trigger, fire_score, matched_span, surface, budget)
-        .unwrap_or_default()
+        .unwrap_or(Shown { body: String::new(), outcome: ShowOutcome::Error })
 }
 
 pub(crate) fn capture_show_check(

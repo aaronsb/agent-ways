@@ -20,7 +20,54 @@ use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_te
 // ── ways show way ───────────────────────────────────────────────
 
 pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
-    way_scored(id, session_id, trigger, None, None, None, None)
+    way_scored(id, session_id, trigger, None, None, None, None).map(|s| s.body)
+}
+
+/// What [`way_scored`] did with a way, for the scan's decision record
+/// (ADR-701 §2). The events it logs are unchanged; this names the same
+/// decision once more for the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShowOutcome {
+    /// Shown for the first time in its refire window.
+    Fired,
+    /// Shown again after its refire window passed.
+    Redisclosed,
+    /// Held back by its refire curve.
+    HeldRefire,
+    /// Held back by the hook's context budget.
+    HeldContextCap,
+    /// Not shown: disabled, out of scope, or no way file.
+    NotFireable,
+    /// `way_scored` failed. Never returned by it; a caller that absorbs its
+    /// error records this.
+    Error,
+}
+
+impl ShowOutcome {
+    /// The outcome's name in a decision record.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShowOutcome::Fired => "fired",
+            ShowOutcome::Redisclosed => "redisclosed",
+            ShowOutcome::HeldRefire => "held_refire",
+            ShowOutcome::HeldContextCap => "held_context_cap",
+            ShowOutcome::NotFireable => "not_fireable",
+            ShowOutcome::Error => "error",
+        }
+    }
+}
+
+/// A way's delivered text and what became of it. `body` is empty unless the
+/// way was shown.
+pub struct Shown {
+    pub body: String,
+    pub outcome: ShowOutcome,
+}
+
+impl Shown {
+    fn held(outcome: ShowOutcome) -> Self {
+        Shown { body: String::new(), outcome }
+    }
 }
 
 // ── Hook context budget ─────────────────────────────────────────
@@ -528,6 +575,10 @@ pub(crate) fn would_fire(id: &str, session_id: &str) -> bool {
 /// — bounded by [`surface_snippet`] — only alongside a `fire_score`, i.e. on semantic
 /// fires, giving the read-side precision instrument a judgeable record of what fired
 /// each way without re-embedding history. Keyword fires already carry `matched_span`.
+///
+/// Returns the delivered text with what became of the way (fired, re-disclosed,
+/// or held and why), which the prompt and task lanes write to their decision
+/// record (ADR-701 §2).
 pub fn way_scored(
     id: &str,
     session_id: &str,
@@ -536,11 +587,11 @@ pub fn way_scored(
     matched_span: Option<&str>,
     surface: Option<&str>,
     mut budget: Option<&mut ContextBudget>,
-) -> Result<String> {
+) -> Result<Shown> {
     let Some(Fireable { project_dir, domain, scope, way_file, is_project_local, content, firing, curve }) =
         fireable(id, session_id)?
     else {
-        return Ok(String::new());
+        return Ok(Shown::held(ShowOutcome::NotFireable));
     };
     // One transcript read per fire: the same tick feeds the fast-path decision,
     // the re-check under the lock, the recorded fire, and the stamps below.
@@ -560,7 +611,7 @@ pub fn way_scored(
     let decision = session::way_fire_outcome(id, session_id, &curve, token_pos);
     if !decision.outcome.is_allowed() {
         suppress(Suppression::Refire, decision.last_fire);
-        return Ok(String::new());
+        return Ok(Shown::held(ShowOutcome::HeldRefire));
     }
     // A static body that cannot fit is withheld before its macro runs: the
     // macro only adds to it. Later, smaller candidates may still fit.
@@ -569,7 +620,7 @@ pub fn way_scored(
         if !b.fits(&body) {
             b.refuse();
             suppress(Suppression::ContextCap, decision.last_fire);
-            return Ok(String::new());
+            return Ok(Shown::held(ShowOutcome::HeldContextCap));
         }
     }
 
@@ -589,13 +640,13 @@ pub fn way_scored(
     if !decision.outcome.is_allowed() {
         drop(lock);
         suppress(Suppression::Refire, decision.last_fire);
-        return Ok(String::new());
+        return Ok(Shown::held(ShowOutcome::HeldRefire));
     }
     if let Some(b) = budget {
         if !b.admit(&output) {
             drop(lock);
             suppress(Suppression::ContextCap, decision.last_fire);
-            return Ok(String::new());
+            return Ok(Shown::held(ShowOutcome::HeldContextCap));
         }
     }
     session::record_way_fire(id, session_id, &curve, token_pos);
@@ -705,7 +756,8 @@ pub fn way_scored(
     let refs: Vec<(&str, &str)> = log_fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
     session::log_event(&refs);
 
-    Ok(output)
+    let outcome = if is_redisclosure { ShowOutcome::Redisclosed } else { ShowOutcome::Fired };
+    Ok(Shown { body: output, outcome })
 }
 
 // ── ways show check ─────────────────────────────────────────────
@@ -792,7 +844,7 @@ pub fn check_within(
             b.reserve(&format!("\n{sections}"));
         }
         let parent_out =
-            way_scored(id, session_id, "check-pull", None, None, None, budget.as_deref_mut())?;
+            way_scored(id, session_id, "check-pull", None, None, None, budget.as_deref_mut())?.body;
         if let Some(b) = budget.as_deref_mut() {
             if parent_out.is_empty() {
                 b.cancel_reservation();
