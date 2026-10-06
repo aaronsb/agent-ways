@@ -1105,6 +1105,24 @@ mod archive_tests {
         assert!(archive_failed_today(&dir, EVENTS, NOW), "the decisions marker sweep left the events marker");
     }
 
+    /// Compaction rewrites the live file of the stream it was given: the
+    /// decisions log shrinks into decisions archives, and the event log and
+    /// its archives are left as they were.
+    #[test]
+    fn compaction_rewrites_only_its_own_streams_file() {
+        let (dir, events) = state("compact-stream");
+        let decisions = dir.join(DECISIONS.live_name());
+        let body = numbered(100);
+        std::fs::write(&decisions, &body).unwrap();
+        let small = line("way_fired", 0, "events-only");
+        std::fs::write(&events, &small).unwrap();
+        compact_locked(&dir, DECISIONS, NOW, 500, 0, CEILING_EVENTS_BYTES).unwrap().unwrap();
+        assert!(std::fs::read_to_string(&decisions).unwrap().len() < body.len(), "the decisions log shrank");
+        assert_eq!(archives(&dir, DECISIONS), [archive_path(&dir, DECISIONS, NOW)]);
+        assert_eq!(std::fs::read_to_string(&events).unwrap(), small, "the event log is untouched");
+        assert!(archives(&dir, EVENTS).is_empty(), "no events archive was written");
+    }
+
     /// The writer names the live file from the stream: a decisions append
     /// lands in `decisions.jsonl` and never in the event log.
     #[test]
