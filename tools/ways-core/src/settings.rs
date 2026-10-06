@@ -192,7 +192,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("true"),
         scope: Scope::Project,
         doc: "One way on or off in this project.",
-        long: "Project scope only (ADR-131). `false` silences the way in this project; absent means on. `ways settings set ways.project.<id> false` turns a way off; `ways settings unset ways.project.<id>` turns it back on. A key ending in `/*`, such as `softwaredev/code/supplychain/*`, covers every way under that directory; a toggle on a way itself overrides the prefix (ADR-701).",
+        long: "Project scope only (ADR-131). `false` silences the way in this project; absent means on. `ways settings set ways.project.<id> false` turns a way off; `ways settings unset ways.project.<id>` turns it back on. A key ending in `/*`, such as `softwaredev/code/supplychain/*`, covers that directory's way and every way under it; a toggle on a way itself overrides the prefix (ADR-701).",
         ..BASE
     },
     KeySpec {
@@ -262,9 +262,10 @@ const KEYS: &[KeySpec] = &[
         section: "ways.log",
         path: &["event_retention_days"],
         kind: Kind::Int { min: 1, max: 3650 },
+        scope: Scope::User,
         default: DefaultValue::Yaml("90"),
         doc: "Days of history the event log keeps.",
-        long: "Events older than this are dropped from events.jsonl, at most once a day (ADR-701 §2). Session introspection and the tuning passes read this file, so keep enough for them. judge_call lines are kept regardless, since `ways agent cost` sums them.",
+        long: "Machine-wide, so user scope only: a project file cannot shorten it. Events older than this are dropped from events.jsonl, at most once a day (ADR-701 §2). Session introspection and the tuning passes read this file, so keep enough for them. judge_call lines are kept regardless, since `ways agent cost` sums them.",
         ..BASE
     },
     KeySpec {

@@ -715,8 +715,8 @@ pub fn log_event_with(fields: &[(&str, &str)], extra: &[(&str, serde_json::Value
     // publishes a whole file via its own private temp. Concurrent compactions
     // from parallel `ways` processes are last-writer-wins — that drops a bounded
     // window of events, acceptable for a telemetry log, but never tears a line.
-    // Age rotation (ADR-701 §2) runs at most daily, gated by a marker file.
-    rotate_if_due(&events_file, agent_fmt::when::now_secs(), crate::config::global().event_retention_days);
+    // Age rotation (ADR-701 §2): one check a day per process, one winner a day across processes.
+    rotate_by_age_once_per_day();
 
     if let Ok(meta) = std::fs::metadata(&events_file) {
         if meta.len() > MAX_EVENTS_BYTES {
@@ -770,76 +770,132 @@ fn compact_log_tail(path: &std::path::Path, keep_bytes: u64, min_freed: u64) -> 
     agent_settings::writer::write_atomic(path, &out)
 }
 
-/// Age rotation runs at most this often; the marker file's mtime is the clock.
-const ROTATE_EVERY_SECS: u64 = 86_400;
+const DAY_SECS: u64 = 86_400;
 
-/// Rotate the event log by age when a day has passed since the last rotation.
-/// The marker is written first, so a parallel hook that stats it a moment later
-/// sees the slot taken. Returns whether a rotation ran and dropped lines.
-fn rotate_if_due(path: &std::path::Path, now: u64, retention_days: u32) -> bool {
-    let marker = path.with_extension("rotated");
-    // The marker holds the Unix second of the last rotation.
-    let recorded = std::fs::read_to_string(&marker).ok().and_then(|s| s.trim().parse::<u64>().ok());
-    if recorded.is_some_and(|t| now < t + ROTATE_EVERY_SECS) {
-        return false;
+/// Prefix of the daily claim files that sit beside the event log.
+const ROTATE_LOCK_PREFIX: &str = "events.rotated-";
+
+/// Age rotation for the hook path: at most one check per process per day.
+fn rotate_by_age_once_per_day() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static CHECKED_DAY: AtomicU64 = AtomicU64::new(0);
+    let now = agent_fmt::when::now_secs();
+    let day = now / DAY_SECS + 1; // +1 so the initial 0 never matches
+    if CHECKED_DAY.swap(day, Ordering::Relaxed) == day {
+        return;
     }
-    if std::fs::write(&marker, now.to_string()).is_err() {
-        return false;
+    rotate_if_due(&crate::paths::events_log(), now, crate::config::global().event_retention_days);
+}
+
+/// Rotate the event log by age if no process has claimed today's slot.
+///
+/// The slot is a file named for the day, made with `create_new`, so exactly one
+/// of any number of parallel hooks wins it. Claim files for earlier days are
+/// removed, and so are claims for days still to come: those only exist after
+/// the clock ran ahead and was set back, and would otherwise block rotation
+/// until the calendar caught up. Returns whether lines were dropped.
+fn rotate_if_due(path: &std::path::Path, now: u64, retention_days: u32) -> bool {
+    let Some(dir) = path.parent() else { return false };
+    let mine = format!("{ROTATE_LOCK_PREFIX}{}", now / DAY_SECS);
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(ROTATE_LOCK_PREFIX) && name != mine {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    if std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(&mine)).is_err() {
+        return false; // claimed today already, here or by a parallel hook
     }
     rotate_log_by_age(path, now, retention_days).unwrap_or(false)
 }
 
 /// Drop event lines older than `retention_days` from `path` (ADR-701 §2).
 ///
-/// Kept: lines newer than the cutoff, lines whose `ts` does not parse (never
-/// guessed at), and every `judge_call`, as compaction keeps them (#750). The
-/// survivors are written to a private temp and renamed over the log, so a
-/// reader sees a whole file. Hooks append with `O_APPEND` and take no lock, so
-/// bytes appended after the read are copied from the old file's tail onto the
-/// new one just before the rename; the window left is the span between that
-/// last length check and the rename, microseconds, and the same bounded loss
-/// the size compaction accepts. Nothing newer than the cutoff is ever selected
-/// for removal, so the current session's events are never the target.
-/// Returns whether any line was dropped.
+/// The log is append-ordered, so the old lines are a prefix. Only that prefix is
+/// examined, and only the leading `{"ts":"..."` of each line is read; the scan
+/// stops at the first line at or after the cutoff and the rest is copied
+/// unchanged. A log with nothing old costs one line read. Lines whose `ts` is
+/// unreadable and every `judge_call` are kept (#750).
+///
+/// Refused, with the file untouched, when no line reaches the cutoff: the clock
+/// ran ahead or the log is stale, and rotating would drop everything.
+///
+/// The survivors are written to a private temp and renamed over the log. Hooks
+/// append with `O_APPEND` and take no lock, so bytes appended after the read are
+/// copied across just before the rename. The window left is the span between
+/// that last length check and the rename, the same bounded loss the size
+/// compaction accepts. Returns whether any line was dropped.
 fn rotate_log_by_age(path: &std::path::Path, now: u64, retention_days: u32) -> std::io::Result<bool> {
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(e),
-    };
-    let cutoff = now.saturating_sub(u64::from(retention_days.max(1)) * 86_400);
-    let mut out: Vec<u8> = Vec::with_capacity(data.len());
-    let mut dropped = false;
-    for chunk in data.split_inclusive(|&b| b == b'\n') {
-        let line = chunk.strip_suffix(b"\n").unwrap_or(chunk);
-        if line.is_empty() || !is_older_than(line, cutoff) || is_judge_call(line) {
-            out.extend_from_slice(chunk);
-        } else {
-            dropped = true;
-        }
-    }
-    if !dropped {
-        return Ok(false);
-    }
-    // Carry events appended since the read.
-    if let Ok(now_len) = std::fs::metadata(path).map(|m| m.len()) {
-        if now_len > data.len() as u64 {
-            use std::io::{Read, Seek, SeekFrom};
-            let mut f = std::fs::File::open(path)?;
-            f.seek(SeekFrom::Start(data.len() as u64))?;
-            f.read_to_end(&mut out)?;
+    let cutoff = now.saturating_sub(u64::from(retention_days.max(1)) * DAY_SECS);
+    let Some(split) = split_expired(path, cutoff)? else { return Ok(false) };
+    // `split.expired` is where a dated archive of the removed lines would be written.
+    let mut out = split.kept;
+    // Everything from `current_from` on is current; copy it, then whatever arrived meanwhile.
+    let mut f = std::fs::File::open(path)?;
+    let mut pos = split.current_from;
+    loop {
+        use std::io::{Read, Seek, SeekFrom};
+        f.seek(SeekFrom::Start(pos))?;
+        let before = out.len();
+        f.read_to_end(&mut out)?;
+        pos += (out.len() - before) as u64;
+        if std::fs::metadata(path)?.len() <= pos {
+            break;
         }
     }
     agent_settings::writer::write_atomic(path, &out)?;
     Ok(true)
 }
 
-/// Whether an event line's `ts` parses and is before `cutoff`.
-fn is_older_than(line: &[u8], cutoff: u64) -> bool {
-    serde_json::from_slice::<serde_json::Value>(line)
-        .ok()
-        .and_then(|v| v.get("ts").and_then(|t| t.as_str()).and_then(agent_fmt::when::parse_utc_iso))
-        .is_some_and(|ts| ts < cutoff)
+/// The old prefix of the log, sorted into what stays and what expires.
+struct Split {
+    /// Head lines that survive (judge calls, lines with no readable ts).
+    kept: Vec<u8>,
+    /// The lines that expire.
+    #[allow(dead_code)]
+    expired: Vec<u8>,
+    /// Byte offset of the first current line.
+    current_from: u64,
+}
+
+/// Scan the old prefix of the log. `None` when there is nothing to drop or the
+/// scan must not drop (no line reaches `cutoff`).
+fn split_expired(path: &std::path::Path, cutoff: u64) -> std::io::Result<Option<Split>> {
+    use std::io::BufRead;
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let mut reader = std::io::BufReader::new(file);
+    let (mut kept, mut expired) = (Vec::new(), Vec::new());
+    let (mut pos, mut line) = (0u64, Vec::new());
+    loop {
+        line.clear();
+        let n = reader.read_until(b'\n', &mut line)?;
+        if n == 0 {
+            return Ok(None); // no line reached the cutoff
+        }
+        match line_ts(&line) {
+            Some(ts) if ts >= cutoff => {
+                return Ok((!expired.is_empty()).then_some(Split { kept, expired, current_from: pos }));
+            }
+            Some(_) if !is_judge_call(&line) => expired.extend_from_slice(&line),
+            _ => kept.extend_from_slice(&line),
+        }
+        pos += n as u64;
+    }
+}
+
+/// The Unix second of an event line's leading `"ts":"..."`, read from its first
+/// bytes without parsing the line.
+fn line_ts(line: &[u8]) -> Option<u64> {
+    let rest = line.strip_prefix(b"{\"ts\":\"")?;
+    let end = rest.iter().position(|&b| b == b'"')?;
+    agent_fmt::when::parse_utc_iso(std::str::from_utf8(&rest[..end]).ok()?)
 }
 
 /// A whole `judge_call` event line (substring prefilter, then a real parse).
@@ -1166,15 +1222,65 @@ mod compaction_tests {
     #[test]
     fn rotation_runs_once_a_day() {
         let p = tmp("throttle");
-        std::fs::write(&p, line("way_fired", 200, "old")).unwrap();
+        let current = line("way_fired", 0, "now");
+        std::fs::write(&p, format!("{}{current}", line("way_fired", 200, "old"))).unwrap();
         assert!(rotate_if_due(&p, NOW, 90));
         // An old line appears again: the day's slot is spent.
-        std::fs::write(&p, line("way_fired", 200, "old2")).unwrap();
+        std::fs::write(&p, format!("{}{current}", line("way_fired", 200, "old2"))).unwrap();
         assert!(!rotate_if_due(&p, NOW + 60, 90));
         assert!(std::fs::read_to_string(&p).unwrap().contains("old2"));
-        // A day later it is due again.
-        assert!(rotate_if_due(&p, NOW + DAY + 60, 90));
+        // A day later it is due again, and yesterday's claim is gone.
+        let later = NOW + DAY + 60;
+        std::fs::write(&p, format!("{}{}", line("way_fired", 200, "old2"), line("way_fired", 0, "x"))).unwrap();
+        assert!(rotate_if_due(&p, later, 90));
         assert!(!std::fs::read_to_string(&p).unwrap().contains("old2"));
+        let claims = |d: &std::path::Path| std::fs::read_dir(d).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(ROTATE_LOCK_PREFIX)).count();
+        assert_eq!(claims(p.parent().unwrap()), 1);
+    }
+
+    #[test]
+    fn only_one_of_many_parallel_claims_rotates() {
+        let p = tmp("claims");
+        std::fs::write(&p, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
+        let wins: usize = std::thread::scope(|s| {
+            let hs: Vec<_> = (0..8).map(|_| s.spawn(|| rotate_if_due(&p, NOW, 90))).collect();
+            hs.into_iter().map(|h| usize::from(h.join().unwrap())).sum()
+        });
+        assert_eq!(wins, 1);
+    }
+
+    /// A claim for a day that has not come (the clock ran ahead, then back)
+    /// must not block rotation.
+    #[test]
+    fn a_claim_from_the_future_is_discarded() {
+        let p = tmp("future");
+        std::fs::write(&p, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
+        std::fs::write(p.parent().unwrap().join(format!("{ROTATE_LOCK_PREFIX}{}", NOW / DAY + 30)), "").unwrap();
+        assert!(rotate_if_due(&p, NOW, 90));
+        assert!(!std::fs::read_to_string(&p).unwrap().contains("old"));
+        assert!(!p.parent().unwrap().join(format!("{ROTATE_LOCK_PREFIX}{}", NOW / DAY + 30)).exists());
+    }
+
+    /// When the clock jumped ahead, every line is "old". Refuse rather than
+    /// empty the log.
+    #[test]
+    fn rotation_refuses_when_no_line_reaches_the_cutoff() {
+        let p = tmp("ahead");
+        let body = format!("{}{}", line("way_fired", 10, "a"), line("way_fired", 5, "b"));
+        std::fs::write(&p, &body).unwrap();
+        assert!(!rotate_log_by_age(&p, NOW + 400 * DAY, 90).unwrap());
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), body);
+    }
+
+    #[test]
+    fn rotation_stops_at_the_first_current_line_and_copies_the_rest_unchanged() {
+        let p = tmp("prefix");
+        // A later line with an old ts (clock skew) sits in the copied region and stays.
+        let body = format!("{}{}{}{}", line("way_fired", 200, "old"), line("way_fired", 1, "cur"), line("way_fired", 300, "skewed"), line("way_fired", 0, "z"));
+        std::fs::write(&p, body).unwrap();
+        assert!(rotate_log_by_age(&p, NOW, 90).unwrap());
+        let got = std::fs::read_to_string(&p).unwrap();
+        assert!(!got.contains("\"old\"") && got.contains("cur") && got.contains("skewed") && got.contains("\"z\""));
     }
 
     #[test]

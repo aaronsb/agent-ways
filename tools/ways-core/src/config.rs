@@ -237,16 +237,14 @@ impl Config {
     /// A way with no toggle is on.
     pub fn way_disabled(&self, way_id: &str) -> bool {
         // Specificity: an exact match outranks every prefix; between prefixes,
-        // the longer one. Within one key a disable and an enable cannot both
-        // be recorded as a conflict, since a key holds one value; a bad value
-        // reads as disabled (fail closed), and disabled is checked second only
-        // so an explicit `true` entry for the same key cannot be shadowed.
+        // the longer one. A bad toggle value reads as disabled when the file is
+        // loaded (`closed_toggle`), so it arrives here as a disable entry.
         let mut best: Option<(usize, bool)> = None; // (specificity, disabled)
         let mut consider = |key: &str, disabled: bool| {
             let rank = match key.strip_suffix("/*") {
                 None if key == way_id => usize::MAX,
                 None => return,
-                Some(dir) if way_id.len() > dir.len() + 1 && way_id.starts_with(dir) && way_id.as_bytes()[dir.len()] == b'/' => dir.len(),
+                Some(dir) if way_id == dir || (way_id.len() > dir.len() + 1 && way_id.starts_with(dir) && way_id.as_bytes()[dir.len()] == b'/') => dir.len(),
                 Some(_) => return,
             };
             if best.is_none_or(|(r, _)| rank > r) {
@@ -413,7 +411,7 @@ impl Config {
             self.near_miss_margin = v;
         }
         if let Some(v) = doc.get("event_retention_days").and_then(|v| v.as_u64()) {
-            self.event_retention_days = v.clamp(1, 3650) as u32;
+            self.event_retention_days = v as u32; // the schema holds 1..=3650
         }
         if let Some(m) = doc.get("refire_presets").and_then(|v| v.as_mapping()) {
             for (k, v) in m {
@@ -732,13 +730,27 @@ mod tests {
     }
 
     #[test]
+    fn a_project_file_cannot_set_the_event_retention() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "event_retention_days: 1\n");
+        assert_eq!(cfg.event_retention_days, 90, "retention is machine-wide, user scope only");
+    }
+
+    #[test]
+    fn an_explicit_enable_on_the_prefix_dir_beats_the_prefix() {
+        let cfg = project_cfg("ways:\n  a/b/*: false\n  a/b: true\n");
+        assert!(!cfg.way_disabled("a/b"));
+        assert!(cfg.way_disabled("a/b/c"));
+    }
+
+    #[test]
     fn prefix_toggle_disables_every_way_under_it() {
         let cfg = project_cfg("ways:\n  softwaredev/code/supplychain/*: false\n");
         assert!(cfg.way_disabled("softwaredev/code/supplychain/npm"));
         assert!(cfg.way_disabled("softwaredev/code/supplychain/npm/lockfiles"));
         assert!(!cfg.way_disabled("softwaredev/code/quality"), "a sibling stays on");
         assert!(!cfg.way_disabled("softwaredev/code/supplychainx"), "the prefix ends at a path boundary");
-        assert!(!cfg.way_disabled("softwaredev/code/supplychain"), "the prefix covers ways under it, not the parent");
+        assert!(cfg.way_disabled("softwaredev/code/supplychain"), "the prefix covers the way at its own path too");
     }
 
     #[test]
