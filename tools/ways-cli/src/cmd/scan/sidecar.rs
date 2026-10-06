@@ -188,11 +188,7 @@ impl<'a> Reader<'a> {
 /// Write `bytes` to `path` through a sibling staging file, so a reader never
 /// sees a half-written sidecar.
 pub(crate) fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension(format!("bin.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    agent_settings::writer::write_atomic(path, bytes)
 }
 
 /// Read and parse the sidecar at `path`.
@@ -302,7 +298,7 @@ impl std::fmt::Display for Fallback {
             Fallback::NoEmbedder => write!(f, "way-embed not installed"),
             Fallback::Absent => write!(f, "absent; run `ways corpus`"),
             Fallback::BuildFailed(why) => write!(f, "build failed: {why}"),
-            Fallback::NoVectors => write!(f, "way-embed cannot return chunk vectors (needs 1.2.0); run `ways corpus`"),
+            Fallback::NoVectors => write!(f, "way-embed cannot return chunk vectors; upgrade way-embed to 1.2.0 or later, then run `ways corpus`"),
             Fallback::ModelMismatch => write!(f, "built for another model, way-embed or chunker; run `ways corpus`"),
             Fallback::NoHashes => write!(f, "the manifest has no way hashes; run `ways corpus`"),
             Fallback::Incomplete { missing, stale } => {
@@ -585,6 +581,38 @@ mod tests {
         assert!(a.starts_with("minilm-l6-v2.gguf:5|way-embed:15:"), "{a}");
         assert!(a.ends_with(&format!("|sections:{CHUNKER_REV}")), "{a}");
         assert!(model_id(&dir, &dir.join("absent")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The sidecar replaces its path: a write never goes through a link, and
+    /// a write that cannot stage leaves the old bytes.
+    #[cfg(unix)]
+    #[test]
+    fn write_replaces_the_sidecar_atomically() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("ways-sidecar-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target.bin");
+        std::fs::write(&target, "old").unwrap();
+        let path = dir.join(FILE);
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        write(&path, b"new").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"old", "written through the link");
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 2, "staging left behind: {names:?}");
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let can_stage = std::fs::File::create(dir.join("probe")).is_ok();
+        let res = write(&path, b"newer");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if can_stage {
+            eprintln!("SKIPPED write_replaces_the_sidecar_atomically (read-only half): directory modes do not bind this user (root?)");
+        } else {
+            assert!(res.is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

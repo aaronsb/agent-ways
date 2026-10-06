@@ -108,6 +108,8 @@ pub fn run(
         }
     };
 
+    let report = Report { quiet, emit: &|m| eprintln!("{m}") };
+
     let excluded = crate::util::load_excluded_segments();
     let empty_skip: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -200,14 +202,12 @@ pub fn run(
     drop(w);
 
     if sidecar_only {
-        let manifest_path = out_dir.join("embed-manifest.json");
         if let Some(bin) = crate::paths::way_embed_in(&engine_dir) {
             let generate = |bin: &Path, corpus: &Path, model: &Path, what: &str| {
                 run_generate(bin, corpus, model, what, verbose, &vlog)
             };
-            if refresh_stale_sidecar(&out_dir, &engine_dir, &bin, &sources, &generate, supports_vectors(&bin), &manifest_path)? {
+            if refresh_stale_sidecar(&out_dir, &engine_dir, &bin, &sources, &generate, vector_support(&bin), &report)? {
                 let _ = std::fs::remove_file(tmpfile);
-                log(&format!("Body sidecar rebuilt for the current engine: {}", out_dir.join(crate::cmd::scan::sidecar::FILE).display()));
                 return Ok(());
             }
         }
@@ -260,16 +260,8 @@ pub fn run(
     let body_sidecar = match (&settled, bin.as_deref()) {
         (Settled::Promoted, Some(bin)) => {
             vlog("building body sidecar (ADR-701 §6)");
-            let side = refresh_body_sidecar(&out_dir, &engine_dir, bin, &sources, &generate, supports_vectors(bin));
-            match side.get("reason").and_then(|r| r.as_str()) {
-                Some(why) => eprintln!("warning: body sidecar not built: {why}; body confirmation embeds per call"),
-                None => log(&format!(
-                    "Body sidecar: {} ({} ways, {} sections)",
-                    out_dir.join(crate::cmd::scan::sidecar::FILE).display(),
-                    side["ways"],
-                    side["sections"]
-                )),
-            }
+            let side = refresh_body_sidecar(&out_dir, &engine_dir, bin, &sources, &generate, vector_support(bin));
+            report.sidecar(&side, &out_dir, false);
             side
         }
         _ => previous_manifest
@@ -301,7 +293,7 @@ pub fn run(
         "engine": engine,
     });
     vlog("writing manifest");
-    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+    write_manifest(&manifest_path, &manifest)?;
     log(&format!("Manifest written: {}", manifest_path.display()));
     vlog("done");
 
@@ -364,11 +356,13 @@ fn refresh_body_sidecar(
     bin: &Path,
     sources: &HashMap<String, PathBuf>,
     generate: &GeneratePass<'_>,
-    vectors: bool,
+    vectors: VectorSupport,
 ) -> serde_json::Value {
     let _ = std::fs::remove_file(out_dir.join(crate::cmd::scan::sidecar::FILE));
-    if !vectors {
-        return json!({ "file": null, "reason": NO_VECTORS, "unsupported": true });
+    match vectors {
+        VectorSupport::Yes => {}
+        VectorSupport::Unsupported => return json!({ "file": null, "reason": NO_VECTORS, "unsupported": true }),
+        VectorSupport::Unknown(why) => return json!({ "file": null, "reason": why }),
     }
     match build_body_sidecar(out_dir, engine_dir, bin, sources, generate) {
         Ok((ways, sections)) => json!({
@@ -408,40 +402,120 @@ fn refresh_stale_sidecar(
     bin: &Path,
     sources: &HashMap<String, PathBuf>,
     generate: &GeneratePass<'_>,
-    vectors: bool,
-    manifest_path: &Path,
+    vectors: VectorSupport,
+    report: &Report<'_>,
 ) -> Result<bool> {
-    let Some(mut m) = read_manifest(manifest_path) else { return Ok(false) };
+    let manifest_path = out_dir.join("embed-manifest.json");
+    let Some(mut m) = read_manifest(&manifest_path) else { return Ok(false) };
     if m.get("way_hashes") != Some(&way_hashes(sources)) {
         return Ok(false);
     }
     let side = refresh_body_sidecar(out_dir, engine_dir, bin, sources, generate, vectors);
-    if let Some(why) = side.get("reason").and_then(|r| r.as_str()) {
-        eprintln!("warning: body sidecar not built: {why}; body confirmation embeds per call");
-    }
+    report.sidecar(&side, out_dir, true);
     m["failed_at"] = if sidecar_failed(&side) { json!(agent_fmt::when::now_secs()) } else { serde_json::Value::Null };
     m["body_sidecar"] = side;
-    std::fs::write(manifest_path, serde_json::to_string_pretty(&m)?)?;
+    write_manifest(&manifest_path, &m)?;
     Ok(true)
+}
+
+/// Where a corpus build's messages go. `emit` is stderr in the CLI; tests
+/// collect. `quiet` is `--quiet` (`--verbose` already outranks it).
+struct Report<'a> {
+    quiet: bool,
+    emit: &'a dyn Fn(&str),
+}
+
+impl Report<'_> {
+    /// Say what happened to the sidecar: the warning when none was built
+    /// (unless it is the quiet-silenced install state), the success line
+    /// (not under `--quiet`) when one was.
+    fn sidecar(&self, side: &serde_json::Value, out_dir: &Path, rebuilt: bool) {
+        if let Some(warning) = sidecar_warning(side, self.quiet) {
+            (self.emit)(&warning);
+        } else if side.get("reason").is_none() && !self.quiet {
+            let file = out_dir.join(crate::cmd::scan::sidecar::FILE).display().to_string();
+            (self.emit)(&if rebuilt {
+                format!("Body sidecar rebuilt for the current engine: {file}")
+            } else {
+                format!("Body sidecar: {file} ({} ways, {} sections)", side["ways"], side["sections"])
+            });
+        }
+    }
+}
+
+/// The warning for a sidecar the build did not produce, or None when there is
+/// nothing to say. A way-embed without `--vectors` is an install state, not a
+/// failure, so `--quiet` silences it; any other reason is always reported.
+fn sidecar_warning(side: &serde_json::Value, quiet: bool) -> Option<String> {
+    let why = side.get("reason").and_then(|r| r.as_str())?;
+    if quiet && side.get("unsupported").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return None;
+    }
+    Some(format!("warning: body sidecar not built: {why}; body confirmation embeds per call"))
+}
+
+/// Write the embed manifest through a sibling staging file, so a reader or a
+/// crash never sees it half-written.
+fn write_manifest(path: &Path, manifest: &serde_json::Value) -> Result<()> {
+    agent_settings::writer::write_atomic(path, serde_json::to_string_pretty(manifest)?)
+        .with_context(|| format!("writing {}", path.display()))
 }
 
 /// Why no sidecar is built for a way-embed older than 1.2.0.
 const NO_VECTORS: &str = "way-embed < 1.2.0 lacks --vectors";
 
-/// True when `bin` is way-embed 1.2.0 or later, which prints chunk vectors
-/// with `match --vectors`. Checked once per corpus build.
-fn supports_vectors(bin: &Path) -> bool {
-    std::process::Command::new(bin)
-        .arg("--version")
-        .output()
-        .ok()
-        .and_then(|o| parse_way_embed_version(&String::from_utf8_lossy(&o.stdout)))
-        .is_some_and(|v| v >= (1, 2, 0))
+/// Whether the installed way-embed can return chunk vectors (`match
+/// --vectors`, 1.2.0 and later). Checked once per corpus build.
+#[derive(Debug, PartialEq)]
+enum VectorSupport {
+    Yes,
+    /// A version was read and it is below 1.2.0: an install state.
+    Unsupported,
+    /// The version could not be read (the binary failed or printed something
+    /// unrecognised): a failure, with its reason.
+    Unknown(String),
 }
 
-/// `way-embed X.Y.Z` to `(X, Y, Z)`.
+fn vector_support(bin: &Path) -> VectorSupport {
+    match retry_if_busy(|| std::process::Command::new(bin).arg("--version").output()) {
+        Err(e) => VectorSupport::Unknown(format!("way-embed --version could not run: {e}")),
+        Ok(o) if !o.status.success() => VectorSupport::Unknown(format!("way-embed --version failed ({})", o.status)),
+        Ok(o) => classify_version(&String::from_utf8_lossy(&o.stdout)),
+    }
+}
+
+/// Run `spawn`, trying again a few times while the binary is busy (ETXTBSY: a
+/// concurrent install or a forked child still holds it open for writing).
+fn retry_if_busy<T>(mut spawn: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    const TRIES: u32 = 5;
+    let mut tries = 1;
+    loop {
+        match spawn() {
+            Err(e) if tries < TRIES && is_text_file_busy(&e) => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            other => return other,
+        }
+    }
+}
+
+fn is_text_file_busy(e: &std::io::Error) -> bool {
+    cfg!(unix) && e.raw_os_error() == Some(26)
+}
+
+fn classify_version(out: &str) -> VectorSupport {
+    match parse_way_embed_version(out) {
+        Some(v) if v >= (1, 2, 0) => VectorSupport::Yes,
+        Some(_) => VectorSupport::Unsupported,
+        None => VectorSupport::Unknown(format!("way-embed --version printed {:?}, not a version", out.trim())),
+    }
+}
+
+/// `way-embed X.Y.Z[-pre][+build]` to `(X, Y, Z)`; a suffix is ignored.
 fn parse_way_embed_version(out: &str) -> Option<(u32, u32, u32)> {
     let v = out.trim().strip_prefix("way-embed ")?;
+    let v = v.split(['-', '+']).next()?;
     let mut parts = v.split('.').map(|p| p.trim().parse::<u32>().ok());
     Some((parts.next()??, parts.next()??, parts.next()??))
 }
@@ -636,15 +710,20 @@ impl Staged {
     }
 }
 
-/// Remove staging files a killed build left behind: `*.tmp` from this module
-/// and `*.tmp.tmp` from `way-embed generate`. Only files older than an hour
+/// Remove staging files a killed build left behind: `*.tmp` from this module,
+/// the dot-prefixed ones `write_atomic` stages the sidecar and manifest
+/// through, and `*.tmp.tmp` from `way-embed generate`. Only files older than an hour
 /// go, so a build running concurrently keeps its own.
 fn sweep_staging_debris(out_dir: &Path) {
     let Ok(entries) = std::fs::read_dir(out_dir) else { return };
     let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let ours = name.starts_with("ways-corpus") || name.starts_with(crate::cmd::scan::sidecar::FILE);
+        // write_atomic stages as `.<name>.<pid>.<n>.tmp`.
+        let bare = name.strip_prefix('.').unwrap_or(&name);
+        let ours = bare.starts_with("ways-corpus")
+            || bare.starts_with(crate::cmd::scan::sidecar::FILE)
+            || bare.starts_with("embed-manifest.json");
         if !(ours && name.contains(".tmp")) {
             continue;
         }
@@ -1637,6 +1716,68 @@ mod tests {
         assert_eq!(parse_way_embed_version("error: unknown"), None);
         assert!(parse_way_embed_version("way-embed 1.1.2").unwrap() < (1, 2, 0));
         assert!(parse_way_embed_version("way-embed 1.10.0").unwrap() >= (1, 2, 0));
+        assert_eq!(parse_way_embed_version("way-embed 1.2.0-rc1\n"), Some((1, 2, 0)));
+        assert_eq!(parse_way_embed_version("way-embed 1.3.0+build5"), Some((1, 3, 0)));
+        assert_eq!(parse_way_embed_version("way-embed 1.2.0-rc1+b2"), Some((1, 2, 0)));
+    }
+
+    /// Only a version read and found below 1.2.0 is the install state that
+    /// `--quiet` hides; a binary that cannot say its version is a failure.
+    #[test]
+    fn only_a_parsed_old_version_is_unsupported() {
+        assert_eq!(classify_version("way-embed 1.1.2\n"), VectorSupport::Unsupported);
+        assert_eq!(classify_version("way-embed 1.2.0"), VectorSupport::Yes);
+        assert_eq!(classify_version("way-embed 1.2.0-rc1"), VectorSupport::Yes);
+        assert_eq!(classify_version("way-embed 2.0.0+abc"), VectorSupport::Yes);
+        assert!(matches!(classify_version(""), VectorSupport::Unknown(_)));
+        assert!(matches!(classify_version("Segmentation fault"), VectorSupport::Unknown(_)));
+        assert!(matches!(classify_version("way-embed dev"), VectorSupport::Unknown(_)));
+    }
+
+    /// A busy binary is tried again a bounded number of times.
+    #[cfg(unix)]
+    #[test]
+    fn a_busy_binary_is_retried_a_few_times() {
+        let busy = || std::io::Error::from_raw_os_error(26);
+        let mut n = 0;
+        let r = retry_if_busy(|| {
+            n += 1;
+            if n < 3 { Err(busy()) } else { Ok(n) }
+        });
+        assert_eq!(r.unwrap(), 3);
+        let mut n = 0;
+        let r: std::io::Result<()> = retry_if_busy(|| {
+            n += 1;
+            Err(busy())
+        });
+        assert!(r.is_err());
+        assert_eq!(n, 5, "unbounded or no retry");
+        let mut n = 0;
+        let r: std::io::Result<()> = retry_if_busy(|| {
+            n += 1;
+            Err(std::io::ErrorKind::NotFound.into())
+        });
+        assert!(r.is_err());
+        assert_eq!(n, 1, "retried an error that is not busy");
+    }
+
+    /// What `--version` of a real executable decides.
+    #[cfg(unix)]
+    #[test]
+    fn the_version_probe_reads_a_stub_way_embed() {
+        let dir = scratch("vector-support");
+        let stub = |name: &str, body: &str| {
+            let p = dir.join(name);
+            std::fs::write(&p, body).unwrap();
+            std::fs::set_permissions(&p, <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755)).unwrap();
+            p
+        };
+        assert_eq!(vector_support(&stub("old", "#!/bin/sh\necho 'way-embed 1.1.2'\n")), VectorSupport::Unsupported);
+        assert_eq!(vector_support(&stub("new", "#!/bin/sh\necho 'way-embed 1.2.0-rc1'\n")), VectorSupport::Yes);
+        assert!(matches!(vector_support(&stub("crash", "#!/bin/sh\necho 'way-embed 1.1.2'; exit 3\n")), VectorSupport::Unknown(_)));
+        assert!(matches!(vector_support(&stub("junk", "#!/bin/sh\necho nonsense\n")), VectorSupport::Unknown(_)));
+        assert!(matches!(vector_support(&dir.join("absent")), VectorSupport::Unknown(_)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A rebuild removes the previous sidecar first: a failed or skipped build
@@ -1656,13 +1797,13 @@ mod tests {
         let old = dir.join(sidecar::FILE);
 
         std::fs::write(&old, "previous sidecar").unwrap();
-        let side = refresh_body_sidecar(&dir, &engine, &bin, &sources, &failing, true);
+        let side = refresh_body_sidecar(&dir, &engine, &bin, &sources, &failing, VectorSupport::Yes);
         assert!(!old.exists(), "old sidecar left after a failed build");
         assert_eq!(side["reason"], json!("body sections embedding generation failed"));
         assert!(sidecar_failed(&side));
 
         std::fs::write(&old, "previous sidecar").unwrap();
-        let side = refresh_body_sidecar(&dir, &engine, &bin, &sources, &failing, false);
+        let side = refresh_body_sidecar(&dir, &engine, &bin, &sources, &failing, VectorSupport::Unsupported);
         assert!(!old.exists(), "old sidecar left when way-embed lacks --vectors");
         assert_eq!(side, json!({ "file": null, "reason": NO_VECTORS, "unsupported": true }));
         assert!(!sidecar_failed(&side));
@@ -1703,7 +1844,7 @@ mod tests {
 
         // A recorded build: alias hashes and a sidecar at this engine.
         let manifest = dir.join("embed-manifest.json");
-        let side = refresh_body_sidecar(&dir, &engine, &bin, &sources, &generate, true);
+        let side = refresh_body_sidecar(&dir, &engine, &bin, &sources, &generate, VectorSupport::Yes);
         std::fs::write(&manifest, json!({ "embedded": true, "way_hashes": way_hashes(&sources), "body_sidecar": side }).to_string()).unwrap();
         // The corpus dir is both the engine dir and the output dir in production.
         let state = || sidecar::state(&dir, &bin, ["w"]).map(|s| (s.way_count(), s.vector_count()));
@@ -1716,7 +1857,7 @@ mod tests {
         std::fs::File::options().append(true).open(&bin).unwrap().set_modified(std::time::SystemTime::now()).unwrap();
         assert!(sidecar_engine_stale(&manifest, &engine, &bin), "changed engine not seen");
 
-        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, &generate, true, &manifest).unwrap());
+        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, &generate, VectorSupport::Yes, &Report { quiet: false, emit: &|_| {} }).unwrap());
         assert_eq!(*calls.borrow(), 2, "sidecar not rebuilt");
         assert!(!sidecar_engine_stale(&manifest, &engine, &bin));
         let s = state();
@@ -1726,7 +1867,7 @@ mod tests {
         // Ways changed under an unchanged mtime check: not a sidecar-only job.
         std::fs::write(dir.join("w.md"), "---\ndescription: d\nvocabulary: v\n---\n# T\n\nEdited text of the way body here.\n").unwrap();
         std::fs::File::options().append(true).open(&bin).unwrap().set_modified(day_ago).unwrap();
-        assert!(!refresh_stale_sidecar(&dir, &engine, &bin, &sources, &generate, true, &manifest).unwrap(), "rebuilt a sidecar for a stale corpus");
+        assert!(!refresh_stale_sidecar(&dir, &engine, &bin, &sources, &generate, VectorSupport::Yes, &Report { quiet: false, emit: &|_| {} }).unwrap(), "rebuilt a sidecar for a stale corpus");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1762,20 +1903,28 @@ mod tests {
     fn stale_sidecar_staging_files_are_swept() {
         let dir = scratch("sweep-sidecar");
         let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
-        let names = ["ways-corpus-sections.123.tmp", "ways-corpus-sections.123.tmp.tmp", "ways-body-en.bin.123.tmp"];
+        // The sidecar and manifest stage through write_atomic: `.<name>.<pid>.<n>.tmp`.
+        let names = [
+            "ways-corpus-sections.123.tmp",
+            "ways-corpus-sections.123.tmp.tmp",
+            ".ways-body-en.bin.123.0.tmp",
+            ".embed-manifest.json.123.1.tmp",
+        ];
         for n in names {
             let p = dir.join(n);
             std::fs::write(&p, "x").unwrap();
             std::fs::File::options().append(true).open(&p).unwrap().set_modified(old).unwrap();
         }
-        std::fs::write(dir.join("ways-body-en.bin.456.tmp"), "fresh").unwrap();
+        std::fs::write(dir.join(".ways-body-en.bin.456.0.tmp"), "fresh").unwrap();
         std::fs::write(dir.join("ways-body-en.bin"), "live").unwrap();
+        std::fs::write(dir.join("embed-manifest.json"), "live").unwrap();
         sweep_staging_debris(&dir);
         for n in names {
             assert!(!dir.join(n).exists(), "{n} not swept");
         }
-        assert!(dir.join("ways-body-en.bin.456.tmp").exists(), "a fresh staging file swept");
+        assert!(dir.join(".ways-body-en.bin.456.0.tmp").exists(), "a fresh staging file swept");
         assert!(dir.join("ways-body-en.bin").exists(), "the live sidecar swept");
+        assert!(dir.join("embed-manifest.json").exists(), "the live manifest swept");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1819,5 +1968,206 @@ mod tests {
         assert!(matches!(o, Embedded::Failed(ref w) if w.contains("combined")), "{o:?}");
         assert_eq!(calls, ["EN", "multilingual", "combined"]);
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    fn unsupported() -> serde_json::Value {
+        json!({ "file": null, "reason": NO_VECTORS, "unsupported": true })
+    }
+
+    #[test]
+    fn a_way_embed_without_vectors_is_silent_under_quiet() {
+        assert_eq!(sidecar_warning(&unsupported(), true), None);
+    }
+
+    #[test]
+    fn a_way_embed_without_vectors_still_warns_without_quiet() {
+        let w = sidecar_warning(&unsupported(), false).unwrap();
+        assert!(w.starts_with("warning: body sidecar not built: way-embed < 1.2.0"), "{w}");
+    }
+
+    #[test]
+    fn a_real_failure_warns_even_under_quiet() {
+        let side = json!({ "file": null, "reason": "body sections embedding generation failed" });
+        let w = sidecar_warning(&side, true).unwrap();
+        assert!(w.contains("body sections embedding generation failed"), "{w}");
+        assert_eq!(sidecar_warning(&json!({ "file": "x", "vectors": true }), true), None);
+    }
+
+    #[test]
+    fn the_manifest_is_complete_after_write_and_leaves_no_staging_file() {
+        let dir = scratch("manifest-atomic");
+        let path = dir.join("embed-manifest.json");
+        write_manifest(&path, &json!({ "v": 1 })).unwrap();
+        write_manifest(&path, &json!({ "v": 2, "pad": "x".repeat(10_000) })).unwrap();
+        let back: serde_json::Value = serde_json::from_str(&read(&path)).unwrap();
+        assert_eq!(back["v"], json!(2));
+        let names: Vec<String> =
+            std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(names, vec!["embed-manifest.json".to_string()], "staging file left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A write that cannot stage leaves the old manifest as it was.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_manifest_write_leaves_the_old_manifest_intact() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("manifest-fail");
+        let path = dir.join("embed-manifest.json");
+        write_manifest(&path, &json!({ "v": 1 })).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let res = write_manifest(&path, &json!({ "v": 2 }));
+        let can_stage = std::fs::File::create(dir.join("probe")).is_ok();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if can_stage {
+            eprintln!("SKIPPED a_failed_manifest_write_leaves_the_old_manifest_intact: directory modes do not bind this user (root?)");
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        assert!(res.is_err(), "the manifest was rewritten in place");
+        let back: serde_json::Value = serde_json::from_str(&read(&path)).unwrap();
+        assert_eq!(back["v"], json!(1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A manifest replaced through write_manifest is a new file: a symlink at
+    /// the path is replaced, and what it pointed at is untouched.
+    #[cfg(unix)]
+    #[test]
+    fn write_manifest_replaces_the_path_instead_of_writing_through_it() {
+        let dir = scratch("manifest-link");
+        let target = dir.join("target.json");
+        std::fs::write(&target, "old").unwrap();
+        let path = dir.join("embed-manifest.json");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        write_manifest(&path, &json!({ "v": 1 })).unwrap();
+        assert_eq!(read(&target), "old");
+        assert!(std::fs::symlink_metadata(&path).unwrap().file_type().is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Fixture for the sidecar-only path: a manifest whose way hashes match
+    /// `sources`, and a way-embed binary.
+    fn sidecar_only_fixture(name: &str) -> (PathBuf, PathBuf, PathBuf, HashMap<String, PathBuf>) {
+        let dir = scratch(name);
+        let engine = dir.join("engine");
+        std::fs::create_dir_all(&engine).unwrap();
+        std::fs::write(engine.join(crate::paths::EN_MODEL), "model").unwrap();
+        let bin = engine.join("way-embed");
+        std::fs::write(&bin, "binary").unwrap();
+        let way = dir.join("w.md");
+        std::fs::write(&way, "---\ndescription: d\nvocabulary: v\n---\n# T\n\nA section long enough to embed here.\n").unwrap();
+        let sources: HashMap<String, PathBuf> = [("w".to_string(), way)].into_iter().collect();
+        let manifest = json!({ "way_hashes": way_hashes(&sources), "embedded": true, "body_sidecar": { "file": "ways-body-en.bin", "model_id": "old" } });
+        std::fs::write(dir.join("embed-manifest.json"), manifest.to_string()).unwrap();
+        (dir, engine, bin, sources)
+    }
+
+    fn embedding_ok(_: &Path, corpus: &Path, _: &Path, _: &str) -> std::result::Result<Instant, String> {
+        let rows: Vec<String> = read(corpus)
+            .lines()
+            .map(|l| {
+                let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+                v["embedding"] = json!([1.0, 0.0]);
+                v.to_string()
+            })
+            .collect();
+        std::fs::write(corpus, rows.join("\n") + "\n").unwrap();
+        Ok(Instant::now())
+    }
+
+    /// What the sidecar-only path says, for a vector-support answer and a
+    /// generate pass.
+    fn sidecar_only_says(name: &str, quiet: bool, vectors: VectorSupport, generate: &GeneratePass<'_>) -> Vec<String> {
+        let (dir, engine, bin, sources) = sidecar_only_fixture(name);
+        let said = RefCell::new(Vec::new());
+        let report = Report { quiet, emit: &|m| said.borrow_mut().push(m.to_string()) };
+        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, generate, vectors, &report).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+        said.into_inner()
+    }
+
+    #[test]
+    fn the_sidecar_only_path_is_silent_under_quiet_for_an_old_way_embed() {
+        assert!(sidecar_only_says("so-quiet", true, VectorSupport::Unsupported, &embedding_ok).is_empty());
+    }
+
+    /// The warning, and no "rebuilt" claim for a sidecar that was just removed.
+    #[test]
+    fn the_sidecar_only_path_warns_once_and_claims_no_rebuild_when_none_was_built() {
+        let said = sidecar_only_says("so-loud", false, VectorSupport::Unsupported, &embedding_ok);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].starts_with("warning: body sidecar not built"), "{said:?}");
+        let said = sidecar_only_says("so-fail", false, VectorSupport::Yes, &|_, _, _, _| Err("boom".to_string()));
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("boom") && !said[0].contains("rebuilt"), "{said:?}");
+    }
+
+    #[test]
+    fn the_sidecar_only_path_warns_under_quiet_for_a_real_failure() {
+        let said = sidecar_only_says("so-real", true, VectorSupport::Unknown("way-embed --version failed".into()), &embedding_ok);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("way-embed --version failed"), "{said:?}");
+        let said = sidecar_only_says("so-boom", true, VectorSupport::Yes, &|_, _, _, _| Err("boom".to_string()));
+        assert_eq!(said.len(), 1, "{said:?}");
+    }
+
+    #[test]
+    fn the_sidecar_only_path_says_rebuilt_when_it_wrote_the_sidecar() {
+        let said = sidecar_only_says("so-built", false, VectorSupport::Yes, &embedding_ok);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].starts_with("Body sidecar rebuilt for the current engine: "), "{said:?}");
+        assert!(said[0].ends_with(crate::cmd::scan::sidecar::FILE), "{said:?}");
+        assert!(sidecar_only_says("so-built-quiet", true, VectorSupport::Yes, &embedding_ok).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_sidecar_only_path_replaces_the_manifest_instead_of_writing_through_it() {
+        let (dir, engine, bin, sources) = sidecar_only_fixture("so-atomic");
+        let manifest = dir.join("embed-manifest.json");
+        let target = dir.join("target.json");
+        std::fs::rename(&manifest, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &manifest).unwrap();
+        let before = read(&target);
+        let report = Report { quiet: true, emit: &|_| {} };
+        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, &embedding_ok, VectorSupport::Yes, &report).unwrap());
+        assert_eq!(read(&target), before, "the manifest was written through its link");
+        assert!(std::fs::symlink_metadata(&manifest).unwrap().file_type().is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A read-only output directory fails the sidecar-only refresh and leaves
+    /// the old manifest as it was.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_sidecar_only_manifest_write_leaves_the_old_manifest_intact() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, engine, bin, sources) = sidecar_only_fixture("so-readonly");
+        let manifest = dir.join("embed-manifest.json");
+        let before = read(&manifest);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let can_stage = std::fs::File::create(dir.join("probe")).is_ok();
+        let report = Report { quiet: true, emit: &|_| {} };
+        let res = refresh_stale_sidecar(&dir, &engine, &bin, &sources, &embedding_ok, VectorSupport::Unsupported, &report);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if can_stage {
+            eprintln!("SKIPPED a_failed_sidecar_only_manifest_write_leaves_the_old_manifest_intact: directory modes do not bind this user (root?)");
+        } else {
+            assert!(res.is_err(), "the manifest was rewritten in place");
+            assert_eq!(read(&manifest), before);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The full path's own line for a built sidecar.
+    #[test]
+    fn the_full_path_names_a_built_sidecar_and_is_quiet_under_quiet() {
+        let side = json!({ "file": "ways-body-en.bin", "ways": 3, "sections": 9, "vectors": true });
+        let said = RefCell::new(Vec::new());
+        Report { quiet: false, emit: &|m| said.borrow_mut().push(m.to_string()) }.sidecar(&side, Path::new("/o"), false);
+        assert_eq!(said.take(), vec!["Body sidecar: /o/ways-body-en.bin (3 ways, 9 sections)".to_string()]);
+        Report { quiet: true, emit: &|m| said.borrow_mut().push(m.to_string()) }.sidecar(&side, Path::new("/o"), false);
+        assert!(said.take().is_empty());
     }
 }

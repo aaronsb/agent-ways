@@ -509,7 +509,7 @@ mod tests {
             sidecar_line(&incomplete),
             "Body sidecar: not used, confirmation embeds per call — incomplete (missing a; stale b, c, d and 1 more); run `ways corpus`"
         );
-        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("way-embed cannot return chunk vectors (needs 1.2.0); run `ways corpus`"));
+        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("way-embed cannot return chunk vectors; upgrade way-embed to 1.2.0 or later, then run `ways corpus`"));
         assert!(sidecar_line(&Err(Fallback::BuildFailed("boom".into()))).ends_with("build failed: boom"));
         assert_eq!(sidecar_json(&Err(Fallback::Absent)), json!({ "used": false, "reason": "absent; run `ways corpus`" }));
         assert_eq!(sidecar_json(&Ok((1, 2))), json!({ "used": true, "ways": 1, "sections": 2 }));
