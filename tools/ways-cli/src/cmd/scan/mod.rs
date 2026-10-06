@@ -277,9 +277,19 @@ fn scan_prompt_surface(
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
 
+    // ADR-160: the chunked late-interaction matcher IS the semantic matcher. It decides
+    // the semantic channel over the reduced surface (chunk → softmax-share →
+    // body-confirm), computed once here and consulted per way in match_prompt.
+    // The single-vector calibrated gate is retained only as the fail-safe: when
+    // the matcher can't run (surface too sparse to chunk, engine unavailable) it
+    // returns None and match_prompt uses the single-vector scores. The keyword
+    // gate and near-miss telemetry keep using the single-vector batch scores.
+    let verdicts = late_interaction::run(&reduced, &body_map(candidates.iter().filter(|w| eligible(w, Lane::Prompt { scope: &scope }, &project_dir))));
+
     // ADR-701 §2: log the top candidates with share and margin, from the rows
-    // the scan already holds. Enabled ways only: `candidates` is already
-    // filtered by the domain and per-way toggles.
+    // the scan already holds, and whether confirmation read the body sidecar.
+    // Enabled ways only: `candidates` is already filtered by the domain and
+    // per-way toggles.
     {
         let enabled: std::collections::HashMap<&str, &str> = candidates
             .iter()
@@ -289,18 +299,10 @@ fn scan_prompt_surface(
         candidate_log::log_scan_candidates(
             &embed_matches,
             &enabled,
+            verdicts.as_ref().is_some_and(|v| v.used_sidecar()),
             &[("surface", "prompt"), ("scope", &scope), ("project", &project_dir), ("session", session_id), ("hook_event", hook_event)],
         );
     }
-
-    // ADR-160: the chunked late-interaction matcher IS the semantic matcher. It decides
-    // the semantic channel over the reduced surface (chunk → softmax-share →
-    // body-confirm), computed once here and consulted per way in match_prompt.
-    // The single-vector calibrated gate is retained only as the fail-safe: when
-    // the matcher can't run (surface too sparse to chunk, engine unavailable) it
-    // returns None and match_prompt uses the single-vector scores. The keyword
-    // gate and near-miss telemetry keep using the single-vector batch scores.
-    let verdicts = late_interaction::run(&reduced, &body_map(candidates.iter().filter(|w| eligible(w, Lane::Prompt { scope: &scope }, &project_dir))));
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
     // review): the shared embed vector mixes the response context in, which
@@ -540,6 +542,7 @@ pub fn task(
         candidate_log::log_scan_candidates(
             &embed_matches,
             &enabled,
+            verdicts.as_ref().is_some_and(|v| v.used_sidecar()),
             &[("surface", "task"), ("scope", task_scope), ("project", &project_dir), ("session", session_id)],
         );
     }

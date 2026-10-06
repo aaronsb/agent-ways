@@ -25,6 +25,15 @@
 //! Peak/share are lenient (specificity + competition); the body-confirm is the
 //! strict corroboration — the two take opposite stances on purpose (ADR-160).
 //!
+//! **Body sidecar (ADR-701 §6, §7).** When the corpus build's section sidecar
+//! covers every enabled way at the alias corpus's content hashes, the match
+//! pass also returns each chunk's vector (`way-embed match --vectors`) and
+//! confirmation is the max cosine of the won chunk against the way's section
+//! vectors, or its alias vector for a way with no sections. No further
+//! process runs. Otherwise (no sidecar, an incomplete or stale one, or a
+//! way-embed without `--vectors`) confirmation embeds the body per call, as
+//! before.
+//!
 //! **Operating points are HAND-SET and UNCALIBRATED.** ADR-160 stays Proposed
 //! until they are fit against a precision metric (task #5). It is the semantic
 //! matcher (not opt-in); until calibration lands it stays on its branch.
@@ -39,6 +48,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::reduce::split_sentences;
+use super::sidecar::{self, Sidecar};
 
 // ── Hand-set operating points (uncalibrated — task #5 fits these) ──
 /// Per-chunk softmax temperature. Small τ sharpens the competition so a clear
@@ -69,6 +79,8 @@ const MAX_WINNERS_TO_CONFIRM: usize = 6;
 /// a representative score (the summed softmax-share) for telemetry.
 pub(crate) struct Verdicts {
     fired: HashMap<String, f64>,
+    /// Confirmation read the body sidecar (ADR-701 §7's sidecar state).
+    sidecar: bool,
 }
 
 /// One way's ranking evidence from the chunk-match stage.
@@ -87,6 +99,11 @@ impl Verdicts {
     /// The share score if the matcher fired `corpus_id`, else `None`.
     pub(crate) fn fired_score(&self, corpus_id: &str) -> Option<f64> {
         self.fired.get(corpus_id).copied()
+    }
+
+    /// True when this scan confirmed against the body sidecar.
+    pub(crate) fn used_sidecar(&self) -> bool {
+        self.sidecar
     }
 }
 
@@ -140,7 +157,10 @@ pub(crate) fn run_diagnostic(
     if chunks.len() < 2 {
         return None;
     }
-    let per_chunk = mask_to_enabled(batch_match(&bin, &corpus, &model, &chunks)?, bodies);
+    let sidecar = complete_sidecar(&xdg, bodies);
+    let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
+    let confirmer = Confirmer::new(&bin, &model, &corpus, sidecar, matched.vectors);
+    let per_chunk = mask_to_enabled(matched.per_chunk, bodies);
     let ranked = aggregate(&per_chunk, chunks.len());
 
     let mut rows = Vec::new();
@@ -151,9 +171,7 @@ pub(crate) fn run_diagnostic(
         // reports `confirm: None`.
         let admitted = r.share >= SHARE_GATE || r.peak >= PEAK_GATE;
         let confirm = if admitted {
-            bodies
-                .get(&r.id)
-                .and_then(|path| body_confirm(&bin, &model, &chunks[r.peak_chunk..=r.peak_chunk], path))
+            bodies.get(&r.id).and_then(|path| confirmer.confirm(&r.id, r.peak_chunk, &chunks, path))
         } else {
             None
         };
@@ -185,8 +203,17 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
         return None;
     }
 
-    // Stage 2 (match): one batched pass, all chunks against the corpus.
-    let per_chunk = mask_to_enabled(batch_match(&bin, &corpus, &model, &chunks)?, bodies);
+    // Stage 2 (match): one batched pass, all chunks against the corpus. When
+    // the sidecar is complete the pass also returns the chunks' vectors.
+    let t = std::time::Instant::now();
+    let sidecar = complete_sidecar(&xdg, bodies);
+    if dbg { eprintln!("LI: body sidecar {} ({:.2} ms)", if sidecar.is_some() { "complete" } else { "absent or incomplete" }, ms(t)); }
+    let t = std::time::Instant::now();
+    let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
+    if dbg { eprintln!("LI: match pass {:.1} ms", ms(t)); }
+    let confirmer = Confirmer::new(&bin, &model, &corpus, sidecar, matched.vectors);
+    if dbg { eprintln!("LI: confirm via {}", if confirmer.uses_sidecar() { "sidecar" } else { "per-call embedding" }); }
+    let per_chunk = mask_to_enabled(matched.per_chunk, bodies);
     if dbg { eprintln!("LI: per_chunk rows: {:?}", per_chunk.iter().map(|c| c.len()).collect::<Vec<_>>()); }
 
     // Stages 3+4: peak rank + per-chunk softmax-share, sorted by share desc.
@@ -218,21 +245,86 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
     // rejected an ADR way on an ADR-plus-PR-plus-tests prompt). Corroborating the
     // winning evidence against the body still rejects single-token collisions (a
     // collided chunk finds no support in the way's own body) without the dilution.
+    let t = std::time::Instant::now();
+    let n_survivors = survivors.len();
     let mut fired = HashMap::new();
     for r in survivors {
         let Some(path) = bodies.get(&r.id) else {
             if dbg { eprintln!("LI:   {} → no body path", r.id); }
             continue;
         };
-        let won = &chunks[r.peak_chunk..=r.peak_chunk];
-        let confirm = body_confirm(&bin, &model, won, path)?;
+        let confirm = confirmer.confirm(&r.id, r.peak_chunk, &chunks, path)?;
         if dbg { eprintln!("LI:   {} confirm={confirm:.3} (gate {CONFIRM_GATE})", r.id); }
         if confirm >= CONFIRM_GATE {
             fired.insert(r.id, r.share);
         }
     }
+    if dbg { eprintln!("LI: confirm stage {n_survivors} survivors in {:.2} ms", ms(t)); }
     if dbg { eprintln!("LI: fired {} ways", fired.len()); }
-    Some(Verdicts { fired })
+    Some(Verdicts { fired, sidecar: confirmer.uses_sidecar() })
+}
+
+/// Milliseconds since `t`, for the WAYS_LI_DEBUG trace.
+fn ms(t: std::time::Instant) -> f64 {
+    t.elapsed().as_secs_f64() * 1000.0
+}
+
+/// ADR-701 §7: the body sidecar in `corpus_dir`, only when it was built with
+/// the installed model and covers every way in `enabled` at the alias corpus's
+/// content hashes (the manifest's `way_hashes`).
+fn complete_sidecar(corpus_dir: &Path, enabled: &HashMap<String, PathBuf>) -> Option<Sidecar> {
+    let sc = sidecar::read(&corpus_dir.join(sidecar::FILE))?;
+    let model = sidecar::model_id(corpus_dir)?;
+    let alias = sidecar::alias_hashes(&corpus_dir.join("embed-manifest.json"));
+    sc.covers(&model, enabled.keys().map(String::as_str), &alias).then_some(sc)
+}
+
+/// How stage 5 confirms a survivor: against the body sidecar with the match
+/// pass's chunk vectors, or by embedding the body per call.
+enum Confirmer<'a> {
+    Sidecar { sidecar: Sidecar, vectors: Vec<Vec<f32>>, corpus: &'a Path },
+    PerCall { bin: &'a Path, model: &'a Path },
+}
+
+impl<'a> Confirmer<'a> {
+    /// The sidecar state needs both a complete sidecar and the chunk vectors.
+    fn new(
+        bin: &'a Path,
+        model: &'a Path,
+        corpus: &'a Path,
+        sidecar: Option<Sidecar>,
+        vectors: Option<Vec<Vec<f32>>>,
+    ) -> Self {
+        match (sidecar, vectors) {
+            (Some(sidecar), Some(vectors)) => Confirmer::Sidecar { sidecar, vectors, corpus },
+            _ => Confirmer::PerCall { bin, model },
+        }
+    }
+
+    fn uses_sidecar(&self) -> bool {
+        matches!(self, Confirmer::Sidecar { .. })
+    }
+
+    /// Confirmation score of way `id` on the chunk it won. `None` only when the
+    /// per-call subprocess fails.
+    fn confirm(&self, id: &str, won: usize, chunks: &[String], body_path: &Path) -> Option<f64> {
+        match self {
+            Confirmer::Sidecar { sidecar, vectors, corpus } => {
+                let v = vectors.get(won)?;
+                Some(sidecar_confirm(sidecar, id, v, || sidecar::alias_vector(corpus, id)))
+            }
+            Confirmer::PerCall { bin, model } => body_confirm(bin, model, &chunks[won..=won], body_path),
+        }
+    }
+}
+
+/// Stage 5 against the sidecar: the max cosine of the won chunk's vector over
+/// the way's section vectors. A way with no sections confirms against its
+/// alias vector (ADR-701 §6); with neither it scores 0.0 and never fires.
+fn sidecar_confirm(sc: &Sidecar, id: &str, chunk: &[f32], alias: impl FnOnce() -> Option<Vec<f32>>) -> f64 {
+    sc.max_cosine(id, chunk)
+        .or_else(|| alias().filter(|a| a.len() == chunk.len()).map(|a| sidecar::dot(&a, chunk)))
+        .unwrap_or(0.0)
 }
 
 /// Split the surface into sentence chunks, drop trivially short fragments and
@@ -256,41 +348,66 @@ fn chunk_surface(surface: &str) -> Vec<String> {
     out
 }
 
+/// The match pass's output: per-chunk rows and, when asked for and supported,
+/// each chunk's embedding.
+struct Matched {
+    per_chunk: Vec<Vec<(String, f64)>>,
+    vectors: Option<Vec<Vec<f32>>>,
+}
+
 /// Stage 2 match: run `way-embed match --batch` with the chunks on stdin, return
 /// per-chunk `(way_id, cosine)` rows (each inner vec sorted by cosine desc, as
 /// way-embed emits). `--threshold 0.0` returns every non-negative cosine.
-fn batch_match(
-    bin: &Path,
-    corpus: &Path,
-    model: &Path,
-    chunks: &[String],
-) -> Option<Vec<Vec<(String, f64)>>> {
-    let mut cmd = Command::new(bin);
-    cmd.args([
-        "match",
-        "--corpus",
-        corpus.to_str()?,
-        "--model",
-        model.to_str()?,
-        "--batch",
-        "--threshold",
-        "0.0",
-    ]);
+///
+/// With `want_vectors` the pass adds `--vectors` and also returns each chunk's
+/// vector. A way-embed older than 1.2.0 rejects the flag before loading the
+/// model; the pass then reruns without it and returns no vectors.
+fn batch_match(bin: &Path, corpus: &Path, model: &Path, chunks: &[String], want_vectors: bool) -> Option<Matched> {
     let input = chunks.join("\n");
-    let stdout = run_stdin(cmd, &input)?;
+    let run = |vectors: bool| {
+        let mut cmd = Command::new(bin);
+        cmd.args(["match", "--corpus", corpus.to_str()?, "--model", model.to_str()?, "--batch", "--threshold", "0.0"]);
+        if vectors {
+            cmd.arg("--vectors");
+        }
+        run_stdin(cmd, &input)
+    };
+    let (stdout, asked) = match want_vectors.then(|| run(true)).flatten() {
+        Some(out) => (out, true),
+        None => (run(false)?, false),
+    };
+    let matched = parse_match(&stdout, chunks.len())?;
+    Some(Matched { vectors: matched.vectors.filter(|_| asked), ..matched })
+}
 
-    // Lines are `qindex<TAB>id<TAB>cos`, grouped and ordered by qindex.
-    let mut per_chunk: Vec<Vec<(String, f64)>> = vec![Vec::new(); chunks.len()];
+/// Parse `way-embed match --batch` output. Score lines are
+/// `qindex<TAB>id<TAB>cos`, grouped and ordered by qindex; with `--vectors`
+/// each query's group is preceded by `v<TAB>qindex<TAB>f,f,...`. Vectors come
+/// back only when every chunk has one of a single dimension.
+fn parse_match(stdout: &str, n_chunks: usize) -> Option<Matched> {
+    let mut per_chunk: Vec<Vec<(String, f64)>> = vec![Vec::new(); n_chunks];
+    let mut vectors: Vec<Option<Vec<f32>>> = vec![None; n_chunks];
     for line in stdout.lines() {
         let mut parts = line.split('\t');
-        let qi: usize = parts.next()?.parse().ok()?;
+        let first = parts.next()?;
+        if first == "v" {
+            let qi: usize = parts.next()?.parse().ok()?;
+            let v: Option<Vec<f32>> = parts.next()?.split(',').map(|x| x.parse().ok()).collect();
+            if let Some(slot) = vectors.get_mut(qi) {
+                *slot = v;
+            }
+            continue;
+        }
+        let qi: usize = first.parse().ok()?;
         let id = parts.next()?.to_string();
         let cos: f64 = parts.next()?.parse().ok()?;
         if let Some(bucket) = per_chunk.get_mut(qi) {
             bucket.push((id, cos));
         }
     }
-    Some(per_chunk)
+    let vectors: Option<Vec<Vec<f32>>> = vectors.into_iter().collect();
+    let vectors = vectors.filter(|vs| vs.first().is_some_and(|f| !f.is_empty() && vs.iter().all(|v| v.len() == f.len())));
+    Some(Matched { per_chunk, vectors })
 }
 
 /// ADR-701 §1: keep only rows for ways in the enabled set before any
@@ -627,6 +744,118 @@ mod tests {
         assert!(chunk_sections(body).is_empty());
     }
 
+    fn unit(v: &[f32]) -> Vec<f32> {
+        let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        v.iter().map(|x| x / n).collect()
+    }
+
+    /// A sidecar with way "multi" (three sections) and "bare" (none).
+    fn sample_sidecar() -> Sidecar {
+        let ways = vec![
+            sidecar::WaySections {
+                id: "multi".into(),
+                hash: 1,
+                vectors: vec![unit(&[1.0, 0.0, 0.0]), unit(&[1.0, 1.0, 0.0]), unit(&[0.0, 0.0, 1.0])],
+            },
+            sidecar::WaySections { id: "bare".into(), hash: 2, vectors: vec![] },
+        ];
+        sidecar::decode(&sidecar::encode("m", 3, &ways).unwrap()).unwrap()
+    }
+
+    /// Confirmation against the sidecar is the max cosine of the won chunk over
+    /// the way's sections. Hand-computed for chunk (0.6, 0.8, 0): the sections
+    /// give 0.6, (0.6 + 0.8) / √2 = 0.98995, and 0.
+    #[test]
+    fn sidecar_confirm_is_the_max_cosine_over_sections() {
+        let sc = sample_sidecar();
+        let chunk = [0.6_f32, 0.8, 0.0];
+        let got = sidecar_confirm(&sc, "multi", &chunk, || panic!("a way with sections never reads its alias"));
+        assert!((got - 1.4 / 2f64.sqrt()).abs() < 1e-6, "{got}");
+        assert!(got >= CONFIRM_GATE);
+    }
+
+    /// ADR-701 §6: a way with no sections confirms against its alias vector.
+    #[test]
+    fn sidecar_confirm_falls_back_to_the_alias_for_a_sectionless_way() {
+        let sc = sample_sidecar();
+        let chunk = [0.6_f32, 0.8, 0.0];
+        let got = sidecar_confirm(&sc, "bare", &chunk, || Some(vec![0.0, 1.0, 0.0]));
+        assert!((got - 0.8).abs() < 1e-6, "{got}");
+        // No alias either: it scores 0 and never fires.
+        assert_eq!(sidecar_confirm(&sc, "bare", &chunk, || None), 0.0);
+    }
+
+    #[test]
+    fn parse_match_reads_vectors_and_scores() {
+        let out = "v\t0\t0.5,0.25\n0\ta\t0.9000\n0\tb\t0.1000\nv\t1\t1,0\n1\tb\t0.7000\n";
+        let Matched { per_chunk: rows, vectors } = parse_match(out, 2).unwrap();
+        assert_eq!(rows[0], vec![("a".to_string(), 0.9), ("b".to_string(), 0.1)]);
+        assert_eq!(rows[1], vec![("b".to_string(), 0.7)]);
+        assert_eq!(vectors, Some(vec![vec![0.5, 0.25], vec![1.0, 0.0]]));
+    }
+
+    /// Output without vector lines (way-embed without `--vectors`), or with a
+    /// chunk's vector missing, gives no vectors and the scores unchanged.
+    #[test]
+    fn parse_match_without_every_vector_returns_none() {
+        let Matched { per_chunk: rows, vectors } = parse_match("0\ta\t0.9000\n1\tb\t0.7000\n", 2).unwrap();
+        assert_eq!(rows[1], vec![("b".to_string(), 0.7)]);
+        assert!(vectors.is_none());
+        let vectors = parse_match("v\t0\t0.5,0.25\n0\ta\t0.9000\n1\tb\t0.7000\n", 2).unwrap().vectors;
+        assert!(vectors.is_none(), "chunk 1 has no vector");
+    }
+
+    /// The sidecar state needs a complete sidecar and the chunk vectors; either
+    /// missing is today's per-call confirmation.
+    #[test]
+    fn confirmer_uses_the_sidecar_only_with_vectors() {
+        let p = Path::new("x");
+        assert!(Confirmer::new(p, p, p, Some(sample_sidecar()), Some(vec![vec![1.0, 0.0, 0.0]])).uses_sidecar());
+        assert!(!Confirmer::new(p, p, p, Some(sample_sidecar()), None).uses_sidecar());
+        assert!(!Confirmer::new(p, p, p, None, Some(vec![vec![1.0, 0.0, 0.0]])).uses_sidecar());
+    }
+
+    /// ADR-701 §7 through the files a scan reads: the sidecar is used when it
+    /// covers every enabled way at the manifest's hashes, and not when one
+    /// enabled way is missing from it or stale.
+    #[test]
+    fn complete_sidecar_falls_back_when_an_enabled_way_is_missing_or_stale() {
+        let dir = std::env::temp_dir().join(format!("ways-li-sidecar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(crate::paths::EN_MODEL), "model").unwrap();
+        let model = sidecar::model_id(&dir).unwrap();
+        let write_sidecar = |ways: &[(&str, u64)]| {
+            let ways: Vec<_> = ways
+                .iter()
+                .map(|(id, h)| sidecar::WaySections { id: id.to_string(), hash: *h, vectors: vec![vec![1.0, 0.0]] })
+                .collect();
+            sidecar::write(&dir.join(sidecar::FILE), &sidecar::encode(&model, 2, &ways).unwrap()).unwrap();
+        };
+        std::fs::write(
+            dir.join("embed-manifest.json"),
+            r#"{"way_hashes":{"a":"000000000000000a","b":"000000000000000b","off":"00000000000000ff"}}"#,
+        )
+        .unwrap();
+        let enabled = bodies_of(&["a", "b"]);
+
+        write_sidecar(&[("a", 0xa), ("b", 0xb), ("off", 0xff)]);
+        assert!(complete_sidecar(&dir, &enabled).is_some(), "complete");
+
+        write_sidecar(&[("a", 0xa), ("b", 0xb)]);
+        assert!(complete_sidecar(&dir, &enabled).is_some(), "a missing disabled way does not matter");
+
+        write_sidecar(&[("a", 0xa), ("off", 0xff)]);
+        assert!(complete_sidecar(&dir, &enabled).is_none(), "enabled way b missing");
+
+        write_sidecar(&[("a", 0xa), ("b", 0xbb), ("off", 0xff)]);
+        assert!(complete_sidecar(&dir, &enabled).is_none(), "enabled way b stale");
+
+        std::fs::remove_file(dir.join(sidecar::FILE)).unwrap();
+        assert!(complete_sidecar(&dir, &enabled).is_none(), "no sidecar");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn bodies_of(ids: &[&str]) -> HashMap<String, PathBuf> {
         ids.iter().map(|i| (i.to_string(), PathBuf::from(format!("/{i}.md")))).collect()
     }
@@ -697,3 +926,4 @@ mod tests {
         assert!(ranked[0].share <= 1.0);
     }
 }
+
