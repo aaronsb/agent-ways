@@ -117,7 +117,9 @@ pub fn prompt(
     // The hook's transcript_path names the invoking agent's transcript; the
     // firing path reads the model id (and the refire window) from it.
     crate::cmd::show::set_firing_transcript(transcript);
-    // A user prompt starts a turn: bump the epoch.
+    // A user prompt starts a turn: bump the epoch. The last-scan marker
+    // belongs to the turn before; the scan below writes this turn's.
+    session::clear_last_scan(session_id);
     //
     // A Monitor notification that wakes an idle session also arrives as a
     // prompt, wrapped in a `<task-notification>` envelope. Its body is a
@@ -636,7 +638,7 @@ pub fn task(
     }
 
     order_hits(&mut hits);
-    let stashed = write_stash(&hits, session_id, is_teammate, team);
+    let stashed = write_stash(&hits, record.scan_id(), session_id, is_teammate, team);
     let result = if stashed.is_ok() { "stashed" } else { "error" };
     for (i, hit) in hits.iter().enumerate() {
         record.hit(&hit.id, i + 1, &hit.payload, hit.score, result, None);
@@ -646,8 +648,11 @@ pub fn task(
 }
 
 /// Write the task lane's matched ways to a stash file for SubagentStart to
-/// claim. Nothing is written when nothing matched.
-fn write_stash(hits: &[Hit<String>], session_id: &str, is_teammate: bool, team: Option<&str>) -> Result<()> {
+/// claim, with the `scan_id` of the task scan's decision record, which
+/// becomes the subagent's last scan. Nothing is written when nothing matched:
+/// a stash nobody claims (a dispatch the operator denied) would be claimed by
+/// the next subagent instead of its own.
+fn write_stash(hits: &[Hit<String>], scan_id: &str, session_id: &str, is_teammate: bool, team: Option<&str>) -> Result<()> {
     let matched: Vec<(&str, &str)> = hits.iter().map(|h| (h.id.as_str(), h.payload.as_str())).collect();
 
     // Write stash file if any ways matched
@@ -666,6 +671,7 @@ fn write_stash(hits: &[Hit<String>], session_id: &str, is_teammate: bool, team: 
             "channels": channels,
             "is_teammate": is_teammate,
             "team_name": team.unwrap_or(""),
+            "scan_id": scan_id,
         });
 
         let timestamp = std::time::SystemTime::now()

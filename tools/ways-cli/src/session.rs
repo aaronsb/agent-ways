@@ -286,9 +286,16 @@ pub fn bump_epoch(session_id: &str) -> u64 {
     next
 }
 
-/// The current agent's last prompt-lane scan: its decision record's `scan_id`
-/// and the epoch it ran in (ADR-701 §2). A later pull in the same turn joins
-/// to that record through it.
+/// The current agent's last scan: its decision record's `scan_id` and the
+/// epoch it ran in (ADR-701 §2). A pull joins its turn's record through it,
+/// never through the epoch.
+///
+/// For the main agent the marker names the current turn's scan: a user prompt
+/// clears it before anything else, and the prompt-surface scan (or a queued
+/// message scanned later in the turn) writes it. A turn that is not scanned,
+/// such as a Monitor notification, leaves it absent. A subagent gets no user
+/// prompts: SubagentStart writes its marker once, from the stash its dispatch
+/// left, naming that dispatch's task scan.
 pub fn last_scan_path(session_id: &str) -> PathBuf {
     agent_state_dir(session_id).join("last-scan")
 }
@@ -300,6 +307,20 @@ pub fn write_last_scan(session_id: &str, scan_id: &str, epoch: u64) {
     ensure_parent(&path);
     let body = serde_json::json!({ "scan_id": scan_id, "epoch": epoch }).to_string();
     let _ = agent_settings::writer::write_atomic(&path, body);
+}
+
+/// The `scan_id` the current agent's last-scan marker names, `None` when it
+/// has none.
+pub fn read_last_scan(session_id: &str) -> Option<String> {
+    let text = std::fs::read_to_string(last_scan_path(session_id)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v["scan_id"].as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+/// Drop the current agent's last-scan marker as a new turn starts, so a pull
+/// in a turn with no scan joins nothing rather than the turn before.
+pub fn clear_last_scan(session_id: &str) {
+    let _ = std::fs::remove_file(last_scan_path(session_id));
 }
 
 /// Stamp when a way was last shown (epoch).

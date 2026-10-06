@@ -16,6 +16,8 @@ struct Stash {
     channels: Vec<String>,
     is_teammate: bool,
     team_name: String,
+    /// The dispatch's task-scan record, empty in a stash older than the field.
+    scan_id: String,
 }
 
 /// Whether a Task names an agent with its own definition (project, user or
@@ -70,6 +72,11 @@ pub fn inject(session_id: &str, project_dir: &str) -> anyhow::Result<String> {
         let dir = session::agent_state_dir(session_id);
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join("teammate"), format!("{}\n", stash.team_name))?;
+    }
+    // The subagent gets no user prompt, so its dispatch's task scan is its
+    // last scan for its whole run: a pull it makes joins that record.
+    if !stash.scan_id.is_empty() {
+        session::write_last_scan(session_id, &stash.scan_id, session::get_epoch(session_id));
     }
     let scope = if stash.is_teammate { "teammate" } else { "subagent" };
     let mut context = String::new();
