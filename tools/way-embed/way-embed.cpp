@@ -23,7 +23,7 @@
 #include <vector>
 #include <algorithm>
 
-#define VERSION "1.1.2"
+#define VERSION "1.2.0"
 #define MAX_CORPUS 512
 #define MAX_LINE   65536  /* corpus lines can be long with embedding vectors */
 
@@ -404,14 +404,27 @@ static int cmd_generate(const char *corpus_path, const char *model_path, const c
 /* Score one query against the pre-loaded corpus and emit its matches.
  * qindex < 0  → single-query mode: output "id<TAB>score" (unchanged format).
  * qindex >= 0 → batch mode: output "qindex<TAB>id<TAB>score" so a caller can
- * group a stream of results back to the query that produced them. */
+ * group a stream of results back to the query that produced them.
+ * vectors (batch mode only) → first print the query's own embedding as
+ * "v<TAB>qindex<TAB>f,f,...", so a caller can reuse it with no second
+ * embedding pass (ADR-701 §6: body confirmation against the sidecar). */
 static void score_query(embed_engine *engine,
                         const std::vector<corpus_entry> &corpus,
                         const std::string &query,
                         double default_threshold,
-                        int qindex) {
+                        int qindex,
+                        bool vectors) {
     std::vector<float> query_vec = engine_embed(engine, query);
     int n_embd = engine->n_embd;
+
+    if (vectors && qindex >= 0) {
+        printf("v\t%d\t", qindex);
+        for (int i = 0; i < n_embd; i++) {
+            if (i > 0) putchar(',');
+            printf("%.7g", query_vec[i]);
+        }
+        putchar('\n');
+    }
 
     struct match_result {
         std::string id;
@@ -448,7 +461,7 @@ static void score_query(embed_engine *engine,
  * primitive that amortizes the ~22ms model load across every chunk a hook needs
  * to match in a single invocation (ADR-160). */
 static int cmd_match(const char *corpus_path, const char *model_path, const char *query,
-                     double default_threshold, bool batch) {
+                     double default_threshold, bool batch, bool vectors) {
     std::vector<corpus_entry> corpus;
     if (load_corpus(corpus_path, corpus) < 0) return 1;
 
@@ -477,13 +490,13 @@ static int cmd_match(const char *corpus_path, const char *model_path, const char
             while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
                 line[--len] = '\0';
             if (len == 0) continue;
-            score_query(engine, corpus, line, default_threshold, qindex);
+            score_query(engine, corpus, line, default_threshold, qindex, vectors);
             fflush(stdout);
             qindex++;
         }
         free(line);
     } else {
-        score_query(engine, corpus, query, default_threshold, -1);
+        score_query(engine, corpus, query, default_threshold, -1, false);
     }
 
     engine_free(engine);
@@ -504,7 +517,9 @@ static void usage(const char *prog) {
         "    Score query against pre-computed corpus embeddings.\n"
         "    Single: --query TEXT   → id<TAB>score per match above threshold.\n"
         "    Batch:  --batch        → read one query per line from stdin, load\n"
-        "            model+corpus once, emit qindex<TAB>id<TAB>score per match.\n\n"
+        "            model+corpus once, emit qindex<TAB>id<TAB>score per match.\n"
+        "    --vectors      → with --batch, also emit each query's embedding as\n"
+        "            v<TAB>qindex<TAB>f,f,... before its matches.\n\n"
         "  %s similarity --model FILE --text1 TEXT --text2 TEXT\n"
         "    Embed two texts and print their cosine similarity.\n\n"
         "Options:\n"
@@ -538,6 +553,7 @@ int main(int argc, char **argv) {
     const char *text1 = nullptr;
     const char *text2 = nullptr;
     bool batch = false;
+    bool vectors = false;
     double threshold = -1.0; /* negative = use per-way */
 
     for (int i = 2; i < argc; i++) {
@@ -557,6 +573,8 @@ int main(int argc, char **argv) {
             text2 = argv[++i];
         } else if (strcmp(argv[i], "--batch") == 0) {
             batch = true;
+        } else if (strcmp(argv[i], "--vectors") == 0) {
+            vectors = true;
         } else if (strcmp(argv[i], "--version") == 0) {
             printf("way-embed %s\n", VERSION);
             return 0;
@@ -582,7 +600,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "error: match requires --corpus, --model, and (--query TEXT | --batch)\n");
             return 1;
         }
-        return cmd_match(corpus_path, model_path, query, threshold, batch);
+        return cmd_match(corpus_path, model_path, query, threshold, batch, vectors);
 
     } else if (strcmp(command, "similarity") == 0) {
         if (!model_path || (!batch && (!text1 || !text2))) {
