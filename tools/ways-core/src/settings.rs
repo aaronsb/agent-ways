@@ -263,9 +263,9 @@ const KEYS: &[KeySpec] = &[
         path: &["event_retention_days"],
         kind: Kind::Int { min: 1, max: 3650 },
         scope: Scope::User,
-        default: DefaultValue::Yaml("90"),
-        doc: "Days of history the event log keeps.",
-        long: "Machine-wide, so user scope only: a project file cannot shorten it. Events older than this are dropped from events.jsonl, at most once a day (ADR-701 §2). Session introspection and the tuning passes read this file, so keep enough for them. judge_call lines are kept regardless, since `ways agent cost` sums them.",
+        default: DefaultValue::Yaml("365"),
+        doc: "Days an archive file is kept after it is written.",
+        long: "Machine-wide, so user scope only: a project file cannot shorten it. The live events.jsonl is bounded by size and by age, and the lines it sheds are written to events-YYYY-MM-DD.jsonl.gz beside it, named for the day of the removal. Archives older than this many days are deleted, at most once a day (ADR-701 §2). Introspection, `ways tune stats` and the tuning passes read the archives as well as the live file. events.jsonl itself is never deleted by this setting. judge_call lines stay in the live file, since `ways agent cost` sums them.",
         ..BASE
     },
     KeySpec {

@@ -209,7 +209,7 @@ impl Default for Config {
             semantic_fire_probability: 0.5,
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
-            event_retention_days: 90,
+            event_retention_days: 365,
             refire_presets,
             secret_path_deny: true,
         }
@@ -723,21 +723,21 @@ mod tests {
     }
 
     #[test]
-    fn event_retention_defaults_to_ninety_days_and_is_settable() {
+    fn event_retention_defaults_to_a_year_and_is_settable() {
         let mut cfg = Config::default();
-        assert_eq!(cfg.event_retention_days, 90);
+        assert_eq!(cfg.event_retention_days, 365);
         cfg.apply_yaml("event_retention_days: 30\n");
         assert_eq!(cfg.event_retention_days, 30);
         let mut bad = Config::default();
         bad.apply_yaml("event_retention_days: 0\n");
-        assert_eq!(bad.event_retention_days, 90, "a value outside 1..3650 falls back");
+        assert_eq!(bad.event_retention_days, 365, "a value outside 1..3650 falls back");
     }
 
     #[test]
     fn a_project_file_cannot_set_the_event_retention() {
         let mut cfg = Config::default();
         apply_project(&mut cfg, "event_retention_days: 1\n");
-        assert_eq!(cfg.event_retention_days, 90, "retention is machine-wide, user scope only");
+        assert_eq!(cfg.event_retention_days, 365, "retention is machine-wide, user scope only");
     }
 
     #[test]

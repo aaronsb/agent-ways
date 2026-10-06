@@ -66,12 +66,13 @@ pub fn replay(session: Option<&str>, project: Option<&str>, all: bool, speed: Op
     if json {
         return dump::replay_json(session, project, all, matched);
     }
-    let content = ways_core::firing::load_events_text();
+    let scope = scope::resolve_project_scope(project, all);
+    let content = ways_core::firing::load_events_text_for(session, scope.as_ref().ok().and_then(|s| s.as_deref()));
     if content.trim().is_empty() {
         println!("No events recorded yet.");
         return Ok(());
     }
-    let scope = scope::resolve_project_scope(project, all)?;
+    let scope = scope?;
     need_terminal(open, "replay")?;
     let (palette, shape) = look(depth_of(open.depth.as_deref())?);
     let with_speed = move |mut r: Replay| {
@@ -137,7 +138,7 @@ fn transcript_live(content: &str, id: &str) -> bool {
 pub fn live(session: Option<&str>, project: Option<&str>, open: &Open) -> Result<()> {
     let project = project.map(ways_core::util::project_arg);
     let project = project.as_deref();
-    let content = ways_core::firing::load_events_text();
+    let content = ways_core::firing::load_events_text_for(session, project);
     if content.trim().is_empty() {
         println!("No events recorded yet.");
         return Ok(());
@@ -229,14 +230,15 @@ pub fn list(project: Option<&str>, all: bool, json: bool) -> Result<()> {
 /// specific one, `--all` across every project (which only affects session
 /// picking). With no `--session`, the most recent session in scope is dumped.
 pub fn dump(session: Option<&str>, project: Option<&str>, all: bool, matched: bool) -> Result<()> {
-    let content = ways_core::firing::load_events_text();
+    let scope = scope::resolve_project_scope(project, all);
+    let content = ways_core::firing::load_events_text_for(session, scope.as_ref().ok().and_then(|s| s.as_deref()));
     if content.trim().is_empty() {
         println!("{{\"error\":\"no events recorded yet\"}}");
         return Ok(());
     }
 
     // Fail-loud scope resolution, as JSON (agent-facing).
-    let scope = match scope::resolve_project_scope(project, all) {
+    let scope = match scope {
         Ok(s) => s,
         Err(e) => {
             println!("{{\"error\":{}}}", serde_json::to_string(&e.to_string())?);
@@ -293,7 +295,8 @@ pub fn fires(
     matched: bool,
     json: bool,
 ) -> Result<()> {
-    let content = ways_core::firing::load_events_text();
+    let scope = scope::resolve_project_scope(project, all);
+    let content = ways_core::firing::load_events_text_for(session, scope.as_ref().ok().and_then(|s| s.as_deref()));
     if content.trim().is_empty() {
         if json {
             println!("{}", empty_fires_json(matched));
@@ -303,7 +306,7 @@ pub fn fires(
         return Ok(());
     }
 
-    let scope = scope::resolve_project_scope(project, all)?;
+    let scope = scope?;
     let session_id = match session {
         Some(s) => s.to_string(),
         None => match dump::most_recent_session(&content, scope.as_deref()) {

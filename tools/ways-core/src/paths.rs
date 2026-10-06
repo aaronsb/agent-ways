@@ -168,10 +168,16 @@ pub fn findings_ledger() -> PathBuf {
     state_root().join("findings.jsonl")
 }
 
-/// The event-log files a reader should read: [`events_log`] when it exists.
+/// The event-log files a reader should read, in time order: the dated gzip
+/// archives oldest first (ADR-701 §2), then [`events_log`] when it exists.
+/// Read each with [`crate::event_archive::read_source`], which decompresses.
 pub fn events_log_sources() -> Vec<PathBuf> {
     let log = events_log();
-    if log.exists() { vec![log] } else { Vec::new() }
+    let mut sources = log.parent().map(crate::event_archive::archives).unwrap_or_default();
+    if log.exists() {
+        sources.push(log);
+    }
+    sources
 }
 
 // --- cache ($XDG_CACHE) ---
