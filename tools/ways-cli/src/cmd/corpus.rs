@@ -237,19 +237,17 @@ pub fn run(
     let body_sidecar = match (&settled, bin.as_deref()) {
         (Settled::Promoted, Some(bin)) => {
             vlog("building body sidecar (ADR-701 §6)");
-            match build_body_sidecar(&out_dir, &engine_dir, bin, &sources, &generate) {
-                Ok((ways, vectors)) => {
-                    log(&format!(
-                        "Body sidecar: {} ({ways} ways, {vectors} sections)",
-                        out_dir.join(crate::cmd::scan::sidecar::FILE).display()
-                    ));
-                    json!({ "file": crate::cmd::scan::sidecar::FILE, "ways": ways, "vectors": vectors })
-                }
-                Err(why) => {
-                    eprintln!("warning: body sidecar not built: {why}; body confirmation embeds per call");
-                    json!({ "file": null, "reason": why })
-                }
+            let side = refresh_body_sidecar(&out_dir, &engine_dir, bin, &sources, &generate, supports_vectors(bin));
+            match side.get("reason").and_then(|r| r.as_str()) {
+                Some(why) => eprintln!("warning: body sidecar not built: {why}; body confirmation embeds per call"),
+                None => log(&format!(
+                    "Body sidecar: {} ({} ways, {} sections)",
+                    out_dir.join(crate::cmd::scan::sidecar::FILE).display(),
+                    side["ways"],
+                    side["sections"]
+                )),
             }
+            side
         }
         _ => previous_manifest
             .as_ref()
@@ -276,7 +274,7 @@ pub fn run(
         "body_sidecar": body_sidecar,
         "embedded": complete,
         "reason": reason,
-        "failed_at": if complete { None } else { Some(agent_fmt::when::now_secs()) },
+        "failed_at": if complete && !sidecar_failed(&body_sidecar) { None } else { Some(agent_fmt::when::now_secs()) },
         "engine": engine,
     });
     vlog("writing manifest");
@@ -333,6 +331,54 @@ fn way_hashes(sources: &HashMap<String, PathBuf>) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+/// The `body_sidecar` manifest entry after rebuilding the sidecar. The old file
+/// goes first, so a failed or skipped build never leaves a sidecar that no
+/// longer describes the corpus. With a way-embed that cannot return chunk
+/// vectors the sidecar is useless to a scan and is not built.
+fn refresh_body_sidecar(
+    out_dir: &Path,
+    engine_dir: &Path,
+    bin: &Path,
+    sources: &HashMap<String, PathBuf>,
+    generate: &GeneratePass<'_>,
+    vectors: bool,
+) -> serde_json::Value {
+    let _ = std::fs::remove_file(out_dir.join(crate::cmd::scan::sidecar::FILE));
+    if !vectors {
+        return json!({ "file": null, "reason": NO_VECTORS, "unsupported": true });
+    }
+    match build_body_sidecar(out_dir, engine_dir, bin, sources, generate) {
+        Ok((ways, sections)) => json!({
+            "file": crate::cmd::scan::sidecar::FILE,
+            "ways": ways,
+            "sections": sections,
+            "vectors": true,
+        }),
+        Err(why) => json!({ "file": null, "reason": why }),
+    }
+}
+
+/// Why no sidecar is built for a way-embed older than 1.2.0.
+const NO_VECTORS: &str = "way-embed < 1.2.0 lacks --vectors";
+
+/// True when `bin` is way-embed 1.2.0 or later, which prints chunk vectors
+/// with `match --vectors`. Checked once per corpus build.
+fn supports_vectors(bin: &Path) -> bool {
+    std::process::Command::new(bin)
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| parse_way_embed_version(&String::from_utf8_lossy(&o.stdout)))
+        .is_some_and(|v| v >= (1, 2, 0))
+}
+
+/// `way-embed X.Y.Z` to `(X, Y, Z)`.
+fn parse_way_embed_version(out: &str) -> Option<(u32, u32, u32)> {
+    let v = out.trim().strip_prefix("way-embed ")?;
+    let mut parts = v.split('.').map(|p| p.trim().parse::<u32>().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
+}
+
 /// Build the body sidecar (ADR-701 §6) for every way in `sources`, disabled or
 /// not: split each way into sections, embed them all in one `way-embed
 /// generate` pass with the English model, and write the binary sidecar into
@@ -346,7 +392,7 @@ fn build_body_sidecar(
 ) -> std::result::Result<(usize, usize), String> {
     use crate::cmd::scan::sidecar;
     let model = engine_dir.join(crate::paths::EN_MODEL);
-    let model_id = sidecar::model_id(engine_dir).ok_or("English model missing")?;
+    let model_id = sidecar::model_id(engine_dir, bin).ok_or("English model or way-embed missing")?;
 
     let mut ids: Vec<&String> = sources.keys().collect();
     ids.sort();
@@ -531,7 +577,8 @@ fn sweep_staging_debris(out_dir: &Path) {
     let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !(name.starts_with("ways-corpus") && name.contains(".tmp")) {
+        let ours = name.starts_with("ways-corpus") || name.starts_with(crate::cmd::scan::sidecar::FILE);
+        if !(ours && name.contains(".tmp")) {
             continue;
         }
         let old = entry
@@ -631,12 +678,26 @@ const RETRY_AFTER_SECS: u64 = 24 * 3600;
 /// embedded.
 fn retry_due(manifest: &Path, engine: &str, now: u64) -> bool {
     let Some(m) = read_manifest(manifest) else { return false };
-    if m.get("embedded").and_then(|v| v.as_bool()).unwrap_or(true) {
+    let embedded = m.get("embedded").and_then(|v| v.as_bool()).unwrap_or(true);
+    let side = m.get("body_sidecar").cloned().unwrap_or(serde_json::Value::Null);
+    let side_failed = sidecar_failed(&side);
+    // A way-embed without --vectors is an install state: only a new engine
+    // can change the answer, so it does not retry by the day.
+    let side_unsupported = side.get("unsupported").and_then(|v| v.as_bool()).unwrap_or(false);
+    if embedded && !side_failed && !side_unsupported {
         return false;
     }
     let engine_changed = m.get("engine").and_then(|v| v.as_str()) != Some(engine);
     let failed_at = m.get("failed_at").and_then(|v| v.as_u64()).unwrap_or(0);
-    engine_changed || now.saturating_sub(failed_at) >= RETRY_AFTER_SECS
+    let day_passed = (!embedded || side_failed) && now.saturating_sub(failed_at) >= RETRY_AFTER_SECS;
+    engine_changed || day_passed
+}
+
+/// True when the manifest's `body_sidecar` records a build that failed, as
+/// opposed to one skipped because way-embed lacks `--vectors`.
+fn sidecar_failed(side: &serde_json::Value) -> bool {
+    side.get("reason").is_some_and(|r| r.is_string())
+        && !side.get("unsupported").and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
 /// Embed one project's `.claude/ways/` under namespace `key`.
@@ -1470,7 +1531,10 @@ mod tests {
             std::fs::write(corpus, rows.join("\n") + "\n").unwrap();
             Ok(Instant::now())
         };
-        let got = build_body_sidecar(&dir, &engine, Path::new("way-embed"), &sources, &generate).unwrap();
+        let bin = engine.join("way-embed");
+        std::fs::write(&bin, "binary").unwrap();
+        let model_id = sidecar::model_id(&engine, &bin).unwrap();
+        let got = build_body_sidecar(&dir, &engine, &bin, &sources, &generate).unwrap();
         assert_eq!(got, (2, 2));
         assert_eq!(
             seen.into_inner(),
@@ -1478,7 +1542,7 @@ mod tests {
         );
 
         let sc = sidecar::read(&dir.join(sidecar::FILE)).unwrap();
-        assert_eq!(sc.model, "minilm-l6-v2.gguf:5");
+        assert_eq!(sc.model, model_id);
         assert_eq!(sc.dim, 3);
         assert!((sc.max_cosine("a/prose", &[0.0, 1.0, 0.0]).unwrap() - 1.0).abs() < 1e-9);
         assert!((sc.max_cosine("a/prose", &[0.0, 0.0, 1.0]).unwrap()).abs() < 1e-9, "only two sections");
@@ -1487,7 +1551,7 @@ mod tests {
         let hashes = way_hashes(&sources);
         assert_eq!(hashes["a/prose"], json!(sidecar::hash_hex(sidecar::content_hash(prose.as_bytes()))));
         let alias = sidecar::alias_hashes_from(&json!({ "way_hashes": hashes }));
-        assert!(sc.check("minilm-l6-v2.gguf:5", ["a/prose", "b/table"], &alias).is_ok());
+        assert!(sc.check(&model_id, ["a/prose", "b/table"], &alias).is_ok());
         let leftovers: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .flatten()
@@ -1495,6 +1559,95 @@ mod tests {
             .filter(|n| n.contains(".tmp"))
             .collect();
         assert!(leftovers.is_empty(), "staging left behind: {leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn way_embed_versions_parse_and_gate_vectors() {
+        assert_eq!(parse_way_embed_version("way-embed 1.2.0\n"), Some((1, 2, 0)));
+        assert_eq!(parse_way_embed_version("way-embed 1.10.3"), Some((1, 10, 3)));
+        assert_eq!(parse_way_embed_version("way-embed 0.1.0"), Some((0, 1, 0)));
+        assert_eq!(parse_way_embed_version("error: unknown"), None);
+        assert!(parse_way_embed_version("way-embed 1.1.2").unwrap() < (1, 2, 0));
+        assert!(parse_way_embed_version("way-embed 1.10.0").unwrap() >= (1, 2, 0));
+    }
+
+    /// A rebuild removes the previous sidecar first: a failed or skipped build
+    /// leaves no sidecar describing an older corpus, and records why.
+    #[test]
+    fn a_failed_or_skipped_sidecar_build_leaves_no_old_sidecar() {
+        use crate::cmd::scan::sidecar;
+        let dir = scratch("sidecar-refresh");
+        let engine = dir.join("engine");
+        std::fs::create_dir_all(&engine).unwrap();
+        std::fs::write(engine.join(crate::paths::EN_MODEL), "model").unwrap();
+        let bin = engine.join("way-embed");
+        std::fs::write(&bin, "binary").unwrap();
+        std::fs::write(dir.join("w.md"), "---\ndescription: d\nvocabulary: v\n---\n# T\n\nA section long enough to embed here.\n").unwrap();
+        let sources: HashMap<String, PathBuf> = [("w".to_string(), dir.join("w.md"))].into_iter().collect();
+        let failing = |_: &Path, _: &Path, _: &Path, _: &str| Err("body sections embedding generation failed".to_string());
+        let old = dir.join(sidecar::FILE);
+
+        std::fs::write(&old, "previous sidecar").unwrap();
+        let side = refresh_body_sidecar(&dir, &engine, &bin, &sources, &failing, true);
+        assert!(!old.exists(), "old sidecar left after a failed build");
+        assert_eq!(side["reason"], json!("body sections embedding generation failed"));
+        assert!(sidecar_failed(&side));
+
+        std::fs::write(&old, "previous sidecar").unwrap();
+        let side = refresh_body_sidecar(&dir, &engine, &bin, &sources, &failing, false);
+        assert!(!old.exists(), "old sidecar left when way-embed lacks --vectors");
+        assert_eq!(side, json!({ "file": null, "reason": NO_VECTORS, "unsupported": true }));
+        assert!(!sidecar_failed(&side));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `--if-stale` retries a failed sidecar build like a failed corpus build;
+    /// a way-embed without --vectors waits for a new engine, not a new day.
+    #[test]
+    fn a_failed_sidecar_build_is_retried() {
+        let dir = scratch("stale-sidecar");
+        let manifest = dir.join("embed-manifest.json");
+        let t0 = 1_000_000u64;
+        std::fs::write(
+            &manifest,
+            format!(r#"{{"embedded": true, "engine": "A", "failed_at": {t0}, "body_sidecar": {{"file": null, "reason": "boom"}}}}"#),
+        )
+        .unwrap();
+        assert!(!retry_due(&manifest, "A", t0 + 60));
+        assert!(retry_due(&manifest, "B", t0 + 60), "changed engine");
+        assert!(retry_due(&manifest, "A", t0 + RETRY_AFTER_SECS), "a day later");
+        std::fs::write(
+            &manifest,
+            format!(r#"{{"embedded": true, "engine": "A", "body_sidecar": {{"file": null, "reason": "{NO_VECTORS}", "unsupported": true}}}}"#),
+        )
+        .unwrap();
+        assert!(!retry_due(&manifest, "A", t0 + RETRY_AFTER_SECS), "unsupported retried by the day");
+        assert!(retry_due(&manifest, "B", t0), "unsupported not retried on a new engine");
+        std::fs::write(&manifest, r#"{"embedded": true, "engine": "A", "body_sidecar": {"file": "ways-body-en.bin", "vectors": true}}"#).unwrap();
+        assert!(!retry_due(&manifest, "B", t0 + RETRY_AFTER_SECS), "a built sidecar retried");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Staging debris from the sidecar build is swept like the corpus's own.
+    #[test]
+    fn stale_sidecar_staging_files_are_swept() {
+        let dir = scratch("sweep-sidecar");
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        let names = ["ways-corpus-sections.123.tmp", "ways-corpus-sections.123.tmp.tmp", "ways-body-en.bin.123.tmp"];
+        for n in names {
+            let p = dir.join(n);
+            std::fs::write(&p, "x").unwrap();
+            std::fs::File::options().append(true).open(&p).unwrap().set_modified(old).unwrap();
+        }
+        std::fs::write(dir.join("ways-body-en.bin.456.tmp"), "fresh").unwrap();
+        std::fs::write(dir.join("ways-body-en.bin"), "live").unwrap();
+        sweep_staging_debris(&dir);
+        for n in names {
+            assert!(!dir.join(n).exists(), "{n} not swept");
+        }
+        assert!(dir.join("ways-body-en.bin.456.tmp").exists(), "a fresh staging file swept");
+        assert!(dir.join("ways-body-en.bin").exists(), "the live sidecar swept");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

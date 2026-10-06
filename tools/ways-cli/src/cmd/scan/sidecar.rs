@@ -32,8 +32,11 @@
 //! ## Completeness (ADR-701 §7)
 //!
 //! The corpus manifest (`embed-manifest.json`) records `way_hashes`, each alias
-//! corpus way's content hash. A scan uses the sidecar only when its model id is
-//! the installed model's and every enabled way the alias corpus holds has a
+//! corpus way's content hash, and under `body_sidecar` whether the build's
+//! way-embed can return chunk vectors (`"vectors": true`, 1.2.0 and later). A
+//! scan uses the sidecar only when the manifest says so, its model id is the
+//! installed one's (the model, the way-embed binary and [`CHUNKER_REV`]), and
+//! every enabled way the alias corpus holds has a
 //! record whose hash equals the manifest's. An enabled way the alias corpus
 //! lacks (a worktree's or an unregistered project's) cannot win a chunk and
 //! does not count. Anything less and the scan behaves exactly as without it.
@@ -73,11 +76,20 @@ pub(crate) fn hash_hex(hash: u64) -> String {
     format!("{hash:016x}")
 }
 
-/// The id of the English model in `engine_dir`: file name and size, so a
-/// replaced model invalidates the sidecar.
-pub(crate) fn model_id(engine_dir: &Path) -> Option<String> {
-    let len = engine_dir.join(crate::paths::EN_MODEL).metadata().ok()?.len();
-    Some(format!("{}:{len}", crate::paths::EN_MODEL))
+/// Revision of [`super::late_interaction::chunk_sections`]. Bump it when the
+/// chunking changes, so sidecars built by the old chunker stop being used.
+pub(crate) const CHUNKER_REV: u32 = 1;
+
+/// What the sidecar's vectors depend on: the English model in `engine_dir`
+/// (name and size), the way-embed binary `bin` (size and modification time,
+/// read without running it) and the chunker revision. Replacing any of them
+/// invalidates the sidecar, so a scan never asks a different binary for
+/// `--vectors` or mixes vectors from two embedders.
+pub(crate) fn model_id(engine_dir: &Path, bin: &Path) -> Option<String> {
+    let model = engine_dir.join(crate::paths::EN_MODEL).metadata().ok()?.len();
+    let b = bin.metadata().ok()?;
+    let mtime = b.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some(format!("{}:{model}|way-embed:{}:{mtime}|sections:{CHUNKER_REV}", crate::paths::EN_MODEL, b.len()))
 }
 
 /// Serialize ways into the version-1 format. `None` when a vector's length is
@@ -188,17 +200,58 @@ pub(crate) fn read(path: &Path) -> Option<Sidecar> {
     decode(&std::fs::read(path).ok()?)
 }
 
-/// The manifest's `way_hashes`: each alias corpus way's content hash. Empty
-/// when the manifest predates the field.
-pub(crate) fn alias_hashes(manifest: &Path) -> HashMap<String, u64> {
-    std::fs::read_to_string(manifest)
-        .ok()
-        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-        .map(|m| alias_hashes_from(&m))
-        .unwrap_or_default()
+/// What a scan needs from the corpus manifest about the sidecar.
+#[derive(Debug, Default)]
+pub(crate) struct ManifestView {
+    /// `way_hashes`: each alias corpus way's content hash. Empty when the
+    /// manifest predates the field.
+    pub alias: HashMap<String, u64>,
+    /// `body_sidecar.vectors`: the build's way-embed returns chunk vectors.
+    pub vectors: bool,
+    /// `body_sidecar.reason`: why the last build produced no sidecar.
+    pub reason: Option<String>,
 }
 
-/// [`alias_hashes`] of a parsed manifest.
+impl ManifestView {
+    pub(crate) fn read(manifest: &Path) -> Self {
+        std::fs::read_to_string(manifest)
+            .ok()
+            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+            .map(|m| Self::from_value(&m))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn from_value(m: &serde_json::Value) -> Self {
+        let side = m.get("body_sidecar");
+        ManifestView {
+            alias: alias_hashes_from(m),
+            vectors: side.and_then(|s| s.get("vectors")).and_then(|v| v.as_bool()).unwrap_or(false),
+            reason: side.and_then(|s| s.get("reason")).and_then(|v| v.as_str()).map(str::to_string),
+        }
+    }
+}
+
+/// ADR-701 §7: the sidecar in `corpus_dir` if a scan may use it, else why not.
+/// `bin` is the way-embed the scan runs; `enabled` the ways allowed to compete.
+pub(crate) fn state<'a>(
+    corpus_dir: &Path,
+    bin: &Path,
+    enabled: impl IntoIterator<Item = &'a str>,
+) -> Result<Sidecar, Fallback> {
+    let view = ManifestView::read(&corpus_dir.join("embed-manifest.json"));
+    if let Some(why) = view.reason {
+        return Err(Fallback::BuildFailed(why));
+    }
+    let sc = read(&corpus_dir.join(FILE)).ok_or(Fallback::Absent)?;
+    if !view.vectors {
+        return Err(Fallback::NoVectors);
+    }
+    let model = model_id(corpus_dir, bin).ok_or(Fallback::ModelMismatch)?;
+    sc.check(&model, enabled, &view.alias)?;
+    Ok(sc)
+}
+
+/// The manifest's `way_hashes` of a parsed manifest.
 pub(crate) fn alias_hashes_from(manifest: &serde_json::Value) -> HashMap<String, u64> {
     manifest
         .get("way_hashes")
@@ -218,6 +271,8 @@ pub(crate) enum Fallback {
     Absent,
     /// The last corpus build did not produce a sidecar; its reason.
     BuildFailed(String),
+    /// The build's way-embed cannot return chunk vectors (`--vectors`).
+    NoVectors,
     /// The sidecar was built for another model, embedder or chunker.
     ModelMismatch,
     /// The manifest records no per-way hashes to check against.
@@ -237,7 +292,8 @@ impl std::fmt::Display for Fallback {
         match self {
             Fallback::Absent => write!(f, "absent; run `ways corpus`"),
             Fallback::BuildFailed(why) => write!(f, "build failed: {why}"),
-            Fallback::ModelMismatch => write!(f, "built for another model or way-embed; run `ways corpus`"),
+            Fallback::NoVectors => write!(f, "way-embed cannot return chunk vectors (needs 1.2.0); run `ways corpus`"),
+            Fallback::ModelMismatch => write!(f, "built for another model, way-embed or chunker; run `ways corpus`"),
             Fallback::NoHashes => write!(f, "the manifest has no way hashes; run `ways corpus`"),
             Fallback::Incomplete { missing, stale } => {
                 let mut parts = Vec::new();
@@ -467,16 +523,21 @@ mod tests {
     }
 
     #[test]
-    fn alias_hashes_reads_the_manifest_field() {
+    fn the_manifest_view_reads_hashes_vectors_and_reason() {
         let dir = std::env::temp_dir().join(format!("ways-sidecar-mf-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let m = dir.join("embed-manifest.json");
-        std::fs::write(&m, r#"{"way_hashes":{"a/one":"0000000000001111","bad":"zz"}}"#).unwrap();
-        let h = alias_hashes(&m);
-        assert_eq!(h.get("a/one"), Some(&0x1111));
-        assert!(!h.contains_key("bad"));
-        std::fs::write(&m, r#"{"global_hash":"x"}"#).unwrap();
-        assert!(alias_hashes(&m).is_empty());
+        std::fs::write(&m, r#"{"way_hashes":{"a/one":"0000000000001111","bad":"zz"},"body_sidecar":{"vectors":true}}"#).unwrap();
+        let v = ManifestView::read(&m);
+        assert_eq!(v.alias.get("a/one"), Some(&0x1111));
+        assert!(!v.alias.contains_key("bad"));
+        assert!(v.vectors);
+        assert!(v.reason.is_none());
+        std::fs::write(&m, r#"{"global_hash":"x","body_sidecar":{"file":null,"reason":"boom"}}"#).unwrap();
+        let v = ManifestView::read(&m);
+        assert!(v.alias.is_empty());
+        assert!(!v.vectors);
+        assert_eq!(v.reason.as_deref(), Some("boom"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -487,5 +548,23 @@ mod tests {
         let ways = vec![WaySections { id: "z".into(), hash: 1, vectors: vec![vec![], vec![]] }];
         let sc = decode(&encode("m", 0, &ways).unwrap()).unwrap();
         assert!(sc.max_cosine("z", &[]).is_none());
+    }
+
+    /// The model id moves with the way-embed binary and names the chunker.
+    #[test]
+    fn model_id_changes_with_the_embedder_and_carries_the_chunker_revision() {
+        let dir = std::env::temp_dir().join(format!("ways-sidecar-mid-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(crate::paths::EN_MODEL), "model").unwrap();
+        std::fs::write(dir.join("old"), "way-embed 1.1.2").unwrap();
+        std::fs::write(dir.join("new"), "way-embed 1.2.0 longer").unwrap();
+        let a = model_id(&dir, &dir.join("old")).unwrap();
+        let b = model_id(&dir, &dir.join("new")).unwrap();
+        assert_ne!(a, b);
+        assert!(a.starts_with("minilm-l6-v2.gguf:5|way-embed:15:"), "{a}");
+        assert!(a.ends_with(&format!("|sections:{CHUNKER_REV}")), "{a}");
+        assert!(model_id(&dir, &dir.join("absent")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

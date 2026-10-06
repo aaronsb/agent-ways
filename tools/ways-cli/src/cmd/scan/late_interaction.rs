@@ -157,7 +157,7 @@ pub(crate) fn run_diagnostic(
     if chunks.len() < 2 {
         return None;
     }
-    let sidecar = complete_sidecar(&xdg, bodies);
+    let sidecar = complete_sidecar(&xdg, &bin, bodies);
     let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
     let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors);
     let per_chunk = mask_to_enabled(matched.per_chunk, bodies);
@@ -206,7 +206,7 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>) -> Option<Ve
     // Stage 2 (match): one batched pass, all chunks against the corpus. When
     // the sidecar is complete the pass also returns the chunks' vectors.
     let t = std::time::Instant::now();
-    let sidecar = complete_sidecar(&xdg, bodies);
+    let sidecar = complete_sidecar(&xdg, &bin, bodies);
     if dbg { eprintln!("LI: body sidecar {} ({:.2} ms)", if sidecar.is_some() { "complete" } else { "absent or incomplete" }, ms(t)); }
     let t = std::time::Instant::now();
     let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
@@ -272,11 +272,8 @@ fn ms(t: std::time::Instant) -> f64 {
 /// ADR-701 §7: the body sidecar in `corpus_dir`, only when it was built with
 /// the installed model and covers every way in `enabled` that the alias
 /// corpus holds, at its content hashes (the manifest's `way_hashes`).
-fn complete_sidecar(corpus_dir: &Path, enabled: &HashMap<String, PathBuf>) -> Option<Sidecar> {
-    let sc = sidecar::read(&corpus_dir.join(sidecar::FILE))?;
-    let model = sidecar::model_id(corpus_dir)?;
-    let alias = sidecar::alias_hashes(&corpus_dir.join("embed-manifest.json"));
-    sc.check(&model, enabled.keys().map(String::as_str), &alias).is_ok().then_some(sc)
+fn complete_sidecar(corpus_dir: &Path, bin: &Path, enabled: &HashMap<String, PathBuf>) -> Option<Sidecar> {
+    sidecar::state(corpus_dir, bin, enabled.keys().map(String::as_str)).ok()
 }
 
 /// How stage 5 confirms a survivor: against the body sidecar with the match
@@ -358,24 +355,17 @@ struct Matched {
 /// way-embed emits). `--threshold 0.0` returns every non-negative cosine.
 ///
 /// With `want_vectors` the pass adds `--vectors` and also returns each chunk's
-/// vector. A way-embed older than 1.2.0 rejects the flag before loading the
-/// model; the pass then reruns without it and returns no vectors.
+/// vector. The caller asks only when the sidecar is usable, which means the
+/// manifest recorded that this very binary supports the flag; a failed pass is
+/// a failed pass and is not run again.
 fn batch_match(bin: &Path, corpus: &Path, model: &Path, chunks: &[String], want_vectors: bool) -> Option<Matched> {
-    let input = chunks.join("\n");
-    let run = |vectors: bool| {
-        let mut cmd = Command::new(bin);
-        cmd.args(["match", "--corpus", corpus.to_str()?, "--model", model.to_str()?, "--batch", "--threshold", "0.0"]);
-        if vectors {
-            cmd.arg("--vectors");
-        }
-        run_stdin(cmd, &input)
-    };
-    let (stdout, asked) = match want_vectors.then(|| run(true)).flatten() {
-        Some(out) => (out, true),
-        None => (run(false)?, false),
-    };
-    let matched = parse_match(&stdout, chunks.len())?;
-    Some(Matched { vectors: matched.vectors.filter(|_| asked), ..matched })
+    let mut cmd = Command::new(bin);
+    cmd.args(["match", "--corpus", corpus.to_str()?, "--model", model.to_str()?, "--batch", "--threshold", "0.0"]);
+    if want_vectors {
+        cmd.arg("--vectors");
+    }
+    let matched = parse_match(&run_stdin(cmd, &chunks.join("\n"))?, chunks.len())?;
+    Some(Matched { vectors: matched.vectors.filter(|_| want_vectors), ..matched })
 }
 
 /// Parse `way-embed match --batch` output. Score lines are
@@ -816,6 +806,25 @@ mod tests {
         assert!(on(2).abs() < 1e-6, "best of -1, -0.707, 0");
     }
 
+    /// A match pass that fails is not run again: the model loads once per scan
+    /// even when vectors were asked for.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_match_runs_the_embedder_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("ways-li-once-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("way-embed");
+        let count = dir.join("calls");
+        std::fs::write(&bin, format!("#!/bin/sh\necho x >> {}\nexit 1\n", count.display())).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let chunks = vec!["one chunk here".to_string(), "another chunk".to_string()];
+        assert!(batch_match(&bin, &dir.join("c"), &dir.join("m"), &chunks, true).is_none());
+        assert_eq!(std::fs::read_to_string(&count).unwrap().lines().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The sidecar state needs a complete sidecar and the chunk vectors; either
     /// missing is today's per-call confirmation.
     #[test]
@@ -826,52 +835,69 @@ mod tests {
         assert!(!Confirmer::new(p, p, None, Some(vec![vec![1.0, 0.0, 0.0]])).uses_sidecar());
     }
 
-    /// ADR-701 §7 through the files a scan reads: the sidecar is used when it
-    /// covers every enabled way at the manifest's hashes, and not when one
-    /// enabled way is missing from it or stale.
+    /// ADR-701 §7 through the files a scan reads: the sidecar is used when the
+    /// manifest records `--vectors` support, it was built for this model and
+    /// way-embed, and it covers every enabled way the alias corpus holds at the
+    /// manifest's hashes. Each other state names its reason.
     #[test]
-    fn complete_sidecar_falls_back_when_an_enabled_way_is_missing_or_stale() {
+    fn complete_sidecar_falls_back_with_a_reason() {
+        use sidecar::Fallback;
         let dir = std::env::temp_dir().join(format!("ways-li-sidecar-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(crate::paths::EN_MODEL), "model").unwrap();
-        let model = sidecar::model_id(&dir).unwrap();
-        let write_sidecar = |ways: &[(&str, u64)]| {
+        let bin = dir.join("way-embed");
+        std::fs::write(&bin, "binary").unwrap();
+        let model = sidecar::model_id(&dir, &bin).unwrap();
+        let write_sidecar = |model: &str, ways: &[(&str, u64)]| {
             let ways: Vec<_> = ways
                 .iter()
                 .map(|(id, h)| sidecar::WaySections { id: id.to_string(), hash: *h, vectors: vec![vec![1.0, 0.0]] })
                 .collect();
-            sidecar::write(&dir.join(sidecar::FILE), &sidecar::encode(&model, 2, &ways).unwrap()).unwrap();
+            sidecar::write(&dir.join(sidecar::FILE), &sidecar::encode(model, 2, &ways).unwrap()).unwrap();
         };
-        std::fs::write(
-            dir.join("embed-manifest.json"),
-            r#"{"way_hashes":{"a":"000000000000000a","b":"000000000000000b","off":"00000000000000ff"}}"#,
-        )
-        .unwrap();
+        let manifest = |side: &str| {
+            std::fs::write(
+                dir.join("embed-manifest.json"),
+                format!(r#"{{"way_hashes":{{"a":"000000000000000a","b":"000000000000000b","off":"00000000000000ff"}},"body_sidecar":{side}}}"#),
+            )
+            .unwrap();
+        };
+        let state = |enabled: &[&str]| sidecar::state(&dir, &bin, enabled.iter().copied()).map(|_| ());
+        manifest(r#"{"file":"ways-body-en.bin","vectors":true}"#);
         let enabled = bodies_of(&["a", "b"]);
 
-        write_sidecar(&[("a", 0xa), ("b", 0xb), ("off", 0xff)]);
-        assert!(complete_sidecar(&dir, &enabled).is_some(), "complete");
+        write_sidecar(&model, &[("a", 0xa), ("b", 0xb), ("off", 0xff)]);
+        assert!(complete_sidecar(&dir, &bin, &enabled).is_some(), "complete");
+        assert_eq!(state(&["a", "b", "-proj/unregistered"]), Ok(()), "a way the alias corpus lacks does not count");
 
-        write_sidecar(&[("a", 0xa), ("b", 0xb)]);
-        assert!(complete_sidecar(&dir, &enabled).is_some(), "a missing disabled way does not matter");
+        write_sidecar(&model, &[("a", 0xa), ("b", 0xb)]);
+        assert_eq!(state(&["a", "b"]), Ok(()), "a missing disabled way does not matter");
 
-        write_sidecar(&[("a", 0xa), ("off", 0xff)]);
-        assert!(complete_sidecar(&dir, &enabled).is_none(), "enabled way b missing");
+        write_sidecar(&model, &[("a", 0xa), ("off", 0xff)]);
+        assert_eq!(state(&["a", "b"]), Err(Fallback::Incomplete { missing: vec!["b".into()], stale: vec![] }));
+        assert!(complete_sidecar(&dir, &bin, &enabled).is_none());
 
-        write_sidecar(&[("a", 0xa), ("b", 0xbb), ("off", 0xff)]);
-        assert!(complete_sidecar(&dir, &enabled).is_none(), "enabled way b stale");
+        write_sidecar(&model, &[("a", 0xa), ("b", 0xbb), ("off", 0xff)]);
+        assert_eq!(state(&["a", "b"]), Err(Fallback::Incomplete { missing: vec![], stale: vec!["b".into()] }));
 
-        // Complete, but built for another model: not used.
-        let ways: Vec<_> = [("a", 0xa), ("b", 0xb)]
-            .iter()
-            .map(|(id, h)| sidecar::WaySections { id: id.to_string(), hash: *h, vectors: vec![vec![1.0, 0.0]] })
-            .collect();
-        sidecar::write(&dir.join(sidecar::FILE), &sidecar::encode("other-model:1", 2, &ways).unwrap()).unwrap();
-        assert!(complete_sidecar(&dir, &enabled).is_none(), "model id mismatch");
+        write_sidecar("other-model:1", &[("a", 0xa), ("b", 0xb)]);
+        assert_eq!(state(&["a", "b"]), Err(Fallback::ModelMismatch), "built for another model");
 
+        write_sidecar(&model, &[("a", 0xa), ("b", 0xb)]);
+        std::fs::write(&bin, "a replaced way-embed binary").unwrap();
+        assert_eq!(state(&["a", "b"]), Err(Fallback::ModelMismatch), "way-embed replaced since the build");
+        std::fs::write(&bin, "binary").unwrap();
+
+        manifest(r#"{"file":"ways-body-en.bin"}"#);
+        assert_eq!(state(&["a", "b"]), Err(Fallback::NoVectors), "manifest does not record --vectors");
+
+        manifest(r#"{"file":null,"reason":"way-embed < 1.2.0 lacks --vectors"}"#);
+        assert_eq!(state(&["a", "b"]), Err(Fallback::BuildFailed("way-embed < 1.2.0 lacks --vectors".into())));
+
+        manifest(r#"{"file":"ways-body-en.bin","vectors":true}"#);
         std::fs::remove_file(dir.join(sidecar::FILE)).unwrap();
-        assert!(complete_sidecar(&dir, &enabled).is_none(), "no sidecar");
+        assert_eq!(state(&["a", "b"]), Err(Fallback::Absent), "no sidecar");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
