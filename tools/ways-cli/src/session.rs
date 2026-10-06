@@ -265,7 +265,7 @@ impl AgentState<'_> {
             self.session_id,
             self.agent,
         )
-        .map_or(0, |t| token_position_of(&t))
+        .and_then(|t| token_position_of(&t)).unwrap_or(0)
     }
 }
 
@@ -287,15 +287,17 @@ pub fn bump_epoch(session_id: &str) -> u64 {
 }
 
 /// The current agent's last scan: its decision record's `scan_id` and the
-/// epoch it ran in (ADR-701 §2). A pull joins its turn's record through it,
-/// never through the epoch.
+/// agent's own epoch when the marker was written (ADR-701 §2). A pull joins
+/// its turn's record through the `scan_id`, never through the epoch.
 ///
-/// For the main agent the marker names the current turn's scan: a user prompt
-/// clears it before anything else, and the prompt-surface scan (or a queued
+/// For the main agent the marker names the current turn's scan: the prompt
+/// lane clears it first thing, and the prompt-surface scan (or a queued
 /// message scanned later in the turn) writes it. A turn that is not scanned,
-/// such as a Monitor notification, leaves it absent. A subagent gets no user
+/// such as a Monitor notification, leaves it absent. A project switched off
+/// with `enabled: false` never reaches the prompt lane, so nothing clears the
+/// marker there; its pulls are not logged either. A subagent gets no user
 /// prompts: SubagentStart writes its marker once, from the stash its dispatch
-/// left, naming that dispatch's task scan.
+/// left, naming that dispatch's task scan, with the subagent's epoch at start.
 pub fn last_scan_path(session_id: &str) -> PathBuf {
     agent_state_dir(session_id).join("last-scan")
 }
@@ -380,16 +382,21 @@ pub(crate) fn transcript_in(
 /// The current agent's token position, read from [`current_transcript`]; 0
 /// when there is none.
 pub fn get_token_position(session_id: &str) -> u64 {
-    current_transcript(session_id).map_or(0, |t| token_position_of(&t))
+    read_token_position(session_id).unwrap_or(0)
 }
 
-/// The newest turn that reports usage; a zero-usage synthetic turn does not
-/// reset the position.
-fn token_position_of(transcript: &Path) -> u64 {
-    std::fs::read_to_string(transcript)
-        .ok()
-        .and_then(|c| claude_sessions::usage::last_context_tokens(&c))
-        .unwrap_or(0)
+/// [`get_token_position`], `None` when the agent has no readable transcript,
+/// so a record can tell an unknown position from a real 0.
+pub fn read_token_position(session_id: &str) -> Option<u64> {
+    current_transcript(session_id).and_then(|t| token_position_of(&t))
+}
+
+/// The newest turn that reports usage, 0 before any does; a zero-usage
+/// synthetic turn does not reset the position. `None` when the transcript
+/// cannot be read.
+fn token_position_of(transcript: &Path) -> Option<u64> {
+    let content = std::fs::read_to_string(transcript).ok()?;
+    Some(claude_sessions::usage::last_context_tokens(&content).unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -400,7 +407,7 @@ fn token_position_in(
     session_id: &str,
     agent: &str,
 ) -> u64 {
-    transcript_in(claude, hook_transcript, project_dir, session_id, agent).map_or(0, |t| token_position_of(&t))
+    transcript_in(claude, hook_transcript, project_dir, session_id, agent).and_then(|t| token_position_of(&t)).unwrap_or(0)
 }
 
 /// The session's own transcript: the hook's when its stem is the session id,

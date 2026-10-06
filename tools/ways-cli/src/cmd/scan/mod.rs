@@ -117,9 +117,10 @@ pub fn prompt(
     // The hook's transcript_path names the invoking agent's transcript; the
     // firing path reads the model id (and the refire window) from it.
     crate::cmd::show::set_firing_transcript(transcript);
-    // A user prompt starts a turn: bump the epoch. The last-scan marker
-    // belongs to the turn before; the scan below writes this turn's.
+    // The last-scan marker belongs to the turn before; the scan below writes
+    // this turn's, and a turn with no scan is left with none.
     session::clear_last_scan(session_id);
+    // A user prompt starts a turn: bump the epoch.
     //
     // A Monitor notification that wakes an idle session also arrives as a
     // prompt, wrapped in a `<task-notification>` envelope. Its body is a

@@ -2278,6 +2278,97 @@ fn scenario_a_subagents_pull_joins_its_dispatchs_task_scan() {
     hook_pull(&home, &state, &project, &s, None, "agentdomain/dep", None);
     assert_eq!(decisions_of(&state, &s, "pull").pop().unwrap()["scan_id"], main_scan["scan_id"]);
 
+    // A SubagentStart whose payload names no agent resolves to main. It
+    // claims the stash and injects, but main's marker keeps naming main's turn.
+    let main_marker = std::fs::read_to_string(root.join("last-scan")).unwrap();
+    hook_task(&home, &state, &project, &s);
+    let anon = hook_raw(&home, &state, &project, "subagent-start", &format!(r#"{{"session_id":"{s}","hook_event_name":"SubagentStart"}}"#));
+    assert!(anon.contains("# Marker w"), "the stash was claimed: {anon}");
+    assert_eq!(std::fs::read_to_string(root.join("last-scan")).unwrap(), main_marker);
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// `ways hook pull` for a refused id, with `transcript_path` naming `transcript`.
+#[cfg(unix)]
+fn hook_pull_with_transcript(home: &Path, state: &Path, project: &Path, session: &str, id: &str, transcript: &Path) {
+    let payload = serde_json::json!({
+        "session_id": session,
+        "hook_event_name": "PostToolUse",
+        "tool_name": "mcp__agent-ways__ways_read",
+        "tool_input": { "id": id },
+        "transcript_path": transcript,
+    });
+    hook_raw(home, state, project, "pull", &payload.to_string());
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_a_refused_pull_records_an_unknown_token_position_as_null() {
+    let (base, home, state, project) = per_agent_fixture("pull-tokens");
+    let s = format!("sim-pull-tokens-{}", std::process::id());
+    clean_markers(&s);
+
+    // No transcript anywhere: the position is unknown.
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/nothing", None);
+    // A transcript with no usage yet: a real 0.
+    let transcript = base.join(format!("{s}.jsonl"));
+    std::fs::write(&transcript, "{\"type\":\"user\"}\n").unwrap();
+    hook_pull_with_transcript(&home, &state, &project, &s, "agentdomain/nothing", &transcript);
+    // A transcript reporting usage: its position.
+    std::fs::write(
+        &transcript,
+        "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-5-5\",\"usage\":{\"input_tokens\":4321,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n",
+    )
+    .unwrap();
+    hook_pull_with_transcript(&home, &state, &project, &s, "agentdomain/nothing", &transcript);
+
+    let positions: Vec<serde_json::Value> = decisions_of(&state, &s, "pull").iter().map(|p| p["token_position"].clone()).collect();
+    assert_eq!(positions, [serde_json::Value::Null, serde_json::json!(0), serde_json::json!(4321)]);
+
+    clean_markers(&s);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn scenario_the_way_pulled_event_keeps_its_fields() {
+    let (base, home, state, project) = per_agent_fixture("pull-event");
+    let s = format!("sim-pull-event-{}", std::process::id());
+    clean_markers(&s);
+
+    hook_prompt(&home, &state, &project, &s, "tell me about the moon");
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/w", None);
+    hook_pull(&home, &state, &project, &s, None, "agentdomain/nothing", None);
+
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(state.join("agent-ways/events.jsonl"))
+        .unwrap()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "way_pulled" && v["session"] == s.as_str())
+        .map(|mut v| {
+            assert!(v["ts"].is_string(), "{v}");
+            v["ts"] = "<ts>".into();
+            v
+        })
+        .collect();
+    let proj = project.to_string_lossy();
+    // The event as ways-graph wrote it before pulls joined the decision log.
+    let golden = [
+        serde_json::json!({
+            "ts": "<ts>", "event": "way_pulled", "way": "agentdomain/w", "domain": "agentdomain",
+            "window": "first_fire", "scope": "agent", "project": proj, "session": s, "agent_id": "main",
+            "token_position": "0", "out_of_band": false, "stamped": true,
+        }),
+        serde_json::json!({
+            "ts": "<ts>", "event": "way_pulled", "way": "agentdomain/nothing", "domain": "",
+            "window": "none", "scope": "agent", "project": proj, "session": s, "agent_id": "main",
+            "reason": "not found", "out_of_band": false, "stamped": false,
+        }),
+    ];
+    assert_eq!(events, golden);
+
     clean_markers(&s);
     let _ = std::fs::remove_dir_all(&base);
 }

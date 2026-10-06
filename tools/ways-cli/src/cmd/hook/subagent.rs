@@ -74,8 +74,10 @@ pub fn inject(session_id: &str, project_dir: &str) -> anyhow::Result<String> {
         std::fs::write(dir.join("teammate"), format!("{}\n", stash.team_name))?;
     }
     // The subagent gets no user prompt, so its dispatch's task scan is its
-    // last scan for its whole run: a pull it makes joins that record.
-    if !stash.scan_id.is_empty() {
+    // last scan for its whole run: a pull it makes joins that record. A
+    // payload without an agent id resolves to main, whose marker is its own
+    // turn's and must not be overwritten.
+    if !stash.scan_id.is_empty() && session::current_agent() != session::MAIN_AGENT {
         session::write_last_scan(session_id, &stash.scan_id, session::get_epoch(session_id));
     }
     let scope = if stash.is_teammate { "teammate" } else { "subagent" };

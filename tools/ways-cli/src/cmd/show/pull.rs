@@ -249,7 +249,9 @@ fn pull_record(p: &Pulled, agent: &str, ts: &str) -> serde_json::Value {
         "session": p.session_id,
         "agent": agent,
         "epoch": session::get_epoch(p.session_id),
-        "token_position": p.tick.unwrap_or_else(|| session::get_token_position(p.session_id)),
+        // A stamped pull records the position its stamp used. A refused one
+        // reads it here, null when the agent has no readable transcript.
+        "token_position": p.tick.or_else(|| session::read_token_position(p.session_id)),
         "way": p.id,
         "window": p.window,
         "out_of_band": p.out_of_band,
