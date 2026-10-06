@@ -188,7 +188,8 @@ _The ways engine, continued after the full 100-199 band: matching, disclosure an
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-700](./engine/ADR-700-body-content-score-geometry-and-corpus-growth-in-way-routing-a-measured-exploration.md) | Body content, score geometry and corpus growth in way routing: a measured exploration | proposed |
-| [ADR-701](./engine/ADR-701-ways-as-an-authored-graph-neighbourhood-matching-lookup-on-request-and-a-learning-loop-from-run-logs.md) | Ways as an authored graph: neighbourhood matching, lookup on request, and a learning loop from run logs | proposed |
+| [ADR-701](./engine/ADR-701-neighbourhood-matching-masking-relative-scores-lookup-on-request-and-a-learning-loop-from-run-logs.md) | Neighbourhood matching: masking, relative scores, lookup on request and a learning loop from run logs | proposed |
+| [ADR-702](./engine/ADR-702-way-identity-and-authored-edges-uuids-frontmatter-links-and-an-integrity-checked-graph-index.md) | Way identity and authored edges: UUIDs, frontmatter links and an integrity-checked graph index | proposed |
 
 ## Archived
 

@@ -13,6 +13,7 @@ related:
   - ADR-160
   - ADR-502
   - ADR-701
+  - ADR-702
 ---
 
 # ADR-700: Body content, score geometry and corpus growth in way routing: a measured exploration
