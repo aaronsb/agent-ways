@@ -91,6 +91,36 @@ The full report also has "Top ways by model", the top ten ways with one column p
 
 `--json` adds `by_scope`, `by_way_model`, `by_check`, `check_avg_distance` and `check_anchored`, which the text report leaves out. `ways projects` lists sessions per project.
 
+### The decisions section
+
+The report ends with a section read from the decision log, `decisions.jsonl` and its dated archives (ADR-701 §2). The event log above stays a debugging trail; the decision log is what tuning reads. With no decision log the section is one line, and `--json` carries `"decisions": {"present": false}`.
+
+```
+Decisions (from the decision log):
+  Turns: 4  |  per day over 3 days: mean 1.3, median 1.0, p90 3
+  Scans: 5  |  skipped lines: 1
+
+Outcomes by way:
+  Way   fired redisc refire ctxcap kwgate near jblock ablock withheld stashed
+  d/a       1      -      -      -      -    -      1      -        -       -
+  ...
+
+Judge: 3 verdicts  |  pass 33%  block 33%  would_block 33%  |  judged scans 2, fallback 1, capped 1 (1 ways)
+
+Near-miss leaders:
+  d/n                              3  mean shortfall 0.040
+
+Pulls: 5  |  recall misses 2  |  out-of-band 1  |  already delivered 1  |  null scan_id 1  |  unjoined 0  |  refused 1
+```
+
+- **Turns** counts prompt scans that started a turn, per session and agent. The epoch is not a turn index. Days with no turn count as zero; with `--days N` the calendar is the last N days, otherwise the first to the last day with a turn.
+- **Outcomes by way** counts what each scan decided per way: fired, re-disclosed, held by the refire window or the context cap, gated by the keyword floor, a near miss, blocked by the judge or by an ancestor's block, withheld for a parent, or stashed for a subagent.
+- **Judge** rates are over the verdicts on ways the judge saw: a pass or a shadow `would_block` rides on the fire, an enforced block is a `judge_block` outcome. Fallback and capped count scans.
+- **Near-miss leaders** are the ways that most often scored just under their threshold, with the mean shortfall. Repeated near misses are the vocabulary-change signal of ADR-701 §8.
+- **Pulls** joins each `ways_read` to its turn through `scan_id`. A pull of a way that no scan of its turn fired or re-disclosed is a **recall miss**. An **out-of-band** pull came inside the way's refire window, evidence that its `refire:` is longer than the work needs; the two can overlap. A pull with a null `scan_id`, or one that names no scan in the window, has no turn to judge against. Refused pulls served nothing and are counted apart.
+
+A project filter keeps the turns whose opening scan ran in the project; a pull with no turn has no project and is left out.
+
 ### What the stats do not tell you
 
 The stats show what fired, not whether it helped. A way that fires 140 times may be firing too broadly. A way that never fires may be waiting for work you have not done yet. Use the counts to spot noisy ways, dead ways and empty scopes, then use the audit commands below for precision and recall.
