@@ -749,13 +749,38 @@ fn log_event_to(events_file: &std::path::Path, now: u64, rotate: Option<u32>, fi
     }
 }
 
-/// Hold the log's sidecar lock without waiting. `None` when another process
-/// holds it. Where the filesystem cannot lock, the pass runs unlocked.
+#[cfg(test)]
+thread_local! {
+    /// How long a test thread waits for a busy lock. A test binary runs many
+    /// threads and some spawn processes; a child holds a copy of every
+    /// descriptor open at the fork, and with it the flock, until it execs. A
+    /// lock another thread released then reads busy for a moment, longer under
+    /// load. The product never waits: one process rotates at a time and the
+    /// loser skips. A test that holds the lock on purpose sets this to zero.
+    static LOCK_PATIENCE: std::cell::Cell<std::time::Duration> = const { std::cell::Cell::new(std::time::Duration::from_secs(10)) };
+}
+
+/// How long to wait for a busy lock: never in the product, where one process
+/// rotates at a time and the loser skips; see `LOCK_PATIENCE` for tests.
+fn lock_patience() -> std::time::Duration {
+    #[cfg(test)]
+    return LOCK_PATIENCE.with(|p| p.get());
+    #[cfg(not(test))]
+    std::time::Duration::ZERO
+}
+
+/// Hold the log's sidecar lock, waiting [`lock_patience`] at most. `None` when
+/// another process holds it. Where the filesystem cannot lock, the pass runs
+/// unlocked.
 fn try_log_lock(dir: &std::path::Path) -> Option<std::fs::File> {
     let f = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(dir.join(LOG_LOCK_NAME)).ok()?;
-    match f.try_lock() {
-        Err(std::fs::TryLockError::WouldBlock) => None,
-        _ => Some(f),
+    let (started, patience) = (std::time::Instant::now(), lock_patience());
+    loop {
+        match f.try_lock() {
+            Err(std::fs::TryLockError::WouldBlock) if started.elapsed() < patience => std::thread::sleep(std::time::Duration::from_millis(2)),
+            Err(std::fs::TryLockError::WouldBlock) => return None,
+            _ => return Some(f),
+        }
     }
 }
 
@@ -1799,8 +1824,10 @@ mod archive_tests {
         let (dir, log) = state("locked");
         std::fs::write(&log, numbered(100)).unwrap();
         let held = try_log_lock(&dir).expect("first holder");
+        LOCK_PATIENCE.with(|p| p.set(std::time::Duration::ZERO));
         assert!(compact_locked(&log, NOW, 500, 0, CEILING_EVENTS_BYTES).is_none());
         assert!(!rotate_if_due(&log, NOW, 365));
+        LOCK_PATIENCE.with(|p| p.set(std::time::Duration::from_secs(10)));
         drop(held);
         assert!(compact_locked(&log, NOW, 500, 0, CEILING_EVENTS_BYTES).is_some());
     }
@@ -1879,7 +1906,9 @@ mod archive_tests {
         let (dir, log) = state("slot");
         std::fs::write(&log, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
         let held = try_log_lock(&dir).unwrap();
+        LOCK_PATIENCE.with(|p| p.set(std::time::Duration::ZERO));
         assert!(!rotate_if_due(&log, NOW, 365));
+        LOCK_PATIENCE.with(|p| p.set(std::time::Duration::from_secs(10)));
         let claimed = |d: &std::path::Path| std::fs::read_dir(d).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(ROTATE_LOCK_PREFIX));
         assert!(!claimed(&dir), "the slot is still open");
         drop(held);
@@ -1903,5 +1932,22 @@ mod archive_tests {
         assert_eq!(planted(), 3, "day two: the oldest two at most");
         rotate_if_due(&log, NOW + 402 * DAY, 365);
         assert_eq!(planted(), 1);
+    }
+
+    /// The flake's mechanism: another test thread spawns a process while this
+    /// one holds the lock. The child's copy of the descriptor keeps the flock
+    /// held from the fork until it execs, so a lock this thread already
+    /// released reads busy for a moment. Held here by a thread for 100 ms.
+    #[test]
+    fn the_lock_waits_out_a_descriptor_a_forked_child_still_holds() {
+        let (dir, log) = state("inherited");
+        std::fs::write(&log, format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"))).unwrap();
+        let inherited = try_log_lock(&dir).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(inherited);
+        });
+        assert!(rotate_if_due(&log, NOW, 365), "the pass ran once the descriptor was released");
+        release.join().unwrap();
     }
 }
