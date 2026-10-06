@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    // Read at run time: a test binary reused from another checkout keeps the
+    // path it was built at.
+    std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../..").canonicalize().unwrap()
 }
 
 fn tracked_files(root: &Path) -> Vec<String> {

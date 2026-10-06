@@ -82,7 +82,9 @@ impl Drop for Fx {
 }
 
 fn schema() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../hooks/ways/frontmatter-schema.yaml")
+    // Read at run time: a test binary reused from another checkout keeps the
+    // path it was built at.
+    std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../../hooks/ways/frontmatter-schema.yaml")
 }
 
 fn sees_projected_only(out: &str, what: &str) {

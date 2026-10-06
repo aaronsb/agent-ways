@@ -550,7 +550,9 @@ fn shows(s: &mut Projects) -> String {
 
 #[test]
 fn screen_golden_frames() {
-    let mut g = Goldens::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/projects-tui"));
+    // Read at run time: a test binary reused from another checkout keeps the
+    // path it was built at.
+    let mut g = Goldens::new(std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("tests/fixtures/projects-tui"));
     let f = populated("screen-golden");
     let check = |g: &mut Goldens, name: &str, s: &mut Projects| {
         for (w, h) in [(80, 25), (120, 40)] {

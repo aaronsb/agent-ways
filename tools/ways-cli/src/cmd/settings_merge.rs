@@ -1271,7 +1271,9 @@ mod tests {
         // regresses and a stale-base update false-reverts again. Catches a future
         // hook that shells something outside `.claude/hooks/` or `.claude/bin/`.
         let repo_settings =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings.json");
+            // Read at run time: a test binary reused from another checkout keeps the
+            // path it was built at.
+            std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../../settings.json");
         let raw = match std::fs::read_to_string(&repo_settings) {
             Ok(s) => s,
             Err(_) => return, // not a source checkout — skip

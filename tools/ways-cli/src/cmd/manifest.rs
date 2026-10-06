@@ -203,7 +203,9 @@ mod tests {
     /// The repo root this crate lives in: CARGO_MANIFEST_DIR is …/tools/ways-cli,
     /// so two parents up is the agent-ways checkout (a git repo in dev + CI).
     fn repo_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
+        // Read at run time: a test binary reused from another checkout keeps the
+        // path it was built at.
+        std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into()))
             .parent()
             .and_then(|p| p.parent())
             .expect("repo root")

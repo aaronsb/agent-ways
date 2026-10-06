@@ -52,7 +52,9 @@ fn ways_bin() -> PathBuf {
 }
 
 fn fixture_ways_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ways")
+    // Read at run time: a test binary reused from another checkout keeps the
+    // path it was built at.
+    std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("tests/fixtures/ways")
 }
 
 /// A `ways` command isolated from the operator's install and session.
