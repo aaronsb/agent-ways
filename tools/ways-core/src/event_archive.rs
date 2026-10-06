@@ -242,6 +242,9 @@ mod tests {
         append(&d, EVENTS, NOW, b"b\n").unwrap();
         append(&d, EVENTS, NOW - 3 * DAY_SECS, b"a\n").unwrap();
         std::fs::write(d.join("events-preserved-20261005.jsonl.gz"), b"x").unwrap();
+        // Dates the parser would accept but the archive writer never makes.
+        std::fs::write(d.join("events-2026-1-5.jsonl.gz"), b"x").unwrap();
+        std::fs::write(d.join("events-+2026-10-05.jsonl.gz"), b"x").unwrap();
         std::fs::write(d.join("events.jsonl"), b"live\n").unwrap();
         let names: Vec<String> = archives(&d, EVENTS).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["events-2027-01-12.jsonl.gz", "events-2027-01-15.jsonl.gz"]);
