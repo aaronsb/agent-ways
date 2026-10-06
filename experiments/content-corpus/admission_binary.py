@@ -20,12 +20,18 @@ mean to cite.
     OUT=/tmp/adm-out experiments/content-corpus/admission_binary.py --quick \
         --ways tools/target/release/ways tests/routing-golden.tsv
 
-The binary needs `way-embed`. It is resolved as the binary resolves it: the
-`--way-embed PATH` flag, else $XDG_CACHE_HOME/agent-ways/user/way-embed, else
-the app bin ($XDG_DATA_HOME/agent-ways/bin), else ~/.claude/bin. If none exists
-the script exits 2 naming the paths it tried. It also exits 2 when the binary
-returns no rows for any surface, or its late interaction (confirm) ran on no
-surface: a recall table over all-empty results would read as recall 0.000.
+The engine, `way-embed`, is resolved once, before anything runs, as the binary
+resolves it (ways-core paths::way_embed): $XDG_CACHE_HOME/agent-ways/user/way-embed
+(an empty or relative $XDG_CACHE_HOME counts as unset), else ~/.claude/bin/way-embed,
+each a file. `--way-embed PATH` overrides. That one path serves the binary run
+(linked into the scratch cache) and the port (confirm.EMBED), so both measure
+the same engine; it is printed as `way-embed: PATH` and written to
+admission-binary.json. If none exists the script exits 2 naming the paths tried.
+
+Exit 2 also when a result would be a zero that measured nothing: any surface
+with 2+ chunks (the only ones the binary returns rows for) comes back empty;
+no surface has a confirm score; or no confirm value was compared against the
+port. A recall table over such results would read as recall 0.000.
 
 Surfaces are recall.py's: confirm.py's 310 main surfaces (seed 11) and the 93
 auxiliary surfaces built around the multi-sentence golden prompts (seed 13).
@@ -78,16 +84,17 @@ def die(msg):
 
 
 def find_way_embed(flag):
-    """The way-embed the binary would use: the flag, the cache dir, the app bin,
-    then ~/.claude/bin. Returns the first that exists (a link must resolve)."""
-    data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    """The way-embed the binary would use (ways-core paths::way_embed): the
+    cache dir, then ~/.claude/bin, each a file. A flag overrides."""
+    xdg = Path(os.environ.get("XDG_CACHE_HOME", ""))
+    cache = (xdg if xdg.is_absolute() else Path.home() / ".cache") / "agent-ways" / "user"
     if flag:  # an explicit choice is not silently replaced by a fallback
         if not Path(flag).exists():
             die(f"--way-embed {flag} does not exist")
         return Path(flag).resolve()
-    tried = [run.CACHE / "way-embed", data / "agent-ways" / "bin" / "way-embed", run.EMBED]
+    tried = [cache / "way-embed", Path.home() / ".claude" / "bin" / "way-embed"]
     for c in tried:
-        if c.exists():
+        if c.is_file():
             return c.resolve()
     die("way-embed not found; tried " + ", ".join(str(c) for c in tried)
         + ". Build it or pass --way-embed PATH; without it every surface returns no rows.")
@@ -103,8 +110,9 @@ def binenv(mode, explicit, embed):
               root / "xdg" / "config" / "agent-ways", root / "xdg" / "state", root / "empty"):
         d.mkdir(parents=True, exist_ok=True)
     link = home / ".claude" / "hooks" / "ways"
-    if not link.is_symlink():
-        link.symlink_to(run.WAYS)
+    if link.is_symlink() or link.exists():
+        link.unlink()  # OUT may be shared: never trust a link from another checkout
+    link.symlink_to(run.WAYS)
     if not run.MODEL.exists():
         die(f"model not found: {run.MODEL}")
     for name, src in (("minilm-l6-v2.gguf", run.MODEL), ("way-embed", embed)):
@@ -226,18 +234,23 @@ def quick_subset(golden):
 
 
 def positive_control(mode, rows, allsurf):
-    """A zero must be a measurement: the binary returned rows, and its late
-    interaction (a confirm score or an admission) ran on at least one surface."""
-    nonempty = sum(bool(r) for r in rows)
-    late = sum(any(x["confirm"] is not None or x["admitted"] for x in r) for r in rows)
-    if nonempty == 0:
-        die(f"mode {mode}: the binary returned no rows on 0 of {len(allsurf)} surfaces; "
-            "is way-embed or the corpus missing? refusing to report recall")
+    """A zero must be a measurement. The binary returns rows only for surfaces
+    of 2+ chunks; every one of them must have rows, and at least one must carry
+    a confirm score (late interaction ran)."""
+    multi = [si for si, s in enumerate(allsurf) if len(s["chunks"]) >= 2]
+    if not multi:
+        die(f"mode {mode}: no surface has 2+ chunks; nothing to measure")
+    empty = [si for si in multi if not rows[si]]
+    if empty:
+        die(f"mode {mode}: the binary returned no rows on {len(empty)} of {len(multi)} "
+            f"surfaces with 2+ chunks (first: s{empty[0]}); is way-embed or the corpus "
+            "missing? refusing to report recall")
+    late = sum(any(x["confirm"] is not None for x in rows[si]) for si in multi)
     if late == 0:
-        die(f"mode {mode}: late interaction ran on 0 of {len(allsurf)} surfaces "
-            f"({nonempty} returned rows); refusing to report recall")
-    print(f"  control: rows on {nonempty}/{len(allsurf)} surfaces, "
-          f"late interaction on {late}/{len(allsurf)}")
+        die(f"mode {mode}: late interaction ran on 0 of {len(multi)} surfaces with 2+ chunks "
+            "(no confirm score on any row); refusing to report recall")
+    print(f"  control: rows on {len(multi)}/{len(multi)} surfaces with 2+ chunks, "
+          f"confirm scored on {late}")
 
 
 def main():
@@ -253,6 +266,9 @@ def main():
     a = ap.parse_args()
     ways = str(Path(a.ways).resolve())
     embed = find_way_embed(a.way_embed)
+    C.EMBED = run.EMBED = embed  # the port measures the engine the binary runs
+    print(f"way-embed: {embed}")
+    binenv(a.mode if a.mode != "both" else "share", a.explicit, embed)  # fail fast
 
     alias = [json.loads(l) for l in (O / "alias.jsonl").read_text().splitlines()]
     ids = [x["id"] for x in alias]
@@ -301,6 +317,9 @@ def main():
                     n_conf += 1
                     if abs(r["confirm"] - pc[r["id"]]) > 0.0011:
                         conf_bad.append((si, r["id"], r["confirm"], pc[r["id"]]))
+        if n_conf == 0:
+            die(f"mode {mode}: no confirm value was compared against the port; "
+                "refusing to report agreement")
         binary[mode] = dec_b
         print(f"\n── mode {mode}: binary vs port ──")
         print(f"  surfaces with identical admitted and fired sets: "
@@ -346,6 +365,7 @@ def main():
             if ex[2]:
                 show_ex(*ex)
         report["mode_diff"] = {"gained": dict(gained), "lost": dict(lost), "changed": len(examples)}
+    report["way_embed"] = str(embed)
     (O / "admission-binary.json").write_text(json.dumps(report, indent=1))
 
 
