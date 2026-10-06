@@ -264,7 +264,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Int { min: 1, max: 3650 },
         scope: Scope::User,
         default: DefaultValue::Yaml("365"),
-        doc: "Days of archived event history kept.",
+        doc: "Days an archive file is kept after it is written.",
         long: "Machine-wide, so user scope only: a project file cannot shorten it. The live events.jsonl is bounded by size and by age, and the lines it sheds are written to events-YYYY-MM-DD.jsonl.gz beside it, named for the day of the removal. Archives older than this many days are deleted, at most once a day (ADR-701 §2). Introspection, `ways tune stats` and the tuning passes read the archives as well as the live file. events.jsonl itself is never deleted by this setting. judge_call lines stay in the live file, since `ways agent cost` sums them.",
         ..BASE
     },

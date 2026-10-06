@@ -664,8 +664,8 @@ fn append_jsonl_line(path: &std::path::Path, line: &str) {
 
 /// Size at which the event log is compacted (ADR-134 task E). The near-miss and
 /// fire-score streams (tasks A/D) grow `events.jsonl` faster than fires alone,
-/// so it needs a ceiling. ~32 MiB ≈ 125k events at the observed ~260 bytes/line
-/// — over a year of history at current rates.
+/// so it needs a ceiling. 32 MiB is about 65 days of history at the rates seen
+/// on a working install; what the cap removes goes to the dated archives.
 const MAX_EVENTS_BYTES: u64 = 32 * 1024 * 1024;
 /// Target size kept after compaction (the most recent bytes). The gap to
 /// MAX provides hysteresis: ~8 MiB (~30k events) of new logging between
@@ -681,6 +681,14 @@ const MIN_FREED_BYTES: u64 = (MAX_EVENTS_BYTES - KEEP_EVENTS_BYTES) / 2;
 /// Days of events the live file holds. Older lines move to the dated archives
 /// (ADR-701 §2); `ways.event_retention_days` governs those archives, not this.
 const LIVE_EVENT_DAYS: u32 = 90;
+/// Archiving wins over the size bound up to this size. Past it with the
+/// archive still failing, the cap drops the head unarchived and logs one
+/// `event_log_dropped` event, so a broken archive cannot grow the log forever.
+const CEILING_EVENTS_BYTES: u64 = 4 * MAX_EVENTS_BYTES;
+/// Sidecar that one rotation or compaction at a time holds, non-blocking.
+const LOG_LOCK_NAME: &str = "events.compact.lock";
+/// Day-dated marker beside the log: the archive failed today, so retry tomorrow.
+const ARCHIVE_FAILED_PREFIX: &str = "events.archive-failed-";
 
 /// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl — see paths::events_log).
 pub fn log_event(fields: &[(&str, &str)]) {
@@ -699,10 +707,11 @@ pub fn log_event_with(fields: &[(&str, &str)], extra: &[(&str, serde_json::Value
 /// Append one event to `events_file`, stamped `now`.
 ///
 /// With `rotate` set (the archive retention in days), the age rotation and the
-/// archive expiry run first, before this event is written: the log's newest line is then a real earlier event, which anchors
-/// the cutoff (see [`rotate_log_by_age`]). Rotating after the append would let
-/// the event, stamped by a clock that ran ahead, pull the cutoff past history
-/// the retention should keep.
+/// archive expiry run first, before this event is written. The log's newest
+/// line is then a real earlier event, which anchors both cutoffs (see
+/// [`rotate_log_by_age`]). Rotating after the append would let the event,
+/// stamped by a clock that ran ahead, pull the cutoff past history the
+/// retention should keep.
 fn log_event_to(events_file: &std::path::Path, now: u64, rotate: Option<u32>, fields: &[(&str, &str)], extra: &[(&str, serde_json::Value)]) {
     if let Some(stats_dir) = events_file.parent() {
         let _ = std::fs::create_dir_all(stats_dir);
@@ -730,32 +739,65 @@ fn log_event_to(events_file: &std::path::Path, now: u64, rotate: Option<u32>, fi
     // once per ~8 MiB of growth. Readers always see a complete file: a reader
     // that opened the pre-compaction inode keeps reading it intact (the rename
     // is atomic and unlinks the old name only after), and each compaction
-    // publishes a whole file via its own private temp. Concurrent compactions
-    // from parallel `ways` processes are last-writer-wins — that drops a bounded
-    // window of events, acceptable for a telemetry log, but never tears a line.
+    // publishes a whole file via its own private temp. One compaction or
+    // rotation runs at a time (a non-blocking lock; a loser skips), so the
+    // dropped head is archived once.
     if let Ok(meta) = std::fs::metadata(events_file) {
         if meta.len() > MAX_EVENTS_BYTES {
-            let _ = compact_log_tail(events_file, now, KEEP_EVENTS_BYTES, MIN_FREED_BYTES);
+            let _ = compact_locked(events_file, now, KEEP_EVENTS_BYTES, MIN_FREED_BYTES, CEILING_EVENTS_BYTES);
         }
     }
+}
+
+/// Hold the log's sidecar lock without waiting. `None` when another process
+/// holds it. Where the filesystem cannot lock, the pass runs unlocked.
+fn try_log_lock(dir: &std::path::Path) -> Option<std::fs::File> {
+    let f = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(dir.join(LOG_LOCK_NAME)).ok()?;
+    match f.try_lock() {
+        Err(std::fs::TryLockError::WouldBlock) => None,
+        _ => Some(f),
+    }
+}
+
+/// [`compact_log_tail_with`] under the log lock. `None` when another process
+/// is already rotating or compacting.
+fn compact_locked(path: &std::path::Path, now: u64, keep_bytes: u64, min_freed: u64, ceiling: u64) -> Option<std::io::Result<()>> {
+    let _lock = try_log_lock(path.parent()?)?;
+    Some(compact_log_tail_with(path, now, keep_bytes, min_freed, ceiling))
+}
+
+#[cfg(test)]
+fn compact_log_tail(path: &std::path::Path, now: u64, keep_bytes: u64, min_freed: u64) -> std::io::Result<()> {
+    compact_log_tail_with(path, now, keep_bytes, min_freed, CEILING_EVENTS_BYTES)
 }
 
 /// Rewrite `path` in place to retain only its most recent `keep_bytes`, cut at a
 /// line boundary so the first retained line is whole. The new contents are
 /// written to a per-process, per-attempt temp, synced, then atomically renamed
-/// over `path` — so a published `events.jsonl` is always a complete file even
-/// under concurrent compaction (last rename wins; a bounded window of events may
-/// be lost, but no line is ever torn). Oldest events are dropped — telemetry
-/// tuning cares about recent behavior, and the cap holds a year-plus of history.
+/// over `path`, so a published `events.jsonl` is always a complete file.
 /// `judge_call` lines in the dropped head are carried ahead of the tail (#750).
+///
 /// The rest of the dropped head is appended to the archive for the day of `now`
-/// first, and durably; when that fails nothing is removed (ADR-701 §2).
-/// On any failure the original file is left intact and the temp is removed.
-fn compact_log_tail(path: &std::path::Path, now: u64, keep_bytes: u64, min_freed: u64) -> std::io::Result<()> {
-    let data = std::fs::read(path)?;
+/// first, and durably; when that fails nothing is removed and today's failure
+/// marker stops further attempts until tomorrow. Past `ceiling` bytes with the
+/// archive still failing, the head is dropped unarchived and one
+/// `event_log_dropped` event records it.
+///
+/// One handle serves the read and the carry: after the rename, whatever the old
+/// file gained since is appended to the new one. Callers hold the log lock.
+fn compact_log_tail_with(path: &std::path::Path, now: u64, keep_bytes: u64, min_freed: u64, ceiling: u64) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let f = std::fs::File::open(path)?;
+    let mut data = Vec::new();
+    (&f).read_to_end(&mut data)?;
     let keep = keep_bytes as usize;
     if data.len() <= keep {
         return Ok(());
+    }
+    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let over_ceiling = data.len() as u64 > ceiling;
+    if archive_failed_today(dir, now) && !over_ceiling {
+        return Ok(()); // retry tomorrow
     }
     // Start `keep` bytes from the end, then advance past the next newline so we
     // never retain a partial leading line.
@@ -783,12 +825,51 @@ fn compact_log_tail(path: &std::path::Path, now: u64, keep_bytes: u64, min_freed
     if ((data.len() - out.len()) as u64) < min_freed {
         return Ok(()); // would not pay for the rewrite
     }
-    // The archive first: a failure here stands the pass down with the log intact.
-    archive_removed(path, now, &removed)?;
+    if !same_file(&f, path) {
+        return Ok(());
+    }
+    // The archive first: a failure stands the pass down with the log intact,
+    // unless the log has passed the ceiling.
+    let mut unarchived = None;
+    if let Err(e) = archive_removed(path, now, &removed) {
+        mark_archive_failed(dir, now);
+        if !over_ceiling {
+            return Err(e);
+        }
+        unarchived = Some((removed.len(), e.to_string()));
+    }
+    agent_settings::writer::write_atomic(path, &out)?;
+    // Appends that landed on the old file while the new one was written.
+    (&f).seek(SeekFrom::Start(data.len() as u64))?;
+    let mut gained = Vec::new();
+    (&f).read_to_end(&mut gained)?;
+    if !gained.is_empty() {
+        std::fs::OpenOptions::new().append(true).open(path)?.write_all(&gained)?;
+    }
+    if let Some((bytes, reason)) = unarchived {
+        let event = serde_json::json!({"ts": agent_fmt::when::utc_iso(now), "event": "event_log_dropped", "bytes": bytes, "reason": reason});
+        append_jsonl_line(path, &event.to_string());
+    }
+    Ok(())
+}
 
-    // The shared writer's temp is unique per process and call, so two
-    // concurrent compactions never write the same file and publish a torn tail.
-    agent_settings::writer::write_atomic(path, &out)
+fn archive_failed_today(dir: &std::path::Path, now: u64) -> bool {
+    dir.join(format!("{ARCHIVE_FAILED_PREFIX}{}", now / DAY_SECS)).exists()
+}
+
+/// Record that archiving failed today and clear markers of other days.
+fn mark_archive_failed(dir: &std::path::Path, now: u64) {
+    let mine = format!("{ARCHIVE_FAILED_PREFIX}{}", now / DAY_SECS);
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(ARCHIVE_FAILED_PREFIX) && name != mine {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(dir.join(mine));
 }
 
 const DAY_SECS: u64 = 86_400;
@@ -838,7 +919,13 @@ fn rotate_if_due(path: &std::path::Path, now: u64, archive_days: u32) -> bool {
     if std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(&mine)).is_err() {
         return false; // claimed today already, here or by a parallel hook
     }
-    ways_core::event_archive::expire(dir, now, archive_days);
+    let Some(_lock) = try_log_lock(dir) else { return false };
+    // Expiry anchors to the log like the rotation cutoff: a clock that ran
+    // ahead must not delete archives. With no readable line there is no anchor
+    // and nothing expires.
+    if let Some(anchor) = std::fs::File::open(path).ok().and_then(|f| newest_ts(&f).ok().flatten()) {
+        ways_core::event_archive::expire(dir, anchor.min(now), archive_days);
+    }
     rotate_log_by_age(path, now, LIVE_EVENT_DAYS).unwrap_or(false)
 }
 
@@ -1656,5 +1743,94 @@ mod archive_tests {
         // A one-day retention still leaves the live log alone.
         rotate_if_due(&log, NOW + DAY, 1);
         assert!(archives(&dir).is_empty() && log.exists());
+    }
+
+    #[test]
+    fn a_clock_jump_does_not_expire_archives() {
+        let (dir, log) = state("clock-jump");
+        std::fs::write(&log, line("way_fired", 0, "now")).unwrap();
+        ways_core::event_archive::append(&dir, NOW - 30 * DAY, b"recent\n").unwrap();
+        rotate_if_due(&log, NOW + 400 * DAY, 365);
+        assert_eq!(archives(&dir), [archive_path(&dir, NOW - 30 * DAY)], "the cutoff follows the log, not a clock that ran ahead");
+    }
+
+    fn numbered(n: usize) -> String {
+        (0..n).map(|i| line("way_fired", 5, &format!("n{i:04}"))).collect()
+    }
+
+    #[test]
+    fn two_concurrent_compactions_archive_the_head_once() {
+        let (dir, log) = state("concurrent");
+        let body = numbered(3000);
+        std::fs::write(&log, &body).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let runs: Vec<_> = (0..2)
+            .map(|_| {
+                let (log, barrier) = (log.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    compact_locked(&log, NOW, 20_000, 0, CEILING_EVENTS_BYTES)
+                })
+            })
+            .collect();
+        for r in runs {
+            let _ = r.join().unwrap();
+        }
+        let archived = read_source(&archive_path(&dir, NOW)).unwrap();
+        let live = std::fs::read_to_string(&log).unwrap();
+        let rejoined: Vec<&str> = archived.lines().chain(live.lines()).collect();
+        assert_eq!(rejoined, body.lines().collect::<Vec<_>>(), "each line is in exactly one place, once");
+    }
+
+    #[test]
+    fn a_pass_skips_while_another_holds_the_log_lock() {
+        let (dir, log) = state("locked");
+        std::fs::write(&log, numbered(100)).unwrap();
+        let held = try_log_lock(&dir).expect("first holder");
+        assert!(compact_locked(&log, NOW, 500, 0, CEILING_EVENTS_BYTES).is_none());
+        assert!(!rotate_if_due(&log, NOW, 365));
+        drop(held);
+        assert!(compact_locked(&log, NOW, 500, 0, CEILING_EVENTS_BYTES).is_some());
+    }
+
+    #[test]
+    fn a_failing_archive_is_retried_once_a_day_not_per_append() {
+        let (dir, log) = state("retry");
+        let body = numbered(50);
+        std::fs::write(&log, &body).unwrap();
+        std::fs::create_dir(archive_path(&dir, NOW)).unwrap();
+        assert!(compact_log_tail(&log, NOW, 1500, 0).is_err());
+        // Today's marker is down: the next attempt does not even try.
+        std::fs::remove_dir(archive_path(&dir, NOW)).unwrap();
+        assert!(compact_log_tail(&log, NOW, 1500, 0).is_ok());
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), body, "no attempt was made");
+        // Tomorrow it is tried again, and succeeds.
+        assert!(compact_log_tail(&log, NOW + DAY, 1500, 0).is_ok());
+        assert!(std::fs::read_to_string(&log).unwrap().len() < body.len());
+        assert!(archive_failed_today(&dir, NOW) && !archive_failed_today(&dir, NOW + DAY));
+    }
+
+    #[test]
+    fn past_the_ceiling_with_archiving_failing_the_cap_drops_the_head_and_says_so() {
+        let (dir, log) = state("ceiling");
+        std::fs::write(&log, numbered(50)).unwrap();
+        std::fs::create_dir(archive_path(&dir, NOW)).unwrap();
+        compact_log_tail_with(&log, NOW, 1500, 0, 2000).unwrap();
+        let live = std::fs::read_to_string(&log).unwrap();
+        assert!(!live.contains("n0000") && live.contains("n0049"), "the head went");
+        let dropped = live.lines().find(|l| l.contains("event_log_dropped")).expect("one event_log_dropped line");
+        let v: serde_json::Value = serde_json::from_str(dropped).unwrap();
+        assert!(v["bytes"].as_u64().unwrap() > 0 && v["reason"].as_str().is_some_and(|r| !r.is_empty()), "{dropped}");
+        assert_eq!(live.matches("event_log_dropped").count(), 1);
+    }
+
+    #[test]
+    fn under_the_ceiling_a_failing_archive_still_preserves_everything() {
+        let (dir, log) = state("under-ceiling");
+        let body = numbered(50);
+        std::fs::write(&log, &body).unwrap();
+        std::fs::create_dir(archive_path(&dir, NOW)).unwrap();
+        assert!(compact_log_tail_with(&log, NOW, 1500, 0, 10_000_000).is_err());
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), body);
     }
 }
