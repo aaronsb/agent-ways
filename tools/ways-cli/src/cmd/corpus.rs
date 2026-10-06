@@ -108,10 +108,12 @@ pub fn run(
     // shipped way (precedence project > user > core).
     let user_dir = crate::paths::user_ways_root();
     vlog(&format!("user ways dir:   {}", user_dir.display()));
-    let mut user_sink: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Every way the corpus holds, by id, with the file it came from: the body
+    // sidecar embeds these files and the manifest records their hashes.
+    let mut sources: HashMap<String, PathBuf> = HashMap::new();
     let user_count = if user_dir.is_dir() {
         vlog("scanning user ways");
-        let c = scan_ways_dir(&user_dir, "", &excluded, &mut w, &empty_skip, &mut user_sink)?;
+        let c = scan_ways_dir(&user_dir, "", &excluded, &mut w, &empty_skip, &mut sources)?;
         if c > 0 {
             log(&format!("User ways: {c} ({})", user_dir.display()));
         }
@@ -129,9 +131,8 @@ pub fn run(
     // and a pattern-only user override still suppresses the core way.
     vlog("collecting user way ids (shadow set)");
     let user_shadow = crate::cmd::scan::candidates::way_ids(&user_dir);
-    let mut core_sink: std::collections::HashSet<String> = std::collections::HashSet::new();
     vlog("scanning core ways");
-    let global_count = scan_ways_dir(&global_dir, "", &excluded, &mut w, &user_shadow, &mut core_sink)?;
+    let global_count = scan_ways_dir(&global_dir, "", &excluded, &mut w, &user_shadow, &mut sources)?;
     vlog("hashing core ways");
     let global_hash = content_hash(&global_dir);
     log(&format!(
@@ -166,6 +167,7 @@ pub fn run(
                 &excluded,
                 &mut w,
                 &mut manifest_projects,
+                &mut sources,
                 &log,
             )?;
         }
@@ -183,7 +185,7 @@ pub fn run(
         // Key off the resolved REAL path, not the lossy encoded dir name, so
         // it matches `ways scan <lane> --project <that project>`.
         let key = crate::util::encode_project_key(Path::new(&project_path));
-        project_total += embed_one_project(&ways_path, &key, &project_path, &excluded, &mut w, &mut manifest_projects, &log)?;
+        project_total += embed_one_project(&ways_path, &key, &project_path, &excluded, &mut w, &mut manifest_projects, &mut sources, &log)?;
     }
 
     w.flush()?;
@@ -199,7 +201,9 @@ pub fn run(
     let complete = matches!(outcome, Embedded::Complete);
     let promote = matches!(outcome, Embedded::Complete | Embedded::Degraded(_));
     let manifest_path = out_dir.join("embed-manifest.json");
-    let previous_calibration: ways_core::calibration::Calibration = read_manifest(&manifest_path)
+    let previous_manifest = read_manifest(&manifest_path);
+    let previous_calibration: ways_core::calibration::Calibration = previous_manifest
+        .as_ref()
         .and_then(|m| m.get("calibration").cloned())
         .and_then(|c| serde_json::from_value(c).ok())
         .unwrap_or_default();
@@ -220,6 +224,39 @@ pub fn run(
         Settled::WroteRaw => Default::default(),
     };
 
+    // ADR-701 §6: the body sidecar and the per-way content hashes it is checked
+    // against. Both describe the alias corpus in place, so a kept corpus keeps
+    // the previous build's hashes and sidecar; a promoted one gets new ones.
+    let way_hashes = match settled {
+        Settled::KeptPrevious => previous_manifest
+            .as_ref()
+            .and_then(|m| m.get("way_hashes").cloned())
+            .unwrap_or_else(|| json!({})),
+        Settled::Promoted | Settled::WroteRaw => way_hashes(&sources),
+    };
+    let body_sidecar = match (&settled, bin.as_deref()) {
+        (Settled::Promoted, Some(bin)) => {
+            vlog("building body sidecar (ADR-701 §6)");
+            match build_body_sidecar(&out_dir, &engine_dir, bin, &sources, &generate) {
+                Ok((ways, vectors)) => {
+                    log(&format!(
+                        "Body sidecar: {} ({ways} ways, {vectors} sections)",
+                        out_dir.join(crate::cmd::scan::sidecar::FILE).display()
+                    ));
+                    json!({ "file": crate::cmd::scan::sidecar::FILE, "ways": ways, "vectors": vectors })
+                }
+                Err(why) => {
+                    eprintln!("warning: body sidecar not built: {why}; body confirmation embeds per call");
+                    json!({ "file": null, "reason": why })
+                }
+            }
+        }
+        _ => previous_manifest
+            .as_ref()
+            .and_then(|m| m.get("body_sidecar").cloned())
+            .unwrap_or(serde_json::Value::Null),
+    };
+
     // The manifest records whether every lane embedded, why not, when it
     // failed, and which engine built it. `--if-stale` retries a failed build
     // when the engine changes or a day has passed, not on every session start.
@@ -235,6 +272,8 @@ pub fn run(
         "total_count": total,
         "projects": manifest_projects,
         "calibration": calibration,
+        "way_hashes": way_hashes,
+        "body_sidecar": body_sidecar,
         "embedded": complete,
         "reason": reason,
         "failed_at": if complete { None } else { Some(agent_fmt::when::now_secs()) },
@@ -275,6 +314,108 @@ pub fn run(
         }
         Embedded::Failed(why) => bail!("{why}; {what_happened}"),
     }
+}
+
+/// Each corpus way's content hash, for the manifest's `way_hashes` (ADR-701
+/// §7). A file that cannot be read gets no entry, so a sidecar can never cover
+/// it.
+fn way_hashes(sources: &HashMap<String, PathBuf>) -> serde_json::Value {
+    use crate::cmd::scan::sidecar::{content_hash, hash_hex};
+    let mut ids: Vec<&String> = sources.keys().collect();
+    ids.sort();
+    let map: serde_json::Map<String, serde_json::Value> = ids
+        .into_iter()
+        .filter_map(|id| {
+            let bytes = std::fs::read(&sources[id]).ok()?;
+            Some((id.clone(), json!(hash_hex(content_hash(&bytes)))))
+        })
+        .collect();
+    serde_json::Value::Object(map)
+}
+
+/// Build the body sidecar (ADR-701 §6) for every way in `sources`, disabled or
+/// not: split each way into sections, embed them all in one `way-embed
+/// generate` pass with the English model, and write the binary sidecar into
+/// `out_dir`. Returns (ways, section vectors), or why it could not be built.
+fn build_body_sidecar(
+    out_dir: &Path,
+    engine_dir: &Path,
+    bin: &Path,
+    sources: &HashMap<String, PathBuf>,
+    generate: &GeneratePass<'_>,
+) -> std::result::Result<(usize, usize), String> {
+    use crate::cmd::scan::sidecar;
+    let model = engine_dir.join(crate::paths::EN_MODEL);
+    let model_id = sidecar::model_id(engine_dir).ok_or("English model missing")?;
+
+    let mut ids: Vec<&String> = sources.keys().collect();
+    ids.sort();
+    // (id, hash, sections) per way, read once so hash and sections agree.
+    let mut ways = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Ok(bytes) = std::fs::read(&sources[id]) else { continue };
+        let sections = crate::cmd::scan::chunk_sections(&String::from_utf8_lossy(&bytes));
+        ways.push((id.clone(), sidecar::content_hash(&bytes), sections));
+    }
+
+    // One generate pass over every section, rewritten in place with vectors.
+    // Rows are keyed `{way index}#{n}`, so no way id needs escaping. generate
+    // embeds `description + " " + vocabulary`, the text the measurement used.
+    let staged = out_dir.join(format!("ways-corpus-sections.{}.tmp", std::process::id()));
+    let result = embed_sections(&ways, &staged, bin, &model, generate).and_then(|(dim, mut vectors)| {
+        let mut records = Vec::with_capacity(ways.len());
+        for (wi, (id, hash, sections)) in ways.iter().enumerate() {
+            let vs = (0..sections.len())
+                .map(|n| vectors.remove(&format!("{wi}#{n}")))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| format!("way-embed returned no vector for a section of {id}"))?;
+            records.push(sidecar::WaySections { id: id.clone(), hash: *hash, vectors: vs });
+        }
+        let bytes = sidecar::encode(&model_id, dim, &records).ok_or("section vectors of unequal length")?;
+        sidecar::write(&out_dir.join(sidecar::FILE), &bytes).map_err(|e| e.to_string())?;
+        Ok((records.len(), records.iter().map(|r| r.vectors.len()).sum()))
+    });
+    let _ = std::fs::remove_file(&staged);
+    result
+}
+
+/// Embed every section of `ways` through `staged`, returning the dimension and
+/// the vectors keyed `{way index}#{n}`. No sections, no pass.
+fn embed_sections(
+    ways: &[(String, u64, Vec<String>)],
+    staged: &Path,
+    bin: &Path,
+    model: &Path,
+    generate: &GeneratePass<'_>,
+) -> std::result::Result<(usize, HashMap<String, Vec<f32>>), String> {
+    let mut raw = String::new();
+    for (wi, (_, _, sections)) in ways.iter().enumerate() {
+        for (n, text) in sections.iter().enumerate() {
+            raw.push_str(&json!({ "id": format!("{wi}#{n}"), "description": text, "vocabulary": "" }).to_string());
+            raw.push('\n');
+        }
+    }
+    let mut vectors = HashMap::new();
+    if raw.is_empty() {
+        return Ok((0, vectors));
+    }
+    std::fs::write(staged, raw).map_err(|e| format!("writing {}: {e}", staged.display()))?;
+    generate(bin, staged, model, "body sections")?;
+    let embedded = std::fs::read_to_string(staged).map_err(|e| e.to_string())?;
+    for line in embedded.lines().filter(|l| !l.is_empty()) {
+        let row: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+        let id = row.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let v: Vec<f32> = row
+            .get("embedding")
+            .and_then(|e| e.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_f64()).map(|f| f as f32).collect())
+            .unwrap_or_default();
+        if !v.is_empty() {
+            vectors.insert(id, v);
+        }
+    }
+    let dim = vectors.values().next().map_or(0, Vec::len);
+    Ok((dim, vectors))
 }
 
 /// Child stderr policy for a `way-embed` subprocess.
@@ -502,7 +643,8 @@ fn retry_due(manifest: &Path, engine: &str, now: u64) -> bool {
 ///
 /// Honors the `.ways-embed` marker (skips on `disinclude`), namespaces every
 /// way id as `{key}/{bare_id}`, and records the project in the manifest under
-/// `key`. Returns the number of ways embedded.
+/// `key`. Each way written is added to `sources`. Returns the number of ways
+/// embedded.
 #[allow(clippy::too_many_arguments)]
 fn embed_one_project(
     ways_path: &Path,
@@ -511,6 +653,7 @@ fn embed_one_project(
     excluded: &[String],
     w: &mut impl Write,
     manifest_projects: &mut HashMap<String, serde_json::Value>,
+    sources: &mut HashMap<String, PathBuf>,
     log: &dyn Fn(&str),
 ) -> Result<usize> {
     // Check .ways-embed marker (skip only on explicit disinclude)
@@ -528,10 +671,9 @@ fn embed_one_project(
 
     let prefix = format!("{key}/");
     // Project ids are namespaced ({key}/…), so they can't collide with core/user;
-    // pass fresh dedup sets.
+    // pass a fresh skip set.
     let skip = std::collections::HashSet::new();
-    let mut written = std::collections::HashSet::new();
-    let local_count = scan_ways_dir(ways_path, &prefix, excluded, w, &skip, &mut written)?;
+    let local_count = scan_ways_dir(ways_path, &prefix, excluded, w, &skip, sources)?;
 
     if local_count > 0 {
         let local_hash = content_hash(ways_path);
@@ -557,15 +699,15 @@ fn embed_one_project(
 ///
 /// `skip` holds ids already claimed by a higher-precedence root — a matching way
 /// here is shadowed and dropped (ADR-143 dedup-by-name). Every id actually
-/// written is recorded in `written` so the caller can build the next root's skip
-/// set (precedence: project > user > core).
+/// written is recorded in `written` with the way's own file (not a `.lang.md`
+/// override), which the body sidecar embeds.
 fn scan_ways_dir(
     dir: &Path,
     id_prefix: &str,
     excluded: &[String],
     w: &mut impl Write,
     skip: &std::collections::HashSet<String>,
-    written: &mut std::collections::HashSet<String>,
+    written: &mut HashMap<String, PathBuf>,
 ) -> Result<usize> {
     let mut count = 0;
 
@@ -655,7 +797,12 @@ fn scan_ways_dir(
         if skip.contains(&id) {
             continue;
         }
-        written.insert(id.clone());
+        let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if crate::util::extract_locale_from_filename(fname).is_some() {
+            written.entry(id.clone()).or_insert_with(|| path.clone());
+        } else {
+            written.insert(id.clone(), path.clone());
+        }
 
         // Capture the English root for the multilingual anchor (Pass 2, localized mode).
         en_roots.insert(
@@ -1283,6 +1430,72 @@ mod tests {
         )
         .unwrap();
         (outcome, calls.into_inner(), staged, dir)
+    }
+
+    /// ADR-701 §6: the sidecar holds a record for every corpus way at its file's
+    /// hash, the vectors `generate` produced for its sections in order, and no
+    /// vectors for a way with no sections.
+    #[test]
+    fn body_sidecar_build_writes_every_way_at_its_hash() {
+        use crate::cmd::scan::sidecar;
+        let dir = scratch("sidecar-build");
+        let engine = dir.join("engine");
+        std::fs::create_dir_all(&engine).unwrap();
+        std::fs::write(engine.join(crate::paths::EN_MODEL), "model").unwrap();
+        let prose = "---\ndescription: d\nvocabulary: v\n---\n# One\n\nThe first section has enough words in it.\n\n## Two\n\nThe second section also has enough words.\n";
+        let table = "---\ndescription: d\nvocabulary: v\n---\n# Policy\n\n| a | b |\n";
+        std::fs::write(dir.join("prose.md"), prose).unwrap();
+        std::fs::write(dir.join("table.md"), table).unwrap();
+        let sources: HashMap<String, PathBuf> = [("a/prose", "prose.md"), ("b/table", "table.md")]
+            .iter()
+            .map(|(id, f)| (id.to_string(), dir.join(f)))
+            .collect();
+
+        // A fake generate: embed row k as the unit vector on axis k of 3, the
+        // way way-embed rewrites the corpus in place.
+        let seen = RefCell::new(Vec::new());
+        let generate = |_: &Path, corpus: &Path, _: &Path, _: &str| {
+            let rows: Vec<String> = read(corpus)
+                .lines()
+                .enumerate()
+                .map(|(k, l)| {
+                    let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+                    seen.borrow_mut().push(v["description"].as_str().unwrap().to_string());
+                    let mut e = vec![0.0; 3];
+                    e[k % 3] = 1.0;
+                    v["embedding"] = json!(e);
+                    v.to_string()
+                })
+                .collect();
+            std::fs::write(corpus, rows.join("\n") + "\n").unwrap();
+            Ok(Instant::now())
+        };
+        let got = build_body_sidecar(&dir, &engine, Path::new("way-embed"), &sources, &generate).unwrap();
+        assert_eq!(got, (2, 2));
+        assert_eq!(
+            seen.into_inner(),
+            vec!["One. The first section has enough words in it.", "Two. The second section also has enough words."]
+        );
+
+        let sc = sidecar::read(&dir.join(sidecar::FILE)).unwrap();
+        assert_eq!(sc.model, "minilm-l6-v2.gguf:5");
+        assert_eq!(sc.dim, 3);
+        assert!((sc.max_cosine("a/prose", &[0.0, 1.0, 0.0]).unwrap() - 1.0).abs() < 1e-9);
+        assert!((sc.max_cosine("a/prose", &[0.0, 0.0, 1.0]).unwrap()).abs() < 1e-9, "only two sections");
+        assert!(sc.max_cosine("b/table", &[1.0, 0.0, 0.0]).is_none(), "a sectionless way has no vectors");
+
+        let hashes = way_hashes(&sources);
+        assert_eq!(hashes["a/prose"], json!(sidecar::hash_hex(sidecar::content_hash(prose.as_bytes()))));
+        let alias = sidecar::alias_hashes_from(&json!({ "way_hashes": hashes }));
+        assert!(sc.covers("minilm-l6-v2.gguf:5", ["a/prose", "b/table"], &alias));
+        let leftovers: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "staging left behind: {leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

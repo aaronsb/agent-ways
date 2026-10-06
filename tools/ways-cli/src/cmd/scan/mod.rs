@@ -7,6 +7,7 @@ pub(crate) mod candidates;
 mod candidate_log;
 mod gate;
 mod late_interaction;
+pub(crate) mod sidecar;
 mod lookbehind;
 mod order;
 mod reduce;
@@ -471,7 +472,7 @@ fn scan_prompt_surface(
 
 // ── Authoring diagnostic (task #5) ─────────────────────────────
 
-pub(crate) use late_interaction::{DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE, DIAG_SHARE_GATE};
+pub(crate) use late_interaction::{chunk_sections, DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE, DIAG_SHARE_GATE};
 
 /// Run the late-interaction matcher over `query` for way authoring — the modern
 /// equivalent of the single-vector `ways author match`. Reduces the query exactly as the

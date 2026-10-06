@@ -436,6 +436,93 @@ fn chunk_body(content: &str) -> Vec<String> {
     out
 }
 
+/// Words per section chunk: MiniLM truncates past about 256 tokens, so a long
+/// section is split into pieces of this many words (ADR-701 §6).
+const SECTION_MAX_WORDS: usize = 120;
+/// A section piece shorter than this many characters is dropped.
+const SECTION_MIN_CHARS: usize = 25;
+
+/// Chunk a way's `.md` into heading sections for the body sidecar (ADR-701 §6),
+/// the `section` strategy of `experiments/content-corpus/run.py`: drop the
+/// frontmatter, HTML comments, fenced code, table rows and the See Also
+/// section; split at headings; split a section longer than
+/// [`SECTION_MAX_WORDS`] words; prefix each piece with its heading.
+pub(crate) fn chunk_sections(content: &str) -> Vec<String> {
+    use std::sync::OnceLock;
+    static RE: OnceLock<[regex::Regex; 6]> = OnceLock::new();
+    let [comment, heading_re, lead, code, emph, link] = RE.get_or_init(|| {
+        [
+            regex::Regex::new(r"(?s)<!--.*?-->").expect("static regex"),
+            regex::Regex::new(r"^(#{1,6})\s+(.*)").expect("static regex"),
+            regex::Regex::new(r"^([-*>]|\d+\.)\s+").expect("static regex"),
+            regex::Regex::new(r"`([^`]*)`").expect("static regex"),
+            regex::Regex::new(r"\*\*?([^*]+)\*\*?").expect("static regex"),
+            regex::Regex::new(r"\[([^\]]+)\]\([^)]*\)").expect("static regex"),
+        ]
+    });
+
+    let body = if crate::frontmatter::opens_with_fence(content) {
+        crate::frontmatter::split(content).map_or("", |(_, body)| body)
+    } else {
+        content
+    };
+    let body = comment.replace_all(body, "");
+
+    // (heading, prose lines) per section; "" marks a paragraph break.
+    let mut blocks: Vec<(String, Vec<String>)> = Vec::new();
+    let (mut heading, mut lines, mut in_fence, mut skip) = (String::new(), Vec::<String>::new(), false, false);
+    for raw in body.lines() {
+        let t = raw.trim();
+        if t.starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if let Some(m) = heading_re.captures(t) {
+            if !lines.is_empty() && !skip {
+                blocks.push((std::mem::take(&mut heading), std::mem::take(&mut lines)));
+            }
+            heading = m[2].trim().to_string();
+            lines.clear();
+            skip = heading.to_lowercase().starts_with("see also");
+            continue;
+        }
+        if skip || t.starts_with('|') || t.is_empty() {
+            if t.is_empty() && lines.last().is_some_and(|l| !l.is_empty()) {
+                lines.push(String::new());
+            }
+            continue;
+        }
+        lines.push(lead.replace(t, "").into_owned());
+    }
+    if !lines.is_empty() && !skip {
+        blocks.push((heading, lines));
+    }
+
+    let clean = |s: &str| {
+        let s = code.replace_all(s, "$1");
+        let s = emph.replace_all(&s, "$1");
+        let s = link.replace_all(&s, "$1");
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    let mut out = Vec::new();
+    for (heading, lines) in blocks {
+        let joined = lines.iter().filter(|l| !l.is_empty()).map(String::as_str).collect::<Vec<_>>().join(" ");
+        let cleaned = clean(&joined);
+        let words: Vec<&str> = cleaned.split_whitespace().collect();
+        for piece in words.chunks(SECTION_MAX_WORDS) {
+            let piece = piece.join(" ");
+            if piece.chars().count() < SECTION_MIN_CHARS {
+                continue;
+            }
+            out.push(if heading.is_empty() { piece } else { format!("{heading}. {piece}") });
+        }
+    }
+    out
+}
+
 /// Run `cmd` feeding `input` on stdin, return stdout on success. stdin is small
 /// (chunks/pairs), so writing it fully before draining stdout cannot deadlock.
 fn run_stdin(mut cmd: Command, input: &str) -> Option<String> {
@@ -503,6 +590,41 @@ mod tests {
         let body = "---\nvocabulary: leaked yaml words that are long enough\nmore leaked yaml text here.\n";
         let chunks = chunk_body(body);
         assert!(chunks.iter().all(|c| !c.contains("leaked")), "{chunks:?}");
+    }
+
+    /// ADR-701 §6: the sidecar's section chunks are exactly run.py's `section`
+    /// strategy. The expected chunks were produced by run.py on this fixture.
+    #[test]
+    fn chunk_sections_matches_the_measured_section_strategy() {
+        let long: Vec<String> = (0..120).map(|i| format!("w{i}")).collect();
+        let fixture = format!(
+            "---\ndescription: a fixture way\nvocabulary: fixture words\n---\n\
+             <!-- epistemic: heuristic -->\n# Fixture Way\n\n\
+             Lead paragraph with **bold words** and `inline code` and a [link](http://x.y).\n\
+             - A bullet item that continues the lead.\n1. A numbered item.\n\nShort.\n\n\
+             ## Commands\n\n```bash\necho \"code is not prose\"\n```\n\n\
+             | col | col |\n|-----|-----|\n| table | row |\n\n\
+             > A quoted line in the commands section, long enough to keep.\n\n\
+             ## Tiny\n\nok\n\n## Long Section\n\n\
+             {} tail words one two three four five six seven eight nine.\n\n\
+             ## See Also\n\n- other/way(domain) — never embedded\n",
+            long.join(" ")
+        );
+        let want = vec![
+            "Fixture Way. Lead paragraph with bold words and inline code and a link. A bullet item that continues the lead. A numbered item. Short.".to_string(),
+            "Commands. A quoted line in the commands section, long enough to keep.".to_string(),
+            format!("Long Section. {}", long.join(" ")),
+            "Long Section. tail words one two three four five six seven eight nine.".to_string(),
+        ];
+        assert_eq!(chunk_sections(&fixture), want);
+    }
+
+    /// A way whose prose is all tables and comments has no sections; the alias
+    /// vector stands in for it at confirm time.
+    #[test]
+    fn chunk_sections_is_empty_for_a_table_only_body() {
+        let body = "---\ndescription: d\nvocabulary: v\n---\n# Policy\n\n| a | b |\n|---|---|\n| c | d |\n<!-- note -->\n";
+        assert!(chunk_sections(body).is_empty());
     }
 
     fn bodies_of(ids: &[&str]) -> HashMap<String, PathBuf> {
