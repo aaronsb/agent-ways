@@ -7,14 +7,14 @@ agent-tui frame 100x30
 |│     language                  auto                  ││type     bool (Enter toggles)              │|
 |│     default_scope             agent                 ││default  true                              │|
 |│     disabled_domains          []                    ││from     default                           │|
-|│ ▾ project · way               enabled               ││writes   ~/proj/.claude/ways.yaml          │|
-|│   ▾ this project                                    ││[ways.project.api/dual]                    │|
+|│     event_retention_days      90                    ││writes   ~/proj/.claude/ways.yaml          │|
+|│ ▾ project · way               enabled               ││[ways.project.api/dual]                    │|
+|│   ▾ this project                                    ││                                           │|
 |│     ▾ api                                           ││                                           │|
 |│▌        dual                  true                  ││                                           │|
 |│   ▾ shipped                                         ││                                           │|
-|│     ▸ itops                                         ││                                           │|
-|│     ▸ softwaredev                                   │└───────────────────────────────────────────┘|
-|│                                                     │┌way────────────────────────────────────────┐|
+|│     ▸ itops                                         │└───────────────────────────────────────────┘|
+|│     ▸ softwaredev                                   │┌way────────────────────────────────────────┐|
 |│                                                     ││Two modes for every endpoint, read and     │|
 |│                                                     ││write.                                     │|
 |│                                                     ││                                           │|
@@ -64,26 +64,25 @@ styles
   7  54-64  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   2-10  - - BOLD
-  8  11-16  - - DIM
-  8  32-38  - - DIM
   8  54-64  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9   2-17  - - BOLD
+  9   2-10  - - BOLD
+  9  11-16  - - DIM
+  9  32-38  - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10   2-10  - - BOLD
+ 10   2-17  - - BOLD
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11   1-1   Cyan - BOLD|REVERSED
- 11   2-53  - - BOLD|REVERSED
+ 11   2-10  - - BOLD
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12   2-12  - - BOLD
+ 12   1-1   Cyan - BOLD|REVERSED
+ 12   2-53  - - BOLD|REVERSED
  12  54-55  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
@@ -91,9 +90,10 @@ styles
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14   2-18  - - BOLD
+ 14   2-12  - - BOLD
  14  54-99  - - DIM
  15   0-0   - - DIM
+ 15   2-18  - - BOLD
  15  54-55  - - DIM
  15  56-58  LightBlue - BOLD|DIM
  15  59-99  - - DIM

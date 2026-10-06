@@ -7,15 +7,15 @@ agent-tui frame 100x30
 |│     language                  auto                  ││projects. The projects: all action (p)     │|
 |│     default_scope             agent                 ││lists them here, a group per project; a    │|
 |│     disabled_domains          []                    ││switch there writes that project's         │|
-|│ ▾ project · way               enabled               ││.claude/ways.yaml.                         │|
-|│   ▾ this project                                    ││                                           │|
-|│     ▸ api                                           ││value    4 ways · p shows them             │|
-|│   ▾ shipped                                         ││type     read-only here                    │|
-|│     ▸ itops                                         ││from     known projects                    │|
+|│     event_retention_days      90                    ││.claude/ways.yaml.                         │|
+|│ ▾ project · way               enabled               ││                                           │|
+|│   ▾ this project                                    ││value    4 ways · p shows them             │|
+|│     ▸ api                                           ││type     read-only here                    │|
+|│   ▾ shipped                                         ││from     known projects                    │|
+|│     ▸ itops                                         ││                                           │|
 |│     ▸ softwaredev                                   ││                                           │|
 |│   ▾ other projects                                  ││                                           │|
 |│▌      (hidden)                4 ways · p shows them ││                                           │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -64,21 +64,20 @@ styles
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   2-10  - - BOLD
-  8  11-16  - - DIM
-  8  32-38  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
-  9   2-17  - - BOLD
+  9   2-10  - - BOLD
+  9  11-16  - - DIM
+  9  32-38  - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10   2-10  - - BOLD
+ 10   2-17  - - BOLD
  10  54-64  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11   2-12  - - BOLD
+ 11   2-10  - - BOLD
  11  54-64  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
@@ -86,21 +85,22 @@ styles
  12  54-64  - - DIM
  12  99-99  - - DIM
  13   0-0   - - DIM
- 13   2-18  - - BOLD
+ 13   2-12  - - BOLD
  13  54-55  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM
- 14   2-19  - - BOLD
+ 14   2-18  - - BOLD
  14  54-55  - - DIM
  14  99-99  - - DIM
  15   0-0   - - DIM
- 15   1-1   Cyan - BOLD|REVERSED
- 15   2-31  - - BOLD|REVERSED
- 15  32-52  - - BOLD|DIM|REVERSED
- 15  53-53  - - BOLD|REVERSED
+ 15   2-19  - - BOLD
  15  54-55  - - DIM
  15  99-99  - - DIM
  16   0-0   - - DIM
+ 16   1-1   Cyan - BOLD|REVERSED
+ 16   2-31  - - BOLD|REVERSED
+ 16  32-52  - - BOLD|DIM|REVERSED
+ 16  53-53  - - BOLD|REVERSED
  16  54-55  - - DIM
  16  99-99  - - DIM
  17   0-0   - - DIM

@@ -5,10 +5,10 @@ agent-tui frame 100x30
 |│     enabled                   true                  ││                                           │|
 |│     subagents                 true                  ││The tab's own keys.                        │|
 |│     language                  auto                  ││                                           │|
-|│     default_scope             agent                 ││5 entries, 0 changed                       │|
+|│     default_scope             agent                 ││6 entries, 0 changed                       │|
 |│     disabled_domains          []                    ││                                           │|
+|│     event_retention_days      90                    ││                                           │|
 |│ ▸ project · way               enabled               ││                                           │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -67,12 +67,12 @@ styles
   7  54-55  #434c5e - -
   7  99-99  #434c5e - -
   8   0-0   #434c5e - -
-  8   2-10  - - BOLD
-  8  11-16  #7c8baa - -
-  8  32-38  #7c8baa - -
   8  54-55  #434c5e - -
   8  99-99  #434c5e - -
   9   0-0   #434c5e - -
+  9   2-10  - - BOLD
+  9  11-16  #7c8baa - -
+  9  32-38  #7c8baa - -
   9  54-55  #434c5e - -
   9  99-99  #434c5e - -
  10   0-0   #434c5e - -
