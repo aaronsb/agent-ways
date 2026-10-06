@@ -480,12 +480,24 @@ pub(crate) use late_interaction::{DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE, DI
 /// the reduced surface for context. `None` means late-interaction could not run
 /// (engine unavailable, or the surface is too sparse to chunk) — the caller then
 /// falls back to the single-vector view, mirroring production's fail-safe.
-pub fn diagnose(query: &str, project: Option<&str>, top_n: usize) -> Option<(String, Vec<DiagRow>)> {
+///
+/// The competing set is the one a prompt scan in `agent` scope uses (toggles,
+/// scope and `when:` against `project`), so the shares match the live fire path.
+/// `unfiltered` competes every candidate instead, for seeing how a way would rank
+/// among all of them.
+pub fn diagnose(query: &str, project: Option<&str>, top_n: usize, unfiltered: bool) -> Option<(String, Vec<DiagRow>)> {
     let project_dir = project.map(|s| s.to_string()).unwrap_or_else(crate::util::project_dir);
     let candidates = collect_candidates(&project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
-    let rows = late_interaction::run_diagnostic(&reduced, &body_map(candidates.iter()), top_n)?;
+    let bodies = body_map(diag_candidates(&candidates, &project_dir, unfiltered).into_iter());
+    let rows = late_interaction::run_diagnostic(&reduced, &bodies, top_n)?;
     Some((reduced, rows))
+}
+
+/// The candidates `ways author match` competes: the prompt lane in `agent`
+/// scope, or all of them when `unfiltered`.
+fn diag_candidates<'a>(candidates: &'a [WayCandidate], project_dir: &str, unfiltered: bool) -> Vec<&'a WayCandidate> {
+    candidates.iter().filter(|w| unfiltered || eligible(w, Lane::Prompt { scope: "agent" }, project_dir)).collect()
 }
 
 // ── Task scan (subagent/teammate stash) ────────────────────────
@@ -1849,5 +1861,13 @@ mod eligibility_tests {
         // With the old toggle-only set it would have competed.
         let all = body_map(cands.iter());
         assert!(late_interaction::shares_for_test(rows, &all).iter().any(|(id, _)| id == "agent-only"));
+    }
+
+    #[test]
+    fn the_authoring_view_competes_the_prompt_lane_unless_asked_for_all() {
+        let cands = [way("agent", "agent", None), way("sub", "subagent", None)];
+        let ids = |unfiltered| diag_candidates(&cands, "/p", unfiltered).iter().map(|w| w.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(false), ["agent"], "default: what a prompt scan in agent scope competes");
+        assert_eq!(ids(true), ["agent", "sub"]);
     }
 }

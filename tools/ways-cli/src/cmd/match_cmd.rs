@@ -103,9 +103,12 @@ fn run(query: String) -> Result<()> {
 /// can see the exact evidence a fire hinges on. Falls back to the single-vector
 /// view when late-interaction cannot run (sparse surface / no engine), mirroring
 /// production's fail-safe.
-pub fn run_late(query: String, project: Option<&str>) -> Result<()> {
+///
+/// The ways that compete are those a prompt scan in `agent` scope competes, so the
+/// shares match the live fire path; `unfiltered` competes every way.
+pub fn run_late(query: String, project: Option<&str>, unfiltered: bool) -> Result<()> {
     const TOP_N: usize = 20;
-    let Some((reduced, rows)) = crate::cmd::scan::diagnose(&query, project, TOP_N) else {
+    let Some((reduced, rows)) = crate::cmd::scan::diagnose(&query, project, TOP_N, unfiltered) else {
         eprintln!(
             "late-interaction unavailable for this query (surface too sparse to chunk, \
              or the embedding engine is not set up) — showing the single-vector view.\n"

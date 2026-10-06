@@ -1675,17 +1675,28 @@ fn scenario_event_log_rotates_old_lines_on_a_scan() {
     copy_dir_all(&fixture_ways_dir(), &ways_link).unwrap();
 
     let state = home.join(".local/state/agent-ways");
-    std::fs::create_dir_all(&state).unwrap();
     let log = state.join("events.jsonl");
-    std::fs::write(&log, "{\"ts\":\"2001-01-01T00:00:00Z\",\"event\":\"way_fired\",\"way\":\"ancient/way\"}\n").unwrap();
 
-    // A way fires, which logs an event: the scan appends, then rotates.
-    s.scan_prompt_with_home("write unit tests with good coverage", &home);
+    // A first scan writes a current line, which anchors the cutoff to real time.
+    s.scan_prompt_with_home("how do I write a unit test for this module", &home);
     assert_marker_exists("testdomain/parent/child", &s.id);
+
+    // Put an old line at the head and release today's claim, as the next day would.
+    let current = std::fs::read_to_string(&log).unwrap();
+    std::fs::write(&log, format!("{{\"ts\":\"2001-01-01T00:00:00Z\",\"event\":\"way_fired\",\"way\":\"ancient/way\"}}\n{current}")).unwrap();
+    for e in std::fs::read_dir(&state).unwrap().flatten() {
+        if e.file_name().to_string_lossy().starts_with("events.rotated-") {
+            std::fs::remove_file(e.path()).unwrap();
+        }
+    }
+
+    // A second scan fires another way: the event rotates the old line out first.
+    s.scan_prompt_with_home("refactor extract method decompose this function", &home);
+    assert_marker_exists("testdomain/parent/child2", &s.id);
 
     let got = std::fs::read_to_string(&log).unwrap();
     assert!(!got.contains("ancient/way"), "the old line is rotated out:\n{got}");
-    assert!(got.contains("testdomain/parent/child"), "the scan's own event is kept:\n{got}");
+    assert!(got.contains("testdomain/parent/child2") && got.contains("testdomain/parent/child\""), "the scans' own events are kept:\n{got}");
     let claimed = std::fs::read_dir(&state)
         .unwrap()
         .flatten()
