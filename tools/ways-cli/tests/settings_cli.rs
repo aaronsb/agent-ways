@@ -460,7 +460,7 @@ fn hook_commands_load_only_their_sections() {
     // read attend's files: a broken one would print its finding here.
     f.write(&f.root.join("xdg/config/attend/config.yaml"), "engagement: [\n");
     let ways_line =
-        "settings-trace: load-sections ways:config [ways,ways.switch,ways.subagents,ways.domains,matching,install.targets,install.secret_path_deny,ways.project]";
+        "settings-trace: load-sections ways:config [ways,ways.switch,ways.subagents,ways.domains,matching,install.targets,install.secret_path_deny,ways.project,ways.log]";
     let agent_line = "settings-trace: load-sections ways-agent:agent [gate,gate.mode,gate.profiles]";
     for args in [
         vec!["scan", "prompt", "--query=write a unit test", "--session=s1"],

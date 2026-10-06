@@ -1052,7 +1052,7 @@ fn log_near_miss(
 ) {
     let fmt = |v: Option<f64>| v.map(|s| format!("{s:.4}")).unwrap_or_default();
     let domain = way.id.split('/').next().unwrap_or(&way.id);
-    // ADR-134 task E: events.jsonl rotation/cap will bound this stream's growth.
+    // events.jsonl is bounded by age (retention days) and size; see session::log_event.
     session::log_event(&[
         ("event", "way_nearmiss"),
         ("way", &way.id),

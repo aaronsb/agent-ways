@@ -155,6 +155,8 @@ pub struct Config {
     /// Default 0.05: a narrow band that captures genuine near-fires without
     /// flooding the log with deep misses.
     pub near_miss_margin: f64,
+    /// Days of history the telemetry event log keeps (ADR-701 §2). Default 90.
+    pub event_retention_days: u32,
     /// Refire presets (ADR-126). Each value is a fraction of the session
     /// context window. At fire evaluation time, a way's `refire: <name>`
     /// resolves by looking up the preset here and multiplying by the
@@ -207,6 +209,7 @@ impl Default for Config {
             semantic_fire_probability: 0.5,
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
+            event_retention_days: 90,
             refire_presets,
             secret_path_deny: true,
         }
@@ -408,6 +411,9 @@ impl Config {
         }
         if let Some(v) = doc.get("near_miss_margin").and_then(|v| v.as_f64()) {
             self.near_miss_margin = v;
+        }
+        if let Some(v) = doc.get("event_retention_days").and_then(|v| v.as_u64()) {
+            self.event_retention_days = v.clamp(1, 3650) as u32;
         }
         if let Some(m) = doc.get("refire_presets").and_then(|v| v.as_mapping()) {
             for (k, v) in m {
@@ -712,6 +718,17 @@ mod tests {
         let mut cfg = Config::default();
         cfg.apply_project_ways_overlay(yaml);
         cfg
+    }
+
+    #[test]
+    fn event_retention_defaults_to_ninety_days_and_is_settable() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.event_retention_days, 90);
+        cfg.apply_yaml("event_retention_days: 30\n");
+        assert_eq!(cfg.event_retention_days, 30);
+        let mut bad = Config::default();
+        bad.apply_yaml("event_retention_days: 0\n");
+        assert_eq!(bad.event_retention_days, 90, "a value outside 1..3650 falls back");
     }
 
     #[test]

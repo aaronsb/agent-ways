@@ -17,7 +17,7 @@ pub const FILE: &str = "config";
 /// The list is explicit so a hook names each section it loads, through
 /// `load-sections`, never a whole-file `load-all`.
 pub const HOOK_SECTIONS: &[&str] =
-    &["ways", "ways.switch", "ways.subagents", "ways.domains", "matching", "install.targets", "install.secret_path_deny", "ways.project"];
+    &["ways", "ways.switch", "ways.subagents", "ways.domains", "matching", "install.targets", "install.secret_path_deny", "ways.project", "ways.log"];
 
 /// The fallback unit is the section (ADR-503 §4), so each switch that turns
 /// something off is a section of its own: a bad value elsewhere can never
@@ -69,6 +69,14 @@ const SECTIONS: &[SectionSpec] = &[
         per_entry: false, entry: None, repair: None,
         columns: None,
         doc: "When a way fires: the calibrated probabilities, the parent boost, and how often a way may fire again.",
+    },
+    SectionSpec {
+        name: "ways.log",
+        file: FILE,
+        top: &["event_retention_days"],
+        per_entry: false, entry: None, repair: None,
+        columns: None,
+        doc: "How long the telemetry event log keeps history.",
     },
     SectionSpec {
         name: "install.targets",
@@ -247,6 +255,16 @@ const KEYS: &[KeySpec] = &[
         instances: &["once", "rare", "normal", "frequent"],
         doc: "A refire preset: the fraction of the context window before a way may fire again.",
         long: "A way's `refire: <name>` looks the preset up here and multiplies by the session's context window (ADR-126). New names may be added.",
+        ..BASE
+    },
+    KeySpec {
+        name: "ways.event_retention_days",
+        section: "ways.log",
+        path: &["event_retention_days"],
+        kind: Kind::Int { min: 1, max: 3650 },
+        default: DefaultValue::Yaml("90"),
+        doc: "Days of history the event log keeps.",
+        long: "Events older than this are dropped from events.jsonl, at most once a day (ADR-701 §2). Session introspection and the tuning passes read this file, so keep enough for them. judge_call lines are kept regardless, since `ways agent cost` sums them.",
         ..BASE
     },
     KeySpec {
