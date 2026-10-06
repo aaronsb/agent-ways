@@ -82,10 +82,12 @@ pub(super) fn scan_lane(scores: &super::scoring::EmbedScores) -> Option<(&'stati
 }
 
 /// Log the scan's top candidates as one `scan_candidates` event. `enabled` maps
-/// a corpus id to the way's bare id for every way that may compete.
+/// a corpus id to the way's bare id for every way that may compete. `sidecar`
+/// says whether body confirmation read the body sidecar (ADR-701 §7).
 pub(super) fn log_scan_candidates(
     scores: &super::scoring::EmbedScores,
     enabled: &HashMap<&str, &str>,
+    sidecar: bool,
     context: &[(&str, &str)],
 ) {
     let Some((lane, rows)) = scan_lane(scores) else { return };
@@ -95,8 +97,7 @@ pub(super) fn log_scan_candidates(
     }
     let mut fields = vec![("event", "scan_candidates"), ("lane", lane), ("basis", BASIS)];
     fields.extend_from_slice(context);
-    // `sidecar` is false until the body sidecar ships (ADR-701 §6).
-    crate::session::log_event_with(&fields, &[("sidecar", serde_json::Value::Bool(false)), ("candidates", candidates_json(&top))]);
+    crate::session::log_event_with(&fields, &[("sidecar", serde_json::Value::Bool(sidecar)), ("candidates", candidates_json(&top))]);
 }
 
 /// Where cosine and share come from: the single-vector rows over the whole

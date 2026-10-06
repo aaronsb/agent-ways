@@ -16,6 +16,7 @@ pub fn run(json_output: bool) -> Result<()> {
 
     let model_exists = model_path.is_file();
     let corpus_exists = corpus_path.is_file();
+    let sidecar = crate::cmd::scan::sidecar_state(&crate::util::project_dir());
 
     // Post-ADR-125: embedding is the sole engine. "none" means model or corpus missing.
     let engine = if way_embed.is_some() && model_exists && corpus_exists {
@@ -118,6 +119,7 @@ pub fn run(json_output: bool) -> Result<()> {
                 "entries": corpus_count,
                 "embedded": corpus_embedded,
             },
+            "body_sidecar": sidecar_json(&sidecar),
             "calibration": {
                 "present": cal_en_auc.is_some(),
                 "en_auc": cal_en_auc,
@@ -223,6 +225,10 @@ pub fn run(json_output: bool) -> Result<()> {
             }
         }
 
+        if corpus_exists {
+            println!("{}", sidecar_line(&sidecar));
+        }
+
         // Calibration (ADR-156): without it the semantic lane cannot fire.
         if corpus_exists {
             match cal_en_auc {
@@ -307,6 +313,21 @@ fn count_ways(dir: &Path) -> (usize, usize) {
     }
 
     (total, semantic)
+}
+
+/// ADR-701 §7: which state body confirmation runs in, and why it dropped.
+pub(crate) fn sidecar_line(state: &Result<(usize, usize), crate::cmd::scan::sidecar::Fallback>) -> String {
+    match state {
+        Ok((ways, sections)) => format!("Body sidecar: in use ({ways} ways, {sections} sections)"),
+        Err(why) => format!("Body sidecar: not used, confirmation embeds per call — {why}"),
+    }
+}
+
+fn sidecar_json(state: &Result<(usize, usize), crate::cmd::scan::sidecar::Fallback>) -> serde_json::Value {
+    match state {
+        Ok((ways, sections)) => json!({ "used": true, "ways": ways, "sections": sections }),
+        Err(why) => json!({ "used": false, "reason": why.to_string() }),
+    }
 }
 
 fn count_lines(path: &Path) -> usize {
@@ -476,6 +497,24 @@ fn gate_json() -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    use super::{sidecar_json, sidecar_line};
+    use crate::cmd::scan::sidecar::Fallback;
+    use serde_json::json;
+
+    #[test]
+    fn the_sidecar_line_names_the_state_and_the_reason() {
+        assert_eq!(sidecar_line(&Ok((137, 647))), "Body sidecar: in use (137 ways, 647 sections)");
+        let incomplete = Err(Fallback::Incomplete { missing: vec!["a".into()], stale: vec!["b".into(), "c".into(), "d".into(), "e".into()] });
+        assert_eq!(
+            sidecar_line(&incomplete),
+            "Body sidecar: not used, confirmation embeds per call — incomplete (missing a; stale b, c, d and 1 more); run `ways corpus`"
+        );
+        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("way-embed cannot return chunk vectors (needs 1.2.0); run `ways corpus`"));
+        assert!(sidecar_line(&Err(Fallback::BuildFailed("boom".into()))).ends_with("build failed: boom"));
+        assert_eq!(sidecar_json(&Err(Fallback::Absent)), json!({ "used": false, "reason": "absent; run `ways corpus`" }));
+        assert_eq!(sidecar_json(&Ok((1, 2))), json!({ "used": true, "ways": 1, "sections": 2 }));
+    }
+
     use super::key_phrase;
     use std::path::Path;
 
