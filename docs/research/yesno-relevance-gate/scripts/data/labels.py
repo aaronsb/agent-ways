@@ -153,7 +153,7 @@ L = [
 ('C89', 'ea/email', EN, 0, "A ray-tracing approximation question has nothing to do with email triage."),
 ('C13', 'softwaredev/environment/container-safety', EN, 0, "Filing issues has nothing to do with container execution safety."),
 ('C17', 'meta/knowledge/optimization/tuning', EN, 0, "Reviewing GitHub items has nothing to do with locale alias tuning."),
-('X210', 'data/schema-docs', EN, 0, "Running the wrap skill has nothing to do with database schema documentation."),
+('X210', 'data/documentation', EN, 0, "Running the wrap skill has nothing to do with database schema documentation."),
 ('C122', 'ea/comms/recap', EN, 0, "Converting ADRs has nothing to do with meeting recaps."),
 ('C250', 'itops/proposals', EN, 0, "Checking a zsh direnv loader has nothing to do with production change proposals."),
 ('C135', 'softwaredev/delivery/groundwork/permission', EN, 0, "Terrain colour maps have nothing to do with team ownership boundaries."),
