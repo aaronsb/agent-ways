@@ -338,41 +338,31 @@ pub fn extract_epistemic(content: &str) -> Option<String> {
     None
 }
 
-/// Extract See Also references from the body of a way file.
-/// Returns (target_name, target_domain, label) tuples.
-pub fn extract_see_also(content: &str) -> Vec<(String, String, String)> {
-    let mut refs = Vec::new();
-    let mut in_see_also = false;
-
-    for line in content.lines() {
-        if line.starts_with("## See Also") {
-            in_see_also = true;
-            continue;
-        }
-        if in_see_also && line.starts_with("## ") {
-            break;
-        }
-        if in_see_also && line.starts_with("- ") {
-            if let Some(parsed) = parse_see_also_line(line) {
-                refs.push(parsed);
-            }
-        }
-    }
-    refs
+/// One See Also entry that names a way: `- name(domain) — label`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WayRef {
+    /// A path (`code/quality`, `trust`), as written.
+    pub name: String,
+    /// The domain in parentheses (`softwaredev`).
+    pub domain: String,
+    /// The text after the dash; empty when there is none.
+    pub label: String,
 }
 
-/// See Also targets that name a way: `- name(domain) — label` lines where
-/// `name` is a path (`code/quality`, `trust`) and `domain` a single word, with
-/// the parenthesis touching the name. Returns `(name, domain)`.
+/// See Also entries that name a way: `- name(domain) — label` lines where
+/// `name` is a path (`code/quality`, `trust`) and `domain` a single word with
+/// a letter in it, and the parenthesis touches the name.
 ///
 /// A See Also section also carries references to things that are not ways:
 /// skills (`develop (skill)`), subagents, ADRs, doc paths, URLs, and prose.
 /// None of those has the touching `name(domain)` form with a path-shaped name,
 /// so they are skipped here and left to read as plain text. The heading
-/// matches `## See Also` in any letter case.
-pub fn extract_way_refs(content: &str) -> Vec<(String, String)> {
+/// matches `## See Also` in any letter case. Resolve an entry with
+/// [`crate::scanner::resolve_ref`].
+pub fn extract_way_refs(content: &str) -> Vec<WayRef> {
     fn token(s: &str, allow_slash: bool) -> bool {
         !s.is_empty()
+            && s.chars().any(|c| c.is_ascii_lowercase())
             && !s.starts_with('/')
             && !s.ends_with('/')
             && !s.contains("//")
@@ -403,32 +393,22 @@ pub fn extract_way_refs(content: &str) -> Vec<(String, String)> {
         let Some(close) = rest[open..].find(')') else { continue };
         let name = &rest[..open];
         let domain = &rest[open + 1..open + close];
-        if token(name, true) && token(domain, false) {
-            refs.push((name.to_string(), domain.to_string()));
+        if !(token(name, true) && token(domain, false)) {
+            continue;
         }
+        let after = rest[open + close + 1..].trim();
+        let label = after
+            .strip_prefix('\u{2014}')
+            .or_else(|| after.strip_prefix("--"))
+            .unwrap_or("")
+            .trim();
+        refs.push(WayRef {
+            name: name.to_string(),
+            domain: domain.to_string(),
+            label: label.to_string(),
+        });
     }
     refs
-}
-
-/// Parse a See Also line like `- code/testing(softwaredev) — quality requires test coverage`
-fn parse_see_also_line(line: &str) -> Option<(String, String, String)> {
-    let line = line.strip_prefix("- ")?;
-
-    let paren_open = line.find('(')?;
-    let paren_close = line.find(')')?;
-
-    let name = line[..paren_open].trim().to_string();
-    let domain = line[paren_open + 1..paren_close].trim().to_string();
-
-    let label = line[paren_close + 1..]
-        .trim()
-        .strip_prefix('\u{2014}') // em dash
-        .or_else(|| line[paren_close + 1..].trim().strip_prefix("--"))
-        .unwrap_or("")
-        .trim()
-        .to_string();
-
-    Some((name, domain, label))
 }
 
 #[cfg(test)]
@@ -439,7 +419,8 @@ mod tests {
     fn way_refs_keep_only_name_domain_entries() {
         let body = "# W\n\n## See also\n\n\
             - code/quality(softwaredev) \u{2014} a way\n\
-            - trust(meta) \u{2014} a domain way\n\
+            - trust(meta) -- no dash label\n\
+            - git(1) \u{2014} a man page\n\
             - develop (skill) \u{2014} a skill\n\
             - code-reviewer (subagent, `agents/code-reviewer.md`) \u{2014} an agent\n\
             - `docs/development.md` \u{2014} a doc\n\
@@ -447,12 +428,12 @@ mod tests {
             - ea / email / comms(ea) \u{2014} several\n\
             - ADR-183 \u{2014} an adr\n\
             \n## Other\n- late(meta) \u{2014} not in See Also\n";
+        let refs = extract_way_refs(body);
+        let got: Vec<(&str, &str, &str)> =
+            refs.iter().map(|r| (r.name.as_str(), r.domain.as_str(), r.label.as_str())).collect();
         assert_eq!(
-            extract_way_refs(body),
-            vec![
-                ("code/quality".to_string(), "softwaredev".to_string()),
-                ("trust".to_string(), "meta".to_string()),
-            ]
+            got,
+            vec![("code/quality", "softwaredev", "a way"), ("trust", "meta", "no dash label")]
         );
     }
 

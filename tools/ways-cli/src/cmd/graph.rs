@@ -37,14 +37,17 @@ pub fn run(ways_dir: Option<String>, output: Option<String>) -> Result<()> {
         w.write_all(b"\n")?;
         node_count += 1;
 
-        for (target_name, _target_domain, label) in frontmatter::extract_see_also(&content) {
+        // Edges point at node ids: an entry that names no node (a skill, a
+        // subagent, a way without a description) is not an edge.
+        for r in frontmatter::extract_way_refs(&content) {
+            let Some(target) = scanner::resolve_ref(&ways, &r.name, &r.domain) else { continue };
             let mut edge = json!({
                 "source": way.id,
-                "target": target_name,
+                "target": target.id,
                 "type": "see_also",
             });
-            if !label.is_empty() {
-                edge["label"] = json!(label);
+            if !r.label.is_empty() {
+                edge["label"] = json!(r.label);
             }
             serde_json::to_writer(&mut w, &edge)?;
             w.write_all(b"\n")?;

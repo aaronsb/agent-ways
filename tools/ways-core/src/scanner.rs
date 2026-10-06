@@ -44,7 +44,7 @@ pub fn md_files(root: &Path, kind: MdKind) -> impl Iterator<Item = PathBuf> {
 }
 
 /// A discovered way file with its derived identity.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WayFile {
     /// Absolute path to the way file
     pub path: PathBuf,
@@ -56,18 +56,42 @@ pub struct WayFile {
 
 /// Scan a directory for way files (identified by YAML frontmatter with `description:` field).
 pub fn scan_ways(root: &Path) -> Result<Vec<WayFile>> {
-    let mut ways = Vec::new();
+    Ok(scan_with(root, has_way_frontmatter))
+}
 
-    for path in md_files(root, MdKind::Ways) {
-        if has_way_frontmatter(&path) {
-            if let Some(way) = way_from_path(&path, root) {
-                ways.push(way);
-            }
-        }
-    }
+/// Like [`scan_ways`], but a way is any non-check `.md` file that opens with a
+/// frontmatter fence. Ways that fire on a path, a command or a trigger carry no
+/// `description:`; they are ways all the same, and a See Also entry can name one.
+/// The same identity rule as [`scan_ways`] applies.
+pub fn scan_declared_ways(root: &Path) -> Vec<WayFile> {
+    scan_with(root, |p| {
+        std::fs::read_to_string(p).is_ok_and(|c| crate::frontmatter::opens_with_fence(&c))
+    })
+}
 
+fn scan_with(root: &Path, is_way: impl Fn(&Path) -> bool) -> Vec<WayFile> {
+    let mut ways: Vec<WayFile> = md_files(root, MdKind::Ways)
+        .filter(|p| is_way(p))
+        .filter_map(|p| way_from_path(&p, root))
+        .collect();
     ways.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(ways)
+    ways
+}
+
+/// The way a See Also entry `name(domain)` names, among `ways`.
+///
+/// `domain/name` is tried first (`code/quality(softwaredev)` is way
+/// `code/quality` in domain `softwaredev`). Entries that spell the domain out
+/// resolve too: `data/migrations(data)` is `migrations` in `data`, and
+/// `documentation(documentation)` is the domain-root way. A name that lands in a
+/// different domain than the one in parentheses does not resolve.
+pub fn resolve_ref<'a>(ways: &'a [WayFile], name: &str, domain: &str) -> Option<&'a WayFile> {
+    let find = |id: &str| ways.iter().find(|w| w.domain == domain && w.id == id);
+    find(name).or_else(|| {
+        name.strip_prefix(domain)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .and_then(find)
+    })
 }
 
 /// Check if a file has YAML frontmatter containing a `description:` field.
@@ -232,6 +256,40 @@ mod tests {
 
         let ids: Vec<String> = scan_ways(&root).unwrap().into_iter().map(|w| w.id).collect();
         assert_eq!(ids, vec!["alpha", "mike", "zulu"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn declared_ways_include_those_without_a_description() {
+        let root = scratch("declared");
+        write_way(&root, "d/with/with.md", WAY);
+        write_way(&root, "d/files-only/files-only.md", "---\nfiles: x\n---\nbody\n");
+        write_way(&root, "d/plain/plain.md", "# no frontmatter\n");
+
+        assert_eq!(scan_ways(&root).unwrap().len(), 1);
+        let ids: Vec<String> = scan_declared_ways(&root).into_iter().map(|w| w.id).collect();
+        assert_eq!(ids, vec!["files-only", "with"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_ref_handles_every_spelling_and_refuses_a_wrong_domain() {
+        let root = scratch("resolve");
+        write_way(&root, "softwaredev/code/quality/quality.md", WAY);
+        write_way(&root, "meta/trust/trust.md", WAY);
+        write_way(&root, "data/migrations/migrations.md", WAY);
+        write_way(&root, "documentation/documentation.md", WAY);
+        write_way(&root, "research/research.md", WAY);
+        let ways = scan_ways(&root).unwrap();
+
+        let id = |n: &str, d: &str| resolve_ref(&ways, n, d).map(|w| w.id.as_str());
+        assert_eq!(id("code/quality", "softwaredev"), Some("code/quality"));
+        assert_eq!(id("trust", "meta"), Some("trust"));
+        assert_eq!(id("data/migrations", "data"), Some("migrations"));
+        assert_eq!(id("documentation", "documentation"), Some("documentation"));
+        assert_eq!(id("research", "research"), Some("research"));
+        assert_eq!(id("research", "softwaredev"), None);
+        assert_eq!(id("code/missing", "softwaredev"), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 
