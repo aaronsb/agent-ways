@@ -10,16 +10,18 @@
 //! the live file, one source in memory at a time. It is tolerant: a malformed
 //! line, a line of an unknown kind and a line outside the [`Window`] are
 //! skipped, and fields it does not know are ignored. [`Turns`] groups the
-//! stream into turns as it goes.
+//! stream into turns and judges each pull as it goes.
 //!
 //! A turn is opened by a scan with `turn_start: true` and keyed by
 //! `(session, agent)`. The epoch is not a turn index: the command and file
 //! lanes bump it on every tool call. Later scans of the same session and agent
-//! with `turn_start: false` belong to the open turn, and a pull belongs to the
-//! turn holding the scan its `scan_id` names.
+//! with `turn_start: false` belong to the open turn. A pull joins the scan its
+//! `scan_id` names, through an index of every scan in the window, so it joins
+//! even after that scan's turn has closed.
 
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::event_archive::{self, DECISIONS};
@@ -168,7 +170,7 @@ pub fn parse_line(line: &str) -> Option<Record> {
 /// The decision log's sources in time order: archives oldest first, then the
 /// live file when it exists.
 pub fn sources() -> Vec<PathBuf> {
-    crate::paths::decisions_log_sources()
+    crate::paths::decisions_log().parent().map(sources_in).unwrap_or_default()
 }
 
 /// [`sources`] for a decision log kept in `dir`.
@@ -181,12 +183,49 @@ pub fn sources_in(dir: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// A streaming reader over decision-log sources. Holds one source's text at a
-/// time; an unreadable source is skipped.
+/// One source being read. The live file is streamed line by line. An archive
+/// is held decoded, one day at a time: [`event_archive::read_source`] returns
+/// the whole buffer, and its recovery from a torn gzip member is what the
+/// reader relies on.
+enum Source {
+    Decoded { text: String, pos: usize },
+    Live(BufReader<std::fs::File>),
+}
+
+impl Source {
+    fn open(path: &Path) -> Option<Source> {
+        if path.extension().is_some_and(|e| e == "gz") {
+            Some(Source::Decoded { text: event_archive::read_source(path)?, pos: 0 })
+        } else {
+            std::fs::File::open(path).ok().map(|f| Source::Live(BufReader::new(f)))
+        }
+    }
+
+    /// The next line, `None` at the end. An unreadable stretch ends the source.
+    fn line(&mut self) -> Option<String> {
+        match self {
+            Source::Decoded { text, pos } => {
+                let rest = text.get(*pos..).filter(|r| !r.is_empty())?;
+                let end = rest.find('\n').map_or(rest.len(), |i| i + 1);
+                *pos += end;
+                Some(rest[..end].to_string())
+            }
+            Source::Live(r) => {
+                let mut buf = Vec::new();
+                match r.read_until(b'\n', &mut buf) {
+                    Ok(0) | Err(_) => None,
+                    Ok(_) => Some(String::from_utf8_lossy(&buf).into_owned()),
+                }
+            }
+        }
+    }
+}
+
+/// A streaming reader over decision-log sources, one source open at a time;
+/// an unreadable source is skipped.
 pub struct Records {
     pending: std::vec::IntoIter<PathBuf>,
-    text: String,
-    pos: usize,
+    current: Option<Source>,
     window: Window,
     skipped: usize,
 }
@@ -194,7 +233,7 @@ pub struct Records {
 impl Records {
     /// Records of `sources`, in order, that fall in `window`.
     pub fn new(sources: Vec<PathBuf>, window: Window) -> Self {
-        Records { pending: sources.into_iter(), text: String::new(), pos: 0, window, skipped: 0 }
+        Records { pending: sources.into_iter(), current: None, window, skipped: 0 }
     }
 
     /// Records of the installed decision log in `window`.
@@ -207,6 +246,15 @@ impl Records {
     pub fn skipped(&self) -> usize {
         self.skipped
     }
+
+    fn next_line(&mut self) -> Option<String> {
+        loop {
+            if let Some(line) = self.current.as_mut().and_then(Source::line) {
+                return Some(line);
+            }
+            self.current = Source::open(&self.pending.next()?);
+        }
+    }
 }
 
 impl Iterator for Records {
@@ -214,20 +262,11 @@ impl Iterator for Records {
 
     fn next(&mut self) -> Option<Record> {
         loop {
-            if self.pos >= self.text.len() {
-                let path = self.pending.next()?;
-                self.text = event_archive::read_source(&path).unwrap_or_default();
-                self.pos = 0;
-                continue;
-            }
-            let rest = &self.text[self.pos..];
-            let end = rest.find('\n').map_or(rest.len(), |i| i + 1);
-            let line = &rest[..end];
-            self.pos += end;
+            let line = self.next_line()?;
             if line.trim().is_empty() {
                 continue;
             }
-            match parse_line(line) {
+            match parse_line(&line) {
                 Some(r) if self.window.contains(r.ts()) => return Some(r),
                 Some(_) => {}
                 None => self.skipped += 1,
@@ -236,14 +275,20 @@ impl Iterator for Records {
     }
 }
 
-/// One turn: the scan that opened it, the scans of the same session and agent
-/// that followed it, and the pulls that joined one of its scans.
+/// One turn: the scan that opened it and the scans attributed to it after,
+/// in log order. Pulls are not held here: each is judged as it arrives (see
+/// [`Joined`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Turn {
+    /// The turn's place in the stream, counting from 0. A [`Joined`] pull
+    /// names its turn by it.
+    pub ordinal: u32,
     pub start: Scan,
-    /// Later scans of the turn, `turn_start: false`, in log order.
+    /// Later scans: the turn agent's own `turn_start: false` scans, and
+    /// scans of other agents of the session with no turn of their own (a
+    /// subagent's nested dispatch), attributed to the session's most recently
+    /// active turn.
     pub scans: Vec<Scan>,
-    pub pulls: Vec<Pull>,
 }
 
 impl Turn {
@@ -251,91 +296,229 @@ impl Turn {
     pub fn all_scans(&self) -> impl Iterator<Item = &Scan> {
         std::iter::once(&self.start).chain(&self.scans)
     }
+}
 
-    /// Whether any scan of the turn fired or re-disclosed `way`.
-    pub fn delivered(&self, way: &str) -> bool {
-        self.all_scans().flat_map(|s| &s.outcomes).any(|o| o.way == way && matches!(o.result.as_str(), "fired" | "redisclosed"))
-    }
+/// How a pull relates to what its context had already been given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Join {
+    /// The context already had the way. A pull by the agent that wrote the
+    /// named scan: a scan of that agent in the scan's turn, up to the pull,
+    /// fired or re-disclosed it. A pull by another agent (a subagent whose
+    /// marker names its dispatch scan): the named scan stashed it.
+    Delivered,
+    /// The pull's context had not been given the way.
+    RecallMiss,
+    /// The pull named no scan.
+    NoScanId,
+    /// The pull named a scan that is not in the window.
+    Unknown,
+}
+
+/// A pull with its verdict, the turn of the scan it named and that scan's
+/// project.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Joined {
+    pub pull: Pull,
+    pub join: Join,
+    pub turn: Option<u32>,
+    pub project: Option<String>,
 }
 
 /// What [`Turns`] hands on.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Grouped {
-    /// A turn, complete: its session and agent started another, or the stream
-    /// ended.
+    /// A turn, complete: its agent started another, it was idle past
+    /// [`IDLE_SECS`], or the stream ended.
     Turn(Turn),
-    /// A `turn_start: false` scan with no open turn for its session and
-    /// agent, such as one whose turn began before the window.
+    /// A `turn_start: false` scan with no turn in its session to belong to,
+    /// such as one whose turn began before the window.
     Orphan(Scan),
-    /// A pull whose `scan_id` is null, or names no scan of an open turn.
-    Unjoined(Pull),
+    /// A pull, judged when it arrives.
+    Pull(Joined),
 }
 
-/// Groups a record stream into turns as it arrives. Holds only the open turn
-/// of each `(session, agent)` and an index of their scan ids, so a closed turn
-/// is handed on and dropped.
+/// An open turn idle this long, by record ts, is handed on.
+pub const IDLE_SECS: u64 = 86_400;
+const SWEEP_SECS: u64 = 3_600;
+
+/// What a later pull needs of one scan, held for every scan in the window.
+/// Names are interned, so an entry is a few words.
+struct ScanInfo {
+    turn: Option<u32>,
+    agent: u32,
+    project: u32,
+    /// Ways this scan stashed for a subagent.
+    stashed: Box<[u32]>,
+    /// Ways this scan fired or re-disclosed; read only for a scan with no turn.
+    delivered: Box<[u32]>,
+}
+
+/// What a later pull needs of one turn.
+struct TurnInfo {
+    /// Ways the turn agent's scans fired or re-disclosed so far.
+    delivered: Vec<u32>,
+}
+
+struct Open {
+    turn: Turn,
+    agent: u32,
+    last: u64,
+}
+
+#[derive(Default)]
+struct Names {
+    ids: HashMap<Box<str>, u32>,
+    names: Vec<Box<str>>,
+}
+
+impl Names {
+    fn id(&mut self, s: &str) -> u32 {
+        if let Some(&i) = self.ids.get(s) {
+            return i;
+        }
+        let i = self.names.len() as u32;
+        self.names.push(s.into());
+        self.ids.insert(s.into(), i);
+        i
+    }
+
+    fn find(&self, s: &str) -> Option<u32> {
+        self.ids.get(s).copied()
+    }
+}
+
+/// Groups a record stream into turns and judges each pull, as it arrives.
+///
+/// Every scan in the window is indexed by `scan_id`, so a pull joins the scan
+/// it names whether or not that scan's turn is still open: a background
+/// subagent's pull, naming the dispatch scan of a turn main has since moved
+/// past, still joins. A turn is handed on when its agent starts another,
+/// when no scan has joined it for [`IDLE_SECS`] of record time, or at the end.
 #[derive(Default)]
 pub struct Turns {
-    open: HashMap<(String, String), Turn>,
-    by_scan: HashMap<String, (String, String)>,
+    open: HashMap<(String, String), Open>,
+    scans: HashMap<Box<str>, ScanInfo>,
+    turns: Vec<TurnInfo>,
+    names: Names,
+    last_sweep: u64,
 }
+
+fn ways_with(scan: &Scan, names: &mut Names, results: &[&str]) -> Box<[u32]> {
+    scan.outcomes.iter().filter(|o| results.contains(&o.result.as_str())).map(|o| names.id(&o.way)).collect()
+}
+
+const DELIVERED: &[&str] = &["fired", "redisclosed"];
 
 impl Turns {
     pub fn new() -> Self {
         Turns::default()
     }
 
+    /// Scans indexed so far, for measuring the index.
+    pub fn indexed(&self) -> usize {
+        self.scans.len()
+    }
+
     /// Take one record, handing on whatever it completes.
     pub fn push(&mut self, record: Record, emit: &mut impl FnMut(Grouped)) {
-        match record {
-            Record::Scan(scan) => {
-                let scan = *scan;
-                let key = (scan.session.clone(), scan.agent.clone());
-                if scan.turn_start {
-                    if let Some(done) = self.open.remove(&key) {
-                        self.close(done, emit);
-                    }
-                    if !scan.scan_id.is_empty() {
-                        self.by_scan.insert(scan.scan_id.clone(), key.clone());
-                    }
-                    self.open.insert(key, Turn { start: scan, scans: Vec::new(), pulls: Vec::new() });
-                } else if let Some(turn) = self.open.get_mut(&key) {
-                    if !scan.scan_id.is_empty() {
-                        self.by_scan.insert(scan.scan_id.clone(), key);
-                    }
-                    turn.scans.push(scan);
-                } else {
-                    emit(Grouped::Orphan(scan));
-                }
+        if let Some(now) = agent_fmt::when::parse_utc_iso(record.ts()) {
+            if now >= self.last_sweep + SWEEP_SECS {
+                self.last_sweep = now;
+                self.close_idle(now, emit);
             }
+        }
+        match record {
+            Record::Scan(scan) => self.scan(*scan, emit),
             Record::Pull(pull) => {
-                let turn = pull.scan_id.as_ref().and_then(|id| self.by_scan.get(id)).and_then(|key| self.open.get_mut(key));
-                match turn {
-                    Some(t) => t.pulls.push(pull),
-                    None => emit(Grouped::Unjoined(pull)),
-                }
+                let joined = self.join(pull);
+                emit(Grouped::Pull(joined));
             }
         }
     }
 
-    /// Hand on every turn still open, oldest start first.
-    pub fn finish(mut self, emit: &mut impl FnMut(Grouped)) {
-        let mut rest: Vec<Turn> = self.open.drain().map(|(_, t)| t).collect();
-        rest.sort_by(|a, b| a.start.ts.cmp(&b.start.ts).then_with(|| a.start.scan_id.cmp(&b.start.scan_id)));
-        for t in rest {
+    fn scan(&mut self, scan: Scan, emit: &mut impl FnMut(Grouped)) {
+        let now = agent_fmt::when::parse_utc_iso(&scan.ts).unwrap_or(self.last_sweep);
+        let agent = self.names.id(&scan.agent);
+        let key = (scan.session.clone(), scan.agent.clone());
+        let turn_key = if scan.turn_start {
+            if let Some(done) = self.open.remove(&key) {
+                emit(Grouped::Turn(done.turn));
+            }
+            let ordinal = self.turns.len() as u32;
+            self.turns.push(TurnInfo { delivered: Vec::new() });
+            let start = scan.clone();
+            self.open.insert(key.clone(), Open { turn: Turn { ordinal, start, scans: Vec::new() }, agent, last: now });
+            Some(key)
+        } else if self.open.contains_key(&key) {
+            Some(key)
+        } else {
+            // No turn of its own: a nested dispatch from inside a subagent.
+            // It belongs to the session's most recently active turn.
+            self.open.iter().filter(|(k, _)| k.0 == scan.session).max_by_key(|(_, o)| (o.last, o.turn.ordinal)).map(|(k, _)| k.clone())
+        };
+        let info = ScanInfo {
+            turn: turn_key.as_ref().map(|k| self.open[k].turn.ordinal),
+            agent,
+            project: self.names.id(&scan.project),
+            stashed: ways_with(&scan, &mut self.names, &["stashed"]),
+            delivered: ways_with(&scan, &mut self.names, DELIVERED),
+        };
+        if let Some(k) = &turn_key {
+            let open = self.open.get_mut(k).expect("open turn");
+            if open.agent == agent {
+                self.turns[open.turn.ordinal as usize].delivered.extend(info.delivered.iter());
+            }
+            open.last = open.last.max(now);
+            if !scan.turn_start {
+                open.turn.scans.push(scan.clone());
+            }
+        }
+        if !scan.scan_id.is_empty() {
+            self.scans.insert(scan.scan_id.as_str().into(), info);
+        }
+        if turn_key.is_none() {
+            emit(Grouped::Orphan(scan));
+        }
+    }
+
+    fn join(&self, pull: Pull) -> Joined {
+        let Some(id) = pull.scan_id.as_deref() else { return Joined { pull, join: Join::NoScanId, turn: None, project: None } };
+        let Some(info) = self.scans.get(id) else { return Joined { pull, join: Join::Unknown, turn: None, project: None } };
+        let way = self.names.find(&pull.way);
+        let has = |set: &[u32]| way.is_some_and(|w| set.contains(&w));
+        let delivered = if self.names.find(&pull.agent) == Some(info.agent) {
+            match info.turn {
+                Some(t) => has(&self.turns[t as usize].delivered),
+                None => has(&info.delivered),
+            }
+        } else {
+            has(&info.stashed)
+        };
+        let project = Some(self.names.names[info.project as usize].to_string());
+        Joined { pull, join: if delivered { Join::Delivered } else { Join::RecallMiss }, turn: info.turn, project }
+    }
+
+    fn close_idle(&mut self, now: u64, emit: &mut impl FnMut(Grouped)) {
+        let idle: Vec<(String, String)> = self.open.iter().filter(|(_, o)| o.last + IDLE_SECS < now).map(|(k, _)| k.clone()).collect();
+        let mut done: Vec<Turn> = idle.iter().filter_map(|k| self.open.remove(k)).map(|o| o.turn).collect();
+        done.sort_by_key(|t| t.ordinal);
+        for t in done {
             emit(Grouped::Turn(t));
         }
     }
 
-    fn close(&mut self, turn: Turn, emit: &mut impl FnMut(Grouped)) {
-        for s in turn.all_scans() {
-            self.by_scan.remove(&s.scan_id);
+    /// Hand on every turn still open, in the order they opened.
+    pub fn finish(mut self, emit: &mut impl FnMut(Grouped)) {
+        let mut rest: Vec<Turn> = self.open.drain().map(|(_, o)| o.turn).collect();
+        rest.sort_by_key(|t| t.ordinal);
+        for t in rest {
+            emit(Grouped::Turn(t));
         }
-        emit(Grouped::Turn(turn));
     }
 }
 
-/// Group a record stream into turns, handing each on as it completes.
+/// Group a record stream into turns and judged pulls, handing each on as it
+/// completes.
 pub fn group(records: impl IntoIterator<Item = Record>, mut emit: impl FnMut(Grouped)) {
     let mut turns = Turns::new();
     for r in records {
@@ -453,29 +636,127 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    #[test]
-    fn turns_open_on_turn_start_and_collect_their_scans_and_pulls() {
-        let (archive, live) = fixture::split();
-        let records: Vec<Record> = archive.into_iter().chain(live).filter_map(parse_line).collect();
-        let out = grouped(records);
-        let turns: Vec<&Turn> = out.iter().filter_map(|g| if let Grouped::Turn(t) = g { Some(t) } else { None }).collect();
-        let shape: Vec<(&str, Vec<&str>, Vec<&str>)> = turns
-            .iter()
-            .map(|t| (t.start.scan_id.as_str(), t.scans.iter().map(|s| s.scan_id.as_str()).collect(), t.pulls.iter().map(|p| p.way.as_str()).collect()))
-            .collect();
-        assert_eq!(
-            shape,
-            [("a1", vec!["a2"], vec!["d/a", "d/x"]), ("b1", vec![], vec!["d/a"]), ("a3", vec![], vec![])],
-            "three turns, though s1's two turns share epoch 3"
-        );
-        assert!(turns[0].delivered("d/a") && !turns[0].delivered("d/x"));
-        let unjoined: Vec<&str> = out.iter().filter_map(|g| if let Grouped::Unjoined(p) = g { Some(p.way.as_str()) } else { None }).collect();
-        assert_eq!(unjoined, ["d/c"], "the null scan_id pull");
+    fn turns_of(out: &[Grouped]) -> Vec<(&str, Vec<&str>)> {
+        out.iter()
+            .filter_map(|g| if let Grouped::Turn(t) = g { Some((t.start.scan_id.as_str(), t.scans.iter().map(|s| s.scan_id.as_str()).collect())) } else { None })
+            .collect()
+    }
+
+    fn joins_of(out: &[Grouped]) -> Vec<(&str, &str, Join)> {
+        out.iter()
+            .filter_map(|g| if let Grouped::Pull(j) = g { Some((j.pull.agent.as_str(), j.pull.way.as_str(), j.join)) } else { None })
+            .collect()
+    }
+
+    fn lines(ls: &[String]) -> Vec<Record> {
+        ls.iter().map(|l| parse_line(l).unwrap_or_else(|| panic!("{l}"))).collect()
+    }
+
+    fn scan(ts: &str, id: &str, agent: &str, start: bool, outcomes: &[(&str, &str)]) -> String {
+        let o: Vec<String> = outcomes.iter().map(|(w, r)| format!(r#"{{"way":"{w}","result":"{r}"}}"#)).collect();
+        format!(r#"{{"ts":"{ts}","kind":"scan","scan_id":"{id}","session":"s","agent":"{agent}","turn_start":{start},"project":"/p","outcomes":[{}]}}"#, o.join(","))
+    }
+
+    fn pull(ts: &str, agent: &str, way: &str, scan_id: &str) -> String {
+        format!(r#"{{"ts":"{ts}","kind":"pull","session":"s","agent":"{agent}","way":"{way}","stamped":true,"scan_id":"{scan_id}"}}"#)
     }
 
     #[test]
-    fn a_continuing_scan_with_no_open_turn_is_an_orphan() {
+    fn turns_open_on_turn_start_and_pulls_are_judged_as_they_arrive() {
+        let (archive, live) = fixture::split();
+        let records: Vec<Record> = archive.into_iter().chain(live).filter_map(parse_line).collect();
+        let out = grouped(records);
+        assert_eq!(turns_of(&out), [("a1", vec!["a2"]), ("b1", vec![]), ("a3", vec![])], "three turns, though s1's two turns share epoch 3");
+        assert_eq!(
+            joins_of(&out),
+            [
+                ("main", "d/a", Join::Delivered),
+                ("main", "d/x", Join::RecallMiss),
+                ("main", "d/c", Join::NoScanId),
+                ("main", "d/a", Join::RecallMiss),
+            ],
+            "a1 fired d/a; nothing in s1's turn fired d/x; s2's d/a was judge-blocked"
+        );
+    }
+
+    #[test]
+    fn a_continuing_scan_with_no_turn_in_its_session_is_an_orphan() {
         let out = grouped(vec![parse_line(fixture::S1[1]).unwrap()]);
         assert!(matches!(&out[..], [Grouped::Orphan(s)] if s.scan_id == "a2"));
+    }
+
+    /// m1 fires d/a and its task scan t1 stashes d/y for sub1. main's next
+    /// prompt m2 closes the turn before sub1, running in the background, pulls.
+    fn late_session() -> Vec<String> {
+        vec![
+            scan("2026-09-01T10:00:00Z", "m1", "main", true, &[("d/a", "fired")]),
+            scan("2026-09-01T10:00:10Z", "t1", "main", false, &[("d/y", "stashed")]),
+            scan("2026-09-01T10:01:00Z", "m2", "main", true, &[]),
+            pull("2026-09-01T10:02:00Z", "sub1", "d/y", "t1"),
+            pull("2026-09-01T10:02:10Z", "sub1", "d/a", "t1"),
+            pull("2026-09-01T10:02:20Z", "main", "d/y", "m2"),
+        ]
+    }
+
+    #[test]
+    fn a_late_subagent_pull_joins_the_dispatch_scan_after_the_next_prompt() {
+        let out = grouped(lines(&late_session()));
+        assert_eq!(turns_of(&out), [("m1", vec!["t1"]), ("m2", vec![])]);
+        let joined: Vec<(&str, Option<u32>)> = out.iter().filter_map(|g| if let Grouped::Pull(j) = g { Some((j.pull.way.as_str(), j.turn)) } else { None }).collect();
+        assert_eq!(joined, [("d/y", Some(0)), ("d/a", Some(0)), ("d/y", Some(1))], "sub1's pulls join m1's turn though m2 closed it");
+    }
+
+    #[test]
+    fn delivered_is_judged_per_context() {
+        let mut ls = late_session();
+        ls.push(pull("2026-09-01T10:00:20Z", "main", "d/y", "m1"));
+        let out = grouped(lines(&ls));
+        assert_eq!(
+            joins_of(&out),
+            [
+                ("sub1", "d/y", Join::Delivered),
+                ("sub1", "d/a", Join::RecallMiss),
+                ("main", "d/y", Join::RecallMiss),
+                ("main", "d/y", Join::RecallMiss),
+            ],
+            "sub1 was stashed d/y, not d/a, which only main had; main was never given d/y, stashed only for sub1"
+        );
+    }
+
+    #[test]
+    fn a_main_pull_counts_only_what_its_turn_delivered_before_it() {
+        let ls = vec![
+            scan("2026-09-01T10:00:00Z", "m1", "main", true, &[]),
+            pull("2026-09-01T10:00:05Z", "main", "d/a", "m1"),
+            scan("2026-09-01T10:00:10Z", "m1b", "main", false, &[("d/a", "fired")]),
+            pull("2026-09-01T10:00:20Z", "main", "d/a", "m1"),
+        ];
+        assert_eq!(joins_of(&grouped(lines(&ls))), [("main", "d/a", Join::RecallMiss), ("main", "d/a", Join::Delivered)]);
+    }
+
+    #[test]
+    fn a_nested_dispatch_is_indexed_and_its_subagent_pull_joins_it() {
+        let ls = vec![
+            scan("2026-09-01T10:00:00Z", "m1", "main", true, &[]),
+            scan("2026-09-01T10:00:10Z", "t1", "main", false, &[("d/y", "stashed")]),
+            scan("2026-09-01T10:00:30Z", "t2", "sub1", false, &[("d/z", "stashed")]),
+            pull("2026-09-01T10:00:40Z", "sub2", "d/z", "t2"),
+            pull("2026-09-01T10:00:50Z", "sub2", "d/y", "t2"),
+        ];
+        let out = grouped(lines(&ls));
+        assert_eq!(turns_of(&out), [("m1", vec!["t1", "t2"])], "sub1's dispatch belongs to the session's turn, not an orphan");
+        assert_eq!(joins_of(&out), [("sub2", "d/z", Join::Delivered), ("sub2", "d/y", Join::RecallMiss)]);
+    }
+
+    #[test]
+    fn an_idle_open_turn_is_handed_on_after_a_day() {
+        let ls = vec![
+            scan("2026-09-01T10:00:00Z", "m1", "main", true, &[]),
+            r#"{"ts":"2026-09-02T11:00:00Z","kind":"scan","scan_id":"x1","session":"other","agent":"main","turn_start":true,"project":"/p","outcomes":[]}"#.to_string(),
+            r#"{"ts":"2026-09-02T11:00:01Z","kind":"scan","scan_id":"x2","session":"other","agent":"main","turn_start":true,"project":"/p","outcomes":[]}"#.to_string(),
+        ];
+        let out = grouped(lines(&ls));
+        let order: Vec<&str> = out.iter().map(|g| if let Grouped::Turn(t) = g { t.start.scan_id.as_str() } else { "?" }).collect();
+        assert_eq!(order, ["m1", "x1", "x2"], "m1 is handed on as x1 arrives 25h later, before x2 closes x1");
     }
 }
