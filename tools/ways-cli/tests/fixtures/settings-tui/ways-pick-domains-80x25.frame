@@ -7,7 +7,7 @@ agent-tui frame 80x25
 |│     language            auto             ││such as [ea, itops].              │|
 |│     default_scope       agent            ││                                  │|
 |│▌    disabled_domains    []               ││Every way under a listed domain   │|
-|│     event_retention_days 90              ││stays silent. Set as a list, `[ea,│|
+|│     event_retention_days 365             ││stays silent. Set as a list, `[ea,│|
 |│ ▸ project · way         enabled          ││itops]` or `ea,itops`.            │|
 |│              ┌pick any: ways.disabled_domains─────────────────┐              │|
 |│              │ [x] itops                                      │              │|

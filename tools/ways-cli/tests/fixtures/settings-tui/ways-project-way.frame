@@ -7,7 +7,7 @@ agent-tui frame 100x30
 |│     language                  auto                  ││type     bool (Enter toggles)              │|
 |│     default_scope             agent                 ││default  true                              │|
 |│     disabled_domains          []                    ││from     default                           │|
-|│     event_retention_days      90                    ││writes   ~/proj/.claude/ways.yaml          │|
+|│     event_retention_days      365                   ││writes   ~/proj/.claude/ways.yaml          │|
 |│ ▾ project · way               enabled               ││[ways.project.api/dual]                    │|
 |│   ▾ this project                                    ││                                           │|
 |│     ▾ api                                           ││                                           │|

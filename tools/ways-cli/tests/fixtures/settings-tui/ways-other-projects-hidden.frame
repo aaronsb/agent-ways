@@ -7,7 +7,7 @@ agent-tui frame 100x30
 |│     language                  auto                  ││projects. The projects: all action (p)     │|
 |│     default_scope             agent                 ││lists them here, a group per project; a    │|
 |│     disabled_domains          []                    ││switch there writes that project's         │|
-|│     event_retention_days      90                    ││.claude/ways.yaml.                         │|
+|│     event_retention_days      365                   ││.claude/ways.yaml.                         │|
 |│ ▾ project · way               enabled               ││                                           │|
 |│   ▾ this project                                    ││value    4 ways · p shows them             │|
 |│     ▸ api                                           ││type     read-only here                    │|

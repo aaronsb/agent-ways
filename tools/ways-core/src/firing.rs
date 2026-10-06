@@ -15,7 +15,7 @@ use std::collections::HashMap;
 pub fn load_events() -> Vec<Value> {
     crate::paths::events_log_sources()
         .iter()
-        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .filter_map(|path| crate::event_archive::read_source(path))
         .flat_map(|content| {
             content
                 .lines()
@@ -33,7 +33,7 @@ pub fn load_events() -> Vec<Value> {
 pub fn load_events_text() -> String {
     crate::paths::events_log_sources()
         .iter()
-        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .filter_map(|path| crate::event_archive::read_source(path))
         .collect::<Vec<_>>()
         .join("\n")
 }

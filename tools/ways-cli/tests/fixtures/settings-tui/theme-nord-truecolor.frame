@@ -7,7 +7,7 @@ agent-tui frame 100x30
 |│     language                  auto                  ││                                           │|
 |│     default_scope             agent                 ││6 entries, 0 changed                       │|
 |│     disabled_domains          []                    ││                                           │|
-|│     event_retention_days      90                    ││                                           │|
+|│     event_retention_days      365                   ││                                           │|
 |│ ▸ project · way               enabled               ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|

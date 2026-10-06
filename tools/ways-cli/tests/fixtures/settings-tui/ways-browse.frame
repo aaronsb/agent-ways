@@ -7,7 +7,7 @@ agent-tui frame 100x30
 |│     language                  auto                  ││in its .claude/ways.yaml. Each entry falls │|
 |│     default_scope             agent                 ││back alone.                                │|
 |│     disabled_domains          []                    ││                                           │|
-|│     event_retention_days      90                    ││2 entries, 0 changed                       │|
+|│     event_retention_days      365                   ││2 entries, 0 changed                       │|
 |│▌▾ project · way               enabled               ││                                           │|
 |│   ▾ this project                                    ││                                           │|
 |│       (no project ways)       none · ways init      ││                                           │|

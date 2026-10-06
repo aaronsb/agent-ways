@@ -7,7 +7,7 @@ agent-tui frame 100x30
 |│▌    language                  auto                  ││code.                                      │|
 |│     default_scope             agent                 ││                                           │|
 |│     disabled_domains          []                    ││en and auto keep the English corpus. A     │|
-|│     event_retention_days      90                    ││specific code, set by the ways-localize    │|
+|│     event_retention_days      365                   ││specific code, set by the ways-localize    │|
 |│ ▸ project · way               enabled               ││skill, switches the build, matcher and     │|
 |│                                                     ││tuner to that language (ADR-139).          │|
 |│                                                     ││                                           │|

@@ -7,7 +7,7 @@ agent-tui frame 100x30
 |│     language                  auto                  ││type     bool (Enter toggles)              │|
 |│     default_scope             agent                 ││default  true                              │|
 |│     disabled_domains          []                    ││from     project ·                         │|
-|│     event_retention_days      90                    ││~/Projects/gateway/.claude/ways.yaml       │|
+|│     event_retention_days      365                   ││~/Projects/gateway/.claude/ways.yaml       │|
 |│ ▾ project · way               enabled               ││writes                                     │|
 |│   ▾ this project                                    ││~/Projects/gateway/.claude/ways.yaml       │|
 |│     ▸ api                                           ││[ways.project.api/rate-limit]              │|
