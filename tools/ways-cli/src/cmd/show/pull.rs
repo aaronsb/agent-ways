@@ -1,155 +1,198 @@
 //! A way pulled on request: `ways_read` (ADR-701 §5).
 //!
-//! Injection decides whether a way fires; a pull is the agent's own choice, so
-//! it needs no match, no judge and no scope, and the refire window (ADR-126)
-//! does not hold it back. The body is rendered as injection renders it. The
-//! disclosure is stamped as injection stamps it, so the next prompt scan sees
-//! the way as shown and does not repeat it. The disable switches still apply:
-//! a way the operator turned off is refused, with the toggle named.
+//! Serving and stamping are two steps, because only the second needs to know
+//! which agent asked. [`read`] returns the body as injection renders it and
+//! changes nothing: the MCP server is shared by a session's subagents and
+//! cannot tell them from main. [`stamp`] runs from the PostToolUse hook on
+//! `ways_read` (`ways hook pull`), whose payload names the calling agent, and
+//! records the disclosure for that agent as injection does, so the next scan
+//! does not repeat the way.
+//!
+//! A pull needs no match, no judge and no scope, and the refire window
+//! (ADR-126) does not hold it back. The disable switches still apply, and an
+//! id is validated and its file confined to the ways roots before anything is
+//! read or written.
 
 use anyhow::{bail, Result};
 use serde_json::json;
+use std::path::{Path, PathBuf};
 
 use super::{fireable_in_scope, render_way, stamp_disclosure, static_way_body, MacroRun};
 use crate::session;
 
-/// What a pull delivers and how it sat with the way's refire window.
+/// What a read serves.
 #[derive(Debug)]
-pub struct Pulled {
+pub struct Read {
     pub body: String,
-    /// The way was inside its re-disclosure suppression window, where
-    /// injection would have held it back.
-    pub out_of_band: bool,
-    /// Epochs since the way's last disclosure; set only when `out_of_band`.
-    pub epoch_distance: Option<u64>,
-    /// Disclosure was stamped. False without a session, and for a way whose
-    /// refire curve cannot be resolved (injection refuses such a way, so there
-    /// is no repeat to prevent); `stamp_note` says which.
-    pub stamped: bool,
-    pub stamp_note: Option<String>,
+    /// The way's `scope:` field, `agent` when it names none.
+    pub scope: String,
+    /// Set when the way's scope does not match the session's.
+    pub note: Option<String>,
 }
 
-/// Pull `id`. `session_id` is `None` when the caller cannot name its session:
-/// the body is served and nothing is stamped.
-pub fn pull(id: &str, session_id: Option<&str>) -> Result<Pulled> {
+/// An id is a way path: `/`-separated parts of `[A-Za-z0-9._-]`, none empty,
+/// `.` or `..`. That rules out absolute paths, `\`, and any climb out of a root.
+pub(crate) fn check_id(id: &str) -> Result<()> {
+    let plain = |part: &str| {
+        !part.is_empty() && part != "." && part != ".." && part.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    };
+    if id.split('/').all(plain) {
+        Ok(())
+    } else {
+        bail!("`{id}` is not a way id: expected `/`-separated parts of letters, digits, `.`, `_` and `-`")
+    }
+}
+
+/// The way's file and whether it is project-local, for an id that passed
+/// [`check_id`], is on, and resolves to a file inside a ways root.
+fn resolve(id: &str, project_dir: &str) -> Result<(PathBuf, bool)> {
+    check_id(id)?;
     if let Some(why) = disabled_reason(id) {
         bail!("way {id} is disabled: {why}");
     }
-    let project_dir = crate::util::project_dir();
-    let Some((way_file, is_project_local)) = session::resolve_way_file(id, &project_dir) else {
+    let Some((file, local)) = session::resolve_way_file(id, project_dir) else {
         bail!("no way named {id} in the project, user or core roots");
     };
+    if !inside_a_root(&file, project_dir) {
+        bail!("way {id} resolves outside the ways roots");
+    }
+    Ok((file, local))
+}
+
+/// Whether `file`, links resolved, sits under one of the ways roots, links resolved.
+fn inside_a_root(file: &Path, project_dir: &str) -> bool {
+    let Ok(file) = std::fs::canonicalize(file) else { return false };
+    ways_core::paths::ways_roots(Some(Path::new(project_dir)))
+        .iter()
+        .filter_map(|r| std::fs::canonicalize(r).ok())
+        .any(|root| file.starts_with(root))
+}
+
+/// Serve `id`'s body as injection renders it, changing no state. `session_id`,
+/// when known, is the session whose scope a mismatch is reported against.
+pub fn read(id: &str, session_id: Option<&str>) -> Result<Read> {
+    let project_dir = crate::util::project_dir();
+    let (way_file, is_project_local) = resolve(id, &project_dir)?;
+    let content = std::fs::read_to_string(&way_file)?;
+    let session_scope = session_id.map_or_else(|| "agent".to_string(), session::detect_scope);
+    let field = crate::frontmatter::field_in(&content, "scope").unwrap_or_default();
+    let note = (!session::scope_matches(&field, &session_scope)).then(|| {
+        format!("this way is scoped to `{field}` and this session is `{session_scope}`, so injection would not deliver it here")
+    });
+    let run = MacroRun { session_id: session_id.unwrap_or(""), project_dir: &project_dir, scope: &session_scope };
+    let body = render_way(&static_way_body(&content), &content, &way_file, is_project_local, &run);
+    Ok(Read { body, scope: if field.is_empty() { "agent".into() } else { field }, note })
+}
+
+/// Record a pull of `id` as a disclosure to the agent this process serves
+/// (`CLAUDE_AGENT_ID`, as every hook sets it) in `session_id`, and log it.
+pub fn stamp(id: &str, session_id: &str) -> Result<()> {
+    let project_dir = crate::util::project_dir();
+    resolve(id, &project_dir)?;
     let domain = id.split('/').next().unwrap_or(id).to_string();
+    let scope = session::detect_scope(session_id);
 
-    let Some(sid) = session_id else {
-        let (body, content) = body_of(&way_file)?;
-        let run = MacroRun { session_id: "", project_dir: &project_dir, scope: "agent" };
-        let out = render_way(&body, &content, &way_file, is_project_local, &run);
-        log_pulled(id, &domain, "", &project_dir, "agent", None, false, None, "no session id");
-        return Ok(Pulled {
-            body: out,
-            out_of_band: false,
-            epoch_distance: None,
-            stamped: false,
-            stamp_note: Some("no session id: the pull was not stamped, so injection may deliver this way again".into()),
-        });
+    let Ok(Some(fireable)) = fireable_in_scope(id, session_id, false) else {
+        // A way with no resolvable `refire:` is never injected, so there is no
+        // repeat to prevent. The pull is still logged.
+        log_pulled(&Pulled { id, domain: &domain, session_id, project_dir: &project_dir, scope: &scope, tick: None, window: "none", out_of_band: false, epoch_distance: None, stamped: false });
+        return Ok(());
     };
 
-    let fireable = match fireable_in_scope(id, sid, false) {
-        Ok(Some(f)) => f,
-        Ok(None) => bail!("no way named {id} in the project, user or core roots"),
-        Err(e) => {
-            // A way with no resolvable `refire:` is never injected, so there is
-            // nothing to stamp against. Serve it.
-            let (body, content) = body_of(&way_file)?;
-            let scope = session::detect_scope(sid);
-            let run = MacroRun { session_id: sid, project_dir: &project_dir, scope: &scope };
-            let out = render_way(&body, &content, &way_file, is_project_local, &run);
-            log_pulled(id, &domain, sid, &project_dir, &scope, None, false, None, "unstamped");
-            return Ok(Pulled { body: out, out_of_band: false, epoch_distance: None, stamped: false, stamp_note: Some(e.to_string()) });
-        }
-    };
-
-    let tick = session::get_token_position(sid);
-    let decision = session::way_fire_outcome(id, sid, &fireable.curve, tick);
+    let tick = session::get_token_position(session_id);
+    let decision = session::way_fire_outcome(id, session_id, &fireable.curve, tick);
     let out_of_band = decision.outcome == session::FireOutcome::Suppressed;
-    let epoch_distance = out_of_band.then(|| session::get_epoch(sid).saturating_sub(session::get_way_epoch(id, sid)));
+    let epoch_distance = out_of_band.then(|| session::get_epoch(session_id).saturating_sub(session::get_way_epoch(id, session_id)));
     let window = match decision.outcome {
         session::FireOutcome::FirstFire => "first_fire",
         session::FireOutcome::ReFire => "refire",
         session::FireOutcome::Suppressed => "suppressed",
     };
 
-    let body = static_way_body(&fireable.content);
-    let run = MacroRun { session_id: sid, project_dir: &fireable.project_dir, scope: &fireable.scope };
-    let out = render_way(&body, &fireable.content, &fireable.way_file, fireable.is_project_local, &run);
-
-    let lock = session::lock_engagement(id, sid);
-    session::record_way_fire(id, sid, &fireable.curve, tick);
+    let lock = session::lock_engagement(id, session_id);
+    session::record_way_fire(id, session_id, &fireable.curve, tick);
     drop(lock);
-    stamp_disclosure(id, sid, tick);
+    stamp_disclosure(id, session_id, tick);
 
-    log_pulled(id, &fireable.domain, sid, &fireable.project_dir, &fireable.scope, Some(tick), out_of_band, epoch_distance, window);
-    Ok(Pulled { body: out, out_of_band, epoch_distance, stamped: true, stamp_note: None })
-}
-
-fn body_of(way_file: &std::path::Path) -> Result<(String, String)> {
-    let content = std::fs::read_to_string(way_file)?;
-    Ok((static_way_body(&content), content))
+    log_pulled(&Pulled {
+        id,
+        domain: &fireable.domain,
+        session_id,
+        project_dir: &fireable.project_dir,
+        scope: &fireable.scope,
+        tick: Some(tick),
+        window,
+        out_of_band,
+        epoch_distance,
+        stamped: true,
+    });
+    Ok(())
 }
 
 /// The switch that turns `id` off, named for the operator, or `None` when the
-/// way is on. A domain in the user's `disabled_domains` wins over a project
-/// toggle; among project toggles the most specific key is the one named.
-pub(crate) fn disabled_reason(id: &str) -> Option<String> {
+/// way is on. A domain in the user's `disabled_domains` wins over a project toggle.
+fn disabled_reason(id: &str) -> Option<String> {
     let domain = id.split('/').next().unwrap_or(id);
     if session::domain_disabled(domain) {
         return Some(format!("its domain `{domain}` is listed in `disabled_domains` in the user config"));
     }
-    if !session::way_disabled(id) {
-        return None;
-    }
-    let key = crate::config::global()
-        .disabled_ways()
-        .iter()
-        .filter(|k| match k.strip_suffix("/*") {
-            Some(prefix) => id == prefix || id.starts_with(&format!("{prefix}/")),
-            None => k.as_str() == id,
-        })
-        .max_by_key(|k| k.len())?;
+    let key = crate::config::global().disabling_toggle(id)?;
     Some(format!("the project toggle `{key}: false` in `.claude/ways.yaml`"))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn log_pulled(
-    id: &str,
-    domain: &str,
-    session_id: &str,
-    project_dir: &str,
-    scope: &str,
+struct Pulled<'a> {
+    id: &'a str,
+    domain: &'a str,
+    session_id: &'a str,
+    project_dir: &'a str,
+    scope: &'a str,
     tick: Option<u64>,
+    /// `first_fire`, `refire` or `suppressed` as the firing engine classified the
+    /// pull, `none` when it was not consulted.
+    window: &'a str,
     out_of_band: bool,
     epoch_distance: Option<u64>,
-    window: &str,
-) {
+    stamped: bool,
+}
+
+fn log_pulled(p: &Pulled) {
     let agent_id = session::current_agent();
-    let tick = tick.map(|t| t.to_string());
+    let tick = p.tick.map(|t| t.to_string());
     let mut fields = vec![
         ("event", "way_pulled"),
-        ("way", id),
-        ("domain", domain),
-        ("window", window),
-        ("scope", scope),
-        ("project", project_dir),
-        ("session", session_id),
+        ("way", p.id),
+        ("domain", p.domain),
+        ("window", p.window),
+        ("scope", p.scope),
+        ("project", p.project_dir),
+        ("session", p.session_id),
         ("agent_id", agent_id.as_str()),
     ];
     if let Some(t) = tick.as_deref() {
         fields.push(("token_position", t));
     }
-    let mut extra = vec![("out_of_band", json!(out_of_band))];
-    if let Some(d) = epoch_distance {
+    let mut extra = vec![("out_of_band", json!(p.out_of_band)), ("stamped", json!(p.stamped))];
+    if let Some(d) = p.epoch_distance {
         extra.push(("epoch_distance", json!(d)));
     }
     session::log_event_with(&fields, &extra);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_id;
+
+    #[test]
+    fn plain_way_paths_pass() {
+        for id in ["a", "softwaredev/code/quality", "d/with-dash_and.dot", "d/v1.2"] {
+            assert!(check_id(id).is_ok(), "{id}");
+        }
+    }
+
+    #[test]
+    fn anything_that_could_leave_a_root_or_name_nothing_fails() {
+        for id in ["", "/", "/etc/passwd", "..", "../x", "a/../b", "a/./b", "./a", "a//b", "a/", "a\\b", "C:\\x", "a b", "a/\u{0}"] {
+            assert!(check_id(id).is_err(), "{id:?}");
+        }
+    }
 }

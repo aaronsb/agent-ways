@@ -74,7 +74,8 @@ impl Env {
             .env("XDG_STATE_HOME", self.state())
             .env("XDG_CONFIG_HOME", self.home.join(".config"))
             .env("XDG_DATA_HOME", self.home.join(".local/share"))
-            .env("XDG_BIN_HOME", self.home.join(".local/bin"));
+            .env("XDG_BIN_HOME", self.home.join(".local/bin"))
+            .env("CLAUDE_CONTEXT_WINDOW", "100000");
         for var in ["CLAUDE_PROJECT_DIR", "CLAUDE_AGENT_ID", "CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR"] {
             c.env_remove(var);
         }
@@ -140,90 +141,194 @@ fn guide_env(name: &str) -> Env {
     env
 }
 
+impl Env {
+    /// `ways hook pull`, as the PostToolUse hook on `ways_read` runs it.
+    fn hook_pull(&self, id: &str, agent: Option<&str>, transcript: Option<&std::path::Path>) -> std::process::Output {
+        use std::io::Write;
+        let mut payload = serde_json::json!({
+            "session_id": self.session,
+            "hook_event_name": "PostToolUse",
+            "tool_name": "mcp__agent-ways__ways_read",
+            "tool_input": { "id": id },
+            "cwd": self.project,
+        });
+        if let Some(a) = agent {
+            payload["agent_id"] = a.into();
+        }
+        if let Some(t) = transcript {
+            payload["transcript_path"] = t.to_string_lossy().as_ref().into();
+        }
+        let mut child = self.cmd(&["hook", "pull"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(payload.to_string().as_bytes()).unwrap();
+        child.wait_with_output().unwrap()
+    }
+
+    fn marker_of(&self, way: &str, agent: &str) -> PathBuf {
+        PathBuf::from(format!("{}/{}/ways/{way}/.marker.{agent}", sessions_root(), self.session))
+    }
+}
+
 #[test]
-fn a_read_returns_the_body_and_logs_a_pull() {
+fn a_read_serves_the_body_and_stamps_nothing() {
     let env = guide_env("shape");
     let (v, code) = env.read("lookupdomain/guide");
     assert_eq!(code, 0, "{v}");
+    assert_eq!(v["contract"], 1);
     assert_eq!(v["way"], "lookupdomain/guide");
     assert_eq!(v["route"], "lookupdomain > guide");
     assert!(v["body"].as_str().unwrap().contains("# Marker guide"), "{v}");
-    assert_eq!(v["out_of_band"], false);
-    assert_eq!(v["stamped"], true);
-    assert!(v.get("epoch_distance").is_none());
-
-    let pulls = env.events("way_pulled");
-    assert_eq!(pulls.len(), 1);
-    assert_eq!(pulls[0]["way"], "lookupdomain/guide");
-    assert_eq!(pulls[0]["out_of_band"], false);
-    assert_eq!(pulls[0]["window"], "first_fire");
+    assert_eq!(v["scope"], "agent");
+    assert!(v.get("note").is_none());
+    assert!(!env.marker("lookupdomain/guide").exists(), "the server cannot tell which agent asked, so it stamps no one");
+    assert!(env.events("way_pulled").is_empty());
 }
 
 #[test]
-fn a_pull_stamps_disclosure_so_a_following_scan_does_not_refire_the_way() {
+fn the_hook_stamps_the_pull_so_a_following_scan_does_not_refire_the_way() {
     let env = guide_env("stamp");
-    env.read("lookupdomain/guide");
+    assert!(env.hook_pull("lookupdomain/guide", None, None).status.success());
     assert!(env.marker("lookupdomain/guide").exists(), "the pull wrote the disclosure marker injection writes");
-
     let out = env.scan_command("git commit -m x");
     assert!(!out.contains("# Marker guide"), "the way was re-injected right after a pull: {out}");
     assert!(env.events("way_fired").is_empty(), "no injection fire follows a pull");
-}
-
-#[test]
-fn a_pull_inside_the_refire_window_returns_the_body_and_logs_the_epoch_distance() {
-    let env = guide_env("window");
-    // Injection delivers the way first, at epoch 0.
-    let out = env.scan_command("git commit -m x");
-    assert!(out.contains("# Marker guide"), "injection fires the way: {out}");
-    // Two prompts and one more tool call pass (each scan bumps the epoch); the way is still inside its window.
-    env.scan_prompt("hello there");
-    env.scan_prompt("and again");
-    // Injection would hold the way back now.
-    assert!(!env.scan_command("git commit -m y").contains("# Marker guide"));
-
-    let (v, code) = env.read("lookupdomain/guide");
-    assert_eq!(code, 0, "{v}");
-    assert!(v["body"].as_str().unwrap().contains("# Marker guide"), "a pull always returns the way: {v}");
-    assert_eq!(v["out_of_band"], true);
-    assert_eq!(v["epoch_distance"], 3, "disclosed at epoch 1, read at epoch 4");
-
     let pulls = env.events("way_pulled");
     assert_eq!(pulls.len(), 1);
-    assert_eq!(pulls[0]["out_of_band"], true);
-    assert_eq!(pulls[0]["epoch_distance"], 3);
-    assert_eq!(pulls[0]["window"], "suppressed");
+    assert_eq!((pulls[0]["way"].as_str(), pulls[0]["window"].as_str()), (Some("lookupdomain/guide"), Some("first_fire")));
+    assert_eq!((&pulls[0]["out_of_band"], &pulls[0]["stamped"]), (&Value::Bool(false), &Value::Bool(true)));
 }
 
 #[test]
-fn a_disabled_way_is_refused_and_the_toggle_is_named() {
+fn a_subagents_pull_is_stamped_for_the_subagent_and_not_for_main() {
+    let env = guide_env("subagent");
+    assert!(env.hook_pull("lookupdomain/guide", Some("sub1"), None).status.success());
+    assert!(env.marker_of("lookupdomain/guide", "sub1").exists(), "the stamp lands on the calling agent");
+    assert!(!env.marker("lookupdomain/guide").exists(), "main's marker stays absent");
+    // Main has not seen the way, so injection still delivers it there.
+    assert!(env.scan_command("git commit -m x").contains("# Marker guide"));
+}
+
+#[test]
+fn a_pull_inside_the_refire_window_is_out_of_band_and_restarts_the_window() {
+    let env = guide_env("ticks");
+    let transcript = env.base.join(format!("{}.jsonl", env.session));
+    let at = |tokens: u64| {
+        std::fs::write(
+            &transcript,
+            format!(
+                r#"{{"type":"assistant","message":{{"model":"claude-opus-5-5","usage":{{"input_tokens":{tokens},"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}}}"#
+            ) + "\n",
+        )
+        .unwrap();
+    };
+    let scan = |env: &Env| {
+        let project = env.project.to_string_lossy().into_owned();
+        let out = env
+            .cmd(&["scan", "command", "--command", "git commit -m x", "--session", &env.session, "--project", &project, "--transcript", &transcript.to_string_lossy()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    // The window is 0.15 of 100k tokens: a way re-discloses once more than 15k tokens have passed.
+    at(20_000);
+    assert!(scan(&env).contains("# Marker guide"), "T1: injection fires the way");
+    at(30_000);
+    assert!(env.hook_pull("lookupdomain/guide", None, Some(&transcript)).status.success());
+    let pulls = env.events("way_pulled");
+    assert_eq!(pulls.len(), 1);
+    assert_eq!((pulls[0]["window"].as_str(), &pulls[0]["out_of_band"]), (Some("suppressed"), &Value::Bool(true)));
+    assert!(pulls[0]["epoch_distance"].is_number(), "{}", pulls[0]);
+    at(40_000);
+    assert!(!scan(&env).contains("# Marker guide"), "T2+10k is inside the window the pull restarted (T1+20k would have refired)");
+    at(50_000);
+    assert!(scan(&env).contains("# Marker guide"), "T2+20k is past the window: the way refires");
+    assert_eq!(env.events("way_redisclosed").len(), 1);
+}
+
+#[test]
+fn a_disabled_way_is_refused_with_or_without_a_session_and_the_toggle_is_named() {
     let env = guide_env("disabled");
     std::fs::write(env.project.join(".claude/ways.yaml"), "ways:\n  lookupdomain/*: false\n").unwrap();
-    let (v, code) = env.read("lookupdomain/guide");
-    assert_eq!(code, 1, "{v}");
-    let err = v["error"].as_str().unwrap();
-    assert!(err.contains("disabled") && err.contains("lookupdomain/*: false") && err.contains("ways.yaml"), "{err}");
-    assert!(v.get("body").is_none(), "a disabled way is not served");
+    for args in [vec!["read", "lookupdomain/guide", "--session", env.session.as_str()], vec!["read", "lookupdomain/guide"]] {
+        let (v, code) = env.lookup(&args);
+        assert_eq!(code, 1, "{v}");
+        let err = v["error"].as_str().unwrap();
+        assert!(err.contains("disabled") && err.contains("lookupdomain/*: false") && err.contains("ways.yaml"), "{err}");
+        assert!(v.get("body").is_none(), "a disabled way is not served");
+    }
+    assert!(env.hook_pull("lookupdomain/guide", None, None).status.success());
+    assert!(!env.marker("lookupdomain/guide").exists(), "a disabled way is not stamped either");
     assert!(env.events("way_pulled").is_empty());
+}
+
+#[test]
+fn an_id_that_leaves_the_ways_roots_is_refused_by_every_verb() {
+    let env = guide_env("escape");
+    let outside = env.base.join("outside/secret");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("secret.md"), "---\ndescription: x\nrefire: once\n---\nTOP SECRET\n").unwrap();
+    // A link inside the root that resolves outside it.
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, env.ways_root().join("lookupdomain/link")).unwrap();
+    let absolute = outside.to_string_lossy().into_owned();
+    for id in ["../../../../outside/secret", "lookupdomain/../../../../outside/secret", absolute.as_str(), "lookupdomain\\guide", "lookupdomain//guide", "./lookupdomain/guide", ""] {
+        for verb in ["read", "neighbors"] {
+            let (v, code) = env.lookup(&[verb, id]);
+            assert_eq!(code, 1, "{verb} {id:?}: {v}");
+            assert!(!v.to_string().contains("TOP SECRET"), "{verb} {id:?} leaked the file");
+        }
+        env.hook_pull(id, None, None);
+    }
+    #[cfg(unix)]
+    {
+        let (v, code) = env.read("lookupdomain/link");
+        assert_eq!(code, 1, "{v}");
+        assert!(!v.to_string().contains("TOP SECRET"));
+        env.hook_pull("lookupdomain/link", None, None);
+    }
+    let escaped = format!("{}/{}/ways", sessions_root(), env.session);
+    let stamped: Vec<_> = std::fs::read_dir(&escaped).map(|d| d.flatten().map(|e| e.file_name()).collect()).unwrap_or_default();
+    assert!(stamped.is_empty(), "nothing was stamped for a refused id: {stamped:?}");
+    assert!(env.events("way_pulled").is_empty());
+    assert!(env.read("lookupdomain/guide").1 == 0, "a plain id still reads");
+}
+
+#[test]
+fn a_project_with_ways_switched_off_serves_no_search_or_read() {
+    let env = guide_env("off");
+    std::fs::write(env.project.join(".claude/ways.yaml"), "enabled: false\n").unwrap();
+    for args in [vec!["read", "lookupdomain/guide"], vec!["search", "commit"]] {
+        let (v, code) = env.lookup(&args);
+        assert_eq!(code, 1, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("enabled: false"), "{v}");
+    }
+    env.hook_pull("lookupdomain/guide", None, None);
     assert!(!env.marker("lookupdomain/guide").exists());
 }
 
 #[test]
-fn an_unknown_way_is_an_error() {
-    let env = guide_env("unknown");
-    let (v, code) = env.read("lookupdomain/nothing");
-    assert_eq!(code, 1);
-    assert!(v["error"].as_str().unwrap().contains("no way named"), "{v}");
+fn a_read_ignores_the_ways_scope_and_says_when_it_does_not_match_the_session() {
+    let env = Env::new("scope");
+    env.way("lookupdomain/sub", "description: sub only\nscope: subagent\nrefire: 0.15\n", "# Marker sub\n");
+    let (v, code) = env.lookup(&["read", "lookupdomain/sub", "--session", &env.session]);
+    assert_eq!(code, 0, "scope never refuses a pull: {v}");
+    assert!(v["body"].as_str().unwrap().contains("# Marker sub"));
+    assert_eq!(v["scope"], "subagent");
+    let note = v["note"].as_str().expect("a note names the mismatch");
+    assert!(note.contains("subagent") && note.contains("agent"), "{note}");
 }
 
 #[test]
-fn a_read_without_a_session_serves_the_body_unstamped() {
-    let env = guide_env("nosession");
-    let (v, code) = env.lookup(&["read", "lookupdomain/guide"]);
+fn a_neighbour_out_of_scope_for_the_session_is_marked() {
+    let env = Env::new("scopenb");
+    env.way("nd/a", "description: a\n", "# A\n\n## See Also\n\n- b(nd) — b\n- c(nd) — c\n");
+    env.way("nd/b", "description: b\nscope: subagent\n", "# B\n");
+    env.way("nd/c", "description: c\n", "# C\n");
+    let (v, code) = env.lookup(&["neighbors", "nd/a", "--session", &env.session]);
     assert_eq!(code, 0, "{v}");
-    assert!(v["body"].as_str().unwrap().contains("# Marker guide"));
-    assert_eq!(v["stamped"], false);
-    assert!(v["note"].as_str().unwrap().contains("no session"));
+    let all = v["neighbors"].as_array().unwrap();
+    let find = |w: &str| all.iter().find(|n| n["way"] == w).unwrap();
+    assert_eq!(find("nd/b")["in_scope"], false);
+    assert!(find("nd/c").get("in_scope").is_none());
 }
 
 fn embedding(env: &Env, rows: &[(&str, [f64; 3])]) {
@@ -247,6 +352,7 @@ fn neighbours_label_the_tree_a_see_also_edge_and_a_semantic_neighbour() {
 
     let (v, code) = env.lookup(&["neighbors", "nd/code"]);
     assert_eq!(code, 0, "{v}");
+    assert_eq!(v["contract"], 1);
     let all = v["neighbors"].as_array().unwrap();
     let of = |kind: &str| -> Vec<&str> { all.iter().filter(|n| n["kind"] == kind).map(|n| n["way"].as_str().unwrap()).collect() };
     assert_eq!(of("child"), ["nd/code/quality"]);
@@ -262,5 +368,6 @@ fn a_search_without_an_embedding_engine_is_an_error_not_an_empty_list() {
     let env = guide_env("search");
     let (v, code) = env.lookup(&["search", "commit the change", "--session", &env.session]);
     assert_eq!(code, 1, "{v}");
+    assert_eq!(v["contract"], 1, "an error carries the contract too");
     assert!(v["error"].as_str().unwrap().contains("embedding"), "{v}");
 }

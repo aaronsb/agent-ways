@@ -20,15 +20,26 @@ const NEIGHBOUR_THRESHOLD: f64 = 0.3;
 /// Print one lookup's result as a JSON object and exit: 0 for a result, 1 for
 /// an `{"error": ...}` object.
 pub fn emit(result: Result<Value>) -> ! {
-    match result {
-        Ok(v) => {
-            println!("{v}");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            println!("{}", json!({ "error": format!("{e:#}") }));
-            std::process::exit(1);
-        }
+    let (mut object, code) = match result {
+        Ok(v) => (v, 0),
+        Err(e) => (json!({ "error": format!("{e:#}") }), 1),
+    };
+    object["contract"] = json!(CONTRACT);
+    println!("{object}");
+    std::process::exit(code);
+}
+
+/// The version of this JSON interface. Every object carries it, and `ways-mcp`
+/// refuses a `ways` that speaks another, so the two binaries can update apart.
+pub const CONTRACT: u64 = 1;
+
+/// The refusal for a project that switched ways off (ADR-184 item 6): a lookup
+/// serves nothing there, as the scan lanes inject nothing.
+pub fn ensure_enabled() -> Result<()> {
+    if crate::cmd::scan::enabled_for(None) {
+        Ok(())
+    } else {
+        bail!("ways are switched off here: `enabled: false` in this project's `.claude/ways.yaml` or in the user config")
     }
 }
 
@@ -60,28 +71,23 @@ pub fn search_json(query: &str, session_id: Option<&str>, top_n: usize) -> Resul
     Ok(json!({ "lane": found.lane, "candidates": hits }))
 }
 
-/// `ways_read`: pull a way and stamp its disclosure.
+/// `ways_read`: a way's body as injection renders it. Nothing is stamped here;
+/// the PostToolUse hook does that for the calling agent (`ways hook pull`).
 pub fn read_json(id: &str, session_id: Option<&str>) -> Result<Value> {
-    let pulled = crate::cmd::show::pull(id, session_id)?;
-    let mut o = json!({
-        "way": id,
-        "route": route_of(id),
-        "body": pulled.body,
-        "out_of_band": pulled.out_of_band,
-        "stamped": pulled.stamped,
-    });
-    if let Some(d) = pulled.epoch_distance {
-        o["epoch_distance"] = json!(d);
-    }
-    if let Some(note) = pulled.stamp_note {
+    let read = crate::cmd::show::pull::read(id, session_id)?;
+    let mut o = json!({ "way": id, "route": route_of(id), "scope": read.scope, "body": read.body });
+    if let Some(note) = read.note {
         o["note"] = json!(note);
     }
     Ok(o)
 }
 
-/// `ways_neighbors`: the way's tree, See Also and semantic neighbours.
-pub fn neighbors_json(id: &str, top_n: usize) -> Result<Value> {
+/// `ways_neighbors`: the way's tree, See Also and semantic neighbours. With a
+/// session, a neighbour whose `scope:` would not reach that session is marked.
+pub fn neighbors_json(id: &str, session_id: Option<&str>, top_n: usize) -> Result<Value> {
+    crate::cmd::show::pull::check_id(id)?;
     let project_dir = crate::util::project_dir();
+    let session_scope = session_id.map_or_else(|| "agent".to_string(), session::detect_scope);
     let roots = ways_core::paths::ways_roots(Some(Path::new(&project_dir)));
     let ways = collect_ways(&roots);
 
@@ -89,7 +95,13 @@ pub fn neighbors_json(id: &str, top_n: usize) -> Result<Value> {
     let entries = if corpus.is_file() { load_embeddings(&corpus.to_string_lossy()).ok() } else { None };
     let prefix = format!("{}/", crate::util::encode_project_key(Path::new(&project_dir)));
     let is_disabled = |way: &str| session::domain_disabled(way.split('/').next().unwrap_or(way)) || session::way_disabled(way);
-    neighbors_in(id, &ways, entries.as_deref(), &prefix, top_n, &is_disabled)
+    let out_of_scope = |way: &str| {
+        ways.iter()
+            .find(|n| n.id == way)
+            .and_then(|n| std::fs::read_to_string(&n.file.path).ok())
+            .is_some_and(|c| !session::scope_matches(&crate::frontmatter::field_in(&c, "scope").unwrap_or_default(), &session_scope))
+    };
+    neighbors_in(id, &ways, entries.as_deref(), &prefix, top_n, &is_disabled, &out_of_scope)
 }
 
 /// One way with its tree id (domain included, as `ways_read` takes it).
@@ -134,6 +146,7 @@ fn neighbors_in(
     project_prefix: &str,
     top_n: usize,
     is_disabled: &dyn Fn(&str) -> bool,
+    out_of_scope: &dyn Fn(&str) -> bool,
 ) -> Result<Value> {
     let target = ways
         .iter()
@@ -151,6 +164,9 @@ fn neighbors_in(
         let mut o = json!({ "kind": kind, "way": way, "route": route_of(way) });
         if is_disabled(way) {
             o["enabled"] = json!(false);
+        }
+        if out_of_scope(way) {
+            o["in_scope"] = json!(false);
         }
         if let Value::Object(map) = extra {
             for (k, v) in map {
@@ -274,7 +290,7 @@ mod tests {
             entry("d/tests", [0.0, 1.0, 0.0]),
             entry("d/code/quality", [0.0, 0.0, 1.0]),
         ];
-        let got = neighbors_in("d/code", &ways, Some(&entries), "-p/", 5, &|_| false).unwrap();
+        let got = neighbors_in("d/code", &ways, Some(&entries), "-p/", 5, &|_| false, &|_| false).unwrap();
         assert_eq!(kinds(&got, "parent"), ["d"]);
         assert_eq!(kinds(&got, "child"), ["d/code/quality"]);
         assert_eq!(kinds(&got, "see_also"), ["d/tests"]);
@@ -291,7 +307,7 @@ mod tests {
     #[test]
     fn a_way_pointed_at_lists_who_points_at_it() {
         let (root, ways) = tree("incoming");
-        let got = neighbors_in("d/tests", &ways, None, "-p/", 5, &|_| false).unwrap();
+        let got = neighbors_in("d/tests", &ways, None, "-p/", 5, &|_| false, &|_| false).unwrap();
         assert_eq!(kinds(&got, "see_also_from"), ["d/code"]);
         assert!(got["note"].as_str().unwrap().contains("no corpus"));
         let _ = std::fs::remove_dir_all(root);
@@ -305,7 +321,7 @@ mod tests {
             entry("d/other", [1.0, 0.0, 0.0]),
             entry("-elsewhere/d/tests", [1.0, 0.0, 0.0]),
         ];
-        let got = neighbors_in("d/code", &ways, Some(&entries), "-p/", 5, &|w| w == "d/other").unwrap();
+        let got = neighbors_in("d/code", &ways, Some(&entries), "-p/", 5, &|w| w == "d/other", &|_| false).unwrap();
         let sem: Vec<&Value> = got["neighbors"].as_array().unwrap().iter().filter(|n| n["kind"] == "semantic").collect();
         assert_eq!(sem.len(), 1);
         assert_eq!(sem[0]["way"], "d/other");
@@ -316,8 +332,8 @@ mod tests {
     #[test]
     fn an_unknown_way_is_an_error_and_a_unique_suffix_resolves() {
         let (root, ways) = tree("lookup");
-        assert!(neighbors_in("d/missing", &ways, None, "-p/", 5, &|_| false).is_err());
-        let got = neighbors_in("quality", &ways, None, "-p/", 5, &|_| false).unwrap();
+        assert!(neighbors_in("d/missing", &ways, None, "-p/", 5, &|_| false, &|_| false).is_err());
+        let got = neighbors_in("quality", &ways, None, "-p/", 5, &|_| false, &|_| false).unwrap();
         assert_eq!(got["way"], "d/code/quality");
         let _ = std::fs::remove_dir_all(root);
     }

@@ -21,6 +21,8 @@ pub enum HookEvent {
     Task,
     /// PostToolUse and PostToolUseFailure: run the postchecks (check-post.sh).
     PostTool,
+    /// PostToolUse on `ways_read`: stamp the pull for the calling agent (check-pull.sh).
+    Pull,
     /// PostToolUse: match queued operator messages (check-queued.sh).
     Queued,
     /// Stop: record the last response for the next prompt (check-response.sh).
@@ -54,6 +56,7 @@ pub enum Request {
     File { session: String, path: String },
     Task { session: String, query: String, team: Option<String>, subagent_type: Option<String> },
     PostTool { session: String, hook_event: String },
+    Pull { session: String, id: String },
     Queued { session: String, transcript: String },
     Stop { session: String, transcript: String },
     SubagentStart { session: String },
@@ -132,6 +135,10 @@ impl HookInput {
             HookEvent::PostTool => Request::PostTool {
                 session,
                 hook_event: self.text("/hook_event_name").unwrap_or_else(|| "PostToolUse".into()),
+            },
+            HookEvent::Pull => match self.text("/tool_input/id") {
+                Some(id) => Request::Pull { session, id },
+                None => Request::Skip,
             },
             HookEvent::Queued => match self.text("/transcript_path") {
                 Some(transcript) => Request::Queued { session, transcript },
@@ -255,6 +262,13 @@ mod tests {
     }
 
     #[test]
+    fn pull_needs_the_way_id_the_tool_was_given() {
+        let raw = r#"{"session_id":"s","tool_input":{"id":"d/w"}}"#;
+        assert_eq!(req(E::Pull, raw), Request::Pull { session: "s".into(), id: "d/w".into() });
+        assert_eq!(req(E::Pull, r#"{"session_id":"s","tool_input":{}}"#), Request::Skip);
+    }
+
+    #[test]
     fn queued_needs_a_transcript() {
         let raw = r#"{"session_id":"s","transcript_path":"/t.jsonl"}"#;
         assert_eq!(req(E::Queued, raw), Request::Queued { session: "s".into(), transcript: "/t.jsonl".into() });
@@ -279,7 +293,7 @@ mod tests {
 
     #[test]
     fn no_session_no_work() {
-        for e in [E::Prompt, E::State, E::Command, E::File, E::Task, E::PostTool, E::Queued, E::Stop, E::SubagentStart, E::TasksActive] {
+        for e in [E::Prompt, E::State, E::Command, E::File, E::Task, E::PostTool, E::Pull, E::Queued, E::Stop, E::SubagentStart, E::TasksActive] {
             assert_eq!(req(e, r#"{"prompt":"x","transcript_path":"/t"}"#), Request::Skip, "{e:?}");
             // An id that would leave the sessions root is no id.
             let escaping = r#"{"session_id":"../victim","prompt":"x","transcript_path":"/t"}"#;

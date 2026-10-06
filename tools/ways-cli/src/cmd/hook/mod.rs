@@ -84,6 +84,14 @@ pub fn run(event: HookEvent) -> Result<()> {
             emit(&hook_event, &post_tool::scan(&raw, &session, &project_dir));
             Ok(())
         }
+        Request::Pull { session, id } => {
+            // The calling agent is the payload's `agent_id`, set in the
+            // environment above, so the stamp lands on it and not on main.
+            crate::cmd::show::set_firing_transcript(transcript);
+            // A refused id stamps nothing; the hook prints nothing either way.
+            let _ = crate::cmd::show::pull::stamp(&id, &session);
+            Ok(())
+        }
         Request::Queued { session, transcript } => {
             // Operator messages are queued to the main agent, and a subagent's
             // hook names main's transcript and shares the session's scan mark,
@@ -149,7 +157,7 @@ fn subagent_lane(request: &Request, from_subagent: bool) -> Option<&'static str>
         Request::File { .. } => Some("file"),
         Request::PostTool { .. } => Some("post_tool"),
         Request::Queued { .. } => Some("queued"),
-        Request::Stop { .. } | Request::SessionStart { .. } | Request::TasksActive { .. } | Request::Skip => None,
+        Request::Pull { .. } | Request::Stop { .. } | Request::SessionStart { .. } | Request::TasksActive { .. } | Request::Skip => None,
     }
 }
 
@@ -161,6 +169,7 @@ fn request_session(request: &Request) -> Option<&str> {
         | Request::File { session, .. }
         | Request::Task { session, .. }
         | Request::PostTool { session, .. }
+        | Request::Pull { session, .. }
         | Request::Queued { session, .. }
         | Request::Stop { session, .. }
         | Request::SubagentStart { session }

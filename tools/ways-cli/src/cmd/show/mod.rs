@@ -4,8 +4,7 @@
 
 mod helpers;
 mod metrics;
-mod pull;
-pub use pull::pull;
+pub mod pull;
 
 use anyhow::Result;
 use serde_json::json;

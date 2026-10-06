@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use super::candidate_log::ranked_candidates;
-use super::{batch_embed_score, candidate_log, collect_candidates, eligible, reduce, Lane, WayCandidate, BUDGET_PROMPT};
+use super::{batch_embed_score, candidate_log, collect_candidates, prompt_competitors, reduce, WayCandidate, BUDGET_PROMPT};
 use crate::session;
 
 /// One ranked way.
@@ -39,8 +39,7 @@ pub(crate) struct Search {
 pub(crate) fn search(query: &str, session_id: Option<&str>, project_dir: &str, top_n: usize) -> Option<Search> {
     let scope = session_id.map_or_else(|| "agent".to_string(), session::detect_scope);
     let candidates = collect_candidates(project_dir);
-    let eligible_ways: Vec<&WayCandidate> =
-        candidates.iter().filter(|c| c.embeddable() && eligible(c, Lane::Prompt { scope: &scope }, project_dir)).collect();
+    let eligible_ways = prompt_competitors(&candidates, &scope, project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
     let scores = batch_embed_score(&reduced);
     let (lane, rows) = candidate_log::scan_lane(&scores)?;

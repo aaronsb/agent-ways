@@ -660,17 +660,20 @@ enum LookupCommand {
         #[arg(long, default_value = "5")]
         top: usize,
     },
-    /// A way's body as injection delivers it, stamping disclosure for the session
+    /// A way's body as injection renders it; stamping is the PostToolUse hook's (`ways hook pull`)
     Read {
         /// Way id (e.g. "softwaredev/code/quality")
         id: String,
-        /// The session to stamp; without one the body is served unstamped
+        /// The session whose scope a mismatch is reported against
         #[arg(long)]
         session: Option<String>,
     },
     /// A way's parent, children, See Also edges and nearest semantic neighbours
     Neighbors {
         id: String,
+        /// The session, to mark neighbours whose scope would not reach it
+        #[arg(long)]
+        session: Option<String>,
         /// How many semantic neighbours to return
         #[arg(long, default_value = "5")]
         top: usize,
@@ -1114,9 +1117,13 @@ fn run() -> Result<()> {
                 std::env::set_var("CLAUDE_PROJECT_DIR", p);
             }
             cmd::lookup::emit(match what {
-                LookupCommand::Search { query, session, top } => cmd::lookup::search_json(&query, session.as_deref(), top),
-                LookupCommand::Read { id, session } => cmd::lookup::read_json(&id, session.as_deref()),
-                LookupCommand::Neighbors { id, top } => cmd::lookup::neighbors_json(&id, top),
+                LookupCommand::Search { query, session, top } => {
+                    cmd::lookup::ensure_enabled().and_then(|()| cmd::lookup::search_json(&query, session.as_deref(), top))
+                }
+                LookupCommand::Read { id, session } => {
+                    cmd::lookup::ensure_enabled().and_then(|()| cmd::lookup::read_json(&id, session.as_deref()))
+                }
+                LookupCommand::Neighbors { id, session, top } => cmd::lookup::neighbors_json(&id, session.as_deref(), top),
             })
         }
         Commands::Scan { mode } => match mode {
