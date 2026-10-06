@@ -13,7 +13,7 @@ Setting up the shell layer of a personal developer machine — the things a user
 
 | Concern | Way |
 |---------|-----|
-| Interactive prompt appearance | `workstation/shell/prompt` |
+| Interactive prompt appearance | `workstation/shell/shell-prompt` |
 | Modular shellrc, PATH, XDG | `workstation/shell/shellrc` |
 | Modern CLI tools (lsd, bat, fd, rg, fzf, ...) | `workstation/shell/tools` |
 | Global git identity and defaults | `workstation/shell/gitconfig` |

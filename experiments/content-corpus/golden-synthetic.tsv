@@ -209,8 +209,8 @@ suggest a good sci-fi novel for a long flight	none	none
 how do i say thank you in korean	none	none
 what's the tallest mountain in south america	none	none
 i feel kind of tired today, any tips for a better night's sleep	none	none
-can you generate an ER diagram from our sql schema file and a page listing every table and column	data/documentation	direct
-our docs site has no picture of how the tables relate and the column list is out of date, tired of editing it by hand	data/documentation	situational
+can you generate an ER diagram from our sql schema file and a page listing every table and column	data/schema-docs	direct
+our docs site has no picture of how the tables relate and the column list is out of date, tired of editing it by hand	data/schema-docs	situational
 we have like 140 migration files, squash them into one starting point and make sure it matches	data/migrations/checkpoint	direct
 fresh installs take forever because they replay years of old sql files one after another, want a shortcut that gives the same end result	data/migrations/checkpoint	situational
 make this migration safe to run twice, it keeps blowing up when the column already exists	data/migrations/idempotent	direct

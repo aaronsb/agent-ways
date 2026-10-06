@@ -43,5 +43,5 @@ Don't stop at the first measurement. A single design often rests on a stack of u
 
 - architecture/design(softwaredev) — the parent: deliberation before committing
 - adr(documentation) — the probe gates the Draft → Accepted transition; cite the evidence in the ADR
-- groundtruth(softwaredev) — the inverse: verify claims against *existing* executable code, not a new throwaway
-- research(softwaredev) — gathers from sources; this runs the real system when sources can't settle a behavioral/performance claim
+- freshness/groundtruth(softwaredev) — the inverse: verify claims against *existing* executable code, not a new throwaway
+- research(research) — gathers from sources; this runs the real system when sources can't settle a behavioral/performance claim

@@ -134,4 +134,4 @@ PR-comment destination is a workflow question (GitHub-mode vs. local-mode). See 
 ## See Also
 
 - environment/recovery(softwaredev) — classify a failed or wrong handback before retrying or re-briefing
-- research(softwaredev) — the fan-out step that uses these investigation rules
+- research(research) — the fan-out step that uses these investigation rules

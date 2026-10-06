@@ -217,6 +217,38 @@ pub fn ways_roots(project: Option<&Path>) -> Vec<PathBuf> {
     roots
 }
 
+/// The schema file only the shipped corpus carries, at the top of its ways root.
+pub const SCHEMA_FILE: &str = "frontmatter-schema.yaml";
+
+fn canonical(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// The ways root that holds `path` (a way, or a directory inside a root): the
+/// nearest ancestor that is one of [`ways_roots`], carries [`SCHEMA_FILE`], or
+/// is a `.claude/ways` directory. `None` when `path` sits in no ways root.
+pub fn containing_ways_root(path: &Path, project: Option<&Path>) -> Option<PathBuf> {
+    let path = canonical(path);
+    let known: Vec<PathBuf> = ways_roots(project).iter().map(|r| canonical(r)).collect();
+    let start = if path.is_dir() { Some(path.as_path()) } else { path.parent() };
+    start?.ancestors().find_map(|dir| {
+        let dotclaude_ways = dir.file_name().is_some_and(|n| n == "ways")
+            && dir.parent().and_then(|p| p.file_name()).is_some_and(|n| n == ".claude");
+        (known.iter().any(|k| k == dir) || dir.join(SCHEMA_FILE).is_file() || dotclaude_ways)
+            .then(|| dir.to_path_buf())
+    })
+}
+
+/// Whether `root` is the core corpus: it carries [`SCHEMA_FILE`], or it is the
+/// shipped, app or projected ways root. User and project roots are not core.
+pub fn is_core_root(root: &Path) -> bool {
+    let root = canonical(root);
+    root.join(SCHEMA_FILE).is_file()
+        || [shipped_ways_root(), core_ways_root(), projected_ways_root()]
+            .iter()
+            .any(|c| canonical(c) == root)
+}
+
 /// The trusted-project-macros list: `~/.claude/trusted-project-macros`. The
 /// projects whose own macros may run; `ways show` reads it and `ways
 /// author permissions` reports it.
@@ -302,6 +334,45 @@ mod tests {
         assert!(config_root().ends_with("agent-ways"));
         assert!(state_root().ends_with("agent-ways"));
         assert!(cache_root().ends_with("agent-ways"));
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ways-paths-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        canonical(&d)
+    }
+
+    #[test]
+    fn a_subtree_and_a_file_find_their_core_root() {
+        let d = scratch("core");
+        let root = d.join("hooks/ways");
+        std::fs::create_dir_all(root.join("softwaredev/code")).unwrap();
+        std::fs::write(root.join(SCHEMA_FILE), "x: 1\n").unwrap();
+        std::fs::write(root.join("softwaredev/code/code.md"), "---\ndescription: d\n---\n").unwrap();
+
+        assert_eq!(containing_ways_root(&root, None), Some(root.clone()));
+        assert_eq!(containing_ways_root(&root.join("softwaredev"), None), Some(root.clone()));
+        assert_eq!(containing_ways_root(&root.join("softwaredev/code/code.md"), None), Some(root.clone()));
+        assert!(is_core_root(&root));
+    }
+
+    #[test]
+    fn an_unrelated_hooks_ways_dir_is_neither_a_root_nor_core() {
+        let d = scratch("unrelated");
+        let dir = d.join("hooks/ways");
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        assert_eq!(containing_ways_root(&dir.join("a"), None), None);
+        assert!(!is_core_root(&dir));
+    }
+
+    #[test]
+    fn a_dotclaude_ways_dir_is_a_non_core_root() {
+        let d = scratch("project");
+        let root = d.join("proj/.claude/ways");
+        std::fs::create_dir_all(root.join("x")).unwrap();
+        assert_eq!(containing_ways_root(&root.join("x"), None), Some(root.clone()));
+        assert!(!is_core_root(&root));
     }
 
     #[test]

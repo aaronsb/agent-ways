@@ -36,4 +36,4 @@ A checkpoint apply has a fingerprint: every consolidated version shares one `app
 ## See Also
 
 - data/migrations/numbering(data) — the ledger the baseline pre-populates
-- data/documentation(data) — regenerate schema docs from the new baseline
+- data/schema-docs(data) — regenerate schema docs from the new baseline
