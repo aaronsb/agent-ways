@@ -60,7 +60,7 @@ const CEILING_EVENTS_BYTES: u64 = 4 * MAX_EVENTS_BYTES;
 /// What a stream's live file holds. The daily pass moves the rest to the
 /// stream's dated archives. Each stream has its own bound (ADR-701 §2): the
 /// event log is kept by age and size, the decision log by turns.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LiveBound {
     /// Lines younger than this many days.
     Days(u32),
@@ -70,6 +70,21 @@ enum LiveBound {
 
 /// The event stream's daily bound.
 const EVENT_BOUND: LiveBound = LiveBound::Days(LIVE_EVENT_DAYS);
+
+/// `stream`'s retention under `cfg`: the days its archives are kept and the
+/// bound of its live file. The writers take both from here, so no stream is
+/// held to another stream's bound.
+fn retention(stream: Stream, cfg: &crate::config::Config) -> (u32, LiveBound) {
+    let bound = match stream {
+        Stream::Events => EVENT_BOUND,
+        Stream::Decisions => LiveBound::Turns(cfg.decision_retention_turns),
+    };
+    (cfg.event_retention_days, bound)
+}
+
+/// Age past which a `write_atomic` temp of a live file counts as left by a
+/// crash (see [`sweep_temps`]).
+const STALE_TEMP: std::time::Duration = std::time::Duration::from_secs(3600);
 
 // Every sidecar is named for its stream, so two streams sharing the state
 // directory never share a lock, a day's rotation slot or a failure marker.
@@ -101,7 +116,7 @@ pub fn log_event(fields: &[(&str, &str)]) {
 /// fields they know, so an extra nested value costs them nothing.
 pub fn log_event_with(fields: &[(&str, &str)], extra: &[(&str, serde_json::Value)]) {
     let now = agent_fmt::when::now_secs();
-    let rotate = rotation_due_today(EVENTS, now).then(|| (crate::config::global().event_retention_days, EVENT_BOUND));
+    let rotate = rotation_due_today(EVENTS, now).then(|| retention(EVENTS, crate::config::global()));
     log_event_to(&crate::paths::state_root(), EVENTS, now, rotate, fields, extra);
 }
 
@@ -115,20 +130,17 @@ pub fn log_event_with(fields: &[(&str, &str)], extra: &[(&str, serde_json::Value
 /// log's size cap and age bound do not apply to this stream.
 pub fn log_decision(record: &serde_json::Value) {
     let now = agent_fmt::when::now_secs();
-    let trim = rotation_due_today(DECISIONS, now).then(|| {
-        let cfg = crate::config::global();
-        (cfg.event_retention_days, cfg.decision_retention_turns)
-    });
+    let trim = rotation_due_today(DECISIONS, now).then(|| retention(DECISIONS, crate::config::global()));
     log_decision_to(&crate::paths::state_root(), now, trim, record);
 }
 
 /// Append `record` to the decision log in `dir`. With `trim` set (the archive
-/// retention in days and the turns the live file keeps), the daily pass runs
-/// first, as [`log_event_to`] runs the event stream's.
-fn log_decision_to(dir: &std::path::Path, now: u64, trim: Option<(u32, u64)>, record: &serde_json::Value) {
+/// retention in days and the live bound), the daily pass runs first, as
+/// [`log_event_to`] runs the event stream's.
+fn log_decision_to(dir: &std::path::Path, now: u64, trim: Option<(u32, LiveBound)>, record: &serde_json::Value) {
     let _ = std::fs::create_dir_all(dir);
-    if let Some((archive_days, keep_turns)) = trim {
-        rotate_if_due(dir, DECISIONS, now, archive_days, LiveBound::Turns(keep_turns));
+    if let Some((archive_days, bound)) = trim {
+        rotate_if_due(dir, DECISIONS, now, archive_days, bound);
     }
     if let Ok(line) = serde_json::to_string(record) {
         append_jsonl_line(&dir.join(DECISIONS.live_name()), &line);
@@ -385,7 +397,8 @@ fn archive_removed(path: &std::path::Path, stream: Stream, now: u64, removed: &[
 /// files for earlier days are removed, and so are claims for days still to
 /// come: those only exist after the clock ran ahead and was set back, and would
 /// otherwise block rotation until the calendar caught up. The slot's winner
-/// also deletes the stream's archives older than `archive_days`. Returns
+/// also deletes the stream's archives older than `archive_days` and the temp
+/// files crashed rewrites of the live file left ([`sweep_temps`]). Returns
 /// whether lines left the live log.
 fn rotate_if_due(dir: &std::path::Path, stream: Stream, now: u64, archive_days: u32, bound: LiveBound) -> bool {
     let path = &dir.join(stream.live_name());
@@ -403,9 +416,36 @@ fn rotate_if_due(dir: &std::path::Path, stream: Stream, now: u64, archive_days: 
     if let Some(anchor) = std::fs::File::open(path).ok().and_then(|f| newest_ts(&f).ok().flatten()) {
         ways_core::event_archive::expire(dir, stream, anchor.min(now), archive_days);
     }
+    sweep_temps(dir, stream, std::time::SystemTime::now());
     match bound {
         LiveBound::Days(days) => rotate_log_by_age(path, stream, now, days).unwrap_or(false),
         LiveBound::Turns(keep) => turns::trim_to_turns(path, stream, now, keep).unwrap_or(false),
+    }
+}
+
+/// Remove the temp files in `dir` that rewrites of `stream`'s live file left
+/// when their process died before the rename.
+///
+/// A trim's temp (`.<live>.<pid>.trim.tmp`) goes whatever its age: one trim a
+/// day runs, under the day's claim, so no other one is live. A `write_atomic`
+/// temp (`.<live>.<pid>.<n>.tmp`) goes once older than [`STALE_TEMP`]: every
+/// rewrite that publishes one holds the stream's lock, but the lock is skipped
+/// where the filesystem cannot lock and compaction is not claim-gated, so a
+/// fresh one may belong to a rewrite still running. Other names are left alone.
+fn sweep_temps(dir: &std::path::Path, stream: Stream, now: std::time::SystemTime) {
+    let prefix = format!(".{}.", stream.live_name());
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(rest) = name.to_str().and_then(|n| n.strip_prefix(&prefix)).and_then(|r| r.strip_suffix(".tmp")) else { continue };
+        let Some((pid, tag)) = rest.split_once('.') else { continue };
+        let stale = digits(pid)
+            && (tag == "trim"
+                || (digits(tag) && e.metadata().and_then(|m| m.modified()).is_ok_and(|t| now.duration_since(t).is_ok_and(|age| age > STALE_TEMP))));
+        if stale {
+            let _ = std::fs::remove_file(e.path());
+        }
     }
 }
 
@@ -1210,6 +1250,54 @@ mod archive_tests {
     /// The per-process day check is per stream. A day far from any real clock
     /// keeps the events slot clear of hooks logging in parallel test threads,
     /// and nothing else checks the decisions slot.
+    /// Each stream is held to its own bound and archive retention, read from
+    /// the settings.
+    #[test]
+    fn each_stream_takes_its_own_retention_from_the_settings() {
+        let mut cfg = crate::config::Config::default();
+        cfg.event_retention_days = 30;
+        cfg.decision_retention_turns = 1234;
+        assert_eq!(retention(EVENTS, &cfg), (30, LiveBound::Days(LIVE_EVENT_DAYS)));
+        assert_eq!(retention(DECISIONS, &cfg), (30, LiveBound::Turns(1234)));
+    }
+
+    /// The daily pass removes the temps crashed rewrites of its own stream
+    /// left: a trim's at any age, a `write_atomic` one once it is an hour old.
+    /// A fresh `write_atomic` temp, another stream's and other names stay.
+    #[test]
+    fn the_daily_pass_sweeps_its_streams_crash_debris() {
+        let (dir, events) = state("debris");
+        std::fs::write(&events, line("way_fired", 0, "now")).unwrap();
+        std::fs::write(dir.join(DECISIONS.live_name()), "{\"turn_start\":true}\n").unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600);
+        let plant = |name: &str, aged: bool| {
+            let f = std::fs::File::create(dir.join(name)).unwrap();
+            if aged {
+                f.set_modified(old).unwrap();
+            }
+        };
+        plant(".events.jsonl.123.7.tmp", true);
+        plant(".events.jsonl.124.8.tmp", false);
+        plant(".decisions.jsonl.125.trim.tmp", false);
+        plant(".decisions.jsonl.126.9.tmp", true);
+        plant(".decisions.jsonl.127.10.tmp", false);
+        plant(".events.jsonl.x.1.tmp", true);
+        plant(".other.jsonl.1.2.tmp", true);
+        let temps = || {
+            let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".tmp")).collect();
+            names.sort();
+            names
+        };
+        rotate_if_due(&dir, EVENTS, NOW, 365, EVENT_BOUND);
+        assert_eq!(
+            temps(),
+            [".decisions.jsonl.125.trim.tmp", ".decisions.jsonl.126.9.tmp", ".decisions.jsonl.127.10.tmp", ".events.jsonl.124.8.tmp", ".events.jsonl.x.1.tmp", ".other.jsonl.1.2.tmp"],
+            "the events pass took only its own stale temp"
+        );
+        rotate_if_due(&dir, DECISIONS, NOW, 365, LiveBound::Turns(10));
+        assert_eq!(temps(), [".decisions.jsonl.127.10.tmp", ".events.jsonl.124.8.tmp", ".events.jsonl.x.1.tmp", ".other.jsonl.1.2.tmp"]);
+    }
+
     #[test]
     fn checking_one_streams_day_does_not_mark_the_others() {
         let day = NOW + 5000 * DAY;

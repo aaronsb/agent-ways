@@ -109,7 +109,7 @@ fn scan_turn_starts(f: &std::fs::File, buf: usize, mut visit: impl FnMut(u64, u6
         let len = chunk.len();
         let mut i = 0;
         while i < len {
-            let end = chunk[i..].iter().position(|&b| b == b'\n').map_or(len, |j| i + j + 1);
+            let end = memchr::memchr(b'\n', &chunk[i..]).map_or(len, |j| i + j + 1);
             let seg = &chunk[i..end];
             if !found && marker_in(&tail, seg) {
                 found = true;
@@ -137,14 +137,14 @@ fn scan_turn_starts(f: &std::fs::File, buf: usize, mut visit: impl FnMut(u64, u6
 /// line just before it) and `seg`.
 fn marker_in(tail: &[u8], seg: &[u8]) -> bool {
     const N: usize = TURN_START.len();
-    if seg.windows(N).any(|w| w == TURN_START) {
+    if memchr::memmem::find(seg, TURN_START).is_some() {
         return true;
     }
     let mut joint = [0u8; 2 * N];
     let k = seg.len().min(N - 1);
     joint[..tail.len()].copy_from_slice(tail);
     joint[tail.len()..tail.len() + k].copy_from_slice(&seg[..k]);
-    joint[..tail.len() + k].windows(N).any(|w| w == TURN_START)
+    memchr::memmem::find(&joint[..tail.len() + k], TURN_START).is_some()
 }
 
 /// A temp file beside the log that becomes the log on [`Staged::publish`] and
@@ -156,9 +156,10 @@ struct Staged {
 }
 
 impl Staged {
-    /// A fresh temp beside `path`, with `path`'s permissions. One trim of a
-    /// stream runs at a time under its lock, so a temp of this name left by an
-    /// earlier crash is stale and is truncated.
+    /// A fresh temp beside `path`, with `path`'s permissions. One trim runs a
+    /// day, so a temp of this name is left by an earlier crash of a process
+    /// with this pid and is truncated. Temps of other pids are removed by the
+    /// daily pass before the trim (`sweep_temps`).
     fn beside(path: &Path) -> std::io::Result<Self> {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let tmp = path.with_file_name(format!(".{name}.{}.trim.tmp", std::process::id()));
@@ -435,7 +436,7 @@ mod tests {
         let record = serde_json::json!({"ts": ts(), "kind": "scan", "turn": 15, "turn_start": true});
         log_decision_to(&dir, NOW, None, &record);
         assert_eq!(std::fs::read_to_string(&log).unwrap(), turns(0..15) + &record.to_string() + "\n", "no trim when the day was checked");
-        log_decision_to(&dir, NOW, Some((365, KEEP)), &record);
+        log_decision_to(&dir, NOW, Some((365, LiveBound::Turns(KEEP))), &record);
         let live = std::fs::read_to_string(&log).unwrap();
         assert_eq!(live, turns(6..15) + &record.to_string() + "\n" + &record.to_string() + "\n");
         assert_eq!(archived(&dir), turns(0..6));
