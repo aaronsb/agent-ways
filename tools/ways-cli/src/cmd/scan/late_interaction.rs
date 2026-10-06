@@ -43,9 +43,9 @@ use super::reduce::split_sentences;
 // ── Hand-set operating points (uncalibrated — task #5 fits these) ──
 /// Per-chunk softmax temperature. Small τ sharpens the competition so a clear
 /// per-chunk winner takes most of the mass.
-const SOFTMAX_TAU: f64 = 0.08;
+pub(super) const SOFTMAX_TAU: f64 = 0.08;
 /// Ways entering each chunk's softmax (the rest score ~0 mass anyway).
-const TOP_K_PER_CHUNK: usize = 8;
+pub(super) const TOP_K_PER_CHUNK: usize = 8;
 /// Summed-share / n_chunks that admits a way into confirmation.
 const SHARE_GATE: f64 = 0.15;
 /// Peak per-chunk cosine that, on its own, admits a way into confirmation even

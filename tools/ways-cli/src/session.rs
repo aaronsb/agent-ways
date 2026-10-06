@@ -681,6 +681,13 @@ const MIN_FREED_BYTES: u64 = (MAX_EVENTS_BYTES - KEEP_EVENTS_BYTES) / 2;
 
 /// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl — see paths::events_log).
 pub fn log_event(fields: &[(&str, &str)]) {
+    log_event_with(fields, &[]);
+}
+
+/// [`log_event`] with structured values beside the string fields, for an event
+/// that carries a list (`scan_candidates`). Readers key on `event` and read the
+/// fields they know, so an extra nested value costs them nothing.
+pub fn log_event_with(fields: &[(&str, &str)], extra: &[(&str, serde_json::Value)]) {
     let events_file = crate::paths::events_log();
     if let Some(stats_dir) = events_file.parent() {
         let _ = std::fs::create_dir_all(stats_dir);
@@ -691,6 +698,9 @@ pub fn log_event(fields: &[(&str, &str)]) {
     obj.insert("ts".to_string(), serde_json::Value::String(ts));
     for (k, v) in fields {
         obj.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+    }
+    for (k, v) in extra {
+        obj.insert(k.to_string(), v.clone());
     }
 
     if let Ok(line) = serde_json::to_string(&serde_json::Value::Object(obj)) {

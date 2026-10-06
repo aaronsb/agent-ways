@@ -4,6 +4,7 @@
 //! scope/precondition gating, parent-threshold lowering, and show (display).
 
 pub(crate) mod candidates;
+mod candidate_log;
 mod gate;
 mod late_interaction;
 mod lookbehind;
@@ -274,6 +275,19 @@ fn scan_prompt_surface(
     let reduced = reduce::reduce_for_embed(&embed_input, BUDGET_PROMPT);
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
+
+    // ADR-701 §2: log the top candidates with share and margin, from the rows
+    // the scan already holds. Enabled ways only: `candidates` is already
+    // filtered by the domain and per-way toggles.
+    {
+        let enabled: std::collections::HashMap<&str, &str> =
+            candidates.iter().filter(|c| c.embeddable()).map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
+        candidate_log::log_scan_candidates(
+            &embed_matches,
+            &enabled,
+            &[("scope", &scope), ("project", &project_dir), ("session", session_id), ("hook_event", hook_event)],
+        );
+    }
 
     // ADR-160: the chunked late-interaction matcher IS the semantic matcher. It decides
     // the semantic channel over the reduced surface (chunk → softmax-share →
