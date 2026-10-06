@@ -361,6 +361,55 @@ pub fn extract_see_also(content: &str) -> Vec<(String, String, String)> {
     refs
 }
 
+/// See Also targets that name a way: `- name(domain) — label` lines where
+/// `name` is a path (`code/quality`, `trust`) and `domain` a single word, with
+/// the parenthesis touching the name. Returns `(name, domain)`.
+///
+/// A See Also section also carries references to things that are not ways:
+/// skills (`develop (skill)`), subagents, ADRs, doc paths, URLs, and prose.
+/// None of those has the touching `name(domain)` form with a path-shaped name,
+/// so they are skipped here and left to read as plain text. The heading
+/// matches `## See Also` in any letter case.
+pub fn extract_way_refs(content: &str) -> Vec<(String, String)> {
+    fn token(s: &str, allow_slash: bool) -> bool {
+        !s.is_empty()
+            && !s.starts_with('/')
+            && !s.ends_with('/')
+            && !s.contains("//")
+            && s.chars().all(|c| {
+                c.is_ascii_lowercase()
+                    || c.is_ascii_digit()
+                    || c == '-'
+                    || c == '_'
+                    || (allow_slash && c == '/')
+            })
+    }
+
+    let mut refs = Vec::new();
+    let mut in_see_also = false;
+    for line in content.lines() {
+        if line.len() >= 11 && line.is_char_boundary(11) && line[..11].eq_ignore_ascii_case("## See Also") {
+            in_see_also = true;
+            continue;
+        }
+        if in_see_also && line.starts_with("## ") {
+            break;
+        }
+        if !in_see_also {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix("- ") else { continue };
+        let Some(open) = rest.find('(') else { continue };
+        let Some(close) = rest[open..].find(')') else { continue };
+        let name = &rest[..open];
+        let domain = &rest[open + 1..open + close];
+        if token(name, true) && token(domain, false) {
+            refs.push((name.to_string(), domain.to_string()));
+        }
+    }
+    refs
+}
+
 /// Parse a See Also line like `- code/testing(softwaredev) — quality requires test coverage`
 fn parse_see_also_line(line: &str) -> Option<(String, String, String)> {
     let line = line.strip_prefix("- ")?;
@@ -385,6 +434,27 @@ fn parse_see_also_line(line: &str) -> Option<(String, String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn way_refs_keep_only_name_domain_entries() {
+        let body = "# W\n\n## See also\n\n\
+            - code/quality(softwaredev) \u{2014} a way\n\
+            - trust(meta) \u{2014} a domain way\n\
+            - develop (skill) \u{2014} a skill\n\
+            - code-reviewer (subagent, `agents/code-reviewer.md`) \u{2014} an agent\n\
+            - `docs/development.md` \u{2014} a doc\n\
+            - https://example.com/x \u{2014} a url\n\
+            - ea / email / comms(ea) \u{2014} several\n\
+            - ADR-183 \u{2014} an adr\n\
+            \n## Other\n- late(meta) \u{2014} not in See Also\n";
+        assert_eq!(
+            extract_way_refs(body),
+            vec![
+                ("code/quality".to_string(), "softwaredev".to_string()),
+                ("trust".to_string(), "meta".to_string()),
+            ]
+        );
+    }
 
     #[test]
     fn opens_with_fence_tolerates_crlf() {
