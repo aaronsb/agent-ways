@@ -24,11 +24,32 @@ pub(super) fn append_jsonl_line(path: &std::path::Path, line: &str) {
     let mut buf = String::with_capacity(line.len() + 1);
     buf.push_str(line);
     buf.push('\n');
-    let _ = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut f| f.write_all(buf.as_bytes()));
+    let _ = open_live(std::fs::OpenOptions::new().create(true).append(true), path).and_then(|mut f| f.write_all(buf.as_bytes()));
+}
+
+/// Open a live log with `opts` so a rewrite can rename over it while the
+/// handle is open.
+///
+/// Compaction and the daily pass hold the live file open across the rename
+/// that replaces it, and a hook may be appending at that moment. Unix allows
+/// that. Windows refuses to replace a file while any handle on it was opened
+/// without `FILE_SHARE_DELETE`, which std's default share mode leaves out, so
+/// every handle on a live log asks for it.
+fn open_live(opts: &mut std::fs::OpenOptions, path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 0x1;
+        const FILE_SHARE_WRITE: u32 = 0x2;
+        const FILE_SHARE_DELETE: u32 = 0x4;
+        opts.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    }
+    opts.open(path)
+}
+
+/// [`open_live`] for reading.
+fn open_live_read(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    open_live(std::fs::OpenOptions::new().read(true), path)
 }
 
 // ── Event logging ───────────────────────────────────────────────
@@ -271,7 +292,7 @@ fn compact_log_tail_hooked(path: &std::path::Path, stream: Stream, now: u64, kee
     if size <= keep_bytes || (size <= ceiling && archive_failed_today(dir, stream, now)) {
         return Ok(()); // nothing to cut, or retry tomorrow
     }
-    let f = std::fs::File::open(path)?;
+    let f = open_live_read(path)?;
     let mut data = Vec::new();
     (&f).read_to_end(&mut data)?;
     let keep = keep_bytes as usize;
@@ -325,7 +346,7 @@ fn compact_log_tail_hooked(path: &std::path::Path, stream: Stream, now: u64, kee
     let mut gained = Vec::new();
     (&f).read_to_end(&mut gained)?;
     if !gained.is_empty() {
-        std::fs::OpenOptions::new().append(true).open(path)?.write_all(&gained)?;
+        open_live(std::fs::OpenOptions::new().append(true), path)?.write_all(&gained)?;
     }
     if let Some((bytes, reason)) = unarchived {
         let event = serde_json::json!({"ts": agent_fmt::when::utc_iso(now), "event": "event_log_dropped", "bytes": bytes, "reason": reason});
@@ -413,7 +434,7 @@ fn rotate_if_due(dir: &std::path::Path, stream: Stream, now: u64, archive_days: 
     // Expiry anchors to the log like the rotation cutoff: a clock that ran
     // ahead must not delete archives. With no readable line there is no anchor
     // and nothing expires.
-    if let Some(anchor) = std::fs::File::open(path).ok().and_then(|f| newest_ts(&f).ok().flatten()) {
+    if let Some(anchor) = open_live_read(path).ok().and_then(|f| newest_ts(&f).ok().flatten()) {
         ways_core::event_archive::expire(dir, stream, anchor.min(now), archive_days);
     }
     sweep_temps(dir, stream, std::time::SystemTime::now());
@@ -478,7 +499,7 @@ fn rotate_log_by_age(path: &std::path::Path, stream: Stream, now: u64, retention
 /// something to happen in that window.
 fn rotate_log_by_age_hooked(path: &std::path::Path, stream: Stream, now: u64, retention_days: u32, before_publish: &mut dyn FnMut()) -> std::io::Result<bool> {
     use std::io::{Read, Seek, SeekFrom, Write};
-    let f = match std::fs::File::open(path) {
+    let f = match open_live_read(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e),
@@ -507,12 +528,13 @@ fn rotate_log_by_age_hooked(path: &std::path::Path, stream: Stream, now: u64, re
     let mut gained = Vec::new();
     (&f).read_to_end(&mut gained)?;
     if !gained.is_empty() {
-        std::fs::OpenOptions::new().append(true).open(path)?.write_all(&gained)?;
+        open_live(std::fs::OpenOptions::new().append(true), path)?.write_all(&gained)?;
     }
     Ok(true)
 }
 
-/// Whether the open handle and `path` are the same file. Where the platform
+/// Whether the open handle and `path` are the same file: the device and inode
+/// on Unix, the volume serial and file index on Windows. Where the platform
 /// gives no file identity this is assumed.
 fn same_file(f: &std::fs::File, path: &std::path::Path) -> bool {
     #[cfg(unix)]
@@ -523,7 +545,22 @@ fn same_file(f: &std::fs::File, path: &std::path::Path) -> bool {
             _ => false,
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
+        fn id(f: &std::fs::File) -> Option<(u32, u32, u32)> {
+            // SAFETY: the handle is open for the call and `info` is a valid out-pointer.
+            let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+            let ok = unsafe { GetFileInformationByHandle(f.as_raw_handle(), &mut info) } != 0;
+            ok.then_some((info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow))
+        }
+        match (id(f), open_live_read(path).ok().as_ref().and_then(id)) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = (f, path);
         true

@@ -11,7 +11,7 @@
 //! members are one valid gzip stream, so a day's second removal appends a new
 //! member and never rewrites the first.
 
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 const DAY_SECS: u64 = 86_400;
@@ -105,13 +105,16 @@ pub fn append(dir: &Path, stream: Stream, now: u64, removed: &[u8]) -> std::io::
 pub fn append_from(dir: &Path, stream: Stream, now: u64, removed: &mut dyn Read) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let path = archive_path(dir, stream, now);
-    let mut opts = std::fs::OpenOptions::new();
-    opts.append(true);
-    let f = opts.create(true).open(&path)?;
+    // Read and write, not append: on Windows an append-only handle lacks
+    // write-data access, so `LockFileEx` and the cut-back's `set_len` both fail
+    // with ERROR_ACCESS_DENIED. Every writer holds the exclusive lock, so
+    // writing at the end under it appends as `O_APPEND` would.
+    let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
     f.lock()?;
 
     let written = (|| {
         let before = f.metadata()?.len();
+        (&f).seek(SeekFrom::Start(before))?;
         let result = (|| {
             let mut enc = flate2::write::GzEncoder::new(std::io::BufWriter::with_capacity(64 * 1024, &f), flate2::Compression::default());
             std::io::copy(removed, &mut enc)?;

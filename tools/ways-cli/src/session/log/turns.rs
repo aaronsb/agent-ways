@@ -7,7 +7,7 @@
 //! a turn index (see `cmd::scan::decision::Context`), so turns are counted
 //! from the records alone.
 
-use super::{mark_archive_failed, same_file, Stream};
+use super::{mark_archive_failed, open_live, open_live_read, same_file, Stream};
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -42,7 +42,7 @@ pub(super) fn trim_to_turns(path: &Path, stream: Stream, now: u64, keep: u64) ->
 /// and before the file is checked and replaced, for tests that need something
 /// to happen in that window.
 fn trim_to_turns_hooked(path: &Path, stream: Stream, now: u64, keep: u64, before_publish: &mut dyn FnMut()) -> std::io::Result<bool> {
-    let f = match std::fs::File::open(path) {
+    let f = match open_live_read(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e),
@@ -65,7 +65,7 @@ fn trim_to_turns_hooked(path: &Path, stream: Stream, now: u64, keep: u64, before
     (&f).seek(SeekFrom::Start(cut))?;
     let mut pos = cut;
     loop {
-        pos += std::io::copy(&mut &f, &mut staged.file)?;
+        pos += std::io::copy(&mut &f, staged.file())?;
         if f.metadata()?.len() <= pos {
             break;
         }
@@ -83,7 +83,7 @@ fn trim_to_turns_hooked(path: &Path, stream: Stream, now: u64, keep: u64, before
     staged.publish(path)?;
     // Records that landed on the old file while the new one was written.
     (&f).seek(SeekFrom::Start(pos))?;
-    std::io::copy(&mut &f, &mut std::fs::OpenOptions::new().append(true).open(path)?)?;
+    std::io::copy(&mut &f, &mut open_live(std::fs::OpenOptions::new().append(true), path)?)?;
     Ok(true)
 }
 
@@ -149,9 +149,12 @@ fn marker_in(tail: &[u8], seg: &[u8]) -> bool {
 
 /// A temp file beside the log that becomes the log on [`Staged::publish`] and
 /// is removed if it never does.
+///
+/// The handle is closed before the temp is renamed or removed: Windows refuses
+/// either while a handle opened without `FILE_SHARE_DELETE` is open.
 struct Staged {
     tmp: PathBuf,
-    file: std::fs::File,
+    file: Option<std::fs::File>,
     published: bool,
 }
 
@@ -167,13 +170,19 @@ impl Staged {
         if let Ok(meta) = std::fs::metadata(path) {
             file.set_permissions(meta.permissions())?;
         }
-        Ok(Staged { tmp, file, published: false })
+        Ok(Staged { tmp, file: Some(file), published: false })
+    }
+
+    /// The open temp, for writing the kept turns.
+    fn file(&mut self) -> &mut std::fs::File {
+        self.file.as_mut().expect("the temp is open until publish or drop")
     }
 
     /// Make the temp durable, rename it over `path`, and sync the directory so
     /// the rename is durable too.
     fn publish(mut self, path: &Path) -> std::io::Result<()> {
-        self.file.sync_all()?;
+        self.file().sync_all()?;
+        drop(self.file.take());
         std::fs::rename(&self.tmp, path)?;
         self.published = true;
         #[cfg(unix)]
@@ -186,6 +195,7 @@ impl Staged {
 
 impl Drop for Staged {
     fn drop(&mut self) {
+        drop(self.file.take());
         if !self.published {
             let _ = std::fs::remove_file(&self.tmp);
         }
