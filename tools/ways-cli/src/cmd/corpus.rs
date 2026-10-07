@@ -2166,7 +2166,9 @@ mod tests {
         let side = json!({ "file": "ways-body-en.bin", "ways": 3, "sections": 9, "vectors": true });
         let said = RefCell::new(Vec::new());
         Report { quiet: false, emit: &|m| said.borrow_mut().push(m.to_string()) }.sidecar(&side, Path::new("/o"), false);
-        assert_eq!(said.take(), vec!["Body sidecar: /o/ways-body-en.bin (3 ways, 9 sections)".to_string()]);
+        // The path is joined natively, so the separator is the platform's.
+        let file = Path::new("/o").join("ways-body-en.bin");
+        assert_eq!(said.take(), vec![format!("Body sidecar: {} (3 ways, 9 sections)", file.display())]);
         Report { quiet: true, emit: &|m| said.borrow_mut().push(m.to_string()) }.sidecar(&side, Path::new("/o"), false);
         assert!(said.take().is_empty());
     }

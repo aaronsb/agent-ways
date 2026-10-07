@@ -38,8 +38,13 @@ fn canonical(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
+/// `path` relative to `root`, with `/` between components on every platform,
+/// the form way identities and the other lint output use.
 fn rel(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root).unwrap_or(path).display().to_string()
+    match path.strip_prefix(root) {
+        Ok(rel) => rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"),
+        Err(_) => path.display().to_string(),
+    }
 }
 
 /// See Also entries naming no way. `lookup` lists the other roots a name may
