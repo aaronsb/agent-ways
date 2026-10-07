@@ -62,7 +62,14 @@ considered:
   - operator: aaronsb
     said: "Which scan lanes should write decision records? Prompt and task only (Recommended). Should prompt/task way_keyword_gated and way_nearmiss events leave events.jsonl? Keep them for now (Recommended). How many turns should the live decisions file hold? 50,000 turns (Recommended)"
     via: "session 274b9457, 2026-10-05, choice tool answers to the #12 decision-record plan"
-status: proposed
+  - operator: aaronsb
+    said: "I think I remember now - it was that we needed to build a release, with idempotency with the way that ways are written now, then review them and enhance the dataset with the tooling functional, I think."
+    via: chat, session d51a7fea, 2026-10-07
+    covers: [non-breaking]
+  - operator: aaronsb
+    said: "way-embed 1.2.0: Hold for release 2 (Recommended). ADR statuses at merge: Yes, as proposed (Recommended) — accept 701 and 700, 702 stays proposed."
+    via: chat, session d51a7fea, 2026-10-07, choice tool
+status: accepted
 date: 2026-10-05
 deciders:
   - aaronsb

@@ -2,7 +2,11 @@
 contract: adr/v1
 kind: evidence
 capability: matching
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "ADR statuses at merge: Yes, as proposed (Recommended) — accept 701 and 700, 702 stays proposed."
+    via: chat, session d51a7fea, 2026-10-07, choice tool
+status: accepted
 date: 2026-10-05
 deciders:
   - aaronsb
