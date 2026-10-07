@@ -152,10 +152,8 @@ pub(crate) fn decode(bytes: &[u8]) -> Option<Sidecar> {
     if row != vector_count || r.bytes.len() - r.at != vector_count.checked_mul(dim)?.checked_mul(4)? {
         return None;
     }
-    let vectors = r.bytes[r.at..]
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect();
+    let (words, _) = r.bytes[r.at..].as_chunks::<4>();
+    let vectors = words.iter().map(|c| f32::from_le_bytes(*c)).collect();
     Some(Sidecar { model, dim, index, vectors })
 }
 
