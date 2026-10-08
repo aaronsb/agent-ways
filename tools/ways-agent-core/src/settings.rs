@@ -84,7 +84,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Fn(|b| shipped_field(b, "model")),
         check: Some(check_model),
         doc: "The model a profile calls.",
-        long: "The shipped profiles use Claude Haiku 5.5, with a threshold measured on Haiku 4.5; another model scores on its own scale. `ways agent models` lists what a provider serves and keeps the list this key offers; until it has run for the profile's provider the key takes any model id, and a list that has aged is still offered.",
+        long: "The shipped profiles are tuned for Claude Haiku 4.5 (Haiku 5.5 ranked worse); another model scores on its own scale. `ways agent models` lists what a provider serves and keeps the list this key offers; until it has run for the profile's provider the key takes any model id, and a list that has aged is still offered.",
         ..BASE
     },
     KeySpec {

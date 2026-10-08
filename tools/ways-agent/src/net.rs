@@ -303,11 +303,20 @@ pub fn judge(
                 .pointer("/choices/0/message/tool_calls/0/function/arguments")
                 .and_then(Value::as_str)
                 .ok_or_else(|| failed("answer: no tool call".to_string()))?;
-            serde_json::from_str(args).map_err(|e| failed(format!("answer: arguments are not JSON: {e}")))?
+            decode_arguments(args).map_err(|e| failed(format!("answer: arguments are not JSON: {e}")))?
         }
     };
     let p_yes = judge::parse_judgements(&input, n).map_err(|e| failed(format!("answer: {e}")))?;
     Ok((p_yes, usage))
+}
+
+/// The JSON of an OpenRouter tool call's `arguments`. Some upstream providers
+/// encode the object twice, so a value that parses to a string is parsed once more.
+fn decode_arguments(args: &str) -> std::result::Result<Value, serde_json::Error> {
+    match serde_json::from_str::<Value>(args)? {
+        Value::String(inner) => serde_json::from_str(&inner),
+        v => Ok(v),
+    }
 }
 
 /// The usage block of a 200 reply, in either provider's shape. `None` when
@@ -406,6 +415,25 @@ mod tests {
             Some(Usage { input_tokens: 850, output_tokens: 40, cache_read_tokens: 100, cache_write_tokens: 50, provider_cost_usd: Some(0.0012) })
         );
         assert_eq!(usage(Provider::Anthropic, &json!({"content": []})), None);
+    }
+
+    #[test]
+    fn a_double_encoded_answer_recovers() {
+        let obj = json!({"judgements": [{"id": "g1", "relevant": true, "confidence": 0.9}]});
+        let once = obj.to_string();
+        let twice = serde_json::to_string(&once).unwrap();
+        for args in [&once, &twice] {
+            let p = crate::judge::parse_judgements(&decode_arguments(args).unwrap(), 1).unwrap();
+            assert!((p[0] - 0.9).abs() < 1e-9, "{args}");
+        }
+        assert!(decode_arguments("\"not json\"").is_err());
+    }
+
+    #[test]
+    fn a_judgement_that_is_a_string_judges_nothing() {
+        let args = json!({"judgements": ["{\"id\":\"g1\",\"relevant\":true,\"confidence\":0.9}"]}).to_string();
+        let err = crate::judge::parse_judgements(&decode_arguments(&args).unwrap(), 2).unwrap_err();
+        assert_eq!(err.to_string(), "the answer judged 0 of 2 candidates");
     }
 
     #[test]

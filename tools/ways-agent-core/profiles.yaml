@@ -1,9 +1,13 @@
 # Engine profiles the ways agent ships (ADR-196 §5).
 #
-# The profiles were measured on Claude Haiku 4.5 (ADR-195): the judge reads
-# the way's path and description against the last turn, capped at 1,200
-# characters, with a threshold of 0.3 on P(yes). They moved to Claude Haiku
-# 5.5 on 2026-10-08; 0.3 is carried over pending a re-measure on 5.5.
+# The profiles are tuned on Claude Haiku 4.5 (ADR-195): the judge reads the
+# way's path and description against the last turn, capped at 1,200
+# characters, with a threshold of 0.3 on P(yes). Haiku 4.5 stays the shipped
+# judge. Haiku 5.5 was measured on 2026-10-08 (332 golden groups, via
+# OpenRouter; experiments/content-corpus/results-judge-haiku-5-5.md) and not
+# adopted: its ranking is worse (AUC down 0.02 to 0.04, interval excludes 0),
+# at 0.3 it passes more than twice the irrelevant candidates, and its p95 latency
+# is over 3 s. It remains selectable per profile.
 # Thresholds are per engine because each model's confidence sits on its own
 # scale. A judge call takes about 0.6 s plus 0.1 s per candidate (ADR-195,
 # second addendum), so a request carries at most max_candidates, in the
@@ -14,7 +18,7 @@
 
 anthropic:
   provider: anthropic
-  model: claude-haiku-5-5
+  model: claude-haiku-4-5
   threshold: 0.3
   timeout_ms: 2000
   turns: 1
@@ -24,7 +28,7 @@ anthropic:
 
 openrouter:
   provider: openrouter
-  model: anthropic/claude-haiku-5.5
+  model: anthropic/claude-haiku-4.5
   threshold: 0.3
   timeout_ms: 2000
   turns: 1
