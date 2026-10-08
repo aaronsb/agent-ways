@@ -4,7 +4,7 @@ Measured 2026-10-05 on branch `spike/admission-recall` (from `ways-graph` 0bdd66
 
 ## Method
 
-- **Corpora and binary.** `make ways-rebuild`, then `OUT=/tmp/recall-out python3 experiments/content-corpus/run.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv`. Embeddings come from the `way-embed` the scan resolves first, as in `confirm.py`.
+- **Corpora and binary.** `make ways-rebuild`, then `OUT=/tmp/recall-out python3 experiments/content-corpus/run.py <(ways author golden --tsv) tests/routing-golden.tsv`. Embeddings come from the `way-embed` the scan resolves first, as in `confirm.py`.
 - **Surfaces.** `confirm.py`'s 310 surfaces, seed 11: 110 T+T, 60 T+N, 80 T+T+N, 60 T+T+T. T+T and T+N have two prompts; T+T+N and T+T+T have three. `build_surfaces` keeps only surfaces where each prompt is exactly one chunk, so on these surfaces a prompt never becomes several chunks.
 - **Multi-chunk prompts.** Only 3 of the 332 golden prompts split into two chunks on their own. An auxiliary set of 93 surfaces holds each of them alone (3), with one other targeted prompt (45), and with two (45). Chunk ownership comes from chunking each prompt separately. These 93 surfaces carry the "own prompt 2+ chunks" breakdown, and they rest on 3 prompts.
 - **Single-prompt surfaces.** 329 of the 332 golden prompts are one chunk alone. `late_interaction::run` returns `None` below 2 chunks and the single-vector gate runs, so a single-sentence prompt never reaches late interaction. The 3 two-sentence prompts do.
@@ -181,8 +181,8 @@ The share gate, not the cap or confirm, drops most expected ways: 248 of 620 (40
 
 ```sh
 make ways-rebuild
-OUT=/tmp/recall-out python3 experiments/content-corpus/run.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
-OUT=/tmp/recall-out python3 experiments/content-corpus/recall.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
+OUT=/tmp/recall-out python3 experiments/content-corpus/run.py <(ways author golden --tsv) tests/routing-golden.tsv
+OUT=/tmp/recall-out python3 experiments/content-corpus/recall.py <(ways author golden --tsv) tests/routing-golden.tsv
 ```
 
 The first `recall.py` run takes about 4 minutes, nearly all of it the batched confirm call. Later runs read `$OUT/recall-confirm-cache.json`. The output includes `$OUT/recall.log`, if redirected, `$OUT/recall-sweep.tsv` (every setting) and `$OUT/recall.json` (per-way traces at the shipped point, and the sweep).

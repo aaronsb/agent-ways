@@ -4,7 +4,7 @@ Follow-up to ADR-700, which left one question open: does choosing a region of th
 
 ## Method
 
-**Data.** The ADR-700 golden set: `golden-synthetic.tsv` plus `tests/routing-golden.tsv`, 332 rows, 314 targeted and 18 `none`. Each prompt is embedded once; scores are cosine against the alias vectors, plus the hubness-corrected score (CSLS, k = 10, two-fold, the same folds as `geometry.py`).
+**Data.** The ADR-700 golden set: the golden sidecars (`ways author golden --tsv`) plus `tests/routing-golden.tsv`, 332 rows, 314 targeted and 18 `none`. Each prompt is embedded once; scores are cosine against the alias vectors, plus the hubness-corrected score (CSLS, k = 10, two-fold, the same folds as `geometry.py`).
 
 **Tree.** Way ids are paths. The domain is the first segment; there are 10 domains. A node is any path prefix of a way id. Only 5 domains have a root way (`documentation`, `ea`, `data`, `research`, `writing`); `softwaredev` (68 ways) and `meta` (27) do not, and 35 ways have no parent way.
 
@@ -116,8 +116,8 @@ On this set, choosing a region first does not beat flat competition, and no vari
 ## Reproduce
 
 ```
-OUT=/tmp/subtree-out python3 experiments/content-corpus/run.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
-OUT=/tmp/subtree-out python3 experiments/content-corpus/subtree.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
+OUT=/tmp/subtree-out python3 experiments/content-corpus/run.py <(ways author golden --tsv) tests/routing-golden.tsv
+OUT=/tmp/subtree-out python3 experiments/content-corpus/subtree.py <(ways author golden --tsv) tests/routing-golden.tsv
 ```
 
 `run.py` needs `bin/ways` (`make ways`) and `~/.claude/bin/way-embed` with the MiniLM model in the agent-ways cache.

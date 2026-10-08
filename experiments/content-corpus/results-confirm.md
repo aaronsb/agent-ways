@@ -4,7 +4,7 @@ Measured 2026-10-05 on branch `spike/body-confirm` (from `ways-graph` 0945952a).
 
 ## Method
 
-- **Corpora.** `OUT=/tmp/confirm-out python3 experiments/content-corpus/run.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv`: 332 golden rows, 137 ways, 647 section chunks (4.7 per way). `bin/ways` was built with `make ways-rebuild`.
+- **Corpora.** `OUT=/tmp/confirm-out python3 experiments/content-corpus/run.py <(ways author golden --tsv) tests/routing-golden.tsv`: 332 golden rows, 137 ways, 647 section chunks (4.7 per way). `bin/ways` was built with `make ways-rebuild`.
 - **Surfaces.** `confirm.py` joins golden prompts as sentences into 310 surfaces (seed 11): 110 of two targeted prompts (T+T), 60 targeted plus `none` (T+N), 80 T+T+N, and 60 T+T+T. Targeted prompts in one surface come from different areas (the first two path segments) and their expected ways are not ancestors of each other. Each surface stays under the 110-token prompt budget, so `reduce_for_embed` returns it unchanged. Each surface splits into exactly one chunk per prompt.
 - **Labels.** An admitted way is *relevant* when it is the expected way of one of the surface's prompts. It is *related* when it is an ancestor or descendant of an expected way, and *irrelevant* otherwise. The main table excludes related ways. A second table counts them as relevant.
 - **Pipeline.** A Python port of `late_interaction.rs`: `split_sentences`, `chunk_surface`, `way-embed match --batch --threshold 0.0` against the alias corpus, softmax over each chunk's top 8 at τ 0.08, share = Σmass / n_chunks, admission on share ≥ 0.15 or peak ≥ 0.50, then up to 6 survivors by peak.
@@ -57,7 +57,7 @@ Measured 2026-10-05 on branch `spike/body-confirm` (from `ways-graph` 0945952a).
 - **The won chunk needs a vector.** Path (b) uses it, and today's `way-embed match` subprocess does not return chunk vectors. Under the subprocess architecture, the sidecar saves the body embeddings only if the chunk vectors come from the match pass, which means extending `match` or using the in-process embedder ADR-701 assumes. Otherwise one embedding call per surface is still needed, about 80 ms, in place of one per survivor. The microsecond figure holds only once chunk vectors are in hand.
 - **The labels are synthetic.** An "irrelevant" admitted way can be useful (a parent domain, say), and a relevant way can win a chunk from the other prompt. Related ways are reported both ways. There are only 106 negatives, so the CI is wide.
 - **Admission recall is 49%.** Confirmation was measured only on what admission passes. A sidecar would not change admission.
-- **The surfaces are concatenated golden prompts.** They are not real multi-sentence prompts with response context. `golden-synthetic.tsv` has only 18 `none` rows, so T+N and T+T+N reuse them heavily.
+- **The surfaces are concatenated golden prompts.** They are not real multi-sentence prompts with response context. the golden sidecars (`ways author golden --tsv`) has only 18 `none` rows, so T+N and T+T+N reuse them heavily.
 - **(a) and (b) read different body text.** (a) reads the first 8 sentences, including tables, HTML comments and See Also. (b) reads all prose sections without those. The comparison is between the two designs as specified, not between chunkings of the same text.
 - Timing is single-machine and wall-clock, with way-embed run as production runs it (fresh process per call).
 
@@ -69,8 +69,8 @@ Confirming against precomputed section vectors separates relevant survivors from
 
 ```sh
 make ways-rebuild
-OUT=/tmp/confirm-out python3 experiments/content-corpus/run.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
-OUT=/tmp/confirm-out python3 experiments/content-corpus/confirm.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
+OUT=/tmp/confirm-out python3 experiments/content-corpus/run.py <(ways author golden --tsv) tests/routing-golden.tsv
+OUT=/tmp/confirm-out python3 experiments/content-corpus/confirm.py <(ways author golden --tsv) tests/routing-golden.tsv
 ```
 
 For `--verify WRAPPER`, build a scratch HOME (`.claude/hooks/ways` → this checkout's `hooks/ways`, `.claude/bin/way-embed` → the real one) and a scratch `XDG_CACHE_HOME` (`agent-ways/user/` holding links to `minilm-l6-v2.gguf` and `way-embed`, and a copy of `$OUT/alias.jsonl` as `ways-corpus-en.jsonl`). Create an empty `/tmp/confirm-empty`. The wrapper is then:

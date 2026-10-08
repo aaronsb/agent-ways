@@ -18,7 +18,7 @@ strict record_judgements tool forced by tool_choice, one request per prompt
 carrying every candidate, the last turn cut to 1,200 characters, `<` neutralised.
 
 Sets:
-  golden  experiments/content-corpus/golden-synthetic.tsv + tests/routing-golden.tsv;
+  golden  `ways author golden --tsv` + tests/routing-golden.tsv;
           candidates are the alias-cosine top 3 (targeted prompt) or top 2
           (`none` prompt), in rank order; relevant = the expected way (strict)
           or the expected way, its parent or a child (family).
@@ -65,7 +65,9 @@ import run  # noqa: E402  (way-embed and model paths, batch_scores)
 
 OUT = Path(os.environ.get("OUT", "/tmp/judge-ab-out"))
 CACHE = HERE / "judge-ab-calls.jsonl"
-GOLDEN = [HERE / "golden-synthetic.tsv", REPO / "tests" / "routing-golden.tsv"]
+# The synthetic rows are exported from the per-way golden sidecars (ADR-701 §9)
+# into OUT at prepare time; the routing rows stay a checked-in file.
+GOLDEN = [OUT / "golden-synthetic.tsv", REPO / "tests" / "routing-golden.tsv"]
 PROBE = Path.home() / ".local/state/agent-ways/probes/yesno-gate"
 
 # Production request (net.rs, judge.rs, profiles.yaml).
@@ -198,12 +200,21 @@ def render_turn(text):
     return f"User: {t}"
 
 
+def ways_bin():
+    """The ways binary build_alias uses: this checkout's bin/ways, else PATH."""
+    b = REPO / "bin" / "ways"
+    return b if b.exists() else shutil.which("ways")
+
+
 def prepare():
     OUT.mkdir(parents=True, exist_ok=True)
     alias, desc = build_alias()
     known = set(desc)
     groups = []
 
+    GOLDEN[0].write_text(subprocess.run(
+        [str(ways_bin()), "author", "golden", "--tsv", "--ways-dir", str(REPO / "hooks" / "ways")],
+        check=True, capture_output=True, text=True).stdout)
     golden = []
     for p in GOLDEN:
         for line in p.read_text().splitlines():

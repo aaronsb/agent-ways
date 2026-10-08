@@ -26,7 +26,7 @@ Measurements taken 2026-10-05 on the 137 committed ways in `hooks/ways`, with th
 
 ## Method
 
-**Golden set.** 332 rows: 272 synthetic prompts, one `direct` and one `situational` per way, written by subagents that read each way file and its neighbours; 15 `none` prompts that no way covers; and the 45 rows of `tests/routing-golden.tsv`. A `situational` prompt describes the user's situation without naming the topic. One slice of 68 prompts had its `situational` rows rewritten after the author read the way bodies; every result below holds with that slice removed. The set is at `experiments/content-corpus/golden-synthetic.tsv`.
+**Golden set.** 332 rows: 272 synthetic prompts, one `direct` and one `situational` per way, written by subagents that read each way file and its neighbours; 15 `none` prompts that no way covers; and the 45 rows of `tests/routing-golden.tsv`. A `situational` prompt describes the user's situation without naming the topic. One slice of 68 prompts had its `situational` rows rewritten after the author read the way bodies; every result below holds with that slice removed. The synthetic rows live in per-way `*.golden.jsonl` sidecars (ADR-701 §9); `ways author golden --tsv` exports them.
 
 **Corpora.** The alias corpus is the one `ways corpus` builds. Each body corpus holds the way's prose with frontmatter, code blocks, tables, HTML comments and the See Also section removed, chunked three ways:
 
