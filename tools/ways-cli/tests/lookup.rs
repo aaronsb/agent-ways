@@ -16,14 +16,25 @@ fn sessions_root() -> String {
     if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
         return format!("{xdg}/claude-sessions");
     }
-    let uid = Command::new("id")
-        .arg("-u")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "0".to_string());
-    format!("/tmp/.claude-sessions-{uid}")
+    #[cfg(windows)]
+    {
+        let base = std::env::var("LOCALAPPDATA")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
+        format!("{base}/claude-ways/sessions")
+    }
+    #[cfg(not(windows))]
+    {
+        let uid = Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "0".to_string());
+        format!("/tmp/.claude-sessions-{uid}")
+    }
 }
 
 struct Env {
@@ -318,6 +329,8 @@ fn an_id_that_leaves_the_ways_roots_is_refused_by_every_verb() {
         }
         env.hook_pull(id, None, None);
     }
+    // The link exists on Unix only (Windows needs a privilege to create one),
+    // so only there is a pull refused as "outside roots".
     #[cfg(unix)]
     {
         let (v, code) = env.read("lookupdomain/link");
@@ -329,6 +342,7 @@ fn an_id_that_leaves_the_ways_roots_is_refused_by_every_verb() {
     let stamped: Vec<_> = std::fs::read_dir(&escaped).map(|d| d.flatten().map(|e| e.file_name()).collect()).unwrap_or_default();
     assert!(stamped.is_empty(), "nothing was stamped for a refused id: {stamped:?}");
     assert!(env.events("way_pulled").iter().all(|p| p["stamped"] == false), "every pull of these ids was refused");
+    #[cfg(unix)]
     assert!(env.events("way_pulled").iter().any(|p| p["reason"] == "outside roots"), "the link is named as such");
     assert!(env.read("lookupdomain/guide").1 == 0, "a plain id still reads");
 }

@@ -11,7 +11,7 @@
 //! members are one valid gzip stream, so a day's second removal appends a new
 //! member and never rewrites the first.
 
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 const DAY_SECS: u64 = 86_400;
@@ -105,13 +105,16 @@ pub fn append(dir: &Path, stream: Stream, now: u64, removed: &[u8]) -> std::io::
 pub fn append_from(dir: &Path, stream: Stream, now: u64, removed: &mut dyn Read) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let path = archive_path(dir, stream, now);
-    let mut opts = std::fs::OpenOptions::new();
-    opts.append(true);
-    let f = opts.create(true).open(&path)?;
+    // Read and write, not append: on Windows an append-only handle lacks
+    // write-data access, so `LockFileEx` and the cut-back's `set_len` both fail
+    // with ERROR_ACCESS_DENIED. Every writer holds the exclusive lock, so
+    // writing at the end under it appends as `O_APPEND` would.
+    let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
     f.lock()?;
 
     let written = (|| {
         let before = f.metadata()?.len();
+        (&f).seek(SeekFrom::Start(before))?;
         let result = (|| {
             let mut enc = flate2::write::GzEncoder::new(std::io::BufWriter::with_capacity(64 * 1024, &f), flate2::Compression::default());
             std::io::copy(removed, &mut enc)?;
@@ -160,12 +163,28 @@ pub fn expire(dir: &Path, stream: Stream, now: u64, retention_days: u32) -> usiz
 /// decompressed. Unreadable files give `None`. The bytes become the string
 /// without a copy when they are valid UTF-8.
 ///
+/// On Windows an archive is read under a shared lock. [`append_from`]'s
+/// exclusive lock is mandatory there, so a read while a member is being
+/// written fails with ERROR_LOCK_VIOLATION and would drop the day's archive
+/// from the result. The shared lock waits for the writer instead; the writer
+/// holds its lock only across one member's write and fsync, and the system
+/// releases it if the writer dies. On Unix the lock is advisory and a reader
+/// sees whole members already, so nothing changes there.
+///
 /// A member that fails to decode (a torn write) gives up the lines it held
 /// before the damage, and decoding resumes at the next gzip header, so one bad
 /// member does not hide the members after it.
 pub fn read_source(path: &Path) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    let out = if path.extension().is_some_and(|e| e == "gz") { decode_members(&bytes) } else { bytes };
+    let is_archive = path.extension().is_some_and(|e| e == "gz");
+    let mut f = std::fs::File::open(path).ok()?;
+    #[cfg(windows)]
+    if is_archive {
+        // Where the file system cannot lock, read unlocked rather than drop the archive.
+        let _ = f.lock_shared();
+    }
+    let mut bytes = Vec::new();
+    f.read_to_end(&mut bytes).ok()?;
+    let out = if is_archive { decode_members(&bytes) } else { bytes };
     Some(String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
 }
 
@@ -244,6 +263,33 @@ mod tests {
         append(&d, EVENTS, NOW + 60, b"three\n").unwrap();
         assert_eq!(archives(&d, EVENTS).len(), 1);
         assert_eq!(read_source(&archive_path(&d, EVENTS, NOW)).unwrap(), "one\ntwo\nthree\n");
+    }
+
+    /// On Windows the writer's lock is mandatory: a reader waits it out and
+    /// gets the archive, rather than failing the read and dropping the day.
+    #[cfg(windows)]
+    #[test]
+    fn a_read_waits_out_the_writers_lock_and_gets_the_archive() {
+        let d = dir("locked-read");
+        append(&d, EVENTS, NOW, b"one\ntwo\n").unwrap();
+        let path = archive_path(&d, EVENTS, NOW);
+        let (locked, held) = std::sync::mpsc::channel();
+        let writer = {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+                f.lock().unwrap();
+                locked.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                drop(f);
+            })
+        };
+        held.recv().unwrap();
+        let started = std::time::Instant::now();
+        let text = read_source(&path);
+        writer.join().unwrap();
+        assert_eq!(text.as_deref(), Some("one\ntwo\n"));
+        assert!(started.elapsed() >= std::time::Duration::from_millis(100), "the read waited for the lock");
     }
 
     #[test]
