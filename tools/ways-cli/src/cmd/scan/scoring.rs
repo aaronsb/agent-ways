@@ -67,6 +67,49 @@ fn best_score(rows: Option<&[(String, f64)]>, way_id: &str) -> Option<f64> {
         .fold(None, |acc, s| Some(acc.map_or(s, |a: f64| a.max(s))))
 }
 
+/// Where a probe run points the scan: a ways root and the corpus artifacts built
+/// from it, in place of the shipped ways and the canonical corpus. Set once per
+/// thread by `ways author probe`; the hooks never set it.
+pub(crate) struct Isolation {
+    pub ways_dir: std::path::PathBuf,
+    pub artifacts: std::path::PathBuf,
+}
+
+thread_local! {
+    // Per thread, so a test that isolates its scan cannot leak into another.
+    // A probe run is single-threaded.
+    static ISOLATION: std::cell::RefCell<Option<Isolation>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Clears the thread's isolation when dropped.
+pub(crate) struct IsolationGuard;
+
+impl Drop for IsolationGuard {
+    fn drop(&mut self) {
+        ISOLATION.with(|i| *i.borrow_mut() = None);
+    }
+}
+
+/// Point this thread's scans at `isolation` until the guard drops.
+pub(crate) fn isolate(isolation: Isolation) -> IsolationGuard {
+    ISOLATION.with(|i| *i.borrow_mut() = Some(isolation));
+    IsolationGuard
+}
+
+/// The isolated ways root, when a probe run set one.
+pub(crate) fn isolated_ways_dir() -> Option<std::path::PathBuf> {
+    ISOLATION.with(|i| i.borrow().as_ref().map(|i| i.ways_dir.clone()))
+}
+
+/// The directory holding the corpus, manifest and body sidecar the scan reads:
+/// the isolated one when set, else the canonical engine dir. Models and the
+/// `way-embed` binary always come from the canonical engine dir.
+pub(crate) fn artifact_dir() -> std::path::PathBuf {
+    ISOLATION
+        .with(|i| i.borrow().as_ref().map(|i| i.artifacts.clone()))
+        .unwrap_or_else(crate::paths::corpus_dir)
+}
+
 /// Whether the multilingual matching lane is enabled.
 ///
 /// The lane runs only in **localized mode** — `output_language` in the user config set
@@ -99,11 +142,12 @@ pub(crate) fn batch_embed_score_with(
         return EmbedScores { en: None, multi: None, calibration: Default::default() };
     };
     let xdg = crate::paths::corpus_dir();
-    let calibration = load_calibration(&xdg);
+    let artifacts = artifact_dir();
+    let calibration = load_calibration(&artifacts);
 
     let en_corpus = match corpus {
         Some(p) => p.to_path_buf(),
-        None => xdg.join("ways-corpus-en.jsonl"),
+        None => artifacts.join("ways-corpus-en.jsonl"),
     };
     let en_model = xdg.join(crate::paths::EN_MODEL);
     let en = run_if_ready(&embed_bin, &en_corpus, &en_model, query, "EN");
@@ -112,7 +156,7 @@ pub(crate) fn batch_embed_score_with(
     // English-mode installs never load the heavier 768-dim model on a match —
     // gated on output_language, not on corpus-file presence.
     let multi = if multilingual_enabled(&crate::config::global().language) {
-        let multi_corpus = sibling_corpus(corpus, &xdg, "ways-corpus-multi.jsonl");
+        let multi_corpus = sibling_corpus(corpus, &artifacts, "ways-corpus-multi.jsonl");
         let multi_model = xdg.join(crate::paths::MULTI_MODEL);
         run_if_ready(&embed_bin, &multi_corpus, &multi_model, query, "multilingual")
     } else {

@@ -66,7 +66,10 @@ impl WayRoots {
     fn resolve(project_dir: &str) -> Self {
         Self {
             project: PathBuf::from(project_dir).join(".claude/ways"),
-            all: ways_core::paths::ways_roots(Some(Path::new(project_dir))),
+            all: match super::scoring::isolated_ways_dir() {
+                Some(dir) => vec![dir],
+                None => ways_core::paths::ways_roots(Some(Path::new(project_dir))),
+            },
         }
     }
 
