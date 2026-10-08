@@ -5,15 +5,13 @@
 //! optional `"surface":"tool"` for a way that fires on a tool call. A
 //! `golden-none.jsonl` line is `{"prompt":"..."}`: a prompt no way should win.
 //!
-//! In a core root every semantic way (a `description:`, not an attend signal) must
+//! In a core root every semantic way (a `description:` and a `vocabulary:`, the corpus's admission rule) must
 //! carry a sidecar with a non-empty direct and a non-empty situational prompt.
 //! In any root, a sidecar that is malformed, or that sits beside no way, is
 //! reported. User and project roots have no coverage requirement, and their
 //! findings are warnings; the core corpus gets errors.
 
 use std::path::{Path, PathBuf};
-
-use super::helpers::has_field;
 
 const SIDECAR_SUFFIX: &str = ".golden.jsonl";
 const NONE_FILE: &str = "golden-none.jsonl";
@@ -64,8 +62,9 @@ fn rel(root: &Path, path: &Path) -> String {
 }
 
 /// Whether the way file at `path` must carry a sidecar in a core root: a
-/// non-check, non-locale `.md` with frontmatter and a `description:`, other
-/// than an attend signal handler (a nested `trigger:` block).
+/// non-check, non-locale `.md` with frontmatter and both a `description:` and a
+/// `vocabulary:` (the corpus's admission rule); an attend signal handler
+/// (a nested `trigger:` block, a description with no vocabulary) is never admitted.
 fn needs_golden(path: &Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     if crate::scanner::is_check(path) || crate::util::extract_locale_from_filename(name).is_some() {
@@ -73,10 +72,8 @@ fn needs_golden(path: &Path) -> bool {
     }
     let Ok(content) = std::fs::read_to_string(path) else { return false };
     let Some((fm, _)) = crate::frontmatter::split(&content) else { return false };
-    // A nested `trigger:` block is an attend signal handler, matched by signal
-    // name. A flat `trigger: session-start` way still carries a description.
-    let attend_signal = has_field(&fm, "trigger") && crate::frontmatter::field(&fm, "trigger").is_none();
-    crate::frontmatter::field(&fm, "description").is_some() && !attend_signal
+    let has = |k| crate::frontmatter::field(&fm, k).is_some_and(|v| !v.trim().is_empty());
+    has("description") && has("vocabulary")
 }
 
 fn check(dir: &Path, ways_dir: &Path, core: bool) -> Report {
@@ -237,15 +234,16 @@ mod tests {
     }
 
     #[test]
-    fn only_description_ways_that_are_not_attend_signals_need_a_sidecar() {
+    fn only_ways_with_description_and_vocabulary_need_a_sidecar() {
         let root = scratch("exempt");
         way(&root, "a/files-only", "files: x\n");
         way(&root, "a/signal", "description: d\ntrigger:\n  type: attend\n");
-        way(&root, "a/flat", "description: d\ntrigger: session-start\n");
+        way(&root, "a/desc-only", "description: d\n");
+        way(&root, "a/flat", "description: d\nvocabulary: v\ntrigger: session-start\n");
         std::fs::write(root.join("a/files-only/files-only.check.md"), "---\ndescription: d\n---\n").unwrap();
         std::fs::write(root.join("a/files-only/files-only.ja.md"), "---\ndescription: d\n---\n").unwrap();
         let r = check(&root, &root, true);
-        assert_eq!(r.findings.len(), 1, "only the flat-trigger way with a description needs one");
+        assert_eq!(r.findings.len(), 1, "only the flat-trigger way with description and vocabulary needs one");
         assert_eq!(r.counts.required, 1);
     }
 
