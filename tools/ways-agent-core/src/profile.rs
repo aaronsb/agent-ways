@@ -42,16 +42,17 @@ impl Provider {
         }
     }
 
-    /// The model the shipped profile is tuned for, and the one the picker recommends.
+    /// The model the shipped profile uses, and the one the picker recommends:
+    /// Claude Haiku 5.5. The threshold was measured on Haiku 4.5.
     pub fn recommended_model(self) -> &'static str {
         match self {
-            Provider::Anthropic => "claude-haiku-4-5",
-            Provider::Openrouter => "anthropic/claude-haiku-4.5",
+            Provider::Anthropic => "claude-haiku-5-5",
+            Provider::Openrouter => "anthropic/claude-haiku-5.5",
         }
     }
 
     /// True for the recommended model's id, alias or dated snapshot
-    /// (`claude-haiku-4-5` and `claude-haiku-4-5-20251001`).
+    /// (`claude-haiku-5-5`, and a dated form such as `claude-haiku-5-5-20260101` if one appears).
     pub fn is_recommended(self, model: &str) -> bool {
         let rec = self.recommended_model();
         model == rec
@@ -74,6 +75,30 @@ impl std::fmt::Display for Provider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
+}
+
+/// Whether a request to `model` may carry `temperature: 0`.
+///
+/// True only for ids known to accept it. Claude 3.x and 4.x (including dated
+/// snapshots and the OpenRouter `anthropic/` forms) do; Claude 5.x and later
+/// return HTTP 400 to any non-default sampling parameter, so those, and any id
+/// this function does not recognise, get none. A non-Anthropic model reached
+/// through OpenRouter keeps `temperature: 0`: those providers accept it, and
+/// the judge wants deterministic verdicts from them.
+pub fn accepts_sampling(model: &str) -> bool {
+    let id = model.split(':').next().unwrap_or(model);
+    let claude = match id.split_once('/') {
+        Some(("anthropic", rest)) => rest,
+        Some(_) => return true,
+        None => id,
+    };
+    let Some(rest) = claude.strip_prefix("claude-") else { return false };
+    // The first short all-digit segment is the major version; the dotted
+    // OpenRouter form (`4.5`) splits on '.' as well. A date is 8 digits.
+    let major = rest
+        .split(['-', '.'])
+        .find(|seg| !seg.is_empty() && seg.len() <= 2 && seg.bytes().all(|b| b.is_ascii_digit()));
+    matches!(major, Some("3" | "4"))
 }
 
 /// What the gate does with a verdict (ADR-196 §6).
@@ -426,10 +451,41 @@ mod tests {
 
     #[test]
     fn the_recommended_model_matches_its_dated_snapshot_only() {
-        assert!(Provider::Anthropic.is_recommended("claude-haiku-4-5"));
-        assert!(Provider::Anthropic.is_recommended("claude-haiku-4-5-20251001"));
-        assert!(!Provider::Anthropic.is_recommended("claude-haiku-4-5-beta"));
-        assert!(!Provider::Openrouter.is_recommended("anthropic/claude-haiku-4.5:batch"));
+        assert!(Provider::Anthropic.is_recommended("claude-haiku-5-5"));
+        assert!(Provider::Anthropic.is_recommended("claude-haiku-5-5-20260101"));
+        assert!(!Provider::Anthropic.is_recommended("claude-haiku-4-5"));
+        assert!(!Provider::Anthropic.is_recommended("claude-haiku-5-5-beta"));
+        assert!(Provider::Openrouter.is_recommended("anthropic/claude-haiku-5.5"));
+        assert!(!Provider::Openrouter.is_recommended("anthropic/claude-haiku-5.5:batch"));
+    }
+
+    #[test]
+    fn only_legacy_models_accept_sampling() {
+        for yes in [
+            "claude-haiku-4-5",
+            "claude-haiku-4-5-20251001",
+            "claude-3-5-haiku-latest",
+            "claude-3-haiku-20240307",
+            "claude-sonnet-4-20250514",
+            "anthropic/claude-haiku-4.5",
+            "anthropic/claude-3.5-haiku",
+            "anthropic/claude-haiku-4.5:batch",
+            "openai/gpt-5",
+            "google/gemini-2.5-flash",
+        ] {
+            assert!(accepts_sampling(yes), "{yes}");
+        }
+        for no in [
+            "claude-haiku-5-5",
+            "claude-haiku-5-5-20260101",
+            "claude-sonnet-5-5",
+            "anthropic/claude-haiku-5.5",
+            "anthropic/claude-haiku-5.5:batch",
+            "some-new-model",
+            "claude-future",
+        ] {
+            assert!(!accepts_sampling(no), "{no}");
+        }
     }
 
     #[test]
@@ -463,7 +519,7 @@ mod tests {
         let s = resolve(&user, |_| true).unwrap().unwrap();
         assert_eq!(s.mode, Mode::Shadow);
         assert_eq!(s.profile.threshold, 0.5);
-        assert_eq!(s.profile.model, "claude-haiku-4-5");
+        assert_eq!(s.profile.model, "claude-haiku-5-5");
     }
 
     #[test]

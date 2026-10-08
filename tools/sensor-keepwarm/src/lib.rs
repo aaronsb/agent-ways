@@ -58,6 +58,7 @@ const PRICES: &[(&str, Price)] = &[
     ("opus-4", Price { read: 0.5, write_1h: 10.0, output: 25.0 }),
     ("sonnet-5", Price { read: 0.2, write_1h: 4.0, output: 10.0 }),
     ("sonnet", Price { read: 0.3, write_1h: 6.0, output: 15.0 }),
+    ("haiku-5", Price { read: 0.01, write_1h: 0.2, output: 0.5 }),
     ("haiku", Price { read: 0.1, write_1h: 2.0, output: 5.0 }),
 ];
 
@@ -613,6 +614,14 @@ impl Sensor for KeepwarmSensor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn haiku_5_5_and_4_5_are_priced_differently() {
+        let new = price_of("claude-haiku-5-5").unwrap();
+        let old = price_of("claude-haiku-4-5").unwrap();
+        assert_eq!((new.read, new.write_1h, new.output), (0.01, 0.2, 0.5));
+        assert_eq!((old.read, old.write_1h, old.output), (0.1, 2.0, 5.0));
+    }
 
     fn entry(at: u64, read: u64, write: u64) -> UsageEntry {
         UsageEntry { at_epoch: at, model: "claude-fable-5-1".into(), input: 20, cache_read: read, cache_creation: write, output: 5 }

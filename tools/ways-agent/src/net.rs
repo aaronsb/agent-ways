@@ -211,14 +211,16 @@ pub fn judge(
     timeout: Duration,
 ) -> std::result::Result<(Vec<f64>, Option<Usage>), JudgeFailure> {
     use crate::judge;
-    let max_tokens = 64 + 48 * n;
-    let (url, body) = match provider {
+    // Haiku 5.5's tokenizer counts the same text as about 30% more tokens.
+    let max_tokens = 96 + 64 * n;
+    // Newer models answer HTTP 400 to any non-default sampling parameter.
+    let temperature = crate::profile::accepts_sampling(model);
+    let (url, mut body) = match provider {
         Provider::Anthropic => (
             format!("{ANTHROPIC}/v1/messages"),
             serde_json::json!({
                 "model": model,
                 "max_tokens": max_tokens,
-                "temperature": 0,
                 "system": judge::SYSTEM,
                 "tools": [{
                     "name": judge::TOOL_NAME,
@@ -235,7 +237,6 @@ pub fn judge(
             serde_json::json!({
                 "model": model,
                 "max_tokens": max_tokens,
-                "temperature": 0,
                 "messages": [
                     {"role": "system", "content": judge::SYSTEM},
                     {"role": "user", "content": prompt},
@@ -249,6 +250,9 @@ pub fn judge(
             }),
         ),
     };
+    if temperature {
+        body["temperature"] = serde_json::json!(0);
+    }
     let mut req = http.post(&url).config().timeout_global(Some(timeout)).build();
     req = match provider {
         Provider::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),

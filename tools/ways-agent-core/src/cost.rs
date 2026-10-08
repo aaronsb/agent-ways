@@ -85,12 +85,24 @@ impl JudgeCall {
 
 /// The list price, USD per million input and output tokens, of a model
 /// agent-ways ships a profile for and whose provider reports no cost:
-/// Claude Haiku 4.5 on Anthropic, under its alias or a dated id.
+/// Claude Haiku 5.5 ($0.10 / $0.50, for prompts up to 100K tokens) and
+/// Haiku 4.5 ($1 / $5) on Anthropic, under the alias or a dated id.
 pub fn list_price(provider: Provider, model: &str) -> Option<(f64, f64)> {
-    let haiku_4_5 = model
-        .strip_prefix("claude-haiku-4-5")
-        .is_some_and(|rest| rest.is_empty() || rest.strip_prefix('-').is_some_and(|d| d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit())));
-    (provider == Provider::Anthropic && haiku_4_5).then_some((1.0, 5.0))
+    let is = |base: &str| {
+        model
+            .strip_prefix(base)
+            .is_some_and(|rest| rest.is_empty() || rest.strip_prefix('-').is_some_and(|d| d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit())))
+    };
+    if provider != Provider::Anthropic {
+        return None;
+    }
+    if is("claude-haiku-5-5") {
+        Some((0.10, 0.50))
+    } else if is("claude-haiku-4-5") {
+        Some((1.0, 5.0))
+    } else {
+        None
+    }
 }
 
 /// The provider's figure where it reported one, else tokens times the
@@ -128,20 +140,21 @@ mod tests {
         let u = Usage { input_tokens: 1_000_000, output_tokens: 100_000, ..Default::default() };
         let (cost, source) = price(&u, &haiku());
         assert_eq!(source, CostSource::PriceTable);
-        assert!((cost.unwrap() - 1.5).abs() < 1e-9);
+        assert!((cost.unwrap() - 0.15).abs() < 1e-9);
     }
 
     #[test]
     fn cache_tokens_use_anthropic_multipliers() {
         let u = Usage { cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000, ..Default::default() };
         let (cost, _) = price(&u, &haiku());
-        assert!((cost.unwrap() - 1.35).abs() < 1e-9);
+        assert!((cost.unwrap() - 0.135).abs() < 1e-9);
     }
 
     #[test]
     fn the_list_price_follows_the_model_and_an_override_wins() {
         let u = Usage { input_tokens: 1_000_000, ..Default::default() };
         let mut p = haiku();
+        assert_eq!(price(&u, &p), (Some(0.10), CostSource::PriceTable));
         p.model = "claude-haiku-4-5-20251001".into();
         assert_eq!(price(&u, &p), (Some(1.0), CostSource::PriceTable));
         p.model = "claude-sonnet-4-5".into();
@@ -153,6 +166,15 @@ mod tests {
         p.model = "claude-sonnet-4-5".into();
         (p.price_in_per_mtok, p.price_out_per_mtok) = (Some(3.0), Some(15.0));
         assert_eq!(price(&u, &p), (Some(3.0), CostSource::PriceTable));
+    }
+
+    #[test]
+    fn list_prices_cover_haiku_5_5_and_4_5() {
+        assert_eq!(list_price(Provider::Anthropic, "claude-haiku-5-5"), Some((0.10, 0.50)));
+        assert_eq!(list_price(Provider::Anthropic, "claude-haiku-5-5-20260101"), Some((0.10, 0.50)));
+        assert_eq!(list_price(Provider::Anthropic, "claude-haiku-4-5"), Some((1.0, 5.0)));
+        assert_eq!(list_price(Provider::Anthropic, "claude-haiku-4-5-20251001"), Some((1.0, 5.0)));
+        assert_eq!(list_price(Provider::Openrouter, "anthropic/claude-haiku-5.5"), None);
     }
 
     #[test]

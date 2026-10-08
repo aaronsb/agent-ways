@@ -5,23 +5,23 @@ agent-tui frame 100x30
 |│     engine                                          ││                                           │|
 |│     mode                      enforce               ││The model a profile calls.                 │|
 |│ ▾ profiles · setting          value                 ││                                           │|
-|│   ▾ anthropic                                       ││The shipped profiles are tuned for Claude  │|
-|│       provider                anthropic             ││Haiku 4.5; another model scores on its own │|
-|│▌      model                   claude-haiku-4-5      ││scale. `ways agent models` lists what a    │|
-|│       threshold               0.3                   ││provider serves and keeps the list this key│|
-|│       timeout_ms              2000                  ││offers; until it has run for the profile's │|
-|│       turns                   1                     ││provider the key takes any model id, and a │|
-|│       max_turn_chars   ┌pick one: gate.profiles.anthropic.model─────────┐is still offered.       │|
-|│       concurrency      │ ● claude-haiku-4-5  current                    │                        │|
-|│       max_candidates   │   claude-haiku-4-5-20251001                    │ku-4-5                  │|
-|│       price_in_per_mtok│   claude-opus-4-5                              │ude-haiku-4-5 |         │|
-|│       price_out_per_mto│   claude-sonnet-5-5                            │251001 | claude-opus-4-5│|
-|│   ▸ openrouter         └────────────────────────────────────────────────┘ (Enter picks)          │|
-|│ ▸ keys · provider             key                   ││default  claude-haiku-4-5                  │|
+|│   ▾ anthropic                                       ││The shipped profiles use Claude Haiku 5.5, │|
+|│       provider                anthropic             ││with a threshold measured on Haiku 4.5;    │|
+|│▌      model                   claude-haiku-5-5      ││another model scores on its own scale.     │|
+|│       threshold               0.3                   ││`ways agent models` lists what a provider  │|
+|│       timeout_ms              2000                  ││serves and keeps the list this key offers; │|
+|│       turns                   1                     ││until it has run for the profile's provider│|
+|│       max_turn_chars   ┌pick one: gate.profiles.anthropic.model─────────┐odel id, and a list that│|
+|│       concurrency      │ ● claude-haiku-5-5  current                    │ffered.                 │|
+|│       max_candidates   │   claude-haiku-4-5                             │                        │|
+|│       price_in_per_mtok│   claude-opus-4-5                              │ku-5-5                  │|
+|│       price_out_per_mto│   claude-sonnet-5-5                            │ude-haiku-5-5 |         │|
+|│   ▸ openrouter         └────────────────────────────────────────────────┘claude-opus-4-5 |       │|
+|│ ▸ keys · provider             key                   ││claude-sonnet-5-5 (Enter picks)            │|
+|│                                                     ││default  claude-haiku-5-5                  │|
 |│                                                     ││from     default                           │|
 |│                                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
 |│                                                     ││[gate.profiles.anthropic.model]            │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -111,7 +111,7 @@ styles
  18   2-7   - - BOLD
  18   8-18  - - DIM
  18  32-34  - - DIM
- 18  54-64  - - DIM
+ 18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
  19  54-64  - - DIM
@@ -120,7 +120,7 @@ styles
  20  54-64  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
- 21  54-55  - - DIM
+ 21  54-64  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
  22  54-55  - - DIM
