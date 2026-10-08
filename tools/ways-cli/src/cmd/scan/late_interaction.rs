@@ -939,7 +939,7 @@ mod tests {
         std::fs::write(&bin, "binary").unwrap();
 
         manifest(r#"{"file":"ways-body-en.bin"}"#);
-        assert_eq!(state(&["a", "b"]), Err(Fallback::NoVectors), "manifest does not record --vectors");
+        assert_eq!(state(&["a", "b"]), Err(Fallback::BuiltWithoutVectors), "manifest does not record --vectors");
 
         manifest(r#"{"file":null,"reason":"way-embed < 1.2.0 lacks --vectors","unsupported":true}"#);
         assert_eq!(state(&["a", "b"]), Err(Fallback::NoVectors), "built with a way-embed lacking --vectors");
