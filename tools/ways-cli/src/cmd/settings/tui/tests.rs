@@ -784,8 +784,21 @@ fn child_stops_a_command_and_its_children() {
     let ended = job.poll();
     assert!(start.elapsed() < std::time::Duration::from_secs(1), "the stop waited on the command's child: {:?}", start.elapsed());
     assert!(matches!(ended, Some(Err(_))), "{ended:?}");
-    let stat = std::fs::read_to_string(format!("/proc/{sleep}/stat")).unwrap_or_default();
-    assert!(stat.is_empty() || stat.split_whitespace().nth(2) == Some("Z"), "the process the command started is still running: {stat}");
+    // The stop reaps the command it started, not that command's child: the
+    // kill reaches the child asynchronously, and nothing here can wait on a
+    // process it did not start. So its end is polled for, bounded: gone from
+    // /proc, or past running (`Z` awaiting its reaper, `X` being torn down).
+    let state_of = |stat: &str| stat.rsplit_once(')').and_then(|(_, rest)| rest.split_whitespace().next().map(str::to_string));
+    let start = std::time::Instant::now();
+    let stat = loop {
+        let stat = std::fs::read_to_string(format!("/proc/{sleep}/stat")).unwrap_or_default();
+        let ended = state_of(&stat).is_none_or(|s| s == "Z" || s == "X");
+        if ended || start.elapsed() > std::time::Duration::from_secs(10) {
+            break stat;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert!(state_of(&stat).is_none_or(|s| s == "Z" || s == "X"), "the process the command started is still running: {stat}");
 }
 
 #[cfg(unix)]
