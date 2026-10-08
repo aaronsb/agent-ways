@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"what should i assert in these tests, and are there gaps in what we cover"}
+{"kind":"situational","prompt":"i'm unsure whether this check belongs in a quick isolated test or a full-stack one, and my test data is a dump of real customers"}

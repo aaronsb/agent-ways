@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"should i call this function process_v2 or just rename the original"}
+{"kind":"situational","prompt":"there's a comment saying \"first cut, revisit later\" and the helper is named with a number on the end, it reads oddly"}

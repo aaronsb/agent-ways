@@ -20,6 +20,9 @@
 //!   corpus item pulls the embedding toward the negated topic.
 //! - [`locale_stubs`] validates `*.locales.jsonl` per-language overrides
 //!   against the `locale_stub:` schema block.
+//! - [`golden`] validates ADR-701 §9 golden-prompt sidecars
+//!   (`*.golden.jsonl`, `golden-none.jsonl`) and, in a core root, requires one
+//!   per semantic way.
 //! - [`requires`] is the ADR-116 scan-macro-to-permissions machinery.
 //! - [`corpus`] runs the ADR-701 §3 whole-tree checks: See Also targets
 //!   resolve, no symlinks in a root, way file names unique within it.
@@ -30,6 +33,7 @@
 //! the module.
 
 mod corpus;
+mod golden;
 mod helpers;
 mod locale_stubs;
 mod pattern;
@@ -151,17 +155,21 @@ pub fn run(
         fix,
     )?;
 
+    // ADR-701 §9 golden-prompt sidecars: format everywhere, coverage in core.
+    let project = crate::util::project_root().map(PathBuf::from);
+    let golden = golden::lint_golden(&scan_dir, &ways_dir, project.as_deref(), &mut errors, &mut warnings);
+
     // Provenance sidecar validation
     provenance::lint_provenance_sidecars(&scan_dir, &ways_dir, &mut errors)?;
 
     // ADR-701 §3 corpus checks, run against the ways root that holds the
     // target: errors for the core corpus, warnings for user and project roots.
-    let project = crate::util::project_root().map(PathBuf::from);
     corpus::lint_corpus(&scan_dir, project.as_deref(), &mut errors, &mut warnings);
 
     let label = if is_targeted { "Target" } else { "Global" };
     eprintln!(
-        "{label}: scanned {file_count} way files, {stub_count} locale stub files"
+        "{label}: scanned {file_count} way files, {stub_count} locale stub files, {} golden sidecar files ({} ways need one)",
+        golden.files, golden.required
     );
     eprintln!();
     if fixes > 0 {

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write a migration to add a nullable column to the orders table with a down step"}
+{"kind":"situational","prompt":"i need to change the shape of a postgres table that already has data in it, and be able to undo it if it goes wrong"}

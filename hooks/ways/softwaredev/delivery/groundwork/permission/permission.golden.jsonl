@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"i can't touch the pipeline config, another team owns it, so i keep writing wrapper scripts around it"}
+{"kind":"situational","prompt":"all our recent patches are in the files we're allowed to edit while the real problem lives somewhere we have no access to"}

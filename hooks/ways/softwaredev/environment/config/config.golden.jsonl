@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"where do i set the database host and port, is it in the .env"}
+{"kind":"situational","prompt":"the app should crash right at boot if a required variable is missing instead of failing later on first use"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"this command tails logs forever and blocks you, run it in the background"}
+{"kind":"situational","prompt":"you ran a dev server in the foreground and the whole session froze waiting on it"}

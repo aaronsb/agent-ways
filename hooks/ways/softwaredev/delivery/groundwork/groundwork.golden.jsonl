@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"before we change this inherited service, can we even build and deploy it today"}
+{"kind":"situational","prompt":"we were handed a neglected codebase with no tests and no pipeline and i don't know where to start"}

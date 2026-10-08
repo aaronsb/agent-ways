@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"add a regex to this way so it always fires on the exact term, and why is lint complaining about my wildcard"}
+{"kind":"situational","prompt":"my way's regex is matching common words like 'run' and firing everywhere, and lint flagged it as too loose"}

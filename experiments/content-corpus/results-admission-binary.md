@@ -8,7 +8,7 @@ The corpus, way files, vocabulary, calibration and thresholds are as they are on
 
 - **Binary.** `tools/target/release/ways` built from this branch. The setting is `matching.admission`: `share` (the default, today's rule) or `chunk_top`. Both keep the peak co-gate at 0.50, take survivors by peak up to 6, and body-confirm them unchanged.
 - **Port.** `recall.py`'s `evaluate`. `share` is its shipped point (K 8, share 0.15, peak 0.50, cap 6, share / n_chunks). `chunk_top` is its `top1` pick (each chunk's top-ranked way, or peak ≥ 0.50, cap 6).
-- **Surfaces.** `recall.py`'s: 310 main surfaces of two or three golden prompts, one chunk per prompt (seed 11), and 93 auxiliary surfaces built around the 3 golden prompts that split into two chunks (seed 13). Golden files: `golden-synthetic.tsv` and `tests/routing-golden.tsv`, 332 rows.
+- **Surfaces.** `recall.py`'s: 310 main surfaces of two or three golden prompts, one chunk per prompt (seed 11), and 93 auxiliary surfaces built around the 3 golden prompts that split into two chunks (seed 13). Golden files: the golden sidecars (`ways author golden --tsv`) and `tests/routing-golden.tsv`, 332 rows.
 - **The binary's run.** `admission_binary.py` runs `ways author match --all --project EMPTY --json SURFACE` under a scratch HOME and XDG tree. Its corpus is `$OUT/alias.jsonl`, its ways are this checkout's `hooks/ways`, and its `config.yaml` sets `admission:`. There is no body sidecar, so confirmation is per call, as in the port. `--all` competes every way, as the port does. `--json` lists every candidate with the matcher's admitted, capped and fired decision. The diagnostic and `late_interaction::run` take their survivors from one function, `rank_and_admit` (mask, rank, admit, cap).
 - **Comparison.** Per surface, the admitted set and the fired set from the binary against the port's, and every body-confirm value the binary printed against the port's, within 0.001.
 - **Labels and metrics** as in `results-recall.md`: *relevant* is an expected way, *related* an ancestor or descendant of one, *irrelevant* anything else. Recall after confirm is what reaches the judge. Irrelevant fired per surface is what the judge has to reject.
@@ -109,7 +109,7 @@ mkdir -p bin && ln -sf "$PWD/tools/target/release/ways" bin/ways   # run.py buil
 cd experiments/content-corpus
 OUT=/tmp/adm-out python3 -c 'import run; run.OUT.mkdir(parents=True, exist_ok=True); run.build_alias_corpus()'
 OUT=/tmp/adm-out python3 admission_binary.py --ways ../../tools/target/release/ways --mode both \
-    golden-synthetic.tsv ../../tests/routing-golden.tsv
+    <(../../tools/target/release/ways author golden --tsv) ../../tests/routing-golden.tsv
 ```
 
 The first run scores confirm pairs into `$OUT/recall-confirm-cache.json`, shared with `recall.py`. Later runs take about two minutes, all of it the binary's per-surface calls. `--text` reads the table of a binary without `--json`, as Step 1 did with the `ways-graph` build. The summary is written to `$OUT/admission-binary.json`.

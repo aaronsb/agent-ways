@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"make ssh-agent start on login and load my key so i stop typing the passphrase"}
+{"kind":"situational","prompt":"every time i open a terminal and push over git it asks for my key passphrase again, ugh"}

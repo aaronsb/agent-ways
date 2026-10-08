@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"audit our python requirements with pip-audit before installing"}
+{"kind":"situational","prompt":"the setup.py of this pypi wheel runs code on install and i want to look before pip touches it"}

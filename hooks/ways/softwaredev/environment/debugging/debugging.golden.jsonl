@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"help me debug this crash, here's the stack trace"}
+{"kind":"situational","prompt":"something that worked last week is broken now and i want to find which commit introduced it"}

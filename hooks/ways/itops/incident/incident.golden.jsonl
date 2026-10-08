@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"prod is down and the pager just went off, what do we do first"}
+{"kind":"situational","prompt":"customers are reporting errors since the last release, should we revert or push a patch, and what do we write up afterwards"}

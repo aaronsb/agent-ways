@@ -4,7 +4,7 @@ Follow-up to ADR-700 §9 and `results-subtree.md`. That spike found that region-
 
 ## Method
 
-**Data.** The ADR-700 golden set as before: `golden-synthetic.tsv` plus `tests/routing-golden.tsv`, 332 rows, 314 targeted and 18 `none`. Way scores are cosine against the alias vectors (`description + vocabulary`), and the hubness-corrected score (CSLS, k = 10, two-fold, the folds of `geometry.py`).
+**Data.** The ADR-700 golden set as before: the golden sidecars (`ways author golden --tsv`) plus `tests/routing-golden.tsv`, 332 rows, 314 targeted and 18 `none`. Way scores are cosine against the alias vectors (`description + vocabulary`), and the hubness-corrected score (CSLS, k = 10, two-fold, the folds of `geometry.py`).
 
 **Regions.** The 10 domains (first path segment) and 27 intermediate directories, 37 region nodes in all. `research` and `writing` are single-way domains; their region vector is that way's own.
 
@@ -160,8 +160,8 @@ On this set, no region signal independent of the way scores recovers a meaningfu
 ## Reproduce
 
 ```
-OUT=/tmp/region-out python3 experiments/content-corpus/run.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
-OUT=/tmp/region-out python3 experiments/content-corpus/region.py experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
+OUT=/tmp/region-out python3 experiments/content-corpus/run.py <(ways author golden --tsv) tests/routing-golden.tsv
+OUT=/tmp/region-out python3 experiments/content-corpus/region.py <(ways author golden --tsv) tests/routing-golden.tsv
 ```
 
 `run.py` needs `bin/ways` (`make ways`) and `~/.claude/bin/way-embed` with the MiniLM model in the agent-ways cache. `region.py` reads the alias and `section` corpora from `$OUT` and the authored descriptions from `region-descriptions.tsv`.

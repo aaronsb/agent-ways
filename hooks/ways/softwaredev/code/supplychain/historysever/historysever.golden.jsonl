@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"flatten the git history into an orphan branch so the leaked keys are gone"}
+{"kind":"situational","prompt":"we need the old commits gone for good and also want this fork to stop being linked to the original upstream"}

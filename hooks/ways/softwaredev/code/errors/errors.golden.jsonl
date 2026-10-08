@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"how should we handle exceptions in the import pipeline, where do we catch and what do we wrap"}
+{"kind":"situational","prompt":"the service started with no database url set and just limped along using some made-up value, then wrote garbage for an hour"}

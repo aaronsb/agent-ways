@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"my markdown files are hard wrapped at 80 columns and edits keep failing, can you unwrap them"}
+{"kind":"situational","prompt":"every time i tweak one sentence in the docs git shows the whole paragraph as changed"}

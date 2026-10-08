@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"this way file is 200 lines covering four topics, should i split it into a parent and child files"}
+{"kind":"situational","prompt":"my guidance file got huge, and when the broad one fires the narrow ones barely get picked, how do i restructure it into nested pieces"}

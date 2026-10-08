@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"split my zshrc into small files that get sourced and clean up the path duplicates"}
+{"kind":"situational","prompt":"my startup file is 600 lines of pasted junk and the same directories show up in my path five times"}

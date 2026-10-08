@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"give this module a general security review with sensible defaults"}
+{"kind":"situational","prompt":"we're shipping next week and i want a once-over to make the codebase generally harder to attack"}

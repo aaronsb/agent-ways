@@ -550,6 +550,19 @@ enum AuthorCommand {
         #[arg(long, short)]
         output: Option<String>,
     },
+    /// Export the golden-prompt sidecars as TSV (ADR-701 §9)
+    ///
+    /// Reads `{wayname}.golden.jsonl` beside each way and `golden-none.jsonl` at
+    /// the root. With `--tsv`, prints `prompt<TAB>expected_way<TAB>kind` rows
+    /// sorted by way id; without it, a short summary.
+    Golden {
+        /// Ways root directory (default: the shipped ways root)
+        #[arg(long)]
+        ways_dir: Option<String>,
+        /// Print the rows as TSV
+        #[arg(long)]
+        tsv: bool,
+    },
     /// Detect or repair hard-wrapped markdown prose
     ///
     /// Exits 0 when clean and 1 when wrapped prose is found, matching lint
@@ -1282,6 +1295,7 @@ fn run() -> Result<()> {
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
             AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),
             AuthorCommand::Graph { ways_dir, output } => cmd::graph::run(ways_dir, output),
+            AuthorCommand::Golden { ways_dir, tsv } => cmd::golden::run(ways_dir, tsv),
             AuthorCommand::Reflow { path, fix, json, quiet } => cmd::reflow::run(path, fix, json, quiet),
             AuthorCommand::Permissions { global } => cmd::permissions::audit(global),
         },

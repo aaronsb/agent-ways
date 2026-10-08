@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"my service calls a payment api in tests, how do i swap it for a fake so the test doesn't hit the network"}
+{"kind":"situational","prompt":"the unit test keeps making real http calls to a third party and fails when their sandbox is down"}

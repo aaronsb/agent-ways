@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"run cargo audit and look at unsafe and build.rs in our crates"}
+{"kind":"situational","prompt":"one of the crates we depend on has a build script that does network calls, is the rust dependency tree okay"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"open a gh pr for this branch and check what the reviewers commented"}
+{"kind":"situational","prompt":"i'm the only dev on this repo, do i really need to open a pull request for every tiny change or can i just push"}

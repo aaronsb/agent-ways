@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"can we do a stride pass on the new upload service and map where an attacker could get in"}
+{"kind":"situational","prompt":"we're about to expose an internal service to partners and i want to think through who could abuse it and where trust changes hands"}

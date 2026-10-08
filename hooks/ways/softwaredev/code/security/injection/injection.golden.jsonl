@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"make sure this search endpoint is safe from sql injection and xss"}
+{"kind":"situational","prompt":"the form value gets pasted straight into a query string and into a shell call, and i'm not sure that's okay"}

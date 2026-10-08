@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"tests pass on my machine but fail in github actions"}
+{"kind":"situational","prompt":"it's green locally but the runner goes red, and i think a file i made never got pushed"}

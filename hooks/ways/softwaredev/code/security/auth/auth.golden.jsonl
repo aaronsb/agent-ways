@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"add jwt login and role checks to the admin routes"}
+{"kind":"situational","prompt":"any logged-in user can open another person's invoice just by changing the id in the url"}

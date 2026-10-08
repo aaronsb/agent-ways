@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"spin up a helper agent to dig through the logs while you keep working on the parser"}
+{"kind":"situational","prompt":"you told the helper 'try to avoid touching the schema' and it rewrote the schema anyway, how should instructions be handed over"}

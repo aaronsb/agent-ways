@@ -9,7 +9,7 @@ port. This script runs both on the same surfaces and compares them.
     OUT=/tmp/adm-out python3 -c 'import run; run.OUT.mkdir(parents=True, exist_ok=True); run.build_alias_corpus()'
     OUT=/tmp/adm-out experiments/content-corpus/admission_binary.py \
         --ways tools/target/release/ways [--mode share|chunk_top|both] [--text] \
-        experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
+        <(ways author golden --ways-dir hooks/ways --tsv) tests/routing-golden.tsv
 
 Smoke run: add `--quick`. The surfaces are built from the full golden set as
 usual, then cut to a fixed slice (every 8th main surface and every auxiliary
@@ -21,7 +21,7 @@ rows are present:
 
     OUT=/tmp/adm-out experiments/content-corpus/admission_binary.py --quick \
         --ways tools/target/release/ways \
-        experiments/content-corpus/golden-synthetic.tsv tests/routing-golden.tsv
+        <(ways author golden --ways-dir hooks/ways --tsv) tests/routing-golden.tsv
 
 The engine, `way-embed`, is resolved once, before anything runs, as the binary
 resolves it (ways-core paths::way_embed): $XDG_CACHE_HOME/agent-ways/user/way-embed

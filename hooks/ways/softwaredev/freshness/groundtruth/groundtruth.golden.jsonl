@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"does the adr still match what the code actually does, check the code not the doc"}
+{"kind":"situational","prompt":"we're about to refactor the migration code and want proof afterwards that outputs are identical"}

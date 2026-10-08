@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"we have twelve open prs, which ones should land first"}
+{"kind":"situational","prompt":"three pending changes add features to a module nobody can test, and one adds the test runner. what order should they go in"}

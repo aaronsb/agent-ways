@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"which NIST or OWASP control backs up our rule about signing commits?"}
+{"kind":"situational","prompt":"auditor asked what standard justifies requiring conventional commit messages and dependency scanning, i need something to point at"}

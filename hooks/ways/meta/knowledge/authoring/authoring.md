@@ -66,6 +66,7 @@ ways author template meta/newway \
 
 This creates:
 - `{wayname}/{wayname}.md` — frontmatter + body template with guidance placeholders
+- `{wayname}/{wayname}.golden.jsonl` — a blank direct and a blank situational golden prompt, to fill in
 
 Ways are authored **English-only** (ADR-139): localization is adopter-run, not authored per-way — there is no translation step here. Then: `ways author lint <path>`, `ways corpus`, and `ways author match "<prompt>"`. A fire-bearing way needs `refire:`; without it the firing gate refuses the way, so it never reaches the agent (only a Task dispatch to a subagent bypasses the gate).
 
@@ -102,6 +103,14 @@ Full authoring guide: `docs/hooks-and-ways/extending.md`
 ## Locale Stubs
 
 Native-language matching aliases live in `{wayname}.locales.jsonl` beside the way file; the way body stays English. The format and audit are in knowledge/authoring/locale-stubs(meta).
+
+## Golden Prompts
+
+Every core way that matches by prompt carries `{wayname}.golden.jsonl` beside the way file: one `direct` prompt that names the topic and one `situational` prompt that describes the user's situation without naming it (ADR-701 §9).
+
+Each line is `{"kind":"direct","prompt":"..."}`; a way that fires on a tool call adds `"surface":"tool"`. Prompts the matcher should leave alone go in `golden-none.jsonl` at the ways root, one `{"prompt":"..."}` per line.
+
+`ways author lint` fails a core way whose sidecar is missing or has a blank direct or situational prompt, and checks the format in every root. `ways author golden --tsv` exports the rows for the routing experiments.
 
 ## See Also
 

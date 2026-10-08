@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write an adr for why we chose kafka over rabbitmq"}
+{"kind":"situational","prompt":"we picked one approach over another last week for the cache layer and i want the reasoning written down so nobody relitigates it later"}

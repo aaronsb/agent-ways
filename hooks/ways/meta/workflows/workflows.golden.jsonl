@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write a script that fans out agents over all 200 modules, verifies each result, and merges into one report"}
+{"kind":"situational","prompt":"i have hundreds of files to push through the same stages with checks after each, too much to do by hand in one chat"}

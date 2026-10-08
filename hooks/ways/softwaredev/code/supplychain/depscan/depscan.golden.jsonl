@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"scan our lockfiles for known cves before we install anything"}
+{"kind":"situational","prompt":"before running the install on this project, check whether any of the packages it pulls in have published advisories"}

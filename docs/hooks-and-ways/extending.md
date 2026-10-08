@@ -24,10 +24,10 @@ Do not author in `~/.claude/hooks/ways/`. It is a symlink into the app's own cop
 
 ## Creating a way
 
-A way is a directory holding `{wayname}.md`: YAML frontmatter, then the guidance. Optional files beside it are `macro.sh` for dynamic content (see [macros.md](macros.md)) and a `provenance.yaml` sidecar that claims the controls the way serves (see [provenance.md](provenance.md)). There is no registration step.
+A way is a directory holding `{wayname}.md`: YAML frontmatter, then the guidance. Optional files beside it are `macro.sh` for dynamic content (see [macros.md](macros.md)) a `provenance.yaml` sidecar that claims the controls the way serves (see [provenance.md](provenance.md)), and a `{wayname}.golden.jsonl` sidecar of test prompts: one `direct` and one `situational` line, each `{"kind":"direct","prompt":"..."}`. A core way must have one filled in; `ways author lint` checks it. There is no registration step.
 
-1. **Scaffold.** `ways author template <domain>/<wayname> -d "what this way covers" -V "words users would say"` writes the file. Run inside a project, it writes to the project's `.claude/ways/`. With `--global`, or outside a project, it writes to your personal root.
-2. **Edit.** Write the description, vocabulary and body. Add `pattern:`, `commands:`, `files:` or `trigger:` if the way should fire on those.
+1. **Scaffold.** `ways author template <domain>/<wayname> -d "what this way covers" -V "words users would say"` writes the file and a blank golden sidecar. Run inside a project, it writes to the project's `.claude/ways/`. With `--global`, or outside a project, it writes to your personal root.
+2. **Edit.** Write the description, vocabulary and body, and fill both golden prompts. Add `pattern:`, `commands:`, `files:` or `trigger:` if the way should fire on those.
 3. **Lint.** `ways author lint <path>` checks the frontmatter against the schema. Fix every error.
 4. **Rebuild the corpus.** `ways corpus` re-embeds the ways. The semantic matcher reads the corpus, not the files, so an edit to `description:` or `vocabulary:` does nothing until the rebuild. A new session runs `ways corpus --if-stale`, which rebuilds when a way file is newer than the corpus.
 5. **Check the match.** `ways author match "a prompt that should fire it"` shows how the live matcher scores the prompt against every way. Try prompts that should fire it and prompts that should not.

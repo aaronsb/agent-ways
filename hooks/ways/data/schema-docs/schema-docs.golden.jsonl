@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"can you generate an ER diagram from our sql schema file and a page listing every table and column"}
+{"kind":"situational","prompt":"our docs site has no picture of how the tables relate and the column list is out of date, tired of editing it by hand"}

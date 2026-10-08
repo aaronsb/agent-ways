@@ -249,3 +249,7 @@ Added 2026-10-05 from `experiments/content-corpus/judge_ab.py` and `results-judg
 - Ranking only; no thresholds or calibration were fitted.
 - Gains of about 2 points are within noise at this size.
 - Hubness correction and body fusion were not tested together, and neither was routing within a subtree first.
+
+## Notes
+
+- 2026-10-08: the synthetic rows moved from `experiments/content-corpus/golden-synthetic.tsv` into per-way `*.golden.jsonl` sidecars, with the `none` rows in `hooks/ways/golden-none.jsonl` (ADR-701 §9). `ways author golden --tsv` exports the same 289 rows.

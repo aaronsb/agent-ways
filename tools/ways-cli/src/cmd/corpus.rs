@@ -1271,6 +1271,11 @@ fn content_hash_input(entries: &[(String, u64)]) -> Vec<u8> {
 fn any_way_file_newer(root: &Path, manifest: &Path) -> bool {
     crate::scanner::files(root).any(|path| {
         let ext = path.extension().and_then(|e| e.to_str());
+        // Golden prompts (ADR-701 §9) are test data, not matching input.
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.ends_with(".golden.jsonl") || name == "golden-none.jsonl" {
+            return false;
+        }
         (ext == Some("md") || ext == Some("jsonl")) && is_newer_than(&path, manifest)
     })
 }
@@ -1504,6 +1509,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
     use std::cell::RefCell;
+
+    /// Golden prompts are test data: editing them leaves the corpus fresh, while
+    /// a newer way file still marks it stale.
+    #[test]
+    fn golden_sidecars_do_not_make_the_corpus_stale() {
+        let dir = scratch("golden-stale");
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::write(dir.join("a/a.md"), "x").unwrap();
+        let manifest = dir.join("manifest.json");
+        std::fs::write(&manifest, "{}").unwrap();
+        let past = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::File::options().write(true).open(&manifest).unwrap().set_modified(past).unwrap();
+        std::fs::File::options().write(true).open(dir.join("a/a.md")).unwrap().set_modified(past - std::time::Duration::from_secs(60)).unwrap();
+        std::fs::write(dir.join("a/a.golden.jsonl"), "{}").unwrap();
+        std::fs::write(dir.join("golden-none.jsonl"), "{}").unwrap();
+        assert!(!any_way_file_newer(&dir, &manifest));
+        std::fs::write(dir.join("a/a.locales.jsonl"), "{}").unwrap();
+        assert!(any_way_file_newer(&dir, &manifest));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ways-corpus-{name}-{}", std::process::id()));

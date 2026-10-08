@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"design the endpoints for a todo service, list and create and delete"}
+{"kind":"situational","prompt":"the mobile client keeps getting different error bodies from different routes and the list calls return thousands of rows at once"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write a change request for dropping the old production database cluster, with rollback steps and who approves"}
+{"kind":"situational","prompt":"i'm about to do something scary on live servers and want a formal ask sent to the managers first, with a deadline if they don't reply"}

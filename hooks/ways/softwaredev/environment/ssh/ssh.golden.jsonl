@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"scp this file to the remote box and set up key auth"}
+{"kind":"situational","prompt":"i need to copy a folder to a server over the network without being prompted for a password"}
