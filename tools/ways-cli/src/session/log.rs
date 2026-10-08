@@ -8,7 +8,7 @@
 //! while they work. Extracted from `session.rs`, which had passed the
 //! 800-line priority threshold, when ADR-701 §2 added a second stream.
 
-use ways_core::event_archive::{Stream, DECISIONS, EVENTS};
+use ways_core::event_archive::{open_live, open_live_read, Stream, DECISIONS, EVENTS};
 
 mod turns;
 
@@ -25,31 +25,6 @@ pub(super) fn append_jsonl_line(path: &std::path::Path, line: &str) {
     buf.push_str(line);
     buf.push('\n');
     let _ = open_live(std::fs::OpenOptions::new().create(true).append(true), path).and_then(|mut f| f.write_all(buf.as_bytes()));
-}
-
-/// Open a live log with `opts` so a rewrite can rename over it while the
-/// handle is open.
-///
-/// Compaction and the daily pass hold the live file open across the rename
-/// that replaces it, and a hook may be appending at that moment. Unix allows
-/// that. Windows refuses to replace a file while any handle on it was opened
-/// without `FILE_SHARE_DELETE`, which std's default share mode leaves out, so
-/// every handle on a live log asks for it.
-fn open_live(opts: &mut std::fs::OpenOptions, path: &std::path::Path) -> std::io::Result<std::fs::File> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_SHARE_READ: u32 = 0x1;
-        const FILE_SHARE_WRITE: u32 = 0x2;
-        const FILE_SHARE_DELETE: u32 = 0x4;
-        opts.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
-    }
-    opts.open(path)
-}
-
-/// [`open_live`] for reading.
-fn open_live_read(path: &std::path::Path) -> std::io::Result<std::fs::File> {
-    open_live(std::fs::OpenOptions::new().read(true), path)
 }
 
 // ── Event logging ───────────────────────────────────────────────
