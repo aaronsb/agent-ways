@@ -45,4 +45,4 @@ The payloads name `/home/tester/project` as the working directory. The runner cr
 
 ## Tier 2
 
-Tier 2 runs tier 1, then drives the scenarios under `scenarios/` through `claude -p` with a real key, and checks the fired ways and the answer. It spends tokens, so CI runs it after each ways release and on dispatch, never on a pull request. How to run it and add a scenario is in [CLAUDE.md](CLAUDE.md#tier-2).
+Tier 2 runs tier 1, then drives the scenarios under `scenarios/` through `claude -p` with a real key, and checks the fired ways and the answer. It spends tokens, so it runs locally with `make test-live TIER=2`, or on GitHub only when `live-fixture.yml` is dispatched by hand (ADR-508). How to run it and add a scenario is in [CLAUDE.md](CLAUDE.md#tier-2).
