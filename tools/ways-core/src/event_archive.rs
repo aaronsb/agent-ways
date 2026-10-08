@@ -109,7 +109,7 @@ pub fn append_from(dir: &Path, stream: Stream, now: u64, removed: &mut dyn Read)
     // write-data access, so `LockFileEx` and the cut-back's `set_len` both fail
     // with ERROR_ACCESS_DENIED. Every writer holds the exclusive lock, so
     // writing at the end under it appends as `O_APPEND` would.
-    let f = open_live(std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false), &path)?;
+    let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
     f.lock()?;
 
     let written = (|| {
@@ -159,44 +159,31 @@ pub fn expire(dir: &Path, stream: Stream, now: u64, retention_days: u32) -> usiz
     removed
 }
 
-/// Open a stream's file with `opts` so that it can still be replaced or
-/// removed while the handle is open.
-///
-/// The writer's compaction and daily pass rename a new live file over the old
-/// one, and expiry deletes archives, while hooks append and readers such as
-/// `ways tune stats` may hold the file open. Unix allows that. Windows refuses a
-/// rename over, or a delete of, a file while any handle on it was opened
-/// without `FILE_SHARE_DELETE`, which std's default share mode leaves out, so
-/// every reader and writer of a stream's files opens them here.
-pub fn open_live(opts: &mut std::fs::OpenOptions, path: &Path) -> std::io::Result<std::fs::File> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_SHARE_READ: u32 = 0x1;
-        const FILE_SHARE_WRITE: u32 = 0x2;
-        const FILE_SHARE_DELETE: u32 = 0x4;
-        opts.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
-    }
-    opts.open(path)
-}
-
-/// [`open_live`] for reading.
-pub fn open_live_read(path: &Path) -> std::io::Result<std::fs::File> {
-    open_live(std::fs::OpenOptions::new().read(true), path)
-}
-
 /// The text of one log source: a plain file as it is, a `.gz` archive
 /// decompressed. Unreadable files give `None`. The bytes become the string
-/// without a copy when they are valid UTF-8. The file is opened with
-/// [`open_live_read`], so a reader never blocks the writer's rename.
+/// without a copy when they are valid UTF-8.
+///
+/// On Windows an archive is read under a shared lock. [`append_from`]'s
+/// exclusive lock is mandatory there, so a read while a member is being
+/// written fails with ERROR_LOCK_VIOLATION and would drop the day's archive
+/// from the result. The shared lock waits for the writer instead; the writer
+/// holds its lock only across one member's write and fsync, and the system
+/// releases it if the writer dies. On Unix the lock is advisory and a reader
+/// sees whole members already, so nothing changes there.
 ///
 /// A member that fails to decode (a torn write) gives up the lines it held
 /// before the damage, and decoding resumes at the next gzip header, so one bad
 /// member does not hide the members after it.
 pub fn read_source(path: &Path) -> Option<String> {
+    let is_archive = path.extension().is_some_and(|e| e == "gz");
+    let mut f = std::fs::File::open(path).ok()?;
+    #[cfg(windows)]
+    if is_archive {
+        f.lock_shared().ok()?;
+    }
     let mut bytes = Vec::new();
-    open_live_read(path).and_then(|mut f| f.read_to_end(&mut bytes)).ok()?;
-    let out = if path.extension().is_some_and(|e| e == "gz") { decode_members(&bytes) } else { bytes };
+    f.read_to_end(&mut bytes).ok()?;
+    let out = if is_archive { decode_members(&bytes) } else { bytes };
     Some(String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
 }
 

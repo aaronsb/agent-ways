@@ -8,7 +8,7 @@
 //! while they work. Extracted from `session.rs`, which had passed the
 //! 800-line priority threshold, when ADR-701 §2 added a second stream.
 
-use ways_core::event_archive::{open_live, open_live_read, Stream, DECISIONS, EVENTS};
+use ways_core::event_archive::{Stream, DECISIONS, EVENTS};
 
 mod turns;
 
@@ -24,7 +24,11 @@ pub(super) fn append_jsonl_line(path: &std::path::Path, line: &str) {
     let mut buf = String::with_capacity(line.len() + 1);
     buf.push_str(line);
     buf.push('\n');
-    let _ = open_live(std::fs::OpenOptions::new().create(true).append(true), path).and_then(|mut f| f.write_all(buf.as_bytes()));
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(buf.as_bytes()));
 }
 
 // ── Event logging ───────────────────────────────────────────────
@@ -267,7 +271,7 @@ fn compact_log_tail_hooked(path: &std::path::Path, stream: Stream, now: u64, kee
     if size <= keep_bytes || (size <= ceiling && archive_failed_today(dir, stream, now)) {
         return Ok(()); // nothing to cut, or retry tomorrow
     }
-    let f = open_live_read(path)?;
+    let f = std::fs::File::open(path)?;
     let mut data = Vec::new();
     (&f).read_to_end(&mut data)?;
     let keep = keep_bytes as usize;
@@ -315,13 +319,13 @@ fn compact_log_tail_hooked(path: &std::path::Path, stream: Stream, now: u64, kee
         }
         unarchived = Some((removed.len(), e.to_string()));
     }
-    agent_settings::writer::write_atomic(path, &out)?;
+    publish_after_archive(path, stream, now, &mut || agent_settings::writer::write_atomic(path, &out))?;
     // Appends that landed on the old file while the new one was written.
     (&f).seek(SeekFrom::Start(data.len() as u64))?;
     let mut gained = Vec::new();
     (&f).read_to_end(&mut gained)?;
     if !gained.is_empty() {
-        open_live(std::fs::OpenOptions::new().append(true), path)?.write_all(&gained)?;
+        std::fs::OpenOptions::new().append(true).open(path)?.write_all(&gained)?;
     }
     if let Some((bytes, reason)) = unarchived {
         let event = serde_json::json!({"ts": agent_fmt::when::utc_iso(now), "event": "event_log_dropped", "bytes": bytes, "reason": reason});
@@ -330,11 +334,44 @@ fn compact_log_tail_hooked(path: &std::path::Path, stream: Stream, now: u64, kee
     Ok(())
 }
 
+/// Replace `path` by running `publish`, once the lines it drops are archived.
+///
+/// A failure here leaves those lines in the archive and in the log alike. The
+/// next append would archive them again, once per append while the log stays
+/// over the size bound, so the failure sets today's marker as a failed archive
+/// write does, and compaction waits for tomorrow.
+fn publish_after_archive(path: &std::path::Path, stream: Stream, now: u64, publish: &mut dyn FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
+    let result = publish_fault().and_then(|()| publish());
+    if result.is_err() {
+        mark_archive_failed(path.parent().unwrap_or(std::path::Path::new(".")), stream, now);
+    }
+    result
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Makes the next publishes on this test thread fail, as a rename refused
+    /// by the platform would. A publish failure cannot be produced on Unix
+    /// without also making the marker beside the log unwritable.
+    static FAIL_PUBLISH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The test seam behind [`FAIL_PUBLISH`]; `Ok` in the product.
+fn publish_fault() -> std::io::Result<()> {
+    #[cfg(test)]
+    if FAIL_PUBLISH.with(|f| f.get()) {
+        return Err(std::io::Error::other("publish refused (test)"));
+    }
+    Ok(())
+}
+
 fn archive_failed_today(dir: &std::path::Path, stream: Stream, now: u64) -> bool {
     dir.join(day_file(&archive_failed_prefix(stream), now)).exists()
 }
 
-/// Record that archiving `stream` failed today and clear its markers of other days.
+/// Record that a pass over `stream` failed today, archiving its removed lines
+/// or publishing the log after them, and clear its markers of other days.
+/// Below the ceiling, compaction does not retry until tomorrow.
 fn mark_archive_failed(dir: &std::path::Path, stream: Stream, now: u64) {
     let mine = day_file(&archive_failed_prefix(stream), now);
     remove_other_days(dir, &archive_failed_prefix(stream), &mine);
@@ -409,7 +446,7 @@ fn rotate_if_due(dir: &std::path::Path, stream: Stream, now: u64, archive_days: 
     // Expiry anchors to the log like the rotation cutoff: a clock that ran
     // ahead must not delete archives. With no readable line there is no anchor
     // and nothing expires.
-    if let Some(anchor) = open_live_read(path).ok().and_then(|f| newest_ts(&f).ok().flatten()) {
+    if let Some(anchor) = std::fs::File::open(path).ok().and_then(|f| newest_ts(&f).ok().flatten()) {
         ways_core::event_archive::expire(dir, stream, anchor.min(now), archive_days);
     }
     sweep_temps(dir, stream, std::time::SystemTime::now());
@@ -474,7 +511,7 @@ fn rotate_log_by_age(path: &std::path::Path, stream: Stream, now: u64, retention
 /// something to happen in that window.
 fn rotate_log_by_age_hooked(path: &std::path::Path, stream: Stream, now: u64, retention_days: u32, before_publish: &mut dyn FnMut()) -> std::io::Result<bool> {
     use std::io::{Read, Seek, SeekFrom, Write};
-    let f = match open_live_read(path) {
+    let f = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e),
@@ -497,20 +534,20 @@ fn rotate_log_by_age_hooked(path: &std::path::Path, stream: Stream, now: u64, re
         return Ok(false);
     }
     archive_removed(path, stream, now, &expired)?;
-    agent_settings::writer::write_atomic(path, &out)?;
+    publish_after_archive(path, stream, now, &mut || agent_settings::writer::write_atomic(path, &out))?;
     // Appends that landed on the old file while the new one was written.
     (&f).seek(SeekFrom::Start(pos))?;
     let mut gained = Vec::new();
     (&f).read_to_end(&mut gained)?;
     if !gained.is_empty() {
-        open_live(std::fs::OpenOptions::new().append(true), path)?.write_all(&gained)?;
+        std::fs::OpenOptions::new().append(true).open(path)?.write_all(&gained)?;
     }
     Ok(true)
 }
 
 /// Whether the open handle and `path` are the same file: the device and inode
-/// on Unix, the volume serial and file index on Windows. Where the platform
-/// gives no file identity this is assumed.
+/// on Unix, the volume serial and file id on Windows ([`windows_file_id`]).
+/// Where the platform gives no file identity this is assumed.
 fn same_file(f: &std::fs::File, path: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
@@ -522,15 +559,7 @@ fn same_file(f: &std::fs::File, path: &std::path::Path) -> bool {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
-        fn id(f: &std::fs::File) -> Option<(u32, u32, u32)> {
-            // SAFETY: the handle is open for the call and `info` is a valid out-pointer.
-            let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
-            let ok = unsafe { GetFileInformationByHandle(f.as_raw_handle(), &mut info) } != 0;
-            ok.then_some((info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow))
-        }
-        match (id(f), open_live_read(path).ok().as_ref().and_then(id)) {
+        match (windows_file_id(f), std::fs::File::open(path).ok().as_ref().and_then(windows_file_id)) {
             (Some(a), Some(b)) => a == b,
             _ => false,
         }
@@ -540,6 +569,32 @@ fn same_file(f: &std::fs::File, path: &std::path::Path) -> bool {
         let _ = (f, path);
         true
     }
+}
+
+/// A file's identity on Windows: the 64-bit volume serial and the 128-bit
+/// file id from `FileIdInfo`, exact on NTFS and ReFS alike. Where a file system
+/// does not support `FileIdInfo`, the 32-bit volume serial and 64-bit file
+/// index of `GetFileInformationByHandle`, which ReFS does not keep unique.
+#[cfg(windows)]
+fn windows_file_id(f: &std::fs::File) -> Option<(u64, [u8; 16])> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{FileIdInfo, GetFileInformationByHandle, GetFileInformationByHandleEx, BY_HANDLE_FILE_INFORMATION, FILE_ID_INFO};
+    let handle = f.as_raw_handle();
+    // SAFETY: both structs are plain data, valid when zeroed; the handle is
+    // open for both calls and each out-pointer is valid for its size.
+    let mut ex: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<FILE_ID_INFO>() as u32;
+    if unsafe { GetFileInformationByHandleEx(handle, FileIdInfo, (&mut ex as *mut FILE_ID_INFO).cast(), size) } != 0 {
+        return Some((ex.VolumeSerialNumber, ex.FileId.Identifier));
+    }
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(handle, &mut info) } == 0 {
+        return None;
+    }
+    let mut id = [0u8; 16];
+    id[..4].copy_from_slice(&info.nFileIndexLow.to_le_bytes());
+    id[4..8].copy_from_slice(&info.nFileIndexHigh.to_le_bytes());
+    Some((u64::from(info.dwVolumeSerialNumber), id))
 }
 
 /// The ts of the log's newest line, read from its last 64 KiB.
@@ -1082,6 +1137,42 @@ mod archive_tests {
         assert!(compact_log_tail(&log, EVENTS, NOW + DAY, 1500, 0).is_ok());
         assert!(std::fs::read_to_string(&log).unwrap().len() < body.len());
         assert!(archive_failed_today(&dir, EVENTS, NOW) && !archive_failed_today(&dir, EVENTS, NOW + DAY));
+    }
+
+    /// A publish that fails after the head was archived sets today's marker,
+    /// so the appends that follow do not archive the same head again.
+    #[test]
+    fn a_failed_publish_archives_the_head_once_not_once_per_append() {
+        let (dir, log) = state("publish-fail");
+        let body = numbered(50);
+        std::fs::write(&log, &body).unwrap();
+        FAIL_PUBLISH.with(|f| f.set(true));
+        let first = compact_log_tail(&log, EVENTS, NOW, 1500, 0);
+        let again: Vec<bool> = (0..3).map(|_| compact_log_tail(&log, EVENTS, NOW, 1500, 0).is_ok()).collect();
+        FAIL_PUBLISH.with(|f| f.set(false));
+        assert!(first.is_err(), "the publish failed");
+        assert_eq!(again, [true, true, true], "later appends stand down");
+        assert!(archive_failed_today(&dir, EVENTS, NOW));
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), body, "the live file is untouched");
+        let archived = read_source(&archive_path(&dir, EVENTS, NOW)).unwrap();
+        assert!(archived.starts_with(&line("way_fired", 5, "n0000")), "{archived}");
+        assert_eq!(archived.matches("\"n0000\"").count(), 1, "the head is archived once");
+    }
+
+    /// The age rotation's publish failure sets the same marker, so a size
+    /// compaction later that day does not archive the expired lines again.
+    #[test]
+    fn a_failed_rotation_publish_marks_the_day() {
+        let (dir, log) = state("rotate-publish-fail");
+        let body = format!("{}{}", line("way_fired", 200, "old"), line("way_fired", 0, "now"));
+        std::fs::write(&log, &body).unwrap();
+        FAIL_PUBLISH.with(|f| f.set(true));
+        let r = rotate_log_by_age(&log, EVENTS, NOW, 90);
+        FAIL_PUBLISH.with(|f| f.set(false));
+        assert!(r.is_err());
+        assert!(archive_failed_today(&dir, EVENTS, NOW));
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), body);
+        assert_eq!(read_source(&archive_path(&dir, EVENTS, NOW)).unwrap(), line("way_fired", 200, "old"));
     }
 
     #[test]

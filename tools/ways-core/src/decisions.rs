@@ -197,7 +197,7 @@ impl Source {
         if path.extension().is_some_and(|e| e == "gz") {
             Some(Source::Decoded { text: event_archive::read_source(path)?, pos: 0 })
         } else {
-            event_archive::open_live_read(path).ok().map(|f| Source::Live(BufReader::new(f)))
+            std::fs::File::open(path).ok().map(|f| Source::Live(BufReader::new(f)))
         }
     }
 

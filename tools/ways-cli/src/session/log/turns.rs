@@ -7,7 +7,7 @@
 //! a turn index (see `cmd::scan::decision::Context`), so turns are counted
 //! from the records alone.
 
-use super::{mark_archive_failed, open_live, open_live_read, same_file, Stream};
+use super::{mark_archive_failed, publish_after_archive, same_file, Stream};
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -42,7 +42,7 @@ pub(super) fn trim_to_turns(path: &Path, stream: Stream, now: u64, keep: u64) ->
 /// and before the file is checked and replaced, for tests that need something
 /// to happen in that window.
 fn trim_to_turns_hooked(path: &Path, stream: Stream, now: u64, keep: u64, before_publish: &mut dyn FnMut()) -> std::io::Result<bool> {
-    let f = match open_live_read(path) {
+    let f = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e),
@@ -65,7 +65,7 @@ fn trim_to_turns_hooked(path: &Path, stream: Stream, now: u64, keep: u64, before
     (&f).seek(SeekFrom::Start(cut))?;
     let mut pos = cut;
     loop {
-        pos += std::io::copy(&mut &f, staged.file())?;
+        pos += std::io::copy(&mut &f, &mut staged.file)?;
         if f.metadata()?.len() <= pos {
             break;
         }
@@ -80,10 +80,11 @@ fn trim_to_turns_hooked(path: &Path, stream: Stream, now: u64, keep: u64, before
         mark_archive_failed(dir, stream, now);
         return Err(e);
     }
-    staged.publish(path)?;
+    let mut staged = Some(staged);
+    publish_after_archive(path, stream, now, &mut || staged.take().map_or(Ok(()), |s| s.publish(path)))?;
     // Records that landed on the old file while the new one was written.
     (&f).seek(SeekFrom::Start(pos))?;
-    std::io::copy(&mut &f, &mut open_live(std::fs::OpenOptions::new().append(true), path)?)?;
+    std::io::copy(&mut &f, &mut std::fs::OpenOptions::new().append(true).open(path)?)?;
     Ok(true)
 }
 
@@ -149,12 +150,9 @@ fn marker_in(tail: &[u8], seg: &[u8]) -> bool {
 
 /// A temp file beside the log that becomes the log on [`Staged::publish`] and
 /// is removed if it never does.
-///
-/// The handle is closed before the temp is renamed or removed: Windows refuses
-/// either while a handle opened without `FILE_SHARE_DELETE` is open.
 struct Staged {
     tmp: PathBuf,
-    file: Option<std::fs::File>,
+    file: std::fs::File,
     published: bool,
 }
 
@@ -170,19 +168,13 @@ impl Staged {
         if let Ok(meta) = std::fs::metadata(path) {
             file.set_permissions(meta.permissions())?;
         }
-        Ok(Staged { tmp, file: Some(file), published: false })
-    }
-
-    /// The open temp, for writing the kept turns.
-    fn file(&mut self) -> &mut std::fs::File {
-        self.file.as_mut().expect("the temp is open until publish or drop")
+        Ok(Staged { tmp, file, published: false })
     }
 
     /// Make the temp durable, rename it over `path`, and sync the directory so
     /// the rename is durable too.
     fn publish(mut self, path: &Path) -> std::io::Result<()> {
-        self.file().sync_all()?;
-        drop(self.file.take());
+        self.file.sync_all()?;
         std::fs::rename(&self.tmp, path)?;
         self.published = true;
         #[cfg(unix)]
@@ -195,7 +187,6 @@ impl Staged {
 
 impl Drop for Staged {
     fn drop(&mut self) {
-        drop(self.file.take());
         if !self.published {
             let _ = std::fs::remove_file(&self.tmp);
         }
@@ -398,6 +389,23 @@ mod tests {
 
     /// The temp the kept turns are copied to never outlives a trim that
     /// stands down.
+    /// A trim whose publish fails after the head was archived sets today's
+    /// marker and leaves no temp; the log keeps every turn.
+    #[test]
+    fn a_failed_trim_publish_marks_the_day_and_leaves_no_temp() {
+        let (dir, log) = state("publish-fail");
+        std::fs::write(&log, turns(0..15)).unwrap();
+        FAIL_PUBLISH.with(|f| f.set(true));
+        let r = trim_to_turns(&log, DECISIONS, NOW, KEEP);
+        FAIL_PUBLISH.with(|f| f.set(false));
+        assert!(r.is_err());
+        assert!(archive_failed_today(&dir, DECISIONS, NOW));
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), turns(0..15));
+        assert_eq!(archived(&dir), turns(0..5), "the head is archived once");
+        let names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(!names.iter().any(|n| n.ends_with(".tmp")), "{names:?}");
+    }
+
     #[test]
     fn a_trim_that_stands_down_leaves_no_temp() {
         let (dir, log) = state("no-temp");
