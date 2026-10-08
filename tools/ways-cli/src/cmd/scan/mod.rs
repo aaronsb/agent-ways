@@ -8,12 +8,14 @@ mod candidate_log;
 mod decision;
 mod gate;
 mod late_interaction;
+#[cfg(test)]
+pub(crate) use late_interaction::surface_chunk_count;
 pub(crate) mod sidecar;
 pub(crate) mod lookup;
 mod lookbehind;
 mod order;
 pub(crate) mod probe;
-pub(crate) mod reduce;
+mod reduce;
 pub(crate) mod scoring;
 mod state;
 pub(crate) use scoring::{batch_embed_score, batch_embed_score_with, sibling_corpus};

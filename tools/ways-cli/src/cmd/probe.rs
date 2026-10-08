@@ -334,7 +334,6 @@ fn print_summary(results: &[Outcome], admission: &str, project_dir: &str) {
     let boosted = results.iter().filter(|r| r.boost_exercised).count();
     println!();
     println!("path: {late} late interaction, {fallback} single-vector fallback (late interaction could not run), {bash} bash lane (scored probes)");
-    println!("single-vector fallback (late interaction could not run): {fallback} prompt probes");
     println!("parent boost exercised by a parent fired in the same probe: {boosted} probes");
     println!("parent boost from an earlier turn's parent marker: not exercised (each probe is a fresh session)");
     for r in results.iter().filter(|r| !r.scored()) {

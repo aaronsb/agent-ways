@@ -253,15 +253,15 @@ pub fn sample_probes<'a>(rows: &'a [Row]) -> Vec<Probe> {
 /// The kind of a joined probe row.
 pub const JOINED_KIND: &str = "joined";
 
-/// Join a situational and a direct prompt into one two-sentence surface. The
-/// scan's late-interaction matcher splits a surface at `.`, `!` or `?` followed
-/// by whitespace (`reduce::split_sentences`) and needs at least two chunks of
-/// 12 characters or more, so the situational prompt gets a terminator (its own
-/// trailing `.`, `!` or `?` are replaced by one `.`) and a space before the
-/// direct prompt.
+/// Join a situational and a direct prompt into one surface of at least two
+/// sentences. The scan's late-interaction matcher splits a surface at `.`, `!`
+/// or `?` followed by whitespace and needs at least two chunks of 12 characters
+/// or more (`surface_chunk_count`). The situational prompt keeps its own
+/// terminator; a `.` is added only when it has none.
 fn join_prompts(situational: &str, direct: &str) -> String {
-    let s = situational.trim().trim_end_matches(['.', '!', '?']).trim_end();
-    format!("{s}. {}", direct.trim())
+    let s = situational.trim();
+    let sep = if s.ends_with(['.', '!', '?']) { "" } else { "." };
+    format!("{s}{sep} {}", direct.trim())
 }
 
 /// The multi-sentence companion of [`sample_probes`]. It takes the same selected
@@ -365,7 +365,7 @@ mod tests {
 
     fn fixture() -> PathBuf {
         let root = scratch("probes");
-        let g = |w: &str| format!("{{\"kind\":\"direct\",\"prompt\":\"{w} d\"}}\n{{\"kind\":\"situational\",\"prompt\":\"{w} s\"}}\n");
+        let g = |w: &str| format!("{{\"kind\":\"direct\",\"prompt\":\"{w} direct request\"}}\n{{\"kind\":\"situational\",\"prompt\":\"{w} situational note\"}}\n");
         // `grp` has no sidecar of its own: a non-semantic top-level directory.
         for w in ["top", "top/par", "top/par/l1", "top/par/l2", "top/par/l3", "top/lone", "other", "grp/a", "grp/b", "grp/c", "grp/c/k"] {
             let leaf = w.rsplit('/').next().unwrap();
@@ -470,10 +470,11 @@ mod tests {
         for p in &probes {
             let s = sampled.iter().find(|s| s.way == p.way).expect("a joined way is a sampled way");
             assert_eq!((p.role, &p.must_not), (s.role, &s.must_not));
-            let parts: Vec<&str> = crate::cmd::scan::reduce::split_sentences(&p.prompt);
-            assert_eq!(parts.len(), 2, "{}: {:?}", p.way, p.prompt);
+            let n = crate::cmd::scan::surface_chunk_count(&p.prompt);
+            assert!(n >= 2, "{}: {:?} yields {n} chunk(s)", p.way, p.prompt);
         }
-        assert_eq!(join_prompts("a thing happens?!", "do it"), "a thing happens. do it");
+        assert_eq!(join_prompts("a thing happens?!", "do it"), "a thing happens?! do it");
+        assert_eq!(join_prompts("a thing happens", "do it"), "a thing happens. do it");
         assert_eq!(probes, sample_joined(&export(&fixture()).unwrap()));
     }
 
@@ -484,7 +485,12 @@ mod tests {
     fn committed_joined_probe_sample_matches_the_shipped_tree() {
         let repo = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../..");
         let mut now = format!("{PROBES_HEADER}\n");
-        for p in sample_joined(&export(&repo.join("hooks/ways")).unwrap()) {
+        let shipped = sample_joined(&export(&repo.join("hooks/ways")).unwrap());
+        for p in &shipped {
+            let n = crate::cmd::scan::surface_chunk_count(&p.prompt);
+            assert!(n >= 2, "joined row for {} yields {n} chunk(s), so the scan would run single-vector: {:?}", p.way, p.prompt);
+        }
+        for p in shipped {
             now.push_str(&p.tsv());
             now.push('\n');
         }
