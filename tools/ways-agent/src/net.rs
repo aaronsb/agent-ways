@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use crate::cost::Usage;
-use crate::profile::Provider;
+use crate::profile::{accepts_forced_tool, Provider};
 
 const ANTHROPIC: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -75,6 +75,7 @@ impl std::fmt::Display for Check {
             Check::Invalid(m) => write!(f, "invalid: {m}"),
             Check::NoCredit => write!(f, "no credit left on this key"),
             Check::RateLimited => write!(f, "rate-limited; try again shortly"),
+            Check::ModelUnavailable(m) if m.contains(' ') => write!(f, "key valid, but {m}"),
             Check::ModelUnavailable(m) => write!(f, "key valid, but the provider does not offer model {m}"),
             Check::Unreachable(m) => write!(f, "provider unreachable: {m}"),
             Check::Failed(code, m) => write!(f, "provider answered {code}: {m}"),
@@ -85,6 +86,22 @@ impl std::fmt::Display for Check {
 /// Checks the key and the model with calls that cost nothing: a model lookup
 /// on Anthropic; the key-info and model-endpoints lookups on OpenRouter.
 pub fn check(provider: Provider, key: &str, model: &str) -> Check {
+    match lookup(provider, key, model) {
+        Check::Valid => model_fit(model),
+        other => other,
+    }
+}
+
+/// A served model is still unusable if it rejects the judge's forced tool call.
+fn model_fit(model: &str) -> Check {
+    if accepts_forced_tool(model) {
+        Check::Valid
+    } else {
+        Check::ModelUnavailable(format!("{model} rejects a forced tool call, which the judge needs"))
+    }
+}
+
+fn lookup(provider: Provider, key: &str, model: &str) -> Check {
     let http = agent(Duration::from_secs(15));
     match provider {
         Provider::Anthropic => {
@@ -211,14 +228,16 @@ pub fn judge(
     timeout: Duration,
 ) -> std::result::Result<(Vec<f64>, Option<Usage>), JudgeFailure> {
     use crate::judge;
-    let max_tokens = 64 + 48 * n;
-    let (url, body) = match provider {
+    // Haiku 5.5's tokenizer counts the same text as about 30% more tokens.
+    let max_tokens = 96 + 64 * n;
+    // Newer models answer HTTP 400 to any non-default sampling parameter.
+    let temperature = crate::profile::accepts_sampling(model);
+    let (url, mut body) = match provider {
         Provider::Anthropic => (
             format!("{ANTHROPIC}/v1/messages"),
             serde_json::json!({
                 "model": model,
                 "max_tokens": max_tokens,
-                "temperature": 0,
                 "system": judge::SYSTEM,
                 "tools": [{
                     "name": judge::TOOL_NAME,
@@ -235,7 +254,6 @@ pub fn judge(
             serde_json::json!({
                 "model": model,
                 "max_tokens": max_tokens,
-                "temperature": 0,
                 "messages": [
                     {"role": "system", "content": judge::SYSTEM},
                     {"role": "user", "content": prompt},
@@ -249,6 +267,9 @@ pub fn judge(
             }),
         ),
     };
+    if temperature {
+        body["temperature"] = serde_json::json!(0);
+    }
     let mut req = http.post(&url).config().timeout_global(Some(timeout)).build();
     req = match provider {
         Provider::Anthropic => req.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
@@ -361,6 +382,15 @@ mod tests {
         assert_eq!(status_check(402, &json!({})), Check::NoCredit);
         assert_eq!(status_check(429, &Value::Null), Check::RateLimited);
         assert_eq!(status_check(500, &Value::Null), Check::Failed(500, "no message".into()));
+    }
+
+    #[test]
+    fn a_model_that_rejects_a_forced_tool_call_is_unavailable() {
+        assert_eq!(model_fit("claude-haiku-5-5"), Check::Valid);
+        let c = model_fit("claude-sonnet-5-5");
+        assert_eq!(c, Check::ModelUnavailable("claude-sonnet-5-5 rejects a forced tool call, which the judge needs".into()));
+        assert!(c.to_string().contains("rejects a forced tool call"));
+        assert!(!c.to_string().contains("does not offer"));
     }
 
     #[test]

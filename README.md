@@ -64,7 +64,7 @@ sequenceDiagram
 
 Semantic matching runs on your machine through the **embedding engine** (all-MiniLM-L6-v2, a ~21MB GGUF model). It handles similarity of meaning: "pin lockfile versions" matches the supply chain way even though those exact words are absent from the way's vocabulary. `ways status` reports the matcher's current calibration.
 
-Matching proposes; the **relevance judge** decides. On your prompts, and on messages you queue while Claude works, the ways that matched go to a small hosted model (Claude Haiku, through Anthropic or OpenRouter) that answers yes or no for each, up to eight per prompt. Only the ways it passes are injected, so a way that shares words with your prompt but not its intent stays out. The judge runs in the resident `ways-agent`, which holds the API key. Without a key, or when the judge can't answer in time, every matched way is injected as before. [The relevance judge](docs/explanation/relevance-judge/relevance-judge-the-model.md) covers the flow, what it sends, and what it costs.
+Matching proposes; the **relevance judge** decides. On your prompts, and on messages you queue while Claude works, the ways that matched go to a small hosted model (Claude Haiku 5.5, through Anthropic or OpenRouter) that answers yes or no for each, up to eight per prompt. Only the ways it passes are injected, so a way that shares words with your prompt but not its intent stays out. The judge runs in the resident `ways-agent`, which holds the API key. Without a key, or when the judge can't answer in time, every matched way is injected as before. [The relevance judge](docs/explanation/relevance-judge/relevance-judge-the-model.md) covers the flow, what it sends, and what it costs.
 
 ---
 

@@ -84,7 +84,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Fn(|b| shipped_field(b, "model")),
         check: Some(check_model),
         doc: "The model a profile calls.",
-        long: "The shipped profiles are tuned for Claude Haiku 4.5; another model scores on its own scale. `ways agent models` lists what a provider serves and keeps the list this key offers; until it has run for the profile's provider the key takes any model id, and a list that has aged is still offered.",
+        long: "The shipped profiles use Claude Haiku 5.5, with a threshold measured on Haiku 4.5; another model scores on its own scale. `ways agent models` lists what a provider serves and keeps the list this key offers; until it has run for the profile's provider the key takes any model id, and a list that has aged is still offered.",
         ..BASE
     },
     KeySpec {
@@ -146,7 +146,7 @@ const KEYS: &[KeySpec] = &[
         path: &["profiles", "*", "price_in_per_mtok"],
         kind: PRICE,
         doc: "USD per million input tokens, for pricing judge calls.",
-        long: "For a provider that does not report a call's cost, as Anthropic does not. Unset: Claude Haiku 4.5's list price for that model and its dated ids, else the call's cost is unknown. Applies only with price_out_per_mtok set too. `ways agent cost` reports the spend.",
+        long: "For a provider that does not report a call's cost, as Anthropic does not. Unset: the list price of Claude Haiku 5.5 or 4.5 for that model and its dated ids, else the call's cost is unknown. Applies only with price_out_per_mtok set too. `ways agent cost` reports the spend.",
         ..BASE
     },
     KeySpec {
