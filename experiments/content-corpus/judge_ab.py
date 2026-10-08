@@ -340,11 +340,14 @@ def request_body(g, arm, desc, authored, model=MODEL, provider="anthropic"):
         if accepts_sampling(model):
             body["temperature"] = 0
         return body
-    return {"model": model, "max_tokens": 64 + 48 * n, "temperature": 0, "system": SYSTEM,
+    body = {"model": model, "max_tokens": 64 + 48 * n, "system": SYSTEM,
             "tools": [{"name": TOOL_NAME, "description": TOOL_DESCRIPTION, "strict": True,
                        "input_schema": tool_schema(n)}],
             "tool_choice": {"type": "tool", "name": TOOL_NAME},
             "messages": [{"role": "user", "content": prompt}]}
+    if accepts_sampling(model):
+        body["temperature"] = 0
+    return body
 
 
 def api_key(provider="anthropic"):
@@ -409,7 +412,7 @@ def load_cache():
         for l in CACHE.read_text().splitlines():
             r = json.loads(l)
             if r.get("error") is None:
-                out[(r["gid"], r["arm"], r.get("model", MODEL), r.get("provider", "anthropic"))] = r
+                out[(r["req"], r["arm"], r.get("model", MODEL), r.get("provider", "anthropic"))] = r
     return out
 
 
@@ -438,6 +441,21 @@ def estimate_sample(n_sample, arm="A"):
           f"{sum(len(g['cands']) for g in sample)} candidates, arm {arm}")
     print(f"input ~{tin:.0f} tok (x{TOKENIZER_55} for the 5.5 tokenizer); output typical ~{tout_typ}, max {tout_max}")
     print(f"projected cost: typical ${c(tout_typ):.5f}, worst case ${c(tout_max):.5f} (count_tokens is free)")
+
+
+def list_price(model):
+    """USD per token (input, output) for the models this script prices; an unknown
+    model is priced at the dearest known rate so a projection errs high."""
+    if "haiku-5" in model:
+        return HAIKU55_IN, HAIKU55_OUT
+    return PRICE_IN, PRICE_OUT
+
+
+def projected_cost(body, model):
+    """A conservative cost of one call: input tokens at 1 per 2.5 characters of the
+    request JSON (the real ratio is near 1 per 4), plus max_tokens of output."""
+    pin, pout = list_price(model)
+    return len(json.dumps(body)) / 2.5 * pin + body["max_tokens"] * pout
 
 
 def estimate():
@@ -513,10 +531,17 @@ def post_openrouter_cost(reply):
 
 
 def run_calls(cap, limit, arm=None, model=MODEL, provider="anthropic", sample=0, max_calls=0):
+    """`cap` is this run's spend limit in USD (cached spend is not counted), or None.
+    With a cap the run is sequential and each call is refused up front when the
+    spend so far plus the call's conservative projection would cross it."""
+    sequential = cap is not None or provider == "openrouter"
+    cap = 25.0 if cap is None else cap
     groups, desc = load_groups()
     authored = authored_nodes()
     cache = load_cache()
-    key_of = lambda g, a: (g["gid"], a, model, provider)
+    # Rows are found by request hash: gids are the index in one `prepare` output
+    # and go stale when the golden set changes.
+    key_of = lambda g, a: (body_hash(request_body(g, a, desc, authored, model, provider)), a, model, provider)
     spent = sum(r["usd"] for k, r in cache.items() if k[2:] == (model, provider))
     if sample:
         groups = sample_groups(groups, sample)
@@ -531,16 +556,21 @@ def run_calls(cap, limit, arm=None, model=MODEL, provider="anthropic", sample=0,
     key = api_key(provider)
     url = "https://openrouter.ai/api/v1/chat/completions" if provider == "openrouter" else API
     lock = threading.Lock()
-    state = {"spent": 0.0, "done": 0, "stop": False}
+    state = {"spent": 0.0, "done": 0, "stop": False, "why": ""}
     f = CACHE.open("a")
 
     def one(item):
         g, a = item
+        body = request_body(g, a, desc, authored, model, provider)
+        proj = projected_cost(body, model)
         with lock:
             if state["stop"]:
                 return
-            # worst case for one more call is unknown; stop before dispatch once the cap is reached
-        body = request_body(g, a, desc, authored, model, provider)
+            if state["spent"] + proj > cap:
+                state["stop"] = True
+                state["why"] = (f"cap: ${state['spent']:.5f} spent + ${proj:.5f} projected "
+                                f"for the next call would cross ${cap:.4f}")
+                return
         n = len(g["cands"])
         rec = {"set": g["set"], "gid": g["gid"], "arm": a, "model": model, "provider": provider, "n": n,
                "req": body_hash(body), "ways": [c["way"] for c in g["cands"]],
@@ -589,18 +619,17 @@ def run_calls(cap, limit, arm=None, model=MODEL, provider="anthropic", sample=0,
             state["done"] += 1
             if state["done"] % 10 == 0:
                 print(f"  {state['done']}/{len(todo)} calls, running spend ${state['spent']:.5f}", flush=True)
-            state["max_call"] = max(state.get("max_call", 0.0), rec["usd"])
-            # Stop before a call that could cross the cap.
-            if state["spent"] + state["max_call"] >= cap:
+            if provider == "openrouter" and not rec.get("cost_reported"):
                 state["stop"] = True
+                state["why"] = f"no provider-reported cost on {g['gid']}: spend is no longer known"
 
-    # Sequential when a cap this small is in force: no in-flight overshoot.
-    workers = 1 if provider == "openrouter" else 4
+    # Sequential under a cap: no in-flight call can overshoot it.
+    workers = 1 if sequential else 4
     with ThreadPoolExecutor(workers) as ex:
         list(ex.map(one, todo))
     f.close()
     print(f"done {state['done']} calls; spend ${state['spent']:.5f}"
-          + ("; STOPPED at cap" if state["stop"] else ""))
+          + (f"; STOPPED, {state['why']}" if state["stop"] else ""))
 
 
 # ── analysis ─────────────────────────────────────────────────────────────────
@@ -760,11 +789,14 @@ def compare(model, provider, sample_n, arm="A"):
     cache = load_cache()
     # The 4.5 rows were cached under an older gid numbering; the Anthropic request
     # hash identifies the same group (same prompt, candidates and order) in both.
-    by_req = {r["req"]: r for k, r in cache.items() if k[1:] == (arm, MODEL, "anthropic")}
+    by_req = {k[0]: r for k, r in cache.items() if k[1:] == (arm, MODEL, "anthropic")}
     old_of = {g["gid"]: by_req.get(body_hash(request_body(g, arm, desc, authored))) for g in sampled}
+    by_new = {g["gid"]: cache.get((body_hash(request_body(g, arm, desc, authored, model, provider)),
+                                   arm, model, provider)) for g in sampled}
     allrecs = [json.loads(l) for l in CACHE.read_text().splitlines()]
+    new_reqs = {body_hash(request_body(g, arm, desc, authored, model, provider)): g["gid"] for g in sampled}
     new_all = [r for r in allrecs if r.get("model") == model and r.get("provider", "anthropic") == provider
-               and r["arm"] == arm and r["gid"] in set(gids)]
+               and r["arm"] == arm and r["req"] in new_reqs]
     fails = [r for r in new_all if r.get("error")]
     print(f"{model} via {provider}: {len(new_all)} calls, {len(fails)} failed, "
           f"spend ${sum(r['usd'] for r in new_all):.5f}")
@@ -773,7 +805,7 @@ def compare(model, provider, sample_n, arm="A"):
     old, new = {}, {}
     for g in gids:
         o = old_of[g]
-        n = cache.get((g, arm, model, provider))
+        n = by_new.get(g)
         if o and n:
             assert o["ways"] == n["ways"] and o["strict"] == n["strict"], g
             old[g], new[g] = o, n
@@ -832,11 +864,11 @@ def compare_more(model, provider, sample_n, arm="A", n_boot=4000, seed=11):
     authored = authored_nodes()
     sampled = sample_groups(groups, sample_n)
     cache = load_cache()
-    by_req = {r["req"]: r for k, r in cache.items() if k[1:] == (arm, MODEL, "anthropic")}
+    by_req = {k[0]: r for k, r in cache.items() if k[1:] == (arm, MODEL, "anthropic")}
     pairs = []
     for g in sampled:
         o = by_req.get(body_hash(request_body(g, arm, desc, authored)))
-        n = cache.get((g["gid"], arm, model, provider))
+        n = cache.get((body_hash(request_body(g, arm, desc, authored, model, provider)), arm, model, provider))
         if o and n:
             pairs.append((o, n))
     print(f"\nbootstrap on {len(pairs)} paired groups, {n_boot} resamples (seed {seed})")
@@ -876,7 +908,7 @@ def main():
     elif cmd == "run":
         args = sys.argv[2:]
         opt = lambda k, d: args[args.index(k) + 1] if k in args else d
-        run_calls(float(opt("--cap", 25.0)), int(opt("--limit", 0)), opt("--arm", None),
+        run_calls(float(opt("--cap", 0)) if "--cap" in args else None, int(opt("--limit", 0)), opt("--arm", None),
                   opt("--model", MODEL), opt("--provider", "anthropic"), int(opt("--sample", 0)),
                   int(opt("--max-calls", 0)))
     elif cmd == "compare":

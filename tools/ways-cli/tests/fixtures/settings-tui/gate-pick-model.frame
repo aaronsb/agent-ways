@@ -6,24 +6,24 @@ agent-tui frame 100x30
 |│     mode                      enforce               ││The model a profile calls.                 │|
 |│ ▾ profiles · setting          value                 ││                                           │|
 |│   ▾ anthropic                                       ││The shipped profiles are tuned for Claude  │|
-|│       provider                anthropic             ││Haiku 4.5; Haiku 5.5 was measured and not  │|
-|│▌      model                   claude-haiku-4-5      ││adopted (see                               │|
-|│       threshold               0.3                   ││experiments/content-corpus/results-judge-ha│|
-|│       timeout_ms              2000                  ││iku-5-5.md); another model scores on its   │|
-|│       turns                   1                     ││own scale. `ways agent models` lists what a│|
-|│       max_turn_chars   ┌pick one: gate.profiles.anthropic.model─────────┐ keeps the list this key│|
-|│       concurrency      │ ● claude-haiku-4-5  current                    │s run for the profile's │|
-|│       max_candidates   │   claude-haiku-4-5-20251001                    │kes any model id, and a │|
-|│       price_in_per_mtok│   claude-opus-4-5                              │is still offered.       │|
-|│       price_out_per_mto│   claude-sonnet-5-5                            │                        │|
-|│   ▸ openrouter         └────────────────────────────────────────────────┘ku-4-5                  │|
-|│ ▸ keys · provider             key                   ││type     one of claude-haiku-4-5 |         │|
-|│                                                     ││claude-haiku-4-5-20251001 | claude-opus-4-5│|
-|│                                                     ││| claude-sonnet-5-5 (Enter picks)          │|
+|│       provider                anthropic             ││Haiku 4.5 (Haiku 5.5 ranked worse); another│|
+|│▌      model                   claude-haiku-4-5      ││model scores on its own scale. `ways agent │|
+|│       threshold               0.3                   ││models` lists what a provider serves and   │|
+|│       timeout_ms              2000                  ││keeps the list this key offers; until it   │|
+|│       turns                   1                     ││has run for the profile's provider the key │|
+|│       max_turn_chars   ┌pick one: gate.profiles.anthropic.model─────────┐ and a list that has    │|
+|│       concurrency      │ ● claude-haiku-4-5  current                    │ed.                     │|
+|│       max_candidates   │   claude-haiku-4-5-20251001                    │                        │|
+|│       price_in_per_mtok│   claude-opus-4-5                              │ku-4-5                  │|
+|│       price_out_per_mto│   claude-sonnet-5-5                            │ude-haiku-4-5 |         │|
+|│   ▸ openrouter         └────────────────────────────────────────────────┘251001 | claude-opus-4-5│|
+|│ ▸ keys · provider             key                   ││| claude-sonnet-5-5 (Enter picks)          │|
 |│                                                     ││default  claude-haiku-4-5                  │|
 |│                                                     ││from     default                           │|
 |│                                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
 |│                                                     ││[gate.profiles.anthropic.model]            │|
+|│                                                     ││                                           │|
+|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -111,22 +111,22 @@ styles
  18   2-7   - - BOLD
  18   8-18  - - DIM
  18  32-34  - - DIM
- 18  54-64  - - DIM
+ 18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
- 19  54-55  - - DIM
+ 19  54-64  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20  54-55  - - DIM
+ 20  54-64  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
  21  54-64  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
- 22  54-64  - - DIM
+ 22  54-55  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
- 23  54-64  - - DIM
+ 23  54-55  - - DIM
  23  99-99  - - DIM
  24   0-0   - - DIM
  24  54-55  - - DIM

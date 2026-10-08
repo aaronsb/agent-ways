@@ -18,7 +18,7 @@ Both failed (below), so the profiles keep Haiku 4.5, threshold 0.3, timeout_ms 2
 - Set: all 332 golden groups, arm A (today's `way_text`: route, then description), as in `results-judge-ab.md`. Candidates are the alias-cosine top 3 (targeted prompt) or top 2 (`none` prompt). 978 candidates (972 in the 330 paired groups).
 - Baseline: the cached `claude-haiku-4-5` arm-A rows, not re-run. The cache's gid numbering predates the current golden export, so rows are paired by the Anthropic request hash (same prompt, candidates and order). 330 groups pair; one call failed (below) and one fresh group has no cached 4.5 row.
 - 5.5 request: `--provider openrouter --model anthropic/claude-haiku-5.5`, built as `net.rs` builds the OpenRouter body: chat completions, system message, `record_judgements` as a forced function tool, `max_tokens` 96 + 64n, no `temperature` (`accepts_sampling` is false for 5.5). One attempt per group, sequential, no retries.
-- Bounds: first a 50-group spot check (cap $0.01, 60 calls), then the remaining 282 groups (cap $0.08 and 340 calls in total). The loop stops before a call that could cross the cap.
+- Bounds: first a 50-group spot check (cap $0.01, 60 calls), then the remaining 282 groups (cap $0.08 and 340 calls, per run; the earlier 50 are cached, so the two runs together stayed under both). The loop stops before a call that could cross the cap.
 - Labels: `strict` is the expected way; `family` is the expected way, its parent or a child, as `judge_ab.py` defines them.
 - Bootstrap: 4000 resamples of groups, seed 11, `judge_ab.py compare --sample 332`.
 
@@ -56,7 +56,7 @@ Paired bootstrap of AUC(5.5) minus AUC(4.5), 95% interval:
 | 0.8 | 19.3% | 96.9% | 18.6% | 82.4% |
 | 0.9 | 5.0% | 81.5% | 5.2% | 65.5% |
 
-4.5's operating point at 0.3 is 25.7% irrelevant passed with 99.2% strict recall, and 22.3% with 91.2% family recall. On 5.5, matching the irrelevant pass rate takes a threshold of 0.75 (strict recall 97.2%, family recall 84.0%, which is below 4.5's 91.2%). Holding family recall at or above 4.5's takes a threshold of 0.65 or lower, where about half of irrelevant candidates pass. No single 5.5 threshold matches 4.5 on both axes. The nearest compromise, about 0.75, gives up 7 points of family recall.
+4.5's operating point at 0.3 is 25.7% irrelevant passed with 99.2% strict recall, and 22.3% with 91.2% family recall. On 5.5, matching the irrelevant pass rate takes a threshold of 0.75 (strict recall 97.2%, family recall 84.0%, which is below 4.5's 91.2%). Holding family recall at or above 4.5's takes a threshold of 0.65 or lower: at 0.65 family recall is 91.5% with 38.6% of irrelevant candidates passed (strict: 40.9%), and at 0.6 and below about half pass. No single 5.5 threshold matches 4.5 on both axes. The nearest compromise, about 0.75, gives up 7 points of family recall.
 
 ## Latency (5.5 via OpenRouter, 331 successful calls)
 

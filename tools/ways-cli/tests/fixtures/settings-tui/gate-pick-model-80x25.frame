@@ -6,22 +6,22 @@ agent-tui frame 80x25
 |│     mode                enforce          ││The model a profile calls.        │|
 |│ ▾ profiles · setting    value            ││                                  │|
 |│   ▾ anthropic                            ││The shipped profiles are tuned for│|
-|│       provider          anthropic        ││Claude Haiku 4.5; Haiku 5.5 was   │|
-|│▌      model             claude-haiku-4-5 ││measured and not adopted (see     │|
-|│       thresho┌pick one: gate.profiles.anthropic.model─────────┐corpus/results│|
-|│       timeout│ ● claude-haiku-4-5  current                    │; another     │|
-|│       turns  │   claude-haiku-4-5-20251001                    │own scale.    │|
-|│       max_tur│   claude-opus-4-5                              │lists what a  │|
-|│       concurr│   claude-sonnet-5-5                            │keeps the list│|
-|│       max_can└────────────────────────────────────────────────┘il it has run │|
-|│       price_in_per_mtok                  ││for the profile's provider the key│|
-|│       price_out_per_mtok                 ││takes any model id, and a list    │|
-|│   ▸ openrouter                           ││that has aged is still offered.   │|
-|│ ▸ keys · provider       key              ││                                  │|
-|│                                          ││value    claude-haiku-4-5         │|
-|│                                          ││type     one of claude-haiku-4-5 |│|
+|│       provider          anthropic        ││Claude Haiku 4.5 (Haiku 5.5 ranked│|
+|│▌      model             claude-haiku-4-5 ││worse); another model scores on   │|
+|│       thresho┌pick one: gate.profiles.anthropic.model─────────┐ agent models`│|
+|│       timeout│ ● claude-haiku-4-5  current                    │r serves and  │|
+|│       turns  │   claude-haiku-4-5-20251001                    │key offers;   │|
+|│       max_tur│   claude-opus-4-5                              │ the profile's│|
+|│       concurr│   claude-sonnet-5-5                            │es any model  │|
+|│       max_can└────────────────────────────────────────────────┘has aged is   │|
+|│       price_in_per_mtok                  ││still offered.                    │|
+|│       price_out_per_mtok                 ││                                  │|
+|│   ▸ openrouter                           ││value    claude-haiku-4-5         │|
+|│ ▸ keys · provider       key              ││type     one of claude-haiku-4-5 |│|
 |│                                          ││claude-haiku-4-5-20251001 |       │|
 |│                                          ││claude-opus-4-5 |                 │|
+|│                                          ││claude-sonnet-5-5 (Enter picks)   │|
+|│                                          ││default  claude-haiku-4-5         │|
 |└──────────────────────────────────────────┘└──────────────────────────────────┘|
 | pick   ↑↓ choose · Enter or click sets · Esc closes                            |
 styles
@@ -100,25 +100,25 @@ styles
  16  79-79  - - DIM
  17   0-0   - - DIM
  17   2-15  - - BOLD
- 17  43-44  - - DIM
+ 17  43-53  - - DIM
  17  79-79  - - DIM
  18   0-0   - - DIM
  18   2-7   - - BOLD
  18   8-18  - - DIM
  18  26-28  - - DIM
- 18  43-44  - - DIM
+ 18  43-53  - - DIM
  18  79-79  - - DIM
  19   0-0   - - DIM
- 19  43-53  - - DIM
+ 19  43-44  - - DIM
  19  79-79  - - DIM
  20   0-0   - - DIM
- 20  43-53  - - DIM
+ 20  43-44  - - DIM
  20  79-79  - - DIM
  21   0-0   - - DIM
  21  43-44  - - DIM
  21  79-79  - - DIM
  22   0-0   - - DIM
- 22  43-44  - - DIM
+ 22  43-53  - - DIM
  22  79-79  - - DIM
  23   0-79  - - DIM
  24   0-5   Black Cyan BOLD
