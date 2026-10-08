@@ -118,6 +118,41 @@ impl Admission {
     }
 }
 
+/// Whether the body sidecar's best section joins the ranking score
+/// (ADR-701 §6): `alias + 0.25 × best section`, with body confirmation using a
+/// different section than the one that contributed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyRank {
+    /// The alias cosine ranks the way (today's behaviour).
+    Off,
+    /// The fused score ranks the way, where the body sidecar is complete.
+    On,
+}
+
+impl BodyRank {
+    /// The values `matching.body_rank` takes, as written in config.yaml.
+    pub const NAMES: [&'static str; 2] = ["off", "on"];
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "off" => Some(BodyRank::Off),
+            "on" => Some(BodyRank::On),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BodyRank::Off => "off",
+            BodyRank::On => "on",
+        }
+    }
+
+    pub fn is_on(self) -> bool {
+        self == BodyRank::On
+    }
+}
+
 /// Ways configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -189,6 +224,9 @@ pub struct Config {
     /// How the late-interaction matcher admits ways into body confirmation
     /// (ADR-700 §12, ADR-701 increment 6). Default [`Admission::Share`].
     pub admission: Admission,
+    /// Whether the body sidecar's best section joins the ranking score
+    /// (ADR-701 §6, under evaluation). Default [`BodyRank::Off`].
+    pub body_rank: BodyRank,
     /// Days an archive of the event or decision log is kept (ADR-701 §2).
     /// Default 365.
     pub event_retention_days: u32,
@@ -248,6 +286,7 @@ impl Default for Config {
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
             admission: Admission::Share,
+            body_rank: BodyRank::Off,
             event_retention_days: 365,
             decision_retention_turns: 50_000,
             refire_presets,
@@ -443,6 +482,9 @@ impl Config {
         if let Some(v) = doc.get("admission").and_then(|v| v.as_str()).and_then(Admission::parse) {
             self.admission = v;
         }
+        if let Some(v) = doc.get("body_rank").and_then(|v| v.as_str()).and_then(BodyRank::parse) {
+            self.body_rank = v;
+        }
         if let Some(v) = doc.get("event_retention_days").and_then(|v| v.as_u64()) {
             self.event_retention_days = v as u32; // the schema holds 1..=3650
         }
@@ -606,6 +648,7 @@ mod tests {
         assert_eq!(cfg.semantic_fire_probability, 0.5);
         assert_eq!(cfg.keyword_floor_probability, 0.15);
         assert_eq!(cfg.admission, Admission::Share);
+        assert_eq!(cfg.body_rank, BodyRank::Off);
         assert_eq!(cfg.refire_presets.get("once").copied(), Some(1.0));
         assert_eq!(cfg.refire_presets.get("rare").copied(), Some(0.4));
         assert_eq!(cfg.refire_presets.get("normal").copied(), Some(0.15));
@@ -657,6 +700,16 @@ mod tests {
         assert_eq!(cfg.semantic_fire_probability, 0.6);
         assert_eq!(cfg.keyword_floor_probability, 0.2);
         assert_eq!(cfg.parent_boost_floor, 0.25);
+    }
+
+    #[test]
+    fn body_rank_reads_on_and_a_bad_value_leaves_it_off() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("body_rank: on\n");
+        assert_eq!(cfg.body_rank, BodyRank::On);
+        let mut cfg = Config::default();
+        cfg.apply_yaml("body_rank: maybe\n");
+        assert_eq!(cfg.body_rank, BodyRank::Off);
     }
 
     #[test]

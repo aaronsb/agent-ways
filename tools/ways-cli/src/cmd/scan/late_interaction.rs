@@ -49,7 +49,7 @@ use std::process::{Command, Stdio};
 
 use super::reduce::split_sentences;
 use super::sidecar::{self, Sidecar};
-pub(crate) use crate::config::Admission;
+pub(crate) use crate::config::{Admission, BodyRank};
 
 // ── Hand-set operating points (uncalibrated — task #5 fits these) ──
 /// Per-chunk softmax temperature. Small τ sharpens the competition so a clear
@@ -160,6 +160,7 @@ pub(crate) fn run_diagnostic(
     bodies: &HashMap<String, PathBuf>,
     top_n: usize,
     admission: Admission,
+    body_rank: BodyRank,
 ) -> Option<Vec<DiagRow>> {
     let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
@@ -174,8 +175,9 @@ pub(crate) fn run_diagnostic(
         return None;
     }
     let sidecar = complete_sidecar(&artifacts, &xdg, &bin, bodies);
-    let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
-    let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors);
+    let mut matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
+    let fusion = fuse_if_on(body_rank, &mut matched, sidecar.as_ref());
+    let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors, fusion);
     let (ranked, survivors, capped) = rank_and_admit(matched.per_chunk, bodies, chunks.len(), admission);
     // The live matcher's survivor set: confirmation runs for these, and a
     // candidate outside it reports `confirm: None`.
@@ -201,7 +203,7 @@ pub(crate) fn run_diagnostic(
 /// Run the matcher over `surface`. `bodies` maps a way's corpus id to its `.md`
 /// path (for body-confirm); `admission` is the stage-4 rule. Returns `None` when the matcher cannot run — the
 /// caller then falls back to the single-vector semantic gate.
-pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: Admission) -> Option<Verdicts> {
+pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: Admission, body_rank: BodyRank) -> Option<Verdicts> {
     let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
     let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
@@ -227,9 +229,11 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
     let sidecar = complete_sidecar(&artifacts, &xdg, &bin, bodies);
     if dbg { eprintln!("LI: body sidecar {} ({:.2} ms)", if sidecar.is_some() { "complete" } else { "absent or incomplete" }, ms(t)); }
     let t = std::time::Instant::now();
-    let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
+    let mut matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
     if dbg { eprintln!("LI: match pass {:.1} ms", ms(t)); }
-    let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors);
+    let fusion = fuse_if_on(body_rank, &mut matched, sidecar.as_ref());
+    if dbg { eprintln!("LI: body rank {}", if fusion.is_some() { "on" } else { "off" }); }
+    let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors, fusion);
     if dbg { eprintln!("LI: confirm via {}", if confirmer.uses_sidecar() { "sidecar" } else { "per-call embedding" }); }
     // Stages 3+4: mask, peak rank + per-chunk softmax-share sorted by share
     // desc, then the admission rule or the peak co-gate, by peak, capped.
@@ -273,6 +277,82 @@ fn ms(t: std::time::Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
+/// ADR-701 §6, body score in ranking. The weight of the best section's cosine
+/// beside the alias cosine in a way's ranking score.
+pub(crate) const BODY_RANK_WEIGHT: f64 = 0.25;
+
+/// What body-rank fusion remembers for confirmation: for each `(way id, chunk)`,
+/// the alias cosine and the index of the section that contributed.
+pub(crate) type Fusion = HashMap<(String, usize), (f64, usize)>;
+
+/// The ranking score of a way for one chunk: `alias + 0.25 × best section`.
+/// Returns the score and the contributing section's index, or `None` when the
+/// way has no sections (it keeps its alias cosine).
+pub(crate) fn fused_score(sidecar: &Sidecar, id: &str, chunk: &[f32], alias: f64) -> Option<(f64, usize)> {
+    let cos = sidecar.section_cosines(id, chunk)?;
+    let (idx, best) = cos
+        .iter()
+        .copied()
+        .enumerate()
+        .fold(None, |acc: Option<(usize, f64)>, (i, c)| match acc {
+            Some((_, b)) if b >= c => acc,
+            _ => Some((i, c)),
+        })?;
+    Some((alias + BODY_RANK_WEIGHT * best, idx))
+}
+
+/// Replace each chunk's alias rows with fused rows, re-sorted by the fused
+/// score (stable, so ties keep way-embed's order). Returns what confirmation
+/// needs. Only when the sidecar is complete and the chunk vectors came back:
+/// fused and alias-only scores are never mixed in one ranking (ADR-701 §7).
+fn fuse_if_on(mode: BodyRank, matched: &mut Matched, sidecar: Option<&Sidecar>) -> Option<Fusion> {
+    if !mode.is_on() {
+        return None;
+    }
+    let (sidecar, vectors) = (sidecar?, matched.vectors.as_ref()?);
+    let mut fusion = Fusion::new();
+    for (ci, rows) in matched.per_chunk.iter_mut().enumerate() {
+        let Some(v) = vectors.get(ci) else { continue };
+        for (id, score) in rows.iter_mut() {
+            if let Some((fused, idx)) = fused_score(sidecar, id, v, *score) {
+                fusion.insert((id.clone(), ci), (*score, idx));
+                *score = fused;
+            }
+        }
+        rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    }
+    Some(fusion)
+}
+
+/// Body rank on the single-vector path (ADR-701 §6): the one prompt chunk is
+/// matched once more with its vector returned, and each of its English rows
+/// becomes `alias + 0.25 × best section`. A prompt that does not chunk to
+/// exactly one piece, or a sidecar that is not complete, leaves the scores as
+/// they are. The calibration maps the fused cosine as it maps an alias cosine.
+pub(crate) fn fuse_single(scores: &mut super::scoring::EmbedScores, query: &str, bodies: &HashMap<String, PathBuf>, mode: BodyRank) {
+    if !mode.is_on() {
+        return;
+    }
+    let Some(bin) = crate::paths::way_embed() else { return };
+    let xdg = crate::paths::corpus_dir();
+    let artifacts = super::scoring::artifact_dir();
+    let (corpus, model) = (artifacts.join("ways-corpus-en.jsonl"), xdg.join(crate::paths::EN_MODEL));
+    let chunks = chunk_surface(query);
+    if chunks.len() != 1 || scores.en.is_none() || !corpus.is_file() || !model.is_file() {
+        return;
+    }
+    let Some(sidecar) = complete_sidecar(&artifacts, &xdg, &bin, bodies) else { return };
+    let Some(matched) = batch_match(&bin, &corpus, &model, &chunks, true) else { return };
+    let Some(v) = matched.vectors.as_ref().and_then(|vs| vs.first()) else { return };
+    if let Some(rows) = scores.en.as_mut() {
+        for (id, score) in rows.iter_mut() {
+            if let Some((fused, _)) = fused_score(&sidecar, id, v, *score) {
+                *score = fused;
+            }
+        }
+    }
+}
+
 /// ADR-701 §7: the body sidecar in `corpus_dir`, only when it was built with
 /// the installed model and covers every way in `enabled` that the alias
 /// corpus holds, at its content hashes (the manifest's `way_hashes`).
@@ -283,7 +363,7 @@ fn complete_sidecar(corpus_dir: &Path, engine_dir: &Path, bin: &Path, enabled: &
 /// How stage 5 confirms a survivor: against the body sidecar with the match
 /// pass's chunk vectors, or by embedding the body per call.
 enum Confirmer<'a> {
-    Sidecar { sidecar: Sidecar, vectors: Vec<Vec<f32>> },
+    Sidecar { sidecar: Sidecar, vectors: Vec<Vec<f32>>, fusion: Option<Fusion> },
     PerCall { bin: &'a Path, model: &'a Path },
 }
 
@@ -294,9 +374,10 @@ impl<'a> Confirmer<'a> {
         model: &'a Path,
         sidecar: Option<Sidecar>,
         vectors: Option<Vec<Vec<f32>>>,
+        fusion: Option<Fusion>,
     ) -> Self {
         match (sidecar, vectors) {
-            (Some(sidecar), Some(vectors)) => Confirmer::Sidecar { sidecar, vectors },
+            (Some(sidecar), Some(vectors)) => Confirmer::Sidecar { sidecar, vectors, fusion },
             _ => Confirmer::PerCall { bin, model },
         }
     }
@@ -309,9 +390,12 @@ impl<'a> Confirmer<'a> {
     /// was `peak`. `None` only when the per-call subprocess fails.
     fn confirm(&self, id: &str, won: usize, peak: f64, chunks: &[String], body_path: &Path) -> Option<f64> {
         match self {
-            Confirmer::Sidecar { sidecar, vectors } => {
+            Confirmer::Sidecar { sidecar, vectors, fusion } => {
                 let v = vectors.get(won)?;
-                Some(sidecar_confirm(sidecar, id, v, peak))
+                Some(match fusion {
+                    Some(f) => fused_confirm(sidecar, f, id, won, v, peak),
+                    None => sidecar_confirm(sidecar, id, v, peak),
+                })
             }
             Confirmer::PerCall { bin, model } => body_confirm(bin, model, &chunks[won..=won], body_path),
         }
@@ -324,6 +408,26 @@ impl<'a> Confirmer<'a> {
 /// match score, which is the way's peak, so no alias vector is read.
 fn sidecar_confirm(sc: &Sidecar, id: &str, chunk: &[f32], peak: f64) -> f64 {
     sc.max_cosine(id, chunk).unwrap_or(peak)
+}
+
+/// Stage 5 under body rank (ADR-701 §6): the section that contributed to the
+/// ranking score is set aside, and the won chunk is confirmed against the best
+/// of the way's other sections. A way with one section or none is confirmed
+/// against its alias cosine on that chunk. `peak` is the fused ranking score
+/// here, so the alias cosine comes from `fusion`.
+fn fused_confirm(sc: &Sidecar, fusion: &Fusion, id: &str, won: usize, chunk: &[f32], peak: f64) -> f64 {
+    let Some(&(alias, used)) = fusion.get(&(id.to_string(), won)) else {
+        // The way has no sections: its ranking score was its alias cosine.
+        return peak;
+    };
+    let others = sc
+        .section_cosines(id, chunk)
+        .into_iter()
+        .flat_map(|c| c.into_iter().enumerate())
+        .filter(|(i, _)| *i != used)
+        .map(|(_, c)| c)
+        .reduce(f64::max);
+    others.unwrap_or(alias)
 }
 
 /// Split the surface into sentence chunks, drop trivially short fragments and
@@ -825,7 +929,7 @@ mod tests {
     #[test]
     fn sidecar_confirm_falls_back_to_the_peak_for_a_sectionless_way() {
         let p = Path::new("/nonexistent");
-        let c = Confirmer::new(p, p, Some(sample_sidecar()), Some(vec![vec![0.6, 0.8, 0.0]]));
+        let c = Confirmer::new(p, p, Some(sample_sidecar()), Some(vec![vec![0.6, 0.8, 0.0]]), None);
         let got = c.confirm("bare", 0, 0.42, &["c0".to_string()], p).unwrap();
         assert!((got - 0.42).abs() < 1e-12, "{got}");
     }
@@ -856,12 +960,68 @@ mod tests {
     fn confirm_scores_the_won_chunks_vector() {
         let p = Path::new("x");
         let vectors = vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0, 0.0], vec![-1.0, 0.0, 0.0]];
-        let c = Confirmer::new(p, p, Some(sample_sidecar()), Some(vectors));
+        let c = Confirmer::new(p, p, Some(sample_sidecar()), Some(vectors), None);
         let chunks = vec!["c0".to_string(), "c1".to_string(), "c2".to_string()];
         let on = |won| c.confirm("multi", won, 0.0, &chunks, p).unwrap();
         assert!((on(0) - 1.0).abs() < 1e-6);
         assert!((on(1) - 0.5f64.sqrt()).abs() < 1e-6);
         assert!(on(2).abs() < 1e-6, "best of -1, -0.707, 0");
+    }
+
+    /// ADR-701 §6: the ranking score is `alias + 0.25 × best section`, and a way
+    /// with no sections keeps its alias cosine. For chunk (0.6, 0.8, 0) the best
+    /// section is the second (0.98995).
+    #[test]
+    fn fused_score_adds_a_quarter_of_the_best_section() {
+        let sc = sample_sidecar();
+        let chunk = [0.6_f32, 0.8, 0.0];
+        let (got, idx) = fused_score(&sc, "multi", &chunk, 0.4).unwrap();
+        assert_eq!(idx, 1);
+        assert!((got - (0.4 + 0.25 * 1.4 / 2f64.sqrt())).abs() < 1e-6, "{got}");
+        assert!(fused_score(&sc, "bare", &chunk, 0.4).is_none());
+        assert!(fused_score(&sc, "absent", &chunk, 0.4).is_none());
+    }
+
+    /// Under body rank the section that contributed to the score is set aside
+    /// for confirmation: chunk (0.6, 0.8, 0) gives 0.6, 0.98995 and 0 against
+    /// the sections, so the contributing second section leaves 0.6. A way with
+    /// one section or none confirms against its alias cosine instead.
+    #[test]
+    fn fused_confirm_sets_the_contributing_section_aside() {
+        let sc = sample_sidecar();
+        let chunk = [0.6_f32, 0.8, 0.0];
+        let mut fusion = Fusion::new();
+        fusion.insert(("multi".to_string(), 0), (0.4, 1));
+        let got = fused_confirm(&sc, &fusion, "multi", 0, &chunk, 0.9);
+        assert!((got - 0.6).abs() < 1e-6, "{got}");
+        // A way without sections has no fusion entry: its score was its alias.
+        assert_eq!(fused_confirm(&sc, &fusion, "bare", 0, &chunk, 0.31), 0.31);
+        // One section: nothing else to confirm against, so the alias cosine.
+        let one = sidecar::decode(
+            &sidecar::encode("m", 3, &[sidecar::WaySections { id: "one".into(), hash: 3, vectors: vec![unit(&[0.0, 1.0, 0.0])] }]).unwrap(),
+        )
+        .unwrap();
+        fusion.insert(("one".to_string(), 0), (0.22, 0));
+        assert_eq!(fused_confirm(&one, &fusion, "one", 0, &chunk, 0.9), 0.22);
+    }
+
+    /// Fusion re-sorts each chunk's rows by the fused score and leaves the rows
+    /// alone when the mode is off or no sidecar is complete.
+    #[test]
+    fn fuse_if_on_reorders_rows_and_is_inert_when_off() {
+        let rows = || vec![("bare".to_string(), 0.50), ("multi".to_string(), 0.40)];
+        let matched = || Matched { per_chunk: vec![rows()], vectors: Some(vec![vec![0.6, 0.8, 0.0]]) };
+        let sc = sample_sidecar();
+        let mut m = matched();
+        assert!(fuse_if_on(BodyRank::Off, &mut m, Some(&sc)).is_none());
+        assert_eq!(m.per_chunk[0], rows());
+        let mut m = matched();
+        assert!(fuse_if_on(BodyRank::On, &mut m, None).is_none());
+        assert_eq!(m.per_chunk[0], rows());
+        let fusion = fuse_if_on(BodyRank::On, &mut m, Some(&sc)).unwrap();
+        assert_eq!(m.per_chunk[0][0].0, "multi", "0.40 + 0.25 × 0.99 outranks 0.50");
+        assert_eq!(m.per_chunk[0][1], ("bare".to_string(), 0.50));
+        assert_eq!(fusion.get(&("multi".to_string(), 0)), Some(&(0.40, 1)));
     }
 
     /// A match pass that fails is not run again: the model loads once per scan
@@ -888,9 +1048,9 @@ mod tests {
     #[test]
     fn confirmer_uses_the_sidecar_only_with_vectors() {
         let p = Path::new("x");
-        assert!(Confirmer::new(p, p, Some(sample_sidecar()), Some(vec![vec![1.0, 0.0, 0.0]])).uses_sidecar());
-        assert!(!Confirmer::new(p, p, Some(sample_sidecar()), None).uses_sidecar());
-        assert!(!Confirmer::new(p, p, None, Some(vec![vec![1.0, 0.0, 0.0]])).uses_sidecar());
+        assert!(Confirmer::new(p, p, Some(sample_sidecar()), Some(vec![vec![1.0, 0.0, 0.0]]), None).uses_sidecar());
+        assert!(!Confirmer::new(p, p, Some(sample_sidecar()), None, None).uses_sidecar());
+        assert!(!Confirmer::new(p, p, None, Some(vec![vec![1.0, 0.0, 0.0]]), None).uses_sidecar());
     }
 
     /// ADR-701 §7 through the files a scan reads: the sidecar is used when the

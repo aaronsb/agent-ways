@@ -205,7 +205,15 @@ fn stage_str(r: &Outcome) -> String {
     r.skipped.as_ref().map_or_else(|| r.stage.clone(), |why| format!("skipped: {why} ({})", r.stage))
 }
 
-pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String>, project: Option<&str>, tsv: bool) -> Result<()> {
+pub fn run(
+    file: Option<String>,
+    ways_dir: Option<String>,
+    corpus: Option<String>,
+    project: Option<&str>,
+    tsv: bool,
+    body_rank: Option<crate::config::BodyRank>,
+    unrelated: bool,
+) -> Result<()> {
     let path = PathBuf::from(file.unwrap_or_else(|| DEFAULT_FILE.to_string()));
     let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let probes = parse(&text)?;
@@ -233,8 +241,15 @@ pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String
     let project_dir = project.map(str::to_string).unwrap_or_else(crate::util::project_dir);
     // The scan reads its thresholds and toggles from the global config; so does the probe.
     let admission = crate::config::global().admission;
+    let body_rank = body_rank.unwrap_or(crate::config::global().body_rank);
     if crate::paths::way_embed().is_none() || !crate::paths::corpus_dir().join(crate::paths::EN_MODEL).is_file() {
         bail!("embedding engine unavailable (way-embed or the MiniLM model is missing; run make setup)");
+    }
+
+    if unrelated {
+        print_unrelated(&probes, &project_dir, admission, body_rank);
+        drop(guard);
+        return Ok(());
     }
 
     let mut results = Vec::with_capacity(probes.len());
@@ -242,7 +257,7 @@ pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String
         let scan = if is_tool(&probe.kind) {
             crate::cmd::scan::probe::bash(&probe.prompt, &project_dir)
         } else {
-            crate::cmd::scan::probe::prompt(&probe.prompt, &project_dir, admission)
+            crate::cmd::scan::probe::prompt(&probe.prompt, &project_dir, admission, body_rank)
         };
         results.push(evaluate(probe, &scan, is_disabled));
     }
@@ -253,8 +268,38 @@ pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String
     } else {
         print_table(&results);
     }
-    print_summary(&results, admission.as_str(), &project_dir);
+    print_summary(&results, admission.as_str(), body_rank, &project_dir);
     Ok(())
+}
+
+/// Run each row as an unrelated prompt: the way ranked first and its score
+/// (summed share on the late path, calibrated probability on the single-vector
+/// path), then the ways that fired. Ends with how many rows fired anything.
+fn print_unrelated(probes: &[Probe], project_dir: &str, admission: crate::config::Admission, body_rank: crate::config::BodyRank) {
+    println!("path\ttop_way\ttop_score\tfired\tprompt");
+    let (mut fired_rows, mut late_rows) = (0usize, 0usize);
+    for probe in probes {
+        let scan = if is_tool(&probe.kind) {
+            crate::cmd::scan::probe::bash(&probe.prompt, project_dir)
+        } else {
+            crate::cmd::scan::probe::prompt(&probe.prompt, project_dir, admission, body_rank)
+        };
+        let top = scan.rows.first();
+        let fired: Vec<&str> = scan.fired.iter().map(|(id, _)| id.as_str()).collect();
+        fired_rows += usize::from(!fired.is_empty());
+        late_rows += usize::from(scan.late);
+        println!(
+            "{}\t{}\t{}\t{}\t{}",
+            if is_tool(&probe.kind) { "bash" } else if scan.late { "late" } else { "single" },
+            top.map_or("-", |r| r.id.as_str()),
+            opt(top.map(|r| r.score)),
+            if fired.is_empty() { "-".to_string() } else { fired.join(",") },
+            probe.prompt,
+        );
+    }
+    println!();
+    let body_rank = if body_rank.is_on() { " · body rank: on" } else { "" };
+    println!("unrelated: {} rows, {fired_rows} fired a way, {late_rows} on the late path · admission: {}{body_rank}", probes.len(), admission.as_str());
 }
 
 fn print_tsv(results: &[Outcome]) {
@@ -305,11 +350,13 @@ fn print_table(results: &[Outcome]) {
     }
 }
 
-fn print_summary(results: &[Outcome], admission: &str, project_dir: &str) {
+fn print_summary(results: &[Outcome], admission: &str, body_rank: crate::config::BodyRank, project_dir: &str) {
     let (all, roles, kinds) = tally(results);
     let skipped = results.iter().filter(|r| !r.scored()).count();
     println!();
-    println!("probes: {} total, {} scored, {skipped} skipped · admission: {admission} · project: {project_dir}", results.len(), all.scored);
+    // Named only when on, so a run with the flag off prints what it always has.
+    let body_rank = if body_rank.is_on() { " · body rank: on" } else { "" };
+    println!("probes: {} total, {} scored, {skipped} skipped · admission: {admission}{body_rank} · project: {project_dir}", results.len(), all.scored);
     let off = crate::config::global().disabled_domains.join(",");
     println!("operator config: disabled domains: {}", if off.is_empty() { "none" } else { off.as_str() });
     println!("pass = the expected way fires and no must_not way outranks it; top-1 = the expected way ranks first");
@@ -515,7 +562,7 @@ mod tests {
             must_not: vec!["proxy".into()],
         };
         let project = root.to_string_lossy().to_string();
-        let run = || evaluate(&p, &crate::cmd::scan::probe::prompt(&p.prompt, &project, crate::config::Admission::Share), |_| false);
+        let run = || evaluate(&p, &crate::cmd::scan::probe::prompt(&p.prompt, &project, crate::config::Admission::Share, crate::config::BodyRank::Off), |_| false);
         let (a, b) = (run(), run());
         assert_eq!(a, b, "a probe carries no state between runs");
         assert_eq!(a.rank, Some(1), "{a:?}");
@@ -526,12 +573,12 @@ mod tests {
 
         // A joined row (situational sentence, then direct sentence) takes the late path.
         let joined = Probe { prompt: "my tomato plants need watering every morning. prune the seedlings and add compost".into(), kind: "joined".into(), ..p.clone() };
-        let j = evaluate(&joined, &crate::cmd::scan::probe::prompt(&joined.prompt, &project, crate::config::Admission::Share), |_| false);
+        let j = evaluate(&joined, &crate::cmd::scan::probe::prompt(&joined.prompt, &project, crate::config::Admission::Share, crate::config::BodyRank::Off), |_| false);
         assert!(j.late && path_str(&j) == "late", "{j:?}");
         assert_eq!(j.stage, "fired", "{j:?}");
 
         // One sentence has nothing to chunk: the single-vector fail-safe decides.
-        let one = evaluate(&p, &crate::cmd::scan::probe::prompt("my tomato plants need watering", &project, crate::config::Admission::Share), |_| false);
+        let one = evaluate(&p, &crate::cmd::scan::probe::prompt("my tomato plants need watering", &project, crate::config::Admission::Share, crate::config::BodyRank::Off), |_| false);
         assert!(!one.late && path_str(&one) == "single", "{one:?}");
 
         // The Bash lane, with the prompt as the tool description.

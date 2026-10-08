@@ -65,6 +65,7 @@ const SECTIONS: &[SectionSpec] = &[
             "parent_boost_floor",
             "near_miss_margin",
             "admission",
+            "body_rank",
             "refire_presets",
         ],
         per_entry: false, entry: None, repair: None,
@@ -254,6 +255,16 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("share"),
         doc: "How late interaction admits a way into body confirmation: share or chunk_top.",
         long: "share admits a way whose summed softmax share over the surface's chunks reaches 0.15. chunk_top admits the top-ranked way of every chunk instead. Both also admit a way whose peak chunk cosine reaches 0.50, keep at most 6 by peak, and body-confirm them (ADR-700 §12). chunk_top is under evaluation (ADR-701 increment 6).",
+        ..BASE
+    },
+    KeySpec {
+        name: "matching.body_rank",
+        section: "matching",
+        path: &["body_rank"],
+        kind: Kind::Choice(&crate::config::BodyRank::NAMES),
+        default: DefaultValue::Yaml("off"),
+        doc: "Whether a way's best body section joins its ranking score: off or on.",
+        long: "on ranks a way by its alias cosine plus 0.25 times its best body section's cosine, and confirms the body against a section other than the one that contributed (a way with one section or none confirms against its alias). It applies only while the body sidecar is complete. Under evaluation (ADR-701 §6).",
         ..BASE
     },
     KeySpec {
