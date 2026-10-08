@@ -64,9 +64,6 @@ fi
 # Skips itself when the engine is missing, so it is safe to run unconditionally.
 run_suite "Golden Routing" bash "$SCRIPT_DIR/test-routing-golden.sh"
 
-# Probe sample: the committed tree-sampled probe set must match the golden sidecars.
-run_suite "Probe Sample" bash "$SCRIPT_DIR/test-probe-sample.sh"
-
 # ADR lint tests (frontmatter detection, field validation)
 if command -v python3 &>/dev/null; then
   run_suite "ADR Lint Tests" bash "$REPO_ROOT/tests/adr-lint-test.sh"

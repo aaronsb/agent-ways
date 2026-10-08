@@ -5,6 +5,11 @@
 //! `golden-none.jsonl` at the root. The kind is `direct` or `situational`, with
 //! a `-tool` suffix when the line carries `"surface":"tool"`; a none row is
 //! `prompt<TAB>none<TAB>none`. Output is sorted by way id, so it is stable.
+//!
+//! `--probes` prints a header and the tree-sampled probe set instead. The
+//! committed copy is `tests/probes/tree-sample.tsv`; a test here fails when it
+//! drifts from the tree. Regenerate it with
+//! `ways author golden --ways-dir hooks/ways --probes > tests/probes/tree-sample.tsv`.
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -43,6 +48,7 @@ pub fn run(ways_dir: Option<String>, tsv: bool, probes: bool) -> Result<()> {
     let root = ways_dir.map(PathBuf::from).unwrap_or_else(crate::paths::shipped_ways_root);
     let rows = export(&root)?;
     if probes {
+        println!("{PROBES_HEADER}");
         for p in sample_probes(&rows) {
             println!("{}", p.tsv());
         }
@@ -121,7 +127,10 @@ pub fn export(root: &Path) -> Result<Vec<Row>> {
 }
 
 /// One tree-sampled probe: a prompt, the way that should win, and the semantic
-/// siblings that must not out-rank it.
+/// siblings that must not out-rank it: the other ways with the same semantic
+/// parent. For a root, the siblings are the other roots under the same
+/// top-level directory (or, for a top-level root such as `data`, the other
+/// top-level roots).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Probe {
     pub prompt: String,
@@ -130,6 +139,9 @@ pub struct Probe {
     pub role: &'static str,
     pub must_not: Vec<String>,
 }
+
+/// The header line `--probes` prints before the rows.
+pub const PROBES_HEADER: &str = "prompt\texpected_way\tkind\trole\tmust_not";
 
 impl Probe {
     fn tsv(&self) -> String {
@@ -143,20 +155,37 @@ fn fnv1a(id: &str) -> u64 {
     id.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3))
 }
 
-fn parent_dir(id: &str) -> &str {
-    id.rsplit_once('/').map_or("", |(p, _)| p)
+/// The group a root belongs to: its first path component, or "" for a
+/// top-level root. Roots in one group are each other's siblings.
+fn group_of(id: &str) -> &str {
+    id.split_once('/').map_or("", |(g, _)| g)
 }
 
 /// Sample the disclosure tree. The semantic ways are the ids that carry golden
-/// rows. A way's semantic children are the semantic ways whose nearest semantic
-/// ancestor (by id prefix) it is. Roles: `root` is a depth-1 way, `parent` is a
-/// non-root way with semantic children, `leaf` has none. Selected: every root,
-/// every parent, and for each root or parent the one leaf child with the least
-/// `(fnv1a(id), id)`. Roots and parents emit their situational prompt; a leaf
-/// emits both. `must_not` lists the semantic ways sharing the way's parent
-/// directory. Nothing is named by id, so a rename moves the sample with it.
-pub fn sample_probes(rows: &[Row]) -> Vec<Probe> {
-    use std::collections::{BTreeMap, BTreeSet};
+/// rows. A way's semantic parent is its nearest semantic ancestor (by id
+/// prefix). A root is a semantic way with no semantic parent, at any depth.
+/// Roots under a shared non-semantic top-level directory (`itops/*`) form a
+/// group with a virtual parent keyed by that directory, so every top-level
+/// directory is represented.
+///
+/// Selected: every root; every way with semantic children; for each real
+/// parent the one childless child with the least `(fnv1a(id), id)`; and for each
+/// group the one childless root with the least `(fnv1a(id), id)`, labelled
+/// `leaf`. A parent whose children are all parents contributes no leaf, since
+/// its descendants are sampled. A selected way with no semantic children emits
+/// both its direct and situational prompts; a way with children emits its
+/// situational prompt only.
+///
+/// `must_not` is the other ways with the same semantic parent (see [`Probe`]);
+/// the leaf pick and `must_not` use that same relation. No id is hard-coded, so
+/// the sample tolerates renames in the sense that nothing breaks. It does not
+/// keep the pick stable: renaming a directory re-hashes every id under it, and
+/// adding a sibling with a lower hash moves the pick.
+///
+/// Regenerate the committed set with
+/// `ways author golden --ways-dir hooks/ways --probes > tests/probes/tree-sample.tsv`.
+pub fn sample_probes<'a>(rows: &'a [Row]) -> Vec<Probe> {
+    use std::collections::BTreeMap;
     let mut by_way: BTreeMap<&str, Vec<&Row>> = BTreeMap::new();
     for r in rows.iter().filter(|r| r.way != "none") {
         by_way.entry(r.way.as_str()).or_default().push(r);
@@ -165,42 +194,62 @@ pub fn sample_probes(rows: &[Row]) -> Vec<Probe> {
     let nearest_ancestor = |id: &str| -> Option<&str> {
         let mut cur = id;
         while let Some((p, _)) = cur.rsplit_once('/') {
-            if by_way.contains_key(p) {
-                return by_way.get_key_value(p).map(|(k, _)| *k);
+            if let Some((k, _)) = by_way.get_key_value(p) {
+                return Some(*k);
             }
             cur = p;
         }
         None
     };
     let mut children: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for id in &ids {
-        if let Some(a) = nearest_ancestor(id) {
-            children.entry(a).or_default().push(id);
+        match nearest_ancestor(id) {
+            Some(a) => children.entry(a).or_default().push(id),
+            None => groups.entry(group_of(id)).or_default().push(id),
         }
     }
-    let is_parent = |id: &str| children.contains_key(id);
-    let mut selected: BTreeSet<&str> = BTreeSet::new();
+    let has_kids = |id: &str| children.contains_key(id);
+    let pick = |set: &[&'a str]| -> Option<&'a str> {
+        set.iter().copied().filter(|k| !has_kids(k)).min_by_key(|k| (fnv1a(k), *k))
+    };
+
+    let mut selected: BTreeMap<&str, &'static str> = BTreeMap::new();
     for id in &ids {
-        if !id.contains('/') || is_parent(id) {
-            selected.insert(id);
+        if has_kids(id) {
+            selected.insert(id, "parent");
         }
     }
-    for (parent, kids) in &children {
-        let _ = parent;
-        if let Some(leaf) = kids.iter().filter(|k| !is_parent(k)).min_by_key(|k| (fnv1a(k), **k)) {
-            selected.insert(leaf);
+    for roots in groups.values() {
+        for id in roots {
+            selected.insert(id, "root");
         }
     }
+    for kids in children.values() {
+        if let Some(leaf) = pick(kids) {
+            selected.insert(leaf, "leaf");
+        }
+    }
+    for (group, roots) in &groups {
+        // a group only exists as a virtual parent for roots under a directory
+        if group.is_empty() {
+            continue;
+        }
+        if let Some(leaf) = pick(roots) {
+            selected.insert(leaf, "leaf");
+        }
+    }
+
     let mut out = Vec::new();
-    for id in selected {
-        let role = if !id.contains('/') { "root" } else if is_parent(id) { "parent" } else { "leaf" };
-        let must_not: Vec<String> = ids
-            .iter()
-            .filter(|o| **o != id && parent_dir(o) == parent_dir(id))
-            .map(|o| o.to_string())
-            .collect();
+    for (id, role) in selected {
+        let siblings: &Vec<&str> = match nearest_ancestor(id) {
+            Some(p) => &children[p],
+            None => &groups[group_of(id)],
+        };
+        let must_not: Vec<String> = siblings.iter().filter(|o| **o != id).map(|o| o.to_string()).collect();
+        let parent = has_kids(id);
         for r in &by_way[id] {
-            if role != "leaf" && !r.kind.starts_with("situational") {
+            if parent && !r.kind.starts_with("situational") {
                 continue;
             }
             out.push(Probe { prompt: r.prompt.clone(), way: id.to_string(), kind: r.kind.clone(), role, must_not: must_not.clone() });
@@ -214,7 +263,9 @@ mod tests {
     use super::*;
 
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ways-golden-export-{}-{tag}", std::process::id()));
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("ways-golden-export-{}-{tag}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -282,7 +333,8 @@ mod tests {
     fn fixture() -> PathBuf {
         let root = scratch("probes");
         let g = |w: &str| format!("{{\"kind\":\"direct\",\"prompt\":\"{w} d\"}}\n{{\"kind\":\"situational\",\"prompt\":\"{w} s\"}}\n");
-        for w in ["top", "top/par", "top/par/l1", "top/par/l2", "top/par/l3", "top/lone", "other"] {
+        // `grp` has no sidecar of its own: a non-semantic top-level directory.
+        for w in ["top", "top/par", "top/par/l1", "top/par/l2", "top/par/l3", "top/lone", "other", "grp/a", "grp/b", "grp/c", "grp/c/k"] {
             let leaf = w.rsplit('/').next().unwrap();
             put(&root, &format!("{w}/{leaf}.golden.jsonl"), &g(w));
         }
@@ -290,31 +342,55 @@ mod tests {
         root
     }
 
+    fn least(ids: &[&'static str]) -> &'static str {
+        ids.iter().copied().min_by_key(|i| (fnv1a(i), *i)).unwrap()
+    }
+
     #[test]
     fn probes_select_roots_parents_and_one_hashed_leaf_per_parent() {
         let probes = sample_probes(&export(&fixture()).unwrap());
         let got: Vec<(&str, &str, &str)> = probes.iter().map(|p| (p.way.as_str(), p.role, p.kind.as_str())).collect();
-        // the hash picks exactly one of l1..l3 under par
-        let l = ["top/par/l1", "top/par/l2", "top/par/l3"].into_iter().min_by_key(|i| (fnv1a(i), *i)).unwrap();
-        assert_eq!(
-            got,
-            [
-                ("other", "root", "situational"),
-                ("top", "root", "situational"),
-                ("top/lone", "leaf", "direct"),
-                ("top/lone", "leaf", "situational"),
-                ("top/par", "parent", "situational"),
-                (l, "leaf", "direct"),
-                (l, "leaf", "situational"),
-            ]
-        );
+        let l = least(&["top/par/l1", "top/par/l2", "top/par/l3"]);
+        let gl = least(&["grp/a", "grp/b"]); // the group's childless roots; grp/c has a child
+        let (ga, gb) = if gl == "grp/a" { ("leaf", "root") } else { ("root", "leaf") };
+        let mut want: Vec<(&str, &str, &str)> = vec![
+            ("grp/a", ga, "direct"),
+            ("grp/a", ga, "situational"),
+            ("grp/b", gb, "direct"),
+            ("grp/b", gb, "situational"),
+            ("grp/c", "root", "situational"),
+            ("grp/c/k", "leaf", "direct"),
+            ("grp/c/k", "leaf", "situational"),
+            ("other", "root", "direct"),
+            ("other", "root", "situational"),
+            ("top", "root", "situational"),
+            ("top/lone", "leaf", "direct"),
+            ("top/lone", "leaf", "situational"),
+            ("top/par", "parent", "situational"),
+            (l, "leaf", "direct"),
+            (l, "leaf", "situational"),
+        ];
+        want.sort_by(|a, b| a.0.cmp(b.0)); // stable: keeps direct before situational
+        assert_eq!(got, want);
+        // exactly one of the group's childless roots is the group's leaf
+        let leaves: Vec<&str> =
+            probes.iter().filter(|p| p.role == "leaf" && ["grp/a", "grp/b"].contains(&p.way.as_str()) && p.kind == "direct").map(|p| p.way.as_str()).collect();
+        assert_eq!(leaves, [gl]);
     }
 
     #[test]
     fn probes_name_semantic_siblings_in_must_not() {
         let probes = sample_probes(&export(&fixture()).unwrap());
         let m = |w: &str, role: &str| probes.iter().find(|p| p.way == w && p.role == role).unwrap().must_not.clone();
+        // top-level roots are siblings of each other, not of roots under grp
         assert_eq!(m("top", "root"), ["other"]);
+        assert_eq!(m("other", "root"), ["top"]);
+        // roots under a non-semantic directory are siblings within it
+        assert_eq!(m("grp/c", "root"), ["grp/a", "grp/b"]);
+        let gl = least(&["grp/a", "grp/b"]);
+        let other = if gl == "grp/a" { "grp/b" } else { "grp/a" };
+        assert_eq!(m(gl, "leaf"), [other, "grp/c"]);
+        assert_eq!(m("grp/c/k", "leaf"), Vec::<String>::new());
         assert_eq!(m("top/par", "parent"), ["top/lone"]);
         assert_eq!(m("top/lone", "leaf"), ["top/par"]);
         let leaf = probes.iter().find(|p| p.role == "leaf" && p.way.starts_with("top/par/")).unwrap();
@@ -328,6 +404,35 @@ mod tests {
         let a = sample_probes(&export(&root).unwrap());
         assert_eq!(a, sample_probes(&export(&root).unwrap()));
         assert!(a.iter().all(|p| p.way != "none"));
+    }
+
+    /// The committed probe set must match what the shipped tree yields now.
+    /// Regenerate with
+    /// `ways author golden --ways-dir hooks/ways --probes > tests/probes/tree-sample.tsv`.
+    #[test]
+    fn committed_probe_sample_matches_the_shipped_tree() {
+        let repo = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../..");
+        let mut now = format!("{PROBES_HEADER}\n");
+        for p in sample_probes(&export(&repo.join("hooks/ways")).unwrap()) {
+            now.push_str(&p.tsv());
+            now.push('\n');
+        }
+        let committed = std::fs::read_to_string(repo.join("tests/probes/tree-sample.tsv")).expect("tests/probes/tree-sample.tsv");
+        if committed == now {
+            return;
+        }
+        let (c, n): (Vec<&str>, Vec<&str>) = (committed.lines().collect(), now.lines().collect());
+        let mut diff = String::new();
+        for l in c.iter().filter(|l| !n.contains(l)) {
+            diff.push_str(&format!("- {l}\n"));
+        }
+        for l in n.iter().filter(|l| !c.contains(l)) {
+            diff.push_str(&format!("+ {l}\n"));
+        }
+        panic!(
+            "tests/probes/tree-sample.tsv is out of date with the golden sidecars ('-' committed, '+' now):\n{diff}\
+             Regenerate it with:\n  ways author golden --ways-dir hooks/ways --probes > tests/probes/tree-sample.tsv"
+        );
     }
 
     #[test]
