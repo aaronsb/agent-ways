@@ -56,9 +56,11 @@ jobs:
       # session_sim exercises the marker/hook/epoch machinery end-to-end against
       # the built binary, so running it on every OS is the actual proof the
       # session layer works cross-platform. Single-threaded for deterministic
-      # shared-fixture setup (matches build-ways.yml).
-      - name: Run ways tests (unit + integration)
-        run: cargo test --manifest-path tools/Cargo.toml -p ways -- --test-threads=1
+      # shared-fixture setup (matches build-ways.yml). ways-core runs too: it
+      # owns the log archives' locking and the share mode every reader and
+      # writer of the logs opens with, which only Windows exercises.
+      - name: Run ways + ways-core tests (unit + integration)
+        run: cargo test --manifest-path tools/Cargo.toml -p ways -p ways-core -- --test-threads=1
 
       - name: Portability lint (incl. sessions_root agreement)
         run: bash scripts/check-portability.sh
