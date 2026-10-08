@@ -113,6 +113,8 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // touched it.
     let stale = if cargo_changed { Vec::new() } else { stale_suite_binaries(&app) };
 
+    let before = binary_versions(&app);
+
     // Content-only update: nothing that feeds a binary changed and no binary is
     // older than its source. Skip the whole
     // download/build/relink dance and just reproject the pulled content (core.md,
@@ -132,12 +134,9 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
             );
         }
         reproject(&app, &ways_bin)?;
-        println!("\nUpdate complete (content only — binaries unchanged). Restart Claude Code");
-        println!("to pick up the refreshed ways, skills, and hooks.");
+        print_complete(&version_changes(&before, &binary_versions(&app)));
         return Ok(());
     }
-
-    let before = binary_versions(&app);
 
     // 2. Core — ways. Download-first, rename-revert safe, with the ADR-150
     //    downgrade guard: a pre-built that is behind the pulled source is refused
@@ -214,13 +213,8 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     //    un-projected.
     reproject(&app, &ways_bin)?;
 
-    let changes = version_changes(&before, &binary_versions(&app));
-    if ways_refreshed && changes.is_empty() {
-        println!("\nUpdate complete (binaries unchanged). Restart Claude Code to pick up the");
-        println!("refreshed ways, skills, and hooks.");
-    } else if ways_refreshed {
-        println!("\nUpdate complete: {}. Restart Claude Code to pick up", changes.join(", "));
-        println!("the new versions (a running session keeps the old hooks, ways, and skills in memory).");
+    if ways_refreshed {
+        print_complete(&version_changes(&before, &binary_versions(&app)));
     } else {
         println!("\nSource updated and reprojected, but the ways binary refresh failed (no pre-built");
         println!("available and no build toolchain?). Your install still runs the previous binary —");
@@ -362,28 +356,64 @@ fn stale_suite_binaries(app: &Path) -> Vec<Stale> {
         .collect()
 }
 
-/// Each binary an update can refresh, with the version it reports: the suite
-/// under `bin/` and the cached way-embed. A binary that does not answer is left out.
-fn binary_versions(app: &Path) -> Vec<(String, String)> {
+/// What an update can tell about one binary: the version it reports, without
+/// its name (`1.35.0 (ways-v1.35.0-0-g48ce52b)`), and the file's size and
+/// modification time, which move on a rebuild at the same version.
+#[derive(Debug, Clone, PartialEq)]
+struct Seen {
+    version: String,
+    stamp: Option<(u64, std::time::SystemTime)>,
+}
+
+/// Each binary an update can refresh: the suite under `bin/` and the cached
+/// way-embed. A binary that does not answer `--version` is left out.
+fn binary_versions(app: &Path) -> Vec<(String, Seen)> {
     let mut bins: Vec<(String, std::path::PathBuf)> =
         suite_bins(app).into_iter().map(|n| (n.clone(), app.join("bin").join(exe(&n)))).collect();
     if let Some(p) = crate::paths::way_embed_in(&crate::paths::corpus_dir()) {
         bins.push(("way-embed".to_string(), p));
     }
-    bins.into_iter().filter_map(|(n, p)| Some((n, installed_version(&p)?))).collect()
-}
-
-/// `name old → new` for each binary whose version moved, and `name v (new)` for
-/// one the update installed.
-fn version_changes(before: &[(String, String)], after: &[(String, String)]) -> Vec<String> {
-    after
-        .iter()
-        .filter_map(|(name, v)| match before.iter().find(|(b, _)| b == name) {
-            Some((_, old)) if old == v => None,
-            Some((_, old)) => Some(format!("{name} {old} → {v}")),
-            None => Some(format!("{name} {v} (new)")),
+    bins.into_iter()
+        .filter_map(|(name, p)| {
+            let line = version_line(&p)?;
+            let version = line.strip_prefix(name.as_str()).unwrap_or(&line).trim().to_string();
+            let stamp = p.metadata().ok().and_then(|m| Some((m.len(), m.modified().ok()?)));
+            Some((name, Seen { version, stamp }))
         })
         .collect()
+}
+
+/// One entry per binary that moved: `name old → new`, `name v (rebuilt)` for a
+/// new file at the same version, `name v (new)`, or `name v → not answering`.
+fn version_changes(before: &[(String, Seen)], after: &[(String, Seen)]) -> Vec<String> {
+    let mut changes: Vec<String> = after
+        .iter()
+        .filter_map(|(name, now)| match before.iter().find(|(b, _)| b == name) {
+            None => Some(format!("{name} {} (new)", now.version)),
+            Some((_, was)) if was.version != now.version => Some(format!("{name} {} → {}", was.version, now.version)),
+            Some((_, was)) if was.stamp != now.stamp => Some(format!("{name} {} (rebuilt)", now.version)),
+            Some(_) => None,
+        })
+        .collect();
+    changes.extend(
+        before
+            .iter()
+            .filter(|(name, _)| !after.iter().any(|(a, _)| a == name))
+            .map(|(name, was)| format!("{name} {} → not answering", was.version)),
+    );
+    changes
+}
+
+/// The closing lines of an update whose ways binary is in place.
+fn print_complete(changes: &[String]) {
+    if changes.is_empty() {
+        println!("\nUpdate complete (binaries unchanged). Restart Claude Code to pick up the");
+        println!("refreshed ways, skills, and hooks.");
+    } else {
+        println!("\nUpdate complete: {}.", changes.join(", "));
+        println!("Restart Claude Code to pick up the new binaries (a running session keeps the");
+        println!("old hooks, ways, and skills in memory).");
+    }
 }
 
 /// way-embed's version in its source: the `#define VERSION` in way-embed.cpp.
@@ -415,9 +445,8 @@ fn source_versions(app: &Path) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The version a binary reports: the second word of `--version`, as in
-/// `attend 0.15.1 (47d7a97)`.
-fn installed_version(bin: &Path) -> Option<String> {
+/// The first line a binary prints for `--version`.
+fn version_line(bin: &Path) -> Option<String> {
     // A binary just written, here or by a parallel process, can refuse to exec
     // with ETXTBSY while another fork still holds its write handle; it clears
     // in milliseconds, so a few short retries tell it apart from a broken binary.
@@ -431,7 +460,13 @@ fn installed_version(bin: &Path) -> Option<String> {
             r => break r.ok().filter(|o| o.status.success())?,
         }
     };
-    String::from_utf8_lossy(&out.stdout).split_whitespace().nth(1).map(str::to_string)
+    String::from_utf8_lossy(&out.stdout).lines().next().map(|l| l.trim().to_string())
+}
+
+/// The version a binary reports: the second word of `--version`, as in
+/// `attend 0.15.1 (47d7a97)`.
+fn installed_version(bin: &Path) -> Option<String> {
+    version_line(bin)?.split_whitespace().nth(1).map(str::to_string)
 }
 
 /// Whether version `a` is older than `b`: numeric `X.Y.Z` cores compared in
@@ -1097,12 +1132,33 @@ mod tests {
     }
 
     #[test]
-    fn the_closing_line_names_only_the_binaries_whose_version_moved() {
-        let v = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())).collect::<Vec<_>>();
-        let before = v(&[("ways", "1.35.0"), ("attend", "0.15.3"), ("way-embed", "1.1.2")]);
+    fn the_closing_line_names_what_moved_including_a_rebuild_at_the_same_version() {
+        let t0 = std::time::SystemTime::UNIX_EPOCH;
+        let t1 = t0 + std::time::Duration::from_secs(60);
+        let seen = |v: &str, len: u64, at| Seen { version: v.to_string(), stamp: Some((len, at)) };
+        let before = vec![
+            ("ways".to_string(), seen("1.35.0 (ways-v1.35.0-0-g48ce52b)", 10, t0)),
+            ("attend".to_string(), seen("0.15.3 (a8b0511)", 20, t0)),
+            ("way-embed".to_string(), seen("1.1.2", 30, t0)),
+            ("ways-audit".to_string(), seen("1.0.2", 40, t0)),
+        ];
         assert!(version_changes(&before, &before).is_empty(), "nothing moved");
-        let after = v(&[("ways", "1.35.1"), ("attend", "0.15.3"), ("way-embed", "1.1.2"), ("ways-mcp", "0.1.0")]);
-        assert_eq!(version_changes(&before, &after), ["ways 1.35.0 → 1.35.1", "ways-mcp 0.1.0 (new)"]);
+
+        let after = vec![
+            ("ways".to_string(), seen("1.35.0 (ways-v1.35.0-3-gabc1234)", 10, t1)),
+            ("attend".to_string(), seen("0.15.3 (a8b0511)", 20, t0)),
+            ("way-embed".to_string(), seen("1.1.2", 31, t1)),
+            ("ways-mcp".to_string(), seen("0.1.0", 50, t1)),
+        ];
+        assert_eq!(
+            version_changes(&before, &after),
+            [
+                "ways 1.35.0 (ways-v1.35.0-0-g48ce52b) → 1.35.0 (ways-v1.35.0-3-gabc1234)",
+                "way-embed 1.1.2 (rebuilt)",
+                "ways-mcp 0.1.0 (new)",
+                "ways-audit 1.0.2 → not answering",
+            ]
+        );
     }
 
     #[cfg(unix)]
