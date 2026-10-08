@@ -42,7 +42,7 @@ fn canonical(p: &Path) -> PathBuf {
 /// the form way identities and the other lint output use.
 fn rel(root: &Path, path: &Path) -> String {
     match path.strip_prefix(root) {
-        Ok(rel) => rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"),
+        Ok(rel) => crate::util::path_to_id(rel),
         Err(_) => path.display().to_string(),
     }
 }
