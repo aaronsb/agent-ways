@@ -71,6 +71,8 @@ Measured on those sets (results-body-rank.md): the ADR-701 formula, `alias + 0.2
 ### Neutral
 
 - A variant that gains on the late path, such as a different confirmation rule, is evaluated under the same gate.
+- The highest unrelated-prompt score rose from 0.437 to 0.461 against the 0.5 firing bar, so the separation margin fell from 0.063 to 0.039. A later change that raises scores again meets the gate with less room.
+- The probes run without the assistant's last response. Live prompts often carry it and then take the late path, where the default changes nothing, so the single-sentence gain is an upper bound on the live effect. Decision records mark fused scans, so the event log measures how often it applies.
 
 ## Alternatives Considered
 
