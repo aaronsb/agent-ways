@@ -58,22 +58,21 @@ pub fn run(ways_dir: Option<String>, tsv: bool) -> Result<()> {
     Ok(())
 }
 
-/// The way id a sidecar at `sidecar` names: its directory relative to `root`
-/// when the file shares the directory's name, else that directory plus the stem.
+/// The way id a sidecar at `sidecar` names: its directory relative to `root`,
+/// as the corpus names a way (`corpus.rs` takes the parent of the way file).
+/// Two way files in one directory therefore share an id.
 fn way_id(root: &Path, sidecar: &Path, stem: &str) -> String {
     let dir = sidecar.parent().unwrap_or(root);
     let rel = dir.strip_prefix(root).map(crate::util::path_to_id).unwrap_or_default();
-    let last = rel.rsplit('/').next().unwrap_or("");
-    match (rel.is_empty(), last == stem) {
-        (true, _) => stem.to_string(),
-        (false, true) => rel,
-        (false, false) => format!("{rel}/{stem}"),
-    }
+    if rel.is_empty() { stem.to_string() } else { rel }
 }
 
-fn check_cell(s: &str, at: &Path) -> Result<()> {
+fn check_cell(s: &str, at: &Path, line: usize) -> Result<()> {
+    if s.trim().is_empty() {
+        bail!("{} line {line}: the prompt is empty", at.display());
+    }
     if s.contains(['\t', '\n', '\r']) {
-        bail!("{}: a prompt holds a tab or newline, which the TSV export cannot carry", at.display());
+        bail!("{} line {line}: a prompt holds a tab or newline, which the TSV export cannot carry", at.display());
     }
     Ok(())
 }
@@ -93,7 +92,7 @@ pub fn export(root: &Path) -> Result<Vec<Row>> {
             for (i, l) in text(path)?.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
                 let n: NoneLine = serde_json::from_str(l)
                     .with_context(|| format!("{} line {}", path.display(), i + 1))?;
-                check_cell(&n.prompt, path)?;
+                check_cell(&n.prompt, path, i + 1)?;
                 none.push(Row { prompt: n.prompt, way: "none".into(), kind: "none".into() });
             }
         } else if let Some(stem) = name.strip_suffix(".golden.jsonl") {
@@ -104,7 +103,7 @@ pub fn export(root: &Path) -> Result<Vec<Row>> {
                 if g.kind != "direct" && g.kind != "situational" {
                     bail!("{} line {}: unknown kind '{}'", path.display(), i + 1, g.kind);
                 }
-                check_cell(&g.prompt, path)?;
+                check_cell(&g.prompt, path, i + 1)?;
                 let kind = if g.surface.as_deref() == Some("tool") { format!("{}-tool", g.kind) } else { g.kind };
                 rows.push(Row { prompt: g.prompt, way: id.clone(), kind });
             }
@@ -133,11 +132,11 @@ mod tests {
     }
 
     #[test]
-    fn ids_follow_the_directory_or_the_stem() {
+    fn ids_follow_the_directory_as_the_corpus_does() {
         let r = Path::new("/r");
         assert_eq!(way_id(r, Path::new("/r/a/b/b.golden.jsonl"), "b"), "a/b");
         assert_eq!(way_id(r, Path::new("/r/core.golden.jsonl"), "core"), "core");
-        assert_eq!(way_id(r, Path::new("/r/m/think/strategies/react.golden.jsonl"), "react"), "m/think/strategies/react");
+        assert_eq!(way_id(r, Path::new("/r/m/think/strategies/react.golden.jsonl"), "react"), "m/think/strategies");
     }
 
     #[test]
@@ -167,5 +166,21 @@ mod tests {
         let root = scratch("tab");
         put(&root, "a/a.golden.jsonl", "{\"kind\":\"direct\",\"prompt\":\"a\\tb\"}\n");
         assert!(export(&root).is_err());
+    }
+
+    #[test]
+    fn export_refuses_a_newline_and_names_the_line() {
+        let root = scratch("nl");
+        put(&root, "a/a.golden.jsonl", "{\"kind\":\"direct\",\"prompt\":\"ok\"}\n{\"kind\":\"situational\",\"prompt\":\"a\\nb\"}\n");
+        let e = export(&root).unwrap_err().to_string();
+        assert!(e.contains("a.golden.jsonl line 2") && e.contains("tab or newline"), "{e}");
+    }
+
+    #[test]
+    fn export_refuses_an_empty_prompt_and_names_the_line() {
+        let root = scratch("empty");
+        put(&root, "a/a.golden.jsonl", "{\"kind\":\"direct\",\"prompt\":\"ok\"}\n{\"kind\":\"situational\",\"prompt\":\"  \"}\n");
+        let e = export(&root).unwrap_err().to_string();
+        assert!(e.contains("a.golden.jsonl line 2") && e.contains("empty"), "{e}");
     }
 }
