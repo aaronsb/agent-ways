@@ -26,6 +26,11 @@ date: 2026-10-08
 deciders:
   - aaronsb
 amends: "ADR-186#Decision"
+considered:
+  - operator: aaronsb
+    said: "let's make it an optional step, based on the merits of what changed"
+    via: chat, 2026-10-08
+    covers: [release-step]
 related:
   - ADR-186
 ---

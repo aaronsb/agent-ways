@@ -58,6 +58,8 @@ Tags are GPG-signed, so `publish-release` needs a passphrase from the operator's
 
 Bump level follows the commit types, against the *binary*. A corpus-only change with a `fix:` commit is a patch even when it changes what every session sees; the CLI interface is what the version tracks.
 
+The live fixture is an optional staging step, run locally when what changed warrants it (ADR-508). Tier 1, `make test-live TIER=1`, is worth running when the release touches the installer, `ways reconcile` or targets, the `settings.json` merge, hook wiring, or follows a Claude Code version jump. Tier 2, `make test-live TIER=2`, spends API tokens; run it when the release changes what fires in a live session, such as matching, disclosure or hook output. A corpus-only, docs-only or attend-only release skips both. Say in the release PR which tier ran, or why neither did.
+
 ## What to Adopt vs Ignore
 
 Filter upstream changes through what this project cares about:
