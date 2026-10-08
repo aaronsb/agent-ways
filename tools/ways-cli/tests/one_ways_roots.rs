@@ -165,6 +165,13 @@ fn template_global_writes_the_personal_root_not_the_projection() {
     let out = fx.ways(&["author", "template", "mine/newone", "-d", "a personal way", "--global"]);
     let personal = fx.home().join("config/agent-ways/ways/mine/newone/newone.md");
     assert!(personal.is_file(), "template --global must write {}:\n{out}", personal.display());
+    let golden = personal.with_file_name("newone.golden.jsonl");
+    assert_eq!(
+        std::fs::read_to_string(&golden).unwrap_or_default(),
+        "{\"kind\":\"direct\",\"prompt\":\"\"}\n{\"kind\":\"situational\",\"prompt\":\"\"}\n",
+        "template must write the blank golden sidecar {}:\n{out}",
+        golden.display()
+    );
     assert!(
         !fx.home().join("dev/hooks/ways/mine").exists(),
         "template --global must not write through the shipped projection:\n{out}"

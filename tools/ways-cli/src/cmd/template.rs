@@ -1,12 +1,18 @@
 //! Scaffold a new way with frontmatter and body template.
 //!
-//! Creates the way directory and English .md file. Per ADR-139, new ways are
+//! Creates the way directory, the English .md file, and the golden-prompt
+//! sidecar (ADR-701 §9) with blank direct and situational prompts, which a core
+//! way must fill before lint passes. Per ADR-139, new ways are
 //! English-only; localization is adopter-run via the ways-localize skill, not
 //! pre-generated as translation stubs.
 
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 
+
+/// The golden sidecar a new way starts with. Lint rejects the blanks in a core
+/// root until they are filled.
+const GOLDEN_TEMPLATE: &str = "{\"kind\":\"direct\",\"prompt\":\"\"}\n{\"kind\":\"situational\",\"prompt\":\"\"}\n";
 
 pub fn run(
     path: String,
@@ -92,12 +98,17 @@ This way activates when the user or agent is working with:
     std::fs::write(&way_file, md_content)?;
     eprintln!("Created: {}", way_file.display());
 
+    let golden_file = way_dir.join(format!("{way_name}.golden.jsonl"));
+    std::fs::write(&golden_file, GOLDEN_TEMPLATE)?;
+    eprintln!("Created: {}", golden_file.display());
+
     eprintln!();
     eprintln!("Next steps:");
     eprintln!("  1. Edit {}", way_file.display());
-    eprintln!("  2. ways author lint {}", way_file.display());
-    eprintln!("  3. ways corpus");
-    eprintln!("  4. ways author match \"<a prompt that should fire it>\"");
+    eprintln!("  2. Fill both prompts in {} (a direct and a situational one)", golden_file.display());
+    eprintln!("  3. ways author lint {}", way_file.display());
+    eprintln!("  4. ways corpus");
+    eprintln!("  5. ways author match \"<a prompt that should fire it>\"");
 
     Ok(())
 }
