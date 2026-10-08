@@ -2025,6 +2025,7 @@ dependencies = [
  "claude-sessions",
  "glob",
  "libc",
+ "memchr",
  "regex",
  "rust-stemmers",
  "sensor-trait",
@@ -2092,6 +2093,7 @@ dependencies = [
  "agent-theme",
  "anyhow",
  "claude-sessions",
+ "flate2",
  "pulldown-cmark",
  "sensor-trait",
  "serde",
@@ -2105,6 +2107,7 @@ name = "ways-mcp"
 version = "0.1.0"
 dependencies = [
  "attend-presence",
+ "claude-sessions",
  "serde_json",
 ]
 

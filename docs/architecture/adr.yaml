@@ -43,6 +43,12 @@ domains:
     description: The ways method, way authoring, the development loop
     folder: practice
 
+  engine:
+    range: [700, 799]
+    name: Ways engine
+    description: "The ways engine, continued after the full 100-199 band: matching, disclosure and the corpus"
+    folder: engine
+
 # The record contract (ADR-304). Records that declare `contract: adr/v1`
 # follow the kinds below; a record without it is adr/v0 and keeps the v0
 # statuses and checks until someone migrates it.

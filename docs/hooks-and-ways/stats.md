@@ -91,6 +91,36 @@ The full report also has "Top ways by model", the top ten ways with one column p
 
 `--json` adds `by_scope`, `by_way_model`, `by_check`, `check_avg_distance` and `check_anchored`, which the text report leaves out. `ways projects` lists sessions per project.
 
+### The decisions section
+
+The report ends with a section read from the decision log, `decisions.jsonl` and its dated archives (ADR-701 §2). The event log above stays a debugging trail; the decision log is what tuning reads. With no decision log the section is one line, and `--json` carries `"decisions": {"present": false}`. With no event log, the text report says so and still prints the section, and `--json` carries only `decisions`.
+
+```
+Decisions (from the decision log):
+  Turns: 4  |  per day over 3 days: mean 1.3, median 1.0, p90 3
+  Scans: 5  |  skipped lines: 1
+
+Outcomes by way:
+  Way   fired redisc refire ctxcap kwgate near jblock ablock withheld stashed
+  d/a       1      -      -      -      -    -      1      -        -       -
+  ...
+
+Judge: 3 verdicts  |  pass 33%  block 33%  would_block 33%  |  judged scans 2, fallback 1, capped 1 (1 ways)
+
+Near-miss leaders:
+  d/n                              3  mean shortfall 0.040
+
+Pulls: 5  |  recall misses 2  |  out-of-band 1  |  already delivered 1  |  null scan_id 1  |  unjoined 0  |  refused 1
+```
+
+- **Turns** counts prompt scans that started a turn, per session and agent. The epoch is not a turn index. A task scan from inside a subagent, which has no turn of its own, is counted with the session's most recently active turn. A scan by main or a teammate, which open turns of their own, never joins another agent's turn: when its own turn is not open (idle a day, or begun before the window) it is counted outside any turn. Days with no turn count as zero; with `--days N` the window and the calendar are the last N calendar days, today included, otherwise the calendar runs from the first to the last day with a turn. A turn whose record carries no date is counted but has no day.
+- **Outcomes by way** counts what each scan decided per way: fired, re-disclosed, held by the refire window or the context cap, gated by the keyword floor, a near miss, blocked by the judge or by an ancestor's block, withheld for a parent, or stashed for a subagent.
+- **Judge** rates are over the verdicts on ways the judge saw: a pass or a shadow `would_block` rides on the fire, an enforced block is a `judge_block` outcome. Fallback and capped count scans.
+- **Near-miss leaders** are the ways that most often scored just under their threshold, with the mean shortfall. Repeated near misses are the vocabulary-change signal of ADR-701 §8.
+- **Pulls** joins each `ways_read` to the scan its `scan_id` names, whether or not that scan's turn has since closed, so a background subagent's late pull still joins its dispatch. The pull is judged against what its own context had been given. A pull by the agent that wrote the scan is **already delivered** when that agent's own turn, before the pull, fired or re-disclosed the way, or, for a scan outside such a turn, when that scan did. A pull by a subagent, naming the task scan that dispatched it, is already delivered when that scan stashed the way for it. Anything else is a **recall miss**: a subagent pulling a way only main was shown, or main pulling a way stashed only for a subagent. An **out-of-band** pull came inside the way's refire window, evidence that its `refire:` is longer than the work needs; the two can overlap. A pull with a null `scan_id` is counted as such, and one naming a scan outside the window as **unjoined**. Refused pulls served nothing and are counted apart.
+
+A project filter keeps the turns whose opening scan ran in the project, and the pulls whose named scan did; a pull that names no scan in the window has no project and is left out.
+
 ### What the stats do not tell you
 
 The stats show what fired, not whether it helped. A way that fires 140 times may be firing too broadly. A way that never fires may be waiting for work you have not done yet. Use the counts to spot noisy ways, dead ways and empty scopes, then use the audit commands below for precision and recall.

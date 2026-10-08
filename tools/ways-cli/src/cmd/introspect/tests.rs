@@ -188,7 +188,9 @@ fn footer(s: &mut Introspect) -> String {
 }
 
 fn goldens() -> Goldens {
-    Goldens::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/introspect-tui"))
+    // Read at run time: a test binary reused from another checkout keeps the
+    // path it was built at.
+    Goldens::new(std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("tests/fixtures/introspect-tui"))
 }
 
 /// Check `s` at both sizes under `name`.

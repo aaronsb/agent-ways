@@ -40,7 +40,7 @@ DEFAULT_BATTERY: list[tuple[str, str, str]] = [
     ("en", "softwaredev/code/testing", "i need to write unit tests for this module"),
     ("en", "softwaredev/environment/debugging", "help me debug this stack trace and narrow down the bug"),
     ("en", "workstation/shell/shellrc", "configure zsh prompt and aliases in .zshrc"),
-    ("en", "workstation/shell/prompt", "set up a starship prompt with nerd font glyphs"),
+    ("en", "workstation/shell/shell-prompt", "set up a starship prompt with nerd font glyphs"),
     ("en", "softwaredev/architecture/adr", "draft an ADR for switching to the new auth system"),
     ("en", "softwaredev/code/security/injection", "sanitize this SQL so it doesn't allow injection"),
     ("en", "meta/knowledge/authoring", "help me write a new way for shell history search"),

@@ -21,12 +21,15 @@
 //! - [`locale_stubs`] validates `*.locales.jsonl` per-language overrides
 //!   against the `locale_stub:` schema block.
 //! - [`requires`] is the ADR-116 scan-macro-to-permissions machinery.
+//! - [`corpus`] runs the ADR-701 §3 whole-tree checks: See Also targets
+//!   resolve, no symlinks in a root, way file names unique within it.
 //! - [`provenance`] validates ADR-110 provenance sidecars.
 //! - [`size`] measures a way's delivered body against the hook context cap.
 //!
 //! Public surface is `run()` — everything else is `pub(super)` within
 //! the module.
 
+mod corpus;
 mod helpers;
 mod locale_stubs;
 mod pattern;
@@ -150,6 +153,11 @@ pub fn run(
 
     // Provenance sidecar validation
     provenance::lint_provenance_sidecars(&scan_dir, &ways_dir, &mut errors)?;
+
+    // ADR-701 §3 corpus checks, run against the ways root that holds the
+    // target: errors for the core corpus, warnings for user and project roots.
+    let project = crate::util::project_root().map(PathBuf::from);
+    corpus::lint_corpus(&scan_dir, project.as_deref(), &mut errors, &mut warnings);
 
     let label = if is_targeted { "Target" } else { "Global" };
     eprintln!(

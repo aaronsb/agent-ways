@@ -106,7 +106,7 @@ pub fn run(session: Option<&str>, sort: &str, json_out: bool, matched: bool) -> 
         (current_epoch, current_tokens_k),
     );
 
-    let blocks = matched.then(|| ways_core::introspection::judge_blocks(&ways_core::firing::load_events_text(), &session_id));
+    let blocks = matched.then(|| ways_core::introspection::judge_blocks(&ways_core::firing::load_events_text_for_session(&session_id), &session_id));
     if ways.is_empty() {
         if json_out && matched {
             print_json(&ways, current_epoch, current_tokens_k, context_window_k, blocks.as_deref());
@@ -359,7 +359,7 @@ fn detect_session_in(sessions_root: &Path, projects_root: &Path) -> Result<Strin
 }
 
 fn latest_session_for_project(project: &str) -> Option<String> {
-    let content = ways_core::firing::load_events_text();
+    let content = ways_core::firing::load_events_text_for_project_sessions(project);
 
     let mut latest: Option<String> = None;
     for line in content.lines() {

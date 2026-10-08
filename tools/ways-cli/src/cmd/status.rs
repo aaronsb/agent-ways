@@ -16,6 +16,7 @@ pub fn run(json_output: bool) -> Result<()> {
 
     let model_exists = model_path.is_file();
     let corpus_exists = corpus_path.is_file();
+    let sidecar = crate::cmd::scan::sidecar_state(&crate::util::project_dir());
 
     // Post-ADR-125: embedding is the sole engine. "none" means model or corpus missing.
     let engine = if way_embed.is_some() && model_exists && corpus_exists {
@@ -89,8 +90,30 @@ pub fn run(json_output: bool) -> Result<()> {
 
     // config::global() — future migration: ctx.config.disabled_domains
     let disabled = crate::config::global().disabled_domains.clone();
-    // ADR-131: project-scope per-way toggles
-    let disabled_ways: Vec<String> = crate::config::global().disabled_ways().to_vec();
+    // ADR-131: project-scope per-way toggles. Every key of the overlay's
+    // `ways:` map is checked, as `ways settings lint` checks it; one naming
+    // no way switches nothing, so it is listed apart from those in effect.
+    let project = crate::util::project_dir();
+    let project_file = ways_core::settings::project_file(Path::new(&project));
+    let overlay = agent_settings::load::Layer::read(
+        &ways_core::settings::SCHEMA,
+        "project",
+        ways_core::settings::FILE,
+        agent_settings::LayerScope::Project,
+        &project_file,
+    );
+    let toggle_check = crate::cmd::toggle_check::check(&crate::cmd::toggle_check::overlay_keys(&overlay), Path::new(&project));
+    let toggles_checked = toggle_check != crate::cmd::toggle_check::Check::NoShippedWays;
+    let unmatched = match toggle_check {
+        crate::cmd::toggle_check::Check::Checked(u) => u,
+        crate::cmd::toggle_check::Check::NoShippedWays => Vec::new(),
+    };
+    let config = crate::config::global();
+    let in_effect = |keys: &[String]| -> Vec<String> {
+        keys.iter().filter(|k| !unmatched.iter().any(|u| &u.key == *k)).cloned().collect()
+    };
+    let disabled_ways = in_effect(config.disabled_ways());
+    let enabled_ways = in_effect(config.enabled_ways());
     // ADR-503 §4: a section that fell back is reported here as well as on
     // the stderr of the command that loaded it, which a hook hides.
     let settings_findings = settings_findings();
@@ -117,6 +140,7 @@ pub fn run(json_output: bool) -> Result<()> {
                 "entries": corpus_count,
                 "embedded": corpus_embedded,
             },
+            "body_sidecar": sidecar_json(&sidecar),
             "calibration": {
                 "present": cal_en_auc.is_some(),
                 "en_auc": cal_en_auc,
@@ -136,6 +160,13 @@ pub fn run(json_output: bool) -> Result<()> {
             "output_language": output_language,
             "disabled_domains": disabled,
             "disabled_ways": disabled_ways,
+            "enabled_ways": enabled_ways,
+            "toggles_checked": toggles_checked,
+            "unmatched_toggles": unmatched.iter().map(|u| json!({
+                "key": u.key,
+                "nearest": u.nearest,
+                "file": project_file.display().to_string(),
+            })).collect::<Vec<_>>(),
             "settings_findings": settings_findings,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -221,6 +252,10 @@ pub fn run(json_output: bool) -> Result<()> {
             }
         }
 
+        if corpus_exists {
+            println!("{}", sidecar_line(&sidecar));
+        }
+
         // Calibration (ADR-156): without it the semantic lane cannot fire.
         if corpus_exists {
             match cal_en_auc {
@@ -247,7 +282,24 @@ pub fn run(json_output: bool) -> Result<()> {
             println!("Disabled domains: {}", disabled.join(", "));
         }
         if !disabled_ways.is_empty() {
-            println!("Disabled ways:    {} (project scope, ADR-131)", disabled_ways.join(", "));
+            println!("Disabled ways:    {} (project scope, ADR-131; `dir/*` covers every way under it)", disabled_ways.join(", "));
+            let on = &enabled_ways;
+            if !on.is_empty() {
+                println!("Enabled by name:  {} (overrides a disabled prefix, ADR-701)", on.join(", "));
+            }
+        }
+        if !toggles_checked {
+            println!("Way toggles: not checked, because the shipped ways were not found");
+        }
+        if !unmatched.is_empty() {
+            let keys: Vec<String> = unmatched
+                .iter()
+                .map(|u| match &u.nearest {
+                    Some(n) => format!("{}, nearest {n}", u.key),
+                    None => u.key.clone(),
+                })
+                .collect();
+            println!("Toggles naming no way: {} in {} switch nothing", keys.join("; "), project_file.display());
         }
         if !settings_findings.is_empty() {
             println!("Settings:  {} finding(s); `ways settings lint` lists them, `ways settings fix <section>` repairs one", settings_findings.len());
@@ -301,6 +353,21 @@ fn count_ways(dir: &Path) -> (usize, usize) {
     }
 
     (total, semantic)
+}
+
+/// ADR-701 §7: which state body confirmation runs in, and why it dropped.
+pub(crate) fn sidecar_line(state: &Result<(usize, usize), crate::cmd::scan::sidecar::Fallback>) -> String {
+    match state {
+        Ok((ways, sections)) => format!("Body sidecar: in use ({ways} ways, {sections} sections)"),
+        Err(why) => format!("Body sidecar: not used, confirmation embeds per call — {why}"),
+    }
+}
+
+fn sidecar_json(state: &Result<(usize, usize), crate::cmd::scan::sidecar::Fallback>) -> serde_json::Value {
+    match state {
+        Ok((ways, sections)) => json!({ "used": true, "ways": ways, "sections": sections }),
+        Err(why) => json!({ "used": false, "reason": why.to_string() }),
+    }
 }
 
 fn count_lines(path: &Path) -> usize {
@@ -470,6 +537,24 @@ fn gate_json() -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    use super::{sidecar_json, sidecar_line};
+    use crate::cmd::scan::sidecar::Fallback;
+    use serde_json::json;
+
+    #[test]
+    fn the_sidecar_line_names_the_state_and_the_reason() {
+        assert_eq!(sidecar_line(&Ok((137, 647))), "Body sidecar: in use (137 ways, 647 sections)");
+        let incomplete = Err(Fallback::Incomplete { missing: vec!["a".into()], stale: vec!["b".into(), "c".into(), "d".into(), "e".into()] });
+        assert_eq!(
+            sidecar_line(&incomplete),
+            "Body sidecar: not used, confirmation embeds per call — incomplete (missing a; stale b, c, d and 1 more); run `ways corpus`"
+        );
+        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("way-embed cannot return chunk vectors; upgrade way-embed to 1.2.0 or later, then run `ways corpus`"));
+        assert!(sidecar_line(&Err(Fallback::BuildFailed("boom".into()))).ends_with("build failed: boom"));
+        assert_eq!(sidecar_json(&Err(Fallback::Absent)), json!({ "used": false, "reason": "absent; run `ways corpus`" }));
+        assert_eq!(sidecar_json(&Ok((1, 2))), json!({ "used": true, "ways": 1, "sections": 2 }));
+    }
+
     use super::key_phrase;
     use std::path::Path;
 

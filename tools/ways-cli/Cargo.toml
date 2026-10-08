@@ -18,6 +18,8 @@ walkdir = "2"
 anyhow = "1"
 glob = "0.3"
 regex = "1"
+# Substring search for the decision log's turn marker (already in the tree via regex).
+memchr = "2"
 rust-stemmers = "1.2"
 agent-fmt = { path = "../agent-fmt" }
 agent-identity = { path = "../agent-identity" }
@@ -36,8 +38,9 @@ attend-config = { path = "../attend-config" }
 agent-tui = { path = "../agent-tui" }
 
 [target.'cfg(windows)'.dependencies]
-# Process liveness for `ways projects relocate` (OpenProcess + GetExitCodeProcess).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+# Process liveness for `ways projects relocate` (OpenProcess + GetExitCodeProcess),
+# and file identity for the log rewriters (GetFileInformationByHandle).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 
 [target.'cfg(unix)'.dependencies]
 # SIGPIPE back to its default, so a closed pipe ends the process quietly.

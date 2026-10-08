@@ -14,7 +14,9 @@
 //! parent's block is what kept it out. Every verdict, cap and fallback is logged to
 //! `events.jsonl`, and any failure fails open: the matcher's decision stands.
 //! Each provider call is logged once more as `judge_call`, with its tokens
-//! and cost, so spend is counted per call, not per way (#741).
+//! and cost, so spend is counted per call, not per way (#741). The gate also
+//! hands every verdict and its own status back to the scan, which writes them
+//! to the turn's decision record (ADR-701 §2).
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -51,6 +53,50 @@ pub(super) struct LogContext<'a> {
     pub sink: EventSink<'a>,
 }
 
+/// One verdict of the judge, as its `way_judged` line logs it.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct Judgement {
+    pub p_yes: f64,
+    /// `pass`, `block` or `would_block`.
+    pub verdict: &'static str,
+}
+
+/// How the gate ran on one scan.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(super) enum Status {
+    /// Off: no engine and no key, or mode off.
+    #[default]
+    Off,
+    /// On, with nothing to judge: no way is pending, or every pending way is
+    /// `pattern_strict`.
+    Idle,
+    /// The judge answered.
+    Judged { engine: String, model: String, judge_ms: u64 },
+    /// The gate failed open; `reason` as its `gate_fallback` line logs it.
+    Fallback { reason: String },
+}
+
+/// What the gate decided on one scan: the ways it blocks, every verdict, how
+/// it ran, and the ways past the cap that went unjudged.
+#[derive(Default)]
+pub(super) struct Gate {
+    pub blocked: Blocked,
+    pub judgements: HashMap<String, Judgement>,
+    pub status: Status,
+    pub capped: Vec<String>,
+}
+
+impl Gate {
+    fn fallback(reason: &str) -> Self {
+        Gate { status: Status::Fallback { reason: reason.to_string() }, ..Gate::default() }
+    }
+
+    #[cfg(test)]
+    fn ids(&self) -> std::collections::HashSet<String> {
+        self.blocked.ids()
+    }
+}
+
 /// The ways the gate blocked, each with the fields of its `way_judged` line.
 #[derive(Default)]
 pub(super) struct Blocked(HashMap<String, Vec<(String, String)>>);
@@ -58,6 +104,11 @@ pub(super) struct Blocked(HashMap<String, Vec<(String, String)>>);
 impl Blocked {
     pub(super) fn contains(&self, id: &str) -> bool {
         self.0.contains_key(id)
+    }
+
+    /// The fields of `id`'s `way_judged` block line, when it is blocked.
+    pub(super) fn fields(&self, id: &str) -> Option<&[(String, String)]> {
+        self.0.get(id).map(Vec::as_slice)
     }
 
     #[cfg(test)]
@@ -103,14 +154,14 @@ impl Blocked {
     }
 }
 
-/// The ways the gate blocks. Empty when the gate is off, in shadow mode, or
-/// failed.
+/// What the gate decides. Nothing is blocked when the gate is off, in shadow
+/// mode, or failed.
 pub(super) fn apply(
     pending: &[Pending<'_>],
     prompt: &str,
     response_context: Option<&str>,
     log: &LogContext<'_>,
-) -> Blocked {
+) -> Gate {
     use ways_agent_core::keys;
     // The agent reads the key file, never a hook's environment, so only a key
     // file turns the gate on: an ANTHROPIC_API_KEY set for Claude Code itself
@@ -130,35 +181,39 @@ fn apply_from(
     response_context: Option<&str>,
     log: &LogContext<'_>,
     call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
-) -> Blocked {
-    let Some(settings) = settings(path, has_key, log) else { return Blocked::default() };
-    run(pending, prompt, response_context, &settings, log, call)
+) -> Gate {
+    match settings(path, has_key, log) {
+        Ok(Some(settings)) => run(pending, prompt, response_context, &settings, log, call),
+        Ok(None) => Gate::default(),
+        Err(reason) => Gate::fallback(&reason),
+    }
 }
 
-/// The gate's settings. `None` when the gate is off: no engine and no key,
-/// mode off, or a configuration error (logged as `gate_fallback`). An
-/// agent.yaml that does not parse, or a bad `mode`, fails closed: the gate is
-/// off and nothing is sent to a provider (ADR-503 addendum).
+/// The gate's settings. `None` when the gate is off: no engine and no key, or
+/// mode off. A configuration error is logged as `gate_fallback` and returned
+/// as its reason. An agent.yaml that does not parse, or a bad `mode`, fails
+/// closed: the gate is off and nothing is sent to a provider (ADR-503 addendum).
 fn settings(
     path: &std::path::Path,
     has_key: impl Fn(ways_agent_core::profile::Provider) -> bool,
     log: &LogContext<'_>,
-) -> Option<Settings> {
+) -> Result<Option<Settings>, String> {
     match profile::gate_settings(path, has_key) {
-        Ok(s) => s.filter(|s| s.mode != Mode::Off),
+        Ok(s) => Ok(s.filter(|s| s.mode != Mode::Off)),
         Err(e) => {
+            let reason = format!("config: {e:#}");
             // Logged for the tuning passes, and said on stderr, since a hook
             // shows nothing else: the gate is off until agent.yaml is fixed.
             (log.sink)(&[
                 ("event", "gate_fallback"),
-                ("reason", &format!("config: {e:#}")),
+                ("reason", &reason),
                 ("hook", log.hook_event),
                 ("scope", log.scope),
                 ("project", log.project_dir),
                 ("session", log.session_id),
             ]);
             eprintln!("[ways] settings: {e:#}");
-            None
+            Err(reason)
         }
     }
 }
@@ -166,15 +221,22 @@ fn settings(
 /// A judge block of `id` (p_yes 0.05), for tests of the scan's call site.
 #[cfg(test)]
 pub(super) fn test_blocked(id: &str, log: &LogContext<'_>) -> Blocked {
+    test_gate(&[(id, 0.05)], Mode::Enforce, log).blocked
+}
+
+/// The gate as the judge's `verdicts` in `mode` leave it (threshold 0.3,
+/// 800 ms), for tests of what the scan records.
+#[cfg(test)]
+pub(super) fn test_gate(verdicts: &[(&str, f64)], mode: Mode, log: &LogContext<'_>) -> Gate {
     use ways_agent_core::profile::Provider;
     use ways_agent_core::protocol::Verdict;
     let j = Judged {
         engine: "anthropic".into(),
         provider: Provider::Anthropic,
         model: "claude-haiku-4-5".into(),
-        mode: Mode::Enforce,
+        mode,
         threshold: 0.3,
-        verdicts: vec![Verdict { id: id.to_string(), p_yes: 0.05 }],
+        verdicts: verdicts.iter().map(|(id, p)| Verdict { id: id.to_string(), p_yes: *p }).collect(),
         latency_ms: 800,
         call: None,
     };
@@ -189,10 +251,10 @@ fn run(
     settings: &Settings,
     log: &LogContext<'_>,
     call: impl FnOnce(JudgeRequest, Duration) -> Result<Reply, String>,
-) -> Blocked {
+) -> Gate {
     let mut judged: Vec<&Pending<'_>> = pending.iter().filter(|p| !p.pattern_strict).collect();
     if judged.is_empty() {
-        return Blocked::default();
+        return Gate { status: Status::Idle, ..Gate::default() };
     }
     let cap = settings.profile.max_candidates;
     let mut unjudged: Vec<&str> = Vec::new();
@@ -221,18 +283,18 @@ fn run(
     let begun = Instant::now();
     let reply = call(request, Duration::from_millis(settings.profile.timeout_ms) + READ_GRACE);
     let elapsed_ms = begun.elapsed().as_millis().to_string();
-    match reply {
+    let mut gate = match reply {
         Ok(Reply::Judged(j)) => {
             // An agent older than #741 reports no call; the call was still made.
             let call = j.call.clone().unwrap_or_else(|| JudgeCall::priced(&j.engine, &settings.profile, j.verdicts.len(), None));
             log_call(&call, None, log);
-            let mut blocked = decide(&j, log, &elapsed_ms);
+            let mut gate = decide(&j, log, &elapsed_ms);
             // A way's guidance presumes its parent's: an unjudged way under a
             // blocked ancestor goes with it.
-            for id in unjudged {
-                blocked.with_ancestor(id, log);
+            for id in &unjudged {
+                gate.blocked.with_ancestor(id, log);
             }
-            blocked
+            gate
         }
         Ok(Reply::Fallback { reason, call, .. }) => {
             // An agent older than #741 sends no call; its reason says whether
@@ -262,7 +324,9 @@ fn run(
             }
             fallback(&reason, judged.len(), log, &elapsed_ms)
         }
-    }
+    };
+    gate.capped = unjudged.iter().map(|id| id.to_string()).collect();
+    gate
 }
 
 /// The turns the judge reads: Claude's last reply, then the prompt. Profiles
@@ -276,9 +340,12 @@ fn turns(prompt: &str, response_context: Option<&str>) -> Vec<Turn> {
     turns
 }
 
-/// Logs each verdict and returns the ways to block.
-fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> Blocked {
-    let mut blocked = Blocked::default();
+/// Logs each verdict and returns them with the ways to block.
+fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> Gate {
+    let mut gate = Gate {
+        status: Status::Judged { engine: j.engine.clone(), model: j.model.clone(), judge_ms: j.latency_ms },
+        ..Gate::default()
+    };
     let threshold = format!("{:.2}", j.threshold);
     for v in &j.verdicts {
         let pass = v.p_yes >= j.threshold;
@@ -312,11 +379,12 @@ fn decide(j: &Judged, log: &LogContext<'_>, elapsed_ms: &str) -> Blocked {
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
         (log.sink)(&fields.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
+        gate.judgements.insert(v.id.clone(), Judgement { p_yes: v.p_yes, verdict });
         if verdict == "block" {
-            blocked.0.insert(v.id.clone(), fields);
+            gate.blocked.0.insert(v.id.clone(), fields);
         }
     }
-    blocked
+    gate
 }
 
 /// Logs one provider call: `outcome` is `judged`, or `fallback` with the
@@ -352,7 +420,7 @@ fn log_call(call: &JudgeCall, fallback_reason: Option<&str>, log: &LogContext<'_
 }
 
 /// Logs a fallback; nothing is blocked.
-fn fallback(reason: &str, candidates: usize, log: &LogContext<'_>, elapsed_ms: &str) -> Blocked {
+fn fallback(reason: &str, candidates: usize, log: &LogContext<'_>, elapsed_ms: &str) -> Gate {
     (log.sink)(&[
         ("event", "gate_fallback"),
         ("reason", reason),
@@ -363,7 +431,7 @@ fn fallback(reason: &str, candidates: usize, log: &LogContext<'_>, elapsed_ms: &
         ("project", log.project_dir),
         ("session", log.session_id),
     ]);
-    Blocked::default()
+    Gate::fallback(reason)
 }
 
 #[cfg(test)]
@@ -568,6 +636,31 @@ mod tests {
         assert_eq!(events.iter().filter(|e| field(e, "event") == "way_judged").count(), 8);
     }
 
+    /// The scan's decision record reads every verdict, not only the blocks,
+    /// and how the gate ran (ADR-701 §2).
+    #[test]
+    fn the_gate_returns_every_verdict_its_status_and_the_capped_ways() {
+        let events = Events::default();
+        let sink = recorder(&events);
+        let g = run(&pending(), "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| {
+            Ok(judged(Mode::Enforce, &[("softwaredev/code/security/secrets", 0.92), ("data/migrations", 0.05)]))
+        });
+        assert_eq!(g.judgements["softwaredev/code/security/secrets"], Judgement { p_yes: 0.92, verdict: "pass" });
+        assert_eq!(g.judgements["data/migrations"], Judgement { p_yes: 0.05, verdict: "block" });
+        assert!(!g.judgements.contains_key("meta/strict"), "a strict way is never judged");
+        assert_eq!(g.status, Status::Judged { engine: "anthropic".into(), model: "claude-haiku-4-5".into(), judge_ms: 800 });
+        assert!(g.capped.is_empty());
+
+        let ids: Vec<String> = (0..10).map(|i| format!("w/{i}")).collect();
+        let g = run(&pending_ids(&ids, 0), "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| Err("deadline".into()));
+        assert_eq!(g.status, Status::Fallback { reason: "deadline".into() });
+        assert_eq!(g.capped, ["w/8", "w/9"]);
+        assert!(g.judgements.is_empty());
+
+        let strict = vec![Pending { id: "a", description: "d", pattern_strict: true }];
+        assert_eq!(run(&strict, "q", None, &settings(Mode::Enforce), &log(&sink), |_, _| panic!("no call")).status, Status::Idle);
+    }
+
     fn pending_ids(ids: &[String], strict: usize) -> Vec<Pending<'_>> {
         ids.iter()
             .enumerate()
@@ -608,7 +701,8 @@ mod tests {
             &match judged(Mode::Enforce, &[("p", 0.05)]) { Reply::Judged(j) => j, _ => unreachable!() },
             &lc,
             "5",
-        );
+        )
+        .blocked;
         assert!(blocked.with_ancestor("p/c", &lc));
         assert!(blocked.with_ancestor("p/c/d", &lc));
         assert!(!blocked.with_ancestor("p/c", &lc), "already blocked");
@@ -679,10 +773,15 @@ mod tests {
             let events = Events::default();
             let sink = recorder(&events);
             let calls = std::cell::Cell::new(0);
-            apply_from(&path, |_| true, &pending(), "add a secret", None, &log(&sink), |_, _| {
+            let gate = apply_from(&path, |_| true, &pending(), "add a secret", None, &log(&sink), |_, _| {
                 calls.set(calls.get() + 1);
                 Err("stub".into())
             });
+            let config_fallback = matches!(&gate.status, Status::Fallback { reason } if reason.starts_with("config:"));
+            assert_eq!(config_fallback, closed, "{text:?}: the record names the config fallback: {:?}", gate.status);
+            if text == "mode: off\n" {
+                assert_eq!(gate.status, Status::Off);
+            }
             let fallback = events.borrow().iter().any(|e| {
                 field(e, "event") == "gate_fallback"
                     && field(e, "reason").starts_with("config:")

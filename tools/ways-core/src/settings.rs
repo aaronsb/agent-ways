@@ -17,7 +17,7 @@ pub const FILE: &str = "config";
 /// The list is explicit so a hook names each section it loads, through
 /// `load-sections`, never a whole-file `load-all`.
 pub const HOOK_SECTIONS: &[&str] =
-    &["ways", "ways.switch", "ways.subagents", "ways.domains", "matching", "install.targets", "install.secret_path_deny", "ways.project"];
+    &["ways", "ways.switch", "ways.subagents", "ways.domains", "matching", "install.targets", "install.secret_path_deny", "ways.project", "ways.log"];
 
 /// The fallback unit is the section (ADR-503 §4), so each switch that turns
 /// something off is a section of its own: a bad value elsewhere can never
@@ -64,11 +64,20 @@ const SECTIONS: &[SectionSpec] = &[
             "parent_threshold_multiplier",
             "parent_boost_floor",
             "near_miss_margin",
+            "admission",
             "refire_presets",
         ],
         per_entry: false, entry: None, repair: None,
         columns: None,
         doc: "When a way fires: the calibrated probabilities, the parent boost, and how often a way may fire again.",
+    },
+    SectionSpec {
+        name: "ways.log",
+        file: FILE,
+        top: &["event_retention_days", "decision_retention_turns"],
+        per_entry: false, entry: None, repair: None,
+        columns: None,
+        doc: "How long the event and decision logs keep history.",
     },
     SectionSpec {
         name: "install.targets",
@@ -184,7 +193,7 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("true"),
         scope: Scope::Project,
         doc: "One way on or off in this project.",
-        long: "Project scope only (ADR-131). `false` silences the way in this project; absent means on. `ways settings set ways.project.<id> false` turns a way off; `ways settings unset ways.project.<id>` turns it back on.",
+        long: "Project scope only (ADR-131). `false` silences the way in this project; absent means on. `ways settings set ways.project.<id> false` turns a way off; `ways settings unset ways.project.<id>` turns it back on. A key ending in `/*`, such as `softwaredev/code/supplychain/*`, covers that directory's way and every way under it; a toggle on a way itself overrides the prefix (ADR-701).",
         ..BASE
     },
     KeySpec {
@@ -238,6 +247,16 @@ const KEYS: &[KeySpec] = &[
         ..BASE
     },
     KeySpec {
+        name: "matching.admission",
+        section: "matching",
+        path: &["admission"],
+        kind: Kind::Choice(&crate::config::Admission::NAMES),
+        default: DefaultValue::Yaml("share"),
+        doc: "How late interaction admits a way into body confirmation: share or chunk_top.",
+        long: "share admits a way whose summed softmax share over the surface's chunks reaches 0.15. chunk_top admits the top-ranked way of every chunk instead. Both also admit a way whose peak chunk cosine reaches 0.50, keep at most 6 by peak, and body-confirm them (ADR-700 §12). chunk_top is under evaluation (ADR-701 increment 6).",
+        ..BASE
+    },
+    KeySpec {
         name: "matching.refire_presets.*",
         section: "matching",
         path: &["refire_presets", "*"],
@@ -247,6 +266,28 @@ const KEYS: &[KeySpec] = &[
         instances: &["once", "rare", "normal", "frequent"],
         doc: "A refire preset: the fraction of the context window before a way may fire again.",
         long: "A way's `refire: <name>` looks the preset up here and multiplies by the session's context window (ADR-126). New names may be added.",
+        ..BASE
+    },
+    KeySpec {
+        name: "ways.event_retention_days",
+        section: "ways.log",
+        path: &["event_retention_days"],
+        kind: Kind::Int { min: 1, max: 3650 },
+        scope: Scope::User,
+        default: DefaultValue::Yaml("365"),
+        doc: "Days an archive file is kept after it is written.",
+        long: "Machine-wide, so user scope only: a project file cannot shorten it. The live events.jsonl is bounded by size and by age, and the lines it sheds are written to events-YYYY-MM-DD.jsonl.gz beside it, named for the day of the removal. Archives older than this many days are deleted, at most once a day (ADR-701 §2). Introspection, `ways tune stats` and the tuning passes read the archives as well as the live file. events.jsonl itself is never deleted by this setting. judge_call lines stay in the live file, since `ways agent cost` sums them.",
+        ..BASE
+    },
+    KeySpec {
+        name: "ways.decision_retention_turns",
+        section: "ways.log",
+        path: &["decision_retention_turns"],
+        kind: Kind::Int { min: 1, max: 10_000_000 },
+        scope: Scope::User,
+        default: DefaultValue::Yaml("50000"),
+        doc: "Turns of decision records the live decisions.jsonl holds.",
+        long: "Machine-wide, so user scope only (ADR-701 §2). A turn is a decision record with turn_start true, together with the records after it up to the next one. Once a day, when the live file holds 10% more turns than this, its oldest turns move whole to decisions-YYYY-MM-DD.jsonl.gz beside it and the newest this many stay. Those archives expire under ways.event_retention_days.",
         ..BASE
     },
     KeySpec {
@@ -329,7 +370,8 @@ fn languages(_layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
 
 /// The domains `ways.disabled_domains` may name: the top-level directories
 /// of the user, shipped and projected ways roots that hold a way, as the
-/// scanner counts one (a `description:` in its frontmatter), and those of
+/// engine counts one (a frontmatter fence; a file- or state-triggered way has
+/// no `description:`), and those of
 /// each project the layers carry (`<project>/.claude/ways.yaml` names its
 /// `.claude/ways/`), since the engine honours a project's own domain there.
 /// So the rule is the layers': a write to a project's file, and a write
@@ -344,7 +386,7 @@ fn domains(layers: &[Layer], _: &[String]) -> Result<Vec<String>, String> {
     }
     let mut found = std::collections::BTreeSet::new();
     for root in roots.iter().filter(|r| r.is_dir()) {
-        for way in crate::scanner::scan_ways(root).unwrap_or_default() {
+        for way in crate::scanner::scan_declared_ways(root) {
             if !way.domain.starts_with('.') {
                 found.insert(way.domain);
             }

@@ -4,8 +4,12 @@
 //! scope/precondition gating, parent-threshold lowering, and show (display).
 
 pub(crate) mod candidates;
+mod candidate_log;
+mod decision;
 mod gate;
 mod late_interaction;
+pub(crate) mod sidecar;
+pub(crate) mod lookup;
 mod lookbehind;
 mod order;
 mod reduce;
@@ -113,6 +117,9 @@ pub fn prompt(
     // The hook's transcript_path names the invoking agent's transcript; the
     // firing path reads the model id (and the refire window) from it.
     crate::cmd::show::set_firing_transcript(transcript);
+    // The last-scan marker belongs to the turn before; the scan below writes
+    // this turn's, and a turn with no scan is left with none.
+    session::clear_last_scan(session_id);
     // A user prompt starts a turn: bump the epoch.
     //
     // A Monitor notification that wakes an idle session also arrives as a
@@ -252,11 +259,19 @@ fn scan_prompt_surface(
         .map(|s| s.to_string())
         .unwrap_or_else(crate::util::project_dir);
 
-    if bump_epoch {
-        session::bump_epoch(session_id);
-    }
+    let epoch = if bump_epoch { session::bump_epoch(session_id) } else { session::get_epoch(session_id) };
 
     let scope = session::detect_scope(session_id);
+    // ADR-701 §2: the turn's decision record, written once at the end of the scan.
+    let mut record = decision::Record::begin(&decision::Context {
+        surface: decision::Surface::Prompt,
+        hook_event,
+        scope: &scope,
+        project: &project_dir,
+        session: session_id,
+        epoch,
+        turn_start: bump_epoch,
+    });
     let candidates = collect_candidates(&project_dir);
     let near_miss_margin = crate::config::global().near_miss_margin;
     let keyword_floor = crate::config::global().keyword_floor_probability;
@@ -275,6 +290,8 @@ fn scan_prompt_surface(
     let embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
 
+    let competitors = prompt_competitors(&candidates, &scope, &project_dir);
+
     // ADR-160: the chunked late-interaction matcher IS the semantic matcher. It decides
     // the semantic channel over the reduced surface (chunk → softmax-share →
     // body-confirm), computed once here and consulted per way in match_prompt.
@@ -282,7 +299,17 @@ fn scan_prompt_surface(
     // the matcher can't run (surface too sparse to chunk, engine unavailable) it
     // returns None and match_prompt uses the single-vector scores. The keyword
     // gate and near-miss telemetry keep using the single-vector batch scores.
-    let verdicts = late_interaction::run(&reduced, &body_map(&candidates));
+    let verdicts = late_interaction::run(&reduced, &body_map(competitors.iter().copied()), crate::config::global().admission);
+
+    // ADR-701 §2: record the top candidates with share and margin, from the
+    // rows the scan already holds, and whether confirmation read the body
+    // sidecar. Enabled ways only: `candidates` is already filtered by the
+    // domain and per-way toggles.
+    {
+        let enabled: std::collections::HashMap<&str, &str> =
+            competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
+        record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
+    }
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
     // review): the shared embed vector mixes the response context in, which
@@ -305,10 +332,7 @@ fn scan_prompt_surface(
     let mut fired_ids: HashSet<String> = HashSet::new();
 
     for way in &candidates {
-        if !session::scope_matches(&way.scope, &scope) {
-            continue;
-        }
-        if !check_when(&way.when_project, &way.when_file_exists, &project_dir) {
+        if !eligible(way, Lane::Prompt { scope: &scope }, &project_dir) {
             continue;
         }
 
@@ -391,9 +415,11 @@ fn scan_prompt_surface(
             }
             PromptMatch::KeywordGated(kg) => {
                 log_keyword_gated(way, &kg, "prompt", &scope, &project_dir, session_id);
+                record_keyword_gated(&mut record, way, &kg);
             }
             PromptMatch::NearMiss(nm) => {
                 log_near_miss(way, &nm, "prompt", &scope, &project_dir, session_id, query);
+                record_near_miss(&mut record, way, &nm);
             }
             PromptMatch::NoMatch => {}
         }
@@ -420,18 +446,11 @@ fn scan_prompt_surface(
         hook_event,
         sink: &session::log_event,
     };
-    let mut blocked = gate::apply(&pending, query, response_context, &gate_log);
+    let mut gate = gate::apply(&pending, query, response_context, &gate_log);
 
-    let mut shown: HashSet<String> = HashSet::new();
-    for hit in &hits {
-        let (channel, matched_span, needs_parent) = &hit.payload;
-        if blocked.contains(&hit.id) {
-            continue;
-        }
-        if *needs_parent && withheld_for_parent(&hit.id, &shown, &pending, &mut blocked, &gate_log) {
-            continue;
-        }
-        let out = capture_show_way(
+    admit_hits(&hits, &mut gate, &pending, &gate_log, &mut record, |hit| {
+        let (channel, matched_span, _) = &hit.payload;
+        let shown = capture_show_way(
             &hit.id,
             session_id,
             channel,
@@ -440,13 +459,15 @@ fn scan_prompt_surface(
             Some(reduced.as_str()),
             Some(&mut budget),
         );
-        if !out.is_empty() {
-            shown.insert(hit.id.clone());
-            context.push_str(&out);
+        let delivered = !shown.body.is_empty();
+        if delivered {
+            context.push_str(&shown.body);
             context.push_str("\n\n");
             budget.charge("\n\n");
         }
-    }
+        (shown.outcome, delivered)
+    });
+    record.write();
 
     if !context.is_empty() {
         emit_hook_context(hook_event, context.trim_end());
@@ -455,9 +476,47 @@ fn scan_prompt_surface(
     Ok(())
 }
 
+/// A prompt-lane hit's payload: the channel that fired it, its matched span,
+/// and whether it fired only on this scan's parent boost.
+type PromptPayload = (String, Option<String>, bool);
+
+/// Admit the prompt lane's hits in order and record what became of each in
+/// the turn's decision record (ADR-701 §2), then how the gate ran. A way the
+/// gate blocked is skipped. A way that fired only on a parent shown in this
+/// scan is withheld when that parent was not shown. Every other way goes to
+/// `show`, which returns what `way_scored` did with it and whether its body
+/// reached the context.
+fn admit_hits(
+    hits: &[Hit<PromptPayload>],
+    gate: &mut gate::Gate,
+    pending: &[gate::Pending<'_>],
+    gate_log: &gate::LogContext<'_>,
+    record: &mut decision::Record,
+    mut show: impl FnMut(&Hit<PromptPayload>) -> (crate::cmd::show::ShowOutcome, bool),
+) {
+    let mut shown: HashSet<String> = HashSet::new();
+    for (i, hit) in hits.iter().enumerate() {
+        let (channel, _, needs_parent) = &hit.payload;
+        let result = if let Some(result) = decision::block_result(&gate.blocked, &hit.id) {
+            result
+        } else if *needs_parent && withheld_for_parent(&hit.id, &shown, pending, &mut gate.blocked, gate_log) {
+            // Withheld with a parent the judge blocked records that block.
+            decision::block_result(&gate.blocked, &hit.id).unwrap_or("withheld_for_parent")
+        } else {
+            let (outcome, delivered) = show(hit);
+            if delivered {
+                shown.insert(hit.id.clone());
+            }
+            outcome.as_str()
+        };
+        record.hit(&hit.id, i + 1, channel, hit.score, result, Some(gate));
+    }
+    record.judge(gate);
+}
+
 // ── Authoring diagnostic (task #5) ─────────────────────────────
 
-pub(crate) use late_interaction::{DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE, DIAG_SHARE_GATE};
+pub(crate) use late_interaction::{admission_rule, chunk_sections, Admission, DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE};
 
 /// Run the late-interaction matcher over `query` for way authoring — the modern
 /// equivalent of the single-vector `ways author match`. Reduces the query exactly as the
@@ -466,12 +525,24 @@ pub(crate) use late_interaction::{DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE, DI
 /// the reduced surface for context. `None` means late-interaction could not run
 /// (engine unavailable, or the surface is too sparse to chunk) — the caller then
 /// falls back to the single-vector view, mirroring production's fail-safe.
-pub fn diagnose(query: &str, project: Option<&str>, top_n: usize) -> Option<(String, Vec<DiagRow>)> {
+///
+/// The competing set is the one a prompt scan in `agent` scope uses (toggles,
+/// scope and `when:` against `project`), so the shares match the live fire path.
+/// `unfiltered` competes every candidate instead, for seeing how a way would rank
+/// among all of them. `admission` is the stage-4 rule the live matcher would use.
+pub fn diagnose(query: &str, project: Option<&str>, top_n: usize, unfiltered: bool, admission: Admission) -> Option<(String, Vec<DiagRow>)> {
     let project_dir = project.map(|s| s.to_string()).unwrap_or_else(crate::util::project_dir);
     let candidates = collect_candidates(&project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
-    let rows = late_interaction::run_diagnostic(&reduced, &body_map(&candidates), top_n)?;
+    let bodies = body_map(diag_candidates(&candidates, &project_dir, unfiltered).into_iter());
+    let rows = late_interaction::run_diagnostic(&reduced, &bodies, top_n, admission)?;
     Some((reduced, rows))
+}
+
+/// The candidates `ways author match` competes: the prompt lane in `agent`
+/// scope, or all of them when `unfiltered`.
+fn diag_candidates<'a>(candidates: &'a [WayCandidate], project_dir: &str, unfiltered: bool) -> Vec<&'a WayCandidate> {
+    candidates.iter().filter(|w| unfiltered || eligible(w, Lane::Prompt { scope: "agent" }, project_dir)).collect()
 }
 
 // ── Task scan (subagent/teammate stash) ────────────────────────
@@ -501,28 +572,38 @@ pub fn task(
     let masked = mask_nonlinguistic(query);
     // ADR-160: the matcher is the semantic matcher on the task surface too;
     // single-vector is the fail-safe when it can't chunk (see scan::prompt).
-    let verdicts = late_interaction::run(&reduced, &body_map(&candidates));
+    let verdicts = late_interaction::run(
+        &reduced,
+        &body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir))),
+        crate::config::global().admission,
+    );
+    // ADR-701 §2: the task lane writes a decision record too, its candidates
+    // drawn from the ways eligible there. A dispatch is not a turn: the epoch
+    // is the dispatching agent's, unbumped.
+    let mut record = decision::Record::begin(&decision::Context {
+        surface: decision::Surface::Task,
+        hook_event: "PreToolUse",
+        scope: task_scope,
+        project: &project_dir,
+        session: session_id,
+        epoch: session::get_epoch(session_id),
+        turn_start: false,
+    });
+    {
+        let lane = Lane::Task { teammate: is_teammate };
+        let enabled: std::collections::HashMap<&str, &str> = candidates
+            .iter()
+            .filter(|c| c.embeddable() && eligible(c, lane, &project_dir))
+            .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
+            .collect();
+        record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
+    }
 
     // Payload: channel. Ordered like the other lanes before the stash is written.
     let mut hits: Vec<Hit<String>> = Vec::new();
 
     for way in &candidates {
-        // Must have subagent or teammate scope
-        let scope = &way.scope;
-        if is_teammate {
-            if !scope.contains("subagent") && !scope.contains("teammate") {
-                continue;
-            }
-        } else if !scope.contains("subagent") {
-            continue;
-        }
-
-        // Skip state-triggered ways
-        if way.trigger.is_some() {
-            continue;
-        }
-
-        if !check_when(&way.when_project, &way.when_file_exists, &project_dir) {
+        if !eligible(way, Lane::Task { teammate: is_teammate }, &project_dir) {
             continue;
         }
 
@@ -551,16 +632,33 @@ pub fn task(
             }
             PromptMatch::KeywordGated(kg) => {
                 log_keyword_gated(way, &kg, "task", task_scope, &project_dir, session_id);
+                record_keyword_gated(&mut record, way, &kg);
             }
             PromptMatch::NearMiss(nm) => {
                 log_near_miss(way, &nm, "task", task_scope, &project_dir, session_id, query);
+                record_near_miss(&mut record, way, &nm);
             }
             PromptMatch::NoMatch => {}
         }
     }
 
     order_hits(&mut hits);
-    let matched: Vec<(String, String)> = hits.into_iter().map(|h| (h.id, h.payload)).collect();
+    let stashed = write_stash(&hits, record.scan_id(), session_id, is_teammate, team);
+    let result = if stashed.is_ok() { "stashed" } else { "error" };
+    for (i, hit) in hits.iter().enumerate() {
+        record.hit(&hit.id, i + 1, &hit.payload, hit.score, result, None);
+    }
+    record.write();
+    stashed
+}
+
+/// Write the task lane's matched ways to a stash file for SubagentStart to
+/// claim, with the `scan_id` of the task scan's decision record, which
+/// becomes the subagent's last scan. Nothing is written when nothing matched:
+/// a stash nobody claims (a dispatch the operator denied) would be claimed by
+/// the next subagent instead of its own.
+fn write_stash(hits: &[Hit<String>], scan_id: &str, session_id: &str, is_teammate: bool, team: Option<&str>) -> Result<()> {
+    let matched: Vec<(&str, &str)> = hits.iter().map(|h| (h.id.as_str(), h.payload.as_str())).collect();
 
     // Write stash file if any ways matched
     if !matched.is_empty() {
@@ -570,14 +668,15 @@ pub fn task(
         );
         std::fs::create_dir_all(&stash_dir)?;
 
-        let ways: Vec<&str> = matched.iter().map(|(id, _)| id.as_str()).collect();
-        let channels: Vec<&str> = matched.iter().map(|(_, ch)| ch.as_str()).collect();
+        let ways: Vec<&str> = matched.iter().map(|(id, _)| *id).collect();
+        let channels: Vec<&str> = matched.iter().map(|(_, ch)| *ch).collect();
 
         let stash = serde_json::json!({
             "ways": ways,
             "channels": channels,
             "is_teammate": is_teammate,
             "team_name": team.unwrap_or(""),
+            "scan_id": scan_id,
         });
 
         let timestamp = std::time::SystemTime::now()
@@ -716,7 +815,8 @@ pub fn command(
             span.as_deref(),
             surface,
             Some(&mut budget),
-        );
+        )
+        .body;
         if !out.is_empty() {
             shown.insert(hit.id.clone());
             context.push_str(&out);
@@ -800,7 +900,7 @@ pub fn file(
     }
     order_hits(&mut hits);
     for hit in &hits {
-        let out = capture_show_way(&hit.id, session_id, "file", None, Some(hit.payload.as_str()), None, Some(&mut budget));
+        let out = capture_show_way(&hit.id, session_id, "file", None, Some(hit.payload.as_str()), None, Some(&mut budget)).body;
         if !out.is_empty() {
             context.push_str(&out);
         }
@@ -891,14 +991,54 @@ struct NearMiss {
     margin: f64,
 }
 
+/// The surface a scan serves, which decides what may fire on it.
+#[derive(Clone, Copy)]
+enum Lane<'a> {
+    /// A user prompt, in the session's scope.
+    Prompt { scope: &'a str },
+    /// A subagent or teammate dispatch.
+    Task { teammate: bool },
+}
+
+/// Whether `way` can fire on this lane at all: scope, state trigger and `when:`
+/// preconditions. The scan loops apply it to each candidate, and the matchers
+/// take their competing set from it, so a way that cannot fire here takes no
+/// softmax share and no confirmation slot (ADR-701 §1). Toggles are already
+/// applied by `collect_candidates`.
+fn eligible(way: &WayCandidate, lane: Lane<'_>, project_dir: &str) -> bool {
+    let lane_ok = match lane {
+        Lane::Prompt { scope } => session::scope_matches(&way.scope, scope),
+        // A task scan needs subagent scope (or teammate for a team) and skips
+        // state-triggered ways.
+        Lane::Task { teammate } => {
+            (way.scope.contains("subagent") || (teammate && way.scope.contains("teammate"))) && way.trigger.is_none()
+        }
+    };
+    lane_ok && check_when(&way.when_project, &way.when_file_exists, project_dir)
+}
+
+/// The ways a prompt in `scope` competes: embeddable and [`eligible`] on the
+/// prompt lane. The scan's matcher, its logged candidates and a lookup's
+/// search all take their set from here, so none can drift from the others.
+pub(crate) fn prompt_competitors<'a>(candidates: &'a [WayCandidate], scope: &str, project_dir: &str) -> Vec<&'a WayCandidate> {
+    candidates.iter().filter(|c| c.embeddable() && eligible(c, Lane::Prompt { scope }, project_dir)).collect()
+}
+
+/// ADR-701 §7: the body sidecar a prompt scan in `project_dir` would use, as
+/// (ways, section vectors), or why it would confirm per call. For `ways status`.
+pub(crate) fn sidecar_state(project_dir: &str) -> Result<(usize, usize), sidecar::Fallback> {
+    let bin = crate::paths::way_embed().ok_or(sidecar::Fallback::NoEmbedder)?;
+    let candidates = collect_candidates(project_dir);
+    let enabled = body_map(prompt_competitors(&candidates, "agent", project_dir).into_iter());
+    let sc = sidecar::state(&crate::paths::corpus_dir(), &bin, enabled.keys().map(String::as_str))?;
+    Ok((sc.way_count(), sc.vector_count()))
+}
+
 /// Map each embeddable candidate's corpus id to its `.md` path, for the
-/// late-interaction matcher's body-confirmation stage (ADR-160).
-fn body_map(candidates: &[WayCandidate]) -> std::collections::HashMap<String, PathBuf> {
-    candidates
-        .iter()
-        .filter(|c| c.embeddable())
-        .map(|c| (c.corpus_id.clone(), c.path.clone()))
-        .collect()
+/// late-interaction matcher's body-confirmation stage (ADR-160) and as the set
+/// of ways allowed to compete.
+fn body_map<'a>(candidates: impl Iterator<Item = &'a WayCandidate>) -> std::collections::HashMap<String, PathBuf> {
+    candidates.filter(|c| c.embeddable()).map(|c| (c.corpus_id.clone(), c.path.clone())).collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1038,7 +1178,7 @@ fn log_near_miss(
 ) {
     let fmt = |v: Option<f64>| v.map(|s| format!("{s:.4}")).unwrap_or_default();
     let domain = way.id.split('/').next().unwrap_or(&way.id);
-    // ADR-134 task E: events.jsonl rotation/cap will bound this stream's growth.
+    // events.jsonl is bounded by age (retention days) and size; see session::log_event.
     session::log_event(&[
         ("event", "way_nearmiss"),
         ("way", &way.id),
@@ -1092,6 +1232,18 @@ fn log_keyword_gated(
         ("session", session_id),
         ("token_position", &token_pos.to_string()),
     ]);
+}
+
+/// Record a keyword-gated way in the scan's decision record (ADR-701 §2), with
+/// the evidence its `way_keyword_gated` event carries.
+fn record_keyword_gated(record: &mut decision::Record, way: &WayCandidate, kg: &KeywordGated) {
+    record.keyword_gated(&way.id, &kg.matched_span, kg.prob_en, kg.prob_multi, kg.floor);
+}
+
+/// Record a near miss in the scan's decision record (ADR-701 §2), with the
+/// scores its `way_nearmiss` event carries.
+fn record_near_miss(record: &mut decision::Record, way: &WayCandidate, nm: &NearMiss) {
+    record.near_miss(&way.id, nm.prob_en, nm.prob_multi, nm.tau_s, nm.margin);
 }
 
 /// The effective semantic fire probability τ_s for a way at a given moment in a
@@ -1743,5 +1895,156 @@ mod queued_tests {
             assert_eq!(get(child[0], k), "", "{k}");
         }
         assert!(events.iter().all(|e| get(e, "way") != "p/held"));
+    }
+
+    // ── ADR-701 §2: what the prompt lane records for each hit ──
+
+    use crate::cmd::show::ShowOutcome;
+
+    fn hit(id: &str, needs_parent: bool) -> Hit<PromptPayload> {
+        Hit::scored(id, None, ("keyword".to_string(), None, needs_parent))
+    }
+
+    /// Run [`admit_hits`] over `hits` with `gate`, every shown way firing, and
+    /// return the record's outcomes keyed by way, its judge block, and the
+    /// ways `show` was asked for.
+    fn admit(hits: &[Hit<PromptPayload>], mut gate: gate::Gate) -> (serde_json::Value, Vec<String>) {
+        let sink = |_: &[(&str, &str)]| {};
+        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        let mut record = decision::Record::for_test();
+        let mut asked = Vec::new();
+        admit_hits(hits, &mut gate, &[], &lc, &mut record, |h| {
+            asked.push(h.id.clone());
+            (ShowOutcome::Fired, true)
+        });
+        (record.to_json(), asked)
+    }
+
+    fn gate_of(verdicts: &[(&str, f64)], mode: ways_agent_core::profile::Mode) -> gate::Gate {
+        let sink = |_: &[(&str, &str)]| {};
+        let lc = gate::LogContext { session_id: "s", project_dir: "/tmp", scope: "agent", hook_event: "UserPromptSubmit", sink: &sink };
+        gate::test_gate(verdicts, mode, &lc)
+    }
+
+    fn outcome<'v>(record: &'v serde_json::Value, way: &str) -> &'v serde_json::Value {
+        record["outcomes"].as_array().unwrap().iter().find(|o| o["way"] == way).unwrap_or_else(|| panic!("no outcome for {way}: {record}"))
+    }
+
+    #[test]
+    fn an_enforced_block_is_recorded_and_never_shown_and_a_pass_carries_its_verdict() {
+        let (r, asked) = admit(&[hit("a", false), hit("b", false)], gate_of(&[("a", 0.9), ("b", 0.05)], ways_agent_core::profile::Mode::Enforce));
+        assert_eq!(asked, ["a"], "a blocked way is never shown");
+        let a = outcome(&r, "a");
+        assert_eq!((a["result"].as_str(), a["p_yes"].as_f64(), a["verdict"].as_str(), a["rank"].as_u64()), (Some("fired"), Some(0.9), Some("pass"), Some(1)));
+        let b = outcome(&r, "b");
+        assert_eq!((b["result"].as_str(), b["p_yes"].as_f64(), b["threshold"].as_f64(), b["mode"].as_str()), (Some("judge_block"), Some(0.05), Some(0.3), Some("enforce")));
+        assert_eq!(r["judge"]["status"], "judged");
+    }
+
+    #[test]
+    fn a_shadow_would_block_is_shown_and_recorded_with_its_verdict() {
+        let (r, asked) = admit(&[hit("a", false)], gate_of(&[("a", 0.05)], ways_agent_core::profile::Mode::Shadow));
+        assert_eq!(asked, ["a"]);
+        let a = outcome(&r, "a");
+        assert_eq!((a["result"].as_str(), a["verdict"].as_str()), (Some("fired"), Some("would_block")));
+    }
+
+    #[test]
+    fn a_gate_fallback_shows_every_way_and_names_the_fallback() {
+        let g = gate::Gate { status: gate::Status::Fallback { reason: "deadline".into() }, ..Default::default() };
+        let (r, asked) = admit(&[hit("a", false), hit("b", false)], g);
+        assert_eq!(asked, ["a", "b"]);
+        assert!(["a", "b"].iter().all(|w| outcome(&r, w)["result"] == "fired" && outcome(&r, w).get("verdict").is_none()));
+        assert_eq!(r["judge"], serde_json::json!({"status": "fallback", "reason": "deadline"}));
+    }
+
+    #[test]
+    fn a_child_without_its_parent_is_withheld_and_with_it_is_shown() {
+        let (r, asked) = admit(&[hit("p/c", true)], gate::Gate::default());
+        assert!(asked.is_empty());
+        assert_eq!(outcome(&r, "p/c")["result"], "withheld_for_parent");
+
+        let (r, asked) = admit(&[hit("p", false), hit("p/c", true)], gate::Gate::default());
+        assert_eq!(asked, ["p", "p/c"]);
+        assert_eq!(outcome(&r, "p/c")["result"], "fired");
+        assert_eq!(r["judge"]["status"], "off");
+    }
+}
+
+#[cfg(test)]
+mod eligibility_tests {
+    //! ADR-701 §1: the competing set is the ways that can fire on the lane.
+    use super::*;
+
+    fn way(id: &str, scope: &str, trigger: Option<&str>) -> WayCandidate {
+        WayCandidate {
+            id: id.to_string(),
+            corpus_id: id.to_string(),
+            path: PathBuf::from(format!("/{id}.md")),
+            pattern: None,
+            pattern_strict: false,
+            commands: None,
+            files: None,
+            description: "d".into(),
+            vocabulary: "v".into(),
+            threshold: 0.0,
+            scope: scope.to_string(),
+            when_project: None,
+            when_file_exists: None,
+            trigger: trigger.map(String::from),
+            trigger_path: None,
+        }
+    }
+
+    #[test]
+    fn each_lane_admits_what_its_scan_loop_admits() {
+        let agent = way("a", "agent", None);
+        let sub = way("s", "subagent", None);
+        let team = way("t", "teammate", None);
+        let state = way("st", "subagent", Some("context-threshold"));
+        let p = Lane::Prompt { scope: "agent" };
+        assert!(eligible(&agent, p, "/p") && !eligible(&sub, p, "/p"));
+        let task = Lane::Task { teammate: false };
+        assert!(eligible(&sub, task, "/p") && !eligible(&agent, task, "/p") && !eligible(&team, task, "/p"));
+        assert!(!eligible(&state, task, "/p"), "a state-triggered way skips the task lane");
+        assert!(eligible(&team, Lane::Task { teammate: true }, "/p"));
+    }
+
+    #[test]
+    fn a_when_precondition_that_fails_makes_a_way_ineligible() {
+        let mut w = way("w", "agent", None);
+        w.when_project = Some("/definitely/not/this/project".into());
+        assert!(!eligible(&w, Lane::Prompt { scope: "agent" }, "/p"));
+    }
+
+    /// An agent-scope way that beats every chunk must not take share from the
+    /// subagent-scope ways that can fire on the task lane.
+    #[test]
+    fn an_ineligible_by_scope_way_takes_no_share_on_the_task_lane() {
+        let cands = [way("agent-only", "agent", None), way("a", "subagent", None), way("b", "subagent", None)];
+        let row = |v: &[(&str, f64)]| v.iter().map(|(i, c)| (i.to_string(), *c)).collect::<Vec<_>>();
+        let rows = vec![
+            row(&[("agent-only", 0.9), ("a", 0.6), ("b", 0.5)]),
+            row(&[("agent-only", 0.8), ("b", 0.55), ("a", 0.3)]),
+        ];
+        let lane = Lane::Task { teammate: false };
+        let eligible_map = body_map(cands.iter().filter(|w| eligible(w, lane, "/p")));
+        let got = late_interaction::shares_for_test(rows.clone(), &eligible_map);
+        let absent: Vec<Vec<(String, f64)>> =
+            rows.iter().map(|r| r.iter().filter(|(i, _)| i != "agent-only").cloned().collect()).collect();
+        let want = late_interaction::shares_for_test(absent, &eligible_map);
+        assert_eq!(got, want);
+        assert!(got.iter().all(|(id, _)| id != "agent-only"));
+        // With the old toggle-only set it would have competed.
+        let all = body_map(cands.iter());
+        assert!(late_interaction::shares_for_test(rows, &all).iter().any(|(id, _)| id == "agent-only"));
+    }
+
+    #[test]
+    fn the_authoring_view_competes_the_prompt_lane_unless_asked_for_all() {
+        let cands = [way("agent", "agent", None), way("sub", "subagent", None)];
+        let ids = |unfiltered| diag_candidates(&cands, "/p", unfiltered).iter().map(|w| w.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(false), ["agent"], "default: what a prompt scan in agent scope competes");
+        assert_eq!(ids(true), ["agent", "sub"]);
     }
 }

@@ -154,10 +154,23 @@ pub fn user_config() -> PathBuf {
 
 // --- state ($XDG_STATE) ---
 
+/// A log stream's live file: `$XDG_STATE/agent-ways/<stem>.jsonl`.
+pub fn stream_log(stream: crate::event_archive::Stream) -> PathBuf {
+    state_root().join(stream.live_name())
+}
+
 /// Telemetry/event log: `$XDG_STATE/agent-ways/events.jsonl` (our telemetry).
-/// The Rust writer and every reader route through here.
+/// Readers route through here. The writer joins [`state_root`] with the
+/// stream's own live name, which [`stream_log`] also uses, so both name the
+/// same file.
 pub fn events_log() -> PathBuf {
-    state_root().join("events.jsonl")
+    stream_log(crate::event_archive::EVENTS)
+}
+
+/// Per-turn decision records (ADR-701 §2):
+/// `$XDG_STATE/agent-ways/decisions.jsonl`, archived like the event log.
+pub fn decisions_log() -> PathBuf {
+    stream_log(crate::event_archive::DECISIONS)
 }
 
 /// Append-only ledger of assembled compliance findings (ADR-201):
@@ -168,10 +181,26 @@ pub fn findings_ledger() -> PathBuf {
     state_root().join("findings.jsonl")
 }
 
-/// The event-log files a reader should read: [`events_log`] when it exists.
+/// The files of one log stream a reader should read, in time order: the dated
+/// gzip archives oldest first (ADR-701 §2), then [`stream_log`] when it exists.
+/// Read each with [`crate::event_archive::read_source`], which decompresses.
+pub fn stream_log_sources(stream: crate::event_archive::Stream) -> Vec<PathBuf> {
+    let log = stream_log(stream);
+    let mut sources = log.parent().map(|dir| crate::event_archive::archives(dir, stream)).unwrap_or_default();
+    if log.exists() {
+        sources.push(log);
+    }
+    sources
+}
+
+/// [`stream_log_sources`] for the event log.
 pub fn events_log_sources() -> Vec<PathBuf> {
-    let log = events_log();
-    if log.exists() { vec![log] } else { Vec::new() }
+    stream_log_sources(crate::event_archive::EVENTS)
+}
+
+/// [`stream_log_sources`] for the decision log.
+pub fn decisions_log_sources() -> Vec<PathBuf> {
+    stream_log_sources(crate::event_archive::DECISIONS)
 }
 
 // --- cache ($XDG_CACHE) ---
@@ -215,6 +244,38 @@ pub fn ways_roots(project: Option<&Path>) -> Vec<PathBuf> {
     roots.push(shipped_ways_root());
     roots.retain(|r| r.is_dir());
     roots
+}
+
+/// The schema file only the shipped corpus carries, at the top of its ways root.
+pub const SCHEMA_FILE: &str = "frontmatter-schema.yaml";
+
+fn canonical(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// The ways root that holds `path` (a way, or a directory inside a root): the
+/// nearest ancestor that is one of [`ways_roots`], carries [`SCHEMA_FILE`], or
+/// is a `.claude/ways` directory. `None` when `path` sits in no ways root.
+pub fn containing_ways_root(path: &Path, project: Option<&Path>) -> Option<PathBuf> {
+    let path = canonical(path);
+    let known: Vec<PathBuf> = ways_roots(project).iter().map(|r| canonical(r)).collect();
+    let start = if path.is_dir() { Some(path.as_path()) } else { path.parent() };
+    start?.ancestors().find_map(|dir| {
+        let dotclaude_ways = dir.file_name().is_some_and(|n| n == "ways")
+            && dir.parent().and_then(|p| p.file_name()).is_some_and(|n| n == ".claude");
+        (known.iter().any(|k| k == dir) || dir.join(SCHEMA_FILE).is_file() || dotclaude_ways)
+            .then(|| dir.to_path_buf())
+    })
+}
+
+/// Whether `root` is the core corpus: it carries [`SCHEMA_FILE`], or it is the
+/// shipped, app or projected ways root. User and project roots are not core.
+pub fn is_core_root(root: &Path) -> bool {
+    let root = canonical(root);
+    root.join(SCHEMA_FILE).is_file()
+        || [shipped_ways_root(), core_ways_root(), projected_ways_root()]
+            .iter()
+            .any(|c| canonical(c) == root)
 }
 
 /// The trusted-project-macros list: `~/.claude/trusted-project-macros`. The
@@ -304,6 +365,45 @@ mod tests {
         assert!(cache_root().ends_with("agent-ways"));
     }
 
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ways-paths-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        canonical(&d)
+    }
+
+    #[test]
+    fn a_subtree_and_a_file_find_their_core_root() {
+        let d = scratch("core");
+        let root = d.join("hooks/ways");
+        std::fs::create_dir_all(root.join("softwaredev/code")).unwrap();
+        std::fs::write(root.join(SCHEMA_FILE), "x: 1\n").unwrap();
+        std::fs::write(root.join("softwaredev/code/code.md"), "---\ndescription: d\n---\n").unwrap();
+
+        assert_eq!(containing_ways_root(&root, None), Some(root.clone()));
+        assert_eq!(containing_ways_root(&root.join("softwaredev"), None), Some(root.clone()));
+        assert_eq!(containing_ways_root(&root.join("softwaredev/code/code.md"), None), Some(root.clone()));
+        assert!(is_core_root(&root));
+    }
+
+    #[test]
+    fn an_unrelated_hooks_ways_dir_is_neither_a_root_nor_core() {
+        let d = scratch("unrelated");
+        let dir = d.join("hooks/ways");
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        assert_eq!(containing_ways_root(&dir.join("a"), None), None);
+        assert!(!is_core_root(&dir));
+    }
+
+    #[test]
+    fn a_dotclaude_ways_dir_is_a_non_core_root() {
+        let d = scratch("project");
+        let root = d.join("proj/.claude/ways");
+        std::fs::create_dir_all(root.join("x")).unwrap();
+        assert_eq!(containing_ways_root(&root.join("x"), None), Some(root.clone()));
+        assert!(!is_core_root(&root));
+    }
+
     #[test]
     fn projection_is_dotclaude() {
         assert!(projection_root().ends_with(".claude"));
@@ -324,6 +424,8 @@ mod tests {
         assert!(corpus_dir().ends_with("user"));
         assert!(corpus_dir().parent().unwrap().ends_with(APP));
         assert!(events_log().ends_with("events.jsonl"));
+        assert_eq!(decisions_log().parent(), events_log().parent(), "the decision log sits beside the event log");
+        assert!(decisions_log().ends_with("decisions.jsonl"));
         assert!(bin_root().ends_with("bin"));
     }
 

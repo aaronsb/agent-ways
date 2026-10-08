@@ -34,7 +34,7 @@ Lexicographic order by filename is the ordering contract. Prefix with numbers: `
 | `06-node.zsh` | Node / fnm / nvm |
 | `07-aliases.zsh` | Aliases for modern CLI tools |
 | `08-completions.zsh` | Completion system init |
-| `09-omp.zsh` | oh-my-posh init (see `workstation/shell/prompt`) |
+| `09-omp.zsh` | oh-my-posh init (see `workstation/shell/shell-prompt`) |
 
 ## XDG base dirs
 
@@ -78,7 +78,7 @@ A missing tool must silently no-op, not raise. This is what lets the same conf.d
 
 ## See Also
 
-- workstation/shell/prompt(workstation) — 09-omp.zsh loads oh-my-posh
+- workstation/shell/shell-prompt(workstation) — 09-omp.zsh loads oh-my-posh
 - workstation/shell/sshagent(workstation) — 04-ssh.zsh loads the agent
 - workstation/shell/tools(workstation) — 07-aliases.zsh configures modern CLI tools
 - workstation/shell(workstation) — parent

@@ -7,9 +7,9 @@ agent-tui frame 100x30
 |│▌    language                  auto                  ││code.                                      │|
 |│     default_scope             agent                 ││                                           │|
 |│     disabled_domains          []                    ││en and auto keep the English corpus. A     │|
-|│ ▸ project · way               enabled               ││specific code, set by the ways-localize    │|
-|│                                                     ││skill, switches the build, matcher and     │|
-|│                                                     ││tuner to that language (ADR-139).          │|
+|│     event_retention_days      365                   ││specific code, set by the ways-localize    │|
+|│     decision_retention_turns  50000                 ││skill, switches the build, matcher and     │|
+|│ ▸ project · way               enabled               ││tuner to that language (ADR-139).          │|
 |│                                                     ││                                           │|
 |│                                                     ││value    auto                              │|
 |│                                                     ││type     one of en | auto | ar | de | es | │|
@@ -66,15 +66,15 @@ styles
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   2-10  - - BOLD
-  8  11-16  - - DIM
-  8  32-38  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
+ 10   2-10  - - BOLD
+ 10  11-16  - - DIM
+ 10  32-38  - - DIM
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM

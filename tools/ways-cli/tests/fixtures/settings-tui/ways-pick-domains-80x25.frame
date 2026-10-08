@@ -7,9 +7,9 @@ agent-tui frame 80x25
 |│     language            auto             ││such as [ea, itops].              │|
 |│     default_scope       agent            ││                                  │|
 |│▌    disabled_domains    []               ││Every way under a listed domain   │|
-|│ ▸ project · way         enabled          ││stays silent. Set as a list, `[ea,│|
-|│                                          ││itops]` or `ea,itops`.            │|
-|│              ┌pick any: ways.disabled_domains─────────────────┐              │|
+|│     event_retention_days 365             ││stays silent. Set as a list, `[ea,│|
+|│     decision_retention_turns 50000       ││itops]` or `ea,itops`.            │|
+|│ ▸ project · w┌pick any: ways.disabled_domains─────────────────┐              │|
 |│              │ [x] itops                                      │              │|
 |│              │ [ ] softwaredev                                │s |           │|
 |│              └────────────────────────────────────────────────┘icks)         │|
@@ -61,15 +61,14 @@ styles
   7  43-44  - - DIM
   7  79-79  - - DIM
   8   0-0   - - DIM
-  8   2-10  - - BOLD
-  8  11-16  - - DIM
-  8  26-32  - - DIM
   8  43-44  - - DIM
   8  79-79  - - DIM
   9   0-0   - - DIM
   9  43-44  - - DIM
   9  79-79  - - DIM
  10   0-0   - - DIM
+ 10   2-10  - - BOLD
+ 10  11-14  - - DIM
  10  15-15  LightBlue - -
  10  16-46  LightBlue - BOLD
  10  47-64  LightBlue - -

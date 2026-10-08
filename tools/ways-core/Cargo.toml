@@ -19,6 +19,9 @@ walkdir = "2"
 # Default features off: we need the parser, not the HTML renderer.
 pulldown-cmark = { version = "0.13", default-features = false }
 anyhow = "1"
+# Event-log archives are gzip (ADR-701 §2). The pure-Rust backend (miniz_oxide,
+# already in the workspace lock); licence MIT OR Apache-2.0.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 sensor-trait = { path = "../sensor-trait" }
 claude-sessions = { path = "../claude-sessions" }
 agent-settings = { path = "../agent-settings" }

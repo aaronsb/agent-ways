@@ -82,7 +82,9 @@ impl Drop for Fx {
 }
 
 fn schema() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../hooks/ways/frontmatter-schema.yaml")
+    // Read at run time: a test binary reused from another checkout keeps the
+    // path it was built at.
+    std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../../hooks/ways/frontmatter-schema.yaml")
 }
 
 fn sees_projected_only(out: &str, what: &str) {
@@ -130,7 +132,7 @@ fn corpus_builds_from_the_projection() {
 #[test]
 fn settings_screens_list_the_projected_ways() {
     let fx = Fx::new("tui");
-    let out = fx.ways(&["settings", "ways", "--depth", "none", "--snap", "100x40", "--keys", "down down down down down down right"]);
+    let out = fx.ways(&["settings", "ways", "--depth", "none", "--snap", "100x40", "--keys", "down down down down down down down down right"]);
     assert!(out.contains("▸ dev"), "the settings tab must list the projected domain:\n{out}");
     assert!(!out.contains("stale"), "the settings tab must not list the app copy:\n{out}");
 }

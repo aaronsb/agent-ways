@@ -235,7 +235,7 @@ pub fn render_text(calls: &[Call], by: By, log_from: Option<&str>) -> String {
 
 /// Read every events log source; unreadable files are skipped.
 pub fn load() -> Vec<Call> {
-    ways_core::paths::events_log_sources().iter().filter_map(|p| std::fs::read_to_string(p).ok()).flat_map(|t| parse_log(&t)).collect()
+    ways_core::paths::events_log_sources().iter().filter_map(|p| ways_core::event_archive::read_source(p)).flat_map(|t| parse_log(&t)).collect()
 }
 
 #[cfg(test)]

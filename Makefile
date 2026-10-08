@@ -330,7 +330,7 @@ test-unit:
 	@echo "Running Rust unit tests..."
 	@# Every crate, including agent-theme (and its raw-colour lint over the workspace, ADR-504 §6)
 	@# and ways-cli's piped_output test.
-	@cargo test --manifest-path tools/Cargo.toml --workspace --quiet
+	@cargo test --manifest-path tools/Cargo.toml --workspace --no-fail-fast --quiet
 	@echo "Unit tests passed."
 
 test-sim: ways

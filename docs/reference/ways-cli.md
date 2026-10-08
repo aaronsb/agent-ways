@@ -467,15 +467,17 @@ Exit codes: `0` clean, `1` errors found (with `--check`), `2` the invocation was
 
 **Run from:** Anywhere. It covers the global ways plus the project-local ways of `--project <dir>` (default: the current directory).
 
-**Tells you:** The late-interaction diagnostic ([ADR-160](../architecture/ways/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md)). A header gives the gates in force (admit on share or peak, then confirm) and how many ways would fire, then the reduced surface the query was chunked from. Then, for the top 20 candidates ranked by share:
+**Tells you:** The late-interaction diagnostic ([ADR-160](../architecture/ways/ADR-160-chunked-late-interaction-matching-with-softmax-share-gating-for-way-selection.md)). A header gives the gates in force (admit on the `matching.admission` rule or peak, then confirm) and how many ways would fire, then the reduced surface the query was chunked from. Then, for the top 20 candidates ranked by share:
 
 | Column | Meaning |
 |---|---|
 | `peak` | The way's strongest single-chunk cosine |
 | `share` | Softmax mass the way won across chunks, which the share gate reads |
 | `confirm` | Best match of the way's own body against the chunk it won (`—` when not admitted) |
-| `outcome` | `fired ✓`, `< gate` (admitted by neither share nor peak), or `< confirm` (admitted, but the body did not corroborate) |
+| `outcome` | `fired ✓`, `< gate` (admitted by neither the admission rule nor peak), `< cap` (passed, but cut by the cap of 6, highest peak first), or `< confirm` (admitted, but the body did not corroborate) |
 | `won chunk` | The surface chunk the way matched on |
+
+`--json` prints one object with every candidate rather than the top 20: `reduced`, `admission`, and `rows` of `id`, `peak`, `share`, `won_chunk`, `confirm`, `admitted`, `capped` and `fired`. Admission follows `matching.admission` as read for `--project`, or for the current directory. When late interaction cannot run, `reduced` is `null` and `rows` is empty.
 
 When the query is too sparse to chunk, or the embedding engine cannot run late interaction, it says so on stderr and prints the single-vector view instead, as the fire path does. There the cosines are mapped through the calibrated logistic `g(s)` and fire when `g(s) ≥ τ_s`; see [the engine reference](../hooks-and-ways/engine-reference.md).
 
@@ -583,6 +585,8 @@ ways tune stats --global --json
 **Ways per hook invocation:** how many ways one hook call delivered, per channel (`prompt`, `bash`, `file`, `state`, ...): the invocation count, how many delivered 1, 2, 3 or 4+ ways, and the maximum. An invocation is approximated as the `way_fired` rows that share a session, an agent (`agent_id`, since subagent hooks report the parent's session id), a timestamp (one-second resolution) and a channel. Rows written before `agent_id` existed merge parallel agents under one session, so on old data the 4+ tail is an upper bound. The prompt channel folds the keyword and semantic prompt matchers together, and the bash channel folds `bash` with `semantic:bash:*`.
 
 `--json` adds `by_model` (`{model: {fires, redisclosures}}`), `by_way_model` (`{way: {model: fires}}`) and `ways_per_invocation` (`{channel: {invocations, "1", "2", "3", "4+", max}}`).
+
+**Decisions:** a closing section read from the decision log and its archives (ADR-701 §2): turns per day (count, mean, median, p90), outcome counts per way, the judge's pass, block and would-block rates with fallback and capped scans, the near-miss leaders with their mean shortfall, and pulls split into already delivered, recall misses, out-of-band reads, null `scan_id`, unjoined (naming a scan outside the window) and refused. `--json` carries it as `decisions` (`{present, records, skipped_lines, turns, turns_per_day, scans, orphan_scans, by_way: {way: {result: n}}, judge, near_miss_leaders, pulls}`), or `{"present": false}` when there is no decision log. [Stats and observability](../hooks-and-ways/stats.md#the-decisions-section) explains each count.
 
 ### `ways tune precision`
 

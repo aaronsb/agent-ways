@@ -195,12 +195,14 @@ pub(super) enum WayScope {
     Shipped,
     /// Named in a ways.yaml, found in no root.
     Missing,
+    /// A `dir/*` toggle: covers the ways under a directory, no way of its own.
+    Prefix,
     /// Another project's, listed in the all projects view.
     Other,
 }
 
 impl WayScope {
-    const ORDER: [WayScope; 4] = [WayScope::Project, WayScope::User, WayScope::Shipped, WayScope::Missing];
+    const ORDER: [WayScope; 5] = [WayScope::Project, WayScope::User, WayScope::Shipped, WayScope::Prefix, WayScope::Missing];
 
     fn label(self) -> &'static str {
         match self {
@@ -208,6 +210,7 @@ impl WayScope {
             WayScope::User => "your ways",
             WayScope::Shipped => "shipped",
             WayScope::Missing => "not found",
+            WayScope::Prefix => "prefixes",
             WayScope::Other => "another project",
         }
     }
@@ -219,6 +222,7 @@ impl WayScope {
             WayScope::User => format!("Your own ways, in {}. They survive updates and shadow a shipped way of the same id.", tilde(&ctx.user_ways, home)),
             WayScope::Shipped => "The ways agent-ways ships.".into(),
             WayScope::Missing => "Switches this project's ways.yaml names for ways no root holds any more.".into(),
+            WayScope::Prefix => "A `dir/*` switch covers that directory's way and every way under it; a switch on a way itself overrides it (ADR-701).".into(),
             WayScope::Other => "The ways of another project Claude Code knows.".into(),
         }
     }
@@ -271,7 +275,11 @@ pub(super) fn way_about(w: &Located, home: &Path) -> String {
 /// how many ways, how many off. Only a row with a store is a switch.
 /// Returns `(ways, off)` for `n`.
 pub(super) fn summarize(n: &mut Node) -> (usize, usize) {
-    let own = n.setting.as_ref().filter(|s| s.store.is_some()).map_or((0, 0), |s| (1, usize::from(s.loaded == "false")));
+    let own = n
+        .setting
+        .as_ref()
+        .filter(|s| s.store.as_ref().is_some_and(|st| !st.key.ends_with("/*")))
+        .map_or((0, 0), |s| (1, usize::from(s.loaded == "false")));
     if n.children.is_empty() {
         return own;
     }
@@ -360,6 +368,18 @@ impl Ways {
         // The parts of a name the tab itself stands for.
         let depth = tab.prefix.split('.').count();
         let scopes = if tab.name == "ways" { self.way_scopes() } else { BTreeMap::new() };
+        // The switches the project's file sets, by id, so a way that sets none
+        // can be shown as a session will treat it: off under a disabled prefix.
+        let toggles: Vec<(String, bool)> = self
+            .reg
+            .concrete("ways.project", layers)
+            .into_iter()
+            .filter(|k| k.spec.name == "ways.project.*")
+            .filter_map(|k| {
+                let on = display(resolve(k.spec, &k.bound, layers).value.as_ref(), k.spec.kind) != "false";
+                Some((k.bound.first()?.clone(), on))
+            })
+            .collect();
         for b in self.keys_of(tab, layers, &scopes) {
             files.insert(b.spec.file);
             let segs = segments(&b);
@@ -377,7 +397,17 @@ impl Ways {
                 Some(f) => format!("{layer} · {}", tilde(Path::new(&f), home)),
                 None => layer,
             };
-            let mut s = Setting::new(kind(b.spec.kind, layers, &b.bound), display(r.value.as_ref(), b.spec.kind), source);
+            let mut shown = display(r.value.as_ref(), b.spec.kind);
+            let mut source = source;
+            if b.spec.name == "ways.project.*" {
+                let id = b.bound.first().map(String::as_str).unwrap_or_default();
+                let explicit = toggles.iter().any(|(k, _)| k == id);
+                if !explicit && ways_core::config::way_toggled_off(toggles.iter().map(|(k, on)| (k.as_str(), *on)), id) {
+                    shown = "false".into();
+                    source = "off under a prefix switch".into();
+                }
+            }
+            let mut s = Setting::new(kind(b.spec.kind, layers, &b.bound), shown, source);
             if let Some(d) = r.default.as_ref().or(b.spec.default_for(&b.bound).as_ref()) {
                 s = s.default(display(Some(d), b.spec.kind));
             }
@@ -408,7 +438,11 @@ impl Ways {
                 // A way's switch sits under the scope its file comes from.
                 let id = b.bound.first().cloned().unwrap_or_default();
                 let found = scopes.get(&id);
-                let scope = found.map_or(WayScope::Missing, |w| w.scope);
+                let scope = match found {
+                    Some(w) => w.scope,
+                    None if id.ends_with("/*") => WayScope::Prefix,
+                    None => WayScope::Missing,
+                };
                 if let Some(w) = found {
                     node = node.about("way", way_about(w, home));
                 }

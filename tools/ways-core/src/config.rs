@@ -87,6 +87,37 @@ fn expand_tilde(p: &str) -> PathBuf {
     }
 }
 
+/// How the late-interaction matcher admits a way into body confirmation
+/// (ADR-700 §12). Either way the peak co-gate (peak ≥ 0.50) also admits, the
+/// survivors are taken by peak up to the cap, and body confirmation follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Admission {
+    /// Summed softmax share / n_chunks ≥ 0.15.
+    Share,
+    /// The top-ranked way of any chunk; the share gate does not apply.
+    ChunkTop,
+}
+
+impl Admission {
+    /// The values `matching.admission` takes, as written in config.yaml.
+    pub const NAMES: [&'static str; 2] = ["share", "chunk_top"];
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "share" => Some(Admission::Share),
+            "chunk_top" => Some(Admission::ChunkTop),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Admission::Share => "share",
+            Admission::ChunkTop => "chunk_top",
+        }
+    }
+}
+
 /// Ways configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -119,6 +150,10 @@ pub struct Config {
     /// per-way knobs to user-scope `apply_yaml` would have to also touch
     /// this field, which sits right next to a load-bearing doc comment.
     pub(crate) disabled_ways: Vec<String>,
+    /// Ways and prefixes the project switched on by name (`way: true`). Read
+    /// only through [`Config::way_disabled`], where an explicit entry overrides
+    /// a broader prefix (ADR-701 §1). Project scope only, like `disabled_ways`.
+    pub(crate) enabled_ways: Vec<String>,
     /// Parent-boost multiplier: a child way's effective semantic fire
     /// probability is multiplied by this value when any ancestor way has fired
     /// in the session. Values <1.0 make children fire more easily once their
@@ -151,6 +186,15 @@ pub struct Config {
     /// Default 0.05: a narrow band that captures genuine near-fires without
     /// flooding the log with deep misses.
     pub near_miss_margin: f64,
+    /// How the late-interaction matcher admits ways into body confirmation
+    /// (ADR-700 §12, ADR-701 increment 6). Default [`Admission::Share`].
+    pub admission: Admission,
+    /// Days an archive of the event or decision log is kept (ADR-701 §2).
+    /// Default 365.
+    pub event_retention_days: u32,
+    /// Turns the live decision log holds (ADR-701 §2); older turns move to
+    /// its dated archives. Default 50,000.
+    pub decision_retention_turns: u64,
     /// Refire presets (ADR-126). Each value is a fraction of the session
     /// context window. At fire evaluation time, a way's `refire: <name>`
     /// resolves by looking up the preset here and multiplying by the
@@ -197,11 +241,15 @@ impl Default for Config {
             language: "auto".to_string(),
             disabled_domains: Vec::new(),
             disabled_ways: Vec::new(),
+            enabled_ways: Vec::new(),
             parent_threshold_multiplier: 0.8,
             parent_boost_floor: 0.30,
             semantic_fire_probability: 0.5,
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
+            admission: Admission::Share,
+            event_retention_days: 365,
+            decision_retention_turns: 50_000,
             refire_presets,
             secret_path_deny: true,
         }
@@ -212,6 +260,34 @@ impl Config {
     /// Public read accessor for the project-scope disable list (ADR-131).
     pub fn disabled_ways(&self) -> &[String] {
         &self.disabled_ways
+    }
+
+    /// Ways and prefixes the project switched on by name; they override a
+    /// broader disabled prefix (ADR-701 §1).
+    pub fn enabled_ways(&self) -> &[String] {
+        &self.enabled_ways
+    }
+
+    /// Whether the project switched `way_id` off (ADR-131, ADR-701 §1).
+    ///
+    /// A toggle key is either a way id or a path prefix ending in `/*`, which
+    /// covers every way under that directory. The most specific toggle wins: a
+    /// toggle on the way itself beats any prefix, and a longer prefix beats a
+    /// shorter one. So `a/b/*: false` with `a/b/c: true` leaves `a/b/c` on.
+    /// A way with no toggle is on.
+    pub fn way_disabled(&self, way_id: &str) -> bool {
+        self.disabling_toggle(way_id).is_some()
+    }
+
+    /// The toggle key that switches `way_id` off, by the rule of
+    /// [`Config::way_disabled`]; `None` when the way is on. Callers that tell
+    /// the operator why a way is refused name this key.
+    pub fn disabling_toggle(&self, way_id: &str) -> Option<&str> {
+        winning_toggle(
+            self.enabled_ways.iter().map(|k| (k.as_str(), true)).chain(self.disabled_ways.iter().map(|k| (k.as_str(), false))),
+            way_id,
+        )
+        .and_then(|(key, enabled)| (!enabled).then_some(key))
     }
 
     /// The effective projection targets (ADR-184). With no `targets` key the
@@ -364,6 +440,15 @@ impl Config {
         if let Some(v) = doc.get("near_miss_margin").and_then(|v| v.as_f64()) {
             self.near_miss_margin = v;
         }
+        if let Some(v) = doc.get("admission").and_then(|v| v.as_str()).and_then(Admission::parse) {
+            self.admission = v;
+        }
+        if let Some(v) = doc.get("event_retention_days").and_then(|v| v.as_u64()) {
+            self.event_retention_days = v as u32; // the schema holds 1..=3650
+        }
+        if let Some(v) = doc.get("decision_retention_turns").and_then(|v| v.as_u64()) {
+            self.decision_retention_turns = v; // the schema holds 1..=10,000,000
+        }
         if let Some(m) = doc.get("refire_presets").and_then(|v| v.as_mapping()) {
             for (k, v) in m {
                 if let (Some(name), Some(fraction)) = (k.as_str(), v.as_f64()) {
@@ -390,7 +475,9 @@ impl Config {
     ///     meta/introspection:                # long-form
     ///       enabled: false
     ///
-    /// Anything that evaluates to enabled=false is collected into `disabled_ways`.
+    /// Anything that evaluates to enabled=false is collected into `disabled_ways`;
+    /// an explicit enabled=true into `enabled_ways`, so it can override a prefix.
+    /// A key ending in `/*` is a path prefix (ADR-701 §1, see `way_disabled`).
     /// Unknown sub-keys on the long-form (threshold overrides, etc.) are ignored
     /// — reserved for future use per ADR-131.
     fn apply_project_ways_overlay_value(&mut self, doc: &serde_yaml::Value) {
@@ -399,20 +486,52 @@ impl Config {
         };
         for (k, v) in ways {
             let Some(name) = k.as_str() else { continue };
-            let disabled = match v {
-                serde_yaml::Value::Bool(b) => !*b, // shorthand: `way: false` means disabled
+            // `Some(true)` is an explicit enable, `Some(false)` an explicit disable;
+            // anything else (no `enabled` key, a non-boolean) states nothing.
+            let enabled = match v {
+                serde_yaml::Value::Bool(b) => Some(*b), // shorthand: `way: false` means disabled
                 serde_yaml::Value::Mapping(m) => m
                     .get(serde_yaml::Value::String("enabled".to_string()))
-                    .and_then(|v| v.as_bool())
-                    .map(|b| !b)
-                    .unwrap_or(false),
-                _ => false,
+                    .and_then(|v| v.as_bool()),
+                _ => None,
             };
-            if disabled && !self.disabled_ways.iter().any(|w| w == name) {
-                self.disabled_ways.push(name.to_string());
+            let list = match enabled {
+                Some(false) => &mut self.disabled_ways,
+                Some(true) => &mut self.enabled_ways,
+                None => continue,
+            };
+            if !list.iter().any(|w| w == name) {
+                list.push(name.to_string());
             }
         }
     }
+}
+
+/// Whether a set of project toggles switches `way_id` off. Each toggle is
+/// `(key, enabled)`, where the key is a way id or a `dir/*` prefix. The most
+/// specific toggle wins: a toggle on the way itself beats any prefix, and a
+/// longer prefix beats a shorter one; a prefix covers the way at its own path
+/// and every way under it. No matching toggle leaves the way on. The settings
+/// screens call this too, so what they show is what a session does.
+pub fn way_toggled_off<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> bool {
+    winning_toggle(toggles, way_id).is_some_and(|(_, enabled)| !enabled)
+}
+
+/// The most specific toggle covering `way_id`, as `(key, enabled)`.
+fn winning_toggle<'a>(toggles: impl Iterator<Item = (&'a str, bool)>, way_id: &str) -> Option<(&'a str, bool)> {
+    let mut best: Option<(usize, &'a str, bool)> = None; // (specificity, key, enabled)
+    for (key, enabled) in toggles {
+        let rank = match key.strip_suffix("/*") {
+            None if key == way_id => usize::MAX,
+            None => continue,
+            Some(dir) if way_id == dir || (way_id.len() > dir.len() + 1 && way_id.starts_with(dir) && way_id.as_bytes()[dir.len()] == b'/') => dir.len(),
+            Some(_) => continue,
+        };
+        if best.is_none_or(|(r, _, _)| rank > r) {
+            best = Some((rank, key, enabled));
+        }
+    }
+    best.map(|(_, key, enabled)| (key, enabled))
 }
 
 fn home_dir() -> PathBuf {
@@ -486,6 +605,7 @@ mod tests {
         assert_eq!(cfg.parent_boost_floor, 0.30);
         assert_eq!(cfg.semantic_fire_probability, 0.5);
         assert_eq!(cfg.keyword_floor_probability, 0.15);
+        assert_eq!(cfg.admission, Admission::Share);
         assert_eq!(cfg.refire_presets.get("once").copied(), Some(1.0));
         assert_eq!(cfg.refire_presets.get("rare").copied(), Some(0.4));
         assert_eq!(cfg.refire_presets.get("normal").copied(), Some(0.15));
@@ -537,6 +657,17 @@ mod tests {
         assert_eq!(cfg.semantic_fire_probability, 0.6);
         assert_eq!(cfg.keyword_floor_probability, 0.2);
         assert_eq!(cfg.parent_boost_floor, 0.25);
+    }
+
+    #[test]
+    fn admission_reads_chunk_top_and_a_bad_value_falls_the_section_back() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("admission: chunk_top\n");
+        assert_eq!(cfg.admission, Admission::ChunkTop);
+        let mut cfg = Config::default();
+        cfg.apply_yaml("admission: top1\nnear_miss_margin: 0.1\n");
+        assert_eq!(cfg.admission, Admission::Share, "an unknown mode is refused by the schema");
+        assert_eq!(cfg.near_miss_margin, 0.05, "with the rest of the matching section");
     }
 
     #[test]
@@ -652,6 +783,121 @@ mod tests {
         let mut cfg = Config::default();
         cfg.apply_yaml("ways:\n  itops/incident: false\n");
         assert!(cfg.disabled_ways.is_empty());
+    }
+
+    // ── ADR-701 §1: path-prefix toggles ────────────────────────────
+
+    fn project_cfg(yaml: &str) -> Config {
+        let mut cfg = Config::default();
+        cfg.apply_project_ways_overlay(yaml);
+        cfg
+    }
+
+    #[test]
+    fn event_retention_defaults_to_a_year_and_is_settable() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.event_retention_days, 365);
+        cfg.apply_yaml("event_retention_days: 30\n");
+        assert_eq!(cfg.event_retention_days, 30);
+        let mut bad = Config::default();
+        bad.apply_yaml("event_retention_days: 0\n");
+        assert_eq!(bad.event_retention_days, 365, "a value outside 1..3650 falls back");
+    }
+
+    #[test]
+    fn decision_retention_defaults_to_fifty_thousand_turns_and_is_settable() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.decision_retention_turns, 50_000);
+        cfg.apply_yaml("decision_retention_turns: 2000\n");
+        assert_eq!(cfg.decision_retention_turns, 2000);
+        for bad_value in ["0", "-5", "10000001", "lots"] {
+            let mut bad = Config::default();
+            bad.apply_yaml(&format!("decision_retention_turns: {bad_value}\n"));
+            assert_eq!(bad.decision_retention_turns, 50_000, "{bad_value} is outside 1..=10,000,000 and falls back");
+        }
+    }
+
+    #[test]
+    fn a_project_file_cannot_set_the_decision_retention() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "decision_retention_turns: 1\n");
+        assert_eq!(cfg.decision_retention_turns, 50_000, "retention is machine-wide, user scope only");
+    }
+
+    #[test]
+    fn a_project_file_cannot_set_the_event_retention() {
+        let mut cfg = Config::default();
+        apply_project(&mut cfg, "event_retention_days: 1\n");
+        assert_eq!(cfg.event_retention_days, 365, "retention is machine-wide, user scope only");
+    }
+
+    #[test]
+    fn an_explicit_enable_on_the_prefix_dir_beats_the_prefix() {
+        let cfg = project_cfg("ways:\n  a/b/*: false\n  a/b: true\n");
+        assert!(!cfg.way_disabled("a/b"));
+        assert!(cfg.way_disabled("a/b/c"));
+    }
+
+    #[test]
+    fn disabling_toggle_names_the_key_that_wins() {
+        let cfg = project_cfg("ways:\n  a/*: false\n  a/b/*: false\n  a/b/c: false\n  a/b/d: true\n");
+        assert_eq!(cfg.disabling_toggle("a/b/c"), Some("a/b/c"), "the way's own toggle is the most specific");
+        assert_eq!(cfg.disabling_toggle("a/b/x"), Some("a/b/*"), "the longer prefix beats the shorter");
+        assert_eq!(cfg.disabling_toggle("a/z"), Some("a/*"));
+        assert_eq!(cfg.disabling_toggle("a/b/d"), None, "an explicit enable wins, so nothing disables it");
+        assert_eq!(cfg.disabling_toggle("other/w"), None);
+        for id in ["a/b/c", "a/b/x", "a/z", "a/b/d", "other/w"] {
+            assert_eq!(cfg.way_disabled(id), cfg.disabling_toggle(id).is_some(), "{id}: one rule for both");
+        }
+    }
+
+    #[test]
+    fn prefix_toggle_disables_every_way_under_it() {
+        let cfg = project_cfg("ways:\n  softwaredev/code/supplychain/*: false\n");
+        assert!(cfg.way_disabled("softwaredev/code/supplychain/npm"));
+        assert!(cfg.way_disabled("softwaredev/code/supplychain/npm/lockfiles"));
+        assert!(!cfg.way_disabled("softwaredev/code/quality"), "a sibling stays on");
+        assert!(!cfg.way_disabled("softwaredev/code/supplychainx"), "the prefix ends at a path boundary");
+        assert!(cfg.way_disabled("softwaredev/code/supplychain"), "the prefix covers the way at its own path too");
+    }
+
+    #[test]
+    fn explicit_enable_overrides_a_disabled_prefix() {
+        let cfg = project_cfg(
+            "ways:\n  softwaredev/code/supplychain/*: false\n  softwaredev/code/supplychain/npm: true\n",
+        );
+        assert!(!cfg.way_disabled("softwaredev/code/supplychain/npm"));
+        assert!(cfg.way_disabled("softwaredev/code/supplychain/pip"));
+    }
+
+    #[test]
+    fn explicit_disable_overrides_an_enabled_prefix() {
+        let cfg = project_cfg(
+            "ways:\n  softwaredev/code/*: true\n  softwaredev/code/quality:\n    enabled: false\n",
+        );
+        assert!(cfg.way_disabled("softwaredev/code/quality"));
+        assert!(!cfg.way_disabled("softwaredev/code/testing"));
+    }
+
+    #[test]
+    fn the_longer_prefix_wins_between_prefixes() {
+        let cfg = project_cfg("ways:\n  a/*: false\n  a/b/*: true\n");
+        assert!(cfg.way_disabled("a/x"));
+        assert!(!cfg.way_disabled("a/b/c"));
+    }
+
+    #[test]
+    fn exact_toggle_still_works_without_prefixes() {
+        let cfg = project_cfg("ways:\n  itops/incident: false\n");
+        assert!(cfg.way_disabled("itops/incident"));
+        assert!(!cfg.way_disabled("itops/other"));
+    }
+
+    #[test]
+    fn user_scope_yaml_never_supplies_prefix_toggles() {
+        let mut cfg = Config::default();
+        cfg.apply_yaml("ways:\n  a/*: false\n");
+        assert!(!cfg.way_disabled("a/b"), "per-way toggles are project scope only (ADR-131)");
     }
 
     #[test]

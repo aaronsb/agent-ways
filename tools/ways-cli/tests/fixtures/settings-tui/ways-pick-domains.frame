@@ -7,9 +7,9 @@ agent-tui frame 100x30
 |│     language                  auto                  ││[ea, itops].                               │|
 |│     default_scope             agent                 ││                                           │|
 |│▌    disabled_domains          []                    ││Every way under a listed domain stays      │|
-|│ ▸ project · way               enabled               ││silent. Set as a list, `[ea, itops]` or    │|
-|│                                                     ││`ea,itops`.                                │|
-|│                                                     ││                                           │|
+|│     event_retention_days      365                   ││silent. Set as a list, `[ea, itops]` or    │|
+|│     decision_retention_turns  50000                 ││`ea,itops`.                                │|
+|│ ▸ project · way               enabled               ││                                           │|
 |│                                                     ││value    []                                │|
 |│                                                     ││type     any of itops | softwaredev (Enter │|
 |│                        ┌pick any: ways.disabled_domains─────────────────┐                        │|
@@ -66,15 +66,15 @@ styles
   7  54-55  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
-  8   2-10  - - BOLD
-  8  11-16  - - DIM
-  8  32-38  - - DIM
   8  54-55  - - DIM
   8  99-99  - - DIM
   9   0-0   - - DIM
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
+ 10   2-10  - - BOLD
+ 10  11-16  - - DIM
+ 10  32-38  - - DIM
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM

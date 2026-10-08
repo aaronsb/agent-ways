@@ -31,4 +31,4 @@ A comparison table, a quoted passage, or a document *about* these patterns will 
 ## See Also
 
 - trust/prose(meta) — the full account of what decoration is and why it survives to turn 50
-- `documentation/markdown/reflow` — the sibling check, for hard-wrapped prose
+- markdown/reflow(documentation) — the sibling check, for hard-wrapped prose

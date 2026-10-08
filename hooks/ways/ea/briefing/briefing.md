@@ -25,4 +25,8 @@ A briefing ends in *suggestions* — a ranked action list and proposed task muta
 ## See also
 
 - the **briefing** skill — the runnable procedure
-- ea / email / calendar / tasks / comms(ea) — per-domain judgment
+- ea(ea) — the domain root: shared judgment
+- email(ea) — per-domain judgment for mail
+- calendar(ea) — per-domain judgment for the calendar
+- tasks(ea) — per-domain judgment for tasks
+- comms(ea) — per-domain judgment for chat

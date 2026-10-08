@@ -1,6 +1,6 @@
 ---
 description: Sub-agent delegation — when to spawn a specialized sub-agent, writing the brief so each constraint keeps its stated strength, the shape the worker reports back, and how deep delegation goes
-vocabulary: subagent sub-agent delegate delegation spawn background parallel worker teammate explore fan-out brief instructions constraint preference hard requirement bound restate fidelity handback report back blocked leaf depth
+vocabulary: subagent sub-agent delegate delegation spawn background parallel worker teammate explore fan-out brief instructions constraint preference hard requirement bound restate fidelity handback report back blocked leaf depth worktree isolation
 pattern: subagent|delegat|spawn.{0,30}agent|review.{0,30}\bpr\b|organiz.{0,30}docs
 scope: agent
 refire: 0.15
@@ -62,6 +62,12 @@ Carry each constraint at its stated strength. "Avoid X where you can" is a prefe
 ## Depth
 
 Leaf agents carry no `Agent` tool. Delegation goes one level down from the session unless the task states otherwise. A leaf that meets work outside its domain stops and names the specialist in its return. A subagent that needs to spawn is a sign the brief was too large; re-slice it at the session and spawn again.
+
+## Worktree Isolation
+
+A worktree agent starts from the default branch. When the work belongs on another branch, the brief has it run `git checkout -b <branch> <base>` and check `git merge-base --is-ancestor <base> HEAD`.
+
+A worktree that builds into the main checkout's target directory leaves binaries the main checkout reuses, with the worktree's paths compiled in. If that happened, run `cargo clean -p <crate>` there.
 
 ## Investigation Briefs
 
@@ -134,4 +140,4 @@ PR-comment destination is a workflow question (GitHub-mode vs. local-mode). See 
 ## See Also
 
 - environment/recovery(softwaredev) — classify a failed or wrong handback before retrying or re-briefing
-- research(softwaredev) — the fan-out step that uses these investigation rules
+- research(research) — the fan-out step that uses these investigation rules

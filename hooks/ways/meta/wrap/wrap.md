@@ -32,4 +32,4 @@ The `compaction-checkpoint` way fires **on its own** as context nears the limit.
 - compaction-checkpoint(meta) — the automatic, threshold-triggered sibling.
 - todos(meta) — the TaskList-at-compaction discipline the skill enforces on demand.
 - start(meta) — the opening bookend; same gauge (`ways context`), opposite pole.
-- merge(softwaredev) — landing an increment is iterative (many per session); wrapping is terminal (once).
+- delivery/merge(softwaredev) — landing an increment is iterative (many per session); wrapping is terminal (once).

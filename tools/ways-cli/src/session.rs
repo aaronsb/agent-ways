@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 mod engagement;
+mod log;
 
 // Re-export the ADR-123 firing-dynamics engagement cluster so the rest
 // of the crate keeps addressing these items as `session::REFIRE_FLOOR`,
@@ -17,6 +18,8 @@ pub use engagement::{
     first_suppression_in_window, lock_engagement, record_way_fire, way_fire_outcome,
     way_refire_threshold_k, EngagementLock, FireDecision, FireOutcome, REFIRE_FLOOR,
 };
+pub use log::{log_decision, log_event, log_event_with};
+use log::append_jsonl_line;
 
 // ── Session directory ──────────────────────────────────────────
 
@@ -262,7 +265,7 @@ impl AgentState<'_> {
             self.session_id,
             self.agent,
         )
-        .map_or(0, |t| token_position_of(&t))
+        .and_then(|t| token_position_of(&t)).unwrap_or(0)
     }
 }
 
@@ -281,6 +284,45 @@ pub fn bump_epoch(session_id: &str) -> u64 {
     let next = read_u64_path(&path) + 1;
     let _ = std::fs::write(&path, next.to_string());
     next
+}
+
+/// The current agent's last scan: its decision record's `scan_id` and the
+/// agent's own epoch when the marker was written (ADR-701 §2). A pull joins
+/// its turn's record through the `scan_id`, never through the epoch.
+///
+/// For the main agent the marker names the current turn's scan: the prompt
+/// lane clears it first thing, and the prompt-surface scan (or a queued
+/// message scanned later in the turn) writes it. A turn that is not scanned,
+/// such as a Monitor notification, leaves it absent. A project switched off
+/// with `enabled: false` never reaches the prompt lane, so nothing clears the
+/// marker there; its pulls are not logged either. A subagent gets no user
+/// prompts: SubagentStart writes its marker once, from the stash its dispatch
+/// left, naming that dispatch's task scan, with the subagent's epoch at start.
+pub fn last_scan_path(session_id: &str) -> PathBuf {
+    agent_state_dir(session_id).join("last-scan")
+}
+
+/// Record the last scan, published whole so a reader never sees half of it.
+/// Best-effort: a failed write loses only the join for this turn.
+pub fn write_last_scan(session_id: &str, scan_id: &str, epoch: u64) {
+    let path = last_scan_path(session_id);
+    ensure_parent(&path);
+    let body = serde_json::json!({ "scan_id": scan_id, "epoch": epoch }).to_string();
+    let _ = agent_settings::writer::write_atomic(&path, body);
+}
+
+/// The `scan_id` the current agent's last-scan marker names, `None` when it
+/// has none.
+pub fn read_last_scan(session_id: &str) -> Option<String> {
+    let text = std::fs::read_to_string(last_scan_path(session_id)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v["scan_id"].as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+/// Drop the current agent's last-scan marker as a new turn starts, so a pull
+/// in a turn with no scan joins nothing rather than the turn before.
+pub fn clear_last_scan(session_id: &str) {
+    let _ = std::fs::remove_file(last_scan_path(session_id));
 }
 
 /// Stamp when a way was last shown (epoch).
@@ -340,16 +382,21 @@ pub(crate) fn transcript_in(
 /// The current agent's token position, read from [`current_transcript`]; 0
 /// when there is none.
 pub fn get_token_position(session_id: &str) -> u64 {
-    current_transcript(session_id).map_or(0, |t| token_position_of(&t))
+    read_token_position(session_id).unwrap_or(0)
 }
 
-/// The newest turn that reports usage; a zero-usage synthetic turn does not
-/// reset the position.
-fn token_position_of(transcript: &Path) -> u64 {
-    std::fs::read_to_string(transcript)
-        .ok()
-        .and_then(|c| claude_sessions::usage::last_context_tokens(&c))
-        .unwrap_or(0)
+/// [`get_token_position`], `None` when the agent has no readable transcript,
+/// so a record can tell an unknown position from a real 0.
+pub fn read_token_position(session_id: &str) -> Option<u64> {
+    current_transcript(session_id).and_then(|t| token_position_of(&t))
+}
+
+/// The newest turn that reports usage, 0 before any does; a zero-usage
+/// synthetic turn does not reset the position. `None` when the transcript
+/// cannot be read.
+fn token_position_of(transcript: &Path) -> Option<u64> {
+    let content = std::fs::read_to_string(transcript).ok()?;
+    Some(claude_sessions::usage::last_context_tokens(&content).unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -360,7 +407,7 @@ fn token_position_in(
     session_id: &str,
     agent: &str,
 ) -> u64 {
-    transcript_in(claude, hook_transcript, project_dir, session_id, agent).map_or(0, |t| token_position_of(&t))
+    transcript_in(claude, hook_transcript, project_dir, session_id, agent).and_then(|t| token_position_of(&t)).unwrap_or(0)
 }
 
 /// The session's own transcript: the hook's when its stem is the session id,
@@ -641,129 +688,6 @@ pub fn append_metric(session_id: &str, metric: &serde_json::Value) {
     }
 }
 
-/// Append one JSONL record as a single `write` on an `O_APPEND` handle.
-///
-/// `writeln!` on a `File` issues two writes, the record and then the newline.
-/// Parallel hooks append to the same logs, and two processes interleaving as
-/// `recA recB \n \n` corrupt both lines, which readers then drop. That lost the
-/// `way_fired` and `way_suppressed` rows of two racing PreToolUse hooks in CI
-/// (#528). One buffer, one `write_all`, keeps each record whole.
-fn append_jsonl_line(path: &std::path::Path, line: &str) {
-    use std::io::Write;
-    let mut buf = String::with_capacity(line.len() + 1);
-    buf.push_str(line);
-    buf.push('\n');
-    let _ = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut f| f.write_all(buf.as_bytes()));
-}
-
-// ── Event logging ───────────────────────────────────────────────
-
-/// Size at which the event log is compacted (ADR-134 task E). The near-miss and
-/// fire-score streams (tasks A/D) grow `events.jsonl` faster than fires alone,
-/// so it needs a ceiling. ~32 MiB ≈ 125k events at the observed ~260 bytes/line
-/// — over a year of history at current rates.
-const MAX_EVENTS_BYTES: u64 = 32 * 1024 * 1024;
-/// Target size kept after compaction (the most recent bytes). The gap to
-/// MAX provides hysteresis: ~8 MiB (~30k events) of new logging between
-/// compactions, so the rewrite is rare, not per-append.
-const KEEP_EVENTS_BYTES: u64 = 24 * 1024 * 1024;
-/// Compaction carries every `judge_call` line (#750), so the file settles at
-/// KEEP + judge history. Once that history exceeds MAX - KEEP the file is over
-/// MAX right after compacting; a rewrite that frees less than this is skipped so
-/// appends do not re-read and rewrite the whole file each time. Non-judge lines
-/// then accumulate until a compaction frees at least half the MAX-KEEP gap. The
-/// file is bounded by KEEP + judge history + MAX-KEEP/2 + that accumulation.
-const MIN_FREED_BYTES: u64 = (MAX_EVENTS_BYTES - KEEP_EVENTS_BYTES) / 2;
-
-/// Log an event to the telemetry log ($XDG_STATE/agent-ways/events.jsonl — see paths::events_log).
-pub fn log_event(fields: &[(&str, &str)]) {
-    let events_file = crate::paths::events_log();
-    if let Some(stats_dir) = events_file.parent() {
-        let _ = std::fs::create_dir_all(stats_dir);
-    }
-
-    let ts = agent_fmt::when::now_utc_iso();
-    let mut obj = serde_json::Map::new();
-    obj.insert("ts".to_string(), serde_json::Value::String(ts));
-    for (k, v) in fields {
-        obj.insert(k.to_string(), serde_json::Value::String(v.to_string()));
-    }
-
-    if let Ok(line) = serde_json::to_string(&serde_json::Value::Object(obj)) {
-        append_jsonl_line(&events_file, &line);
-    }
-
-    // Amortized cap: only when the log crosses MAX do we rewrite it to the most
-    // recent KEEP bytes. A single stat() per append; the O(n) rewrite happens
-    // once per ~8 MiB of growth. Readers always see a complete file: a reader
-    // that opened the pre-compaction inode keeps reading it intact (the rename
-    // is atomic and unlinks the old name only after), and each compaction
-    // publishes a whole file via its own private temp. Concurrent compactions
-    // from parallel `ways` processes are last-writer-wins — that drops a bounded
-    // window of events, acceptable for a telemetry log, but never tears a line.
-    if let Ok(meta) = std::fs::metadata(&events_file) {
-        if meta.len() > MAX_EVENTS_BYTES {
-            let _ = compact_log_tail(&events_file, KEEP_EVENTS_BYTES, MIN_FREED_BYTES);
-        }
-    }
-}
-
-/// Rewrite `path` in place to retain only its most recent `keep_bytes`, cut at a
-/// line boundary so the first retained line is whole. The new contents are
-/// written to a per-process, per-attempt temp, synced, then atomically renamed
-/// over `path` — so a published `events.jsonl` is always a complete file even
-/// under concurrent compaction (last rename wins; a bounded window of events may
-/// be lost, but no line is ever torn). Oldest events are dropped — telemetry
-/// tuning cares about recent behavior, and the cap holds a year-plus of history.
-/// `judge_call` lines in the dropped head are carried ahead of the tail (#750).
-/// On any failure the original file is left intact and the temp is removed.
-fn compact_log_tail(path: &std::path::Path, keep_bytes: u64, min_freed: u64) -> std::io::Result<()> {
-    let data = std::fs::read(path)?;
-    let keep = keep_bytes as usize;
-    if data.len() <= keep {
-        return Ok(());
-    }
-    // Start `keep` bytes from the end, then advance past the next newline so we
-    // never retain a partial leading line.
-    let cut = data.len() - keep;
-    let start = match data[cut..].iter().position(|&b| b == b'\n') {
-        Some(off) => cut + off + 1,
-        None => data.len(), // single huge line / no boundary: drop it all
-    };
-
-    // The judge's spend history must outlive the cut (#750): `ways agent cost`
-    // reads `judge_call` lines from this file, so the ones in the dropped head
-    // are carried ahead of the kept tail. A call is ~300 bytes, so a year of
-    // heavy use adds a few MiB. Carried lines sit in the head region on the
-    // next compaction and are carried again, never duplicated.
-    let mut out: Vec<u8> = Vec::new();
-    for line in data[..start].split(|&b| b == b'\n') {
-        if is_judge_call(line) {
-            out.extend_from_slice(line);
-            out.push(b'\n');
-        }
-    }
-    out.extend_from_slice(&data[start..]);
-    if ((data.len() - out.len()) as u64) < min_freed {
-        return Ok(()); // would not pay for the rewrite
-    }
-
-    // The shared writer's temp is unique per process and call, so two
-    // concurrent compactions never write the same file and publish a torn tail.
-    agent_settings::writer::write_atomic(path, &out)
-}
-
-/// A whole `judge_call` event line (substring prefilter, then a real parse).
-fn is_judge_call(line: &[u8]) -> bool {
-    const NEEDLE: &[u8] = b"judge_call";
-    line.windows(NEEDLE.len()).any(|w| w == NEEDLE)
-        && serde_json::from_slice::<serde_json::Value>(line).is_ok_and(|v| v.get("event").and_then(|e| e.as_str()) == Some("judge_call"))
-}
-
 // ── Domain disable check ────────────────────────────────────────
 
 /// Check if a domain is disabled.
@@ -774,9 +698,10 @@ pub fn domain_disabled(domain: &str) -> bool {
 
 /// Check if a specific way is disabled in the current project (ADR-131).
 /// Project-scope only — sourced exclusively from `{project}/.claude/ways.yaml`.
+/// A toggle may name the way or a `dir/*` prefix; the most specific wins (ADR-701 §1).
 /// config::global() — future migration: ctx.config.disabled_ways
 pub fn way_disabled(way_id: &str) -> bool {
-    crate::config::global().disabled_ways().iter().any(|w| w == way_id)
+    crate::config::global().way_disabled(way_id)
 }
 
 
@@ -1020,142 +945,5 @@ mod token_position_tests {
     fn main_keeps_the_legacy_state_root() {
         assert_eq!(agent_state_dir_for("s", MAIN_AGENT), session_dir("s"));
         assert_eq!(agent_state_dir_for("s", "a1"), session_dir("s").join("agents").join("a1"));
-    }
-}
-
-#[cfg(test)]
-mod compaction_tests {
-    use super::*;
-
-    #[test]
-    fn compact_log_tail_keeps_recent_whole_lines() {
-        // A unique temp path (process id; no clock/random in this crate's tests).
-        let path = std::env::temp_dir().join(format!("ways-evt-{}.jsonl", std::process::id()));
-        // 1000 numbered JSON lines (~20 bytes each → ~20 KB).
-        let mut content = String::new();
-        for i in 0..1000 {
-            content.push_str(&format!("{{\"n\":{i}}}\n"));
-        }
-        std::fs::write(&path, &content).unwrap();
-        let before = std::fs::metadata(&path).unwrap().len();
-
-        // Keep ~2 KB → far below the file size, so it must compact.
-        compact_log_tail(&path, 2000, 0).unwrap();
-
-        let after = std::fs::read_to_string(&path).unwrap();
-        let after_len = after.len() as u64;
-        assert!(after_len < before, "file should shrink");
-        assert!(after_len <= 2000 + 32, "retained ~keep_bytes (+ one boundary line)");
-
-        let lines: Vec<&str> = after.lines().collect();
-        // Every retained line is whole, parseable JSON (no partial leading line).
-        for l in &lines {
-            serde_json::from_str::<serde_json::Value>(l).expect("retained line is valid JSON");
-        }
-        // The most recent line is preserved; the oldest are dropped.
-        assert_eq!(*lines.last().unwrap(), "{\"n\":999}");
-        assert!(!after.contains("{\"n\":0}"), "oldest events dropped");
-
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn compaction_keeps_judge_calls_so_spend_still_counts_them() {
-        let path = std::env::temp_dir().join(format!("ways-evt-judge-{}.jsonl", std::process::id()));
-        let judge = |ts: &str| format!("{{\"event\":\"judge_call\",\"ts\":\"{ts}\",\"session\":\"s\",\"project\":\"/p\",\"input_tokens\":\"10\",\"output_tokens\":\"1\",\"cost_usd\":\"0.0100\",\"cost_source\":\"provider\"}}\n");
-        let filler = |s: &mut String| {
-            for i in 0..500 {
-                s.push_str(&format!("{{\"event\":\"way_fired\",\"n\":\"{i}\"}}\n"));
-            }
-        };
-        // Two old judge calls buried in filler that the cut drops.
-        let mut content = judge("2026-01-05T10:00:00Z");
-        filler(&mut content);
-        content.push_str(&judge("2026-01-06T10:00:00Z"));
-        filler(&mut content);
-        content.push_str(&judge("2026-10-01T10:00:00Z"));
-        std::fs::write(&path, &content).unwrap();
-
-        compact_log_tail(&path, 2000, 0).unwrap();
-        let after = std::fs::read_to_string(&path).unwrap();
-        assert!(after.len() < content.len(), "filler is cut");
-
-        let calls = ways_agent_core::spend::parse_log(&after);
-        assert_eq!(calls.len(), 3, "all three judge calls survive");
-        assert_eq!(ways_agent_core::spend::covers_since(&calls).as_deref(), Some("2026-01-05T10:00:00Z"));
-
-        // A second compaction carries them again without duplicating.
-        compact_log_tail(&path, 2000, 0).unwrap();
-        assert_eq!(ways_agent_core::spend::parse_log(&std::fs::read_to_string(&path).unwrap()).len(), 3);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn compaction_skips_a_rewrite_that_frees_too_little_and_keeps_judge_calls() {
-        let path = std::env::temp_dir().join(format!("ways-evt-gap-{}.jsonl", std::process::id()));
-        let judge = |i: usize| format!("{{\"event\":\"judge_call\",\"ts\":\"2026-01-05T10:00:{:02}Z\",\"cost_source\":\"unknown\"}}\n", i % 60);
-        // Judge history (~4 KB) larger than the gap (keep 500, min_freed 1000).
-        let mut content: String = (0..50).map(judge).collect();
-        std::fs::write(&path, &content).unwrap();
-        let (keep, min_freed) = (500, 1000);
-
-        // Appending filler: the first compactions free < min_freed, so the file is left as is.
-        for i in 0..10 {
-            content.push_str(&format!("{{\"event\":\"way_fired\",\"n\":\"{i}\"}}\n"));
-            std::fs::write(&path, &content).unwrap();
-            let before = std::fs::read(&path).unwrap();
-            compact_log_tail(&path, keep, min_freed).unwrap();
-            assert_eq!(std::fs::read(&path).unwrap(), before, "no rewrite while it frees too little");
-        }
-
-        // Enough filler to free more than min_freed: it compacts, and judge calls survive.
-        for i in 0..100 {
-            content.push_str(&format!("{{\"event\":\"way_fired\",\"n\":\"{i}\"}}\n"));
-        }
-        std::fs::write(&path, &content).unwrap();
-        compact_log_tail(&path, keep, min_freed).unwrap();
-        let after = std::fs::read_to_string(&path).unwrap();
-        assert!(after.len() < content.len(), "compacted once it pays");
-        assert_eq!(ways_agent_core::spend::parse_log(&after).len(), 50, "every judge call kept");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn compact_log_tail_noop_when_under_keep() {
-        let path = std::env::temp_dir().join(format!("ways-evt-small-{}.jsonl", std::process::id()));
-        let content = "{\"n\":1}\n{\"n\":2}\n";
-        std::fs::write(&path, content).unwrap();
-        compact_log_tail(&path, 1024 * 1024, 0).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn compact_log_tail_drops_oversized_unbroken_blob() {
-        // A single line larger than keep_bytes with no newline has no boundary
-        // to cut at — the intended behavior is to drop it (it is already corrupt
-        // for a line-oriented log), leaving an empty file rather than a partial.
-        let path = std::env::temp_dir().join(format!("ways-evt-blob-{}.jsonl", std::process::id()));
-        std::fs::write(&path, "x".repeat(5000)).unwrap();
-        compact_log_tail(&path, 1000, 0).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn compact_log_tail_is_idempotent() {
-        // After one compaction the file is under keep, so a second is a no-op.
-        let path = std::env::temp_dir().join(format!("ways-evt-idem-{}.jsonl", std::process::id()));
-        let mut content = String::new();
-        for i in 0..500 {
-            content.push_str(&format!("{{\"n\":{i}}}\n"));
-        }
-        std::fs::write(&path, &content).unwrap();
-        compact_log_tail(&path, 1500, 0).unwrap();
-        let once = std::fs::read_to_string(&path).unwrap();
-        compact_log_tail(&path, 1500, 0).unwrap();
-        let twice = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(once, twice, "second compaction is a no-op");
-        let _ = std::fs::remove_file(&path);
     }
 }

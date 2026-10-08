@@ -155,7 +155,9 @@ fn glyphs(frame: &str) -> String {
 }
 
 fn goldens() -> Goldens {
-    Goldens::new(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/settings-tui"))
+    // Read at run time: a test binary reused from another checkout keeps the
+    // path it was built at.
+    Goldens::new(std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("tests/fixtures/settings-tui"))
 }
 
 // ── the apply path writes what `set` writes ────────────────────
@@ -646,7 +648,7 @@ fn golden_frames() {
     fx.file(".config/agent-ways/config.yaml", "# by hand\nnear_miss_margin: 0.1\n");
     let mut g = goldens();
     let shots: &[(&str, &str, &str, &str)] = &[
-        ("ways-browse", "ways", "down down down down down down right", "100x30"),
+        ("ways-browse", "ways", "down down down down down down down down right", "100x30"),
         ("ways-edit", "ways", "down down down e", "100x30"),
         ("ways-review", "ways", "down enter / text:incident enter end enter enter w", "100x30"),
         ("matching-browse", "matching", "", "100x30"),

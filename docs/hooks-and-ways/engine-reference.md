@@ -11,6 +11,7 @@ The authoritative statement of how the ways matching engine decides a fire: conf
 | `parent_threshold_multiplier` | **0.8** |
 | `parent_boost_floor` | **0.30** |
 | `near_miss_margin` | 0.05 |
+| `admission` | `share` (or `chunk_top`; see the late-interaction step 4) |
 | `refire_presets` | `once` 1.0, `rare` 0.4, `normal` 0.15, `frequent` 0.05 |
 
 Retired keys warn and are ignored (`tools/ways-core/src/settings.rs` `RETIRED`): `default_embed_threshold` and `default_multi_embed_threshold` (use `semantic_fire_probability`), `keyword_gate_fraction` (use `keyword_floor_probability`). There is no `embed_threshold` frontmatter field and no per-way threshold.
@@ -41,8 +42,8 @@ A `pattern:` regex hit fires when `prob_en ≥ τ_k ∨ prob_multi ≥ τ_k`, th
 1. splits the reduced surface into sentence chunks (at most `MAX_SURFACE_CHUNKS` 12, each at least `MIN_CHUNK_CHARS` 12) and embeds them in one `way-embed` batch against `ways-corpus-en.jsonl`;
 2. ranks each way by its peak cosine over the chunks;
 3. within each chunk runs a softmax over the top `TOP_K_PER_CHUNK` (8) ways at temperature `SOFTMAX_TAU` (0.08), and sums each way's share over the chunks divided by their number;
-4. admits a way whose share is at least `SHARE_GATE` (0.15), or whose peak is at least `PEAK_GATE` (0.50);
-5. confirms at most `MAX_WINNERS_TO_CONFIRM` (6) admitted ways by the cosine between the chunk each one won and its own body chunks (at most `MAX_BODY_CHUNKS` 8), which must reach `CONFIRM_GATE` (0.35).
+4. admits a way whose peak is at least `PEAK_GATE` (0.50), or that passes the `admission` rule (`admit`): under `share`, the default, a share of at least `SHARE_GATE` (0.15); under `chunk_top`, being the top-ranked way of some chunk (ADR-700 §12, under evaluation as ADR-701 increment 6);
+5. confirms at most `MAX_WINNERS_TO_CONFIRM` (6) admitted ways, highest peak first, by the cosine between the chunk each one won and its own body chunks (at most `MAX_BODY_CHUNKS` 8), which must reach `CONFIRM_GATE` (0.35).
 
 These operating points are hand-set and uncalibrated. The fired score, logged as `fire_score`, is the summed share.
 

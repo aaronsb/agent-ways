@@ -1275,7 +1275,9 @@ mod tests {
 
     #[test]
     fn embedded_assets_outside_tools_are_classified() {
-        let crate_root = Path::new(env!("CARGO_MANIFEST_DIR")); // tools/ways-cli
+        // Read at run time: a test binary reused from another checkout keeps the
+        // path it was built at.
+        let crate_root = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())); // tools/ways-cli
         let tools = crate_root.parent().unwrap(); // tools/
         let repo = tools.parent().unwrap(); // repo root
         let mut escaping: Vec<String> = Vec::new();

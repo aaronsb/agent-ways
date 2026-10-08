@@ -104,7 +104,7 @@ pub fn state(
         // No context budget on this lane yet: core alone runs past the 10,000
         // character cap on SessionStart, and a budget would admit core and
         // then withhold every state way behind it.
-        let out = capture_show_way(&way.id, session_id, "state", None, None, None, None);
+        let out = capture_show_way(&way.id, session_id, "state", None, None, None, None).body;
         if !out.is_empty() {
             context.push_str(&out);
             context.push_str("\n\n");

@@ -70,7 +70,9 @@ fn scan(root: &Path) -> (Vec<String>, Vec<PathBuf>) {
 }
 
 fn tools_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("agent-theme sits in tools/").to_path_buf()
+    // Read at run time: a test binary reused from another checkout keeps the
+    // path it was built at.
+    std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).parent().expect("agent-theme sits in tools/").to_path_buf()
 }
 
 #[test]

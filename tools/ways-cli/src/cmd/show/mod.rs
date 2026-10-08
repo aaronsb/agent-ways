@@ -4,6 +4,7 @@
 
 mod helpers;
 mod metrics;
+pub mod pull;
 
 use anyhow::Result;
 use serde_json::json;
@@ -19,7 +20,54 @@ use metrics::{compute_tree_metrics, count_siblings, git_version, dirty_status_te
 // ── ways show way ───────────────────────────────────────────────
 
 pub fn way(id: &str, session_id: &str, trigger: &str) -> Result<String> {
-    way_scored(id, session_id, trigger, None, None, None, None)
+    way_scored(id, session_id, trigger, None, None, None, None).map(|s| s.body)
+}
+
+/// What [`way_scored`] did with a way, for the scan's decision record
+/// (ADR-701 §2). The events it logs are unchanged; this names the same
+/// decision once more for the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShowOutcome {
+    /// Shown for the first time in its refire window.
+    Fired,
+    /// Shown again after its refire window passed.
+    Redisclosed,
+    /// Held back by its refire curve.
+    HeldRefire,
+    /// Held back by the hook's context budget.
+    HeldContextCap,
+    /// Not shown: disabled, out of scope, or no way file.
+    NotFireable,
+    /// `way_scored` failed. Never returned by it; a caller that absorbs its
+    /// error records this.
+    Error,
+}
+
+impl ShowOutcome {
+    /// The outcome's name in a decision record.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShowOutcome::Fired => "fired",
+            ShowOutcome::Redisclosed => "redisclosed",
+            ShowOutcome::HeldRefire => "held_refire",
+            ShowOutcome::HeldContextCap => "held_context_cap",
+            ShowOutcome::NotFireable => "not_fireable",
+            ShowOutcome::Error => "error",
+        }
+    }
+}
+
+/// A way's delivered text and what became of it. `body` is empty unless the
+/// way was shown.
+pub struct Shown {
+    pub body: String,
+    pub outcome: ShowOutcome,
+}
+
+impl Shown {
+    fn held(outcome: ShowOutcome) -> Self {
+        Shown { body: String::new(), outcome }
+    }
 }
 
 // ── Hook context budget ─────────────────────────────────────────
@@ -332,6 +380,13 @@ struct Fireable {
 /// Resolves a way for firing: the disable switches, its file, its scope and
 /// its refire curve. `None` when it is disabled, missing or out of scope.
 fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
+    fireable_in_scope(id, session_id, true)
+}
+
+/// [`fireable`], with the way's `scope:` check optional. A pull (ADR-701 §5)
+/// skips it: the agent named the way, so the scope that decides what injection
+/// may deliver does not decide what it may read. The disable switches still apply.
+fn fireable_in_scope(id: &str, session_id: &str, enforce_scope: bool) -> Result<Option<Fireable>> {
     let project_dir = crate::util::project_dir();
 
     // Disable checks: domain (user scope) and per-way (project scope, ADR-131)
@@ -349,7 +404,7 @@ fn fireable(id: &str, session_id: &str) -> Result<Option<Fireable>> {
     // Read frontmatter for scope field
     let content = std::fs::read_to_string(&way_file)?;
     let scope_field = crate::frontmatter::field_in(&content, "scope").unwrap_or_default();
-    if !session::scope_matches(&scope_field, &scope) {
+    if enforce_scope && !session::scope_matches(&scope_field, &scope) {
         return Ok(None);
     }
 
@@ -481,9 +536,19 @@ fn record_injected(id: &str, session_id: &str, way_file: &Path, project_dir: &st
     let lock = session::lock_engagement(id, session_id);
     session::record_way_fire(id, session_id, &curve, tick);
     drop(lock);
+    stamp_disclosure(id, session_id, tick);
+}
+
+/// Stamp that a way was disclosed to the session at `tick`: its marker, token
+/// position and epoch. Returns the epoch stamped. Injection and a pull
+/// (ADR-701 §5) both end here, so a pulled way reads as shown to every reader
+/// of these stamps.
+fn stamp_disclosure(id: &str, session_id: &str, tick: u64) -> u64 {
     session::stamp_way_marker(id, session_id, tick);
     session::stamp_way_tokens(id, session_id, tick);
-    session::stamp_way_epoch(id, session_id, session::get_epoch(session_id));
+    let epoch = session::get_epoch(session_id);
+    session::stamp_way_epoch(id, session_id, epoch);
+    epoch
 }
 
 /// Whether [`way_scored`] would show this way now, budget aside: not disabled,
@@ -510,6 +575,10 @@ pub(crate) fn would_fire(id: &str, session_id: &str) -> bool {
 /// — bounded by [`surface_snippet`] — only alongside a `fire_score`, i.e. on semantic
 /// fires, giving the read-side precision instrument a judgeable record of what fired
 /// each way without re-embedding history. Keyword fires already carry `matched_span`.
+///
+/// Returns the delivered text with what became of the way (fired, re-disclosed,
+/// or held and why), which the prompt and task lanes write to their decision
+/// record (ADR-701 §2).
 pub fn way_scored(
     id: &str,
     session_id: &str,
@@ -518,11 +587,11 @@ pub fn way_scored(
     matched_span: Option<&str>,
     surface: Option<&str>,
     mut budget: Option<&mut ContextBudget>,
-) -> Result<String> {
+) -> Result<Shown> {
     let Some(Fireable { project_dir, domain, scope, way_file, is_project_local, content, firing, curve }) =
         fireable(id, session_id)?
     else {
-        return Ok(String::new());
+        return Ok(Shown::held(ShowOutcome::NotFireable));
     };
     // One transcript read per fire: the same tick feeds the fast-path decision,
     // the re-check under the lock, the recorded fire, and the stamps below.
@@ -542,7 +611,7 @@ pub fn way_scored(
     let decision = session::way_fire_outcome(id, session_id, &curve, token_pos);
     if !decision.outcome.is_allowed() {
         suppress(Suppression::Refire, decision.last_fire);
-        return Ok(String::new());
+        return Ok(Shown::held(ShowOutcome::HeldRefire));
     }
     // A static body that cannot fit is withheld before its macro runs: the
     // macro only adds to it. Later, smaller candidates may still fit.
@@ -551,7 +620,7 @@ pub fn way_scored(
         if !b.fits(&body) {
             b.refuse();
             suppress(Suppression::ContextCap, decision.last_fire);
-            return Ok(String::new());
+            return Ok(Shown::held(ShowOutcome::HeldContextCap));
         }
     }
 
@@ -571,25 +640,20 @@ pub fn way_scored(
     if !decision.outcome.is_allowed() {
         drop(lock);
         suppress(Suppression::Refire, decision.last_fire);
-        return Ok(String::new());
+        return Ok(Shown::held(ShowOutcome::HeldRefire));
     }
     if let Some(b) = budget {
         if !b.admit(&output) {
             drop(lock);
             suppress(Suppression::ContextCap, decision.last_fire);
-            return Ok(String::new());
+            return Ok(Shown::held(ShowOutcome::HeldContextCap));
         }
     }
     session::record_way_fire(id, session_id, &curve, token_pos);
     drop(lock);
     let is_redisclosure = decision.outcome.is_redisclosure();
 
-    // Stamp markers
-    session::stamp_way_marker(id, session_id, token_pos);
-    session::stamp_way_tokens(id, session_id, token_pos);
-
-    let epoch = session::get_epoch(session_id);
-    session::stamp_way_epoch(id, session_id, epoch);
+    let epoch = stamp_disclosure(id, session_id, token_pos);
 
     // Tree disclosure tracking
     let (tree_depth, parent_id, parent_epoch, epoch_from_parent) =
@@ -692,7 +756,8 @@ pub fn way_scored(
     let refs: Vec<(&str, &str)> = log_fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
     session::log_event(&refs);
 
-    Ok(output)
+    let outcome = if is_redisclosure { ShowOutcome::Redisclosed } else { ShowOutcome::Fired };
+    Ok(Shown { body: output, outcome })
 }
 
 // ── ways show check ─────────────────────────────────────────────
@@ -779,7 +844,7 @@ pub fn check_within(
             b.reserve(&format!("\n{sections}"));
         }
         let parent_out =
-            way_scored(id, session_id, "check-pull", None, None, None, budget.as_deref_mut())?;
+            way_scored(id, session_id, "check-pull", None, None, None, budget.as_deref_mut())?.body;
         if let Some(b) = budget.as_deref_mut() {
             if parent_out.is_empty() {
                 b.cancel_reservation();

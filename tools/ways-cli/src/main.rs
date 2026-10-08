@@ -231,6 +231,16 @@ enum Commands {
         #[command(subcommand)]
         mode: ScanCommand,
     },
+    /// Look ways up on request, as one JSON object: the machine interface the
+    /// MCP tools `ways_search`, `ways_read` and `ways_neighbors` call (ADR-701 §5)
+    #[command(hide = true)]
+    Lookup {
+        /// Project directory (default: CLAUDE_PROJECT_DIR, else the working directory)
+        #[arg(long, global = true)]
+        project: Option<PathBuf>,
+        #[command(subcommand)]
+        what: LookupCommand,
+    },
     /// Print the projection manifest — the desired state of ~/.claude derived
     /// from `git ls-files` over the projection allowlist (ADR-144). The
     /// reconciler converges ~/.claude toward this.
@@ -485,13 +495,21 @@ enum AuthorCommand {
     ///
     /// Diagnose how a query matches ways under the live late-interaction matcher
     /// (ADR-160): peak · share · body-confirm · fired, per candidate — the tool
-    /// for authoring a way against how it actually fires.
+    /// for authoring a way against how it actually fires. Ways compete as they do
+    /// in a prompt scan in agent scope (toggles, scope, `when:`); `--all` competes
+    /// every way.
     Match {
         /// The query string to match
         query: String,
         /// Project directory (for project-local ways; default: current)
         #[arg(long)]
         project: Option<String>,
+        /// Compete every way, ignoring scope and `when:` (toggled-off ways stay out)
+        #[arg(long)]
+        all: bool,
+        /// Print every candidate as one JSON object
+        #[arg(long)]
+        json: bool,
     },
     /// Analyze a progressive-disclosure tree
     Tree {
@@ -630,6 +648,38 @@ enum TuneCommand {
         /// Machine-readable JSON output
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum LookupCommand {
+    /// Candidates for a query on the prompt lane, with route, cosine, share and margin
+    Search {
+        query: String,
+        /// The session, for its scope
+        #[arg(long)]
+        session: Option<String>,
+        /// How many candidates to return
+        #[arg(long, default_value = "5")]
+        top: usize,
+    },
+    /// A way's body as injection renders it; stamping is the PostToolUse hook's (`ways hook pull`)
+    Read {
+        /// Way id (e.g. "softwaredev/code/quality")
+        id: String,
+        /// The session whose scope a mismatch is reported against
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// A way's parent, children, See Also edges and nearest semantic neighbours
+    Neighbors {
+        id: String,
+        /// The session, to mark neighbours whose scope would not reach it
+        #[arg(long)]
+        session: Option<String>,
+        /// How many semantic neighbours to return
+        #[arg(long, default_value = "5")]
+        top: usize,
     },
 }
 
@@ -1063,6 +1113,22 @@ fn run() -> Result<()> {
             cmd::reconcile::run(source, dest, mode, dry_run, quiet, force)
         }
         Commands::Status { json } => cmd::status::run(json),
+        Commands::Lookup { project, what } => {
+            // Every reader below resolves the project as a hook would, from the
+            // environment, before the config is first read.
+            if let Some(p) = project {
+                std::env::set_var("CLAUDE_PROJECT_DIR", p);
+            }
+            cmd::lookup::emit(match what {
+                LookupCommand::Search { query, session, top } => {
+                    cmd::lookup::ensure_enabled().and_then(|()| cmd::lookup::search_json(&query, session.as_deref(), top))
+                }
+                LookupCommand::Read { id, session } => {
+                    cmd::lookup::ensure_enabled().and_then(|()| cmd::lookup::read_json(&id, session.as_deref()))
+                }
+                LookupCommand::Neighbors { id, session, top } => cmd::lookup::neighbors_json(&id, session.as_deref(), top),
+            })
+        }
         Commands::Scan { mode } => match mode {
             // ADR-184 item 6: a project (or user config) with `enabled: false`
             // injects nothing. Checked before any lane runs.
@@ -1211,7 +1277,7 @@ fn run() -> Result<()> {
             AuthorCommand::Template { path, description, vocabulary, scope, global } => {
                 cmd::template::run(path, description, vocabulary, scope, global)
             }
-            AuthorCommand::Match { query, project } => cmd::match_cmd::run_late(query, project.as_deref()),
+            AuthorCommand::Match { query, project, all, json } => cmd::match_cmd::run_late(query, project.as_deref(), all, json),
             AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
             AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),

@@ -193,7 +193,7 @@ fn scan_provenance(
         }
 
         let rel = path.strip_prefix(root).unwrap_or(path);
-        let way_key = rel.parent().unwrap_or(Path::new("")).display().to_string();
+        let way_key = crate::util::path_to_id(rel.parent().unwrap_or(Path::new("")));
 
         if way_key.is_empty() || !way_key.contains('/') {
             continue; // need at least domain/way
@@ -211,13 +211,13 @@ fn scan_provenance(
             with_prov.push(way_key.clone());
             ways.insert(
                 way_key,
-                json!({ "path": rel.display().to_string(), "provenance": p }),
+                json!({ "path": crate::util::path_to_id(rel), "provenance": p }),
             );
         } else {
             without_prov.push(way_key.clone());
             ways.insert(
                 way_key,
-                json!({ "path": rel.display().to_string(), "provenance": null }),
+                json!({ "path": crate::util::path_to_id(rel), "provenance": null }),
             );
         }
     }

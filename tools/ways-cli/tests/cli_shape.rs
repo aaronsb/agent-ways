@@ -39,7 +39,7 @@ fn help_lists_the_fourteen_commands_in_order() {
 #[test]
 fn plumbing_is_hidden_and_still_runs() {
     let help = stdout(&ways(&["--help"]));
-    for name in ["hook", "show", "scan", "manifest", "project-slug", "sessions-root", "events-log-path"] {
+    for name in ["hook", "show", "scan", "lookup", "manifest", "project-slug", "sessions-root", "events-log-path"] {
         assert!(!listed(&help).iter().any(|n| n == name), "{name} is listed");
         assert!(ways(&[name, "--help"]).status.success(), "{name} --help fails");
     }
