@@ -593,6 +593,9 @@ enum AuthorCommand {
         /// Print the tree-sampled probe set as TSV: prompt, expected_way, kind, role, must_not
         #[arg(long, conflicts_with = "tsv")]
         probes: bool,
+        /// With --probes: the multi-sentence set, each way's situational then direct prompt joined (kind `joined`)
+        #[arg(long, requires = "probes")]
+        joined: bool,
     },
     /// Detect or repair hard-wrapped markdown prose
     ///
@@ -1329,7 +1332,7 @@ fn run() -> Result<()> {
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
             AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),
             AuthorCommand::Graph { ways_dir, output } => cmd::graph::run(ways_dir, output),
-            AuthorCommand::Golden { ways_dir, tsv, probes } => cmd::golden::run(ways_dir, tsv, probes),
+            AuthorCommand::Golden { ways_dir, tsv, probes, joined } => cmd::golden::run(ways_dir, tsv, probes, joined),
             AuthorCommand::Reflow { path, fix, json, quiet } => cmd::reflow::run(path, fix, json, quiet),
             AuthorCommand::Permissions { global } => cmd::permissions::audit(global),
         },

@@ -13,7 +13,7 @@ pub(crate) mod lookup;
 mod lookbehind;
 mod order;
 pub(crate) mod probe;
-mod reduce;
+pub(crate) mod reduce;
 pub(crate) mod scoring;
 mod state;
 pub(crate) use scoring::{batch_embed_score, batch_embed_score_with, sibling_corpus};
