@@ -511,6 +511,34 @@ enum AuthorCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Score a probe file through the real prompt scan (ADR-701)
+    ///
+    /// Runs each probe as a fresh session through the scan the hooks run: alias
+    /// rank, eligibility, admission, body confirmation and the firing gate, with
+    /// the relevance judge off and no state carried between probes. `-tool`
+    /// kinds go through the Bash lane with the prompt as the tool description.
+    /// Reports where the expected way ranked and which stage decided it, then
+    /// the pass rate (the way fires and no `must_not` way outranks it).
+    ///
+    /// Build the corpus from the same tree first:
+    /// `ways corpus --ways-dir hooks/ways --output DIR`, then pass
+    /// `--ways-dir hooks/ways --corpus DIR`.
+    Probe {
+        /// Probe file (default: tests/probes/tree-sample.tsv)
+        file: Option<String>,
+        /// Ways root to score against (default: the shipped ways; needs --corpus)
+        #[arg(long, requires = "corpus")]
+        ways_dir: Option<String>,
+        /// Corpus built from that ways root: its directory or ways-corpus-en.jsonl
+        #[arg(long, requires = "ways_dir")]
+        corpus: Option<String>,
+        /// Project directory for `when:` preconditions (default: current)
+        #[arg(long)]
+        project: Option<String>,
+        /// Print one TSV row per probe instead of the table
+        #[arg(long)]
+        tsv: bool,
+    },
     /// Analyze a progressive-disclosure tree
     Tree {
         /// Way path or short name (e.g., "supplychain" or full path)
@@ -1294,6 +1322,9 @@ fn run() -> Result<()> {
                 cmd::template::run(path, description, vocabulary, scope, global)
             }
             AuthorCommand::Match { query, project, all, json } => cmd::match_cmd::run_late(query, project.as_deref(), all, json),
+            AuthorCommand::Probe { file, ways_dir, corpus, project, tsv } => {
+                cmd::probe::run(file, ways_dir, corpus, project.as_deref(), tsv)
+            }
             AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
             AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),

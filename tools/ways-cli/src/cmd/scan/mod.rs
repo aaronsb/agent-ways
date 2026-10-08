@@ -12,6 +12,7 @@ pub(crate) mod sidecar;
 pub(crate) mod lookup;
 mod lookbehind;
 mod order;
+pub(crate) mod probe;
 mod reduce;
 pub(crate) mod scoring;
 mod state;
@@ -273,8 +274,6 @@ fn scan_prompt_surface(
         turn_start: bump_epoch,
     });
     let candidates = collect_candidates(&project_dir);
-    let near_miss_margin = crate::config::global().near_miss_margin;
-    let keyword_floor = crate::config::global().keyword_floor_probability;
 
     // ADR-130: cap embed input to the model's working window via the
     // sentence-salience reducer. Pattern/keyword matching downstream
@@ -318,7 +317,6 @@ fn scan_prompt_surface(
     // response must not be vetoed by that response. Only turns where a hit
     // actually lands below the floor pay the second embed pass, and only
     // when response context contributed at all.
-    let response_contributed = embed_input != query;
     let mut prompt_only_scores: Option<EmbedScores> = None;
 
     let mut context = String::new();
@@ -336,71 +334,12 @@ fn scan_prompt_surface(
             continue;
         }
 
-        // pattern_strict means "this exact text, always": it bypasses the
-        // mask as well as the gate, so a strict pattern can target URL or
-        // code-fence content the mask would otherwise hide (ADR-155 §2).
-        let regex_text: &str = if way.pattern_strict { query } else { &masked };
-        let (thresholds, scan_boost) = effective_thresholds_in_scan(way, session_id, &fired_ids);
-
-        // Additive matching: pattern OR semantic
-        let mut outcome = match_prompt(
-            regex_text,
-            &way.pattern,
-            way.pattern_strict,
-            way.embeddable(),
-            &way.corpus_id,
-            thresholds,
-            &embed_matches,
-            near_miss_margin,
-            keyword_floor,
-            verdicts.as_ref(),
+        let (outcome, needs_parent) = prompt_outcome(
+            way,
+            &PromptSurface { query, masked: &masked, session_id, response_context, embed_matches: &embed_matches, verdicts: verdicts.as_ref() },
+            &fired_ids,
+            &mut prompt_only_scores,
         );
-
-        // Gate re-check against the prompt alone before accepting the veto.
-        let mut used_prompt_only = false;
-        if let PromptMatch::KeywordGated(_) = outcome {
-            if response_contributed {
-                used_prompt_only = true;
-                let scores = prompt_only_scores.get_or_insert_with(|| {
-                    batch_embed_score(&reduce::reduce_for_embed(query, BUDGET_PROMPT))
-                });
-                outcome = match_prompt(
-                    regex_text,
-                    &way.pattern,
-                    way.pattern_strict,
-                    way.embeddable(),
-                    &way.corpus_id,
-                    thresholds,
-                    scores,
-                    near_miss_margin,
-                    keyword_floor,
-                    verdicts.as_ref(),
-                );
-            }
-        }
-
-        // A fire that needed this scan's parent boost is shown only if that
-        // parent is shown too: without it the child would not have fired.
-        let needs_parent = scan_boost
-            && matches!(outcome, PromptMatch::Fired { .. })
-            && !matches!(
-                match_prompt(
-                    regex_text,
-                    &way.pattern,
-                    way.pattern_strict,
-                    way.embeddable(),
-                    &way.corpus_id,
-                    effective_thresholds(way, session_id),
-                    match (used_prompt_only, prompt_only_scores.as_ref()) {
-                        (true, Some(scores)) => scores,
-                        _ => &embed_matches,
-                    },
-                    near_miss_margin,
-                    keyword_floor,
-                    verdicts.as_ref(),
-                ),
-                PromptMatch::Fired { .. }
-            );
 
         match outcome {
             PromptMatch::Fired { channel, score, matched_span } => {
@@ -474,6 +413,99 @@ fn scan_prompt_surface(
     }
 
     Ok(())
+}
+
+/// What the prompt lane decides each way against: the surface, its embed scores
+/// and the matcher's verdicts. Shared by the scan and the probe scorer.
+struct PromptSurface<'a> {
+    query: &'a str,
+    masked: &'a str,
+    session_id: &'a str,
+    response_context: Option<&'a str>,
+    embed_matches: &'a EmbedScores,
+    verdicts: Option<&'a late_interaction::Verdicts>,
+}
+
+/// One way's prompt-lane outcome and whether it fired only on this scan's
+/// parent boost. `fired_ids` are the ways already fired in this scan (candidates
+/// arrive in tree order). `prompt_only_scores` caches the second embed pass the
+/// keyword gate's re-check may need.
+fn prompt_outcome(
+    way: &WayCandidate,
+    surface: &PromptSurface<'_>,
+    fired_ids: &HashSet<String>,
+    prompt_only_scores: &mut Option<EmbedScores>,
+) -> (PromptMatch, bool) {
+    let PromptSurface { query, masked, session_id, response_context, embed_matches, verdicts } = *surface;
+    let near_miss_margin = crate::config::global().near_miss_margin;
+    let keyword_floor = crate::config::global().keyword_floor_probability;
+    let response_contributed = response_context.is_some_and(|rc| !rc.trim().is_empty());
+
+    // pattern_strict means "this exact text, always": it bypasses the
+    // mask as well as the gate, so a strict pattern can target URL or
+    // code-fence content the mask would otherwise hide (ADR-155 §2).
+    let regex_text: &str = if way.pattern_strict { query } else { masked };
+    let (thresholds, scan_boost) = effective_thresholds_in_scan(way, session_id, fired_ids);
+
+    // Additive matching: pattern OR semantic
+    let mut outcome = match_prompt(
+        regex_text,
+        &way.pattern,
+        way.pattern_strict,
+        way.embeddable(),
+        &way.corpus_id,
+        thresholds,
+        embed_matches,
+        near_miss_margin,
+        keyword_floor,
+        verdicts,
+    );
+
+    // Gate re-check against the prompt alone before accepting the veto.
+    let mut used_prompt_only = false;
+    if let PromptMatch::KeywordGated(_) = outcome {
+        if response_contributed {
+            used_prompt_only = true;
+            let scores = prompt_only_scores
+                .get_or_insert_with(|| batch_embed_score(&reduce::reduce_for_embed(query, BUDGET_PROMPT)));
+            outcome = match_prompt(
+                regex_text,
+                &way.pattern,
+                way.pattern_strict,
+                way.embeddable(),
+                &way.corpus_id,
+                thresholds,
+                scores,
+                near_miss_margin,
+                keyword_floor,
+                verdicts,
+            );
+        }
+    }
+
+    // A fire that needed this scan's parent boost is shown only if that
+    // parent is shown too: without it the child would not have fired.
+    let needs_parent = scan_boost
+        && matches!(outcome, PromptMatch::Fired { .. })
+        && !matches!(
+            match_prompt(
+                regex_text,
+                &way.pattern,
+                way.pattern_strict,
+                way.embeddable(),
+                &way.corpus_id,
+                effective_thresholds(way, session_id),
+                match (used_prompt_only, prompt_only_scores.as_ref()) {
+                    (true, Some(scores)) => scores,
+                    _ => embed_matches,
+                },
+                near_miss_margin,
+                keyword_floor,
+                verdicts,
+            ),
+            PromptMatch::Fired { .. }
+        );
+    (outcome, needs_parent)
 }
 
 /// A prompt-lane hit's payload: the channel that fired it, its matched span,
@@ -733,71 +765,7 @@ pub fn command(
     let reduced_for_embed = reduce::reduce_for_embed(&query_for_embed, BUDGET_COMMAND);
     let embed_matches = batch_embed_score(&reduced_for_embed);
 
-    // Way matching: commands regex + pattern regex + semantic (ADR-155 §4).
-    // Hits are collected, then admitted in a fixed order (scan/order.rs).
-    // Payload: (channel, matched span, fired only on this scan's parent boost).
-    let mut hits: Vec<Hit<(&'static str, Option<String>, bool)>> = Vec::new();
-    let mut fired_ids: HashSet<String> = HashSet::new();
-    for way in &candidates {
-        if !session::scope_matches(&way.scope, &scope) {
-            continue;
-        }
-        if !check_when(&way.when_project, &way.when_file_exists, &project_dir) {
-            continue;
-        }
-
-        // Commands regex first, then the description pattern — capture the span
-        // of whichever matched (ADR-153 §3), with the pattern that matched it.
-        let matched = way
-            .commands
-            .as_deref()
-            .and_then(|p| regex_span(p, cmd).map(|s| (p, s)))
-            .or_else(|| match (description, way.pattern.as_deref()) {
-                // Pattern compiles case-insensitively (ADR-157), so match the
-                // description in its original case for a truer captured span.
-                (Some(desc), Some(pat)) => regex_span(pat, desc).map(|s| (pat, s)),
-                _ => None,
-            });
-
-        if let Some((pat, span)) = matched {
-            fired_ids.insert(way.id.clone());
-            hits.push(Hit::explicit(&way.id, pat, &span, ("bash", Some(span.clone()), false)));
-            continue;
-        }
-
-        // Semantic lane at the bash surface (ADR-155 §4): the tool
-        // `description` is Claude's own natural-language statement of intent,
-        // scored with the same per-way thresholds as the prompt surface,
-        // against embeddings this event already computed for checks. State-
-        // triggered ways are excluded, mirroring the task surface — their
-        // trigger is a condition, not a topic. No near-miss logging here:
-        // bash events are the highest-volume surface, and the tuning stream
-        // (ADR-134) is fed by the prompt/task surfaces.
-        if way.trigger.is_some() {
-            continue;
-        }
-        let (t, scan_boost) = effective_thresholds_in_scan(way, session_id, &fired_ids);
-        let prob_en = embed_matches.prob_en(&way.corpus_id, way.embeddable());
-        let prob_multi = embed_matches.prob_multi(&way.corpus_id, way.embeddable());
-        // `semantic:` prefix keeps every consumer that special-cases semantic
-        // channels (drill-down's "no recoverable term" note, span handling)
-        // treating this lane correctly.
-        let fired = if prob_en.is_some_and(|p| p >= t.semantic) {
-            Some(("semantic:bash:en", prob_en))
-        } else if prob_multi.is_some_and(|p| p >= t.semantic) {
-            Some(("semantic:bash:multi", prob_multi))
-        } else {
-            None
-        };
-        if let Some((channel, score)) = fired {
-            // Fired only on this scan's parent boost: shown only with that parent.
-            let base = effective_thresholds(way, session_id).semantic;
-            let needs_parent = scan_boost && !score.is_some_and(|p| p >= base);
-            fired_ids.insert(way.id.clone());
-            hits.push(Hit::scored(&way.id, score, (channel, None, needs_parent)));
-        }
-    }
-    order_hits(&mut hits);
+    let hits = command_hits(&CommandSurface { cmd, description, session_id, scope: &scope, project_dir: &project_dir }, &candidates, &embed_matches);
     let mut shown: HashSet<String> = HashSet::new();
     for hit in &hits {
         let (channel, span, needs_parent) = &hit.payload;
@@ -859,6 +827,92 @@ pub fn command(
     }
 
     Ok(())
+}
+
+/// What the Bash lane matches a command against.
+struct CommandSurface<'a> {
+    cmd: &'a str,
+    description: Option<&'a str>,
+    session_id: &'a str,
+    scope: &'a str,
+    project_dir: &'a str,
+}
+
+/// The Bash lane's way hits for one command, in admission order: the command
+/// and description regexes, then the semantic lane on the tool description.
+/// Shared by the scan and the probe scorer.
+fn command_hits(
+    surface: &CommandSurface<'_>,
+    candidates: &[WayCandidate],
+    embed_matches: &EmbedScores,
+) -> Vec<Hit<(&'static str, Option<String>, bool)>> {
+    let CommandSurface { cmd, description, session_id, scope, project_dir } = *surface;
+    // Way matching: commands regex + pattern regex + semantic (ADR-155 §4).
+    // Hits are collected, then admitted in a fixed order (scan/order.rs).
+    // Payload: (channel, matched span, fired only on this scan's parent boost).
+    let mut hits: Vec<Hit<(&'static str, Option<String>, bool)>> = Vec::new();
+    let mut fired_ids: HashSet<String> = HashSet::new();
+    for way in candidates {
+        if !session::scope_matches(&way.scope, scope) {
+            continue;
+        }
+        if !check_when(&way.when_project, &way.when_file_exists, project_dir) {
+            continue;
+        }
+
+        // Commands regex first, then the description pattern — capture the span
+        // of whichever matched (ADR-153 §3), with the pattern that matched it.
+        let matched = way
+            .commands
+            .as_deref()
+            .and_then(|p| regex_span(p, cmd).map(|s| (p, s)))
+            .or_else(|| match (description, way.pattern.as_deref()) {
+                // Pattern compiles case-insensitively (ADR-157), so match the
+                // description in its original case for a truer captured span.
+                (Some(desc), Some(pat)) => regex_span(pat, desc).map(|s| (pat, s)),
+                _ => None,
+            });
+
+        if let Some((pat, span)) = matched {
+            fired_ids.insert(way.id.clone());
+            hits.push(Hit::explicit(&way.id, pat, &span, ("bash", Some(span.clone()), false)));
+            continue;
+        }
+
+        // Semantic lane at the bash surface (ADR-155 §4): the tool
+        // `description` is Claude's own natural-language statement of intent,
+        // scored with the same per-way thresholds as the prompt surface,
+        // against embeddings this event already computed for checks. State-
+        // triggered ways are excluded, mirroring the task surface — their
+        // trigger is a condition, not a topic. No near-miss logging here:
+        // bash events are the highest-volume surface, and the tuning stream
+        // (ADR-134) is fed by the prompt/task surfaces.
+        if way.trigger.is_some() {
+            continue;
+        }
+        let (t, scan_boost) = effective_thresholds_in_scan(way, session_id, &fired_ids);
+        let prob_en = embed_matches.prob_en(&way.corpus_id, way.embeddable());
+        let prob_multi = embed_matches.prob_multi(&way.corpus_id, way.embeddable());
+        // `semantic:` prefix keeps every consumer that special-cases semantic
+        // channels (drill-down's "no recoverable term" note, span handling)
+        // treating this lane correctly.
+        let fired = if prob_en.is_some_and(|p| p >= t.semantic) {
+            Some(("semantic:bash:en", prob_en))
+        } else if prob_multi.is_some_and(|p| p >= t.semantic) {
+            Some(("semantic:bash:multi", prob_multi))
+        } else {
+            None
+        };
+        if let Some((channel, score)) = fired {
+            // Fired only on this scan's parent boost: shown only with that parent.
+            let base = effective_thresholds(way, session_id).semantic;
+            let needs_parent = scan_boost && !score.is_some_and(|p| p >= base);
+            fired_ids.insert(way.id.clone());
+            hits.push(Hit::scored(&way.id, score, (channel, None, needs_parent)));
+        }
+    }
+    order_hits(&mut hits);
+    hits
 }
 
 // ── File scan ───────────────────────────────────────────────────

@@ -163,7 +163,8 @@ pub(crate) fn run_diagnostic(
 ) -> Option<Vec<DiagRow>> {
     let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
-    let corpus = xdg.join("ways-corpus-en.jsonl");
+    let artifacts = super::scoring::artifact_dir();
+    let corpus = artifacts.join("ways-corpus-en.jsonl");
     let model = xdg.join(crate::paths::EN_MODEL);
     if !corpus.is_file() || !model.is_file() {
         return None;
@@ -172,7 +173,7 @@ pub(crate) fn run_diagnostic(
     if chunks.len() < 2 {
         return None;
     }
-    let sidecar = complete_sidecar(&xdg, &bin, bodies);
+    let sidecar = complete_sidecar(&artifacts, &xdg, &bin, bodies);
     let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
     let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors);
     let (ranked, survivors, capped) = rank_and_admit(matched.per_chunk, bodies, chunks.len(), admission);
@@ -204,7 +205,8 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
     let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
     let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
-    let corpus = xdg.join("ways-corpus-en.jsonl");
+    let artifacts = super::scoring::artifact_dir();
+    let corpus = artifacts.join("ways-corpus-en.jsonl");
     let model = xdg.join(crate::paths::EN_MODEL);
     if !corpus.is_file() || !model.is_file() {
         if dbg { eprintln!("LI: corpus/model missing → fallback"); }
@@ -222,7 +224,7 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
     // Stage 2 (match): one batched pass, all chunks against the corpus. When
     // the sidecar is complete the pass also returns the chunks' vectors.
     let t = std::time::Instant::now();
-    let sidecar = complete_sidecar(&xdg, &bin, bodies);
+    let sidecar = complete_sidecar(&artifacts, &xdg, &bin, bodies);
     if dbg { eprintln!("LI: body sidecar {} ({:.2} ms)", if sidecar.is_some() { "complete" } else { "absent or incomplete" }, ms(t)); }
     let t = std::time::Instant::now();
     let matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
@@ -274,8 +276,8 @@ fn ms(t: std::time::Instant) -> f64 {
 /// ADR-701 §7: the body sidecar in `corpus_dir`, only when it was built with
 /// the installed model and covers every way in `enabled` that the alias
 /// corpus holds, at its content hashes (the manifest's `way_hashes`).
-fn complete_sidecar(corpus_dir: &Path, bin: &Path, enabled: &HashMap<String, PathBuf>) -> Option<Sidecar> {
-    sidecar::state(corpus_dir, bin, enabled.keys().map(String::as_str)).ok()
+fn complete_sidecar(corpus_dir: &Path, engine_dir: &Path, bin: &Path, enabled: &HashMap<String, PathBuf>) -> Option<Sidecar> {
+    sidecar::state_in(corpus_dir, engine_dir, bin, enabled.keys().map(String::as_str)).ok()
 }
 
 /// How stage 5 confirms a survivor: against the body sidecar with the match
@@ -917,7 +919,7 @@ mod tests {
         let enabled = bodies_of(&["a", "b"]);
 
         write_sidecar(&model, &[("a", 0xa), ("b", 0xb), ("off", 0xff)]);
-        assert!(complete_sidecar(&dir, &bin, &enabled).is_some(), "complete");
+        assert!(complete_sidecar(&dir, &dir, &bin, &enabled).is_some(), "complete");
         assert_eq!(state(&["a", "b", "-proj/unregistered"]), Ok(()), "a way the alias corpus lacks does not count");
 
         write_sidecar(&model, &[("a", 0xa), ("b", 0xb)]);
@@ -925,7 +927,7 @@ mod tests {
 
         write_sidecar(&model, &[("a", 0xa), ("off", 0xff)]);
         assert_eq!(state(&["a", "b"]), Err(Fallback::Incomplete { missing: vec!["b".into()], stale: vec![] }));
-        assert!(complete_sidecar(&dir, &bin, &enabled).is_none());
+        assert!(complete_sidecar(&dir, &dir, &bin, &enabled).is_none());
 
         write_sidecar(&model, &[("a", 0xa), ("b", 0xbb), ("off", 0xff)]);
         assert_eq!(state(&["a", "b"]), Err(Fallback::Incomplete { missing: vec![], stale: vec!["b".into()] }));

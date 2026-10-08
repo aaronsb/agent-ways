@@ -236,6 +236,18 @@ pub(crate) fn state<'a>(
     bin: &Path,
     enabled: impl IntoIterator<Item = &'a str>,
 ) -> Result<Sidecar, Fallback> {
+    state_in(corpus_dir, corpus_dir, bin, enabled)
+}
+
+/// [`state`] for artifacts kept apart from the engine: the sidecar and manifest
+/// are read from `corpus_dir` and the model's identity from `engine_dir`. An
+/// isolated corpus (`ways author probe --corpus`) holds the former only.
+pub(crate) fn state_in<'a>(
+    corpus_dir: &Path,
+    engine_dir: &Path,
+    bin: &Path,
+    enabled: impl IntoIterator<Item = &'a str>,
+) -> Result<Sidecar, Fallback> {
     let view = ManifestView::read(&corpus_dir.join("embed-manifest.json"));
     if view.unsupported {
         return Err(Fallback::NoVectors);
@@ -247,7 +259,7 @@ pub(crate) fn state<'a>(
     if !view.vectors {
         return Err(Fallback::BuiltWithoutVectors);
     }
-    let model = model_id(corpus_dir, bin).ok_or(Fallback::ModelMismatch)?;
+    let model = model_id(engine_dir, bin).ok_or(Fallback::ModelMismatch)?;
     sc.check(&model, enabled, &view.alias)?;
     Ok(sc)
 }
