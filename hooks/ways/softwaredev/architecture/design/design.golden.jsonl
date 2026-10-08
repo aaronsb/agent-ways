@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"help me sketch a design for the notifications service, weigh a monolith against splitting it up, and write a proposal"}
+{"kind":"situational","prompt":"before we build, i need to compare two approaches for storing user preferences and lay out what each one costs"}

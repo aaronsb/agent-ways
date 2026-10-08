@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"this test is flaky, it failed again after retry, how many times should i try"}
+{"kind":"situational","prompt":"you've tried the same fix three times and the error is identical, stop looping"}

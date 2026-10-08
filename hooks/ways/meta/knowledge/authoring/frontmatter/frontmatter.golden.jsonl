@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"what fields can go in a way's header and which trigger types need which"}
+{"kind":"situational","prompt":"i wrote a way that should only fire when a certain file exists in the project, which header key do i use"}

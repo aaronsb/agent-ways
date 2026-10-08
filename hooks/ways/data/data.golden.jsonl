@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"should i use sqlite or postgres for this small internal tool"}
+{"kind":"situational","prompt":"i'm building a little app that stores a few thousand records, not sure how heavy a way to keep them i need"}

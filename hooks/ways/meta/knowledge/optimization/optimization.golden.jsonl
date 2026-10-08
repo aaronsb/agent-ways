@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"run the vocabulary suggest on the git way and see what's unused or overlapping"}
+{"kind":"situational","prompt":"some of our guidance never fires and other bits fire on the wrong prompts, can you audit coverage and sharpen the matching"}

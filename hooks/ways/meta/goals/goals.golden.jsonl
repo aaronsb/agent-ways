@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"set a goal so you keep going until the whole test suite passes without me nudging"}
+{"kind":"situational","prompt":"i keep typing 'continue' every turn while you grind through these failing tests; can it run itself until done"}

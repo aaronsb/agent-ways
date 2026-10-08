@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"let's do this one test-first, write the failing case and then make it pass"}
+{"kind":"situational","prompt":"this old module has zero tests and i need to change it, want to pin down what it does now before touching it"}

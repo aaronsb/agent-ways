@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"spike something quick against the real payments sandbox before we commit to this design"}
+{"kind":"situational","prompt":"our plan assumes the vendor endpoint answers in under 200ms and returns small payloads but nobody has actually checked that"}

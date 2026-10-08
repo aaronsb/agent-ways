@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"this pr says it fixes the race, but how do i know it actually does"}
+{"kind":"situational","prompt":"the agent says it wrote thorough tests and everything works, but i don't trust its own summary of what it did"}

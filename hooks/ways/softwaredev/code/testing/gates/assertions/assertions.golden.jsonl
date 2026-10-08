@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"my mock call count assertion feels vacuous, how should i write better assertions and mark a known bug"}
+{"kind":"situational","prompt":"the test stays green even though i broke the feature, the expected value is computed from the same function it tests"}

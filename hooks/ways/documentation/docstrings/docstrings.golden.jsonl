@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"add jsdoc to the exported functions in utils.ts"}
+{"kind":"situational","prompt":"new folks can't tell what any of the public helpers in this module are supposed to take or return without reading the whole body"}

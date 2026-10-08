@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"classify this operation by risk and decide what approval it needs"}
+{"kind":"situational","prompt":"deleting rows in the live table versus reading a config, how do we decide which ones need someone to sign off and which can just run"}

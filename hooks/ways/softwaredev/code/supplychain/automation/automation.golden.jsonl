@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"set up dependabot and codeql for this repo and add a make target for audits"}
+{"kind":"situational","prompt":"we have ci on github already and want vulnerability checks to run automatically on every push without us remembering"}

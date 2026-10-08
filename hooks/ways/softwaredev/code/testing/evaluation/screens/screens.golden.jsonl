@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"snapshot the tui screens at 80x25 and review the golden image diffs"}
+{"kind":"situational","prompt":"the menu looks fine on my wide terminal but users with small windows see text cut off and the popup overflowing"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"run govulncheck and check our replace directives in go.mod"}
+{"kind":"situational","prompt":"this golang service pulls from a module proxy and one require line points at a fork, are the checksums and vulns okay"}

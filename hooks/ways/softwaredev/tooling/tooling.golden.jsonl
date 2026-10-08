@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"let's write a small cli subcommand for this instead of me pasting the same shell steps every time"}
+{"kind":"situational","prompt":"every deploy i run the same eight commands by hand in order and it's tedious and error prone"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"generate a .patch file from my last three commits"}
+{"kind":"situational","prompt":"i need to send my changes as a file to someone who can't pull from my repo, and then they need to apply it"}

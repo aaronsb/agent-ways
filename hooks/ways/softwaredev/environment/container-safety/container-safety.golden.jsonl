@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"make the dockerfile run as a non-root user so build output isn't owned by root"}
+{"kind":"situational","prompt":"files our container build wrote into the mounted folder are now owned by root on my machine"}

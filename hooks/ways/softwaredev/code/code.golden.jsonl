@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"what's our general approach for keeping this codebase healthy, covering quality, tests, safety and speed"}
+{"kind":"situational","prompt":"the repo works but feels fragile and slow and sloppy all over, where do i even start tightening it up"}

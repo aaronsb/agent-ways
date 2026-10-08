@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write me a good commit message for these staged changes"}
+{"kind":"situational","prompt":"i've got a pile of unrelated edits in my working tree and want to record them as separate, tidy history entries"}

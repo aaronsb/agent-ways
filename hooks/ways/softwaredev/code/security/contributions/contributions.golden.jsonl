@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"someone we don't know sent a patch to our repo and i want to make sure it isn't hiding anything nasty"}
+{"kind":"situational","prompt":"a first-time stranger opened a pull request that touches the build script and a few unicode-looking lines, something feels off"}

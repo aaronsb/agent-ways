@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"fix this bug in the parser and make sure the change fits into the existing function rather than a bolted-on workaround"}
+{"kind":"situational","prompt":"i removed the old handler but there are leftover imports and a near-identical copy of the function sitting in another file"}

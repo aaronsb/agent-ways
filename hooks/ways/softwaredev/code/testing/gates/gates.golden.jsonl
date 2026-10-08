@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"before merging, confirm the tests and lint checks actually ran and report each one"}
+{"kind":"situational","prompt":"the scanner said zero findings and ci was green, but i'm not sure it even looked at the right folder"}

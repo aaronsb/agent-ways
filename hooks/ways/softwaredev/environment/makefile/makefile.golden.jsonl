@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"add a make target for lint and format"}
+{"kind":"situational","prompt":"i keep retyping the same build and test commands, is there a standard project entry point for these"}

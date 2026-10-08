@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write an allowlist for the upload filter, should it fail open or closed if the lookup breaks"}
+{"kind":"situational","prompt":"our rate limiter started blocking normal customers, so i'm thinking of just raising the limit until the complaints stop"}

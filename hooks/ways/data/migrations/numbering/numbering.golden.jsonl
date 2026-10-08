@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"what should i name the next migration file, is 0045 ok when 0043 and 0044 exist on different branches"}
+{"kind":"situational","prompt":"two of us each added a new schema change file today and both got the same prefix number, how do we sort that out"}

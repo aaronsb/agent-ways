@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"run npm audit and check for sketchy postinstall scripts or typosquats"}
+{"kind":"situational","prompt":"this npm package we added runs something when it installs and the name is one letter off from a popular library"}

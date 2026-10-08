@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"should we pin exact versions in package.json and commit the lock, what about caret ranges"}
+{"kind":"situational","prompt":"a fresh ci run pulled a newer transitive version than my laptop had and the build behaved differently"}

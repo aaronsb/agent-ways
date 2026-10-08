@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"before you build this, check if we already decided anything about the auth flow in the past records"}
+{"kind":"situational","prompt":"no idea why the queue worker is written like this, was there a reason someone chose it, before i rip it out"}

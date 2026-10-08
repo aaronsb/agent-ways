@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"how do i stop prompt injection in our agent that reads web pages and calls tools"}
+{"kind":"situational","prompt":"the assistant summarised a webpage and then tried to email our config to an address that was buried in the page text"}

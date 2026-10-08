@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"review it, fix whatever you find, then merge and delete the branch"}
+{"kind":"situational","prompt":"this change is huge and touches the core auth path, how careful should the automated checking be before it goes in"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"i can't reproduce the bug the reporter hit, and the reviewer found issues so i need to re-review after each fix"}
+{"kind":"situational","prompt":"my fix passes when i call the function directly but the user said it still breaks in their setup, and the test is flaky"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write a new skill for our release checklist, where should it live and what do we call it"}
+{"kind":"situational","prompt":"i want to package this repeated multi-step procedure so i can trigger it with a slash command, how should it be authored here"}

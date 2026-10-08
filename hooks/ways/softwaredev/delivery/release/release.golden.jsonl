@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"bump the version, update the changelog and tag 2.4.0"}
+{"kind":"situational","prompt":"shipping v3 tomorrow, the exact build that passed ci should go out, not a rebuilt one, and i want a way back"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"which docs and generated files have fallen behind the code","surface":"tool"}
+{"kind":"situational","prompt":"the readme describes things we removed months ago and the lockfile looks old","surface":"tool"}

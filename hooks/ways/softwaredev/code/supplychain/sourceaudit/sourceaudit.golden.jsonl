@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"grep this unfamiliar code for eval, base64 blobs, pickle and other nasty patterns"}
+{"kind":"situational","prompt":"before i run this script a stranger gave me, i want to read it for anything obfuscated or phoning home"}

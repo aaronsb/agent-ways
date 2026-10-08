@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"make this migration safe to run twice, it keeps blowing up when the column already exists"}
+{"kind":"situational","prompt":"the deploy died halfway through my sql script and now when i start it again it errors on stuff that was already created"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"how should we organize our docs folder so there are clear page types and a checker that catches broken links"}
+{"kind":"situational","prompt":"our project documentation has grown into a sprawl with no consistent front matter, and nothing verifies that pages link to each other correctly"}

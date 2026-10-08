@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"this class does way too much, help me refactor it and apply solid"}
+{"kind":"situational","prompt":"reviewing a teammate's module and it's one 900 line file with deep nesting and copy-pasted blocks, what should be cleaned up"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"let's write down the team's rules for code style, test coverage and which dependencies we allow"}
+{"kind":"situational","prompt":"two reviewers keep arguing over tabs, naming and whether we need tests, we should agree once and put it somewhere"}

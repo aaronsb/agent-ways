@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"check this repo's git history for big blobs and any leaked tokens"}
+{"kind":"situational","prompt":"cloned a repo that weighs 2gb for a tiny project, i want to know what's hiding in its past commits"}
