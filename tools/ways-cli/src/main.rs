@@ -538,9 +538,9 @@ enum AuthorCommand {
         /// Print one TSV row per probe instead of the table
         #[arg(long)]
         tsv: bool,
-        /// Run with body score in ranking on or off, whatever `matching.body_rank` says
-        /// (default: the configured value). Recorded in the summary header when on.
-        #[arg(long, value_name = "off|on|scaled", value_parser = ["off", "on", "scaled"])]
+        /// Run with this `matching.body_rank` mode, whatever the config says (default: the
+        /// configured value). The summary header names the mode whenever it is not `off`.
+        #[arg(long, value_name = "off|on|scaled|scaled-single", value_parser = ["off", "on", "scaled", "scaled-single"])]
         body_rank: Option<String>,
         /// Treat every row as an unrelated prompt (its `expected_way` is ignored): print the
         /// way ranked first with its score and the ways that fired, then how many rows fired

@@ -57,14 +57,11 @@ pub(crate) fn prompt(query: &str, project_dir: &str, admission: Admission, body_
     let scope = "agent";
     let candidates = collect_candidates(project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
-    let mut embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
     let competitors = prompt_competitors(&candidates, scope, project_dir);
     let bodies = body_map(competitors.iter().copied());
+    let (embed_matches, _) = late_interaction::single_scores(&reduced, &bodies, body_rank);
     let verdicts = late_interaction::run(&reduced, &bodies, admission, body_rank);
-    if verdicts.is_none() {
-        late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank);
-    }
     let diag = verdicts.as_ref().and_then(|_| late_interaction::run_diagnostic(&reduced, &bodies, usize::MAX, admission, body_rank));
 
     let mut stages: HashMap<String, &'static str> = HashMap::new();

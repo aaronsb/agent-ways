@@ -725,6 +725,24 @@ mod tests {
         assert_eq!(cfg.parent_boost_floor, 0.25);
     }
 
+    /// Which path each mode reaches and whether it keeps the alias scale.
+    #[test]
+    fn body_rank_modes_say_where_they_apply() {
+        // (mode, name, any path, late interaction, alias-scale blend)
+        let table = [
+            (BodyRank::Off, "off", false, false, false),
+            (BodyRank::On, "on", true, true, false),
+            (BodyRank::Scaled, "scaled", true, true, true),
+            (BodyRank::ScaledSingle, "scaled-single", true, false, true),
+        ];
+        for (mode, name, on, late, scaled) in table {
+            assert_eq!(mode.as_str(), name);
+            assert_eq!(BodyRank::parse(name), Some(mode));
+            assert_eq!((mode.is_on(), mode.fuses_late(), mode.is_scaled()), (on, late, scaled), "{name}");
+        }
+        assert_eq!(BodyRank::NAMES, ["off", "on", "scaled", "scaled-single"]);
+    }
+
     #[test]
     fn body_rank_reads_each_mode_and_a_bad_value_keeps_the_default() {
         let mut cfg = Config::default();

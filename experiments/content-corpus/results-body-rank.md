@@ -20,9 +20,9 @@ ways author probe tests/probes/tree-sample-joined.tsv --ways-dir hooks/ways --co
 ways author probe NONE.tsv --ways-dir hooks/ways --corpus DIR --body-rank off|on --unrelated
 ```
 
-`--body-rank` overrides `matching.body_rank` for the run and is named in the summary header only when on. `--unrelated` ignores each row's expected way and prints the way ranked first, its score (summed share on the late path, calibrated probability on the single-vector path) and the ways that fired.
+`--body-rank` overrides `matching.body_rank` for the run and is named in the summary header whenever the mode is not `off` (the first pass printed it only for `on`). `--unrelated` ignores each row's expected way and prints the way ranked first, its score (summed share on the late path, calibrated probability on the single-vector path) and the ways that fired.
 
-**Unrelated sets.** All `none` rows: the 15 prompts of `hooks/ways/golden-none.jsonl` and the 3 `none` rows of `tests/routing-golden.tsv`. All 18 are one sentence, so they exercise only the single-vector path. To cover the late path, 15 joined unrelated prompts were built from the same 18 (nine pairs and six triples, sentences joined with `. `). The converted files are probe TSVs with `expected_way = none`.
+**Unrelated sets.** (Committed as `tests/probes/unrelated-golden-none.tsv`, `unrelated-routing-none.tsv` and `unrelated-joined.tsv`; run them with `--unrelated`.) All `none` rows: the 15 prompts of `hooks/ways/golden-none.jsonl` and the 3 `none` rows of `tests/routing-golden.tsv`. All 18 are one sentence, so they exercise only the single-vector path. To cover the late path, 15 joined unrelated prompts were built from the same 18 (nine pairs and six triples, sentences joined with `. `). The converted files are probe TSVs with `expected_way = none`.
 
 **Flag off is unchanged.** Output with the flag off (default) was compared byte for byte with the output of the binary built from `main` before this branch: `cmp` reports no difference for the table and the `--tsv` form on both `tree-sample.tsv` and `tree-sample-joined.tsv`.
 
@@ -324,7 +324,7 @@ These are the figures, with no choice made. The points the tables show:
 
 The operator chose the scaled blend (w = 0.25) on the single-vector path only, with late interaction left on alias scores, as the default. `scaled-single` is that mode; `off`, `on` and `scaled` stay selectable, and the weight is the constant 0.25 (no config key). Decision records carry the mode string only when the scan actually ranked on fused scores, so a late-path scan under the default carries nothing.
 
-Runs on the final build with the default config (no \`--body-rank\` flag), against the same corpus as above:
+Runs on the final build with the default config (no `--body-rank` flag), against the same corpus as above:
 
 ```
 ways author probe tests/probes/tree-sample.tsv        --ways-dir hooks/ways --corpus DIR --tsv
@@ -340,6 +340,19 @@ ways author probe NONE.tsv                            --ways-dir hooks/ways --co
 | routing-golden `none` rows (3, single) | 0 rows fire | |
 | joined unrelated (15 rows, late) | 0 rows fire | |
 
-On tree-sample the default and `scaled` differ in the two rows of the one multi-sentence probe (\`meta/develop\`, takes the late path): share 0.1172 under the default (alias scores) against 0.1188 under \`scaled\`. Neither passes, and no count changes. The summary header names the mode when the body score is in use, so default-config probe output now carries \` · body rank: scaled-single\`; \`--body-rank off\` reproduces the earlier output byte for byte.
+On tree-sample the default and `scaled` differ in the two rows of the one multi-sentence probe (`meta/develop`, takes the late path): share 0.1172 under the default (alias scores) against 0.1188 under `scaled`. Neither passes, and no count changes. The summary header names the mode when the body score is in use, so default-config probe output now carries ` · body rank: scaled-single`; `--body-rank off` reproduces the earlier output byte for byte.
 
-\`bash tests/test-routing-golden.sh\` scores raw cosines through way-embed and does not read this setting. It reports top-1 40/40 (100%, floor 90%) and none 3/3 below 0.30, the same before and after the change.
+`bash tests/test-routing-golden.sh` scores raw cosines through way-embed and does not read this setting. It reports top-1 40/40 (100%, floor 90%) and none 3/3 below 0.30, the same before and after the change.
+
+### Single-vector path: one pass for scores and vector
+
+The single-vector path used to run `way-embed` twice per prompt with the flag on: once for the alias scores (`--query` on the reduced prompt) and once in `--batch` mode for the query vector. `way-embed match` returns vectors only in `--batch` mode, so the first English pass now uses `--batch --vectors` for a prompt that chunks to one piece, and the alias scores and the section cosines come from the same embedding. The chunk text is the whitespace-normalised reduced prompt; the old alias pass embedded the reduced prompt as is. Prompts of several chunks, a sidecar that is not complete, or a failed pass score exactly as before. With `body_rank: off` nothing changes: output is byte-identical to `main` on both probe sets, table and `--tsv`.
+
+Re-measured with the default config on the same corpus: tree-sample, tree-sample-joined and all three unrelated sets are **byte-identical** to the Shipped default outputs above. No number moved. Probe time over `tests/probes/tree-sample.tsv` (130 rows, release build, three runs each):
+
+| build | per prompt |
+|---|---|
+| before, default config | 96.0 to 96.4 ms |
+| after, default config | 62.6 to 64.1 ms |
+| before, `--body-rank off` | 61.6 to 62.5 ms |
+| after, `--body-rank off` | 61.5 to 61.9 ms |

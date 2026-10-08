@@ -359,35 +359,39 @@ fn fuse_if_on(mode: BodyRank, matched: &mut Matched, sidecar: Option<&Sidecar>) 
     Some(fusion)
 }
 
-/// Body rank on the single-vector path (ADR-701 §6): the one prompt chunk is
-/// matched once more with its vector returned, and each of its English rows
-/// becomes `alias + 0.25 × best section`. A prompt that does not chunk to
-/// exactly one piece, or a sidecar that is not complete, leaves the scores as
-/// they are. The calibration maps the fused cosine as it maps an alias cosine.
-/// Returns whether the scores were fused.
-pub(crate) fn fuse_single(scores: &mut super::scoring::EmbedScores, query: &str, bodies: &HashMap<String, PathBuf>, mode: BodyRank) -> bool {
+/// The English scores for a prompt, with body rank applied on the
+/// single-vector path (ADR-701 §6). A prompt that chunks to exactly one piece,
+/// with the mode on and the sidecar complete, takes one `way-embed` pass that
+/// returns both the alias cosines and the chunk's vector, so the section
+/// cosines are computed on the same text the alias score used. Each English row
+/// becomes `alias + w × best section` (divided by `1 + w` when scaled), and the
+/// calibration maps it as it maps an alias cosine. Any other prompt, or a
+/// failed pass, scores as [`super::scoring::batch_embed_score`] does, unfused.
+/// The flag says whether the scores were fused.
+pub(crate) fn single_scores(query: &str, bodies: &HashMap<String, PathBuf>, mode: BodyRank) -> (super::scoring::EmbedScores, bool) {
+    let plain = || (super::scoring::batch_embed_score(query), false);
     if !mode.is_on() {
-        return false;
+        return plain();
     }
-    let Some(bin) = crate::paths::way_embed() else { return false };
+    let Some(bin) = crate::paths::way_embed() else { return plain() };
     let xdg = crate::paths::corpus_dir();
     let artifacts = super::scoring::artifact_dir();
     let (corpus, model) = (artifacts.join("ways-corpus-en.jsonl"), xdg.join(crate::paths::EN_MODEL));
     let chunks = chunk_surface(query);
-    if chunks.len() != 1 || scores.en.is_none() || !corpus.is_file() || !model.is_file() {
-        return false;
+    if chunks.len() != 1 || !corpus.is_file() || !model.is_file() {
+        return plain();
     }
-    let Some(sidecar) = complete_sidecar(&artifacts, &xdg, &bin, bodies) else { return false };
-    let Some(matched) = batch_match(&bin, &corpus, &model, &chunks, true) else { return false };
-    let Some(v) = matched.vectors.as_ref().and_then(|vs| vs.first()) else { return false };
-    if let Some(rows) = scores.en.as_mut() {
-        for (id, score) in rows.iter_mut() {
-            if let Some((fused, _)) = fused_score(&sidecar, id, v, *score, mode) {
-                *score = fused;
-            }
+    let Some(sidecar) = complete_sidecar(&artifacts, &xdg, &bin, bodies) else { return plain() };
+    let Some(mut matched) = batch_match(&bin, &corpus, &model, &chunks, true) else { return plain() };
+    let (Some(v), Some(mut rows)) = (matched.vectors.as_ref().and_then(|vs| vs.first().cloned()), matched.per_chunk.pop()) else {
+        return plain();
+    };
+    for (id, score) in rows.iter_mut() {
+        if let Some((fused, _)) = fused_score(&sidecar, id, &v, *score, mode) {
+            *score = fused;
         }
     }
-    true
+    (super::scoring::batch_embed_score_given_en(query, rows), true)
 }
 
 /// ADR-701 §7: the body sidecar in `corpus_dir`, only when it was built with
@@ -1086,6 +1090,11 @@ mod tests {
         let mut m = matched();
         assert!(fuse_if_on(BodyRank::On, &mut m, None).is_none());
         assert_eq!(m.per_chunk[0], rows());
+        // The single-vector default leaves late interaction on alias scores.
+        let mut m = matched();
+        assert!(fuse_if_on(BodyRank::ScaledSingle, &mut m, Some(&sc)).is_none());
+        assert_eq!(m.per_chunk[0], rows());
+        let mut m = matched();
         let fusion = fuse_if_on(BodyRank::On, &mut m, Some(&sc)).unwrap();
         assert_eq!(m.per_chunk[0][0].0, "multi", "0.40 + 0.25 × 0.99 outranks 0.50");
         assert_eq!(m.per_chunk[0][1], ("bare".to_string(), 0.50));
