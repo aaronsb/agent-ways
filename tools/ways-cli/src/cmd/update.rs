@@ -357,12 +357,23 @@ fn stale_suite_binaries(app: &Path) -> Vec<Stale> {
 }
 
 /// What an update can tell about one binary: the version it reports, without
-/// its name (`1.35.0 (ways-v1.35.0-0-g48ce52b)`), and the file's size and
-/// modification time, which move on a rebuild at the same version.
+/// its name (`1.35.0 (ways-v1.35.0-0-g48ce52b)`), and its size and content
+/// hash, which move on a rebuild at the same version and stay put when the
+/// same release is downloaded again.
 #[derive(Debug, Clone, PartialEq)]
 struct Seen {
     version: String,
-    stamp: Option<(u64, std::time::SystemTime)>,
+    stamp: Option<(u64, u64)>,
+}
+
+/// A file's size and a hash of its bytes, for telling two copies apart
+/// within one update run.
+fn content_stamp(p: &Path) -> Option<(u64, u64)> {
+    use std::hash::{Hash, Hasher};
+    let bytes = std::fs::read(p).ok()?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    Some((bytes.len() as u64, h.finish()))
 }
 
 /// Each binary an update can refresh: the suite under `bin/` and the cached
@@ -377,7 +388,7 @@ fn binary_versions(app: &Path) -> Vec<(String, Seen)> {
         .filter_map(|(name, p)| {
             let line = version_line(&p)?;
             let version = line.strip_prefix(name.as_str()).unwrap_or(&line).trim().to_string();
-            let stamp = p.metadata().ok().and_then(|m| Some((m.len(), m.modified().ok()?)));
+            let stamp = content_stamp(&p);
             Some((name, Seen { version, stamp }))
         })
         .collect()
@@ -1133,9 +1144,8 @@ mod tests {
 
     #[test]
     fn the_closing_line_names_what_moved_including_a_rebuild_at_the_same_version() {
-        let t0 = std::time::SystemTime::UNIX_EPOCH;
-        let t1 = t0 + std::time::Duration::from_secs(60);
-        let seen = |v: &str, len: u64, at| Seen { version: v.to_string(), stamp: Some((len, at)) };
+        let (t0, t1) = (0xa, 0xb);
+        let seen = |v: &str, len: u64, hash: u64| Seen { version: v.to_string(), stamp: Some((len, hash)) };
         let before = vec![
             ("ways".to_string(), seen("1.35.0 (ways-v1.35.0-0-g48ce52b)", 10, t0)),
             ("attend".to_string(), seen("0.15.3 (a8b0511)", 20, t0)),
@@ -1147,7 +1157,7 @@ mod tests {
         let after = vec![
             ("ways".to_string(), seen("1.35.0 (ways-v1.35.0-3-gabc1234)", 10, t1)),
             ("attend".to_string(), seen("0.15.3 (a8b0511)", 20, t0)),
-            ("way-embed".to_string(), seen("1.1.2", 31, t1)),
+            ("way-embed".to_string(), seen("1.1.2", 30, t1)),
             ("ways-mcp".to_string(), seen("0.1.0", 50, t1)),
         ];
         assert_eq!(
@@ -1159,6 +1169,17 @@ mod tests {
                 "ways-audit 1.0.2 → not answering",
             ]
         );
+    }
+
+    #[test]
+    fn the_same_bytes_written_again_carry_the_same_stamp() {
+        let dir = tmp();
+        let (a, b) = (dir.join("a"), dir.join("b"));
+        std::fs::write(&a, b"release bytes").unwrap();
+        std::fs::write(&b, b"release bytes").unwrap();
+        assert_eq!(content_stamp(&a), content_stamp(&b), "a re-download of the same release is unchanged");
+        std::fs::write(&b, b"rebuilt bytes").unwrap();
+        assert_ne!(content_stamp(&a), content_stamp(&b), "a rebuild is seen");
     }
 
     #[cfg(unix)]
