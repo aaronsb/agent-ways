@@ -62,9 +62,10 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         println!("ways update would, in {}:", app.display());
         println!("  1. scripts/update.sh          — git pull (autostash-safe)");
         println!("     (binary steps 2-4 run only if the pull changed their source, or a suite");
-        println!("      binary's --version is older than its Cargo.toml)");
+        println!("      binary's --version is older than its Cargo.toml, or way-embed's than its source)");
         println!("  2. refresh ways               — if cargo source changed: download pre-built (guarded), else build");
-        println!("  3. refresh way-embed          — if tools/way-embed changed: download pre-built, else build (optional)");
+        println!("  3. refresh way-embed          — if tools/way-embed changed or way-embed is older than its source:");
+        println!("     latest release, kept when at or ahead of it; else build (optional)");
         println!("  4. refresh the rest of tools/suite-bins — if cargo source changed: download pre-built, else build;");
         println!("     a stale binary whose source did not change: latest release in place, else build");
         println!("  5. make relink                — install any suite binary still missing, symlink the suite onto PATH");
@@ -112,7 +113,8 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // touched it.
     let stale = if cargo_changed { Vec::new() } else { stale_suite_binaries(&app) };
 
-    // Content-only update: nothing that feeds a binary changed. Skip the whole
+    // Content-only update: nothing that feeds a binary changed and no binary is
+    // older than its source. Skip the whole
     // download/build/relink dance and just reproject the pulled content (core.md,
     // ways, skills, hooks). This is the fast path the churn report was about — a
     // metadata pull must not trigger a cargo + cmake rebuild of the suite. The one
@@ -359,7 +361,10 @@ fn way_embed_source_version(app: &Path) -> Option<String> {
     std::fs::read_to_string(app.join("tools/way-embed/way-embed.cpp"))
         .ok()?
         .lines()
-        .find_map(|l| Some(l.trim().strip_prefix("#define VERSION")?.trim().trim_matches('"').to_string()))
+        .find_map(|l| {
+            let rest = l.trim().strip_prefix("#define VERSION ")?;
+            Some(rest.split('"').nth(1)?.to_string())
+        })
 }
 
 /// Whether the installed way-embed is older than its source. A binary that
@@ -1075,7 +1080,11 @@ mod tests {
         assert!(!way_embed_stale(&app, &bin), "no source: not stale");
 
         std::fs::create_dir_all(app.join("tools/way-embed")).unwrap();
-        std::fs::write(app.join("tools/way-embed/way-embed.cpp"), "#include <x>\n#define VERSION \"1.2.0\"\nint main() {}\n").unwrap();
+        std::fs::write(
+            app.join("tools/way-embed/way-embed.cpp"),
+            "#define VERSION_MAJOR 9\n#define VERSION \"1.2.0\" // the release\nint main() {}\n",
+        )
+        .unwrap();
         assert_eq!(way_embed_source_version(&app).as_deref(), Some("1.2.0"));
         assert!(way_embed_stale(&app, &bin), "1.1.2 under a 1.2.0 source");
         reports("1.2.0");
