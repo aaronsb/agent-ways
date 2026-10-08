@@ -99,7 +99,12 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     // relies on is really "matches HEAD, assuming the prior build was clean.")
     let (wt_cargo, wt_embed) = working_tree_build_groups(&app);
     let cargo_changed = committed_cargo || wt_cargo;
-    let way_embed_changed = committed_embed || wt_embed;
+    // way-embed's source can also move past the installed binary before its
+    // release exists; once the release ships, no later pull need touch
+    // tools/way-embed, so the version is checked as well (#772).
+    let way_embed_changed = committed_embed
+        || wt_embed
+        || crate::paths::way_embed_in(&crate::paths::corpus_dir()).is_some_and(|bin| way_embed_stale(&app, &bin));
 
     // The diff misses a binary the source moved past before this pull, as when an
     // earlier update ran before the release assets existed (#772). A suite binary
@@ -347,6 +352,23 @@ fn stale_suite_binaries(app: &Path) -> Vec<Stale> {
             version_older(&installed, &source).then_some(Stale { name, installed, source })
         })
         .collect()
+}
+
+/// way-embed's version in its source: the `#define VERSION` in way-embed.cpp.
+fn way_embed_source_version(app: &Path) -> Option<String> {
+    std::fs::read_to_string(app.join("tools/way-embed/way-embed.cpp"))
+        .ok()?
+        .lines()
+        .find_map(|l| Some(l.trim().strip_prefix("#define VERSION")?.trim().trim_matches('"').to_string()))
+}
+
+/// Whether the installed way-embed is older than its source. A binary that
+/// does not run, or a source with no version, is not reported stale.
+fn way_embed_stale(app: &Path, bin: &Path) -> bool {
+    match (installed_version(bin), way_embed_source_version(app)) {
+        (Some(installed), Some(source)) => version_older(&installed, &source),
+        _ => false,
+    }
 }
 
 /// `(package name, version)` of each crate directly under `tools/`.
@@ -1037,6 +1059,31 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&bin).unwrap(), "OLD-BINARY", "and be the same file");
         assert!(!app.join("bin").join(format!("{}.pre-update", exe("ways"))).exists(), "backup consumed by the revert");
         let _ = std::fs::remove_dir_all(&app);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn way_embed_is_stale_only_when_it_reports_a_version_older_than_its_source() {
+        use std::os::unix::fs::PermissionsExt;
+        let app = tmp();
+        let bin = app.join("way-embed");
+        let reports = |v: &str| {
+            std::fs::write(&bin, format!("#!/bin/sh\necho 'way-embed {v}'\n")).unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        reports("1.1.2");
+        assert!(!way_embed_stale(&app, &bin), "no source: not stale");
+
+        std::fs::create_dir_all(app.join("tools/way-embed")).unwrap();
+        std::fs::write(app.join("tools/way-embed/way-embed.cpp"), "#include <x>\n#define VERSION \"1.2.0\"\nint main() {}\n").unwrap();
+        assert_eq!(way_embed_source_version(&app).as_deref(), Some("1.2.0"));
+        assert!(way_embed_stale(&app, &bin), "1.1.2 under a 1.2.0 source");
+        reports("1.2.0");
+        assert!(!way_embed_stale(&app, &bin), "matches its source");
+        reports("1.3.0");
+        assert!(!way_embed_stale(&app, &bin), "ahead of its source");
+        std::fs::remove_file(&bin).unwrap();
+        assert!(!way_embed_stale(&app, &bin), "missing binary: left to relink");
     }
 
     #[cfg(unix)]
