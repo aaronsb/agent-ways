@@ -4,12 +4,12 @@ Measured 2026-10-08 on branch `adr-701-probe-scorer`. Question from ADR-701 §9:
 
 ## Method
 
-`ways author probe` runs each row as a fresh session through the scan's own functions: candidate collection, eligibility, the late-interaction matcher with `matching.admission`, the per-way outcome (keyword gate, semantic channel, parent boost) and the admission order. The relevance judge is off. A probe reads no refire stamp and no parent marker and writes no marker, log or decision record. Candidates and the corpus come from this checkout's `hooks/ways`, not the projection; the embedding engine and MiniLM are the installed ones.
+`ways author probe` runs each row as a fresh session through the scan's own functions: candidate collection, eligibility, the late-interaction matcher with `matching.admission`, the per-way outcome (keyword gate, semantic channel, parent boost) and the admission order. The relevance judge is off. A probe reads no refire stamp and no parent marker and writes no marker, log or decision record. Candidates and the corpus come from this checkout's `hooks/ways`, not the projection; thresholds, admission and toggles come from the operator's global config, as the hook reads them; the embedding engine and MiniLM are the installed ones.
 
 - **Prompt lane.** `direct` and `situational` rows. The scan loop's per-way decision is shared code (`prompt_outcome`), so the probe cannot drift from it.
-- **Tool lane.** `-tool` rows go through the Bash lane's way matching (`command_hits`, the `PreToolUse` entry) with the prompt as the tool description and an empty command. That lane takes free text, so no row is skipped.
+- **Tool lane.** `-tool` rows go through the Bash lane's way matching (`command_hits`, the `PreToolUse` entry) with the prompt as the tool description and an empty command, so free text is scored there. The lane tries a way's `commands` and description `pattern` first and skips a state-triggered way's semantic match. A state-triggered expected way with a regex is scored (a regex miss is a failure, stage `regex-miss`); one with no regex cannot fire there and is skipped.
 - **Rank and share.** Rank is the expected way's position among the ways that compete, best first. On the late-interaction path the ordering quantity is the summed softmax share. On the single-vector path (below) it is the calibrated probability `g(cos)`, which the share column then shows. Margin is the expected way's quantity minus the best other way's.
-- **Stage.** `fired`: the way's body would have been shown. `below-threshold`: it competed and the matcher did not fire it. `not-admitted`, `capped` and `not-confirmed`: it fell at that late-interaction stage. `keyword-gated`: its pattern matched and the keyword floor vetoed it. `masked`: scope or `when:` kept it out of the lane. `state-trigger`: the way fires from a condition, which the Bash lane's semantic matcher skips. `withheld-parent`: it fired only on a parent boost and no parent was shown.
+- **Stage.** `fired`: the way's body would have been shown. `below-threshold`: it competed and the matcher did not fire it. `not-admitted`, `capped` and `not-confirmed`: it fell at that late-interaction stage. `keyword-gated`: its pattern matched and the keyword floor vetoed it. `masked`: scope or `when:` kept it out of the lane. `state-trigger`: the way fires from a condition and has no regex for the Bash lane to try. `regex-miss`: a state-triggered way's regex did not match. `not-embeddable`: no vocabulary and no pattern, so no channel can fire it. `withheld-parent`: it fired only on a parent boost and no parent was shown.
 - **Pass.** The expected way fires and no `must_not` way ranks ahead of it. Top-1 is rank 1.
 
 ```
@@ -24,20 +24,30 @@ Two runs of the command produce identical output.
 
 - **Late interaction ran for 1 of 130 prompt probes.** The matcher chunks the surface into sentences and needs at least two. The other 129 golden prompts are one sentence, so the scan used its single-vector fail-safe for them, as the hook does: a way fires when `g(cos)` clears `semantic_fire_probability`. Their `peak` and `confirm` are empty, and the admission stages (`not-admitted`, `capped`, `not-confirmed`) can occur only for the one probe that ran late interaction. This baseline is mostly a measure of the single-vector gate. A multi-sentence probe set would be needed to measure admission and body confirmation.
 - **Parent boost.** Exercised where a parent fires in the same probe and lowers its child's bar (24 probes). A boost from an earlier turn's parent marker is not exercised: each probe is a fresh session, and the probe does not fake a marker.
-- **Skipped:** 1. A row whose expected way cannot fire on its lane by design (scope, `when:`, or a state trigger) is reported `skipped: lane-ineligible`, with the stage that showed it, and left out of every denominator. This replaces the first run of this baseline, which scored `softwaredev/freshness` on the Bash lane as a failure (131 scored, pass 81/131 = 61.8%, top-1 71/131 = 54.2%). It carries `trigger: session-start`, so the Bash lane's semantic matcher skips it.
+- **Skipped:** 1. A row whose expected way cannot fire on its lane by design is reported `skipped: lane-ineligible` and left out of every denominator. That covers `masked` (scope or `when:`), `state-trigger` with no regex, and `not-embeddable`. A way the operator's config turns off (`disabled_domains` or a toggle) is `skipped: disabled`. The summary prints the config's disabled domains; this run had none. The first run of this baseline scored `softwaredev/freshness` on the Bash lane as a failure (131 scored, pass 81/131 = 61.8%, top-1 71/131 = 54.2%). It carries `trigger: session-start` and no regex.
 
 ## Summary
 
-131 probes, 130 scored, 1 skipped. Admission rule `share`.
+Output of the command above, after the table of rows:
 
 ```
+probes: 131 total, 130 scored, 1 skipped · admission: share · project: /home/aaron/Projects/ai/harness/agent-ways
+operator config: disabled domains: none
+pass = the expected way fires and no must_not way outranks it; top-1 = the expected way ranks first
+
+group                   scored    pass     pass%   top-1    top-1%   fires    fires%
+overall                    130      81     62.3%      71     54.6%      86     66.2%
+role=leaf                   58      43     74.1%      38     65.5%      45     77.6%
+role=parent                 17       8     47.1%       8     47.1%       9     52.9%
+role=root                   55      30     54.5%      25     45.5%      32     58.2%
+kind=direct                 51      44     86.3%      40     78.4%      45     88.2%
+kind=situational            79      37     46.8%      31     39.2%      41     51.9%
+
 single-vector fallback (late interaction could not run): 129 prompt probes
 parent boost exercised by a parent fired in the same probe: 24 probes
 parent boost from an earlier turn's parent marker: not exercised (each probe is a fresh session)
 skipped: softwaredev/freshness (situational-tool): lane-ineligible (state-trigger)
 ```
-
-Skipped: `softwaredev/freshness` (situational-tool): lane-ineligible (state-trigger).
 
 Failing probes by stage:
 

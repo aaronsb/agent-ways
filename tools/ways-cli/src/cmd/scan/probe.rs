@@ -152,20 +152,25 @@ pub(crate) fn bash(text: &str, project_dir: &str) -> ProbeScan {
     let boost_exercised = hits.iter().any(|h| h.payload.2);
 
     let mut stages: HashMap<String, &'static str> = HashMap::new();
-    let lane_ok = |w: &WayCandidate| {
+    // The lane tries a way's `commands` and description `pattern` before it skips
+    // a state-triggered way, so only a trigger with neither is out of reach.
+    let tries_regex = |w: &WayCandidate| w.commands.is_some() || w.pattern.is_some();
+    let in_scope = |w: &WayCandidate| {
         crate::session::scope_matches(&w.scope, scope)
             && super::candidates::check_when(&w.when_project, &w.when_file_exists, project_dir)
-            && w.trigger.is_none()
     };
     for w in &candidates {
-        if !lane_ok(w) {
-            // A state-triggered way (session-start, context-threshold) fires from
-            // a condition; the Bash lane's semantic matcher skips it.
-            stages.insert(w.id.clone(), if w.trigger.is_some() { "state-trigger" } else { "masked" });
+        if !in_scope(w) {
+            stages.insert(w.id.clone(), "masked");
+        } else if w.trigger.is_some() {
+            // A state trigger fires from a condition. With no regex the Bash
+            // lane cannot reach the way; with one, a miss is a miss.
+            stages.insert(w.id.clone(), if tries_regex(w) { "regex-miss" } else { "state-trigger" });
         }
     }
     let fired = admit(&hits, &mut stages, |h| (h.payload.0.to_string(), h.payload.2));
-    let competitors: Vec<&WayCandidate> = candidates.iter().filter(|c| c.embeddable() && lane_ok(c)).collect();
+    let competitors: Vec<&WayCandidate> =
+        candidates.iter().filter(|c| c.embeddable() && in_scope(c) && c.trigger.is_none()).collect();
     let mut rows = single_vector_rows(&competitors, &embed_matches);
     sort_rows(&mut rows);
     for c in &competitors {

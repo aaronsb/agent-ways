@@ -81,9 +81,19 @@ thread_local! {
     static ISOLATION: std::cell::RefCell<Option<Isolation>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Point this thread's scans at `isolation`.
-pub(crate) fn isolate(isolation: Isolation) {
+/// Clears the thread's isolation when dropped.
+pub(crate) struct IsolationGuard;
+
+impl Drop for IsolationGuard {
+    fn drop(&mut self) {
+        ISOLATION.with(|i| *i.borrow_mut() = None);
+    }
+}
+
+/// Point this thread's scans at `isolation` until the guard drops.
+pub(crate) fn isolate(isolation: Isolation) -> IsolationGuard {
     ISOLATION.with(|i| *i.borrow_mut() = Some(isolation));
+    IsolationGuard
 }
 
 /// The isolated ways root, when a probe run set one.
@@ -146,7 +156,7 @@ pub(crate) fn batch_embed_score_with(
     // English-mode installs never load the heavier 768-dim model on a match —
     // gated on output_language, not on corpus-file presence.
     let multi = if multilingual_enabled(&crate::config::global().language) {
-        let multi_corpus = sibling_corpus(corpus, &xdg, "ways-corpus-multi.jsonl");
+        let multi_corpus = sibling_corpus(corpus, &artifacts, "ways-corpus-multi.jsonl");
         let multi_model = xdg.join(crate::paths::MULTI_MODEL);
         run_if_ready(&embed_bin, &multi_corpus, &multi_model, query, "multilingual")
     } else {

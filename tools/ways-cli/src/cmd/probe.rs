@@ -85,13 +85,18 @@ pub fn parse(text: &str) -> Result<Vec<Probe>> {
     Ok(out)
 }
 
+/// Whether the operator's config turns the way off (its domain or the way).
+fn is_disabled(id: &str) -> bool {
+    crate::session::domain_disabled(id.split('/').next().unwrap_or(id)) || crate::session::way_disabled(id)
+}
+
 /// Whether a kind belongs to the tool surface.
 fn is_tool(kind: &str) -> bool {
     kind.ends_with("-tool")
 }
 
 /// Read one scan's result for `probe`.
-pub fn evaluate(probe: &Probe, scan: &ProbeScan) -> Outcome {
+pub fn evaluate(probe: &Probe, scan: &ProbeScan, disabled: impl Fn(&str) -> bool) -> Outcome {
     let position = scan.rows.iter().position(|r| r.id == probe.expected);
     let rank = position.map(|p| p + 1);
     let share = position.map(|p| scan.rows[p].score);
@@ -100,21 +105,32 @@ pub fn evaluate(probe: &Probe, scan: &ProbeScan) -> Outcome {
         if best_other.is_finite() { s - best_other } else { s }
     });
     let stage = scan.stages.get(&probe.expected).copied().unwrap_or("not-in-tree").to_string();
+    let fires = stage == "fired";
     let rank_of = |id: &str| scan.rows.iter().position(|r| r.id == id);
     let mut sibling_over: Vec<String> = probe
         .must_not
         .iter()
         .filter(|m| match (rank_of(m), position) {
             (Some(m), Some(e)) => m < e,
-            (Some(_), None) => true,
+            // The expected way has no row (a pattern-only way is unranked): a
+            // sibling outranks it only when it did not fire.
+            (Some(_), None) => !fires,
             _ => false,
         })
         .cloned()
         .collect();
     sibling_over.sort();
     // A way that cannot fire on this lane by design (scope, `when:`, a state
-    // trigger) is not a miss of the matcher: it is left out of the rates.
-    let skipped = matches!(stage.as_str(), "masked" | "state-trigger").then(|| "lane-ineligible".to_string());
+    // trigger with no regex, no matchable text) or that the operator's config
+    // turned off is not a miss of the matcher: it is left out of the rates.
+    let skipped = if stage == "not-in-tree" && disabled(&probe.expected) {
+        Some("disabled")
+    } else if matches!(stage.as_str(), "masked" | "state-trigger" | "not-embeddable") {
+        Some("lane-ineligible")
+    } else {
+        None
+    }
+    .map(str::to_string);
     Outcome {
         probe: probe.clone(),
         skipped,
@@ -124,7 +140,7 @@ pub fn evaluate(probe: &Probe, scan: &ProbeScan) -> Outcome {
         peak: position.and_then(|p| scan.rows[p].peak),
         confirm: position.and_then(|p| scan.rows[p].confirm),
         also_fired: scan.fired.iter().filter(|(id, _)| *id != probe.expected).map(|(id, _)| id.clone()).collect(),
-        fires: stage == "fired",
+        fires,
         stage,
         sibling_over,
         boost_exercised: scan.boost_exercised,
@@ -182,9 +198,16 @@ pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String
     let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let probes = parse(&text)?;
 
+    let mut guard = None;
     if let (Some(ways), Some(corpus)) = (&ways_dir, &corpus) {
         let corpus = PathBuf::from(corpus);
-        let artifacts = if corpus.is_dir() { corpus } else { corpus.parent().map(Path::to_path_buf).unwrap_or_default() };
+        let artifacts = if corpus.is_dir() {
+            corpus
+        } else if corpus.file_name().is_some_and(|n| n == "ways-corpus-en.jsonl") {
+            corpus.parent().map(Path::to_path_buf).unwrap_or_default()
+        } else {
+            bail!("--corpus names {}, which is not ways-corpus-en.jsonl; pass that file or its directory", corpus.display());
+        };
         if !artifacts.join("ways-corpus-en.jsonl").is_file() {
             bail!("no ways-corpus-en.jsonl in {} (build it: ways corpus --ways-dir {ways} --output DIR)", artifacts.display());
         }
@@ -192,11 +215,12 @@ pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String
         if !ways_dir.is_dir() {
             bail!("{} is not a directory", ways_dir.display());
         }
-        isolate(Isolation { ways_dir, artifacts });
+        guard = Some(isolate(Isolation { ways_dir, artifacts }));
     }
 
     let project_dir = project.map(str::to_string).unwrap_or_else(crate::util::project_dir);
-    let admission = crate::config::Config::load(&project_dir).admission;
+    // The scan reads its thresholds and toggles from the global config; so does the probe.
+    let admission = crate::config::global().admission;
     if crate::paths::way_embed().is_none() || !crate::paths::corpus_dir().join(crate::paths::EN_MODEL).is_file() {
         bail!("embedding engine unavailable (way-embed or the MiniLM model is missing; run make setup)");
     }
@@ -208,8 +232,9 @@ pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String
         } else {
             crate::cmd::scan::probe::prompt(&probe.prompt, &project_dir, admission)
         };
-        results.push(evaluate(probe, &scan));
+        results.push(evaluate(probe, &scan, is_disabled));
     }
+    drop(guard);
 
     if tsv {
         print_tsv(&results);
@@ -271,6 +296,8 @@ fn print_summary(results: &[Outcome], admission: &str, project_dir: &str) {
     let skipped = results.iter().filter(|r| !r.scored()).count();
     println!();
     println!("probes: {} total, {} scored, {skipped} skipped · admission: {admission} · project: {project_dir}", results.len(), all.scored);
+    let off = crate::config::global().disabled_domains.join(",");
+    println!("operator config: disabled domains: {}", if off.is_empty() { "none" } else { off.as_str() });
     println!("pass = the expected way fires and no must_not way outranks it; top-1 = the expected way ranks first");
     println!();
     println!("{:<22}  {:>6}  {:>6}  {:>8}  {:>6}  {:>8}  {:>6}  {:>8}", "group", "scored", "pass", "pass%", "top-1", "top-1%", "fires", "fires%");
@@ -338,7 +365,7 @@ mod tests {
     #[test]
     fn a_fired_first_ranked_way_passes_with_its_margin() {
         let s = scan(&[("a/b", 0.5), ("a/c", 0.25)], &[("a/b", "fired"), ("a/c", "not-admitted")]);
-        let r = evaluate(&probe("a/b", &["a/c"]), &s);
+        let r = evaluate(&probe("a/b", &["a/c"]), &s, |_| false);
         assert_eq!((r.rank, r.stage.as_str(), r.fires), (Some(1), "fired", true));
         assert!((r.margin.unwrap() - 0.25).abs() < 1e-9);
         assert!(r.sibling_over.is_empty());
@@ -348,7 +375,7 @@ mod tests {
     #[test]
     fn a_must_not_way_ahead_of_the_expected_way_fails_it_even_when_it_fires() {
         let s = scan(&[("a/c", 0.6), ("a/b", 0.3), ("a/d", 0.1)], &[("a/b", "fired"), ("a/c", "fired")]);
-        let r = evaluate(&probe("a/b", &["a/c", "a/d"]), &s);
+        let r = evaluate(&probe("a/b", &["a/c", "a/d"]), &s, |_| false);
         assert_eq!(r.rank, Some(2));
         assert_eq!(r.sibling_over, vec!["a/c".to_string()]);
         assert!(r.fires && !r.pass() && !r.top1());
@@ -358,7 +385,7 @@ mod tests {
     #[test]
     fn a_way_that_does_not_fire_reports_its_stage_and_fails() {
         let s = scan(&[("a/b", 0.1)], &[("a/b", "not-admitted")]);
-        let r = evaluate(&probe("a/b", &[]), &s);
+        let r = evaluate(&probe("a/b", &[]), &s, |_| false);
         assert_eq!((r.stage.as_str(), r.fires, r.pass()), ("not-admitted", false, false));
         assert!((r.margin.unwrap() - 0.1).abs() < 1e-9);
     }
@@ -366,7 +393,7 @@ mod tests {
     #[test]
     fn an_unknown_expected_way_is_not_in_tree_and_outranked_by_any_ranked_must_not() {
         let s = scan(&[("a/c", 0.4)], &[]);
-        let r = evaluate(&probe("a/zzz", &["a/c", "a/q"]), &s);
+        let r = evaluate(&probe("a/zzz", &["a/c", "a/q"]), &s, |_| false);
         assert_eq!((r.rank, r.stage.as_str()), (None, "not-in-tree"));
         assert_eq!(r.sibling_over, vec!["a/c".to_string()]);
     }
@@ -374,10 +401,10 @@ mod tests {
     #[test]
     fn a_way_that_cannot_fire_on_the_lane_is_skipped_and_leaves_the_rates() {
         let s = scan(&[("a/c", 0.4)], &[("a/b", "state-trigger"), ("a/c", "fired")]);
-        let skipped = evaluate(&probe("a/b", &[]), &s);
+        let skipped = evaluate(&probe("a/b", &[]), &s, |_| false);
         assert_eq!(skipped.skipped.as_deref(), Some("lane-ineligible"));
         assert!(!skipped.scored() && !skipped.pass());
-        let ok = evaluate(&probe("a/c", &[]), &s);
+        let ok = evaluate(&probe("a/c", &[]), &s, |_| false);
         assert!(ok.scored());
         let (all, _, kinds) = tally(&[skipped, ok]);
         assert_eq!((all.scored, all.passed, all.top1), (1, 1, 1));
@@ -385,9 +412,43 @@ mod tests {
     }
 
     #[test]
+    fn a_trigger_way_with_a_regex_that_misses_is_a_failure_not_a_skip() {
+        let s = scan(&[], &[("a/b", "regex-miss")]);
+        let r = evaluate(&probe("a/b", &[]), &s, |_| false);
+        assert!(r.scored() && !r.pass());
+        assert_eq!(r.stage, "regex-miss");
+    }
+
+    #[test]
+    fn a_pattern_only_way_that_fired_is_not_outranked_by_a_must_not_row() {
+        let fired = scan(&[("a/c", 0.6)], &[("a/b", "fired"), ("a/c", "below-threshold")]);
+        let r = evaluate(&probe("a/b", &["a/c"]), &fired, |_| false);
+        assert!(r.rank.is_none() && r.sibling_over.is_empty() && r.pass());
+        let missed = scan(&[("a/c", 0.6)], &[("a/b", "regex-miss")]);
+        let r = evaluate(&probe("a/b", &["a/c"]), &missed, |_| false);
+        assert_eq!(r.sibling_over, vec!["a/c".to_string()]);
+    }
+
+    #[test]
+    fn an_unembeddable_way_is_skipped_on_the_lane() {
+        let s = scan(&[], &[("a/b", "not-embeddable")]);
+        let r = evaluate(&probe("a/b", &[]), &s, |_| false);
+        assert_eq!(r.skipped.as_deref(), Some("lane-ineligible"));
+    }
+
+    #[test]
+    fn a_way_the_operator_disabled_is_skipped_not_failed() {
+        let s = scan(&[], &[]);
+        let r = evaluate(&probe("a/b", &[]), &s, |id| id.starts_with("a/"));
+        assert_eq!(r.skipped.as_deref(), Some("disabled"));
+        let r = evaluate(&probe("zzz", &[]), &s, |_| false);
+        assert!(r.scored(), "an unknown way that is not disabled stays a failure");
+    }
+
+    #[test]
     fn tally_groups_by_role_and_kind_and_leaves_skipped_rows_out() {
         let s = scan(&[("a/b", 0.5)], &[("a/b", "fired")]);
-        let ok = evaluate(&probe("a/b", &[]), &s);
+        let ok = evaluate(&probe("a/b", &[]), &s, |_| false);
         let mut bad = ok.clone();
         bad.fires = false;
         bad.probe.role = "root".into();
@@ -411,14 +472,15 @@ mod tests {
         let root = std::env::temp_dir().join(format!("ways-probe-fixture-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let ways = root.join("ways");
-        for (dir, desc, vocab, body) in [
-            ("garden", "watering and pruning tomato plants in a vegetable garden", "tomato garden watering pruning soil seedlings compost", "Water tomato plants at the base in the morning. Prune suckers from tomato plants weekly."),
-            ("proxy", "configuring an nginx reverse proxy with tls", "nginx proxy upstream tls certificate reverse load balancer", "Configure the nginx reverse proxy upstream block and the tls certificate paths."),
+        for (dir, desc, vocab, body, extra) in [
+            ("garden", "watering and pruning tomato plants in a vegetable garden", "tomato garden watering pruning soil seedlings compost", "Water tomato plants at the base in the morning. Prune suckers from tomato plants weekly.", ""),
+            ("proxy", "configuring an nginx reverse proxy with tls", "nginx proxy upstream tls certificate reverse load balancer", "Configure the nginx reverse proxy upstream block and the tls certificate paths.", ""),
+            ("watcher", "watching the disk quota on shared hosts", "disk quota watcher hosts usage", "Check the disk quota before a large copy.", "trigger: session-start\npattern: \\bzzqqmarker\\b\n"),
         ] {
             std::fs::create_dir_all(ways.join(dir)).unwrap();
             std::fs::write(
                 ways.join(dir).join(format!("{dir}.md")),
-                format!("---\ndescription: {desc}\nvocabulary: {vocab}\nscope: agent\n---\n# {dir}\n\n{body}\n"),
+                format!("---\ndescription: {desc}\nvocabulary: {vocab}\nscope: agent\n{extra}---\n# {dir}\n\n{body}\n"),
             )
             .unwrap();
         }
@@ -428,7 +490,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&root);
             return;
         }
-        isolate(Isolation { ways_dir: ways.clone(), artifacts: out });
+        let _guard = isolate(Isolation { ways_dir: ways.clone(), artifacts: out });
         let p = Probe {
             prompt: "my tomato plants need watering every morning. the seedlings also need pruning and compost.".into(),
             expected: "garden".into(),
@@ -437,13 +499,29 @@ mod tests {
             must_not: vec!["proxy".into()],
         };
         let project = root.to_string_lossy().to_string();
-        let run = || evaluate(&p, &crate::cmd::scan::probe::prompt(&p.prompt, &project, crate::config::Admission::Share));
+        let run = || evaluate(&p, &crate::cmd::scan::probe::prompt(&p.prompt, &project, crate::config::Admission::Share), |_| false);
         let (a, b) = (run(), run());
-        let _ = std::fs::remove_dir_all(&root);
         assert_eq!(a, b, "a probe carries no state between runs");
         assert_eq!(a.rank, Some(1), "{a:?}");
         assert!(a.sibling_over.is_empty(), "{a:?}");
         assert_eq!(a.stage, "fired", "{a:?}");
         assert!(!a.boost_exercised);
+        assert!(a.late, "a two-sentence surface runs the late-interaction matcher: {a:?}");
+
+        // One sentence has nothing to chunk: the single-vector fail-safe decides.
+        let one = evaluate(&p, &crate::cmd::scan::probe::prompt("my tomato plants need watering", &project, crate::config::Admission::Share), |_| false);
+        assert!(!one.late, "{one:?}");
+
+        // The Bash lane, with the prompt as the tool description.
+        let bash = |text: &str, expected: &str| {
+            let bp = Probe { prompt: text.into(), expected: expected.into(), kind: "situational-tool".into(), role: "root".into(), must_not: Vec::new() };
+            evaluate(&bp, &crate::cmd::scan::probe::bash(text, &project), |_| false)
+        };
+        let hit = bash("check zzqqmarker on the host", "watcher");
+        assert_eq!((hit.stage.as_str(), hit.fires), ("fired", true), "{hit:?}");
+        let miss = bash("check the host", "watcher");
+        assert_eq!(miss.stage, "regex-miss", "{miss:?}");
+        assert!(miss.scored() && !miss.pass());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
