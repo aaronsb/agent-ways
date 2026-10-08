@@ -137,6 +137,8 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
         return Ok(());
     }
 
+    let before = binary_versions(&app);
+
     // 2. Core — ways. Download-first, rename-revert safe, with the ADR-150
     //    downgrade guard: a pre-built that is behind the pulled source is refused
     //    (built from source instead, or the previous binary kept) so the updater
@@ -212,9 +214,13 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     //    un-projected.
     reproject(&app, &ways_bin)?;
 
-    if ways_refreshed {
-        println!("\nUpdate complete. Restart Claude Code to pick up the new version");
-        println!("(a running session keeps the old hooks, ways, and skills in memory).");
+    let changes = version_changes(&before, &binary_versions(&app));
+    if ways_refreshed && changes.is_empty() {
+        println!("\nUpdate complete (binaries unchanged). Restart Claude Code to pick up the");
+        println!("refreshed ways, skills, and hooks.");
+    } else if ways_refreshed {
+        println!("\nUpdate complete: {}. Restart Claude Code to pick up", changes.join(", "));
+        println!("the new versions (a running session keeps the old hooks, ways, and skills in memory).");
     } else {
         println!("\nSource updated and reprojected, but the ways binary refresh failed (no pre-built");
         println!("available and no build toolchain?). Your install still runs the previous binary —");
@@ -352,6 +358,30 @@ fn stale_suite_binaries(app: &Path) -> Vec<Stale> {
             let installed = installed_version(&app.join("bin").join(exe(&name)))?;
             let source = sources.iter().find(|(n, _)| *n == name)?.1.clone();
             version_older(&installed, &source).then_some(Stale { name, installed, source })
+        })
+        .collect()
+}
+
+/// Each binary an update can refresh, with the version it reports: the suite
+/// under `bin/` and the cached way-embed. A binary that does not answer is left out.
+fn binary_versions(app: &Path) -> Vec<(String, String)> {
+    let mut bins: Vec<(String, std::path::PathBuf)> =
+        suite_bins(app).into_iter().map(|n| (n.clone(), app.join("bin").join(exe(&n)))).collect();
+    if let Some(p) = crate::paths::way_embed_in(&crate::paths::corpus_dir()) {
+        bins.push(("way-embed".to_string(), p));
+    }
+    bins.into_iter().filter_map(|(n, p)| Some((n, installed_version(&p)?))).collect()
+}
+
+/// `name old → new` for each binary whose version moved, and `name v (new)` for
+/// one the update installed.
+fn version_changes(before: &[(String, String)], after: &[(String, String)]) -> Vec<String> {
+    after
+        .iter()
+        .filter_map(|(name, v)| match before.iter().find(|(b, _)| b == name) {
+            Some((_, old)) if old == v => None,
+            Some((_, old)) => Some(format!("{name} {old} → {v}")),
+            None => Some(format!("{name} {v} (new)")),
         })
         .collect()
 }
@@ -1064,6 +1094,15 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&bin).unwrap(), "OLD-BINARY", "and be the same file");
         assert!(!app.join("bin").join(format!("{}.pre-update", exe("ways"))).exists(), "backup consumed by the revert");
         let _ = std::fs::remove_dir_all(&app);
+    }
+
+    #[test]
+    fn the_closing_line_names_only_the_binaries_whose_version_moved() {
+        let v = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())).collect::<Vec<_>>();
+        let before = v(&[("ways", "1.35.0"), ("attend", "0.15.3"), ("way-embed", "1.1.2")]);
+        assert!(version_changes(&before, &before).is_empty(), "nothing moved");
+        let after = v(&[("ways", "1.35.1"), ("attend", "0.15.3"), ("way-embed", "1.1.2"), ("ways-mcp", "0.1.0")]);
+        assert_eq!(version_changes(&before, &after), ["ways 1.35.0 → 1.35.1", "ways-mcp 0.1.0 (new)"]);
     }
 
     #[cfg(unix)]
