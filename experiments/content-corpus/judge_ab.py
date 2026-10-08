@@ -34,8 +34,18 @@ them. Band: share >= 0.5 strong, < 0.35 weak, else uncertain (ADR-700 §4).
 
     judge_ab.py prepare     build the corpus and the candidate groups
     judge_ab.py estimate    count input tokens (free endpoint) and project cost
-    judge_ab.py run [--cap USD] [--limit N]   call the judge, cached, with a running tally
+    judge_ab.py run [--cap USD] [--limit N] [--arm A] [--model M] [--provider anthropic|openrouter]
+                    [--sample N] [--max-calls N]
+                            call the judge, cached, with a running tally
     judge_ab.py analyze     tables to stdout (results-judge-ab.md is written from them)
+    judge_ab.py compare [--model M] [--provider P] [--sample N]
+                            paired 4.5 vs a second model on the sampled groups
+
+`--provider openrouter` builds the body as net.rs does for OpenRouter (chat completions, forced
+function tool_choice, max_tokens 96 + 64n, temperature 0 only when the model accepts sampling) and
+reads $OPENROUTER_API_KEY, else ~/.config/agent-ways/keys/openrouter; it records the provider's
+reported cost. `--sample N` draws a seeded stratified sample of golden groups.
+$WAYS_BIN overrides the ways binary (default: bin/ways, else PATH).
 
 The key is read from $ANTHROPIC_API_KEY, else $WAYS_JUDGE_KEY_FILE, else
 ~/.config/agent-ways/keys/anthropic (the ways agent's key file). It is never
@@ -99,8 +109,7 @@ TOPK = {"target": 3, "none": 2}
 
 def build_alias():
     """Alias corpus from this checkout's hooks/ways, as run.py builds it."""
-    ways = REPO / "bin" / "ways"
-    ways = str(ways) if ways.exists() else shutil.which("ways")
+    ways = ways_bin()
     out = OUT / "alias"
     out.mkdir(parents=True, exist_ok=True)
     subprocess.run([ways, "corpus", "--ways-dir", str(run.WAYS), "--output", str(out), "-q"],
@@ -201,7 +210,9 @@ def render_turn(text):
 
 
 def ways_bin():
-    """The ways binary build_alias uses: this checkout's bin/ways, else PATH."""
+    """The ways binary: $WAYS_BIN, else this checkout's bin/ways, else PATH."""
+    if os.environ.get("WAYS_BIN"):
+        return os.environ["WAYS_BIN"]
     b = REPO / "bin" / "ways"
     found = str(b) if b.exists() else shutil.which("ways")
     if not found:
@@ -295,29 +306,63 @@ def tool_schema(n):
                                "confidence": {"type": "number"}}}}}}
 
 
-def request_body(g, arm, desc, authored):
+def accepts_sampling(model):
+    """profile.rs accepts_sampling for the ids used here."""
+    import re
+    i = model.split(":")[0]
+    if "/" in i:
+        p, rest = i.split("/", 1)
+        if p != "anthropic":
+            return True
+        i = rest
+    if not i.startswith("claude-"):
+        return False
+    nums = [x for x in re.split(r"[-.]", i[len("claude-"):]) if x and len(x) <= 2 and x.isdigit()]
+    if not nums:
+        return False
+    if nums[0] == "3":
+        return True
+    return nums[0] == "4" and (len(nums) == 1 or int(nums[1]) <= 6)
+
+
+def request_body(g, arm, desc, authored, model=MODEL, provider="anthropic"):
     texts = [candidate_text(arm, c, desc, authored) for c in g["cands"]]
     guidance = "\n\n".join(f'<guidance id="g{i + 1}">\n{t.replace("<", "‹")}\n</guidance>'
                            for i, t in enumerate(texts))
     prompt = f"{INSTRUCTION}\n\n{guidance}\n\n<conversation>\n{g['turn']}\n</conversation>"
     n = len(texts)
-    return {"model": MODEL, "max_tokens": 64 + 48 * n, "temperature": 0, "system": SYSTEM,
+    if provider == "openrouter":
+        body = {"model": model, "max_tokens": 96 + 64 * n,
+                "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
+                "tools": [{"type": "function", "function": {
+                    "name": TOOL_NAME, "description": TOOL_DESCRIPTION, "parameters": tool_schema(n)}}],
+                "tool_choice": {"type": "function", "function": {"name": TOOL_NAME}}}
+        if accepts_sampling(model):
+            body["temperature"] = 0
+        return body
+    return {"model": model, "max_tokens": 64 + 48 * n, "temperature": 0, "system": SYSTEM,
             "tools": [{"name": TOOL_NAME, "description": TOOL_DESCRIPTION, "strict": True,
                        "input_schema": tool_schema(n)}],
             "tool_choice": {"type": "tool", "name": TOOL_NAME},
             "messages": [{"role": "user", "content": prompt}]}
 
 
-def api_key():
+def api_key(provider="anthropic"):
+    if provider == "openrouter":
+        if os.environ.get("OPENROUTER_API_KEY"):
+            return os.environ["OPENROUTER_API_KEY"].strip()
+        return (Path.home() / ".config/agent-ways/keys/openrouter").read_text().strip()
     if os.environ.get("ANTHROPIC_API_KEY"):
         return os.environ["ANTHROPIC_API_KEY"].strip()
     f = os.environ.get("WAYS_JUDGE_KEY_FILE", str(Path.home() / ".config/agent-ways/keys/anthropic"))
     return Path(f).read_text().strip()
 
 
-def post(url, body, key, timeout=60):
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={
-        "x-api-key": key, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json"})
+def post(url, body, key, timeout=60, provider="anthropic"):
+    hdr = ({"Authorization": f"Bearer {key}", "X-Title": "agent-ways"} if provider == "openrouter"
+           else {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION})
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                 headers={**hdr, "content-type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
 
@@ -327,7 +372,20 @@ def p_yes(relevant, conf):
     return c if relevant else 1.0 - c
 
 
-def parse(reply, n):
+def parse(reply, n, provider="anthropic"):
+    if provider == "openrouter":
+        args = (((reply.get("choices") or [{}])[0].get("message") or {}).get("tool_calls") or [{}])[0] \
+            .get("function", {}).get("arguments")
+        if not isinstance(args, str):
+            raise ValueError("no tool call")
+        out = [None] * n
+        for j in json.loads(args).get("judgements", []):
+            idx = j.get("id", "")[1:]
+            if idx.isdigit() and 1 <= int(idx) <= n and out[int(idx) - 1] is None:
+                out[int(idx) - 1] = p_yes(j["relevant"], j["confidence"])
+        if any(p is None for p in out):
+            raise ValueError(f"judged {sum(p is not None for p in out)} of {n}")
+        return out
     block = next((b for b in reply.get("content", []) if b.get("type") == "tool_use"), None)
     if not block:
         raise ValueError(f"no tool_use block (stop_reason {reply.get('stop_reason')})")
@@ -351,11 +409,43 @@ def load_cache():
         for l in CACHE.read_text().splitlines():
             r = json.loads(l)
             if r.get("error") is None:
-                out[(r["gid"], r["arm"])] = r
+                out[(r["gid"], r["arm"], r.get("model", MODEL), r.get("provider", "anthropic"))] = r
     return out
 
 
+HAIKU55_IN, HAIKU55_OUT = 0.10 / 1e6, 0.50 / 1e6   # cost.rs list price, USD per token
+TOKENIZER_55 = 1.3                                   # net.rs: Haiku 5.5 counts ~30% more tokens
+
+
+def estimate_sample(n_sample, arm="A"):
+    """Free input-token count of the sampled groups (Anthropic count_tokens, Haiku 4.5
+    tokenizer, scaled by TOKENIZER_55), priced at the Haiku 5.5 list price; output is
+    bounded by max_tokens (96 + 64n), the worst case for a forced tool call."""
+    groups, desc = load_groups()
+    authored = authored_nodes()
+    key = api_key()
+    sample = sample_groups(groups, n_sample)
+    tin = tout_max = tout_typ = 0
+    for g in sample:
+        b = request_body(g, arm, desc, authored)
+        b = {k: v for k, v in b.items() if k not in ("max_tokens", "temperature")}
+        tin += post(API + "/count_tokens", b, key)["input_tokens"] * TOKENIZER_55
+        n = len(g["cands"])
+        tout_max += 96 + 64 * n
+        tout_typ += 30 + 25 * n
+    c = lambda o: tin * HAIKU55_IN + o * HAIKU55_OUT
+    print(f"{len(sample)} groups ({sum(g['expected'] == 'none' for g in sample)} none), "
+          f"{sum(len(g['cands']) for g in sample)} candidates, arm {arm}")
+    print(f"input ~{tin:.0f} tok (x{TOKENIZER_55} for the 5.5 tokenizer); output typical ~{tout_typ}, max {tout_max}")
+    print(f"projected cost: typical ${c(tout_typ):.5f}, worst case ${c(tout_max):.5f} (count_tokens is free)")
+
+
 def estimate():
+    args = sys.argv[2:]
+    if "--sample" in args:
+        estimate_sample(int(args[args.index("--sample") + 1]),
+                        args[args.index("--arm") + 1] if "--arm" in args else "A")
+        return
     groups, desc = load_groups()
     authored = authored_nodes()
     key = api_key()
@@ -386,27 +476,73 @@ def estimate():
     print(f"projected total: ${total:.2f} (count_tokens is free)")
 
 
-def run_calls(cap, limit):
+def sample_groups(groups, n, seed=20261008):
+    """Seeded stratified draw of golden groups: targeted (expected way among the
+    candidates), targeted-miss and `none` groups kept in balance, spread over
+    candidate counts. Half the quota goes to `none` groups, half to targeted ones."""
+    gold = [g for g in groups if g["set"] == "golden"]
+    rng = random.Random(seed)
+    nones = [g for g in gold if g["expected"] == "none"]
+    targ = [g for g in gold if g["expected"] != "none"]
+
+    def spread(pool, k):
+        # round-robin over (candidate count, hit/miss) strata, random within each
+        strata = defaultdict(list)
+        for g in pool:
+            hit = any(c["strict"] for c in g["cands"])
+            strata[(len(g["cands"]), hit)].append(g)
+        for v in strata.values():
+            rng.shuffle(v)
+        keys = sorted(strata)
+        out = []
+        while len(out) < k and any(strata[x] for x in keys):
+            for x in keys:
+                if strata[x] and len(out) < k:
+                    out.append(strata[x].pop())
+        return out
+
+    # `none` groups are scarce; whatever they cannot fill goes to the targeted ones.
+    k_none = min(len(nones), n // 2)
+    picked = spread(nones, k_none) + spread(targ, n - k_none)
+    return sorted(picked, key=lambda g: g["gid"])
+
+
+def post_openrouter_cost(reply):
+    u = (reply or {}).get("usage") or {}
+    return u.get("cost"), u.get("prompt_tokens", 0), u.get("completion_tokens", 0)
+
+
+def run_calls(cap, limit, arm=None, model=MODEL, provider="anthropic", sample=0, max_calls=0):
     groups, desc = load_groups()
     authored = authored_nodes()
     cache = load_cache()
-    spent = sum(r["usd"] for r in cache.values())
-    todo = [(g, arm) for g in groups for arm in ARMS if (g["gid"], arm) not in cache]
+    key_of = lambda g, a: (g["gid"], a, model, provider)
+    spent = sum(r["usd"] for k, r in cache.items() if k[2:] == (model, provider))
+    if sample:
+        groups = sample_groups(groups, sample)
+    arms = (arm,) if arm else ARMS
+    todo = [(g, a) for g in groups for a in arms if key_of(g, a) not in cache]
     if limit:
         todo = todo[:limit]
-    print(f"cached {len(cache)} calls (${spent:.3f}); to run {len(todo)}; cap ${cap:.2f}")
-    key = api_key()
+    if max_calls:
+        todo = todo[:max_calls]
+    print(f"cached {len(cache)} calls; {model} via {provider} so far ${spent:.5f}; "
+          f"to run {len(todo)}; cap ${cap:.4f}")
+    key = api_key(provider)
+    url = "https://openrouter.ai/api/v1/chat/completions" if provider == "openrouter" else API
     lock = threading.Lock()
-    state = {"spent": spent, "done": 0, "stop": False}
+    state = {"spent": 0.0, "done": 0, "stop": False}
     f = CACHE.open("a")
 
     def one(item):
-        g, arm = item
-        if state["stop"]:
-            return
-        body = request_body(g, arm, desc, authored)
+        g, a = item
+        with lock:
+            if state["stop"]:
+                return
+            # worst case for one more call is unknown; stop before dispatch once the cap is reached
+        body = request_body(g, a, desc, authored, model, provider)
         n = len(g["cands"])
-        rec = {"set": g["set"], "gid": g["gid"], "arm": arm, "model": MODEL, "n": n,
+        rec = {"set": g["set"], "gid": g["gid"], "arm": a, "model": model, "provider": provider, "n": n,
                "req": body_hash(body), "ways": [c["way"] for c in g["cands"]],
                "strict": [c["strict"] for c in g["cands"]], "family": [c["family"] for c in g["cands"]],
                "share": [c["share"] for c in g["cands"]], "margin": [c["margin"] for c in g["cands"]],
@@ -416,27 +552,33 @@ def run_calls(cap, limit):
         else:
             rec["items"] = [c["item"] for c in g["cands"]]
         err, reply, t0 = None, None, time.perf_counter()
-        for attempt in range(5):
+        # A single attempt: the call budget is a hard bound, so no retries.
+        try:
+            reply = post(url, body, key, provider=provider)
+        except urllib.error.HTTPError as e:
+            detail = ""
             try:
-                reply = post(API, body, key)
-                break
-            except urllib.error.HTTPError as e:
-                err = f"http_{e.code}"
-                if e.code in (429, 500, 502, 503, 529):
-                    time.sleep(2 ** attempt * 2)
-                    continue
-                break
-            except Exception as e:  # transport
-                err = type(e).__name__
-                time.sleep(2 ** attempt)
+                detail = e.read().decode()[:300].replace(key, "<key>")
+            except Exception:
+                pass
+            err = f"http_{e.code}: {detail}"
+        except Exception as e:  # transport
+            err = type(e).__name__
         rec["ms"] = round((time.perf_counter() - t0) * 1000)
-        usage = (reply or {}).get("usage", {})
-        rec["usage"] = {k: usage.get(k, 0) for k in ("input_tokens", "output_tokens")}
-        rec["usd"] = usage.get("input_tokens", 0) * PRICE_IN + usage.get("output_tokens", 0) * PRICE_OUT
-        if reply is not None:
-            err = None
+        if provider == "openrouter":
+            cost, pin, pout = post_openrouter_cost(reply)
+            rec["usage"] = {"input_tokens": pin, "output_tokens": pout}
+            rec["usd"] = cost if isinstance(cost, (int, float)) else 0.0
+            rec["cost_reported"] = isinstance(cost, (int, float))
+            if reply is not None and isinstance(reply.get("error"), dict):
+                err = f"provider: {json.dumps(reply['error'])[:300]}"
+        else:
+            usage = (reply or {}).get("usage", {})
+            rec["usage"] = {k: usage.get(k, 0) for k in ("input_tokens", "output_tokens")}
+            rec["usd"] = usage.get("input_tokens", 0) * PRICE_IN + usage.get("output_tokens", 0) * PRICE_OUT
+        if reply is not None and err is None:
             try:
-                rec["p_yes"] = [round(p, 4) for p in parse(reply, n)]
+                rec["p_yes"] = [round(p, 4) for p in parse(reply, n, provider)]
             except Exception as e:
                 err = f"answer: {e}"
         rec["error"] = err
@@ -445,15 +587,19 @@ def run_calls(cap, limit):
             f.flush()
             state["spent"] += rec["usd"]
             state["done"] += 1
-            if state["done"] % 50 == 0:
-                print(f"  {state['done']}/{len(todo)} calls, running spend ${state['spent']:.3f}", flush=True)
-            if state["spent"] > cap:
+            if state["done"] % 10 == 0:
+                print(f"  {state['done']}/{len(todo)} calls, running spend ${state['spent']:.5f}", flush=True)
+            state["max_call"] = max(state.get("max_call", 0.0), rec["usd"])
+            # Stop before a call that could cross the cap.
+            if state["spent"] + state["max_call"] >= cap:
                 state["stop"] = True
 
-    with ThreadPoolExecutor(4) as ex:
+    # Sequential when a cap this small is in force: no in-flight overshoot.
+    workers = 1 if provider == "openrouter" else 4
+    with ThreadPoolExecutor(workers) as ex:
         list(ex.map(one, todo))
     f.close()
-    print(f"done {state['done']} calls; total spend ${state['spent']:.3f}"
+    print(f"done {state['done']} calls; spend ${state['spent']:.5f}"
           + ("; STOPPED at cap" if state["stop"] else ""))
 
 
@@ -525,6 +671,7 @@ def bootstrap(by_arm, label, a, b, n=2000, seed=7):
 
 def analyze():
     recs = [json.loads(l) for l in CACHE.read_text().splitlines()]
+    recs = [r for r in recs if r.get("model", MODEL) == MODEL and r.get("provider", "anthropic") == "anthropic"]
     ok = [r for r in recs if r.get("error") is None]
     err = [r for r in recs if r.get("error") is not None]
     spent = sum(r["usd"] for r in recs)
@@ -603,6 +750,82 @@ def analyze():
                   f"verdict flips: {dict(flips)}")
 
 
+def compare(model, provider, sample_n, arm="A"):
+    """Paired comparison on the sampled groups: the cached claude-haiku-4-5 rows
+    against `model` via `provider`."""
+    groups, desc = load_groups()
+    authored = authored_nodes()
+    sampled = sample_groups(groups, sample_n)
+    gids = [g["gid"] for g in sampled]
+    cache = load_cache()
+    # The 4.5 rows were cached under an older gid numbering; the Anthropic request
+    # hash identifies the same group (same prompt, candidates and order) in both.
+    by_req = {r["req"]: r for k, r in cache.items() if k[1:] == (arm, MODEL, "anthropic")}
+    old_of = {g["gid"]: by_req.get(body_hash(request_body(g, arm, desc, authored))) for g in sampled}
+    allrecs = [json.loads(l) for l in CACHE.read_text().splitlines()]
+    new_all = [r for r in allrecs if r.get("model") == model and r.get("provider", "anthropic") == provider
+               and r["arm"] == arm and r["gid"] in set(gids)]
+    fails = [r for r in new_all if r.get("error")]
+    print(f"{model} via {provider}: {len(new_all)} calls, {len(fails)} failed, "
+          f"spend ${sum(r['usd'] for r in new_all):.5f}")
+    for r in fails:
+        print("  failure:", r["gid"], r["error"])
+    old, new = {}, {}
+    for g in gids:
+        o = old_of[g]
+        n = cache.get((g, arm, model, provider))
+        if o and n:
+            assert o["ways"] == n["ways"] and o["strict"] == n["strict"], g
+            old[g], new[g] = o, n
+    print(f"paired groups: {len(old)} of {len(gids)}")
+    lat = sorted(r["ms"] for r in new_all if not r.get("error"))
+    if lat:
+        print(f"latency {model}: median {lat[len(lat) // 2]} ms, max {lat[-1]} ms; "
+              f"4.5 cached median {sorted(r['ms'] for r in old.values())[len(old) // 2]} ms")
+
+    def pct(v, q):
+        v = sorted(v)
+        return v[min(len(v) - 1, int(q * len(v)))]
+
+    for label in ("strict", "family"):
+        print(f"\n## labels {label}")
+        res = {}
+        for name, d in (("claude-haiku-4-5", old), (model, new)):
+            u = units([d[g] for g in sorted(d)], label)
+            pos = [p for _, p, y in u if y]
+            neg = [p for _, p, y in u if not y]
+            res[name] = (u, pos, neg)
+            st = stats(u)
+            print(f"{name}: {len(pos)} relevant / {len(neg)} irrelevant; AUC {st['auc']:.3f}; "
+                  f"@0.3 pass irrelevant {sum(p >= .3 for p in neg)}/{len(neg)}, "
+                  f"reject irrelevant {sum(p < .3 for p in neg)}/{len(neg)}, "
+                  f"pass relevant {sum(p >= .3 for p in pos)}/{len(pos)}, "
+                  f"lose relevant {sum(p < .3 for p in pos)}/{len(pos)}")
+            for nm, v in (("relevant", pos), ("irrelevant", neg)):
+                print(f"   P(yes) {nm}: min {min(v):.2f} p25 {pct(v, .25):.2f} median {pct(v, .5):.2f} "
+                      f"p75 {pct(v, .75):.2f} max {max(v):.2f}; mean {sum(v) / len(v):.3f}")
+        (_, pos4, neg4) = res["claude-haiku-4-5"]
+        (_, pos5, neg5) = res[model]
+        fp4 = sum(p >= .3 for p in neg4) / len(neg4)
+        rc4 = sum(p >= .3 for p in pos4) / len(pos4)
+        grid = sorted({p for p in pos5 + neg5} | {0.0, 1.0})
+        # threshold t: pass iff p >= t. Matching pass-rate on irrelevant (<= 4.5's) and recall (>= 4.5's).
+        both = [t for t in grid if sum(p >= t for p in neg5) / len(neg5) <= fp4 + 1e-9
+                and sum(p >= t for p in pos5) / len(pos5) >= rc4 - 1e-9]
+        by_fp = [t for t in grid if sum(p >= t for p in neg5) / len(neg5) <= fp4 + 1e-9]
+        by_rc = [t for t in grid if sum(p >= t for p in pos5) / len(pos5) >= rc4 - 1e-9]
+        print(f"4.5 @0.3: irrelevant pass rate {fp4:.1%}, relevant recall {rc4:.1%}")
+        print(f"{model} threshold matching irrelevant pass rate (lowest t with rate <= 4.5's): "
+              f"{min(by_fp):.2f}" if by_fp else "  none")
+        print(f"{model} threshold matching recall (highest t with recall >= 4.5's): "
+              f"{max(by_rc):.2f}" if by_rc else "  none")
+        print(f"{model} thresholds meeting both: "
+              + (f"{min(both):.2f}..{max(both):.2f}" if both else "none"))
+        for t in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
+            print(f"   t={t:.1f}: irrelevant pass {sum(p >= t for p in neg5) / len(neg5):.1%}, "
+                  f"recall {sum(p >= t for p in pos5) / len(pos5):.1%}")
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "analyze"
     if cmd == "prepare":
@@ -611,9 +834,14 @@ def main():
         estimate()
     elif cmd == "run":
         args = sys.argv[2:]
-        cap = float(args[args.index("--cap") + 1]) if "--cap" in args else 25.0
-        limit = int(args[args.index("--limit") + 1]) if "--limit" in args else 0
-        run_calls(cap, limit)
+        opt = lambda k, d: args[args.index(k) + 1] if k in args else d
+        run_calls(float(opt("--cap", 25.0)), int(opt("--limit", 0)), opt("--arm", None),
+                  opt("--model", MODEL), opt("--provider", "anthropic"), int(opt("--sample", 0)),
+                  int(opt("--max-calls", 0)))
+    elif cmd == "compare":
+        args = sys.argv[2:]
+        opt = lambda k, d: args[args.index(k) + 1] if k in args else d
+        compare(opt("--model", MODEL), opt("--provider", "anthropic"), int(opt("--sample", 60)))
     elif cmd == "analyze":
         analyze()
     else:
