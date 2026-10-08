@@ -8,7 +8,7 @@ agent-tui frame 80x25
 |│     parent_boost_floor  0.3              ││                                  │|
 |│     near_miss_margin    0.1              ││A pattern: hit fires only when the│|
 |│     admission           share            ││calibrated probability reaches    │|
-|│     body_rank           off              ││this floor (ADR-156). Ways opt out│|
+|│     body_rank           scaled-single    ││this floor (ADR-156). Ways opt out│|
 |│ ▸ refire_presets · setting value         ││with pattern_strict: true.        │|
 |│                                          ││                                  │|
 |│                                          ││value    0.15                     │|

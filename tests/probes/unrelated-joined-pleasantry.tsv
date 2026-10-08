@@ -1,0 +1,16 @@
+prompt	expected_way	kind	role	must_not
+ok. what's the capital of mongolia. translate this sentence to french: the meeting has been moved to noon.	none	direct	root	
+Yes. give me a good recipe for sourdough pancakes. who won the world cup in 1998.	none	direct	root	
+Thanks! my sister's wedding is next month and i have no idea what to get her. how many ounces are in a pound.	none	direct	root	
+Yes. tell me a joke about penguins. what's a good name for a golden retriever puppy.	none	direct	root	
+Thanks! how long should i boil an egg for a runny yolk. convert 72 fahrenheit to celsius.	none	direct	root	
+Great! what's the difference between a crocodile and an alligator. suggest a good sci-fi novel for a long flight.	none	direct	root	
+Thanks! how do i say thank you in korean. what's the tallest mountain in south america.	none	direct	root	
+ok. i feel kind of tired today, any tips for a better night's sleep. what is a good recipe for sourdough bread.	none	direct	root	
+Thanks! recommend a good science fiction novel. how many teaspoons are in a tablespoon.	none	direct	root	
+Thanks! what's the capital of mongolia. translate this sentence to french: the meeting has been moved to noon. give me a good recipe for sourdough pancakes.	none	direct	root	
+Hm. who won the world cup in 1998. my sister's wedding is next month and i have no idea what to get her. how many ounces are in a pound.	none	direct	root	
+Great! tell me a joke about penguins. what's a good name for a golden retriever puppy. how long should i boil an egg for a runny yolk.	none	direct	root	
+ok. convert 72 fahrenheit to celsius. what's the difference between a crocodile and an alligator. suggest a good sci-fi novel for a long flight.	none	direct	root	
+Yes. how do i say thank you in korean. what's the tallest mountain in south america. i feel kind of tired today, any tips for a better night's sleep.	none	direct	root	
+Yes. what is a good recipe for sourdough bread. recommend a good science fiction novel. how many teaspoons are in a tablespoon.	none	direct	root	

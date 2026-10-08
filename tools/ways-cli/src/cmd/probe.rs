@@ -205,15 +205,23 @@ fn stage_str(r: &Outcome) -> String {
     r.skipped.as_ref().map_or_else(|| r.stage.clone(), |why| format!("skipped: {why} ({})", r.stage))
 }
 
-pub fn run(
-    file: Option<String>,
-    ways_dir: Option<String>,
-    corpus: Option<String>,
-    project: Option<&str>,
-    tsv: bool,
-    body_rank: Option<crate::config::BodyRank>,
-    unrelated: bool,
-) -> Result<()> {
+/// How a probe run differs from the configured scan: switches for evaluating
+/// matcher changes, none of which the hooks set.
+#[derive(Default)]
+pub struct Eval {
+    /// Override `matching.body_rank` for the run.
+    pub body_rank: Option<crate::config::BodyRank>,
+    /// Print the unrelated-prompt view instead of scoring expected ways.
+    pub unrelated: bool,
+    /// Weight of the best body section in the blend.
+    pub body_rank_weight: Option<f64>,
+    /// Confirm a one-section way against that section.
+    pub single_section_confirm: bool,
+}
+
+pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String>, project: Option<&str>, tsv: bool, eval: Eval) -> Result<()> {
+    let Eval { body_rank, unrelated, body_rank_weight, single_section_confirm } = eval;
+    crate::cmd::scan::set_body_rank_tuning(body_rank_weight, single_section_confirm);
     let path = PathBuf::from(file.unwrap_or_else(|| DEFAULT_FILE.to_string()));
     let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let probes = parse(&text)?;
@@ -298,7 +306,7 @@ fn print_unrelated(probes: &[Probe], project_dir: &str, admission: crate::config
         );
     }
     println!();
-    let body_rank = if body_rank.is_on() { " · body rank: on" } else { "" };
+    let body_rank = if body_rank.is_on() { format!(" · body rank: {}", body_rank.as_str()) } else { String::new() };
     println!("unrelated: {} rows, {fired_rows} fired a way, {late_rows} on the late path · admission: {}{body_rank}", probes.len(), admission.as_str());
 }
 
@@ -355,7 +363,7 @@ fn print_summary(results: &[Outcome], admission: &str, body_rank: crate::config:
     let skipped = results.iter().filter(|r| !r.scored()).count();
     println!();
     // Named only when on, so a run with the flag off prints what it always has.
-    let body_rank = if body_rank.is_on() { " · body rank: on" } else { "" };
+    let body_rank = if body_rank.is_on() { format!(" · body rank: {}", body_rank.as_str()) } else { String::new() };
     println!("probes: {} total, {} scored, {skipped} skipped · admission: {admission}{body_rank} · project: {project_dir}", results.len(), all.scored);
     let off = crate::config::global().disabled_domains.join(",");
     println!("operator config: disabled domains: {}", if off.is_empty() { "none" } else { off.as_str() });

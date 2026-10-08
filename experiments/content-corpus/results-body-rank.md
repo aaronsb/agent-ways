@@ -20,9 +20,9 @@ ways author probe tests/probes/tree-sample-joined.tsv --ways-dir hooks/ways --co
 ways author probe NONE.tsv --ways-dir hooks/ways --corpus DIR --body-rank off|on --unrelated
 ```
 
-`--body-rank` overrides `matching.body_rank` for the run and is named in the summary header only when on. `--unrelated` ignores each row's expected way and prints the way ranked first, its score (summed share on the late path, calibrated probability on the single-vector path) and the ways that fired.
+`--body-rank` overrides `matching.body_rank` for the run and is named in the summary header whenever the mode is not `off` (the first pass printed it only for `on`). `--unrelated` ignores each row's expected way and prints the way ranked first, its score (summed share on the late path, calibrated probability on the single-vector path) and the ways that fired.
 
-**Unrelated sets.** All `none` rows: the 15 prompts of `hooks/ways/golden-none.jsonl` and the 3 `none` rows of `tests/routing-golden.tsv`. All 18 are one sentence, so they exercise only the single-vector path. To cover the late path, 15 joined unrelated prompts were built from the same 18 (nine pairs and six triples, sentences joined with `. `). The converted files are probe TSVs with `expected_way = none`.
+**Unrelated sets.** (Committed as `tests/probes/unrelated-golden-none.tsv`, `unrelated-routing-none.tsv` and `unrelated-joined.tsv`; run them with `--unrelated`.) All `none` rows: the 15 prompts of `hooks/ways/golden-none.jsonl` and the 3 `none` rows of `tests/routing-golden.tsv`. All 18 are one sentence, so they exercise only the single-vector path. To cover the late path, 15 joined unrelated prompts were built from the same 18 (nine pairs and six triples, sentences joined with `. `). The converted files are probe TSVs with `expected_way = none`.
 
 **Flag off is unchanged.** Output with the flag off (default) was compared byte for byte with the output of the binary built from `main` before this branch: `cmp` reports no difference for the table and the `--tsv` form on both `tree-sample.tsv` and `tree-sample-joined.tsv`.
 
@@ -156,3 +156,229 @@ ADR-701 §6 adopts the fused score only when the evaluation shows a gain with no
 - The Bash lane and the multilingual lane.
 - A calibration refit on fused cosines (ADR-700 §10 measured fusion on top-1 only).
 - The 18 unrelated prompts are all one sentence; the 15 joined ones are synthetic combinations of the same 18.
+
+## 2026-10-08, second pass: the scaled blend and the lone-section confirm
+
+Measured on branch `adr-701-body-rank-scaled`, after #881 merged. The first pass found that `alias + 0.25 × best section` raises every score above the scale the calibration was fitted on, and the rescaled control looked better than the literal formula. This pass adds that blend as a mode and measures it beside the others.
+
+### Method
+
+- **`matching.body_rank: scaled`.** Rank score = (alias + w × best section) / (1 + w), w = 0.25. It sits on the alias scale, so the calibration `g(s)` and the peak and share gates keep their meaning. `on` stays the literal ADR formula for comparison. Confirmation under both is the first pass's rule: set aside the contributing section, and a way with one section or none confirms against its alias cosine on the won chunk (raw, never scaled).
+- **Lone-section confirm variant.** A way with exactly one section confirms against that section, reusing it, instead of against its alias. It is a probe-only switch (`--single-section-confirm`) and cannot be set from config.
+- **Weight.** `--body-rank-weight W` (probe only) sets w for the sweep. Without it w is 0.25.
+- **Runs.** The same corpus, probe files and unrelated sets as the first pass, one binary. Commands, with `NONE` standing for each of the three unrelated files:
+
+```
+ways author probe tests/probes/tree-sample.tsv        --ways-dir hooks/ways --corpus DIR --body-rank off|on|scaled [--single-section-confirm] [--body-rank-weight W] --tsv
+ways author probe tests/probes/tree-sample-joined.tsv --ways-dir hooks/ways --corpus DIR (same flags) --tsv
+ways author probe NONE.tsv                            --ways-dir hooks/ways --corpus DIR (same flags) --unrelated
+```
+
+- **Check on the harness.** The `off` and `on` outputs of this build are byte-identical to the first pass's, and `off` is byte-identical to the build from `main` before either pass.
+- "Other ways fired" is the number of ways that fired on a probe besides the expected one, summed over rows. Flipped rows are against `off`. The flipped rows for `on` are in the first pass above.
+
+### tree-sample (single-sentence)
+
+| config | scored | pass | top-1 | expected fires | other ways fired |
+|---|---|---|---|---|---|
+| off | 130 | 81 | 71 | 86 | 456 |
+| on | 130 | 97 | 74 | 107 | 1375 |
+| scaled | 130 | 86 | 75 | 91 | 433 |
+| scaled + lone-section confirm | 130 | 86 | 75 | 91 | 433 |
+| on + lone-section confirm | 130 | 97 | 74 | 107 | 1375 |
+
+Stage of the expected way, all scored rows:
+
+| stage | off | on | scaled | scaled + lone-section confirm | on + lone-section confirm |
+|---|---|---|---|---|---|
+| below-threshold | 42 | 22 | 38 | 38 | 22 |
+| fired | 86 | 107 | 91 | 91 | 107 |
+| keyword-gated | 1 | 0 | 0 | 0 | 0 |
+| not-admitted | 1 | 1 | 1 | 1 | 1 |
+
+Flipped rows, off to scaled: 6 fail to pass, 1 pass to fail.
+
+| flip | expected way | stage off to scaled | prompt |
+|---|---|---|---|
+| pass to fail | meta/trust/delegation | fired to below-threshold | the draft is done, now publish it as me to the shared calendar and inv |
+| fail to pass | meta/wrap | keyword-gated to fired | i'm done for today, wrap things up and give me something to paste next |
+| fail to pass | meta/wrap | fired to fired | context is nearly full and it's late, land what's in flight and leave  |
+| fail to pass | softwaredev/architecture/threat-modeling | below-threshold to fired | we're about to expose an internal service to partners and i want to th |
+| fail to pass | softwaredev/code/supplychain/depscan | below-threshold to fired | before running the install on this project, check whether any of the p |
+| fail to pass | softwaredev/code/testing/gates | below-threshold to fired | the scanner said zero findings and ci was green, but i'm not sure it e |
+| fail to pass | softwaredev/code/testing/gates/assertions | below-threshold to fired | the test stays green even though i broke the feature, the expected val |
+
+Flipped rows, off to scaled + lone-section confirm: 6 fail to pass, 1 pass to fail.
+
+| flip | expected way | stage off to scaled + lone-section confirm | prompt |
+|---|---|---|---|
+| pass to fail | meta/trust/delegation | fired to below-threshold | the draft is done, now publish it as me to the shared calendar and inv |
+| fail to pass | meta/wrap | keyword-gated to fired | i'm done for today, wrap things up and give me something to paste next |
+| fail to pass | meta/wrap | fired to fired | context is nearly full and it's late, land what's in flight and leave  |
+| fail to pass | softwaredev/architecture/threat-modeling | below-threshold to fired | we're about to expose an internal service to partners and i want to th |
+| fail to pass | softwaredev/code/supplychain/depscan | below-threshold to fired | before running the install on this project, check whether any of the p |
+| fail to pass | softwaredev/code/testing/gates | below-threshold to fired | the scanner said zero findings and ci was green, but i'm not sure it e |
+| fail to pass | softwaredev/code/testing/gates/assertions | below-threshold to fired | the test stays green even though i broke the feature, the expected val |
+
+### tree-sample-joined (late)
+
+| config | scored | pass | top-1 | expected fires | other ways fired |
+|---|---|---|---|---|---|
+| off | 79 | 55 | 64 | 57 | 52 |
+| on | 79 | 54 | 64 | 55 | 69 |
+| scaled | 79 | 54 | 65 | 54 | 44 |
+| scaled + lone-section confirm | 79 | 52 | 65 | 52 | 44 |
+| on + lone-section confirm | 79 | 51 | 64 | 52 | 68 |
+
+Stage of the expected way, all scored rows:
+
+| stage | off | on | scaled | scaled + lone-section confirm | on + lone-section confirm |
+|---|---|---|---|---|---|
+| below-threshold | 2 | 2 | 2 | 2 | 2 |
+| fired | 57 | 55 | 54 | 52 | 52 |
+| not-admitted | 8 | 7 | 8 | 8 | 7 |
+| not-confirmed | 12 | 15 | 15 | 17 | 18 |
+
+Flipped rows, off to scaled: 6 fail to pass, 7 pass to fail.
+
+| flip | expected way | stage off to scaled | prompt |
+|---|---|---|---|
+| pass to fail | documentation | fired to not-confirmed | our project documentation has grown into a sprawl with no consistent f |
+| pass to fail | documentation/api | fired to not-confirmed | the mobile client keeps getting different error bodies from different  |
+| pass to fail | itops/incident | fired to not-confirmed | customers are reporting errors since the last release, should we rever |
+| pass to fail | meta/choices | fired to not-confirmed | you went with the redis approach and never told me there were other wa |
+| pass to fail | meta/knowledge/authoring/pii-free | fired to not-confirmed | this guidance file i'm about to share still has my coworker's name and |
+| pass to fail | meta/trust/delegation | fired to not-confirmed | the draft is done, now publish it as me to the shared calendar and inv |
+| fail to pass | meta/wrap | fired to fired | context is nearly full and it's late, land what's in flight and leave  |
+| fail to pass | softwaredev/architecture | not-confirmed to fired | we keep arguing about where responsibilities should live across the wh |
+| fail to pass | softwaredev/architecture/threat-modeling | not-confirmed to fired | we're about to expose an internal service to partners and i want to th |
+| pass to fail | softwaredev/delivery/groundwork/permission | fired to not-confirmed | all our recent patches are in the files we're allowed to edit while th |
+| fail to pass | softwaredev/delivery/release | fired to fired | shipping v3 tomorrow, the exact build that passed ci should go out, no |
+| fail to pass | softwaredev/environment | not-confirmed to fired | new laptop, nothing builds yet, not sure whether it's missing installs |
+| fail to pass | workstation/pkghistory | not-confirmed to fired | this laptop has accumulated a ton of random software over three years  |
+
+Flipped rows, off to scaled + lone-section confirm: 4 fail to pass, 7 pass to fail.
+
+| flip | expected way | stage off to scaled + lone-section confirm | prompt |
+|---|---|---|---|
+| pass to fail | documentation | fired to not-confirmed | our project documentation has grown into a sprawl with no consistent f |
+| pass to fail | documentation/api | fired to not-confirmed | the mobile client keeps getting different error bodies from different  |
+| pass to fail | itops/incident | fired to not-confirmed | customers are reporting errors since the last release, should we rever |
+| pass to fail | meta/choices | fired to not-confirmed | you went with the redis approach and never told me there were other wa |
+| pass to fail | meta/knowledge/authoring/pii-free | fired to not-confirmed | this guidance file i'm about to share still has my coworker's name and |
+| pass to fail | meta/trust/delegation | fired to not-confirmed | the draft is done, now publish it as me to the shared calendar and inv |
+| fail to pass | meta/wrap | fired to fired | context is nearly full and it's late, land what's in flight and leave  |
+| fail to pass | softwaredev/architecture/threat-modeling | not-confirmed to fired | we're about to expose an internal service to partners and i want to th |
+| pass to fail | softwaredev/delivery/groundwork/permission | fired to not-confirmed | all our recent patches are in the files we're allowed to edit while th |
+| fail to pass | softwaredev/delivery/release | fired to fired | shipping v3 tomorrow, the exact build that passed ci should go out, no |
+| fail to pass | workstation/pkghistory | not-confirmed to fired | this laptop has accumulated a ton of random software over three years  |
+
+### Unrelated prompts
+
+| set | config | rows | rows firing | max top score | mean top score |
+|---|---|---|---|---|---|
+| golden-none.jsonl (single) | off | 15 | 0 | 0.4370 | 0.1048 |
+| golden-none.jsonl (single) | on | 15 | 1 | 0.7876 | 0.1825 |
+| golden-none.jsonl (single) | scaled | 15 | 0 | 0.4606 | 0.0916 |
+| golden-none.jsonl (single) | scaled + lone-section confirm | 15 | 0 | 0.4606 | 0.0916 |
+| golden-none.jsonl (single) | on + lone-section confirm | 15 | 1 | 0.7876 | 0.1825 |
+| routing-golden none (single) | off | 3 | 0 | 0.0437 | 0.0372 |
+| routing-golden none (single) | on | 3 | 0 | 0.0856 | 0.0697 |
+| routing-golden none (single) | scaled | 3 | 0 | 0.0430 | 0.0362 |
+| routing-golden none (single) | scaled + lone-section confirm | 3 | 0 | 0.0430 | 0.0362 |
+| routing-golden none (single) | on + lone-section confirm | 3 | 0 | 0.0856 | 0.0697 |
+| joined unrelated (late) | off | 15 | 0 | 0.2266 | 0.1374 |
+| joined unrelated (late) | on | 15 | 0 | 0.2417 | 0.1492 |
+| joined unrelated (late) | scaled | 15 | 0 | 0.1970 | 0.1288 |
+| joined unrelated (late) | scaled + lone-section confirm | 15 | 0 | 0.1970 | 0.1288 |
+| joined unrelated (late) | on + lone-section confirm | 15 | 0 | 0.2417 | 0.1492 |
+
+### Weight sweep, scaled, tree-sample (single-sentence)
+
+| w | pass | top-1 | expected fires | other ways fired | golden-none rows firing | golden-none max top | routing none firing |
+|---|---|---|---|---|---|---|---|
+| off (no body) | 81 | 71 | 86 | 456 | 0 | 0.4370 | 0 |
+| 0.15 | 82 | 71 | 87 | 437 | 0 | 0.4524 | 0 |
+| 0.25 | 86 | 75 | 91 | 433 | 0 | 0.4606 | 0 |
+| 0.35 | 87 | 73 | 93 | 447 | 0 | 0.4677 | 0 |
+
+### Weight sweep, scaled, tree-sample-joined (late), same runs
+
+| w | pass | top-1 | expected fires | other ways fired | joined-unrelated rows firing |
+|---|---|---|---|---|---|
+| off (no body) | 55 | 64 | 57 | 52 | 0 |
+| 0.15 | 52 | 65 | 53 | 44 | 0 |
+| 0.25 | 54 | 65 | 54 | 44 | 0 |
+| 0.35 | 53 | 66 | 53 | 45 | 0 |
+
+### Reading the numbers
+
+These are the figures, with no choice made. The points the tables show:
+
+- On the single-sentence set, `scaled` gains 5 passes and 4 top-1 over `off`, fires 5 more expected ways, fires fewer other ways (433 against 456), and fires no unrelated row. `on` gains 16 passes and fires one unrelated row and 1375 other ways.
+- On the late-interaction set no mode beats `off` on passes (55): `on` 54, `scaled` 54, `scaled` with the lone-section confirm 52, `on` with it 51. Top-1 is 64 (`off`, `on`), 65 (`scaled`).
+- The lone-section confirm changes nothing on the single-sentence set, which has no confirmation stage. On the late set it lowers passes by 2 under `scaled` and 3 under `on`, because it takes back the two or three rows the alias confirm admitted (`softwaredev/architecture` and `softwaredev/environment` stop passing under `scaled`).
+- The sweep on the single-sentence set: pass 81 (off), 82, 86, 87 at w = 0.15, 0.25, 0.35; top-1 71, 71, 75, 73; other ways fired 456, 437, 433, 447. No unrelated row fires at any w; the golden-none maximum top score is 0.4370, 0.4524, 0.4606, 0.4677. On the late set, pass is 52, 54, 53 at the three weights against 55 for `off`.
+
+## Shipped default: `body_rank: scaled-single`
+
+The operator chose the scaled blend (w = 0.25) on the single-vector path only, with late interaction left on alias scores, as the default. `scaled-single` is that mode; `off`, `on` and `scaled` stay selectable, and the weight is the constant 0.25 (no config key). Decision records carry the mode string only when the scan actually ranked on fused scores, so a late-path scan under the default carries nothing.
+
+Runs on the final build with the default config (no `--body-rank` flag), against the same corpus as above:
+
+```
+ways author probe tests/probes/tree-sample.tsv        --ways-dir hooks/ways --corpus DIR --tsv
+ways author probe tests/probes/tree-sample-joined.tsv --ways-dir hooks/ways --corpus DIR --tsv
+ways author probe NONE.tsv                            --ways-dir hooks/ways --corpus DIR --unrelated   (golden-none, routing-golden none, joined unrelated)
+```
+
+| set | result under the default | compared with |
+|---|---|---|
+| tree-sample (single-sentence) | pass 86, top-1 75, expected way fires 91, other ways fired 433 | the `scaled` numbers above: the same |
+| tree-sample-joined (late) | pass 55, top-1 64, expected way fires 57, other ways fired 52 | `off`: rows byte-identical; the whole output identical once the header's `body rank: scaled-single` is removed |
+| golden-none.jsonl (15 rows, single) | 0 rows fire | |
+| routing-golden `none` rows (3, single) | 0 rows fire | |
+| joined unrelated (15 rows, late) | 0 rows fire | |
+
+On tree-sample the default and `scaled` differ in two rows that carry the same multi-sentence prompt (`meta/develop`), which takes the late path: share 0.1172 under the default (alias scores) against 0.1188 under `scaled`. Neither passes, and no count changes. The summary header names the mode whenever it is not `off`, so default-config probe output carries ` · body rank: scaled-single`; `--body-rank off` reproduces the earlier output byte for byte.
+
+`bash tests/test-routing-golden.sh` scores raw cosines through way-embed and does not read this setting. It reports top-1 40/40 (100%, floor 90%) and none 3/3 below 0.30, the same before and after the change.
+
+### Single-vector path: one pass for scores and vector
+
+The single-vector path used to run `way-embed` twice per prompt with the flag on: once for the alias scores (`--query` on the reduced prompt) and once in `--batch` mode for the query vector. `way-embed match` returns vectors only in `--batch` mode, so the first English pass now uses `--batch --vectors` for a prompt that chunks to one piece, and the alias scores and the section cosines come from the same embedding. The chunk text is the reduced prompt after the scan's chunker has collapsed whitespace, dropped fragments under 12 characters and dropped duplicate sentences; the old alias pass embedded the reduced prompt as is. The two texts differ when the chunker drops something, such as a leading "Thanks!", which the next section measures. Prompts of several chunks, a sidecar that is not complete, or a failed pass score exactly as before. With `body_rank: off` nothing changes: output is byte-identical to `main` on both probe sets, table and `--tsv`.
+
+Re-measured with the default config on the same corpus: tree-sample, tree-sample-joined and all three unrelated sets are **byte-identical** to the Shipped default outputs above. No number moved. Probe time over `tests/probes/tree-sample.tsv` (130 rows, release build, three runs each):
+
+| build | per prompt |
+|---|---|
+| before, default config | 96.0 to 96.4 ms |
+| after, default config | 62.6 to 64.1 ms |
+| before, `--body-rank off` | 61.6 to 62.5 ms |
+| after, `--body-rank off` | 61.5 to 61.9 ms |
+
+### Pleasantry-prefixed prompts
+
+A prompt that opens with a fragment the chunker drops ("Thanks!", "ok.") still chunks to one piece. Under the default the alias scores come from the stripped chunk; under `off` they come from the whole string. To measure the difference, `tests/probes/tree-sample-pleasantry.tsv` is `tree-sample.tsv` with one of five openers (`Thanks!`, `ok.`, `Yes.`, `Great!`, `Hm.`) put in front of each prompt, picked by a stable hash of the prompt. The three unrelated sets get the same treatment (`unrelated-golden-none-pleasantry.tsv`, `unrelated-routing-none-pleasantry.tsv`, `unrelated-joined-pleasantry.tsv`). Regenerate them with
+
+```
+ways author golden --ways-dir hooks/ways --probes --pleasantry > tests/probes/tree-sample-pleasantry.tsv
+ways author golden --pleasantry-of tests/probes/unrelated-X.tsv > tests/probes/unrelated-X-pleasantry.tsv
+```
+
+A unit test fails when a committed set differs from its base with the opener applied. Runs: `ways author probe FILE --ways-dir hooks/ways --corpus DIR --body-rank off|scaled-single [--tsv | --unrelated]`.
+
+| tree-sample-pleasantry (130 scored) | pass | top-1 | expected way fires | other ways fired |
+|---|---|---|---|---|
+| off | 76 | 67 | 82 | 439 |
+| default (`scaled-single`) | 86 | 75 | 91 | 433 |
+
+Against `off`, 13 rows go fail to pass and 3 pass to fail (`itops/proposals`, `meta/trust/delegation`, `softwaredev/architecture/threat-modeling`). The default's numbers equal its numbers on the plain set (86, 75, 91, 433), which is what stripping the fragment should give; `off` loses 5 passes to the opener.
+
+| unrelated set, pleasantry-prefixed | rows | rows firing, off | rows firing, default | max top score, off | max top score, default |
+|---|---|---|---|---|---|
+| golden-none (single) | 15 | 0 | 0 | 0.4380 | 0.4606 |
+| routing-golden none (single) | 3 | 0 | 0 | 0.0546 | 0.0430 |
+| joined unrelated (late) | 15 | 0 | 0 | 0.2266 | 0.2266 |
+
+ADR-703's gate (the default must not lose against `off` on this set, and no unrelated prompt may start firing) holds.

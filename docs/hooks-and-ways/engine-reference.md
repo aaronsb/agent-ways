@@ -12,7 +12,7 @@ The authoritative statement of how the ways matching engine decides a fire: conf
 | `parent_boost_floor` | **0.30** |
 | `near_miss_margin` | 0.05 |
 | `admission` | `share` (or `chunk_top`; see the late-interaction step 4) |
-| `body_rank` | `off` (or `on`; adds `0.25 × best body section` to each way's cosine while the body sidecar is complete, on both the late-interaction and single-vector paths, and confirms against a section other than the one that contributed; under evaluation as ADR-701 §6, results in `experiments/content-corpus/results-body-rank.md`) |
+| `body_rank` | `scaled-single` (or `off`, `on`, `scaled`). `scaled-single`, the default, ranks one-sentence prompts on `(alias + 0.25 × best body section) / 1.25` and leaves late interaction on alias cosines. `scaled` applies that blend on both paths; `on` is the literal `alias + 0.25 × best section` on both, which runs above the scale the calibration was fitted on. `off` is alias cosines alone. Only while the body sidecar is complete. Under `on` and `scaled`, late-interaction confirmation uses a section other than the one that contributed (ADR-701 §6; results in `experiments/content-corpus/results-body-rank.md`) |
 | `refire_presets` | `once` 1.0, `rare` 0.4, `normal` 0.15, `frequent` 0.05 |
 
 Retired keys warn and are ignored (`tools/ways-core/src/settings.rs` `RETIRED`): `default_embed_threshold` and `default_multi_embed_threshold` (use `semantic_fire_probability`), `keyword_gate_fraction` (use `keyword_floor_probability`). There is no `embed_threshold` frontmatter field and no per-way threshold.

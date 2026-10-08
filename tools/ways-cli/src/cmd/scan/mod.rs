@@ -288,10 +288,12 @@ fn scan_prompt_surface(
         _ => query.to_string(),
     };
     let reduced = reduce::reduce_for_embed(&embed_input, BUDGET_PROMPT);
-    let mut embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
 
     let competitors = prompt_competitors(&candidates, &scope, &project_dir);
+    let bodies = body_map(competitors.iter().copied());
+    let body_rank = crate::config::global().body_rank;
+    let (embed_matches, single_fused) = late_interaction::single_scores(&reduced, &bodies, body_rank);
 
     // ADR-160: the chunked late-interaction matcher IS the semantic matcher. It decides
     // the semantic channel over the reduced surface (chunk → softmax-share →
@@ -300,13 +302,8 @@ fn scan_prompt_surface(
     // the matcher can't run (surface too sparse to chunk, engine unavailable) it
     // returns None and match_prompt uses the single-vector scores. The keyword
     // gate and near-miss telemetry keep using the single-vector batch scores.
-    let bodies = body_map(competitors.iter().copied());
-    let body_rank = crate::config::global().body_rank;
     let verdicts = late_interaction::run(&reduced, &bodies, crate::config::global().admission, body_rank);
-    let fused = match &verdicts {
-        Some(v) => v.used_body_rank(),
-        None => late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank),
-    };
+    let fused = single_fused || verdicts.as_ref().is_some_and(|v| v.used_body_rank());
 
     // ADR-701 §2: record the top candidates with share and margin, from the
     // rows the scan already holds, and whether confirmation read the body
@@ -316,7 +313,7 @@ fn scan_prompt_surface(
         let enabled: std::collections::HashMap<&str, &str> =
             competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
         record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
-        record.body_rank(fused);
+        record.body_rank(fused.then(|| body_rank.as_str()));
     }
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
@@ -481,12 +478,12 @@ fn prompt_outcome(
             used_prompt_only = true;
             let scores = prompt_only_scores.get_or_insert_with(|| {
                 let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
-                let mut scores = batch_embed_score(&reduced);
                 // Same ranking as the primary pass: fused where that pass was.
                 if verdicts.is_none() {
-                    late_interaction::fuse_single(&mut scores, &reduced, bodies, body_rank);
+                    late_interaction::single_scores(&reduced, bodies, body_rank).0
+                } else {
+                    batch_embed_score(&reduced)
                 }
-                scores
             });
             outcome = match_prompt(
                 regex_text,
@@ -568,6 +565,16 @@ fn admit_hits(
 
 // ── Authoring diagnostic (task #5) ─────────────────────────────
 
+/// Probe-only switches for the body-rank evaluation (see `late_interaction::Tuning`).
+pub(crate) fn set_body_rank_tuning(weight: Option<f64>, single_section_confirm: bool) {
+    if weight.is_some() || single_section_confirm {
+        late_interaction::set_tuning(late_interaction::Tuning {
+            weight: weight.unwrap_or(late_interaction::BODY_RANK_WEIGHT),
+            single_section_confirm,
+        });
+    }
+}
+
 pub(crate) use late_interaction::{admission_rule, chunk_sections, Admission, BodyRank, DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE};
 
 /// Run the late-interaction matcher over `query` for way authoring — the modern
@@ -620,17 +627,14 @@ pub fn task(
     // ADR-130: agent delegation prompts are the largest input class in
     // practice. Reduce to the model's window before embedding.
     let reduced = reduce::reduce_for_embed(query, BUDGET_TASK);
-    let mut embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
     // ADR-160: the matcher is the semantic matcher on the task surface too;
     // single-vector is the fail-safe when it can't chunk (see scan::prompt).
     let bodies = body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir)));
     let body_rank = crate::config::global().body_rank;
+    let (embed_matches, single_fused) = late_interaction::single_scores(&reduced, &bodies, body_rank);
     let verdicts = late_interaction::run(&reduced, &bodies, crate::config::global().admission, body_rank);
-    let fused = match &verdicts {
-        Some(v) => v.used_body_rank(),
-        None => late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank),
-    };
+    let fused = single_fused || verdicts.as_ref().is_some_and(|v| v.used_body_rank());
     // ADR-701 §2: the task lane writes a decision record too, its candidates
     // drawn from the ways eligible there. A dispatch is not a turn: the epoch
     // is the dispatching agent's, unbumped.
@@ -651,7 +655,7 @@ pub fn task(
             .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
             .collect();
         record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
-        record.body_rank(fused);
+        record.body_rank(fused.then(|| body_rank.as_str()));
     }
 
     // Payload: channel. Ordered like the other lanes before the stash is written.

@@ -47,12 +47,26 @@ impl Row {
     }
 }
 
-pub fn run(ways_dir: Option<String>, tsv: bool, probes: bool, joined: bool) -> Result<()> {
+pub fn run(ways_dir: Option<String>, tsv: bool, probes: bool, joined: bool, pleasantry: bool, pleasantry_of: Option<String>) -> Result<()> {
+    if let Some(file) = pleasantry_of {
+        let text = std::fs::read_to_string(&file).with_context(|| format!("reading {file}"))?;
+        println!("{PROBES_HEADER}");
+        for mut p in super::probe::parse(&text)? {
+            p.prompt = with_pleasantry(&p.prompt);
+            println!("{}\t{}\t{}\t{}\t{}", p.prompt, p.expected, p.kind, p.role, p.must_not.join(","));
+        }
+        return Ok(());
+    }
     let root = ways_dir.map(PathBuf::from).unwrap_or_else(crate::paths::shipped_ways_root);
     let rows = export(&root)?;
     if probes {
         println!("{PROBES_HEADER}");
-        let set = if joined { sample_joined(&rows) } else { sample_probes(&rows) };
+        let mut set = if joined { sample_joined(&rows) } else { sample_probes(&rows) };
+        if pleasantry {
+            for p in &mut set {
+                p.prompt = with_pleasantry(&p.prompt);
+            }
+        }
         for p in set {
             println!("{}", p.tsv());
         }
@@ -157,6 +171,23 @@ impl Probe {
 /// platforms, so the leaf a parent contributes depends only on the ids.
 fn fnv1a(id: &str) -> u64 {
     id.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+}
+
+/// Short openers a user types before the request. Each is under 12 characters,
+/// so the scan's chunker drops it as a trivial fragment.
+pub const PLEASANTRIES: [&str; 5] = ["Thanks!", "ok.", "Yes.", "Great!", "Hm."];
+
+/// `prompt` with a pleasantry in front, picked by `fnv1a(prompt)` so the same
+/// prompt always gets the same opener. The scan drops the fragment, so the
+/// prompt still chunks to one piece, but under `body_rank: off` the embedded
+/// text is the whole string and under the default it is the stripped chunk.
+///
+/// Regenerate the committed sets with
+/// `ways author golden --ways-dir hooks/ways --probes --pleasantry > tests/probes/tree-sample-pleasantry.tsv`
+/// and, for each unrelated set,
+/// `ways author golden --pleasantry-of tests/probes/unrelated-X.tsv > tests/probes/unrelated-X-pleasantry.tsv`.
+pub fn with_pleasantry(prompt: &str) -> String {
+    format!("{} {prompt}", PLEASANTRIES[(fnv1a(prompt) % PLEASANTRIES.len() as u64) as usize])
 }
 
 /// The group a root belongs to: its first path component, or "" for a
@@ -459,6 +490,39 @@ mod tests {
             "tests/probes/tree-sample.tsv is out of date with the golden sidecars ('-' committed, '+' now):\n{diff}\
              Regenerate it with:\n  ways author golden --ways-dir hooks/ways --probes > tests/probes/tree-sample.tsv"
         );
+    }
+
+    #[test]
+    fn a_pleasantry_is_a_stable_fragment_the_chunker_drops() {
+        assert_eq!(with_pleasantry("how do i start"), with_pleasantry("how do i start"));
+        let seen: std::collections::HashSet<_> = (0..200).map(|i| with_pleasantry(&format!("prompt number {i}")).split(' ').next().unwrap().to_string()).collect();
+        assert_eq!(seen.len(), PLEASANTRIES.len(), "every opener gets used");
+        assert!(PLEASANTRIES.iter().all(|p| p.chars().count() < 12));
+        assert_eq!(super::super::scan::surface_chunk_count(&with_pleasantry("my tomato plants need watering every morning")), 1);
+    }
+
+    /// Each committed pleasantry set is its base set with the opener put on.
+    /// Regenerate with the commands on [`with_pleasantry`].
+    #[test]
+    fn committed_pleasantry_sets_match_their_bases() {
+        let repo = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../..");
+        let read = |f: &str| std::fs::read_to_string(repo.join("tests/probes").join(f)).unwrap_or_else(|_| panic!("tests/probes/{f}"));
+        let prefixed = |base: &str| -> String {
+            let mut out = format!("{PROBES_HEADER}\n");
+            for mut p in super::super::probe::parse(&read(base)).unwrap() {
+                p.prompt = with_pleasantry(&p.prompt);
+                out.push_str(&format!("{}\t{}\t{}\t{}\t{}\n", p.prompt, p.expected, p.kind, p.role, p.must_not.join(",")));
+            }
+            out
+        };
+        for (base, set) in [
+            ("tree-sample.tsv", "tree-sample-pleasantry.tsv"),
+            ("unrelated-golden-none.tsv", "unrelated-golden-none-pleasantry.tsv"),
+            ("unrelated-routing-none.tsv", "unrelated-routing-none-pleasantry.tsv"),
+            ("unrelated-joined.tsv", "unrelated-joined-pleasantry.tsv"),
+        ] {
+            assert_eq!(read(set), prefixed(base), "tests/probes/{set} is out of date with tests/probes/{base}; regenerate it (see with_pleasantry)");
+        }
     }
 
     #[test]

@@ -138,6 +138,17 @@ pub(crate) fn batch_embed_score_with(
     query: &str,
     corpus: Option<&std::path::Path>,
 ) -> EmbedScores {
+    score_lanes(query, corpus, None)
+}
+
+/// [`batch_embed_score`] with the English rows already in hand (from a pass
+/// that also returned the query vector), so the English lane is not run twice.
+/// The multilingual lane and the calibration come as they do there.
+pub(crate) fn batch_embed_score_given_en(query: &str, en: Vec<(String, f64)>) -> EmbedScores {
+    score_lanes(query, None, Some(en))
+}
+
+fn score_lanes(query: &str, corpus: Option<&std::path::Path>, en_given: Option<Vec<(String, f64)>>) -> EmbedScores {
     let Some(embed_bin) = crate::paths::way_embed() else {
         return EmbedScores { en: None, multi: None, calibration: Default::default() };
     };
@@ -150,7 +161,10 @@ pub(crate) fn batch_embed_score_with(
         None => artifacts.join("ways-corpus-en.jsonl"),
     };
     let en_model = xdg.join(crate::paths::EN_MODEL);
-    let en = run_if_ready(&embed_bin, &en_corpus, &en_model, query, "EN");
+    let en = match en_given {
+        Some(rows) => Some(rows),
+        None => run_if_ready(&embed_bin, &en_corpus, &en_model, query, "EN"),
+    };
 
     // Mode gate (ADR-139): the multilingual lane runs only in localized mode, so
     // English-mode installs never load the heavier 768-dim model on a match —
