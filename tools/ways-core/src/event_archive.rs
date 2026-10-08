@@ -179,7 +179,8 @@ pub fn read_source(path: &Path) -> Option<String> {
     let mut f = std::fs::File::open(path).ok()?;
     #[cfg(windows)]
     if is_archive {
-        f.lock_shared().ok()?;
+        // Where the file system cannot lock, read unlocked rather than drop the archive.
+        let _ = f.lock_shared();
     }
     let mut bytes = Vec::new();
     f.read_to_end(&mut bytes).ok()?;
@@ -262,6 +263,33 @@ mod tests {
         append(&d, EVENTS, NOW + 60, b"three\n").unwrap();
         assert_eq!(archives(&d, EVENTS).len(), 1);
         assert_eq!(read_source(&archive_path(&d, EVENTS, NOW)).unwrap(), "one\ntwo\nthree\n");
+    }
+
+    /// On Windows the writer's lock is mandatory: a reader waits it out and
+    /// gets the archive, rather than failing the read and dropping the day.
+    #[cfg(windows)]
+    #[test]
+    fn a_read_waits_out_the_writers_lock_and_gets_the_archive() {
+        let d = dir("locked-read");
+        append(&d, EVENTS, NOW, b"one\ntwo\n").unwrap();
+        let path = archive_path(&d, EVENTS, NOW);
+        let (locked, held) = std::sync::mpsc::channel();
+        let writer = {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+                f.lock().unwrap();
+                locked.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                drop(f);
+            })
+        };
+        held.recv().unwrap();
+        let started = std::time::Instant::now();
+        let text = read_source(&path);
+        writer.join().unwrap();
+        assert_eq!(text.as_deref(), Some("one\ntwo\n"));
+        assert!(started.elapsed() >= std::time::Duration::from_millis(100), "the read waited for the lock");
     }
 
     #[test]

@@ -7,7 +7,7 @@
 //! a turn index (see `cmd::scan::decision::Context`), so turns are counted
 //! from the records alone.
 
-use super::{mark_archive_failed, publish_after_archive, same_file, Stream};
+use super::{mark_archive_failed, publish_after_archive, publish_failed_today, same_file, Stream};
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -42,6 +42,9 @@ pub(super) fn trim_to_turns(path: &Path, stream: Stream, now: u64, keep: u64) ->
 /// and before the file is checked and replaced, for tests that need something
 /// to happen in that window.
 fn trim_to_turns_hooked(path: &Path, stream: Stream, now: u64, keep: u64, before_publish: &mut dyn FnMut()) -> std::io::Result<bool> {
+    if path.parent().is_some_and(|dir| publish_failed_today(dir, stream, now)) {
+        return Ok(false); // a publish failed today; retry tomorrow
+    }
     let f = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -387,10 +390,9 @@ mod tests {
         assert_eq!(stopped_at, Some(expected[4]), "the scan stops when the visitor says so");
     }
 
-    /// The temp the kept turns are copied to never outlives a trim that
-    /// stands down.
     /// A trim whose publish fails after the head was archived sets today's
-    /// marker and leaves no temp; the log keeps every turn.
+    /// marker and leaves no temp; the log keeps every turn, and a second trim
+    /// that day stands down.
     #[test]
     fn a_failed_trim_publish_marks_the_day_and_leaves_no_temp() {
         let (dir, log) = state("publish-fail");
@@ -399,13 +401,16 @@ mod tests {
         let r = trim_to_turns(&log, DECISIONS, NOW, KEEP);
         FAIL_PUBLISH.with(|f| f.set(false));
         assert!(r.is_err());
-        assert!(archive_failed_today(&dir, DECISIONS, NOW));
+        assert!(publish_failed_today(&dir, DECISIONS, NOW));
+        assert!(!trim_to_turns(&log, DECISIONS, NOW, KEEP).unwrap(), "a second trim today stands down");
         assert_eq!(std::fs::read_to_string(&log).unwrap(), turns(0..15));
         assert_eq!(archived(&dir), turns(0..5), "the head is archived once");
         let names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert!(!names.iter().any(|n| n.ends_with(".tmp")), "{names:?}");
     }
 
+    /// The temp the kept turns are copied to never outlives a trim that
+    /// stands down.
     #[test]
     fn a_trim_that_stands_down_leaves_no_temp() {
         let (dir, log) = state("no-temp");
