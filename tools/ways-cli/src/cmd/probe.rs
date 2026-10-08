@@ -112,9 +112,12 @@ pub fn evaluate(probe: &Probe, scan: &ProbeScan) -> Outcome {
         .cloned()
         .collect();
     sibling_over.sort();
+    // A way that cannot fire on this lane by design (scope, `when:`, a state
+    // trigger) is not a miss of the matcher: it is left out of the rates.
+    let skipped = matches!(stage.as_str(), "masked" | "state-trigger").then(|| "lane-ineligible".to_string());
     Outcome {
         probe: probe.clone(),
-        skipped: None,
+        skipped,
         rank,
         share,
         margin,
@@ -171,7 +174,7 @@ fn rank_str(r: &Outcome) -> String {
 }
 
 fn stage_str(r: &Outcome) -> String {
-    r.skipped.as_ref().map_or_else(|| r.stage.clone(), |why| format!("skipped: {why}"))
+    r.skipped.as_ref().map_or_else(|| r.stage.clone(), |why| format!("skipped: {why} ({})", r.stage))
 }
 
 pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String>, project: Option<&str>, tsv: bool) -> Result<()> {
@@ -291,7 +294,7 @@ fn print_summary(results: &[Outcome], admission: &str, project_dir: &str) {
     println!("parent boost exercised by a parent fired in the same probe: {boosted} probes");
     println!("parent boost from an earlier turn's parent marker: not exercised (each probe is a fresh session)");
     for r in results.iter().filter(|r| !r.scored()) {
-        println!("skipped: {} ({}): {}", r.probe.expected, r.probe.kind, stage_str(r));
+        println!("skipped: {} ({}): {} ({})", r.probe.expected, r.probe.kind, r.skipped.as_deref().unwrap_or(""), r.stage);
     }
 }
 
@@ -366,6 +369,19 @@ mod tests {
         let r = evaluate(&probe("a/zzz", &["a/c", "a/q"]), &s);
         assert_eq!((r.rank, r.stage.as_str()), (None, "not-in-tree"));
         assert_eq!(r.sibling_over, vec!["a/c".to_string()]);
+    }
+
+    #[test]
+    fn a_way_that_cannot_fire_on_the_lane_is_skipped_and_leaves_the_rates() {
+        let s = scan(&[("a/c", 0.4)], &[("a/b", "state-trigger"), ("a/c", "fired")]);
+        let skipped = evaluate(&probe("a/b", &[]), &s);
+        assert_eq!(skipped.skipped.as_deref(), Some("lane-ineligible"));
+        assert!(!skipped.scored() && !skipped.pass());
+        let ok = evaluate(&probe("a/c", &[]), &s);
+        assert!(ok.scored());
+        let (all, _, kinds) = tally(&[skipped, ok]);
+        assert_eq!((all.scored, all.passed, all.top1), (1, 1, 1));
+        assert_eq!(kinds["direct"].scored, 1);
     }
 
     #[test]

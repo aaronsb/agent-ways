@@ -24,17 +24,20 @@ Two runs of the command produce identical output.
 
 - **Late interaction ran for 1 of 130 prompt probes.** The matcher chunks the surface into sentences and needs at least two. The other 129 golden prompts are one sentence, so the scan used its single-vector fail-safe for them, as the hook does: a way fires when `g(cos)` clears `semantic_fire_probability`. Their `peak` and `confirm` are empty, and the admission stages (`not-admitted`, `capped`, `not-confirmed`) can occur only for the one probe that ran late interaction. This baseline is mostly a measure of the single-vector gate. A multi-sentence probe set would be needed to measure admission and body confirmation.
 - **Parent boost.** Exercised where a parent fires in the same probe and lowers its child's bar (24 probes). A boost from an earlier turn's parent marker is not exercised: each probe is a fresh session, and the probe does not fake a marker.
-- **Skipped:** 0.
+- **Skipped:** 1. A row whose expected way cannot fire on its lane by design (scope, `when:`, or a state trigger) is reported `skipped: lane-ineligible`, with the stage that showed it, and left out of every denominator. This replaces the first run of this baseline, which scored `softwaredev/freshness` on the Bash lane as a failure (131 scored, pass 81/131 = 61.8%, top-1 71/131 = 54.2%). It carries `trigger: session-start`, so the Bash lane's semantic matcher skips it.
 
 ## Summary
 
-131 probes, 131 scored, 0 skipped. Admission rule `share`.
+131 probes, 130 scored, 1 skipped. Admission rule `share`.
 
 ```
 single-vector fallback (late interaction could not run): 129 prompt probes
 parent boost exercised by a parent fired in the same probe: 24 probes
 parent boost from an earlier turn's parent marker: not exercised (each probe is a fresh session)
+skipped: softwaredev/freshness (situational-tool): lane-ineligible (state-trigger)
 ```
+
+Skipped: `softwaredev/freshness` (situational-tool): lane-ineligible (state-trigger).
 
 Failing probes by stage:
 
@@ -44,11 +47,10 @@ Failing probes by stage:
 | fired | 5 |
 | keyword-gated | 1 |
 | not-admitted | 1 |
-| state-trigger | 1 |
 
 ## Failing probes
 
-50 of 131. `rank` is the expected way's position, `-` when it was not ranked. `sibling_over` lists the `must_not` ways that ranked ahead of it. A `fired` stage with a non-empty `sibling_over` means the way fired but lost the ranking to a sibling.
+49 of 130 scored. `rank` is the expected way's position, `-` when it was not ranked. `sibling_over` lists the `must_not` ways that ranked ahead of it. A `fired` stage with a non-empty `sibling_over` means the way fired but lost the ranking to a sibling.
 
 | expected_way | role | kind | rank | share | stage | sibling_over |
 |---|---|---|---|---|---|---|
@@ -98,13 +100,10 @@ Failing probes by stage:
 | softwaredev/delivery | root | situational | 23 | 0.0841 | below-threshold | softwaredev/code,softwaredev/visualization |
 | softwaredev/delivery/release | leaf | situational | 3 | 0.3895 | below-threshold | softwaredev/delivery/groundwork |
 | softwaredev/environment | root | situational | 3 | 0.1675 | below-threshold |  |
-| softwaredev/freshness | root | situational-tool | - | - | state-trigger | softwaredev/architecture,softwaredev/code,softwaredev/delivery,softwaredev/environment,softwaredev/tooling,softwaredev/visualization |
 | workstation/shell/tools | leaf | situational | 20 | 0.0292 | below-threshold | workstation/shell/shellrc |
 | writing | root | direct | 32 | 0.0788 | below-threshold |  |
 | writing | root | situational | 6 | 0.3097 | below-threshold |  |
 
 ## Reading this
 
-- **The tool row is unreachable on this lane.** `softwaredev/freshness` carries `trigger: session-start`, so the Bash lane's semantic matcher skips it by design. The probe's `-tool` kind describes a surface the way is not matched on. That is a probe-file question, not a matcher result.
 - **Direct against situational.** Direct prompts name the topic and pass at a far higher rate than situational ones, which describe the circumstance. The misses are mostly `below-threshold`: the way competed and the calibrated probability stayed under the bar.
-
