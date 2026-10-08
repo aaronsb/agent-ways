@@ -163,21 +163,18 @@ fn group_of(id: &str) -> &str {
 
 /// Sample the disclosure tree. The semantic ways are the ids that carry golden
 /// rows. A way's semantic parent is its nearest semantic ancestor (by id
-/// prefix). A root is a semantic way with no semantic parent, at any depth.
-/// Roots under a shared non-semantic top-level directory (`itops/*`) form a
-/// group with a virtual parent keyed by that directory, so every top-level
-/// directory is represented.
+/// prefix). A root is a semantic way with no semantic parent, at any depth, so
+/// every top-level directory that holds a semantic way is represented.
 ///
-/// Selected: every root; every way with semantic children; for each real
-/// parent the one childless child with the least `(fnv1a(id), id)`; and for each
-/// group the one childless root with the least `(fnv1a(id), id)`, labelled
-/// `leaf`. A parent whose children are all parents contributes no leaf, since
+/// Selected: every root; every way with semantic children; and for each parent
+/// the one childless child with the least `(fnv1a(id), id)`. A parent whose children are all parents contributes no leaf, since
 /// its descendants are sampled. A selected way with no semantic children emits
 /// both its direct and situational prompts; a way with children emits its
 /// situational prompt only.
 ///
 /// `must_not` is the other ways with the same semantic parent (see [`Probe`]);
-/// the leaf pick and `must_not` use that same relation. No id is hard-coded, so
+/// roots are grouped by top-level directory for this purpose only. The leaf
+/// pick and `must_not` use the same parent relation. No id is hard-coded, so
 /// the sample tolerates renames in the sense that nothing breaks. It does not
 /// keep the pick stable: renaming a directory re-hashes every id under it, and
 /// adding a sibling with a lower hash moves the pick.
@@ -227,15 +224,6 @@ pub fn sample_probes<'a>(rows: &'a [Row]) -> Vec<Probe> {
     }
     for kids in children.values() {
         if let Some(leaf) = pick(kids) {
-            selected.insert(leaf, "leaf");
-        }
-    }
-    for (group, roots) in &groups {
-        // a group only exists as a virtual parent for roots under a directory
-        if group.is_empty() {
-            continue;
-        }
-        if let Some(leaf) = pick(roots) {
             selected.insert(leaf, "leaf");
         }
     }
@@ -351,13 +339,11 @@ mod tests {
         let probes = sample_probes(&export(&fixture()).unwrap());
         let got: Vec<(&str, &str, &str)> = probes.iter().map(|p| (p.way.as_str(), p.role, p.kind.as_str())).collect();
         let l = least(&["top/par/l1", "top/par/l2", "top/par/l3"]);
-        let gl = least(&["grp/a", "grp/b"]); // the group's childless roots; grp/c has a child
-        let (ga, gb) = if gl == "grp/a" { ("leaf", "root") } else { ("root", "leaf") };
         let mut want: Vec<(&str, &str, &str)> = vec![
-            ("grp/a", ga, "direct"),
-            ("grp/a", ga, "situational"),
-            ("grp/b", gb, "direct"),
-            ("grp/b", gb, "situational"),
+            ("grp/a", "root", "direct"),
+            ("grp/a", "root", "situational"),
+            ("grp/b", "root", "direct"),
+            ("grp/b", "root", "situational"),
             ("grp/c", "root", "situational"),
             ("grp/c/k", "leaf", "direct"),
             ("grp/c/k", "leaf", "situational"),
@@ -372,10 +358,6 @@ mod tests {
         ];
         want.sort_by(|a, b| a.0.cmp(b.0)); // stable: keeps direct before situational
         assert_eq!(got, want);
-        // exactly one of the group's childless roots is the group's leaf
-        let leaves: Vec<&str> =
-            probes.iter().filter(|p| p.role == "leaf" && ["grp/a", "grp/b"].contains(&p.way.as_str()) && p.kind == "direct").map(|p| p.way.as_str()).collect();
-        assert_eq!(leaves, [gl]);
     }
 
     #[test]
@@ -387,9 +369,8 @@ mod tests {
         assert_eq!(m("other", "root"), ["top"]);
         // roots under a non-semantic directory are siblings within it
         assert_eq!(m("grp/c", "root"), ["grp/a", "grp/b"]);
-        let gl = least(&["grp/a", "grp/b"]);
-        let other = if gl == "grp/a" { "grp/b" } else { "grp/a" };
-        assert_eq!(m(gl, "leaf"), [other, "grp/c"]);
+        assert_eq!(m("grp/a", "root"), ["grp/b", "grp/c"]);
+        assert_eq!(m("grp/b", "root"), ["grp/a", "grp/c"]);
         assert_eq!(m("grp/c/k", "leaf"), Vec::<String>::new());
         assert_eq!(m("top/par", "parent"), ["top/lone"]);
         assert_eq!(m("top/lone", "leaf"), ["top/par"]);

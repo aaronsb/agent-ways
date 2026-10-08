@@ -1,6 +1,6 @@
 prompt	expected_way	kind	role	must_not
-my new coworker starts monday, can we put the repo guide somewhere their claude can just open it	collaboration/onboarding-share	direct	leaf	
-i'd rather not make the new hire clone this whole thing and dig around for the setup notes, any easier route?	collaboration/onboarding-share	situational	leaf	
+my new coworker starts monday, can we put the repo guide somewhere their claude can just open it	collaboration/onboarding-share	direct	root	
+i'd rather not make the new hire clone this whole thing and dig around for the setup notes, any easier route?	collaboration/onboarding-share	situational	root	
 i'm building a little app that stores a few thousand records, not sure how heavy a way to keep them i need	data	situational	root	documentation,ea,research,writing
 i need to change the shape of a postgres table that already has data in it, and be able to undo it if it goes wrong	data/migrations	situational	parent	data/schema-docs
 make this migration safe to run twice, it keeps blowing up when the column already exists	data/migrations/idempotent	direct	leaf	data/migrations/checkpoint,data/migrations/numbering
@@ -25,8 +25,8 @@ i'm about to jump on a call with a client i haven't spoken to in months, pull to
 my personal list has a bunch of stuff from months ago that i either did or stopped caring about, help me tidy it	ea/tasks	situational	parent	ea/briefing,ea/calendar,ea/comms,ea/email,ea/intelligence
 log 6 hours for the redwood project on tuesday in my timesheet	ea/tasks/time	direct	leaf	
 it's the end of the month and i can't remember which days i worked for which customer, need to bill them	ea/tasks/time	situational	leaf	
-prod is down and the pager just went off, what do we do first	itops/incident	direct	leaf	itops/policy,itops/proposals,itops/runbooks
-customers are reporting errors since the last release, should we revert or push a patch, and what do we write up afterwards	itops/incident	situational	leaf	itops/policy,itops/proposals,itops/runbooks
+prod is down and the pager just went off, what do we do first	itops/incident	direct	root	itops/policy,itops/proposals,itops/runbooks
+customers are reporting errors since the last release, should we revert or push a patch, and what do we write up afterwards	itops/incident	situational	root	itops/policy,itops/proposals,itops/runbooks
 classify this operation by risk and decide what approval it needs	itops/policy	direct	root	itops/incident,itops/proposals,itops/runbooks
 deleting rows in the live table versus reading a config, how do we decide which ones need someone to sign off and which can just run	itops/policy	situational	root	itops/incident,itops/proposals,itops/runbooks
 write a change request for dropping the old production database cluster, with rollback steps and who approves	itops/proposals	direct	root	itops/incident,itops/policy,itops/runbooks
@@ -64,8 +64,8 @@ i keep going back and forth between two designs, and every time i think i've got
 you made a mistake last week that cost me credibility and now i'm hesitant to hand you anything, how do we get past that	meta/trust	situational	root	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/workflows,meta/wrap
 go ahead and send the email to the vendor from my gmail	meta/trust/delegation	direct	leaf	meta/trust/autonomy,meta/trust/prose,meta/trust/voice
 the draft is done, now publish it as me to the shared calendar and invite the whole department	meta/trust/delegation	situational	leaf	meta/trust/autonomy,meta/trust/prose,meta/trust/voice
-write a script that fans out agents over all 200 modules, verifies each result, and merges into one report	meta/workflows	direct	leaf	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/trust,meta/wrap
-i have hundreds of files to push through the same stages with checks after each, too much to do by hand in one chat	meta/workflows	situational	leaf	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/trust,meta/wrap
+write a script that fans out agents over all 200 modules, verifies each result, and merges into one report	meta/workflows	direct	root	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/trust,meta/wrap
+i have hundreds of files to push through the same stages with checks after each, too much to do by hand in one chat	meta/workflows	situational	root	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/trust,meta/wrap
 i'm done for today, wrap things up and give me something to paste next time	meta/wrap	direct	root	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/trust,meta/workflows
 context is nearly full and it's late, land what's in flight and leave notes so tomorrow's session can resume	meta/wrap	situational	root	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/trust,meta/workflows
 dig into how other teams handle feature flag cleanup, prefer official docs over blog posts	research	direct	root	data,documentation,ea,writing
@@ -118,13 +118,13 @@ you ran a dev server in the foreground and the whole session froze waiting on it
 the readme describes things we removed months ago and the lockfile looks old	softwaredev/freshness	situational-tool	root	softwaredev/architecture,softwaredev/code,softwaredev/delivery,softwaredev/environment,softwaredev/tooling,softwaredev/visualization
 does the adr still match what the code actually does, check the code not the doc	softwaredev/freshness/groundtruth	direct	leaf	
 we're about to refactor the migration code and want proof afterwards that outputs are identical	softwaredev/freshness/groundtruth	situational	leaf	
-let's write a small cli subcommand for this instead of me pasting the same shell steps every time	softwaredev/tooling	direct	leaf	softwaredev/architecture,softwaredev/code,softwaredev/delivery,softwaredev/environment,softwaredev/freshness,softwaredev/visualization
-every deploy i run the same eight commands by hand in order and it's tedious and error prone	softwaredev/tooling	situational	leaf	softwaredev/architecture,softwaredev/code,softwaredev/delivery,softwaredev/environment,softwaredev/freshness,softwaredev/visualization
+let's write a small cli subcommand for this instead of me pasting the same shell steps every time	softwaredev/tooling	direct	root	softwaredev/architecture,softwaredev/code,softwaredev/delivery,softwaredev/environment,softwaredev/freshness,softwaredev/visualization
+every deploy i run the same eight commands by hand in order and it's tedious and error prone	softwaredev/tooling	situational	root	softwaredev/architecture,softwaredev/code,softwaredev/delivery,softwaredev/environment,softwaredev/freshness,softwaredev/visualization
 i'm new here and want to understand how the pieces talk to each other, ideally with a picture	softwaredev/visualization	situational	root	softwaredev/architecture,softwaredev/code,softwaredev/delivery,softwaredev/environment,softwaredev/freshness,softwaredev/tooling
 plot these latency numbers as a sparkline in the terminal	softwaredev/visualization/charts	direct	leaf	softwaredev/visualization/diagrams
 i have a list of daily counts and want to eyeball the trend right here in my shell	softwaredev/visualization/charts	situational	leaf	softwaredev/visualization/diagrams
-look through my pacman log and help me figure out what i installed years ago and don't use anymore	workstation/pkghistory	direct	leaf	workstation/shell
-this laptop has accumulated a ton of random software over three years and i want to cull what i've forgotten about	workstation/pkghistory	situational	leaf	workstation/shell
+look through my pacman log and help me figure out what i installed years ago and don't use anymore	workstation/pkghistory	direct	root	workstation/shell
+this laptop has accumulated a ton of random software over three years and i want to cull what i've forgotten about	workstation/pkghistory	situational	root	workstation/shell
 just wiped my box and installed arch, how do i get my terminal feeling like home again	workstation/shell	situational	root	workstation/pkghistory
 install ripgrep, fd, bat and zoxide and alias them in my shell	workstation/shell/tools	direct	leaf	workstation/shell/gitconfig,workstation/shell/shellrc,workstation/shell/sshagent
 want ls and cat and find to be faster and prettier with colors, what should i swap them for	workstation/shell/tools	situational	leaf	workstation/shell/gitconfig,workstation/shell/shellrc,workstation/shell/sshagent
