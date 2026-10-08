@@ -189,6 +189,18 @@ fn rank_str(r: &Outcome) -> String {
     r.rank.map_or("-".to_string(), |n| n.to_string())
 }
 
+/// The scoring path: `late` (late interaction ran), `single` (the single-vector
+/// fail-safe decided) or `bash` (the tool lane, always single-vector).
+fn path_str(r: &Outcome) -> &'static str {
+    if is_tool(&r.probe.kind) {
+        "bash"
+    } else if r.late {
+        "late"
+    } else {
+        "single"
+    }
+}
+
 fn stage_str(r: &Outcome) -> String {
     r.skipped.as_ref().map_or_else(|| r.stage.clone(), |why| format!("skipped: {why} ({})", r.stage))
 }
@@ -246,13 +258,14 @@ pub fn run(file: Option<String>, ways_dir: Option<String>, corpus: Option<String
 }
 
 fn print_tsv(results: &[Outcome]) {
-    println!("expected_way\trole\tkind\trank\tshare\tmargin\tstage\tfires\tsibling_over\tpass\tpeak\tconfirm\talso_fired\tprompt");
+    println!("expected_way\trole\tkind\tpath\trank\tshare\tmargin\tstage\tfires\tsibling_over\tpass\tpeak\tconfirm\talso_fired\tprompt");
     for r in results {
         println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             r.probe.expected,
             r.probe.role,
             r.probe.kind,
+            path_str(r),
             rank_str(r),
             opt(r.share),
             r.margin.map_or("-".to_string(), |m| format!("{m:+.4}")),
@@ -270,16 +283,17 @@ fn print_tsv(results: &[Outcome]) {
 
 fn print_table(results: &[Outcome]) {
     println!(
-        "{:<40}  {:<6}  {:<18}  {:>4}  {:>6}  {:>7}  {:<15}  {:<5}  {:<4}  sibling_over",
-        "expected_way", "role", "kind", "rank", "share", "margin", "stage", "fires", "pass"
+        "{:<40}  {:<6}  {:<18}  {:<6}  {:>4}  {:>6}  {:>7}  {:<15}  {:<5}  {:<4}  sibling_over",
+        "expected_way", "role", "kind", "path", "rank", "share", "margin", "stage", "fires", "pass"
     );
-    println!("{}", "-".repeat(130));
+    println!("{}", "-".repeat(137));
     for r in results {
         println!(
-            "{:<40}  {:<6}  {:<18}  {:>4}  {:>6}  {:>7}  {:<15}  {:<5}  {:<4}  {}",
+            "{:<40}  {:<6}  {:<18}  {:<6}  {:>4}  {:>6}  {:>7}  {:<15}  {:<5}  {:<4}  {}",
             r.probe.expected,
             r.probe.role,
             r.probe.kind,
+            path_str(r),
             rank_str(r),
             r.share.map_or("-".to_string(), |v| format!("{v:.3}")),
             r.margin.map_or("-".to_string(), |m| format!("{m:+.3}")),
@@ -315,9 +329,11 @@ fn print_summary(results: &[Outcome], admission: &str, project_dir: &str) {
         line(&format!("kind={k}"), t);
     }
     let fallback = results.iter().filter(|r| r.scored() && !r.late && !is_tool(&r.probe.kind)).count();
+    let late = results.iter().filter(|r| r.scored() && path_str(r) == "late").count();
+    let bash = results.iter().filter(|r| r.scored() && path_str(r) == "bash").count();
     let boosted = results.iter().filter(|r| r.boost_exercised).count();
     println!();
-    println!("single-vector fallback (late interaction could not run): {fallback} prompt probes");
+    println!("path: {late} late interaction, {fallback} single-vector fallback (late interaction could not run), {bash} bash lane (scored probes)");
     println!("parent boost exercised by a parent fired in the same probe: {boosted} probes");
     println!("parent boost from an earlier turn's parent marker: not exercised (each probe is a fresh session)");
     for r in results.iter().filter(|r| !r.scored()) {
@@ -508,9 +524,15 @@ mod tests {
         assert!(!a.boost_exercised);
         assert!(a.late, "a two-sentence surface runs the late-interaction matcher: {a:?}");
 
+        // A joined row (situational sentence, then direct sentence) takes the late path.
+        let joined = Probe { prompt: "my tomato plants need watering every morning. prune the seedlings and add compost".into(), kind: "joined".into(), ..p.clone() };
+        let j = evaluate(&joined, &crate::cmd::scan::probe::prompt(&joined.prompt, &project, crate::config::Admission::Share), |_| false);
+        assert!(j.late && path_str(&j) == "late", "{j:?}");
+        assert_eq!(j.stage, "fired", "{j:?}");
+
         // One sentence has nothing to chunk: the single-vector fail-safe decides.
         let one = evaluate(&p, &crate::cmd::scan::probe::prompt("my tomato plants need watering", &project, crate::config::Admission::Share), |_| false);
-        assert!(!one.late, "{one:?}");
+        assert!(!one.late && path_str(&one) == "single", "{one:?}");
 
         // The Bash lane, with the prompt as the tool description.
         let bash = |text: &str, expected: &str| {

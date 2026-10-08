@@ -117,3 +117,91 @@ Failing probes by stage:
 ## Reading this
 
 - **Direct against situational.** Direct prompts name the topic and pass at a far higher rate than situational ones, which describe the circumstance. The misses are mostly `below-threshold`: the way competed and the calibrated probability stayed under the bar.
+
+
+## Joined probes
+
+Measured 2026-10-08 on branch `adr-701-multi-sentence-probes`. The baseline above is mostly a single-vector measurement: late interaction needs at least two sentence chunks and 129 of 130 prompt probes had one. The joined set (`tests/probes/tree-sample-joined.tsv`, 79 rows) gives each sampled way a two-sentence surface, so admission, sidecar body confirmation and capping run.
+
+### Set
+
+`ways author golden --ways-dir hooks/ways --probes --joined` selects the same ways as `--probes`, with the same role and `must_not`. Each row's prompt is the way's first `situational` golden prompt, then a space, then the way's first `direct` golden prompt. The situational prompt keeps its own trailing `.`, `!` or `?`; a `.` is added only when it has none. The kind is `joined`. A way without both prompts has no row; tool-surface rows are not used. The chunker splits at `.`, `!` or `?` followed by whitespace (`reduce::split_sentences`), so each joined prompt yields at least two chunks (`meta/develop` yields three, because its situational prompt has a period inside it). The drift test asserts at least two chunks for every shipped row, using the scan's own `chunk_surface` count, which also applies the 12-character minimum and dedup. The 79 rows are 33 roots, 17 parents and 29 leaves. Parents appear because the golden sidecars give them a direct prompt, which `--probes` leaves out.
+
+### Command
+
+```
+ways corpus --ways-dir hooks/ways --output "$TMP/corpus"
+ways author probe tests/probes/tree-sample-joined.tsv --ways-dir hooks/ways --corpus "$TMP/corpus"
+```
+
+`ways author probe` now prints a `path` column (`late`, `single` or `bash`) and a `path:` count line in the summary.
+
+### Summary
+
+Output of the command above, after the table of rows:
+
+```
+probes: 79 total, 79 scored, 0 skipped · admission: share · project: /home/aaron/Projects/ai/harness/agent-ways
+operator config: disabled domains: none
+pass = the expected way fires and no must_not way outranks it; top-1 = the expected way ranks first
+
+group                   scored    pass     pass%   top-1    top-1%   fires    fires%
+overall                     79      55     69.6%      64     81.0%      57     72.2%
+role=leaf                   29      26     89.7%      26     89.7%      27     93.1%
+role=parent                 17      11     64.7%      13     76.5%      11     64.7%
+role=root                   33      18     54.5%      25     75.8%      19     57.6%
+kind=joined                 79      55     69.6%      64     81.0%      57     72.2%
+
+path: 79 late interaction, 0 single-vector fallback (late interaction could not run), 0 bash lane (scored probes)
+parent boost exercised by a parent fired in the same probe: 0 probes
+parent boost from an earlier turn's parent marker: not exercised (each probe is a fresh session)
+```
+
+### Stage of the expected way
+
+| Stage | Probes |
+|---|---|
+| fired | 57 |
+| not-confirmed | 12 |
+| not-admitted | 8 |
+| below-threshold | 2 |
+| capped | 0 |
+
+`not-confirmed` is a way admitted by the matcher whose sidecar body cosine did not confirm it. `below-threshold` here means the way had no row at all: the match runs at threshold 0.0, so it was outside every chunk's top 8 matches (`TOP_K_PER_CHUNK`). Of the 24 failures, 22 did not fire and 2 fired but were outranked by a `must_not` sibling (`meta/wrap`, `softwaredev/delivery/release`).
+
+### Failing probes
+
+| Expected way | Role | Rank | Stage | sibling_over | Peak | Confirm |
+|---|---|---|---|---|---|---|
+| `ea` | root | 1 | not-confirmed | - | 0.5305 | 0.3286 |
+| `ea/comms` | parent | 1 | not-confirmed | - | 0.5017 | 0.3353 |
+| `ea/intelligence` | leaf | 1 | not-confirmed | - | 0.3903 | 0.3051 |
+| `ea/tasks` | parent | 2 | not-admitted | - | 0.2299 | - |
+| `itops/proposals` | root | 2 | not-admitted | - | 0.4484 | - |
+| `meta/develop` | root | 1 | not-admitted | - | 0.3772 | - |
+| `meta/memory` | root | 1 | not-confirmed | - | 0.3431 | 0.2528 |
+| `meta/start` | root | - | below-threshold | meta/memory,meta/wrap | - | - |
+| `meta/subagents` | root | - | below-threshold | meta/deployment,meta/introspection,meta/knowledge | - | - |
+| `meta/think` | root | 7 | not-admitted | meta/develop | 0.2419 | - |
+| `meta/workflows` | root | 1 | not-confirmed | - | 0.3444 | 0.3201 |
+| `meta/wrap` | root | 5 | fired | meta/start | 0.3787 | - |
+| `research` | root | 6 | not-admitted | data | 0.3454 | - |
+| `softwaredev/architecture` | root | 1 | not-confirmed | - | 0.3804 | 0.2138 |
+| `softwaredev/architecture/design` | parent | 4 | not-admitted | - | 0.3200 | - |
+| `softwaredev/architecture/threat-modeling` | leaf | 2 | not-confirmed | - | 0.3093 | 0.3255 |
+| `softwaredev/code/supplychain` | parent | 1 | not-confirmed | - | 0.3828 | 0.3425 |
+| `softwaredev/code/testing/gates` | parent | 1 | not-confirmed | - | 0.6682 | 0.3054 |
+| `softwaredev/delivery` | root | 14 | not-admitted | softwaredev/code,softwaredev/environment | 0.2654 | - |
+| `softwaredev/delivery/groundwork` | parent | 1 | not-confirmed | - | 0.4640 | 0.2617 |
+| `softwaredev/delivery/release` | leaf | 2 | fired | softwaredev/delivery/groundwork | 0.4291 | 0.5639 |
+| `softwaredev/environment` | root | 1 | not-confirmed | - | 0.4439 | 0.1415 |
+| `workstation/pkghistory` | root | 1 | not-confirmed | - | 0.3895 | 0.3085 |
+| `writing` | root | 15 | not-admitted | - | 0.2507 | - |
+
+### Against the single-sentence baseline
+
+Same 79 ways. The single-sentence baseline rows for these ways are 79 situational prompts (37 pass, 31 top-1, 41 fire; 78 single-vector, 1 late) and 51 direct prompts (44 pass, 40 top-1, 45 fire; all single-vector). The joined rows are 55 pass (69.6%), 64 top-1 (81.0%), 57 fire, all late interaction. Per way, 23 ways that did not pass on their situational prompt pass joined; 5 that passed on their situational prompt fail joined (`ea`, `ea/intelligence`, `meta/workflows`, `softwaredev/delivery/groundwork`, `workstation/pkghistory`, all `not-confirmed`); 7 that passed on their direct prompt fail joined. The two baselines use different surfaces and different paths, so the pass counts compare the set as a whole, not a single variable. The probe parent-boost count is 0 on the joined set against 24 on the baseline.
+
+### Join rule change
+
+The first version of the set replaced the situational prompt's trailing `.`, `!` or `?` with a `.`. The rule now keeps the terminator the prompt has and adds a `.` only when it has none. Two rows changed text (`collaboration/onboarding-share` and `meta/introspection`, each a situational prompt ending in `?`). The probe was rerun on the regenerated set: no result moved. Every number, stage count and failing row above is identical to the first run.

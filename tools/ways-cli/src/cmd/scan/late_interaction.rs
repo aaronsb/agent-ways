@@ -347,6 +347,13 @@ fn chunk_surface(surface: &str) -> Vec<String> {
     out
 }
 
+/// How many chunks the scan would match for `surface`, after the short-fragment
+/// and duplicate rules. Late interaction runs only when this is at least 2.
+#[cfg(test)]
+pub(crate) fn surface_chunk_count(surface: &str) -> usize {
+    chunk_surface(surface).len()
+}
+
 /// The match pass's output: per-chunk rows and, when asked for and supported,
 /// each chunk's embedding.
 struct Matched {

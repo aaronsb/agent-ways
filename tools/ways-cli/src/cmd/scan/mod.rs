@@ -8,6 +8,8 @@ mod candidate_log;
 mod decision;
 mod gate;
 mod late_interaction;
+#[cfg(test)]
+pub(crate) use late_interaction::surface_chunk_count;
 pub(crate) mod sidecar;
 pub(crate) mod lookup;
 mod lookbehind;

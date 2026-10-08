@@ -6,6 +6,9 @@
 //! a `-tool` suffix when the line carries `"surface":"tool"`; a none row is
 //! `prompt<TAB>none<TAB>none`. Output is sorted by way id, so it is stable.
 //!
+//! `--probes --joined` prints the multi-sentence companion set (see
+//! [`sample_joined`]), committed as `tests/probes/tree-sample-joined.tsv`.
+//!
 //! `--probes` prints a header and the tree-sampled probe set instead. The
 //! committed copy is `tests/probes/tree-sample.tsv`; a test here fails when it
 //! drifts from the tree. Regenerate it with
@@ -44,12 +47,13 @@ impl Row {
     }
 }
 
-pub fn run(ways_dir: Option<String>, tsv: bool, probes: bool) -> Result<()> {
+pub fn run(ways_dir: Option<String>, tsv: bool, probes: bool, joined: bool) -> Result<()> {
     let root = ways_dir.map(PathBuf::from).unwrap_or_else(crate::paths::shipped_ways_root);
     let rows = export(&root)?;
     if probes {
         println!("{PROBES_HEADER}");
-        for p in sample_probes(&rows) {
+        let set = if joined { sample_joined(&rows) } else { sample_probes(&rows) };
+        for p in set {
             println!("{}", p.tsv());
         }
         return Ok(());
@@ -246,6 +250,47 @@ pub fn sample_probes<'a>(rows: &'a [Row]) -> Vec<Probe> {
     out
 }
 
+/// The kind of a joined probe row.
+pub const JOINED_KIND: &str = "joined";
+
+/// Join a situational and a direct prompt into one surface of at least two
+/// sentences. The scan's late-interaction matcher splits a surface at `.`, `!`
+/// or `?` followed by whitespace and needs at least two chunks of 12 characters
+/// or more (`surface_chunk_count`). The situational prompt keeps its own
+/// terminator; a `.` is added only when it has none.
+fn join_prompts(situational: &str, direct: &str) -> String {
+    let s = situational.trim();
+    let sep = if s.ends_with(['.', '!', '?']) { "" } else { "." };
+    format!("{s}{sep} {}", direct.trim())
+}
+
+/// The multi-sentence companion of [`sample_probes`]. It takes the same selected
+/// ways, with the same role and `must_not`, and emits one row per way whose
+/// prompt is the way's first situational golden prompt followed by its first
+/// direct golden prompt as a separate sentence (tool-surface rows are not
+/// used). A way missing either prompt has no row. The kind is `joined`.
+///
+/// Regenerate the committed set with
+/// `ways author golden --ways-dir hooks/ways --probes --joined > tests/probes/tree-sample-joined.tsv`.
+pub fn sample_joined(rows: &[Row]) -> Vec<Probe> {
+    let mut out: Vec<Probe> = Vec::new();
+    for p in sample_probes(rows) {
+        if out.iter().any(|o| o.way == p.way) {
+            continue;
+        }
+        let first = |kind: &str| rows.iter().find(|r| r.way == p.way && r.kind == kind);
+        let (Some(sit), Some(dir)) = (first("situational"), first("direct")) else { continue };
+        out.push(Probe {
+            prompt: join_prompts(&sit.prompt, &dir.prompt),
+            way: p.way,
+            kind: JOINED_KIND.to_string(),
+            role: p.role,
+            must_not: p.must_not,
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,7 +365,7 @@ mod tests {
 
     fn fixture() -> PathBuf {
         let root = scratch("probes");
-        let g = |w: &str| format!("{{\"kind\":\"direct\",\"prompt\":\"{w} d\"}}\n{{\"kind\":\"situational\",\"prompt\":\"{w} s\"}}\n");
+        let g = |w: &str| format!("{{\"kind\":\"direct\",\"prompt\":\"{w} direct request\"}}\n{{\"kind\":\"situational\",\"prompt\":\"{w} situational note\"}}\n");
         // `grp` has no sidecar of its own: a non-semantic top-level directory.
         for w in ["top", "top/par", "top/par/l1", "top/par/l2", "top/par/l3", "top/lone", "other", "grp/a", "grp/b", "grp/c", "grp/c/k"] {
             let leaf = w.rsplit('/').next().unwrap();
@@ -413,6 +458,57 @@ mod tests {
         panic!(
             "tests/probes/tree-sample.tsv is out of date with the golden sidecars ('-' committed, '+' now):\n{diff}\
              Regenerate it with:\n  ways author golden --ways-dir hooks/ways --probes > tests/probes/tree-sample.tsv"
+        );
+    }
+
+    #[test]
+    fn joined_probes_pair_situational_then_direct_with_a_sentence_break() {
+        let probes = sample_joined(&export(&fixture()).unwrap());
+        assert!(!probes.is_empty());
+        assert!(probes.iter().all(|p| p.kind == JOINED_KIND));
+        let sampled = sample_probes(&export(&fixture()).unwrap());
+        for p in &probes {
+            let s = sampled.iter().find(|s| s.way == p.way).expect("a joined way is a sampled way");
+            assert_eq!((p.role, &p.must_not), (s.role, &s.must_not));
+            let n = crate::cmd::scan::surface_chunk_count(&p.prompt);
+            assert!(n >= 2, "{}: {:?} yields {n} chunk(s)", p.way, p.prompt);
+        }
+        assert_eq!(join_prompts("a thing happens?!", "do it"), "a thing happens?! do it");
+        assert_eq!(join_prompts("a thing happens", "do it"), "a thing happens. do it");
+        assert_eq!(probes, sample_joined(&export(&fixture()).unwrap()));
+    }
+
+    /// The committed joined set must match what the shipped tree yields now.
+    /// Regenerate with
+    /// `ways author golden --ways-dir hooks/ways --probes --joined > tests/probes/tree-sample-joined.tsv`.
+    #[test]
+    fn committed_joined_probe_sample_matches_the_shipped_tree() {
+        let repo = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| env!("CARGO_MANIFEST_DIR").into())).join("../..");
+        let mut now = format!("{PROBES_HEADER}\n");
+        let shipped = sample_joined(&export(&repo.join("hooks/ways")).unwrap());
+        for p in &shipped {
+            let n = crate::cmd::scan::surface_chunk_count(&p.prompt);
+            assert!(n >= 2, "joined row for {} yields {n} chunk(s), so the scan would run single-vector: {:?}", p.way, p.prompt);
+        }
+        for p in shipped {
+            now.push_str(&p.tsv());
+            now.push('\n');
+        }
+        let committed = std::fs::read_to_string(repo.join("tests/probes/tree-sample-joined.tsv")).expect("tests/probes/tree-sample-joined.tsv");
+        if committed == now {
+            return;
+        }
+        let (c, n): (Vec<&str>, Vec<&str>) = (committed.lines().collect(), now.lines().collect());
+        let mut diff = String::new();
+        for l in c.iter().filter(|l| !n.contains(l)) {
+            diff.push_str(&format!("- {l}\n"));
+        }
+        for l in n.iter().filter(|l| !c.contains(l)) {
+            diff.push_str(&format!("+ {l}\n"));
+        }
+        panic!(
+            "tests/probes/tree-sample-joined.tsv is out of date with the golden sidecars ('-' committed, '+' now):\n{diff}\
+             Regenerate it with:\n  ways author golden --ways-dir hooks/ways --probes --joined > tests/probes/tree-sample-joined.tsv"
         );
     }
 
