@@ -303,9 +303,10 @@ fn scan_prompt_surface(
     let bodies = body_map(competitors.iter().copied());
     let body_rank = crate::config::global().body_rank;
     let verdicts = late_interaction::run(&reduced, &bodies, crate::config::global().admission, body_rank);
-    if verdicts.is_none() {
-        late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank);
-    }
+    let fused = match &verdicts {
+        Some(v) => v.used_body_rank(),
+        None => late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank),
+    };
 
     // ADR-701 §2: record the top candidates with share and margin, from the
     // rows the scan already holds, and whether confirmation read the body
@@ -315,6 +316,7 @@ fn scan_prompt_surface(
         let enabled: std::collections::HashMap<&str, &str> =
             competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
         record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
+        record.body_rank(fused);
     }
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
@@ -343,7 +345,7 @@ fn scan_prompt_surface(
 
         let (outcome, needs_parent) = prompt_outcome(
             way,
-            &PromptSurface { query, masked: &masked, session_id, response_context, embed_matches: &embed_matches, verdicts: verdicts.as_ref() },
+            &PromptSurface { body_rank, bodies: &bodies, query, masked: &masked, session_id, response_context, embed_matches: &embed_matches, verdicts: verdicts.as_ref() },
             &fired_ids,
             &mut prompt_only_scores,
         );
@@ -425,6 +427,10 @@ fn scan_prompt_surface(
 /// What the prompt lane decides each way against: the surface, its embed scores
 /// and the matcher's verdicts. Shared by the scan and the probe scorer.
 struct PromptSurface<'a> {
+    /// Body-rank mode and the competing ways' bodies, so the keyword gate's
+    /// prompt-only re-check fuses its scores as the primary pass did.
+    body_rank: crate::config::BodyRank,
+    bodies: &'a std::collections::HashMap<String, PathBuf>,
     query: &'a str,
     masked: &'a str,
     session_id: &'a str,
@@ -443,7 +449,7 @@ fn prompt_outcome(
     fired_ids: &HashSet<String>,
     prompt_only_scores: &mut Option<EmbedScores>,
 ) -> (PromptMatch, bool) {
-    let PromptSurface { query, masked, session_id, response_context, embed_matches, verdicts } = *surface;
+    let PromptSurface { body_rank, bodies, query, masked, session_id, response_context, embed_matches, verdicts } = *surface;
     let near_miss_margin = crate::config::global().near_miss_margin;
     let keyword_floor = crate::config::global().keyword_floor_probability;
     let response_contributed = response_context.is_some_and(|rc| !rc.trim().is_empty());
@@ -473,8 +479,15 @@ fn prompt_outcome(
     if let PromptMatch::KeywordGated(_) = outcome {
         if response_contributed {
             used_prompt_only = true;
-            let scores = prompt_only_scores
-                .get_or_insert_with(|| batch_embed_score(&reduce::reduce_for_embed(query, BUDGET_PROMPT)));
+            let scores = prompt_only_scores.get_or_insert_with(|| {
+                let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
+                let mut scores = batch_embed_score(&reduced);
+                // Same ranking as the primary pass: fused where that pass was.
+                if verdicts.is_none() {
+                    late_interaction::fuse_single(&mut scores, &reduced, bodies, body_rank);
+                }
+                scores
+            });
             outcome = match_prompt(
                 regex_text,
                 &way.pattern,
@@ -614,9 +627,10 @@ pub fn task(
     let bodies = body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir)));
     let body_rank = crate::config::global().body_rank;
     let verdicts = late_interaction::run(&reduced, &bodies, crate::config::global().admission, body_rank);
-    if verdicts.is_none() {
-        late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank);
-    }
+    let fused = match &verdicts {
+        Some(v) => v.used_body_rank(),
+        None => late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank),
+    };
     // ADR-701 §2: the task lane writes a decision record too, its candidates
     // drawn from the ways eligible there. A dispatch is not a turn: the epoch
     // is the dispatching agent's, unbumped.
@@ -637,6 +651,7 @@ pub fn task(
             .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
             .collect();
         record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
+        record.body_rank(fused);
     }
 
     // Payload: channel. Ordered like the other lanes before the stash is written.

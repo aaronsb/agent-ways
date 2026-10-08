@@ -82,6 +82,8 @@ pub(crate) struct Verdicts {
     fired: HashMap<String, f64>,
     /// Confirmation read the body sidecar (ADR-701 §7's sidecar state).
     sidecar: bool,
+    /// The ranking used fused scores (`matching.body_rank` on, sidecar complete).
+    fused: bool,
 }
 
 /// One way's ranking evidence from the chunk-match stage.
@@ -106,6 +108,11 @@ impl Verdicts {
     /// True when this scan confirmed against the body sidecar.
     pub(crate) fn used_sidecar(&self) -> bool {
         self.sidecar
+    }
+
+    /// True when this scan ranked on fused scores, not alias cosines.
+    pub(crate) fn used_body_rank(&self) -> bool {
+        self.fused
     }
 }
 
@@ -232,7 +239,8 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
     let mut matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
     if dbg { eprintln!("LI: match pass {:.1} ms", ms(t)); }
     let fusion = fuse_if_on(body_rank, &mut matched, sidecar.as_ref());
-    if dbg { eprintln!("LI: body rank {}", if fusion.is_some() { "on" } else { "off" }); }
+    let fusion_on = fusion.is_some();
+    if dbg { eprintln!("LI: body rank {}", if fusion_on { "on" } else { "off" }); }
     let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors, fusion);
     if dbg { eprintln!("LI: confirm via {}", if confirmer.uses_sidecar() { "sidecar" } else { "per-call embedding" }); }
     // Stages 3+4: mask, peak rank + per-chunk softmax-share sorted by share
@@ -269,7 +277,7 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
     }
     if dbg { eprintln!("LI: confirm stage {n_survivors} survivors in {:.2} ms", ms(t)); }
     if dbg { eprintln!("LI: fired {} ways", fired.len()); }
-    Some(Verdicts { fired, sidecar: confirmer.uses_sidecar() })
+    Some(Verdicts { fired, sidecar: confirmer.uses_sidecar(), fused: fusion_on })
 }
 
 /// Milliseconds since `t`, for the WAYS_LI_DEBUG trace.
@@ -303,16 +311,18 @@ pub(crate) fn fused_score(sidecar: &Sidecar, id: &str, chunk: &[f32], alias: f64
 
 /// Replace each chunk's alias rows with fused rows, re-sorted by the fused
 /// score (stable, so ties keep way-embed's order). Returns what confirmation
-/// needs. Only when the sidecar is complete and the chunk vectors came back:
-/// fused and alias-only scores are never mixed in one ranking (ADR-701 §7).
+/// needs. Only when the sidecar is complete and the chunk vectors came back,
+/// so a ranking is fused or alias-only as a whole (ADR-701 §7). Inside a fused
+/// ranking, a way with no sections has nothing to add and keeps its raw alias
+/// cosine beside fused neighbours.
 fn fuse_if_on(mode: BodyRank, matched: &mut Matched, sidecar: Option<&Sidecar>) -> Option<Fusion> {
     if !mode.is_on() {
         return None;
     }
     let (sidecar, vectors) = (sidecar?, matched.vectors.as_ref()?);
     let mut fusion = Fusion::new();
-    for (ci, rows) in matched.per_chunk.iter_mut().enumerate() {
-        let Some(v) = vectors.get(ci) else { continue };
+    // `parse_match` returns vectors only when every chunk has one.
+    for (ci, (rows, v)) in matched.per_chunk.iter_mut().zip(vectors).enumerate() {
         for (id, score) in rows.iter_mut() {
             if let Some((fused, idx)) = fused_score(sidecar, id, v, *score) {
                 fusion.insert((id.clone(), ci), (*score, idx));
@@ -329,21 +339,22 @@ fn fuse_if_on(mode: BodyRank, matched: &mut Matched, sidecar: Option<&Sidecar>) 
 /// becomes `alias + 0.25 × best section`. A prompt that does not chunk to
 /// exactly one piece, or a sidecar that is not complete, leaves the scores as
 /// they are. The calibration maps the fused cosine as it maps an alias cosine.
-pub(crate) fn fuse_single(scores: &mut super::scoring::EmbedScores, query: &str, bodies: &HashMap<String, PathBuf>, mode: BodyRank) {
+/// Returns whether the scores were fused.
+pub(crate) fn fuse_single(scores: &mut super::scoring::EmbedScores, query: &str, bodies: &HashMap<String, PathBuf>, mode: BodyRank) -> bool {
     if !mode.is_on() {
-        return;
+        return false;
     }
-    let Some(bin) = crate::paths::way_embed() else { return };
+    let Some(bin) = crate::paths::way_embed() else { return false };
     let xdg = crate::paths::corpus_dir();
     let artifacts = super::scoring::artifact_dir();
     let (corpus, model) = (artifacts.join("ways-corpus-en.jsonl"), xdg.join(crate::paths::EN_MODEL));
     let chunks = chunk_surface(query);
     if chunks.len() != 1 || scores.en.is_none() || !corpus.is_file() || !model.is_file() {
-        return;
+        return false;
     }
-    let Some(sidecar) = complete_sidecar(&artifacts, &xdg, &bin, bodies) else { return };
-    let Some(matched) = batch_match(&bin, &corpus, &model, &chunks, true) else { return };
-    let Some(v) = matched.vectors.as_ref().and_then(|vs| vs.first()) else { return };
+    let Some(sidecar) = complete_sidecar(&artifacts, &xdg, &bin, bodies) else { return false };
+    let Some(matched) = batch_match(&bin, &corpus, &model, &chunks, true) else { return false };
+    let Some(v) = matched.vectors.as_ref().and_then(|vs| vs.first()) else { return false };
     if let Some(rows) = scores.en.as_mut() {
         for (id, score) in rows.iter_mut() {
             if let Some((fused, _)) = fused_score(&sidecar, id, v, *score) {
@@ -351,6 +362,7 @@ pub(crate) fn fuse_single(scores: &mut super::scoring::EmbedScores, query: &str,
             }
         }
     }
+    true
 }
 
 /// ADR-701 §7: the body sidecar in `corpus_dir`, only when it was built with
@@ -1003,6 +1015,27 @@ mod tests {
         .unwrap();
         fusion.insert(("one".to_string(), 0), (0.22, 0));
         assert_eq!(fused_confirm(&one, &fusion, "one", 0, &chunk, 0.9), 0.22);
+    }
+
+    /// Two sections that tie on the chunk: the one that contributed is set aside
+    /// by index, so its twin still counts as a different section.
+    #[test]
+    fn a_tying_section_still_counts_as_a_different_one() {
+        let twins = sidecar::decode(
+            &sidecar::encode(
+                "m",
+                3,
+                &[sidecar::WaySections { id: "twin".into(), hash: 4, vectors: vec![unit(&[0.0, 1.0, 0.0]), unit(&[0.0, 1.0, 0.0])] }],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let chunk = [0.0_f32, 1.0, 0.0];
+        let (_, used) = fused_score(&twins, "twin", &chunk, 0.2).unwrap();
+        let mut fusion = Fusion::new();
+        fusion.insert(("twin".to_string(), 0), (0.2, used));
+        let got = fused_confirm(&twins, &fusion, "twin", 0, &chunk, 0.9);
+        assert!((got - 1.0).abs() < 1e-6, "the twin section confirms at 1.0, not the alias 0.2: {got}");
     }
 
     /// Fusion re-sorts each chunk's rows by the fused score and leaves the rows

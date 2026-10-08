@@ -7,7 +7,7 @@ Measured 2026-10-08 on branch `adr-701-body-rank`. ADR-701 §6 adopts `alias + 0
 **What the flag does.** With `body_rank: on` and a complete body sidecar (ADR-701 §7), each way's cosine against a prompt chunk becomes `alias + 0.25 × max over the way's section vectors`.
 
 - **Late-interaction path** (2 or more chunks). The fused cosine replaces the alias cosine in every chunk's rows before masking, softmax share, peak, the peak co-gate and the admission rule. Confirmation then reads the chunk the way won, sets aside the section that contributed to that chunk's score, and takes the best of the remaining sections. A way with one section or none confirms against its alias cosine on that chunk.
-- **Single-vector path** (a one-sentence prompt, or late interaction unable to run). The prompt's chunk is matched once more with its vector returned, and each English row becomes `alias + 0.25 × best section`. The calibration `g(s)` then maps the fused cosine exactly as it maps an alias cosine. There is no confirmation stage on this path.
+- **Single-vector path** (a prompt that chunks to exactly one piece; a prompt of several chunks whose late-interaction run fails stays on alias cosines). The prompt's chunk is matched once more with its vector returned, and each English row becomes `alias + 0.25 × best section`. The calibration `g(s)` then maps the fused cosine exactly as it maps an alias cosine. There is no confirmation stage on this path.
 - **Not touched:** the Bash lane, the multilingual lane, the retired-key and sidecar-absent states. Without a complete sidecar the flag does nothing, so fused and alias-only scores are never mixed in one ranking.
 
 ADR-701 does not scope the fusion to one path ("the alias matcher, with the fused score once adopted"), so both paths take it. The two paths form scores in different places (the late path in `fuse_if_on`, before `rank_and_admit`; the single path in `fuse_single`, on the `EmbedScores` rows), both through the one function `fused_score`.
@@ -102,6 +102,16 @@ Flipped rows: 7 fail to pass, 8 pass to fail.
 | fail to pass | workstation/pkghistory | not-confirmed to fired |
 
 Top-1 changed on 4 rows: 2 gained, 2 lost. Seven of the eight losses are rows that were admitted and confirmed against their best section before, and fail confirmation against the next-best section now. The confirmation rule is stricter by construction, and more rows land in `not-confirmed` (12 to 15).
+
+**Offset: single-section ways.** Three of the seven joined fail-to-pass rows come from the rule for a way with one section, not from the fusion. Such a way has no other section, so confirmation reduces to its alias cosine on the won chunk, which must reach the confirm gate of 0.35. With the flag off, the same rows are confirmed against their one section, which scores low:
+
+| way | stage off | confirm off (the one section) | stage on | confirm on (alias cosine) |
+|---|---|---|---|---|
+| softwaredev/architecture | not-confirmed | 0.2138 | fired | 0.3804 |
+| softwaredev/environment | not-confirmed | 0.1415 | fired | 0.4439 |
+| itops/proposals | not-admitted | - | fired | 0.4484 (admitted on fused peak 0.5076, which crosses the 0.50 peak co-gate) |
+
+The alias cosine is higher than the section cosine for these ways, so they pass. Without these three the late set would show 4 fail-to-pass against 8 pass-to-fail.
 
 ## Results: separation from unrelated prompts
 

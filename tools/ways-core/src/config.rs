@@ -708,8 +708,9 @@ mod tests {
         cfg.apply_yaml("body_rank: on\n");
         assert_eq!(cfg.body_rank, BodyRank::On);
         let mut cfg = Config::default();
-        cfg.apply_yaml("body_rank: maybe\n");
-        assert_eq!(cfg.body_rank, BodyRank::Off);
+        cfg.apply_yaml("body_rank: maybe\nnear_miss_margin: 0.1\n");
+        assert_eq!(cfg.body_rank, BodyRank::Off, "an unknown mode is refused by the schema");
+        assert_eq!(cfg.near_miss_margin, 0.05, "with the rest of the matching section");
     }
 
     #[test]

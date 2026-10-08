@@ -72,6 +72,8 @@ pub(crate) fn prompt(query: &str, project_dir: &str, admission: Admission, body_
     let mut fired_ids: HashSet<String> = HashSet::new();
     let mut prompt_only: Option<EmbedScores> = None;
     let surface = PromptSurface {
+        body_rank,
+        bodies: &bodies,
         query,
         masked: &masked,
         session_id: PROBE_SESSION,
