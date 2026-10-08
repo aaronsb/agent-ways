@@ -40,11 +40,11 @@ Add a new assertion to the section it belongs to. Name it as a sentence that rea
 
 ## CI
 
-The branch flavor runs as the `live fixture (tier 1)` job in `portability.yml` on every pull request. The release flavor runs from `live-fixture.yml` on dispatch only (ADR-508). A red release job means drift between `main`, the latest release, or Claude Code's newest version, and it is never a check on a PR.
+The branch flavor runs as the `live fixture (tier 1)` job in `portability.yml` on every pull request. The release flavor runs from `live-fixture.yml` after each ways release finishes building, and on dispatch (ADR-508). A red release job means drift between `main`, the latest release, or Claude Code's newest version, and it is never a check on a PR.
 
 ## Tier 2
 
-Tier 2 runs tier 1 as its precondition, then drives scenarios through `claude -p` with a real key. It spends tokens, so CI runs it only when `live-fixture.yml` is dispatched, never on a pull request (ADR-508).
+Tier 2 runs tier 1 as its precondition, then drives scenarios through `claude -p` with a real key. It spends tokens, so CI runs it from `live-fixture.yml` after each ways release and on dispatch, never on a pull request (ADR-508).
 
 ```bash
 ANTHROPIC_API_KEY_FILE=~/path/to/key make test-live TIER=2
