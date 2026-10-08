@@ -2,13 +2,11 @@ name: Live fixture (release flavor)
 
 # ADR-186 item 2: the release flavor runs the documented one-liner, which
 # clones main and downloads the latest release assets, with Claude Code at its
-# latest version. It runs nightly and on dispatch, never on a pull request, so
-# drift on either side shows up here and not as a red check on someone's PR.
+# latest version. It runs on dispatch only (ADR-508), never on a pull request,
+# so drift on either side shows up here and not as a red check on someone's PR.
 # The branch flavor, the PR gate, lives in portability.yml.
 
 on:
-  schedule:
-    - cron: '17 6 * * *'
   workflow_dispatch:
     inputs:
       claude_version:
