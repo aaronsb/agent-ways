@@ -203,7 +203,10 @@ def render_turn(text):
 def ways_bin():
     """The ways binary build_alias uses: this checkout's bin/ways, else PATH."""
     b = REPO / "bin" / "ways"
-    return b if b.exists() else shutil.which("ways")
+    found = str(b) if b.exists() else shutil.which("ways")
+    if not found:
+        sys.exit("ways binary not found: build with make ways or put ways on PATH")
+    return found
 
 
 def prepare():
