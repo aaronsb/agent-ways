@@ -99,16 +99,50 @@ This way activates when the user or agent is working with:
     eprintln!("Created: {}", way_file.display());
 
     let golden_file = way_dir.join(format!("{way_name}.golden.jsonl"));
-    std::fs::write(&golden_file, GOLDEN_TEMPLATE)?;
-    eprintln!("Created: {}", golden_file.display());
+    let project = crate::util::project_root().map(PathBuf::from);
+    let wants_golden = in_core_root(&way_dir, project.as_deref());
+    if wants_golden {
+        std::fs::write(&golden_file, GOLDEN_TEMPLATE)?;
+        eprintln!("Created: {}", golden_file.display());
+    }
 
     eprintln!();
     eprintln!("Next steps:");
     eprintln!("  1. Edit {}", way_file.display());
-    eprintln!("  2. Fill both prompts in {} (a direct and a situational one)", golden_file.display());
-    eprintln!("  3. ways author lint {}", way_file.display());
-    eprintln!("  4. ways corpus");
-    eprintln!("  5. ways author match \"<a prompt that should fire it>\"");
+    let mut step = 2;
+    if wants_golden {
+        eprintln!("  {step}. Fill both prompts in {} (a direct and a situational one)", golden_file.display());
+        step += 1;
+    }
+    eprintln!("  {step}. ways author lint {}", way_file.display());
+    eprintln!("  {}. ways corpus", step + 1);
+    eprintln!("  {}. ways author match \"<a prompt that should fire it>\"", step + 2);
 
     Ok(())
+}
+
+/// Whether `way_dir` sits in a core ways root, the only place ADR-701 §9
+/// requires golden prompts. User and project roots get no blank sidecar.
+fn in_core_root(way_dir: &Path, project: Option<&Path>) -> bool {
+    crate::paths::containing_ways_root(way_dir, project)
+        .is_some_and(|root| crate::paths::is_core_root(&root))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_core_root_gets_the_blank_sidecar() {
+        let base = std::env::temp_dir().join(format!("ways-template-core-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let core = base.join("core/a/w");
+        let user = base.join("proj/.claude/ways/a/w");
+        std::fs::create_dir_all(&core).unwrap();
+        std::fs::create_dir_all(&user).unwrap();
+        std::fs::write(base.join("core/frontmatter-schema.yaml"), "").unwrap();
+        assert!(in_core_root(&core, None));
+        assert!(!in_core_root(&user, Some(&base.join("proj"))));
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

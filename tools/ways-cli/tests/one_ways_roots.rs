@@ -166,10 +166,9 @@ fn template_global_writes_the_personal_root_not_the_projection() {
     let personal = fx.home().join("config/agent-ways/ways/mine/newone/newone.md");
     assert!(personal.is_file(), "template --global must write {}:\n{out}", personal.display());
     let golden = personal.with_file_name("newone.golden.jsonl");
-    assert_eq!(
-        std::fs::read_to_string(&golden).unwrap_or_default(),
-        "{\"kind\":\"direct\",\"prompt\":\"\"}\n{\"kind\":\"situational\",\"prompt\":\"\"}\n",
-        "template must write the blank golden sidecar {}:\n{out}",
+    assert!(
+        !golden.exists(),
+        "a personal root has no golden requirement, so template must not write {}:\n{out}",
         golden.display()
     );
     assert!(
@@ -193,4 +192,31 @@ fn lint_check_fails_a_fire_bearing_way_without_refire() {
     let out = fx.ways(&["author", "lint", path]);
     assert!(out.contains("ERROR") && out.contains("no `refire:` field"), "{out}");
     assert_eq!(fx.ways_status(&["author", "lint", "--check", path]), Some(1), "{out}");
+}
+
+#[test]
+fn lint_check_requires_a_golden_sidecar_in_a_core_root() {
+    let fx = Fx::new("coregolden");
+    // A root holding frontmatter-schema.yaml is a core root (paths::is_core_root).
+    let root = fx.home().join("corecheck");
+    let dir = root.join("mine/sem");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(schema(), root.join("frontmatter-schema.yaml")).unwrap();
+    std::fs::write(
+        dir.join("sem.md"),
+        "---\ndescription: a semantic way\nvocabulary: semantic\nrefire: 0.15\n---\n# sem\n",
+    )
+    .unwrap();
+    let path = root.to_str().unwrap();
+    let out = fx.ways(&["author", "lint", "--check", path]);
+    assert!(out.contains("ERROR") && out.contains("no `sem.golden.jsonl`"), "{out}");
+    assert_eq!(fx.ways_status(&["author", "lint", "--check", path]), Some(1), "{out}");
+
+    std::fs::write(
+        dir.join("sem.golden.jsonl"),
+        "{\"kind\":\"direct\",\"prompt\":\"a semantic prompt\"}\n{\"kind\":\"situational\",\"prompt\":\"a situation\"}\n",
+    )
+    .unwrap();
+    let out = fx.ways(&["author", "lint", "--check", path]);
+    assert_eq!(fx.ways_status(&["author", "lint", "--check", path]), Some(0), "{out}");
 }
