@@ -115,11 +115,14 @@ fn run(query: String) -> Result<()> {
 /// with no rows, in place of the single-vector view.
 pub fn run_late(query: String, project: Option<&str>, unfiltered: bool, json: bool) -> Result<()> {
     let top_n = if json { usize::MAX } else { 20 };
-    let admission = match project {
-        Some(dir) => crate::config::Config::load(dir).admission,
-        None => crate::config::global().admission,
+    let (admission, body_rank) = match project {
+        Some(dir) => {
+            let cfg = crate::config::Config::load(dir);
+            (cfg.admission, cfg.body_rank)
+        }
+        None => (crate::config::global().admission, crate::config::global().body_rank),
     };
-    let diag = crate::cmd::scan::diagnose(&query, project, top_n, unfiltered, admission);
+    let diag = crate::cmd::scan::diagnose(&query, project, top_n, unfiltered, admission, body_rank);
     if json {
         let (reduced, rows) = match diag {
             Some((reduced, rows)) => (Some(reduced), rows),

@@ -19,7 +19,7 @@ use super::{
     prompt_competitors, prompt_outcome, reduce, CommandSurface, Lane, PromptMatch, PromptSurface, WayCandidate,
     BUDGET_COMMAND, BUDGET_PROMPT,
 };
-use crate::config::Admission;
+use crate::config::{Admission, BodyRank};
 
 /// A probe's session id. It names no session, so no marker answers to it.
 const PROBE_SESSION: &str = "ways-probe-fresh";
@@ -53,22 +53,27 @@ pub(crate) struct ProbeScan {
 }
 
 /// Probe the prompt lane with `query`.
-pub(crate) fn prompt(query: &str, project_dir: &str, admission: Admission) -> ProbeScan {
+pub(crate) fn prompt(query: &str, project_dir: &str, admission: Admission, body_rank: BodyRank) -> ProbeScan {
     let scope = "agent";
     let candidates = collect_candidates(project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
-    let embed_matches = batch_embed_score(&reduced);
+    let mut embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
     let competitors = prompt_competitors(&candidates, scope, project_dir);
     let bodies = body_map(competitors.iter().copied());
-    let verdicts = late_interaction::run(&reduced, &bodies, admission);
-    let diag = verdicts.as_ref().and_then(|_| late_interaction::run_diagnostic(&reduced, &bodies, usize::MAX, admission));
+    let verdicts = late_interaction::run(&reduced, &bodies, admission, body_rank);
+    if verdicts.is_none() {
+        late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank);
+    }
+    let diag = verdicts.as_ref().and_then(|_| late_interaction::run_diagnostic(&reduced, &bodies, usize::MAX, admission, body_rank));
 
     let mut stages: HashMap<String, &'static str> = HashMap::new();
     let mut hits: Vec<Hit<(String, bool)>> = Vec::new();
     let mut fired_ids: HashSet<String> = HashSet::new();
     let mut prompt_only: Option<EmbedScores> = None;
     let surface = PromptSurface {
+        body_rank,
+        bodies: &bodies,
         query,
         masked: &masked,
         session_id: PROBE_SESSION,

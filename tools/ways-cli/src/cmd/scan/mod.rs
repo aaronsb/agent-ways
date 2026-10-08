@@ -288,7 +288,7 @@ fn scan_prompt_surface(
         _ => query.to_string(),
     };
     let reduced = reduce::reduce_for_embed(&embed_input, BUDGET_PROMPT);
-    let embed_matches = batch_embed_score(&reduced);
+    let mut embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
 
     let competitors = prompt_competitors(&candidates, &scope, &project_dir);
@@ -300,7 +300,13 @@ fn scan_prompt_surface(
     // the matcher can't run (surface too sparse to chunk, engine unavailable) it
     // returns None and match_prompt uses the single-vector scores. The keyword
     // gate and near-miss telemetry keep using the single-vector batch scores.
-    let verdicts = late_interaction::run(&reduced, &body_map(competitors.iter().copied()), crate::config::global().admission);
+    let bodies = body_map(competitors.iter().copied());
+    let body_rank = crate::config::global().body_rank;
+    let verdicts = late_interaction::run(&reduced, &bodies, crate::config::global().admission, body_rank);
+    let fused = match &verdicts {
+        Some(v) => v.used_body_rank(),
+        None => late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank),
+    };
 
     // ADR-701 §2: record the top candidates with share and margin, from the
     // rows the scan already holds, and whether confirmation read the body
@@ -310,6 +316,7 @@ fn scan_prompt_surface(
         let enabled: std::collections::HashMap<&str, &str> =
             competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
         record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
+        record.body_rank(fused);
     }
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
@@ -338,7 +345,7 @@ fn scan_prompt_surface(
 
         let (outcome, needs_parent) = prompt_outcome(
             way,
-            &PromptSurface { query, masked: &masked, session_id, response_context, embed_matches: &embed_matches, verdicts: verdicts.as_ref() },
+            &PromptSurface { body_rank, bodies: &bodies, query, masked: &masked, session_id, response_context, embed_matches: &embed_matches, verdicts: verdicts.as_ref() },
             &fired_ids,
             &mut prompt_only_scores,
         );
@@ -420,6 +427,10 @@ fn scan_prompt_surface(
 /// What the prompt lane decides each way against: the surface, its embed scores
 /// and the matcher's verdicts. Shared by the scan and the probe scorer.
 struct PromptSurface<'a> {
+    /// Body-rank mode and the competing ways' bodies, so the keyword gate's
+    /// prompt-only re-check fuses its scores as the primary pass did.
+    body_rank: crate::config::BodyRank,
+    bodies: &'a std::collections::HashMap<String, PathBuf>,
     query: &'a str,
     masked: &'a str,
     session_id: &'a str,
@@ -438,7 +449,7 @@ fn prompt_outcome(
     fired_ids: &HashSet<String>,
     prompt_only_scores: &mut Option<EmbedScores>,
 ) -> (PromptMatch, bool) {
-    let PromptSurface { query, masked, session_id, response_context, embed_matches, verdicts } = *surface;
+    let PromptSurface { body_rank, bodies, query, masked, session_id, response_context, embed_matches, verdicts } = *surface;
     let near_miss_margin = crate::config::global().near_miss_margin;
     let keyword_floor = crate::config::global().keyword_floor_probability;
     let response_contributed = response_context.is_some_and(|rc| !rc.trim().is_empty());
@@ -468,8 +479,15 @@ fn prompt_outcome(
     if let PromptMatch::KeywordGated(_) = outcome {
         if response_contributed {
             used_prompt_only = true;
-            let scores = prompt_only_scores
-                .get_or_insert_with(|| batch_embed_score(&reduce::reduce_for_embed(query, BUDGET_PROMPT)));
+            let scores = prompt_only_scores.get_or_insert_with(|| {
+                let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
+                let mut scores = batch_embed_score(&reduced);
+                // Same ranking as the primary pass: fused where that pass was.
+                if verdicts.is_none() {
+                    late_interaction::fuse_single(&mut scores, &reduced, bodies, body_rank);
+                }
+                scores
+            });
             outcome = match_prompt(
                 regex_text,
                 &way.pattern,
@@ -550,7 +568,7 @@ fn admit_hits(
 
 // ── Authoring diagnostic (task #5) ─────────────────────────────
 
-pub(crate) use late_interaction::{admission_rule, chunk_sections, Admission, DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE};
+pub(crate) use late_interaction::{admission_rule, chunk_sections, Admission, BodyRank, DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE};
 
 /// Run the late-interaction matcher over `query` for way authoring — the modern
 /// equivalent of the single-vector `ways author match`. Reduces the query exactly as the
@@ -564,12 +582,12 @@ pub(crate) use late_interaction::{admission_rule, chunk_sections, Admission, Dia
 /// scope and `when:` against `project`), so the shares match the live fire path.
 /// `unfiltered` competes every candidate instead, for seeing how a way would rank
 /// among all of them. `admission` is the stage-4 rule the live matcher would use.
-pub fn diagnose(query: &str, project: Option<&str>, top_n: usize, unfiltered: bool, admission: Admission) -> Option<(String, Vec<DiagRow>)> {
+pub fn diagnose(query: &str, project: Option<&str>, top_n: usize, unfiltered: bool, admission: Admission, body_rank: BodyRank) -> Option<(String, Vec<DiagRow>)> {
     let project_dir = project.map(|s| s.to_string()).unwrap_or_else(crate::util::project_dir);
     let candidates = collect_candidates(&project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
     let bodies = body_map(diag_candidates(&candidates, &project_dir, unfiltered).into_iter());
-    let rows = late_interaction::run_diagnostic(&reduced, &bodies, top_n, admission)?;
+    let rows = late_interaction::run_diagnostic(&reduced, &bodies, top_n, admission, body_rank)?;
     Some((reduced, rows))
 }
 
@@ -602,15 +620,17 @@ pub fn task(
     // ADR-130: agent delegation prompts are the largest input class in
     // practice. Reduce to the model's window before embedding.
     let reduced = reduce::reduce_for_embed(query, BUDGET_TASK);
-    let embed_matches = batch_embed_score(&reduced);
+    let mut embed_matches = batch_embed_score(&reduced);
     let masked = mask_nonlinguistic(query);
     // ADR-160: the matcher is the semantic matcher on the task surface too;
     // single-vector is the fail-safe when it can't chunk (see scan::prompt).
-    let verdicts = late_interaction::run(
-        &reduced,
-        &body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir))),
-        crate::config::global().admission,
-    );
+    let bodies = body_map(candidates.iter().filter(|w| eligible(w, Lane::Task { teammate: is_teammate }, &project_dir)));
+    let body_rank = crate::config::global().body_rank;
+    let verdicts = late_interaction::run(&reduced, &bodies, crate::config::global().admission, body_rank);
+    let fused = match &verdicts {
+        Some(v) => v.used_body_rank(),
+        None => late_interaction::fuse_single(&mut embed_matches, &reduced, &bodies, body_rank),
+    };
     // ADR-701 §2: the task lane writes a decision record too, its candidates
     // drawn from the ways eligible there. A dispatch is not a turn: the epoch
     // is the dispatching agent's, unbumped.
@@ -631,6 +651,7 @@ pub fn task(
             .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
             .collect();
         record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
+        record.body_rank(fused);
     }
 
     // Payload: channel. Ordered like the other lanes before the stash is written.

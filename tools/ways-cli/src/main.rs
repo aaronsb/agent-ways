@@ -538,6 +538,15 @@ enum AuthorCommand {
         /// Print one TSV row per probe instead of the table
         #[arg(long)]
         tsv: bool,
+        /// Run with body score in ranking on or off, whatever `matching.body_rank` says
+        /// (default: the configured value). Recorded in the summary header when on.
+        #[arg(long, value_name = "off|on", value_parser = ["off", "on"])]
+        body_rank: Option<String>,
+        /// Treat every row as an unrelated prompt (its `expected_way` is ignored): print the
+        /// way ranked first with its score and the ways that fired, then how many rows fired
+        /// anything. For checking that a matcher change leaves unrelated prompts silent.
+        #[arg(long, conflicts_with = "tsv")]
+        unrelated: bool,
     },
     /// Analyze a progressive-disclosure tree
     Tree {
@@ -1325,8 +1334,8 @@ fn run() -> Result<()> {
                 cmd::template::run(path, description, vocabulary, scope, global)
             }
             AuthorCommand::Match { query, project, all, json } => cmd::match_cmd::run_late(query, project.as_deref(), all, json),
-            AuthorCommand::Probe { file, ways_dir, corpus, project, tsv } => {
-                cmd::probe::run(file, ways_dir, corpus, project.as_deref(), tsv)
+            AuthorCommand::Probe { file, ways_dir, corpus, project, tsv, body_rank, unrelated } => {
+                cmd::probe::run(file, ways_dir, corpus, project.as_deref(), tsv, body_rank.as_deref().and_then(config::BodyRank::parse), unrelated)
             }
             AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),

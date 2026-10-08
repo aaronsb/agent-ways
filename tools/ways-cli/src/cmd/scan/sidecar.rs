@@ -385,6 +385,16 @@ impl Sidecar {
             .map(|s| dot(s, v))
             .reduce(f64::max)
     }
+
+    /// Cosine of `v` with each of the way's section vectors, in section order.
+    /// `None` when the way has no sections (or no record).
+    pub(crate) fn section_cosines(&self, id: &str, v: &[f32]) -> Option<Vec<f64>> {
+        let &(_, row, n) = self.index.get(id)?;
+        if n == 0 || self.dim == 0 || v.len() != self.dim {
+            return None;
+        }
+        Some(self.vectors[row * self.dim..(row + n) * self.dim].chunks_exact(self.dim).map(|s| dot(s, v)).collect())
+    }
 }
 
 /// Dot product in f64. Vectors from way-embed are L2-normalised, so this is
