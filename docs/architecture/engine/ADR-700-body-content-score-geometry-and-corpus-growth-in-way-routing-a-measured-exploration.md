@@ -26,7 +26,7 @@ Measurements taken 2026-10-05 on the 137 committed ways in `hooks/ways`, with th
 
 ## Method
 
-**Golden set.** 332 rows: 272 synthetic prompts, one `direct` and one `situational` per way, written by subagents that read each way file and its neighbours; 15 `none` prompts that no way covers; and the 45 rows of `tests/routing-golden.tsv`. A `situational` prompt describes the user's situation without naming the topic. One slice of 68 prompts had its `situational` rows rewritten after the author read the way bodies; every result below holds with that slice removed. The synthetic rows live in per-way `*.golden.jsonl` sidecars (ADR-701 §9); `ways author golden --tsv` exports them.
+**Golden set.** 332 rows: 272 synthetic prompts, one `direct` and one `situational` per way, written by subagents that read each way file and its neighbours; 15 `none` prompts that no way covers; and the 45 rows of `tests/routing-golden.tsv`. A `situational` prompt describes the user's situation without naming the topic. One slice of 68 prompts had its `situational` rows rewritten after the author read the way bodies; every result below holds with that slice removed. The set is at `experiments/content-corpus/golden-synthetic.tsv`.
 
 **Corpora.** The alias corpus is the one `ways corpus` builds. Each body corpus holds the way's prose with frontmatter, code blocks, tables, HTML comments and the See Also section removed, chunked three ways:
 
@@ -249,3 +249,7 @@ Added 2026-10-05 from `experiments/content-corpus/judge_ab.py` and `results-judg
 - Ranking only; no thresholds or calibration were fitted.
 - Gains of about 2 points are within noise at this size.
 - Hubness correction and body fusion were not tested together, and neither was routing within a subtree first.
+
+## Notes
+
+- 2026-10-08: the synthetic rows moved from `experiments/content-corpus/golden-synthetic.tsv` into per-way `*.golden.jsonl` sidecars, with the `none` rows in `hooks/ways/golden-none.jsonl` (ADR-701 §9). `ways author golden --tsv` exports the same 289 rows.
