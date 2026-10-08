@@ -42,17 +42,16 @@ impl Provider {
         }
     }
 
-    /// The model the shipped profile uses, and the one the picker recommends:
-    /// Claude Haiku 5.5. The threshold was measured on Haiku 4.5.
+    /// The model the shipped profile is tuned for, and the one the picker recommends.
     pub fn recommended_model(self) -> &'static str {
         match self {
-            Provider::Anthropic => "claude-haiku-5-5",
-            Provider::Openrouter => "anthropic/claude-haiku-5.5",
+            Provider::Anthropic => "claude-haiku-4-5",
+            Provider::Openrouter => "anthropic/claude-haiku-4.5",
         }
     }
 
     /// True for the recommended model's id, alias or dated snapshot
-    /// (`claude-haiku-5-5`, and a dated form such as `claude-haiku-5-5-20260101` if one appears).
+    /// (`claude-haiku-4-5` and `claude-haiku-4-5-20251001`).
     pub fn is_recommended(self, model: &str) -> bool {
         let rec = self.recommended_model();
         model == rec
@@ -474,12 +473,12 @@ mod tests {
 
     #[test]
     fn the_recommended_model_matches_its_dated_snapshot_only() {
-        assert!(Provider::Anthropic.is_recommended("claude-haiku-5-5"));
-        assert!(Provider::Anthropic.is_recommended("claude-haiku-5-5-20260101"));
-        assert!(!Provider::Anthropic.is_recommended("claude-haiku-4-5"));
-        assert!(!Provider::Anthropic.is_recommended("claude-haiku-5-5-beta"));
-        assert!(Provider::Openrouter.is_recommended("anthropic/claude-haiku-5.5"));
-        assert!(!Provider::Openrouter.is_recommended("anthropic/claude-haiku-5.5:batch"));
+        assert!(Provider::Anthropic.is_recommended("claude-haiku-4-5"));
+        assert!(Provider::Anthropic.is_recommended("claude-haiku-4-5-20251001"));
+        assert!(!Provider::Anthropic.is_recommended("claude-haiku-5-5"));
+        assert!(!Provider::Anthropic.is_recommended("claude-haiku-4-5-beta"));
+        assert!(Provider::Openrouter.is_recommended("anthropic/claude-haiku-4.5"));
+        assert!(!Provider::Openrouter.is_recommended("anthropic/claude-haiku-4.5:batch"));
     }
 
     #[test]
@@ -580,7 +579,7 @@ mod tests {
         let s = resolve(&user, |_| true).unwrap().unwrap();
         assert_eq!(s.mode, Mode::Shadow);
         assert_eq!(s.profile.threshold, 0.5);
-        assert_eq!(s.profile.model, "claude-haiku-5-5");
+        assert_eq!(s.profile.model, "claude-haiku-4-5");
     }
 
     #[test]

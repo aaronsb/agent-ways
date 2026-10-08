@@ -113,7 +113,7 @@ The judge does not cover the command, file, task, state and subagent lanes, the 
 
 ## Threshold and cap
 
-Each engine profile carries its own threshold, because each model's confidence sits on its own scale. The shipped profiles judge with Claude Haiku 5.5 and use 0.3, the operating point ADR-195 measured on Haiku 4.5; the threshold is carried over until it is re-measured on 5.5. A verdict with P(yes) at or above the threshold passes.
+Each engine profile carries its own threshold, because each model's confidence sits on its own scale. The shipped profiles use 0.3 for Claude Haiku 4.5, the operating point ADR-195 measured. Haiku 5.5 was measured against it and not adopted: it ranks worse and passes more irrelevant candidates at 0.3, and it stays selectable. A verdict with P(yes) at or above the threshold passes.
 
 A judge call takes about 0.6 s plus 0.1 s per candidate, so a request carries at most `max_candidates` ways (8 in the shipped profiles), in matcher order ([ADR-197](../../architecture/ways/ADR-197-cap-the-candidates-the-relevance-gate-judges-per-request.md)). Overflow passes unjudged, with two exceptions that follow the ways tree:
 

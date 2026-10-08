@@ -534,7 +534,7 @@ mod tests {
         let c = &calls[0];
         assert_eq!((field(c, "outcome"), field(c, "candidates"), field(c, "cost_source")), ("judged", "2", "price_table"));
         assert_eq!((field(c, "input_tokens"), field(c, "output_tokens")), ("1000", "100"));
-        assert_eq!(field(c, "cost_usd"), "0.00015000");
+        assert_eq!(field(c, "cost_usd"), "0.00150000");
         assert_eq!(field(c, "session"), "test-gate");
     }
 

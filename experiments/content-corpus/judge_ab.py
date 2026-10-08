@@ -826,6 +826,47 @@ def compare(model, provider, sample_n, arm="A"):
                   f"recall {sum(p >= t for p in pos5) / len(pos5):.1%}")
 
 
+def compare_more(model, provider, sample_n, arm="A", n_boot=4000, seed=11):
+    """Paired bootstrap over groups of AUC(model) - AUC(4.5), and latency percentiles."""
+    groups, desc = load_groups()
+    authored = authored_nodes()
+    sampled = sample_groups(groups, sample_n)
+    cache = load_cache()
+    by_req = {r["req"]: r for k, r in cache.items() if k[1:] == (arm, MODEL, "anthropic")}
+    pairs = []
+    for g in sampled:
+        o = by_req.get(body_hash(request_body(g, arm, desc, authored)))
+        n = cache.get((g["gid"], arm, model, provider))
+        if o and n:
+            pairs.append((o, n))
+    print(f"\nbootstrap on {len(pairs)} paired groups, {n_boot} resamples (seed {seed})")
+    rng = random.Random(seed)
+    for label in ("strict", "family"):
+        def d(idx):
+            u4 = [(i, p, y) for i, k in enumerate(idx) for p, y in zip(pairs[k][0]["p_yes"], pairs[k][0][label])]
+            u5 = [(i, p, y) for i, k in enumerate(idx) for p, y in zip(pairs[k][1]["p_yes"], pairs[k][1][label])]
+            a4 = stats(u4)["auc"]
+            a5 = stats(u5)["auc"]
+            return a4, a5
+        a4, a5 = d(list(range(len(pairs))))
+        diffs = []
+        for _ in range(n_boot):
+            x, y = d([rng.randrange(len(pairs)) for _ in pairs])
+            if not (math.isnan(x) or math.isnan(y)):
+                diffs.append(y - x)
+        diffs.sort()
+        lo, hi = diffs[int(0.025 * len(diffs))], diffs[int(0.975 * len(diffs)) - 1]
+        print(f"{label}: AUC 4.5 {a4:.4f}, 5.5 {a5:.4f}, diff {a5 - a4:+.4f}, 95% interval [{lo:+.4f}, {hi:+.4f}]"
+              f" -> {'includes 0' if lo <= 0 <= hi else 'excludes 0'}")
+    lat = sorted(r["ms"] for r in (json.loads(l) for l in CACHE.read_text().splitlines())
+                 if r.get("model") == model and r.get("provider", "anthropic") == provider and not r.get("error"))
+    q = lambda f: lat[min(len(lat) - 1, math.ceil(f * len(lat)) - 1)]
+    print(f"latency over {len(lat)} calls: p50 {q(.5)} p90 {q(.9)} p95 {q(.95)} p99 {q(.99)} max {lat[-1]} ms; "
+          f"over 2000 ms: {sum(x > 2000 for x in lat)} ({sum(x > 2000 for x in lat) / len(lat):.1%})")
+    p99 = q(.99)
+    print(f"timeout rule: p99 x1.2 = {p99 * 1.2:.0f} -> {math.ceil(p99 * 1.2 / 500) * 500} ms")
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "analyze"
     if cmd == "prepare":
@@ -842,6 +883,7 @@ def main():
         args = sys.argv[2:]
         opt = lambda k, d: args[args.index(k) + 1] if k in args else d
         compare(opt("--model", MODEL), opt("--provider", "anthropic"), int(opt("--sample", 60)))
+        compare_more(opt("--model", MODEL), opt("--provider", "anthropic"), int(opt("--sample", 60)))
     elif cmd == "analyze":
         analyze()
     else:

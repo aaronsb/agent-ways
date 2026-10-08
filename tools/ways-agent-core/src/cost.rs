@@ -140,20 +140,21 @@ mod tests {
         let u = Usage { input_tokens: 1_000_000, output_tokens: 100_000, ..Default::default() };
         let (cost, source) = price(&u, &haiku());
         assert_eq!(source, CostSource::PriceTable);
-        assert!((cost.unwrap() - 0.15).abs() < 1e-9);
+        assert!((cost.unwrap() - 1.5).abs() < 1e-9);
     }
 
     #[test]
     fn cache_tokens_use_anthropic_multipliers() {
         let u = Usage { cache_read_tokens: 1_000_000, cache_write_tokens: 1_000_000, ..Default::default() };
         let (cost, _) = price(&u, &haiku());
-        assert!((cost.unwrap() - 0.135).abs() < 1e-9);
+        assert!((cost.unwrap() - 1.35).abs() < 1e-9);
     }
 
     #[test]
     fn the_list_price_follows_the_model_and_an_override_wins() {
         let u = Usage { input_tokens: 1_000_000, ..Default::default() };
         let mut p = haiku();
+        p.model = "claude-haiku-5-5".into();
         assert_eq!(price(&u, &p), (Some(0.10), CostSource::PriceTable));
         p.model = "claude-haiku-4-5-20251001".into();
         assert_eq!(price(&u, &p), (Some(1.0), CostSource::PriceTable));
