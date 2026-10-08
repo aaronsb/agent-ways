@@ -132,17 +132,21 @@ pub enum BodyRank {
     /// `(alias + 0.25 × best section) / 1.25`: the same blend on the alias
     /// scale, so the calibration keeps its meaning.
     Scaled,
+    /// `Scaled` on the single-vector path only; late interaction keeps alias
+    /// scores. The default.
+    ScaledSingle,
 }
 
 impl BodyRank {
     /// The values `matching.body_rank` takes, as written in config.yaml.
-    pub const NAMES: [&'static str; 3] = ["off", "on", "scaled"];
+    pub const NAMES: [&'static str; 4] = ["off", "on", "scaled", "scaled-single"];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "off" => Some(BodyRank::Off),
             "on" => Some(BodyRank::On),
             "scaled" => Some(BodyRank::Scaled),
+            "scaled-single" => Some(BodyRank::ScaledSingle),
             _ => None,
         }
     }
@@ -152,12 +156,23 @@ impl BodyRank {
             BodyRank::Off => "off",
             BodyRank::On => "on",
             BodyRank::Scaled => "scaled",
+            BodyRank::ScaledSingle => "scaled-single",
         }
     }
 
-    /// Body score joins the ranking, scaled or not.
+    /// Body score joins the ranking on some path.
     pub fn is_on(self) -> bool {
         self != BodyRank::Off
+    }
+
+    /// Late interaction ranks on the blend.
+    pub fn fuses_late(self) -> bool {
+        matches!(self, BodyRank::On | BodyRank::Scaled)
+    }
+
+    /// The blend is divided by `1 + w`, keeping the alias scale.
+    pub fn is_scaled(self) -> bool {
+        matches!(self, BodyRank::Scaled | BodyRank::ScaledSingle)
     }
 }
 
@@ -233,7 +248,7 @@ pub struct Config {
     /// (ADR-700 §12, ADR-701 increment 6). Default [`Admission::Share`].
     pub admission: Admission,
     /// Whether the body sidecar's best section joins the ranking score
-    /// (ADR-701 §6, under evaluation). Default [`BodyRank::Off`].
+    /// (ADR-701 §6). Default [`BodyRank::ScaledSingle`].
     pub body_rank: BodyRank,
     /// Days an archive of the event or decision log is kept (ADR-701 §2).
     /// Default 365.
@@ -294,7 +309,7 @@ impl Default for Config {
             keyword_floor_probability: 0.15,
             near_miss_margin: 0.05,
             admission: Admission::Share,
-            body_rank: BodyRank::Off,
+            body_rank: BodyRank::ScaledSingle,
             event_retention_days: 365,
             decision_retention_turns: 50_000,
             refire_presets,
@@ -656,7 +671,7 @@ mod tests {
         assert_eq!(cfg.semantic_fire_probability, 0.5);
         assert_eq!(cfg.keyword_floor_probability, 0.15);
         assert_eq!(cfg.admission, Admission::Share);
-        assert_eq!(cfg.body_rank, BodyRank::Off);
+        assert_eq!(cfg.body_rank, BodyRank::ScaledSingle);
         assert_eq!(cfg.refire_presets.get("once").copied(), Some(1.0));
         assert_eq!(cfg.refire_presets.get("rare").copied(), Some(0.4));
         assert_eq!(cfg.refire_presets.get("normal").copied(), Some(0.15));
@@ -711,15 +726,19 @@ mod tests {
     }
 
     #[test]
-    fn body_rank_reads_on_and_a_bad_value_leaves_it_off() {
+    fn body_rank_reads_each_mode_and_a_bad_value_keeps_the_default() {
         let mut cfg = Config::default();
         cfg.apply_yaml("body_rank: on\n");
         assert_eq!(cfg.body_rank, BodyRank::On);
         cfg.apply_yaml("body_rank: scaled\n");
         assert_eq!(cfg.body_rank, BodyRank::Scaled);
+        cfg.apply_yaml("body_rank: scaled-single\n");
+        assert_eq!(cfg.body_rank, BodyRank::ScaledSingle);
+        cfg.apply_yaml("body_rank: off\n");
+        assert_eq!(cfg.body_rank, BodyRank::Off);
         let mut cfg = Config::default();
         cfg.apply_yaml("body_rank: maybe\nnear_miss_margin: 0.1\n");
-        assert_eq!(cfg.body_rank, BodyRank::Off, "an unknown mode is refused by the schema");
+        assert_eq!(cfg.body_rank, BodyRank::ScaledSingle, "an unknown mode is refused by the schema");
         assert_eq!(cfg.near_miss_margin, 0.05, "with the rest of the matching section");
     }
 

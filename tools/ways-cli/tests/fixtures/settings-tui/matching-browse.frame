@@ -8,7 +8,7 @@ agent-tui frame 100x30
 |│     parent_boost_floor        0.3                   ││7 entries, 0 changed                       │|
 |│     near_miss_margin          0.1                   ││                                           │|
 |│     admission                 share                 ││                                           │|
-|│     body_rank                 off                   ││                                           │|
+|│     body_rank                 scaled-single         ││                                           │|
 |│ ▸ refire_presets · setting    value                 ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|

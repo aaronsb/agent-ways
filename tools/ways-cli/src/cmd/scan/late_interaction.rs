@@ -331,7 +331,7 @@ pub(crate) fn fused_score(sidecar: &Sidecar, id: &str, chunk: &[f32], alias: f64
         })?;
     let w = tuning().weight;
     let sum = alias + w * best;
-    Some((if mode == BodyRank::Scaled { sum / (1.0 + w) } else { sum }, idx))
+    Some((if mode.is_scaled() { sum / (1.0 + w) } else { sum }, idx))
 }
 
 /// Replace each chunk's alias rows with fused rows, re-sorted by the fused
@@ -341,7 +341,7 @@ pub(crate) fn fused_score(sidecar: &Sidecar, id: &str, chunk: &[f32], alias: f64
 /// ranking, a way with no sections has nothing to add and keeps its raw alias
 /// cosine beside fused neighbours.
 fn fuse_if_on(mode: BodyRank, matched: &mut Matched, sidecar: Option<&Sidecar>) -> Option<Fusion> {
-    if !mode.is_on() {
+    if !mode.fuses_late() {
         return None;
     }
     let (sidecar, vectors) = (sidecar?, matched.vectors.as_ref()?);

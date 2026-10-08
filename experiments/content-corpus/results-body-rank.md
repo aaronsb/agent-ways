@@ -319,3 +319,27 @@ These are the figures, with no choice made. The points the tables show:
 - On the late-interaction set no mode beats `off` on passes (55): `on` 54, `scaled` 54, `scaled` with the lone-section confirm 52, `on` with it 51. Top-1 is 64 (`off`, `on`), 65 (`scaled`).
 - The lone-section confirm changes nothing on the single-sentence set, which has no confirmation stage. On the late set it lowers passes by 2 under `scaled` and 3 under `on`, because it takes back the two or three rows the alias confirm admitted (`softwaredev/architecture` and `softwaredev/environment` stop passing under `scaled`).
 - The sweep on the single-sentence set: pass 81 (off), 82, 86, 87 at w = 0.15, 0.25, 0.35; top-1 71, 71, 75, 73; other ways fired 456, 437, 433, 447. No unrelated row fires at any w; the golden-none maximum top score is 0.4370, 0.4524, 0.4606, 0.4677. On the late set, pass is 52, 54, 53 at the three weights against 55 for `off`.
+
+## Shipped default: `body_rank: scaled-single`
+
+The operator chose the scaled blend (w = 0.25) on the single-vector path only, with late interaction left on alias scores, as the default. `scaled-single` is that mode; `off`, `on` and `scaled` stay selectable, and the weight is the constant 0.25 (no config key). Decision records carry the mode string only when the scan actually ranked on fused scores, so a late-path scan under the default carries nothing.
+
+Runs on the final build with the default config (no \`--body-rank\` flag), against the same corpus as above:
+
+```
+ways author probe tests/probes/tree-sample.tsv        --ways-dir hooks/ways --corpus DIR --tsv
+ways author probe tests/probes/tree-sample-joined.tsv --ways-dir hooks/ways --corpus DIR --tsv
+ways author probe NONE.tsv                            --ways-dir hooks/ways --corpus DIR --unrelated   (golden-none, routing-golden none, joined unrelated)
+```
+
+| set | result under the default | compared with |
+|---|---|---|
+| tree-sample (single-sentence) | pass 86, top-1 75, expected way fires 91, other ways fired 433 | the `scaled` numbers above: the same |
+| tree-sample-joined (late) | pass 55, top-1 64, expected way fires 57, other ways fired 52 | `off`: rows byte-identical; the whole output identical once the header's `body rank: scaled-single` is removed |
+| golden-none.jsonl (15 rows, single) | 0 rows fire | |
+| routing-golden `none` rows (3, single) | 0 rows fire | |
+| joined unrelated (15 rows, late) | 0 rows fire | |
+
+On tree-sample the default and `scaled` differ in the two rows of the one multi-sentence probe (\`meta/develop\`, takes the late path): share 0.1172 under the default (alias scores) against 0.1188 under \`scaled\`. Neither passes, and no count changes. The summary header names the mode when the body score is in use, so default-config probe output now carries \` · body rank: scaled-single\`; \`--body-rank off\` reproduces the earlier output byte for byte.
+
+\`bash tests/test-routing-golden.sh\` scores raw cosines through way-embed and does not read this setting. It reports top-1 40/40 (100%, floor 90%) and none 3/3 below 0.30, the same before and after the change.

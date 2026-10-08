@@ -10,7 +10,7 @@ agent-tui frame 100x30
 |│     parent_boost_floor        0.3                   ││                                           │|
 |│     near_miss_margin          0.05                  ││1 entry, 0 changed                         │|
 |│     admission                 share                 ││                                           │|
-|│     body_rank                 off                   ││actions                                    │|
+|│     body_rank                 scaled-single         ││actions                                    │|
 |│ ▸ refire_presets · setting    value                 ││  i lint                                   │|
 |│                                                     ││    ways settings lint                     │|
 |│                                                     ││                                           │|
