@@ -245,7 +245,7 @@ pub(crate) fn state<'a>(
     }
     let sc = read(&corpus_dir.join(FILE)).ok_or(Fallback::Absent)?;
     if !view.vectors {
-        return Err(Fallback::NoVectors);
+        return Err(Fallback::BuiltWithoutVectors);
     }
     let model = model_id(corpus_dir, bin).ok_or(Fallback::ModelMismatch)?;
     sc.check(&model, enabled, &view.alias)?;
@@ -276,6 +276,8 @@ pub(crate) enum Fallback {
     BuildFailed(String),
     /// The build's way-embed cannot return chunk vectors (`--vectors`).
     NoVectors,
+    /// A sidecar from a build that recorded no chunk vectors.
+    BuiltWithoutVectors,
     /// The sidecar was built for another model, embedder or chunker.
     ModelMismatch,
     /// The manifest records no per-way hashes to check against.
@@ -296,7 +298,8 @@ impl std::fmt::Display for Fallback {
             Fallback::NoEmbedder => write!(f, "way-embed not installed"),
             Fallback::Absent => write!(f, "absent; run `ways corpus`"),
             Fallback::BuildFailed(why) => write!(f, "build failed: {why}"),
-            Fallback::NoVectors => write!(f, "way-embed cannot return chunk vectors; upgrade way-embed to 1.2.0 or later, then run `ways corpus`"),
+            Fallback::NoVectors => write!(f, "the installed way-embed cannot return chunk vectors, which way-embed 1.2.0 adds; `ways update` installs it once it is published"),
+            Fallback::BuiltWithoutVectors => write!(f, "built without chunk vectors; run `ways corpus`"),
             Fallback::ModelMismatch => write!(f, "built for another model, way-embed or chunker; run `ways corpus`"),
             Fallback::NoHashes => write!(f, "the manifest has no way hashes; run `ways corpus`"),
             Fallback::Incomplete { missing, stale } => {

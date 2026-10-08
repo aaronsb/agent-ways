@@ -189,7 +189,7 @@ pub fn run(json_output: bool) -> Result<()> {
             println!("  ways:      {}", exe.display());
         }
         if let Some(ref embed) = way_embed {
-            println!("  way-embed: {}", embed.display());
+            println!("  way-embed: {}", binary_with_version(embed));
         } else {
             println!("  way-embed: not found");
         }
@@ -424,13 +424,24 @@ fn install_json() -> serde_json::Value {
 
 /// The installed ways-mcp and its version: what new sessions start. A running
 /// session reports its own server's version through `ways_status`.
+/// `bin` with what its `--version` prints, if it answers.
+fn version_of(bin: &Path) -> Option<String> {
+    let out = std::process::Command::new(bin).arg("--version").output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn binary_with_version(bin: &Path) -> String {
+    match version_of(bin) {
+        Some(v) => format!("{} ({v})", bin.display()),
+        None => bin.display().to_string(),
+    }
+}
+
 fn mcp_binary_line() -> String {
     let bin = crate::paths::data_root().join("bin").join("ways-mcp");
-    match std::process::Command::new(&bin).arg("--version").output() {
-        Ok(out) if out.status.success() => {
-            format!("{} ({})", bin.display(), String::from_utf8_lossy(&out.stdout).trim())
-        }
-        _ => "not installed (`make ways-mcp` in the app directory, or `ways update`)".to_string(),
+    match version_of(&bin) {
+        Some(_) => binary_with_version(&bin),
+        None => "not installed (`make ways-mcp` in the app directory, or `ways update`)".to_string(),
     }
 }
 
@@ -549,7 +560,8 @@ mod tests {
             sidecar_line(&incomplete),
             "Body sidecar: not used, confirmation embeds per call — incomplete (missing a; stale b, c, d and 1 more); run `ways corpus`"
         );
-        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("way-embed cannot return chunk vectors; upgrade way-embed to 1.2.0 or later, then run `ways corpus`"));
+        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("the installed way-embed cannot return chunk vectors, which way-embed 1.2.0 adds; `ways update` installs it once it is published"));
+        assert!(sidecar_line(&Err(Fallback::BuiltWithoutVectors)).ends_with("built without chunk vectors; run `ways corpus`"));
         assert!(sidecar_line(&Err(Fallback::BuildFailed("boom".into()))).ends_with("build failed: boom"));
         assert_eq!(sidecar_json(&Err(Fallback::Absent)), json!({ "used": false, "reason": "absent; run `ways corpus`" }));
         assert_eq!(sidecar_json(&Ok((1, 2))), json!({ "used": true, "ways": 1, "sections": 2 }));
