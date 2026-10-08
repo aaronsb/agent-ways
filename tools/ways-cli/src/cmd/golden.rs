@@ -52,7 +52,7 @@ pub fn run(ways_dir: Option<String>, tsv: bool) -> Result<()> {
     ways.dedup();
     let none = rows.iter().filter(|r| r.way == "none").count();
     println!("Golden prompts under {}", root.display());
-    println!("  ways covered: {}", ways.len());
+    println!("  covered ways: {}", ways.len());
     println!("  rows: {} ({} way, {} none)", rows.len(), rows.len() - none, none);
     println!("  `ways author golden --tsv` prints the rows as prompt, expected_way, kind");
     Ok(())
