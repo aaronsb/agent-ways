@@ -2,6 +2,7 @@ pub mod agent;
 pub mod banner;
 pub mod context;
 pub mod corpus;
+pub mod golden;
 pub mod graph;
 pub mod hook;
 pub mod init;
