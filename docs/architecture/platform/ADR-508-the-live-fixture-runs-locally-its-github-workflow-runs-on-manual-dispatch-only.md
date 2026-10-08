@@ -12,6 +12,10 @@ basis:
     level: directed
     said: "if it's dispatched when we're staging a new release that seems like a reasonable approach"
     via: chat, 2026-10-08
+  - operator: aaronsb
+    level: directed
+    said: "to be honest, just having it be a local action seems like the best approach right now, the more I think about it. it can stay a manual invocation on github"
+    via: chat, 2026-10-08
   - evidence: "live-fixture.yml scheduled runs 2026-10-01 to 2026-10-08: 4 of 8 failed"
   - precedent: ADR-186
 agent:
@@ -26,15 +30,15 @@ related:
   - ADR-186
 ---
 
-# ADR-508: The live fixture's release flavor and tier 2 run per release, not nightly
+# ADR-508: The live fixture runs locally; its GitHub workflow runs on manual dispatch only
 
 ## Summary
 
-- **Decided:** the release flavor of tier 1 and tier 2 run when a `ways-v*` release finishes building, and on `workflow_dispatch`. The nightly schedule is removed. The branch flavor stays the pull-request gate.
+- **Decided:** the live fixture is a local action, `make test-live`, run when staging a release. `live-fixture.yml` keeps `workflow_dispatch` and loses its nightly schedule. The branch flavor of tier 1 stays the pull-request gate in `portability.yml`.
 - **Trades away:** detection of drift between releases, chiefly a new Claude Code version breaking the latest release. That drift now shows up at the next release or when someone dispatches the run.
 - **One-way?** No. Restoring the schedule is one line in the workflow.
-- **Probes:** *Confident (per-release):* a run per release is the point where a result leads to work. *Not confident (other-components):* releases of components other than `ways` do not need the run.
-- **Inversion:** between continuous drift monitoring and testing only on change. The decision tests each release and on demand.
+- **Probes:** *Confident (local-first):* running the fixture locally while staging a release is where its result leads to work. *Not confident (release-step):* the release skill should name the run as a staging step.
+- **Inversion:** between continuous drift monitoring and testing only on change. The decision tests on demand, by the person staging a release.
 
 ## Context
 
@@ -42,13 +46,13 @@ ADR-186 §2 and §4 run the release flavor and tier 2 on a nightly schedule as w
 
 ## Decision
 
-`live-fixture.yml` drops its `schedule` trigger. It runs on `workflow_run` when the `Build ways CLI` workflow completes successfully for a `ways-v*` tag, which is after the release assets are published, so the release flavor tests the release just cut. Branch pushes that complete the build workflow are skipped by the job condition. `workflow_dispatch` stays, for a Claude Code change that matters or to verify a change to tier 2 against a branch. ADR-186 §2's "on the nightly schedule" and §4's "and on `schedule`" are replaced by this; everything else in ADR-186 stands.
+`live-fixture.yml` drops its `schedule` trigger and keeps `workflow_dispatch`. The fixture is run locally with `make test-live` (`TIER=1|2`, `FLAVOR=branch|release`) when staging a release, after a Claude Code change that matters, or to verify a tier 2 change. The GitHub workflow remains for a manual run on a clean runner. ADR-186 §2's "on the nightly schedule" and §4's "and on `schedule`" are replaced by this; everything else in ADR-186 stands.
 
 ## Consequences
 
 ### Positive
 
-- Tier 2 spends tokens once per release, and a red run points at the release that caused it.
+- Tier 2 spends tokens only when a person runs it, and the result lands in front of that person.
 
 ### Negative
 
@@ -62,4 +66,4 @@ ADR-186 §2 and §4 run the release flavor and tier 2 on a nightly schedule as w
 
 - **Keep tier 1 release nightly, move tier 2 to dispatch only.** Tier 1 costs no tokens, but its nightly failures led to no work either.
 - **Weekly schedule.** Fewer runs with the same problem: a result nobody acts on.
-- **Dispatch only, with a release checklist step.** Relies on someone remembering; the `workflow_run` trigger does it for every release.
+- **Run after every `ways-v*` release build through `workflow_run`.** Automatic, but the result lands on GitHub after the release is out; a local run while staging catches the problem before the tag.
