@@ -58,6 +58,8 @@ const PRICES: &[(&str, Price)] = &[
     ("opus-4", Price { read: 0.5, write_1h: 10.0, output: 25.0 }),
     ("sonnet-5", Price { read: 0.2, write_1h: 4.0, output: 10.0 }),
     ("sonnet", Price { read: 0.3, write_1h: 6.0, output: 15.0 }),
+    // Haiku 5.5 at the <=100K-prompt rate card ($0.10/$0.50 per MTok input/output);
+    // prompts over 100K bill at 5x, so this row understates a long main session.
     ("haiku-5", Price { read: 0.01, write_1h: 0.2, output: 0.5 }),
     ("haiku", Price { read: 0.1, write_1h: 2.0, output: 5.0 }),
 ];

@@ -79,12 +79,13 @@ impl std::fmt::Display for Provider {
 
 /// Whether a request to `model` may carry `temperature: 0`.
 ///
-/// True only for ids known to accept it. Claude 3.x and 4.x (including dated
-/// snapshots and the OpenRouter `anthropic/` forms) do; Claude 5.x and later
-/// return HTTP 400 to any non-default sampling parameter, so those, and any id
-/// this function does not recognise, get none. A non-Anthropic model reached
-/// through OpenRouter keeps `temperature: 0`: those providers accept it, and
-/// the judge wants deterministic verdicts from them.
+/// True only for ids known to accept it: Claude 3.x, 4.0 and 4.1 through 4.6
+/// (including dated snapshots and the OpenRouter `anthropic/` forms). Opus 4.7
+/// and later, and every Claude 5.x model, return HTTP 400 to any non-default
+/// sampling parameter, so those, and any Claude id this function does not
+/// recognise, get none. A non-Anthropic model reached through OpenRouter keeps
+/// `temperature: 0`: those providers accept it, and the judge wants
+/// deterministic verdicts from them.
 pub fn accepts_sampling(model: &str) -> bool {
     let id = model.split(':').next().unwrap_or(model);
     let claude = match id.split_once('/') {
@@ -93,12 +94,34 @@ pub fn accepts_sampling(model: &str) -> bool {
         None => id,
     };
     let Some(rest) = claude.strip_prefix("claude-") else { return false };
-    // The first short all-digit segment is the major version; the dotted
-    // OpenRouter form (`4.5`) splits on '.' as well. A date is 8 digits.
-    let major = rest
+    // Version numbers are the short all-digit segments; the dotted OpenRouter
+    // form (`4.5`) splits on '.' as well. An 8-digit date is not a minor.
+    let mut nums = rest
         .split(['-', '.'])
-        .find(|seg| !seg.is_empty() && seg.len() <= 2 && seg.bytes().all(|b| b.is_ascii_digit()));
-    matches!(major, Some("3" | "4"))
+        .filter(|seg| !seg.is_empty() && seg.len() <= 2 && seg.bytes().all(|b| b.is_ascii_digit()));
+    match (nums.next(), nums.next()) {
+        (Some("3"), _) => true,
+        (Some("4"), None) => true,
+        (Some("4"), Some(minor)) => minor.parse::<u8>().is_ok_and(|m| m <= 6),
+        _ => false,
+    }
+}
+
+/// Whether `model` accepts the forced `tool_choice` the judge sends.
+///
+/// Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 return HTTP 400 to a forced
+/// tool call; every other model accepts it. Matches both the dashed and the
+/// dotted id forms, with or without a date or `:variant` suffix.
+pub fn accepts_forced_tool(model: &str) -> bool {
+    let id = model.split(':').next().unwrap_or(model).replace('.', "-");
+    let rejecting = ["opus-5-5", "sonnet-5-5", "fable-5-1", "mythos-5-1"];
+    !rejecting.iter().any(|needle| {
+        id.match_indices(needle).any(|(i, _)| {
+            let before = id[..i].chars().next_back();
+            let after = id[i + needle.len()..].chars().next();
+            before.is_none_or(|c| c == '-' || c == '/') && after.is_none_or(|c| c == '-')
+        })
+    })
 }
 
 /// What the gate does with a verdict (ADR-196 §6).
@@ -470,6 +493,10 @@ mod tests {
             "anthropic/claude-haiku-4.5",
             "anthropic/claude-3.5-haiku",
             "anthropic/claude-haiku-4.5:batch",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-opus-4-1-20250805",
+            "anthropic/claude-sonnet-4.6",
             "openai/gpt-5",
             "google/gemini-2.5-flash",
         ] {
@@ -479,12 +506,46 @@ mod tests {
             "claude-haiku-5-5",
             "claude-haiku-5-5-20260101",
             "claude-sonnet-5-5",
+            "claude-opus-4-7",
+            "claude-opus-4-8-20260301",
+            "anthropic/claude-opus-4.7",
+            "anthropic/claude-opus-4.8:batch",
             "anthropic/claude-haiku-5.5",
             "anthropic/claude-haiku-5.5:batch",
             "some-new-model",
             "claude-future",
         ] {
             assert!(!accepts_sampling(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn forced_tool_is_rejected_only_by_four_models() {
+        for no in [
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-sonnet-5-5-20260101",
+            "claude-fable-5-1",
+            "claude-mythos-5-1",
+            "anthropic/claude-opus-5.5",
+            "anthropic/claude-sonnet-5.5:batch",
+            "anthropic/claude-fable-5.1",
+            "anthropic/claude-mythos-5.1",
+        ] {
+            assert!(!accepts_forced_tool(no), "{no}");
+        }
+        for yes in [
+            "claude-haiku-5-5",
+            "anthropic/claude-haiku-5.5",
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-fable-5",
+            "claude-opus-4-7",
+            "claude-sonnet-4-20250514",
+            "claude-haiku-4-5",
+            "openai/gpt-5",
+        ] {
+            assert!(accepts_forced_tool(yes), "{yes}");
         }
     }
 

@@ -689,7 +689,7 @@ fn golden_frames() {
     // The profile's model, a picker once `ways agent models` has cached the
     // provider's list (#795): the tuned model first, an older list as good.
     let cached = Fx::new();
-    let models = ["claude-sonnet-5-5", "claude-opus-4-5", "claude-haiku-5-5", "claude-haiku-4-5"];
+    let models = ["claude-sonnet-5-5", "claude-opus-4-5", "claude-haiku-5-5", "claude-haiku-5-5-20260101", "claude-haiku-4-5"];
     let list: Vec<String> = models.iter().map(|m| format!("{{\"id\":\"{m}\",\"name\":\"{m}\",\"input_per_mtok\":null,\"output_per_mtok\":null}}")).collect();
     cached.file(".cache/agent-ways/agent/models-anthropic.json", &format!("{{\"provider\":\"anthropic\",\"fetched_at\":1700000000,\"models\":[{}]}}\n", list.join(",")));
     let pick = "down down down right down right down down enter down";

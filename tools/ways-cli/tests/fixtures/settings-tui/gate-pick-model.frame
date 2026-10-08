@@ -10,19 +10,19 @@ agent-tui frame 100x30
 |│▌      model                   claude-haiku-5-5      ││another model scores on its own scale.     │|
 |│       threshold               0.3                   ││`ways agent models` lists what a provider  │|
 |│       timeout_ms              2000                  ││serves and keeps the list this key offers; │|
-|│       turns                   1                     ││until it has run for the profile's provider│|
-|│       max_turn_chars   ┌pick one: gate.profiles.anthropic.model─────────┐odel id, and a list that│|
-|│       concurrency      │ ● claude-haiku-5-5  current                    │ffered.                 │|
+|│       turns            ┌pick one: gate.profiles.anthropic.model─────────┐r the profile's provider│|
+|│       max_turn_chars   │ ● claude-haiku-5-5  current                    │odel id, and a list that│|
+|│       concurrency      │   claude-haiku-5-5-20260101                    │ffered.                 │|
 |│       max_candidates   │   claude-haiku-4-5                             │                        │|
 |│       price_in_per_mtok│   claude-opus-4-5                              │ku-5-5                  │|
 |│       price_out_per_mto│   claude-sonnet-5-5                            │ude-haiku-5-5 |         │|
-|│   ▸ openrouter         └────────────────────────────────────────────────┘claude-opus-4-5 |       │|
-|│ ▸ keys · provider             key                   ││claude-sonnet-5-5 (Enter picks)            │|
+|│   ▸ openrouter         └────────────────────────────────────────────────┘260101 |                │|
+|│ ▸ keys · provider             key                   ││claude-haiku-4-5 | claude-opus-4-5 |       │|
+|│                                                     ││claude-sonnet-5-5 (Enter picks)            │|
 |│                                                     ││default  claude-haiku-5-5                  │|
 |│                                                     ││from     default                           │|
 |│                                                     ││writes   ~/.config/agent-ways/agent.yaml   │|
 |│                                                     ││[gate.profiles.anthropic.model]            │|
-|│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -79,20 +79,21 @@ styles
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
- 11  54-55  - - DIM
+ 11  25-25  LightBlue - -
+ 11  26-64  LightBlue - BOLD
+ 11  65-74  LightBlue - -
  11  99-99  - - DIM
  12   0-0   - - DIM
  12  25-25  LightBlue - -
- 12  26-64  LightBlue - BOLD
- 12  65-74  LightBlue - -
+ 12  74-74  LightBlue - -
  12  99-99  - - DIM
  13   0-0   - - DIM
  13  25-25  LightBlue - -
+ 13  26-73  - - BOLD|REVERSED
  13  74-74  LightBlue - -
  13  99-99  - - DIM
  14   0-0   - - DIM
  14  25-25  LightBlue - -
- 14  26-73  - - BOLD|REVERSED
  14  74-74  LightBlue - -
  14  99-99  - - DIM
  15   0-0   - - DIM
@@ -114,7 +115,7 @@ styles
  18  54-55  - - DIM
  18  99-99  - - DIM
  19   0-0   - - DIM
- 19  54-64  - - DIM
+ 19  54-55  - - DIM
  19  99-99  - - DIM
  20   0-0   - - DIM
  20  54-64  - - DIM
@@ -123,7 +124,7 @@ styles
  21  54-64  - - DIM
  21  99-99  - - DIM
  22   0-0   - - DIM
- 22  54-55  - - DIM
+ 22  54-64  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
  23  54-55  - - DIM

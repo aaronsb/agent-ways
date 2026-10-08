@@ -10,18 +10,18 @@ agent-tui frame 80x25
 |│▌      model             claude-haiku-5-5 ││measured on Haiku 4.5; another    │|
 |│       thresho┌pick one: gate.profiles.anthropic.model─────────┐own scale.    │|
 |│       timeout│ ● claude-haiku-5-5  current                    │lists what a  │|
-|│       turns  │   claude-haiku-4-5                             │keeps the list│|
-|│       max_tur│   claude-opus-4-5                              │il it has run │|
-|│       concurr│   claude-sonnet-5-5                            │ovider the key│|
-|│       max_can└────────────────────────────────────────────────┘and a list    │|
-|│       price_in_per_mtok                  ││that has aged is still offered.   │|
+|│       turns  │   claude-haiku-5-5-20260101                    │keeps the list│|
+|│       max_tur│   claude-haiku-4-5                             │il it has run │|
+|│       concurr│   claude-opus-4-5                              │ovider the key│|
+|│       max_can│   claude-sonnet-5-5                            │and a list    │|
+|│       price_i└────────────────────────────────────────────────┘ll offered.   │|
 |│       price_out_per_mtok                 ││                                  │|
 |│   ▸ openrouter                           ││value    claude-haiku-5-5         │|
 |│ ▸ keys · provider       key              ││type     one of claude-haiku-5-5 |│|
+|│                                          ││claude-haiku-5-5-20260101 |       │|
 |│                                          ││claude-haiku-4-5 | claude-opus-4-5│|
 |│                                          ││| claude-sonnet-5-5 (Enter picks) │|
 |│                                          ││default  claude-haiku-5-5         │|
-|│                                          ││from     default                  │|
 |└──────────────────────────────────────────┘└──────────────────────────────────┘|
 | pick   ↑↓ choose · Enter or click sets · Esc closes                            |
 styles
@@ -90,10 +90,11 @@ styles
  13  64-64  LightBlue - -
  13  79-79  - - DIM
  14   0-0   - - DIM
- 14  15-64  LightBlue - -
+ 14  15-15  LightBlue - -
+ 14  64-64  LightBlue - -
  14  79-79  - - DIM
  15   0-0   - - DIM
- 15  43-44  - - DIM
+ 15  15-64  LightBlue - -
  15  79-79  - - DIM
  16   0-0   - - DIM
  16  43-44  - - DIM
@@ -115,7 +116,7 @@ styles
  20  43-44  - - DIM
  20  79-79  - - DIM
  21   0-0   - - DIM
- 21  43-53  - - DIM
+ 21  43-44  - - DIM
  21  79-79  - - DIM
  22   0-0   - - DIM
  22  43-53  - - DIM

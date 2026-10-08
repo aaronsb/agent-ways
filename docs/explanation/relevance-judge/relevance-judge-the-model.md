@@ -54,7 +54,7 @@ sequenceDiagram
         Note over G,A: the hook starts the agent if none is listening
         A->>A: settings, verified key, free slot, render prompt
         opt the agent calls the provider
-            A->>P: one forced tool call at temperature 0
+            A->>P: one forced tool call, at temperature 0 where the model accepts it
             P-->>A: relevant and confidence per candidate, usage
         end
         alt verdicts came back
@@ -84,7 +84,7 @@ Step by step:
 5. Ways marked `pattern_strict` are not judged. The rest are taken in matcher order up to the profile's `max_candidates`. Any overflow is logged as `gate_capped` and passes unjudged.
 6. The hook sends one request to the ways agent over a Unix socket, starting the agent if none is listening. The request carries the conversation turns and, for each candidate, the way's path and description.
 7. The agent re-reads its settings, confirms the key passed its last check, waits for a free provider slot, and renders the prompt.
-8. The agent makes one call to the provider, Anthropic or OpenRouter, that forces a `record_judgements` tool answer at temperature 0. Each candidate gets `relevant` and `confidence`, which become P(yes): the confidence of a yes, or one minus the confidence of a no.
+8. The agent makes one call to the provider, Anthropic or OpenRouter, that forces a `record_judgements` tool answer. Models that accept sampling run at temperature 0; Haiku 5.5 rejects sampling parameters, so it runs at its default and the forced tool call constrains the output. Each candidate gets `relevant` and `confidence`, which become P(yes): the confidence of a yes, or one minus the confidence of a no.
 9. The hook logs the call as `judge_call` and each verdict as `way_judged`. In enforce mode, a way with P(yes) below the threshold is blocked.
 10. Blocked ways are skipped before their fire is recorded, so no `way_fired` line is written and the way keeps its refire budget. The rest are injected as `additionalContext`.
 
