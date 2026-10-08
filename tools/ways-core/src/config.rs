@@ -119,24 +119,30 @@ impl Admission {
 }
 
 /// Whether the body sidecar's best section joins the ranking score
-/// (ADR-701 §6): `alias + 0.25 × best section`, with body confirmation using a
-/// different section than the one that contributed.
+/// (ADR-701 §6), with body confirmation using a different section than the
+/// one that contributed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyRank {
     /// The alias cosine ranks the way (today's behaviour).
     Off,
-    /// The fused score ranks the way, where the body sidecar is complete.
+    /// `alias + 0.25 × best section` ranks the way, where the body sidecar is
+    /// complete. The ADR's literal formula, whose scale runs above the alias
+    /// cosines the calibration was fitted on.
     On,
+    /// `(alias + 0.25 × best section) / 1.25`: the same blend on the alias
+    /// scale, so the calibration keeps its meaning.
+    Scaled,
 }
 
 impl BodyRank {
     /// The values `matching.body_rank` takes, as written in config.yaml.
-    pub const NAMES: [&'static str; 2] = ["off", "on"];
+    pub const NAMES: [&'static str; 3] = ["off", "on", "scaled"];
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "off" => Some(BodyRank::Off),
             "on" => Some(BodyRank::On),
+            "scaled" => Some(BodyRank::Scaled),
             _ => None,
         }
     }
@@ -145,11 +151,13 @@ impl BodyRank {
         match self {
             BodyRank::Off => "off",
             BodyRank::On => "on",
+            BodyRank::Scaled => "scaled",
         }
     }
 
+    /// Body score joins the ranking, scaled or not.
     pub fn is_on(self) -> bool {
-        self == BodyRank::On
+        self != BodyRank::Off
     }
 }
 
@@ -707,6 +715,8 @@ mod tests {
         let mut cfg = Config::default();
         cfg.apply_yaml("body_rank: on\n");
         assert_eq!(cfg.body_rank, BodyRank::On);
+        cfg.apply_yaml("body_rank: scaled\n");
+        assert_eq!(cfg.body_rank, BodyRank::Scaled);
         let mut cfg = Config::default();
         cfg.apply_yaml("body_rank: maybe\nnear_miss_margin: 0.1\n");
         assert_eq!(cfg.body_rank, BodyRank::Off, "an unknown mode is refused by the schema");

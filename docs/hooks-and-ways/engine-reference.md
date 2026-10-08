@@ -12,7 +12,7 @@ The authoritative statement of how the ways matching engine decides a fire: conf
 | `parent_boost_floor` | **0.30** |
 | `near_miss_margin` | 0.05 |
 | `admission` | `share` (or `chunk_top`; see the late-interaction step 4) |
-| `body_rank` | `off` (or `on`; adds `0.25 × best body section` to each way's cosine while the body sidecar is complete, on both the late-interaction and single-vector paths, and confirms against a section other than the one that contributed; under evaluation as ADR-701 §6, results in `experiments/content-corpus/results-body-rank.md`) |
+| `body_rank` | `off` (or `on`, or `scaled`, which divides the `on` blend by 1.25 to keep the alias scale; `on` adds `0.25 × best body section` to each way's cosine while the body sidecar is complete, on both the late-interaction and single-vector paths, and confirms against a section other than the one that contributed; under evaluation as ADR-701 §6, results in `experiments/content-corpus/results-body-rank.md`) |
 | `refire_presets` | `once` 1.0, `rare` 0.4, `normal` 0.15, `frequent` 0.05 |
 
 Retired keys warn and are ignored (`tools/ways-core/src/settings.rs` `RETIRED`): `default_embed_threshold` and `default_multi_embed_threshold` (use `semantic_fire_probability`), `keyword_gate_fraction` (use `keyword_floor_probability`). There is no `embed_threshold` frontmatter field and no per-way threshold.

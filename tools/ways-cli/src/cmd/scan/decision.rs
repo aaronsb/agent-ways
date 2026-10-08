@@ -62,7 +62,7 @@ pub(super) struct Record {
     lane: Option<&'static str>,
     sidecar: bool,
     /// The scan ranked on fused alias-plus-body scores (`matching.body_rank`).
-    body_rank: bool,
+    body_rank: Option<&'static str>,
     candidates: Vec<candidate_log::Candidate>,
     outcomes: Vec<Map<String, Value>>,
     judge: Option<Value>,
@@ -116,7 +116,7 @@ impl Record {
             epoch,
             lane: None,
             sidecar: false,
-            body_rank: false,
+            body_rank: None,
             candidates: Vec::new(),
             outcomes: Vec::new(),
             judge: None,
@@ -141,8 +141,8 @@ impl Record {
 
     /// Says the scan ranked on fused scores, so a reader of the log can tell
     /// them from alias cosines (ADR-701 §8).
-    pub(super) fn body_rank(&mut self, on: bool) {
-        self.body_rank = on;
+    pub(super) fn body_rank(&mut self, mode: Option<&'static str>) {
+        self.body_rank = mode;
     }
 
     /// A way that matched its pattern but was vetoed by the keyword floor.
@@ -241,8 +241,8 @@ impl Record {
         r.insert("basis".into(), BASIS.into());
         r.insert("sidecar".into(), self.sidecar.into());
         // Named only when on, so a record written with the flag off is unchanged.
-        if self.body_rank {
-            r.insert("body_rank".into(), true.into());
+        if let Some(mode) = self.body_rank {
+            r.insert("body_rank".into(), mode.into());
         }
         r.insert("candidates".into(), candidate_log::candidates_json(&self.candidates));
         r.insert("outcomes".into(), Value::Array(self.outcomes.iter().cloned().map(Value::Object).collect()));

@@ -540,13 +540,19 @@ enum AuthorCommand {
         tsv: bool,
         /// Run with body score in ranking on or off, whatever `matching.body_rank` says
         /// (default: the configured value). Recorded in the summary header when on.
-        #[arg(long, value_name = "off|on", value_parser = ["off", "on"])]
+        #[arg(long, value_name = "off|on|scaled", value_parser = ["off", "on", "scaled"])]
         body_rank: Option<String>,
         /// Treat every row as an unrelated prompt (its `expected_way` is ignored): print the
         /// way ranked first with its score and the ways that fired, then how many rows fired
         /// anything. For checking that a matcher change leaves unrelated prompts silent.
         #[arg(long, conflicts_with = "tsv")]
         unrelated: bool,
+        /// Weight of the best body section in the blend (default 0.25; evaluation only)
+        #[arg(long, value_name = "W")]
+        body_rank_weight: Option<f64>,
+        /// Confirm a way with one section against that section instead of its alias (evaluation only)
+        #[arg(long)]
+        single_section_confirm: bool,
     },
     /// Analyze a progressive-disclosure tree
     Tree {
@@ -1334,8 +1340,15 @@ fn run() -> Result<()> {
                 cmd::template::run(path, description, vocabulary, scope, global)
             }
             AuthorCommand::Match { query, project, all, json } => cmd::match_cmd::run_late(query, project.as_deref(), all, json),
-            AuthorCommand::Probe { file, ways_dir, corpus, project, tsv, body_rank, unrelated } => {
-                cmd::probe::run(file, ways_dir, corpus, project.as_deref(), tsv, body_rank.as_deref().and_then(config::BodyRank::parse), unrelated)
+            AuthorCommand::Probe { file, ways_dir, corpus, project, tsv, body_rank, unrelated, body_rank_weight, single_section_confirm } => {
+                cmd::probe::run(
+                    file,
+                    ways_dir,
+                    corpus,
+                    project.as_deref(),
+                    tsv,
+                    cmd::probe::Eval { body_rank: body_rank.as_deref().and_then(config::BodyRank::parse), unrelated, body_rank_weight, single_section_confirm },
+                )
             }
             AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),

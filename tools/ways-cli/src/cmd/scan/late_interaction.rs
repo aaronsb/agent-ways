@@ -289,14 +289,37 @@ fn ms(t: std::time::Instant) -> f64 {
 /// beside the alias cosine in a way's ranking score.
 pub(crate) const BODY_RANK_WEIGHT: f64 = 0.25;
 
+/// Evaluation switches for `ways author probe`, read where scores are fused.
+/// The scan never sets them, so a hook run always uses the defaults.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Tuning {
+    /// Weight of the best section's cosine.
+    pub weight: f64,
+    /// A way with one section confirms against that section (reusing it)
+    /// instead of its alias cosine.
+    pub single_section_confirm: bool,
+}
+
+static TUNING: std::sync::OnceLock<Tuning> = std::sync::OnceLock::new();
+
+/// Set the evaluation switches for this process (probe only; first call wins).
+pub(crate) fn set_tuning(t: Tuning) {
+    let _ = TUNING.set(t);
+}
+
+fn tuning() -> Tuning {
+    TUNING.get().copied().unwrap_or(Tuning { weight: BODY_RANK_WEIGHT, single_section_confirm: false })
+}
+
 /// What body-rank fusion remembers for confirmation: for each `(way id, chunk)`,
 /// the alias cosine and the index of the section that contributed.
 pub(crate) type Fusion = HashMap<(String, usize), (f64, usize)>;
 
-/// The ranking score of a way for one chunk: `alias + 0.25 × best section`.
-/// Returns the score and the contributing section's index, or `None` when the
-/// way has no sections (it keeps its alias cosine).
-pub(crate) fn fused_score(sidecar: &Sidecar, id: &str, chunk: &[f32], alias: f64) -> Option<(f64, usize)> {
+/// The ranking score of a way for one chunk: `alias + w × best section`, divided
+/// by `1 + w` in `Scaled` mode (w is 0.25). Returns the score and the
+/// contributing section's index, or `None` when the way has no sections (it
+/// keeps its alias cosine).
+pub(crate) fn fused_score(sidecar: &Sidecar, id: &str, chunk: &[f32], alias: f64, mode: BodyRank) -> Option<(f64, usize)> {
     let cos = sidecar.section_cosines(id, chunk)?;
     let (idx, best) = cos
         .iter()
@@ -306,7 +329,9 @@ pub(crate) fn fused_score(sidecar: &Sidecar, id: &str, chunk: &[f32], alias: f64
             Some((_, b)) if b >= c => acc,
             _ => Some((i, c)),
         })?;
-    Some((alias + BODY_RANK_WEIGHT * best, idx))
+    let w = tuning().weight;
+    let sum = alias + w * best;
+    Some((if mode == BodyRank::Scaled { sum / (1.0 + w) } else { sum }, idx))
 }
 
 /// Replace each chunk's alias rows with fused rows, re-sorted by the fused
@@ -324,7 +349,7 @@ fn fuse_if_on(mode: BodyRank, matched: &mut Matched, sidecar: Option<&Sidecar>) 
     // `parse_match` returns vectors only when every chunk has one.
     for (ci, (rows, v)) in matched.per_chunk.iter_mut().zip(vectors).enumerate() {
         for (id, score) in rows.iter_mut() {
-            if let Some((fused, idx)) = fused_score(sidecar, id, v, *score) {
+            if let Some((fused, idx)) = fused_score(sidecar, id, v, *score, mode) {
                 fusion.insert((id.clone(), ci), (*score, idx));
                 *score = fused;
             }
@@ -357,7 +382,7 @@ pub(crate) fn fuse_single(scores: &mut super::scoring::EmbedScores, query: &str,
     let Some(v) = matched.vectors.as_ref().and_then(|vs| vs.first()) else { return false };
     if let Some(rows) = scores.en.as_mut() {
         for (id, score) in rows.iter_mut() {
-            if let Some((fused, _)) = fused_score(&sidecar, id, v, *score) {
+            if let Some((fused, _)) = fused_score(&sidecar, id, v, *score, mode) {
                 *score = fused;
             }
         }
@@ -405,7 +430,7 @@ impl<'a> Confirmer<'a> {
             Confirmer::Sidecar { sidecar, vectors, fusion } => {
                 let v = vectors.get(won)?;
                 Some(match fusion {
-                    Some(f) => fused_confirm(sidecar, f, id, won, v, peak),
+                    Some(f) => fused_confirm(sidecar, f, id, won, v, peak, tuning().single_section_confirm),
                     None => sidecar_confirm(sidecar, id, v, peak),
                 })
             }
@@ -427,7 +452,7 @@ fn sidecar_confirm(sc: &Sidecar, id: &str, chunk: &[f32], peak: f64) -> f64 {
 /// of the way's other sections. A way with one section or none is confirmed
 /// against its alias cosine on that chunk. `peak` is the fused ranking score
 /// here, so the alias cosine comes from `fusion`.
-fn fused_confirm(sc: &Sidecar, fusion: &Fusion, id: &str, won: usize, chunk: &[f32], peak: f64) -> f64 {
+fn fused_confirm(sc: &Sidecar, fusion: &Fusion, id: &str, won: usize, chunk: &[f32], peak: f64, reuse_single: bool) -> f64 {
     let Some(&(alias, used)) = fusion.get(&(id.to_string(), won)) else {
         // The way has no sections: its ranking score was its alias cosine.
         return peak;
@@ -439,6 +464,11 @@ fn fused_confirm(sc: &Sidecar, fusion: &Fusion, id: &str, won: usize, chunk: &[f
         .filter(|(i, _)| *i != used)
         .map(|(_, c)| c)
         .reduce(f64::max);
+    // A single section is both the contributor and the only candidate. By the
+    // ADR's rule it confirms against the alias; the probe can instead reuse it.
+    if others.is_none() && reuse_single {
+        return sc.section_cosines(id, chunk).and_then(|c| c.get(used).copied()).unwrap_or(alias);
+    }
     others.unwrap_or(alias)
 }
 
@@ -987,11 +1017,14 @@ mod tests {
     fn fused_score_adds_a_quarter_of_the_best_section() {
         let sc = sample_sidecar();
         let chunk = [0.6_f32, 0.8, 0.0];
-        let (got, idx) = fused_score(&sc, "multi", &chunk, 0.4).unwrap();
+        let (got, idx) = fused_score(&sc, "multi", &chunk, 0.4, BodyRank::On).unwrap();
         assert_eq!(idx, 1);
         assert!((got - (0.4 + 0.25 * 1.4 / 2f64.sqrt())).abs() < 1e-6, "{got}");
-        assert!(fused_score(&sc, "bare", &chunk, 0.4).is_none());
-        assert!(fused_score(&sc, "absent", &chunk, 0.4).is_none());
+        // Scaled keeps the alias scale: (0.4 + 0.25 × 0.98995) / 1.25.
+        let (scaled, _) = fused_score(&sc, "multi", &chunk, 0.4, BodyRank::Scaled).unwrap();
+        assert!((scaled - got / 1.25).abs() < 1e-9, "{scaled}");
+        assert!(fused_score(&sc, "bare", &chunk, 0.4, BodyRank::On).is_none());
+        assert!(fused_score(&sc, "absent", &chunk, 0.4, BodyRank::On).is_none());
     }
 
     /// Under body rank the section that contributed to the score is set aside
@@ -1004,17 +1037,19 @@ mod tests {
         let chunk = [0.6_f32, 0.8, 0.0];
         let mut fusion = Fusion::new();
         fusion.insert(("multi".to_string(), 0), (0.4, 1));
-        let got = fused_confirm(&sc, &fusion, "multi", 0, &chunk, 0.9);
+        let got = fused_confirm(&sc, &fusion, "multi", 0, &chunk, 0.9, false);
         assert!((got - 0.6).abs() < 1e-6, "{got}");
         // A way without sections has no fusion entry: its score was its alias.
-        assert_eq!(fused_confirm(&sc, &fusion, "bare", 0, &chunk, 0.31), 0.31);
+        assert_eq!(fused_confirm(&sc, &fusion, "bare", 0, &chunk, 0.31, false), 0.31);
         // One section: nothing else to confirm against, so the alias cosine.
         let one = sidecar::decode(
             &sidecar::encode("m", 3, &[sidecar::WaySections { id: "one".into(), hash: 3, vectors: vec![unit(&[0.0, 1.0, 0.0])] }]).unwrap(),
         )
         .unwrap();
         fusion.insert(("one".to_string(), 0), (0.22, 0));
-        assert_eq!(fused_confirm(&one, &fusion, "one", 0, &chunk, 0.9), 0.22);
+        assert_eq!(fused_confirm(&one, &fusion, "one", 0, &chunk, 0.9, false), 0.22);
+        // Reusing the lone section: chunk (0.6, 0.8, 0) against (0, 1, 0) is 0.8.
+        assert!((fused_confirm(&one, &fusion, "one", 0, &chunk, 0.9, true) - 0.8).abs() < 1e-6);
     }
 
     /// Two sections that tie on the chunk: the one that contributed is set aside
@@ -1031,10 +1066,10 @@ mod tests {
         )
         .unwrap();
         let chunk = [0.0_f32, 1.0, 0.0];
-        let (_, used) = fused_score(&twins, "twin", &chunk, 0.2).unwrap();
+        let (_, used) = fused_score(&twins, "twin", &chunk, 0.2, BodyRank::On).unwrap();
         let mut fusion = Fusion::new();
         fusion.insert(("twin".to_string(), 0), (0.2, used));
-        let got = fused_confirm(&twins, &fusion, "twin", 0, &chunk, 0.9);
+        let got = fused_confirm(&twins, &fusion, "twin", 0, &chunk, 0.9, false);
         assert!((got - 1.0).abs() < 1e-6, "the twin section confirms at 1.0, not the alias 0.2: {got}");
     }
 

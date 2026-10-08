@@ -316,7 +316,7 @@ fn scan_prompt_surface(
         let enabled: std::collections::HashMap<&str, &str> =
             competitors.iter().map(|c| (c.corpus_id.as_str(), c.id.as_str())).collect();
         record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
-        record.body_rank(fused);
+        record.body_rank(fused.then(|| body_rank.as_str()));
     }
 
     // Prompt-only embed scores, computed lazily for gate re-checks (ADR-155
@@ -568,6 +568,16 @@ fn admit_hits(
 
 // ── Authoring diagnostic (task #5) ─────────────────────────────
 
+/// Probe-only switches for the body-rank evaluation (see `late_interaction::Tuning`).
+pub(crate) fn set_body_rank_tuning(weight: Option<f64>, single_section_confirm: bool) {
+    if weight.is_some() || single_section_confirm {
+        late_interaction::set_tuning(late_interaction::Tuning {
+            weight: weight.unwrap_or(late_interaction::BODY_RANK_WEIGHT),
+            single_section_confirm,
+        });
+    }
+}
+
 pub(crate) use late_interaction::{admission_rule, chunk_sections, Admission, BodyRank, DiagRow, DIAG_CONFIRM_GATE, DIAG_PEAK_GATE};
 
 /// Run the late-interaction matcher over `query` for way authoring — the modern
@@ -651,7 +661,7 @@ pub fn task(
             .map(|c| (c.corpus_id.as_str(), c.id.as_str()))
             .collect();
         record.candidates(&embed_matches, &enabled, verdicts.as_ref().is_some_and(|v| v.used_sidecar()));
-        record.body_rank(fused);
+        record.body_rank(fused.then(|| body_rank.as_str()));
     }
 
     // Payload: channel. Ordered like the other lanes before the stash is written.

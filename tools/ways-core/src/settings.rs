@@ -263,8 +263,8 @@ const KEYS: &[KeySpec] = &[
         path: &["body_rank"],
         kind: Kind::Choice(&crate::config::BodyRank::NAMES),
         default: DefaultValue::Yaml("off"),
-        doc: "Whether a way's best body section joins its ranking score: off or on.",
-        long: "on ranks a way by its alias cosine plus 0.25 times its best body section's cosine, and confirms the body against a section other than the one that contributed (a way with one section or none confirms against its alias). It applies only while the body sidecar is complete. Under evaluation (ADR-701 §6).",
+        doc: "Whether a way's best body section joins its ranking score: off, on or scaled.",
+        long: "on ranks a way by its alias cosine plus 0.25 times its best body section's cosine. scaled divides that by 1.25, keeping the alias scale the calibration was fitted on. Both confirm the body against a section other than the one that contributed (a way with one section or none confirms against its alias). It applies only while the body sidecar is complete. Under evaluation (ADR-701 §6).",
         ..BASE
     },
     KeySpec {
