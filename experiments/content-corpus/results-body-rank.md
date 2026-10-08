@@ -340,13 +340,13 @@ ways author probe NONE.tsv                            --ways-dir hooks/ways --co
 | routing-golden `none` rows (3, single) | 0 rows fire | |
 | joined unrelated (15 rows, late) | 0 rows fire | |
 
-On tree-sample the default and `scaled` differ in the two rows of the one multi-sentence probe (`meta/develop`, takes the late path): share 0.1172 under the default (alias scores) against 0.1188 under `scaled`. Neither passes, and no count changes. The summary header names the mode when the body score is in use, so default-config probe output now carries ` · body rank: scaled-single`; `--body-rank off` reproduces the earlier output byte for byte.
+On tree-sample the default and `scaled` differ in two rows that carry the same multi-sentence prompt (`meta/develop`), which takes the late path: share 0.1172 under the default (alias scores) against 0.1188 under `scaled`. Neither passes, and no count changes. The summary header names the mode whenever it is not `off`, so default-config probe output carries ` · body rank: scaled-single`; `--body-rank off` reproduces the earlier output byte for byte.
 
 `bash tests/test-routing-golden.sh` scores raw cosines through way-embed and does not read this setting. It reports top-1 40/40 (100%, floor 90%) and none 3/3 below 0.30, the same before and after the change.
 
 ### Single-vector path: one pass for scores and vector
 
-The single-vector path used to run `way-embed` twice per prompt with the flag on: once for the alias scores (`--query` on the reduced prompt) and once in `--batch` mode for the query vector. `way-embed match` returns vectors only in `--batch` mode, so the first English pass now uses `--batch --vectors` for a prompt that chunks to one piece, and the alias scores and the section cosines come from the same embedding. The chunk text is the whitespace-normalised reduced prompt; the old alias pass embedded the reduced prompt as is. Prompts of several chunks, a sidecar that is not complete, or a failed pass score exactly as before. With `body_rank: off` nothing changes: output is byte-identical to `main` on both probe sets, table and `--tsv`.
+The single-vector path used to run `way-embed` twice per prompt with the flag on: once for the alias scores (`--query` on the reduced prompt) and once in `--batch` mode for the query vector. `way-embed match` returns vectors only in `--batch` mode, so the first English pass now uses `--batch --vectors` for a prompt that chunks to one piece, and the alias scores and the section cosines come from the same embedding. The chunk text is the reduced prompt after the scan's chunker has collapsed whitespace, dropped fragments under 12 characters and dropped duplicate sentences; the old alias pass embedded the reduced prompt as is. The two texts differ when the chunker drops something, such as a leading "Thanks!", which the next section measures. Prompts of several chunks, a sidecar that is not complete, or a failed pass score exactly as before. With `body_rank: off` nothing changes: output is byte-identical to `main` on both probe sets, table and `--tsv`.
 
 Re-measured with the default config on the same corpus: tree-sample, tree-sample-joined and all three unrelated sets are **byte-identical** to the Shipped default outputs above. No number moved. Probe time over `tests/probes/tree-sample.tsv` (130 rows, release build, three runs each):
 
@@ -356,3 +356,29 @@ Re-measured with the default config on the same corpus: tree-sample, tree-sample
 | after, default config | 62.6 to 64.1 ms |
 | before, `--body-rank off` | 61.6 to 62.5 ms |
 | after, `--body-rank off` | 61.5 to 61.9 ms |
+
+### Pleasantry-prefixed prompts
+
+A prompt that opens with a fragment the chunker drops ("Thanks!", "ok.") still chunks to one piece. Under the default the alias scores come from the stripped chunk; under `off` they come from the whole string. To measure the difference, `tests/probes/tree-sample-pleasantry.tsv` is `tree-sample.tsv` with one of five openers (`Thanks!`, `ok.`, `Yes.`, `Great!`, `Hm.`) put in front of each prompt, picked by a stable hash of the prompt. The three unrelated sets get the same treatment (`unrelated-golden-none-pleasantry.tsv`, `unrelated-routing-none-pleasantry.tsv`, `unrelated-joined-pleasantry.tsv`). Regenerate them with
+
+```
+ways author golden --ways-dir hooks/ways --probes --pleasantry > tests/probes/tree-sample-pleasantry.tsv
+ways author golden --pleasantry-of tests/probes/unrelated-X.tsv > tests/probes/unrelated-X-pleasantry.tsv
+```
+
+A unit test fails when a committed set differs from its base with the opener applied. Runs: `ways author probe FILE --ways-dir hooks/ways --corpus DIR --body-rank off|scaled-single [--tsv | --unrelated]`.
+
+| tree-sample-pleasantry (130 scored) | pass | top-1 | expected way fires | other ways fired |
+|---|---|---|---|---|
+| off | 76 | 67 | 82 | 439 |
+| default (`scaled-single`) | 86 | 75 | 91 | 433 |
+
+Against `off`, 13 rows go fail to pass and 3 pass to fail (`itops/proposals`, `meta/trust/delegation`, `softwaredev/architecture/threat-modeling`). The default's numbers equal its numbers on the plain set (86, 75, 91, 433), which is what stripping the fragment should give; `off` loses 5 passes to the opener.
+
+| unrelated set, pleasantry-prefixed | rows | rows firing, off | rows firing, default | max top score, off | max top score, default |
+|---|---|---|---|---|---|
+| golden-none (single) | 15 | 0 | 0 | 0.4380 | 0.4606 |
+| routing-golden none (single) | 3 | 0 | 0 | 0.0546 | 0.0430 |
+| joined unrelated (late) | 15 | 0 | 0 | 0.2266 | 0.2266 |
+
+ADR-703's gate (the default must not lose against `off` on this set, and no unrelated prompt may start firing) holds.

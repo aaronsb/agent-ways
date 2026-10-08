@@ -32,7 +32,7 @@ related:
   - ADR-701
 ---
 
-# ADR-703: Self-evaluated probe sets gate ADR-701's matching changes, and the body score ships scaled on single-sentence prompts
+# ADR-703: Self-evaluated probe sets gate ADR-701's matching changes, and the body score ships scaled on prompts that chunk to one piece
 
 ## Summary
 
@@ -48,7 +48,7 @@ ADR-701 §6 adopts the body score in ranking only after an evaluation on held-ou
 
 The golden prompts now travel with the corpus (one direct and one situational prompt beside each semantic core way, checked by lint). From them, `ways author golden --probes` samples a fixed set by tree position (every root and parent, one hashed leaf per parent), and `--probes --joined` builds two-sentence probes that reach late interaction. `ways author probe` scores both through the live scan. Both sets are drift-checked in CI.
 
-Measured on those sets (results-body-rank.md): the ADR-701 formula, `alias + 0.25 × best section`, raised every way's score above the scale the calibration was fitted on. It passed more single-sentence probes but made an unrelated prompt fire and tripled stray fires, and gained nothing on the late path. Dividing by `1 + w` keeps the alias scale. On single-sentence prompts it moved pass from 81 to 86 of 130 and top-1 from 71 to 75, cut other ways fired from 456 to 433, and left every unrelated prompt below the bar. On the 79 joined prompts it moved pass from 55 to 54, losing six rows at body confirmation against the next-best section.
+Measured on those sets (results-body-rank.md): the ADR-701 formula, `alias + 0.25 × best section`, raised every way's score above the scale the calibration was fitted on. It passed more one-chunk probes but made an unrelated prompt fire and tripled stray fires, and gained nothing on the late path. Dividing by `1 + w` keeps the alias scale. On prompts that chunk to one piece it moved pass from 81 to 86 of 130 and top-1 from 71 to 75, cut other ways fired from 456 to 433, and left every unrelated prompt below the bar. On the 79 joined prompts it moved pass from 55 to 54, losing six rows at body confirmation against the next-best section. With a short pleasantry in front of each prompt (the scan drops a fragment under 12 characters, so the prompt still chunks to one piece), the default moved pass from 76 to 86 of 130 against `off` and top-1 from 67 to 75, with no unrelated prompt firing.
 
 ## Decision
 
@@ -72,7 +72,7 @@ Measured on those sets (results-body-rank.md): the ADR-701 formula, `alias + 0.2
 
 - A variant that gains on the late path, such as a different confirmation rule, is evaluated under the same gate.
 - The highest unrelated-prompt score rose from 0.437 to 0.461 against the 0.5 firing bar, so the separation margin fell from 0.063 to 0.039. A later change that raises scores again meets the gate with less room.
-- The probes run without the assistant's last response. Live prompts often carry it and then take the late path, where the default changes nothing, so the single-sentence gain is an upper bound on the live effect. Decision records mark fused scans, so the event log measures how often it applies.
+- The probes run without the assistant's last response. Live prompts often carry it and then take the late path, where the default changes nothing, so the one-chunk gain is an upper bound on the live effect. Decision records mark fused scans, so the event log measures how often it applies.
 
 ## Alternatives Considered
 

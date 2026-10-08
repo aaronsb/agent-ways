@@ -386,12 +386,22 @@ pub(crate) fn single_scores(query: &str, bodies: &HashMap<String, PathBuf>, mode
     let (Some(v), Some(mut rows)) = (matched.vectors.as_ref().and_then(|vs| vs.first().cloned()), matched.per_chunk.pop()) else {
         return plain();
     };
+    let fused = fuse_rows(&sidecar, &mut rows, &v, mode);
+    (super::scoring::batch_embed_score_given_en(query, rows), fused)
+}
+
+/// Fuse one chunk's rows in place. True when at least one row changed: a
+/// sidecar that holds no sections for any ranked way leaves the scores as the
+/// alias cosines, and the scan then must not say it ranked on fused scores.
+fn fuse_rows(sidecar: &Sidecar, rows: &mut [(String, f64)], chunk: &[f32], mode: BodyRank) -> bool {
+    let mut any = false;
     for (id, score) in rows.iter_mut() {
-        if let Some((fused, _)) = fused_score(&sidecar, id, &v, *score, mode) {
+        if let Some((fused, _)) = fused_score(sidecar, id, chunk, *score, mode) {
             *score = fused;
+            any = true;
         }
     }
-    (super::scoring::batch_embed_score_given_en(query, rows), true)
+    any
 }
 
 /// ADR-701 §7: the body sidecar in `corpus_dir`, only when it was built with
@@ -1099,6 +1109,20 @@ mod tests {
         assert_eq!(m.per_chunk[0][0].0, "multi", "0.40 + 0.25 × 0.99 outranks 0.50");
         assert_eq!(m.per_chunk[0][1], ("bare".to_string(), 0.50));
         assert_eq!(fusion.get(&("multi".to_string(), 0)), Some(&(0.40, 1)));
+    }
+
+    /// The scan says it ranked on fused scores only when a row was fused.
+    #[test]
+    fn fuse_rows_reports_fusion_only_when_a_row_changed() {
+        let sc = sample_sidecar();
+        let chunk = [0.6_f32, 0.8, 0.0];
+        let mut none = vec![("bare".to_string(), 0.5), ("absent".to_string(), 0.4)];
+        assert!(!fuse_rows(&sc, &mut none, &chunk, BodyRank::ScaledSingle));
+        assert_eq!(none, vec![("bare".to_string(), 0.5), ("absent".to_string(), 0.4)]);
+        let mut some = vec![("bare".to_string(), 0.5), ("multi".to_string(), 0.4)];
+        assert!(fuse_rows(&sc, &mut some, &chunk, BodyRank::ScaledSingle));
+        assert_eq!(some[0], ("bare".to_string(), 0.5));
+        assert!((some[1].1 - (0.4 + 0.25 * 1.4 / 2f64.sqrt()) / 1.25).abs() < 1e-6);
     }
 
     /// A match pass that fails is not run again: the model loads once per scan

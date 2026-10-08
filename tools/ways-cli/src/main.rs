@@ -611,6 +611,12 @@ enum AuthorCommand {
         /// With --probes: the multi-sentence set, each way's situational then direct prompt joined (kind `joined`)
         #[arg(long, requires = "probes")]
         joined: bool,
+        /// With --probes: put a short pleasantry ("Thanks!", "ok.", ...) in front of each prompt
+        #[arg(long, requires = "probes")]
+        pleasantry: bool,
+        /// Print a probe file with a pleasantry in front of each prompt (the unrelated sets)
+        #[arg(long, value_name = "FILE", conflicts_with_all = ["tsv", "probes"])]
+        pleasantry_of: Option<String>,
     },
     /// Detect or repair hard-wrapped markdown prose
     ///
@@ -1354,7 +1360,7 @@ fn run() -> Result<()> {
             AuthorCommand::Siblings { id, threshold, corpus, model } => cmd::siblings::run(id, threshold, corpus, model),
             AuthorCommand::Suggest { file, min_freq } => cmd::suggest::run(file, min_freq),
             AuthorCommand::Graph { ways_dir, output } => cmd::graph::run(ways_dir, output),
-            AuthorCommand::Golden { ways_dir, tsv, probes, joined } => cmd::golden::run(ways_dir, tsv, probes, joined),
+            AuthorCommand::Golden { ways_dir, tsv, probes, joined, pleasantry, pleasantry_of } => cmd::golden::run(ways_dir, tsv, probes, joined, pleasantry, pleasantry_of),
             AuthorCommand::Reflow { path, fix, json, quiet } => cmd::reflow::run(path, fix, json, quiet),
             AuthorCommand::Permissions { global } => cmd::permissions::audit(global),
         },
