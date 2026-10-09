@@ -288,7 +288,7 @@ Other test tools: `scripts/doc-graph.sh --stats` checks documentation link integ
 
 ## What's Included
 
-The shipped ways cover commits, security, testing, debugging, dependencies, architecture, documentation and more, across ten domains: `collaboration`, `data`, `documentation`, `ea`, `itops`, `meta`, `research`, `softwaredev`, `workstation` and `writing`. `ways status` prints the current count. The live index is generated at session start. **Replace these entirely** if your domain isn't software dev.
+The shipped ways cover commits, security, testing, debugging, dependencies, architecture, documentation and more, across eleven domains: `collaboration`, `data`, `documentation`, `ea`, `evaluative`, `itops`, `meta`, `research`, `softwaredev`, `workstation` and `writing`. `ways status` prints the current count. The live index is generated at session start. **Replace these entirely** if your domain isn't software dev.
 
 Also included:
 - **[Agent teams](docs/hooks-and-ways/teams.md)** — three-scope model (agent/teammate/subagent) with scope-gated governance and team telemetry. When one agent becomes a team, every teammate gets the same handbook.

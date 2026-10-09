@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"flag a benchmark timing regression when the residual against the fitted reference window passes three sigma"}
+{"kind":"situational","prompt":"our benchmark numbers jitter from run to run, so a fixed pass threshold either cries wolf or misses real slowdowns"}

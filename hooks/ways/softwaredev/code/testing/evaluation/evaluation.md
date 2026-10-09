@@ -59,3 +59,4 @@ Report each evaluation with three facts: the command that ran, how many times, a
 - environment/hostparity(softwaredev) — a result on one host is evidence about that host
 - environment/debugging(softwaredev) — finding the root cause once the failure reproduces
 - delivery/merge(softwaredev) — remediating review findings before the merge gate
+- evaluative(evaluative) — when an agent writes the code and a harness judges it: the shared core and the loop types

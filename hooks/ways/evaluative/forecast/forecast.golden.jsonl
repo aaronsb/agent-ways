@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"backtest the demand forecast with a walk-forward split and check it beats a seasonal naive baseline"}
+{"kind":"situational","prompt":"my sales prediction model scores great on the test set but i think some future data snuck into the features"}

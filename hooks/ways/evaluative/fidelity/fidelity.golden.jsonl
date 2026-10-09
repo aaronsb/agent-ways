@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"compare the reconstruction against the surviving reference output and keep a byte-exact baseline for regressions"}
+{"kind":"situational","prompt":"we are rebuilding an old program from its printed results and need to know when our numbers drift from the original"}
