@@ -40,7 +40,15 @@ basis:
 agent:
   name: claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "we're more using these different evaluative loop approaches as a way to add some diversity to the types of evaluative loops as ways"
+    via: chat, 2026-10-09
+    covers: [loop-types]
+  - operator: aaronsb
+    said: "let's get all these authored, linted and scored, ensure the corpus builds, and we can merge in one pr then cut a new release"
+    via: chat, 2026-10-09; then chose 'Tune, then merge' after the held-out check
+status: accepted
 date: 2026-10-09
 deciders:
   - aaronsb
@@ -56,7 +64,7 @@ related:
 ## Summary
 
 - **Decided:** a new top-level ways domain, `evaluative`, for work where a coding agent writes the artifact and instruments it does not control decide whether the work is done. A root way states the roles and a shared core, and routes by the kind of output to eleven loop types: perceptual, sandboxed, clean-room, fidelity, probe-set, rubric, agent-eval, forecast, model-oracle, ablation and held-out. The domain sits beside `softwaredev/code/testing` and links to it; no existing way moves.
-- **Trades away:** one home for evaluation guidance. Test-writing mechanics stay under `softwaredev/code/testing`, so a reader follows links between two domains, and the two can drift. Twelve prompt-matched ways also join routing: on the existing golden prompts, an evaluative way fires alongside the expected one on 15 rows, no pass changes, and `meta/workflows` direct drops from rank 1 to 2 while still passing.
+- **Trades away:** one home for evaluation guidance. Test-writing mechanics stay under `softwaredev/code/testing`, so a reader follows links between two domains, and the two can drift. Twelve prompt-matched ways also join routing: on the existing golden prompts, an evaluative way fires alongside the expected one on 15 rows, no pass changes, and `meta/workflows` direct drops from rank 1 to 2 while still passing. On blind held-out prompts the ways pass 10 of 24, mostly direct asks.
 - **One-way?** No. A domain is a directory; it can be disabled per user or project with `disabled_domains`, renamed, or folded into another domain.
 - **Probes:** *Confident (loop-types):* you wanted agents given the variety of loops your projects use to pick from; children organised by loop type serve that. *Not confident (operator-baselines):* several loops send every baseline or oracle change to the operator for approval, solo projects included; is that the default you want?
 - **Inversion:** between leaving the method implicit in each project's own skills and harness, and encoding it as guidance every agent receives. The decision encodes the roles, the shared failure modes, and a catalogue of loop shapes, and leaves each project's instruments to the project.
@@ -107,6 +115,7 @@ The corpus covers how to write a test (`softwaredev/code/testing` and its childr
 
 - Guidance on evaluation now spans two domains, and a change to one can leave the other stale.
 - Twelve more prompt-matched ways compete in routing. Their vocabulary has to stay apart from the testing ways' and from each other's.
+- The ways fire on direct asks about their situation more reliably than on passing mentions of it. Measured under `held-out`, self-evaluated: the author's goldens pass 24 of 24. A sealed set of 24 prompts, written blind from one-sentence situations, passed 9 before tuning and 10 after (direct 7 of 12, passing mentions 3 of 12). The tuning used a second blind set of 36 and moved it from 0 to 5, all on direct asks. Raising recall on passing mentions further took common words that made the ways fire on unrelated existing prompts, so those rows were left failing.
 
 ### Neutral
 
