@@ -27,11 +27,11 @@ Future information leaks in quietly: a feature computed over the whole series, s
 
 ## A scale-free metric, per horizon
 
-Use an error measure that compares across series and scales, such as mean absolute scaled error, which scores against the naive forecast. Report it per forecast horizon: a model can win one step ahead and lose at twelve.
+Use an error measure that compares across series and scales, such as mean absolute scaled error: the forecast's mean absolute error divided by the in-sample mean absolute error of a one-step naive forecast (seasonal naive for seasonal data) on the training data. Below 1 beats that naive forecast. Report it per forecast horizon: a model can win one step ahead and lose at twelve.
 
 ## Read the residuals
 
-Forecast residuals on the test window should look like noise. Autocorrelation left in them (visible in an autocorrelation plot or a portmanteau test), a trend, or a periodic pattern means the model missed structure. Report the diagnostics with the error metric.
+Check the one-step-ahead residuals: from the fit on the training data, and from one-step forecasts in the backtest. They should look like noise. Autocorrelation left in them (visible in an autocorrelation plot or a portmanteau test), a trend, or a periodic pattern means the model missed structure. Errors of forecasts more than one step ahead are autocorrelated even for a correct model, because neighbouring forecasts share most of their unknown future, so they are not tested this way. Report the diagnostics with the error metric.
 
 ## Match the family to the signal
 

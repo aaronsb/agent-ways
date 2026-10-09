@@ -15,10 +15,9 @@ These hold in every loop type below.
 
 - **The author does not touch the judge.** The agent never writes, weakens, or regenerates the oracle that judges its own change: no re-recorded baseline, widened tolerance, deleted case, or rubric item rewritten to match what the code now produces. A change to the oracle is its own change, shown to the operator with what moved and by how much.
 - **The verdict is the exit status.** A harness that prints failures and exits zero leaves the agent as the only gate. The run fails when a check fails.
-- **Gates skip or fail loudly.** A check that cannot run says so on its own line and is reported as skipped. It never reads as a pass (see code/testing/gates).
-- **A cited count comes from a run in this change.** A pass count in a commit, PR, or handoff names the command and was produced after the last edit. A count carried over from an earlier session is history.
-- **The instruments are tested.** A check script that fails to parse, a capture that drops the field the diff compares, or a scanner pointed at the wrong path returns what a clean result returns. Plant a defect and watch each instrument go red once.
-- **The harness grows with the product.** A feature ships its check in the same change. A defect that escaped the harness becomes a case before the fix lands. When a check fails, suspect the check before the code, and keep the instrumentation that settled which was wrong.
+- **Gates and instruments are proven as code/testing/gates requires:** a skipped check reads as skipped, and each instrument has been seen red once.
+- **A cited count comes from a run in this change.** A pass count in a commit, PR, or handoff names the command and was produced after the last edit.
+- **The harness grows with the product.** A feature ships its check in the same change. A defect that escaped the harness becomes a case before the fix lands.
 
 ## Choose the loop
 

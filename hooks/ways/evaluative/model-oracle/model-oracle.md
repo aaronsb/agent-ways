@@ -13,13 +13,15 @@ This differs from `evaluative/probe-set`, where a labelled sample is scored by a
 
 ## Fit on a frozen reference window
 
-Choose a window of known-good behaviour (the last N commits, a week of telemetry, a validated simulation run), fit the model on it, and record which window it was. Usual fits are an autoregressive model, a seasonal decomposition, or a Kalman filter tracking a slowly moving level. Keep the model as simple as the signal allows.
+Choose a window of known-good behaviour (the last N commits, a week of telemetry, a validated simulation run), fit the model on it, and record which window it was. Fits range from a robust band around the median to change-point detection, a seasonal decomposition, or a Kalman filter tracking a slowly moving level. Keep the model as simple as the signal allows.
 
 ## Set the threshold before the change
 
-Derive the threshold from the residual's own spread on the reference window, such as k standard deviations, and fix it before the change under test is measured. A threshold chosen after seeing the new result can be placed anywhere. Report the residual as a multiple of that spread.
+Derive the threshold from the residual's own spread on the reference window and fix it before the change under test is measured. A threshold chosen after seeing the new result can be placed anywhere. Report the residual as a multiple of that spread.
 
-Measure enough repetitions to estimate the spread honestly. One timing per commit puts machine noise into the reference window.
+- **Use a robust spread.** Timings and telemetry are skewed and carry outliers, which inflate a standard deviation. Centre on the median and scale by the median absolute deviation (multiplied by about 1.4826 to be comparable to a standard deviation for normal data), or use a percentile band, then set the threshold at k of those robust spreads.
+- **Account for how many series are checked.** At three standard deviations a single normal series raises a false alarm about once in 370 checks. A suite of 200 benchmarks checked per commit then flags something most of the time with nothing wrong. With many series, set k for the whole family, not per series, or control the false-discovery rate across them, and rerun a flagged series before acting on it.
+- **Measure enough repetitions** to estimate the spread honestly. One timing per commit puts machine noise into the reference window.
 
 ## A flagged residual is a finding
 
@@ -31,7 +33,7 @@ Sometimes the system has legitimately changed: a deliberate optimisation, new ha
 
 ## Keep the measuring host still
 
-The residual is only as clean as the measurement. Pin the host, the build flags and the input; record them with each run (see environment/hostparity). A residual that appears only on one machine is a fact about that machine.
+Pin the host, the build flags and the input; record them with each run (see environment/hostparity).
 
 ## See Also
 

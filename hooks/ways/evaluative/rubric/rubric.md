@@ -11,9 +11,9 @@ The subject is a model's answer: it varies between runs, and the same intent can
 
 ## A scenario
 
-A scenario is a fixed setup (a project directory, seeded files, a prompt, sometimes a second turn) and a check script. The run is the real one: the model, the tools and the hooks the user would have.
+A scenario is a fixed setup (a project directory, seeded files, a prompt, sometimes a second turn) and a check script. The run is the real one: the model, and the tools and configuration a user would have.
 
-- **Deterministic checks first.** Did the run exit cleanly, did the expected guidance load, was one commit made, is the working tree clean, does the file the run wrote pass its linter. These do not depend on phrasing.
+- **Deterministic checks first.** Did the run exit cleanly, did the expected context load, was one commit made, is the working tree clean, does the file the run wrote pass its linter. These do not depend on phrasing.
 - **A rubric for the answer.** Each item is a pattern the answer should contain ("names the decision kind", "puts the question to the operator"). The scenario passes when at least a stated number of items hit. The threshold allows phrasing to vary without letting an answer that misses the point through.
 
 ## Test the judge
@@ -23,7 +23,7 @@ The rubric is an instrument and fails the way instruments fail.
 - **Every check script must parse.** A script the shell cannot parse stops partway when it is sourced. The checks after the error never run, and the scenario reports what ran as a full pass. The runner parses each script before running it and fails the scenario when it does not parse.
 - **Each rubric item is tested against a known-good and a known-bad answer.** The good answer hits, the bad one misses. A pattern that hits both is measuring nothing. One that misses the good answer will fail correct runs.
 - **Quoting is part of the pattern.** Characters the shell interprets inside a quoted pattern change what the pattern is. Prefer single-quoted patterns.
-- **A model used as a judge** gets the same treatment: a labelled set of answers it must grade correctly before its verdicts count, re-run when the judging model changes.
+- **A model used as a judge** is calibrated before its verdicts count (see `evaluative/agent-eval`).
 
 ## Variance and cost
 

@@ -48,7 +48,7 @@ related:
 ## Summary
 
 - **Decided:** a new top-level ways domain, `evaluative`, for work where a coding agent writes the artifact and instruments it does not control decide whether the work is done. A root way states the roles and a shared core, and routes by the kind of output to nine loop types: perceptual, sandboxed, clean-room, fidelity, probe-set, rubric, agent-eval, forecast and model-oracle. The domain sits beside `softwaredev/code/testing` and links to it; no existing way moves.
-- **Trades away:** one home for evaluation guidance. Test-writing mechanics stay under `softwaredev/code/testing`, so a reader follows links between two domains, and the two can drift. Ten prompt-matched ways also join routing.
+- **Trades away:** one home for evaluation guidance. Test-writing mechanics stay under `softwaredev/code/testing`, so a reader follows links between two domains, and the two can drift. Ten prompt-matched ways also join routing: on the existing golden prompts, an evaluative way fires alongside the expected one on 13 rows, no pass changes, and `meta/workflows` direct drops from rank 1 to 2 while still passing.
 - **One-way?** No. A domain is a directory; it can be disabled per user or project with `disabled_domains`, renamed, or folded into another domain.
 - **Probes:** *Confident (loop-types):* you wanted agents given the variety of loops your projects use to pick from; children organised by loop type serve that. *Not confident (operator-baselines):* several loops send every baseline or oracle change to the operator for approval, solo projects included; is that the default you want?
 - **Inversion:** between leaving the method implicit in each project's own skills and harness, and encoding it as guidance every agent receives. The decision encodes the roles, the shared failure modes, and a catalogue of loop shapes, and leaves each project's instruments to the project.
@@ -69,10 +69,9 @@ The corpus covers how to write a test (`softwaredev/code/testing` and its childr
 2. The root way, `evaluative`, names three roles: the author (the agent), the instruments (harness, drivers, readouts), and the oracle (what the output is compared against). It carries the core every loop shares:
    - the author never writes, weakens, or regenerates the oracle that judges its own change;
    - the verdict is the exit status;
-   - gates skip or fail loudly;
    - a cited count comes from a run in this change;
-   - the instruments are tested;
-   - the harness grows with each feature and each escaped defect.
+   - the harness grows with each feature and each escaped defect;
+   - gates and instruments are proven as `code/testing/gates` requires, by a one-line link rather than a restatement.
    It ends with a table that routes to a loop type by what the output is and what can judge it.
 3. Each child is a loop type, one per kind of output and judge:
    - `perceptual`: a running interactive program, driven headlessly and looked at.

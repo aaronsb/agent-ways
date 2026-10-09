@@ -11,16 +11,16 @@ The change alters a score: how a query ranks results, which handler a request ro
 
 ## The sets
 
-- **A sampled set** that exercises the paths the system takes, drawn by a rule (position in a tree, one case per category, a hash) and committed so every run scores the same rows. Regenerate it with the rule when the source changes, and check in CI that the committed copy matches.
+- **A sampled set** that exercises the paths the system takes, drawn by a rule (one case per category, a hash) and committed so every run scores the same rows. Regenerate it with the rule when the source changes, and check in CI that the committed copy matches.
 - **Variants of the set** that reach other code paths: multi-part inputs, inputs with noise in front.
-- **An unrelated set** of inputs that should match nothing. It measures separation: how far the strongest wrong score sits below the firing bar.
+- **An unrelated set** of inputs that should match nothing. It measures separation: how far the strongest wrong score sits below the decision threshold.
 
 ## The adoption rule
 
 A change is adopted when it gains on the path it changes and loses nothing in separation:
 
 - The metric rises on the set that exercises the changed path.
-- No unrelated input starts firing, and the margin below the bar is reported. A gain that spends most of the margin is reported as such.
+- No unrelated input starts matching, and the margin below the threshold is reported. A gain that spends most of the margin is reported as such.
 - Paths the change should not touch come out row-for-row identical. Check by diffing outputs, not by comparing totals.
 
 Sweep a small grid of settings and report every point, including the ones that lost. A recommended default carries its one-line reason.
