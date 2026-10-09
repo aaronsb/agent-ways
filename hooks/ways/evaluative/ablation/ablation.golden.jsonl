@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"run an ablation with a baseline arm without the new system prompt, a treatment arm with it, and a blind judge comparing both"}
+{"kind":"situational","prompt":"we added a page of guidance to the agent and want to know whether it actually changes what the agent does or just costs tokens"}

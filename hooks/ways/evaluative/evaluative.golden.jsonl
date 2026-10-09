@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"set up an evaluative loop so the agent writes the code and a harness it does not control judges whether it is done"}
+{"kind":"situational","prompt":"the coding agent writes all the code in this repo now, so what should decide that its work is done instead of its own report"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"write a rubric with a hit threshold to score the model answers in the end-to-end scenarios"}
+{"kind":"situational","prompt":"the llm gives a slightly different answer every run so an exact string match in the test keeps failing"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"set up an agent eval with isolated trials, graders on the end state, and report pass@k across the task suite"}
+{"kind":"situational","prompt":"our coding agent sometimes finishes the ticket and sometimes wanders off, and we have no idea how often each happens"}

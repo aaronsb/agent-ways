@@ -1,19 +1,19 @@
 prompt	expected_way	kind	role	must_not
 Yes. my new coworker starts monday, can we put the repo guide somewhere their claude can just open it	collaboration/onboarding-share	direct	root	
 Thanks! i'd rather not make the new hire clone this whole thing and dig around for the setup notes, any easier route?	collaboration/onboarding-share	situational	root	
-Hm. i'm building a little app that stores a few thousand records, not sure how heavy a way to keep them i need	data	situational	root	documentation,ea,research,writing
+Hm. i'm building a little app that stores a few thousand records, not sure how heavy a way to keep them i need	data	situational	root	documentation,ea,evaluative,research,writing
 Yes. i need to change the shape of a postgres table that already has data in it, and be able to undo it if it goes wrong	data/migrations	situational	parent	data/schema-docs
 Yes. make this migration safe to run twice, it keeps blowing up when the column already exists	data/migrations/idempotent	direct	leaf	data/migrations/checkpoint,data/migrations/numbering
 Yes. the deploy died halfway through my sql script and now when i start it again it errors on stuff that was already created	data/migrations/idempotent	situational	leaf	data/migrations/checkpoint,data/migrations/numbering
 Hm. can you generate an ER diagram from our sql schema file and a page listing every table and column	data/schema-docs	direct	leaf	data/migrations
 Yes. our docs site has no picture of how the tables relate and the column list is out of date, tired of editing it by hand	data/schema-docs	situational	leaf	data/migrations
-ok. our project documentation has grown into a sprawl with no consistent front matter, and nothing verifies that pages link to each other correctly	documentation	situational	root	data,ea,research,writing
+ok. our project documentation has grown into a sprawl with no consistent front matter, and nothing verifies that pages link to each other correctly	documentation	situational	root	data,ea,evaluative,research,writing
 ok. we picked one approach over another last week for the cache layer and i want the reasoning written down so nobody relitigates it later	documentation/adr	situational	parent	documentation/adr-context,documentation/api,documentation/diataxis,documentation/docstrings,documentation/markdown,documentation/mermaid,documentation/readme,documentation/standards,documentation/validate
 Yes. how do i start using adrs in this repo that already has a folder of old decision docs in a different format	documentation/adr/migration	direct	leaf	documentation/adr/consider
 Thanks! we have a pile of old markdown notes about past choices with status lines in the body and i want them in the new tooling	documentation/adr/migration	situational	leaf	documentation/adr/consider
 Yes. design the endpoints for a todo service, list and create and delete	documentation/api	direct	leaf	documentation/adr,documentation/adr-context,documentation/diataxis,documentation/docstrings,documentation/markdown,documentation/mermaid,documentation/readme,documentation/standards,documentation/validate
 Hm. the mobile client keeps getting different error bodies from different routes and the list calls return thousands of rows at once	documentation/api	situational	leaf	documentation/adr,documentation/adr-context,documentation/diataxis,documentation/docstrings,documentation/markdown,documentation/mermaid,documentation/readme,documentation/standards,documentation/validate
-Great! i have a work account and a personal one and things pile up in all of them, can you manage the lot for me	ea	situational	root	data,documentation,research,writing
+Great! i have a work account and a personal one and things pile up in all of them, can you manage the lot for me	ea	situational	root	data,documentation,evaluative,research,writing
 Yes. there was a thread going in the team channel this morning and i missed it, can you see where it landed	ea/comms	situational	parent	ea/briefing,ea/calendar,ea/email,ea/intelligence,ea/tasks
 ok. pull the transcript from yesterday's meeting and list the action items	ea/comms/recap	direct	leaf	
 Thanks! i skipped the sync this morning, what did they actually decide and who got stuck with what	ea/comms/recap	situational	leaf	
@@ -25,6 +25,9 @@ Great! i'm about to jump on a call with a client i haven't spoken to in months, 
 Great! my personal list has a bunch of stuff from months ago that i either did or stopped caring about, help me tidy it	ea/tasks	situational	parent	ea/briefing,ea/calendar,ea/comms,ea/email,ea/intelligence
 ok. log 6 hours for the redwood project on tuesday in my timesheet	ea/tasks/time	direct	leaf	
 Thanks! it's the end of the month and i can't remember which days i worked for which customer, need to bill them	ea/tasks/time	situational	leaf	
+Great! the coding agent writes all the code in this repo now, so what should decide that its work is done instead of its own report	evaluative	situational	root	data,documentation,ea,research,writing
+Yes. score the ranking change on the sampled probe set and only adopt it if top-1 rises with no new false positives on the unrelated set	evaluative/probe-set	direct	leaf	evaluative/ablation,evaluative/agent-eval,evaluative/clean-room,evaluative/fidelity,evaluative/forecast,evaluative/held-out,evaluative/model-oracle,evaluative/perceptual,evaluative/rubric,evaluative/sandboxed
+Thanks! i tweaked how search results get scored and want to know if it actually helps or just shuffles things around	evaluative/probe-set	situational	leaf	evaluative/ablation,evaluative/agent-eval,evaluative/clean-room,evaluative/fidelity,evaluative/forecast,evaluative/held-out,evaluative/model-oracle,evaluative/perceptual,evaluative/rubric,evaluative/sandboxed
 Yes. prod is down and the pager just went off, what do we do first	itops/incident	direct	root	itops/policy,itops/proposals,itops/runbooks
 Yes. customers are reporting errors since the last release, should we revert or push a patch, and what do we write up afterwards	itops/incident	situational	root	itops/policy,itops/proposals,itops/runbooks
 ok. classify this operation by risk and decide what approval it needs	itops/policy	direct	root	itops/incident,itops/proposals,itops/runbooks
@@ -68,8 +71,8 @@ Thanks! write a script that fans out agents over all 200 modules, verifies each 
 Hm. i have hundreds of files to push through the same stages with checks after each, too much to do by hand in one chat	meta/workflows	situational	root	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/trust,meta/wrap
 Yes. i'm done for today, wrap things up and give me something to paste next time	meta/wrap	direct	root	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/trust,meta/workflows
 Hm. context is nearly full and it's late, land what's in flight and leave notes so tomorrow's session can resume	meta/wrap	situational	root	meta/choices,meta/deployment,meta/develop,meta/goals,meta/governance,meta/introspection,meta/knowledge,meta/memory,meta/skills,meta/start,meta/subagents,meta/think,meta/trust,meta/workflows
-Hm. dig into how other teams handle feature flag cleanup, prefer official docs over blog posts	research	direct	root	data,documentation,ea,writing
-Yes. which of these two vector databases has credible benchmarks, check vendor docs, papers and forum posts and tell me how reliable each is	research	situational	root	data,documentation,ea,writing
+Hm. dig into how other teams handle feature flag cleanup, prefer official docs over blog posts	research	direct	root	data,documentation,ea,evaluative,writing
+Yes. which of these two vector databases has credible benchmarks, check vendor docs, papers and forum posts and tell me how reliable each is	research	situational	root	data,documentation,ea,evaluative,writing
 Thanks! we keep arguing about where responsibilities should live across the whole app and nobody has a shared picture of the structure	softwaredev/architecture	situational	root	softwaredev/code,softwaredev/delivery,softwaredev/environment,softwaredev/freshness,softwaredev/tooling,softwaredev/visualization
 ok. before we build, i need to compare two approaches for storing user preferences and lay out what each one costs	softwaredev/architecture/design	situational	parent	softwaredev/architecture/threat-modeling
 Thanks! spike something quick against the real payments sandbox before we commit to this design	softwaredev/architecture/design/prototype	direct	leaf	
@@ -128,5 +131,5 @@ Hm. this laptop has accumulated a ton of random software over three years and i 
 ok. just wiped my box and installed arch, how do i get my terminal feeling like home again	workstation/shell	situational	root	workstation/pkghistory
 Thanks! install ripgrep, fd, bat and zoxide and alias them in my shell	workstation/shell/tools	direct	leaf	workstation/shell/gitconfig,workstation/shell/shellrc,workstation/shell/sshagent
 ok. want ls and cat and find to be faster and prettier with colors, what should i swap them for	workstation/shell/tools	situational	leaf	workstation/shell/gitconfig,workstation/shell/shellrc,workstation/shell/sshagent
-ok. draft a status update for my manager covering this sprint	writing	direct	root	data,documentation,ea,research
-Thanks! need a one-page proposal for the leadership meeting thursday and no idea how to structure it for that audience	writing	situational	root	data,documentation,ea,research
+ok. draft a status update for my manager covering this sprint	writing	direct	root	data,documentation,ea,evaluative,research
+Thanks! need a one-page proposal for the leadership meeting thursday and no idea how to structure it for that audience	writing	situational	root	data,documentation,ea,evaluative,research

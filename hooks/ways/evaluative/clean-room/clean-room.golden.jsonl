@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"install the product from scratch in a fresh docker container the way a new user would and check their existing config survives"}
+{"kind":"situational","prompt":"the installer works on my machine but i have never tried it on a box that already has someone else is settings on it"}

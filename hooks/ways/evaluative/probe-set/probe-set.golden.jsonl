@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"score the ranking change on the sampled probe set and only adopt it if top-1 rises with no new false positives on the unrelated set"}
+{"kind":"situational","prompt":"i tweaked how search results get scored and want to know if it actually helps or just shuffles things around"}

@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"run the compositor effect in a nested isolated session, send it commands and read back its state after each one"}
+{"kind":"situational","prompt":"testing my window manager plugin froze my real desktop because the test session leaked into it"}
