@@ -553,6 +553,23 @@ enum AuthorCommand {
         /// Confirm a way with one section against that section instead of its alias (evaluation only)
         #[arg(long)]
         single_section_confirm: bool,
+        /// Run with this `matching.hubness` mode, whatever the config says (default: the
+        /// configured value). The summary header names the mode whenever it is not `off`.
+        #[arg(long, value_name = "off|single|both", value_parser = ["off", "single", "both"])]
+        hubness: Option<String>,
+        /// Hubness λ: the penalty is λ × (hub − mean hub) (default 0.5; evaluation only)
+        #[arg(long, value_name = "L")]
+        hubness_lambda: Option<f64>,
+        /// Hubness k: hub is the mean of a way's top k fitting cosines, at most 32 (default 10; evaluation only)
+        #[arg(long, value_name = "K", value_parser = clap::value_parser!(u32).range(1..=32))]
+        hubness_k: Option<u32>,
+        /// Penalty shape: centred λ × (hub − mean), one-sided λ × max(0, hub − mean), or raw λ × hub
+        /// (default centred; evaluation only)
+        #[arg(long, value_name = "centred|one-sided|raw", value_parser = ["centred", "one-sided", "raw"])]
+        hubness_shape: Option<String>,
+        /// Draw a fused score's penalty from the alias fit instead of the fused one (evaluation only)
+        #[arg(long)]
+        hubness_alias_fit: bool,
     },
     /// Analyze a progressive-disclosure tree
     Tree {
@@ -1346,14 +1363,50 @@ fn run() -> Result<()> {
                 cmd::template::run(path, description, vocabulary, scope, global)
             }
             AuthorCommand::Match { query, project, all, json } => cmd::match_cmd::run_late(query, project.as_deref(), all, json),
-            AuthorCommand::Probe { file, ways_dir, corpus, project, tsv, body_rank, unrelated, body_rank_weight, single_section_confirm } => {
+            AuthorCommand::Probe {
+                file,
+                ways_dir,
+                corpus,
+                project,
+                tsv,
+                body_rank,
+                unrelated,
+                body_rank_weight,
+                single_section_confirm,
+                hubness,
+                hubness_lambda,
+                hubness_k,
+                hubness_shape,
+                hubness_alias_fit,
+            } => {
+                let tuned = hubness_lambda.is_some() || hubness_k.is_some() || hubness_shape.is_some() || hubness_alias_fit;
+                let hubness_tuning = tuned.then(|| {
+                    let d = cmd::scan::HubnessTuning::default();
+                    cmd::scan::HubnessTuning {
+                        lambda: hubness_lambda.unwrap_or(d.lambda),
+                        k: hubness_k.map_or(d.k, |k| k as usize),
+                        shape: match hubness_shape.as_deref() {
+                            Some("one-sided") => cmd::scan::HubnessShape::OneSided,
+                            Some("raw") => cmd::scan::HubnessShape::Raw,
+                            _ => d.shape,
+                        },
+                        fit: if hubness_alias_fit { cmd::scan::HubnessFit::Alias } else { d.fit },
+                    }
+                });
                 cmd::probe::run(
                     file,
                     ways_dir,
                     corpus,
                     project.as_deref(),
                     tsv,
-                    cmd::probe::Eval { body_rank: body_rank.as_deref().and_then(config::BodyRank::parse), unrelated, body_rank_weight, single_section_confirm },
+                    cmd::probe::Eval {
+                        body_rank: body_rank.as_deref().and_then(config::BodyRank::parse),
+                        unrelated,
+                        body_rank_weight,
+                        single_section_confirm,
+                        hubness: hubness.as_deref().and_then(config::Hubness::parse),
+                        hubness_tuning,
+                    },
                 )
             }
             AuthorCommand::Tree { path, jaccard } => cmd::tree::run(path, jaccard),

@@ -63,6 +63,8 @@ pub(super) struct Record {
     sidecar: bool,
     /// The scan ranked on fused alias-plus-body scores (`matching.body_rank`).
     body_rank: Option<&'static str>,
+    /// The scan lowered scores by the hubness penalty (`matching.hubness`).
+    hubness: Option<&'static str>,
     candidates: Vec<candidate_log::Candidate>,
     outcomes: Vec<Map<String, Value>>,
     judge: Option<Value>,
@@ -117,6 +119,7 @@ impl Record {
             lane: None,
             sidecar: false,
             body_rank: None,
+            hubness: None,
             candidates: Vec::new(),
             outcomes: Vec::new(),
             judge: None,
@@ -139,10 +142,12 @@ impl Record {
         }
     }
 
-    /// Says the scan ranked on fused scores, so a reader of the log can tell
-    /// them from alias cosines (ADR-701 §8).
-    pub(super) fn body_rank(&mut self, mode: Option<&'static str>) {
-        self.body_rank = mode;
+    /// Says the scan ranked on fused or hubness-penalised scores, on either
+    /// path, so a reader of the log can tell them from alias cosines
+    /// (ADR-701 §8). Each mode is named only when a path applied it.
+    pub(super) fn ranking(&mut self, ranking: super::late_interaction::Ranking, single: super::late_interaction::Applied, late: super::late_interaction::Applied) {
+        self.body_rank = (single.fused || late.fused).then(|| ranking.body.as_str());
+        self.hubness = (single.hub || late.hub).then(|| ranking.hub.as_str());
     }
 
     /// A way that matched its pattern but was vetoed by the keyword floor.
@@ -243,6 +248,9 @@ impl Record {
         // Named only when on, so a record written with the flag off is unchanged.
         if let Some(mode) = self.body_rank {
             r.insert("body_rank".into(), mode.into());
+        }
+        if let Some(mode) = self.hubness {
+            r.insert("hubness".into(), mode.into());
         }
         r.insert("candidates".into(), candidate_log::candidates_json(&self.candidates));
         r.insert("outcomes".into(), Value::Array(self.outcomes.iter().cloned().map(Value::Object).collect()));

@@ -19,7 +19,8 @@ use super::{
     prompt_competitors, prompt_outcome, reduce, CommandSurface, Lane, PromptMatch, PromptSurface, WayCandidate,
     BUDGET_COMMAND, BUDGET_PROMPT,
 };
-use crate::config::{Admission, BodyRank};
+use super::late_interaction::Ranking;
+use crate::config::Admission;
 
 /// A probe's session id. It names no session, so no marker answers to it.
 const PROBE_SESSION: &str = "ways-probe-fresh";
@@ -53,23 +54,23 @@ pub(crate) struct ProbeScan {
 }
 
 /// Probe the prompt lane with `query`.
-pub(crate) fn prompt(query: &str, project_dir: &str, admission: Admission, body_rank: BodyRank) -> ProbeScan {
+pub(crate) fn prompt(query: &str, project_dir: &str, admission: Admission, ranking: Ranking) -> ProbeScan {
     let scope = "agent";
     let candidates = collect_candidates(project_dir);
     let reduced = reduce::reduce_for_embed(query, BUDGET_PROMPT);
     let masked = mask_nonlinguistic(query);
     let competitors = prompt_competitors(&candidates, scope, project_dir);
     let bodies = body_map(competitors.iter().copied());
-    let (embed_matches, _) = late_interaction::single_scores(&reduced, &bodies, body_rank);
-    let verdicts = late_interaction::run(&reduced, &bodies, admission, body_rank);
-    let diag = verdicts.as_ref().and_then(|_| late_interaction::run_diagnostic(&reduced, &bodies, usize::MAX, admission, body_rank));
+    let (embed_matches, _) = late_interaction::single_scores(&reduced, &bodies, ranking);
+    let verdicts = late_interaction::run(&reduced, &bodies, admission, ranking);
+    let diag = verdicts.as_ref().and_then(|_| late_interaction::run_diagnostic(&reduced, &bodies, usize::MAX, admission, ranking));
 
     let mut stages: HashMap<String, &'static str> = HashMap::new();
     let mut hits: Vec<Hit<(String, bool)>> = Vec::new();
     let mut fired_ids: HashSet<String> = HashSet::new();
     let mut prompt_only: Option<EmbedScores> = None;
     let surface = PromptSurface {
-        body_rank,
+        ranking,
         bodies: &bodies,
         query,
         masked: &masked,

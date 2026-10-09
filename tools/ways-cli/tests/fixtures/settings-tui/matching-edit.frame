@@ -9,8 +9,8 @@ agent-tui frame 100x30
 |│     near_miss_margin          0.1                   ││A pattern: hit fires only when the         │|
 |│     admission                 share                 ││calibrated probability reaches this floor  │|
 |│     body_rank                 scaled-single         ││(ADR-156). Ways opt out with               │|
-|│ ▸ refire_presets · setting    value                 ││pattern_strict: true.                      │|
-|│                                                     ││                                           │|
+|│     hubness                   off                   ││pattern_strict: true.                      │|
+|│ ▸ refire_presets · setting    value                 ││                                           │|
 |│                                                     ││value    0.15                              │|
 |│                                                     ││type     number 0..=1 (Enter edits)        │|
 |│                                                     ││default  0.15                              │|
@@ -73,12 +73,12 @@ styles
   9  54-55  - - DIM
   9  99-99  - - DIM
  10   0-0   - - DIM
- 10   2-17  - - BOLD
- 10  18-27  - - DIM
- 10  32-36  - - DIM
  10  54-55  - - DIM
  10  99-99  - - DIM
  11   0-0   - - DIM
+ 11   2-17  - - BOLD
+ 11  18-27  - - DIM
+ 11  32-36  - - DIM
  11  54-55  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM

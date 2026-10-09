@@ -289,7 +289,9 @@ fn an_emitted_section_applies_unchanged() {
     assert_eq!(code, 0, "{out}{err}");
     let report: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert!(report["rejected"].as_array().unwrap().is_empty());
-    assert_eq!(report["accepted"].as_array().unwrap().len(), 11);
+    let accepted = report["accepted"].as_array().unwrap();
+    assert_eq!(accepted.len(), 12);
+    assert!(accepted.contains(&serde_json::json!("matching.hubness")), "{accepted:?}");
     let written = &report["written"]["<ROOT>/xdg/config/agent-ways/config.yaml"];
     assert_eq!(parsed(&serde_yaml::to_string(written).unwrap()), parsed(&frag), "the fragment written fits back into the file");
     // A multi-file emit applies too.

@@ -66,6 +66,7 @@ const SECTIONS: &[SectionSpec] = &[
             "near_miss_margin",
             "admission",
             "body_rank",
+            "hubness",
             "refire_presets",
         ],
         per_entry: false, entry: None, repair: None,
@@ -265,6 +266,16 @@ const KEYS: &[KeySpec] = &[
         default: DefaultValue::Yaml("scaled-single"),
         doc: "Whether a way's best body section joins its ranking score: off, on, scaled or scaled-single.",
         long: "on ranks a way by its alias cosine plus 0.25 times its best body section's cosine. scaled divides that by 1.25, keeping the alias scale the calibration was fitted on. scaled-single, the default, applies scaled to one-sentence prompts only and leaves late interaction on alias scores. on and scaled also reach late interaction, where they confirm the body against a section other than the one that contributed (a way with one section or none confirms against its alias). All of it applies only while the body sidecar is complete. off ranks on alias cosines alone (ADR-701 §6).",
+        ..BASE
+    },
+    KeySpec {
+        name: "matching.hubness",
+        section: "matching",
+        path: &["hubness"],
+        kind: Kind::Choice(&crate::config::Hubness::NAMES),
+        default: DefaultValue::Yaml("off"),
+        doc: "Whether a way's hubness lowers its ranking score: off, single or both.",
+        long: "A hub is a way that scores high against many prompts. The corpus build scores the golden prompts the committed probe sets leave out and records each way's top cosines. With the penalty on, a way's score drops by 0.5 times the mean of its top 10 cosines less that mean averaged over all ways (ADR-700 §5). single applies it to one-sentence prompts; both also to late interaction. It applies only while the hubness file was built with the installed model. Under evaluation (ADR-701 §6).",
         ..BASE
     },
     KeySpec {

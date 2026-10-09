@@ -34,6 +34,12 @@
 //! way-embed without `--vectors`) confirmation embeds the body per call, as
 //! before.
 //!
+//! **Hubness (ADR-700 §5).** With `matching.hubness: both`, each chunk's rows
+//! are lowered by the way's hubness penalty ([`super::hubness`]) after any
+//! body-rank fusion and before masking, share, peak and admission.
+//! Confirmation reads the way's unpenalised score, so the penalty changes
+//! which ways compete and leaves corroboration as it was.
+//!
 //! **Operating points are HAND-SET and UNCALIBRATED.** ADR-160 stays Proposed
 //! until they are fit against a precision metric (task #5). It is the semantic
 //! matcher (not opt-in); until calibration lands it stays on its branch.
@@ -47,9 +53,33 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use super::hubness::{self, Hubs};
 use super::reduce::split_sentences;
 use super::sidecar::{self, Sidecar};
-pub(crate) use crate::config::{Admission, BodyRank};
+pub(crate) use crate::config::{Admission, BodyRank, Hubness};
+
+/// How the scan forms ranking scores: body rank and the hubness penalty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Ranking {
+    pub body: BodyRank,
+    pub hub: Hubness,
+}
+
+impl Ranking {
+    /// The configured modes.
+    pub(crate) fn configured(cfg: &crate::config::Config) -> Self {
+        Ranking { body: cfg.body_rank, hub: cfg.hubness }
+    }
+}
+
+/// What a ranking actually applied, for the decision record.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Applied {
+    /// Rows were fused alias-plus-body scores.
+    pub fused: bool,
+    /// Rows were lowered by the hubness penalty.
+    pub hub: bool,
+}
 
 // ── Hand-set operating points (uncalibrated — task #5 fits these) ──
 /// Per-chunk softmax temperature. Small τ sharpens the competition so a clear
@@ -82,8 +112,9 @@ pub(crate) struct Verdicts {
     fired: HashMap<String, f64>,
     /// Confirmation read the body sidecar (ADR-701 §7's sidecar state).
     sidecar: bool,
-    /// The ranking used fused scores (`matching.body_rank` on, sidecar complete).
-    fused: bool,
+    /// What the ranking applied: fused scores (`matching.body_rank` on,
+    /// sidecar complete), the hubness penalty (`matching.hubness: both`).
+    applied: Applied,
 }
 
 /// One way's ranking evidence from the chunk-match stage.
@@ -110,9 +141,9 @@ impl Verdicts {
         self.sidecar
     }
 
-    /// True when this scan ranked on fused scores, not alias cosines.
-    pub(crate) fn used_body_rank(&self) -> bool {
-        self.fused
+    /// What this scan's ranking applied.
+    pub(crate) fn applied(&self) -> Applied {
+        self.applied
     }
 }
 
@@ -167,7 +198,7 @@ pub(crate) fn run_diagnostic(
     bodies: &HashMap<String, PathBuf>,
     top_n: usize,
     admission: Admission,
-    body_rank: BodyRank,
+    ranking: Ranking,
 ) -> Option<Vec<DiagRow>> {
     let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
@@ -183,7 +214,8 @@ pub(crate) fn run_diagnostic(
     }
     let sidecar = complete_sidecar(&artifacts, &xdg, &bin, bodies);
     let mut matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
-    let fusion = fuse_if_on(body_rank, &mut matched, sidecar.as_ref());
+    let fusion = fuse_if_on(ranking.body, &mut matched, sidecar.as_ref());
+    let penalties = penalise_late(ranking.hub, &mut matched, fusion.is_some(), &artifacts, &xdg, &bin);
     let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors, fusion);
     let (ranked, survivors, capped) = rank_and_admit(matched.per_chunk, bodies, chunks.len(), admission);
     // The live matcher's survivor set: confirmation runs for these, and a
@@ -196,7 +228,7 @@ pub(crate) fn run_diagnostic(
         let won_chunk = chunks.get(r.peak_chunk).cloned().unwrap_or_default();
         let admitted = survivors.contains(&r.id);
         let confirm = if admitted {
-            bodies.get(&r.id).and_then(|path| confirmer.confirm(&r.id, r.peak_chunk, r.peak, &chunks, path))
+            bodies.get(&r.id).and_then(|path| confirmer.confirm(&r.id, r.peak_chunk, unpenalised(&penalties, &r), &chunks, path))
         } else {
             None
         };
@@ -210,7 +242,7 @@ pub(crate) fn run_diagnostic(
 /// Run the matcher over `surface`. `bodies` maps a way's corpus id to its `.md`
 /// path (for body-confirm); `admission` is the stage-4 rule. Returns `None` when the matcher cannot run — the
 /// caller then falls back to the single-vector semantic gate.
-pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: Admission, body_rank: BodyRank) -> Option<Verdicts> {
+pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: Admission, ranking: Ranking) -> Option<Verdicts> {
     let dbg = std::env::var("WAYS_LI_DEBUG").is_ok();
     let bin = crate::paths::way_embed()?;
     let xdg = crate::paths::corpus_dir();
@@ -238,9 +270,11 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
     let t = std::time::Instant::now();
     let mut matched = batch_match(&bin, &corpus, &model, &chunks, sidecar.is_some())?;
     if dbg { eprintln!("LI: match pass {:.1} ms", ms(t)); }
-    let fusion = fuse_if_on(body_rank, &mut matched, sidecar.as_ref());
+    let fusion = fuse_if_on(ranking.body, &mut matched, sidecar.as_ref());
     let fusion_on = fusion.is_some();
     if dbg { eprintln!("LI: body rank {}", if fusion_on { "on" } else { "off" }); }
+    let penalties = penalise_late(ranking.hub, &mut matched, fusion_on, &artifacts, &xdg, &bin);
+    if dbg { eprintln!("LI: hubness {}", if penalties.is_some() { "on" } else { "off" }); }
     let confirmer = Confirmer::new(&bin, &model, sidecar, matched.vectors, fusion);
     if dbg { eprintln!("LI: confirm via {}", if confirmer.uses_sidecar() { "sidecar" } else { "per-call embedding" }); }
     // Stages 3+4: mask, peak rank + per-chunk softmax-share sorted by share
@@ -269,7 +303,7 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
             if dbg { eprintln!("LI:   {} → no body path", r.id); }
             continue;
         };
-        let confirm = confirmer.confirm(&r.id, r.peak_chunk, r.peak, &chunks, path)?;
+        let confirm = confirmer.confirm(&r.id, r.peak_chunk, unpenalised(&penalties, &r), &chunks, path)?;
         if dbg { eprintln!("LI:   {} confirm={confirm:.3} (gate {CONFIRM_GATE})", r.id); }
         if confirm >= CONFIRM_GATE {
             fired.insert(r.id, r.share);
@@ -277,7 +311,7 @@ pub(crate) fn run(surface: &str, bodies: &HashMap<String, PathBuf>, admission: A
     }
     if dbg { eprintln!("LI: confirm stage {n_survivors} survivors in {:.2} ms", ms(t)); }
     if dbg { eprintln!("LI: fired {} ways", fired.len()); }
-    Some(Verdicts { fired, sidecar: confirmer.uses_sidecar(), fused: fusion_on })
+    Some(Verdicts { fired, sidecar: confirmer.uses_sidecar(), applied: Applied { fused: fusion_on, hub: penalties.is_some() } })
 }
 
 /// Milliseconds since `t`, for the WAYS_LI_DEBUG trace.
@@ -359,6 +393,60 @@ fn fuse_if_on(mode: BodyRank, matched: &mut Matched, sidecar: Option<&Sidecar>) 
     Some(fusion)
 }
 
+/// The hubness fit for the scan's corpus, when present and built by the
+/// installed embedder.
+fn load_hubs(artifacts: &Path, engine_dir: &Path, bin: &Path) -> Option<Hubs> {
+    hubness::load(artifacts, engine_dir, bin)
+}
+
+/// Lower every chunk's rows by the hubness penalty when `mode` reaches late
+/// interaction and the fit is present. Returns the penalties applied, so
+/// confirmation can read unpenalised scores; `None` when nothing changed.
+fn penalise_late(mode: Hubness, matched: &mut Matched, fused: bool, artifacts: &Path, engine_dir: &Path, bin: &Path) -> Option<HashMap<String, f64>> {
+    if !mode.reaches_late() {
+        return None;
+    }
+    let penalties = load_hubs(artifacts, engine_dir, bin)?.penalties(fused);
+    let mut any = false;
+    for rows in &mut matched.per_chunk {
+        any |= hubness::apply(rows, &penalties);
+    }
+    any.then_some(penalties)
+}
+
+/// A ranked way's peak before the hubness penalty.
+fn unpenalised(penalties: &Option<HashMap<String, f64>>, r: &Ranked) -> f64 {
+    r.peak + penalties.as_ref().and_then(|p| p.get(&r.id)).copied().unwrap_or(0.0)
+}
+
+/// Per-query match rows and each query's vector, from one `way-embed match` pass.
+pub(crate) type RowsAndVectors = (Vec<Vec<(String, f64)>>, Vec<Vec<f32>>);
+
+/// Every line of `queries` matched against `corpus` in one pass, with each
+/// query's vector: the per-query rows and vectors, or `None` when the pass
+/// fails or a vector is missing. For the corpus build's hubness fit.
+pub(crate) fn match_with_vectors(bin: &Path, corpus: &Path, model: &Path, queries: &[String]) -> Option<RowsAndVectors> {
+    let matched = batch_match(bin, corpus, model, queries, true)?;
+    Some((matched.per_chunk, matched.vectors?))
+}
+
+/// The English scores for a prompt under `ranking`, on the single-vector
+/// path: body rank as [`body_scores`] forms them, then, for a prompt that
+/// chunks to one piece, the hubness penalty when `ranking.hub` is on and the
+/// fit is present. A prompt of several chunks is left to late interaction and
+/// its single-vector rows stay unpenalised, as they stay unfused.
+pub(crate) fn single_scores(query: &str, bodies: &HashMap<String, PathBuf>, ranking: Ranking) -> (super::scoring::EmbedScores, Applied) {
+    let (mut scores, fused) = body_scores(query, bodies, ranking.body);
+    let mut hub = false;
+    if ranking.hub.is_on() && chunk_surface(query).len() == 1 {
+        if let (Some(bin), Some(rows)) = (crate::paths::way_embed(), scores.en.as_mut()) {
+            let hubs = load_hubs(&super::scoring::artifact_dir(), &crate::paths::corpus_dir(), &bin);
+            hub = hubness::penalise(hubs.as_ref(), rows, fused);
+        }
+    }
+    (scores, Applied { fused, hub })
+}
+
 /// The English scores for a prompt, with body rank applied on the
 /// single-vector path (ADR-701 §6). A prompt that chunks to exactly one piece,
 /// with the mode on and the sidecar complete, takes one `way-embed` pass that
@@ -368,7 +456,7 @@ fn fuse_if_on(mode: BodyRank, matched: &mut Matched, sidecar: Option<&Sidecar>) 
 /// calibration maps it as it maps an alias cosine. Any other prompt, or a
 /// failed pass, scores as [`super::scoring::batch_embed_score`] does, unfused.
 /// The flag says whether the scores were fused.
-pub(crate) fn single_scores(query: &str, bodies: &HashMap<String, PathBuf>, mode: BodyRank) -> (super::scoring::EmbedScores, bool) {
+fn body_scores(query: &str, bodies: &HashMap<String, PathBuf>, mode: BodyRank) -> (super::scoring::EmbedScores, bool) {
     let plain = || (super::scoring::batch_embed_score(query), false);
     if !mode.is_on() {
         return plain();

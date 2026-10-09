@@ -176,6 +176,52 @@ impl BodyRank {
     }
 }
 
+/// Whether a way's ranking score is lowered by its hubness (ADR-700 §5): the
+/// mean of its top-k cosines over a fitting prompt set scored at corpus build,
+/// centred on the mean over ways so the alias scale the calibration was fitted
+/// on holds on average.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hubness {
+    /// No penalty (today's behaviour).
+    Off,
+    /// The penalty on the single-vector path only.
+    Single,
+    /// The penalty on the single-vector path and in late interaction.
+    Both,
+}
+
+impl Hubness {
+    /// The values `matching.hubness` takes, as written in config.yaml.
+    pub const NAMES: [&'static str; 3] = ["off", "single", "both"];
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "off" => Some(Hubness::Off),
+            "single" => Some(Hubness::Single),
+            "both" => Some(Hubness::Both),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Hubness::Off => "off",
+            Hubness::Single => "single",
+            Hubness::Both => "both",
+        }
+    }
+
+    /// The penalty applies on the single-vector path.
+    pub fn is_on(self) -> bool {
+        self != Hubness::Off
+    }
+
+    /// The penalty applies in late interaction.
+    pub fn reaches_late(self) -> bool {
+        self == Hubness::Both
+    }
+}
+
 /// Ways configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -250,6 +296,9 @@ pub struct Config {
     /// Whether the body sidecar's best section joins the ranking score
     /// (ADR-701 §6). Default [`BodyRank::ScaledSingle`].
     pub body_rank: BodyRank,
+    /// Whether a way's hubness lowers its ranking score (ADR-700 §5, ADR-701
+    /// §6). Default [`Hubness::Off`].
+    pub hubness: Hubness,
     /// Days an archive of the event or decision log is kept (ADR-701 §2).
     /// Default 365.
     pub event_retention_days: u32,
@@ -310,6 +359,7 @@ impl Default for Config {
             near_miss_margin: 0.05,
             admission: Admission::Share,
             body_rank: BodyRank::ScaledSingle,
+            hubness: Hubness::Off,
             event_retention_days: 365,
             decision_retention_turns: 50_000,
             refire_presets,
@@ -507,6 +557,9 @@ impl Config {
         }
         if let Some(v) = doc.get("body_rank").and_then(|v| v.as_str()).and_then(BodyRank::parse) {
             self.body_rank = v;
+        }
+        if let Some(v) = doc.get("hubness").and_then(|v| v.as_str()).and_then(Hubness::parse) {
+            self.hubness = v;
         }
         if let Some(v) = doc.get("event_retention_days").and_then(|v| v.as_u64()) {
             self.event_retention_days = v as u32; // the schema holds 1..=3650
@@ -758,6 +811,31 @@ mod tests {
         cfg.apply_yaml("body_rank: maybe\nnear_miss_margin: 0.1\n");
         assert_eq!(cfg.body_rank, BodyRank::ScaledSingle, "an unknown mode is refused by the schema");
         assert_eq!(cfg.near_miss_margin, 0.05, "with the rest of the matching section");
+    }
+
+    #[test]
+    fn hubness_modes_say_where_they_apply() {
+        // (mode, name, single path, late interaction)
+        let table = [(Hubness::Off, "off", false, false), (Hubness::Single, "single", true, false), (Hubness::Both, "both", true, true)];
+        for (mode, name, on, late) in table {
+            assert_eq!(mode.as_str(), name);
+            assert_eq!(Hubness::parse(name), Some(mode));
+            assert_eq!((mode.is_on(), mode.reaches_late()), (on, late), "{name}");
+        }
+        assert_eq!(Hubness::NAMES, ["off", "single", "both"]);
+    }
+
+    #[test]
+    fn hubness_defaults_off_and_reads_each_mode() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.hubness, Hubness::Off);
+        cfg.apply_yaml("hubness: both\n");
+        assert_eq!(cfg.hubness, Hubness::Both);
+        cfg.apply_yaml("hubness: single\n");
+        assert_eq!(cfg.hubness, Hubness::Single);
+        let mut cfg = Config::default();
+        cfg.apply_yaml("hubness: sometimes\n");
+        assert_eq!(cfg.hubness, Hubness::Off, "an unknown mode is refused by the schema");
     }
 
     #[test]

@@ -11,8 +11,8 @@ agent-tui frame 100x30
 |│     near_miss_margin          0.05                  ││1 entry, 0 changed                         │|
 |│     admission                 share                 ││                                           │|
 |│     body_rank                 scaled-single         ││actions                                    │|
-|│ ▸ refire_presets · setting    value                 ││  i lint                                   │|
-|│                                                     ││    ways settings lint                     │|
+|│     hubness                   off                   ││  i lint                                   │|
+|│ ▸ refire_presets · setting    value                 ││    ways settings lint                     │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -80,13 +80,13 @@ styles
  11  54-62  - - DIM
  11  99-99  - - DIM
  12   0-0   - - DIM
- 12   2-17  - - BOLD
- 12  18-27  - - DIM
- 12  32-36  - - DIM
  12  54-55  - - DIM
  12  56-59  Cyan - -
  12  99-99  - - DIM
  13   0-0   - - DIM
+ 13   2-17  - - BOLD
+ 13  18-27  - - DIM
+ 13  32-36  - - DIM
  13  54-77  - - DIM
  13  99-99  - - DIM
  14   0-0   - - DIM

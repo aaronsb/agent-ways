@@ -206,7 +206,7 @@ pub fn run(
             let generate = |bin: &Path, corpus: &Path, model: &Path, what: &str| {
                 run_generate(bin, corpus, model, what, verbose, &vlog)
             };
-            if refresh_stale_sidecar(&out_dir, &engine_dir, &bin, &sources, &generate, vector_support(&bin), &report)? {
+            if refresh_stale_sidecar(&out_dir, &engine_dir, &bin, &sources, &global_dir, &generate, vector_support(&bin), &report)? {
                 let _ = std::fs::remove_file(tmpfile);
                 return Ok(());
             }
@@ -269,6 +269,16 @@ pub fn run(
             .and_then(|m| m.get("body_sidecar").cloned())
             .unwrap_or(serde_json::Value::Null),
     };
+    let hubness = match (&settled, bin.as_deref()) {
+        (Settled::Promoted, Some(bin)) => {
+            vlog("fitting hubness (ADR-700 §5)");
+            refresh_hubness(&out_dir, &engine_dir, bin, &global_dir, &body_sidecar)
+        }
+        _ => previous_manifest
+            .as_ref()
+            .and_then(|m| m.get("hubness").cloned())
+            .unwrap_or(serde_json::Value::Null),
+    };
 
     // The manifest records whether every lane embedded, why not, when it
     // failed, and which engine built it. `--if-stale` retries a failed build
@@ -287,6 +297,7 @@ pub fn run(
         "calibration": calibration,
         "way_hashes": way_hashes,
         "body_sidecar": body_sidecar,
+        "hubness": hubness,
         "embedded": complete,
         "reason": reason,
         "failed_at": if complete && !sidecar_failed(&body_sidecar) { None } else { Some(agent_fmt::when::now_secs()) },
@@ -376,6 +387,23 @@ fn refresh_body_sidecar(
     }
 }
 
+/// The `hubness` manifest entry after refitting the hubness penalty
+/// (ADR-700 §5) from the golden prompts under `ways_root`, against the alias
+/// corpus and the body sidecar just built. The old file goes first, as the
+/// sidecar's does. The penalty is off by default (`matching.hubness`), so a
+/// fit that cannot be made records why and is not a build failure.
+fn refresh_hubness(out_dir: &Path, engine_dir: &Path, bin: &Path, ways_root: &Path, side: &serde_json::Value) -> serde_json::Value {
+    use crate::cmd::scan::hubness;
+    let _ = std::fs::remove_file(out_dir.join(hubness::FILE));
+    if side.get("reason").is_some() {
+        return json!({ "file": null, "reason": "no body sidecar" });
+    }
+    match hubness::build(out_dir, engine_dir, bin, ways_root) {
+        Ok((prompts, ways)) => json!({ "file": hubness::FILE, "prompts": prompts, "ways": ways }),
+        Err(why) => json!({ "file": null, "reason": why }),
+    }
+}
+
 /// True when the manifest records a built sidecar whose engine fingerprint
 /// (model, way-embed binary, chunker revision; `sidecar::model_id`) differs
 /// from the current one: a reinstalled or upgraded way-embed, a new model or
@@ -396,11 +424,13 @@ fn sidecar_engine_stale(manifest: &Path, engine_dir: &Path, bin: &Path) -> bool 
 /// Rebuild only the sidecar for a corpus that is otherwise current, and record
 /// it in the manifest. `Ok(false)`, touching nothing, when the ways no longer
 /// hash as the manifest records: the corpus itself needs a rebuild.
+#[allow(clippy::too_many_arguments)]
 fn refresh_stale_sidecar(
     out_dir: &Path,
     engine_dir: &Path,
     bin: &Path,
     sources: &HashMap<String, PathBuf>,
+    ways_root: &Path,
     generate: &GeneratePass<'_>,
     vectors: VectorSupport,
     report: &Report<'_>,
@@ -413,6 +443,7 @@ fn refresh_stale_sidecar(
     let side = refresh_body_sidecar(out_dir, engine_dir, bin, sources, generate, vectors);
     report.sidecar(&side, out_dir, true);
     m["failed_at"] = if sidecar_failed(&side) { json!(agent_fmt::when::now_secs()) } else { serde_json::Value::Null };
+    m["hubness"] = refresh_hubness(out_dir, engine_dir, bin, ways_root, &side);
     m["body_sidecar"] = side;
     write_manifest(&manifest_path, &m)?;
     Ok(true)
@@ -1882,7 +1913,7 @@ mod tests {
         std::fs::File::options().append(true).open(&bin).unwrap().set_modified(std::time::SystemTime::now()).unwrap();
         assert!(sidecar_engine_stale(&manifest, &engine, &bin), "changed engine not seen");
 
-        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, &generate, VectorSupport::Yes, &Report { quiet: false, emit: &|_| {} }).unwrap());
+        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, &dir, &generate, VectorSupport::Yes, &Report { quiet: false, emit: &|_| {} }).unwrap());
         assert_eq!(*calls.borrow(), 2, "sidecar not rebuilt");
         assert!(!sidecar_engine_stale(&manifest, &engine, &bin));
         let s = state();
@@ -1892,7 +1923,7 @@ mod tests {
         // Ways changed under an unchanged mtime check: not a sidecar-only job.
         std::fs::write(dir.join("w.md"), "---\ndescription: d\nvocabulary: v\n---\n# T\n\nEdited text of the way body here.\n").unwrap();
         std::fs::File::options().append(true).open(&bin).unwrap().set_modified(day_ago).unwrap();
-        assert!(!refresh_stale_sidecar(&dir, &engine, &bin, &sources, &generate, VectorSupport::Yes, &Report { quiet: false, emit: &|_| {} }).unwrap(), "rebuilt a sidecar for a stale corpus");
+        assert!(!refresh_stale_sidecar(&dir, &engine, &bin, &sources, &dir, &generate, VectorSupport::Yes, &Report { quiet: false, emit: &|_| {} }).unwrap(), "rebuilt a sidecar for a stale corpus");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2107,7 +2138,7 @@ mod tests {
         let (dir, engine, bin, sources) = sidecar_only_fixture(name);
         let said = RefCell::new(Vec::new());
         let report = Report { quiet, emit: &|m| said.borrow_mut().push(m.to_string()) };
-        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, generate, vectors, &report).unwrap());
+        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, &dir, generate, vectors, &report).unwrap());
         let _ = std::fs::remove_dir_all(&dir);
         said.into_inner()
     }
@@ -2156,7 +2187,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, &manifest).unwrap();
         let before = read(&target);
         let report = Report { quiet: true, emit: &|_| {} };
-        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, &embedding_ok, VectorSupport::Yes, &report).unwrap());
+        assert!(refresh_stale_sidecar(&dir, &engine, &bin, &sources, &dir, &embedding_ok, VectorSupport::Yes, &report).unwrap());
         assert_eq!(read(&target), before, "the manifest was written through its link");
         assert!(std::fs::symlink_metadata(&manifest).unwrap().file_type().is_file());
         let _ = std::fs::remove_dir_all(&dir);
@@ -2174,7 +2205,7 @@ mod tests {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
         let can_stage = std::fs::File::create(dir.join("probe")).is_ok();
         let report = Report { quiet: true, emit: &|_| {} };
-        let res = refresh_stale_sidecar(&dir, &engine, &bin, &sources, &embedding_ok, VectorSupport::Unsupported, &report);
+        let res = refresh_stale_sidecar(&dir, &engine, &bin, &sources, &dir, &embedding_ok, VectorSupport::Unsupported, &report);
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
         if can_stage {
             eprintln!("SKIPPED a_failed_sidecar_only_manifest_write_leaves_the_old_manifest_intact: directory modes do not bind this user (root?)");
