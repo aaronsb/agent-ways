@@ -20,6 +20,14 @@ basis:
     level: directed
     said: "let's get all these authored, linted and scored, ensure the corpus builds, and we can merge in one pr then cut a new release"
     via: chat, 2026-10-09, relayed by the coordinating session
+  - operator: aaronsb
+    level: directed
+    said: "let's bring these into the evaluative domain so we can cover this gap"
+    via: chat, 2026-10-09, adding held-out and ablation
+  - operator: aaronsb
+    level: directed
+    said: "we can take the independent isolated model, where we invoke claude in a container with an api key, ask the eval questions, then run with ways in the container, and compare the results (a three way eval)"
+    via: chat, 2026-10-09
   - evidence: "aaronsb/broke-flats: .claude/skills/verify-game/SKILL.md, scripts/smoke.mjs:1546, commits 1725e14, 7b2ddac, 2af37b0"
   - evidence: "aaronsb/kwin-canvas: dev/nest.sh:344, effect/contents/ui/main.qml:1708, tests/lib.sh:21, commit 3dd5b82, issue #12"
   - evidence: "aaronsb/view1108: CLAUDE.md:705-733, tools/gate.sh, tools/imgdiff.py, commits 1365aab, 8e096bf, 3085a14"
@@ -47,8 +55,8 @@ related:
 
 ## Summary
 
-- **Decided:** a new top-level ways domain, `evaluative`, for work where a coding agent writes the artifact and instruments it does not control decide whether the work is done. A root way states the roles and a shared core, and routes by the kind of output to nine loop types: perceptual, sandboxed, clean-room, fidelity, probe-set, rubric, agent-eval, forecast and model-oracle. The domain sits beside `softwaredev/code/testing` and links to it; no existing way moves.
-- **Trades away:** one home for evaluation guidance. Test-writing mechanics stay under `softwaredev/code/testing`, so a reader follows links between two domains, and the two can drift. Ten prompt-matched ways also join routing: on the existing golden prompts, an evaluative way fires alongside the expected one on 13 rows, no pass changes, and `meta/workflows` direct drops from rank 1 to 2 while still passing.
+- **Decided:** a new top-level ways domain, `evaluative`, for work where a coding agent writes the artifact and instruments it does not control decide whether the work is done. A root way states the roles and a shared core, and routes by the kind of output to eleven loop types: perceptual, sandboxed, clean-room, fidelity, probe-set, rubric, agent-eval, forecast, model-oracle, ablation and held-out. The domain sits beside `softwaredev/code/testing` and links to it; no existing way moves.
+- **Trades away:** one home for evaluation guidance. Test-writing mechanics stay under `softwaredev/code/testing`, so a reader follows links between two domains, and the two can drift. Twelve prompt-matched ways also join routing: on the existing golden prompts, an evaluative way fires alongside the expected one on 15 rows, no pass changes, and `meta/workflows` direct drops from rank 1 to 2 while still passing.
 - **One-way?** No. A domain is a directory; it can be disabled per user or project with `disabled_domains`, renamed, or folded into another domain.
 - **Probes:** *Confident (loop-types):* you wanted agents given the variety of loops your projects use to pick from; children organised by loop type serve that. *Not confident (operator-baselines):* several loops send every baseline or oracle change to the operator for approval, solo projects included; is that the default you want?
 - **Inversion:** between leaving the method implicit in each project's own skills and harness, and encoding it as guidance every agent receives. The decision encodes the roles, the shared failure modes, and a catalogue of loop shapes, and leaves each project's instruments to the project.
@@ -83,6 +91,8 @@ The corpus covers how to write a test (`softwaredev/code/testing` and its childr
    - `agent-eval`: a multi-turn, tool-using agent, judged on its end state and trajectory over repeated isolated trials.
    - `forecast`: a predictive model of time-ordered data, judged on a frozen held-out future window against a naive baseline.
    - `model-oracle`: a model of normal behaviour used as the judge where no fixed expected value exists, by the residual against a threshold set before the change.
+   - `ablation`: a change to an agent's context, measured by arms with and without it, graded by a blind independent judge, with a positive control that the change engaged.
+   - `held-out`: cases written by a writer who never saw the subject, kept from the author, scored only at the gate, and retired once their failures are seen; it applies to the cases of any loop above.
 4. The existing testing, gates, claims, host-parity, recovery, container-safety and bounded-execution ways stay where they are. The new ways link to them and do not restate them.
 
 ## Consequences
@@ -96,7 +106,7 @@ The corpus covers how to write a test (`softwaredev/code/testing` and its childr
 ### Negative
 
 - Guidance on evaluation now spans two domains, and a change to one can leave the other stale.
-- Ten more prompt-matched ways compete in routing. Their vocabulary has to stay apart from the testing ways' and from each other's.
+- Twelve more prompt-matched ways compete in routing. Their vocabulary has to stay apart from the testing ways' and from each other's.
 
 ### Neutral
 

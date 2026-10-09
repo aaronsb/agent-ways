@@ -34,6 +34,8 @@ Pick by what the product emits and what can judge it. A project often runs more 
 | A multi-turn agent that uses tools | The end state it leaves and its trajectory, over repeated trials | `evaluative/agent-eval` |
 | A predictive or analytical model of time-ordered data | Held-out future data, against a naive baseline | `evaluative/forecast` |
 | A measurement with no fixed expected value: timings, telemetry, drift | A model of normal behaviour, judged by the residual | `evaluative/model-oracle` |
+| A change to an agent's context: a prompt, skill, tool, or guidance | Arms with and without it, graded by a blind judge | `evaluative/ablation` |
+| The cases for any loop above | Cases written by someone who never saw the subject, scored only at the gate | `evaluative/held-out` |
 
 Some of these sit close together. `sandboxed` isolates a running subject so it can be observed. `clean-room` proves the product installs and first runs from nothing. `rubric` scores one answer, and can run inside a clean room once its install has passed. `agent-eval` judges a whole run of an agent, not a single answer. `forecast` evaluates a model the agent wrote; `model-oracle` uses a fitted model as the judge of something else.
 

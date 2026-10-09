@@ -1,0 +1,2 @@
+{"kind":"direct","prompt":"have a fresh agent with no context write held-out test cases from a one-line description, and keep them hidden from me while i tune"}
+{"kind":"situational","prompt":"everything passes on the examples i wrote myself, so i want someone who never saw the code to write new ones i will not look at"}
