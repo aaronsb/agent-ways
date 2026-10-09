@@ -1,6 +1,6 @@
 ---
-description: a probe-set evaluative loop for a ranking, routing, retrieval, search, recommendation or scoring change; score a sampled evaluation set with a metric, adopt only on a gain on the path the change touches with no loss in separation, keep an unrelated set that must not start firing, and label the results self-evaluated
-vocabulary: ranking routing retrieval search recommendation classifier matcher scoring threshold calibration embedding cosine similarity top-1 recall precision pass rate margin separation sampled set probe set eval set held-out unrelated prompts false positive stray fires sweep variant mode default adopt self-evaluated metric gain regression row-for-row
+description: a probe-set evaluative loop for a change to ranking, search, matching, routing or scoring that was judged by trying a handful of examples; score a fixed sampled set with a metric, adopt only on a gain with no loss in separation, keep an unrelated set that must not start matching, label results self-evaluated
+vocabulary: tried a few queries handful of examples spot check eyeballed some results search ranking weights relevance fuzzy matching name matching routing rules classifier threshold recommendation retrieval sampled set probe set eval set unrelated inputs false positives top-1 recall precision margin separation sweep adopt self-evaluated metric
 scope: agent, subagent
 refire: 0.15
 ---
@@ -8,6 +8,10 @@ refire: 0.15
 # Probe-Set Loop
 
 The change alters a score: how a query ranks results, which handler a request routes to, what a classifier admits. No single output is right or wrong; the evidence is a metric over a set of cases. The loop scores a fixed set before and after, and adopts a change only on the result.
+
+## When it applies
+
+A change to how results are ranked, matched, routed or scored, checked by trying a handful of examples by hand. The examples look better, but nobody knows whether other inputs got worse or whether things now match that should not.
 
 ## The sets
 

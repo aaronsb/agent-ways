@@ -11,6 +11,10 @@ This loop proves the install path. The product is installed from nothing into a 
 
 It starts from an empty machine; the root's routing table sets it beside `sandboxed` and `rubric`.
 
+## When it applies
+
+An install script, setup instructions, a getting-started guide or upgrade steps that have only been run on the author's machine, which already had the tools, settings and leftovers the steps assume. The next person to run them starts from something else.
+
 ## A reproducible room
 
 - **Pin the base image and every tool version** the install depends on, in one place the image and the runner both read. A moving target (a "latest" channel) gets a cache-bust keyed to the date, so a stale cached layer cannot stand in for it. Pinned versions keep full caching.

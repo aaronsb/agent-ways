@@ -1,6 +1,6 @@
 ---
-description: held-out evaluation cases written by someone other than the author; a fresh writer with no session context sees only a one-sentence statement of the situation, never the implementation or its wording, and the set is kept apart, scored only at the gate, and retired once the author has seen its failures
-vocabulary: passes on the examples i wrote myself someone who never saw the code writes new ones i will not look at held-out holdout cases written by someone else independent case writer fresh agent no context blind cases unseen cases the author never saw self-written cases echo its own wording retire the set replace with new cases gap between held-out and self-written score
+description: held-out evaluation for code whose tests were written by the same person or agent that wrote the code; cases from a fresh writer with no session context who sees only a one-sentence statement of the situation, kept apart from the author, scored only at the gate, and retired once their failures are seen
+vocabulary: wrote the code and every test for it myself same author wrote both passes on the examples i wrote myself someone who never saw the code writes new ones i will not look at held-out holdout cases written by someone else independent case writer fresh agent no context unseen cases the author never saw self-written cases echo its own wording retire the set gap between held-out and self-written score
 scope: agent, subagent
 refire: 0.15
 ---
@@ -10,6 +10,10 @@ refire: 0.15
 Cases the author writes share the author's assumptions and its vocabulary. A subject tuned against them learns to pass them. Held-out cases are written by someone who has not seen the subject, kept away from the author while it tunes, and scored only at the gate. The distance between the held-out score and the self-written one measures how far the author fit its own cases.
 
 This applies across loop types: the cases of `evaluative/probe-set`, the tasks of `evaluative/agent-eval`, the scenarios of `evaluative/rubric`, the test window of `evaluative/forecast`. Those ways say how each kind of case is scored; this one says who writes it and who may see it.
+
+## When it applies
+
+The same person or agent wrote the code and every test for it, and all the tests pass. The tests check what the author thought to check, in the author's own terms.
 
 ## Who writes the cases
 

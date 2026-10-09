@@ -1,6 +1,6 @@
 ---
-description: a forecast evaluative loop for a predictive or analytical model of time-ordered data, judged on held-out future observations; walk-forward backtest, beat a naive baseline, check for leakage, scale-free error per horizon, residual diagnostics, and a test window frozen before fitting
-vocabulary: forecast forecasting predict prediction time series time-ordered backtest walk-forward rolling origin held-out future horizon naive baseline seasonal naive last value leakage look-ahead lookahead mase mape error per horizon residual autocorrelation ljung-box arima arma autoregressive fourier spectral periodic kalman state-space lstm gru rnn transformer reservoir echo state network takens delay embedding chaotic train test split
+description: a forecast evaluative loop for a predictive model only ever scored on the data it was trained on or on history it has already seen; judge it on held-out future data with a walk-forward backtest against a naive baseline, check for leakage, report scale-free error per horizon and residual diagnostics
+vocabulary: prediction model predictive model accuracy only scored on training data fits history perfectly looks amazing on past data predicting the future churn sales demand delays overfit forecast forecasting time series backtest walk-forward rolling origin held-out future horizon naive baseline seasonal naive leakage look-ahead mase residual autocorrelation arima fourier kalman lstm transformer echo state takens train test split
 scope: agent, subagent
 refire: 0.15
 ---
@@ -8,6 +8,10 @@ refire: 0.15
 # Forecast Loop
 
 The agent writes a model that predicts or explains a time-ordered signal: demand, load, a sensor, a price, a physical quantity. The judge is data the model has not seen, from later in time than anything it was fitted on.
+
+## When it applies
+
+A model that predicts something, such as churn, demand, sales or delays, scores well, but only on the data it was trained on or on a past it has already seen. How it does on data from after its training period is unknown.
 
 ## Freeze the test window first
 

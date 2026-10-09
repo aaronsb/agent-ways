@@ -1,6 +1,6 @@
 ---
-description: an ablation evaluative loop for a change to an agent's context such as a prompt, skill, tool, injected guidance or system prompt; compare a baseline arm without it and a treatment arm with it, graded blind by an independent judge, with a positive control that the change engaged and remove-one arms to attribute an effect
-vocabulary: ablation ablate arms baseline arm treatment arm with and without a b comparison does this prompt help does the guidance change behaviour system prompt skill tool injected context blind judge shuffled order strip the injected text positive control engaged loaded remove-one leave-one-out attribute the effect noise floor scenarios times arms times trials three way comparison
+description: an ablation evaluative loop for a change to what an agent is given, such as a rewritten system prompt, new instructions, a new tool or trimmed guidance, that seems better but hasn't been measured; compare arms with and without it, graded blind by an independent judge, with a positive control that the change engaged
+vocabulary: rewrote the system prompt changed the instructions reworded the prompt added a tool trimmed the guidance seems smarter now feels better before and after did it actually help with and without ablation ablate arms baseline arm treatment arm blind judge shuffled order strip the injected text positive control remove-one leave-one-out attribute the effect noise floor three way comparison
 scope: agent, subagent
 refire: 0.15
 ---
@@ -8,6 +8,10 @@ refire: 0.15
 # Ablation Loop
 
 The change is to what an agent is given: a prompt, a skill, a tool, a block of injected guidance, a system prompt. The question is whether behaviour changes because of it. The loop runs the same scenarios in separate arms and has an independent judge compare them blind.
+
+## When it applies
+
+Someone changed what an agent is given, such as its system prompt, instructions, tools or guidance file, and it seems better since. The impression comes from a few conversations, with no comparison against the version without the change.
 
 ## Three roles
 

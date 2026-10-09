@@ -11,6 +11,10 @@ Some outputs have no fixed right answer. A benchmark takes 41.2 ms one run and 4
 
 This differs from `evaluative/probe-set`, where a labelled sample is scored by a metric, and from `evaluative/fidelity`, where an external answer key exists. Here the judge is fitted from the system's own history.
 
+## When it applies
+
+A number that is never the same twice, such as response latency, memory use, an error rate or a benchmark timing, and the question is whether a change made it worse or whether this is its usual wobble. A fixed limit either fires on ordinary noise or misses a real shift.
+
 ## Fit on a frozen reference window
 
 Choose a window of known-good behaviour (the last N commits, a week of telemetry, a validated simulation run), fit the model on it, and record which window it was. Fits range from a robust band around the median to change-point detection, a seasonal decomposition, or a Kalman filter tracking a slowly moving level. Keep the model as simple as the signal allows.

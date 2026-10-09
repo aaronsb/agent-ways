@@ -1,6 +1,6 @@
 ---
-description: a sandboxed evaluative loop for behaviour inside a platform that is risky or hidden to run directly, such as a compositor effect, window manager, kernel module, device or shared service; run a nested isolated instance, send it commands, read a text state dump, inject real input, and confirm ground truth by a separate route
-vocabulary: test session leaked into my real desktop nested instance sandbox isolated virtual compositor window manager wayland kwin x11 plugin effect extension kernel module device emulator vm container namespace dbus host desktop leak command channel state dump state line injected input fake input probe window ground truth separate route side effect isolation audit
+description: a sandboxed evaluative loop for an extension, plugin or effect that runs inside a host application or platform, tested in a separate isolated instance so a mistake cannot break your own editor, desktop or service; a command channel, a text state dump, real input, and ground truth read by a separate route
+vocabulary: extension plugin add-on editor extension browser extension desktop extension shell extension compositor effect window manager kernel module device emulator separate profile isolated instance nested session throwaway instance without breaking my own setup test session leaked command channel state dump injected input probe window ground truth isolation audit
 scope: agent, subagent
 refire: 0.15
 ---
@@ -8,6 +8,10 @@ refire: 0.15
 # Sandboxed Loop
 
 The subject runs inside a platform: a compositor, a desktop shell, a kernel, a device, a shared service. Running it on the agent's own host risks the operator's live session, and the platform hides most of what happens. The loop runs a second, isolated instance of the real platform and builds a channel into the subject.
+
+## When it applies
+
+A plugin, extension, add-on or effect that loads into a host program: an editor, a browser, a desktop shell, a window manager, a kernel. Trying it means loading it into the host you are working in, where a mistake can break your editor or session.
 
 ## Run the real platform, isolated
 

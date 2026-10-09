@@ -1,6 +1,6 @@
 ---
-description: a fidelity evaluative loop for a reconstruction, port or reimplementation with an external answer key such as surviving reference output, original listings, published tables or measured data; keep a frozen byte-exact regression baseline separate from fidelity argued against the reference with numbers, and route baseline deltas to the operator
-vocabulary: reconstruction reimplementation port emulation historical original surviving output reference reference output answer key published tables measured data listing film fidelity faithful byte-exact bit-exact baseline frozen numerics hex double precision tolerance rms residual fit diff queue auto-pass approved delta magnitude dual implementation cross-check fallback native wasm second implementation
+description: a fidelity evaluative loop for a port, rewrite or replacement that must give exactly the same results as the old system or a reference such as a spec's examples or published output; a frozen byte-exact baseline for regression kept separate from fidelity argued against the reference with numbers
+vocabulary: port rewrite replacement replacing the old system legacy system must give exactly the same results same totals identical output matches the old one to the cent spec examples test vectors reference output answer key reconstruction emulation byte-exact baseline frozen numerics tolerance diff queue auto-pass approved delta dual implementation cross-check
 scope: agent, subagent
 refire: 0.15
 ---
@@ -8,6 +8,10 @@ refire: 0.15
 # Fidelity Loop
 
 The target is something that already exists elsewhere: the output of a lost program, a published table, a measured trajectory, an older implementation's results. That external reference is the answer key. Two questions get two separate instruments: did this change move anything (regression), and is the output faithful to the reference (fidelity).
+
+## When it applies
+
+A port to another language, a rewrite, or a replacement for an old system, where the new version has to produce the same numbers, totals or output as the old one or as published examples. A few spot checks agree and the rest has not been compared.
 
 ## Regression: a frozen baseline, byte-exact
 

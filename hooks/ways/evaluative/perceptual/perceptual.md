@@ -9,6 +9,10 @@ refire: 0.15
 
 The product is a running program a person looks at. The agent drives it headlessly, reads its state, takes screenshots, and looks. Nothing can call the result right without someone reading the image, so the agent is one of the instruments here, and the shared core in `evaluative` keeps that honest.
 
+## When it applies
+
+A change to something people see or play: a page layout, a dashboard, a chart's colours or labels, a menu, the feel of a game's controls or physics. The code compiles and the change seems right, but nobody has opened the running program and looked.
+
 ## Make the program drivable
 
 - **Expose state in development builds.** A global handle the harness can read (scene, score, player position, open dialog), behind the build's dev flag so it never ships. Read numbers before reading pixels.

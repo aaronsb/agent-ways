@@ -9,6 +9,10 @@ refire: 0.15
 
 In an evaluative loop the agent writes the software and something it does not control decides whether the work is done. Three roles: the **author** (the agent), the **instruments** (the harness, drivers and readouts that run the product and observe it), and the **oracle** (what the output is compared against: a frozen baseline, an external reference, a metric over a sample, a rubric, or the operator). Done is a verdict the agent read back from an instrument. A verdict the agent asserted is a claim (see delivery/groundwork/claims).
 
+## When it applies
+
+Someone has finished a change and is about to call it done, hand it over, or ship it, and the evidence so far is that it reads correctly, looks right, or the author is confident. Nothing outside the author has run it and reported back.
+
 ## The shared core
 
 These hold in every loop type below.

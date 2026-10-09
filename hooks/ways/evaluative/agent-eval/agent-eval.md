@@ -1,6 +1,6 @@
 ---
-description: an agent-eval evaluative loop for a multi-turn, tool-using agent, judged on the end state it leaves and its transcript across repeated trials; tasks with reference solutions, isolated trials, code graders first and calibrated model graders where needed, pass@k or pass^k, capability versus regression suites
-vocabulary: agent sometimes finishes the ticket sometimes wanders off how often agent eval agent evals eval suite trial trials grader graders code grader model grader human grader llm judge grader calibration transcript transcripts end state graded reference solution pass@k pass^k capability eval regression eval saturated saturation graduate reward hacking grader loophole broken task benchmark infrastructure noise
+description: an agent-eval evaluative loop for a multi-turn, tool-using agent that only succeeds some of the time; measure how often over repeated isolated trials, grading the end state it leaves and its transcript, with reference solutions, code graders first and calibrated model graders, pass@k or pass^k
+vocabulary: agent sometimes finishes the ticket sometimes wanders off how often succeeds three out of five agent eval agent evals eval suite trial trials grader graders code grader model grader human grader llm judge grader calibration transcript transcripts end state graded reference solution pass@k pass^k capability eval regression eval saturated saturation graduate reward hacking grader loophole broken task benchmark infrastructure noise
 scope: agent, subagent
 refire: 0.15
 ---
@@ -8,6 +8,10 @@ refire: 0.15
 # Agent-Eval Loop
 
 The subject is an agent: a model that takes many turns, calls tools, and changes an environment. One answer is not the unit. A **task** has defined inputs and success criteria. Each attempt at it is a **trial**. The **transcript** records the trial: outputs, tool calls, intermediate results. The **outcome** is the state of the environment when the trial ends. **Graders** score aspects of a trial. `evaluative/rubric` scores a single answer; this loop scores whole runs.
+
+## When it applies
+
+An agent that carries out multi-step work with tools succeeds on some runs and fails on others, and changes to it are judged by trying it once or twice. Nobody knows its success rate, or whether the last change moved it.
 
 ## Grade the outcome, and the transcript beside it
 

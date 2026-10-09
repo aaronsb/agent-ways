@@ -1,6 +1,6 @@
 ---
 description: a rubric evaluative loop for a language model's non-deterministic answer, where wording changes every run; score each answer against a rubric of expected points with a hit threshold alongside deterministic checks, and test each rubric item against a known-good and a known-bad answer
-vocabulary: llm language model answer reply wording phrasing varies every run different answer each time non-deterministic stochastic exact string match flaky rubric rubric item hit miss threshold expected points known-good known-bad answer live model call api key tokens sampling temperature
+vocabulary: grade llm summaries generated text quality language model answer reply wording phrasing varies every run different answer each time non-deterministic stochastic exact string match flaky just skim a few outputs rubric rubric item hit miss threshold expected points known-good known-bad answer live model call api key tokens sampling temperature
 scope: agent, subagent
 refire: 0.15
 ---
@@ -8,6 +8,10 @@ refire: 0.15
 # Rubric Loop
 
 The subject is a model's answer: it varies between runs, and the same intent can be phrased many ways. The loop runs each scenario and judges the result in two layers: deterministic checks on what the run did, and a rubric on what the answer said. A rubric scores one output. A multi-turn agent judged on the path it took and the state it left is `evaluative/agent-eval`.
+
+## When it applies
+
+Text a language model writes, such as summaries, descriptions, replies or release notes, comes out differently each run, and quality is judged by reading a few outputs. An exact-match test fails on every run, so nothing checks the rest.
 
 ## A scenario
 
