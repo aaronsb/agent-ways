@@ -87,6 +87,19 @@ rubric_threshold() {
   if [[ $RUBRIC_HIT -ge $1 ]]; then ok "$name"; else fail "$name"; fi
 }
 
+# source_check FILE — source a scenario's check script. A script that does not
+# parse fails here, since bash would stop sourcing at the error and every
+# check after it would be silently skipped.
+source_check() {
+  local err
+  if ! err=$(bash -n "$1" 2>&1); then
+    fail "$(basename "$1") parses" "$err"
+    return
+  fi
+  # shellcheck disable=SC1090
+  source "$1"
+}
+
 # --- scenarios ----------------------------------------------------------------
 
 run_scenario() {
@@ -117,8 +130,7 @@ run_scenario() {
     if [[ -f "$dir/check1.sh" ]]; then
       RUBRIC_HIT=0
       RUBRIC_TOTAL=0
-      # shellcheck disable=SC1091
-      source "$dir/check1.sh"
+      source_check "$dir/check1.sh"
     fi
     if [[ -n "$SESSION" ]]; then
       run_turn "$dir/prompt2.txt" 2 "$turns"
@@ -129,8 +141,7 @@ run_scenario() {
 
   RUBRIC_HIT=0
   RUBRIC_TOTAL=0
-  # shellcheck disable=SC1091
-  source "$dir/check.sh"
+  source_check "$dir/check.sh"
 }
 
 # run_turn PROMPT_FILE SUFFIX TURNS — one `claude -p` call capped at TURNS.

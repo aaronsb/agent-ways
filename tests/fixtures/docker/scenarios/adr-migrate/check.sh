@@ -26,7 +26,7 @@ PY
   if [[ -z "$missing" ]]; then ok "ADR-$n keeps its original sections"; else fail "ADR-$n keeps its original sections" "$missing"; fi
 done
 
-rubric "names the kind chosen"      "kind[`*:= ]+decision|as an? decision"
-rubric "names the verb chosen"      "\\b(retire|constrain|add|change|cut)\\b"
-rubric "explains the basis"         "\\b(evidence|precedent)\\b"
+rubric "names the kind chosen"      'kind[`*:= ]+decision|as an? decision'
+rubric "names the verb chosen"      '\b(retire|constrain|add|change|cut)\b'
+rubric "explains the basis"         '\b(evidence|precedent)\b'
 rubric_threshold 3
