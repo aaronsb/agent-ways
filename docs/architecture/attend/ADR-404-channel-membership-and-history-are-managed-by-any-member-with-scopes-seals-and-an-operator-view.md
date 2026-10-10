@@ -26,8 +26,8 @@ basis:
     paraphrase: true
   - operator: aaronsb
     level: guided
-    said: a membership cooldown keyed per member and channel stops remove and rejoin flapping; it applies to every channel and everyone, attend-chat included; in attend-chat a timing test (press a random key, press it again when a bar fills) skips it for one action; the CLI has no skip
-    via: relayed by the main session, 2026-10-10, revising an earlier exemption for attend-chat
+    said: a membership cooldown keyed per member and channel stops remove and rejoin flapping; it applies to every channel and everyone; when it blocks an action in attend-chat the screen asks "cooldown <remaining> — override? y/N", y performs the action and the override is logged; the CLI has no override
+    via: relayed by the main session, 2026-10-10, replacing an earlier exemption for attend-chat and a timing test
     paraphrase: true
   - evidence: "/purge keeps any signal a live consumer has not seen (tools/attend-chat/src/app/keys.rs, purge_channel_in) and never reaches a project tray; the cold-start rule delivers addressed project-tray mail whatever its age, the newest 50 (tools/attend-state/src/cold_start.rs, plan); a reproduction in an isolated cache showed a new agent drained all 30 day-old addressed messages after #open and channel history were deleted"
   - evidence: "/invite writes a directed signal and the invitee must run attend join itself (tools/attend-chat/src/app/keys.rs, run_invite: consent asymmetry, issue #393); /kick removes without consent"
@@ -59,7 +59,7 @@ related:
 
 ## Summary
 
-- **Decided:** ten decisions, each separable, so each can be accepted or rejected alone. D1 gives every member, agent or human, the same powers over a channel: invite or enroll a member, remove one, seal and unseal. Removal is not a ban. D2 adds a cooldown against flapping, on every channel and for everyone; a timing test in attend-chat skips it for one action. D3 lets an explicit history clear archive a room's and a project tray's history past the unconsumed guard, so new agents are not caught up on it. D4 gives a channel a directory scope that enrolls agents by where they work, with membership inherited downward. D5 adds sealed channels, which cut inheritance. D6 lets `attend join` and `attend leave` take a path. D7 renders the same model as text for agents. D8 registers the settings these need, and lets attend-chat write the one theme choice. D9 is the operator screen's layout. D10 defines the attend-chat timing test, a speed bump and no proof of a human.
+- **Decided:** ten decisions, each separable, so each can be accepted or rejected alone. D1 gives every member, agent or human, the same powers over a channel: invite or enroll a member, remove one, seal and unseal. Removal is not a ban. D2 adds a cooldown against flapping, on every channel and for everyone; attend-chat can override it for one action, after asking. D3 lets an explicit history clear archive a room's and a project tray's history past the unconsumed guard, so new agents are not caught up on it. D4 gives a channel a directory scope that enrolls agents by where they work, with membership inherited downward. D5 adds sealed channels, which cut inheritance. D6 lets `attend join` and `attend leave` take a path. D7 renders the same model as text for agents. D8 registers the settings these need, and lets attend-chat write the one theme choice. D9 is the operator screen's layout. D10 defines that override.
 - **Trades away:** the consent asymmetry of issue #393 (only the invitee could add itself), and ADR-172 Decision 5's guarantee that no message a live session has not consumed is ever removed, where an explicit clear says otherwise. Membership stops being a flat list: it becomes manual entries plus scope rules plus inheritance, which every view must explain.
 - **One-way?** No. D3 archives rather than deletes, so a clear can be undone. Scopes, seals and exclusions are new state in `_groups.yaml` that an older attend ignores; dropping them later is a migration of that file, not of messages.
 - **Probes:** *Confident (powers):* you want an agent you set to work on a project to be able to bring a colleague into the channel without you, as you can. *Not confident (clear):* when you clear a channel's history, an idle agent that is still a member and has not read the last few messages should lose them too, rather than the clear waiting for it.
@@ -93,7 +93,7 @@ Any member of a channel, agent or human, may invite or enroll a member, remove o
 
 After any membership change for a (member, channel) pair (an invite, a removal, a self-join, a self-leave), a further change for that pair is refused until the cooldown has passed. The refusal says how long remains and is logged. Sealing and unsealing take the same cooldown, keyed per channel. The duration is `attend.channels.membership_cooldown`, in seconds, default 60, registered in attend's schema (ADR-503 §13).
 
-The cooldown is universal: every channel, `#open` included, with no per-channel switch and no exempt actor. The one way past it is D10's timing test, passed in attend-chat, which skips it for that one action. The CLI has no skip.
+The cooldown is universal: every channel, `#open` included, with no per-channel switch and no exempt actor. The one way past it is D10's override in attend-chat, for one action at a time. The CLI has no override.
 
 ### D3. An explicit clear archives history past the unconsumed guard
 
@@ -141,14 +141,11 @@ attend-chat may write the one theme choice, ways' `theme.active`, through the sh
 - A collapsible left sidebar shows the full channel tree by scope nesting, expanding and collapsing as a directory browser does, with compact per-row figures: members, unread, time since the last message, and the sealed marker, for example `▸ project-a-root  3👤 12✉ 4m`. Enter or a click on a row opens the same context menu as the tab. `attend.chat.sidebar_key` toggles it.
 - The channel menu gains Seal or Unseal and Auto-join rule… (setting the scope, D4).
 
-### D10. The timing test in attend-chat
+### D10. attend-chat may override the cooldown, after asking
 
-A change attend-chat would refuse under D2 offers a test instead. A modal names a key `[k]`, drawn at random from a–z and 0–9 for each challenge. Pressing `[k]` starts a bar that fills over a random duration between 2 and 5 seconds, the duration not shown. Pressing `[k]` again when the bar is full, within a tolerance of 300 ms either side, passes, and the one change goes ahead past the cooldown. A press before the window, no press by its end, or any other key fails; a retry draws a new key and a new duration. Esc cancels. No key pressed during the test reaches the compose box.
+When the cooldown blocks an action in attend-chat, the bottom bar asks `cooldown <remaining> — override? y/N`. `y` performs the action; any other key cancels it. An override is logged with its actor like every other membership event, and the channel's system line says it was an override. The CLI has no override, and a headless `attend-chat --snap` is a dry run that changes nothing.
 
-- Three tries per action. After the third failure the skip is unavailable for that action and the normal cooldown applies; the modal says so and closes. The count resets when the cooldown expires or the action succeeds. Every failure is logged like any other membership event.
-- The tolerance is a named constant, 300 ms: wide enough for a person watching a bar on a loaded terminal, narrow enough that pressing on a fixed rhythm misses across durations from 2 to 5 seconds.
-- It needs only key presses, so it works without the keyboard enhancement.
-- It is a speed bump against accidental or habitual flapping, an agent's included, and no proof of a human. An agent that drives attend-chat on a pseudo-terminal and reads the screen can pass it. The test is offered only by attend-chat running interactively on a terminal; a headless `attend-chat --snap` is a dry run that changes nothing, and stays so. Every change passed this way is logged as such.
+The question is a pause, not a lock: anything that drives attend-chat can answer it. It stops a flap that nobody meant, and the log names every override.
 
 ## Consequences
 
@@ -164,7 +161,7 @@ A change attend-chat would refuse under D2 offers a test instead. A modal names 
 - ADR-172 Decision 5's guarantee becomes conditional: an explicit clear archives a message an idle live member has not read. The archive makes it recoverable, not delivered.
 - Membership is computed, not listed. A member's channels depend on scopes, seals, inheritance and exclusions, and a bug there misroutes messages. Every view must show origin, and the evaluation needs its own test table.
 - Symmetric powers let a confused agent remove members or seal a channel; the cooldown, the log, the system line and the operator's view bound the damage but do not prevent it.
-- The cooldown refuses a legitimate quick correction made through the CLI; attend-chat's timing test is the way past it, and it is deliberately slower than a retry loop.
+- The cooldown refuses a legitimate quick correction made through the CLI; attend-chat's override is the way past it.
 
 ### Neutral
 
@@ -192,5 +189,6 @@ These fit ADR-136, ADR-170, ADR-172 and ADR-504 as accepted and need none of the
 - **Glob rules for auto-membership.** Globs can overlap without nesting, so "the deepest channel" is undefined for them. Directory scopes make nesting a prefix test.
 - **Same-scope channels as one depth.** Enrolls every agent there in two rooms with one meaning; refusing keeps one name per place.
 - **Operator-only seal and membership.** Simpler to reason about, but agents would route every reorganization through the operator, the bottleneck this record removes.
-- **Exempting the operator, by a CLI flag or by attend-chat's identity.** A flag any agent could pass; an identity any agent that launches attend-chat could take. A timing test costs a person a few seconds and makes flapping slow for anyone.
-- **A hold-to-confirm test.** Needs key-release events, which only the keyboard enhancement reports; without it a hold must be guessed from autorepeat timing. The press-twice test needs only presses.
+- **No override at all.** Simplest, and a flap could not be forced; but an operator correcting their own mistake would wait out the cooldown with nothing to do.
+- **Exempting the operator, by a CLI flag or by attend-chat's identity.** A flag any agent could pass, and an exemption that asks nothing makes the cooldown invisible to whoever holds it. Asking each time keeps it visible and logged.
+- **A timing or hold-to-confirm test before the override.** Considered and dropped as more ceremony than the risk needs: anything that drives the screen could pass it too.
