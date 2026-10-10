@@ -898,16 +898,103 @@ fn the_plus_slot_takes_a_new_channels_name() {
     assert_eq!(c.input().text(), "a draft");
 }
 
+/// Enter on the `+` slot goes straight to the name prompt: no menu between.
+#[test]
+fn golden_enter_on_the_plus_slot_asks_the_name_at_once() {
+    let mut g = goldens();
+    let mut c = chat().dry_run(true);
+    typed(&mut c, "a draft");
+    plus_slot(&mut c);
+    let shown = text(&mut c, 80, 25);
+    assert!(!shown.contains("pick one") && !shown.contains("New channel…"), "no menu: {shown}");
+    assert!(bar(&mut c).contains("new channel: type its name"), "{}", bar(&mut c));
+    g.check("new-channel-prompt-80x25", &testkit::render_screen(&mut c, 80, 25));
+    // A click on the slot does the same.
+    press(&mut c, key(KeyCode::Esc));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, " + ").expect("the slot is drawn");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x + 1, y));
+    assert!(bar(&mut c).contains("new channel: type its name"), "{}", bar(&mut c));
+    assert!(!text(&mut c, 80, 25).contains("pick one"));
+    g.finish();
+}
+
+/// Ctrl+N asks the name from the compose box, keeping the draft, and from
+/// the tab bar.
+#[test]
+fn golden_ctrl_n_asks_a_new_channels_name_and_gives_the_draft_back() {
+    let mut g = goldens();
+    let mut c = chat().dry_run(true);
+    typed(&mut c, "a draft");
+    press(&mut c, ctrl('n'));
+    assert!(c.input().is_empty(), "the compose box is lent to the name");
+    typed(&mut c, "release");
+    g.check("ctrl-n-new-channel-draft-80x25", &testkit::render_screen(&mut c, 80, 25));
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: /channels create not run");
+    assert_eq!(c.input().text(), "a draft", "the draft is back");
+    // Pressed again while the name is being typed, it keeps the name apart from the draft.
+    press(&mut c, ctrl('n'));
+    typed(&mut c, "half");
+    press(&mut c, ctrl('n'));
+    assert_eq!(c.input().text(), "half");
+    press(&mut c, key(KeyCode::Esc));
+    assert_eq!(c.input().text(), "a draft");
+    // From the tab bar: the focus goes back and the prompt opens.
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, ctrl('n'));
+    assert!(bar(&mut c).contains("new channel: type its name") && !bar(&mut c).contains("TABS"), "{}", bar(&mut c));
+    press(&mut c, key(KeyCode::Esc));
+    assert_eq!(c.input().text(), "a draft");
+    g.finish();
+}
+
+/// Ctrl+N without the keyboard enhancement is the byte 0x0E, which
+/// crossterm's parser reads as Ctrl+n (`parse.rs`: `0x01..=0x1A` is
+/// Ctrl+letter, apart from CR, LF, Tab, ESC and DEL). It asks a name; it
+/// never sends and never quits.
+#[test]
+fn legacy_ctrl_n_byte_never_quits_or_sends() {
+    for draft in ["", "hello"] {
+        let mut c = chat().dry_run(true);
+        typed(&mut c, draft);
+        let before = c.signals().len();
+        assert!(press(&mut c, ctrl('n')), "draft {draft:?}: Ctrl+N closed the chat");
+        assert!(bar(&mut c).contains("new channel: type its name"), "{}", bar(&mut c));
+        assert_eq!(c.signals().len(), before, "nothing was sent");
+        assert!(press(&mut c, key(KeyCode::Esc)), "Esc cancels the name, not the chat");
+        assert_eq!(c.input().text(), draft);
+    }
+}
+
+/// The tab bar's focus on a channel tab, on `≡` and on `+`: reverse video
+/// behind a ▸, and TABS in the footer.
+#[test]
+fn golden_the_tab_bar_focus_is_marked_on_every_kind_of_tab() {
+    let mut g = goldens();
+    let mut c = chat().dry_run(true);
+    drawn(&mut c, &[key(KeyCode::F(2)), key(KeyCode::Right), key(KeyCode::Right)], 80, 25);
+    assert!(text(&mut c, 80, 25).contains("▸3 #deploy"));
+    g.check("tab-bar-focused-80x25", &testkit::render_screen(&mut c, 80, 25));
+    drawn(&mut c, &[key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Left)], 80, 25);
+    assert!(text(&mut c, 80, 25).contains("▸≡"));
+    g.check("tab-bar-focused-common-80x25", &testkit::render_screen(&mut c, 80, 25));
+    drawn(&mut c, &[key(KeyCode::Left)], 80, 25);
+    assert!(text(&mut c, 80, 25).contains("▸+"));
+    g.check("tab-bar-focused-plus-80x25", &testkit::render_screen(&mut c, 80, 25));
+    drawn(&mut c, &[key(KeyCode::Esc)], 80, 25);
+    assert!(!text(&mut c, 80, 25).contains('▸'));
+    g.finish();
+}
+
 #[test]
 fn f2_moves_along_the_tab_bar_and_enter_opens_the_menu() {
-    let mut g = goldens();
     // The fallback where the terminal reports no Ctrl+digits.
     let mut c = chat();
     drawn(&mut c, &[key(KeyCode::F(2))], 80, 25);
-    assert!(bar(&mut c).contains("tabs: ← → move · Enter menu · Esc back"), "{}", bar(&mut c));
+    assert!(bar(&mut c).contains("TABS") && bar(&mut c).contains("← → move · Enter menu · Ctrl+N new channel · Esc back"), "{}", bar(&mut c));
     drawn(&mut c, &[key(KeyCode::Right), key(KeyCode::Right)], 80, 25);
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
-    g.check("tab-bar-focused-80x25", &testkit::render_screen(&mut c, 80, 25));
     press(&mut c, key(KeyCode::Enter));
     assert!(text(&mut c, 80, 25).contains("pick one: #deploy"));
     press(&mut c, key(KeyCode::Esc));
@@ -918,7 +1005,6 @@ fn f2_moves_along_the_tab_bar_and_enter_opens_the_menu() {
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()), "the + slot is not a tab");
     press(&mut c, key(KeyCode::Enter));
     assert!(bar(&mut c).contains("new channel:"), "{}", bar(&mut c));
-    g.finish();
 }
 
 #[test]

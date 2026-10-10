@@ -12,6 +12,7 @@ agent-tui frame 80x25
 |│Alt+1-9            tab (again: menu)                                          │|
 |│F2                 tabs                                                       │|
 |│Ctrl+T             the tab bar, as F2: ← → move, Enter its menu, Esc back     │|
+|│Ctrl+N             new channel, from the compose box or the tab bar           │|
 |│right-click a tab  its menu; so does a click on the tab shown                 │|
 |│M-m                mouse on or off (off lets the terminal select text)        │|
 |│Shift-drag         selects text while the mouse is on, in most terminals      │|
@@ -21,7 +22,6 @@ agent-tui frame 80x25
 |│                                                                              │|
 |│help: chat                                                                    │|
 |│Enter sends to the shown channel; merged sends to #open. @name or #channel    │|
-|│at the start addresses the message; Tab completes them, and on an empty       │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
 styles
@@ -89,11 +89,12 @@ styles
  18   1-19  Cyan - -
  18  79-79  LightBlue - -
  19   0-0   LightBlue - -
+ 19   1-19  Cyan - -
  19  79-79  LightBlue - -
  20   0-0   LightBlue - -
- 20   1-10  - - BOLD
  20  79-79  LightBlue - -
  21   0-0   LightBlue - -
+ 21   1-10  - - BOLD
  21  79-79  LightBlue - -
  22   0-0   LightBlue - -
  22  79-79  LightBlue - -

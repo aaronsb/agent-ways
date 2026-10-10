@@ -83,7 +83,8 @@ A line that starts with `/` runs a command. The helper row completes the command
 | Tab | on an empty line, the next tab; otherwise complete the `@name`, `#channel` or `/command` being typed |
 | Ctrl-1 … Ctrl-9 | show a tab (1 is merged, 2 is `#open`); on the tab already shown, open its menu. Needs a terminal that speaks the kitty keyboard protocol; the F1 view says whether yours does |
 | Alt-1 … Alt-9 | show a tab where Ctrl and a digit do not arrive; Konsole and GNOME Terminal keep Alt and a digit for their own tabs |
-| F2, Ctrl-T | the tab bar: Left and Right move, Enter opens the tab's menu, Esc goes back |
+| F2, Ctrl-T | the tab bar, marked by TABS in the footer and a reversed, ▸-led tab under the cursor: Left and Right move, Enter opens the tab's menu (the `+` slot asks the new channel's name at once), Esc goes back |
+| Ctrl-N | ask a new channel's name in the compose box, from the compose box or the tab bar; the draft comes back afterwards |
 | right-click a tab | its menu; with the mouse on, a click on the tab already shown opens it too |
 | PgUp, PgDn | scroll the feed |
 | Left, Right, Home, End | move the cursor |

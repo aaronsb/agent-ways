@@ -642,6 +642,14 @@ impl Pane for ChatPane {
         self.open_tab_menu(i);
     }
 
+    fn new_item_label(&self) -> Option<&'static str> {
+        Some("new channel")
+    }
+
+    fn new_item(&mut self) {
+        self.new_channel();
+    }
+
     fn interrupted(&mut self) {
         self.drop_question();
     }
