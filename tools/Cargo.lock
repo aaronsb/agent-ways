@@ -2014,7 +2014,7 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "ways"
-version = "1.36.1"
+version = "1.36.2"
 dependencies = [
  "agent-fmt",
  "agent-identity",
