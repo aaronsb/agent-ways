@@ -251,7 +251,8 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
     }
     let caps = ColorDepth::detect();
     let names_before = tabs::strip_names(&channels(caps));
-    match dissolve_group_in(&signals_base(), &name, attend_groups::member_alive) {
+    let me = crate::signal::human_member_id();
+    match dissolve_group_in(&signals_base(), &name, &me, attend_groups::member_alive) {
         EnterAction::ClearWithStatus(status) => {
             let focus = if *foreground == Tab::Channel(name.clone()) {
                 tabs::advance_after_dissolve(&name, &names_before)
@@ -275,9 +276,16 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
 /// members are all heartbeat-stale — or an orphan `@dir` the yaml
 /// has no entry for — dissolves freely; that's the clutter this
 /// command exists to clear.
+///
+/// The operator running the command (`self_member`, ADR-170's username
+/// member, kept heartbeat-fresh by the open chat) never counts as a live
+/// member: the guard protects peers working in the channel, and without
+/// the exclusion an operator could not dissolve any channel they had
+/// joined. The empty-group send gate excludes the sender the same way.
 fn dissolve_group_in<F: Fn(&str) -> bool>(
     base: &std::path::Path,
     name: &str,
+    self_member: &str,
     is_live: F,
 ) -> EnterAction {
     // Member id is irrelevant for dissolve — it acts on the group,
@@ -291,11 +299,11 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
     let live = members
         .iter()
         .flatten()
-        .filter(|m| is_live(m))
+        .filter(|m| m.as_str() != self_member && is_live(m))
         .count();
     if live > 0 {
         return EnterAction::StatusOnly(format!(
-            "#{name}: {live} live member{} — not dissolving",
+            "#{name}: {live} live member{} — not dissolving; /kick them first",
             if live == 1 { "" } else { "s" }
         ));
     }
@@ -935,7 +943,7 @@ mod tests {
     #[test]
     fn dissolve_unknown_group_is_precise() {
         let base = tempdir_like();
-        match dissolve_group_in(&base, "ghost", |_| false) {
+        match dissolve_group_in(&base, "ghost", "aaron", |_| false) {
             EnterAction::StatusOnly(s) => assert!(s.contains("unknown group")),
             _ => panic!("unknown group should keep input with status"),
         }
@@ -948,7 +956,7 @@ mod tests {
         // channel bar until dissolved.
         let base = tempdir_like();
         std::fs::create_dir_all(base.join("@bg-test")).unwrap();
-        match dissolve_group_in(&base, "bg-test", |_| false) {
+        match dissolve_group_in(&base, "bg-test", "aaron", |_| false) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #bg-test")),
             _ => panic!("orphan dissolve should clear input with status"),
         }
@@ -961,7 +969,7 @@ mod tests {
         attend_groups::Groups::new(&base, "dead-session")
             .join("temp", false)
             .unwrap();
-        match dissolve_group_in(&base, "temp", |_| false) {
+        match dissolve_group_in(&base, "temp", "aaron", |_| false) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #temp")),
             _ => panic!("stale-member dissolve should clear input with status"),
         }
@@ -975,12 +983,34 @@ mod tests {
         attend_groups::Groups::new(&base, "live-session")
             .join("deploy", false)
             .unwrap();
-        match dissolve_group_in(&base, "deploy", |_| true) {
+        match dissolve_group_in(&base, "deploy", "aaron", |_| true) {
             EnterAction::StatusOnly(s) => assert!(s.contains("1 live member")),
             _ => panic!("live-member dissolve should refuse with status"),
         }
         // Nothing was touched.
         assert!(base.join("@deploy").is_dir());
+    }
+
+    #[test]
+    fn dissolve_does_not_count_the_operator_as_a_live_member() {
+        // The operator joined the channel from the chat, whose heartbeat
+        // keeps them live: their own membership must not hold the
+        // channel open against them. A live peer still does.
+        let base = tempdir_like();
+        join_group_in(&base, "aaron", "kwin-canvas");
+        match dissolve_group_in(&base, "kwin-canvas", "aaron", |_| true) {
+            EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #kwin-canvas"), "got: {s}"),
+            _ => panic!("the operator alone in a channel should dissolve it"),
+        }
+        assert!(!base.join("@kwin-canvas").exists());
+        assert!(attend_groups::Groups::new(&base, "x").members("kwin-canvas").is_none());
+
+        join_group_in(&base, "aaron", "testing");
+        join_group_in(&base, "live-session", "testing");
+        match dissolve_group_in(&base, "testing", "aaron", |_| true) {
+            EnterAction::StatusOnly(s) => assert!(s.contains("1 live member") && s.contains("/kick"), "got: {s}"),
+            _ => panic!("a live peer still holds the channel"),
+        }
     }
 
     #[test]
