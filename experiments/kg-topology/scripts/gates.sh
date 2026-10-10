@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # usage: gates.sh <worktree> <corpus-dir> <label>
 W=$1; C=$2; L=$3
 cd "$W" || exit 1

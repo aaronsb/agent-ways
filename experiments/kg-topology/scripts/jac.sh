@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # usage: jac.sh <worktree>
 mkdir -p /tmp/kgtopo-a3601/mainx && tar -xf /tmp/kgtopo-a3601/main-ways.tar -C /tmp/kgtopo-a3601/mainx
 for d in collaboration data documentation ea evaluative itops meta softwaredev workstation; do
