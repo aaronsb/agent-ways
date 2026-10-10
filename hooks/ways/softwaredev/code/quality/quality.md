@@ -1,6 +1,6 @@
 ---
 description: code quality, refactoring, SOLID principles, code review standards, technical debt, maintainability
-vocabulary: refactor quality solid principle decompose extract method responsibility coupling cohesion maintainability readability
+vocabulary: refactor quality solid principle decompose extract method responsibility coupling cohesion maintainability readability idioms ecosystem invariant
 pattern: solid.?principle|refactor|code.?review|code.?quality|clean.?up|simplify|decompos|extract.?method|tech.?debt
 refire: 0.2
 macro: append

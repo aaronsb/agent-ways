@@ -1,6 +1,6 @@
 ---
 description: source code security audit for dangerous patterns, obfuscation, exfiltration
-vocabulary: eval exec obfuscated base64 pickle deserialize exfiltration shell injection subprocess os.system innerHTML dangerous pattern code audit source review
+vocabulary: eval exec obfuscated base64 pickle deserialize exfiltration shell injection subprocess os.system innerHTML dangerous pattern code audit source review decode hex rce single-char encoding
 scope: agent, subagent
 refire: 0.15
 ---

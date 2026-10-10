@@ -1,6 +1,6 @@
 ---
 description: structured reasoning, thinking frameworks, cognitive scaffolding for complex decisions
-vocabulary: explore options approaches trade-off balance alternatives stuck principle abstract reasoning framework systematic
+vocabulary: explore options approaches trade-off balance alternatives stuck principle abstract reasoning framework systematic trilemma step-back self-consistency metacognitive competing
 pattern: explore.{0,30}(option|approach|alternativ)|weigh.{0,30}(option|trade|alternativ)|trade.?off|several (option|approach|alternativ|way)|competing (objective|priorit|concern|goal)|first principle|step.?back|i'?m stuck|which (approach|option)
 scope: agent, subagent
 refire: 0.15

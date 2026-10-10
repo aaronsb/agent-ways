@@ -1,6 +1,6 @@
 ---
 description: developer safety when a build or task runs inside a container — non-root execution, host artifact ownership, least privilege, scoped bind mounts
-vocabulary: container docker podman buildah nerdctl dockerfile containerfile compose image build stage bind mount volume rootless non-root user uid gid privileged capability drop artifact ownership blast radius developer safety
+vocabulary: container docker podman buildah nerdctl dockerfile containerfile compose image build stage bind mount volume rootless non-root user uid gid privileged capability drop artifact ownership blast radius developer safety sudo slim multi-stage root-owned unprivileged socket
 files: Dockerfile|Containerfile|(docker-)?compose\.ya?ml|\.dockerignore|\.devcontainer
 commands: (docker|podman|nerdctl|buildah)\ (build|run|compose)
 refire: 0.15

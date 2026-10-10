@@ -1,6 +1,6 @@
 ---
 description: Choosing whose voice to use when writing through human communication channels — ghostwriting, attributed, collaborative modes
-vocabulary: voice attribution ghostwrite tone style identity mode credited signed content perspective recipient naturally reviewed approved ask
+vocabulary: voice attribution ghostwrite tone style identity mode credited signed content perspective recipient naturally reviewed approved ask authorship misattribution mimicry laundering blended
 scope: agent, subagent
 refire: 0.15
 ---

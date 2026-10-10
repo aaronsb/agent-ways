@@ -1,6 +1,6 @@
 ---
 description: held-out evaluation for code whose tests were written by the same person or agent that wrote the code; cases from a fresh writer with no session context who sees only a one-sentence statement of the situation, kept apart from the author, scored only at the gate, and retired once their failures are seen
-vocabulary: wrote the code and every test for it myself same author wrote both passes on the examples i wrote myself someone who never saw the code writes new ones i will not look at held-out holdout cases written by someone else independent case writer fresh agent no context unseen cases the author never saw self-written cases echo its own wording retire the set gap between held-out and self-written score
+vocabulary: wrote the code and every test for it myself same author wrote both passes on the examples i wrote myself someone who never saw the code writes new ones i will not look at held-out holdout cases written by someone else independent case writer fresh agent no context unseen cases the author never saw self-written cases echo its own wording retire the set gap between held-out and self-written score near-misses contamination self-fit overfitting
 scope: agent, subagent
 refire: 0.15
 ---

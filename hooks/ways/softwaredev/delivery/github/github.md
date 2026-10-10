@@ -1,6 +1,6 @@
 ---
 description: GitHub pull requests, issues, review comments, CI checks
-vocabulary: github pull request pull requests pr prs issue issues fork upstream label labels milestone branch protection codeowners gh cli review comments ci checks
+vocabulary: github pull request pull requests pr prs issue issues fork upstream label labels milestone branch protection codeowners gh cli review comments ci checks squash rebase badges shields.io post-merge boards
 pattern: github|\bgh (pr|issue)\b|issue #?\d+|github issues?|pull.?requests?|\bprs?\b|review.?(pr|comment)|merge.?request
 commands: ^gh\ |^gh$
 refire: 0.15

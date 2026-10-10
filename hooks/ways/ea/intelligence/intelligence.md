@@ -1,6 +1,6 @@
 ---
 description: brief me before this meeting, who is attending and what we discussed with them last time, open commitments, a dossier on a person or client built from email calendar chat and files
-vocabulary: meeting prep pre-read brief me beforehand attendees dossier who is attending last occurrence recap prior threads open commitments client history background weekly review end of week synthesis
+vocabulary: meeting prep pre-read brief me beforehand attendees dossier who is attending last occurrence recap prior threads open commitments client history background weekly review end of week synthesis eisenhower dashboard end-of-week overdue attendee inactive preparation
 scope: agent, subagent
 refire: 0.15
 ---

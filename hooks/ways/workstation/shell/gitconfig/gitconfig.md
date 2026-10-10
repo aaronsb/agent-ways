@@ -1,6 +1,6 @@
 ---
 description: global git configuration — identity, default branch, pull strategy, delta pager, credential helper, global gitignore
-vocabulary: gitconfig global identity user.name user.email pull.rebase init.defaultBranch credential helper libsecret keychain delta pager core.pager gitignore push.autoSetupRemote
+vocabulary: gitconfig global identity user.name user.email pull.rebase init.defaultBranch credential helper libsecret keychain delta pager core.pager gitignore push.autoSetupRemote includeif osxkeychain conditional excludesfile identities
 files: /\.gitconfig$|/\.config/git/config$|/\.gitignore_global$
 commands: git\ config\ --global
 scope: agent

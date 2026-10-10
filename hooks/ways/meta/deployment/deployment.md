@@ -1,6 +1,6 @@
 ---
 description: How agent-ways itself deploys into the home config dir — ~/.claude as a thin projection of an XDG application (source in $XDG_DATA_HOME/agent-ways), how the agent-ways installer/update/`ways reconcile` work under it, how to spot a legacy pre-1.0 in-place agent-ways clone that must `ways migrate` instead of pull, and where the migrator lives now that 1.9.0 removed it from the binary — surfaced only when installing, updating, migrating, or reconciling agent-ways itself, or resolving an existing ~/.claude conflict during agent-ways setup
-vocabulary: agent-ways ~/.claude thin projection XDG application $XDG_DATA_HOME/agent-ways ways reconcile ways migrate reproject legacy in-place clone pre-1.0 agent-ways projected roots settings.json merge curl bash agent-ways installer existing .claude clobber subdirectory topology ADR-142
+vocabulary: agent-ways ~/.claude thin projection XDG application $XDG_DATA_HOME/agent-ways ways reconcile ways migrate reproject legacy in-place clone pre-1.0 agent-ways projected roots settings.json merge curl bash agent-ways installer existing .claude clobber subdirectory topology ADR-142 activation opt-out reprojection disabled adopters re-materialize
 pattern: agent-ways|~/\.claude|existing \.?claude|ways (reconcile|migrate)|ways update|in-place clone|thin projection|xdg.?data
 refire: 0.15
 scope: agent, subagent

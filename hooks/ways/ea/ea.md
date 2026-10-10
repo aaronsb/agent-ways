@@ -1,6 +1,6 @@
 ---
 description: executive assistant work across the human's own email inboxes, calendars, chat platforms, and to-do lists, usually on several accounts at once
-vocabulary: executive assistant inbox inboxes mailbox calendar calendars appointments correspondence triage briefing agenda gmail outlook google workspace microsoft 365 accounts identities
+vocabulary: executive assistant inbox inboxes mailbox calendar calendars appointments correspondence triage briefing agenda gmail outlook google workspace microsoft 365 accounts identities guardrails multi-account auto-execute communications
 scope: agent, subagent
 refire: 0.15
 ---

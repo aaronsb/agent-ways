@@ -1,6 +1,6 @@
 ---
 description: a rubric evaluative loop for a language model's non-deterministic answer, where wording changes every run; score each answer against a rubric of expected points with a hit threshold alongside deterministic checks, and test each rubric item against a known-good and a known-bad answer
-vocabulary: grade llm summaries generated text quality language model answer reply wording phrasing varies every run different answer each time non-deterministic stochastic exact string match flaky just skim a few outputs rubric rubric item hit miss threshold expected points known-good known-bad answer live model call api key tokens sampling temperature
+vocabulary: grade llm summaries generated text quality language model answer reply wording phrasing varies every run different answer each time non-deterministic stochastic exact string match flaky just skim a few outputs rubric rubric item hit miss threshold expected points known-good known-bad answer live model call api key tokens sampling temperature variance non-determinism exact-match quoting single-quoted model-written
 scope: agent, subagent
 refire: 0.15
 ---

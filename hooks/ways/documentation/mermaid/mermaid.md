@@ -1,6 +1,6 @@
 ---
 description: Mermaid diagrams, flowcharts, sequence diagrams, state diagrams, diagram styling, palette and color choices for light and dark themes
-vocabulary: mermaid diagram flowchart sequence state class gantt chart gitgraph timeline svg styling palette color fill stroke contrast light dark mode theme legible opaque subgraph
+vocabulary: mermaid diagram flowchart sequence state class gantt chart gitgraph timeline svg styling palette color fill stroke contrast light dark mode theme legible opaque subgraph legend hue translucent theme-independent ascii
 scope: agent, subagent
 refire: 0.15
 ---
@@ -89,3 +89,7 @@ Two anchors keep it legible: **one hue = one role** (don't reuse green for both 
 - Unstyled diagrams when 3+ actors or concerns are present — add color
 
 **Validate before committing.** Render the diagram (`mmdc -i diagram.mmd -o /tmp/out.svg`, or the terminal `mmaid` way) — a clean render means the syntax parsed. Eyeball it in both a light and a dark preview.
+
+## See Also
+
+- visualization/diagrams(softwaredev) — rendering Mermaid in the terminal with mmaid

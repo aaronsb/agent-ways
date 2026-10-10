@@ -1,6 +1,6 @@
 ---
 description: How we write Claude Code skills in this repo — skill naming and scope conventions, the global-scope caveat, and choosing a skill as the authoring surface for a procedure; defers SKILL.md mechanics to the official docs
-vocabulary: skill slash command SKILL.md create author write invoke user-invocable plugin convention scope global
+vocabulary: skill slash command SKILL.md create author write invoke user-invocable plugin convention scope global hyphenated location-independent canonical self-contained procedures
 pattern: SKILL\.md|skill.?(creation|author|write)|claude.?code.?skill|~\/\.claude\/skills
 scope: agent, subagent
 refire: 0.15

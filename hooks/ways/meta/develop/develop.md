@@ -1,6 +1,6 @@
 ---
 description: How we carry a piece of work through the development loop — a variable front (design, prototype, ADR, ordered by where the uncertainty lives) and a stable tail (build, review, fix, merge). Route to the /develop skill, which picks the shape and borrows the stage skills rather than reimplementing them.
-vocabulary: develop development loop workflow build feature implement carry work through iterate design prototype adr plan review fix merge order sequence what first where to start shape front tail claim evidence uncertainty method process the way we work
+vocabulary: develop development loop workflow build feature implement carry work through iterate design prototype adr plan review fix merge order sequence what first where to start shape front tail claim evidence uncertainty method process the way we work prototype-first design-first adr-first router reordering
 pattern: /develop\b|develop (this|the|a|our)|work through (this|the|a)|(build|tackle) (this|the) feature|the (dev|development) loop|how (do|should) we (build|develop|approach|tackle)|where (do|should) (we|i) start|what (comes |do we do |should we do )first
 refire: 0.2
 scope: agent

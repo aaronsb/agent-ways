@@ -1,6 +1,6 @@
 ---
 description: a sandboxed evaluative loop for an extension, plugin or effect that runs inside a host application or platform, tested in a separate isolated instance so a mistake cannot break your own editor, desktop or service; a command channel, a text state dump, real input, and ground truth read by a separate route
-vocabulary: extension plugin add-on editor extension browser extension desktop extension shell extension compositor effect window manager kernel module device emulator separate profile isolated instance nested session throwaway instance without breaking my own setup test session leaked command channel state dump injected input probe window ground truth isolation audit
+vocabulary: extension plugin add-on editor extension browser extension desktop extension shell extension compositor effect window manager kernel module device emulator separate profile isolated instance nested session throwaway instance without breaking my own setup test session leaked command channel state dump injected input probe window ground truth isolation audit protocol geometry breakage
 scope: agent, subagent
 refire: 0.15
 ---

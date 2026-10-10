@@ -1,6 +1,6 @@
 ---
 description: an agent-eval evaluative loop for a multi-turn, tool-using agent that only succeeds some of the time; measure how often over repeated isolated trials, grading the end state it leaves and its transcript, with reference solutions, code graders first and calibrated model graders, pass@k or pass^k
-vocabulary: agent sometimes finishes the ticket sometimes wanders off how often succeeds three out of five agent eval agent evals eval suite trial trials grader graders code grader model grader human grader llm judge grader calibration transcript transcripts end state graded reference solution pass@k pass^k capability eval regression eval saturated saturation graduate reward hacking grader loophole broken task benchmark infrastructure noise
+vocabulary: agent sometimes finishes the ticket sometimes wanders off how often succeeds three out of five agent eval agent evals eval suite trial trials grader graders code grader model grader human grader llm judge grader calibration transcript transcripts end state graded reference solution pass@k pass^k capability eval regression eval saturated saturation graduate reward hacking grader loophole broken task benchmark infrastructure noise llm-as-judge graduation outcome code-based
 scope: agent, subagent
 refire: 0.15
 ---

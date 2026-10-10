@@ -1,6 +1,6 @@
 ---
 description: When to reach for the Workflow tool — deterministic multi-agent orchestration (fan-out, staged pipelines, verification and synthesis across many items) and how far up the substrate ladder a task warrants climbing
-vocabulary: workflow orchestrate orchestration fan out pipeline multi-agent parallel stage deterministic deliver decompose verify synthesize substrate gate remediate adversarially scale
+vocabulary: workflow orchestrate orchestration fan out pipeline multi-agent parallel stage deterministic deliver decompose verify synthesize substrate gate remediate adversarially scale work-list scout four-square decomposition sweep opt-in
 pattern: orchestrat|fan.?out|pipeline|multi.?agent
 scope: agent
 refire: 0.15

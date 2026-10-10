@@ -1,6 +1,6 @@
 ---
 description: verification gates before merge, whether the tests and checks actually ran, reporting each gate as executed, discovered, or absent, positive controls for empty results, gate depth by change class
-vocabulary: gate gates ci check checks verification verify verified tests ran coverage scanner scan lint pass green ready merge executed discovered absent positive control null result zero findings clean instrument report
+vocabulary: gate gates ci check checks verification verify verified tests ran coverage scanner scan lint pass green ready merge executed discovered absent positive control null result zero findings clean instrument report zero-count three-state uninvoked glob breadth
 commands: (npm|pnpm|yarn)\ test|pytest|cargo\ test|go\ test|make\ test|make\ check
 scope: agent, subagent
 refire: 0.15

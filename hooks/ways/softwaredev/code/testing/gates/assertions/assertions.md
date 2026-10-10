@@ -1,6 +1,6 @@
 ---
 description: the shape of a test assertion, composition versus a bare count, expected values independent of the subject, failure messages that name what drifted, mock call counts, snapshot and golden baselines, a named known-bug marker that expires when the bug is fixed
-vocabulary: assert assertion expect expected mock called toHaveBeenCalled snapshot golden baseline known bug xfail known_bug marker tautological witness drift composition count
+vocabulary: assert assertion expect expected mock called toHaveBeenCalled snapshot golden baseline known bug xfail known_bug marker tautological witness drift composition count vacuous volatile self-expiring serialized expectation echo
 scope: agent, subagent
 refire: 0.15
 ---

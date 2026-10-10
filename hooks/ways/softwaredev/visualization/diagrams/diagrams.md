@@ -1,6 +1,6 @@
 ---
 description: Render Mermaid diagrams as terminal art using mmaid — flowcharts, sequences, state machines, ER diagrams, pie charts, gantt, git graphs, and more
-vocabulary: mermaid diagram flowchart sequence state class er entity relationship pie chart gantt timeline kanban mindmap git graph block treemap quadrant render terminal visualize architecture
+vocabulary: mermaid diagram flowchart sequence state class er entity relationship pie chart gantt timeline kanban mindmap git graph block treemap quadrant render terminal visualize architecture renderer piping ascii-only stdin cli
 pattern: mermaid|diagram|flowchart|gantt|mindmap
 scope: agent, subagent
 refire: 0.15
@@ -98,3 +98,7 @@ If the user asks to "visualize" something, consider whether the data is structur
 ## GitHub Compatibility Note
 
 When writing Mermaid for GitHub markdown (not terminal rendering), use `<br>` instead of `\n` for line breaks in node labels — GitHub's renderer doesn't support `\n`.
+
+## See Also
+
+- mermaid(documentation) — diagram-type choice, GitHub compatibility, and styling for both themes

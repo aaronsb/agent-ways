@@ -1,6 +1,6 @@
 ---
 description: Python dependency security, pip-audit, setup.py risks, PyPI typosquatting
-vocabulary: pip-audit setup.py pyproject.toml requirements.txt wheel sdist PyPI typosquat safety pip install python package
+vocabulary: pip-audit setup.py pyproject.toml requirements.txt wheel sdist PyPI typosquat safety pip install python package pickle unpickle deserialization lookalike
 scope: agent, subagent
 refire: 0.15
 ---

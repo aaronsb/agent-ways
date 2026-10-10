@@ -1,6 +1,6 @@
 ---
 description: Recognize the beginning of a working session and route to the /start skill — orient to where work was left off, run a structured interview on a greenfield repo, check the context gauge to confirm it really is session-start, then recommend planning with context already warm.
-vocabulary: start begin open session kick off pick up where we left off resume orient greenfield new project fresh start what were we doing catch up state of play onboard warm context ready to work get going first thing
+vocabulary: start begin open session kick off pick up where we left off resume orient greenfield new project fresh start what were we doing catch up state of play onboard warm context ready to work get going first thing slate toggles
 pattern: /start\b|let'?s (get )?start|pick(ing)? up where|where (we|i) left off|start(ing)? (the |a )?(session|work|fresh)|new (work )?session|what were we (doing|working on)
 refire: 0.15
 scope: agent

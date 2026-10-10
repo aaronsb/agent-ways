@@ -1,6 +1,6 @@
 ---
 description: drafting email replies, writing style calibration, creating email drafts with proper threading
-vocabulary: draft reply respond compose email write message tone voice style thread attachment
+vocabulary: draft reply respond compose email write message tone voice style thread attachment multipart message-id in-reply-to ai-generated
 scope: agent, subagent
 refire: 0.15
 ---

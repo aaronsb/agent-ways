@@ -1,6 +1,6 @@
 ---
 description: what to do when something keeps failing, a flaky test, a command that fails again after a retry, a gate that went red twice, a subagent that came back wrong; classify the failure before retrying, three attempts total, then escalate to the user with evidence
-vocabulary: retry retries retrying flaky flake intermittent still failing fails again keeps failing tried three times same error try again try once more gate red red gate stuck loop spinning going in circles subagent came back wrong delegation handback escalate escalation give up attempt attempts backoff transient deterministic reclassify fallback wrong-sized
+vocabulary: retry retries retrying flaky flake intermittent still failing fails again keeps failing tried three times same error try again try once more gate red red gate stuck loop spinning going in circles subagent came back wrong delegation handback escalate escalation give up attempt attempts backoff transient deterministic reclassify fallback wrong-sized three-attempt runaway rescope re-brief no-progress
 pattern: \bflaky\b|\bintermittent\b
 scope: agent, subagent
 refire: 0.15

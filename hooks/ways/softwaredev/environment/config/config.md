@@ -1,6 +1,6 @@
 ---
 description: configuration, environment variables, dotenv files, connection settings
-vocabulary: dotenv environment configuration envvar config.json config.yaml connection port host url setting variable string
+vocabulary: dotenv environment configuration envvar config.json config.yaml connection port host url setting variable string env.example vars startup placeholder loudly
 files: \.env|config\.(json|yaml|yml|toml)$
 scope: agent, subagent
 refire: 0.15

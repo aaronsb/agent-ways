@@ -1,6 +1,6 @@
 ---
 description: test coverage, test structure, assertions, fixtures, what and how to test, choosing the lowest test level that proves the contract, and synthetic fixtures instead of a copy of production data
-vocabulary: test coverage assertion framework spec fixture describe expect verify unit integration contract end-to-end e2e golden snapshot property evaluation test level mock synthetic seed data production copy sample anonymize mask
+vocabulary: test coverage assertion framework spec fixture describe expect verify unit integration contract end-to-end e2e golden snapshot property evaluation test level mock synthetic seed data production copy sample anonymize mask pyramid property-based arrange-act-assert off-by-one aaa conformance
 commands: npm\ test|yarn\ test|jest|pytest|cargo\ test|go\ test|rspec
 scope: agent, subagent
 refire: 0.2

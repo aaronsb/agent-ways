@@ -1,6 +1,6 @@
 ---
 description: the keyword lane of a way — adding a pattern regex beside semantic matching, the floor-gated fire rule, pattern_strict and pattern_keep, and pattern hygiene lint findings
-vocabulary: pattern regex keyword lane floor gate pattern_strict pattern_keep hygiene anchor term-of-art wildcard unbounded common-word fail-open case-insensitive
+vocabulary: pattern regex keyword lane floor gate pattern_strict pattern_keep hygiene anchor term-of-art wildcard unbounded common-word fail-open case-insensitive unconditional lowercase pattern-hygiene calibration
 scope: agent, subagent
 refire: 0.15
 ---

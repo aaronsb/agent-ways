@@ -1,6 +1,6 @@
 ---
 description: a fidelity evaluative loop for a port, rewrite or replacement that must give exactly the same results as the old system or a reference such as a spec's examples or published output; a frozen byte-exact baseline for regression kept separate from fidelity argued against the reference with numbers
-vocabulary: port rewrite replacement replacing the old system legacy system must give exactly the same results same totals identical output matches the old one to the cent spec examples test vectors reference output answer key reconstruction emulation byte-exact baseline frozen numerics tolerance diff queue auto-pass approved delta dual implementation cross-check
+vocabulary: port rewrite replacement replacing the old system legacy system must give exactly the same results same totals identical output matches the old one to the cent spec examples test vectors reference output answer key reconstruction emulation byte-exact baseline frozen numerics tolerance diff queue auto-pass approved delta dual implementation cross-check pixel lineage anachronism cross-implementation predicted
 scope: agent, subagent
 refire: 0.15
 ---

@@ -1,6 +1,6 @@
 ---
 description: injection prevention — SQL injection, XSS, command injection; validate and escape untrusted input before it reaches a query, a shell, or an HTML context
-vocabulary: injection sql xss innerHTML parameterized sanitize escape shell command untrusted input template interpolation eval exec
+vocabulary: injection sql xss innerHTML parameterized sanitize escape shell command untrusted input template interpolation eval exec orm escaping unsanitized templates queries
 scope: agent, subagent
 refire: 0.2
 pattern: sql.?injection|command.?injection|\bxss\b|cross.?site.?scripting

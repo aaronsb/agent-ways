@@ -1,6 +1,6 @@
 ---
 description: validating documentation with a fresh reader who has not seen your reasoning, testing whether the README or onboarding guide works for a newcomer, a false-premise question to check the docs let the reader push back, and proving a docs linter by planting a violation
-vocabulary: validate validation test docs documentation readme onboarding guide fresh eyes newcomer clean context cold read false premise docs review does the documentation work entry point wrong answer defect linter plant violation
+vocabulary: validate validation test docs documentation readme onboarding guide fresh eyes newcomer clean context cold read false premise docs review does the documentation work entry point wrong answer defect linter plant violation cold-read grading self-review navigation
 files: README\.md$|docs/.*(guide|tutorial|getting.?started|onboarding|index)\.md$
 scope: agent, subagent
 refire: 0.2

@@ -1,6 +1,6 @@
 ---
 description: the evaluation loop that decides a fix or a test is done; reproduce the reported failure in the reporter's environment, drive the path the real program takes, fix every review finding and re-review on the scenarios that found them, and state how many runs a flaky or intermittent test result rests on
-vocabulary: reproduce reproduced repro reporter reported environment real path real loop event loop stateful headless driver tick ticks redraw draw between keys calls hand directly test-only shortcut reviewer review finding findings re-review round rounds original scenario replay loop count runs looped repeat thousand times denominator failure rate once a week intermittent sometimes fails passed locally passed 50 times race call it fixed reproduced before fix confirm fixed flaky flake can't reproduce
+vocabulary: reproduce reproduced repro reporter reported environment real path real loop event loop stateful headless driver tick ticks redraw draw between keys calls hand directly test-only shortcut reviewer review finding findings re-review round rounds original scenario replay loop count runs looped repeat thousand times denominator failure rate once a week intermittent sometimes fails passed locally passed 50 times race call it fixed reproduced before fix confirm fixed flaky flake can't reproduce run-count unreproduced statistics
 pattern: \bre-?review(ed|ing)?\b|(can.?t|cannot|unable to|could ?n.?t) (repro|reproduce)\b
 scope: agent, subagent
 refire: 0.15

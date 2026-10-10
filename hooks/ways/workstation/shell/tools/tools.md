@@ -1,6 +1,6 @@
 ---
 description: modern CLI tool ecosystem on a workstation — installing and aliasing replacements like lsd, bat, fd, ripgrep, fzf, zoxide, delta, tldr, jq, gh via system package manager
-vocabulary: lsd eza bat fd ripgrep rg fzf zoxide delta tldr jq gh batcat fdfind alias modern replacement cli homebrew brew pacman apt dnf batman MANPAGER
+vocabulary: lsd eza bat fd ripgrep rg fzf zoxide delta tldr jq gh batcat fdfind alias modern replacement cli homebrew brew pacman apt dnf batman MANPAGER debian ubuntu sixel exa conf.d key-bindings
 scope: agent
 refire: 0.15
 ---

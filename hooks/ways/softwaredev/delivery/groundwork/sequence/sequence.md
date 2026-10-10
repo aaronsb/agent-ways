@@ -1,6 +1,6 @@
 ---
 description: ordering a queue of open pull requests and issues so changes that establish verification land before changes that assume it, and holding changes into an area nobody can yet test or deploy
-vocabulary: queue ordering triage order backlog land first jump the queue hold blocked on prerequisite stack piling up unverifiable module merit versus order which first sequence open prs
+vocabulary: queue ordering triage order backlog land first jump the queue hold blocked on prerequisite stack piling up unverifiable module merit versus order which first sequence open prs readiness persuasiveness unmet placement
 scope: agent, subagent
 refire: 0.2
 ---

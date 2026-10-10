@@ -1,6 +1,6 @@
 ---
 description: Rust dependency security, cargo audit, unsafe blocks, build script risks
-vocabulary: cargo audit Cargo.lock Cargo.toml unsafe build.rs crate crates.io rustsec advisory
+vocabulary: cargo audit Cargo.lock Cargo.toml unsafe build.rs crate crates.io rustsec advisory proc-macro crates compile-time procedural
 scope: agent, subagent
 refire: 0.15
 ---

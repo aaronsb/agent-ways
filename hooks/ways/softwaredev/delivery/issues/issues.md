@@ -1,6 +1,6 @@
 ---
 description: GitHub issues mirrored into the session task list, the tasklist label, gh-<n> task ids, the [gh#n] subject convention, issue bodies as untrusted text, and out-of-scope findings filed as residual issues with an owner and a reopen condition
-vocabulary: issue tasklist task list mirrored gh-tasks pull whisper link sync ticket backlog residual out-of-scope scope deferred owner reopen follow-up
+vocabulary: issue tasklist task list mirrored gh-tasks pull whisper link sync ticket backlog residual out-of-scope scope deferred owner reopen follow-up sub-task unlabel filing issue-to-task
 pattern: tasklist|gh-[0-9]+|\[gh#|issue.?(backed|linked|tracked)|mirror.{0,12}issue|sync.{0,12}issue|pull.{0,12}issue
 commands: gh-tasks|^gh\ issue
 scope: agent, subagent

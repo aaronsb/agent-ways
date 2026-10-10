@@ -1,6 +1,6 @@
 ---
 description: sending email, posting chat messages, pushing commits, or changing calendar events through the human's own accounts, where the action carries their name and cannot be unsent
-vocabulary: send this email post this message reply as me on my behalf from my account my inbox my calendar push to my repo as the human their identity their name attributed unsent recipient verify the address bounce borrowed access
+vocabulary: send this email post this message reply as me on my behalf from my account my inbox my calendar push to my repo as the human their identity their name attributed unsent recipient verify the address bounce borrowed access suggest-then-confirm irreversibility human-owned misuse
 scope: agent, subagent
 refire: 0.15
 ---

@@ -1,6 +1,6 @@
 ---
 description: the human's personal to-dos and obligations in their task manager app, due dates and reminders, marking items done, clearing stale ones
-vocabulary: to-do todos personal obligation errand chore commitment due date deadline overdue reminder nag done mark complete stale google tasks todoist things omnifocus eisenhower urgent important
+vocabulary: to-do todos personal obligation errand chore commitment due date deadline overdue reminder nag done mark complete stale google tasks todoist things omnifocus eisenhower urgent important fabricate traceability bulk
 scope: agent, subagent
 refire: 0.15
 ---

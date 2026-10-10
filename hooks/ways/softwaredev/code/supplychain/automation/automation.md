@@ -1,6 +1,6 @@
 ---
 description: security scanning automation, GitHub Actions, Dependabot, CodeQL, Makefile audit targets
-vocabulary: github action dependabot codeql security scanning automation ci pipeline sbom scorecard make audit workflow security policy
+vocabulary: github action dependabot codeql security scanning automation ci pipeline sbom scorecard make audit workflow security policy auto-merge
 scope: agent, subagent
 refire: 0.15
 ---

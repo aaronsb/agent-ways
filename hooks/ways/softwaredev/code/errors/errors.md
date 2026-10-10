@@ -1,6 +1,6 @@
 ---
 description: error handling — exceptions, try-catch boundaries, wrapping and propagation; a missing required config value fails at startup rather than getting a default that silences it; input outside the domain is rejected, not clamped or coerced
-vocabulary: exception catch throw boundary wrap rethrow propagate unhandled fallback missing required config env var add a default silence startup fail fast clamp coerce truncate out of range invalid reject validate
+vocabulary: exception catch throw boundary wrap rethrow propagate unhandled fallback missing required config env var add a default silence startup fail fast clamp coerce truncate out of range invalid reject validate re-throw swallowing null gracefully out-of-domain
 pattern: error.?handl|try.?catch|throw
 scope: agent, subagent
 refire: 0.2

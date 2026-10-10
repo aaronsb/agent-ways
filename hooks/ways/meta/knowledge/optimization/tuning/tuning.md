@@ -1,6 +1,6 @@
 ---
 description: locale alias tuning — root-anchored fidelity and discrimination audit, the ways tune locale acceptance gate for adopter-run localization
-vocabulary: tune tuning audit fidelity discrimination confuser anchor root gap margin re-author stub locale lang acceptance gate localized
+vocabulary: tune tuning audit fidelity discrimination confuser anchor root gap margin re-author stub locale lang acceptance gate localized mis-route mistranslation hoovering broad-vocabulary root-alignment trim
 scope: agent
 refire: 0.15
 ---

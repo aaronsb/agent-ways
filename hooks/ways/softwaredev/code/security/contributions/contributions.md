@@ -1,6 +1,6 @@
 ---
 description: adversarial security review of pull requests and patches from external or unknown contributors, hunting subtle malicious changes
-vocabulary: contributor external untrusted pr contribution review malicious backdoor exfiltration trojan homoglyph bidi diff scrutiny insider driveby fork patch
+vocabulary: contributor external untrusted pr contribution review malicious backdoor exfiltration trojan homoglyph bidi diff scrutiny insider driveby fork patch zero-width base64 obfuscation postinstall per-contributor
 pattern: external.?(pr|contribut|patch)|untrusted.?(pr|contribut)|from.?(people|strangers|outside)|unknown.?contribut|drive.?by|third.?part(y|ies).?(pr|patch|contribut)
 scope: agent, subagent
 refire: 0.2

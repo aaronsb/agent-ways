@@ -1,6 +1,6 @@
 ---
 description: software releases, the changelog, version bump, semantic versioning, tagging, publishing the same immutable artifact that passed CI, and a rehearsed rollback
-vocabulary: release releases changelog version bump semver semantic versioning git tag tagging release notes release candidate publish package registry artifact digest immutable build promote promotion rollback rehearsal restore point github release cargo publish npm publish
+vocabulary: release releases changelog version bump semver semantic versioning git tag tagging release notes release candidate publish package registry artifact digest immutable build promote promotion rollback rehearsal restore point github release cargo publish npm publish gpg passphrase signed tag-triggered byte-identical tracker fix-version
 refire: 0.15
 pattern: release|changelog|semver|git.?tag|release.?(notes|candidate)|npm.?publish|cargo.?publish
 pattern_keep: release  # measured (ADR-155 §5): load-bearing ('github release with binaries' g=0.46, keyword-only); noise floor-gated (median g=0.01)

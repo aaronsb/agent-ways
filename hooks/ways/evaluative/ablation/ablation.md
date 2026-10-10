@@ -1,6 +1,6 @@
 ---
 description: an ablation evaluative loop for a change to what an agent is given, such as a rewritten system prompt, new instructions, a new tool or trimmed guidance, that seems better but hasn't been measured; compare arms with and without it, graded blind by an independent judge, with a positive control that the change engaged
-vocabulary: rewrote the system prompt changed the instructions reworded the prompt added a tool trimmed the guidance seems smarter now feels better before and after did it actually help with and without ablation ablate arms baseline arm treatment arm blind judge shuffled order strip the injected text positive control remove-one leave-one-out attribute the effect noise floor three way comparison
+vocabulary: rewrote the system prompt changed the instructions reworded the prompt added a tool trimmed the guidance seems smarter now feels better before and after did it actually help with and without ablation ablate arms baseline arm treatment arm blind judge shuffled order strip the injected text positive control remove-one leave-one-out attribute the effect noise floor three way comparison trials graders run-to-run anecdotal scenario
 scope: agent, subagent
 refire: 0.15
 ---

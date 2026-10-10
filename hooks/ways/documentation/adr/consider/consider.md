@@ -1,6 +1,6 @@
 ---
 description: handing a proposed decision record to the operator, checking the operator's intent, an advisor answering when no one is present or under a goal, reviewing past decisions with the operator, accepting rejecting or abandoning a record, and raising a concern about a decision
-vocabulary: canary consider review approve approval looks good lgtm ship it sounds good go ahead accept reject abandon proposed decision summary probe probes intent inversion advisor skeptic goal unattended concern pushback sign off operator recent decisions sessions flag
+vocabulary: canary consider review approve approval looks good lgtm ship it sounds good go ahead accept reject abandon proposed decision summary probe probes intent inversion advisor skeptic goal unattended concern pushback sign off operator recent decisions sessions flag teammate-style confidence-labeled
 pattern: \b(looks? good|lgtm|sgtm|ship it|sounds good|go ahead|go for it|approved?|accept (it|this|the adr|adr-?\s?\d+)|review (with me )?(the |my |our )?(recent |last \w+ )?(decisions|adrs|records))\b
 commands: adr\ (accept|reject|abandon|consider)
 files: docs/architecture/.*\.md$

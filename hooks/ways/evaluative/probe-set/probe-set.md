@@ -1,6 +1,6 @@
 ---
 description: a probe-set evaluative loop for a change to ranking, search, matching, routing or scoring that was judged by trying a handful of examples; score a fixed sampled set with a metric, adopt only on a gain with no loss in separation, keep an unrelated set that must not start matching, label results self-evaluated
-vocabulary: tried a few queries handful of examples spot check eyeballed some results search ranking weights relevance fuzzy matching name matching routing rules classifier threshold recommendation retrieval sampled set probe set eval set unrelated inputs false positives top-1 recall precision margin separation sweep adopt self-evaluated metric
+vocabulary: tried a few queries handful of examples spot check eyeballed some results search ranking weights relevance fuzzy matching name matching routing rules classifier threshold recommendation retrieval sampled set probe set eval set unrelated inputs false positives top-1 recall precision margin separation sweep adopt self-evaluated metric grid variants disjoint row-for-row multi-part real-world
 scope: agent, subagent
 refire: 0.15
 ---

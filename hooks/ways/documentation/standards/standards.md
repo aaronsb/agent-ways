@@ -1,6 +1,6 @@
 ---
 description: establishing team norms, coding conventions, testing philosophy, dependency policy, accessibility requirements
-vocabulary: convention norm guideline accessibility style guide linting rule agreement philosophy
+vocabulary: convention norm guideline accessibility style guide linting rule agreement philosophy aspirational scannable actionable adherence
 scope: agent, subagent
 refire: 0.2
 ---
