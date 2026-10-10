@@ -664,7 +664,7 @@ fn golden_frames() {
         ("theme-review", "theme", "down down e text:mine enter q", "100x30"),
         ("matching-80x25", "matching", "down down", "80x25"),
         ("attend-browse", "attend", "down down right", "100x30"),
-        ("attend-edit", "attend", "down down right down down down down e ctrl-u text:900", "100x30"),
+        ("attend-edit", "attend", "down down right down down e ctrl-u text:900", "100x30"),
         ("attend-review", "attend", "right down e ctrl-u text:30 enter w", "100x30"),
         ("sensors-browse", "sensors", "down down down right", "100x30"),
         ("sensors-edit", "sensors", "down right down down e ctrl-u text:45", "100x30"),

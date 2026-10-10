@@ -53,8 +53,11 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     draw_helper(chat, f, helper, &text, &groups);
 }
 
-/// The channel tabs (#393) the shell draws on its tab bar: merged pinned at
-/// slot zero, then `#open` and the named channels, numbered for Alt+N and
+/// The tab bar the shell draws: the common menu's `≡` slot, merged, then
+/// `#open` and the channels in use (today every channel: the strip's one
+/// seam is `crate::tabs::strip_names`), then the `+` slot. Merged is tab
+/// 1, so Ctrl+N and Alt+N keep their numbers; the slots carry none. The
+/// channel tabs (#393) are numbered for Alt+N and
 /// led by the channel's glyph in its identity colour, so the bar doubles as
 /// the channel legend. A `#partial` being typed marks the tabs it completes
 /// to.
@@ -62,7 +65,7 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
     let depth = chat.palette.depth();
     let text = chat.input.text().to_string();
     let partial = find_trailing_mention(&text).filter(|m| m.sigil == Sigil::Group).map(|m| m.partial.to_string());
-    let mut out = vec![PaneTab::new("merged")];
+    let mut out = vec![PaneTab::new("≡").action(), PaneTab::new("merged")];
     for k in &chat.world().groups {
         let mut glyph = Style::new().fg(color_for(k.group.palette, depth));
         if k.is_base || k.group.style.bold {
@@ -74,6 +77,7 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
                 .target(prefix_match(&k.group.name, partial.as_deref())),
         );
     }
+    out.push(PaneTab::new("+").action());
     out
 }
 

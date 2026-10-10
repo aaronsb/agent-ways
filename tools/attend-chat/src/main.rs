@@ -10,10 +10,26 @@ const HELP: &str = "attend-chat — interactive chat TUI for attend (ADR-120)
 
 usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
 
-  Esc / Ctrl-C              exit; with a draft in the compose box, asks first
+  Esc / Ctrl-C              exit; with a draft in the compose box, asks first. Where
+                            the terminal does not report Ctrl+digits, Ctrl+3 is Esc,
+                            so Esc asks first there too: y quits
   Enter                     send to the foreground channel
-  Tab                       cycle tabs (empty input) / complete @name #channel /command
-  Alt+1..9                  jump to tab (1 = merged, 2 = #open, ...)
+  Ctrl+1..9                 show tab N (1 = merged, 2 = #open, ...); again on the
+                            shown tab, its menu. Needs a terminal that speaks the
+                            kitty keyboard protocol; F1 says whether yours does
+  Alt+1..9                  show tab N where Ctrl+digits do not arrive (Konsole and
+                            GNOME Terminal keep Alt+digits for their own tabs)
+  F2 / Ctrl+T               the tab bar: Left Right move, Enter the tab's menu,
+                            Esc back to the compose box
+  Tab                       next tab (empty input) / complete @name #channel /command
+  tab menus                 ≡ (left of merged, no number): Theme, Keybinding set,
+                            Mouse at start, Settings. merged: Clear view.
+                            #open: Clear view, Clear history. A channel: Add
+                            agent (not built yet), Invite agent, Remove agent,
+                            Describe, Clear history, Leave, Delete channel.
+                            The + slot: New channel. Clear history and Delete
+                            ask first: y goes ahead. Channel tabs are ordered
+                            by their newest message, #open first
   Shift-Enter / Alt-Enter   insert newline
   Left / Right / Home / End move cursor
   Backspace / Delete        edit
@@ -26,10 +42,12 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             the wheel scrolls the messages; Shift-drag selects
                             text in most terminals
 
-  The colours follow the agent-ways theme (`ways settings theme`).
+  The colours follow the agent-ways theme (`ways settings theme`). Which keys
+  reach the tabs, and whether the mouse starts on, are attend.chat.* settings:
+  /config lists and sets them, as does `ways settings`.
 
   --snap WxH     print one frame at W by H in agent-tui's frame format, headless
-  --keys KEYS    keys for --snap, space separated (`text:hi enter tab esc alt-1` …),
+  --keys KEYS    keys for --snap, space separated (`text:hi enter tab esc alt-1 ctrl-3 f2` …),
                  and the mouse: `click:COL,ROW`, `wheel:up@COL,ROW` (from 0, top left);
                  a dry run: Enter sends nothing to the bus and runs no slash command
   --depth DEPTH  colour depth: truecolor, 256, 16 or none; the terminal's by default

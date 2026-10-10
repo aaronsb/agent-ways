@@ -12,10 +12,19 @@ pub(crate) fn cmd_join(name: &str, pin: bool) {
     // Enrolled first, so a crash between the two never leaves a member
     // that is not enrolled; a failed join takes the enrollment back.
     crate::util::enroll_by_join();
+    // The backlog is marked before the membership is written, so no
+    // conduit scans the room while its history is still unseen. A join
+    // that answers an invitation keeps the room's recent history to read;
+    // one that does not, holds back what is older than the fresh window.
+    let note = match attend_groups::validate_group_name(name) {
+        Ok(()) if r.take_invite(name) => crate::util::brief_invited_room(&r, name),
+        Ok(()) => crate::util::backlog_note(crate::util::baseline_joined_room(&r, name)),
+        Err(_) => String::new(),
+    };
     match r.join(name, pin) {
         Ok(()) => {
             let suffix = if pin { " (pinned)" } else { "" };
-            println!("[attend] joined #{name}{suffix}");
+            println!("[attend] joined #{name}{suffix}{note}");
         }
         Err(e) => {
             crate::util::settle_join_enrollment(&r);

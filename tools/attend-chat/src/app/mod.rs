@@ -14,6 +14,7 @@
 //! [`keys`] as free functions; the editing keys are the shared input's.
 
 mod keys;
+mod menu;
 mod view;
 
 use std::sync::mpsc::Receiver;
@@ -28,7 +29,7 @@ use agent_tui::ratatui::text::Span;
 use agent_tui::ratatui::Frame;
 use agent_tui::screen::Screen;
 use agent_tui::theme::{Palette, Shape};
-use agent_tui::{App, Binding, Keyed, Pane, PaneTab, Tone};
+use agent_tui::{App, Binding, Keyed, Open, Pane, PaneTab, Tone};
 use attend_instances::SnapshotCache;
 
 use crate::chip::{known_identities, KnownIdentity};
@@ -149,6 +150,19 @@ pub struct ChatPane {
     /// feed's times are relative to the day (`HH:MM` today, a date before).
     day_seen: Option<SystemTime>,
     hits: Hits,
+    /// What a tab's menu asked the shell to open over the pane.
+    open: Option<Open>,
+    /// A menu step, or a quit, waiting for `y`.
+    pending: Option<menu::Pending>,
+    /// The compose box lent to a channel's name or description, and the
+    /// draft it held before.
+    prompt: Option<(menu::Prompt, String)>,
+    /// The terminal reports Ctrl+digits as themselves. Without it Ctrl+3
+    /// arrives as Esc, so Esc on an empty line asks before quitting.
+    enhanced: bool,
+    /// The chat's settings (`attend.chat.*`), read at start and again
+    /// after a command, so `/config` applies at once.
+    config: attend_config::ChatConfig,
 }
 
 impl ChatPane {
@@ -178,6 +192,11 @@ impl ChatPane {
             draws: 0,
             day_seen: None,
             hits: Hits::default(),
+            open: None,
+            pending: None,
+            prompt: None,
+            enhanced: false,
+            config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
         }
     }
 
@@ -254,6 +273,8 @@ impl ChatPane {
 
     fn set_tab(&mut self, t: Tab) {
         if t != self.foreground {
+            // A question asked on one tab is not answered on another.
+            self.drop_question();
             self.foreground = t;
             self.feed = FeedState::default();
             self.invalidate();
@@ -268,6 +289,7 @@ impl ChatPane {
         // peer dissolves the foregrounded channel, Enter agrees with the
         // destination flag, which has degraded to #open.
         let fg = self.normal_tab();
+        let sets_jump = self.input.text().trim_start().starts_with("/config tabs.jump");
         match handle_enter(self.input.text(), &self.signals, &fg) {
             EnterAction::None => {}
             EnterAction::ClearWithStatus(s) => {
@@ -300,7 +322,17 @@ impl ChatPane {
                 self.show_newest();
             }
         }
+        self.reload_settings();
+        if sets_jump && !self.status_is_error {
+            let said = format!("{}{}", self.status, self.jump_warning());
+            self.say(said, false);
+        }
         self.stale();
+    }
+
+    /// Read the chat's settings again: a `/config` set applies at once.
+    fn reload_settings(&mut self) {
+        self.config = crate::settings::load(&std::env::current_dir().unwrap_or_default());
     }
 
     /// Enter in a dry run: say what would happen, change nothing.
@@ -429,18 +461,21 @@ impl Pane for ChatPane {
         view::tabs(self)
     }
 
+    /// The bar's index of the tab shown: 0 is the `≡` slot, 1 merged, then
+    /// the channels, then the `+` slot.
     fn tab(&mut self) -> usize {
         match self.normal_tab() {
-            Tab::Merged => 0,
-            Tab::Channel(g) => self.strip_names().iter().position(|n| *n == g).map_or(0, |i| i + 1),
+            Tab::Merged => 1,
+            Tab::Channel(g) => self.strip_names().iter().position(|n| *n == g).map_or(1, |i| i + 2),
         }
     }
 
-    /// 0 is merged, then the channels in strip order (Alt+N's slots, less
-    /// one). An index past them does nothing.
+    /// Show the bar's tab `i`: merged, or a channel (tab number `i`, as
+    /// Alt+N and Ctrl+N count them). The slots and an index past the tabs
+    /// do nothing.
     fn set_tab(&mut self, i: usize) {
         let names = self.strip_names();
-        if let Some(t) = tabs::jump(i as u32 + 1, &names) {
+        if let Some(t) = i.checked_sub(1).and_then(|n| tabs::jump(n as u32 + 1, &names)) {
             ChatPane::set_tab(self, t);
         }
     }
@@ -483,7 +518,33 @@ impl Pane for ChatPane {
     fn key(&mut self, k: KeyEvent) -> Keyed {
         self.dirty = true;
         let m = k.modifiers;
+        let plain = !m.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        if self.pending.is_some() {
+            let yes = plain && matches!(k.code, KeyCode::Char('y' | 'Y'));
+            if self.answer(yes) {
+                return Keyed::Quit;
+            }
+            // Any other character keeps things as they are and is typing:
+            // it goes on into the draft. Other keys only answer.
+            if yes || !(plain && matches!(k.code, KeyCode::Char(_))) {
+                return Keyed::Done;
+            }
+        }
+        if self.prompt.is_some() {
+            match k.code {
+                KeyCode::Esc => self.prompt_cancel(),
+                KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.prompt_enter(),
+                KeyCode::Tab | KeyCode::PageUp | KeyCode::PageDown => {}
+                _ => {
+                    self.input.key(k);
+                }
+            }
+            return Keyed::Done;
+        }
         match k.code {
+            // Without the keyboard enhancement Ctrl+3 is this same Esc:
+            // ask, so a tab key never closes the chat.
+            KeyCode::Esc if !self.enhanced && self.input.is_empty() => self.pending = Some(menu::Pending::Quit),
             KeyCode::Esc => return Keyed::Pass,
             KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.enter(),
             KeyCode::Tab => self.tab_key(),
@@ -544,6 +605,9 @@ impl Pane for ChatPane {
     /// error in the error role; past [`STATUS_ASSERT`] the help of a
     /// command being typed, or the last result, set back.
     fn status(&mut self) -> Option<(String, Tone)> {
+        if let Some(s) = self.menu_status() {
+            return Some((s, Tone::Said));
+        }
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
         let (line, how) = status_slot(fresh, self.status_is_error, crate::slash::contextual_help(self.input.text()), &self.status);
         let tone = match how {
@@ -562,11 +626,54 @@ impl Pane for ChatPane {
     /// a command's output) is the terminal's selection, and middle-click
     /// pastes into the compose box. Alt+m gives the shell the mouse.
     fn mouse_default(&self) -> bool {
-        false
+        self.config.mouse
     }
 
     fn unsaved(&self) -> Option<String> {
-        (!self.input.is_empty()).then(|| "a draft in the compose box".to_string())
+        let held = self.prompt.as_ref().is_some_and(|(_, draft)| !draft.is_empty());
+        (!self.input.is_empty() || held).then(|| "a draft in the compose box".to_string())
+    }
+
+    fn has_tab_menus(&self) -> bool {
+        true
+    }
+
+    fn tab_menu(&mut self, i: usize) {
+        self.open_tab_menu(i);
+    }
+
+    fn interrupted(&mut self) {
+        self.drop_question();
+    }
+
+    fn quit_help(&self) -> Option<String> {
+        Some(if self.enhanced {
+            "quit; asks first over a draft".into()
+        } else {
+            "quit; asks over a draft; else Esc asks and y quits".into()
+        })
+    }
+
+    fn take_open(&mut self) -> Option<Open> {
+        self.open.take()
+    }
+
+    fn picked(&mut self, id: &str, values: Vec<String>) {
+        if let Some(v) = values.first() {
+            self.menu_picked(id, v);
+        }
+    }
+
+    fn keyboard_enhancement(&self) -> bool {
+        true
+    }
+
+    fn tab_keys(&self) -> agent_tui::TabKeys {
+        crate::settings::tab_keys(&self.config)
+    }
+
+    fn set_keyboard_enhanced(&mut self, on: bool) {
+        self.enhanced = on;
     }
 
     fn discard(&mut self) {
@@ -643,6 +750,13 @@ impl Chat {
     /// headless frame (`--snap`), which must never post or change state.
     pub fn dry_run(mut self, on: bool) -> Chat {
         self.pane_mut().dry_run = on;
+        self
+    }
+
+    /// As if the terminal did, or did not, take the keyboard enhancement
+    /// (`--snap` and the tests: no terminal answers there).
+    pub fn enhanced(mut self, on: bool) -> Chat {
+        self.app.set_keyboard_enhanced(on);
         self
     }
 

@@ -81,6 +81,70 @@ pub(crate) fn enroll_by_join() {
     }
 }
 
+/// Before this session joins channel `name`: mark the channel's old
+/// messages seen, as the cold start does for every room (ADR-136
+/// Decision 2, ADR-172's cold-start rule), so joining a channel late does
+/// not deliver its history. Messages younger than the fresh window stay
+/// live. A channel the session is already in is left alone: what it has
+/// not consumed there is still owed to it. Returns how many were marked;
+/// only a resolved session keeps a seen-set, so any other marks nothing.
+pub(crate) fn baseline_joined_room(groups: &groups::Groups, name: &str) -> usize {
+    let ident = attend_presence::session::identity();
+    if !ident.resolved() || groups.my_groups().iter().any(|(n, _)| n == name) {
+        return 0;
+    }
+    let backlog = attend_state::cold_start::room_backlog(&groups.group_dir(name));
+    let n = backlog.len();
+    attend_state::StateStore::new(Some(ident.session_id)).mark_seen(backlog);
+    n
+}
+
+/// Before this session joins channel `name` in answer to an invitation:
+/// the room's history is a briefing, so it stays deliverable, the newest
+/// [`attend_state::cold_start::ADDRESSED_MAX`] of it, as addressed mail
+/// is. A session that has not had its cold start yet has it now, over the
+/// rooms it already receives, so the first scan after the join is warm and
+/// does not baseline the briefing away. Returns the line the join prints.
+pub(crate) fn brief_invited_room(groups: &groups::Groups, name: &str) -> String {
+    let ident = attend_presence::session::identity();
+    if !ident.resolved() || groups.my_groups().iter().any(|(n, _)| n == name) {
+        return String::new();
+    }
+    let store = attend_state::StateStore::new(Some(ident.session_id.clone()));
+    let snapshot = store.load();
+    let mut note = None;
+    if !snapshot.as_ref().is_some_and(|s| s.baselined) {
+        let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
+        let scan = crate::cmd::inbox::scan_pending(&groups.receive_dirs(&ident.origin_path), &seen, &ident.session_id, true);
+        let owed: std::collections::HashSet<String> = scan.delivered.iter().map(|d| attend_state::seen_key(&format!("{}.signal", d.id))).collect();
+        store.baseline(scan.mark.into_iter().filter(|k| !owed.contains(k)));
+        note = scan.note;
+    }
+    let dir = groups.group_dir(name);
+    let held = attend_state::cold_start::room_beyond_newest(&dir, attend_state::cold_start::ADDRESSED_MAX);
+    let total = std::fs::read_dir(&dir).map(|d| d.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".signal")).count()).unwrap_or(0);
+    let held_n = held.len();
+    store.mark_seen(held);
+    let mut line = format!(" (invited: {} earlier message(s) to read", total - held_n);
+    if held_n > 0 {
+        line += &format!(", {held_n} older not shown");
+    }
+    line += ")";
+    if let Some(n) = note {
+        line += &format!("; {n}");
+    }
+    line
+}
+
+/// What a join prints after its line for the backlog it did not hand over.
+pub(crate) fn backlog_note(n: usize) -> String {
+    match n {
+        0 => String::new(),
+        1 => " (1 earlier message not shown; attend inbox)".to_string(),
+        n => format!(" ({n} earlier messages not shown; attend inbox)"),
+    }
+}
+
 /// After this session's channels changed: a session in no channel any more
 /// withdraws its join enrollment. One that also ran `attend run` stays
 /// enrolled through that.

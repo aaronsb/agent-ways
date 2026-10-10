@@ -1,23 +1,23 @@
 agent-tui frame 120x40
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coordination                                  |
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                                                           |
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                                                                 │|
-|│ │ Wells            │ rollout is green on staging                                                                     │|
-|│ │ beta             │ production at 15:00                                                                             │|
-|│ │ ▽ 13:55          │                                                                                                 │|
+|│ │ Laszlo           │ starting the theme port; the legend moves first                                                 │|
+|│ │ alpha            │                                                                                                 │|
+|│ │ 13:50            │                                                                                                 │|
 |│ ╰──────────────────╯                                                                                                 │|
 |│                                                                                                                      │|
+|│ ╭──────────────────╮                                                                                                 │|
+|│ │ aaron            │ the shell this ran under: /bin/sh                                                               │|
+|│ │ aaron            │  file: sh                                                                                       │|
+|│ │ 13:58            │                                                                                                 │|
+|│ ╰──────────────────╯                                                                                                 │|
 |│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
-|│                                                                                                                      │|
+|│ ╭──────────────────╮                                                                                                 │|
+|│ │ Laszlo           │ a longer message, so the feed shows how a body wraps beside its chip when it runs past the      │|
+|│ │ alpha            │ width of the row it is given                                                                    │|
+|│ │ 13:59            │                                                                                                 │|
+|│ ╰──────────────────╯                                                                                                 │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -35,39 +35,37 @@ agent-tui frame 120x40
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
 |│ >                                                                                                                    │|
-|│                                                                                                             #deploy  │|
+|│                                                                                                               #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @aaron @Wells                                                                                                  |
-| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · Alt+1-9 tab (again: menu) · F2 tabs   |
+| chat  clear #open history? deletes what every live agent has read, older than 90 s · y clears · any other key keeps it |
 styles
   0   0-2   White Blue -
   0   5-14  White Blue -
   0  17-18  Blue - BOLD
-  0  19-27  White Blue -
+  0  19-27  Black Cyan BOLD
   0  30-31  Red - -
-  0  32-42  Black Cyan BOLD
+  0  32-42  White Blue -
   0  45-46  Cyan - -
   0  47-56  White Blue -
   0  59-61  White Blue -
-  0  62-85  - - DIM
   1   0-119 - - DIM
   2   0-0   - - DIM
   2   2-21  - - DIM
   2 119-119 - - DIM
   3   0-0   - - DIM
   3   2-2   - - DIM
-  3   4-8   LightCyan - -
+  3   4-9   Cyan - BOLD
   3  21-21  - - DIM
   3 119-119 - - DIM
   4   0-0   - - DIM
   4   2-2   - - DIM
-  4   4-7   - - DIM
+  4   4-8   - - DIM
   4  21-21  - - DIM
   4 119-119 - - DIM
   5   0-0   - - DIM
   5   2-2   - - DIM
-  5   4-5   Red - -
-  5   6-10  - - DIM
+  5   4-8   - - DIM
   5  21-21  - - DIM
   5 119-119 - - DIM
   6   0-0   - - DIM
@@ -76,26 +74,49 @@ styles
   7   0-0   - - DIM
   7 119-119 - - DIM
   8   0-0   - - DIM
+  8   2-21  - - DIM
   8 119-119 - - DIM
   9   0-0   - - DIM
+  9   2-2   - - DIM
+  9   4-8   LightYellow - -
+  9  21-21  - - DIM
   9 119-119 - - DIM
  10   0-0   - - DIM
+ 10   2-2   - - DIM
+ 10   4-8   - - DIM
+ 10  21-21  - - DIM
+ 10  23-32  White DarkGray -
  10 119-119 - - DIM
  11   0-0   - - DIM
+ 11   2-2   - - DIM
+ 11   4-8   - - DIM
+ 11  21-21  - - DIM
  11 119-119 - - DIM
  12   0-0   - - DIM
+ 12   2-21  - - DIM
  12 119-119 - - DIM
  13   0-0   - - DIM
  13 119-119 - - DIM
  14   0-0   - - DIM
+ 14   2-21  - - DIM
  14 119-119 - - DIM
  15   0-0   - - DIM
+ 15   2-2   - - DIM
+ 15   4-9   Cyan - BOLD
+ 15  21-21  - - DIM
  15 119-119 - - DIM
  16   0-0   - - DIM
+ 16   2-2   - - DIM
+ 16   4-8   - - DIM
+ 16  21-21  - - DIM
  16 119-119 - - DIM
  17   0-0   - - DIM
+ 17   2-2   - - DIM
+ 17   4-8   - - DIM
+ 17  21-21  - - DIM
  17 119-119 - - DIM
  18   0-0   - - DIM
+ 18   2-21  - - DIM
  18 119-119 - - DIM
  19   0-0   - - DIM
  19 119-119 - - DIM
@@ -132,24 +153,10 @@ styles
  35   4-4   - - REVERSED
  35 119-119 Cyan - -
  36   0-0   Cyan - -
- 36 109-117 White Blue -
+ 36 111-117 White Blue -
  36 119-119 Cyan - -
  37   0-119 Cyan - -
  38   1-7   Cyan - BOLD
  38   9-14  LightYellow - -
  38  16-21  LightCyan - -
  39   0-5   Black Cyan BOLD
- 39   7-21  - - DIM|ITALIC
- 39  22-24  - - DIM
- 39  25-27  Cyan - -
- 39  28-34  - - DIM|ITALIC
- 39  35-40  Cyan - -
- 39  41-47  - - DIM|ITALIC
- 39  48-51  Cyan - -
- 39  52-62  - - DIM|ITALIC
- 39  63-72  Cyan - -
- 39  73-81  - - DIM|ITALIC
- 39  82-89  Cyan - -
- 39  90-109 - - DIM|ITALIC
- 39 110-112 Cyan - -
- 39 113-116 - - DIM|ITALIC

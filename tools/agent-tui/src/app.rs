@@ -10,6 +10,8 @@ mod items;
 mod keys;
 pub mod pane;
 mod paneshell;
+mod panetabs;
+pub use panetabs::{Jump, TabKeys};
 mod pick;
 mod render;
 mod response;
@@ -260,6 +262,11 @@ pub struct App {
     /// The content of a screen that is not a tree ([`pane::Pane`]): its
     /// tabs are the tab bar's, and there is no theme tab.
     pane: Option<Box<dyn pane::Pane>>,
+    /// The tab bar has the focus (F2): the tab under its cursor.
+    strip: Option<usize>,
+    /// The terminal reports Ctrl+digits as themselves (the kitty keyboard
+    /// protocol is on).
+    enhanced: bool,
 }
 
 impl App {
@@ -292,6 +299,8 @@ impl App {
             themes: Themes::new(None, agent_theme::ColorDepth::TrueColor, None),
             drag: None,
             pane: None,
+            strip: None,
+            enhanced: false,
         }
     }
 

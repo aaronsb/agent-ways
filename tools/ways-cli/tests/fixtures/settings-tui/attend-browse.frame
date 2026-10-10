@@ -6,7 +6,7 @@ agent-tui frame 100x30
 |│▌▾ cleanup · setting           value                 ││The background sweep of signals whose      │|
 |│     enabled                   true                  ││project is gone (ADR-136).                 │|
 |│     interval                  600                   ││                                           │|
-|│                                                     ││2 entries, 0 changed                       │|
+|│ ▸ chat · setting              value                 ││2 entries, 0 changed                       │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -71,6 +71,9 @@ styles
   6  54-55  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
+  7   2-7   - - BOLD
+  7   8-17  - - DIM
+  7  32-36  - - DIM
   7  54-75  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM

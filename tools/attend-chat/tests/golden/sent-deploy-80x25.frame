@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra   — rollout coordination    |
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coordi|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                         │|
 |│ │ Wells            │ rollout is green on staging                             │|
@@ -25,14 +25,16 @@ agent-tui frame 80x25
 | @Laszlo @aaron @Wells                                                          |
 | chat  sent → #deploy │ mouse off (M-m) │ F1 keys · Enter send · Tab complete   |
 styles
-  0   0-9   White Blue -
-  0  12-13  Blue - BOLD
-  0  14-22  White Blue -
-  0  25-26  Red - -
-  0  27-37  Black Cyan BOLD
-  0  40-41  Cyan - -
-  0  42-51  White Blue -
-  0  52-75  - - DIM
+  0   0-2   White Blue -
+  0   5-14  White Blue -
+  0  17-18  Blue - BOLD
+  0  19-27  White Blue -
+  0  30-31  Red - -
+  0  32-42  Black Cyan BOLD
+  0  45-46  Cyan - -
+  0  47-56  White Blue -
+  0  59-61  White Blue -
+  0  62-79  - - DIM
   1   0-79  - - DIM
   2   0-0   - - DIM
   2   2-21  - - DIM

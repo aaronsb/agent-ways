@@ -79,33 +79,59 @@ pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> 
     // before the `@`/`#`/broadcast dispatch because slash syntax
     // is start-of-input only and unambiguous.
     if let Some((cmd, args)) = slash::parse(&msg) {
-        return match slash::dispatch(cmd, args) {
-            slash::SlashOutcome::Ok(s) => EnterAction::ClearWithStatus(s),
-            slash::SlashOutcome::Err(s) => EnterAction::StatusOnly(s),
-            slash::SlashOutcome::ClearTranscript => EnterAction::ClearTranscript,
-            slash::SlashOutcome::Join(name) => run_join(&name),
-            slash::SlashOutcome::Leave(chan) => run_leave(chan, foreground),
-            slash::SlashOutcome::Dissolve(chan) => run_dissolve(chan, foreground),
-            slash::SlashOutcome::ListChannels => {
-                channels_status_in(&signals_base(), attend_groups::member_alive)
-            }
-            slash::SlashOutcome::CreateChannel { name, description } => {
-                create_channel_in(&signals_base(), &name, description.as_deref())
-            }
-            slash::SlashOutcome::DescribeChannel { name, description } => {
-                describe_channel_in(&signals_base(), &name, &description)
-            }
-            slash::SlashOutcome::Purge(chan) => run_purge(chan, foreground),
-            slash::SlashOutcome::Peers => run_peers(),
-            slash::SlashOutcome::Whois(name) => run_whois(&name),
-            slash::SlashOutcome::Invite { member, channel } => {
-                run_invite(&member, channel, foreground)
-            }
-            slash::SlashOutcome::Kick { member, channel } => {
-                run_kick(&member, channel, foreground)
-            }
-        };
+        return run_slash(slash::dispatch(cmd, args), foreground);
     }
+    send_message(&msg, signals, foreground)
+}
+
+/// Run a dispatched slash command: the one path both the typed command
+/// and the tab menu's items take.
+pub fn run_slash(outcome: slash::SlashOutcome, foreground: &Tab) -> EnterAction {
+    match outcome {
+        slash::SlashOutcome::Ok(s) => EnterAction::ClearWithStatus(s),
+        slash::SlashOutcome::Err(s) => EnterAction::StatusOnly(s),
+        slash::SlashOutcome::ClearTranscript => EnterAction::ClearTranscript,
+        slash::SlashOutcome::Join(name) => run_join(&name),
+        slash::SlashOutcome::Leave(chan) => run_leave(chan, foreground),
+        slash::SlashOutcome::Dissolve(chan) => run_dissolve(chan, foreground),
+        slash::SlashOutcome::ListChannels => {
+            channels_status_in(&signals_base(), attend_groups::member_alive)
+        }
+        slash::SlashOutcome::CreateChannel { name, description } => {
+            create_channel_in(&signals_base(), &name, description.as_deref())
+        }
+        slash::SlashOutcome::DescribeChannel { name, description } => {
+            describe_channel_in(&signals_base(), &name, &description)
+        }
+        slash::SlashOutcome::Purge(chan) => run_purge(chan, foreground),
+        slash::SlashOutcome::Peers => run_peers(),
+        slash::SlashOutcome::Whois(name) => run_whois(&name),
+        slash::SlashOutcome::Invite { member, channel } => {
+            run_invite(&member, channel, foreground)
+        }
+        slash::SlashOutcome::Kick { member, channel } => {
+            run_kick(&member, channel, foreground)
+        }
+        slash::SlashOutcome::Config { key, value } => run_config(key, value),
+    }
+}
+
+/// `/config`: list the chat's settings, or set one in attend's user file.
+fn run_config(key: Option<String>, value: Option<String>) -> EnterAction {
+    let dir = std::env::current_dir().unwrap_or_default();
+    match (key, value) {
+        (Some(k), Some(v)) => match crate::settings::set(&k, &v, &attend_config::user_path(), &dir) {
+            Ok(s) => EnterAction::ClearWithStatus(s),
+            Err(e) => EnterAction::StatusOnly(e),
+        },
+        _ => EnterAction::ClearWithStatus(crate::settings::listing(&dir)),
+    }
+}
+
+/// Send `msg`: to the recipients its leading `@`/`#` run addresses, or
+/// to the foreground tab's channel.
+fn send_message(msg: &str, signals: &[Signal], foreground: &Tab) -> EnterAction {
+    let msg = msg.to_string();
     let caps = ColorDepth::detect();
     let seeds = discover_sessions();
     // Local instance cache for this Enter-handler invocation.
@@ -251,7 +277,8 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
     }
     let caps = ColorDepth::detect();
     let names_before = tabs::strip_names(&channels(caps));
-    match dissolve_group_in(&signals_base(), &name, attend_groups::member_alive) {
+    let me = crate::signal::human_member_id();
+    match dissolve_group_in(&signals_base(), &name, &me, attend_groups::member_alive) {
         EnterAction::ClearWithStatus(status) => {
             let focus = if *foreground == Tab::Channel(name.clone()) {
                 tabs::advance_after_dissolve(&name, &names_before)
@@ -275,9 +302,16 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
 /// members are all heartbeat-stale — or an orphan `@dir` the yaml
 /// has no entry for — dissolves freely; that's the clutter this
 /// command exists to clear.
+///
+/// The operator running the command (`self_member`, ADR-170's username
+/// member, kept heartbeat-fresh by the open chat) never counts as a live
+/// member: the guard protects peers working in the channel, and without
+/// the exclusion an operator could not dissolve any channel they had
+/// joined. The empty-group send gate excludes the sender the same way.
 fn dissolve_group_in<F: Fn(&str) -> bool>(
     base: &std::path::Path,
     name: &str,
+    self_member: &str,
     is_live: F,
 ) -> EnterAction {
     // Member id is irrelevant for dissolve — it acts on the group,
@@ -291,11 +325,11 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
     let live = members
         .iter()
         .flatten()
-        .filter(|m| is_live(m))
+        .filter(|m| m.as_str() != self_member && is_live(m))
         .count();
     if live > 0 {
         return EnterAction::StatusOnly(format!(
-            "#{name}: {live} live member{} — not dissolving",
+            "#{name}: {live} live member{} — not dissolving; /kick them first",
             if live == 1 { "" } else { "s" }
         ));
     }
@@ -444,9 +478,12 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
         Err(e) => return EnterAction::StatusOnly(e),
     };
     let dest = cwd_dir(&peer.root);
-    let body = format!("you're invited to #{g} — join with: attend join {g}");
+    let body = format!("you're invited to #{g} — join with: attend join {g} (its recent history is yours to read)");
     match write_signal(&dest, &body) {
         Ok(_) => {
+            // The invitee's join answers this: it keeps the room's recent
+            // history to read rather than holding it back (ADR-404).
+            let _ = attend_groups::Groups::new(&signals_base(), "").invite(&g, &peer.session_id);
             let status = format!("invited @{} to #{g}", peer.display);
             // Same echo rule as directed sends: synthesize only when
             // the destination isn't a dir our own watcher surfaces.
@@ -935,7 +972,7 @@ mod tests {
     #[test]
     fn dissolve_unknown_group_is_precise() {
         let base = tempdir_like();
-        match dissolve_group_in(&base, "ghost", |_| false) {
+        match dissolve_group_in(&base, "ghost", "aaron", |_| false) {
             EnterAction::StatusOnly(s) => assert!(s.contains("unknown group")),
             _ => panic!("unknown group should keep input with status"),
         }
@@ -948,7 +985,7 @@ mod tests {
         // channel bar until dissolved.
         let base = tempdir_like();
         std::fs::create_dir_all(base.join("@bg-test")).unwrap();
-        match dissolve_group_in(&base, "bg-test", |_| false) {
+        match dissolve_group_in(&base, "bg-test", "aaron", |_| false) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #bg-test")),
             _ => panic!("orphan dissolve should clear input with status"),
         }
@@ -961,7 +998,7 @@ mod tests {
         attend_groups::Groups::new(&base, "dead-session")
             .join("temp", false)
             .unwrap();
-        match dissolve_group_in(&base, "temp", |_| false) {
+        match dissolve_group_in(&base, "temp", "aaron", |_| false) {
             EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #temp")),
             _ => panic!("stale-member dissolve should clear input with status"),
         }
@@ -975,12 +1012,34 @@ mod tests {
         attend_groups::Groups::new(&base, "live-session")
             .join("deploy", false)
             .unwrap();
-        match dissolve_group_in(&base, "deploy", |_| true) {
+        match dissolve_group_in(&base, "deploy", "aaron", |_| true) {
             EnterAction::StatusOnly(s) => assert!(s.contains("1 live member")),
             _ => panic!("live-member dissolve should refuse with status"),
         }
         // Nothing was touched.
         assert!(base.join("@deploy").is_dir());
+    }
+
+    #[test]
+    fn dissolve_does_not_count_the_operator_as_a_live_member() {
+        // The operator joined the channel from the chat, whose heartbeat
+        // keeps them live: their own membership must not hold the
+        // channel open against them. A live peer still does.
+        let base = tempdir_like();
+        join_group_in(&base, "aaron", "kwin-canvas");
+        match dissolve_group_in(&base, "kwin-canvas", "aaron", |_| true) {
+            EnterAction::ClearWithStatus(s) => assert!(s.contains("dissolved #kwin-canvas"), "got: {s}"),
+            _ => panic!("the operator alone in a channel should dissolve it"),
+        }
+        assert!(!base.join("@kwin-canvas").exists());
+        assert!(attend_groups::Groups::new(&base, "x").members("kwin-canvas").is_none());
+
+        join_group_in(&base, "aaron", "testing");
+        join_group_in(&base, "live-session", "testing");
+        match dissolve_group_in(&base, "testing", "aaron", |_| true) {
+            EnterAction::StatusOnly(s) => assert!(s.contains("1 live member") && s.contains("/kick"), "got: {s}"),
+            _ => panic!("a live peer still holds the channel"),
+        }
     }
 
     #[test]

@@ -1,100 +1,82 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coordi|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
+|│ ╭──────────────────╮                                                         │|
+|│ │ Wells            │ rollout is green on staging                             │|
 |│ │ beta             │ production at 15:00                                     │|
 |│ │ ▽ 13:55          │                                                         │|
 |│ ╰──────────────────╯                                                         │|
 |│                                                                              │|
-|│ ╭──────────────────╮                                                         │|
-|│ │ aaron            │ the shell this ran under: /bin/sh                       │|
-|│ │ aaron            │  file: sh                                               │|
-|│ │ 13:58            │                                                         │|
-|│ ╰──────────────────╯                                                         │|
 |│                                                                              │|
-|│ ╭──────────────────╮                                                         │|
-|│ │ Laszlo           │ a longer message, so the feed shows how a body wraps    │|
-|│ │ alpha            │ beside its chip when it runs past the width of the row  │|
-|│ │ 13:59            │ it is given                                             │|
-|│ ╰──────────────────╯                                                         │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
 |│                                                                              │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
-|│ > /bogus                                                                     │|
-|│                                                                              │|
+|│ >                                                                            │|
+|│                                                                     #deploy  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
-| /help /whois /peers /join /leave /dissolve /channels /invite /kick /purge /conf|
-| chat  unknown: /bogus (try /help) │ mouse off (M-m) │ F1 keys · Enter send     |
+| @Laszlo @aaron @Wells                                                          |
+| chat  tabs: ← → move · Enter menu · Esc back │ mouse off (M-m) │ F1 keys       |
 styles
   0   0-2   White Blue -
-  0   5-14  Black Cyan BOLD
+  0   5-14  White Blue -
   0  17-18  Blue - BOLD
   0  19-27  White Blue -
   0  30-31  Red - -
-  0  32-42  White Blue -
+  0  32-42  Black Cyan BOLD|UNDERLINED
   0  45-46  Cyan - -
   0  47-56  White Blue -
   0  59-61  White Blue -
+  0  62-79  - - DIM
   1   0-79  - - DIM
   2   0-0   - - DIM
-  2   2-2   - - DIM
-  2   4-7   - - DIM
-  2  21-21  - - DIM
+  2   2-21  - - DIM
   2  79-79  - - DIM
   3   0-0   - - DIM
   3   2-2   - - DIM
-  3   4-5   Red - -
-  3   6-10  - - DIM
+  3   4-8   LightCyan - -
   3  21-21  - - DIM
   3  79-79  - - DIM
   4   0-0   - - DIM
-  4   2-21  - - DIM
+  4   2-2   - - DIM
+  4   4-7   - - DIM
+  4  21-21  - - DIM
   4  79-79  - - DIM
   5   0-0   - - DIM
+  5   2-2   - - DIM
+  5   4-5   Red - -
+  5   6-10  - - DIM
+  5  21-21  - - DIM
   5  79-79  - - DIM
   6   0-0   - - DIM
   6   2-21  - - DIM
   6  79-79  - - DIM
   7   0-0   - - DIM
-  7   2-2   - - DIM
-  7   4-8   LightYellow - -
-  7  21-21  - - DIM
   7  79-79  - - DIM
   8   0-0   - - DIM
-  8   2-2   - - DIM
-  8   4-8   - - DIM
-  8  21-21  - - DIM
-  8  23-32  White DarkGray -
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9   2-2   - - DIM
-  9   4-8   - - DIM
-  9  21-21  - - DIM
   9  79-79  - - DIM
  10   0-0   - - DIM
- 10   2-21  - - DIM
  10  79-79  - - DIM
  11   0-0   - - DIM
  11  79-79  - - DIM
  12   0-0   - - DIM
- 12   2-21  - - DIM
  12  79-79  - - DIM
  13   0-0   - - DIM
- 13   2-2   - - DIM
- 13   4-9   Cyan - BOLD
- 13  21-21  - - DIM
  13  79-79  - - DIM
  14   0-0   - - DIM
- 14   2-2   - - DIM
- 14   4-8   - - DIM
- 14  21-21  - - DIM
  14  79-79  - - DIM
  15   0-0   - - DIM
- 15   2-2   - - DIM
- 15   4-8   - - DIM
- 15  21-21  - - DIM
  15  79-79  - - DIM
  16   0-0   - - DIM
- 16   2-21  - - DIM
  16  79-79  - - DIM
  17   0-0   - - DIM
  17  79-79  - - DIM
@@ -102,28 +84,18 @@ styles
  19   0-79  Cyan - -
  20   0-0   Cyan - -
  20   2-3   Cyan - -
- 20  10-10  - - REVERSED
+ 20   4-4   - - REVERSED
  20  79-79  Cyan - -
  21   0-0   Cyan - -
+ 21  69-77  White Blue -
  21  79-79  Cyan - -
  22   0-79  Cyan - -
- 23   1-5   Cyan - -
- 23   7-12  Cyan - -
- 23  14-19  Cyan - -
- 23  21-25  Cyan - -
- 23  27-32  Cyan - -
- 23  34-42  Cyan - -
- 23  44-52  Cyan - -
- 23  54-60  Cyan - -
- 23  62-66  Cyan - -
- 23  68-73  Cyan - -
- 23  75-79  Cyan - -
+ 23   1-7   Cyan - BOLD
+ 23   9-14  LightYellow - -
+ 23  16-21  LightCyan - -
  24   0-5   Black Cyan BOLD
- 24   7-33  Red - -
- 24  34-36  - - DIM
- 24  37-51  - - DIM|ITALIC
- 24  52-54  - - DIM
- 24  55-57  Cyan - -
- 24  58-64  - - DIM|ITALIC
- 24  65-70  Cyan - -
- 24  71-74  - - DIM|ITALIC
+ 24  45-47  - - DIM
+ 24  48-62  - - DIM|ITALIC
+ 24  63-65  - - DIM
+ 24  66-68  Cyan - -
+ 24  69-72  - - DIM|ITALIC

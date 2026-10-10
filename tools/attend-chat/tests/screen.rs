@@ -239,8 +239,15 @@ fn without_colour_no_cell_is_coloured() {
 
 #[test]
 fn esc_and_ctrl_c_end_the_chat() {
-    let mut c = chat();
+    // Where the terminal reports Ctrl+digits, Esc is only Esc.
+    let mut c = chat().enhanced(true);
     assert!(!press(&mut c, key(KeyCode::Esc)));
+    // Where it does not, Ctrl+3 is this same Esc: it asks, and y quits.
+    let mut c = chat();
+    assert!(press(&mut c, key(KeyCode::Esc)));
+    assert!(press(&mut c, key(KeyCode::Esc)), "a second Esc (or Ctrl+3) stays");
+    assert!(press(&mut c, key(KeyCode::Esc)));
+    assert!(!press(&mut c, key(KeyCode::Char('y'))));
     let mut c = chat();
     assert!(!press(&mut c, KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
 }
@@ -753,4 +760,271 @@ fn golden_clicks_in_the_feed_and_the_compose_box() {
     assert!(testkit::play(&mut c, &script, Some((80, 25))));
     g.check("clicked-feed-compose-80x25", &testkit::render_screen(&mut c, 80, 25));
     g.finish();
+}
+
+// ── The tab menu (Ctrl+digit, F2, clicks) ───────────────────────────
+
+fn ctrl(ch: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
+}
+
+fn text(c: &mut Chat, w: u16, h: u16) -> String {
+    testkit::text(&testkit::render_screen(c, w, h))
+}
+
+/// The bottom bar's row.
+fn bar(c: &mut Chat) -> String {
+    testkit::rows(&testkit::render_screen(c, 160, 25)).pop().expect("a bottom bar")
+}
+
+#[test]
+fn ctrl_digit_shows_a_tab_and_a_second_press_opens_its_menu() {
+    let mut g = goldens();
+    let mut c = chat().enhanced(true);
+    drawn(&mut c, &[ctrl('3')], 80, 25);
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    assert!(!text(&mut c, 80, 25).contains("pick one"), "the first press only shows the tab");
+    drawn(&mut c, &[ctrl('3')], 80, 25);
+    let shown = text(&mut c, 80, 25);
+    for item in ["pick one: #deploy", "Add agent ▸", "Invite agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Leave", "Delete channel"] {
+        assert!(shown.contains(item), "{item}: {shown}");
+    }
+    g.check("tab-menu-deploy-80x25", &testkit::render_screen(&mut c, 80, 25));
+    assert!(press(&mut c, key(KeyCode::Esc)), "Esc closes the menu, not the chat");
+    assert!(!text(&mut c, 80, 25).contains("pick one"));
+    assert!(c.input().is_empty(), "Ctrl+digits type nothing");
+    g.finish();
+}
+
+#[test]
+fn the_menus_differ_by_tab() {
+    let mut c = chat().enhanced(true);
+    press(&mut c, ctrl('1'));
+    let merged = text(&mut c, 80, 25);
+    assert!(merged.contains("pick one: merged") && merged.contains("Clear view") && !merged.contains("Clear history"), "{merged}");
+    press(&mut c, key(KeyCode::Esc));
+    press(&mut c, ctrl('2'));
+    press(&mut c, ctrl('2'));
+    let open = text(&mut c, 80, 25);
+    assert!(open.contains("pick one: #open") && open.contains("Clear history") && !open.contains("Delete channel"), "{open}");
+}
+
+#[test]
+fn clear_history_asks_first_and_y_runs_the_purge() {
+    let mut g = goldens();
+    let mut c = chat().enhanced(true).dry_run(true);
+    // #open's menu puts the harmless item first: Clear view, then Clear history.
+    let open_clear_history = |c: &mut Chat| {
+        press(c, ctrl('2'));
+        press(c, ctrl('2'));
+        press(c, key(KeyCode::Down));
+        press(c, key(KeyCode::Enter));
+    };
+    open_clear_history(&mut c);
+    assert!(bar(&mut c).contains("clear #open history? deletes what every live agent has read, older than 90 s"), "{}", bar(&mut c));
+    g.check("tab-menu-confirm-120x40", &testkit::render_screen(&mut c, 120, 40));
+    assert!(press(&mut c, key(KeyCode::Esc)), "Esc keeps the history and the chat");
+    assert_eq!(c.status(), "kept");
+    press(&mut c, ctrl('2'));
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Enter));
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.status(), "dry run: /purge not run");
+    assert!(c.input().is_empty(), "the y answered; it typed nothing");
+    // Delete channel on a named channel: the last item. Another character
+    // keeps the channel and goes on into the draft.
+    press(&mut c, ctrl('3'));
+    press(&mut c, ctrl('3'));
+    press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(bar(&mut c).contains("delete #deploy and its history?"), "{}", bar(&mut c));
+    press(&mut c, key(KeyCode::Char('n')));
+    assert_eq!((c.status(), c.input().text()), ("kept", "n"));
+    g.finish();
+}
+
+#[test]
+fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
+    let ask = |c: &mut Chat| {
+        press(c, ctrl('3'));
+        press(c, ctrl('3'));
+        press(c, key(KeyCode::End));
+        press(c, key(KeyCode::Enter));
+        assert!(bar(c).contains("delete #deploy"), "{}", bar(c));
+    };
+    // A tab change.
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask(&mut c);
+    press(&mut c, ctrl('4'));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+    assert!(!bar(&mut c).contains("delete #deploy"));
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.input().text(), "y", "the question is gone: y is typing");
+    // The tab bar's focus.
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask(&mut c);
+    press(&mut c, key(KeyCode::F(2)));
+    assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Esc));
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.input().text(), "y");
+    // A click on a tab.
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask(&mut c);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "2 #open").expect("the tab is drawn");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.input().text(), "y");
+}
+
+#[test]
+fn the_plus_slot_takes_a_new_channels_name() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    typed(&mut c, "a draft");
+    plus_slot(&mut c);
+    assert!(bar(&mut c).contains("new channel: type its name"), "{}", bar(&mut c));
+    assert!(c.input().is_empty(), "the compose box is lent to the name");
+    typed(&mut c, "no spaces");
+    press(&mut c, key(KeyCode::Enter));
+    assert!(c.status().starts_with("new channel:"), "a bad name is refused: {}", c.status());
+    press(&mut c, key(KeyCode::Esc));
+    assert_eq!(c.input().text(), "a draft", "Esc gives the draft back");
+    plus_slot(&mut c);
+    typed(&mut c, "#topic");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: /channels create not run");
+    assert_eq!(c.input().text(), "a draft");
+}
+
+#[test]
+fn f2_moves_along_the_tab_bar_and_enter_opens_the_menu() {
+    let mut g = goldens();
+    // The fallback where the terminal reports no Ctrl+digits.
+    let mut c = chat();
+    drawn(&mut c, &[key(KeyCode::F(2))], 80, 25);
+    assert!(bar(&mut c).contains("tabs: ← → move · Enter menu · Esc back"), "{}", bar(&mut c));
+    drawn(&mut c, &[key(KeyCode::Right), key(KeyCode::Right)], 80, 25);
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    g.check("tab-bar-focused-80x25", &testkit::render_screen(&mut c, 80, 25));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"));
+    press(&mut c, key(KeyCode::Esc));
+    // To the + slot: it is pointed at, never shown, and Enter asks a name.
+    press(&mut c, ctrl('t'));
+    press(&mut c, key(KeyCode::Right));
+    press(&mut c, key(KeyCode::Right));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()), "the + slot is not a tab");
+    press(&mut c, key(KeyCode::Enter));
+    assert!(bar(&mut c).contains("new channel:"), "{}", bar(&mut c));
+    g.finish();
+}
+
+#[test]
+fn a_second_click_on_the_shown_tab_or_a_right_click_opens_its_menu() {
+    let mut c = chat();
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    assert!(!text(&mut c, 80, 25).contains("pick one"));
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"));
+    press(&mut c, key(KeyCode::Esc));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "4 #infra").expect("the tab is drawn");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Right), x, y));
+    assert!(text(&mut c, 80, 25).contains("pick one: #infra"));
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "a right click opens the menu without showing the tab");
+}
+
+/// What a terminal without the kitty keyboard protocol sends for Ctrl+1
+/// through Ctrl+9, as crossterm reads it: `1`, NUL (Ctrl+Space), ESC,
+/// FS..US (Ctrl+4..7), DEL (Backspace), `9`. None may quit or send.
+fn legacy_ctrl_digits() -> Vec<KeyEvent> {
+    let mut out = vec![key(KeyCode::Char('1')), KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL), key(KeyCode::Esc)];
+    out.extend(['4', '5', '6', '7'].map(ctrl));
+    out.extend([key(KeyCode::Backspace), key(KeyCode::Char('9'))]);
+    out
+}
+
+#[test]
+fn legacy_ctrl_digit_bytes_never_quit_or_send() {
+    for draft in ["", "hello"] {
+        let mut c = chat();
+        typed(&mut c, draft);
+        let before = c.signals().len();
+        for k in legacy_ctrl_digits() {
+            assert!(press(&mut c, k), "draft {draft:?}: {k:?} closed the chat");
+        }
+        assert_eq!(c.signals().len(), before, "nothing was sent");
+        assert!(!c.status().starts_with("sent"), "{}", c.status());
+    }
+    // From an empty line the ESC byte (Ctrl+3) opens the quit question, and
+    // the next Ctrl+digit byte answers no.
+    let mut c = chat();
+    for k in legacy_ctrl_digits().into_iter().skip(2) {
+        assert!(press(&mut c, k), "{k:?} closed the chat");
+    }
+}
+
+#[test]
+fn the_f1_view_says_whether_ctrl_digits_arrive() {
+    let mut c = chat();
+    press(&mut c, key(KeyCode::F(1)));
+    assert!(text(&mut c, 140, 40).contains("does not report Ctrl+digits"));
+    let mut c = chat().enhanced(true);
+    press(&mut c, key(KeyCode::F(1)));
+    assert!(text(&mut c, 140, 40).contains("Ctrl+digits arrive"));
+}
+
+/// Open the `+` slot from the keyboard: the tab bar, then left past `≡`.
+fn plus_slot(c: &mut Chat) {
+    for k in [key(KeyCode::F(2)), key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Enter)] {
+        press(c, k);
+    }
+}
+
+#[test]
+fn the_common_menu_sits_before_merged_and_merged_keeps_number_one() {
+    let mut g = goldens();
+    let mut c = chat().enhanced(true).dry_run(true);
+    let shown = text(&mut c, 80, 25);
+    assert!(shown.contains("≡    1 merged"), "{shown}");
+    press(&mut c, ctrl('3'));
+    press(&mut c, ctrl('1'));
+    assert_eq!(c.foreground(), &Tab::Merged, "Ctrl+1 is merged, as before");
+    // ≡ is the slot left of merged on the focused bar.
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Left));
+    press(&mut c, key(KeyCode::Enter));
+    let menu = text(&mut c, 80, 25);
+    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse on at start", "Settings…"] {
+        assert!(menu.contains(item), "{item}: {menu}");
+    }
+    g.check("common-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
+    press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: /config not run", "Settings… is /config");
+    g.finish();
+}
+
+#[test]
+fn the_common_menu_offers_themes_and_keybinding_sets() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "≡").expect("the slot is drawn");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    press(&mut c, key(KeyCode::Enter));
+    let themes = text(&mut c, 80, 30);
+    assert!(themes.contains("theme for this session") && themes.contains("terminal") && themes.contains("nord"), "{themes}");
+    press(&mut c, key(KeyCode::Enter));
+    assert!(c.status().starts_with("theme terminal for this session"), "{}", c.status());
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Enter));
+    let sets = text(&mut c, 80, 30);
+    assert!(sets.contains("ctrl: Ctrl+1-9, F2, Ctrl+T") && sets.contains("fallback only: F2, Ctrl+T, Tab"), "{sets}");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: /config not run", "a set is written through /config");
 }

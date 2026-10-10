@@ -236,6 +236,31 @@ impl Groups {
         }
     }
 
+    /// The file that records `member`'s pending invitation to `name`: a
+    /// sibling of the room's signals, which every scanner skips (they read
+    /// `.signal` files only), gone with the room when it is dissolved.
+    fn invite_path(&self, name: &str, member: &str) -> PathBuf {
+        self.group_dir(name).join(format!("{member}.invite"))
+    }
+
+    /// Record that `member` was invited to `name`. The invitee's own
+    /// `attend join` answers it ([`Groups::take_invite`]).
+    pub fn invite(&self, name: &str, member: &str) -> Result<(), String> {
+        validate_group_name(name)?;
+        if member.is_empty() || member.contains('/') {
+            return Err(format!("'{member}' is not a member id"));
+        }
+        let dir = self.group_dir(name);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        fs::write(self.invite_path(name, member), b"").map_err(|e| e.to_string())
+    }
+
+    /// Whether this member had a pending invitation to `name`; the
+    /// invitation is spent either way.
+    pub fn take_invite(&self, name: &str) -> bool {
+        validate_group_name(name).is_ok() && fs::remove_file(self.invite_path(name, &self.member_id)).is_ok()
+    }
+
     /// Leave a named group.
     pub fn leave(&self, name: &str) -> Result<(), String> {
         let mut state = self.load_state();
@@ -1066,5 +1091,23 @@ mod injection_tests {
         assert!(validate_group_name("#x").unwrap_err().contains("# or :"));
         assert!(validate_group_name("a:b").unwrap_err().contains("# or :"));
         assert!(validate_group_name("plain-name").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod invite_tests {
+    use super::*;
+
+    #[test]
+    fn an_invitation_is_taken_once_by_its_invitee() {
+        let base = std::env::temp_dir().join(format!("attend-groups-invite-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        Groups::new(&base, "").invite("topic", "sess-a").unwrap();
+        assert!(!Groups::new(&base, "sess-b").take_invite("topic"), "not b's");
+        assert!(Groups::new(&base, "sess-a").take_invite("topic"));
+        assert!(!Groups::new(&base, "sess-a").take_invite("topic"), "spent");
+        assert!(Groups::new(&base, "").invite("open", "sess-a").is_err(), "a reserved name");
+        assert!(Groups::new(&base, "").invite("topic", "../x").is_err());
+        let _ = fs::remove_dir_all(&base);
     }
 }

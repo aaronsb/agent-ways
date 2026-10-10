@@ -78,11 +78,27 @@ pub fn scan_in(base: &Path, caps: ColorDepth) -> Vec<KnownGroup> {
             })
         })
         .collect();
-    // Alphabetical order so the legend is stable across renders.
-    // Groups aren't temporally ordered the way agents are (no
-    // "newest-seen" concept) — alpha is the least-surprising default.
-    out.sort_by(|a, b| a.group.name.cmp(&b.group.name));
-    out
+    // The tab bar is the active-channel switcher (ADR-404 D9): the
+    // channel whose newest message is newest comes first, so Ctrl+N and
+    // Alt+N reach the busy channels with low numbers. Channels with no
+    // message, or the same instant, fall back to alphabetical, which keeps
+    // the order stable between renders. `#open` is pinned before all of
+    // them by `channels_in` (ADR-124 §3).
+    let mut keyed: Vec<(Option<std::time::SystemTime>, KnownGroup)> =
+        out.drain(..).map(|g| (last_activity(&base.join(format!("{GROUP_PREFIX}{}", g.group.name))), g)).collect();
+    keyed.sort_by(|(ta, a), (tb, b)| tb.cmp(ta).then_with(|| a.group.name.cmp(&b.group.name)));
+    keyed.into_iter().map(|(_, g)| g).collect()
+}
+
+/// When the newest message in a room's directory was written; `None` for
+/// a room with none.
+fn last_activity(dir: &Path) -> Option<std::time::SystemTime> {
+    fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".signal"))
+        .filter_map(|e| e.metadata().ok()?.modified().ok())
+        .max()
 }
 
 /// Channel-bar view: base `#open` followed by every discovered group.
@@ -230,6 +246,22 @@ mod tests {
     fn write_yaml(base: &Path, content: &str) {
         let mut f = fs::File::create(base.join("_groups.yaml")).unwrap();
         f.write_all(content.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn channels_are_ordered_by_their_newest_message_with_open_pinned() {
+        let base = tempdir_like();
+        let now = std::time::SystemTime::now();
+        for (room, age) in [("alpha", Some(300)), ("beta", Some(10)), ("gamma", None), ("delta", None), ("open", Some(1))] {
+            let dir = base.join(format!("@{room}"));
+            fs::create_dir_all(&dir).unwrap();
+            if let Some(secs) = age {
+                let f = fs::File::create(dir.join("m.signal")).unwrap();
+                f.set_modified(now - std::time::Duration::from_secs(secs)).unwrap();
+            }
+        }
+        let names: Vec<String> = channels_in(&base, ColorDepth::TrueColor).into_iter().map(|k| k.group.name).collect();
+        assert_eq!(names, ["open", "beta", "alpha", "delta", "gamma"], "#open pinned; newest first; quiet ones alphabetical");
     }
 
     #[test]

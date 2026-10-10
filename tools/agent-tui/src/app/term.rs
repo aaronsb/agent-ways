@@ -16,9 +16,38 @@ use super::*;
 /// and the signals again.
 pub(crate) const POLL: Duration = Duration::from_millis(100);
 
-/// Put the terminal back as the shell found it: mouse reporting off, raw
-/// mode off, the main screen back, the cursor shown. Safe to call twice.
+/// Whether the keyboard enhancement is pushed on the terminal's stack, so
+/// every way out pops it: a quit, a panic and a signal.
+static KEYBOARD_PUSHED: AtomicBool = AtomicBool::new(false);
+
+/// The escape that pops the keyboard enhancement, for the signal handler.
+const KEYBOARD_POP: &[u8] = b"\x1b[<u";
+
+/// Ask the terminal to report Ctrl+digits and the other keys that legacy
+/// encoding folds into others (Ctrl+3 is Esc, Ctrl+8 is Backspace): the
+/// kitty keyboard protocol's first flag, DISAMBIGUATE_ESCAPE_CODES. Only
+/// when the terminal answers the protocol's query; returns whether it is
+/// on. [`restore`] pops it.
+pub(crate) fn enable_keyboard_enhancement() -> bool {
+    use ratatui::crossterm::event::{KeyboardEnhancementFlags, PushKeyboardEnhancementFlags};
+    if !matches!(ratatui::crossterm::terminal::supports_keyboard_enhancement(), Ok(true)) {
+        return false;
+    }
+    let flags = PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES);
+    if execute!(io::stdout(), flags).is_err() {
+        return false;
+    }
+    KEYBOARD_PUSHED.store(true, Ordering::SeqCst);
+    true
+}
+
+/// Put the terminal back as the shell found it: the keyboard enhancement
+/// popped, mouse reporting off, raw mode off, the main screen back, the
+/// cursor shown. Safe to call twice.
 pub fn restore() {
+    if KEYBOARD_PUSHED.swap(false, Ordering::SeqCst) {
+        let _ = execute!(io::stdout(), ratatui::crossterm::event::PopKeyboardEnhancementFlags);
+    }
     let _ = execute!(io::stdout(), DisableMouseCapture);
     // try_restore: restore() prints its error, and a print to a terminal
     // that hung up panics, which in a drop aborts.
@@ -97,6 +126,9 @@ fn emergency_exit(sig: i32) -> ! {
     unsafe {
         if pg > 0 {
             libc::killpg(pg, libc::SIGKILL);
+        }
+        if KEYBOARD_PUSHED.load(Ordering::SeqCst) {
+            libc::write(1, KEYBOARD_POP.as_ptr().cast(), KEYBOARD_POP.len());
         }
         if let Some(r) = RESET.get() {
             libc::write(1, r.as_ptr().cast(), r.len());
@@ -368,6 +400,14 @@ impl App {
     pub fn run(mut self, term: &mut DefaultTerminal, signals: &Signals) -> io::Result<Session> {
         let mut captured = false;
         let mut schedule = Schedule::new(Instant::now());
+        if self.pane.as_ref().is_some_and(|p| p.keyboard_enhancement()) {
+            // A frame first: the probe waits on the terminal's answer, up
+            // to crossterm's timeout where none comes, and a blank screen
+            // through that wait reads as a hang.
+            term.draw(|f| self.draw(f))?;
+            let on = enable_keyboard_enhancement();
+            self.set_keyboard_enhanced(on);
+        }
         loop {
             if let Some(sig) = signals.caught() {
                 signals.take_up();

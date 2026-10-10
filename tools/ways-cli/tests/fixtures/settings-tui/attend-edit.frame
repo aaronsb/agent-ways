@@ -6,7 +6,7 @@ agent-tui frame 100x30
 |│ ▾ cleanup · setting           value                 ││Seconds between sweeps.                    │|
 |│     enabled                   true                  ││                                           │|
 |│▌    interval                  600                   ││value    600                               │|
-|│                                                     ││type     integer 1..=604800 (Enter edits)  │|
+|│ ▸ chat · setting              value                 ││type     integer 1..=604800 (Enter edits)  │|
 |│                                                     ││default  600                               │|
 |│                                                     ││from     default                           │|
 |│                                                     ││writes   ~/.config/attend/config.yaml      │|
@@ -70,6 +70,9 @@ styles
   6  54-64  - - DIM
   6  99-99  - - DIM
   7   0-0   - - DIM
+  7   2-7   - - BOLD
+  7   8-17  - - DIM
+  7  32-36  - - DIM
   7  54-64  - - DIM
   7  99-99  - - DIM
   8   0-0   - - DIM
