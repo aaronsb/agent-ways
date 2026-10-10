@@ -119,6 +119,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-401](./attend/ADR-401-attend-envelope-fields-sender-kind-principal-and-addressee-on-every-signal.md) | Attend envelope fields: sender kind, principal, and addressee on every signal | accepted |
 | [ADR-402](./attend/ADR-402-claude-code-channels-deliver-mcp-server-events-into-the-model-s-turn-and-wake-an-idle-session.md) | Claude Code channels deliver MCP server events into the model's turn and wake an idle session | accepted |
 | [ADR-403](./attend/ADR-403-attend-hosts-sensors-under-one-spec-compiled-command-and-mcp-sensors-in-yaml-files.md) | Attend hosts sensors under one spec: compiled, command and MCP sensors in YAML files | proposed |
+| [ADR-404](./attend/ADR-404-channel-membership-and-history-are-managed-by-any-member-with-scopes-seals-and-an-operator-view.md) | Channel membership and history are managed by any member, with scopes, seals and an operator view | proposed |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_
