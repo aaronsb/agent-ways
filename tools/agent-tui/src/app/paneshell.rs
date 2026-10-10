@@ -253,7 +253,9 @@ impl App {
                 return true;
             }
             KeyCode::Char(c @ '1'..='9') if digit_jump => {
-                self.pane_tab(c as usize - '1' as usize);
+                if let Some(i) = self.numbered(c as usize - '0' as usize) {
+                    self.pane_tab(i);
+                }
                 return true;
             }
             _ => {}
@@ -699,9 +701,9 @@ mod tests {
             a.key(ctrl('2'));
             assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1]), "text {text}: the second opens its menu");
             a.key(ctrl('3'));
-            assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1, 2]), "text {text}: the + slot is never shown, only opened");
+            assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1]), "text {text}: the + slot has no number");
             a.key(ctrl('9'));
-            assert_eq!(two(&a).menus.len(), 2, "no ninth tab: nothing");
+            assert_eq!(two(&a).menus.len(), 1, "no ninth tab: nothing");
             assert_eq!(two(&a).keys, 0, "none reached the pane");
         }
     }

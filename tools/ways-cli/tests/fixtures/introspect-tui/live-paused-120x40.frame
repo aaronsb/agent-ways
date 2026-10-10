@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│························◆·························································■·············· forecast 132K → 179K│|
 |│+ ↩ softwaredev/code/testing                                                                                          │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| paused  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space follow · f matched · 1-9 tabs                     |
+| paused  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space follow · f matched · 1-9 tabs · F2 tabs           |
 styles
   0   0-11  Black Cyan BOLD
   0  14-22  White Blue -
@@ -182,4 +182,6 @@ styles
  39  79-80  Cyan - -
  39  81-90  - - DIM|ITALIC
  39  91-94  Cyan - -
- 39  95-98  - - DIM|ITALIC
+ 39  95-101 - - DIM|ITALIC
+ 39 102-104 Cyan - -
+ 39 105-108 - - DIM|ITALIC

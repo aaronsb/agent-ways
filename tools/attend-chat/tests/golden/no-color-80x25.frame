@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                        |
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ │ beta             │ production at 15:00                                     │|
 |│ │ ▽ 13:55          │                                                         │|
@@ -25,13 +25,14 @@ agent-tui frame 80x25
 | @Laszlo @aaron @Wells                                                          |
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
 styles
-  0   0-9   - - BOLD|REVERSED
-  0  12-13  - - BOLD
-  0  14-22  - - REVERSED
-  0  27-37  - - REVERSED
-  0  40-41  - - BOLD
-  0  42-51  - - REVERSED
-  0  54-56  - - REVERSED
+  0   0-2   - - REVERSED
+  0   5-14  - - BOLD|REVERSED
+  0  17-18  - - BOLD
+  0  19-27  - - REVERSED
+  0  32-42  - - REVERSED
+  0  45-46  - - BOLD
+  0  47-56  - - REVERSED
+  0  59-61  - - REVERSED
   1   0-79  - - DIM
   2   0-0   - - DIM
   2   2-2   - - DIM

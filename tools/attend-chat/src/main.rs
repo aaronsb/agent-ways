@@ -22,7 +22,8 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
   F2 / Ctrl+T               the tab bar: Left Right move, Enter the tab's menu,
                             Esc back to the compose box
   Tab                       next tab (empty input) / complete @name #channel /command
-  tab menus                 merged: Clear view. #open: Clear history, Clear view.
+  tab menus                 ≡ (left of merged, no number): Theme, Keybinding set,
+                            Mouse at start, Settings. merged: Clear view. #open: Clear history, Clear view.
                             A channel: Add agent, Remove agent, Describe, Clear
                             history, Leave, Delete channel. The + slot: New channel.
                             Clear history and Delete ask first: y goes ahead

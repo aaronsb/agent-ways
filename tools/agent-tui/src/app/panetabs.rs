@@ -8,8 +8,9 @@
 //!   goes where it would have gone.
 //! - A click on a tab shows it; a click on the tab already shown, or a right
 //!   click, opens its menu.
-//! - An action slot ([`PaneTab::action`], such as `+`) has no number and is
-//!   never shown as a tab: choosing it opens its menu, the pane's action.
+//! - An action slot ([`PaneTab::action`], such as `≡` or `+`) has no number
+//!   and is never shown as a tab: choosing it opens its menu. Numbers count
+//!   the tabs alone, so a slot before the first tab leaves it tab 1.
 //!
 //! Alt+1-9 still shows a tab where the terminal passes Alt+digits on;
 //! Konsole and GNOME Terminal keep them for their own tabs.
@@ -169,7 +170,9 @@ impl App {
         }
         match k.code {
             KeyCode::Char(c @ '1'..='9') if ctrl && self.ctrl_jump() => {
-                self.pane_tab_or_menu(c as usize - '1' as usize);
+                if let Some(i) = self.numbered(c as usize - '0' as usize) {
+                    self.pane_tab_or_menu(i);
+                }
                 true
             }
             _ => false,
@@ -195,6 +198,12 @@ impl App {
             p.set_tab(to);
         }
         self.strip = Some(to);
+    }
+
+    /// The index of tab number `n` (from 1): action slots carry no number.
+    pub(super) fn numbered(&mut self, n: usize) -> Option<usize> {
+        let p = self.pane.as_mut()?;
+        p.tabs().iter().enumerate().filter(|(_, t)| !t.action).nth(n.checked_sub(1)?).map(|(i, _)| i)
     }
 
     /// Show the pane's tab `i`, when it has one and it is a tab.
@@ -237,13 +246,17 @@ impl App {
         let active = p.tab();
         let trailer = p.trailer();
         let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut number = 0;
         for (i, t) in tabs.into_iter().enumerate() {
             if i > 0 {
                 spans.push(Span::raw("  "));
             }
             let x = area.x + width(&spans);
             spans.extend(t.lead);
-            let label = if t.action { format!(" {} ", t.name) } else { format!(" {} {} ", i + 1, t.name) };
+            if !t.action {
+                number += 1;
+            }
+            let label = if t.action { format!(" {} ", t.name) } else { format!(" {number} {} ", t.name) };
             let mut seg = crate::strip::tab_seg(label, i == active && !t.action);
             seg.style = crate::strip::target(seg.style, t.target);
             if cursor == Some(i) {

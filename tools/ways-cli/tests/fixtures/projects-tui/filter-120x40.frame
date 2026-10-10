@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| filter  1/1 │ mouse on (M-m) │ F1 keys · ↑↓ select · ⏎ keep · esc clear · M-1-9 tabs                                   |
+| filter  1/1 │ mouse on (M-m) │ F1 keys · ↑↓ select · ⏎ keep · esc clear · Alt+1-9 tab (again: menu) · F2 tabs          |
 styles
   0   0-9   White Blue -
   0  10-13  Cyan - -
@@ -135,5 +135,7 @@ styles
  39  56-62  - - DIM|ITALIC
  39  63-66  Cyan - -
  39  67-74  - - DIM|ITALIC
- 39  75-80  Cyan - -
- 39  81-84  - - DIM|ITALIC
+ 39  75-82  Cyan - -
+ 39  83-102 - - DIM|ITALIC
+ 39 103-105 Cyan - -
+ 39 106-109 - - DIM|ITALIC

@@ -8,22 +8,22 @@ agent-tui frame 80x25
 |│ ╭──────────────────╮                                                         │|
 |│ │ aaron            │ the shell this ran under: /bin/sh                       │|
 |│ │ aaron            │  file: sh                                               │|
-|│ │ 13:58            │                                                         │|
-|│ ╰──────────────────╯                                                         │|
-|│                                                                              │|
-|│ ╭──────────────────╮                                                         │|
-|│ │ Laszlo           │ a longer message, so the feed shows how a body wraps    │|
-|│ │ alpha            │ beside its chip when it runs past the width of the row  │|
+|│ │ 13:58      ┌pick one: attend-chat───────────────────────────┐              │|
+|│ ╰────────────│   Theme ▸                                      │              │|
+|│              │   Keybinding set ▸                             │              │|
+|│ ╭────────────│   Mouse on at start                            │              │|
+|│ │ Laszlo     │   Settings…                                    │body wraps    │|
+|│ │ alpha      └────────────────────────────────────────────────┘h of the row  │|
 |│ │ 13:59            │ it is given                                             │|
 |│ ╰──────────────────╯                                                         │|
 |│                                                                              │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
-|│ > /bogus                                                                     │|
-|│                                                                              │|
+|│ >                                                                            │|
+|│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
-| /help /whois /peers /join /leave /dissolve /channels /invite /kick /purge /conf|
-| chat  unknown: /bogus (try /help) │ mouse off (M-m) │ F1 keys · Enter send     |
+| @Laszlo @aaron @Wells                                                          |
+| pick   ↑↓ choose · Enter or click sets · Esc closes                            |
 styles
   0   0-2   White Blue -
   0   5-14  Black Cyan BOLD
@@ -68,25 +68,35 @@ styles
   9   0-0   - - DIM
   9   2-2   - - DIM
   9   4-8   - - DIM
-  9  21-21  - - DIM
+  9  15-15  LightBlue - -
+  9  16-36  LightBlue - BOLD
+  9  37-64  LightBlue - -
   9  79-79  - - DIM
  10   0-0   - - DIM
- 10   2-21  - - DIM
+ 10   2-14  - - DIM
+ 10  15-15  LightBlue - -
+ 10  16-63  - - BOLD|REVERSED
+ 10  64-64  LightBlue - -
  10  79-79  - - DIM
  11   0-0   - - DIM
+ 11  15-15  LightBlue - -
+ 11  64-64  LightBlue - -
  11  79-79  - - DIM
  12   0-0   - - DIM
- 12   2-21  - - DIM
+ 12   2-14  - - DIM
+ 12  15-15  LightBlue - -
+ 12  64-64  LightBlue - -
  12  79-79  - - DIM
  13   0-0   - - DIM
  13   2-2   - - DIM
  13   4-9   Cyan - BOLD
- 13  21-21  - - DIM
+ 13  15-15  LightBlue - -
+ 13  64-64  LightBlue - -
  13  79-79  - - DIM
  14   0-0   - - DIM
  14   2-2   - - DIM
  14   4-8   - - DIM
- 14  21-21  - - DIM
+ 14  15-64  LightBlue - -
  14  79-79  - - DIM
  15   0-0   - - DIM
  15   2-2   - - DIM
@@ -102,28 +112,14 @@ styles
  19   0-79  Cyan - -
  20   0-0   Cyan - -
  20   2-3   Cyan - -
- 20  10-10  - - REVERSED
+ 20   4-4   - - REVERSED
  20  79-79  Cyan - -
  21   0-0   Cyan - -
+ 21  71-77  White Blue -
  21  79-79  Cyan - -
  22   0-79  Cyan - -
- 23   1-5   Cyan - -
- 23   7-12  Cyan - -
- 23  14-19  Cyan - -
- 23  21-25  Cyan - -
- 23  27-32  Cyan - -
- 23  34-42  Cyan - -
- 23  44-52  Cyan - -
- 23  54-60  Cyan - -
- 23  62-66  Cyan - -
- 23  68-73  Cyan - -
- 23  75-79  Cyan - -
+ 23   1-7   Cyan - BOLD
+ 23   9-14  LightYellow - -
+ 23  16-21  LightCyan - -
  24   0-5   Black Cyan BOLD
- 24   7-33  Red - -
- 24  34-36  - - DIM
- 24  37-51  - - DIM|ITALIC
- 24  52-54  - - DIM
- 24  55-57  Cyan - -
- 24  58-64  - - DIM|ITALIC
- 24  65-70  Cyan - -
- 24  71-74  - - DIM|ITALIC
+ 24   6-51  - - DIM|ITALIC

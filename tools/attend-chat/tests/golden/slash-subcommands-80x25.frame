@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                        |
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ │ beta             │ production at 15:00                                     │|
 |│ │ ▽ 13:55          │                                                         │|
@@ -25,14 +25,15 @@ agent-tui frame 80x25
 | list create describe                                                           |
 | chat  /channels [list|create|describe] — List · create · describe channels     |
 styles
-  0   0-9   Black Cyan BOLD
-  0  12-13  Blue - BOLD
-  0  14-22  White Blue -
-  0  25-26  Red - -
-  0  27-37  White Blue -
-  0  40-41  Cyan - -
-  0  42-51  White Blue -
-  0  54-56  White Blue -
+  0   0-2   White Blue -
+  0   5-14  Black Cyan BOLD
+  0  17-18  Blue - BOLD
+  0  19-27  White Blue -
+  0  30-31  Red - -
+  0  32-42  White Blue -
+  0  45-46  Cyan - -
+  0  47-56  White Blue -
+  0  59-61  White Blue -
   1   0-79  - - DIM
   2   0-0   - - DIM
   2   2-2   - - DIM

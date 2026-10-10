@@ -3,6 +3,8 @@
 //! to a name or a description. Every item runs the slash command that
 //! does the same thing ([`keys::run_slash`]); the commands stay.
 //!
+//! - `≡`, the common menu: Theme ▸ (this session's look), Keybinding set ▸
+//!   (presets over `attend.chat.tabs.*`), the mouse at start, Settings… .
 //! - merged: Clear view.
 //! - `#open`: Clear history, Clear view.
 //! - a named channel: Add agent ▸, Remove agent ▸, Describe…, Clear
@@ -30,6 +32,19 @@ pub(super) const REMOVE_AGENT: &str = "Remove agent ▸";
 pub(super) const DESCRIBE: &str = "Describe…";
 pub(super) const LEAVE: &str = "Leave";
 pub(super) const DELETE: &str = "Delete channel";
+pub(super) const THEME: &str = "Theme ▸";
+pub(super) const KEYS: &str = "Keybinding set ▸";
+pub(super) const MOUSE_ON: &str = "Mouse on at start";
+pub(super) const MOUSE_OFF: &str = "Mouse off at start";
+pub(super) const SETTINGS: &str = "Settings…";
+
+/// The keybinding presets: a label, then the `attend.chat.tabs.*` values.
+pub(super) const PRESETS: &[(&str, &str, &str)] = &[
+    ("ctrl: Ctrl+1-9, F2, Ctrl+T", "ctrl", "both"),
+    ("alt: Alt+1-9, F2, Ctrl+T", "alt", "both"),
+    ("fallback only: F2, Ctrl+T, Tab", "none", "both"),
+    ("auto: Ctrl+1-9 where it arrives, else Alt+1-9", "auto", "both"),
+];
 
 /// A step waiting for `y`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,17 +92,20 @@ impl ChatPane {
         })
     }
 
-    /// Open the menu of tab `i`: 0 is merged, then the channels in strip
-    /// order, then the `+` slot.
+    /// Open the menu of the bar's tab `i`: 0 is the `≡` slot, 1 merged,
+    /// then the channels in strip order, then the `+` slot.
     pub(super) fn open_tab_menu(&mut self, i: usize) {
         self.dirty = true;
         let names = self.strip_names();
-        if i == names.len() + 1 {
+        if i == 0 {
+            return self.common_menu();
+        }
+        if i == names.len() + 2 {
             return self.start_prompt(Prompt::NewChannel);
         }
         let channel = match i {
-            0 => None,
-            i => match names.get(i - 1) {
+            1 => None,
+            i => match names.get(i - 2) {
                 Some(n) => Some(n.clone()),
                 None => return,
             },
@@ -97,9 +115,68 @@ impl ChatPane {
         self.open = Some(Open::Pick { id, title, options: items(channel.as_deref()), multi: false, chosen: Vec::new() });
     }
 
+    fn common_menu(&mut self) {
+        let mouse = if self.config.mouse { MOUSE_OFF } else { MOUSE_ON };
+        let options = [THEME, KEYS, mouse, SETTINGS].iter().map(|s| s.to_string()).collect();
+        self.open = Some(Open::Pick { id: "common".into(), title: "attend-chat".into(), options, multi: false, chosen: Vec::new() });
+    }
+
+    fn common_item(&mut self, item: &str) {
+        match item {
+            THEME => {
+                let set = agent_theme::ThemeSet::load(agent_theme::user_dir().as_deref());
+                let mut options = vec!["terminal".to_string()];
+                options.extend(set.list().map(|(t, _)| t.name.clone()));
+                self.open = Some(Open::Pick { id: "theme".into(), title: "theme for this session".into(), options, multi: false, chosen: Vec::new() });
+            }
+            KEYS => {
+                let options = PRESETS.iter().map(|(l, _, _)| l.to_string()).collect();
+                self.open = Some(Open::Pick { id: "keys".into(), title: "keybinding set".into(), options, multi: false, chosen: Vec::new() });
+            }
+            MOUSE_ON | MOUSE_OFF => {
+                let on = item == MOUSE_ON;
+                self.run("config", SlashOutcome::Config { key: Some("mouse".into()), value: Some(on.to_string()) });
+            }
+            SETTINGS => {
+                self.run("config", SlashOutcome::Config { key: None, value: None });
+            }
+            _ => {}
+        }
+    }
+
+    /// The session's look: `terminal` is the terminal's own palette. Kept
+    /// for this session; the stored choice is ways' `theme.active`, which
+    /// the chat reads and does not write (ADR-504).
+    fn theme_picked(&mut self, name: &str) {
+        let depth = self.palette.depth();
+        let active = (name != "terminal").then_some(name);
+        let (palette, warning) = crate::theme::palette(active, depth);
+        self.palette = palette;
+        self.invalidate();
+        match warning {
+            Some(w) => self.say(format!("theme: {w}"), true),
+            None => self.say(format!("theme {name} for this session; `ways settings set theme.active {name}` keeps it"), false),
+        }
+    }
+
     /// A menu item, or a submenu's peer, was chosen.
     pub(super) fn menu_picked(&mut self, id: &str, value: &str) {
         self.dirty = true;
+        match id {
+            "common" => return self.common_item(value),
+            "theme" => return self.theme_picked(value),
+            "keys" => {
+                if let Some((_, jump, focus)) = PRESETS.iter().find(|(l, _, _)| *l == value) {
+                    let set = self.run("config", SlashOutcome::Config { key: Some("tabs.jump".into()), value: Some(jump.to_string()) });
+                    if set && !self.dry_run {
+                        self.run("config", SlashOutcome::Config { key: Some("tabs.focus_key".into()), value: Some(focus.to_string()) });
+                        self.say(format!("keybinding set: {value}"), false);
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
         if let Some(c) = id.strip_prefix("menu:") {
             return self.item(c, value);
         }
@@ -252,6 +329,7 @@ impl ChatPane {
                 true
             }
         };
+        self.reload_settings();
         self.stale();
         ok
     }

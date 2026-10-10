@@ -454,18 +454,21 @@ impl Pane for ChatPane {
         view::tabs(self)
     }
 
+    /// The bar's index of the tab shown: 0 is the `≡` slot, 1 merged, then
+    /// the channels, then the `+` slot.
     fn tab(&mut self) -> usize {
         match self.normal_tab() {
-            Tab::Merged => 0,
-            Tab::Channel(g) => self.strip_names().iter().position(|n| *n == g).map_or(0, |i| i + 1),
+            Tab::Merged => 1,
+            Tab::Channel(g) => self.strip_names().iter().position(|n| *n == g).map_or(1, |i| i + 2),
         }
     }
 
-    /// 0 is merged, then the channels in strip order (Alt+N's slots, less
-    /// one). An index past them does nothing.
+    /// Show the bar's tab `i`: merged, or a channel (tab number `i`, as
+    /// Alt+N and Ctrl+N count them). The slots and an index past the tabs
+    /// do nothing.
     fn set_tab(&mut self, i: usize) {
         let names = self.strip_names();
-        if let Some(t) = tabs::jump(i as u32 + 1, &names) {
+        if let Some(t) = i.checked_sub(1).and_then(|n| tabs::jump(n as u32 + 1, &names)) {
             ChatPane::set_tab(self, t);
         }
     }

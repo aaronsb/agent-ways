@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│······································································●·······················◆···· forecast 18K → 60K│|
 |│+ softwaredev/code/testing (embed:en), softwaredev/delivery/commits (keyword)                                         │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| replay  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space play · +- 1.0s · f injected · 1-9 tabs            |
+| replay  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space play · +- 1.0s · f injected · 1-9 tabs · F2 tabs  |
 styles
   0   0-11  Black Cyan BOLD
   0  14-22  White Blue -
@@ -173,4 +173,6 @@ styles
  39  87-88  Cyan - -
  39  89-99  - - DIM|ITALIC
  39 100-103 Cyan - -
- 39 104-107 - - DIM|ITALIC
+ 39 104-110 - - DIM|ITALIC
+ 39 111-113 Cyan - -
+ 39 114-117 - - DIM|ITALIC

@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                                                                |
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                                                           |
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                                                                 │|
 |│ │ Laszlo           │ starting the theme port; the legend moves first                                                 │|
@@ -40,14 +40,15 @@ agent-tui frame 120x40
 | @Laszlo @aaron @Wells                                                                                                  |
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · Alt+1-9 tab (again: menu) · F2 tabs   |
 styles
-  0   0-9   #2e3440 #c99fc1 BOLD
-  0  12-13  #ffb3a1 - BOLD
-  0  14-22  #2e3440 #bfa2c3 -
-  0  25-26  #e07b7b - -
-  0  27-37  #2e3440 #bfa2c3 -
-  0  40-41  #b0bec5 - -
-  0  42-51  #2e3440 #bfa2c3 -
-  0  54-56  #2e3440 #bfa2c3 -
+  0   0-2   #2e3440 #bfa2c3 -
+  0   5-14  #2e3440 #c99fc1 BOLD
+  0  17-18  #ffb3a1 - BOLD
+  0  19-27  #2e3440 #bfa2c3 -
+  0  30-31  #e07b7b - -
+  0  32-42  #2e3440 #bfa2c3 -
+  0  45-46  #b0bec5 - -
+  0  47-56  #2e3440 #bfa2c3 -
+  0  59-61  #2e3440 #bfa2c3 -
   1   0-119 #434c5e - -
   2   0-0   #434c5e - -
   2   2-21  #434c5e - -

@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│● 1 re-disclose now  │ 40K interval                                                                                   │|
 |│⊝ suppressed: dispatch (session switch), agent a7f3c2 (session switch)                                                │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| replay  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space play · +- 1.0s · f matched · 1-9 tabs             |
+| replay  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space play · +- 1.0s · f matched · 1-9 tabs · F2 tabs   |
 styles
   0   0-11  Black Cyan BOLD
   0  14-22  White Blue -
@@ -158,4 +158,6 @@ styles
  39  87-88  Cyan - -
  39  89-98  - - DIM|ITALIC
  39  99-102 Cyan - -
- 39 103-106 - - DIM|ITALIC
+ 39 103-109 - - DIM|ITALIC
+ 39 110-112 Cyan - -
+ 39 113-116 - - DIM|ITALIC

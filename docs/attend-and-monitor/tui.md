@@ -92,7 +92,7 @@ A line that starts with `/` runs a command. The helper row completes the command
 | F1 | the key help |
 | Esc, Ctrl-C | quit. Where Ctrl and a digit do not arrive, Ctrl-3 sends Esc, so Esc on an empty line asks first and `y` quits |
 
-**Tab menus.** merged: Clear view. `#open`: Clear history, Clear view. A named channel: Add agent (invites a live peer; it joins itself), Remove agent, Describe, Clear history, Leave, Delete channel. The `+` at the end of the bar asks a new channel's name in the compose box. Clear history and Delete channel ask first: `y` goes ahead, any other key keeps it. Each item runs the slash command that does the same thing.
+**Tab menus.** `≡`, left of merged and unnumbered, is the common menu: Theme (this session's look; `ways settings set theme.active` keeps one), Keybinding set (presets over the tab keys), Mouse on or off at start, Settings (the `/config` list). Merged stays tab 1. merged: Clear view. `#open`: Clear history, Clear view. A named channel: Add agent (invites a live peer; it joins itself), Remove agent, Describe, Clear history, Leave, Delete channel. The `+` at the end of the bar asks a new channel's name in the compose box. Clear history and Delete channel ask first: `y` goes ahead, any other key keeps it. Each item runs the slash command that does the same thing.
 
 **Settings.** `attend.chat.tabs.jump` (auto, ctrl, alt, both, none), `attend.chat.tabs.menu_on_repeat`, `attend.chat.tabs.focus_key` (both, f2, ctrl-t, none) and `attend.chat.mouse` live in attend's user file. `/config` lists them with the layer each comes from, and `/config <key> <value>` sets one; `ways settings` reads and sets the same keys.
 

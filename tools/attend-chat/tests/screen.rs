@@ -839,7 +839,7 @@ fn clear_history_asks_first_and_y_runs_the_purge() {
 fn the_plus_slot_takes_a_new_channels_name() {
     let mut c = chat().enhanced(true).dry_run(true);
     typed(&mut c, "a draft");
-    press(&mut c, ctrl('5'));
+    plus_slot(&mut c);
     assert!(bar(&mut c).contains("new channel: type its name"), "{}", bar(&mut c));
     assert!(c.input().is_empty(), "the compose box is lent to the name");
     typed(&mut c, "no spaces");
@@ -847,7 +847,7 @@ fn the_plus_slot_takes_a_new_channels_name() {
     assert!(c.status().starts_with("new channel:"), "a bad name is refused: {}", c.status());
     press(&mut c, key(KeyCode::Esc));
     assert_eq!(c.input().text(), "a draft", "Esc gives the draft back");
-    press(&mut c, ctrl('5'));
+    plus_slot(&mut c);
     typed(&mut c, "#topic");
     press(&mut c, key(KeyCode::Enter));
     assert_eq!(c.status(), "dry run: /channels create not run");
@@ -932,4 +932,55 @@ fn the_f1_view_says_whether_ctrl_digits_arrive() {
     let mut c = chat().enhanced(true);
     press(&mut c, key(KeyCode::F(1)));
     assert!(text(&mut c, 140, 40).contains("Ctrl+digits arrive"));
+}
+
+/// Open the `+` slot from the keyboard: the tab bar, then left past `≡`.
+fn plus_slot(c: &mut Chat) {
+    for k in [key(KeyCode::F(2)), key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Enter)] {
+        press(c, k);
+    }
+}
+
+#[test]
+fn the_common_menu_sits_before_merged_and_merged_keeps_number_one() {
+    let mut g = goldens();
+    let mut c = chat().enhanced(true).dry_run(true);
+    let shown = text(&mut c, 80, 25);
+    assert!(shown.contains("≡    1 merged"), "{shown}");
+    press(&mut c, ctrl('3'));
+    press(&mut c, ctrl('1'));
+    assert_eq!(c.foreground(), &Tab::Merged, "Ctrl+1 is merged, as before");
+    // ≡ is the slot left of merged on the focused bar.
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Left));
+    press(&mut c, key(KeyCode::Enter));
+    let menu = text(&mut c, 80, 25);
+    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse on at start", "Settings…"] {
+        assert!(menu.contains(item), "{item}: {menu}");
+    }
+    g.check("common-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
+    press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: /config not run", "Settings… is /config");
+    g.finish();
+}
+
+#[test]
+fn the_common_menu_offers_themes_and_keybinding_sets() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "≡").expect("the slot is drawn");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    press(&mut c, key(KeyCode::Enter));
+    let themes = text(&mut c, 80, 30);
+    assert!(themes.contains("theme for this session") && themes.contains("terminal") && themes.contains("nord"), "{themes}");
+    press(&mut c, key(KeyCode::Enter));
+    assert!(c.status().starts_with("theme terminal for this session"), "{}", c.status());
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Enter));
+    let sets = text(&mut c, 80, 30);
+    assert!(sets.contains("ctrl: Ctrl+1-9, F2, Ctrl+T") && sets.contains("fallback only: F2, Ctrl+T, Tab"), "{sets}");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: /config not run", "a set is written through /config");
 }
