@@ -244,13 +244,15 @@ impl ChatPane {
     /// Ask for a new channel's name in the compose box: from the `+` slot
     /// or Ctrl+N. A waiting question is dropped; the name already being
     /// typed is left alone, so a repeat cannot take the name for the draft.
+    /// A description being typed is never thrown away: the request waits
+    /// until it is sent or cancelled.
     pub(super) fn new_channel(&mut self) {
         self.dirty = true;
         self.pending = None;
-        if !matches!(self.prompt, Some((Prompt::NewChannel, _))) {
-            // Another prompt (Describe) hands the draft back first.
-            self.end_prompt();
-            self.start_prompt(Prompt::NewChannel);
+        match self.prompt {
+            Some((Prompt::NewChannel, _)) => {}
+            Some(_) => self.say("finish the description, or Esc, first", false),
+            None => self.start_prompt(Prompt::NewChannel),
         }
     }
 
@@ -313,8 +315,8 @@ impl ChatPane {
 
     /// The shell took a key or a click: a waiting question is dropped.
     pub(super) fn drop_question(&mut self) {
-        if self.pending.take().is_some() {
-            self.say("kept", false);
+        if let Some(p) = self.pending.take() {
+            self.say(if p == Pending::Quit { "stayed" } else { "kept" }, false);
         }
     }
 

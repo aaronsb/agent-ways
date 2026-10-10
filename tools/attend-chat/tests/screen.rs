@@ -949,12 +949,33 @@ fn golden_ctrl_n_asks_a_new_channels_name_and_gives_the_draft_back() {
     g.finish();
 }
 
-/// Ctrl+N without the keyboard enhancement is the byte 0x0E, which
-/// crossterm's parser reads as Ctrl+n (`parse.rs`: `0x01..=0x1A` is
-/// Ctrl+letter, apart from CR, LF, Tab, ESC and DEL). It asks a name; it
-/// never sends and never quits.
+/// Ctrl+N while a description is being typed keeps the description and says
+/// why nothing opened.
 #[test]
-fn legacy_ctrl_n_byte_never_quits_or_sends() {
+fn ctrl_n_never_throws_away_a_description_being_typed() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    typed(&mut c, "a draft");
+    drawn(&mut c, &[ctrl('3'), ctrl('3')], 80, 25);
+    for _ in 0..3 {
+        press(&mut c, key(KeyCode::Down));
+    }
+    press(&mut c, key(KeyCode::Enter));
+    assert!(bar(&mut c).contains("describe #deploy"), "{}", bar(&mut c));
+    typed(&mut c, "half a line");
+    press(&mut c, ctrl('n'));
+    assert_eq!(c.input().text(), "half a line", "the description stays");
+    assert_eq!(c.status(), "finish the description, or Esc, first");
+    press(&mut c, key(KeyCode::Esc));
+    assert_eq!(c.input().text(), "a draft");
+}
+
+/// Ctrl+N asks a name; it never sends and never quits. Without the keyboard
+/// enhancement the terminal sends the byte 0x0E, which crossterm's parser
+/// reads as this same Ctrl+n event (`parse.rs`: `0x01..=0x1A` is
+/// Ctrl+letter, apart from CR, LF, Tab, ESC and DEL); the test drives the
+/// event, not the byte.
+#[test]
+fn ctrl_n_never_quits_or_sends() {
     for draft in ["", "hello"] {
         let mut c = chat().dry_run(true);
         typed(&mut c, draft);

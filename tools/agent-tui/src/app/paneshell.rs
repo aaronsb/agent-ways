@@ -156,7 +156,7 @@ impl App {
         let focused = self.strip.is_some();
         let Some(p) = &mut self.pane else { return Vec::new() };
         // While the tab bar has the focus the bar says so, over the pane's mode.
-        let (mode, ground) = if focused { ("TABS".to_string(), theme::Ground::Hot) } else { (p.mode(), p.mode_ground()) };
+        let (mode, ground) = if focused { ("TABS".to_string(), theme::Ground::Accent) } else { (p.mode(), p.mode_ground()) };
         let lozenge = self.shape.lozenge(&[Seg::on(format!(" {mode} "), ground).bold()]);
         // What the shell said last (the mouse toggled) until the next key
         // reaches the pane; else the pane's own.
