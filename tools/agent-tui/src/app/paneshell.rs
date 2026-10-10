@@ -84,6 +84,9 @@ impl App {
         if text && ctrl && alt {
             out.push(Binding::help("Alt+1-9", "a tab, where the terminal passes Alt+digits on (Konsole keeps them)"));
         }
+        if let Some(n) = self.new_item_label() {
+            out.push(Binding::help("Ctrl+N", format!("{n}, from the compose box or the tab bar")));
+        }
         if menus {
             out.push(Binding::help("right-click a tab", if keys.menu_on_repeat { "its menu; so does a click on the tab shown" } else { "its menu" }));
         }
@@ -150,8 +153,11 @@ impl App {
         // As the settings tree names it; Shift-drag is in the key help.
         let mouse = if self.mouse { format!("mouse on ({key})") } else { format!("mouse off ({key})") };
         let footer: Vec<Binding> = self.bindings().into_iter().filter(|b| b.footer).collect();
+        let focused = self.strip.is_some();
         let Some(p) = &mut self.pane else { return Vec::new() };
-        let lozenge = self.shape.lozenge(&[Seg::on(format!(" {} ", p.mode()), p.mode_ground()).bold()]);
+        // While the tab bar has the focus the bar says so, over the pane's mode.
+        let (mode, ground) = if focused { ("TABS".to_string(), theme::Ground::Hot) } else { (p.mode(), p.mode_ground()) };
+        let lozenge = self.shape.lozenge(&[Seg::on(format!(" {mode} "), ground).bold()]);
         // What the shell said last (the mouse toggled) until the next key
         // reaches the pane; else the pane's own.
         let said = if self.msg.is_empty() { p.status() } else { Some((self.msg.clone(), Tone::Said)) };
@@ -452,6 +458,8 @@ mod tests {
         /// The tabs whose menu was asked for, in order.
         menus: Vec<usize>,
         tab_keys: TabKeys,
+        /// `Some`: the pane takes Ctrl+N, counting its uses.
+        news: Option<usize>,
     }
 
     impl Pane for Two {
@@ -472,6 +480,12 @@ mod tests {
         }
         fn has_tab_menus(&self) -> bool {
             true
+        }
+        fn new_item_label(&self) -> Option<&'static str> {
+            self.news.map(|_| "new thing")
+        }
+        fn new_item(&mut self) {
+            self.news = self.news.map(|n| n + 1);
         }
         fn tab_keys(&self) -> TabKeys {
             self.tab_keys
@@ -510,7 +524,7 @@ mod tests {
     }
 
     fn app(text: bool) -> App {
-        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default() })
+        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None })
     }
 
     #[test]
@@ -723,7 +737,7 @@ mod tests {
         a.key(k(KeyCode::F(2), KeyModifiers::NONE));
         assert!(a.strip_focused());
         let bar = testkit::rows(&testkit::render(&mut a, 100, 6)).pop().expect("a bar");
-        assert!(bar.contains("tabs: ← → move · Enter menu · Esc back"), "{bar}");
+        assert!(bar.contains("TABS") && bar.contains("← → move · Enter menu · Esc back") && !bar.contains("Ctrl+N"), "{bar}");
         a.key(k(KeyCode::Right, KeyModifiers::NONE));
         assert_eq!(two(&a).tab, 1, "Right shows the next tab");
         a.key(k(KeyCode::Right, KeyModifiers::NONE));
@@ -741,6 +755,44 @@ mod tests {
         a.key(k(KeyCode::F(2), KeyModifiers::NONE));
         a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
         assert_eq!((a.strip_focused(), two(&a).keys), (false, 1), "another key gives the focus back and goes on to the pane");
+    }
+
+    /// The focused tab is in reverse video behind a `▸`, on a channel tab
+    /// and on an action slot; the bar's lozenge reads TABS.
+    #[test]
+    fn the_focused_tab_is_marked_and_the_bar_says_tabs() {
+        let mut a = app(true);
+        let buf = testkit::render(&mut a, 100, 6);
+        assert!(!testkit::text(&buf).contains('▸'), "no marker without the focus");
+        a.key(k(KeyCode::F(2), KeyModifiers::NONE));
+        let buf = testkit::render(&mut a, 100, 6);
+        let (x, y) = testkit::find(&buf, "▸1 one").expect("the marker leads the focused tab");
+        assert!(buf.cell((x, y)).expect("a cell").modifier.contains(Modifier::REVERSED));
+        let (px, _) = testkit::find(&buf, "2 two").expect("the others keep their look");
+        assert!(!buf.cell((px, y)).expect("a cell").modifier.contains(Modifier::REVERSED));
+        a.key(k(KeyCode::Left, KeyModifiers::NONE));
+        let buf = testkit::render(&mut a, 100, 6);
+        let (x, y) = testkit::find(&buf, "▸+").expect("the cursor shows on an action slot");
+        assert!(buf.cell((x, y)).expect("a cell").modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn ctrl_n_is_the_panes_only_when_it_names_an_action() {
+        let mut a = app(true);
+        a.key(ctrl('n'));
+        assert_eq!((two(&a).keys, two(&a).news), (1, None), "a pane without the action gets the key");
+        assert!(!testkit::text(&testkit::render(&mut a, 100, 20)).contains("Ctrl+N"));
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").news = Some(0);
+        a.key(ctrl('n'));
+        assert_eq!((two(&a).keys, two(&a).news), (0, Some(1)), "from the compose box the shell runs it");
+        a.key(k(KeyCode::F(2), KeyModifiers::NONE));
+        let bar = testkit::rows(&testkit::render(&mut a, 100, 6)).pop().expect("a bar");
+        assert!(bar.contains("Ctrl+N new thing"), "{bar}");
+        a.key(ctrl('n'));
+        assert_eq!((two(&a).keys, two(&a).news, a.strip_focused()), (0, Some(2), false), "from the tab bar too, and the focus goes back");
+        a.key(k(KeyCode::F(1), KeyModifiers::NONE));
+        assert!(testkit::text(&testkit::render(&mut a, 100, 24)).contains("new thing, from the compose box or the tab bar"));
     }
 
     #[test]
@@ -783,7 +835,7 @@ mod tests {
                 true
             }
         }
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default() };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
         let mut a = App::with_pane("asks", Asks(two));
         a.key(k(KeyCode::F(1), KeyModifiers::NONE));
         let off = testkit::text(&testkit::render(&mut a, 140, 24));
@@ -825,7 +877,7 @@ mod tests {
 
     #[test]
     fn a_pane_without_tab_menus_gets_no_tab_bar_focus_and_names_none() {
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default() };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
         let mut a = App::with_pane("plain", Plain(two));
         a.key(k(KeyCode::F(2), KeyModifiers::NONE));
         assert!(!a.strip_focused(), "F2 is the pane's");

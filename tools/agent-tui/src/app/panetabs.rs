@@ -5,7 +5,11 @@
 //! - F2 or Ctrl+T gives the bar the focus: Left and Right move along it,
 //!   showing each tab they land on, Enter opens the menu, Esc (or F2 or
 //!   Ctrl+T again) gives the focus back. Any other key gives it back and
-//!   goes where it would have gone.
+//!   goes where it would have gone. The focused tab is drawn in reverse
+//!   video behind a `▸`, and the bottom bar's lozenge reads `TABS`.
+//! - Ctrl+N, where the pane names an action for it
+//!   ([`crate::Pane::new_item_label`]), runs it from the compose box or
+//!   from the tab bar.
 //! - A click on a tab shows it; a click on the tab already shown, or a right
 //!   click, opens its menu.
 //! - An action slot ([`PaneTab::action`], such as `≡` or `+`) has no number
@@ -96,8 +100,14 @@ impl TabKeys {
     }
 }
 
-/// What the bottom bar says while the tab bar has the focus.
-const STRIP_HINT: &str = "tabs: ← → move · Enter menu · Esc back";
+/// What the bottom bar says while the tab bar has the focus, after its
+/// `TABS` lozenge; `new` is the pane's Ctrl+N action, if it has one.
+fn strip_hint(new: Option<&str>) -> String {
+    match new {
+        Some(n) => format!("← → move · Enter menu · Ctrl+N {n} · Esc back"),
+        None => "← → move · Enter menu · Esc back".into(),
+    }
+}
 
 fn width(spans: &[Span]) -> u16 {
     spans.iter().map(|s| s.width() as u16).sum()
@@ -141,6 +151,11 @@ impl App {
         self.pane.as_ref().is_some_and(|p| p.has_tab_menus())
     }
 
+    /// The pane's Ctrl+N action, when its tabs have menus and it names one.
+    pub(super) fn new_item_label(&self) -> Option<&'static str> {
+        self.pane.as_ref().filter(|p| p.has_tab_menus()).and_then(|p| p.new_item_label())
+    }
+
     /// Tell the pane the shell took a key or a click before it.
     pub(super) fn interrupt_pane(&mut self) {
         if let Some(p) = &mut self.pane {
@@ -164,6 +179,15 @@ impl App {
         let keys = self.tab_keys();
         let menus = self.has_tab_menus();
         let toggle = menus && ((keys.f2 && k.code == KeyCode::F(2)) || (keys.ctrl_t && ctrl && k.code == KeyCode::Char('t')));
+        if ctrl && k.code == KeyCode::Char('n') && self.new_item_label().is_some() {
+            self.strip_blur();
+            self.interrupt_pane();
+            if let Some(p) = &mut self.pane {
+                p.new_item();
+            }
+            self.take_pane_open();
+            return true;
+        }
         if let Some(at) = self.strip {
             match k.code {
                 KeyCode::Left => self.strip_move(at, false),
@@ -185,7 +209,7 @@ impl App {
             self.interrupt_pane();
             if let Some(p) = &mut self.pane {
                 self.strip = Some(p.tab());
-                self.msg = STRIP_HINT.into();
+                self.msg = strip_hint(p.new_item_label());
             }
             return true;
         }
@@ -262,7 +286,7 @@ impl App {
     /// The pane's tabs as the shell draws its own: numbered lozenges, the
     /// shown one on the accent, each after its lead, then the trailer. Each
     /// tab, lead and all, is a click target. The tab under the bar's cursor
-    /// is underlined; an action slot carries no number.
+    /// is drawn in reverse video behind a `▸`; an action slot carries no number.
     pub(super) fn draw_pane_tabs(&mut self, f: &mut Frame, area: Rect) {
         self.hits.tabs.clear();
         let cursor = self.strip;
@@ -282,10 +306,14 @@ impl App {
                 number += 1;
             }
             let label = if t.action { format!(" {} ", t.name) } else { format!(" {number} {} ", t.name) };
+            let at_cursor = cursor == Some(i);
+            // The marker takes the label's leading space, so the bar does
+            // not shift when the focus moves.
+            let label = if at_cursor { format!("▸{}", label.strip_prefix(' ').unwrap_or(&label)) } else { label };
             let mut seg = crate::strip::tab_seg(label, i == active && !t.action);
             seg.style = crate::strip::target(seg.style, t.target);
-            if cursor == Some(i) {
-                seg.style = seg.style.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
+            if at_cursor {
+                seg.style = seg.style.add_modifier(Modifier::REVERSED | Modifier::BOLD);
             }
             spans.extend(self.shape.lozenge(&[seg]));
             let w = area.x + width(&spans) - x;
