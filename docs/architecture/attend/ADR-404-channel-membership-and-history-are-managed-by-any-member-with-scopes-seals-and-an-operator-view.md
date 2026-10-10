@@ -3,7 +3,7 @@ contract: adr/v1
 kind: decision
 verb: change
 capability: attend
-amends: ADR-172#Decision
+amends: [ADR-172#Decision, 'ADR-172#Addendum, 2026-10-01: enrollment and one cold-start rule', ADR-503#Decision, 'ADR-504#Note (2026-10-02): a screen that is not a tree is a pane inside `App`']
 basis:
   - operator: aaronsb
     level: directed
@@ -84,6 +84,8 @@ Agents join and leave channels on their own through the CLI (`attend join`, `att
 
 Any member of a channel, agent or human, may invite or enroll a member, remove one, and seal or unseal the channel (D5). Members are agent sessions and human operator sessions alike (ADR-170). The verbs follow attend's existing names: `attend invite <member> [<channel>]` enrolls the member at once (the invite becomes membership, not a request), `attend kick <member> [<channel>]` removes, `attend seal <channel>` and `attend unseal <channel>`. attend-chat's `/invite`, `/kick` and the tab menu's Add agent and Remove agent run the same paths.
 
+- **An invitation brings a briefing.** A join that answers a pending invitation for that member and channel skips the late-join baseline: the room's history stays deliverable, the newest 50 messages, the cap the cold-start rule puts on addressed mail. A self-join with no invitation keeps the baseline. Under D1 the invitation is itself the enrollment, so the briefing is what the enrolled member is handed first.
+
 - **Removal is not a ban.** Removing a member stops delivery to it and records an exclusion for that member and channel. The exclusion blocks only automatic re-enrollment (D4 scopes, inheritance). An explicit `attend join` by the member always succeeds, clears the exclusion, and is logged like any other change. There is no ban state. The one thing that can refuse a join is D5's no-self-join switch.
 - **A self-leave records an exclusion too**, so a leave from a scope- or inherited-membership channel is not undone by the next evaluation.
 - **Every change is logged and announced.** The membership log in attend's cache records actor, verb, member, channel and time. The channel receives a system line naming the actor, such as `@kg-agent sealed #project-a-docs` or `@aaron added @wells`.
@@ -129,17 +131,20 @@ An argument starting with `/`, `~` or `.` is a path; channel names cannot contai
 
 `attend channels` renders the channel tree by scope nesting as indented text: each channel with its scope, member count, sealed marker, and for each member its origin. `attend peers` shows each agent's effective channels. Both are compact, one line per entry, and greppable: an agent reads the same model the operator sees.
 
-### D8. Settings, and the theme from the chat
+### D8. attend-chat edits its own keys, and the theme
 
-The chat's keys are attend's, under `attend.chat.*`, in attend's user file (ADR-503 §13): `tabs.jump`, `tabs.menu_on_repeat`, `tabs.focus_key`, `mouse`, and `sidebar_key` for D9. `attend.channels.membership_cooldown` serves D2. attend registers them in its own schema; ADR-503 needs no amendment for that.
+The chat's keys are attend's, under `attend.chat.*`, in attend's user file: `tabs.jump`, `tabs.menu_on_repeat`, `tabs.focus_key`, `mouse`, and `sidebar_key` for D9. `attend.channels.membership_cooldown` serves D2. attend registers them in its own schema, as ADR-503 Decision 13 provides.
 
-attend-chat may write the one theme choice, ways' `theme.active`, through the shared writer and the declaration `agent_theme::settings` holds. This amends ADR-504's note that attend reads the theme and never writes it: the reason for that note, one owner of the key's definition, holds when the write uses the same declaration and writer `ways settings` uses.
+That decision also says attend's settings "are edited through `ways settings`" and that "`attend` has no settings UI of its own". attend-chat is a separate application (ADR-504 Decision 1), but the keys are attend's, and its `/config` and the common menu's Keybinding set and Mouse items are a second way to edit them. This amends ADR-503 Decision 13: attend-chat may list and set its own `attend.chat.*` keys, through attend-config's writer and the schema `ways settings` reads, so the two stay one definition and one file. `ways settings` still edits every key; `attend` itself still has no settings UI.
+
+On the same terms attend-chat may write the one theme choice, ways' `theme.active`, through the settings writer and the declaration `agent_theme::settings` holds, as ADR-504's note of 2026-10-01 says the theme tab does. Until then the common menu's Theme item changes the look for the session only.
 
 ### D9. The operator screen's layout
 
 - The top row holds the common menu (`≡`) and the channels in use: joined, or active recently. Action slots carry no number, so merged stays tab 1.
 - A collapsible left sidebar shows the full channel tree by scope nesting, expanding and collapsing as a directory browser does, with compact per-row figures: members, unread, time since the last message, and the sealed marker, for example `▸ project-a-root  3👤 12✉ 4m`. Enter or a click on a row opens the same context menu as the tab. `attend.chat.sidebar_key` toggles it.
 - The channel menu gains Seal or Unseal and Auto-join rule… (setting the scope, D4).
+- The tabs of a pane with menus are reached by Ctrl+1-9 where the terminal reports Ctrl+digits (again on the shown tab: its menu), by F2 or Ctrl+T on the tab bar, and by a second click or a right click; Alt+1-9 stays where it arrives. This amends ADR-504's note of 2026-10-02 on panes, which names Alt+1-9 as the tab key beside text: Konsole and GNOME Terminal keep Alt plus a digit for their own tabs.
 
 ### D10. attend-chat may override the cooldown, after asking
 
@@ -168,13 +173,22 @@ The question is a pause, not a lock: anything that drives attend-chat can answer
 - `_groups.yaml` gains per-channel `scope`, `sealed`, `inherit_descendants`, `no_self_join` and per-member `exclusions`; the parser in attend-groups owns them, and an older attend ignores them.
 - The consent asymmetry of issue #393 ends: `/invite` enrolls.
 
-## Implemented with this record, under the accepted decisions
+## Implemented with this record
 
-These fit ADR-136, ADR-170, ADR-172 and ADR-504 as accepted and need none of the above:
+### Under the accepted decisions
 
-- A join (CLI or scene) marks the channel's messages older than the cold-start window seen before writing the membership, and says how many it held back: ADR-136 Decision 2's "keeps a fresh join from dumping history".
+These fit ADR-136, ADR-170 and ADR-172 as accepted and need none of the above:
+
+- A self-join (CLI or scene) marks the channel's messages older than the cold-start window seen before writing the membership, and says how many it held back: ADR-136 Decision 2's "keeps a fresh join from dumping history".
 - `/dissolve` from attend-chat no longer counts the operator's own heartbeat as a live member (ADR-170's guard protects peers working in the channel).
-- attend-chat's tabs: Ctrl+1-9 under the kitty keyboard protocol (Esc asks before quitting where Ctrl+3 is Esc), F2 and Ctrl+T focus the tab bar, a second click or a right click opens a tab's menu, the `+` slot creates a channel, the `≡` common menu, and the `attend.chat.*` keys with `/config`. Add agent invites (the current rule); Clear history runs today's `/purge`; the theme from the common menu holds for the session only, pending D8.
+
+### Ahead of acceptance
+
+These shipped with the record and stand on the decisions named; rejecting a decision takes its item out:
+
+- D1, the invitation briefing: attend-chat's `/invite` and Add agent record a pending invitation beside the room's signals, and the invitee's `attend join` spends it, keeps the newest 50 messages deliverable, and runs a cold session's cold start at once so its first scan does not baseline the briefing away. Add agent still invites rather than enrolls; Clear history still runs today's `/purge`, which keeps messages younger than 90 seconds and any a live agent has not read.
+- D9, the tab keys and menus: Ctrl+1-9 under the kitty keyboard protocol (Esc on an empty line asks before quitting where Ctrl+3 arrives as Esc), F2 and Ctrl+T, menus on a second click or a right click, the `+` slot, and the `≡` common menu.
+- D8, the `attend.chat.*` keys with `/config`, the Keybinding set presets and the mouse item. The theme item holds for the session only.
 
 ## Open questions
 
