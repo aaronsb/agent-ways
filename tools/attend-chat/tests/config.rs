@@ -60,7 +60,7 @@ fn config_lists_sets_refuses_and_applies_at_once() {
     let clear: Vec<KeyEvent> = std::iter::repeat_n(key(KeyCode::Backspace), 40).collect();
     testkit::drive(&mut c, &clear);
     enter(&mut c, "/config mouse true");
-    assert_eq!(c.status(), "mouse = true; takes effect on restart");
+    assert_eq!(c.status(), "mouse = true; mouse takes effect on restart");
 
     // The keys and their values complete as any subcommand does.
     let keys: Vec<KeyEvent> = "/config tabs.f".chars().map(|ch| key(KeyCode::Char(ch))).chain([key(KeyCode::Tab)]).collect();
@@ -68,4 +68,23 @@ fn config_lists_sets_refuses_and_applies_at_once() {
     assert_eq!(c.input().text(), "/config tabs.focus_key ");
     testkit::drive(&mut c, &[key(KeyCode::Char('f')), key(KeyCode::Tab)]);
     assert_eq!(c.input().text(), "/config tabs.focus_key f2 ");
+
+    // A terminal that does not report Ctrl+digits: asking for them warns,
+    // and the bar names the keys that work there.
+    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).heartbeat(false);
+    enter(&mut c, "/config tabs.jump ctrl");
+    assert_eq!(c.status(), "tabs.jump = ctrl · Ctrl+digits do not arrive in this terminal; F2 reaches the tabs");
+    let b = bar(&mut c);
+    assert!(!b.contains("Ctrl+1-9") && b.contains("F2 tabs"), "{b}");
+    enter(&mut c, "/config tabs.jump both");
+    assert!(c.status().ends_with("Alt+1-9 and F2 do"), "{}", c.status());
+    assert!(bar(&mut c).contains("Alt+1-9 tab (again: menu)"));
+
+    // The ≡ menu's keybinding set writes its keys in one go.
+    for k in [KeyCode::F(2), KeyCode::Left, KeyCode::Enter, KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Enter] {
+        testkit::drive(&mut c, &[key(k)]);
+    }
+    assert!(c.status().starts_with("keybinding set: alt"), "{}", c.status());
+    let file = std::fs::read_to_string(attend_config::user_path()).unwrap();
+    assert!(file.contains("jump: alt") && file.contains("focus_key: both"), "{file}");
 }

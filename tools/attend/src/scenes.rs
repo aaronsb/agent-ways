@@ -63,17 +63,22 @@ pub fn activate(scene_name: &str, groups: &Groups) -> Result<String, String> {
     activate_in(&load_scenes(), scene_name, groups)
 }
 
-fn activate_in(scenes: &HashMap<String, Scene>, scene_name: &str, groups: &Groups) -> Result<String, String> {
+/// The scene `scene_name` names, if it can be activated: known, and not a
+/// legacy `rooms:` scene. Checked before anything touches membership.
+pub fn checked<'a>(scenes: &'a HashMap<String, Scene>, scene_name: &str) -> Result<&'a Scene, String> {
     let scene = scenes
         .get(scene_name)
         .ok_or_else(|| format!("unknown scene '{scene_name}' — try: {}",
             scenes.keys().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")))?;
-
     // transition: removed by #717 (ADR-506)
-    // Refuse before touching membership.
     if let Some(e) = scene.legacy_rooms_error(scene_name) {
         return Err(e);
     }
+    Ok(scene)
+}
+
+fn activate_in(scenes: &HashMap<String, Scene>, scene_name: &str, groups: &Groups) -> Result<String, String> {
+    let scene = checked(scenes, scene_name)?;
 
     // Leave all current named channels
     for (name, _) in groups.my_groups() {

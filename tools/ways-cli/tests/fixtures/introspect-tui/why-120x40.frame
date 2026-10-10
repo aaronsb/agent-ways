@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                      ││                                                                              │|
 |│                                      ││                                                                              │|
 |└──────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────┘|
-| why  mouse on (m) │ ? keys · ↑↓ way · j/k read · ←→ frame · esc timeline · f matched · 1-9 tabs · F2 tabs              |
+| why  mouse on (m) │ ? keys · ↑↓ way · j/k read · ←→ frame · esc timeline · f matched · 1-9 tabs                        |
 styles
   0   0-11  Black Cyan BOLD
   0  14-22  White Blue -
@@ -199,6 +199,4 @@ styles
  39  76-77  Cyan - -
  39  78-87  - - DIM|ITALIC
  39  88-91  Cyan - -
- 39  92-98  - - DIM|ITALIC
- 39  99-101 Cyan - -
- 39 102-105 - - DIM|ITALIC
+ 39  92-95  - - DIM|ITALIC

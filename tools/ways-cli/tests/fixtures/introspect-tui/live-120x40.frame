@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│··································································································● forecast 31K → 61K│|
 |│+ ⎯ compaction · window 2 ⎯, ↩ softwaredev/delivery/commits                                                           │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
-| live  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause · f matched · 1-9 tabs · F2 tabs              |
+| live  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space pause · f matched · 1-9 tabs                        |
 styles
   0   0-11  Black Cyan BOLD
   0  14-22  White Blue -
@@ -154,6 +154,4 @@ styles
  39  76-77  Cyan - -
  39  78-87  - - DIM|ITALIC
  39  88-91  Cyan - -
- 39  92-98  - - DIM|ITALIC
- 39  99-101 Cyan - -
- 39 102-105 - - DIM|ITALIC
+ 39  92-95  - - DIM|ITALIC

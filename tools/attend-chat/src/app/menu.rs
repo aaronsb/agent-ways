@@ -68,7 +68,7 @@ pub(super) enum Prompt {
 pub(super) fn items(channel: Option<&str>) -> Vec<String> {
     let items: &[&str] = match channel {
         None => &[CLEAR_VIEW],
-        Some(BASE_CHANNEL_NAME) => &[CLEAR_HISTORY, CLEAR_VIEW],
+        Some(BASE_CHANNEL_NAME) => &[CLEAR_VIEW, CLEAR_HISTORY],
         Some(_) => &[ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE],
     };
     items.iter().map(|s| s.to_string()).collect()
@@ -80,7 +80,7 @@ impl ChatPane {
         if let Some(p) = &self.pending {
             return Some(match p {
                 Pending::ClearHistory(c) => {
-                    format!("clear #{c} history? new agents are no longer caught up on it · y clears · any other key keeps it")
+                    format!("clear #{c} history? deletes what every live agent has read, older than 90 s · y clears · any other key keeps it")
                 }
                 Pending::Delete(c) => format!("delete #{c} and its history? y deletes · any other key keeps it"),
                 Pending::Quit => "quit? y quits · any other key stays · Ctrl-C quits at once".into(),
@@ -167,10 +167,18 @@ impl ChatPane {
             "theme" => return self.theme_picked(value),
             "keys" => {
                 if let Some((_, jump, focus)) = PRESETS.iter().find(|(l, _, _)| *l == value) {
-                    let set = self.run("config", SlashOutcome::Config { key: Some("tabs.jump".into()), value: Some(jump.to_string()) });
-                    if set && !self.dry_run {
-                        self.run("config", SlashOutcome::Config { key: Some("tabs.focus_key".into()), value: Some(focus.to_string()) });
-                        self.say(format!("keybinding set: {value}"), false);
+                    if self.dry_run {
+                        return self.say("dry run: /config not run", false);
+                    }
+                    let dir = std::env::current_dir().unwrap_or_default();
+                    let pairs = [("tabs.jump", *jump), ("tabs.focus_key", *focus)];
+                    match crate::settings::set_many(&pairs, &attend_config::user_path(), &dir) {
+                        Ok(_) => {
+                            self.reload_settings();
+                            let said = format!("keybinding set: {value}{}", self.jump_warning());
+                            self.say(said, false);
+                        }
+                        Err(e) => self.say(e, true),
                     }
                 }
                 return;
@@ -273,6 +281,26 @@ impl ChatPane {
         self.say("cancelled", false);
     }
 
+    /// What to add to a status line when the jump setting asks for Ctrl+digits
+    /// in a terminal that does not report them.
+    pub(super) fn jump_warning(&self) -> &'static str {
+        if self.enhanced || !matches!(self.config.jump.as_str(), "ctrl" | "both") {
+            return "";
+        }
+        if self.config.jump == "both" {
+            " · Ctrl+digits do not arrive in this terminal; Alt+1-9 and F2 do"
+        } else {
+            " · Ctrl+digits do not arrive in this terminal; F2 reaches the tabs"
+        }
+    }
+
+    /// The shell took a key or a click: a waiting question is dropped.
+    pub(super) fn drop_question(&mut self) {
+        if self.pending.take().is_some() {
+            self.say("kept", false);
+        }
+    }
+
     /// A key while a step waits: `y` goes ahead, any other key keeps
     /// things as they are. True when the screen should quit.
     pub(super) fn answer(&mut self, yes: bool) -> bool {
@@ -342,7 +370,7 @@ mod tests {
     #[test]
     fn each_tab_offers_what_its_channel_allows() {
         assert_eq!(items(None), [CLEAR_VIEW]);
-        assert_eq!(items(Some("open")), [CLEAR_HISTORY, CLEAR_VIEW]);
+        assert_eq!(items(Some("open")), [CLEAR_VIEW, CLEAR_HISTORY], "the harmless item first");
         assert_eq!(items(Some("deploy")), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE]);
     }
 }

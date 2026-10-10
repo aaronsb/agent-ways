@@ -57,26 +57,35 @@ pub fn listing(dir: &Path) -> String {
     format!("{} · /config <key> <value> sets one", out.join(" · "))
 }
 
-/// Set chat key `key` (its short name) to `raw`, in the user file at
-/// `user`, read back through the layers for `dir`. Says what happened:
-/// written, unchanged, or written but a higher layer still decides it.
+/// Set chat key `key` (its short name) to `raw` in the user file at
+/// `user`: one key, as [`set_many`] sets several.
 pub fn set(key: &str, raw: &str, user: &Path, dir: &Path) -> Result<String, String> {
-    let name = format!("{PREFIX}{}", key.trim_start_matches(PREFIX));
-    let Some(spec) = SCHEMA.keys.iter().find(|s| s.name == name && KEYS.contains(&&name[PREFIX.len()..])) else {
-        return Err(format!("/config: {key} is not a chat key ({})", KEYS.join(", ")));
-    };
+    set_many(&[(key, raw)], user, dir)
+}
+
+/// Set chat keys, each a short name and a raw value, in the user file at
+/// `user`, in one locked write: all or nothing. Says what changed.
+///
+/// The chat's keys are user-scoped, so no project layer can set them and
+/// what is written is what the chat reads; nothing can override it today.
+pub fn set_many(pairs: &[(&str, &str)], user: &Path, dir: &Path) -> Result<String, String> {
     let before = layers(dir);
-    let value = spec.parse_cli(raw, &before, &[]).map_err(|e| format!("/config {key}: {e}"))?;
-    let changed = attend_config::write(user, &[(name.as_str(), value.clone())]).map_err(|e| format!("/config {key}: {e}"))?;
-    let after = layers(dir);
-    let r = resolve(spec, &[], &after);
-    let short = &name[PREFIX.len()..];
-    if r.value.as_ref() != Some(&value) {
-        let from = r.layer.map_or("the default", |i| after[i].name.as_str());
-        return Ok(format!("{short} written to {}, but {from} still sets it", user.display()));
+    let mut values = Vec::new();
+    for (key, raw) in pairs {
+        let short = key.trim_start_matches(PREFIX);
+        if !KEYS.contains(&short) {
+            return Err(format!("/config: {key} is not a chat key ({})", KEYS.join(", ")));
+        }
+        let name = format!("{PREFIX}{short}");
+        let spec = SCHEMA.keys.iter().find(|s| s.name == name).ok_or_else(|| format!("/config: {key} is not in attend's schema"))?;
+        let value = spec.parse_cli(raw, &before, &[]).map_err(|e| format!("/config {short}: {e}"))?;
+        values.push((name, short.to_string(), value));
     }
-    let when = if short == "mouse" { "; takes effect on restart" } else { "" };
-    Ok(if changed { format!("{short} = {}{when}", plain(&value)) } else { format!("{short} is already {}", plain(&value)) })
+    let writes: Vec<(&str, Value)> = values.iter().map(|(n, _, v)| (n.as_str(), v.clone())).collect();
+    let changed = attend_config::write(user, &writes).map_err(|e| format!("/config: {e}"))?;
+    let shown: Vec<String> = values.iter().map(|(_, s, v)| format!("{s} = {}", plain(v))).collect();
+    let when = if values.iter().any(|(_, s, _)| s == "mouse") { "; mouse takes effect on restart" } else { "" };
+    Ok(if changed { format!("{}{when}", shown.join(", ")) } else { format!("already {}", shown.join(", ")) })
 }
 
 #[cfg(test)]

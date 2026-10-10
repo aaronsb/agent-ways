@@ -16,7 +16,7 @@ agent-tui frame 80x25
 |│M-m                mouse on or off (off lets the terminal select text)        │|
 |│Shift-drag         selects text while the mouse is on, in most terminals      │|
 |│middle-click       pastes only while the mouse is off                         │|
-|│Esc ^C             quit; asks first over unsaved work                         │|
+|│Esc ^C             quit; asks over a draft; else Esc asks and y quits         │|
 |│click              a tab shows it; the wheel scrolls                          │|
 |│                                                                              │|
 |│help: chat                                                                    │|

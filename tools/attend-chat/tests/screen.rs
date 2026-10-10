@@ -813,26 +813,70 @@ fn the_menus_differ_by_tab() {
 fn clear_history_asks_first_and_y_runs_the_purge() {
     let mut g = goldens();
     let mut c = chat().enhanced(true).dry_run(true);
-    press(&mut c, ctrl('2'));
-    press(&mut c, ctrl('2'));
-    press(&mut c, key(KeyCode::Enter));
-    assert!(bar(&mut c).contains("clear #open history?"), "{}", bar(&mut c));
+    // #open's menu puts the harmless item first: Clear view, then Clear history.
+    let open_clear_history = |c: &mut Chat| {
+        press(c, ctrl('2'));
+        press(c, ctrl('2'));
+        press(c, key(KeyCode::Down));
+        press(c, key(KeyCode::Enter));
+    };
+    open_clear_history(&mut c);
+    assert!(bar(&mut c).contains("clear #open history? deletes what every live agent has read, older than 90 s"), "{}", bar(&mut c));
     g.check("tab-menu-confirm-120x40", &testkit::render_screen(&mut c, 120, 40));
     assert!(press(&mut c, key(KeyCode::Esc)), "Esc keeps the history and the chat");
     assert_eq!(c.status(), "kept");
     press(&mut c, ctrl('2'));
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
     press(&mut c, key(KeyCode::Char('y')));
     assert_eq!(c.status(), "dry run: /purge not run");
-    // Delete channel on a named channel: the last item.
+    assert!(c.input().is_empty(), "the y answered; it typed nothing");
+    // Delete channel on a named channel: the last item. Another character
+    // keeps the channel and goes on into the draft.
     press(&mut c, ctrl('3'));
     press(&mut c, ctrl('3'));
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Enter));
     assert!(bar(&mut c).contains("delete #deploy and its history?"), "{}", bar(&mut c));
     press(&mut c, key(KeyCode::Char('n')));
-    assert_eq!(c.status(), "kept");
+    assert_eq!((c.status(), c.input().text()), ("kept", "n"));
     g.finish();
+}
+
+#[test]
+fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
+    let ask = |c: &mut Chat| {
+        press(c, ctrl('3'));
+        press(c, ctrl('3'));
+        press(c, key(KeyCode::End));
+        press(c, key(KeyCode::Enter));
+        assert!(bar(c).contains("delete #deploy"), "{}", bar(c));
+    };
+    // A tab change.
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask(&mut c);
+    press(&mut c, ctrl('4'));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+    assert!(!bar(&mut c).contains("delete #deploy"));
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.input().text(), "y", "the question is gone: y is typing");
+    // The tab bar's focus.
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask(&mut c);
+    press(&mut c, key(KeyCode::F(2)));
+    assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Esc));
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.input().text(), "y");
+    // A click on a tab.
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask(&mut c);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "2 #open").expect("the tab is drawn");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.input().text(), "y");
 }
 
 #[test]

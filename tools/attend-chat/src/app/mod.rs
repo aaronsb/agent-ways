@@ -273,6 +273,8 @@ impl ChatPane {
 
     fn set_tab(&mut self, t: Tab) {
         if t != self.foreground {
+            // A question asked on one tab is not answered on another.
+            self.drop_question();
             self.foreground = t;
             self.feed = FeedState::default();
             self.invalidate();
@@ -287,6 +289,7 @@ impl ChatPane {
         // peer dissolves the foregrounded channel, Enter agrees with the
         // destination flag, which has degraded to #open.
         let fg = self.normal_tab();
+        let sets_jump = self.input.text().trim_start().starts_with("/config tabs.jump");
         match handle_enter(self.input.text(), &self.signals, &fg) {
             EnterAction::None => {}
             EnterAction::ClearWithStatus(s) => {
@@ -320,6 +323,10 @@ impl ChatPane {
             }
         }
         self.reload_settings();
+        if sets_jump && !self.status_is_error {
+            let said = format!("{}{}", self.status, self.jump_warning());
+            self.say(said, false);
+        }
         self.stale();
     }
 
@@ -514,7 +521,14 @@ impl Pane for ChatPane {
         let plain = !m.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         if self.pending.is_some() {
             let yes = plain && matches!(k.code, KeyCode::Char('y' | 'Y'));
-            return if self.answer(yes) { Keyed::Quit } else { Keyed::Done };
+            if self.answer(yes) {
+                return Keyed::Quit;
+            }
+            // Any other character keeps things as they are and is typing:
+            // it goes on into the draft. Other keys only answer.
+            if yes || !(plain && matches!(k.code, KeyCode::Char(_))) {
+                return Keyed::Done;
+            }
         }
         if self.prompt.is_some() {
             match k.code {
@@ -620,8 +634,24 @@ impl Pane for ChatPane {
         (!self.input.is_empty() || held).then(|| "a draft in the compose box".to_string())
     }
 
+    fn has_tab_menus(&self) -> bool {
+        true
+    }
+
     fn tab_menu(&mut self, i: usize) {
         self.open_tab_menu(i);
+    }
+
+    fn interrupted(&mut self) {
+        self.drop_question();
+    }
+
+    fn quit_help(&self) -> Option<String> {
+        Some(if self.enhanced {
+            "quit; asks first over a draft".into()
+        } else {
+            "quit; asks over a draft; else Esc asks and y quits".into()
+        })
     }
 
     fn take_open(&mut self) -> Option<Open> {

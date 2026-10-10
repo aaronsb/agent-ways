@@ -114,3 +114,18 @@ fn a_warm_session_answering_an_invitation_gets_the_briefing_too() {
     let drained = f.drain("plain");
     assert!(drained.contains("briefing 0") && drained.contains("briefing 2"), "{drained}");
 }
+
+#[test]
+fn a_scene_holds_back_its_channels_history_and_says_so() {
+    let f = warm_agent("join-backlog-scene");
+    let scenes = f.home.join("config").join("attend").join("scenes.yaml");
+    std::fs::write(&scenes, "workroom:\n  channels: [testing]\nlegacy:\n  rooms: [testing]\n").unwrap();
+    for i in 0..3 {
+        f.put("@testing", &format!("other-old-{i}"), &format!("{OLD} {i}"), 10 * MINUTE);
+    }
+    // A scene that cannot activate marks nothing.
+    assert!(!f.attend(&["scene", "legacy"]).status.success());
+    let out = f.ok(&["scene", "workroom"]);
+    assert!(out.contains("joined: testing (3 earlier messages not shown; attend inbox)"), "{out}");
+    assert!(!f.drain("plain").contains(OLD));
+}

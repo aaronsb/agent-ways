@@ -148,9 +148,27 @@ pub trait Pane: Any {
     /// does nothing.
     fn set_tab(&mut self, i: usize);
 
+    /// Whether the pane's tabs have menus ([`Pane::tab_menu`]). Without
+    /// them the shell offers no tab-bar focus (F2, Ctrl+T), no menu on a
+    /// repeated jump or a right click, and names none of those keys.
+    fn has_tab_menus(&self) -> bool {
+        false
+    }
+
     /// Open tab `i`'s menu, through [`Pane::take_open`]; on an action slot,
     /// its action. Nothing by default.
     fn tab_menu(&mut self, _i: usize) {}
+
+    /// The shell took a key or a click before the pane saw it: the tab bar
+    /// got the focus, a tab was clicked. A pane waiting on an answer (a
+    /// `y` to confirm) drops the question.
+    fn interrupted(&mut self) {}
+
+    /// How the key help describes quitting, when the pane's differs from
+    /// the shell's (asking first over unsaved work).
+    fn quit_help(&self) -> Option<String> {
+        None
+    }
 
     /// How the tabs are reached from the keyboard, from the pane's settings.
     fn tab_keys(&self) -> super::panetabs::TabKeys {

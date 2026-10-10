@@ -129,6 +129,25 @@ impl App {
         self.tab_keys().ctrl(self.enhanced)
     }
 
+    /// Whether the footer names Ctrl+digits: only where they arrive as
+    /// themselves. A setting that asks for them in a terminal that folds
+    /// them into other keys leaves the footer to the keys that work.
+    pub(super) fn ctrl_shown(&self) -> bool {
+        self.ctrl_jump() && self.enhanced
+    }
+
+    /// Whether the pane's tabs have menus.
+    pub(super) fn has_tab_menus(&self) -> bool {
+        self.pane.as_ref().is_some_and(|p| p.has_tab_menus())
+    }
+
+    /// Tell the pane the shell took a key or a click before it.
+    pub(super) fn interrupt_pane(&mut self) {
+        if let Some(p) = &mut self.pane {
+            p.interrupted();
+        }
+    }
+
     /// Whether Alt+digits jump to a tab here.
     pub(super) fn alt_jump(&self) -> bool {
         self.tab_keys().alt(self.enhanced)
@@ -143,7 +162,8 @@ impl App {
     pub(super) fn pane_tab_key(&mut self, k: KeyEvent) -> bool {
         let ctrl = k.modifiers == KeyModifiers::CONTROL;
         let keys = self.tab_keys();
-        let toggle = (keys.f2 && k.code == KeyCode::F(2)) || (keys.ctrl_t && ctrl && k.code == KeyCode::Char('t'));
+        let menus = self.has_tab_menus();
+        let toggle = menus && ((keys.f2 && k.code == KeyCode::F(2)) || (keys.ctrl_t && ctrl && k.code == KeyCode::Char('t')));
         if let Some(at) = self.strip {
             match k.code {
                 KeyCode::Left => self.strip_move(at, false),
@@ -162,6 +182,7 @@ impl App {
             return true;
         }
         if toggle {
+            self.interrupt_pane();
             if let Some(p) = &mut self.pane {
                 self.strip = Some(p.tab());
                 self.msg = STRIP_HINT.into();
@@ -219,7 +240,8 @@ impl App {
     pub(super) fn pane_tab_or_menu(&mut self, i: usize) {
         let Some(p) = &mut self.pane else { return };
         let Some(t) = p.tabs().get(i).cloned() else { return };
-        if t.action || (p.tab() == i && p.tab_keys().menu_on_repeat) {
+        let menus = p.has_tab_menus();
+        if menus && (t.action || (p.tab() == i && p.tab_keys().menu_on_repeat)) {
             self.open_tab_menu(i);
         } else if p.tab() != i {
             p.set_tab(i);
@@ -229,6 +251,9 @@ impl App {
     /// Open tab `i`'s menu, over the pane.
     pub(super) fn open_tab_menu(&mut self, i: usize) {
         if let Some(p) = &mut self.pane {
+            if !p.has_tab_menus() {
+                return;
+            }
             p.tab_menu(i);
         }
         self.take_pane_open();

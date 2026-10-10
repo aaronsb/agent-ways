@@ -401,6 +401,10 @@ impl App {
         let mut captured = false;
         let mut schedule = Schedule::new(Instant::now());
         if self.pane.as_ref().is_some_and(|p| p.keyboard_enhancement()) {
+            // A frame first: the probe waits on the terminal's answer, up
+            // to crossterm's timeout where none comes, and a blank screen
+            // through that wait reads as a hang.
+            term.draw(|f| self.draw(f))?;
             let on = enable_keyboard_enhancement();
             self.set_keyboard_enhanced(on);
         }

@@ -63,18 +63,19 @@ impl App {
         let k = |plain: &str, chord: &str| if text { chord.to_string() } else { plain.to_string() };
         let mut out = vec![Binding::new(k("?", "F1"), "keys")];
         let keys = self.tab_keys();
-        let again = if keys.menu_on_repeat { "tab (again: menu)" } else { "tab" };
-        let (ctrl, alt) = (self.ctrl_jump(), self.alt_jump());
+        let menus = self.has_tab_menus();
+        let again = if keys.menu_on_repeat && menus { "tab (again: menu)" } else { "tab" };
+        let (ctrl, alt) = (self.ctrl_shown(), self.alt_jump());
         match (text, ctrl, alt) {
             (false, _, _) => out.push(Binding::new("1-9", "tabs")),
             (true, true, _) => out.push(Binding::new("Ctrl+1-9", again)),
             (true, false, true) => out.push(Binding::new("Alt+1-9", again)),
             (true, false, false) => {}
         }
-        if let Some(f) = keys.focus_label() {
+        if let Some(f) = keys.focus_label().filter(|_| menus) {
             out.push(Binding::new(f, "tabs"));
         }
-        if keys.f2 && keys.ctrl_t {
+        if menus && keys.f2 && keys.ctrl_t {
             out.push(Binding::help("Ctrl+T", "the tab bar, as F2: ← → move, Enter its menu, Esc back"));
         }
         if !text && ctrl {
@@ -83,12 +84,15 @@ impl App {
         if text && ctrl && alt {
             out.push(Binding::help("Alt+1-9", "a tab, where the terminal passes Alt+digits on (Konsole keeps them)"));
         }
-        out.push(Binding::help("right-click a tab", if keys.menu_on_repeat { "its menu; so does a click on the tab shown" } else { "its menu" }));
+        if menus {
+            out.push(Binding::help("right-click a tab", if keys.menu_on_repeat { "its menu; so does a click on the tab shown" } else { "its menu" }));
+        }
+        let quit = self.pane.as_ref().and_then(|p| p.quit_help()).unwrap_or_else(|| "quit; asks first over unsaved work".into());
         out.extend([
             Binding::help(self.mouse_key(), "mouse on or off (off lets the terminal select text)"),
             Binding::help("Shift-drag", "selects text while the mouse is on, in most terminals"),
             Binding::help("middle-click", "pastes only while the mouse is off"),
-            Binding::help(k("q Esc ^C", "Esc ^C"), "quit; asks first over unsaved work"),
+            Binding::help(k("q Esc ^C", "Esc ^C"), quit),
             Binding::help("click", "a tab shows it; the wheel scrolls"),
         ]);
         out
@@ -351,6 +355,7 @@ impl App {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
+                    self.interrupt_pane();
                     return self.pane_tab_or_menu(i);
                 }
                 if self.hits.pane.contains(at) {
@@ -361,6 +366,7 @@ impl App {
             }
             MouseEventKind::Down(MouseButton::Right) => {
                 if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
+                    self.interrupt_pane();
                     return self.open_tab_menu(i);
                 }
             }
@@ -463,6 +469,9 @@ mod tests {
         }
         fn tab_menu(&mut self, i: usize) {
             self.menus.push(i);
+        }
+        fn has_tab_menus(&self) -> bool {
+            true
         }
         fn tab_keys(&self) -> TabKeys {
             self.tab_keys
@@ -783,6 +792,63 @@ mod tests {
         let on = testkit::text(&testkit::render(&mut a, 140, 24));
         assert!(on.contains("Ctrl+digits arrive"), "{on}");
         assert!(!testkit::text(&testkit::render(&mut app(true), 140, 24)).contains("keyboard:"), "a pane that did not ask says nothing");
+    }
+
+    /// A pane whose tabs have no menus, as `ways introspect` and `ways
+    /// projects`: no tab-bar focus, no menu, and none of their keys named.
+    struct Plain(Two);
+    impl Pane for Plain {
+        fn palette(&self) -> theme::Palette {
+            self.0.palette()
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            vec![PaneTab::new("one"), PaneTab::new("two")]
+        }
+        fn tab(&mut self) -> usize {
+            self.0.tab
+        }
+        fn set_tab(&mut self, i: usize) {
+            self.0.tab = i;
+        }
+        fn tab_menu(&mut self, i: usize) {
+            self.0.menus.push(i);
+        }
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, _: KeyEvent) -> Keyed {
+            self.0.keys += 1;
+            Keyed::Done
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn a_pane_without_tab_menus_gets_no_tab_bar_focus_and_names_none() {
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default() };
+        let mut a = App::with_pane("plain", Plain(two));
+        a.key(k(KeyCode::F(2), KeyModifiers::NONE));
+        assert!(!a.strip_focused(), "F2 is the pane's");
+        a.key(k(KeyCode::Char('2'), KeyModifiers::NONE));
+        a.key(k(KeyCode::Char('2'), KeyModifiers::NONE));
+        let p: &Plain = a.pane_ref().expect("the pane");
+        assert_eq!((p.0.tab, p.0.menus.len()), (1, 0), "a repeated jump opens no menu");
+        let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
+        assert!(footer.contains("1-9 tabs") && !footer.contains("F2"), "{footer}");
+        a.key(k(KeyCode::Char('?'), KeyModifiers::NONE));
+        let help = testkit::text(&testkit::render(&mut a, 140, 30));
+        assert!(!help.contains("right-click") && !help.contains("Ctrl+T"), "{help}");
+    }
+
+    #[test]
+    fn the_footer_names_ctrl_digits_only_where_they_arrive() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").tab_keys = TabKeys { jump: Jump::Ctrl, ..TabKeys::default() };
+        let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
+        assert!(!footer.contains("Ctrl+1-9") && footer.contains("F2 tabs"), "not reported here: {footer}");
+        a.set_keyboard_enhanced(true);
+        let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
+        assert!(footer.contains("Ctrl+1-9 tab (again: menu)"), "{footer}");
     }
 
     #[test]

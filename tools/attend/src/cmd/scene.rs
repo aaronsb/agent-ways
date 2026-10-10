@@ -5,17 +5,17 @@ use crate::util::get_groups;
 
 pub(crate) fn cmd_scene(name: &str) {
     let r = get_groups();
+    let all = scenes::load_scenes();
     // A scene's channels are joined as `attend join` joins one: their old
-    // messages are marked seen first.
-    if let Some(scene) = scenes::load_scenes().get(name) {
-        for channel in &scene.channels {
-            crate::util::baseline_joined_room(&r, channel);
-        }
-    }
+    // messages are marked seen first, once the scene is known to activate.
+    let held = match scenes::checked(&all, name) {
+        Ok(scene) => scene.channels.iter().map(|c| crate::util::baseline_joined_room(&r, c)).sum(),
+        Err(_) => 0,
+    };
     match scenes::activate(name, &r) {
         Ok(result) => {
             settle_scene_enrollment(name, &r);
-            println!("[attend] scene '{name}': {result}");
+            println!("[attend] scene '{name}': {result}{}", crate::util::backlog_note(held));
         }
         Err(e) => {
             eprintln!("[attend] scene: {e}");
