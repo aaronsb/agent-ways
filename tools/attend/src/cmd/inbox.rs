@@ -251,7 +251,7 @@ const DRAIN_RENDER_MAX: usize = 10;
 
 /// One scanned pending message. Module scope (not fn-local) so the scan
 /// core is testable without the identity/HOME plumbing around it.
-struct Drained {
+pub(crate) struct Drained {
     mtime: std::time::SystemTime,
     when: String,
     sender: String,
@@ -259,7 +259,7 @@ struct Drained {
     /// display label is presentation over it, never a substitute.
     sender_id: String,
     scope: String,
-    id: String,
+    pub(crate) id: String,
     body: String,
     source_cwd: String,
 }
@@ -274,10 +274,10 @@ impl DrainedView for Drained {
 
 /// What one drain scan found: the messages to deliver, the seen-set keys
 /// to record, and on a cold start the line announcing what it held back.
-struct Scan {
-    delivered: Vec<Drained>,
-    mark: Vec<String>,
-    note: Option<String>,
+pub(crate) struct Scan {
+    pub(crate) delivered: Vec<Drained>,
+    pub(crate) mark: Vec<String>,
+    pub(crate) note: Option<String>,
 }
 
 /// The scope label a drained message carries for its room.
@@ -302,7 +302,7 @@ fn room_label(room: &Room) -> String {
 /// addressed mail is delivered whatever its age, old `#open` and channel
 /// backlog is marked without being shown, and the scan reports a note
 /// counting what it held back.
-fn scan_pending(
+pub(crate) fn scan_pending(
     scan_dirs: &[attend_groups::ReceiveDir],
     seen: &std::collections::HashSet<String>,
     own_session_id: &str,

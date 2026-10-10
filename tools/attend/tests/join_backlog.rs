@@ -70,3 +70,47 @@ fn a_late_join_under_attend_run_holds_back_the_history_too() {
     run.wait_for("the live message", Duration::from_secs(30), |r| r.output().contains(LIVE));
     assert!(!run.output().contains(OLD), "the room's history is not delivered: {}", run.output());
 }
+
+/// Record a pending invitation for the fixture's session, as attend-chat's
+/// `/invite` does.
+fn invite(f: &Fixture, channel: &str) {
+    attend_groups::Groups::new(&f.signals(), "").invite(channel, &f.sid).unwrap();
+}
+
+#[test]
+fn a_join_that_answers_an_invitation_delivers_the_rooms_recent_history() {
+    // Cold, as an invited agent usually is: its join is what enrolls it.
+    let f = Fixture::new("join-invited-cold");
+    for i in 0..60 {
+        // Ten minutes and more old: past the cold-start window.
+        f.put("@testing", &format!("other-brief-{i:02}"), &format!("briefing {i:02}"), 10 * MINUTE + Duration::from_secs(60 - i));
+    }
+    f.put(&f.project_tray(), "other-addressed", "addressed before the join", 30 * MINUTE);
+    f.put("_broadcast", "other-open", "old open chatter", 30 * MINUTE);
+    invite(&f, "testing");
+
+    let joined = f.ok(&["join", "testing"]);
+    assert!(joined.contains("invited: 50 earlier message(s) to read, 10 older not shown"), "{joined}");
+    let drained = f.drain("plain");
+    assert!(drained.contains("51 message(s) drained"), "the 50 newest of the room and the addressed mail: {drained}");
+    assert!(drained.contains("briefing 59") && drained.contains("briefing 10"), "{drained}");
+    assert!(!drained.contains("briefing 09"), "older than the newest 50: {drained}");
+    assert!(drained.contains("addressed before the join"), "{drained}");
+    assert!(!drained.contains("old open chatter"), "the rest of the cold start still holds: {drained}");
+    // The invitation is spent: leaving and joining again is a self-join.
+    f.ok(&["leave", "testing"]);
+    f.put("@testing", "other-later", "later history", 10 * MINUTE);
+    assert!(f.ok(&["join", "testing"]).contains("1 earlier message not shown"));
+}
+
+#[test]
+fn a_warm_session_answering_an_invitation_gets_the_briefing_too() {
+    let f = warm_agent("join-invited-warm");
+    for i in 0..3 {
+        f.put("@testing", &format!("other-brief-{i}"), &format!("briefing {i}"), 10 * MINUTE);
+    }
+    invite(&f, "testing");
+    assert!(f.ok(&["join", "testing"]).contains("invited: 3 earlier message(s) to read"));
+    let drained = f.drain("plain");
+    assert!(drained.contains("briefing 0") && drained.contains("briefing 2"), "{drained}");
+}

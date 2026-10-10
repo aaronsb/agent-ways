@@ -92,9 +92,46 @@ pub fn room_backlog(dir: &Path) -> Vec<String> {
     keys
 }
 
+/// The seen-set keys of a room's signals beyond the newest `keep`, by age:
+/// what an invited session's join holds back of the room's history, so the
+/// briefing it is handed is capped as addressed mail is ([`ADDRESSED_MAX`]).
+pub fn room_beyond_newest(dir: &Path, keep: usize) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut aged: Vec<(Duration, String)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            if !name.ends_with(".signal") {
+                return None;
+            }
+            let age = e.metadata().ok()?.modified().ok()?.elapsed().unwrap_or_default();
+            Some((age, crate::seen_key(&name)))
+        })
+        .collect();
+    // Newest first; everything after the first `keep` is held back.
+    aged.sort();
+    let mut out: Vec<String> = aged.into_iter().skip(keep).map(|(_, k)| k).collect();
+    out.sort();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn beyond_the_newest_is_everything_but_the_newest_n() {
+        let dir = std::env::temp_dir().join(format!("attend-room-newest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let now = std::time::SystemTime::now();
+        for (name, mins) in [("a.signal", 30), ("b.signal", 20), ("c.signal", 10), ("note.invite", 40)] {
+            let f = std::fs::File::create(dir.join(name)).unwrap();
+            f.set_modified(now - Duration::from_secs(mins * 60)).unwrap();
+        }
+        assert_eq!(room_beyond_newest(&dir, 2), vec!["a.signal".to_string()]);
+        assert!(room_beyond_newest(&dir, 50).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn a_rooms_backlog_is_its_old_signals_only() {

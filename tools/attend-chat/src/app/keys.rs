@@ -478,9 +478,12 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
         Err(e) => return EnterAction::StatusOnly(e),
     };
     let dest = cwd_dir(&peer.root);
-    let body = format!("you're invited to #{g} — join with: attend join {g}");
+    let body = format!("you're invited to #{g} — join with: attend join {g} (its recent history is yours to read)");
     match write_signal(&dest, &body) {
         Ok(_) => {
+            // The invitee's join answers this: it keeps the room's recent
+            // history to read rather than holding it back (ADR-404).
+            let _ = attend_groups::Groups::new(&signals_base(), "").invite(&g, &peer.session_id);
             let status = format!("invited @{} to #{g}", peer.display);
             // Same echo rule as directed sends: synthesize only when
             // the destination isn't a dir our own watcher surfaces.
