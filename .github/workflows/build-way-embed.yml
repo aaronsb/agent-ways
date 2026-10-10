@@ -17,6 +17,9 @@ on:
 
 jobs:
   build:
+    # A release bump PR changes only a version line and the lockfile; the tag
+    # push that follows it builds and tests every platform.
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release/')
     uses: ./.github/workflows/reusable-build.yml
     permissions:
       contents: write  # the release job publishes; the others drop to read
