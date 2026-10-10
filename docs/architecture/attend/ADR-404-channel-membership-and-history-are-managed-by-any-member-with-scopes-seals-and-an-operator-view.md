@@ -34,6 +34,11 @@ basis:
     said: "review of ADR-404: add enrolls directly and invite is a request, both for agents and humans; replay a message to a session only if it was a member when it was posted, marked by membership events in the channel's history, directed mail only to its addressee, with an attend history command for the rest; agents and operators both set scopes; no no_self_join switch; a channel's name and its path are synonyms; the top row is an active-channel switcher by recency; the override's friction is for an agent driving attend-chat, and it is recorded as an event"
     via: relayed by the main session, 2026-10-10
     paraphrase: true
+  - operator: aaronsb
+    level: directed
+    said: lineage confirmed (clear, resume and compaction continue the agent; a fresh process in the same directory is a new agent); a new agent gets no replay, only a hint that N messages in a channel may be relevant because its predecessor was involved, carrying the session distance, labelled likely relevant or probably stale by thresholds in attend's settings
+    via: relayed by the main session, 2026-10-10
+    paraphrase: true
   - evidence: "/purge keeps any signal a live consumer has not seen (tools/attend-chat/src/app/keys.rs, purge_channel_in) and never reaches a project tray; the cold-start rule delivers addressed project-tray mail whatever its age, the newest 50 (tools/attend-state/src/cold_start.rs, plan); a reproduction in an isolated cache showed a new agent drained all 30 day-old addressed messages after #open and channel history were deleted"
   - evidence: "/invite writes a directed signal and the invitee must run attend join itself (tools/attend-chat/src/app/keys.rs, run_invite: consent asymmetry, issue #393); /kick removes without consent"
   - precedent: ADR-136
@@ -112,19 +117,26 @@ The cooldown is universal: every channel, `#open` included, with no per-channel 
 
 ### D3. A session is replayed what it was a member for
 
-*Operator: revised 2026-10-10 (rewritten around membership events). The lineage rule is proposed by the main session and awaits the operator's confirmation.*
+*Operator: revised 2026-10-10 (rewritten around membership events). D3d: Operator: agreed 2026-10-10, with session distance.*
 
 **D3a. Membership events in the history.** Every add, invite, accepted invite, join, leave and kick writes a membership event into the channel's history, beside its messages: the member, its session id, the time, and the actor. `#open` takes an implicit join when a session enrolls (ADR-172's addendum).
 
 **D3b. Replay follows membership.** A message is replayed to session S only if S was a member when the message was posted: after S's join event, with no leave or kick of S between. Directed mail is replayed only to the session it was addressed to, by ADR-401's addressee field, not to every later session in the project. This replaces the cold-start rule's time window (ADR-172, addendum of 2026-10-01) for both conduits; the seen-set still keeps delivery to once.
 
-A session that a message fails the rule for is not replayed it. It gets one line per channel instead: `N messages in history — attend history <channel> to read`. `attend history <channel>` is a new read-only command that lists the channel's history, membership events included, and marks nothing seen.
+A session that a message fails the rule for is not replayed it. A new agent (D3d) is replayed nothing from before its first join; what it may need is offered as D3f's hint, one line per channel, and otherwise as `N messages in history — attend history <channel> to read`. `attend history <channel>` is a new read-only command that lists the channel's history, membership events included, and marks nothing seen.
 
 **D3c. The briefing of an add or an invitation.** A member brought in by someone else needs the conversation it is brought into, and its own join event postdates that conversation. So an add or an invitation carries a replay-from point, recorded in its membership event: by default 60 minutes before the add or the invitation, capped at the newest 50 messages, the cap ADR-172 gives addressed mail. The adder or inviter may set it: `attend add|invite <member> [<channel>] --since <duration|message-id>`. When the invitee's join answers the invitation, or when the add lands, the member's replay position starts at that point rather than at its join. A self-join with no invitation starts at the join.
 
 *Why this point, and not another:* the alternative anchors were the inviter's own last membership change, which is arbitrary (a long-time member would brief everything, one who just joined nothing), and the invitee's join, which briefs nothing. The person who brings a member in decides what it needs; a default window before that moment covers the conversation that prompted it, and the cap bounds a busy channel.
 
 **D3d. Session lineage.** A session that continues another (after `/clear`, `--resume` or a compaction) is the same agent: it inherits the earlier session's memberships and replay positions. The link is made at `SessionStart` from the hook's source, as the task-list carry-forward links them (`gh-tasks attach`): `compact` keeps the session id; `clear` gives the same Claude Code process a new id, which attend already follows by the process key (`attend_presence::enrollment::previous_id`); `resume` is recorded under the session it resumes. A new Claude Code process in the same directory is a new agent, with no membership and no replay position.
+
+**D3f. A new agent gets a hint, with the session distance.** A new agent is replayed nothing. For each channel its predecessor took part in, it gets one line saying how many messages there may be relevant and how far back that predecessor was:
+
+- The **predecessor** is the most recent earlier session in the same project directory that was a member of the channel, or sent or received in it.
+- The **distance** is the number of Claude Code sessions started in that directory since the predecessor started, a lineage (D3d) counting as one session.
+- The line reads, for example, `14 messages in #kg-sync from a session 1 back — likely relevant · attend history #kg-sync`; past the stale threshold, `… from a session 10 back — probably stale`; in between, neutral wording with no label. The thresholds are attend settings: `attend.channels.hint_relevant_within` (default 2: a distance of 2 or less reads "likely relevant") and `attend.channels.hint_stale_from` (default 6: a distance of 6 or more reads "probably stale").
+- The session list comes from Claude Code's per-project transcripts under `~/.claude/projects/<slug>/`, read through the claude-sessions crate. Today that crate lists a project's transcripts (`claude_sessions::transcripts_in`, `newest_transcript`) and live session records (`read_session_records`: pid, session id, cwd), but it exposes no start time per session. The follow-up adds one there, from each transcript's first timestamped line, so the start order is read in one place.
 
 **D3e. An explicit clear archives history.** Kept from the first draft as its own sub-decision: with D3b a new session is no longer replayed old history, but an operator may still want a room's history gone. `/purge`, the menu's Clear history and a new `attend purge [<channel>]` move every message older than the 90-second grace window into an archive outside every receive directory (`_archive/<room>/`), whether or not a live session has consumed it, which amends ADR-172 Decision 5 for an explicit clear only. A project tray takes the same clear (`/purge @name`, `attend purge --tray <path>`). `attend history --archived` lists the archive; `attend unarchive <channel>` moves it back. Membership events are not archived.
 
@@ -167,7 +179,7 @@ A channel's name and its scope path are synonyms for one channel. A channel alwa
 
 *Operator: agreed 2026-10-10.*
 
-The chat's keys are attend's, under `attend.chat.*`, in attend's user file: `tabs.jump`, `tabs.menu_on_repeat`, `tabs.focus_key`, `mouse`, and `sidebar_key` for D9. `attend.channels.membership_cooldown` serves D2. attend registers them in its own schema, as ADR-503 Decision 13 provides.
+The chat's keys are attend's, under `attend.chat.*`, in attend's user file: `tabs.jump`, `tabs.menu_on_repeat`, `tabs.focus_key`, `mouse`, and `sidebar_key` for D9. `attend.channels.membership_cooldown` serves D2; `attend.channels.hint_relevant_within` and `attend.channels.hint_stale_from` serve D3f. attend registers them in its own schema, as ADR-503 Decision 13 provides.
 
 That decision also says attend's settings "are edited through `ways settings`" and that "`attend` has no settings UI of its own". attend-chat is a separate application (ADR-504 Decision 1), but the keys are attend's, and its `/config` and the common menu's Keybinding set and Mouse items are a second way to edit them. This amends ADR-503 Decision 13: attend-chat may list and set its own `attend.chat.*` keys, through attend-config's writer and the schema `ways settings` reads, so the two stay one definition and one file. `ways settings` still edits every key; `attend` itself still has no settings UI.
 
@@ -203,7 +215,8 @@ The question exists to slow an agent that drives attend-chat's screen directly r
 ### Negative
 
 - Replay becomes a computation over membership events, scopes, inheritance and lineage; a bug there misroutes or withholds messages. It needs its own test table, and every view must show origin.
-- Lineage at `SessionStart` depends on the hook's source and on Claude Code's session records; a continuation the hook cannot link is treated as a new agent, which is replayed nothing from before.
+- Lineage at `SessionStart` depends on the hook's source and on Claude Code's session records; a continuation the hook cannot link is treated as a new agent, which is replayed nothing from before and gets only D3f's hint.
+- The session distance counts sessions, not time or relatedness: a short throwaway session in the directory pushes a real predecessor one step further back.
 - ADR-172 Decision 5's guarantee becomes conditional: an explicit clear archives a message an idle live member has not read. The archive makes it recoverable, not delivered.
 - Symmetric powers let a confused agent remove members, rescope or seal a channel; the cooldown, the history and the operator's view bound the damage but do not prevent it.
 
@@ -232,7 +245,6 @@ These shipped with the record and stand on the decisions named; rejecting a deci
 
 ## Open questions
 
-- D3d's lineage rule awaits the operator's confirmation, in particular whether `--resume` continues an agent or starts one.
 - Whether `attend inbox` should list only what D3b would replay, leaving the rest to `attend history`.
 
 ## Alternatives Considered
