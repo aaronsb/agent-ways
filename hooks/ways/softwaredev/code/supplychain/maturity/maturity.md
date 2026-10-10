@@ -1,6 +1,6 @@
 ---
 description: judging whether a candidate package is what it presents itself as — adoption versus presentation, and thin wrappers around a mature library
-vocabulary: package maturity adoption downloads stars wrapper thin wrapper reimplementation candidate library evaluate choose between alternatives which package should we use first order transitive dependency underneath polish spec popular skepticism pre-adoption
+vocabulary: package maturity adoption downloads stars wrapper thin wrapper reimplementation candidate library evaluate choose between alternatives which package should we use first order transitive dependency underneath polish spec skepticism pre-adoption
 scope: agent, subagent
 refire: 0.15
 ---

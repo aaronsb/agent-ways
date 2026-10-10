@@ -1,6 +1,6 @@
 ---
 description: opening a pull request as the moment to look back over the session, asking whether the human corrected, explained, or pushed back on something that should become a way, a skill, or a workflow
-vocabulary: open a pull request create the pr introspection retrospective reflect look back lessons learned surprise correction convention captured as a way skill workflow ceremony carried-forward surprised teaching
+vocabulary: open a pull request create the pr introspection retrospective reflect look back lessons learned surprise correction convention captured as a way skill workflow ceremony carried-forward
 pattern: pull.?request|create.{0,20}\bpr\b|\bpr\b.{0,20}create|write.{0,20}\bpr\b|open.{0,20}\bpr\b
 commands: gh\ pr\ create
 macro: prepend

@@ -1,6 +1,6 @@
 ---
 description: schedule a meeting, check my availability, block time on my calendar, create calendar events, find a free slot
-vocabulary: schedule calendar availability block time event meeting invite reminder reschedule free busy slot book appointment timezone deadlines cross-account multi-account conflict scheduled
+vocabulary: schedule calendar availability block time event meeting invite reminder reschedule free busy slot book appointment timezone deadlines cross-account multi-account scheduled
 scope: agent, subagent
 refire: 0.15
 ---

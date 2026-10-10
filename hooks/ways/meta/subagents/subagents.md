@@ -1,6 +1,6 @@
 ---
 description: Sub-agent delegation — when to spawn a specialized sub-agent, writing the brief so each constraint keeps its stated strength, the shape the worker reports back, and how deep delegation goes
-vocabulary: subagent sub-agent delegate delegation spawn background parallel worker teammate explore fan-out brief instructions constraint preference hard requirement bound restate fidelity handback report back blocked leaf depth worktree isolation sonnet skeptic roster red-team shared-state unreported
+vocabulary: subagent sub-agent delegate delegation spawn background parallel worker teammate explore fan-out brief instructions constraint preference hard requirement bound restate fidelity handback report back blocked leaf depth worktree isolation skeptic roster red-team shared-state unreported
 pattern: subagent|delegat|spawn.{0,30}agent|review.{0,30}\bpr\b|organiz.{0,30}docs
 scope: agent
 refire: 0.15

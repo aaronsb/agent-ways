@@ -1,6 +1,6 @@
 ---
 description: a perceptual evaluative loop for an interactive program such as a game, web page or GUI app; drive it headlessly with simulated input, force state through development-build handles, wait on game or app state rather than time, take screenshots and say what they show
-vocabulary: play it myself after each change to see whether the screen still renders right phone held upright game browser headless chrome puppeteer playwright cdp devtools screenshot screenshots canvas webgl three.js render frame animation viewport phone tablet portrait simulated input keypress click tap touch dev build debug handle window global force state smoke scenario playtest look at it say what you saw sleep timing captures visual flakiness responsive state-anchored
+vocabulary: play it myself after each change to see whether the screen still renders right phone held upright game browser headless chrome puppeteer playwright cdp devtools screenshot screenshots canvas webgl three.js render frame animation viewport phone tablet portrait simulated input keypress click tap touch dev build debug handle window global force state smoke scenario playtest look at it say what you saw sleep timing captures visual flakiness state-anchored
 scope: agent, subagent
 refire: 0.15
 ---

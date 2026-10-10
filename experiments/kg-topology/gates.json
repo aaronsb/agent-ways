@@ -77,5 +77,47 @@
  "sibling_jaccard_pairs_ge_0.15": {
   "main": 1,
   "branch": 0
+ },
+ "after_review_pruning": {
+  "tree-sample": {
+   "pass": 90,
+   "top1": 80,
+   "rows": 133
+  },
+  "tree-sample-joined": {
+   "pass": 58,
+   "top1": 69,
+   "rows": 81
+  },
+  "tree-sample-pleasantry": {
+   "pass": 90,
+   "top1": 80,
+   "rows": 133
+  },
+  "unrelated_fired": 0,
+  "terms_dropped": 36
+ },
+ "sealed_held_out": {
+  "rows": 24,
+  "set": "evaluative ways, written blind from one-sentence situations (ADR-605 held-out)",
+  "scores": [
+   {
+    "stage": "before tuning",
+    "pass": 9
+   },
+   {
+    "stage": "after evaluative tuning (main)",
+    "pass": 10,
+    "top1": 9
+   },
+   {
+    "stage": "kg terms, before review pruning",
+    "pass": 11,
+    "top1": 11,
+    "direct": "8/12",
+    "passing_mentions": "3/12"
+   }
+  ],
+  "status": "retired after three scorings; not re-scored after pruning"
  }
 }

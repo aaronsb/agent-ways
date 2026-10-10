@@ -1,6 +1,6 @@
 ---
 description: tracing one change from clean checkout to production to find where it waits and who can move it, and separating coding time from waiting time before proposing tools, agents, or automation
-vocabulary: stall waiting time where does it wait who moves it end to end walkthrough trace one change lead time cycle time bottleneck stuck handoff pending approval idle throughput why aren't we shipping faster longest person-dependent organizational
+vocabulary: stall waiting time where does it wait who moves it end to end walkthrough trace one change lead time cycle time bottleneck stuck handoff pending approval idle throughput why aren't we shipping faster person-dependent organizational
 scope: agent, subagent
 refire: 0.2
 ---
