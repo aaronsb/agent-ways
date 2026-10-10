@@ -14,6 +14,14 @@
 //! shell's own keys take their Alt form there: Alt+1-9 for a tab, Alt+m for
 //! the mouse. F1 opens the key help, and Esc and Ctrl-C quit, asking first
 //! when the pane holds unsaved work.
+//!
+//! Every pane's tabs answer to the same keys and clicks: Ctrl+1-9 shows a
+//! tab, and on the tab already shown opens its menu ([`Pane::tab_menu`]);
+//! F2 or Ctrl+T moves the focus to the tab bar, where Left and Right move,
+//! Enter opens the menu and Esc goes back; a click on a tab shows it, a
+//! second click or a right click opens its menu. Ctrl+digits reach the
+//! screen as themselves only under the kitty keyboard protocol, which the
+//! shell turns on for a pane that asks ([`Pane::keyboard_enhancement`]).
 
 use std::any::Any;
 use std::time::Duration;
@@ -36,6 +44,9 @@ pub struct PaneTab {
     /// Marked as the target of Tab completion, bold and underlined
     /// ([`crate::strip::target`]).
     pub target: bool,
+    /// An action at the end of the bar, such as `+` for a new channel: no
+    /// number, never shown as a tab; choosing it opens its menu.
+    pub action: bool,
 }
 
 impl PaneTab {
@@ -50,6 +61,12 @@ impl PaneTab {
 
     pub fn target(mut self, on: bool) -> PaneTab {
         self.target = on;
+        self
+    }
+
+    /// An action slot rather than a tab ([`PaneTab::action`]).
+    pub fn action(mut self) -> PaneTab {
+        self.action = true;
         self
     }
 }
@@ -96,6 +113,8 @@ pub enum Keyed {
     Done,
     /// Not the pane's key: the shell's, such as Esc, which quits.
     Pass,
+    /// Quit, as Esc would: the pane confirmed it.
+    Quit,
 }
 
 /// What a pane asks the shell to open over it ([`Pane::take_open`]).
@@ -129,6 +148,25 @@ pub trait Pane: Any {
     /// does nothing.
     fn set_tab(&mut self, i: usize);
 
+    /// Open tab `i`'s menu, through [`Pane::take_open`]; on an action slot,
+    /// its action. Nothing by default.
+    fn tab_menu(&mut self, _i: usize) {}
+
+    /// How the tabs are reached from the keyboard, from the pane's settings.
+    fn tab_keys(&self) -> super::panetabs::TabKeys {
+        super::panetabs::TabKeys::default()
+    }
+
+    /// Whether the pane wants Ctrl+digits and the other ambiguous keys
+    /// reported as themselves (the kitty keyboard protocol's first flag).
+    fn keyboard_enhancement(&self) -> bool {
+        false
+    }
+
+    /// Whether the terminal took the keyboard enhancement the pane asked
+    /// for: without it Ctrl+3 arrives as Esc and Ctrl+8 as Backspace.
+    fn set_keyboard_enhanced(&mut self, _on: bool) {}
+
     /// Text after the tabs, such as what the shown channel is for.
     fn trailer(&mut self) -> Vec<Span<'static>> {
         Vec::new()
@@ -137,8 +175,9 @@ pub trait Pane: Any {
     /// Draw the area between the tab bar and the bottom bar.
     fn draw(&mut self, f: &mut Frame, area: Rect);
 
-    /// A key the shell did not take. The shell takes F1, its Alt chords
-    /// (Alt+1-9 for a tab, Alt+m for the mouse) on every pane, and beside
+    /// A key the shell did not take. The shell takes F1, F2, Ctrl+T,
+    /// Ctrl+1-9, its Alt chords (Alt+1-9 for a tab, Alt+m for the mouse)
+    /// and, while the tab bar has the focus, every key, on every pane; beside
     /// a pane that owns no text its plain forms too: `?`, `q`, `m` and the
     /// digits. A pane binds none of these.
     fn key(&mut self, k: KeyEvent) -> Keyed;

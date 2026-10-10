@@ -55,18 +55,43 @@ impl App {
     /// The shell's own keys around the pane, in the form they take there:
     /// Alt chords beside a pane that owns text. The key help comes first,
     /// so the footer always has room for the key that finds the rest.
+    ///
+    /// Beside text the footer names Ctrl+1-9 and F2 for the tabs, not the
+    /// Alt digits, which Konsole and GNOME Terminal keep for their own tabs.
     pub fn shell_bindings(&self) -> Vec<Binding> {
         let text = self.owns_text();
         let k = |plain: &str, chord: &str| if text { chord.to_string() } else { plain.to_string() };
-        vec![
-            Binding::new(k("?", "F1"), "keys"),
-            Binding::new(k("1-9", "M-1-9"), "tabs"),
+        let mut out = vec![Binding::new(k("?", "F1"), "keys")];
+        let keys = self.tab_keys();
+        let again = if keys.menu_on_repeat { "tab (again: menu)" } else { "tab" };
+        let (ctrl, alt) = (self.ctrl_jump(), self.alt_jump());
+        match (text, ctrl, alt) {
+            (false, _, _) => out.push(Binding::new("1-9", "tabs")),
+            (true, true, _) => out.push(Binding::new("Ctrl+1-9", again)),
+            (true, false, true) => out.push(Binding::new("Alt+1-9", again)),
+            (true, false, false) => {}
+        }
+        if let Some(f) = keys.focus_label() {
+            out.push(Binding::new(f, "tabs"));
+        }
+        if keys.f2 && keys.ctrl_t {
+            out.push(Binding::help("Ctrl+T", "the tab bar, as F2: ← → move, Enter its menu, Esc back"));
+        }
+        if !text && ctrl {
+            out.push(Binding::help("Ctrl+1-9", again));
+        }
+        if text && ctrl && alt {
+            out.push(Binding::help("Alt+1-9", "a tab, where the terminal passes Alt+digits on (Konsole keeps them)"));
+        }
+        out.push(Binding::help("right-click a tab", if keys.menu_on_repeat { "its menu; so does a click on the tab shown" } else { "its menu" }));
+        out.extend([
             Binding::help(self.mouse_key(), "mouse on or off (off lets the terminal select text)"),
             Binding::help("Shift-drag", "selects text while the mouse is on, in most terminals"),
             Binding::help("middle-click", "pastes only while the mouse is off"),
             Binding::help(k("q Esc ^C", "Esc ^C"), "quit; asks first over unsaved work"),
             Binding::help("click", "a tab shows it; the wheel scrolls"),
-        ]
+        ]);
+        out
     }
 
     /// The key that turns the mouse on or off as the bar names it: `m`, or
@@ -109,32 +134,6 @@ impl App {
             _ => {}
         }
         self.draw_status(f, status);
-    }
-
-    /// The pane's tabs as the shell draws its own: numbered lozenges, the
-    /// shown one on the accent, each after its lead, then the trailer. Each
-    /// tab, lead and all, is a click target.
-    fn draw_pane_tabs(&mut self, f: &mut Frame, area: Rect) {
-        self.hits.tabs.clear();
-        let Some(p) = &mut self.pane else { return };
-        let tabs = p.tabs();
-        let active = p.tab();
-        let trailer = p.trailer();
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        for (i, t) in tabs.into_iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw("  "));
-            }
-            let x = area.x + width(&spans);
-            spans.extend(t.lead);
-            let mut seg = crate::strip::tab_seg(format!(" {} {} ", i + 1, t.name), i == active);
-            seg.style = crate::strip::target(seg.style, t.target);
-            spans.extend(self.shape.lozenge(&[seg]));
-            let w = area.x + width(&spans) - x;
-            self.hits.tabs.push((Rect { x, y: area.y, width: w, height: 1 }.intersection(area), i));
-        }
-        spans.extend(trailer);
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     /// The bottom bar over a pane: its lozenge, the message, then the mouse
@@ -208,6 +207,10 @@ impl App {
             lines.push(Line::styled(format!("help: {}", self.title), Style::new().add_modifier(Modifier::BOLD)));
             lines.extend(text.lines().map(|l| Line::raw(l.to_string())));
         }
+        if let Some(kb) = self.keyboard_line() {
+            lines.push(Line::raw(""));
+            lines.push(Line::raw(kb));
+        }
         let widest = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
         let r = modal_rect(area, widest.max(56) + 2, lines.len() as u16 + 2);
         let room = r.height.saturating_sub(2);
@@ -220,11 +223,15 @@ impl App {
     /// the mouse, the key help); the pane gets the rest; what the pane
     /// passes on and quits, quits.
     pub(super) fn pane_key(&mut self, k: KeyEvent) -> bool {
+        if self.pane_tab_key(k) {
+            return true;
+        }
         let text = self.owns_text();
         let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         // The shell's letter and digit keys: plain, or the Alt chord, which
         // is the only form beside text.
         let shell = k.modifiers == KeyModifiers::ALT || (!text && plain);
+        let digit_jump = (k.modifiers == KeyModifiers::ALT && self.alt_jump()) || (!text && plain);
         match k.code {
             KeyCode::F(1) => {
                 self.mode = Mode::Help { scroll: 0 };
@@ -245,7 +252,7 @@ impl App {
                 }
                 return true;
             }
-            KeyCode::Char(c @ '1'..='9') if shell => {
+            KeyCode::Char(c @ '1'..='9') if digit_jump => {
                 self.pane_tab(c as usize - '1' as usize);
                 return true;
             }
@@ -259,6 +266,7 @@ impl App {
             Keyed::Done => true,
             Keyed::Pass if k.code == KeyCode::Esc => self.quit(),
             Keyed::Pass => true,
+            Keyed::Quit => self.quit(),
         }
     }
 
@@ -327,16 +335,9 @@ impl App {
         self.take_pane_open();
     }
 
-    /// Show the pane's tab `i`, when it has one.
-    fn pane_tab(&mut self, i: usize) {
-        let Some(p) = &mut self.pane else { return };
-        if i < p.tabs().len() {
-            p.set_tab(i);
-        }
-    }
-
-    /// The mouse while a pane is shown: a click on a tab shows it; the
-    /// wheel and a click inside the pane are the pane's. A middle click
+    /// The mouse while a pane is shown: a click on a tab shows it, and on
+    /// the tab shown opens its menu, as a right click does; the wheel and a
+    /// click inside the pane are the pane's. A middle click
     /// pastes nothing while the shell has the mouse, and the bar says so.
     pub(super) fn pane_mouse(&mut self, m: MouseEvent) {
         let at = Position::new(m.column, m.row);
@@ -348,12 +349,17 @@ impl App {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
-                    return self.pane_tab(i);
+                    return self.pane_tab_or_menu(i);
                 }
                 if self.hits.pane.contains(at) {
                     if let Some(p) = &mut self.pane {
                         p.click(at);
                     }
+                }
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
+                    return self.open_tab_menu(i);
                 }
             }
             MouseEventKind::Down(MouseButton::Middle) => {
@@ -420,6 +426,7 @@ impl crate::screen::Screen for App {
 #[cfg(test)]
 mod tests {
     use super::super::pane::{Pane, PaneTab};
+    use super::super::panetabs::{Jump, TabKeys};
     use super::*;
     use crate::testkit;
 
@@ -434,6 +441,9 @@ mod tests {
         /// What the next key opens, and what a picker set.
         open: Option<Open>,
         picked: Vec<String>,
+        /// The tabs whose menu was asked for, in order.
+        menus: Vec<usize>,
+        tab_keys: TabKeys,
     }
 
     impl Pane for Two {
@@ -447,7 +457,13 @@ mod tests {
             theme::Palette::default()
         }
         fn tabs(&mut self) -> Vec<PaneTab> {
-            vec![PaneTab::new("one"), PaneTab::new("two")]
+            vec![PaneTab::new("one"), PaneTab::new("two"), PaneTab::new("+").action()]
+        }
+        fn tab_menu(&mut self, i: usize) {
+            self.menus.push(i);
+        }
+        fn tab_keys(&self) -> TabKeys {
+            self.tab_keys
         }
         fn tab(&mut self) -> usize {
             self.tab
@@ -483,7 +499,7 @@ mod tests {
     }
 
     fn app(text: bool) -> App {
-        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new() })
+        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default() })
     }
 
     #[test]
@@ -639,8 +655,132 @@ mod tests {
         a.key(k(KeyCode::Char('m'), KeyModifiers::ALT));
         assert_eq!(two(&a).tab, 1);
         assert!(!a.mouse_on());
-        let footer = testkit::rows(&testkit::render(&mut a, 100, 6)).pop().expect("a bar");
-        assert!(footer.contains("mouse off (M-m)") && footer.contains("M-1-9 tabs") && footer.contains("F1 keys"), "{footer}");
+        let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
+        assert!(footer.contains("mouse off (M-m)") && footer.contains("Alt+1-9 tab (again: menu)") && footer.contains("F2 tabs") && footer.contains("F1 keys"), "{footer}");
+        a.set_keyboard_enhanced(true);
+        let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
+        assert!(footer.contains("Ctrl+1-9 tab (again: menu)") && !footer.contains("Alt+1-9"), "auto: Ctrl where the terminal reports it: {footer}");
+    }
+
+    #[test]
+    fn the_tab_keys_follow_the_setting() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").tab_keys = TabKeys { jump: Jump::Alt, menu_on_repeat: false, f2: false, ctrl_t: true };
+        a.set_keyboard_enhanced(true);
+        a.key(ctrl('2'));
+        assert_eq!(two(&a).tab, 0, "jump alt: Ctrl+digits do nothing");
+        a.key(k(KeyCode::Char('2'), KeyModifiers::ALT));
+        a.key(k(KeyCode::Char('2'), KeyModifiers::ALT));
+        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![]), "no menu on a repeat");
+        a.key(k(KeyCode::F(2), KeyModifiers::NONE));
+        assert!(!a.strip_focused(), "F2 is off");
+        a.key(ctrl('t'));
+        assert!(a.strip_focused(), "Ctrl+T is on");
+        let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
+        assert!(footer.contains("Alt+1-9 tab ·") && footer.contains("Ctrl+T tabs"), "{footer}");
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        a.pane_mut::<Two>().expect("the pane").tab_keys = TabKeys { jump: Jump::None, ..TabKeys::default() };
+        a.key(k(KeyCode::Char('1'), KeyModifiers::ALT));
+        a.key(ctrl('1'));
+        assert_eq!(two(&a).tab, 1, "jump none: no digit jumps");
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        k(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_digit_shows_a_tab_and_again_opens_its_menu() {
+        for text in [true, false] {
+            let mut a = app(text);
+            a.set_keyboard_enhanced(true);
+            a.key(ctrl('2'));
+            assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![]), "text {text}: the first press shows the tab");
+            a.key(ctrl('2'));
+            assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1]), "text {text}: the second opens its menu");
+            a.key(ctrl('3'));
+            assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1, 2]), "text {text}: the + slot is never shown, only opened");
+            a.key(ctrl('9'));
+            assert_eq!(two(&a).menus.len(), 2, "no ninth tab: nothing");
+            assert_eq!(two(&a).keys, 0, "none reached the pane");
+        }
+    }
+
+    #[test]
+    fn f2_and_ctrl_t_give_the_tab_bar_the_focus() {
+        let mut a = app(true);
+        a.key(k(KeyCode::F(2), KeyModifiers::NONE));
+        assert!(a.strip_focused());
+        let bar = testkit::rows(&testkit::render(&mut a, 100, 6)).pop().expect("a bar");
+        assert!(bar.contains("tabs: ← → move · Enter menu · Esc back"), "{bar}");
+        a.key(k(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(two(&a).tab, 1, "Right shows the next tab");
+        a.key(k(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(two(&a).tab, 1, "the + slot is pointed at, not shown");
+        a.key(k(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(two(&a).tab, 0, "past the end, the first");
+        a.key(k(KeyCode::Left, KeyModifiers::NONE));
+        a.key(k(KeyCode::Left, KeyModifiers::NONE));
+        a.key(k(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!((two(&a).tab, two(&a).menus.clone(), a.strip_focused()), (1, vec![1], false), "Enter opens the menu");
+        a.key(ctrl('t'));
+        assert!(a.strip_focused());
+        assert!(a.key(k(KeyCode::Esc, KeyModifiers::NONE)), "Esc gives the focus back and quits nothing");
+        assert!(!a.strip_focused());
+        a.key(k(KeyCode::F(2), KeyModifiers::NONE));
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert_eq!((a.strip_focused(), two(&a).keys), (false, 1), "another key gives the focus back and goes on to the pane");
+    }
+
+    #[test]
+    fn a_click_on_the_shown_tab_or_a_right_click_opens_its_menu() {
+        let mut a = app(false);
+        let buf = testkit::render(&mut a, 60, 8);
+        let (x2, y) = testkit::find(&buf, "2 two").expect("the tab");
+        let (x1, _) = testkit::find(&buf, "1 one").expect("the tab");
+        let ev = |kind, column| MouseEvent { kind, column, row: y, modifiers: KeyModifiers::NONE };
+        a.mouse(ev(MouseEventKind::Down(MouseButton::Left), x2));
+        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![]));
+        a.mouse(ev(MouseEventKind::Down(MouseButton::Left), x2));
+        assert_eq!(two(&a).menus, [1], "a second click on the shown tab opens its menu");
+        a.mouse(ev(MouseEventKind::Down(MouseButton::Right), x1));
+        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1, 0]), "a right click opens a tab's menu without showing it");
+    }
+
+    #[test]
+    fn the_key_help_says_whether_ctrl_digits_arrive() {
+        struct Asks(Two);
+        impl Pane for Asks {
+            fn palette(&self) -> theme::Palette {
+                self.0.palette()
+            }
+            fn tabs(&mut self) -> Vec<PaneTab> {
+                self.0.tabs()
+            }
+            fn tab(&mut self) -> usize {
+                0
+            }
+            fn set_tab(&mut self, _: usize) {}
+            fn draw(&mut self, _: &mut Frame, _: Rect) {}
+            fn key(&mut self, _: KeyEvent) -> Keyed {
+                Keyed::Done
+            }
+            fn bindings(&self) -> Vec<Binding> {
+                Vec::new()
+            }
+            fn keyboard_enhancement(&self) -> bool {
+                true
+            }
+        }
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default() };
+        let mut a = App::with_pane("asks", Asks(two));
+        a.key(k(KeyCode::F(1), KeyModifiers::NONE));
+        let off = testkit::text(&testkit::render(&mut a, 140, 24));
+        assert!(off.contains("does not report Ctrl+digits"), "{off}");
+        a.set_keyboard_enhanced(true);
+        let on = testkit::text(&testkit::render(&mut a, 140, 24));
+        assert!(on.contains("Ctrl+digits arrive"), "{on}");
+        assert!(!testkit::text(&testkit::render(&mut app(true), 140, 24)).contains("keyboard:"), "a pane that did not ask says nothing");
     }
 
     #[test]

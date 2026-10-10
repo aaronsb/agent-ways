@@ -189,3 +189,25 @@ fn help_describes_an_attend_key_and_the_sensors_tab() {
     assert_eq!(code, 0);
     assert!(out.starts_with("attend.sensors: "), "{out}");
 }
+
+#[test]
+fn the_chat_keys_are_listed_set_and_refused_like_any_attend_key() {
+    let fx = Fx::new();
+    // Read with their defaults before any file sets them.
+    assert_eq!(fx.run(&["settings", "get", "attend.chat.tabs.jump"]).0, "auto\n");
+    assert_eq!(fx.run(&["settings", "get", "attend.chat.tabs.menu_on_repeat"]).0, "true\n");
+    assert_eq!(fx.run(&["settings", "get", "attend.chat.tabs.focus_key"]).0, "both\n");
+    assert_eq!(fx.run(&["settings", "get", "attend.chat.mouse"]).0, "false\n");
+    let (_, err, code) = fx.run(&["settings", "set", "attend.chat.tabs.jump", "ctrl"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(fx.read(&fx.user()).contains("chat:\n  tabs:\n    jump: ctrl\n"), "{}", fx.read(&fx.user()));
+    assert_eq!(fx.run(&["settings", "get", "attend.chat.tabs.jump"]).0, "ctrl\n");
+    // A value outside the choice writes nothing.
+    let before = fx.read(&fx.user());
+    let (_, err, code) = fx.run(&["settings", "set", "attend.chat.tabs.jump", "super"]);
+    assert_eq!(code, 3, "{err}");
+    assert_eq!(fx.read(&fx.user()), before);
+    // The chat's keys are the user's: a project file cannot set them.
+    let (_, _, code) = fx.run(&["settings", "set", "attend.chat.mouse", "true", "--project", "."]);
+    assert_ne!(code, 0, "a project cannot set a user key");
+}

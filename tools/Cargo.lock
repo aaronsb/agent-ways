@@ -191,6 +191,7 @@ version = "0.7.1"
 dependencies = [
  "agent-fmt",
  "agent-identity",
+ "agent-settings",
  "agent-theme",
  "agent-tui",
  "attend-config",
@@ -201,6 +202,7 @@ dependencies = [
  "claude-sessions",
  "libc",
  "notify",
+ "serde_yaml",
 ]
 
 [[package]]

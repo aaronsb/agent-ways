@@ -79,33 +79,59 @@ pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> 
     // before the `@`/`#`/broadcast dispatch because slash syntax
     // is start-of-input only and unambiguous.
     if let Some((cmd, args)) = slash::parse(&msg) {
-        return match slash::dispatch(cmd, args) {
-            slash::SlashOutcome::Ok(s) => EnterAction::ClearWithStatus(s),
-            slash::SlashOutcome::Err(s) => EnterAction::StatusOnly(s),
-            slash::SlashOutcome::ClearTranscript => EnterAction::ClearTranscript,
-            slash::SlashOutcome::Join(name) => run_join(&name),
-            slash::SlashOutcome::Leave(chan) => run_leave(chan, foreground),
-            slash::SlashOutcome::Dissolve(chan) => run_dissolve(chan, foreground),
-            slash::SlashOutcome::ListChannels => {
-                channels_status_in(&signals_base(), attend_groups::member_alive)
-            }
-            slash::SlashOutcome::CreateChannel { name, description } => {
-                create_channel_in(&signals_base(), &name, description.as_deref())
-            }
-            slash::SlashOutcome::DescribeChannel { name, description } => {
-                describe_channel_in(&signals_base(), &name, &description)
-            }
-            slash::SlashOutcome::Purge(chan) => run_purge(chan, foreground),
-            slash::SlashOutcome::Peers => run_peers(),
-            slash::SlashOutcome::Whois(name) => run_whois(&name),
-            slash::SlashOutcome::Invite { member, channel } => {
-                run_invite(&member, channel, foreground)
-            }
-            slash::SlashOutcome::Kick { member, channel } => {
-                run_kick(&member, channel, foreground)
-            }
-        };
+        return run_slash(slash::dispatch(cmd, args), foreground);
     }
+    send_message(&msg, signals, foreground)
+}
+
+/// Run a dispatched slash command: the one path both the typed command
+/// and the tab menu's items take.
+pub fn run_slash(outcome: slash::SlashOutcome, foreground: &Tab) -> EnterAction {
+    match outcome {
+        slash::SlashOutcome::Ok(s) => EnterAction::ClearWithStatus(s),
+        slash::SlashOutcome::Err(s) => EnterAction::StatusOnly(s),
+        slash::SlashOutcome::ClearTranscript => EnterAction::ClearTranscript,
+        slash::SlashOutcome::Join(name) => run_join(&name),
+        slash::SlashOutcome::Leave(chan) => run_leave(chan, foreground),
+        slash::SlashOutcome::Dissolve(chan) => run_dissolve(chan, foreground),
+        slash::SlashOutcome::ListChannels => {
+            channels_status_in(&signals_base(), attend_groups::member_alive)
+        }
+        slash::SlashOutcome::CreateChannel { name, description } => {
+            create_channel_in(&signals_base(), &name, description.as_deref())
+        }
+        slash::SlashOutcome::DescribeChannel { name, description } => {
+            describe_channel_in(&signals_base(), &name, &description)
+        }
+        slash::SlashOutcome::Purge(chan) => run_purge(chan, foreground),
+        slash::SlashOutcome::Peers => run_peers(),
+        slash::SlashOutcome::Whois(name) => run_whois(&name),
+        slash::SlashOutcome::Invite { member, channel } => {
+            run_invite(&member, channel, foreground)
+        }
+        slash::SlashOutcome::Kick { member, channel } => {
+            run_kick(&member, channel, foreground)
+        }
+        slash::SlashOutcome::Config { key, value } => run_config(key, value),
+    }
+}
+
+/// `/config`: list the chat's settings, or set one in attend's user file.
+fn run_config(key: Option<String>, value: Option<String>) -> EnterAction {
+    let dir = std::env::current_dir().unwrap_or_default();
+    match (key, value) {
+        (Some(k), Some(v)) => match crate::settings::set(&k, &v, &attend_config::user_path(), &dir) {
+            Ok(s) => EnterAction::ClearWithStatus(s),
+            Err(e) => EnterAction::StatusOnly(e),
+        },
+        _ => EnterAction::ClearWithStatus(crate::settings::listing(&dir)),
+    }
+}
+
+/// Send `msg`: to the recipients its leading `@`/`#` run addresses, or
+/// to the foreground tab's channel.
+fn send_message(msg: &str, signals: &[Signal], foreground: &Tab) -> EnterAction {
+    let msg = msg.to_string();
     let caps = ColorDepth::detect();
     let seeds = discover_sessions();
     // Local instance cache for this Enter-handler invocation.

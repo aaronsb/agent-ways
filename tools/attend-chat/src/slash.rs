@@ -80,6 +80,35 @@ pub const CHANNELS_SUBS: &[SubCommand] = &[
     },
 ];
 
+const BOOL_VALUES: &[SubCommand] = &[
+    SubCommand { name: "true", description: "on", grammar: &[] },
+    SubCommand { name: "false", description: "off", grammar: &[] },
+];
+
+const JUMP_VALUES: &[SubCommand] = &[
+    SubCommand { name: "auto", description: "Ctrl+digit where the terminal reports it, else Alt+digit", grammar: &[] },
+    SubCommand { name: "ctrl", description: "Ctrl+digit", grammar: &[] },
+    SubCommand { name: "alt", description: "Alt+digit", grammar: &[] },
+    SubCommand { name: "both", description: "Ctrl+digit and Alt+digit", grammar: &[] },
+    SubCommand { name: "none", description: "no digit jumps; F2 and Tab still reach the tabs", grammar: &[] },
+];
+
+const FOCUS_VALUES: &[SubCommand] = &[
+    SubCommand { name: "both", description: "F2 and Ctrl+T", grammar: &[] },
+    SubCommand { name: "f2", description: "F2", grammar: &[] },
+    SubCommand { name: "ctrl-t", description: "Ctrl+T", grammar: &[] },
+    SubCommand { name: "none", description: "no key gives the tab bar the focus", grammar: &[] },
+];
+
+/// `/config`'s keys, each a choice of its values: the chat's settings
+/// (`attend.chat.*`, crate::settings).
+pub const CONFIG_SUBS: &[SubCommand] = &[
+    SubCommand { name: "tabs.jump", description: "Which modifier with a digit jumps to a tab", grammar: &[Token::Subcommands(JUMP_VALUES)] },
+    SubCommand { name: "tabs.menu_on_repeat", description: "Jumping to the shown tab opens its menu", grammar: &[Token::Subcommands(BOOL_VALUES)] },
+    SubCommand { name: "tabs.focus_key", description: "The key that focuses the tab bar", grammar: &[Token::Subcommands(FOCUS_VALUES)] },
+    SubCommand { name: "mouse", description: "Start with the mouse on", grammar: &[Token::Subcommands(BOOL_VALUES)] },
+];
+
 /// Every slash command the TUI knows about. Implemented ones
 /// dispatch; planned ones autocomplete and show up in `/help` so
 /// agents can see the roadmap without reading code.
@@ -143,6 +172,12 @@ pub const REGISTRY: &[SlashCommand] = &[
         description: "Delete a channel's on-disk history",
         status: Status::Implemented,
         grammar: &[GROUP_OPT],
+    },
+    SlashCommand {
+        name: "config",
+        description: "List or set the chat's settings",
+        status: Status::Implemented,
+        grammar: &[Token::Subcommands(CONFIG_SUBS)],
     },
     SlashCommand {
         name: "clear",
@@ -366,6 +401,12 @@ pub enum SlashOutcome {
         member: String,
         channel: Option<String>,
     },
+    /// `/config` lists the chat's settings; `/config <key> <value>` sets
+    /// one in attend's user file.
+    Config {
+        key: Option<String>,
+        value: Option<String>,
+    },
 }
 
 /// Normalize an agent argument: first whitespace-separated token,
@@ -402,6 +443,13 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
         Status::Implemented => match cmd.name {
             "help" => SlashOutcome::Ok(help_message()),
             "clear" => SlashOutcome::ClearTranscript,
+            "config" => {
+                let mut t = args.split_whitespace();
+                match (t.next(), t.next()) {
+                    (Some(k), None) => SlashOutcome::Err(format!("usage: /config {k} <value>")),
+                    (k, v) => SlashOutcome::Config { key: k.map(str::to_string), value: v.map(str::to_string) },
+                }
+            }
             "join" => match group_arg(args) {
                 None => SlashOutcome::Err("usage: /join <group>".into()),
                 // Friendlier than the generic "'open' is reserved":

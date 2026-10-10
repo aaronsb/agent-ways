@@ -19,6 +19,18 @@ pub struct Config {
     pub engagement: EngagementConfig,
     pub cleanup: CleanupConfig,
     pub sensors: HashMap<String, SensorConfig>,
+    pub chat: ChatConfig,
+}
+
+/// attend-chat's own keys: how its tabs are reached, and the mouse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatConfig {
+    /// `auto`, `ctrl`, `alt`, `both` or `none`.
+    pub jump: String,
+    pub menu_on_repeat: bool,
+    /// `both`, `f2`, `ctrl-t` or `none`.
+    pub focus_key: String,
+    pub mouse: bool,
 }
 
 /// Background signal-file cleanup inside `attend run`. Reaping is by
@@ -132,7 +144,14 @@ impl Config {
                 (n, c)
             })
             .collect();
-        Config { governor, engagement, cleanup, sensors }
+        let text = |name: &str, default: &str| get(name, layers).and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| default.to_string());
+        let chat = ChatConfig {
+            jump: text("attend.chat.tabs.jump", "auto"),
+            menu_on_repeat: get("attend.chat.tabs.menu_on_repeat", layers).and_then(|v| v.as_bool()).unwrap_or(true),
+            focus_key: text("attend.chat.tabs.focus_key", "both"),
+            mouse: get("attend.chat.mouse", layers).and_then(|v| v.as_bool()).unwrap_or(false),
+        };
+        Config { governor, engagement, cleanup, sensors, chat }
     }
 
     /// Load the user file, then the project's at `working_dir`. Each finding

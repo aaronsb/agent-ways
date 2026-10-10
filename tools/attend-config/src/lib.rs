@@ -12,7 +12,7 @@ mod config;
 pub mod schema;
 pub mod theme;
 
-pub use config::{expand_path, CleanupConfig, Config, EngagementConfig, GovernorConfig, SensorConfig};
+pub use config::{expand_path, ChatConfig, CleanupConfig, Config, EngagementConfig, GovernorConfig, SensorConfig};
 pub use schema::{BUILTINS, FILE, SCHEMA};
 
 use agent_settings::schema::LayerScope;

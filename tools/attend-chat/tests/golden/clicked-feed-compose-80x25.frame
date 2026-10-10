@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                             |
+| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                        |
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                         │|
 |│ │ Wells            │ rollout is green on staging                             │|
@@ -32,6 +32,7 @@ styles
   0  27-37  White Blue -
   0  40-41  Cyan - -
   0  42-51  White Blue -
+  0  54-56  White Blue -
   1   0-79  - - DIM
   2   0-0   - - DIM
   2   2-21  Cyan - -

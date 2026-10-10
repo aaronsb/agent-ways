@@ -84,6 +84,16 @@ const SECTIONS: &[SectionSpec] = &[
         doc: "The background sweep of signals whose project is gone (ADR-136).",
     },
     SectionSpec {
+        name: "attend.chat",
+        file: FILE,
+        top: &["chat"],
+        per_entry: false,
+        entry: None,
+        repair: None,
+        columns: None,
+        doc: "attend-chat, the operator's screen: how its tabs are reached and whether it starts with the mouse.",
+    },
+    SectionSpec {
         name: "attend.sensors",
         file: FILE,
         top: &["sensors"],
@@ -217,6 +227,50 @@ const KEYS: &[KeySpec] = &[
         path: &["cleanup", "interval"],
         default: DefaultValue::Yaml("600"),
         doc: "Seconds between sweeps.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend.chat.tabs.jump",
+        section: "attend.chat",
+        path: &["chat", "tabs", "jump"],
+        kind: Kind::Choice(&["auto", "ctrl", "alt", "both", "none"]),
+        default: DefaultValue::Yaml("auto"),
+        scope: Scope::User,
+        doc: "Which modifier with a digit jumps to a tab: auto, ctrl, alt, both or none.",
+        long: "auto is Ctrl+digit where the terminal speaks the kitty keyboard protocol and reports Ctrl+digits, else Alt+digit. Konsole and GNOME Terminal keep Alt+digits for their own tabs; F2 reaches the tabs everywhere.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend.chat.tabs.menu_on_repeat",
+        section: "attend.chat",
+        path: &["chat", "tabs", "menu_on_repeat"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        scope: Scope::User,
+        doc: "Whether jumping to, or clicking, the tab already shown opens its menu.",
+        long: "A right click on a tab, and Enter on the focused tab bar, open the menu either way.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend.chat.tabs.focus_key",
+        section: "attend.chat",
+        path: &["chat", "tabs", "focus_key"],
+        kind: Kind::Choice(&["both", "f2", "ctrl-t", "none"]),
+        default: DefaultValue::Yaml("both"),
+        scope: Scope::User,
+        doc: "The key that gives the tab bar the focus: both (F2 and Ctrl+T), f2, ctrl-t or none.",
+        long: "On the focused tab bar Left and Right move, Enter opens the tab's menu and Esc goes back to the compose box.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend.chat.mouse",
+        section: "attend.chat",
+        path: &["chat", "mouse"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("false"),
+        scope: Scope::User,
+        doc: "Whether attend-chat starts with the mouse on.",
+        long: "Off, the terminal selects text and middle-click pastes; Alt+m turns the mouse on for clicks on tabs, messages and chips.",
         ..BASE
     },
     KeySpec {

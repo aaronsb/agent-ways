@@ -81,13 +81,22 @@ A line that starts with `/` runs a command. The helper row completes the command
 | Enter | send, or run the slash command |
 | Shift-Enter, Alt-Enter | new line |
 | Tab | on an empty line, the next tab; otherwise complete the `@name`, `#channel` or `/command` being typed |
-| Alt-1 … Alt-9 | jump to a tab (1 is merged, 2 is `#open`) |
+| Ctrl-1 … Ctrl-9 | show a tab (1 is merged, 2 is `#open`); on the tab already shown, open its menu. Needs a terminal that speaks the kitty keyboard protocol; the F1 view says whether yours does |
+| Alt-1 … Alt-9 | show a tab where Ctrl and a digit do not arrive; Konsole and GNOME Terminal keep Alt and a digit for their own tabs |
+| F2, Ctrl-T | the tab bar: Left and Right move, Enter opens the tab's menu, Esc goes back |
+| right-click a tab | its menu; with the mouse on, a click on the tab already shown opens it too |
 | PgUp, PgDn | scroll the feed |
 | Left, Right, Home, End | move the cursor |
 | Backspace, Delete | edit |
 | Alt-m | turn mouse capture on or off |
 | F1 | the key help |
-| Esc, Ctrl-C | quit |
+| Esc, Ctrl-C | quit. Where Ctrl and a digit do not arrive, Ctrl-3 sends Esc, so Esc on an empty line asks first and `y` quits |
+
+**Tab menus.** merged: Clear view. `#open`: Clear history, Clear view. A named channel: Add agent (invites a live peer; it joins itself), Remove agent, Describe, Clear history, Leave, Delete channel. The `+` at the end of the bar asks a new channel's name in the compose box. Clear history and Delete channel ask first: `y` goes ahead, any other key keeps it. Each item runs the slash command that does the same thing.
+
+**Settings.** `attend.chat.tabs.jump` (auto, ctrl, alt, both, none), `attend.chat.tabs.menu_on_repeat`, `attend.chat.tabs.focus_key` (both, f2, ctrl-t, none) and `attend.chat.mouse` live in attend's user file. `/config` lists them with the layer each comes from, and `/config <key> <value>` sets one; `ways settings` reads and sets the same keys.
+
+To see whether a terminal speaks the kitty keyboard protocol, run `printf '\e[?u\e[c'; read -rsd c -t1 r; printf '%q\n' "$r"` in it: a reply holding `[?` followed by digits and `u` means it does; one holding only the `c` answer means it does not.
 
 **The mouse is off at start.** With capture off, the terminal owns the mouse: dragging selects text to copy, and middle-click pastes into the compose box. Alt-m gives the mouse to the screen. Then a click on a tab shows it, a click on a message selects it and scrolls it fully into view, a click in the compose box places the cursor, a click on a helper chip completes it, and the wheel scrolls the feed. Shift-drag still selects text in most terminals.
 

@@ -15,6 +15,7 @@ pub mod helper;
 pub mod legend;
 pub mod peers;
 pub mod sessions;
+pub mod settings;
 pub mod signal;
 pub mod slash;
 pub mod tabs;

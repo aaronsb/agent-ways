@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra                                                                     |
+| 1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                                                                |
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                                                                 │|
 |│ │ Laszlo           │ starting the theme port; the legend moves first                                                 │|
@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                                                                                               #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @aaron @Wells                                                                                                  |
-| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · M-1-9 tabs                            |
+| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · Alt+1-9 tab (again: menu) · F2 tabs   |
 styles
   0   0-9   Black Cyan BOLD
   0  12-13  Blue - BOLD
@@ -47,6 +47,7 @@ styles
   0  27-37  White Blue -
   0  40-41  Cyan - -
   0  42-51  White Blue -
+  0  54-56  White Blue -
   1   0-119 - - DIM
   2   0-0   - - DIM
   2   2-21  - - DIM
@@ -180,5 +181,7 @@ styles
  39  52-62  - - DIM|ITALIC
  39  63-72  Cyan - -
  39  73-81  - - DIM|ITALIC
- 39  82-87  Cyan - -
- 39  88-91  - - DIM|ITALIC
+ 39  82-89  Cyan - -
+ 39  90-109 - - DIM|ITALIC
+ 39 110-112 Cyan - -
+ 39 113-116 - - DIM|ITALIC

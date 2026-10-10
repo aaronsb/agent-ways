@@ -23,6 +23,9 @@ agent-tui = { path = "../agent-tui" }
 agent-theme = { path = "../agent-theme", features = ["ratatui"] }
 # Reads the user's theme choice (`theme.active`, `theme.shape`), read only.
 attend-config = { path = "../attend-config" }
+# The chat's own keys (`attend.chat.*`) resolve and are written through it.
+agent-settings = { path = "../agent-settings" }
+serde_yaml = "0.9"
 attend-groups = { path = "../attend-groups" }
 attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }

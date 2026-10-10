@@ -74,6 +74,7 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
                 .target(prefix_match(&k.group.name, partial.as_deref())),
         );
     }
+    out.push(PaneTab::new("+").action());
     out
 }
 

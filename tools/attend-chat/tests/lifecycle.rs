@@ -213,9 +213,15 @@ mod on_a_terminal {
     }
 
     #[test]
-    fn esc_closes_the_screen_and_ends_the_process() {
+    fn esc_then_y_closes_the_screen_and_ends_the_process() {
+        // This pty answers no keyboard-protocol query, as a terminal
+        // without the kitty protocol: Ctrl+3 would be this same Esc byte,
+        // so Esc asks first and only `y` quits.
         let mut p = start("esc");
         p.master.as_mut().unwrap().write_all(&[27]).unwrap();
+        p.wait_for(b"quit? y quits");
+        assert!(p.child.try_wait().unwrap().is_none(), "Esc alone keeps the screen");
+        p.master.as_mut().unwrap().write_all(b"y").unwrap();
         assert_eq!(p.exit_code(), Some(0));
         std::thread::sleep(Duration::from_millis(100));
         assert!(p.restored());
