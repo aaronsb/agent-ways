@@ -1,0 +1,81 @@
+{
+ "corpus": "ways corpus --ways-dir hooks/ways (built per side)",
+ "probe": "ways author probe <file> --ways-dir hooks/ways --corpus <dir> [--unrelated]",
+ "main": {
+  "tree-sample": [
+   133,
+   89,
+   76
+  ],
+  "tree-sample-joined": [
+   81,
+   57,
+   65
+  ],
+  "tree-sample-pleasantry": [
+   133,
+   89,
+   76
+  ],
+  "unrelated_fired": 0
+ },
+ "branch": {
+  "tree-sample": [
+   133,
+   91,
+   78
+  ],
+  "tree-sample-joined": [
+   81,
+   58,
+   69
+  ],
+  "tree-sample-pleasantry": [
+   133,
+   91,
+   78
+  ],
+  "unrelated_fired": 0
+ },
+ "columns": "[scored,pass,top1]",
+ "first_pass_branch": {
+  "tree-sample": [
+   133,
+   86,
+   74
+  ],
+  "tree-sample-joined": [
+   81,
+   57,
+   68
+  ]
+ },
+ "pruned_ways": [
+  "softwaredev/code/security",
+  "softwaredev/code/supplychain/depscan",
+  "softwaredev/delivery/groundwork",
+  "meta/knowledge/optimization",
+  "ea/comms",
+  "collaboration/onboarding-share",
+  "itops/policy"
+ ],
+ "pruned_terms": [
+  "itops/proposals:reversibility",
+  "meta/start:context-status",
+  "meta/start:mid-session"
+ ],
+ "no_vocabulary_line_skipped": [
+  "meta/compaction-checkpoint",
+  "meta/knowledge/authoring",
+  "meta/knowledge/authoring/tool-agnostic",
+  "meta/todos",
+  "meta/trust/prose/sustain",
+  "softwaredev/code/overbuild",
+  "workstation/shell/shell-prompt"
+ ],
+ "lint": "0 errors, 1 warning (documentation/adr/migration body size, pre-existing)",
+ "sibling_jaccard_pairs_ge_0.15": {
+  "main": 1,
+  "branch": 0
+ }
+}

@@ -1,6 +1,6 @@
 ---
 description: a model-oracle evaluative loop where a model fitted to a system's normal behaviour judges new output by the residual between prediction and observation, for when no fixed expected value exists; benchmark timings across commits, telemetry, simulation energy drift, a metric tracked across releases
-vocabulary: numbers jitter run to run fixed pass threshold cries wolf misses real slowdowns no fixed expected value normal behaviour expected range benchmark timing timings across commits performance regression slower than usual telemetry metric across releases anomaly outlier drift energy drift long simulation conservation reference window frozen k sigma three sigma control limit band envelope residual threshold regime change new normal re-baseline seasonal decomposition noise floor
+vocabulary: numbers jitter run to run fixed pass threshold cries wolf misses real slowdowns no fixed expected value normal behaviour expected range benchmark timing timings across commits performance regression slower than usual telemetry metric across releases anomaly outlier drift energy drift long simulation conservation reference window frozen k sigma three sigma control limit band envelope residual threshold regime change new normal re-baseline seasonal decomposition noise floor percentile median mad refit pre-registered family-wise variability
 scope: agent, subagent
 refire: 0.15
 ---

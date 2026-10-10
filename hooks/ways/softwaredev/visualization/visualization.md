@@ -1,6 +1,6 @@
 ---
 description: Suggest visual representations when explaining, walking through, or describing systems, flows, and relationships
-vocabulary: walk me through explain how show me describe overview understand flow process step by step architecture workflow pipeline relationship lifecycle sequence interaction dependency diagram visual how it works system
+vocabulary: walk me through explain how show me describe overview understand flow process step by step architecture workflow pipeline relationship lifecycle sequence interaction dependency diagram visual how it works system quantitative histogram entity chart
 pattern: walk.{0,20}through|step.by.step
 scope: agent, subagent
 refire: 0.15

@@ -1,6 +1,6 @@
 ---
 description: Overview of the ways system — how ways, skills, and hooks relate, domain organization, matching modes
-vocabulary: ways way knowledge guidance context inject hook trigger matching semantic vocabulary domain
+vocabulary: ways way knowledge guidance context inject hook trigger matching semantic vocabulary domain userpromptsubmit pretooluse re-injection autostash project-local epoch
 pattern: (^| )ways?( |$)|context.?inject
 scope: agent, subagent
 refire: 0.15

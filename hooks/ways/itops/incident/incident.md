@@ -1,6 +1,6 @@
 ---
 description: production incidents — something is down or broken, alert triage, escalation tiers and MTTR targets, fixing forward versus rolling back, and what has to exist before an incident closes
-vocabulary: incident outage production down broken failing alert page on-call escalation severity triage tier l0 l1 l2 mttr remediate fix forward roll back restore contain regression postmortem closure prevention hazard residual
+vocabulary: incident outage production down broken failing alert page on-call escalation severity triage tier l0 l1 l2 mttr remediate fix forward roll back restore contain regression postmortem closure prevention hazard residual sre devops vpn containment fix-forward
 pattern: incident.?response|l0.?support|l1.?support|l2.?support|escalat|mean.?time|alert.?(response|triage)|remediat|fix.?forward|post.?mortem|on.?call
 scope: agent, subagent
 refire: 0.15

@@ -1,6 +1,6 @@
 ---
 description: When and why to set a /goal — running Claude in goal mode toward a completion condition, and the regime that creates
-vocabulary: goal goal-mode autonomous loop completion condition keep working until evaluator continue persist bounded objective set a goal ralph regime evidence approvals operator turns stopping
+vocabulary: goal goal-mode autonomous loop completion condition keep working until evaluator continue persist bounded objective set a goal ralph regime evidence approvals operator turns stopping open-ended single-step per-turn suitability goal-author
 scope: agent, subagent
 refire: 0.15
 ---

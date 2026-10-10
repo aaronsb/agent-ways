@@ -1,6 +1,6 @@
 ---
 description: Recognize an end-of-session signal and route to the /wrap skill — square the TaskList honestly, write a continuation prompt, and hand off to a gauge-aware directed compaction.
-vocabulary: wrap session end checkpoint handoff continuation compact close out done for the day pause stopping point sign off end of session wind down
+vocabulary: wrap session end checkpoint handoff continuation compact close out done for the day pause stopping point sign off end of session wind down wrap-up gauge-timed mis-timed ready-to-run
 pattern: wrap.?(up|this up|it up|things up)|wrapping up|let'?s wrap|end of (the )?session|wrap.{0,10}(session|for the day|for today)|checkpoint.{0,15}compact|/wrap
 scope: agent
 refire: 0.15

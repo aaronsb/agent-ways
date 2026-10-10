@@ -1,6 +1,6 @@
 ---
 description: performance optimization, profiling, benchmarking, latency
-vocabulary: optimize profile benchmark latency throughput memory cache bottleneck flamegraph allocation heap speed slow performance
+vocabulary: optimize profile benchmark latency throughput memory cache bottleneck flamegraph allocation heap speed slow performance quadratic n+1 caching invalidation algorithmic micro-optimizations concat
 pattern: slow|optimi|latency|cpu.?profil|flamegraph|speed.?up|benchmark|bottleneck|throughput|memory.?leak
 pattern_keep: slow  # measured (ADR-155 §5): floor-band load-bearing ('this is slow' g=0.22, keyword-only); noise floor-gated (slow cooker g=0.003)
 scope: agent, subagent

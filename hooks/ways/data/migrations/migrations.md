@@ -1,6 +1,6 @@
 ---
 description: database schema migrations, table and column alterations, rollback procedures
-vocabulary: migration schema alter table column index rollback seed ddl prisma alembic knex flyway
+vocabulary: migration schema alter table column index rollback seed ddl prisma alembic knex flyway activerecord immutability re-runnable single-purpose
 pattern: migrat|database.?change|alter.?table|add.?column|drop.?(table|column)|alembic|prisma.?migrate|knex.?migrate|flyway|liquibase
 scope: agent, subagent
 refire: 0.15

@@ -1,6 +1,6 @@
 ---
 description: Structured investigation — scoping a question, fanning out across independent sources, ranking source authority from official docs down to community posts, and synthesizing findings into an answer
-vocabulary: research investigate look into dig into find out compare evaluate assess synthesize source sources primary source official docs authority credible trust citation evidence survey landscape alternatives options fan-out sweep confidence
+vocabulary: research investigate look into dig into find out compare evaluate assess synthesize source sources primary source official docs authority credible trust citation evidence survey landscape alternatives options fan-out sweep confidence tangent comparative matrix recommendation urls
 macro: append
 scope: agent
 requires: ["Bash(grep:*)"]

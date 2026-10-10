@@ -1,6 +1,6 @@
 ---
 description: code documentation, docstrings, JSDoc, Godoc, rustdoc, inline comments
-vocabulary: docstring jsdoc godoc pydoc rustdoc comment annotation type hint documentation
+vocabulary: docstring jsdoc godoc pydoc rustdoc comment annotation type hint documentation google-style getters exported idiomatic self-evident
 scope: agent, subagent
 refire: 0.15
 ---

@@ -1,6 +1,6 @@
 ---
 description: Go dependency security, govulncheck, module verification, replace directives
-vocabulary: govulncheck go.sum go.mod replace directive go install go get module proxy checksum
+vocabulary: govulncheck go.sum go.mod replace directive go install go get module proxy checksum sum.golang.org modules transparency
 scope: agent, subagent
 refire: 0.15
 ---

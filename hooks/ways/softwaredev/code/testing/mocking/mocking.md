@@ -1,6 +1,6 @@
 ---
 description: mocking dependencies, test doubles, fakes, stubs, spies, dependency injection for tests
-vocabulary: mock fake stub spy double dependency inject external isolate test double
+vocabulary: mock fake stub spy double dependency inject external isolate test double flaky non-deterministic randomness third-party filesystem
 scope: agent, subagent
 refire: 0.2
 ---

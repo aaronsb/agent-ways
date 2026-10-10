@@ -1,6 +1,6 @@
 ---
 description: deriving how a system actually behaves from executable artifacts (code, migrations, runtime config) rather than from docs, ADRs or specs, and capturing a golden-master baseline before a refactor or migration so the diff afterward proves the behavior did not change
-vocabulary: ground truth source of truth authoritative security review reconcile docs vs code spec vs implementation stale drift what does the system actually do baseline supersede golden master oracle refactor migration behavior preserved no behavior change same outputs recapture intended delta pinning
+vocabulary: ground truth source of truth authoritative security review reconcile docs vs code spec vs implementation stale drift what does the system actually do baseline supersede golden master oracle refactor migration behavior preserved no behavior change same outputs recapture intended delta pinning yardstick re-baseline divergence adrift semantically
 pattern: source.?of.?truth|ground.?truth|security.?review|reconcile|docs?.vs.?code|spec.vs.?implementation|actually (do|behave|work|enforce)|is (this|the|that).{0,30}(up.?to.?date|still (true|accurate|current))|stale (adr|doc|spec)|golden.?master
 scope: agent, subagent
 refire: 0.2

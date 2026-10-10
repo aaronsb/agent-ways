@@ -1,6 +1,6 @@
 ---
 description: evaluative loop engineering, where a coding agent writes the software and a harness and oracle it does not control judge whether the work is done; separating the author from the judge, and choosing which kind of evaluative loop fits the product
-vocabulary: evaluative loop coding agent writes all the code what decides its work is done author judge harness oracle verdict agent-written agent authored self-grade grade its own homework answer key baseline regenerate weaken loosen tolerance exit status instrument greater loop development loop judge the output looks right done claim count harness grows escaped defect
+vocabulary: evaluative loop coding agent writes all the code what decides its work is done author judge harness oracle verdict agent-written agent authored self-grade grade its own homework answer key baseline regenerate weaken loosen tolerance exit status instrument greater loop development loop judge the output looks right done claim count harness grows escaped defect rubric readout telemetry naive re-recording
 scope: agent, subagent
 refire: 0.15
 ---

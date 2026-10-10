@@ -1,6 +1,6 @@
 ---
 description: designing a restrictive rule such as an allowlist, denylist, filter, quota, rate limit, or validator so it catches what it must and keeps the ordinary path working; fallback posture fail-open or fail-closed; never widen a control to clear a symptom
-vocabulary: allowlist denylist blocklist filter guard validator quota rate limit fallback fail-open fail-closed widen loosen relax the rule
+vocabulary: allowlist denylist blocklist filter guard validator quota rate limit fallback fail-open fail-closed widen loosen relax the rule over-restrictive weakened collateral protective
 scope: agent, subagent
 refire: 0.15
 ---

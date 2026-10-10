@@ -1,6 +1,6 @@
 ---
 description: writing locale stubs for a way — the locales.jsonl file of per-language description and vocabulary aliases that let a way match prompts in another language
-vocabulary: locales.jsonl locale stub alias per-language native translate translation lang jsonl coordinate multilingual
+vocabulary: locales.jsonl locale stub alias per-language native translate translation lang jsonl coordinate multilingual per-locale english-only confuser re-author
 scope: agent, subagent
 refire: 0.15
 ---

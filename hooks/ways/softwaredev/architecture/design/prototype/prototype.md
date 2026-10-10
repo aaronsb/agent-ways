@@ -1,6 +1,6 @@
 ---
 description: when a design decision rests on external-system behavior, performance, latency, or data-volume assumptions, build a throwaway prototype or probe the real system to confirm or kill it BEFORE committing
-vocabulary: prototype probe spike throwaway validate empirically measure benchmark external api third-party rate limit latency budget payload size data volume webhook poll assumption load-bearing claim feasibility proof of concept
+vocabulary: prototype probe spike throwaway validate empirically measure benchmark external api third-party rate limit latency budget payload size data volume webhook poll assumption load-bearing claim feasibility proof of concept falsifiable bet unmeasured prototype-before-accept decisive
 scope: agent, subagent
 refire: 0.2
 ---

@@ -1,6 +1,6 @@
 ---
 description: fixing a bug, refactoring, or changing existing code so the change integrates into the file instead of being patched on; no v2 wrapper or new-suffix copy of the old function, delete dead code and dangling imports after a removal, treat a rename that crosses an API or wire boundary as a contract change, sweep sibling copies of the same defect
-vocabulary: fix the bug fix refactor patch change existing code modify update legacy old handler callers break compatibility rename wrapper v2 cleanup clean up dead code unused duplicate copy paste additive diff sweep bolted stitched integrate integration siblings copies dangling import removal boundary
+vocabulary: fix the bug fix refactor patch change existing code modify update legacy old handler callers break compatibility rename wrapper v2 cleanup clean up dead code unused duplicate copy paste additive diff sweep bolted stitched integrate integration siblings copies dangling import removal boundary seam dual-read consolidate holistic residue self-check
 files: \.(rs|py|ts|tsx|js|go|java|rb|sh|c|cpp|h)$
 refire: 0.15
 scope: agent, subagent

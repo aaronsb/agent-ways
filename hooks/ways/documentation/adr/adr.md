@@ -1,6 +1,6 @@
 ---
 description: Agent Decision Records (ADRs) — creating, managing, and referencing ADRs for technical choices, how reversible a decision is, a deliberate deviation from a standard, and superseding an accepted ADR
-vocabulary: adr architecture decision record design pattern technical choice trade-off rationale alternative reversibility reversible one-way irreversible deviation deviate depart standard exception waiver supersede superseded accepted defer
+vocabulary: adr architecture decision record design pattern technical choice trade-off rationale alternative reversibility reversible one-way irreversible deviation deviate depart standard exception waiver supersede superseded accepted defer as-built alternatives deferral vendoring
 pattern: (^| )adr( |$)|architect|decision|design.?pattern|technical.?choice|trade.?off
 files: docs/architecture/.*\.md$
 macro: prepend

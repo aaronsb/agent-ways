@@ -1,6 +1,6 @@
 ---
 description: modular shell startup configuration — zshrc or bashrc as a thin loader sourcing conf.d includes, XDG base directories, PATH deduplication
-vocabulary: zshrc bashrc rcfile conf.d sourced modular loader include XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME PATH typeset profile startup interactive login
+vocabulary: zshrc bashrc rcfile conf.d sourced modular loader include XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME PATH typeset profile startup interactive login fragment prepend dedup lexicographic monolithic disable-by-rename
 files: /\.zshrc$|/\.bashrc$|/\.zshenv$|/\.zprofile$|/\.zsh/conf\.d/|/\.bashrc\.d/
 scope: agent
 refire: 0.15

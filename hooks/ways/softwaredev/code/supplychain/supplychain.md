@@ -1,6 +1,6 @@
 ---
 description: supply chain security, repository trust assessment, evaluating code from untrusted sources
-vocabulary: supply chain trust assessment forked repo untrusted repo audit repo hygiene dependency scan vulnerability malicious backdoor provenance clone fork grab use try found shared unfamiliar external third party
+vocabulary: supply chain trust assessment forked repo untrusted repo audit repo hygiene dependency scan vulnerability malicious backdoor provenance clone fork grab use try found shared unfamiliar external third party tier tainted adoption
 commands: git\ clone
 scope: agent, subagent
 refire: 0.2

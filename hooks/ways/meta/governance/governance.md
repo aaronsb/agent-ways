@@ -1,6 +1,6 @@
 ---
 description: Grounding recommendations in real governance controls — when and how to cite the standards (NIST, OWASP, ISO, SOC 2, CIS, IEEE) behind a practice
-vocabulary: governance control citation justify justification standard compliance traceability provenance regulatory audit why do we do this NIST OWASP ISO SOC CIS IEEE commits security conventional requirement
+vocabulary: governance control citation justify justification standard compliance traceability provenance regulatory audit why do we do this NIST OWASP ISO SOC CIS IEEE commits security conventional requirement governance-cite over-citing lookup quote
 scope: agent, subagent
 refire: 0.15
 ---

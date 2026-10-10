@@ -1,6 +1,6 @@
 ---
 description: personal developer shell environment setup on a workstation — interactive prompt, modular shellrc, modern CLI tool ecosystem, global git identity, persistent ssh-agent
-vocabulary: workstation zsh bash shell dotfile rcfile PATH XDG prompt oh-my-posh theme bootstrap fresh machine setup personal home config homebrew pacman apt
+vocabulary: workstation zsh bash shell dotfile rcfile PATH XDG prompt oh-my-posh theme bootstrap fresh machine setup personal home config homebrew pacman apt oh-my-zsh dnf ripgrep plugin clobber
 scope: agent, subagent
 refire: 0.15
 ---

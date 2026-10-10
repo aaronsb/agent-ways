@@ -1,6 +1,6 @@
 ---
 description: the way frontmatter field reference — pattern, files, and commands triggers, semantic description and vocabulary, state triggers, when preconditions, macro, and scope
-vocabulary: frontmatter field schema when precondition project scope subagent teammate macro prepend append threshold file-exists context-threshold session-start path commands files
+vocabulary: frontmatter field schema when precondition project scope subagent teammate macro prepend append threshold file-exists context-threshold session-start path commands files stash modifiers project-scoped state-based pattern-based
 scope: agent, subagent
 refire: 0.15
 ---

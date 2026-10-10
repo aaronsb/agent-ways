@@ -1,6 +1,6 @@
 ---
 description: catch me up morning briefing, what happened overnight while I was away, start of day summary across all inboxes and calendars
-vocabulary: catch up morning briefing what's my day start of day need to know overnight summary today agenda priorities
+vocabulary: catch up morning briefing what's my day start of day need to know overnight summary today agenda priorities catch-me-up cross-source unified
 scope: agent, subagent
 refire: 0.15
 ---

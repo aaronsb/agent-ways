@@ -1,6 +1,6 @@
 ---
 description: a visual evaluation loop for terminal UI screens; snapshot each screen at the terminal sizes users run, reach each state with a scripted key sequence, review every golden image diff of a screen capture row by row, and exercise external commands through a stand-in runner
-vocabulary: tui terminal ui screen screenshot snapshot capture pane frame golden image diff render layout 80x25 100x30 columns rows small terminal resize keys keypress keystroke key sequence modal popup overlay scroll wrap truncation clipped overflow stand-in runner fake command long output exit code visual
+vocabulary: tui terminal ui screen screenshot snapshot capture pane frame golden image diff render layout 80x25 100x30 columns rows small terminal resize keys keypress keystroke key sequence modal popup overlay scroll wrap truncation clipped overflow stand-in runner fake command long output exit code visual tmux pty pseudo-terminal multiplexer truncated footer
 pattern: \btui\b|\b(80|100|120|132)x(24|25|30|40|43|50)\b
 scope: agent, subagent
 refire: 0.15

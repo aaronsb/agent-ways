@@ -1,6 +1,6 @@
 ---
 description: logging billable hours to a timesheet, time entries by client and project, catching up on unlogged time, preparing an invoice
-vocabulary: timesheet timesheets billable hours time entry time entries unlogged time hours worked per client invoice invoicing client engagement kantata harvest toggl clockify
+vocabulary: timesheet timesheets billable hours time entry time entries unlogged time hours worked per client invoice invoicing client engagement kantata harvest toggl clockify billing unbilled uninvoiced utilization auto-log weekly
 scope: agent, subagent
 refire: 0.15
 ---

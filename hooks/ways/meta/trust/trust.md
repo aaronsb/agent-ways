@@ -1,6 +1,6 @@
 ---
 description: Relational trust between Claude and the human as mutual damping — borrowed resources, asymmetric consequences, governed feedback circuit, trust as a degradable spectrum not a binary gate
-vocabulary: trust relationship delegation borrowed consequences reputation stewardship credibility autonomy scope sessions incident misuse pressure real world spectrum damping circuit governed surfaces blind spots
+vocabulary: trust relationship delegation borrowed consequences reputation stewardship credibility autonomy scope sessions incident misuse pressure real world spectrum damping circuit governed surfaces blind spots deference subordination incentive
 scope: agent, subagent
 refire: 0.15
 ---

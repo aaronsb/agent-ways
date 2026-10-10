@@ -1,6 +1,6 @@
 ---
 description: persistent SSH agent on a workstation — ssh-add, keychain integration, socket path, launchd or systemd agent, key generation, ~/.ssh/config defaults
-vocabulary: ssh-agent ssh-add keychain apple-use-keychain launchd systemd gnome-keyring SSH_AUTH_SOCK ed25519 AddKeysToAgent UseKeychain IdentityFile persistent socket keygen
+vocabulary: ssh-agent ssh-add keychain apple-use-keychain launchd systemd gnome-keyring SSH_AUTH_SOCK ed25519 AddKeysToAgent UseKeychain IdentityFile persistent socket keygen kwallet kde ssh-keygen batchmode connecttimeout macos
 files: /\.ssh/config$
 commands: ssh-add\b|ssh-agent\b|ssh-keygen\b
 scope: agent

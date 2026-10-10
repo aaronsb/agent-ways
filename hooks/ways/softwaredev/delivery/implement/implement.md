@@ -1,6 +1,6 @@
 ---
 description: Implementation planning, work breakdown, safe parallelization, briefing the human before writing code, and the four-field shape of a task description
-vocabulary: implement build begin start work execute plan breakdown parallelize worktree task sprint kick off begin coding increment contract failing test red rollback depends slice
+vocabulary: implement build begin start work execute plan breakdown parallelize worktree task sprint kick off begin coding increment contract failing test red rollback depends slice pushback re-slice misordered revise
 macro: append
 scope: agent
 requires: ["Read", "Bash(cat:*)", "Bash(find:*)", "Bash(wc:*)"]

@@ -1,6 +1,6 @@
 ---
 description: Node.js dependency security, npm audit, postinstall scripts, typosquatting
-vocabulary: npm audit package-lock.json node_modules postinstall preinstall yarn pnpm npx typosquat javascript typescript
+vocabulary: npm audit package-lock.json node_modules postinstall preinstall yarn pnpm npx typosquat javascript typescript npmjs ignore-scripts transitive lookalike
 scope: agent, subagent
 refire: 0.15
 ---

@@ -1,6 +1,6 @@
 ---
 description: decomposing a large way into a progressive disclosure tree of parent and child ways — when to split, the parent boost, sibling vocabulary isolation, token budgets, and anti-rationalization tables in leaf ways
-vocabulary: tree child parent split decompose subway sub-way nest leaf sibling jaccard isolation boost cascade budget worst-case rationalization counter
+vocabulary: tree child parent split decompose subway sub-way nest leaf sibling jaccard isolation boost cascade budget worst-case rationalization counter dag multiplier cross-fire child-root splitting
 scope: agent, subagent
 refire: 0.15
 ---

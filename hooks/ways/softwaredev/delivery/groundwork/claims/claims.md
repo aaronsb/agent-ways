@@ -1,6 +1,6 @@
 ---
 description: separating what a pull request, issue, or agent report says about itself from what it demonstrates, treating the description as a claim and asking what would show it wrong
-vocabulary: claim evidence self-report writeup narrative pr body issue body summary says it does polished description convincing plausible falsify disprove shown wrong take their word take its word
+vocabulary: claim evidence self-report writeup narrative pr body issue body summary says it does polished description convincing plausible falsify disprove shown wrong take their word take its word refutation falsifiability could-not-refute reproduction
 scope: agent, subagent
 refire: 0.2
 ---

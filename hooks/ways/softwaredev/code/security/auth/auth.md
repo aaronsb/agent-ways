@@ -1,6 +1,6 @@
 ---
 description: authentication, authorization, access control, middleware guards, RBAC, permissions
-vocabulary: authentication authorization middleware guard permission role rbac access control login session jwt csrf cors
+vocabulary: authentication authorization middleware guard permission role rbac access control login session jwt csrf cors idor role-based server-side client-side forgery unprotected admin
 scope: agent, subagent
 refire: 0.2
 ---

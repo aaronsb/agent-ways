@@ -1,6 +1,6 @@
 ---
 description: a green result on the authoring host is evidence about the authoring host only; the CI runner, container, staging box, or other OS is a separate host until exercised there, and untracked or unpushed files do not exist for it
-vocabulary: works locally fails in ci on my machine passes here ci red workflow runner container differs github actions pipeline job target host authoring host parity unpushed untracked uncommitted reproduce ci locally act same image verified unverified
+vocabulary: works locally fails in ci on my machine passes here ci red workflow runner container differs github actions pipeline job target host authoring host parity unpushed untracked uncommitted reproduce ci locally act same image verified unverified laptop stand-in substitute host-naming
 files: \.github/workflows/.*\.ya?ml$|Dockerfile|\.gitlab-ci\.yml
 commands: git push
 scope: agent, subagent

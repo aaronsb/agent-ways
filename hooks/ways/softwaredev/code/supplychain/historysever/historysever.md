@@ -1,6 +1,6 @@
 ---
 description: git history flattening, fork severing, BFG cleanup, removing secrets from git history
-vocabulary: orphan branch sever history flatten history fork sever bfg git reflog gc prune standalone delete fork
+vocabulary: orphan branch sever history flatten history fork sever bfg git reflog gc prune standalone delete fork revoked unrotatable bloated discard repo-cleaner
 scope: agent, subagent
 refire: 0.15
 ---

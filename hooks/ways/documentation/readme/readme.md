@@ -1,6 +1,6 @@
 ---
 description: README authoring, project overview, getting started guide, README structure
-vocabulary: readme project overview getting started quick start onboarding introduction about what is this
+vocabulary: readme project overview getting started quick start onboarding introduction about what is this gist monolith installation-first over-documenting
 scope: agent, subagent
 refire: 0.15
 ---

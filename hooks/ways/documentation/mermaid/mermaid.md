@@ -1,6 +1,6 @@
 ---
 description: Mermaid diagrams, flowcharts, sequence diagrams, state diagrams, diagram styling, palette and color choices for light and dark themes
-vocabulary: mermaid diagram flowchart sequence state class gantt chart gitgraph timeline svg styling palette color fill stroke contrast light dark mode theme legible opaque subgraph
+vocabulary: mermaid diagram flowchart sequence state class gantt chart gitgraph timeline svg styling palette color fill stroke contrast light dark mode theme legible opaque subgraph legend hue translucent theme-independent ascii
 scope: agent, subagent
 refire: 0.15
 ---

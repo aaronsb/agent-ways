@@ -1,6 +1,6 @@
 ---
 description: setting a way's firing cadence with the refire field — how soon a way re-discloses after it fires, as a fraction of the context window or a named preset
-vocabulary: refire cadence redisclose re-disclosure half-life preset once rare normal frequent refire_presets window fraction fire-bearing
+vocabulary: refire cadence redisclose re-disclosure half-life preset once rare normal frequent refire_presets window fraction fire-bearing fire-time exempt refusal portability
 scope: agent, subagent
 refire: 0.15
 ---

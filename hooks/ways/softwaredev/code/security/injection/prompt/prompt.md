@@ -1,6 +1,6 @@
 ---
 description: prompt injection and LLM tool-call safety; model output is data until validated, instructions hidden in a retrieved document or tool result carry no authority, scope the tools an agent can reach, test for tool hijacking and exfiltration through tool arguments
-vocabulary: prompt injection jailbreak model output llm agent instructions hidden in retrieved document tool result tool call tool arguments hijack hijacking exfiltration data not instructions untrusted content rag context window system prompt
+vocabulary: prompt injection jailbreak model output llm agent instructions hidden in retrieved document tool result tool call tool arguments hijack hijacking exfiltration data not instructions untrusted content rag context window system prompt allowlist abuse fixture payloads indirect
 pattern: prompt.?injection|jailbreak|tool.?hijack
 scope: agent, subagent
 refire: 0.2

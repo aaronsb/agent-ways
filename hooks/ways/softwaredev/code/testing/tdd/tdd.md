@@ -1,6 +1,6 @@
 ---
 description: test-driven development, TDD red-green-refactor cycle, failing test first, characterization tests on untested or legacy code, proving an inherited green suite by reintroducing the defect
-vocabulary: tdd red green refactor test first implementation failing characterize characterization legacy inherited untested suite mutation defect regression
+vocabulary: tdd red green refactor test first implementation failing characterize characterization legacy inherited untested suite mutation defect regression phase exploratory prototyping glue unproven
 scope: agent, subagent
 refire: 0.2
 ---

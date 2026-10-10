@@ -1,6 +1,6 @@
 ---
 description: artifact freshness — surfacing files that describe or derive from something else but have drifted behind it
-vocabulary: stale freshness drift outdated lagging behind neglected dormant readme docs documentation lockfile generated derived out of sync reconcile abandoned
+vocabulary: stale freshness drift outdated lagging behind neglected dormant readme docs documentation lockfile generated derived out of sync reconcile abandoned parked lag upgrades
 trigger: session-start
 macro: prepend
 scope: agent

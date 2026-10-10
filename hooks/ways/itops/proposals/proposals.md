@@ -1,6 +1,6 @@
 ---
 description: itops change proposals, a structured approval request before a high-risk operation on production systems, with blast radius, rollback plan, approval lifecycle, and timeout escalation
-vocabulary: change proposal change request approval lifecycle approver blast radius rollback plan production operation destructive infrastructure change maintenance window change advisory board timeout escalation multi-party approval
+vocabulary: change proposal change request approval lifecycle approver blast radius rollback plan production operation destructive infrastructure change maintenance window change advisory board timeout escalation multi-party approval abort preview remind
 pattern: proposal.?(primitive|lifecycle|structure)|human.?in.?(the.?)?loop|approval.?workflow|operation.?proposal
 scope: agent, subagent
 refire: 0.15

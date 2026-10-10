@@ -1,6 +1,6 @@
 ---
 description: git history audit, leaked secrets detection, binary blob discovery in repositories
-vocabulary: git history large objects leaked secrets committed gitignored binary blob git rev-list repo size secret scan AKIA ghp_ glpat xox api key token password private key credentials
+vocabulary: git history large objects leaked secrets committed gitignored binary blob git rev-list repo size secret scan AKIA ghp_ glpat xox api key token password private key credentials zip archives dump
 scope: agent, subagent
 refire: 0.15
 ---

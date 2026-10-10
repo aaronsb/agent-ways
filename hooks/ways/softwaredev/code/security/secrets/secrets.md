@@ -1,6 +1,6 @@
 ---
 description: secrets management, credential hygiene, .env files, API keys, password storage, logging or filing a credential by name without its value, and rotation order after a secret is committed
-vocabulary: secret credential password token api key env .env dotenv rotate rotation expose exposed leaked committed hardcoded log mask redact scan gitignore bcrypt argon2 hash encrypt vault
+vocabulary: secret credential password token api key env .env dotenv rotate rotation expose exposed leaked committed hardcoded log mask redact scan gitignore bcrypt argon2 hash encrypt vault env.example placeholder blast-radius roll metadata
 scope: agent, subagent
 refire: 0.2
 ---

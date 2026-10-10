@@ -1,6 +1,6 @@
 ---
 description: writing idempotent, re-runnable schema migrations that survive a retry or partial failure without erroring on the second pass
-vocabulary: idempotent rerun retry replay guard conditional if not exists create or replace on conflict drop if exists partial failure resume safe reentrant
+vocabulary: idempotent rerun retry replay guard conditional if not exists create or replace on conflict drop if exists partial failure resume safe reentrant wedged interrupted double-run recoverable re-runnable transaction
 pattern: idempoten|if not exists|create or replace|on conflict|re-?runnable|re-?run|drop .{0,30}if exists
 scope: agent, subagent
 refire: 0.15

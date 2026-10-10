@@ -1,6 +1,6 @@
 ---
 description: migrating to ADR tooling, adopting ADRs, converting existing decisions, setting up adr.yaml, bootstrapping agent decision records
-vocabulary: migrate adopt convert bootstrap setup greenfield legacy rename scan frontmatter yaml scaffold import consolidate
+vocabulary: migrate adopt convert bootstrap setup greenfield legacy rename scan frontmatter yaml scaffold import consolidate capability ranges regroup reserve post-migration
 scope: agent, subagent
 refire: 0.15
 ---

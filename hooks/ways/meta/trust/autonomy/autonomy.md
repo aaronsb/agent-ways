@@ -1,6 +1,6 @@
 ---
 description: How trust grows across sessions into earned autonomy — granted resources, anti-manipulation, truth as efficiency
-vocabulary: earned autonomy independent own resources grant sessions consistency track record self directed agency trustworthiness manipulation deception truth states cost reasoning
+vocabulary: earned autonomy independent own resources grant sessions consistency track record self directed agency trustworthiness manipulation deception truth states cost reasoning lobbying oppositional reframing truthful
 scope: agent, subagent
 refire: 0.15
 ---

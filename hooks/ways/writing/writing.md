@@ -1,6 +1,6 @@
 ---
 description: writing and editing prose for people — a report, proposal, memo, status or progress update, presentation, or announcement, and the conventions each genre follows
-vocabulary: write writing draft compose write up proposal report presentation deck slides memo status update progress update announcement outline revise edit rewrite polish tone audience prose style genre
+vocabulary: write writing draft compose write up proposal report presentation deck slides memo status update progress update announcement outline revise edit rewrite polish tone audience prose style genre diction corporate gloss revision genre-specific filler
 macro: append
 scope: agent
 requires: ["Bash(grep:*)"]

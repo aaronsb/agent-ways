@@ -1,6 +1,6 @@
 ---
 description: a forecast evaluative loop for a predictive model only ever scored on the data it was trained on or on history it has already seen; judge it on held-out future data with a walk-forward backtest against a naive baseline, check for leakage, report scale-free error per horizon and residual diagnostics
-vocabulary: prediction model predictive model accuracy only scored on training data fits history perfectly looks amazing on past data predicting the future churn sales demand delays overfit forecast forecasting time series backtest walk-forward rolling origin held-out future horizon naive baseline seasonal naive leakage look-ahead mase residual autocorrelation arima fourier kalman lstm transformer echo state takens train test split
+vocabulary: prediction model predictive model accuracy only scored on training data fits history perfectly looks amazing on past data predicting the future churn sales demand delays overfit forecast forecasting time series backtest walk-forward rolling origin held-out future horizon naive baseline seasonal naive leakage look-ahead mase residual autocorrelation arima fourier kalman lstm transformer echo state takens train test split rolling-origin in-sample overfitting per-horizon one-step preprocessing
 scope: agent, subagent
 refire: 0.15
 ---

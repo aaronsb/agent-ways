@@ -1,6 +1,6 @@
 ---
 description: Persistent memory system — MEMORY.md, topic files, what to record and when
-vocabulary: remember memory save note forget recall persist session learning gotcha pattern
+vocabulary: remember memory save note forget recall persist session learning gotcha pattern self-save over-save pointer formalize session-recap
 trigger: context-threshold
 threshold: 80
 pattern: save.{0,30}(to|this|that).{0,30}memory|note.{0,30}(for|this).{0,30}(later|next)|don't forget|keep.{0,20}in.{0,10}mind

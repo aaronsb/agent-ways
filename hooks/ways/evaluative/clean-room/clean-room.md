@@ -1,6 +1,6 @@
 ---
 description: a clean-room evaluative loop that installs the product from zero into a fresh disposable environment and exercising it the way a new user would; pinned base image and tool versions, branch and release flavours, seeded user config that must survive, idempotence checked by running twice, non-root artifacts
-vocabulary: clean room fresh install from scratch from zero new user first run installer test install path disposable container throwaway machine pinned base image cache bust branch flavour release flavour published artifact seeded home someone else's existing settings config preserved survives untouched second config directory installed over idempotent install twice
+vocabulary: clean room fresh install from scratch from zero new user first run installer test install path disposable container throwaway machine pinned base image cache bust branch flavour release flavour published artifact seeded home someone else's existing settings config preserved survives untouched second config directory installed over idempotent install twice toolchain prebuilt first-run cache-bust unprivileged
 scope: agent, subagent
 refire: 0.15
 ---

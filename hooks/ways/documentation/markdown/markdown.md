@@ -1,6 +1,6 @@
 ---
 description: markdown authoring mechanics — line handling, hard wrapping versus flat prose, when a line break carries structure, tables and fences
-vocabulary: markdown wrap unwrap reflow flatten line length column paragraph prose hard wrap fill width flow text file authoring plaintext txt
+vocabulary: markdown wrap unwrap reflow flatten line length column paragraph prose hard wrap fill width flow text file authoring plaintext txt rewrap hard-wrap unwrapped commonmark reparse
 files: \.md$
 scope: agent, subagent
 refire: 0.15

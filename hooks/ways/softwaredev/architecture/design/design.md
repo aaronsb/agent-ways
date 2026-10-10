@@ -1,6 +1,6 @@
 ---
 description: software system design, architecture patterns, database schema, component modeling, proposals, RFCs, design deliberation
-vocabulary: architecture pattern database schema modeling interface component modules factory observer strategy monolith microservice microservices domain layer coupling cohesion abstraction singleton proposal rfc sketch deliberation whiteboard
+vocabulary: architecture pattern database schema modeling interface component modules factory observer strategy monolith microservice microservices domain layer coupling cohesion abstraction singleton proposal rfc sketch deliberation whiteboard trade-offs adapter testability escalating
 scope: agent, subagent
 refire: 0.15
 ---

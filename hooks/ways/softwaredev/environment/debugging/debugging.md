@@ -1,6 +1,6 @@
 ---
 description: debugging, troubleshooting failures, investigating broken behavior
-vocabulary: debug debugging troubleshoot troubleshooting stack trace stacktrace backtrace add logging tracing root cause reproduce reproduction bisect regression crash crashes segfault exception panic core dump breakpoint bug
+vocabulary: debug debugging troubleshoot troubleshooting stack trace stacktrace backtrace add logging tracing root cause reproduce reproduction bisect regression crash crashes segfault exception panic core dump breakpoint bug guessing speculative blame typos simultaneous
 scope: agent, subagent
 refire: 0.15
 ---

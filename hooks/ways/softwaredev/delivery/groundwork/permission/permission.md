@@ -1,6 +1,6 @@
 ---
 description: when contributions cluster on the files people are allowed to edit because the tests, pipeline, or deployment belong to another team, naming the ownership boundary and the decision it needs instead of building around it
-vocabulary: permission allowed to change not allowed can't touch ownership boundary another team owns platform team owns the pipeline approval negotiate their backlog authority route around workaround wrapper script periphery clustered on config skew who can change this
+vocabulary: permission allowed to change not allowed can't touch ownership boundary another team owns platform team owns the pipeline approval negotiate their backlog authority route around workaround wrapper script periphery clustered on config skew who can change this step-in untestable compensating peripheral
 scope: agent, subagent
 refire: 0.2
 ---

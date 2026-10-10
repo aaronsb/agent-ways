@@ -1,6 +1,6 @@
 ---
 description: Git branch awareness and branching guidance when editing files
-vocabulary: branch checkout worktree main trunk feature fix refactor
+vocabulary: branch checkout worktree main trunk feature fix refactor force-push temp tweaks context-switch
 files: \.(md|rs|sh|py|js|ts|json|yaml|yml|toml|go|rb|java|c|cpp|h|hpp|css|html|sql)$
 refire: 0.1
 macro: prepend
