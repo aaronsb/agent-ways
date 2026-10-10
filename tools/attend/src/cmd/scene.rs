@@ -5,6 +5,13 @@ use crate::util::get_groups;
 
 pub(crate) fn cmd_scene(name: &str) {
     let r = get_groups();
+    // A scene's channels are joined as `attend join` joins one: their old
+    // messages are marked seen first.
+    if let Some(scene) = scenes::load_scenes().get(name) {
+        for channel in &scene.channels {
+            crate::util::baseline_joined_room(&r, channel);
+        }
+    }
     match scenes::activate(name, &r) {
         Ok(result) => {
             settle_scene_enrollment(name, &r);
