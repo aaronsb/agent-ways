@@ -89,3 +89,7 @@ Two anchors keep it legible: **one hue = one role** (don't reuse green for both 
 - Unstyled diagrams when 3+ actors or concerns are present — add color
 
 **Validate before committing.** Render the diagram (`mmdc -i diagram.mmd -o /tmp/out.svg`, or the terminal `mmaid` way) — a clean render means the syntax parsed. Eyeball it in both a light and a dark preview.
+
+## See Also
+
+- visualization/diagrams(softwaredev) — rendering Mermaid in the terminal with mmaid

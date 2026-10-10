@@ -98,3 +98,7 @@ If the user asks to "visualize" something, consider whether the data is structur
 ## GitHub Compatibility Note
 
 When writing Mermaid for GitHub markdown (not terminal rendering), use `<br>` instead of `\n` for line breaks in node labels — GitHub's renderer doesn't support `\n`.
+
+## See Also
+
+- mermaid(documentation) — diagram-type choice, GitHub compatibility, and styling for both themes
