@@ -52,7 +52,12 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "lineage confirmed: clear, resume and compaction continue the agent; a fresh process in the same directory is a new agent; every decision reviewed with a disposition"
+    via: relayed by the main session, 2026-10-10
+    covers: [lineage]
+status: accepted
 date: 2026-10-10
 deciders:
   - aaronsb
