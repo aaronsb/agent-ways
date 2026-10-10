@@ -159,6 +159,20 @@ pub trait Pane: Any {
     /// its action. Nothing by default.
     fn tab_menu(&mut self, _i: usize) {}
 
+    /// What Ctrl+N does in this pane, in a few words ("new channel"), when
+    /// the pane has such an action. Only a pane with tab menus
+    /// ([`Pane::has_tab_menus`]) is asked; with a label the shell takes
+    /// Ctrl+N, from the compose box or the tab bar, calls
+    /// [`Pane::new_item`] and names the key in the help and the tab bar's
+    /// hint. `None` leaves Ctrl+N to the pane.
+    fn new_item_label(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Ctrl+N: do what [`Pane::new_item_label`] names, through
+    /// [`Pane::take_open`] if it opens something.
+    fn new_item(&mut self) {}
+
     /// The shell took a key or a click before the pane saw it: the tab bar
     /// got the focus, a tab was clicked. A pane waiting on an answer (a
     /// `y` to confirm) drops the question.

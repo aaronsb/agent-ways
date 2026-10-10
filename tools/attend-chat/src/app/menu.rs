@@ -9,7 +9,8 @@
 //! - `#open`: Clear history, Clear view.
 //! - a named channel: Add agent ▸, Invite agent ▸, Remove agent ▸,
 //!   Describe…, Clear history, Leave, Delete channel.
-//! - the `+` slot: New channel…, a name typed in the compose box.
+//! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
+//!   channel, typed in the compose box.
 //!
 //! Clear history and Delete channel ask first: `y` goes ahead, any other
 //! key keeps the history. Invite agent asks a live peer to join (it joins
@@ -103,7 +104,7 @@ impl ChatPane {
             return self.common_menu();
         }
         if i == names.len() + 2 {
-            return self.start_prompt(Prompt::NewChannel);
+            return self.new_channel();
         }
         let channel = match i {
             1 => None,
@@ -240,6 +241,21 @@ impl ChatPane {
         self.open = Some(Open::Pick { id, title, options, multi: false, chosen: Vec::new() });
     }
 
+    /// Ask for a new channel's name in the compose box: from the `+` slot
+    /// or Ctrl+N. A waiting question is dropped; the name already being
+    /// typed is left alone, so a repeat cannot take the name for the draft.
+    /// A description being typed is never thrown away: the request waits
+    /// until it is sent or cancelled.
+    pub(super) fn new_channel(&mut self) {
+        self.dirty = true;
+        self.pending = None;
+        match self.prompt {
+            Some((Prompt::NewChannel, _)) => {}
+            Some(_) => self.say("finish the description, or Esc, first", false),
+            None => self.start_prompt(Prompt::NewChannel),
+        }
+    }
+
     /// Lend the compose box to `p`, keeping the draft for after.
     fn start_prompt(&mut self, p: Prompt) {
         let draft = self.input.text().to_string();
@@ -299,8 +315,8 @@ impl ChatPane {
 
     /// The shell took a key or a click: a waiting question is dropped.
     pub(super) fn drop_question(&mut self) {
-        if self.pending.take().is_some() {
-            self.say("kept", false);
+        if let Some(p) = self.pending.take() {
+            self.say(if p == Pending::Quit { "stayed" } else { "kept" }, false);
         }
     }
 

@@ -19,15 +19,19 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             kitty keyboard protocol; F1 says whether yours does
   Alt+1..9                  show tab N where Ctrl+digits do not arrive (Konsole and
                             GNOME Terminal keep Alt+digits for their own tabs)
-  F2 / Ctrl+T               the tab bar: Left Right move, Enter the tab's menu,
-                            Esc back to the compose box
+  F2 / Ctrl+T               the tab bar (footer: TABS; the tab under the cursor is
+                            reversed behind a ▸): Left Right move, Enter the tab's
+                            menu, Esc back to the compose box
+  Ctrl+N                    ask for a new channel's name in the compose box, from
+                            the compose box or the tab bar; a draft comes back after
   Tab                       next tab (empty input) / complete @name #channel /command
   tab menus                 ≡ (left of merged, no number): Theme, Keybinding set,
                             Mouse at start, Settings. merged: Clear view.
                             #open: Clear view, Clear history. A channel: Add
                             agent (not built yet), Invite agent, Remove agent,
                             Describe, Clear history, Leave, Delete channel.
-                            The + slot: New channel. Clear history and Delete
+                            The + slot (or Ctrl+N) asks for a new channel's name
+                            with no menu. Clear history and Delete
                             ask first: y goes ahead. Channel tabs are ordered
                             by their newest message, #open first
   Shift-Enter / Alt-Enter   insert newline
