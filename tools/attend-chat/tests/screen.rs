@@ -786,7 +786,7 @@ fn ctrl_digit_shows_a_tab_and_a_second_press_opens_its_menu() {
     assert!(!text(&mut c, 80, 25).contains("pick one"), "the first press only shows the tab");
     drawn(&mut c, &[ctrl('3')], 80, 25);
     let shown = text(&mut c, 80, 25);
-    for item in ["pick one: #deploy", "Add agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Leave", "Delete channel"] {
+    for item in ["pick one: #deploy", "Add agent ▸", "Invite agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Leave", "Delete channel"] {
         assert!(shown.contains(item), "{item}: {shown}");
     }
     g.check("tab-menu-deploy-80x25", &testkit::render_screen(&mut c, 80, 25));

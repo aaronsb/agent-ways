@@ -23,10 +23,13 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             Esc back to the compose box
   Tab                       next tab (empty input) / complete @name #channel /command
   tab menus                 ≡ (left of merged, no number): Theme, Keybinding set,
-                            Mouse at start, Settings. merged: Clear view. #open: Clear history, Clear view.
-                            A channel: Add agent, Remove agent, Describe, Clear
-                            history, Leave, Delete channel. The + slot: New channel.
-                            Clear history and Delete ask first: y goes ahead
+                            Mouse at start, Settings. merged: Clear view.
+                            #open: Clear view, Clear history. A channel: Add
+                            agent (not built yet), Invite agent, Remove agent,
+                            Describe, Clear history, Leave, Delete channel.
+                            The + slot: New channel. Clear history and Delete
+                            ask first: y goes ahead. Channel tabs are ordered
+                            by their newest message, #open first
   Shift-Enter / Alt-Enter   insert newline
   Left / Right / Home / End move cursor
   Backspace / Delete        edit

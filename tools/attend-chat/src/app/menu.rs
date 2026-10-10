@@ -7,14 +7,15 @@
 //!   (presets over `attend.chat.tabs.*`), the mouse at start, Settings… .
 //! - merged: Clear view.
 //! - `#open`: Clear history, Clear view.
-//! - a named channel: Add agent ▸, Remove agent ▸, Describe…, Clear
-//!   history, Leave, Delete channel.
+//! - a named channel: Add agent ▸, Invite agent ▸, Remove agent ▸,
+//!   Describe…, Clear history, Leave, Delete channel.
 //! - the `+` slot: New channel…, a name typed in the compose box.
 //!
 //! Clear history and Delete channel ask first: `y` goes ahead, any other
-//! key keeps the history. Add agent invites the peer (it joins itself);
-//! enrolling it without its own join is the operator enrollment the Draft
-//! ADR-404 proposes, not done here.
+//! key keeps the history. Invite agent asks a live peer to join (it joins
+//! itself, and its join keeps the room's recent history to read). Add
+//! agent, enrolling a member with no answer from it, is ADR-404 D1 and is
+//! not built yet: the item says so.
 
 use agent_theme::ColorDepth;
 use agent_tui::Open;
@@ -28,6 +29,7 @@ use crate::tabs::Tab;
 pub(super) const CLEAR_VIEW: &str = "Clear view";
 pub(super) const CLEAR_HISTORY: &str = "Clear history";
 pub(super) const ADD_AGENT: &str = "Add agent ▸";
+pub(super) const INVITE_AGENT: &str = "Invite agent ▸";
 pub(super) const REMOVE_AGENT: &str = "Remove agent ▸";
 pub(super) const DESCRIBE: &str = "Describe…";
 pub(super) const LEAVE: &str = "Leave";
@@ -69,7 +71,7 @@ pub(super) fn items(channel: Option<&str>) -> Vec<String> {
     let items: &[&str] = match channel {
         None => &[CLEAR_VIEW],
         Some(BASE_CHANNEL_NAME) => &[CLEAR_VIEW, CLEAR_HISTORY],
-        Some(_) => &[ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE],
+        Some(_) => &[ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE],
     };
     items.iter().map(|s| s.to_string()).collect()
 }
@@ -188,13 +190,13 @@ impl ChatPane {
         if let Some(c) = id.strip_prefix("menu:") {
             return self.item(c, value);
         }
-        // A peer from Add agent or Remove agent: the label's first word is
+        // A peer from Invite agent or Remove agent: the label's first word is
         // the display name the commands resolve.
         let peer = value.split_whitespace().next().unwrap_or(value).to_string();
-        if let Some(c) = id.strip_prefix("add:") {
+        if let Some(c) = id.strip_prefix("invite:") {
             let invited = self.run("invite", SlashOutcome::Invite { member: peer, channel: Some(c.into()) });
-            if invited {
-                let said = format!("{} — they join themselves; enrolling them is Draft ADR-404", self.status);
+            if invited && !self.dry_run {
+                let said = format!("{} — they join themselves", self.status);
                 self.say(said, false);
             }
         } else if let Some(c) = id.strip_prefix("remove:") {
@@ -214,7 +216,8 @@ impl ChatPane {
                 self.run("leave", SlashOutcome::Leave(chan()));
             }
             DESCRIBE => self.start_prompt(Prompt::Describe(channel.into())),
-            ADD_AGENT => self.peer_menu(channel, true),
+            ADD_AGENT => self.say("Add agent enrolls without asking: ADR-404 D1, not built yet; Invite agent ▸ asks them", true),
+            INVITE_AGENT => self.peer_menu(channel, true),
             REMOVE_AGENT => self.peer_menu(channel, false),
             _ => {}
         }
@@ -233,7 +236,7 @@ impl ChatPane {
             let what = if add { "no live agent outside" } else { "no live agent in" };
             return self.say(format!("{what} #{channel}"), true);
         }
-        let (id, title) = if add { (format!("add:{channel}"), format!("add to #{channel}")) } else { (format!("remove:{channel}"), format!("remove from #{channel}")) };
+        let (id, title) = if add { (format!("invite:{channel}"), format!("invite to #{channel}")) } else { (format!("remove:{channel}"), format!("remove from #{channel}")) };
         self.open = Some(Open::Pick { id, title, options, multi: false, chosen: Vec::new() });
     }
 
@@ -371,6 +374,6 @@ mod tests {
     fn each_tab_offers_what_its_channel_allows() {
         assert_eq!(items(None), [CLEAR_VIEW]);
         assert_eq!(items(Some("open")), [CLEAR_VIEW, CLEAR_HISTORY], "the harmless item first");
-        assert_eq!(items(Some("deploy")), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE]);
+        assert_eq!(items(Some("deploy")), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE]);
     }
 }
