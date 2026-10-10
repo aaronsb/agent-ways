@@ -7,6 +7,9 @@
 //! than 100 files including a known one, so a scan that silently matches or
 //! reads nothing cannot pass.
 //!
+//! A CSI with a private-mode prefix (`<`, `>`, `?`, `=`) is a terminal mode
+//! control, not colour, and is not a finding.
+//!
 //! Known gaps: the scan matches one literal per needle, so an escape built
 //! from pieces gets past it: `"\x1b"` followed by `"["`, a `'\x1b'` char with
 //! `[` pushed after it, `char::from(27)`, or the 8-bit CSI `\u{9b}`. The
@@ -47,6 +50,15 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Whether `line` holds `needle` followed by something that can open an SGR.
+/// A private-mode prefix (`<`, `>`, `?`, `=`) after the CSI marks a terminal
+/// mode control, such as the kitty keyboard protocol's push and pop, which
+/// never sets colour.
+fn starts_sgr(line: &str, needle: &str) -> bool {
+    line.match_indices(needle)
+        .any(|(i, _)| !matches!(line[i + needle.len()..].chars().next(), Some('<' | '>' | '?' | '=')))
+}
+
 /// Every raw SGR literal under `root`, as `file:line: text`, and every file
 /// scanned. A line whose code starts with `//` is a comment and not a literal.
 fn scan(root: &Path) -> (Vec<String>, Vec<PathBuf>) {
@@ -60,7 +72,7 @@ fn scan(root: &Path) -> (Vec<String>, Vec<PathBuf>) {
                 continue;
             }
             let lower = line.to_ascii_lowercase();
-            if NEEDLES.iter().any(|n| lower.contains(n)) {
+            if NEEDLES.iter().any(|n| starts_sgr(&lower, n)) {
                 let rel = f.strip_prefix(root).unwrap_or(f);
                 found.push(format!("{}:{}: {}", rel.display(), i + 1, line.trim()));
             }
@@ -104,6 +116,9 @@ fn a_planted_literal_is_reported() {
     write("some-crate/src/lib.rs", &format!("// header\n{planted}"));
     write("other/src/main.rs", &format!("fn g() {{ let _ = \"{}1m\"; }}\n", ["\\", "u{1B}["].concat()));
     write("other/src/doc.rs", &format!("/// writes `{esc}0m` to reset\nfn h() {{}}\n"));
+    // A private-mode control is not colour; a colour code later on the same
+    // line is still caught.
+    write("other/src/mode.rs", &format!("const POP: &[u8] = b\"{esc}<u\";\nconst P2: &str = \"{esc}?25l{esc}1m\";\n"));
     write("agent-theme/src/paint.rs", &planted);
     write("spikes/demo/src/main.rs", &planted);
     write("some-crate/target/debug/build.rs", &planted);
@@ -111,10 +126,11 @@ fn a_planted_literal_is_reported() {
 
     let (found, files) = scan(&root);
     let _ = std::fs::remove_dir_all(&root);
-    assert_eq!(files.len(), 4, "the excluded trees and the .txt file are not read: {files:#?}");
-    assert_eq!(found.len(), 3, "{found:#?}");
+    assert_eq!(files.len(), 5, "the excluded trees and the .txt file are not read: {files:#?}");
+    assert_eq!(found.len(), 4, "{found:#?}");
     let sep = std::path::MAIN_SEPARATOR;
     assert!(found[0].starts_with(&format!("other{sep}src{sep}main.rs:1:")), "{found:#?}");
-    assert!(found[1].starts_with(&format!("some-crate{sep}src{sep}lib.rs:2:")), "{found:#?}");
-    assert!(found[2].starts_with(&format!("spikes{sep}demo{sep}src{sep}main.rs:1:")), "a spike is not exempt: {found:#?}");
+    assert!(found[1].starts_with(&format!("other{sep}src{sep}mode.rs:2:")), "colour after a mode control: {found:#?}");
+    assert!(found[2].starts_with(&format!("some-crate{sep}src{sep}lib.rs:2:")), "{found:#?}");
+    assert!(found[3].starts_with(&format!("spikes{sep}demo{sep}src{sep}main.rs:1:")), "a spike is not exempt: {found:#?}");
 }
