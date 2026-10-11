@@ -93,7 +93,7 @@ A restarted `attend run` restores its seen-set from the checkpoint and delivers 
 
 ## When the session id changes
 
-Claude Code's `/clear` gives the running process a new session id. A running `attend run` notices on its next tick. It first prints any message line its governor still holds, then checkpoints and restarts itself. The restarted process moves the session's state to the new id before reading any of it: the enrollment record, the seen-set, the registry slot with its instance name, channel memberships and the last-inbound record that `attend reply` uses.
+Claude Code's `/clear` gives the running process a new session id. A running `attend run` notices on its next tick. It first prints any message line its governor still holds, then checkpoints and restarts itself. The restarted process moves the session's state to the new id before reading any of it: the enrollment record, the seen-set, the registry slot with its instance name, channel memberships, the last-inbound record that `attend reply` uses, and the banner stamp.
 
 The enrollment record names the Claude Code process (its pid and start time). A run that starts fresh under the new id, after the old run was killed before it could hand over, finds the record left under the old id for the same process and makes the same moves. A session enrolled only by a join has no run; its drain under the new id does the same. If a run cannot restart itself, it says so on the Monitor and exits rather than stay on the old id.
 
