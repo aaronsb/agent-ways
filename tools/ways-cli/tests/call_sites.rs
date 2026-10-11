@@ -7,7 +7,9 @@
 //! or JSON value, a fenced block or backticked span in markdown, a quoted
 //! string or backticked span in Rust, or a spawn of the ways binary. Prose is
 //! skipped, since "how ways match" is English. Each distinct command, and each
-//! verb of a group, is checked with `ways <command> [<verb>] --help`.
+//! verb of a group, is checked with `ways <command> [<verb>] --help`. The names
+//! ADR-509 moved under `ways manage` are matched in messages as well: any
+//! `ways <name>` in a shell or Rust line.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -127,7 +129,8 @@ fn invocations(code: &str) -> Vec<(String, Option<String>)> {
     }
     let mut found = Vec::new();
     for end in ends {
-        let rest = code[end..].trim_start_matches('"');
+        // `"$APP/bin/ways" x`, or `\"$APP/bin/ways\" x` inside an echo.
+        let rest = code[end..].trim_start_matches(['\\', '"']);
         let Some(rest) = rest.strip_prefix(' ') else { continue };
         let Some(a) = word(rest) else { continue };
         found.push((a.to_string(), second(&rest[a.len()..])));
@@ -230,6 +233,13 @@ fn call_sites(root: &Path) -> Sites {
                     }
                 }
             }
+            if k != Kind::Markdown && !PROMPTS.contains(&path.as_str()) {
+                for name in moved_mentions(line) {
+                    if !found.iter().any(|(a, _)| a == name) {
+                        found.push((name.to_string(), None));
+                    }
+                }
+            }
             for site in found {
                 sites.entry(site).or_default().push((format!("{path}:{}", n + 1), shell));
             }
@@ -268,6 +278,28 @@ const SCREEN_GROUPS: &[&str] = &["session", "manage"];
 /// previous release's updater calls it (ADR-509 §4).
 const MOVED: &[&str] = &["update", "reconcile", "uninstall", "target"];
 const UPDATER: &str = "tools/ways-cli/src/cmd/update.rs (spawn)";
+
+/// Files that quote what a person types rather than call ways: the firing
+/// panel's prompts.
+const PROMPTS: &[&str] = &["tools/scripts/fire-panel.json"];
+
+/// The MOVED names after `ways ` anywhere in a line, so a message a person
+/// reads is held to them too: an `echo "… ways update"`, or a Rust string
+/// that does not start with `ways `. `ways manage update` does not match.
+fn moved_mentions(line: &str) -> Vec<&'static str> {
+    let mut found = Vec::new();
+    for (start, _) in line.match_indices("ways ") {
+        let boundary = line[..start].chars().next_back().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        if !boundary {
+            continue;
+        }
+        let rest = &line[start + 5..];
+        if let Some(name) = word(rest).and_then(|w| MOVED.iter().find(|m| **m == w)) {
+            found.push(*name);
+        }
+    }
+    found
+}
 
 #[test]
 fn every_ways_call_site_names_a_command_the_cli_accepts() {
@@ -347,4 +379,20 @@ fn the_scan_reads_each_call_site_form() {
     );
     assert_eq!(spawns("Command::new(exe).args([\"manage\", \"target\", \"plan\"])"), [("manage".into(), Some("target".into()))]);
     assert_eq!(spawns("Command::new(ways_bin).arg(\"reconcile\")"), [("reconcile".into(), None)]);
+    // An escaped quote closing a path in an `echo -e` message.
+    assert_eq!(
+        invocations(r#"echo -e "    ${CYAN}\"$APP_DIR/bin/ways\" reconcile${RESET}""#),
+        [("reconcile".into(), None)]
+    );
+}
+
+#[test]
+fn the_scan_reads_moved_names_in_messages() {
+    // Positive controls: messages a person reads, which `invocations` skips.
+    assert_eq!(moved_mentions(r#"echo "  then run ways update to refresh""#), ["update"]);
+    assert_eq!(moved_mentions(r#"bail!("run `ways reconcile --force` or ways uninstall")"#), ["reconcile", "uninstall"]);
+    assert_eq!(moved_mentions(r#"eprintln!("see ways target list")"#), ["target"]);
+    // The new forms, other words, and the skill's name are not moved names.
+    assert!(moved_mentions("ways manage update && ways manage target list").is_empty());
+    assert!(moved_mentions("always update the cache; ways-update skill; ways updated").is_empty());
 }

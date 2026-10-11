@@ -461,7 +461,7 @@ else
   echo -e "${YELLOW}ways binary not built — projection not created.${RESET}"
   echo "  The application is staged at $APP_DIR. To finish:"
   echo -e "    ${CYAN}cd $APP_DIR && make setup${RESET}      # build the binary"
-  echo -e "    ${CYAN}\"$APP_DIR/bin/ways\" reconcile${RESET}   # materialize the projection"
+  echo -e "    ${CYAN}\"$APP_DIR/bin/ways\" manage repair${RESET}   # materialize the projection"
   echo ""
   exit 1
 fi
