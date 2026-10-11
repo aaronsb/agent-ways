@@ -19,6 +19,7 @@ pub mod permissions;
 pub mod probe;
 pub mod projects;
 pub mod screen_host;
+pub mod attend_mod;
 pub mod mcp_register;
 pub mod reconcile;
 pub mod reinstall;

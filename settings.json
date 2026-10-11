@@ -93,6 +93,7 @@
       "mcp__google-workspace__*",
       "mcp__slack-mcp__*",
       "mcp__thinking-strategies__*",
+      "mcp__attend__*",
       "Bash(./dotfiles help)",
       "Bash(./dotfiles status)",
       "Bash(./dotfiles deploy:*)",

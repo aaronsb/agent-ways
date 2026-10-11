@@ -75,7 +75,7 @@ fn config_for(dest_root: &Path, default_root: &Path, inherited: Option<&Path>) -
     }
 }
 
-fn config_dir(dest_root: &Path, default_root: &Path) -> (Option<PathBuf>, PathBuf) {
+pub(crate) fn config_dir(dest_root: &Path, default_root: &Path) -> (Option<PathBuf>, PathBuf) {
     let inherited = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
     config_for(dest_root, default_root, inherited.as_deref())
 }
@@ -112,7 +112,7 @@ fn is_executable(p: &Path) -> bool {
 
 /// The `claude` binary: `WAYS_CLAUDE_BIN` when set (tests), else the first
 /// executable `claude` on PATH.
-fn claude_bin() -> Option<PathBuf> {
+pub(crate) fn claude_bin() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("WAYS_CLAUDE_BIN") {
         return Some(PathBuf::from(p));
     }
@@ -122,6 +122,12 @@ fn claude_bin() -> Option<PathBuf> {
 }
 
 fn run_claude(claude: &Path, config_dir: Option<&Path>, args: &[&str]) -> Result<(), String> {
+    claude_stdout(claude, config_dir, args).map(|_| ())
+}
+
+/// Run the `claude` CLI under `config_dir` (unset for the default target) and
+/// answer its stdout, or its stderr when it fails.
+pub(crate) fn claude_stdout(claude: &Path, config_dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new(claude);
     cmd.args(args);
     match config_dir {
@@ -130,9 +136,10 @@ fn run_claude(claude: &Path, config_dir: Option<&Path>, args: &[&str]) -> Result
     };
     let out = cmd.output().map_err(|e| e.to_string())?;
     if out.status.success() {
-        Ok(())
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(if err.is_empty() { format!("exit {}", out.status.code().unwrap_or(-1)) } else { err })
     }
 }
 
