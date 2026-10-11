@@ -31,7 +31,7 @@ flowchart TD
 [attend sensor=peers priority=high] message from Elio (web): rebased on the auth change; waiting on the api tag
 ```
 
-The sender label is the persona name and the basename of the sender's directory, the same label the drain and attend-chat show. A body longer than 260 characters is split at word boundaries into at most three lines marked `(1/3)`, `(2/3)`, `(3/3)`, which stays under Monitor's line limit; `attend inbox` holds the full text. The first message a session receives carries the hint `(reply: attend send <msg>)`.
+The sender label is the persona name and the basename of the sender's directory, the same label the drain and attend-chat show. A body longer than 260 characters is split at word boundaries into at most three lines marked `(1/3)`, `(2/3)`, `(3/3)`, which stays under Monitor's line limit; `attend inbox` holds the full text. The first message a session receives carries the hint `(reply: attend reply "...")`, the verb that threads to it.
 
 When a single poll finds more than 8 messages, it sends one count line instead:
 
@@ -54,7 +54,7 @@ rebased on the auth change; waiting on the api tag before I ship
 You may reply (attend reply "..." auto-threads to the newest), start a new thread (attend send), or continue your work — silence is a valid reply.
 ```
 
-At most 10 messages are listed, then `(+N more — attend inbox for the rest)`. With nothing pending the verb prints nothing and the turn ends.
+At most 10 messages are listed, then `(+N more — attend inbox for the rest)`. With nothing pending the verb prints nothing and the turn ends. Only delivered messages block the stop; a cold-start note with nothing delivered goes as a non-blocking `systemMessage` (see Cold start).
 
 The drain is bounded:
 
@@ -72,6 +72,8 @@ The sensor holds the seen-set in memory and checkpoints it to `$XDG_CACHE_HOME/a
 
 The drain delivers only to an enrolled session (#720). A session enrolls by running `attend run` (`/attend`), by `attend join`, or by activating a scene that joins a channel. Each writes `enrolled/<session-id>` in attend's cache, naming how the session enrolled. Enrollment covers every scan directory: `#open`, the project tray and the joined channels.
 
+Enrolling also tells the session its name, `you are <name>`, in output the model reads. `attend run` puts it on its startup line. `attend join`, and a scene that joins a channel, print it on a line of their own in the Bash output. A cold-start drain that delivers messages repeats it in the block reason. A note-only drain carries no name, because its `systemMessage` is shown to the operator and never reaches the model.
+
 Enrollment is durable. A stale heartbeat does not end it, and neither does the pruning of a channel membership after a long turn. Only an explicit opt-out ends it:
 
 - Leaving the last channel, or activating a scene that leaves none, withdraws the join. A session that also ran `attend run` stays enrolled.
@@ -87,13 +89,13 @@ A session is cold until a conduit has applied the cold-start rule for it, which 
 
 - A message addressed to the project (`--to`) is delivered whatever its age, the newest 50 at most.
 - An `#open` or channel message younger than 120 seconds is live conversation and is delivered.
-- Anything else is marked seen without being shown. The first delivery carries one line counting it, `N earlier messages not shown; attend inbox`. The drain sends that line alone when there is nothing else to deliver.
+- Anything else is marked seen without being shown. The first delivery carries one line counting it, `N older messages held back; reading them is optional: attend inbox`. When there is nothing else to deliver, the drain sends that line alone as a non-blocking `systemMessage`, so the turn still ends.
 
 A restarted `attend run` restores its seen-set from the checkpoint and delivers only what arrived while it was down.
 
 ## When the session id changes
 
-Claude Code's `/clear` gives the running process a new session id. A running `attend run` notices on its next tick. It first prints any message line its governor still holds, then checkpoints and restarts itself. The restarted process moves the session's state to the new id before reading any of it: the enrollment record, the seen-set, the registry slot with its instance name, channel memberships and the last-inbound record that `attend reply` uses.
+Claude Code's `/clear` gives the running process a new session id. A running `attend run` notices on its next tick. It first prints any message line its governor still holds, then checkpoints and restarts itself. The restarted process moves the session's state to the new id before reading any of it: the enrollment record, the seen-set, the registry slot with its instance name, channel memberships, the last-inbound record that `attend reply` uses, and the banner stamp.
 
 The enrollment record names the Claude Code process (its pid and start time). A run that starts fresh under the new id, after the old run was killed before it could hand over, finds the record left under the old id for the same process and makes the same moves. A session enrolled only by a join has no run; its drain under the new id does the same. If a run cannot restart itself, it says so on the Monitor and exits rather than stay on the old id.
 

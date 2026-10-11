@@ -15,9 +15,6 @@
 //! prompts that render it. It is the presentation accessor, kept apart
 //! from `--machine` so the key contract stays free of ordinals.
 
-use agent_identity::Identity;
-use agent_theme::ColorDepth;
-
 pub(crate) fn cmd_whoami(machine: bool, display: bool) {
     let ident = attend_presence::session::identity();
 
@@ -28,7 +25,7 @@ pub(crate) fn cmd_whoami(machine: bool, display: bool) {
         return;
     }
 
-    let rendered = display_name(&ident);
+    let rendered = crate::util::display_name(&ident);
     if display {
         println!("{rendered}");
         return;
@@ -59,22 +56,6 @@ pub(crate) fn cmd_whoami(machine: bool, display: bool) {
             "\n[attend] identity is not fully resolved — the instance roster will \
              exclude this process; sends and group membership use the fallback id"
         );
-    }
-}
-
-/// The rendered display name: the origin path's nickname, plus the
-/// instance suffix when several sessions share that origin.
-fn display_name(ident: &attend_presence::session::SessionIdentity) -> String {
-    let nickname = Identity::for_cwd(&ident.origin_path, ColorDepth::detect()).nickname;
-    let instance = attend_instances::Registry::new()
-        .lookup(&ident.origin_path, &ident.session_id);
-    join_display(nickname, instance.as_deref())
-}
-
-fn join_display(nickname: &str, instance: Option<&str>) -> String {
-    match instance {
-        Some(suffix) => format!("{nickname}-{suffix}"),
-        None => nickname.to_string(),
     }
 }
 
@@ -118,7 +99,7 @@ mod tests {
 
     #[test]
     fn display_name_carries_the_instance_suffix_when_present() {
-        assert_eq!(join_display("Chaucer", None), "Chaucer");
-        assert_eq!(join_display("Chaucer", Some("2")), "Chaucer-2");
+        assert_eq!(crate::util::join_display("Chaucer", None), "Chaucer");
+        assert_eq!(crate::util::join_display("Chaucer", Some("2")), "Chaucer-2");
     }
 }

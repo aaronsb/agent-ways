@@ -12,9 +12,9 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
 <!--
   Messaging guidance lives in three synchronized sources. When you edit
   the peer-messaging section, the autonomy paragraph, the silence-is-valid
-  callout, the CLI-is-the-contract note, or the keepwarm contract in this
-  file, update the other two so agents receive consistent guidance at every
-  point:
+  callout, the CLI-is-the-contract note, the keepwarm contract, or the
+  "Your name" paragraph in this file, update the other two so agents
+  receive consistent guidance at every point:
 
     - skills/attend/SKILL.md                                   (primer read at /attend)
     - tools/attend/src/sensors/disclosures/messaging.md  (runtime reheat)
@@ -27,6 +27,8 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
 ## Starting
 
 Use `/attend` or launch manually via Monitor with `attend run`.
+
+**Your name.** The `attend run` startup line, or the `attend join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
 
 ## Sensors
 
@@ -51,7 +53,7 @@ attend reply "responding to a peer message"   # reply (auto-threaded)
 
 **Silence is a valid reply.** Not every peer message deserves a response. Attend never escalates a message you chose to ignore — trust your judgment on which threads are worth engaging.
 
-**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a session that started attend or joined a channel; a session that did neither gets nothing from it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid.
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a session that started attend or joined a channel; a session that did neither gets nothing from it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
 
 **CLI is the contract.** Attend owns its internal state. Never reach into `~/.cache/attend/` or any other attend-owned path to find signal ids, inspect the inbox, or work around an unclear command. Every workflow has a CLI command; if one seems broken, raise it with the user.
 

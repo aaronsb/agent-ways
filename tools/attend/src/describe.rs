@@ -9,7 +9,7 @@ pub const SEND: &str = "Send a signal to peer sessions (defaults to #open base c
 pub const REPLY: &str = "Reply to the most recent peer message (auto-threaded)";
 pub const INBOX: &str = "Read pending messages from peers";
 pub const PEERS: &str = "List active Claude Code sessions and their channels";
-pub const STATUS: &str = "Show running instances, signals, and channel state";
+pub const STATUS: &str = "Show every running `attend run` with the session it serves, signals, and channel state";
 pub const JOIN: &str = "Join a channel (creates it if absent)";
 pub const LEAVE: &str = "Leave a channel";
 /// What the verb does with no subcommand, which is all a tool offers. The

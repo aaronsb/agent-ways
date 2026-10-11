@@ -50,7 +50,7 @@ Active awareness for Claude Code sessions
 * `run` — Start the sensor loop (use with Monitor for async delivery)
 * `peers` — List active Claude Code sessions and their channels
 * `inbox` — Read pending messages from peers
-* `status` — Show running instances, signals, and channel state
+* `status` — Show every running `attend run` with the session it serves, signals, and channel state
 * `whoami` — Print this session's canonical bus identity (issue #378)
 * `sensors` — List all sensors — built-in and config-defined script sensors
 * `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
@@ -123,7 +123,7 @@ Read pending messages from peers
 
 ## `attend status`
 
-Show running instances, signals, and channel state
+Show every running `attend run` with the session it serves, signals, and channel state
 
 **Usage:** `attend status [OPTIONS]`
 

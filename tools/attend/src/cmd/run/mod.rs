@@ -14,6 +14,7 @@
 
 mod governor;
 mod rekey;
+mod stamps;
 mod tick;
 
 use std::collections::BinaryHeap;
@@ -199,11 +200,30 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         }
     }
 
+    // The name peers see this session by. Printed on every startup line so
+    // a session never has to guess its own name or run `attend peers`.
+    let me = crate::util::display_name(&ident);
     match &moved_from {
         Some(old) => println!(
-            "[attend] session id changed ({old} → {session_id}): registry slot, enrollment and seen-set carried over"
+            "[attend] session id changed ({old} → {session_id}): registry slot, enrollment and seen-set carried over — you are {me}"
         ),
-        None => print_startup_banner(&enabled_names, &focus_desc),
+        None => print_startup_banner(
+            &me,
+            &enabled_names,
+            &focus_desc,
+            stamps::banner_stamp_path(&session_id, ident.session_resolved).as_deref(),
+        ),
+    }
+    let live = stamps::live_sessions();
+    let swept = stamps::sweep_stale(
+        &attend_presence::cache::state_dir(),
+        |key| stamps::is_live(key, &live),
+        std::time::SystemTime::now(),
+        stamps::STAMP_MAX_AGE,
+        stamps::SWEEP_MAX_CANDIDATES,
+    );
+    if swept > 0 {
+        emit::log(&format!("removed {swept} stamp file(s) of sessions gone for over a week"));
     }
 
     let mut governor = DisclosureGovernor::new(
@@ -326,10 +346,34 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     }
 }
 
+/// What the startup line says. The banner stamp is per session: a
+/// session with no earlier run of its own has no stamp, so it is told it
+/// started, never that it restarted.
+#[derive(Debug, PartialEq, Eq)]
+enum Banner {
+    /// A binary hot-swap re-executed this process (`ATTEND_RELOADED_FROM`).
+    Reloaded(String),
+    /// This session ran attend before with the same fingerprint: a
+    /// Monitor re-arm or a manual restart.
+    Unchanged,
+    /// No earlier run of this session, or one with another fingerprint.
+    Started,
+}
+
+/// Choose the banner from this session's previous stamp, if any, and the
+/// hot-swap marker.
+fn choose_banner(fingerprint: &str, prev: Option<&str>, reloaded_from: Option<String>) -> Banner {
+    match reloaded_from {
+        Some(v) => Banner::Reloaded(v),
+        None if prev.is_some_and(|p| p.trim() == fingerprint) => Banner::Unchanged,
+        None => Banner::Started,
+    }
+}
+
 /// Print the startup banner. Suppresses repeated unchanged-config
-/// banners, names hot-swap reloads explicitly, and writes a
-/// fingerprint stamp so the next startup can compare.
-fn print_startup_banner(enabled_names: &[String], focus_desc: &str) {
+/// banners for the same session, names hot-swap reloads explicitly, and
+/// writes the session's fingerprint stamp so its next start can compare.
+fn print_startup_banner(me: &str, enabled_names: &[String], focus_desc: &str, stamp_path: Option<&std::path::Path>) {
     let sensor_list = enabled_names.join(", ");
     let banner_fingerprint = format!(
         "v{}:{}:{}:{}",
@@ -347,29 +391,85 @@ fn print_startup_banner(enabled_names: &[String], focus_desc: &str) {
     // subprocesses attend itself spawns.
     let reloaded_from = std::env::var("ATTEND_RELOADED_FROM").ok();
     std::env::remove_var("ATTEND_RELOADED_FROM");
-    let stamp_path = signals_base().join("_last_banner");
-    let prev_fingerprint = std::fs::read_to_string(&stamp_path).unwrap_or_default();
-    if let Some(prev_version) = reloaded_from {
-        // Always emit on a binary hot-swap — the operator needs to
-        // know the running code changed under them, even when
-        // sensors/focus are identical.
-        println!(
-            "[attend] reloaded {} → v{} ({}) — binary updated, state preserved across exec()",
-            prev_version,
-            env!("CARGO_PKG_VERSION"),
-            env!("ATTEND_COMMIT")
+    // The stamp used to be one file for every session on the machine, so
+    // a brand-new session read another session's stamp and was told it had
+    // restarted. Remove that legacy file; the stamp is per session now.
+    std::fs::remove_file(signals_base().join("_last_banner")).ok();
+    let prev = stamp_path.and_then(|p| std::fs::read_to_string(p).ok());
+    let write_stamp = || {
+        if let Some(p) = stamp_path {
+            if let Some(dir) = p.parent() {
+                std::fs::create_dir_all(dir).ok();
+            }
+            std::fs::write(p, &banner_fingerprint).ok();
+        }
+    };
+    let banner = choose_banner(&banner_fingerprint, prev.as_deref(), reloaded_from);
+    println!("{}", banner_line(&banner, me, &sensor_list, focus_desc));
+    if banner != Banner::Unchanged {
+        write_stamp();
+    }
+}
+
+/// The startup line. Every form names the session (`you are <name>`): it is
+/// the first thing attend tells a session, and the name is what peers use.
+/// A binary hot-swap is always named, even when sensors and focus are
+/// identical, so the operator knows the running code changed under them.
+fn banner_line(banner: &Banner, me: &str, sensor_list: &str, focus_desc: &str) -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    let commit = env!("ATTEND_COMMIT");
+    match banner {
+        Banner::Reloaded(prev_version) => format!(
+            "[attend] reloaded {prev_version} → v{version} ({commit}) — binary updated, state preserved across exec() — you are {me}"
+        ),
+        Banner::Unchanged => format!("[attend] restarted (unchanged) — you are {me}"),
+        Banner::Started => format!(
+            "[attend] started v{version} ({commit}) — you are {me} | sensors: {sensor_list} | focus: {focus_desc} | send: attend send <msg> (#open)"
+        ),
+    }
+}
+
+#[cfg(test)]
+mod banner_tests {
+    use super::*;
+
+    #[test]
+    fn a_session_with_no_stamp_of_its_own_is_started() {
+        assert_eq!(choose_banner("v1:abc:git:project only", None, None), Banner::Started);
+    }
+
+    #[test]
+    fn the_same_fingerprint_from_this_session_is_a_restart() {
+        assert_eq!(choose_banner("v1:abc:git", Some("v1:abc:git\n"), None), Banner::Unchanged);
+    }
+
+    #[test]
+    fn a_changed_fingerprint_is_a_start() {
+        assert_eq!(choose_banner("v2:def:git", Some("v1:abc:git"), None), Banner::Started);
+    }
+
+    #[test]
+    fn a_hot_swap_is_named_whatever_the_stamp() {
+        assert_eq!(
+            choose_banner("v1:abc:git", Some("v1:abc:git"), Some("v0.9".into())),
+            Banner::Reloaded("v0.9".into())
         );
-        std::fs::write(&stamp_path, &banner_fingerprint).ok();
-    } else if banner_fingerprint == prev_fingerprint.trim() {
-        println!("[attend] restarted (unchanged)");
-    } else {
-        println!(
-            "[attend] v{} ({}) — sensors: {} | focus: {} | send: attend send <msg> (#open)",
-            env!("CARGO_PKG_VERSION"),
-            env!("ATTEND_COMMIT"),
-            sensor_list,
-            focus_desc
-        );
-        std::fs::write(&stamp_path, &banner_fingerprint).ok();
+    }
+
+    #[test]
+    fn every_banner_names_the_session() {
+        for b in [Banner::Started, Banner::Unchanged, Banner::Reloaded("v0.9".into())] {
+            let line = banner_line(&b, "Chaucer-alpha", "git, peers", "project only");
+            assert!(line.contains("you are Chaucer-alpha"), "{line}");
+        }
+        assert!(banner_line(&Banner::Started, "Chaucer", "git", "project only").starts_with("[attend] started v"));
+    }
+
+    #[test]
+    fn the_stamp_is_keyed_by_session() {
+        let a = stamps::banner_stamp_path("sess-a", true).unwrap();
+        let b = stamps::banner_stamp_path("sess-b", true).unwrap();
+        assert_ne!(a, b);
+        assert!(a.ends_with("sess-a.banner"));
     }
 }

@@ -9,8 +9,8 @@ allowed-tools: Bash, Monitor, Read
 <!--
 Messaging guidance lives in three synchronized sources. When you edit
 the peer-messaging section, the autonomy paragraph, the silence-is-valid
-callout, the CLI-is-the-contract note, or the keepwarm contract, update
-all three:
+callout, the CLI-is-the-contract note, the keepwarm contract, or the
+"Your name" paragraph, update all three:
 
   - skills/attend/SKILL.md                                   (this file — read at /attend invocation)
   - tools/attend/src/sensors/disclosures/messaging.md  (runtime reheat fired by the disclosure sensor)
@@ -47,6 +47,8 @@ Do NOT run `attend run` with the Bash tool. Do NOT use `run_in_background`. Only
 
 On startup, attend emits a usage summary notification. After that, notifications arrive only on meaningful state changes.
 
+**Your name.** The `attend run` startup line, or the `attend join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
+
 ## Step 3: Re-arm on expiry
 
 Monitor kills its command at 30 minutes, the most `timeout_ms` allows, and sends one notice that the monitor expired. The notice wakes an idle session. When it names the attend monitor, call Monitor again with the Step 2 parameters, without asking. attend resumes from its saved state and reports `restarted (unchanged)`. Stop re-arming when the operator turns attend off.
@@ -80,7 +82,7 @@ attend reply "responding to the last peer message" # reply (auto-threaded)
 
 **Silence is a valid reply.** Attend never escalates a message you chose to ignore. Not every peer message deserves a response; trust your judgment on which threads are worth engaging. Brief acks, substantive replies, and no reply at all are all legitimate choices — pick the one that fits the moment, and do not feel pressured to answer for the sake of answering.
 
-**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a session that started attend or joined a channel; a session that did neither gets nothing from it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid.
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a session that started attend or joined a channel; a session that did neither gets nothing from it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
 
 Always wrap the message in double quotes to prevent shell metacharacter expansion (`?`, `*`, `!`). Keep messages under ~400 characters — peer notifications are one-per-line and longer payloads get truncated in-flight.
 

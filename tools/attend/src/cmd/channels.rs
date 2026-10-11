@@ -15,6 +15,9 @@ pub(crate) fn cmd_join(name: &str, pin: bool, json: bool) {
         Ok(j) => {
             let suffix = if j.pinned { " (pinned)" } else { "" };
             println!("[attend] joined #{}{suffix}{}", j.name, j.note);
+            if let Some(me) = &j.you_are {
+                println!("you are {me}");
+            }
         }
         Err(e) => {
             if json {

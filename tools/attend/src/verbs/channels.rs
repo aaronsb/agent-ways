@@ -16,6 +16,9 @@ pub struct Joined {
     /// What the join did with the channel's history, as one parenthesized
     /// clause; empty when there was none to speak of.
     pub note: String,
+    /// The name peers see this session by, which the join tells the
+    /// session as `you are <name>`; `None` for an unresolved session.
+    pub you_are: Option<String>,
 }
 
 /// Why a join did not take.
@@ -60,7 +63,7 @@ pub fn join(name: &str, pin: bool) -> Result<Joined, JoinError> {
         crate::util::backlog_note(crate::util::baseline_joined_room(&me, &r, name))
     };
     match r.join(name, pin) {
-        Ok(()) => Ok(Joined { name: name.to_string(), pinned: pin, note }),
+        Ok(()) => Ok(Joined { name: name.to_string(), pinned: pin, note, you_are: me.resolved().then(|| crate::util::display_name(&me)) }),
         Err(message) => {
             crate::util::settle_join_enrollment(&me, &r);
             Err(JoinError::WriteFailed { message })

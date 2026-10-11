@@ -422,7 +422,7 @@ impl PeerSensor {
                 for (i, chunk) in chunks.into_iter().enumerate() {
                     let header = message_header(&sender, i, total);
                     let body = if i == 0 && include_reply_hint {
-                        format!("{} (reply: attend send <msg>)", chunk)
+                        format!("{chunk}{REPLY_HINT}")
                     } else {
                         chunk
                     };
@@ -772,7 +772,7 @@ fn message_header(sender: &str, chunk_index: usize, total: usize) -> String {
 /// ```
 ///
 /// With a long sender name the prefix overhead can reach ~80 characters.
-/// The reply hint (` (reply: attend send <msg>)`) is 29 characters and is
+/// The reply hint ([`REPLY_HINT`]) is at most 29 characters and is
 /// appended to the first chunk's body when shown. Reserving both:
 ///
 /// ```text
@@ -784,6 +784,11 @@ fn message_header(sender: &str, chunk_index: usize, total: usize) -> String {
 /// packed first chunk with reply hint stays clearly under the ceiling —
 /// 260 + 29 + 80 = 369, ~30 chars below 400.
 const MAX_CHUNK_BODY: usize = 260;
+
+/// Appended to the first peer message a session sees. It names `attend
+/// reply`, which threads to that message on its own, because that is the
+/// verb for answering it; `attend send` starts a new topic.
+const REPLY_HINT: &str = " (reply: attend reply \"...\")";
 
 /// Cap on chunks per message. A message that splits into more than this many
 /// pieces gets its tail replaced with an overflow hint pointing at the inbox.
@@ -933,6 +938,15 @@ mod tests {
         let _ = fs::remove_dir_all(&p);
         fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    /// The hint names the threading verb, and fits the 29 characters the
+    /// chunk budget reserves for it.
+    #[test]
+    fn reply_hint_names_attend_reply_within_its_budget() {
+        assert!(REPLY_HINT.contains("attend reply \""), "{REPLY_HINT}");
+        assert!(!REPLY_HINT.contains("attend send"), "{REPLY_HINT}");
+        assert!(REPLY_HINT.chars().count() <= 29, "{} chars", REPLY_HINT.chars().count());
     }
 
     #[test]
