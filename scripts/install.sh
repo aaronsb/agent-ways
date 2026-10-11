@@ -10,6 +10,9 @@
 #   scripts/install.sh --bootstrap               # clone latest + install
 #   curl ... | bash -s -- --bootstrap            # self-bootstrap from internet
 #   scripts/install.sh --dangerously-clobber     # nuke ~/.claude + app dir, reinstall
+#   scripts/install.sh --stage DIR --from URL --rev SHA [--branch B]
+#                                                # fetch + verify one commit into DIR, install nothing
+#                                                # (`ways manage reinstall` stages with this, ADR-509)
 #
 # The happy path: stage app → make setup → ways reconcile. Everything else is guardrails.
 
@@ -75,17 +78,24 @@ HELP
 
 BOOTSTRAP=false
 CLOBBER=false
+STAGE="" STAGE_FROM="" STAGE_REV="" STAGE_BRANCH=""
+ARGS=("$@")
 
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --bootstrap) BOOTSTRAP=true ;;
     --dangerously-clobber) CLOBBER=true ;;
+    --stage) STAGE="${2:-}"; shift ;;
+    --from) STAGE_FROM="${2:-}"; shift ;;
+    --rev) STAGE_REV="${2:-}"; shift ;;
+    --branch) STAGE_BRANCH="${2:-}"; shift ;;
     --help|-h) show_help; exit 0 ;;
   esac
+  shift
 done
 
 # No flags at all → show help
-if [[ "$BOOTSTRAP" == "false" ]] && [[ ! -f "hooks/check-config-updates.sh" ]]; then
+if [[ "$BOOTSTRAP" == "false" && -z "$STAGE" ]] && [[ ! -f "hooks/check-config-updates.sh" ]]; then
   show_help
   exit 0
 fi
@@ -111,6 +121,48 @@ check_prereqs() {
   fi
 }
 
+# --- Fetch and verify ---
+
+# Clone URL into DEST and check that it is agent-ways. With REV, check out that
+# one commit, and fail if the source does not have it; with BRANCH as well, the
+# branch name is kept on it, tracking origin, so a later pull works. Both the
+# bootstrap and `ways manage reinstall` fetch through here.
+fetch_verified() {
+  local url="$1" dest="$2" rev="${3:-}" branch="${4:-}"
+  if [[ -z "$rev" ]]; then
+    git clone --depth 1 "$url" "$dest" 2>&1 || { echo -e "${RED}Failed to clone ${url}${RESET}"; return 1; }
+  else
+    git clone --no-checkout "$url" "$dest" 2>&1 || { echo -e "${RED}Failed to clone ${url}${RESET}"; return 1; }
+    if [[ -n "$branch" ]]; then
+      git -C "$dest" checkout -q -B "$branch" "$rev" 2>&1 &&
+        { git -C "$dest" branch -q --set-upstream-to="origin/$branch" 2>/dev/null || true; }
+    else
+      git -C "$dest" -c advice.detachedHead=false checkout -q --detach "$rev" 2>&1
+    fi || { echo -e "${RED}${url} does not have ${rev}${RESET}"; return 1; }
+  fi
+  if [[ ! -f "$dest/hooks/check-config-updates.sh" ]]; then
+    echo -e "${RED}Clone doesn't look like agent-ways.${RESET}"
+    return 1
+  fi
+  echo -e "Verified: ${DIM}$(git -C "$dest" log --oneline -1 2>/dev/null)${RESET}"
+}
+
+# --- Stage: fetch and verify one commit, install nothing ---
+
+if [[ -n "$STAGE" ]]; then
+  if [[ -z "$STAGE_FROM" || -z "$STAGE_REV" ]]; then
+    echo -e "${RED}--stage needs --from URL and --rev SHA.${RESET}"
+    exit 2
+  fi
+  if [[ -e "$STAGE" ]]; then
+    echo -e "${RED}${STAGE} already exists.${RESET}"
+    exit 1
+  fi
+  check_prereqs
+  fetch_verified "$STAGE_FROM" "$STAGE" "$STAGE_REV" "$STAGE_BRANCH" || { rm -rf "$STAGE"; exit 1; }
+  exit 0
+fi
+
 # --- Self-bootstrap ---
 
 if [[ "$BOOTSTRAP" == "true" ]]; then
@@ -124,26 +176,13 @@ if [[ "$BOOTSTRAP" == "true" ]]; then
   BOOTSTRAP_DIR=$(mktemp -d)
   trap 'rm -rf "$BOOTSTRAP_DIR"' EXIT
 
-  if ! git clone --depth 1 "$UPSTREAM_URL" "$BOOTSTRAP_DIR/agent-ways" 2>&1; then
-    echo -e "${RED}Failed to clone ${UPSTREAM_URL}${RESET}"
-    exit 1
-  fi
-
   CLONE="$BOOTSTRAP_DIR/agent-ways"
-
-  # Verify the clone
-  if [[ ! -f "$CLONE/hooks/check-config-updates.sh" ]]; then
-    echo -e "${RED}Clone doesn't look like agent-ways.${RESET}"
-    exit 1
-  fi
-
-  CLONE_HEAD=$(git -C "$CLONE" log --oneline -1 2>/dev/null)
-  echo -e "Verified: ${DIM}${CLONE_HEAD}${RESET}"
+  fetch_verified "$UPSTREAM_URL" "$CLONE" || exit 1
   echo ""
 
   # Forward flags (minus --bootstrap) to the verified copy
   FORWARD_ARGS=()
-  for arg in "$@"; do
+  for arg in "${ARGS[@]}"; do
     [[ "$arg" != "--bootstrap" ]] && FORWARD_ARGS+=("$arg")
   done
 
@@ -370,8 +409,9 @@ else
   mkdir -p "$(dirname "$APP_DIR")"
   git clone "$SRC" "$APP_DIR" 2>&1
   # Only rewrite origin when we cloned from a temp/bootstrap source — never
-  # clobber the remote of a checkout we were run from.
-  git -C "$APP_DIR" remote set-url origin "$UPSTREAM_URL" 2>/dev/null || true
+  # clobber the remote of a checkout we were run from. A reinstall names the
+  # source its install came from in AGENT_WAYS_ORIGIN (ADR-509).
+  git -C "$APP_DIR" remote set-url origin "${AGENT_WAYS_ORIGIN:-$UPSTREAM_URL}" 2>/dev/null || true
 fi
 find "$APP_DIR/hooks" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
 
