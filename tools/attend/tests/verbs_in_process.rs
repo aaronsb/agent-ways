@@ -95,6 +95,26 @@ fn open_tray(f: &Fixture) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// A last-inbound record as written before the room was kept: the id alone.
+fn old_record(f: &Fixture, id: &str) {
+    let path = sensor_peers::last_inbound::path(&f.sid);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, id).unwrap();
+}
+
+/// A reply refused because nothing says where its parent was said, with
+/// nothing written to `#open`.
+fn assert_room_unknown(f: &Fixture, result: Result<attend::verbs::Replied, attend::verbs::SendError>) {
+    match result {
+        Err(e @ attend::verbs::SendError::ParentRoomUnknown) => {
+            let why = e.to_string();
+            assert!(why.contains("--channel") && why.contains("--to") && why.contains("attend send"), "{why}");
+        }
+        other => panic!("expected parent_room_unknown: {other:?}"),
+    }
+    assert!(open_tray(f).is_empty(), "nothing reached #open");
+}
+
 /// This session and a live peer, `peer-sess`, both in `mod-trial`.
 fn shared_channel(f: &Fixture) {
     attend::verbs::channels::join("mod-trial", false).expect("join");
@@ -150,8 +170,7 @@ fn a_reply_to_a_parent_in_a_channel_left_is_refused() {
     f.put("@mod-trial", "peer-sess-1-1", "in the channel", std::time::Duration::ZERO);
     // An old-format record, with no room: the parent's file alone says
     // where it was said.
-    std::fs::create_dir_all(sensor_peers::last_inbound::path(&f.sid).parent().unwrap()).unwrap();
-    std::fs::write(sensor_peers::last_inbound::path(&f.sid), "peer-sess-1-1").unwrap();
+    old_record(&f, "peer-sess-1-1");
     attend::verbs::channels::leave("mod-trial");
     match reply("a private answer") {
         Err(e @ attend::verbs::SendError::ParentChannelLeft { .. }) => {
@@ -199,6 +218,39 @@ fn a_reply_to_a_reaped_parent_goes_to_its_recorded_room() {
     assert_eq!(unthreaded.threading, attend::verbs::Threading::Unthreaded);
     assert_eq!(unthreaded.sent.scope, "channel");
     assert!(open_tray(&f).is_empty());
+}
+
+/// An old record names no room, and once the parent is reaped and the
+/// session has left its channel, nothing else does either. The reply is
+/// refused rather than sent to `#open`.
+#[test]
+fn a_reply_to_a_reaped_parent_with_no_recorded_room_is_refused() {
+    let f = Fixture::new("route-unknown-reaped");
+    let _env = enter(&f);
+    shared_channel(&f);
+    old_record(&f, "peer-sess-1-9");
+    attend::verbs::channels::leave("mod-trial");
+    assert_room_unknown(&f, reply("a private answer"));
+}
+
+/// An old record whose id cannot be threaded cannot be looked up either.
+#[test]
+fn a_reply_to_an_unthreadable_id_with_no_recorded_room_is_refused() {
+    let f = Fixture::new("route-unknown-unthreadable");
+    let _env = enter(&f);
+    old_record(&f, "someone@kitty-1");
+    assert_room_unknown(&f, reply("an answer"));
+}
+
+/// A record in this project's tray that does not parse names no sender, so
+/// no place to answer it.
+#[test]
+fn a_reply_to_an_unparseable_directed_parent_is_refused() {
+    let f = Fixture::new("route-unknown-unparseable");
+    let _env = enter(&f);
+    signal(&f, &f.project_tray(), "peer-sess-1-1", "no fields here");
+    old_record(&f, "peer-sess-1-1");
+    assert_room_unknown(&f, reply("an answer"));
 }
 
 /// A message another Claude session sent this project with `--to` is

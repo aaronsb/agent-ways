@@ -80,6 +80,10 @@ pub enum SendError {
     ParentChannelLeft { channel: String },
     /// The parent was said in a channel that no longer exists.
     ParentChannelGone { channel: String },
+    /// Nothing says where the parent was said: its file is gone from every
+    /// tray and channel, and the record names no room. Guessing `#open`
+    /// could carry a private answer into public.
+    ParentRoomUnknown,
 }
 
 impl std::fmt::Display for SendError {
@@ -106,6 +110,9 @@ impl std::fmt::Display for SendError {
                 f,
                 "the message you are replying to was said in channel '{channel}', which no longer exists; pass --channel or --to, or use send"
             ),
+            Self::ParentRoomUnknown => {
+                write!(f, "can't tell where the parent was said; pass --channel or --to, or use attend send")
+            }
         }
     }
 }
@@ -301,10 +308,11 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
 /// A reply stays where its parent was said: in the parent's channel, or,
 /// for a parent another Claude session sent to this project with `--to`,
 /// back to that session's project. A `to` or `channel` in `req` overrides
-/// this. A parent in `#open`, or one from a sender outside Claude Code, is
-/// answered in `#open`. A parent said in a channel is never answered
-/// outside it: when this session has left the channel, or the channel is
-/// gone, the reply is refused.
+/// this. A parent known to have been said in `#open`, or one sent to this
+/// project from outside Claude Code, is answered in `#open`. A parent said
+/// in a channel is never answered outside it: when this session has left
+/// the channel, or the channel is gone, the reply is refused. A parent whose
+/// room cannot be told is refused too, never guessed to be `#open`.
 #[cfg(feature = "sensor-peers")]
 pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     let me = current_session();
@@ -348,8 +356,12 @@ enum Route {
 /// it in answers first. A parent not in those trays but in another channel's
 /// directory was said in a channel this session left. A parent whose file
 /// is gone, or whose id cannot be looked up, goes by `recorded`, the room
-/// the conduit noted when it surfaced the message. With neither, the reply
-/// goes to `#open`.
+/// the conduit noted when it surfaced the message.
+///
+/// The reply goes to `#open` only when the parent is known to have been said
+/// there, or is a message sent to this project from outside Claude Code.
+/// When no room can be told, or a directed parent names no project to answer
+/// in, the reply is refused with [`SendError::ParentRoomUnknown`].
 #[cfg(feature = "sensor-peers")]
 fn parent_route(
     me: &Session,
@@ -372,12 +384,14 @@ fn parent_route(
             Some(dir) => {
                 let sig = std::fs::read_to_string(dir.path.join(&file)).ok();
                 let sig = sig.as_deref().and_then(|c| agent_identity::parse_signal(agent_identity::wire_line(c)));
-                // A record that does not parse still names its room; with
-                // no sender to answer, a directed one is answered in `#open`.
-                Some(match sig {
-                    Some(sig) => Said::of(&dir.room, sig.from, sig.cwd),
-                    None => Said::of(&dir.room, "", ""),
-                })
+                // A record that does not parse still names a shared room.
+                // In this project's tray it names no sender, and so no
+                // place to answer.
+                match (sig, &dir.room) {
+                    (Some(sig), room) => Some(Said::of(room, sig.from, sig.cwd)),
+                    (None, attend_groups::Room::Project) => None,
+                    (None, room) => Some(Said::of(room, "", "")),
+                }
             }
             None => match r.channel_holding(&file) {
                 Some(channel) => return channel_route(&channel),
@@ -387,8 +401,9 @@ fn parent_route(
         None => recorded.cloned(),
     };
     match said {
-        None | Some(Said::Open) | Some(Said::Project(None)) => Ok(Route::Caller),
+        Some(Said::Open) | Some(Said::Project(None)) => Ok(Route::Caller),
         Some(Said::Project(Some(cwd))) => Ok(Route::Project(cwd)),
+        None => Err(SendError::ParentRoomUnknown),
         Some(Said::Channel(channel)) => channel_route(&channel),
     }
 }
