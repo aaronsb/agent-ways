@@ -89,6 +89,10 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     println!("Reinstall {} from {}:\n", source.label(), source.url);
     println!("1. Fetch and verify that commit into {}. If this fails, nothing is removed.", stage.display());
     println!("2. Uninstall, keeping your config and state:");
+    // The stage holds the committed HEAD only; edits in the app dir go with it.
+    if git(&app, &["status", "--porcelain"]).is_some() {
+        println!("   {} has local changes, which the uninstall deletes.", app.display());
+    }
     if let Some(u) = &uninstall {
         u.print();
     }

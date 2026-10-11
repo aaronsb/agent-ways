@@ -122,6 +122,10 @@ fn without_yes_it_prints_the_plan_and_changes_nothing() {
     assert!(t.contains("Uninstall, keeping your config and state") && t.contains("Delete:"), "{t}");
     assert!(t.contains("Install from the stage") && t.contains(" on main"), "{t}");
     assert!(t.contains("Nothing changed"), "{t}");
+    assert!(!t.contains("local changes"), "a clean app says nothing: {t}");
+    write(&s.app().join("mine.txt"), "x\n");
+    let t = text(&s.ways(&["manage", "reinstall"]));
+    assert!(t.contains("has local changes, which the uninstall deletes"), "{t}");
     s.untouched();
 }
 
