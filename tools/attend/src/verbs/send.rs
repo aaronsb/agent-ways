@@ -31,8 +31,26 @@ pub fn split_message(text: &str, max: usize) -> Vec<String> {
     if chars.len() <= max {
         return vec![text.to_string()];
     }
-    // `(99/99) ` is the widest prefix this sizes for.
-    let budget = max.saturating_sub(8).max(1);
+    // The widest prefix, `(n/n) `, is 2 * digits(n) + 4 characters, and n
+    // depends on the room the prefix leaves. Start at one digit and widen
+    // until the count of parts fits the width it was cut for.
+    let digits = |n: usize| n.to_string().len();
+    let mut width = 1;
+    loop {
+        let budget = max.saturating_sub(2 * width + 4).max(1);
+        let parts = cut(&chars, budget);
+        let n = parts.len();
+        if digits(n) <= width {
+            return parts.into_iter().enumerate().map(|(i, p)| format!("({}/{n}) {p}", i + 1)).collect();
+        }
+        width = digits(n);
+    }
+}
+
+/// Cut `chars` into trimmed, non-empty pieces of at most `budget`
+/// characters, breaking at whitespace in a piece's last fifth when there is
+/// some.
+fn cut(chars: &[char], budget: usize) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     let mut at = 0;
     while at < chars.len() {
@@ -50,8 +68,7 @@ pub fn split_message(text: &str, max: usize) -> Vec<String> {
         }
         at = end;
     }
-    let n = parts.len();
-    parts.into_iter().enumerate().map(|(i, p)| format!("({}/{n}) {p}", i + 1)).collect()
+    parts
 }
 
 /// A message written to the bus, as one signal or as numbered parts.
@@ -573,6 +590,20 @@ mod tests {
         // Nothing is lost: the parts rejoin to the text.
         let rejoined: Vec<&str> = parts.iter().map(|p| p.split_once(") ").unwrap().1).collect();
         assert_eq!(rejoined.join(" "), words.trim());
+    }
+
+    /// At 100 parts the prefix `(100/100) ` is ten characters; every part
+    /// still fits the limit.
+    #[test]
+    fn a_hundred_parts_or_more_still_fit_the_limit() {
+        let text = "word ".repeat(10_000);
+        let parts = split_message(text.trim(), PART_MAX);
+        assert!(parts.len() >= 100, "{} parts", parts.len());
+        let n = parts.len();
+        for (i, p) in parts.iter().enumerate() {
+            assert!(p.chars().count() <= PART_MAX, "part {} has {} chars", i + 1, p.chars().count());
+            assert!(p.starts_with(&format!("({}/{n}) ", i + 1)), "{p}");
+        }
     }
 
     #[test]

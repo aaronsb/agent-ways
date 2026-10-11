@@ -300,4 +300,14 @@ mod tests {
         assert_eq!((s.reply_to, s.message), (Some("id-1"), "re:abc-1|inside a thread"));
         assert_eq!(format_signal("claude:a", "p", "/x", None, "plain"), "claude:a|p|/x|plain\n", "only a re: start is marked");
     }
+
+    #[test]
+    fn send_order_reads_the_time_and_sequence_not_the_sender() {
+        use crate::signal_send_order as order;
+        assert!(order("zed-1791000000000000001-0") < order("abe-1791000000000000002-0"));
+        assert!(order("a-1791000000000000001-9") < order("a-1791000000000000001-10"), "seq compares as a number");
+        assert_eq!(order("aaron-kitty-1791000000000000001-3.signal"), (1791000000000000001, 3));
+        assert_eq!(order("hand-written"), (0, 0));
+        assert_eq!(order("12-3"), (0, 0), "no sender part");
+    }
 }

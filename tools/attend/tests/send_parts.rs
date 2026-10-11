@@ -108,3 +108,20 @@ fn a_send_to_the_own_project_names_the_problem() {
     assert!(!err.contains("no active peer"), "{err}");
     assert!(!f.signals().join(f.project_tray()).exists(), "nothing written");
 }
+
+/// Two senders' signals with one mtime list in send order, which the id's
+/// timestamp carries, not in the order of the senders' names.
+#[test]
+fn signals_with_one_mtime_list_in_send_order_across_senders() {
+    let f = Fixture::new("send-order-senders");
+    let dir = f.signals().join("_broadcast");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mtime = std::time::SystemTime::now() - std::time::Duration::from_secs(5);
+    for (id, body) in [("zed-1791000000000000001-0", "first"), ("abe-1791000000000000002-0", "second")] {
+        let path = dir.join(format!("{id}.signal"));
+        std::fs::write(&path, format!("claude:{id}|p|/tmp/p|{body}\n")).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(mtime).unwrap();
+    }
+    let bodies: Vec<String> = open_messages(&f).iter().map(|m| m["message"].as_str().unwrap().to_string()).collect();
+    assert_eq!(bodies, ["first", "second"]);
+}

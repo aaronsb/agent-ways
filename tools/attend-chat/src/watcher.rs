@@ -106,8 +106,11 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
         }
     }
     // Ties on mtime (the parts of a long message, written within one
-    // timestamp tick) go by path, whose id carries the send time.
-    backfill.sort();
+    // timestamp tick) go by the send time the id carries.
+    backfill.sort_by_cached_key(|(t, p)| {
+        let id = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        (*t, agent_identity::signal_send_order(id), p.clone())
+    });
     for (_, path) in backfill {
         if let Some(sig) = parse_file(&path) {
             let _ = tx.send(sig);

@@ -311,7 +311,7 @@ impl PeerSensor {
         // Oldest first, so the parts of a message sent in parts come out in
         // order. Parts written within one timestamp tick share an mtime;
         // their ids carry the send time and order them.
-        found.sort_by(|a, b| a.mtime.cmp(&b.mtime).then_with(|| a.signal_id.cmp(&b.signal_id)));
+        found.sort_by_cached_key(|f| (f.mtime, agent_identity::signal_send_order(&f.signal_id), f.signal_id.clone()));
 
         let plan = baselining.then(|| {
             let pending: Vec<_> = found.iter().map(|f| (&scan_dirs[f.room].room, f.age)).collect();
