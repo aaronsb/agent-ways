@@ -25,7 +25,11 @@ pub(crate) const REPLY_FLAGS: &[&str] = &["--to", "--channel", "--json"];
 /// really contains one); a later `--` in the text does not count.
 fn flag_like_refusal(own_flags: &[&str], message: &[String], raw_args: &[String]) -> Option<String> {
     let first = message.first()?.as_str();
-    if raw_args.windows(2).any(|w| w[0] == "--" && w[1] == first) {
+    // The message is the tail of the raw arguments, so the escape is the
+    // token just before that tail. Matching `--` followed by the first word
+    // anywhere would let `send ok --json -- ok` through.
+    let escape = raw_args.len().checked_sub(message.len() + 1).map(|i| raw_args[i].as_str());
+    if escape == Some("--") {
         return None;
     }
     let name_of = |token: &str| token.split('=').next().unwrap_or(token).to_string();
@@ -260,6 +264,13 @@ mod removed_flag_tests {
         assert!(flag_like_refusal(&msg, &raw).is_some());
         let raw = v(&["attend", "send", "hi", "--", "--json"]);
         assert!(flag_like_refusal(&v(&["hi", "--", "--json"]), &raw).is_some());
+        // A `--` before a later copy of the first word is not the escape.
+        let raw = v(&["attend", "send", "ok", "--json", "--", "ok"]);
+        assert!(flag_like_refusal(&v(&["ok", "--json", "--", "ok"]), &raw).is_some());
+        assert!(flag_like_refusal(&v(&["ok", "--json", "ok"]), &raw).is_some());
+        // The escape after the verb's own flags still counts.
+        let raw = v(&["attend", "send", "--json", "--", "--broadcast", "hi"]);
+        assert!(flag_like_refusal(&v(&["--broadcast", "hi"]), &raw).is_none());
     }
 
     #[test]
