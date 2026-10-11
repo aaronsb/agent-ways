@@ -402,8 +402,8 @@ fn parent_route(
     };
     match said {
         Some(Said::Open) | Some(Said::Project(None)) => Ok(Route::Caller),
-        Some(Said::Project(Some(cwd))) => Ok(Route::Project(cwd)),
-        None => Err(SendError::ParentRoomUnknown),
+        Some(Said::Project(Some(cwd))) if Said::routable_cwd(&cwd) => Ok(Route::Project(cwd)),
+        None | Some(Said::Project(Some(_))) => Err(SendError::ParentRoomUnknown),
         Some(Said::Channel(channel)) => channel_route(&channel),
     }
 }

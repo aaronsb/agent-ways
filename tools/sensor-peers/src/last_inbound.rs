@@ -58,6 +58,12 @@ impl Said {
         }
     }
 
+    /// Whether `cwd` names a project a reply can go back to: non-empty, and
+    /// one line, so it survives the record's line framing intact.
+    pub fn routable_cwd(cwd: &str) -> bool {
+        !cwd.is_empty() && !cwd.contains(['\n', '\r'])
+    }
+
     fn encode(&self) -> String {
         match self {
             Self::Open => "#open".to_string(),
@@ -75,7 +81,11 @@ impl Said {
                 .strip_prefix('@')
                 .filter(|name| !name.is_empty())
                 .map(|name| Self::Channel(name.to_string()))
-                .or_else(|| line.strip_prefix("project ").map(|cwd| Self::Project(Some(cwd.to_string())))),
+                .or_else(|| {
+                    line.strip_prefix("project ")
+                        .filter(|cwd| Self::routable_cwd(cwd))
+                        .map(|cwd| Self::Project(Some(cwd.to_string())))
+                }),
         }
     }
 }
@@ -96,8 +106,11 @@ pub fn path(session_id: &str) -> PathBuf {
 }
 
 /// Record `signal_id`, said in `said`, as the most-recent inbound signal
-/// for `session_id`. Creates the parent directory if needed. Silently
-/// ignores errors: the callers (the peers sensor, the drain) cannot
+/// for `session_id`. Creates the parent directory if needed. A project room
+/// whose cwd is not [`Said::routable_cwd`] is not recorded: the record keeps
+/// the id alone, and a reply to it is refused rather than guessed.
+///
+/// Errors are ignored: the callers (the peers sensor, the drain) cannot
 /// usefully recover from a failed write here, and a missing file on the
 /// reply side degrades to "no threaded reply," not a crash.
 pub fn record(session_id: &str, signal_id: &str, said: &Said) {
@@ -105,15 +118,20 @@ pub fn record(session_id: &str, signal_id: &str, said: &Said) {
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent).ok();
     }
-    fs::write(&p, format!("{signal_id}\n{}\n", said.encode())).ok();
+    let content = match said {
+        Said::Project(Some(cwd)) if !Said::routable_cwd(cwd) => format!("{signal_id}\n"),
+        _ => format!("{signal_id}\n{}\n", said.encode()),
+    };
+    fs::write(&p, content).ok();
 }
 
 /// Read the last-inbound signal for `session_id`, if one exists and its id
-/// line is non-empty. Lines are trimmed in case of a hand-edit.
+/// line is non-empty. The id line is trimmed in case of a hand-edit; the
+/// room line loses only its line terminator, so a cwd reads back exactly.
 pub fn read(session_id: &str) -> Option<LastInbound> {
     let raw = fs::read_to_string(path(session_id)).ok()?;
-    let mut lines = raw.lines().map(str::trim);
-    let id = lines.next().filter(|id| !id.is_empty())?.to_string();
+    let mut lines = raw.lines();
+    let id = lines.next().map(str::trim).filter(|id| !id.is_empty())?.to_string();
     let said = lines.next().and_then(Said::decode);
     Some(LastInbound { id, said })
 }
@@ -154,6 +172,27 @@ mod tests {
             fs::write(path(&sid), old).unwrap();
             assert_eq!(read(&sid), Some(LastInbound { id: "parent-abc-1234".to_string(), said: None }), "{old:?}");
         }
+        fs::remove_file(path(&sid)).ok();
+    }
+
+    /// A project room with an empty or multi-line cwd names no project to
+    /// answer in, so it is never recorded, and one already on disk reads as
+    /// no room: never as an external sender's, whose answer goes to `#open`.
+    #[test]
+    fn a_project_room_without_a_one_line_cwd_reads_as_no_room() {
+        let sid = format!("test-ri-cwd-{}", std::process::id());
+        let no_room = Some(LastInbound { id: "parent-abc-1234".to_string(), said: None });
+        for cwd in ["", "/a\nb", "/a\r", "/a\rb"] {
+            record(&sid, "parent-abc-1234", &Said::Project(Some(cwd.to_string())));
+            assert_eq!(read(&sid), no_room, "{cwd:?}");
+        }
+        for on_disk in ["parent-abc-1234\nproject \n", "parent-abc-1234\nproject \r\n"] {
+            fs::write(path(&sid), on_disk).unwrap();
+            assert_eq!(read(&sid), no_room, "{on_disk:?}");
+        }
+        // Spaces in a cwd are its own; only the line terminator goes.
+        record(&sid, "parent-abc-1234", &Said::Project(Some("/a b ".to_string())));
+        assert_eq!(read(&sid).and_then(|l| l.said), Some(Said::Project(Some("/a b ".to_string()))));
         fs::remove_file(path(&sid)).ok();
     }
 

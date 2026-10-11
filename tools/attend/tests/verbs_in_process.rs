@@ -253,6 +253,21 @@ fn a_reply_to_an_unparseable_directed_parent_is_refused() {
     assert_room_unknown(&f, reply("an answer"));
 }
 
+/// A Claude sender with an empty cwd names no project to answer in. Its
+/// room is not recorded, so once the parent is reaped the reply is refused;
+/// it is never mistaken for an external sender's and sent to `#open`. While
+/// the parent's file stands, the same holds.
+#[test]
+fn a_reply_to_a_directed_parent_with_an_empty_sender_cwd_is_refused() {
+    let f = Fixture::new("route-unknown-emptycwd");
+    let _env = enter(&f);
+    record(&f.sid, "peer-sess-1-1", &Said::Project(Some(String::new())));
+    assert_room_unknown(&f, reply("an answer"));
+
+    signal(&f, &f.project_tray(), "peer-sess-1-1", "claude:peer-sess|peerproj||to your project");
+    assert_room_unknown(&f, reply("an answer"));
+}
+
 /// A message another Claude session sent this project with `--to` is
 /// answered in that session's project, while it is live.
 #[test]
