@@ -11,6 +11,7 @@ pub(crate) mod cleanup;
 pub(crate) mod config_cmd;
 pub(crate) mod channels;
 pub(crate) mod inbox;
+#[cfg(feature = "sensor-keepwarm")]
 pub(crate) mod keepwarm;
 pub(crate) mod peers;
 pub(crate) mod permissions;

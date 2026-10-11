@@ -53,6 +53,8 @@ fn rejoining_a_channel_already_joined_keeps_what_is_owed() {
     assert!(f.drain("plain").contains(OLD), "a member's unconsumed message is still delivered");
 }
 
+// `attend run` has no sensor to scan the room without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_late_join_under_attend_run_holds_back_the_history_too() {
     let f = Fixture::new("join-backlog-run");

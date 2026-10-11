@@ -4,6 +4,7 @@
 mod common;
 use common::Fixture;
 use serde_json::Value;
+#[cfg(feature = "sensor-peers")]
 use std::time::Duration;
 
 fn json(out: &std::process::Output) -> Value {
@@ -69,6 +70,8 @@ fn a_message_that_would_read_as_threaded_is_refused() {
     assert_eq!(ok_json(&f, &["inbox", "--json"])["total"], 0);
 }
 
+// Needs `attend send`/`reply`, compiled out without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_reply_threads_under_the_message_the_drain_delivered() {
     let f = Fixture::new("verbs-json-reply");
@@ -84,6 +87,8 @@ fn a_reply_threads_under_the_message_the_drain_delivered() {
     assert_eq!(sent["threading"], "threaded");
 }
 
+// Needs `attend send`/`reply`, compiled out without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_refusal_is_one_json_error_document_with_the_exit_code_unchanged() {
     let f = Fixture::new("verbs-json-refusal");
@@ -103,6 +108,8 @@ fn a_refusal_is_one_json_error_document_with_the_exit_code_unchanged() {
 /// Exit 2 is usage; under `--json` its document is `{"error":{"kind":
 /// "usage"},"message":...}` and nothing is sent (ADR-185, note of
 /// 2026-10-10).
+// Needs `attend send`/`reply`, compiled out without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_usage_refusal_under_json_is_kind_usage_with_exit_2() {
     let f = Fixture::new("verbs-json-usage");
