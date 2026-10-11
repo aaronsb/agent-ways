@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coordi|
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coord…|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                         │|
 |│ │ Wells            │ rollout is green on staging                             │|

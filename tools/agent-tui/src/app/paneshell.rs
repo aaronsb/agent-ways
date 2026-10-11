@@ -959,6 +959,70 @@ mod tests {
         assert_eq!(two(&a).wheel, 1, "the bottom bar is not the pane");
     }
 
+    /// A pane with the attend-chat bar's shape: the `≡` slot, four tabs with
+    /// a lead glyph each, the `+` slot, and a channel description after it.
+    struct Described(Two);
+    impl Pane for Described {
+        fn palette(&self) -> theme::Palette {
+            self.0.palette()
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            let mut out = vec![PaneTab::new("≡").action()];
+            for n in ["merged", "#open", "#deploy", "#infra"] {
+                out.push(PaneTab::new(n).lead(vec![Span::raw("◆ ")]));
+            }
+            out.push(PaneTab::new("+").action());
+            out
+        }
+        fn tab(&mut self) -> usize {
+            self.0.tab
+        }
+        fn set_tab(&mut self, i: usize) {
+            self.0.tab = i;
+        }
+        fn has_tab_menus(&self) -> bool {
+            true
+        }
+        fn trailer(&mut self) -> Vec<Span<'static>> {
+            vec![Span::raw("  — rollout of the deploy pipeline to every region, one at a time")]
+        }
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, _: KeyEvent) -> Keyed {
+            Keyed::Done
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+    }
+
+    fn described() -> App {
+        let two = Two { tab: 3, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, click_menu: false };
+        App::with_pane("described", Described(two))
+    }
+
+    #[test]
+    fn a_long_trailer_is_cut_with_an_ellipsis_at_80_columns() {
+        let mut a = described();
+        let bar = testkit::rows(&testkit::render(&mut a, 80, 10))[0].clone();
+        assert!(["1 merged", "2 #open", "3 #deploy", "4 #infra", "+"].iter().all(|t| bar.contains(t)), "every tab whole: {bar}");
+        assert!(bar.contains("— rollout") && bar.trim_end().ends_with('…'), "the trailer is cut, not clipped: {bar}");
+        assert_eq!(bar.chars().count(), 80);
+        assert_eq!(a.hits.tabs.len(), 6);
+        assert!(a.hits.tabs.iter().all(|(r, _)| r.right() <= 80 && r.width > 0), "{:?}", a.hits.tabs);
+    }
+
+    #[test]
+    fn a_narrow_bar_drops_the_trailer_then_cuts_names_before_any_tab_goes() {
+        let mut a = described();
+        let bar = testkit::rows(&testkit::render(&mut a, 50, 10))[0].clone();
+        assert!(!bar.contains("rollout"), "the trailer goes first: {bar}");
+        assert!((1..=4).all(|n| bar.contains(&format!(" {n} "))) && bar.contains('+'), "every tab keeps its number: {bar}");
+        assert!(bar.contains('…') && !bar.contains('›'), "names are cut: {bar}");
+        let bar = testkit::rows(&testkit::render(&mut a, 20, 10))[0].clone();
+        assert!(bar.trim_end().ends_with('›'), "the tabs left off are marked: {bar}");
+        assert!(a.hits.tabs.len() < 6, "only the tabs drawn are click targets");
+    }
+
     #[test]
     fn the_key_help_lists_every_binding() {
         let mut a = app(false);

@@ -117,6 +117,31 @@ fn width(spans: &[Span]) -> u16 {
     spans.iter().map(|s| s.width() as u16).sum()
 }
 
+/// The trailer cut to `room` columns, ending in `…` when cut; nothing when
+/// fewer than four columns are left, too few to read.
+fn cut_trailer(spans: Vec<Span<'static>>, room: usize) -> Vec<Span<'static>> {
+    if spans.iter().map(|s| s.width()).sum::<usize>() <= room {
+        return spans;
+    }
+    if room < 4 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut left = room;
+    for s in spans {
+        let w = s.width();
+        if w < left {
+            left -= w;
+            out.push(s);
+            continue;
+        }
+        // The last span shown: cut so its `…` fits, even when it alone would.
+        out.push(Span::styled(crate::wrap::truncate(&s.content, left.min(w - 1)), s.style));
+        break;
+    }
+    out
+}
+
 impl App {
     /// Whether the terminal took the keyboard enhancement, as the run loop
     /// found when it started; the pane is told too. A headless run, which
@@ -311,25 +336,40 @@ impl App {
     /// shown one on the accent, each after its lead, then the trailer. Each
     /// tab, lead and all, is a click target. The tab under the bar's cursor
     /// is drawn in reverse video behind a `▸`; an action slot carries no number.
+    ///
+    /// The bar keeps to its width, as the tree's tab bar does. When the tabs
+    /// and the trailer overflow it, the trailer is cut first, ending in `…`;
+    /// then the gaps tighten; then the names are cut shorter, down to the
+    /// number alone, while each lead and action slot stays whole. Tabs that
+    /// still do not fit are left off behind a `›` marker, so none goes
+    /// missing unannounced.
     pub(super) fn draw_pane_tabs(&mut self, f: &mut Frame, area: Rect) {
         self.hits.tabs.clear();
         let cursor = self.strip;
+        let shape = self.shape;
         let Some(p) = &mut self.pane else { return };
         let tabs = p.tabs();
         let active = p.tab();
         let trailer = p.trailer();
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        let mut number = 0;
-        for (i, t) in tabs.into_iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw("  "));
-            }
-            let x = area.x + width(&spans);
-            spans.extend(t.lead);
-            if !t.action {
-                number += 1;
-            }
-            let label = if t.action { format!(" {} ", t.name) } else { format!(" {number} {} ", t.name) };
+        let mut count = 0;
+        let numbers: Vec<Option<usize>> = tabs
+            .iter()
+            .map(|t| {
+                (!t.action).then(|| {
+                    count += 1;
+                    count
+                })
+            })
+            .collect();
+        // Tab `i`'s lead and lozenge with its name cut to `cap` columns; a
+        // cap of 0 leaves the number alone.
+        let lozenge = |i: usize, cap: usize| -> Vec<Span<'static>> {
+            let t = &tabs[i];
+            let label = match numbers[i] {
+                None => format!(" {} ", t.name),
+                Some(n) if cap == 0 => format!(" {n} "),
+                Some(n) => format!(" {n} {} ", crate::wrap::truncate(&t.name, cap)),
+            };
             let at_cursor = cursor == Some(i);
             // The marker takes the label's leading space, so the bar does
             // not shift when the focus moves.
@@ -339,11 +379,48 @@ impl App {
             if at_cursor {
                 seg.style = seg.style.add_modifier(Modifier::REVERSED | Modifier::BOLD);
             }
-            spans.extend(self.shape.lozenge(&[seg]));
+            let mut out = t.lead.clone();
+            out.extend(shape.lozenge(&[seg]));
+            out
+        };
+        let span = |lozs: &[Vec<Span>], gap: u16| lozs.iter().map(|l| width(l)).sum::<u16>() + gap * lozs.len().saturating_sub(1) as u16;
+        let longest = tabs.iter().filter(|t| !t.action).map(|t| crate::wrap::str_width(&t.name)).max().unwrap_or(0);
+        // Whole names at the usual gap, then at one column, then names cut
+        // shorter. A cap of 1 would leave a bare `…`, so below 2 the name goes.
+        let mut plan = None;
+        'fit: for cap in (0..=longest).rev().filter(|c| *c != 1) {
+            let lozs: Vec<_> = (0..tabs.len()).map(|i| lozenge(i, cap)).collect();
+            let gaps: &[u16] = if cap == longest { &[2, 1] } else { &[1] };
+            for &gap in gaps {
+                if span(&lozs, gap) <= area.width {
+                    plan = Some((lozs, gap, false));
+                    break 'fit;
+                }
+            }
+        }
+        // Even the numbers alone overflow: as many as fit, then the marker.
+        let (lozs, gap, more) = plan.unwrap_or_else(|| {
+            let mut lozs: Vec<_> = (0..tabs.len()).map(|i| lozenge(i, 0)).collect();
+            while !lozs.is_empty() && span(&lozs, 1) + 2 > area.width {
+                lozs.pop();
+            }
+            (lozs, 1, true)
+        });
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for (i, tab) in lozs.into_iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw(" ".repeat(gap as usize)));
+            }
+            let x = area.x + width(&spans);
+            spans.extend(tab);
             let w = area.x + width(&spans) - x;
             self.hits.tabs.push((Rect { x, y: area.y, width: w, height: 1 }.intersection(area), i));
         }
-        spans.extend(trailer);
+        if more {
+            spans.push(Span::styled(" ›", theme::hint()));
+        } else {
+            spans.extend(cut_trailer(trailer, area.width.saturating_sub(width(&spans)) as usize));
+        }
         f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
