@@ -208,15 +208,19 @@ fn header(f: &mut Frame, area: Rect, label: &str) {
 /// Lozenge segments sized to `w` columns in `shape`: the first two hold
 /// `texts[0]` and `texts[1]` cut or padded so the row fills `w`, the last
 /// holds `texts[2]` whole. A project too narrow to read is dropped into the
-/// name's padding.
-fn sized(shape: Shape, texts: [&str; 3], w: usize) -> [String; 3] {
-    let glyphs = usize::from(!shape.cap.is_empty()) + if shape.join.is_empty() { 0 } else { 3 };
+/// name's padding, with the join it would have taken. `bare` is a frame
+/// without colour, where the lozenge draws no glyphs at all.
+fn sized(shape: Shape, bare: bool, texts: [&str; 3], w: usize) -> [String; 3] {
+    // The glyphs `Shape::lozenge` draws for `n` segments: a cap, then a
+    // join after each one.
+    let glyphs = |n: usize| if bare { 0 } else { usize::from(!shape.cap.is_empty()) + n * usize::from(!shape.join.is_empty()) };
     let last = format!(" {} ", texts[2]);
-    let room = w.saturating_sub(glyphs + str_width(&last));
+    let room = w.saturating_sub(glyphs(3) + str_width(&last));
     let name = format!(" {} ", fit(texts[0], room.saturating_sub(2).max(1)));
     let rest = room.saturating_sub(str_width(&name));
     if rest < 4 {
-        return [format!("{name}{}", " ".repeat(rest)), String::new(), last];
+        let pad = w.saturating_sub(glyphs(2) + str_width(&last) + str_width(&name));
+        return [format!("{name}{}", " ".repeat(pad)), String::new(), last];
     }
     let project = format!(" {}", fit(texts[1], rest - 2));
     let pad = rest.saturating_sub(str_width(&project));
@@ -242,7 +246,7 @@ fn agent_line(chat: &ChatPane, s: &Seen, w: usize, mark: Style) -> Line<'static>
     let k = &s.identity;
     let project = agent_identity::cwd_basename(&k.cwd);
     let dot = if s.live { "●" } else { "○" };
-    let texts = sized(chat.shape, [&k.nickname, &project, dot], w);
+    let texts = sized(chat.shape, theme::colourless(), [&k.nickname, &project, dot], w);
     let styles = if agent_identity::is_rich(depth) {
         let st = IdentitySteps::of(Rgb(k.palette.rgb.0, k.palette.rgb.1, k.palette.rgb.2), s.live);
         let cell = |x: agent_theme::Step| Style::new().fg(at(x.fg, depth)).bg(at(x.bg, depth));
@@ -276,7 +280,7 @@ fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown
     let figures = if row.known.is_base { age.to_string() } else { format!("{}{person} {age}", row.known.membership.members.len()).trim_end().to_string() };
     let name = format!("{} #{}", g.glyph, g.name);
     let dot = if active { "●" } else { "○" };
-    let texts = sized(chat.shape, [&name, &figures, dot], w);
+    let texts = sized(chat.shape, theme::colourless(), [&name, &figures, dot], w);
     let styles = if active {
         let name = Seg::on("", Ground::Accent).style;
         [if shown { name.add_modifier(Modifier::BOLD) } else { name }.patch(mark), Seg::on("", Ground::AccentDim).style, Seg::on("", Ground::Rule).style]
@@ -463,13 +467,15 @@ mod tests {
     #[test]
     fn a_row_fills_its_width_in_any_shape() {
         let width = |t: &[String; 3]| t.iter().map(|x| str_width(x)).sum::<usize>();
-        let t = sized(Shape::ROUND, ["Laszlo", "alpha", "●"], 22);
+        let t = sized(Shape::ROUND, false, ["Laszlo", "alpha", "●"], 22);
         assert_eq!(t, [" Laszlo ".to_string(), " alpha ".into(), " ● ".into()]);
         assert_eq!(width(&t) + 4, 22, "cap and three joins");
-        let t = sized(Shape::PLAIN, ["Laszlo", "alpha", "●"], 22);
+        let t = sized(Shape::PLAIN, false, ["Laszlo", "alpha", "●"], 22);
         assert_eq!(width(&t), 22, "plain draws no glyphs");
-        let t = sized(Shape::ROUND, ["Shannon-alphabet", "omnibus", "○"], 22);
-        assert_eq!((t[1].as_str(), width(&t) + 4), ("", 22), "no room to read the project: it goes");
+        let t = sized(Shape::ROUND, false, ["Shannon-alphabet", "omnibus", "○"], 22);
+        assert_eq!((t[1].as_str(), width(&t) + 3), ("", 22), "no room to read the project: it goes, and its join with it");
+        let t = sized(Shape::ROUND, true, ["Laszlo", "alpha", "●"], 22);
+        assert_eq!(width(&t), 22, "without colour the lozenge draws no glyphs, in any shape");
     }
 
     #[test]
