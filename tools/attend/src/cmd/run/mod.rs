@@ -14,6 +14,7 @@
 
 mod governor;
 mod rekey;
+mod stamps;
 mod tick;
 
 use std::collections::BinaryHeap;
@@ -210,8 +211,17 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
             &me,
             &enabled_names,
             &focus_desc,
-            banner_stamp_path(&session_id, ident.session_resolved).as_deref(),
+            stamps::banner_stamp_path(&session_id, ident.session_resolved).as_deref(),
         ),
+    }
+    let swept = stamps::sweep_stale(
+        &attend_presence::cache::state_dir(),
+        &stamps::live_sessions(),
+        std::time::SystemTime::now(),
+        stamps::STAMP_MAX_AGE,
+    );
+    if swept > 0 {
+        emit::log(&format!("removed {swept} stamp file(s) of sessions gone for over a week"));
     }
 
     let mut governor = DisclosureGovernor::new(
@@ -358,13 +368,6 @@ fn choose_banner(fingerprint: &str, prev: Option<&str>, reloaded_from: Option<St
     }
 }
 
-/// Where a session's banner fingerprint is kept: in the state dir next to
-/// its seen-set, keyed by session id. `None` for a session without a
-/// resolved id, which then gets the full banner on every start.
-fn banner_stamp_path(session_id: &str, resolved: bool) -> Option<std::path::PathBuf> {
-    resolved.then(|| attend_presence::cache::state_dir().join(format!("{session_id}.banner")))
-}
-
 /// Print the startup banner. Suppresses repeated unchanged-config
 /// banners for the same session, names hot-swap reloads explicitly, and
 /// writes the session's fingerprint stamp so its next start can compare.
@@ -462,10 +465,9 @@ mod banner_tests {
 
     #[test]
     fn the_stamp_is_keyed_by_session() {
-        let a = banner_stamp_path("sess-a", true).unwrap();
-        let b = banner_stamp_path("sess-b", true).unwrap();
+        let a = stamps::banner_stamp_path("sess-a", true).unwrap();
+        let b = stamps::banner_stamp_path("sess-b", true).unwrap();
         assert_ne!(a, b);
         assert!(a.ends_with("sess-a.banner"));
-        assert_eq!(banner_stamp_path("pid-1", false), None);
     }
 }

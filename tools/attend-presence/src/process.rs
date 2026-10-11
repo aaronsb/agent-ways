@@ -147,6 +147,23 @@ pub fn is_claude(pid: u32) -> bool {
     })
 }
 
+/// The nearest ancestor of `pid` that is the Claude Code program itself,
+/// within 15 hops. A shell whose command line merely mentions `claude`
+/// (the Bash tool sources a snapshot under `~/.claude/`) is skipped.
+pub fn claude_ancestor(pid: u32) -> Option<u32> {
+    const SHELLS: &[&str] = &["sh", "bash", "zsh", "fish", "dash"];
+    let mut cur = parent_pid(pid)?;
+    for _ in 0..15 {
+        let program = argv(cur).and_then(|a| a.into_iter().next()).unwrap_or_default();
+        let base = std::path::Path::new(&program).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if !SHELLS.contains(&base.as_str()) && is_claude(cur) {
+            return Some(cur);
+        }
+        cur = parent_pid(cur)?;
+    }
+    None
+}
+
 /// Whether `ancestor` is in `pid`'s ancestry, `pid` itself included,
 /// within 15 hops.
 pub fn has_ancestor(pid: u32, ancestor: u32) -> bool {
