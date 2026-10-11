@@ -20,7 +20,7 @@ agent-tui frame 80x25
 |│Shift-drag         selects text while the mouse is on, in most terminals      │|
 |│middle-click       pastes only while the mouse is off                         │|
 |│Esc ^C             quit; asks over a draft; else Esc asks and y quits         │|
-|│click              a tab shows it; the wheel scrolls                          │|
+|│click              a tab shows it and opens its menu; the wheel scrolls       │|
 |│                                                                              │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |

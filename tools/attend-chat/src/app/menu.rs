@@ -13,8 +13,10 @@
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
 //!   channel, typed in the compose box.
 //!
-//! Clear history and Delete channel ask first: `y` goes ahead, any other
-//! key keeps the history. Invite agent asks a live peer to join (it joins
+//! Every item that drops something asks first: Clear view, Clear history,
+//! Leave and Delete channel. `y` goes ahead, any other key keeps things as
+//! they are. A click on a tab opens its menu with the first item under the
+//! cursor, so an Enter just after the click must not drop anything. Invite agent asks a live peer to join (it joins
 //! itself, and its join keeps the room's recent history to read). Add
 //! agent, enrolling a member with no answer from it, is ADR-404 D1 and is
 //! not built yet: the item says so.
@@ -54,6 +56,10 @@ pub(super) const PRESETS: &[(&str, &str, &str)] = &[
 /// A step waiting for `y`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Pending {
+    /// Empty the view (`/clear`); the bus keeps every message.
+    ClearView,
+    /// Leave the channel (`/leave`).
+    Leave(String),
     /// Delete the channel's history (`/purge`).
     ClearHistory(String),
     /// Delete the channel (`/dissolve`).
@@ -86,6 +92,8 @@ impl ChatPane {
     pub(super) fn menu_status(&self) -> Option<String> {
         if let Some(p) = &self.pending {
             return Some(match p {
+                Pending::ClearView => "clear the view? the bus keeps every message · y clears · any other key keeps it".into(),
+                Pending::Leave(c) => format!("leave #{c}? y leaves · any other key stays"),
                 Pending::ClearHistory(c) => {
                     format!("clear #{c} history? deletes what every live agent has read, older than 90 s · y clears · any other key keeps it")
                 }
@@ -221,14 +229,10 @@ impl ChatPane {
     fn item(&mut self, channel: &str, item: &str) {
         let chan = || (!channel.is_empty()).then(|| channel.to_string());
         match item {
-            CLEAR_VIEW => {
-                self.run("clear", SlashOutcome::ClearTranscript);
-            }
+            CLEAR_VIEW => self.pending = Some(Pending::ClearView),
             CLEAR_HISTORY => self.pending = Some(Pending::ClearHistory(chan().unwrap_or(BASE_CHANNEL_NAME.into()))),
             DELETE => self.pending = chan().map(Pending::Delete),
-            LEAVE => {
-                self.run("leave", SlashOutcome::Leave(chan()));
-            }
+            LEAVE => self.pending = chan().map(Pending::Leave),
             JOIN => {
                 if let Some(c) = chan() {
                     self.run("join", SlashOutcome::Join(c));
@@ -349,6 +353,12 @@ impl ChatPane {
         }
         match p {
             Pending::Quit => return true,
+            Pending::ClearView => {
+                self.run("clear", SlashOutcome::ClearTranscript);
+            }
+            Pending::Leave(c) => {
+                self.run("leave", SlashOutcome::Leave(Some(c)));
+            }
             Pending::ClearHistory(c) => {
                 self.run("purge", SlashOutcome::Purge(Some(c)));
             }
@@ -410,5 +420,22 @@ mod tests {
         assert_eq!(items(Some("open"), true), [CLEAR_VIEW, CLEAR_HISTORY], "the harmless item first");
         assert_eq!(items(Some("deploy"), true), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE]);
         assert_eq!(items(Some("deploy"), false), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, JOIN, DELETE], "Join to a non-member");
+    }
+
+    #[test]
+    fn every_item_that_drops_something_asks_first() {
+        let mut c = ChatPane::new(None, Default::default());
+        c.dry_run = true;
+        for (item, ask) in [(CLEAR_VIEW, "clear the view?"), (CLEAR_HISTORY, "clear #deploy history?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
+            c.item("deploy", item);
+            assert!(c.menu_status().is_some_and(|s| s.contains(ask)), "{item}: {:?}", c.menu_status());
+            assert_eq!(c.status, "", "{item} ran nothing yet");
+            c.answer(false);
+            assert_eq!(c.status, "kept");
+            c.status.clear();
+        }
+        c.item("deploy", LEAVE);
+        c.answer(true);
+        assert_eq!(c.status, "dry run: /leave not run", "y goes ahead");
     }
 }

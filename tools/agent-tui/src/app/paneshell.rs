@@ -102,8 +102,13 @@ impl App {
             Binding::help("Shift-drag", "selects text while the mouse is on, in most terminals"),
             Binding::help("middle-click", "pastes only while the mouse is off"),
             Binding::help(k("q Esc ^C", "Esc ^C"), quit),
-            Binding::help("click", "a tab shows it; the wheel scrolls"),
         ]);
+        let click = if menus && self.pane.as_ref().is_some_and(|p| p.menu_on_click()) {
+            "a tab shows it and opens its menu; the wheel scrolls"
+        } else {
+            "a tab shows it; the wheel scrolls"
+        };
+        out.push(Binding::help("click", click));
         out
     }
 

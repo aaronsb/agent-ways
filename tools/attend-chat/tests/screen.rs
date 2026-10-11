@@ -853,6 +853,31 @@ fn clear_history_asks_first_and_y_runs_the_purge() {
     g.finish();
 }
 
+/// A click on a tab opens its menu with the first item under the cursor:
+/// merged's Clear view asks before it empties the view.
+#[test]
+fn a_click_then_enter_on_merged_asks_before_clearing_the_view() {
+    let mut c = chat().enhanced(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "1 merged").expect("the merged tab");
+    left(&mut c, (x, y));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(bar(&mut c).contains("clear the view? the bus keeps every message"), "{}", bar(&mut c));
+    assert!(!c.signals().is_empty(), "nothing cleared before the y");
+    press(&mut c, key(KeyCode::Esc));
+    assert_eq!((c.status(), c.signals().is_empty()), ("kept", false));
+    left(&mut c, (x, y));
+    press(&mut c, key(KeyCode::Enter));
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.status(), "transcript cleared");
+    assert!(c.signals().is_empty());
+
+    // The key help names what a click on a tab does.
+    press(&mut c, key(KeyCode::F(1)));
+    let help = text(&mut c, 100, 60);
+    assert!(help.contains("a tab shows it and opens its menu"), "{help}");
+}
+
 #[test]
 fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
     let ask = |c: &mut Chat| {
