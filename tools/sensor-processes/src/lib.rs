@@ -524,6 +524,8 @@ impl ProcessSensor {
         };
         let mut finished: Vec<(&u32, &Tool)> = self.prior_tools.iter().filter(|(pid, _)| !alive(pid)).collect();
         finished.sort_by_key(|(pid, _)| **pid);
+        // Each exit is named by one tool only: of the finished tools that
+        // hosted it, the one with the lowest pid.
         let mut named = vec![false; exits.len()];
         for (pid, tool) in finished {
             let mut with: Vec<String> = Vec::new();
