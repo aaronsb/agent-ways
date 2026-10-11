@@ -199,11 +199,15 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
         }
     }
 
+    // The name peers see this session by. Printed on every startup line so
+    // a session never has to guess its own name or run `attend peers`.
+    let me = crate::cmd::whoami::display_name(&ident);
     match &moved_from {
         Some(old) => println!(
-            "[attend] session id changed ({old} → {session_id}): registry slot, enrollment and seen-set carried over"
+            "[attend] session id changed ({old} → {session_id}): registry slot, enrollment and seen-set carried over — you are {me}"
         ),
         None => print_startup_banner(
+            &me,
             &enabled_names,
             &focus_desc,
             banner_stamp_path(&session_id, ident.session_resolved).as_deref(),
@@ -364,7 +368,7 @@ fn banner_stamp_path(session_id: &str, resolved: bool) -> Option<std::path::Path
 /// Print the startup banner. Suppresses repeated unchanged-config
 /// banners for the same session, names hot-swap reloads explicitly, and
 /// writes the session's fingerprint stamp so its next start can compare.
-fn print_startup_banner(enabled_names: &[String], focus_desc: &str, stamp_path: Option<&std::path::Path>) {
+fn print_startup_banner(me: &str, enabled_names: &[String], focus_desc: &str, stamp_path: Option<&std::path::Path>) {
     let sensor_list = enabled_names.join(", ");
     let banner_fingerprint = format!(
         "v{}:{}:{}:{}",
@@ -395,30 +399,28 @@ fn print_startup_banner(enabled_names: &[String], focus_desc: &str, stamp_path: 
             std::fs::write(p, &banner_fingerprint).ok();
         }
     };
-    match choose_banner(&banner_fingerprint, prev.as_deref(), reloaded_from) {
-        Banner::Reloaded(prev_version) => {
-            // Always emit on a binary hot-swap — the operator needs to
-            // know the running code changed under them, even when
-            // sensors/focus are identical.
-            println!(
-                "[attend] reloaded {} → v{} ({}) — binary updated, state preserved across exec()",
-                prev_version,
-                env!("CARGO_PKG_VERSION"),
-                env!("ATTEND_COMMIT")
-            );
-            write_stamp();
-        }
-        Banner::Unchanged => println!("[attend] restarted (unchanged)"),
-        Banner::Started => {
-            println!(
-                "[attend] started v{} ({}) — sensors: {} | focus: {} | send: attend send <msg> (#open)",
-                env!("CARGO_PKG_VERSION"),
-                env!("ATTEND_COMMIT"),
-                sensor_list,
-                focus_desc
-            );
-            write_stamp();
-        }
+    let banner = choose_banner(&banner_fingerprint, prev.as_deref(), reloaded_from);
+    println!("{}", banner_line(&banner, me, &sensor_list, focus_desc));
+    if banner != Banner::Unchanged {
+        write_stamp();
+    }
+}
+
+/// The startup line. Every form names the session (`you are <name>`): it is
+/// the first thing attend tells a session, and the name is what peers use.
+/// A binary hot-swap is always named, even when sensors and focus are
+/// identical, so the operator knows the running code changed under them.
+fn banner_line(banner: &Banner, me: &str, sensor_list: &str, focus_desc: &str) -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    let commit = env!("ATTEND_COMMIT");
+    match banner {
+        Banner::Reloaded(prev_version) => format!(
+            "[attend] reloaded {prev_version} → v{version} ({commit}) — binary updated, state preserved across exec() — you are {me}"
+        ),
+        Banner::Unchanged => format!("[attend] restarted (unchanged) — you are {me}"),
+        Banner::Started => format!(
+            "[attend] started v{version} ({commit}) — you are {me} | sensors: {sensor_list} | focus: {focus_desc} | send: attend send <msg> (#open)"
+        ),
     }
 }
 
@@ -447,6 +449,15 @@ mod banner_tests {
             choose_banner("v1:abc:git", Some("v1:abc:git"), Some("v0.9".into())),
             Banner::Reloaded("v0.9".into())
         );
+    }
+
+    #[test]
+    fn every_banner_names_the_session() {
+        for b in [Banner::Started, Banner::Unchanged, Banner::Reloaded("v0.9".into())] {
+            let line = banner_line(&b, "Chaucer-alpha", "git, peers", "project only");
+            assert!(line.contains("you are Chaucer-alpha"), "{line}");
+        }
+        assert!(banner_line(&Banner::Started, "Chaucer", "git", "project only").starts_with("[attend] started v"));
     }
 
     #[test]

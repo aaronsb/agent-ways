@@ -63,8 +63,9 @@ pub(crate) fn cmd_whoami(machine: bool, display: bool) {
 }
 
 /// The rendered display name: the origin path's nickname, plus the
-/// instance suffix when several sessions share that origin.
-fn display_name(ident: &attend_presence::session::SessionIdentity) -> String {
+/// instance suffix when several sessions share that origin. The name peers
+/// see this session by; the startup banner and the first drain print it.
+pub(crate) fn display_name(ident: &attend_presence::session::SessionIdentity) -> String {
     let nickname = Identity::for_cwd(&ident.origin_path, ColorDepth::detect()).nickname;
     let instance = attend_instances::Registry::new()
         .lookup(&ident.origin_path, &ident.session_id);

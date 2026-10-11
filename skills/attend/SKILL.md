@@ -47,6 +47,8 @@ Do NOT run `attend run` with the Bash tool. Do NOT use `run_in_background`. Only
 
 On startup, attend emits a usage summary notification. After that, notifications arrive only on meaningful state changes.
 
+**Your name.** The startup line, and the first drain after you enroll, say `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
+
 ## Step 3: Re-arm on expiry
 
 Monitor kills its command at 30 minutes, the most `timeout_ms` allows, and sends one notice that the monitor expired. The notice wakes an idle session. When it names the attend monitor, call Monitor again with the Step 2 parameters, without asking. attend resumes from its saved state and reports `restarted (unchanged)`. Stop re-arming when the operator turns attend off.

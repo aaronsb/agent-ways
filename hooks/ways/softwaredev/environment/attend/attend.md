@@ -28,6 +28,8 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
 
 Use `/attend` or launch manually via Monitor with `attend run`.
 
+**Your name.** The startup line, and the first drain after you enroll, say `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
+
 ## Sensors
 
 - **git** — dirty files, branch changes, upstream divergence

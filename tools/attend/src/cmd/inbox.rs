@@ -498,8 +498,12 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // tolerates — at-least-once. The reverse order would mark messages
     // consumed with no conduit having shown them: loss on BOTH conduits,
     // since the sensor imports drain marks (PR #385 review, finding 2).
+    // The cold start is this conduit's first contact with the session, so
+    // it names the session: a drain-only session (enrolled by a join) has
+    // no startup banner to learn its name from.
+    let me = baselining.then(|| crate::cmd::whoami::display_name(&ident));
     if hook_mode {
-        let reason = render_drain_reason(&delivered, note.as_deref());
+        let reason = render_drain_reason(&delivered, note.as_deref(), me.as_deref());
         println!(
             "{{\"decision\": \"block\", \"reason\": \"{}\"}}",
             json_escape(&reason)
@@ -519,6 +523,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         }
         if let Some(note) = &note {
             println!("{note}");
+        }
+        if let Some(me) = &me {
+            println!("you are {me}");
         }
         println!("{} message(s) drained and marked consumed", delivered.len());
     }
@@ -546,12 +553,14 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 ///
 /// `note` is the cold start's count of messages it held back; it rides the
 /// first delivery after enrollment, or goes alone when nothing else does.
-fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>) -> String {
+/// `me` is the session's own name, given on that same first contact.
+fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&str>) -> String {
+    let you = me.map(|m| format!(" (you are {m})")).unwrap_or_default();
     if delivered.is_empty() {
-        return format!("[attend] {}", note.unwrap_or("no peer messages"));
+        return format!("[attend]{you} {}", note.unwrap_or("no peer messages"));
     }
     let mut out = format!(
-        "[attend] {} peer message(s) delivered at the turn boundary (ADR-172 drain):\n",
+        "[attend] {} peer message(s) delivered at the turn boundary (ADR-172 drain){you}:\n",
         delivered.len()
     );
     if let Some(note) = note {
@@ -752,7 +761,7 @@ mod drain_tests {
     #[test]
     fn drain_reason_renders_messages_and_contract_line() {
         let msgs = vec![msg(1), msg(2)];
-        let reason = render_drain_reason(&msgs, None);
+        let reason = render_drain_reason(&msgs, None, None);
         assert!(reason.contains("2 peer message(s)"));
         assert!(reason.contains("peer-1 (#open, id id-1, from claude:session-1):"));
         assert!(reason.contains("body 2"));
@@ -936,7 +945,7 @@ mod drain_tests {
             id: "abc123-1712345-0".into(),
             body: "hi".into(),
         };
-        let reason = render_drain_reason(&[carried], None);
+        let reason = render_drain_reason(&[carried], None, None);
         assert!(reason.contains("Jovan-alpha (ws) (project, id abc123-1712345-0):"), "{reason}");
         assert!(!reason.contains("from claude:"), "{reason}");
 
@@ -951,7 +960,7 @@ mod drain_tests {
     /// "0 peer message(s) delivered" header.
     #[test]
     fn note_only_reason_is_the_note() {
-        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 earlier messages not shown; attend inbox"));
+        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 earlier messages not shown; attend inbox"), None);
         assert!(reason.starts_with("[attend] 3 earlier messages not shown; attend inbox"), "{reason}");
         assert!(!reason.contains("0 peer message"), "{reason}");
     }
@@ -959,10 +968,20 @@ mod drain_tests {
     #[test]
     fn drain_reason_caps_render_and_counts_remainder() {
         let msgs: Vec<FakeMsg> = (0..14).map(msg).collect();
-        let reason = render_drain_reason(&msgs, None);
+        let reason = render_drain_reason(&msgs, None, None);
         assert!(reason.contains("14 peer message(s)"));
         assert!(reason.contains("body 9"));
         assert!(!reason.contains("body 10"));
         assert!(reason.contains("(+4 more — attend inbox for the rest)"));
+    }
+
+    /// The cold start is first contact: it tells the session its own name.
+    #[test]
+    fn first_contact_names_the_session() {
+        let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();
+        let reason = render_drain_reason(&msgs, None, Some("Chaucer-alpha"));
+        assert!(reason.lines().next().unwrap().contains("(you are Chaucer-alpha)"), "{reason}");
+        let warm = render_drain_reason(&msgs, None, None);
+        assert!(!warm.contains("you are"), "{warm}");
     }
 }
