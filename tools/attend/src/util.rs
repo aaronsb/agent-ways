@@ -162,7 +162,12 @@ pub(crate) fn backlog_note(n: usize) -> String {
 /// it by: `you are <name>`, on its own line, in the Bash output the model
 /// reads. `None` for an unresolved session, which peers do not see by name.
 pub(crate) fn you_are_line(me: &Session) -> Option<String> {
-    me.resolved().then(|| format!("you are {}", display_name(me)))
+    you_are(me).map(|name| format!("you are {name}"))
+}
+
+/// The name peers see session `me` by, or `None` for an unresolved session.
+pub(crate) fn you_are(me: &Session) -> Option<String> {
+    me.resolved().then(|| display_name(me))
 }
 
 /// The rendered display name: the origin path's nickname, plus the
