@@ -382,7 +382,8 @@ impl ProcessSensor {
     /// current marker and time. A watched tool never announces its start,
     /// and its exit is always `<tool> finished`. A hosted app whose exit is
     /// seen in the same poll as its tool's, or one poll before, is named in
-    /// that one event, as in `npm finished (node exited)`. Any other app
+    /// that one event, as in `npm finished (node exited)`, and only in the
+    /// first such event when several of its tools finish together. Any other app
     /// announces its start once it has lasted a poll, and an app that came
     /// and went within one poll produces nothing.
     fn diff(&mut self, current: Snapshot, now: u64) -> Vec<(f64, String)> {
@@ -421,7 +422,7 @@ impl ProcessSensor {
         for (pid, tool) in finished {
             let mut with: Vec<String> = Vec::new();
             for (i, exit) in exits.iter().enumerate() {
-                if exit.hosts.contains(pid) {
+                if !named[i] && exit.hosts.contains(pid) {
                     named[i] = true;
                     if !with.contains(&exit.app) {
                         with.push(exit.app.clone());
@@ -858,6 +859,18 @@ mod tests {
         }
         assert_eq!(texts(&s.diff(see(&only_test), 0)), vec!["npm finished"]);
         assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["npm finished (node exited)"]);
+    }
+
+    /// Two npm runs finishing in the same poll, with node gone from under
+    /// both: the one node exit is named once, by the first run.
+    #[test]
+    fn a_hosted_exit_is_named_by_one_tool() {
+        let both = [ZSH, NVIM, (10, 1, "npm"), (11, 10, "node"), (20, 1, "npm"), (21, 20, "node")];
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        for _ in 0..3 {
+            s.diff(see(&both), 0);
+        }
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["npm finished", "npm finished (node exited)"]);
     }
 
     /// A server dying under `npm run dev` gives one event, whether npm
