@@ -1,10 +1,10 @@
-//! `ways update` — update the agent-ways install from the binary itself.
+//! `ways manage update` — update the agent-ways install from the binary itself.
 //!
 //! The 1.0 lifecycle separates the *app source* (`$XDG_DATA/agent-ways`, a git
 //! checkout) from its *projection* (`~/.claude`, symlinks + a merged
 //! `settings.json`) — ADR-142. Updating means refreshing the source, its
 //! binaries, and reprojecting. Previously that meant "find the app dir, `cd`,
-//! `make update`, `ways reconcile`". This wraps the mainline flow behind one
+//! `make update`, reconcile". This wraps the mainline flow behind one
 //! command, with the same guard/gate the other lifecycle verbs use.
 //!
 //! Two properties the naive `make update` lacks:
@@ -59,7 +59,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     let ways_bin = app.join("bin").join(exe("ways"));
 
     if dry_run {
-        println!("ways update would, in {}:", app.display());
+        println!("ways manage update would, in {}:", app.display());
         println!("  1. scripts/update.sh          — git pull (autostash-safe)");
         println!("     (binary steps 2-4 run only if the pull changed their source, or a suite");
         println!("      binary's --version is older than its Cargo.toml, or way-embed's than its source)");
@@ -218,7 +218,7 @@ pub fn run(dry_run: bool, git_ref: Option<String>) -> Result<()> {
     } else {
         println!("\nSource updated and reprojected, but the ways binary refresh failed (no pre-built");
         println!("available and no build toolchain?). Your install still runs the previous binary —");
-        println!("retry `ways update`, or `make update-binaries` with a toolchain, then restart Claude Code.");
+        println!("retry `ways manage update`, or `make update-binaries` with a toolchain, then restart Claude Code.");
     }
     judge_setup();
     Ok(())
@@ -526,20 +526,20 @@ fn reproject(app: &Path, ways_bin: &Path) -> Result<()> {
         eprintln!("  ⚠ corpus not regenerated ({e}); the next session retries.");
     }
     eprintln!("==> reconcile projection");
-    run_step(Command::new(ways_bin).arg("reconcile").current_dir(app), "ways reconcile")
+    run_step(Command::new(ways_bin).arg("reconcile").current_dir(app), "ways manage repair")
 }
 
-/// `ways update --ref <ref>` — pin the install to a branch, tag, or commit and
+/// `ways manage update --ref <ref>` — pin the install to a branch, tag, or commit and
 /// build the whole suite from source, then relink + reconcile. Distinct from the
 /// release-channel update: fetch-and-checkout instead of pull, force source
 /// builds instead of download-first (an unpublished ref has no pre-built
 /// binary), and no downgrade guard (an explicit pin is not a downgrade). Lands on
-/// a detached HEAD at the ref; `ways update --ref main` returns to the channel.
+/// a detached HEAD at the ref; `ways manage update --ref main` returns to the channel.
 fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool) -> Result<()> {
     let ways_bin = app.join("bin").join(exe("ways"));
 
     if dry_run {
-        println!("ways update --ref {git_ref} would, in {}:", app.display());
+        println!("ways manage update --ref {git_ref} would, in {}:", app.display());
         println!("  1. git fetch origin {git_ref}");
         println!("  2. git checkout --detach       — pin the checkout to the ref");
         println!("  3. make ways-rebuild ways-audit-rebuild [ways-mcp-rebuild] [ways-agent-rebuild] attend-rebuild attend-chat-rebuild  (source, needs cargo)");
@@ -552,7 +552,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
 
     if !has_toolchain {
         bail!(
-            "`ways update --ref` builds the suite from source, which needs a Rust toolchain \
+            "`ways manage update --ref` builds the suite from source, which needs a Rust toolchain \
              (cargo not found). Install it (https://rustup.rs/), then retry."
         );
     }
@@ -622,7 +622,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
             // that would shadow this fresh source build — which lands in bin/ and
             // is relinked into ~/.claude/bin, not the cache — so the ref's
             // way-embed would build but never actually run. Remove the shadowing
-            // copy; it is regenerable cache (a later `ways update` re-downloads it).
+            // copy; it is regenerable cache (a later `ways manage update` re-downloads it).
             let cached = crate::paths::corpus_dir().join(exe("way-embed"));
             if cached.exists() {
                 match std::fs::remove_file(&cached) {
@@ -653,10 +653,10 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
         eprintln!("  ⚠ corpus not regenerated ({e}); the next session retries.");
     }
     eprintln!("==> reconcile projection");
-    run_step(Command::new(&ways_bin).arg("reconcile").current_dir(app), "ways reconcile")?;
+    run_step(Command::new(&ways_bin).arg("reconcile").current_dir(app), "ways manage repair")?;
 
     println!("\nUpgraded to {git_ref} (built from source; the checkout is on a detached HEAD).");
-    println!("Return to the release channel with:  ways update --ref main");
+    println!("Return to the release channel with:  ways manage update --ref main");
     println!("Restart Claude Code to pick up the new version.");
     judge_setup();
     Ok(())
@@ -826,7 +826,7 @@ fn refresh_ways(app: &Path, has_toolchain: bool) -> Result<()> {
             })?;
             bail!(
                 "downloaded ways binary is not a verified upgrade and no toolchain is present \
-                 — kept the previous binary (install a toolchain, then `ways update`)"
+                 — kept the previous binary (install a toolchain, then `ways manage update`)"
             );
         }
     }

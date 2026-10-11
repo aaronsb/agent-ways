@@ -1,6 +1,6 @@
 //! The relevance judge's setup (ADR-196, ADR-502): the warning the top-level
 //! help (bare `ways`, `--help`, `help`) ends with when the judge cannot gate,
-//! and the check and offer that `ways update` and the installer run. Both read
+//! and the check and offer that `ways manage update` and the installer run. Both read
 //! `keys::judge_ready`, so they never disagree.
 
 use std::io::{BufRead, IsTerminal, Write};

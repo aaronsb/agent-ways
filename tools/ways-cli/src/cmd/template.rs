@@ -23,7 +23,7 @@ pub fn run(
 ) -> Result<()> {
     // Resolve the ways root: the project's `.claude/ways/`, or the operator's
     // own root (ADR-143). Never the shipped ways under `~/.claude/hooks/ways`:
-    // that is a projection of the app, and `ways update` replaces it.
+    // that is a projection of the app, and `ways manage update` replaces it.
     let ways_root = if global {
         crate::paths::user_ways_root()
     } else {

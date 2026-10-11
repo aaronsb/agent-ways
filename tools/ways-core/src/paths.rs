@@ -221,7 +221,7 @@ pub fn settings_json() -> PathBuf {
 
 /// The core ways as a session reads them: `~/.claude/hooks/ways`, the
 /// projection of [`core_ways_root`] (a link into the app, or into a dev
-/// checkout after `ways reconcile`). Every runtime reader of the core ways
+/// checkout after `ways manage repair`). Every runtime reader of the core ways
 /// resolves them here; [`core_ways_root`] is the app copy behind it.
 pub fn projected_ways_root() -> PathBuf {
     projection_root().join("hooks").join("ways")

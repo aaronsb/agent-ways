@@ -224,8 +224,8 @@ bash "$ROOT/hooks/check-config-updates.sh"
 check "config-updates: native app source is stamped native" "native" "$(sed -n 's/^type=//p' "$CFG_CACHE")"
 check "config-updates: behind count comes from the app source" "1" "$(sed -n 's/^behind=//p' "$CFG_CACHE")"
 check "config-updates: the native cache names the app dir" "$APP" "$(sed -n 's/^repo=//p' "$CFG_CACHE")"
-check "config-updates: show core nudges with ways update" "yes" \
-    "$("$WAYS_TEST_BIN" show core --session cfg-sess 2>/dev/null | grep -q 'ways update' && echo yes || echo no)"
+check "config-updates: show core nudges with ways manage update" "yes" \
+    "$("$WAYS_TEST_BIN" show core --session cfg-sess 2>/dev/null | grep -q 'ways manage update' && echo yes || echo no)"
 
 # An origin that is not upstream stamps behind=0: no nudge.
 git -C "$APP" remote set-url origin https://example.com/fork/agent-ways.git
@@ -288,7 +288,7 @@ check "post-tool envelope names PostToolUseFailure" "PostToolUseFailure" "$(jq -
 check "post-tool fires the way whose postcheck exits 0" "yes" "$(grep -q 'Fires body' <<< "$out" && echo yes || echo no)"
 check "a project postcheck shadows the core one" "no" "$(grep -q 'shadowed body' <<< "$out" && echo yes || echo no)"
 check "a postcheck sees WAYS_SESSIONS_ROOT" "$SESSIONS" "$(cat "$WORK/postcheck-root" 2>/dev/null)"
-# `ways reconcile` projects the core root as a symlink into the app; the
+# `ways manage repair` projects the core root as a symlink into the app; the
 # scan walks through it (find(1) does not descend a symlinked start point).
 mv "$CORE" "$WORK/core-real" && ln -s "$WORK/core-real" "$CORE"
 out=$(post sess-post-2 PostToolUse)

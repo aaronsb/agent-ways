@@ -8,7 +8,7 @@
 #
 # The in-place clone, ADR-140 subdirectory, fork, renamed-clone and plugin
 # layouts are no longer checked (ADR-505, ADR-506). Nothing here migrates them:
-# `ways reconcile` does not (it stops at the real directories of an in-place
+# `ways manage repair` does not (it stops at the real directories of an in-place
 # clone and changes nothing). The pre-1.0 migrator ships only at the
 # `ways-v1.8.3` tag; see
 # https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md

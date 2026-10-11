@@ -398,7 +398,7 @@ mod tests {
         let s = Shown::of("check", "ways agent key check", Response::Verify, &Ok(()), printed(0, "provider: anthropic\nresult: accepted\n", "")).unwrap();
         assert_eq!(s.lines, ["provider: anthropic", "result: accepted", "", "exit 0"]);
         // An error leads with stderr.
-        let s = Shown::of("plan", "ways target plan x", Response::Report, &Err("exit 2: bad".into()), printed(2, "partial\n", "bad\n")).unwrap();
+        let s = Shown::of("plan", "ways manage target plan x", Response::Report, &Err("exit 2: bad".into()), printed(2, "partial\n", "bad\n")).unwrap();
         assert_eq!(s.lines, ["bad", "partial", "", "exit 2"]);
         // A report that ended well is its text alone; nothing printed says so.
         let s = Shown::of("plan", "p", Response::Report, &Ok(()), printed(0, "", "")).unwrap();

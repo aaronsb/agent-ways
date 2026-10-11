@@ -1150,7 +1150,7 @@ mod tests {
 
     #[test]
     fn update_that_changes_our_hooks_with_a_lost_base_converges() {
-        // The `north` reconcile failure: an `ways update` pulled CHANGED hook
+        // The `north` reconcile failure: an `ways manage update` pulled CHANGED hook
         // definitions while the persisted base was stale (`hooks: {}`, from a long
         // run of no-op reconciles that never rewrote it). Live still held the OLD
         // ways-hook; source shipped a NEW one with a different command. Byte-matching

@@ -6,7 +6,7 @@
 #
 # Why the retry helpers exist: a transient GitHub API / network blip on a `gh release`
 # call used to be swallowed (the call was `... 2>/dev/null`), so an empty
-# result read as "no release" and `ways update` silently degraded to a
+# result read as "no release" and `ways manage update` silently degraded to a
 # from-source build. These helpers retry transient failures and — critically —
 # distinguish "the API call failed" from "the API succeeded but found nothing",
 # so a real blip is retried and, if it persists, reported honestly instead of

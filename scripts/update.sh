@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Robust update front-half (run by `ways update`): pull + prune, surviving the machine-local
+# Robust update front-half (run by `ways manage update`): pull + prune, surviving the machine-local
 # edge cases that make a bare `git pull --ff-only` abort.
 #
 # Two recurring causes:

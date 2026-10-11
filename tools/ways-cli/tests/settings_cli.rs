@@ -506,11 +506,11 @@ fn fix_never_drops_the_targets_list() {
     f.write(&f.user(), src);
     let (_, err, code) = f.run(&["settings", "fix", "install"]);
     assert_eq!(code, 3, "{err}");
-    assert!(err.contains("`ways target add|enable|disable|remove <dir>` repairs it"), "{err}");
+    assert!(err.contains("`ways manage target add|enable|disable|remove <dir>` repairs it"), "{err}");
     assert_eq!(std::fs::read_to_string(f.user()).unwrap(), src);
     // The load diagnostic names that command too, not fix.
     let (_, err, _) = f.run(&["settings", "get", "install.targets"]);
-    assert!(err.contains("ways target") && !err.contains("settings fix install"), "{err}");
+    assert!(err.contains("ways manage target") && !err.contains("settings fix install"), "{err}");
 }
 
 #[test]
@@ -731,7 +731,7 @@ fn an_unparseable_user_file_projects_nowhere() {
         assert_eq!(f.run(&["settings", "get", "ways.enabled"]).0, "false\n", "{text:?}");
         assert_eq!(f.run(&["settings", "get", "install.targets"]).0, "[]\n", "{text:?}");
         assert_eq!(f.run(&["settings", "get", "install.secret_path_deny"]).0, "true\n", "{text:?}");
-        let (_, err, _) = f.run(&["target", "list"]);
+        let (_, err, _) = f.run(&["manage", "target", "list"]);
         assert!(!err.contains("implicit:"), "{text:?}: {err}");
         hooks_say_the_file_is_closed(&f, "<ROOT>/xdg/config/agent-ways/config.yaml", text);
         let (out, _, _) = f.run(&["status"]);

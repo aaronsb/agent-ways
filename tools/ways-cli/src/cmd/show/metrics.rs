@@ -180,8 +180,8 @@ pub(crate) fn render_update_status(content: &str) -> String {
     let repo_disp = if repo.is_empty() { "$XDG_DATA_HOME/agent-ways" } else { &repo };
     let mut out = String::from("\n");
     out.push_str(&format!("**⚠ agent-ways is {behind} commit(s) behind upstream.** Update the app source and reproject:\n"));
-    out.push_str("`ways update`\n");
-    out.push_str(&format!("`ways update` pulls `{repo_disp}`, refreshes the binaries, and reprojects `~/.claude`. A bare pull plus `make setup` skips existing binaries and leaves them stale.\n"));
+    out.push_str("`ways manage update`\n");
+    out.push_str(&format!("`ways manage update` pulls `{repo_disp}`, refreshes the binaries, and reprojects `~/.claude`. A bare pull plus `make setup` skips existing binaries and leaves them stale.\n"));
     out
 }
 
@@ -267,7 +267,7 @@ mod tests {
     fn native_behind_advises_ways_update() {
         let out = render_update_status("type=native\nbehind=2\nrepo=/home/u/.local/share/agent-ways\n");
         assert!(out.contains("2 commit(s) behind"));
-        assert!(out.contains("`ways update`"));
+        assert!(out.contains("`ways manage update`"));
         assert!(!out.contains("make update"));
         assert!(!out.contains("sync-to-home"));
     }

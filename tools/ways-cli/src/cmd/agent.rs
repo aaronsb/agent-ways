@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 /// Runs `ways-agent` with `args` and exits with its status.
 pub fn run(args: &[String]) -> Result<()> {
-    let bin = resolve().context("ways-agent is not installed; run `ways update` to install it")?;
+    let bin = resolve().context("ways-agent is not installed; run `ways manage update` to install it")?;
     // On Unix, become ways-agent: no process in between holds its pipes or
     // outlives a signal sent to it.
     #[cfg(unix)]

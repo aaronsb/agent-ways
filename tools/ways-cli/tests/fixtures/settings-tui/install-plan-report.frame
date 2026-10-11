@@ -7,10 +7,10 @@ agent-tui frame 100x30
 |│     secret_path_deny          true                  ││agent-ways is active in.                   │|
 |│                                                     ││                                           │|
 |│                                                     ││Changed by actions, since each change      │|
-|│                                                     ││reconciles: `ways target                   │|
+|│                                                     ││reconciles: `ways manage target            │|
 |│                                                     ││add|enable|disable|remove <dir>` (ADR-184).│|
 |│                 ┌plan: report──────────────────────────────────────────────────┐/.claude,        │|
-|│                 │ $ ways target plan ~/work-claude                             │                 │|
+|│                 │ $ ways manage target plan ~/work-claude                      │                 │|
 |│                 │                                                              │                 │|
 |│                 │ plan for ~/work-claude                                       │                 │|
 |│                 │   Root       Action Detail                                   │                 │|
@@ -19,9 +19,9 @@ agent-tui frame 100x30
 |│                 │ settings.json: the source ships none; nothing merged         │nfig directories,│|
 |│                 └──────────────────────────────────────────────────────────────┘                 │|
 |│                                                     ││  A add (asks first)                       │|
-|│                                                     ││    ways target add '<arg>'                │|
+|│                                                     ││    ways manage target add '<arg>'         │|
 |│                                                     ││  p plan                                   │|
-|│                                                     ││    ways target plan '<arg>'               │|
+|│                                                     ││    ways manage target plan '<arg>'        │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
@@ -85,7 +85,7 @@ styles
  10  99-99  - - DIM
  11   0-0   - - DIM
  11  18-18  LightBlue - -
- 11  20-51  - - DIM|ITALIC
+ 11  20-58  - - DIM|ITALIC
  11  81-81  LightBlue - -
  11  99-99  - - DIM
  12   0-0   - - DIM
@@ -120,14 +120,14 @@ styles
  19  56-59  Cyan - -
  19  99-99  - - DIM
  20   0-0   - - DIM
- 20  54-82  - - DIM
+ 20  54-89  - - DIM
  20  99-99  - - DIM
  21   0-0   - - DIM
  21  54-55  - - DIM
  21  56-59  Cyan - -
  21  99-99  - - DIM
  22   0-0   - - DIM
- 22  54-83  - - DIM
+ 22  54-90  - - DIM
  22  99-99  - - DIM
  23   0-0   - - DIM
  23  54-55  - - DIM
