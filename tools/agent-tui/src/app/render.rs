@@ -701,7 +701,9 @@ impl App {
                 // A row's actions take the place of the opening hint when
                 // both do not fit; a message said since comes first. It is
                 // cut in the middle to the room left of the call to action,
-                // and goes when too little is left to read.
+                // keeping its end, and goes when too little is left to read.
+                // The opening hint is cut at its tail instead: its keys
+                // lead, and `Tab 1-9` must not be the part cut away.
                 let here = self.footer_actions();
                 let room = area.width.saturating_sub(cta.as_ref().map_or(0, |c| width(c)));
                 let fits = |here: &[Span]| width(&spans) + msg.width() as u16 + width(&[theme::sep()]) + width(here) <= room;
@@ -709,7 +711,8 @@ impl App {
                     // Two columns lead the message; it needs eight past them.
                     let left = room.saturating_sub(width(&spans)) as usize;
                     if left >= 2 + MSG_MIN {
-                        spans.push(Span::styled(format!("  {}", elide(&self.msg, left - 2)), msg.style));
+                        let cut = if self.msg == crate::app::HINT { crate::wrap::truncate(&self.msg, left - 2) } else { elide(&self.msg, left - 2) };
+                        spans.push(Span::styled(format!("  {cut}"), msg.style));
                     }
                 }
                 if let Some(here) = here {
