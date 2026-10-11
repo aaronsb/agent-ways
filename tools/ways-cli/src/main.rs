@@ -13,7 +13,7 @@ pub mod session;
 /// Full version string for `--version`: the semver plus the baked `git describe`
 /// build provenance (ADR-150), e.g. `1.0.0 (ways-v1.0.0-78-gc595437)`. This makes
 /// a dev build visibly and machine-readably distinct from a release build — the
-/// signal `ways update`'s downgrade guard and `download-ways.sh` rely on.
+/// signal `ways manage update`'s downgrade guard and `download-ways.sh` rely on.
 const LONG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("WAYS_BUILD"), ")");
 
 #[derive(Parser)]
@@ -60,14 +60,6 @@ enum Commands {
         depth: Option<String>,
         #[command(subcommand)]
         action: Option<SettingsCommand>,
-    },
-    /// Claude Code config directories agent-ways is active in (ADR-184)
-    ///
-    /// Run bare on a terminal, it opens the settings screens on their install
-    /// tab; in a pipe, it prints this help.
-    Target {
-        #[command(subcommand)]
-        action: Option<TargetCommand>,
     },
     /// The ways agent: keys, models and the daemon (ADR-502)
     ///
@@ -155,62 +147,32 @@ enum Commands {
         #[arg(long)]
         if_stale: bool,
     },
-    /// Update agent-ways: pull, refresh binaries, rebuild, reproject
+    /// Update, repair or remove agent-ways (ADR-509)
     ///
-    /// Update the agent-ways install — pull, refresh binaries (pre-built first),
-    /// regenerate corpus, reproject
-    Update {
-        /// Show what would run without executing it
-        #[arg(long)]
-        dry_run: bool,
-        /// Pin the install to a specific branch, tag, or commit and build the
-        /// whole suite from source, instead of pulling the latest release.
-        /// Leaves the release channel until `ways update --ref main`.
-        #[arg(long = "ref", value_name = "REF")]
-        git_ref: Option<String>,
+    /// The install's lifecycle: update, repair, uninstall and the
+    /// config directories agent-ways is active in. Run bare on a terminal, it
+    /// opens the settings screens on their install tab; in a pipe, it prints
+    /// this help.
+    Manage {
+        #[command(subcommand)]
+        action: Option<ManageCommand>,
     },
-    /// Repair the projection into each target (ADR-144)
-    ///
-    /// Converges every enabled target toward the projection manifest and
-    /// withdraws from every disabled one (ADR-144, ADR-184). Symlink mode
-    /// (default) links each projection root into the source checkout, so a
-    /// `git pull` in $XDG_DATA is live with no further step. Idempotent; silent
-    /// when already up to date.
-    Reconcile {
-        /// Source checkout (default: $XDG_DATA/agent-ways)
-        #[arg(long)]
-        source: Option<String>,
-        /// Projection target (default: ~/.claude)
-        #[arg(long)]
-        dest: Option<String>,
-        /// Materialization: symlink (default) or copy
-        #[arg(long)]
-        mode: Option<String>,
-        /// Show what would change without touching the filesystem
-        #[arg(long)]
-        dry_run: bool,
-        /// Suppress the summary line (still prints any changes)
-        #[arg(long)]
-        quiet: bool,
-        /// When a projection root is already a real directory or file, rename
-        /// it to a timestamped sibling (<name>.ways-backup-<seconds>) instead
-        /// of stopping. Never deletes.
-        #[arg(long)]
-        force: bool,
+    // The one-release aliases of ADR-509 §5: each prints the new form on
+    // stderr, then runs it with the same arguments and exit code. Issue #911
+    // removes them in the release after the one that ships `ways manage`.
+    #[command(hide = true)]
+    Update(UpdateArgs),
+    #[command(hide = true)]
+    Uninstall(UninstallArgs),
+    #[command(hide = true)]
+    Target {
+        #[command(subcommand)]
+        action: Option<TargetCommand>,
     },
-    /// Remove agent-ways; without --yes, print the plan only
-    ///
-    /// Remove agent-ways: withdraw from every target, stop the agent, unlink the
-    /// commands and delete the app. Your config and state stay unless --purge.
-    /// Prints the plan and changes nothing without --yes.
-    Uninstall {
-        /// Do it. Without this flag the plan is printed and nothing changes.
-        #[arg(long)]
-        yes: bool,
-        /// Also delete your config (your ways, API keys, settings) and state (events).
-        #[arg(long)]
-        purge: bool,
-    },
+    /// The fixed name the previous release's updater spawns on the new binary
+    /// (ADR-509 §4): the same code as `ways manage repair`, with no notice.
+    #[command(hide = true)]
+    Reconcile(RepairArgs),
     /// Serve one Claude Code hook: read its JSON payload on stdin and print
     /// what the hook returns (ADR-504 §11). The scripts under hooks/ways call
     /// this and nothing else.
@@ -271,7 +233,7 @@ enum Commands {
     #[command(hide = true)]
     EventsLogPath,
     /// Check the relevance judge's keys and, on a terminal, offer to add one.
-    /// `ways update` runs this; the installer calls it.
+    /// `ways manage update` runs this; the installer calls it.
     #[command(hide = true)]
     JudgeSetup,
 }
@@ -1046,6 +1008,83 @@ enum ThemeCommand {
 }
 
 #[derive(Subcommand)]
+enum ManageCommand {
+    /// Pull the app source, refresh the binaries, rebuild, reproject
+    ///
+    /// Update the agent-ways install: pull, refresh binaries (pre-built
+    /// first), regenerate the corpus, reproject (ADR-150).
+    Update(UpdateArgs),
+    /// Converge every target toward the projection (ADR-144)
+    ///
+    /// Converges every enabled target toward the projection manifest and
+    /// withdraws from every disabled one (ADR-144, ADR-184). Symlink mode
+    /// (default) links each projection root into the source checkout, so a
+    /// pull in $XDG_DATA is live with no further step. Idempotent; silent
+    /// when already up to date.
+    Repair(RepairArgs),
+    /// Remove agent-ways; without --yes, print the plan only
+    ///
+    /// Remove agent-ways: withdraw from every target, stop the agent, unlink the
+    /// commands and delete the app. Your config and state stay unless --purge.
+    /// Prints the plan and changes nothing without --yes.
+    Uninstall(UninstallArgs),
+    /// Claude Code config directories agent-ways is active in (ADR-184)
+    ///
+    /// Run bare on a terminal, it opens the settings screens on their install
+    /// tab; in a pipe, it prints this help.
+    Target {
+        #[command(subcommand)]
+        action: Option<TargetCommand>,
+    },
+}
+
+#[derive(clap::Args)]
+struct UpdateArgs {
+    /// Show what would run without executing it
+    #[arg(long)]
+    dry_run: bool,
+    /// Pin the install to a specific branch, tag, or commit and build the
+    /// whole suite from source, instead of pulling the latest release.
+    /// Leaves the release channel until `ways manage update --ref main`.
+    #[arg(long = "ref", value_name = "REF")]
+    git_ref: Option<String>,
+}
+
+#[derive(clap::Args)]
+struct RepairArgs {
+    /// Source checkout (default: $XDG_DATA/agent-ways)
+    #[arg(long)]
+    source: Option<String>,
+    /// Projection target (default: ~/.claude)
+    #[arg(long)]
+    dest: Option<String>,
+    /// Materialization: symlink (default) or copy
+    #[arg(long)]
+    mode: Option<String>,
+    /// Show what would change without touching the filesystem
+    #[arg(long)]
+    dry_run: bool,
+    /// Suppress the summary line (still prints any changes)
+    #[arg(long)]
+    quiet: bool,
+    /// When a projection root is already a real directory or file, rename
+    /// it to a timestamped sibling (<name>.ways-backup-<seconds>) instead
+    /// of stopping. Never deletes.
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(clap::Args)]
+struct UninstallArgs {
+    /// Do it. Without this flag the plan is printed and nothing changes.
+    #[arg(long)]
+    yes: bool,
+    /// Also delete your config (your ways, API keys, settings) and state (events).
+    #[arg(long)]
+    purge: bool,
+}
+
+#[derive(Subcommand)]
 enum TargetCommand {
     /// List the targets and their converged state
     List {
@@ -1128,12 +1167,13 @@ fn on_terminal() -> bool {
 /// stderr and exit 2, as a group that needs a verb (ADR-507 §7, notes of
 /// 2026-10-02). The long help, unlike clap's short one for a missing verb,
 /// carries the line saying a bare run on a terminal opens the screen.
-fn bare_group(group: &str, screen: impl FnOnce() -> Result<()>) -> Result<()> {
+fn bare_group(group: &[&str], screen: impl FnOnce() -> Result<()>) -> Result<()> {
     use clap::CommandFactory;
     if on_terminal() {
         return screen();
     }
-    let help = Cli::command().try_get_matches_from(["ways", group, "--help"]).expect_err("--help ends parsing");
+    let argv = std::iter::once("ways").chain(group.iter().copied()).chain(std::iter::once("--help"));
+    let help = Cli::command().try_get_matches_from(argv).expect_err("--help ends parsing");
     eprint!("{}", help.render());
     std::process::exit(2);
 }
@@ -1142,6 +1182,40 @@ fn bare_group(group: &str, screen: impl FnOnce() -> Result<()>) -> Result<()> {
 fn settings_screen(tab: &str) -> Result<()> {
     let open = cmd::settings::tui::Open { tab: Some(tab.into()), ..Default::default() };
     cmd::settings::exit_with(cmd::settings::tui::open(&open))
+}
+
+/// The one-release alias notice (ADR-509 §5): the old top-level name, then
+/// the form that replaces it. Removed with the aliases by issue #911.
+fn moved(old: &str) {
+    eprintln!("note: `ways {old}` is now `ways manage {old}`");
+}
+
+fn update(args: UpdateArgs) -> Result<()> {
+    cmd::update::run(args.dry_run, args.git_ref)
+}
+
+/// `ways manage repair` and the hidden fixed `ways reconcile`: one function,
+/// so the two cannot drift (ADR-509 §4).
+fn repair(a: RepairArgs) -> Result<()> {
+    cmd::reconcile::run(a.source, a.dest, a.mode, a.dry_run, a.quiet, a.force)
+}
+
+fn uninstall(args: UninstallArgs) -> Result<()> {
+    cmd::uninstall::run(args.yes, args.purge)
+}
+
+fn target(action: Option<TargetCommand>) -> Result<()> {
+    let Some(action) = action else {
+        return bare_group(&["manage", "target"], || settings_screen("install"));
+    };
+    match action {
+        TargetCommand::List { json } => cmd::target::list(json),
+        TargetCommand::Plan { dir, json } => cmd::target::plan(&dir, json),
+        TargetCommand::Add { dir, force, dry_run, json } => cmd::target::add(&dir, force, dry_run, json),
+        TargetCommand::Enable { dir } => cmd::target::enable(&dir),
+        TargetCommand::Disable { dir } => cmd::target::disable(&dir),
+        TargetCommand::Remove { dir } => cmd::target::remove(&dir),
+    }
 }
 
 fn run() -> Result<()> {
@@ -1177,9 +1251,7 @@ fn run() -> Result<()> {
         Commands::Corpus { ways_dir, output, quiet, verbose, if_stale } => cmd::corpus::run(ways_dir, output, quiet, verbose, if_stale),
         Commands::Init { project } => cmd::init::run(project.as_deref()),
         Commands::Manifest { source, json } => cmd::manifest::run(json, source),
-        Commands::Reconcile { source, dest, mode, dry_run, quiet, force } => {
-            cmd::reconcile::run(source, dest, mode, dry_run, quiet, force)
-        }
+        Commands::Reconcile(args) => repair(args),
         Commands::Status { json } => cmd::status::run(json),
         Commands::Lookup { project, what } => {
             // Every reader below resolves the project as a hook would, from the
@@ -1306,17 +1378,27 @@ fn run() -> Result<()> {
                 },
             })
         }
-        Commands::Target { action: None } => bare_group("target", || settings_screen("install")),
-        Commands::Target { action: Some(action) } => match action {
-            TargetCommand::List { json } => cmd::target::list(json),
-            TargetCommand::Plan { dir, json } => cmd::target::plan(&dir, json),
-            TargetCommand::Add { dir, force, dry_run, json } => cmd::target::add(&dir, force, dry_run, json),
-            TargetCommand::Enable { dir } => cmd::target::enable(&dir),
-            TargetCommand::Disable { dir } => cmd::target::disable(&dir),
-            TargetCommand::Remove { dir } => cmd::target::remove(&dir),
+        Commands::Manage { action: None } => bare_group(&["manage"], || settings_screen("install")),
+        Commands::Manage { action: Some(action) } => match action {
+            ManageCommand::Update(args) => update(args),
+            ManageCommand::Repair(args) => repair(args),
+            ManageCommand::Uninstall(args) => uninstall(args),
+            ManageCommand::Target { action } => target(action),
         },
+        Commands::Update(args) => {
+            moved("update");
+            update(args)
+        }
+        Commands::Uninstall(args) => {
+            moved("uninstall");
+            uninstall(args)
+        }
+        Commands::Target { action } => {
+            moved("target");
+            target(action)
+        }
         Commands::Session { action: None } => {
-            bare_group("session", || cmd::introspect::replay(None, None, false, None, false, false, &cmd::introspect::Open::default()))
+            bare_group(&["session"], || cmd::introspect::replay(None, None, false, None, false, false, &cmd::introspect::Open::default()))
         }
         Commands::Session { action: Some(action) } => match action {
             SessionCommand::Ways { session, sort, json, matched } => cmd::list::run(session.as_deref(), &sort, json, matched),
@@ -1395,8 +1477,6 @@ fn run() -> Result<()> {
         // case is ways' to handle.
         Commands::Agent { args } if args.is_empty() && on_terminal() => settings_screen("gate"),
         Commands::Agent { args } => cmd::agent::run(&args),
-        Commands::Update { dry_run, git_ref } => cmd::update::run(dry_run, git_ref),
         Commands::JudgeSetup => cmd::judge::setup(),
-        Commands::Uninstall { yes, purge } => cmd::uninstall::run(yes, purge),
     }
 }
