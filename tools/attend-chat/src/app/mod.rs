@@ -15,6 +15,7 @@
 
 mod keys;
 mod menu;
+mod sidebar;
 mod view;
 
 use std::sync::mpsc::Receiver;
@@ -32,8 +33,8 @@ use agent_tui::theme::{Palette, Shape};
 use agent_tui::{App, Binding, Keyed, Open, Pane, PaneTab, Tone};
 use attend_instances::SnapshotCache;
 
-use crate::chip::{known_identities, KnownIdentity};
-use crate::groups::{channels, KnownGroup};
+use crate::chip::{seen_identities, Seen};
+use crate::groups::{all_channels, tab_channels, ChannelRow, KnownGroup};
 use crate::sessions::discover as discover_sessions;
 use crate::signal::Signal;
 use crate::tabs::{self, Tab};
@@ -79,7 +80,11 @@ enum Clock {
 /// disk at most once per [`REFRESH`] or input, never per frame.
 struct World {
     groups: Vec<KnownGroup>,
-    known: Vec<KnownIdentity>,
+    /// Every identity seen, live or not, for the left column (ADR-405).
+    seen: Vec<Seen>,
+    /// Every channel, for the left column, and each one's live members.
+    rows: Vec<ChannelRow>,
+    live_members: Vec<usize>,
     /// The instance registry, for each chip's `-<instance>` suffix
     /// (ADR-129). Built afresh with the world, never kept across it.
     instances: SnapshotCache,
@@ -103,6 +108,11 @@ struct Hits {
     compose: (Rect, usize),
     text_width: u16,
     chips: Vec<(Rect, Chip)>,
+    /// The left column's rows, the column's whole area, and the rows of
+    /// each of its lists (agents, channels) for the wheel.
+    side: Vec<(Rect, sidebar::SideHit)>,
+    side_area: Rect,
+    side_lists: [Rect; 2],
 }
 
 /// The chat's state: the messages, the compose box, the shown channel.
@@ -163,6 +173,22 @@ pub struct ChatPane {
     /// The chat's settings (`attend.chat.*`), read at start and again
     /// after a command, so `/config` applies at once.
     config: attend_config::ChatConfig,
+    /// Whether the left column is shown (`attend.chat.sidebar_key`).
+    sidebar: bool,
+    /// The lozenge shape the left column's rows are drawn in, the shell's.
+    shape: Shape,
+    /// The left column's row under the keyboard's cursor, while it has the
+    /// focus (F2, then Down), and the row it is: a refresh that moves the
+    /// row keeps the cursor on it ([`ChatPane::refocus`]).
+    side_focus: Option<usize>,
+    side_focus_hit: Option<sidebar::SideHit>,
+    /// The first row shown of each of the column's lists, agents then
+    /// channels: the wheel moves them, and the cursor keeps itself in view
+    /// while `side_follow`, until the wheel moves the list away from it.
+    side_scroll: [usize; 2],
+    side_follow: bool,
+    /// The members a Remove menu listed, for the one picked.
+    removable: Vec<menu::Member>,
 }
 
 impl ChatPane {
@@ -197,6 +223,13 @@ impl ChatPane {
             prompt: None,
             enhanced: false,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
+            sidebar: true,
+            shape: Shape::PLAIN,
+            side_focus: None,
+            side_focus_hit: None,
+            side_scroll: [0, 0],
+            side_follow: true,
+            removable: Vec::new(),
         }
     }
 
@@ -253,8 +286,17 @@ impl ChatPane {
         if self.world.is_none() {
             let depth = self.palette.depth();
             let instances = SnapshotCache::new();
-            let known = known_identities(&self.signals, &discover_sessions(), depth, &instances);
-            self.world = Some(World { groups: channels(depth), known, instances });
+            let alive = |id: &str| attend_presence::alive(id, &Default::default());
+            let human = |u: &str| alive(&agent_identity::sanitize_id_component(u));
+            // One pass each: the sessions read and the signals walked once,
+            // the channels scanned once; the legend and the tab bar take
+            // their lists from the column's.
+            let rows = all_channels(depth);
+            let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
+            let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
+            let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
+            self.world = Some(World { groups: tab_channels(&rows), seen, rows, live_members, instances });
+            self.refocus();
         }
         self.world.as_ref().expect("just built")
     }
@@ -332,7 +374,17 @@ impl ChatPane {
 
     /// Read the chat's settings again: a `/config` set applies at once.
     fn reload_settings(&mut self) {
-        self.config = crate::settings::load(&std::env::current_dir().unwrap_or_default());
+        self.apply_settings(crate::settings::load(&std::env::current_dir().unwrap_or_default()));
+    }
+
+    /// Take `config` as the chat's settings. A `sidebar_key` newly set to
+    /// `none` shows the column: no key would bring a hidden one back.
+    fn apply_settings(&mut self, config: attend_config::ChatConfig) {
+        if config.sidebar_key == "none" && self.config.sidebar_key != "none" {
+            self.sidebar = true;
+            self.invalidate();
+        }
+        self.config = config;
     }
 
     /// Enter in a dry run: say what would happen, change nothing.
@@ -345,7 +397,9 @@ impl ChatPane {
             Some((cmd, _)) => format!("dry run: /{cmd} not run"),
             None => {
                 let scope = tabs::send_scope(&self.normal_tab());
-                let to = destination_label(&text, &scope).unwrap_or(format!("#{scope}"));
+                let quiet = keys::quiet_names(&self.world().seen);
+                let swept = keys::swept_names(&self.world().rows);
+                let to = destination_label(&text, &scope, &quiet, &swept).unwrap_or(format!("#{scope}"));
                 format!("dry run: not sent to {to}")
             }
         };
@@ -368,7 +422,9 @@ impl ChatPane {
             self.set_tab(tabs::cycle_next(&cur, &names));
             return;
         }
-        let r = handle_tab(self.input.text(), self.input.cursor(), self.tab_cycle.take(), &self.signals);
+        let world = self.world();
+        let (agents, channels) = sidebar::completion_pool(&world.seen, &world.rows);
+        let r = handle_tab(self.input.text(), self.input.cursor(), self.tab_cycle.take(), &agents, &channels);
         self.input.set(r.new_buf, r.new_cursor);
         self.tab_cycle = r.new_cycle;
     }
@@ -541,6 +597,13 @@ impl Pane for ChatPane {
             }
             return Keyed::Done;
         }
+        if self.is_sidebar_key(&k) {
+            self.toggle_sidebar();
+            return Keyed::Done;
+        }
+        if let Some(keyed) = self.side_key(k) {
+            return keyed;
+        }
         match k.code {
             // Without the keyboard enhancement Ctrl+3 is this same Esc:
             // ask, so a tab key never closes the chat.
@@ -561,11 +624,42 @@ impl Pane for ChatPane {
         self.scroll_by(up, WHEEL_ROWS);
     }
 
+    /// A paste goes into the compose box whole, at the cursor: its lines
+    /// stay one draft, and nothing is sent until Enter. A box lent to a
+    /// one-line name or description takes the lines joined by spaces. A
+    /// waiting question is dropped, as a typed character drops it, so a
+    /// later `y` in the paste never answers it. Control characters other
+    /// than newline and tab are left out: an escape sequence in the
+    /// clipboard is not drawn into the box or sent.
+    fn paste(&mut self, text: &str) {
+        self.drop_question();
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let text = if self.prompt.is_some() { text.split('\n').collect::<Vec<_>>().join(" ") } else { text };
+        self.side_focus = None;
+        for c in text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')) {
+            self.input.insert(c);
+        }
+        self.tab_cycle = None;
+        self.dirty = true;
+    }
+
+    /// The wheel over one of the column's lists scrolls that list; anywhere
+    /// else, the feed.
+    fn wheel_at(&mut self, up: bool, at: Position) {
+        match self.hits.side_lists.iter().position(|r| r.contains(at)) {
+            Some(list) => self.side_wheel(list, up),
+            None => self.wheel(up),
+        }
+    }
+
     /// A click on a message selects it and brings it whole into view; on
     /// the compose box's text it puts the cursor there; on a chip of the
     /// helper row it completes what is being typed to it.
     fn click(&mut self, at: Position) {
         self.dirty = true;
+        if !self.hits.side_area.contains(at) {
+            self.side_focus = None;
+        }
         if self.hits.feed.contains(at) {
             if let Some(i) = self.feed.entry_at(at.y - self.hits.feed.y) {
                 self.feed.reveal(i);
@@ -582,19 +676,36 @@ impl Pane for ChatPane {
         }
         if let Some((_, chip)) = self.hits.chips.iter().find(|(r, _)| r.contains(at)).cloned() {
             self.complete(chip);
+            return;
+        }
+        if let Some((_, hit)) = self.hits.side.iter().find(|(r, _)| r.contains(at)).cloned() {
+            self.side_click(hit);
         }
     }
 
     fn bindings(&self) -> Vec<Binding> {
-        vec![
-            Binding::new("Enter", "send"),
-            Binding::new("Tab", "complete"),
+        let mut out = vec![Binding::new("Enter", "send"), Binding::new("Tab", "complete")];
+        // The column's way in, on the footer while the column is drawn and
+        // does not have the keyboard: at 80 columns it takes the place of
+        // the scroll keys, which the key help still lists.
+        if self.side_drawn() && self.side_focus.is_none() {
+            out.push(Binding::new("F2 ↓", "column"));
+        }
+        out.extend([
             Binding::new("PgUp PgDn", "scroll"),
             Binding::help("S-Enter M-Enter", "new line"),
             Binding::help("← → Home End", "move the cursor"),
             Binding::help("Bksp Del", "edit"),
             Binding::help("click a message", "selects it; in the compose box it places the cursor; a chip completes it"),
-        ]
+            Binding::help("click a side row", "an agent: its menu (address, who, remove); a channel: shows it, opens its menu"),
+        ]);
+        if let Some(key) = self.sidebar_key_label() {
+            out.push(Binding::help(key, "show or hide the agents and channels column"));
+        }
+        if self.side_drawn() {
+            out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter opens the row's menu, ↑ at the top or Esc back"));
+        }
+        out
     }
 
     fn mode(&self) -> String {
@@ -607,6 +718,9 @@ impl Pane for ChatPane {
     fn status(&mut self) -> Option<(String, Tone)> {
         if let Some(s) = self.menu_status() {
             return Some((s, Tone::Said));
+        }
+        if self.side_focus.is_some() {
+            return Some((sidebar::FOCUS_HINT.into(), Tone::Said));
         }
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
         let (line, how) = status_slot(fresh, self.status_is_error, crate::slash::contextual_help(self.input.text()), &self.status);
@@ -642,6 +756,19 @@ impl Pane for ChatPane {
         self.open_tab_menu(i);
     }
 
+    /// One click on a channel shows it and opens its menu (ADR-405).
+    fn menu_on_click(&self) -> bool {
+        true
+    }
+
+    fn below_strip(&self) -> Option<&'static str> {
+        self.side_drawn().then_some("the column")
+    }
+
+    fn focus_below(&mut self) -> bool {
+        self.focus_side()
+    }
+
     fn new_item_label(&self) -> Option<&'static str> {
         Some("new channel")
     }
@@ -650,8 +777,13 @@ impl Pane for ChatPane {
         self.new_channel();
     }
 
+    /// The shell took a key or a click: a waiting question is dropped,
+    /// and the column gives up the keyboard (F2, a tab, the bottom bar).
     fn interrupted(&mut self) {
         self.drop_question();
+        if self.side_focus.take().is_some() {
+            self.dirty = true;
+        }
     }
 
     fn quit_help(&self) -> Option<String> {
@@ -730,7 +862,9 @@ pub struct Chat {
 impl Chat {
     /// A chat fed by `rx`, drawn with `palette` and lozenges in `shape`.
     pub fn new(rx: Option<Receiver<Signal>>, palette: Palette, shape: Shape) -> Chat {
-        Chat { app: App::with_pane("chat", ChatPane::new(rx, palette)).shape(shape) }
+        let mut pane = ChatPane::new(rx, palette);
+        pane.shape = shape;
+        Chat { app: App::with_pane("chat", pane).shape(shape) }
     }
 
     fn pane(&self) -> &ChatPane {
@@ -745,6 +879,19 @@ impl Chat {
     pub fn pinned(mut self, now: SystemTime, offset: i64) -> Chat {
         self.pane_mut().clock = Clock::Pinned { now, offset };
         self
+    }
+
+    /// Show the left column of agents and channels, or not (ADR-405);
+    /// shown by default.
+    pub fn sidebar(mut self, on: bool) -> Chat {
+        self.pane_mut().sidebar = on;
+        self
+    }
+
+    /// Whether the left column is shown, as `attend.chat.sidebar_key`
+    /// last left it.
+    pub fn sidebar_shown(&self) -> bool {
+        self.pane().sidebar
     }
 
     /// Keep the human's presence heartbeat, or not.
@@ -844,6 +991,10 @@ impl Screen for Chat {
         self.app.mouse(m);
     }
 
+    fn paste(&mut self, text: &str) {
+        self.app.paste(text);
+    }
+
     fn tick_every(&self) -> Option<Duration> {
         self.app.pane_tick_every()
     }
@@ -862,8 +1013,11 @@ impl World {
         for g in &self.groups {
             out += &format!("#{}|{:?}|{:?}\n", g.group.name, g.membership.members, g.membership.description);
         }
-        for k in &self.known {
-            out += &format!("@{}|{}|{}\n", k.nickname, k.cwd, k.is_claude);
+        for s in &self.seen {
+            out += &format!("@{}|{}|{}|{}\n", s.identity.nickname, s.identity.cwd, s.identity.is_claude, s.live);
+        }
+        for (r, live) in self.rows.iter().zip(&self.live_members) {
+            out += &format!("={}|{:?}|{}|{live}\n", r.known.group.name, r.last, r.on_disk);
         }
         out
     }
@@ -905,6 +1059,42 @@ mod status_slot_tests {
         assert_eq!(how, None);
         let (text, _) = status_slot(false, true, None, "err");
         assert_eq!(text, "err");
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn a_sidebar_key_set_to_none_shows_a_hidden_column() {
+        let mut c = ChatPane::new(None, Palette::default());
+        c.config.sidebar_key = "f3".into();
+        c.sidebar = false;
+        let mut none = c.config.clone();
+        none.sidebar_key = "none".into();
+        c.apply_settings(none.clone());
+        assert!(c.sidebar, "no key could show it again");
+        c.sidebar = false;
+        c.apply_settings(none);
+        assert!(!c.sidebar, "a reload that leaves the key at none keeps what the menu chose");
+    }
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::*;
+
+    #[test]
+    fn a_paste_drops_a_waiting_question_and_leaves_out_control_characters() {
+        let mut c = ChatPane::new(None, Palette::default());
+        c.pending = Some(menu::Pending::Leave("deploy".into()));
+        // An escape sequence as a clipboard can carry one: ESC, then `[31m`.
+        let esc = char::from(0x1b);
+        c.paste(&format!("yes{esc}[31m red\x07\tok\r\nnext"));
+        assert_eq!(c.pending, None, "the paste is typing, not an answer");
+        assert_eq!(c.status, "kept");
+        assert_eq!(c.input.text(), "yes[31m red\tok\nnext", "escape and bell dropped; tab and newline kept");
     }
 }
 

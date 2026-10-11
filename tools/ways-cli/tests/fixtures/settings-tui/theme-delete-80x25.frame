@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| 1 ways    2 matching    3 gate    4 install    5 attend    6 sensors    7 theme|
+| 1 ways   2 matching   3 gate   4 install   5 attend   6 sensors   7 theme      |
 |┌ themes ──────────────────────────────────┐┌theme─────────────────────────────┐|
 |│   terminal         dark                  ││mine                              │|
 |│   agent-ways       dark                  ││mine · dark · background terminal │|
@@ -26,12 +26,12 @@ agent-tui frame 80x25
 | confirm  delete theme mine?   y delete   n keep                                |
 styles
   0   0-7   White Blue -
-  0  10-21  White Blue -
-  0  24-31  White Blue -
-  0  34-44  White Blue -
-  0  47-56  White Blue -
-  0  59-69  White Blue -
-  0  72-79  Black Cyan BOLD
+  0   9-20  White Blue -
+  0  22-29  White Blue -
+  0  31-41  White Blue -
+  0  43-52  White Blue -
+  0  54-64  White Blue -
+  0  66-74  Black Cyan BOLD
   1   0-0   - - DIM
   1   1-8   LightBlue - BOLD|DIM
   1   9-44  - - DIM

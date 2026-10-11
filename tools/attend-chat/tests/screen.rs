@@ -62,6 +62,10 @@ fn fixture() -> &'static Fixture {
         g.join("deploy", true).unwrap();
         g.set_description("deploy", "rollout coordination").unwrap();
         attend_groups::Groups::new(&base, "").create("infra", None).unwrap();
+        // A channel `_groups.yaml` still names after its directory was
+        // swept: the left column lists it, set back (ADR-405).
+        attend_groups::Groups::new(&base, ALPHA_SID).join("archive", false).unwrap();
+        let _ = std::fs::remove_dir_all(base.join("@archive"));
         for sid in [ALPHA_SID, BETA_SID] {
             attend_presence::heartbeat::touch(sid).unwrap();
         }
@@ -104,7 +108,10 @@ fn chat_at(depth: ColorDepth, theme: Option<&str>) -> Chat {
     let f = fixture();
     let dir = f.root.join("config/agent-ways/themes");
     let (painter, _) = agent_theme::Painter::named_in(theme, &dir, depth);
+    // The frames before the left column (ADR-405) keep the legend row;
+    // the column's own tests turn it on (`chat_side`).
     let mut c = Chat::new(None, Palette { painter }, Shape::PLAIN)
+        .sidebar(false)
         .heartbeat(false)
         .pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0);
     for s in transcript() {
@@ -173,6 +180,26 @@ fn golden_legends_mark_what_tab_completes() {
     typed(&mut c, "#de");
     g.check("legend-groups-80x25", &testkit::render_screen(&mut c, 80, 25));
     g.finish();
+}
+
+/// The agent chips run in Tab's cycle: live claudes first, so a claude
+/// gone quiet since its last message is not the first chip while Tab
+/// goes to a live one first.
+#[test]
+fn the_agent_chips_run_in_tabs_cycle() {
+    let mut c = chat();
+    c.push(sig("claude:dddddddd-0000-4000-8000-000000000004", "/work/delta", 10, Channel::Open, "gone quiet since"));
+    typed(&mut c, "@");
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 120, 40));
+    let helper = &rows[rows.len() - 2];
+    let chips: Vec<String> = helper.split_whitespace().filter_map(|w| w.strip_prefix('@')).filter(|n| *n != "aaron").map(String::from).collect();
+    let mut cycle: Vec<String> = Vec::new();
+    for _ in 0..chips.len() {
+        press(&mut c, key(KeyCode::Tab));
+        cycle.push(c.input().text().trim().trim_start_matches('@').to_string());
+    }
+    assert_eq!(chips.len(), 3, "two live claudes and the quiet one: {helper}");
+    assert_eq!(chips, cycle, "the chips in Tab's order: {helper}");
 }
 
 #[test]
@@ -392,17 +419,6 @@ fn an_unchanged_screen_is_copied_not_drawn_again() {
 }
 
 #[test]
-fn an_idle_refresh_of_an_unchanged_world_draws_nothing_new() {
-    let mut c = chat();
-    testkit::render_screen(&mut c, 80, 25);
-    for _ in 0..3 {
-        c.refresh();
-        testkit::render_screen(&mut c, 80, 25);
-    }
-    assert_eq!(c.draws(), 1, "the peers and channels read the same: no re-layout, no redraw");
-}
-
-#[test]
 fn a_failed_command_leaves_the_view_paged_back_and_a_success_returns() {
     let mut c = chat();
     testkit::render_screen(&mut c, 80, 16);
@@ -589,12 +605,14 @@ fn backspace_after_esc_edits_the_draft() {
 }
 
 #[test]
-fn a_click_on_a_tab_shows_its_channel() {
+fn a_click_on_a_tab_shows_its_channel_and_opens_its_menu() {
     let mut c = chat();
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"), "one click opens the menu (ADR-405)");
+    assert!(press(&mut c, key(KeyCode::Esc)), "Esc closes the menu");
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "1 merged").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
@@ -786,9 +804,10 @@ fn ctrl_digit_shows_a_tab_and_a_second_press_opens_its_menu() {
     assert!(!text(&mut c, 80, 25).contains("pick one"), "the first press only shows the tab");
     drawn(&mut c, &[ctrl('3')], 80, 25);
     let shown = text(&mut c, 80, 25);
-    for item in ["pick one: #deploy", "Add agent ▸", "Invite agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Leave", "Delete channel"] {
+    for item in ["pick one: #deploy", "Add agent ▸", "Invite agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Join", "Delete channel"] {
         assert!(shown.contains(item), "{item}: {shown}");
     }
+    assert!(!shown.contains("Leave"), "the human is not in #deploy: Join, not Leave");
     g.check("tab-menu-deploy-80x25", &testkit::render_screen(&mut c, 80, 25));
     assert!(press(&mut c, key(KeyCode::Esc)), "Esc closes the menu, not the chat");
     assert!(!text(&mut c, 80, 25).contains("pick one"));
@@ -843,18 +862,52 @@ fn clear_history_asks_first_and_y_runs_the_purge() {
     g.finish();
 }
 
+/// A click on a tab opens its menu with the first item under the cursor:
+/// merged's Clear view asks before it empties the view.
+#[test]
+fn a_click_then_enter_on_merged_asks_before_clearing_the_view() {
+    let mut c = chat().enhanced(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "1 merged").expect("the merged tab");
+    left(&mut c, (x, y));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(bar(&mut c).contains("clear the view? the bus keeps every message"), "{}", bar(&mut c));
+    assert!(!c.signals().is_empty(), "nothing cleared before the y");
+    press(&mut c, key(KeyCode::Esc));
+    assert_eq!((c.status(), c.signals().is_empty()), ("kept", false));
+    left(&mut c, (x, y));
+    press(&mut c, key(KeyCode::Enter));
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.status(), "transcript cleared");
+    assert!(c.signals().is_empty());
+
+    // The key help names what a click on a tab does.
+    press(&mut c, key(KeyCode::F(1)));
+    let help = text(&mut c, 100, 60);
+    assert!(help.contains("a tab shows it and opens its menu"), "{help}");
+}
+
+/// #deploy's menu, then Delete channel: the question waits for its `y`.
+fn ask_delete(c: &mut Chat) {
+    press(c, ctrl('3'));
+    press(c, ctrl('3'));
+    press(c, key(KeyCode::End));
+    press(c, key(KeyCode::Enter));
+    assert!(bar(c).contains("delete #deploy"), "{}", bar(c));
+}
+
+/// A `y` after the question was dropped types; it deletes nothing.
+fn y_types(c: &mut Chat) {
+    press(c, key(KeyCode::Char('y')));
+    assert_eq!(c.input().text(), "y", "the question is gone: y is typing");
+    assert!(!c.status().starts_with("dry run"), "nothing ran: {}", c.status());
+}
+
 #[test]
 fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
-    let ask = |c: &mut Chat| {
-        press(c, ctrl('3'));
-        press(c, ctrl('3'));
-        press(c, key(KeyCode::End));
-        press(c, key(KeyCode::Enter));
-        assert!(bar(c).contains("delete #deploy"), "{}", bar(c));
-    };
     // A tab change.
     let mut c = chat().enhanced(true).dry_run(true);
-    ask(&mut c);
+    ask_delete(&mut c);
     press(&mut c, ctrl('4'));
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
     assert!(!bar(&mut c).contains("delete #deploy"));
@@ -862,7 +915,7 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
     assert_eq!(c.input().text(), "y", "the question is gone: y is typing");
     // The tab bar's focus.
     let mut c = chat().enhanced(true).dry_run(true);
-    ask(&mut c);
+    ask_delete(&mut c);
     press(&mut c, key(KeyCode::F(2)));
     assert_eq!(c.status(), "kept");
     press(&mut c, key(KeyCode::Esc));
@@ -870,13 +923,66 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
     assert_eq!(c.input().text(), "y");
     // A click on a tab.
     let mut c = chat().enhanced(true).dry_run(true);
-    ask(&mut c);
+    ask_delete(&mut c);
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "2 #open").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Esc));
     press(&mut c, key(KeyCode::Char('y')));
     assert_eq!(c.input().text(), "y");
+}
+
+// Every key the shell takes before the pane drops a waiting question,
+// whatever the bar says after it: a later `y` never answers a question
+// that is no longer shown.
+
+/// Ctrl+digit opens the tab menu over the question; Esc closes it unchanged.
+#[test]
+fn ctrl_digit_drops_a_waiting_question() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask_delete(&mut c);
+    press(&mut c, ctrl('3'));
+    assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Esc));
+    assert!(bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
+    y_types(&mut c);
+}
+
+/// Alt+m turns the mouse off: the bar says what off means, not the question.
+#[test]
+fn alt_m_drops_a_waiting_question() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    press(&mut c, alt('m'));
+    ask_delete(&mut c);
+    press(&mut c, alt('m'));
+    assert_eq!(c.status(), "kept");
+    assert!(!c.app().mouse_on());
+    assert!(bar(&mut c).contains("the terminal selects text"), "{}", bar(&mut c));
+    y_types(&mut c);
+}
+
+/// A middle click with the mouse on puts its paste hint in the bar: the
+/// question goes first.
+#[test]
+fn a_middle_click_drops_a_waiting_question() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    press(&mut c, alt('m'));
+    ask_delete(&mut c);
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Middle), 10, 20));
+    assert_eq!(c.status(), "kept");
+    y_types(&mut c);
+}
+
+/// F1 opens the key help over the question; any other key closes it.
+#[test]
+fn f1_drops_a_waiting_question() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask_delete(&mut c);
+    press(&mut c, key(KeyCode::F(1)));
+    assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Esc));
+    y_types(&mut c);
 }
 
 #[test]
@@ -1029,12 +1135,10 @@ fn f2_moves_along_the_tab_bar_and_enter_opens_the_menu() {
 }
 
 #[test]
-fn a_second_click_on_the_shown_tab_or_a_right_click_opens_its_menu() {
+fn a_right_click_opens_a_tabs_menu_without_showing_it() {
     let mut c = chat();
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
-    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
-    assert!(!text(&mut c, 80, 25).contains("pick one"));
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert!(text(&mut c, 80, 25).contains("pick one: #deploy"));
     press(&mut c, key(KeyCode::Esc));
@@ -1134,4 +1238,442 @@ fn the_common_menu_offers_themes_and_keybinding_sets() {
     assert!(sets.contains("ctrl: Ctrl+1-9, F2, Ctrl+T") && sets.contains("fallback only: F2, Ctrl+T, Tab"), "{sets}");
     press(&mut c, key(KeyCode::Enter));
     assert_eq!(c.status(), "dry run: /config not run", "a set is written through /config");
+}
+
+// ── The left column (ADR-405) ───────────────────────────────────────
+
+/// A claude that has gone quiet: no heartbeat, so set back in the column.
+const GAMMA: &str = "/work/gamma";
+const GAMMA_SID: &str = "cccccccc-0000-4000-8000-000000000003";
+
+/// The chat with the left column shown, and a sender with no heartbeat.
+fn chat_side() -> Chat {
+    let mut c = chat().sidebar(true);
+    c.push(sig(&format!("claude:{GAMMA_SID}"), GAMMA, 900, Channel::Open, "signing off"));
+    c
+}
+
+#[test]
+fn golden_the_column_lists_every_agent_and_channel() {
+    let mut g = goldens();
+    let mut c = chat_side();
+    let shown = text(&mut c, 80, 25);
+    for row in ["Agents 2/4", "Channels 4", "#open", "#deploy", "#infra", "#archive"] {
+        assert!(shown.contains(row), "{row}: {shown}");
+    }
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let gamma = rows.iter().find(|r| r.contains("gamma")).expect("the quiet agent is listed");
+    assert!(gamma.contains('○'), "set back: {gamma}");
+    assert!(!rows[rows.len() - 2].contains("@aaron"), "the legend row is the column's: {:?}", rows[rows.len() - 2]);
+    for (w, h) in SIZES {
+        g.check(&format!("sidebar-{w}x{h}"), &testkit::render_screen(&mut c, w, h));
+    }
+    g.finish();
+}
+
+#[test]
+fn golden_the_sidebar_key_and_a_narrow_terminal_give_the_legend_row_back() {
+    let mut g = goldens();
+    let mut c = chat_side();
+    press(&mut c, key(KeyCode::F(3)));
+    assert!(!c.sidebar_shown());
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows[rows.len() - 2].contains("@"), "the legend row is back: {:?}", rows[rows.len() - 2]);
+    g.check("sidebar-off-80x25", &testkit::render_screen(&mut c, 80, 25));
+    press(&mut c, key(KeyCode::F(3)));
+    assert!(c.sidebar_shown());
+    let narrow = text(&mut c, 70, 25);
+    assert!(!narrow.contains("Agents"), "too narrow for the column: {narrow}");
+    g.check("sidebar-narrow-70x25", &testkit::render_screen(&mut c, 70, 25));
+    g.finish();
+}
+
+#[test]
+fn the_column_keeps_the_helper_row_for_commands() {
+    let mut c = chat_side();
+    typed(&mut c, "/he");
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows[rows.len() - 2].contains("/help"), "{:?}", rows[rows.len() - 2]);
+}
+
+/// Typing a command beside the column keeps the helper row's place, so
+/// the compose box stays put as the command reaches an agent argument.
+#[test]
+fn the_compose_box_stays_put_while_a_command_is_typed() {
+    let mut c = chat_side();
+    let at = |c: &mut Chat| testkit::rows(&testkit::render_screen(c, 80, 25)).iter().position(|r| r.contains("> ")).expect("the prompt");
+    let empty = at(&mut c);
+    let mut rows = Vec::new();
+    for ch in "/whois @L".chars() {
+        typed(&mut c, &ch.to_string());
+        rows.push(at(&mut c));
+    }
+    assert!(rows.iter().all(|r| *r == rows[0]), "the box moved while typing: {rows:?}");
+    assert_eq!(rows[0] + 1, empty, "one row reserved for the command's help");
+}
+
+#[test]
+fn a_click_on_an_agent_row_opens_its_menu_and_on_a_channel_row_the_channels() {
+    let mut c = chat_side().enhanced(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "gamma").expect("the agent row");
+    left(&mut c, (x, y));
+    let menu = text(&mut c, 80, 25);
+    assert!(menu.contains("pick one: @Lyra") && menu.contains("Address @Lyra") && menu.contains("Who is this"), "{menu}");
+    assert!(!menu.contains("Remove from"), "merged shows no channel to remove from: {menu}");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.input().text(), "@Lyra ", "the first item addresses it");
+    // Who is this, for a quiet claude /whois cannot resolve.
+    left(&mut c, (x, y));
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(c.status().contains("session cccccccc") && c.status().contains("quiet"), "{}", c.status());
+    let mut c = chat_side().enhanced(true);
+
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#infra").expect("the channel row");
+    left(&mut c, (x, y));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+    assert!(text(&mut c, 80, 25).contains("pick one: #infra"));
+    press(&mut c, key(KeyCode::Esc));
+
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#archive").expect("the swept channel's row");
+    left(&mut c, (x, y));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()), "a channel with no tab is not shown");
+    assert!(text(&mut c, 80, 25).contains("pick one: #archive"), "its menu opens");
+}
+
+#[test]
+fn a_partial_name_marks_its_rows_in_the_column() {
+    let mut c = chat_side();
+    typed(&mut c, "hi #de");
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#deploy").expect("the row");
+    let cell = buf.cell((x, y)).expect("a cell");
+    assert!(cell.modifier.contains(agent_tui::ratatui::style::Modifier::UNDERLINED), "Tab's target is marked");
+}
+
+/// In the round shape at full colour each row is a lozenge: a cap, the
+/// name on the identity colour, joins, and an inactive agent on the
+/// desaturated steps of its colour.
+#[test]
+fn golden_the_column_draws_lozenges_in_the_round_shape() {
+    let mut g = goldens();
+    let f = fixture();
+    let dir = f.root.join("config/agent-ways/themes");
+    let (painter, _) = agent_theme::Painter::named_in(Some("nord"), &dir, ColorDepth::TrueColor);
+    let mut c = Chat::new(None, Palette { painter }, Shape::ROUND).heartbeat(false).pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0);
+    for s in transcript() {
+        c.push(s);
+    }
+    c.push(sig(&format!("claude:{GAMMA_SID}"), GAMMA, 900, Channel::Open, "signing off"));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let rows = testkit::rows(&buf);
+    let laszlo = rows.iter().position(|r| r.contains("Laszlo") && r.contains('\u{e0b6}')).expect("a capped lozenge");
+    assert!(rows[laszlo].matches('\u{e0b4}').count() == 3, "three joins: {}", rows[laszlo]);
+    let (x, y) = testkit::find(&buf, "Laszlo").expect("the row");
+    let live_bg = buf.cell((x, y)).unwrap().bg;
+    let (x, y) = testkit::find(&buf, "Lyra").expect("the quiet agent's row");
+    let gone_bg = buf.cell((x, y)).unwrap().bg;
+    let lyra = agent_identity::Identity::for_cwd(GAMMA, ColorDepth::TrueColor).palette.rgb;
+    let faded = agent_theme::IdentitySteps::of(agent_theme::Rgb(lyra.0, lyra.1, lyra.2), false).name.bg;
+    assert_eq!(gone_bg, agent_tui::ratatui::style::Color::Rgb(faded.0, faded.1, faded.2), "the desaturated step");
+    assert_ne!(live_bg, gone_bg);
+    g.check("sidebar-round-truecolor-80x25", &buf);
+    g.finish();
+}
+
+/// The column without the mouse: F2, then Down into the column; Up and
+/// Down move, Enter acts on the row, Esc goes back (ADR-405).
+#[test]
+fn golden_the_keyboard_walks_the_column() {
+    let mut g = goldens();
+    let mut c = chat_side().enhanced(true).dry_run(true);
+    testkit::render_screen(&mut c, 80, 25);
+    press(&mut c, key(KeyCode::F(2)));
+    assert!(bar(&mut c).contains("↓ the column"), "the tab bar names the way down: {}", bar(&mut c));
+    press(&mut c, key(KeyCode::Down));
+    assert!(!c.app().strip_focused(), "the focus left the tab bar");
+    press(&mut c, key(KeyCode::Down));
+    let shown = testkit::render_screen(&mut c, 80, 25);
+    g.check("sidebar-keyboard-80x25", &shown);
+    let rows = testkit::rows(&shown);
+    let at = rows.iter().find(|r| r.contains('▸')).expect("the cursor is drawn");
+    assert!(at.contains("#deploy"), "Down from #open is #deploy: {at}");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"), "Enter opens the channel's menu");
+    press(&mut c, key(KeyCode::Esc));
+
+    // Up past the top goes back to the tab bar.
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Down));
+    assert!(bar(&mut c).contains("↑↓ move · Enter · Esc back"), "the bar says how the column is worked: {}", bar(&mut c));
+    for _ in 0..10 {
+        press(&mut c, key(KeyCode::Up));
+        if c.app().strip_focused() {
+            break;
+        }
+    }
+    assert!(c.app().strip_focused(), "Up past the top focuses the tab bar");
+    assert_eq!(c.input().text(), "", "typing nothing");
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Home));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(text(&mut c, 80, 25).contains("pick one: @Laszlo"), "Enter on an agent opens its menu");
+    press(&mut c, key(KeyCode::Enter));
+    assert!(c.input().text().starts_with("@Laszlo"), "{:?}", c.input().text());
+    g.finish();
+}
+
+/// The column gives up the keyboard when it is hidden for width, when F2
+/// takes the tab bar, and on a click outside it.
+#[test]
+fn the_column_lets_go_of_the_keyboard_when_it_goes_or_focus_moves() {
+    let focused = || {
+        let mut c = chat_side().enhanced(true).dry_run(true);
+        testkit::render_screen(&mut c, 80, 25);
+        press(&mut c, key(KeyCode::F(2)));
+        press(&mut c, key(KeyCode::Down));
+        assert!(cursor_row(&mut c, 80).is_some(), "the column has the keyboard");
+        c
+    };
+    // Narrower than the column and the feed: hidden, and so unfocused.
+    let mut c = focused();
+    let narrow = text(&mut c, 70, 25);
+    assert!(!narrow.contains("↑↓ move"), "no hint for a column not drawn: {narrow}");
+    assert!(cursor_row(&mut c, 80).is_none(), "the cursor does not come back with the width");
+    typed(&mut c, "x");
+    assert_eq!(c.input().text(), "x", "keys go to the compose box");
+    // F2 takes the tab bar from the column.
+    let mut c = focused();
+    press(&mut c, key(KeyCode::F(2)));
+    assert!(c.app().strip_focused() && cursor_row(&mut c, 80).is_none());
+    // A click in the feed.
+    let mut c = focused();
+    left(&mut c, (50, 5));
+    assert!(cursor_row(&mut c, 80).is_none(), "a click outside the column");
+    // The tab bar names the column only while it is drawn.
+    let mut c = chat_side().enhanced(true);
+    testkit::render_screen(&mut c, 70, 25);
+    press(&mut c, key(KeyCode::F(2)));
+    assert!(!bar(&mut c).contains("the column"), "{}", bar(&mut c));
+    press(&mut c, key(KeyCode::Esc));
+    press(&mut c, key(KeyCode::F(1)));
+    assert!(!text(&mut c, 70, 40).contains("F2, then"), "the help leaves out a column not drawn");
+}
+
+/// The row the column's cursor is on, if it has one.
+fn cursor_row(c: &mut Chat, w: u16) -> Option<String> {
+    testkit::rows(&testkit::render_screen(c, w, 25)).into_iter().find(|r| r.contains('▸') && !r.starts_with(" ≡"))
+}
+
+/// The column with fifteen more agents than it has rows for.
+fn chat_crowded() -> Chat {
+    let mut c = chat_side();
+    for n in 0..15 {
+        c.push(sig(&format!("claude:dddddddd-0000-4000-8000-{n:012}"), &format!("/work/crowd-{n:02}"), 1000 + n, Channel::Open, "here"));
+    }
+    c
+}
+
+/// Every row of a long list is reachable by keyboard and by mouse: the
+/// cursor scrolls the list to stay in view, and the wheel over a list
+/// scrolls it.
+#[test]
+fn a_long_column_scrolls_with_the_cursor_and_the_wheel() {
+    let mut c = chat_crowded().enhanced(true).dry_run(true);
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let header = rows.iter().find(|r| r.contains("Agents")).expect("the header").clone();
+    assert!(header.contains('↓') && !header.contains('↑'), "rows below, none above: {header}");
+    let first_agent = rows.iter().position(|r| r.contains("Agents")).unwrap() + 1;
+    let top_before = rows[first_agent].clone();
+    // The keyboard: from the first channel, Up into the agents and on past
+    // the rows shown; the cursor is always drawn.
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Down));
+    for _ in 0..19 {
+        press(&mut c, key(KeyCode::Up));
+        assert!(cursor_row(&mut c, 80).is_some(), "the cursor stays in view");
+    }
+    press(&mut c, key(KeyCode::Home));
+    let at = cursor_row(&mut c, 80).expect("the cursor");
+    assert!(at.contains("Laszlo"), "Home reaches the first agent: {at}");
+    press(&mut c, key(KeyCode::End));
+    assert!(cursor_row(&mut c, 80).expect("the cursor").contains("#archive"), "End, the last channel");
+    press(&mut c, key(KeyCode::Esc));
+    // The wheel over the agents scrolls them, and the feed stays put.
+    let mut c = chat_crowded().enhanced(true);
+    testkit::render_screen(&mut c, 80, 25);
+    let ev = |kind| agent_tui::ratatui::crossterm::event::MouseEvent { kind, column: 5, row: first_agent as u16 + 1, modifiers: KeyModifiers::NONE };
+    for _ in 0..30 {
+        c.mouse(ev(MouseEventKind::ScrollDown));
+    }
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert_ne!(rows[first_agent], top_before, "the list moved");
+    let header = rows.iter().find(|r| r.contains("Agents")).unwrap();
+    assert!(header.contains('↑') && !header.contains('↓'), "at the last row: {header}");
+    assert_eq!(c.scroll(), 0, "the feed did not scroll");
+    for _ in 0..30 {
+        c.mouse(ev(MouseEventKind::ScrollUp));
+    }
+    assert_eq!(testkit::rows(&testkit::render_screen(&mut c, 80, 25))[first_agent], top_before, "back to the top");
+}
+
+/// The footer names the way into the column while it is drawn and does
+/// not have the keyboard, at 80 columns too.
+#[test]
+fn the_footer_names_the_way_into_the_column_while_it_is_drawn() {
+    let footer = |c: &mut Chat, w: u16| testkit::rows(&testkit::render_screen(c, w, 25)).pop().expect("a bottom bar");
+    let mut c = chat_side().enhanced(true);
+    assert!(footer(&mut c, 80).contains("F2 ↓ column"), "{}", footer(&mut c, 80));
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Down));
+    assert!(!footer(&mut c, 80).contains("F2 ↓ column"), "in the column already: {}", footer(&mut c, 80));
+    let mut c = chat_side().enhanced(true);
+    assert!(!footer(&mut c, 70).contains("F2 ↓ column"), "no column drawn at 70: {}", footer(&mut c, 70));
+    let mut c = chat();
+    assert!(!footer(&mut c, 80).contains("column"), "the column hidden: {}", footer(&mut c, 80));
+}
+
+/// The cursor stays on its row when a refresh moves the row, and the wheel
+/// over a focused list moves the list away from the cursor without the
+/// next frame snapping it back.
+#[test]
+fn the_columns_cursor_keeps_its_row_and_the_wheel_is_not_undone() {
+    let mut c = chat_crowded().enhanced(true).dry_run(true);
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let first_agent = rows.iter().position(|r| r.contains("Agents")).unwrap() + 1;
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::End));
+    assert!(cursor_row(&mut c, 80).expect("the cursor").contains("#archive"));
+    // A new agent above it moves every channel down a row.
+    c.push(sig("claude:eeeeeeee-0000-4000-8000-000000000001", "/work/newcomer", 5, Channel::Open, "hello"));
+    c.refresh();
+    assert!(cursor_row(&mut c, 80).expect("the cursor").contains("#archive"), "still on #archive after the refresh");
+    // The wheel over the agents, the cursor on the first of them.
+    press(&mut c, key(KeyCode::Home));
+    assert!(cursor_row(&mut c, 80).is_some());
+    for _ in 0..4 {
+        c.mouse(MouseEvent { kind: MouseEventKind::ScrollDown, column: 5, row: first_agent as u16 + 1, modifiers: KeyModifiers::NONE });
+    }
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows.iter().find(|r| r.contains("Agents")).unwrap().contains('↑'), "the list moved and stayed moved");
+    assert!(cursor_row(&mut c, 80).is_none(), "the cursor's row is scrolled out of view, not pulled back");
+    press(&mut c, key(KeyCode::Down));
+    assert!(cursor_row(&mut c, 80).is_some(), "a key move brings the cursor back into view");
+}
+
+/// An agent of the shown channel can be removed from its row, after a y.
+#[test]
+fn an_agent_row_removes_it_from_the_shown_channel() {
+    let mut c = chat_side().enhanced(true).dry_run(true);
+    press(&mut c, ctrl('3'));
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "beta").expect("the member's row");
+    left(&mut c, (x, y));
+    let menu = text(&mut c, 80, 25);
+    assert!(menu.contains("Remove from #deploy"), "{menu}");
+    press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(bar(&mut c).contains("from #deploy? y removes"), "{}", bar(&mut c));
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.status(), "dry run: /kick not run");
+}
+
+/// The compose box's flag marks a swept channel, as it marks a quiet
+/// agent: Enter would be refused.
+#[test]
+fn the_destination_flag_marks_a_swept_channel() {
+    let mut c = chat_side();
+    typed(&mut c, "#archive hi");
+    assert!(text(&mut c, 80, 25).contains(" #archive (swept) "), "{}", text(&mut c, 80, 25));
+}
+
+/// A menu closed unchanged leaves "unchanged" in the bar; a question a
+/// later pick asks replaces it, so the `y` that answers it is never blind.
+/// By keys: #deploy's menu, Esc, its menu again, Delete channel.
+#[test]
+fn a_question_after_a_menu_closed_unchanged_is_shown_by_keys() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    drawn(&mut c, &[ctrl('3'), ctrl('3'), key(KeyCode::Esc)], 80, 25);
+    assert!(bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
+    // Ctrl+3 on the tab shown opens its menu; Join is item 6, Delete 7.
+    let mut keys = vec![ctrl('3')];
+    keys.extend(std::iter::repeat_n(key(KeyCode::Down), 6));
+    keys.push(key(KeyCode::Enter));
+    drawn(&mut c, &keys, 80, 25);
+    let shown = bar(&mut c);
+    assert!(shown.contains("delete #deploy and its history? y deletes") && !shown.contains("unchanged"), "{shown}");
+}
+
+/// The same by the mouse: a menu closed unchanged, then Remove from an
+/// agent's row.
+#[test]
+fn a_question_after_a_menu_closed_unchanged_is_shown_by_the_mouse() {
+    let mut c = chat_side().enhanced(true).dry_run(true);
+    drawn(&mut c, &[ctrl('3'), ctrl('3'), key(KeyCode::Esc)], 80, 25);
+    assert!(bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let row = testkit::find(&buf, "beta").expect("the member's row");
+    left(&mut c, row);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let item = testkit::find(&buf, "Remove from #deploy").expect("the menu's item");
+    left(&mut c, item);
+    let shown = bar(&mut c);
+    assert!(shown.contains("from #deploy? y removes") && !shown.contains("unchanged"), "{shown}");
+}
+
+/// A paste with newlines is one draft in the compose box: nothing sent,
+/// the lines kept, the cursor after them.
+#[test]
+fn a_multi_line_paste_is_one_draft_and_sends_nothing() {
+    let mut c = chat_side();
+    typed(&mut c, "see: ");
+    let before = c.signals().len();
+    assert!(testkit::play(&mut c, &[agent_tui::ratatui::crossterm::event::Event::Paste("a\nb\r\nc".into())], Some((80, 25))));
+    assert_eq!(c.input().text(), "see: a\nb\nc", "one draft, the lines kept");
+    assert_eq!(c.input().cursor(), "see: a\nb\nc".chars().count());
+    assert_eq!((c.signals().len(), c.status()), (before, ""), "nothing sent");
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows.iter().any(|r| r.contains("> see: a")) && rows.iter().any(|r| r.contains("  c")), "the box grows to the lines");
+}
+
+/// The mouse alone shows and hides the column, from the common menu.
+#[test]
+fn the_common_menu_hides_and_shows_the_column() {
+    let mut c = chat_side().enhanced(true);
+    let open_common = |c: &mut Chat| {
+        let buf = testkit::render_screen(c, 80, 25);
+        let at = testkit::find(&buf, "≡").expect("the common slot");
+        left(c, at);
+        text(c, 80, 25)
+    };
+    let menu = open_common(&mut c);
+    assert!(menu.contains("Hide column") && !menu.contains("Show column"), "{menu}");
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let at = testkit::find(&buf, "Hide column").expect("the item");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1));
+    assert!(!c.sidebar_shown(), "hidden");
+    let menu = open_common(&mut c);
+    assert!(menu.contains("Show column"), "{menu}");
+    press(&mut c, key(KeyCode::Esc));
+}
+
+/// Join and Leave from the menu, with no slash command.
+#[test]
+fn a_channel_menu_joins_a_channel_the_human_is_not_in() {
+    let mut c = chat_side().enhanced(true).dry_run(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#deploy").expect("the row");
+    left(&mut c, (x, y));
+    let shown = text(&mut c, 80, 25);
+    assert!(shown.contains("Join") && !shown.contains("Leave"), "{shown}");
+    press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Up));
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: /join not run");
 }

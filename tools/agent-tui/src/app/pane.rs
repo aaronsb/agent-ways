@@ -81,12 +81,20 @@ pub struct Binding {
     pub label: String,
     /// Shown on the footer when it fits; otherwise only in the key help.
     pub footer: bool,
+    /// A shorter label the footer falls back to, so the key keeps its
+    /// place where the whole label would push it or a later key off.
+    pub short: Option<String>,
 }
 
 impl Binding {
     /// A key the footer shows.
     pub fn new(keys: impl Into<String>, label: impl Into<String>) -> Binding {
-        Binding { keys: keys.into(), label: label.into(), footer: true }
+        Binding { keys: keys.into(), label: label.into(), footer: true, short: None }
+    }
+
+    /// The same key, with a shorter label for a footer short of room.
+    pub fn short(self, label: impl Into<String>) -> Binding {
+        Binding { short: Some(label.into()), ..self }
     }
 
     /// A key only the key help lists.
@@ -115,6 +123,9 @@ pub enum Keyed {
     Pass,
     /// Quit, as Esc would: the pane confirmed it.
     Quit,
+    /// Give the tab bar the focus, as F2 would: Up past the top of a list
+    /// below the bar ([`Pane::below_strip`]) goes back up to it.
+    Tabs,
 }
 
 /// What a pane asks the shell to open over it ([`Pane::take_open`]).
@@ -158,6 +169,26 @@ pub trait Pane: Any {
     /// Open tab `i`'s menu, through [`Pane::take_open`]; on an action slot,
     /// its action. Nothing by default.
     fn tab_menu(&mut self, _i: usize) {}
+
+    /// What lies below the tab bar for Down to reach, in a word or two
+    /// ("the column"), when the pane has such a list. Only a pane with tab
+    /// menus is asked; the tab bar's hint names it.
+    fn below_strip(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Down on the focused tab bar: take the focus into the list
+    /// [`Pane::below_strip`] names. False leaves the focus on the bar.
+    fn focus_below(&mut self) -> bool {
+        false
+    }
+
+    /// Whether a left click on a tab shows it and opens its menu at once,
+    /// rather than opening the menu only on the tab already shown. Only a
+    /// pane with tab menus is asked. Keys keep their own rule.
+    fn menu_on_click(&self) -> bool {
+        false
+    }
 
     /// What Ctrl+N does in this pane, in a few words ("new channel"), when
     /// the pane has such an action. Only a pane with tab menus
@@ -225,6 +256,10 @@ pub trait Pane: Any {
 
     /// A left click at `at`, inside the pane's area.
     fn click(&mut self, _at: Position) {}
+
+    /// Text the terminal pasted, whole, newlines and all. Nothing by
+    /// default.
+    fn paste(&mut self, _text: &str) {}
 
     /// The pane's keys, for the footer and the key help.
     fn bindings(&self) -> Vec<Binding>;

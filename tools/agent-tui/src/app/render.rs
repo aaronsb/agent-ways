@@ -78,6 +78,10 @@ pub(super) fn modal_rect(area: Rect, w: u16, h: u16) -> Rect {
     Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
 }
 
+/// The fewest columns a status message is shown in: in fewer, the cut
+/// leaves too little of it to read, so it goes.
+const MSG_MIN: usize = 8;
+
 /// The most dots the masked entry draws; past it a count follows, so the
 /// hint beside the entry stays on screen for a long key.
 const MASK_DOTS: usize = 24;
@@ -201,43 +205,91 @@ impl App {
     /// One lozenge per root: its number and name, then its pending count and
     /// a discard mark as a badge segment when non-zero. The shown tab takes the
     /// accent; in review, a tab with nothing pending is dimmed.
+    ///
+    /// The bar keeps to its width. When the tabs overflow it, the gaps tighten
+    /// first, then the names are cut shorter, down to the number alone; the
+    /// numbers and badges always stay. Tabs that still do not fit are left
+    /// off behind a `›` marker, so none goes missing unannounced; the tab
+    /// shown is never one of them.
     fn draw_tabs(&mut self, f: &mut Frame, area: Rect, active: usize, review: bool) {
-        let mut spans = Vec::new();
-        self.hits.tabs.clear();
-        for (i, r) in self.roots.iter().enumerate() {
-            let label = format!(" {} {} ", i + 1, r.name);
-            let pending = tree::pending(r, &self.queue);
-            let mut segs = vec![if review && pending == 0 && i != active {
-                Seg::faded(label)
-            } else {
-                crate::strip::tab_seg(label, i == active)
-            }];
-            if pending > 0 {
-                segs.push(Seg::on(format!(" ●{pending} ↺ "), Ground::Warn).bold());
+        /// A tab before layout: its index, name and badge, and whether the
+        /// badge is a discard target.
+        struct Tab {
+            i: usize,
+            name: String,
+            badge: Option<String>,
+            faded: bool,
+            discard: bool,
+        }
+        let mut tabs: Vec<Tab> = self
+            .roots
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let pending = tree::pending(r, &self.queue);
+                let badge = (pending > 0).then(|| format!(" ●{pending} ↺ "));
+                Tab { i, name: r.name.clone(), badge, faded: review && pending == 0 && i != active, discard: true }
+            })
+            .collect();
+        // The theme tab: no review, so dimmed there; a badge for unsaved edits, with no discard mark.
+        let badge = self.theme_dirty().then(|| " ●1 ".to_string());
+        tabs.push(Tab { i: self.theme_tab(), name: "theme".into(), badge, faded: review, discard: false });
+
+        let sh = self.shape;
+        // A tab's lozenge with its name cut to `cap` columns; a cap of 0 leaves the number alone.
+        let lozenge = |t: &Tab, cap: usize| {
+            let label = if cap == 0 { format!(" {} ", t.i + 1) } else { format!(" {} {} ", t.i + 1, crate::wrap::truncate(&t.name, cap)) };
+            let mut segs = vec![if t.faded { Seg::faded(label) } else { crate::strip::tab_seg(label, t.i == active) }];
+            if let Some(b) = &t.badge {
+                segs.push(Seg::on(b.clone(), Ground::Warn).bold());
             }
-            let tab = self.shape.lozenge(&segs);
+            sh.lozenge(&segs)
+        };
+        let span = |lozs: &[(&Tab, Vec<Span>)], gap: u16| lozs.iter().map(|(_, l)| width(l)).sum::<u16>() + gap * lozs.len().saturating_sub(1) as u16;
+        let longest = tabs.iter().map(|t| crate::wrap::str_width(&t.name)).max().unwrap_or(0);
+        // Whole names at the usual gap, then at one column, then names cut
+        // shorter. A cap of 1 would leave a bare `…`, so below 2 the name goes.
+        let mut plan = None;
+        'fit: for cap in (0..=longest).rev().filter(|c| *c != 1) {
+            let lozs: Vec<_> = tabs.iter().map(|t| (t, lozenge(t, cap))).collect();
+            let gaps: &[u16] = if cap == longest { &[2, 1] } else { &[1] };
+            for &gap in gaps {
+                if span(&lozs, gap) <= area.width {
+                    plan = Some((lozs, gap, false));
+                    break 'fit;
+                }
+            }
+        }
+        // Even the numbers alone overflow: as many as fit, then the marker.
+        // The last tab other than the one shown goes first.
+        let (lozs, gap, more) = plan.unwrap_or_else(|| {
+            let mut lozs: Vec<_> = tabs.iter().map(|t| (t, lozenge(t, 0))).collect();
+            while !lozs.is_empty() && span(&lozs, 1) + 2 > area.width {
+                let last = lozs.iter().rposition(|(t, _)| t.i != active).unwrap_or(lozs.len() - 1);
+                lozs.remove(last);
+            }
+            (lozs, 1, true)
+        });
+
+        self.hits.tabs.clear();
+        let mut spans = Vec::new();
+        for (k, (t, tab)) in lozs.into_iter().enumerate() {
+            if k > 0 {
+                spans.push(Span::raw(" ".repeat(gap as usize)));
+            }
             let x = area.x + width(&spans);
-            if pending > 0 {
+            if t.discard && t.badge.is_some() {
                 // The badge is the discard target: everything in the lozenge from its first glyph on.
                 let at = tab.iter().position(|sp| sp.content.starts_with(" ●")).unwrap_or(0);
                 let bx = x + width(&tab[..at]);
-                self.hits.discard_tabs.push((Rect { x: bx, y: area.y, width: tab[at].width() as u16, height: 1 }.intersection(area), i));
+                self.hits.discard_tabs.push((Rect { x: bx, y: area.y, width: tab[at].width() as u16, height: 1 }.intersection(area), t.i));
             }
-            let rect = Rect { x, y: area.y, width: width(&tab), height: 1 }.intersection(area);
-            self.hits.tabs.push((rect, i));
+            self.hits.tabs.push((Rect { x, y: area.y, width: width(&tab), height: 1 }.intersection(area), t.i));
             spans.extend(tab);
-            spans.push(Span::raw("  "));
         }
-        // The theme tab: no review, so dimmed there; a badge for unsaved edits, with no discard mark.
-        let i = self.theme_tab();
-        let label = format!(" {} theme ", i + 1);
-        let mut segs = vec![if review { Seg::faded(label) } else { crate::strip::tab_seg(label, i == active) }];
-        if self.theme_dirty() {
-            segs.push(Seg::on(" ●1 ", Ground::Warn).bold());
+        if more {
+            spans.push(Span::styled(" ›", theme::hint()));
         }
-        let tab = self.shape.lozenge(&segs);
-        self.hits.tabs.push((Rect { x: area.x + width(&spans), y: area.y, width: width(&tab), height: 1 }.intersection(area), i));
-        spans.extend(tab);
         f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
@@ -301,7 +353,8 @@ impl App {
             .collect();
         let own = self.roots.get(self.tab).and_then(|t| self.adapter.title(&t.name)).unwrap_or_else(|| self.title.clone());
         let title = if self.filter.is_empty() { own } else { format!("{own} — /{}", self.filter) };
-        let block = pane(title);
+        // The border would clip a long title mid-word: cut it between the corners with `…`.
+        let block = pane(crate::wrap::truncate(&title, area.width.saturating_sub(2) as usize));
         self.hits.list = block.inner(area);
         let list = List::new(items)
             .block(block)
@@ -646,13 +699,21 @@ impl App {
                     spans.push(hint(if self.mouse { "mouse on (m)" } else { "mouse off (m)" }));
                 }
                 // A row's actions take the place of the opening hint when
-                // both do not fit; a message said since comes first, so it
-                // is never cut off.
+                // both do not fit; a message said since comes first. It is
+                // cut in the middle to the room left of the call to action,
+                // keeping its end, and goes when too little is left to read.
+                // The opening hint is cut at its tail instead: its keys
+                // lead, and `Tab 1-9` must not be the part cut away.
                 let here = self.footer_actions();
                 let room = area.width.saturating_sub(cta.as_ref().map_or(0, |c| width(c)));
                 let fits = |here: &[Span]| width(&spans) + msg.width() as u16 + width(&[theme::sep()]) + width(here) <= room;
                 if self.msg != crate::app::HINT || here.as_deref().is_none_or(fits) {
-                    spans.push(msg);
+                    // Two columns lead the message; it needs eight past them.
+                    let left = room.saturating_sub(width(&spans)) as usize;
+                    if left >= 2 + MSG_MIN {
+                        let cut = if self.msg == crate::app::HINT { crate::wrap::truncate(&self.msg, left - 2) } else { elide(&self.msg, left - 2) };
+                        spans.push(Span::styled(format!("  {cut}"), msg.style));
+                    }
                 }
                 if let Some(here) = here {
                     spans.push(theme::sep());

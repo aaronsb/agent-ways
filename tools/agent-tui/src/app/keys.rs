@@ -13,7 +13,9 @@ impl App {
     }
 
     fn key_event(&mut self, k: KeyEvent) -> bool {
-        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+        // Beside a pane, ^C is one of the shell keys the pane is told of.
+        let pane_browse = matches!(self.mode, Mode::Browse) && self.pane.is_some();
+        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') && !pane_browse {
             // A running apply finishes its write steps, which are quick; a
             // command in flight takes a second ^C to stop. Anything pending
             // asks first.

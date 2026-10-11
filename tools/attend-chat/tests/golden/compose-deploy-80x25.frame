@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coordi|
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coord…|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                         │|
 |│ │ Wells            │ rollout is green on staging                             │|
@@ -22,7 +22,7 @@ agent-tui frame 80x25
 |│ > ship it at 15:00                                                           │|
 |│                                                                     #deploy  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
-| @Laszlo @aaron @Wells                                                          |
+| @Laszlo @Wells @aaron                                                          |
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
 styles
   0   0-2   White Blue -
@@ -91,8 +91,8 @@ styles
  21  79-79  Cyan - -
  22   0-79  Cyan - -
  23   1-7   Cyan - BOLD
- 23   9-14  LightYellow - -
- 23  16-21  LightCyan - -
+ 23   9-14  LightCyan - -
+ 23  16-21  LightYellow - -
  24   0-5   Black Cyan BOLD
  24   7-21  - - DIM|ITALIC
  24  22-24  - - DIM

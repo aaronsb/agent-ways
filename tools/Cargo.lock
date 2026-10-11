@@ -2036,6 +2036,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tui-harness",
  "walkdir",
  "ways-agent-core",
  "ways-core",

@@ -1,0 +1,122 @@
+agent-tui frame 70x25
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +         |
+|╭────────────────────────────────────────────────────────────────────╮|
+|│ │ aaron            │  file: sh                                     │|
+|│ │ 13:58            │                                               │|
+|│ ╰──────────────────╯                                               │|
+|│                                                                    │|
+|│ ╭──────────────────╮                                               │|
+|│ │ Laszlo           │ a longer message, so the feed shows how a     │|
+|│ │ alpha            │ body wraps beside its chip when it runs past  │|
+|│ │ 13:59            │ the width of the row it is given              │|
+|│ ╰──────────────────╯                                               │|
+|│                                                                    │|
+|│ ╭──────────────────╮                                               │|
+|│ │ Lyra             │ signing off                                   │|
+|│ │ gamma            │                                               │|
+|│ │ 13:45            │                                               │|
+|│ ╰──────────────────╯                                               │|
+|│                                                                    │|
+|╰────────────────────────────────────────────────────────────────────╯|
+|╭────────────────────────────────────────────────────────────────────╮|
+|│ >                                                                  │|
+|│                                                             #open  │|
+|╰────────────────────────────────────────────────────────────────────╯|
+| @Laszlo @Wells @Lyra @aaron                                          |
+| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete          |
+styles
+  0   0-2   White Blue -
+  0   5-14  Black Cyan BOLD
+  0  17-18  Blue - BOLD
+  0  19-27  White Blue -
+  0  30-31  Red - -
+  0  32-42  White Blue -
+  0  45-46  Cyan - -
+  0  47-56  White Blue -
+  0  59-61  White Blue -
+  1   0-69  - - DIM
+  2   0-0   - - DIM
+  2   2-2   - - DIM
+  2   4-8   - - DIM
+  2  21-21  - - DIM
+  2  23-32  White DarkGray -
+  2  69-69  - - DIM
+  3   0-0   - - DIM
+  3   2-2   - - DIM
+  3   4-8   - - DIM
+  3  21-21  - - DIM
+  3  69-69  - - DIM
+  4   0-0   - - DIM
+  4   2-21  - - DIM
+  4  69-69  - - DIM
+  5   0-0   - - DIM
+  5  69-69  - - DIM
+  6   0-0   - - DIM
+  6   2-21  - - DIM
+  6  69-69  - - DIM
+  7   0-0   - - DIM
+  7   2-2   - - DIM
+  7   4-9   Cyan - BOLD
+  7  21-21  - - DIM
+  7  69-69  - - DIM
+  8   0-0   - - DIM
+  8   2-2   - - DIM
+  8   4-8   - - DIM
+  8  21-21  - - DIM
+  8  69-69  - - DIM
+  9   0-0   - - DIM
+  9   2-2   - - DIM
+  9   4-8   - - DIM
+  9  21-21  - - DIM
+  9  69-69  - - DIM
+ 10   0-0   - - DIM
+ 10   2-21  - - DIM
+ 10  69-69  - - DIM
+ 11   0-0   - - DIM
+ 11  69-69  - - DIM
+ 12   0-0   - - DIM
+ 12   2-21  - - DIM
+ 12  69-69  - - DIM
+ 13   0-0   - - DIM
+ 13   2-2   - - DIM
+ 13   4-7   Magenta - -
+ 13  21-21  - - DIM
+ 13  69-69  - - DIM
+ 14   0-0   - - DIM
+ 14   2-2   - - DIM
+ 14   4-8   - - DIM
+ 14  21-21  - - DIM
+ 14  69-69  - - DIM
+ 15   0-0   - - DIM
+ 15   2-2   - - DIM
+ 15   4-8   - - DIM
+ 15  21-21  - - DIM
+ 15  69-69  - - DIM
+ 16   0-0   - - DIM
+ 16   2-21  - - DIM
+ 16  69-69  - - DIM
+ 17   0-0   - - DIM
+ 17  69-69  - - DIM
+ 18   0-69  - - DIM
+ 19   0-69  Cyan - -
+ 20   0-0   Cyan - -
+ 20   2-3   Cyan - -
+ 20   4-4   - - REVERSED
+ 20  69-69  Cyan - -
+ 21   0-0   Cyan - -
+ 21  61-67  White Blue -
+ 21  69-69  Cyan - -
+ 22   0-69  Cyan - -
+ 23   1-7   Cyan - BOLD
+ 23   9-14  LightCyan - -
+ 23  16-20  - - DIM
+ 23  22-27  LightYellow - -
+ 24   0-5   Black Cyan BOLD
+ 24   7-21  - - DIM|ITALIC
+ 24  22-24  - - DIM
+ 24  25-27  Cyan - -
+ 24  28-34  - - DIM|ITALIC
+ 24  35-40  Cyan - -
+ 24  41-47  - - DIM|ITALIC
+ 24  48-51  Cyan - -
+ 24  52-59  - - DIM|ITALIC

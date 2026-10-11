@@ -36,6 +36,25 @@ const INPUT_ROWS: usize = 10;
 pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let fg = chat.normal_tab();
     let text = chat.input.text().to_string();
+    // The left column (ADR-405), when shown and there is room for it.
+    let side_w = chat.side_width(area.width);
+    let (side, area) = match side_w {
+        Some(w) => {
+            let [side, rest] = Layout::horizontal([Constraint::Length(w), Constraint::Min(1)]).areas(area);
+            (Some(side), rest)
+        }
+        None => {
+            // Hidden for width: the keyboard cannot stay on what is not drawn.
+            chat.side_focus = None;
+            (None, area)
+        }
+    };
+    // While the column lists the agents and channels, the helper row
+    // shows only what it does not: commands, their arguments and hints.
+    // Its row stays while a command is typed, so the compose box does not
+    // jump as the command reaches an `@agent` or `#channel` argument.
+    let helper = side.is_none() || super::sidebar::helper_needed(&text);
+    let helper_h = u16::from(helper || text.trim_start().starts_with('/'));
     let attachments = attach::existing_attachments(&text);
     // The compose box: its rows at the box's inner width less the prompt,
     // the attachment row when a dropped file is in the buffer, and the
@@ -44,13 +63,17 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let rows = chat.input.rows(inner, theme::body());
     let shown = rows.len().clamp(1, INPUT_ROWS);
     let input_h = shown as u16 + 3 + u16::from(!attachments.is_empty());
-    let [feed, compose, helper] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(1)]).areas(area);
+    let [feed, compose, helper_row] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(helper_h)]).areas(area);
 
-    let groups = chat.world().groups.clone();
-    chat.hits = Hits { text_width: inner, ..Hits::default() };
+    chat.hits = Hits { text_width: inner, side_area: side.unwrap_or_default(), ..Hits::default() };
+    if let Some(side) = side {
+        super::sidebar::draw(chat, f, side);
+    }
     draw_feed(chat, f, feed, &fg);
     draw_compose(chat, f, compose, rows, &attachments, &fg);
-    draw_helper(chat, f, helper, &text, &groups);
+    if helper {
+        draw_helper(chat, f, helper_row, &text);
+    }
 }
 
 /// The tab bar the shell draws: the common menu's `≡` slot, merged, then
@@ -210,7 +233,9 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'
     }
     f.render_widget(Paragraph::new(lines), Rect { height: text_h, ..inner });
     let scope = tabs::send_scope(fg);
-    if let Some(label) = super::destination_label(chat.input.text(), &scope) {
+    let quiet = super::keys::quiet_names(&chat.world().seen);
+    let swept = super::keys::swept_names(&chat.world().rows);
+    if let Some(label) = super::destination_label(chat.input.text(), &scope, &quiet, &swept) {
         let flag = format!(" {label} ");
         let w = (str_width(&flag) as u16).min(inner.width);
         let at = Rect { x: inner.x + inner.width - w, y: inner.y + text_h, width: w, height: flag_h };
@@ -221,30 +246,35 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'
 /// The helper row: what the buffer is reaching for (`crate::helper`) —
 /// the agent legend, the channel legend, the slash commands, a level of
 /// subcommands, or a free token's hint. Names Tab would complete to are
-/// marked.
-fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str, groups: &[KnownGroup]) {
+/// marked. The legends list what Tab completes over, as the column does:
+/// quiet agents and swept channels too, set back.
+fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str) {
     let depth = chat.palette.depth();
     let mut chips: Vec<Span<'static>> = Vec::new();
     // What a click on each chip completes to, in the chips' order.
     let mut picks: Vec<Chip> = Vec::new();
     match helper::derive(text) {
         HelperMode::Agents(p) => {
-            for k in &chat.world().known {
+            // In the column's order, which is Tab's cycle.
+            for s in super::sidebar::agent_order(&chat.world().seen) {
+                let k = &s.identity;
                 picks.push(Chip::Agent(k.nickname.clone()));
-                let mut st = Style::new().fg(color_for(k.palette, depth));
+                let mut st = if k.is_claude && !s.live { theme::muted() } else { Style::new().fg(color_for(k.palette, depth)) };
                 if k.style.bold {
                     st = st.add_modifier(Modifier::BOLD);
                 }
                 if k.style.italic {
                     st = st.add_modifier(Modifier::ITALIC);
                 }
-                chips.push(Span::styled(format!("@{}", k.nickname), target(st, prefix_match(&k.nickname, p.as_deref()))));
+                // Marked as Tab would complete it: a claude, not a human.
+                chips.push(Span::styled(format!("@{}", k.nickname), target(st, k.is_claude && prefix_match(&k.nickname, p.as_deref()))));
             }
         }
         HelperMode::Groups(p) => {
-            for k in groups {
+            for row in &chat.world().rows {
+                let k = &row.known;
                 picks.push(Chip::Group(k.group.name.clone()));
-                let mut st = Style::new().fg(color_for(k.group.palette, depth));
+                let mut st = if row.on_disk { Style::new().fg(color_for(k.group.palette, depth)) } else { theme::muted() };
                 // The base channel is always bold: the commons (ADR-124 §4).
                 if k.is_base || k.group.style.bold {
                     st = st.add_modifier(Modifier::BOLD);

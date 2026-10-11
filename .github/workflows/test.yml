@@ -45,6 +45,11 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q tmux
           echo "TUI_HARNESS_REQUIRE_TMUX=1" >> "$GITHUB_ENV"
+      # Tests in other crates (ways-cli's tui_smoke) launch through the
+      # tui-harness binary; build it explicitly rather than rely on the
+      # workspace build order.
+      - name: build tui-harness
+        run: cargo build --manifest-path tools/Cargo.toml -p tui-harness
       - name: test
         run: cargo test --manifest-path tools/Cargo.toml --workspace
       # attend compiles with any subset of its sensors. The default build

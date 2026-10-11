@@ -6,11 +6,10 @@
 
 use agent_theme::ColorDepth;
 
-use crate::chip::{known_identities, resolve_nickname, KnownIdentity};
+use crate::chip::{known_of, resolve_nickname, seen_identities, KnownIdentity, Seen};
 use crate::groups::{channels, channels_in, live_peer_count, resolve_group_dir, BASE_CHANNEL_NAME};
 use crate::legend::{
-    all_completions, all_group_completions, apply_completion, find_trailing_mention,
-    parse_addressed, Addressed, Sigil,
+    apply_completion, find_trailing_mention, parse_addressed, Addressed, Sigil,
 };
 use crate::sessions::discover as discover_sessions;
 use crate::signal::{
@@ -139,7 +138,10 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab) -> EnterAction 
     // not on the render path — they fire on demand and resolve
     // against the current registry state.
     let instance_cache = attend_instances::SnapshotCache::new();
-    let agents = known_identities(signals, &seeds, caps, &instance_cache);
+    let alive = |id: &str| attend_presence::alive(id, &Default::default());
+    let seen = seen_identities(signals, &seeds, caps, alive, |_| true, |_| false, &instance_cache);
+    let agents = known_of(&seen);
+    let quiet = quiet_names(&seen);
     // A message can address several recipients at once
     // (`@Tamsin @Cleo …`). Parse the whole leading run; an empty run
     // means "send to the foreground tab's channel" — `#open` from
@@ -162,11 +164,27 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab) -> EnterAction 
             // explicit `#g` prefix — only the channel came from the
             // tab instead of the message text. The body is unchanged
             // (wire format carries no channel).
-            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents)
+            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet)
         }
     } else {
-        send_to_recipients(&msg, &recipients, &agents)
+        send_to_recipients(&msg, &recipients, &agents, &quiet)
     }
+}
+
+/// The claudes the chat has seen that are quiet now, no heartbeat, by
+/// name: those no live claude also answers to. Tab completes them and the
+/// column lists them; a send to one is refused, and the destination flag
+/// marks it.
+pub(super) fn quiet_names(seen: &[Seen]) -> Vec<String> {
+    let live = |n: &str| seen.iter().any(|s| s.live && s.identity.is_claude && s.identity.nickname.eq_ignore_ascii_case(n));
+    seen.iter().filter(|s| s.identity.is_claude && !s.live && !live(&s.identity.nickname)).map(|s| s.identity.nickname.clone()).collect()
+}
+
+/// The channels `_groups.yaml` still names whose directory was swept, by
+/// name. Tab completes them and the column lists them; a send to one is
+/// refused, and the destination flag marks it.
+pub(super) fn swept_names(rows: &[crate::groups::ChannelRow]) -> Vec<String> {
+    rows.iter().filter(|r| !r.on_disk).map(|r| r.known.group.name.clone()).collect()
 }
 
 /// Addressed-send core shared by the explicit `@`/`#` prefix path and
@@ -177,13 +195,14 @@ fn send_to_recipients(
     msg: &str,
     recipients: &[Addressed<'_>],
     agents: &[KnownIdentity],
+    quiet: &[String],
 ) -> EnterAction {
-    let sent = resolve_recipients(recipients, agents).and_then(|dests| {
-        for dir in &dests {
-            write_signal(dir, msg)?;
-        }
-        Ok(dests)
-    });
+    // A recipient that cannot read it refuses the send, in its own words.
+    let dests = match resolve_recipients(recipients, agents, quiet) {
+        Ok(dests) => dests,
+        Err(refusal) => return EnterAction::StatusOnly(refusal),
+    };
+    let sent = dests.iter().try_for_each(|dir| write_signal(dir, msg).map(|_| ())).map(|()| dests);
     match sent {
         Ok(dests) => {
             let status = format!("sent → {}", recipient_labels(recipients).join(" "));
@@ -519,12 +538,23 @@ fn run_kick(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAct
         Ok(p) => p,
         Err(e) => return EnterAction::StatusOnly(e),
     };
-    let action = kick_member_in(&signals_base(), &g, &peer.session_id, &peer.display);
-    if matches!(action, EnterAction::ClearWithStatus(_)) {
+    kick_member(&g, &peer.session_id, &peer.display, Some(&peer.root))
+}
+
+/// Remove the member `id` from channel `g`, named `label` on the status
+/// line, live or not: the menus reach a quiet member through its
+/// membership id, where `/kick @name` resolves only live peers. A claude
+/// with a `root` is told in its inbox, which it reads when it next runs.
+pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterAction {
+    if g == BASE_CHANNEL_NAME {
+        return EnterAction::StatusOnly("#open is the base channel — you can't kick from it".into());
+    }
+    let action = kick_member_in(&signals_base(), g, id, label);
+    if let (EnterAction::ClearWithStatus(_), Some(root)) = (&action, root) {
         let notice = format!(
             "you were removed from #{g} by the operator — rejoin with: attend join {g}"
         );
-        let _ = write_signal(&cwd_dir(&peer.root), &notice);
+        let _ = write_signal(&cwd_dir(root), &notice);
     }
     action
 }
@@ -651,17 +681,27 @@ fn purge_channel_in(
 /// so the flag cannot disagree with what `handle_enter` does —
 /// misrouted broadcast is the failure it exists to prevent. `None`
 /// while a slash command is being composed (commands don't send).
-/// `scope` is the channel an unaddressed message targets.
-pub fn destination_label(input: &str, scope: &str) -> Option<String> {
+/// `scope` is the channel an unaddressed message targets. An agent named
+/// in `quiet` ([`quiet_names`]) and a channel named in `swept`
+/// ([`swept_names`]) are marked: the send would be refused.
+pub fn destination_label(input: &str, scope: &str, quiet: &[String], swept: &[String]) -> Option<String> {
     if slash::parse(input).is_some() || slash::find_slash_partial(input).is_some() {
         return None;
     }
     let recipients = parse_addressed(input);
     if recipients.is_empty() {
-        Some(format!("#{scope}"))
-    } else {
-        Some(recipient_labels(&recipients).join(" "))
+        return Some(format!("#{scope}"));
     }
+    let labels: Vec<String> = recipients
+        .iter()
+        .zip(recipient_labels(&recipients))
+        .map(|(r, label)| match r {
+            Addressed::Agent(name) if quiet.iter().any(|q| q.eq_ignore_ascii_case(name)) => format!("{label} (quiet)"),
+            Addressed::Group(name) if swept.iter().any(|s| s == name) => format!("{label} (swept)"),
+            _ => label,
+        })
+        .collect();
+    Some(labels.join(" "))
 }
 
 /// Does the sender's own chat watcher already surface signals written to
@@ -692,7 +732,8 @@ fn recipient_labels(recipients: &[Addressed<'_>]) -> Vec<String> {
 }
 
 /// Resolve every addressed recipient to its destination inbox dir, or
-/// return the first addressing error. All-or-nothing on purpose: the
+/// return the first refusal, worded for the status line. All-or-nothing
+/// on purpose: the
 /// caller writes only when *every* recipient resolves, so a single bad
 /// `@name`/`#group` rejects the whole multi-address send instead of
 /// partially delivering. Adjacent or repeated addresses that resolve to
@@ -703,10 +744,16 @@ fn recipient_labels(recipients: &[Addressed<'_>]) -> Vec<String> {
 /// with zero live members would land in `@<name>/` and sit unread while
 /// the chat reports "sent". The base channel (`#open`) bypasses the
 /// check — it rides `_broadcast/`, scanned regardless of membership.
+///
+/// Tab completes quiet agents and swept channels, as the column lists
+/// them, so a send to one says why it is refused: an agent named in
+/// `quiet` has no heartbeat, and a channel whose directory was swept has
+/// nobody live to read it until someone joins it again.
 fn resolve_recipients(
     recipients: &[Addressed<'_>],
     agents: &[KnownIdentity],
-) -> std::io::Result<Vec<std::path::PathBuf>> {
+    quiet: &[String],
+) -> Result<Vec<std::path::PathBuf>, String> {
     let mut dests = Vec::with_capacity(recipients.len());
     let mut seen = std::collections::HashSet::new();
     // Self-exclusion for the liveness gate: since ADR-170 the human
@@ -716,28 +763,31 @@ fn resolve_recipients(
     let self_member = crate::signal::human_member_id();
     for r in recipients {
         let dir = match r {
-            Addressed::Agent(name) => resolve_nickname(name, agents)
-                .map(|cwd| cwd_dir(&cwd))
-                .ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("@{name}: unknown nickname"),
-                    )
-                })?,
+            Addressed::Agent(name) => {
+                // An exact quiet name is refused before a fuzzy match could
+                // carry it to a live agent with a name like it.
+                let exact_live = agents.iter().any(|k| k.is_claude && k.nickname.eq_ignore_ascii_case(name));
+                if let Some(q) = quiet.iter().find(|q| !exact_live && q.eq_ignore_ascii_case(name)) {
+                    return Err(format!("@{q} is quiet (no heartbeat) and would not read this"));
+                }
+                resolve_nickname(name, agents)
+                    .map(|cwd| cwd_dir(&cwd))
+                    .ok_or_else(|| format!("@{name}: unknown nickname"))?
+            }
             Addressed::Group(name) => match resolve_group_dir(name) {
                 Some(dir) if live_peer_count(name, &self_member) > 0 => dir,
-                Some(_) => {
-                    return Err(std::io::Error::other(format!(
-                        "#{name}: no live peers — message would not be read. \
-                         Try #open to broadcast."
-                    )))
-                }
-                None => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("#{name}: unknown group"),
+                Some(dir) if !dir.is_dir() => {
+                    return Err(format!(
+                        "#{name} was swept; /join #{name} and invite a live agent to bring it back, or send to #open"
                     ))
                 }
+                Some(_) => {
+                    return Err(format!(
+                        "#{name}: no live peers — message would not be read. \
+                         Try #open to broadcast."
+                    ))
+                }
+                None => return Err(format!("#{name}: unknown group")),
             },
         };
         if seen.insert(dir.clone()) {
@@ -759,11 +809,15 @@ pub struct TabResult {
 /// Tab-completion + cycle advance. No-op when the caret is mid-buffer
 /// (avoids surprising mid-sentence edits) or when no completion
 /// applies. Slash completions short-circuit before `@`/`#` parsing.
+/// An `@` completes over `agents` and a `#` over `channels`, in their
+/// order: the names the left column lists (ADR-405), so Tab reaches a
+/// quiet agent and a swept channel as a click does.
 pub fn handle_tab(
     buf: &str,
     cursor: usize,
     current_cycle: Option<TabCycle>,
-    signals: &[Signal],
+    agents: &[String],
+    channels: &[String],
 ) -> TabResult {
     let unchanged = TabResult {
         new_buf: buf.to_string(),
@@ -831,19 +885,12 @@ pub fn handle_tab(
     let Some(mention) = find_trailing_mention(buf) else {
         return unchanged;
     };
-    let caps = ColorDepth::detect();
-    let candidates: Vec<String> = match mention.sigil {
-        Sigil::Agent => {
-            let seeds = discover_sessions();
-            let instance_cache = attend_instances::SnapshotCache::new();
-            let agents = known_identities(signals, &seeds, caps, &instance_cache);
-            all_completions(mention.partial, &agents)
-        }
-        Sigil::Group => {
-            let groups = channels(caps);
-            all_group_completions(mention.partial, &groups)
-        }
+    let pool = match mention.sigil {
+        Sigil::Agent => agents,
+        Sigil::Group => channels,
     };
+    let lc = mention.partial.to_ascii_lowercase();
+    let candidates: Vec<String> = pool.iter().filter(|n| n.to_ascii_lowercase().starts_with(&lc)).cloned().collect();
     if candidates.is_empty() {
         return unchanged;
     }
@@ -1285,6 +1332,7 @@ mod tests {
     #[test]
     fn destination_label_tracks_routing_live() {
         // Unaddressed → the scope channel.
+        let destination_label = |i: &str, s: &str| destination_label(i, s, &[], &[]);
         assert_eq!(destination_label("", "open"), Some("#open".into()));
         assert_eq!(destination_label("hello", "open"), Some("#open".into()));
         assert_eq!(destination_label("hello", "deploy"), Some("#deploy".into()));
@@ -1300,7 +1348,41 @@ mod tests {
     }
 
     #[test]
+    fn the_destination_flag_marks_a_quiet_agent() {
+        let quiet = ["Lark".to_string()];
+        assert_eq!(destination_label("@lark hi", "open", &quiet, &[]), Some("@lark (quiet)".into()));
+        assert_eq!(destination_label("@Tamsin @Lark hi", "open", &quiet, &[]), Some("@Tamsin @Lark (quiet)".into()));
+        assert_eq!(destination_label("hi", "open", &quiet, &[]), Some("#open".into()));
+    }
+
+    #[test]
+    fn the_destination_flag_marks_a_swept_channel() {
+        let swept = ["ghost".to_string()];
+        assert_eq!(destination_label("#ghost hi", "open", &[], &swept), Some("#ghost (swept)".into()));
+        assert_eq!(destination_label("#infra #ghost hi", "open", &[], &swept), Some("#infra #ghost (swept)".into()));
+        assert_eq!(destination_label("#ghostly hi", "open", &[], &swept), Some("#ghostly".into()), "the name, not a prefix of it");
+    }
+
+    fn ident(name: &str, cwd: &str) -> KnownIdentity {
+        let id = agent_identity::Identity::for_cwd(cwd, ColorDepth::Ansi16);
+        KnownIdentity { nickname: name.into(), cwd: cwd.into(), is_claude: true, palette: id.palette, style: id.style }
+    }
+
+    #[test]
+    fn a_send_to_a_quiet_agent_or_a_swept_channel_is_refused_in_its_own_words() {
+        let live = [ident("Larks", "/w/larks")];
+        let quiet = ["Lark".to_string()];
+        let to = |r: Addressed<'_>| resolve_recipients(&[r], &live, &quiet);
+        assert_eq!(to(Addressed::Agent("Lark")), Err("@Lark is quiet (no heartbeat) and would not read this".into()), "not carried to Larks by the fuzzy match");
+        assert!(to(Addressed::Agent("Larks")).is_ok(), "a live agent is sent to");
+        assert_eq!(to(Addressed::Agent("Nobody")), Err("@Nobody: unknown nickname".into()));
+        let seen = |name: &str, live: bool| Seen { identity: ident(name, &format!("/w/{name}")), live, member: name.into() };
+        assert_eq!(quiet_names(&[seen("Lark", false), seen("Wells", true), seen("Wells", false)]), ["Lark"], "a name a live agent answers to is not quiet");
+    }
+
+    #[test]
     fn destination_label_hides_while_composing_slash() {
+        let destination_label = |i: &str, s: &str| destination_label(i, s, &[], &[]);
         assert_eq!(destination_label("/", "open"), None);
         assert_eq!(destination_label("/jo", "open"), None);
         assert_eq!(destination_label("/join #deploy", "open"), None);
@@ -1310,9 +1392,23 @@ mod tests {
 
     #[test]
     fn tab_mid_buffer_is_noop_and_resets_cycle() {
-        let res = handle_tab("@foo bar", 3, None, &[]);
+        let res = handle_tab("@foo bar", 3, None, &[], &[]);
         assert_eq!(res.new_buf, "@foo bar");
         assert_eq!(res.new_cursor, 3);
         assert!(res.new_cycle.is_none());
+    }
+
+    #[test]
+    fn tab_completes_over_the_pools_it_is_given_in_their_order() {
+        let agents = ["Laszlo-alpha".to_string(), "Quinn".into(), "Lark".into()];
+        let channels = ["open".to_string(), "deploy".into(), "swept".into()];
+        let r = handle_tab("hi @l", 5, None, &agents, &channels);
+        assert_eq!(r.new_buf, "hi @Laszlo-alpha ");
+        let r = handle_tab(&r.new_buf, r.new_buf.chars().count(), r.new_cycle, &agents, &channels);
+        assert_eq!(r.new_buf, "hi @Lark ", "the next match, a quiet agent the column lists");
+        let r = handle_tab("#sw", 3, None, &agents, &channels);
+        assert_eq!(r.new_buf, "#swept ", "a channel only _groups.yaml names");
+        let r = handle_tab("@zz", 3, None, &agents, &channels);
+        assert_eq!(r.new_buf, "@zz", "nothing listed, nothing completed");
     }
 }

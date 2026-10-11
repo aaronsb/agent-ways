@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coordi|
+| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coord…|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ ╭──────────────────╮                                                         │|
 |│ │ Wells            │ rollout is green on staging                             │|
@@ -13,7 +13,7 @@ agent-tui frame 80x25
 |│              │   Remove agent ▸                               │              │|
 |│              │   Describe…                                    │              │|
 |│              │   Clear history                                │              │|
-|│              │   Leave                                        │              │|
+|│              │   Join                                         │              │|
 |│              │   Delete channel                               │              │|
 |│              └────────────────────────────────────────────────┘              │|
 |│                                                                              │|
@@ -22,7 +22,7 @@ agent-tui frame 80x25
 |│ >                                                                            │|
 |│                                                                     #deploy  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
-| @Laszlo @aaron @Wells                                                          |
+| @Laszlo @Wells @aaron                                                          |
 | pick   ↑↓ choose · Enter or click sets · Esc closes                            |
 styles
   0   0-2   White Blue -
@@ -110,7 +110,7 @@ styles
  21  79-79  Cyan - -
  22   0-79  Cyan - -
  23   1-7   Cyan - BOLD
- 23   9-14  LightYellow - -
- 23  16-21  LightCyan - -
+ 23   9-14  LightCyan - -
+ 23  16-21  LightYellow - -
  24   0-5   Black Cyan BOLD
  24   6-51  - - DIM|ITALIC

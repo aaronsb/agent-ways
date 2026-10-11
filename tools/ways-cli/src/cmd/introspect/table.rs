@@ -285,12 +285,14 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
         // The notes keep `↻` in JSON; the screen draws the re-disclosure
         // mark the rows use, which the terminal fonts have.
         let notes: Vec<String> = frame.new_events.iter().map(|e| e.strip_prefix("↻ ").map_or_else(|| e.clone(), |w| format!("↩ {w}"))).collect();
-        out.push((2, Line::styled(format!("+ {}", notes.join(", ")), theme::ok().add_modifier(Modifier::BOLD))));
+        let text = agent_fmt::truncate_visible(&format!("+ {}", notes.join(", ")), width);
+        out.push((2, Line::styled(text, theme::ok().add_modifier(Modifier::BOLD))));
     }
     // #786: the subagent switch held ways back here, one mark each.
     if !frame.suppressed.is_empty() {
         let each: Vec<String> = frame.suppressed.iter().map(|s| s.label()).collect();
-        out.push((2, Line::styled(format!("⊝ suppressed: {}", each.join(", ")), theme::warn())));
+        let text = agent_fmt::truncate_visible(&format!("⊝ suppressed: {}", each.join(", ")), width);
+        out.push((2, Line::styled(text, theme::warn())));
     }
     out
 }
