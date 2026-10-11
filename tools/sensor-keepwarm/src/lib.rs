@@ -406,11 +406,15 @@ impl State {
                 out.changed = true;
                 let mut line = format!("cold write of {} tokens paid ({})", fmt_tok(entry.cache_creation), fmt_usd(usd));
                 // Only a context the floor can serve is worth holding warm.
-                if entry.context() >= BIG_TOKENS && self.deadline < now + AUTO_WARM_SECS {
-                    self.deadline = now + AUTO_WARM_SECS;
+                // The window runs from the write, not from when it was
+                // scored: a check that resumes after hours away scores an
+                // old write, whose window may already have run out.
+                let until = entry.at_epoch + AUTO_WARM_SECS;
+                if entry.context() >= BIG_TOKENS && until > now && self.deadline < until {
+                    self.deadline = until;
                     self.stopped = None;
                     out.arm_write = Some(self.deadline);
-                    line.push_str(&format!(", keeping the cache warm for {} so it is not paid again today", fmt_duration(AUTO_WARM_SECS)));
+                    line.push_str(&format!(", keeping the cache warm for {} so it is not paid again today", fmt_duration(until - now)));
                 }
                 out.logs.push(line);
             }
@@ -831,8 +835,19 @@ mod tests {
         let out = s.step(&r2, None, back + 30);
         assert_eq!(s.misses.len(), 1);
         assert_eq!(s.misses[0].usd.map(|u| (u * 100.0).round() / 100.0), Some(4.01));
-        assert_eq!(out.arm_write, Some(back + 30 + AUTO_WARM_SECS));
-        assert!(out.logs[0].contains("cold write of 201k tokens paid ($4.01), keeping the cache warm for 3h00m"));
+        assert_eq!(out.arm_write, Some(back + AUTO_WARM_SECS), "the window runs from the write");
+        assert!(out.logs[0].contains("cold write of 201k tokens paid ($4.01), keeping the cache warm for 3h00m"), "{:?}", out.logs);
+    }
+
+    /// A write scored after its window ran out is scored and arms nothing.
+    #[test]
+    fn a_cold_write_scored_after_its_window_arms_nothing() {
+        let (mut s, _) = warm_state();
+        let back = 1000 + TTL_SECS + 600;
+        let r2 = reading(vec![entry(1000, 200_000, 500), entry(back, 0, 200_700)]);
+        let out = s.step(&r2, None, back + AUTO_WARM_SECS + 60);
+        assert_eq!(s.misses.len(), 1);
+        assert_eq!(out.arm_write, None);
     }
 
     #[test]

@@ -189,3 +189,41 @@ fn the_check_without_a_session_prints_nothing() {
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stdout.is_empty());
 }
+
+/// While an `attend run` holds the session, its sensor owns keepwarm: the
+/// check prints nothing, so the session is not woken twice.
+#[test]
+fn the_check_stands_down_under_a_live_run() {
+    let w = Warm::new("kw-live-run");
+    w.reading(&[(51 * MIN, 200_000, 500)]);
+    assert!(w.run(&["keepwarm", "on"]).status.success());
+    w.check();
+    let run = w.f.run();
+    run.wait_for("the run's lock", std::time::Duration::from_secs(20), |_| {
+        let out = w.run(&["keepwarm", "check"]);
+        String::from_utf8_lossy(&out.stderr).contains("an attend run holds this session")
+    });
+    assert_eq!(w.check(), "");
+}
+
+/// A cold write paid while no check ran (the host was dormant) arms the
+/// window from the time of the write, as the sensor's loop would have. One
+/// whose window has already run out arms nothing.
+#[test]
+fn a_cold_write_scored_late_arms_from_its_own_time() {
+    let w = Warm::new("kw-late-write");
+    w.reading(&[(5 * 60 * MIN, 200_000, 500)]);
+    assert_eq!(w.check(), "");
+    w.reading(&[(5 * 60 * MIN, 200_000, 500), (4 * 60 * MIN, 0, 200_500)]);
+    assert_eq!(w.check(), "");
+    let status = w.status_line();
+    assert!(!status.contains(" on,"), "a window that ended an hour ago is not armed: {status}");
+
+    let w = Warm::new("kw-late-write-2");
+    w.reading(&[(3 * 60 * MIN, 200_000, 500)]);
+    assert_eq!(w.check(), "");
+    w.reading(&[(3 * 60 * MIN, 200_000, 500), (20 * MIN, 0, 200_500)]);
+    assert_eq!(w.check(), "");
+    let status = w.status_line();
+    assert!(status.starts_with("keepwarm    on, 2h40m left") || status.starts_with("keepwarm    on, 2h39m left"), "{status}");
+}
