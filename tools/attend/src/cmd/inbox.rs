@@ -152,6 +152,7 @@ pub(crate) struct Drained {
     sender_id: String,
     scope: String,
     /// The room it was found in, which a reply to it stays in.
+    #[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
     room: Room,
     pub(crate) id: String,
     body: String,
