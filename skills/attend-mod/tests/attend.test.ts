@@ -109,6 +109,10 @@ describe('arguments', () => {
     expect(sendArgv('hi', '#ship', '/p')).toEqual(['attend', 'send', '--channel', 'ship', '--to', '/p', '--', 'hi'])
     expect(replyArgv(nasty)).toEqual(['attend', 'reply', '--', nasty])
     expect(replyArgv('ok', 'id-1')).toEqual(['attend', 'send', '--re', 'id-1', '--', 'ok'])
+    // A reply keeps its parent's channel; #open adds no flag.
+    expect(replyArgv('ok', 'id-1', '@mod-trial')).toEqual(['attend', 'send', '--re', 'id-1', '--channel', 'mod-trial', '--', 'ok'])
+    expect(replyArgv('ok', undefined, '#mod-trial')).toEqual(['attend', 'reply', '--channel', 'mod-trial', '--', 'ok'])
+    expect(replyArgv('ok', undefined, '#open')).toEqual(['attend', 'reply', '--', 'ok'])
   })
 
   test('a body cannot close the frame early', () => {

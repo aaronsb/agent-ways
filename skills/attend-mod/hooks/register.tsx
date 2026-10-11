@@ -80,6 +80,10 @@ type Mod = {
   isChatPresent: boolean
   /** Short `~id` handles of delivered messages, to their full ids. */
   ids: Map<string, string>
+  /** Each delivered message's scope, by full id, so a reply keeps its channel. */
+  scopes: Map<string, string>
+  /** The scope of the newest delivered message, for a reply with no `re`. */
+  lastScope?: string
 }
 
 async function attend($: $, argv: readonly string[]) {
@@ -130,7 +134,11 @@ async function refreshPeers($: $) {
  *  session. */
 async function deliver($: $, mod: Mod, msgs: readonly Listed[], count: number, lead?: string) {
   mod.lastActivityMs = await $.clock.now()
-  for (const m of msgs) mod.ids.set(shortId(m.id), m.id)
+  for (const m of msgs) {
+    mod.ids.set(shortId(m.id), m.id)
+    mod.scopes.set(m.id, m.scope)
+    mod.lastScope = m.scope
+  }
   const seen = msgs.map(m => m.scope).filter(c => c.startsWith('#'))
   const s = await readStatus($)
   const full = isFullPreamble(s.deliveries, s.afterCompaction)
@@ -244,6 +252,7 @@ export const register: Register = (on, options) => {
     lastActivityMs: 0,
     isChatPresent: false,
     ids: new Map(),
+    scopes: new Map(),
   }
 
   on('session.start', async ($, e, next) => {
@@ -342,7 +351,8 @@ export const register: Register = (on, options) => {
     if (message.trim() === '') return { result: 'message is empty; nothing sent', isError: true }
     const raw = typeof input.re === 'string' ? input.re.replace(/^~/, '') : ''
     const re = raw === '' ? undefined : mod.ids.get(raw) ?? raw
-    const sent = await sendParts($, chunk(message).map(p => replyArgv(p, re)))
+    const scope = re ? mod.scopes.get(re) : mod.lastScope
+    const sent = await sendParts($, chunk(message).map(p => replyArgv(p, re, scope)))
     $.clock.after(0, () => void wake($, mod, 'this session replied', []))
     return toolText(sent)
   })

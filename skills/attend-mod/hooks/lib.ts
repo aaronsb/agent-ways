@@ -43,8 +43,14 @@ export function sendArgv(message: string, channel?: string, to?: string): string
 
 /** `attend reply -- <message>`, which threads to the last inbound; with `re`,
  *  `attend send --re <id> -- <message>` threads to that id. */
-export function replyArgv(message: string, re?: string): string[] {
-  return re ? [ATTEND, 'send', '--re', re, '--', message] : [ATTEND, 'reply', '--', message]
+/** A reply stays in its parent's channel: `scope` is the parent's (`#name`
+ *  or `@name`); `#open` and non-channel scopes add no flag. */
+export function replyArgv(message: string, re?: string, scope?: string): string[] {
+  const name = scope && /^[#@]/.test(scope) ? scope.slice(1) : ''
+  const channel = name && name !== 'open' ? ['--channel', name] : []
+  return re
+    ? [ATTEND, 'send', '--re', re, ...channel, '--', message]
+    : [ATTEND, 'reply', ...channel, '--', message]
 }
 
 export function joinArgv(channel: string): string[] {
