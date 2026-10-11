@@ -126,6 +126,42 @@ fn parse_ps(stdout: &str) -> Vec<Proc> {
         .collect()
 }
 
+/// Apps the sensor tracks besides the watched tools: application-level
+/// processes whose presence is worth an event.
+const TRACKED: &[&str] = &[
+    // Build tools
+    "cargo", "rustc", "gcc", "g++", "make", "cmake", "ninja",
+    // Runtimes (but not their subprocess churn)
+    "node", "npm", "npx", "python", "python3", "ruby", "java", "go",
+    // Editors
+    "code", "nvim", "vim", "emacs", "helix",
+    // Claude
+    "claude",
+    // Servers
+    "postgres", "mysql", "redis-server", "nginx", "httpd",
+    "docker", "podman", "containerd",
+    // Browsers (top-level only — we track presence, not subprocess count)
+    "firefox", "chromium", "chrome",
+    // Network
+    "ssh", "scp", "rsync", "curl", "wget",
+    // Version control
+    "git",
+];
+
+/// The name a process is tracked under. A process can rename itself, and
+/// some known tools do: npm sets its title to the command line, so its
+/// `comm` reads `npm test` or `npm run dev`, and node names its main thread,
+/// so its `comm` reads `node-MainThread`. The first word of `comm`, and
+/// that word without a trailing `-<suffix>`, are tried after `comm` itself,
+/// and the first of the three that `known` accepts is the name. A process
+/// none of them matches keeps its `comm` as it is, so `Web Content` or
+/// `slack-mcp-linux` is not cut down to a name it does not have.
+fn canonical_name(comm: &str, known: impl Fn(&str) -> bool) -> String {
+    let word = comm.split_whitespace().next().unwrap_or(comm);
+    let base = word.rsplit_once('-').map_or(word, |(base, _)| base);
+    [comm, word, base].into_iter().find(|n| known(n)).unwrap_or(comm).to_string()
+}
+
 /// How far up the parent chain [`tally`] looks for a watched tool. A build
 /// tree is a few levels deep (cargo → rustc, make → cc → cc1); the cap
 /// bounds the walk per process (ADR-137) and stops a pid cycle.
@@ -163,8 +199,12 @@ struct HeldExit {
 /// own (ADR-113: the sensor tracks application presence, not PID churn),
 /// and the parent's exit carries the build event. Any other app stays
 /// visible wherever it runs, so `node` under `npm` or `docker` under
-/// `make` is counted, and recorded as hosted by the tool above it.
+/// `make` is counted, and recorded as hosted by the tool above it. Every
+/// process is first given its [`canonical_name`], against the watched
+/// tools and [`TRACKED`].
 fn tally(procs: &[Proc], is_relevant: impl Fn(&str) -> bool, is_watched: impl Fn(&str) -> bool) -> Snapshot {
+    let known = |n: &str| is_watched(n) || TRACKED.contains(&n);
+    let procs: Vec<Proc> = procs.iter().map(|p| Proc { comm: canonical_name(&p.comm, known), ..p.clone() }).collect();
     let by_pid: HashMap<u32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
     let watched_above = |p: &Proc| {
         let mut tools = Vec::new();
@@ -395,27 +435,7 @@ impl ProcessSensor {
             return true;
         }
 
-        // Interesting application-level processes
-        let interesting = [
-            // Build tools
-            "cargo", "rustc", "gcc", "g++", "make", "cmake", "ninja",
-            // Runtimes (but not their subprocess churn)
-            "node", "npm", "npx", "python", "python3", "ruby", "java", "go",
-            // Editors
-            "code", "nvim", "vim", "emacs", "helix",
-            // Claude
-            "claude",
-            // Servers
-            "postgres", "mysql", "redis-server", "nginx", "httpd",
-            "docker", "podman", "containerd",
-            // Browsers (top-level only — we track presence, not subprocess count)
-            "firefox", "chromium", "chrome",
-            // Network
-            "ssh", "scp", "rsync", "curl", "wget",
-            // Version control
-            "git",
-        ];
-        interesting.contains(&comm)
+        TRACKED.contains(&comm)
     }
 }
 
@@ -881,6 +901,64 @@ mod tests {
         s.prior = apps(&["nvim"]);
         assert!(s.diff(snap(&["nvim", "git"]), 0).is_empty());
         assert!(s.diff(snap(&["nvim"]), 0).is_empty(), "git came and went within a poll");
+    }
+
+    // ── names as the host reports them ─────────────────────────────────
+
+    #[test]
+    fn canonical_name_finds_the_tool_inside_a_renamed_process() {
+        let s = ProcessSensor::new();
+        let known = |n: &str| s.is_watched(n) || TRACKED.contains(&n);
+        assert_eq!(canonical_name("npm test", known), "npm");
+        assert_eq!(canonical_name("npm run dev", known), "npm");
+        assert_eq!(canonical_name("npm exec node -", known), "npm");
+        assert_eq!(canonical_name("node-MainThread", known), "node");
+        assert_eq!(canonical_name("cargo", known), "cargo");
+        assert_eq!(canonical_name("g++", known), "g++");
+        // Names that reduce to nothing known stay whole.
+        assert_eq!(canonical_name("Web Content", known), "Web Content");
+        assert_eq!(canonical_name("slack-mcp-linux", known), "slack-mcp-linux");
+    }
+
+    /// Rows from `ps -o pid=,ppid=,comm=` during a real `npm test`,
+    /// `npm run dev` and `npm exec`, on node v26.10.0 and npm 12.2.0.
+    const LIVE_NPM: &str = "\
+3181657 3181656 bash
+3181672 3181657 npm test
+3181673 3181657 npm run dev
+3181674 3181657 npm exec node -
+3181706 3181673 node-MainThread
+3181707 3181672 node-MainThread
+3181721 3181674 node-MainThread
+";
+
+    #[test]
+    fn tally_sees_npm_and_node_as_this_host_names_them() {
+        let s = ProcessSensor::new();
+        let t = tally(&parse_ps(LIVE_NPM), |c| c != "bash", |c| s.is_watched(c));
+        assert_eq!(t.apps, HashMap::from([("node".to_string(), 3)]));
+        assert_eq!(
+            t.tools,
+            HashMap::from([
+                (3181672, tool("npm", &["node"])),
+                (3181673, tool("npm", &["node"])),
+                (3181674, tool("npm", &["node"])),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_live_npm_test_finishes_naming_node() {
+        let s = ProcessSensor::new();
+        let poll = |rows: &str| tally(&parse_ps(rows), |c| c != "bash", |c| s.is_watched(c));
+        let test_run = "3181657 3181656 bash\n3181672 3181657 npm test\n3181707 3181672 node-MainThread\n";
+        let mut sensor = ProcessSensor::new();
+        let base = poll("3181657 3181656 bash\n");
+        sensor.prior = base.apps;
+        sensor.prior_tools = base.tools;
+        assert!(sensor.diff(poll(test_run), 0).is_empty());
+        assert_eq!(texts(&sensor.diff(poll(test_run), 0)), vec!["node started"]);
+        assert_eq!(texts(&sensor.diff(poll("3181657 3181656 bash\n"), 0)), vec!["npm finished (node exited)"]);
     }
 
     #[test]
