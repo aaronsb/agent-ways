@@ -42,6 +42,27 @@ fn clip(text: &str, room: usize) -> String {
     out
 }
 
+/// A key the shell takes before the pane, read by [`App::shell_key`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ShellKey {
+    /// Ctrl+N: the pane's new item.
+    NewItem,
+    /// A key on the focused tab bar, its cursor on this tab.
+    Strip(usize),
+    /// F2 or Ctrl+T: the tab bar takes the focus.
+    StripFocus,
+    /// Ctrl+digit: tab n (from 1), or its menu on the tab shown.
+    TabOrMenu(usize),
+    /// Alt+digit, or a plain digit beside no text: tab n (from 1).
+    Tab(usize),
+    /// F1, or `?` beside no text: the key help.
+    Help,
+    /// Ctrl+C, or `q` beside no text.
+    Quit,
+    /// Alt+m, or `m` beside no text: the mouse on or off.
+    Mouse,
+}
+
 impl App {
     /// The pane's unsaved work, for the exit guard.
     pub(super) fn pane_unsaved(&self) -> Option<String> {
@@ -252,12 +273,14 @@ impl App {
         f.render_widget(Paragraph::new(lines).scroll((scroll, 0)).block(bordered("keys · ↑↓ scroll · any other key closes").border_style(theme::modal_border())), r);
     }
 
-    /// A key while a pane is shown. The shell takes its own first (a tab,
-    /// the mouse, the key help); the pane gets the rest; what the pane
-    /// passes on and quits, quits.
-    pub(super) fn pane_key(&mut self, k: KeyEvent) -> bool {
-        if self.pane_tab_key(k) {
-            return true;
+    /// The key `k` names when the shell takes it before the pane, or None
+    /// when it is the pane's.
+    fn shell_key(&self, k: KeyEvent) -> Option<ShellKey> {
+        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+            return Some(ShellKey::Quit);
+        }
+        if let Some(s) = self.tab_bar_key(k) {
+            return Some(s);
         }
         let text = self.owns_text();
         let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
@@ -266,32 +289,33 @@ impl App {
         let shell = k.modifiers == KeyModifiers::ALT || (!text && plain);
         let digit_jump = (k.modifiers == KeyModifiers::ALT && self.alt_jump()) || (!text && plain);
         match k.code {
-            KeyCode::F(1) => {
-                self.mode = Mode::Help { scroll: 0 };
-                return true;
-            }
-            KeyCode::Char('?') if !text && plain => {
-                self.mode = Mode::Help { scroll: 0 };
-                return true;
-            }
-            KeyCode::Char('q') if !text && plain => return self.quit(),
-            KeyCode::Char('m') if shell => {
-                self.toggle_mouse();
-                // The bar names the state already; only what off means is said.
-                if self.mouse {
-                    self.msg.clear();
-                } else {
-                    self.msg = "the terminal selects text".into();
-                }
-                return true;
-            }
-            KeyCode::Char(c @ '1'..='9') if digit_jump => {
-                if let Some(i) = self.numbered(c as usize - '0' as usize) {
-                    self.pane_tab(i);
-                }
-                return true;
-            }
-            _ => {}
+            KeyCode::F(1) => Some(ShellKey::Help),
+            KeyCode::Char('?') if !text && plain => Some(ShellKey::Help),
+            KeyCode::Char('q') if !text && plain => Some(ShellKey::Quit),
+            KeyCode::Char('m') if shell => Some(ShellKey::Mouse),
+            KeyCode::Char(c @ '1'..='9') if digit_jump => Some(ShellKey::Tab(c as usize - '0' as usize)),
+            _ => None,
+        }
+    }
+
+    /// A key while a pane is shown. The shell takes its own first (a tab,
+    /// the mouse, the key help, quitting); the pane gets the rest; what the
+    /// pane passes on and quits, quits.
+    ///
+    /// A key the shell takes is one the pane never sees, so the pane is
+    /// told first ([`Pane::interrupted`]): a question it is waiting on is
+    /// dropped, never left for a later `y` to answer unseen. Every shell
+    /// key passes here, so a new one is covered by being added to
+    /// [`App::shell_key`].
+    pub(super) fn pane_key(&mut self, k: KeyEvent) -> bool {
+        let taken = self.shell_key(k);
+        if self.strip.is_some() && !matches!(taken, Some(ShellKey::Strip(_))) {
+            // A key off the focused bar leaves it, then goes where it would.
+            self.strip_blur();
+        }
+        if let Some(s) = taken {
+            self.interrupt_pane();
+            return self.shell_act(s, k);
         }
         self.msg.clear();
         let Some(p) = &mut self.pane else { return true };
@@ -307,6 +331,37 @@ impl App {
                 true
             }
         }
+    }
+
+    /// Act on a key the shell took. False ends the session.
+    fn shell_act(&mut self, s: ShellKey, k: KeyEvent) -> bool {
+        match s {
+            ShellKey::NewItem => self.new_item(),
+            ShellKey::Strip(at) => self.strip_key(at, k),
+            ShellKey::StripFocus => self.strip_focus(),
+            ShellKey::TabOrMenu(n) => {
+                if let Some(i) = self.numbered(n) {
+                    self.pane_tab_or_menu(i);
+                }
+            }
+            ShellKey::Tab(n) => {
+                if let Some(i) = self.numbered(n) {
+                    self.pane_tab(i);
+                }
+            }
+            ShellKey::Help => self.mode = Mode::Help { scroll: 0 },
+            ShellKey::Quit => return self.quit(),
+            ShellKey::Mouse => {
+                self.toggle_mouse();
+                // The bar names the state already; only what off means is said.
+                if self.mouse {
+                    self.msg.clear();
+                } else {
+                    self.msg = "the terminal selects text".into();
+                }
+            }
+        }
+        true
     }
 
     /// The exit guard beside a pane that owns text, where keystrokes are in

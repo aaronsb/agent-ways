@@ -25,6 +25,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use super::paneshell::ShellKey;
 use super::*;
 
 /// Which modifier with a digit jumps to a tab.
@@ -202,57 +203,55 @@ impl App {
         self.strip.is_some()
     }
 
-    /// The tab bar's keys, taken before the pane's: true when taken.
-    pub(super) fn pane_tab_key(&mut self, k: KeyEvent) -> bool {
+    /// The tab bar's keys, which the shell takes before the pane's: Ctrl+N,
+    /// a key on the focused bar, F2 or Ctrl+T, and Ctrl+digits. None leaves
+    /// the key to the shell's other keys, then to the pane.
+    pub(super) fn tab_bar_key(&self, k: KeyEvent) -> Option<ShellKey> {
         let ctrl = k.modifiers == KeyModifiers::CONTROL;
         let keys = self.tab_keys();
-        let menus = self.has_tab_menus();
-        let toggle = menus && ((keys.f2 && k.code == KeyCode::F(2)) || (keys.ctrl_t && ctrl && k.code == KeyCode::Char('t')));
+        let toggle = self.has_tab_menus() && ((keys.f2 && k.code == KeyCode::F(2)) || (keys.ctrl_t && ctrl && k.code == KeyCode::Char('t')));
         if ctrl && k.code == KeyCode::Char('n') && self.new_item_label().is_some() {
-            self.strip_blur();
-            self.interrupt_pane();
-            if let Some(p) = &mut self.pane {
-                p.new_item();
-            }
-            self.take_pane_open();
-            return true;
+            return Some(ShellKey::NewItem);
         }
         if let Some(at) = self.strip {
-            match k.code {
-                KeyCode::Left => self.strip_move(at, false),
-                KeyCode::Right => self.strip_move(at, true),
-                KeyCode::Enter => {
-                    self.strip_blur();
-                    self.open_tab_menu(at);
-                }
-                KeyCode::Esc => self.strip_blur(),
-                KeyCode::Down if self.pane.as_ref().is_some_and(|p| p.below_strip().is_some()) => {
-                    if self.pane.as_mut().is_some_and(|p| p.focus_below()) {
-                        self.strip_blur();
-                    }
-                }
-                _ if toggle => self.strip_blur(),
-                _ => {
-                    self.strip_blur();
-                    return false;
-                }
-            }
-            return true;
-        }
-        if toggle {
-            self.interrupt_pane();
-            self.strip_focus();
-            return true;
+            let below = self.pane.as_ref().is_some_and(|p| p.below_strip().is_some());
+            let bar = toggle || matches!(k.code, KeyCode::Left | KeyCode::Right | KeyCode::Enter | KeyCode::Esc) || (below && k.code == KeyCode::Down);
+            // Any other key leaves the bar and goes where it would have gone.
+            return bar.then_some(ShellKey::Strip(at));
         }
         match k.code {
-            KeyCode::Char(c @ '1'..='9') if ctrl && self.ctrl_jump() => {
-                if let Some(i) = self.numbered(c as usize - '0' as usize) {
-                    self.pane_tab_or_menu(i);
-                }
-                true
-            }
-            _ => false,
+            _ if toggle => Some(ShellKey::StripFocus),
+            KeyCode::Char(c @ '1'..='9') if ctrl && self.ctrl_jump() => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
+            _ => None,
         }
+    }
+
+    /// A key on the focused tab bar, its cursor on tab `at`.
+    pub(super) fn strip_key(&mut self, at: usize, k: KeyEvent) {
+        match k.code {
+            KeyCode::Left => self.strip_move(at, false),
+            KeyCode::Right => self.strip_move(at, true),
+            KeyCode::Enter => {
+                self.strip_blur();
+                self.open_tab_menu(at);
+            }
+            KeyCode::Down => {
+                if self.pane.as_mut().is_some_and(|p| p.focus_below()) {
+                    self.strip_blur();
+                }
+            }
+            // Esc, or the key that gave the bar the focus.
+            _ => self.strip_blur(),
+        }
+    }
+
+    /// Ctrl+N: the pane's new item, from the compose box or the tab bar.
+    pub(super) fn new_item(&mut self) {
+        self.strip_blur();
+        if let Some(p) = &mut self.pane {
+            p.new_item();
+        }
+        self.take_pane_open();
     }
 
     /// Give the tab bar the focus, its cursor on the tab shown.
@@ -263,7 +262,7 @@ impl App {
         }
     }
 
-    fn strip_blur(&mut self) {
+    pub(super) fn strip_blur(&mut self) {
         self.strip = None;
         self.msg.clear();
     }
