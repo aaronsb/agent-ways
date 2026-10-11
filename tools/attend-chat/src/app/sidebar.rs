@@ -121,8 +121,9 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     // Each list scrolls on its own, keeping the keyboard's cursor in view.
     let (vis_a, vis_c) = (ah.saturating_sub(1) as usize, ch.saturating_sub(1) as usize);
     let n_a = seen.len();
-    let sa = in_view(chat.side_scroll[0], n_a, vis_a, focus.filter(|f| *f < n_a));
-    let sc = in_view(chat.side_scroll[1], rows.len(), vis_c, focus.and_then(|f| f.checked_sub(n_a)));
+    let follow = focus.filter(|_| chat.side_follow);
+    let sa = in_view(chat.side_scroll[0], n_a, vis_a, follow.filter(|f| *f < n_a));
+    let sc = in_view(chat.side_scroll[1], rows.len(), vis_c, follow.and_then(|f| f.checked_sub(n_a)));
     chat.side_scroll = [sa, sc];
     let below = |r: Rect| Rect { y: r.y + 1, height: r.height.saturating_sub(1), ..r };
     chat.hits.side_lists = [below(agents), below(channels)];
@@ -316,11 +317,34 @@ impl ChatPane {
     }
 
     /// The wheel over list `list` (0 agents, 1 channels): a row at a time.
-    /// The next frame holds it within the list.
+    /// The next frame holds it within the list; the cursor, if any, stays
+    /// where it is and is not brought back into view until it moves.
     pub(super) fn side_wheel(&mut self, list: usize, up: bool) {
         let top = &mut self.side_scroll[list];
         *top = if up { top.saturating_sub(1) } else { *top + 1 };
+        self.side_follow = false;
         self.dirty = true;
+    }
+
+    /// Put the keyboard's cursor on row `i` of `items`, and the list it is
+    /// in where the cursor shows.
+    fn focus_at(&mut self, items: &[SideHit], i: usize) {
+        self.side_focus = Some(i);
+        self.side_focus_hit = items.get(i).cloned();
+        self.side_follow = true;
+    }
+
+    /// After the world is read again, the cursor follows its row to where
+    /// it is now; a row gone since leaves it at the same place, held within
+    /// a list that may have shrunk.
+    pub(super) fn refocus(&mut self) {
+        let (Some(i), Some(hit)) = (self.side_focus, self.side_focus_hit.clone()) else { return };
+        let items = self.side_items();
+        match items.iter().position(|h| *h == hit) {
+            Some(at) => self.side_focus = Some(at),
+            None if items.is_empty() => self.side_focus = None,
+            None => self.focus_at(&items, i.min(items.len() - 1)),
+        }
     }
 
     /// Show or hide the column.
@@ -370,7 +394,10 @@ impl ChatPane {
             Tab::Merged => None,
         };
         let first = items.iter().position(|h| matches!(h, SideHit::Channel(_)));
-        self.side_focus = shown.or(first).or((!items.is_empty()).then_some(0));
+        match shown.or(first).or((!items.is_empty()).then_some(0)) {
+            Some(i) => self.focus_at(&items, i),
+            None => self.side_focus = None,
+        }
         self.dirty = true;
         self.side_focus.is_some()
     }
@@ -382,8 +409,10 @@ impl ChatPane {
     /// column has no focus.
     pub(super) fn side_key(&mut self, k: agent_tui::ratatui::crossterm::event::KeyEvent) -> Option<Keyed> {
         use agent_tui::ratatui::crossterm::event::KeyCode;
-        let i = self.side_focus?;
+        self.side_focus?;
+        // Read first: a world read again may move the cursor with its row.
         let items = self.side_items();
+        let i = self.side_focus?;
         let last = items.len().saturating_sub(1);
         self.dirty = true;
         match k.code {
@@ -391,10 +420,10 @@ impl ChatPane {
                 self.side_focus = None;
                 return Some(Keyed::Tabs);
             }
-            KeyCode::Up => self.side_focus = Some(i - 1),
-            KeyCode::Down => self.side_focus = Some((i + 1).min(last)),
-            KeyCode::Home => self.side_focus = Some(0),
-            KeyCode::End => self.side_focus = Some(last),
+            KeyCode::Up => self.focus_at(&items, i - 1),
+            KeyCode::Down => self.focus_at(&items, (i + 1).min(last)),
+            KeyCode::Home => self.focus_at(&items, 0),
+            KeyCode::End => self.focus_at(&items, last),
             KeyCode::Esc => self.side_focus = None,
             KeyCode::Enter => {
                 self.side_focus = None;
@@ -458,6 +487,49 @@ mod tests {
         assert_eq!(more(0, 5, 15), " ↓");
         assert_eq!(more(10, 5, 15), " ↑");
         assert_eq!(more(0, 5, 5), "");
+    }
+
+    fn seen(name: &str) -> Seen {
+        let identity = crate::chip::KnownIdentity {
+            nickname: name.into(),
+            cwd: format!("/work/{name}"),
+            is_claude: true,
+            palette: agent_identity::Identity::for_cwd("/w", agent_theme::ColorDepth::Ansi16).palette,
+            style: Default::default(),
+        };
+        Seen { identity, live: true, member: format!("id-{name}") }
+    }
+
+    fn with_agents(c: &mut ChatPane, names: &[&str]) {
+        let seen = names.iter().map(|n| seen(n)).collect();
+        c.world = Some(super::super::World { groups: Vec::new(), seen, rows: Vec::new(), live_members: Vec::new(), instances: attend_instances::SnapshotCache::new() });
+        c.refocus();
+    }
+
+    #[test]
+    fn the_cursor_keeps_to_its_row_across_a_refresh_and_holds_within_a_shorter_list() {
+        let mut c = ChatPane::new(None, Default::default());
+        with_agents(&mut c, &["Ada", "Bo", "Cy"]);
+        let items = c.side_items();
+        c.focus_at(&items, 1);
+        with_agents(&mut c, &["New", "Ada", "Bo", "Cy"]);
+        assert_eq!((c.side_focus, c.side_focus_hit.clone()), (Some(2), Some(SideHit::Agent("id-Bo".into()))), "on Bo, moved down a row");
+        with_agents(&mut c, &["Ada"]);
+        assert_eq!((c.side_focus, c.side_focus_hit.clone()), (Some(0), Some(SideHit::Agent("id-Ada".into()))), "Bo gone: held within the list");
+        with_agents(&mut c, &[]);
+        assert_eq!(c.side_focus, None, "nothing left to be on");
+    }
+
+    #[test]
+    fn the_wheel_moves_a_focused_list_away_from_its_cursor() {
+        let mut c = ChatPane::new(None, Default::default());
+        with_agents(&mut c, &["Ada", "Bo"]);
+        let items = c.side_items();
+        c.focus_at(&items, 0);
+        c.side_wheel(0, false);
+        assert!(!c.side_follow, "the next frame leaves the list where the wheel put it");
+        c.focus_at(&items, 1);
+        assert!(c.side_follow, "a move of the cursor brings it back into view");
     }
 
     #[test]

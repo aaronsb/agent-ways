@@ -1440,6 +1440,35 @@ fn a_long_column_scrolls_with_the_cursor_and_the_wheel() {
     assert_eq!(testkit::rows(&testkit::render_screen(&mut c, 80, 25))[first_agent], top_before, "back to the top");
 }
 
+/// The cursor stays on its row when a refresh moves the row, and the wheel
+/// over a focused list moves the list away from the cursor without the
+/// next frame snapping it back.
+#[test]
+fn the_columns_cursor_keeps_its_row_and_the_wheel_is_not_undone() {
+    let mut c = chat_crowded().enhanced(true).dry_run(true);
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let first_agent = rows.iter().position(|r| r.contains("Agents")).unwrap() + 1;
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::End));
+    assert!(cursor_row(&mut c, 80).expect("the cursor").contains("#archive"));
+    // A new agent above it moves every channel down a row.
+    c.push(sig("claude:eeeeeeee-0000-4000-8000-000000000001", "/work/newcomer", 5, Channel::Open, "hello"));
+    c.refresh();
+    assert!(cursor_row(&mut c, 80).expect("the cursor").contains("#archive"), "still on #archive after the refresh");
+    // The wheel over the agents, the cursor on the first of them.
+    press(&mut c, key(KeyCode::Home));
+    assert!(cursor_row(&mut c, 80).is_some());
+    for _ in 0..4 {
+        c.mouse(MouseEvent { kind: MouseEventKind::ScrollDown, column: 5, row: first_agent as u16 + 1, modifiers: KeyModifiers::NONE });
+    }
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows.iter().find(|r| r.contains("Agents")).unwrap().contains('↑'), "the list moved and stayed moved");
+    assert!(cursor_row(&mut c, 80).is_none(), "the cursor's row is scrolled out of view, not pulled back");
+    press(&mut c, key(KeyCode::Down));
+    assert!(cursor_row(&mut c, 80).is_some(), "a key move brings the cursor back into view");
+}
+
 /// An agent of the shown channel can be removed from its row, after a y.
 #[test]
 fn an_agent_row_removes_it_from_the_shown_channel() {

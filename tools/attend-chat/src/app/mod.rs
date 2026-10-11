@@ -178,11 +178,15 @@ pub struct ChatPane {
     /// The lozenge shape the left column's rows are drawn in, the shell's.
     shape: Shape,
     /// The left column's row under the keyboard's cursor, while it has the
-    /// focus (F2, then Down).
+    /// focus (F2, then Down), and the row it is: a refresh that moves the
+    /// row keeps the cursor on it ([`ChatPane::refocus`]).
     side_focus: Option<usize>,
+    side_focus_hit: Option<sidebar::SideHit>,
     /// The first row shown of each of the column's lists, agents then
-    /// channels: the wheel moves them and the cursor keeps itself in view.
+    /// channels: the wheel moves them, and the cursor keeps itself in view
+    /// while `side_follow`, until the wheel moves the list away from it.
     side_scroll: [usize; 2],
+    side_follow: bool,
     /// The members a Remove menu listed, for the one picked.
     removable: Vec<menu::Member>,
 }
@@ -222,7 +226,9 @@ impl ChatPane {
             sidebar: true,
             shape: Shape::PLAIN,
             side_focus: None,
+            side_focus_hit: None,
             side_scroll: [0, 0],
+            side_follow: true,
             removable: Vec::new(),
         }
     }
@@ -290,6 +296,7 @@ impl ChatPane {
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
             self.world = Some(World { groups: tab_channels(&rows), seen, rows, live_members, instances });
+            self.refocus();
         }
         self.world.as_ref().expect("just built")
     }
