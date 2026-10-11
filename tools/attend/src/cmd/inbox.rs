@@ -155,6 +155,8 @@ pub(crate) struct Drained {
     #[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
     room: Room,
     pub(crate) id: String,
+    /// The id of the message this one replies to, when it is threaded.
+    re: Option<String>,
     body: String,
     source_cwd: String,
 }
@@ -164,6 +166,7 @@ impl DrainedView for Drained {
     fn sender_id(&self) -> &str { &self.sender_id }
     fn scope(&self) -> &str { &self.scope }
     fn id(&self) -> &str { &self.id }
+    fn re(&self) -> Option<&str> { self.re.as_deref() }
     fn body(&self) -> &str { &self.body }
 }
 
@@ -270,6 +273,7 @@ pub(crate) fn scan_pending(
             scope: room_label(&scan_dirs[f.room].room),
             room: scan_dirs[f.room].room.clone(),
             id: f.path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
+            re: sig.reply_to.map(str::to_string),
             body: sig.message.to_string(),
             source_cwd: sig.cwd.to_string(),
         });
@@ -422,6 +426,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
             println!("[{}] {}", d.scope, d.sender);
             println!("  when:    {}", d.when);
             println!("  id:      {}", d.id);
+            if let Some(re) = &d.re {
+                println!("  re:      {re}");
+            }
             // The label carries only the cwd basename; the wire `from`
             // (with an external sender's terminal suffix) and the full
             // source path stay reachable here.
@@ -504,12 +511,15 @@ fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>, me: O
         } else {
             format!(", from {}", d.sender_id())
         };
+        // A reply names its parent, so the reader can tell what it answers.
+        let re = d.re().map(|re| format!(", re {re}")).unwrap_or_default();
         out.push_str(&format!(
-            "\n[{}] {} ({}, id {}{}):\n{}\n",
+            "\n[{}] {} ({}, id {}{}{}):\n{}\n",
             d.when(),
             d.sender(),
             d.scope(),
             d.id(),
+            re,
             from,
             d.body()
         ));
@@ -551,6 +561,8 @@ trait DrainedView {
     fn sender_id(&self) -> &str;
     fn scope(&self) -> &str;
     fn id(&self) -> &str;
+    /// The parent's id, for a threaded reply.
+    fn re(&self) -> Option<&str>;
     fn body(&self) -> &str;
 }
 
@@ -638,6 +650,7 @@ mod drain_tests {
         sender_id: String,
         scope: String,
         id: String,
+        re: Option<String>,
         body: String,
     }
     impl DrainedView for FakeMsg {
@@ -646,6 +659,7 @@ mod drain_tests {
         fn sender_id(&self) -> &str { &self.sender_id }
         fn scope(&self) -> &str { &self.scope }
         fn id(&self) -> &str { &self.id }
+        fn re(&self) -> Option<&str> { self.re.as_deref() }
         fn body(&self) -> &str { &self.body }
     }
     fn msg(n: usize) -> FakeMsg {
@@ -655,6 +669,7 @@ mod drain_tests {
             sender_id: format!("claude:session-{n}"),
             scope: "#open".into(),
             id: format!("id-{n}"),
+            re: None,
             body: format!("body {n}"),
         }
     }
@@ -872,6 +887,7 @@ mod drain_tests {
             sender_id: "claude:abc123".into(),
             scope: "project".into(),
             id: "abc123-1712345-0".into(),
+            re: None,
             body: "hi".into(),
         };
         let reason = render_drain_reason(&[carried], None, None);
@@ -910,6 +926,16 @@ mod drain_tests {
         assert!(out.starts_with("{\"decision\": \"block\""), "{out}");
         assert!(out.contains("held back"), "the note rides the delivery: {out}");
         assert_eq!(hook_output(&[] as &[FakeMsg], None, Some("Chaucer")), None);
+    }
+
+    /// A reply in the hook reason names the message it answers.
+    #[test]
+    fn drain_reason_names_a_replys_parent() {
+        let mut reply = msg(1);
+        reply.re = Some("parent-1-0".into());
+        let reason = render_drain_reason(&[reply, msg(2)], None, None);
+        assert!(reason.contains("peer-1 (#open, id id-1, re parent-1-0, from claude:session-1):"), "{reason}");
+        assert!(reason.contains("peer-2 (#open, id id-2, from claude:session-2):"), "{reason}");
     }
 
     #[test]
