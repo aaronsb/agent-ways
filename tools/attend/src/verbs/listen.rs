@@ -7,7 +7,7 @@
 //! While it is not listening the drain delivers nothing and marks nothing
 //! read; the messages wait in the store.
 
-use crate::util::{adopt_previous_enrollment, current_session, Session};
+use crate::util::{adopt_previous_enrollment, current_session, enroll_as, Session};
 use attend_presence::enrollment::{self, Source};
 use serde::Serialize;
 
@@ -57,19 +57,16 @@ pub fn status() -> Listening {
 }
 
 /// Turn listening on. When the session was not listening, the cold-start
-/// rule applies again at the next drain: what was addressed to its project
-/// meanwhile is delivered, older `#open` and channel backlog is held back
-/// and counted. Delivers nothing itself.
+/// rule applies again at the next drain, as it does for a join or `attend
+/// run` ([`enroll_as`]): what was addressed to its project meanwhile is
+/// delivered, older `#open` and channel backlog is held back and counted.
+/// Delivers nothing itself.
 pub fn on() -> Result<Listening, ListenError> {
     let me = current_session();
     if !me.resolved() {
         return Err(ListenError::Unresolved);
     }
-    let was = adopt_previous_enrollment(&me);
-    enrollment::enroll(&me.session_id, Source::Listen).map_err(|e| ListenError::Unwritable { error: e.to_string() })?;
-    if !was {
-        attend_state::StateStore::new(Some(me.session_id.clone())).reopen_cold_start();
-    }
+    enroll_as(&me, Source::Listen).map_err(|e| ListenError::Unwritable { error: e.to_string() })?;
     // A listening session looks alive to peers and to `/purge` from now,
     // not from its first drain.
     attend_presence::heartbeat::touch(&me.session_id).ok();

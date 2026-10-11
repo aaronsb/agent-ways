@@ -147,3 +147,81 @@ fn unread_on_a_cold_session_counts_what_the_cold_start_delivers() {
     assert_eq!(counts["listening"], false);
     assert!(!f.state_file(&f.sid).exists());
 }
+
+/// `/clear` gives the session a new id. `unread` adopts what this Claude
+/// Code process enrolled under the old id, as `listen` and the drain do, so
+/// it still reports the session listening, counts against the old
+/// seen-set, and reads the old id's channels.
+#[test]
+fn unread_after_clear_counts_as_the_session_did_before() {
+    let f = Fixture::new("unread-clear");
+    f.ok(&["listen", "on"]);
+    f.ok(&["join", "room"]);
+    f.put("_broadcast", "other-1-c1", "delivered open", Duration::ZERO);
+    f.put(&f.project_tray(), "other-1-c2", "delivered addressed", Duration::ZERO);
+    assert!(f.drain("plain").contains("2 message(s) drained"));
+    f.put("@room", "other-1-c3", "unread in room", Duration::ZERO);
+    let before = doc(&f, &["unread", "--json"]);
+    assert_eq!(before["unread"], 1);
+
+    f.set_session_id("sess-unread-clear-after");
+    let after = doc(&f, &["unread", "--json"]);
+    assert_eq!(after["listening"], true, "{after}");
+    assert_eq!(after["unread"], 1, "{after}");
+    assert_eq!(after["rooms"], before["rooms"], "{after}");
+    assert_eq!(f.ok(&["listen"]), "listening\n");
+}
+
+/// `listen off`, then a join: listening again by any way reopens the cold
+/// start, as `listen on` does, so the `#open` backlog built up while not
+/// listening is held back with its note.
+#[test]
+fn a_join_after_listen_off_holds_back_the_backlog() {
+    let f = Fixture::new("join-after-off");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    f.ok(&["listen", "off"]);
+    f.put("_broadcast", "other-1-j1", "old open while off", 30 * MINUTE);
+    f.put(&f.project_tray(), "other-1-j2", "addressed while off", 30 * MINUTE);
+    f.ok(&["join", "newroom"]);
+    let plain = f.drain("plain");
+    assert!(plain.contains("addressed while off"), "{plain}");
+    assert!(!plain.contains("old open while off"), "{plain}");
+    assert!(plain.contains("1 older message held back"), "{plain}");
+}
+
+/// After `listen off`, `unread` counts what the next `listen on` and drain
+/// would deliver, with the older backlog counted as held back.
+#[test]
+fn unread_after_listen_off_counts_what_listen_on_delivers() {
+    let f = Fixture::new("unread-off");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    f.ok(&["listen", "off"]);
+    backlog(&f, "d");
+    let counts = doc(&f, &["unread", "--json"]);
+    assert_eq!(counts["listening"], false);
+    assert_eq!(counts["unread"], 2, "{counts}");
+    assert_eq!(counts["held_back"], 1, "{counts}");
+    f.ok(&["listen", "on"]);
+    assert!(f.drain("plain").contains("2 message(s) drained"));
+}
+
+/// `listen off` while an `attend run` holds the session: it keeps listening
+/// until the run exits, and says so on stderr.
+#[test]
+fn listen_off_under_a_live_run_keeps_listening() {
+    let f = Fixture::new("listen-off-run");
+    let run = f.run();
+    run.wait_for("the run's lock", Duration::from_secs(20), |_| {
+        doc(&f, &["listen", "--json"])["run_live"] == true
+    });
+    let out = f.attend(&["listen", "off", "--json"]);
+    assert!(out.status.success());
+    let state: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(state["listening"], true);
+    assert_eq!(state["run_live"], true);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("listens until that run exits"));
+    drop(run);
+    assert_eq!(f.ok(&["listen"]), "not listening\n", "the opt-out applies once the run is gone");
+}

@@ -114,11 +114,28 @@ pub(crate) fn adopt_previous_enrollment(ident: &Session) -> bool {
     enrollment::is_enrolled(&ident.session_id)
 }
 
-/// Record that this session enrolled by joining a channel (#720). Only a
-/// resolved session enrolls: the drain never runs for any other.
+/// Enroll session `ident` by `source`: `attend listen on`, a channel join,
+/// or `attend run`. A session that was not listening before has its cold
+/// start reopened (`StateStore::reopen_cold_start`), so whichever way it
+/// listens again, the next conduit delivers what was addressed to its
+/// project meanwhile and holds back the older `#open` and channel backlog.
+/// An enrollment this Claude Code process made under its id before
+/// `/clear` counts as listening, and moves here first. Returns whether the
+/// session was listening before. Only a resolved session enrolls: the
+/// drain never runs for any other.
+pub(crate) fn enroll_as(ident: &Session, source: attend_presence::enrollment::Source) -> std::io::Result<bool> {
+    let was = adopt_previous_enrollment(ident);
+    attend_presence::enrollment::enroll(&ident.session_id, source)?;
+    if !was {
+        attend_state::StateStore::new(Some(ident.session_id.clone())).reopen_cold_start();
+    }
+    Ok(was)
+}
+
+/// Record that this session enrolled by joining a channel (#720).
 pub(crate) fn enroll_by_join(ident: &Session) {
     if ident.resolved() {
-        attend_presence::enrollment::enroll(&ident.session_id, attend_presence::enrollment::Source::Join).ok();
+        enroll_as(ident, attend_presence::enrollment::Source::Join).ok();
     }
 }
 

@@ -1,13 +1,18 @@
-//! `unread`: how many messages the drain would deliver to this session now,
-//! by room, without marking any of them read (ADR-406 item 10).
+//! `unread`: how many messages this session would be delivered, by room,
+//! without marking any of them read (ADR-406 item 10).
 //!
 //! The count is the drain's own scan (`scan_pending`) over the rooms the
-//! session receives, against its seen-set, with nothing written. A session
-//! no conduit has baselined yet is counted as its cold start would deliver:
-//! addressed mail and fresh messages, with the older backlog it would hold
-//! back counted apart.
+//! session receives, against its seen-set. It marks nothing read. Its only
+//! writes are the ones `attend listen status` makes too: an enrollment this
+//! Claude Code process made under its id before `/clear` moves to the
+//! current id, and an opt-out whose `attend run` has exited is applied.
+//!
+//! A session that is not listening, or that no conduit has baselined yet,
+//! is counted as its cold start would deliver when it listens: addressed
+//! mail and fresh messages, with the older backlog it would hold back
+//! counted apart.
 
-use crate::util::{current_session, groups_for};
+use crate::util::{adopt_previous_enrollment, current_session, groups_for};
 use attend_groups::Room;
 use serde::Serialize;
 
@@ -17,7 +22,7 @@ pub struct Unread {
     /// Every unread message, across rooms.
     pub unread: usize,
     /// Older backlog a cold start would mark read without showing. Zero for
-    /// a session already baselined.
+    /// a listening session already baselined.
     pub held_back: usize,
     /// Whether the drain delivers to this session (`attend listen`).
     pub listening: bool,
@@ -39,12 +44,17 @@ pub struct RoomCount {
     pub count: usize,
 }
 
-/// Count this session's unread messages. Reads only.
+/// Count this session's unread messages. Marks nothing read.
 pub fn unread() -> Unread {
     let me = current_session();
+    // First, so the seen-set and channels read below are the ones this
+    // session has after `/clear`, not an empty new id's.
+    let listening = me.resolved() && adopt_previous_enrollment(&me);
     let dirs = groups_for(&me).receive_dirs(&me.origin_path);
     let snapshot = me.resolved().then(|| attend_state::StateStore::new(Some(me.session_id.clone())).load()).flatten();
-    let baselining = !snapshot.as_ref().is_some_and(|s| s.baselined);
+    // Not listening, the next delivery comes after the session listens
+    // again, which reopens the cold start.
+    let baselining = !listening || !snapshot.as_ref().is_some_and(|s| s.baselined);
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
     let scan = crate::cmd::inbox::scan_pending(&dirs, &seen, &me.session_id, baselining);
 
@@ -64,7 +74,7 @@ pub fn unread() -> Unread {
     Unread {
         unread: scan.delivered.len(),
         held_back: scan.held_back,
-        listening: me.resolved() && attend_presence::enrollment::is_enrolled(&me.session_id),
+        listening,
         rooms,
     }
 }
