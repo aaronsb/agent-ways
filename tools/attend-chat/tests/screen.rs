@@ -887,18 +887,27 @@ fn a_click_then_enter_on_merged_asks_before_clearing_the_view() {
     assert!(help.contains("a tab shows it and opens its menu"), "{help}");
 }
 
+/// #deploy's menu, then Delete channel: the question waits for its `y`.
+fn ask_delete(c: &mut Chat) {
+    press(c, ctrl('3'));
+    press(c, ctrl('3'));
+    press(c, key(KeyCode::End));
+    press(c, key(KeyCode::Enter));
+    assert!(bar(c).contains("delete #deploy"), "{}", bar(c));
+}
+
+/// A `y` after the question was dropped types; it deletes nothing.
+fn y_types(c: &mut Chat) {
+    press(c, key(KeyCode::Char('y')));
+    assert_eq!(c.input().text(), "y", "the question is gone: y is typing");
+    assert!(!c.status().starts_with("dry run"), "nothing ran: {}", c.status());
+}
+
 #[test]
 fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
-    let ask = |c: &mut Chat| {
-        press(c, ctrl('3'));
-        press(c, ctrl('3'));
-        press(c, key(KeyCode::End));
-        press(c, key(KeyCode::Enter));
-        assert!(bar(c).contains("delete #deploy"), "{}", bar(c));
-    };
     // A tab change.
     let mut c = chat().enhanced(true).dry_run(true);
-    ask(&mut c);
+    ask_delete(&mut c);
     press(&mut c, ctrl('4'));
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
     assert!(!bar(&mut c).contains("delete #deploy"));
@@ -906,7 +915,7 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
     assert_eq!(c.input().text(), "y", "the question is gone: y is typing");
     // The tab bar's focus.
     let mut c = chat().enhanced(true).dry_run(true);
-    ask(&mut c);
+    ask_delete(&mut c);
     press(&mut c, key(KeyCode::F(2)));
     assert_eq!(c.status(), "kept");
     press(&mut c, key(KeyCode::Esc));
@@ -914,7 +923,7 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
     assert_eq!(c.input().text(), "y");
     // A click on a tab.
     let mut c = chat().enhanced(true).dry_run(true);
-    ask(&mut c);
+    ask_delete(&mut c);
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "2 #open").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
@@ -922,6 +931,46 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
     press(&mut c, key(KeyCode::Esc));
     press(&mut c, key(KeyCode::Char('y')));
     assert_eq!(c.input().text(), "y");
+}
+
+// Every key the shell takes before the pane drops a waiting question,
+// whatever the bar says after it: a later `y` never answers a question
+// that is no longer shown.
+
+/// Ctrl+digit opens the tab menu over the question; Esc closes it unchanged.
+#[test]
+fn ctrl_digit_drops_a_waiting_question() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask_delete(&mut c);
+    press(&mut c, ctrl('3'));
+    assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Esc));
+    assert!(bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
+    y_types(&mut c);
+}
+
+/// Alt+m turns the mouse off: the bar says what off means, not the question.
+#[test]
+fn alt_m_drops_a_waiting_question() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    press(&mut c, alt('m'));
+    ask_delete(&mut c);
+    press(&mut c, alt('m'));
+    assert_eq!(c.status(), "kept");
+    assert!(!c.app().mouse_on());
+    assert!(bar(&mut c).contains("the terminal selects text"), "{}", bar(&mut c));
+    y_types(&mut c);
+}
+
+/// F1 opens the key help over the question; any other key closes it.
+#[test]
+fn f1_drops_a_waiting_question() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    ask_delete(&mut c);
+    press(&mut c, key(KeyCode::F(1)));
+    assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Esc));
+    y_types(&mut c);
 }
 
 #[test]
