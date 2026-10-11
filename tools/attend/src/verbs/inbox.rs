@@ -20,9 +20,12 @@ pub struct InboxQuery {
     pub before: Option<u64>,
 }
 
+/// Messages on one inbox page when the caller names no limit.
+pub const DEFAULT_LIMIT: usize = 25;
+
 impl Default for InboxQuery {
     fn default() -> Self {
-        Self { limit: 25, page: 1, before: None }
+        Self { limit: DEFAULT_LIMIT, page: 1, before: None }
     }
 }
 
@@ -66,13 +69,18 @@ pub struct InboxPage {
 /// List the messages from peers in this session's receive set, the same set
 /// the peers sensor and the drain read, paged newest-first.
 pub fn list(query: InboxQuery) -> InboxPage {
+    list_with(query, &SnapshotCache::new())
+}
+
+/// [`list`], reading sender names through `instances`, the registry
+/// snapshots of this listing. A caller that renders the senders again
+/// passes the same cache, so the listing reads each registry once.
+pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
     let me = current_session();
     // An unresolved session's id is a `pid-` placeholder no sender carries,
     // so nothing is skipped as its own.
     let own_session_id = me.session_id.as_str();
     let mut messages: Vec<Message> = Vec::new();
-    // One registry snapshot per distinct cwd for this listing.
-    let instances = SnapshotCache::new();
 
     for dir in &groups_for(&me).receive_dirs(&me.origin_path) {
         let Ok(dir_entries) = std::fs::read_dir(&dir.path) else { continue };
@@ -99,7 +107,7 @@ pub fn list(query: InboxQuery) -> InboxPage {
             messages.push(Message {
                 id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
                 scope,
-                sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
+                sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), instances),
                 from: sig.from.to_string(),
                 source: sig.cwd.to_string(),
                 message: sig.message.to_string(),

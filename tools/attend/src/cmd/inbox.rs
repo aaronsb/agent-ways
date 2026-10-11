@@ -46,7 +46,10 @@ pub(crate) fn cmd_inbox_read(msg_id: &str, json: bool) {
 }
 
 pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>, json: bool) {
-    let listing = inbox::list(InboxQuery { limit, page, before });
+    // One registry snapshot per distinct cwd, shared by the listing and the
+    // rendering below.
+    let instances = SnapshotCache::new();
+    let listing = inbox::list_with(InboxQuery { limit, page, before }, &instances);
     if json {
         crate::cmd::print_json(&listing);
         return;
@@ -60,8 +63,7 @@ pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>, json: bo
         return;
     }
     // The process painter is plain on a pipe (#388); a TTY keeps the
-    // identity colors. One registry snapshot per distinct cwd.
-    let instances = SnapshotCache::new();
+    // identity colors.
     let painter = agent_theme::painter();
     let sender = |m: &inbox::Message| render_sender_label(&m.from, &m.source, &painter, &instances);
     let now = std::time::SystemTime::now();

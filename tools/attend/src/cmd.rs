@@ -23,10 +23,15 @@ pub(crate) mod tune;
 pub(crate) mod whoami;
 
 /// Print `value` as the one JSON document `--json` puts on stdout (ADR-185).
+/// A value that will not encode is reported on stderr and exits 1, so a
+/// caller never takes an empty stdout for a result.
 pub(crate) fn print_json<T: serde::Serialize>(value: &T) {
     match serde_json::to_string(value) {
         Ok(s) => println!("{s}"),
-        Err(e) => eprintln!("[attend] could not encode the result as JSON: {e}"),
+        Err(e) => {
+            eprintln!("[attend] could not encode the result as JSON: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

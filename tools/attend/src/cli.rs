@@ -44,7 +44,7 @@ pub(crate) enum Commands {
         msg_id: Option<String>,
 
         /// Max messages per page, newest first
-        #[arg(long, default_value_t = 25)]
+        #[arg(long, default_value_t = crate::verbs::inbox::DEFAULT_LIMIT)]
         limit: usize,
 
         /// Page number; 1 = newest. Higher numbers walk back into history.
