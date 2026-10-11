@@ -33,7 +33,7 @@ use agent_tui::theme::{Palette, Shape};
 use agent_tui::{App, Binding, Keyed, Open, Pane, PaneTab, Tone};
 use attend_instances::SnapshotCache;
 
-use crate::chip::{known_of, seen_identities, KnownIdentity, Seen};
+use crate::chip::{seen_identities, Seen};
 use crate::groups::{all_channels, tab_channels, ChannelRow, KnownGroup};
 use crate::sessions::discover as discover_sessions;
 use crate::signal::Signal;
@@ -80,7 +80,6 @@ enum Clock {
 /// disk at most once per [`REFRESH`] or input, never per frame.
 struct World {
     groups: Vec<KnownGroup>,
-    known: Vec<KnownIdentity>,
     /// Every identity seen, live or not, for the left column (ADR-405).
     seen: Vec<Seen>,
     /// Every channel, for the left column, and each one's live members.
@@ -289,9 +288,8 @@ impl ChatPane {
             let rows = all_channels(depth);
             let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
-            let known = known_of(&seen);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
-            self.world = Some(World { groups: tab_channels(&rows), known, seen, rows, live_members, instances });
+            self.world = Some(World { groups: tab_channels(&rows), seen, rows, live_members, instances });
         }
         self.world.as_ref().expect("just built")
     }
@@ -392,7 +390,8 @@ impl ChatPane {
             Some((cmd, _)) => format!("dry run: /{cmd} not run"),
             None => {
                 let scope = tabs::send_scope(&self.normal_tab());
-                let to = destination_label(&text, &scope).unwrap_or(format!("#{scope}"));
+                let quiet = keys::quiet_names(&self.world().seen);
+                let to = destination_label(&text, &scope, &quiet).unwrap_or(format!("#{scope}"));
                 format!("dry run: not sent to {to}")
             }
         };

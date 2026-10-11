@@ -65,7 +65,6 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let input_h = shown as u16 + 3 + u16::from(!attachments.is_empty());
     let [feed, compose, helper_row] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(helper_h)]).areas(area);
 
-    let groups = chat.world().groups.clone();
     chat.hits = Hits { text_width: inner, side_area: side.unwrap_or_default(), ..Hits::default() };
     if let Some(side) = side {
         super::sidebar::draw(chat, f, side);
@@ -73,7 +72,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     draw_feed(chat, f, feed, &fg);
     draw_compose(chat, f, compose, rows, &attachments, &fg);
     if helper {
-        draw_helper(chat, f, helper_row, &text, &groups);
+        draw_helper(chat, f, helper_row, &text);
     }
 }
 
@@ -234,7 +233,8 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'
     }
     f.render_widget(Paragraph::new(lines), Rect { height: text_h, ..inner });
     let scope = tabs::send_scope(fg);
-    if let Some(label) = super::destination_label(chat.input.text(), &scope) {
+    let quiet = super::keys::quiet_names(&chat.world().seen);
+    if let Some(label) = super::destination_label(chat.input.text(), &scope, &quiet) {
         let flag = format!(" {label} ");
         let w = (str_width(&flag) as u16).min(inner.width);
         let at = Rect { x: inner.x + inner.width - w, y: inner.y + text_h, width: w, height: flag_h };
@@ -245,17 +245,19 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'
 /// The helper row: what the buffer is reaching for (`crate::helper`) —
 /// the agent legend, the channel legend, the slash commands, a level of
 /// subcommands, or a free token's hint. Names Tab would complete to are
-/// marked.
-fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str, groups: &[KnownGroup]) {
+/// marked. The legends list what Tab completes over, as the column does:
+/// quiet agents and swept channels too, set back.
+fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str) {
     let depth = chat.palette.depth();
     let mut chips: Vec<Span<'static>> = Vec::new();
     // What a click on each chip completes to, in the chips' order.
     let mut picks: Vec<Chip> = Vec::new();
     match helper::derive(text) {
         HelperMode::Agents(p) => {
-            for k in &chat.world().known {
+            for s in &chat.world().seen {
+                let k = &s.identity;
                 picks.push(Chip::Agent(k.nickname.clone()));
-                let mut st = Style::new().fg(color_for(k.palette, depth));
+                let mut st = if k.is_claude && !s.live { theme::muted() } else { Style::new().fg(color_for(k.palette, depth)) };
                 if k.style.bold {
                     st = st.add_modifier(Modifier::BOLD);
                 }
@@ -267,9 +269,10 @@ fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str, group
             }
         }
         HelperMode::Groups(p) => {
-            for k in groups {
+            for row in &chat.world().rows {
+                let k = &row.known;
                 picks.push(Chip::Group(k.group.name.clone()));
-                let mut st = Style::new().fg(color_for(k.group.palette, depth));
+                let mut st = if row.on_disk { Style::new().fg(color_for(k.group.palette, depth)) } else { theme::muted() };
                 // The base channel is always bold: the commons (ADR-124 §4).
                 if k.is_base || k.group.style.bold {
                     st = st.add_modifier(Modifier::BOLD);
