@@ -194,6 +194,29 @@ fn a_projection_stop_keeps_the_built_app_and_names_repair_as_the_finish() {
 }
 
 #[test]
+fn an_installer_without_stage_mode_is_not_run() {
+    let s = Sandbox::new("oldinstaller", BUILDS);
+    // An installer from before --stage updates in place and exits 0.
+    write(&s.app().join("scripts/install.sh"), "touch \"$(dirname \"$0\")/../updated\"\n");
+    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let t = text(&out);
+    assert!(!out.status.success(), "{t}");
+    assert!(t.contains("--stage") && t.contains("nothing was removed"), "{t}");
+    assert!(!s.app().join("updated").exists(), "the old installer ran: {t}");
+    s.untouched();
+}
+
+#[test]
+fn a_relative_origin_resolves_from_the_app_dir() {
+    let s = Sandbox::new("relorigin", BUILDS);
+    git(&s.app(), &["remote", "set-url", "origin", "../../origin"]);
+    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let t = text(&out);
+    assert!(out.status.success(), "{t}");
+    assert!(s.app().join("bin/ways").is_file(), "{t}");
+}
+
+#[test]
 fn a_stage_left_beside_a_changed_app_is_not_discarded() {
     let s = Sandbox::new("leftstage", BUILDS);
     write(&s.stage().join("scripts/install.sh"), "# an earlier run's stage\n");

@@ -133,9 +133,20 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
         }
         std::fs::remove_dir_all(&stage).with_context(|| format!("removing the old stage {}", stage.display()))?;
     }
+    // An installer from before stage mode ignores the flags and updates the
+    // app in place, so it is not run at all.
+    let installer = app.join("scripts/install.sh");
+    if !std::fs::read_to_string(&installer).is_ok_and(|t| t.contains("--stage)")) {
+        bail!(
+            "{} has no --stage mode, which reinstall fetches through; nothing was removed. \
+             Run `ways manage update` to move to a version that has it.",
+            installer.display()
+        );
+    }
     eprintln!("==> fetch and verify {} into {}", source.rev, stage.display());
+    // From the app dir, so a relative origin URL resolves as git resolves it there.
     let mut fetch = Command::new("bash");
-    fetch.arg(app.join("scripts/install.sh")).arg("--stage").arg(&stage).args(["--from", &source.url, "--rev", &source.rev]);
+    fetch.arg(&installer).arg("--stage").arg(&stage).args(["--from", &source.url, "--rev", &source.rev]).current_dir(&app);
     if let Some(b) = &source.branch {
         fetch.args(["--branch", b]);
     }
