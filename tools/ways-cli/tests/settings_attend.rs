@@ -197,7 +197,7 @@ fn the_chat_keys_are_listed_set_and_refused_like_any_attend_key() {
     assert_eq!(fx.run(&["settings", "get", "attend.chat.tabs.jump"]).0, "auto\n");
     assert_eq!(fx.run(&["settings", "get", "attend.chat.tabs.menu_on_repeat"]).0, "true\n");
     assert_eq!(fx.run(&["settings", "get", "attend.chat.tabs.focus_key"]).0, "both\n");
-    assert_eq!(fx.run(&["settings", "get", "attend.chat.mouse"]).0, "false\n");
+    assert_eq!(fx.run(&["settings", "get", "attend.chat.mouse"]).0, "true\n");
     let (_, err, code) = fx.run(&["settings", "set", "attend.chat.tabs.jump", "ctrl"]);
     assert_eq!(code, 0, "{err}");
     assert!(fx.read(&fx.user()).contains("chat:\n  tabs:\n    jump: ctrl\n"), "{}", fx.read(&fx.user()));
