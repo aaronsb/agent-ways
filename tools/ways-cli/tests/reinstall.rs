@@ -194,6 +194,40 @@ fn a_projection_stop_keeps_the_built_app_and_names_repair_as_the_finish() {
 }
 
 #[test]
+fn a_stage_left_beside_a_changed_app_is_not_discarded() {
+    let s = Sandbox::new("leftstage", BUILDS);
+    write(&s.stage().join("scripts/install.sh"), "# an earlier run's stage\n");
+    std::fs::remove_file(s.app().join("hooks/check-config-updates.sh")).unwrap();
+    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let t = text(&out);
+    assert!(!out.status.success(), "{t}");
+    assert!(s.stage().join("scripts/install.sh").is_file(), "the stage is kept: {t}");
+    assert!(t.contains("bash scripts/install.sh"), "it names the finish from the stage: {t}");
+    assert!(s.app().join("Makefile").is_file(), "nothing was removed: {t}");
+}
+
+#[test]
+fn a_failed_uninstall_keeps_the_stage_and_prints_the_finishing_line() {
+    let uid = Command::new("id").arg("-u").output().unwrap();
+    if String::from_utf8_lossy(&uid.stdout).trim() == "0" {
+        return; // root deletes a read-only directory, so the uninstall cannot fail here
+    }
+    let s = Sandbox::new("nouninstall", BUILDS);
+    let locked = s.app().join("locked");
+    write(&locked.join("file"), "x\n");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let t = text(&out);
+    assert!(!out.status.success(), "{t}");
+    assert!(s.stage().join("scripts/install.sh").is_file(), "the stage is kept: {t}");
+    let finish = format!("cd '{}' && AGENT_WAYS_ORIGIN='{}' bash scripts/install.sh", s.stage().display(), s.base.join("origin").display());
+    assert!(t.contains(&finish), "{t}");
+    s.kept_what_the_operator_owns();
+}
+
+#[test]
 fn a_reinstall_puts_back_the_same_commit_branch_and_origin() {
     let s = Sandbox::new("ok", BUILDS);
     let rev = git(&s.app(), &["rev-parse", "HEAD"]);

@@ -68,6 +68,12 @@ fn stage_dir(app: &Path) -> PathBuf {
     app.with_file_name("agent-ways.reinstall")
 }
 
+/// The command that installs from a kept stage and then removes it.
+fn finish_line(stage: &Path, url: &str) -> String {
+    let s = quote(&stage.to_string_lossy());
+    format!("cd {s} && AGENT_WAYS_ORIGIN={} bash scripts/install.sh && rm -rf {s}", quote(url))
+}
+
 /// The installer's exit code when the app is built and on PATH and the
 /// projection stopped at a real path (`scripts/install.sh`).
 const PROJECTION_STOPPED: i32 = 3;
@@ -97,7 +103,8 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     println!("1. Fetch and verify that commit into {}. If this fails, nothing is removed.", stage.display());
     println!("2. Uninstall, keeping your config and state:");
     // The stage holds the committed HEAD only; edits in the app dir go with it.
-    if git(&app, &["status", "--porcelain"]).is_some() {
+    let dirty = git(&app, &["status", "--porcelain"]).is_some();
+    if dirty {
         println!("   {} has local changes, which the uninstall deletes.", app.display());
     }
     if let Some(u) = &uninstall {
@@ -109,9 +116,21 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
         return Ok(());
     }
 
-    // 1. A stage left by an earlier run is stale: that run either finished or
-    //    never removed anything, since the app is still here.
+    // 1. A stage left by an earlier run beside a clean app is stale: that run
+    //    either finished or never removed anything. Beside a changed app it may
+    //    be the only good copy, after an uninstall that stopped partway.
     if stage.exists() {
+        if dirty {
+            eprintln!(
+                "A stage from an earlier reinstall is at {}, and {} has changes.\n\
+                 If that reinstall stopped partway, delete what is left of the app, then finish from the stage:\n  {}\n\
+                 Otherwise remove the stage and run `ways manage reinstall --yes` again.",
+                stage.display(),
+                app.display(),
+                finish_line(&stage, &source.url)
+            );
+            bail!("a stage from an earlier reinstall is in the way");
+        }
         std::fs::remove_dir_all(&stage).with_context(|| format!("removing the old stage {}", stage.display()))?;
     }
     eprintln!("==> fetch and verify {} into {}", source.rev, stage.display());
@@ -135,7 +154,13 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     eprintln!("==> uninstall, keeping config and state");
     if let Some(u) = &uninstall {
         if let Err(e) = u.apply() {
-            eprintln!("The staged copy is kept at {}.", stage.display());
+            eprintln!(
+                "\nThe uninstall did not finish. The staged copy is kept at {}.\n\
+                 Fix the cause above and delete what is left of {}, then finish the install with:\n  {}",
+                stage.display(),
+                app.display(),
+                finish_line(&stage, &source.url)
+            );
             return Err(e);
         }
     }
@@ -169,15 +194,11 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
             if app.exists() {
                 let _ = std::fs::remove_dir_all(&app);
             }
-            let s = stage.to_string_lossy();
             eprintln!(
                 "\nThe install did not finish. The staged copy is kept at {}.\n\
-                 Fix the cause above, then finish the install with:\n  \
-                 cd {} && AGENT_WAYS_ORIGIN={} bash scripts/install.sh && rm -rf {}",
+                 Fix the cause above, then finish the install with:\n  {}",
                 stage.display(),
-                quote(&s),
-                quote(&source.url),
-                quote(&s)
+                finish_line(&stage, &source.url)
             );
             bail!("the install from the stage failed");
         }
