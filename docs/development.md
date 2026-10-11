@@ -93,7 +93,7 @@ $th down demo
 
 See `tools/tui-harness/README.md` for every command.
 
-Each TUI has a scenario script that reaches its screen states with real keys at 80x25 and 120x35 and writes PNGs and text captures under `target/tui-verify/`: `tools/ways-cli/shots/verify.sh` for the `ways` screens and `tools/attend-chat/shots/` for attend-chat. `cargo test -p ways --test tui_smoke` checks key states of the `ways` screens through the harness in CI.
+Each TUI has a scenario script that reaches its screen states with real keys at 80x25 and 120x35 and writes PNGs and text captures under `target/tui-verify/`: `tools/ways-cli/shots/verify.sh` for the `ways` screens and `tools/attend-chat/shots/shots.sh` for attend-chat, each under `target/tui-verify/<tui>/<cols>x<rows>/`. The attend-chat script waits on the screen's text (polling `tui-harness text`) rather than sleeping. `cargo test -p ways --test tui_smoke` checks key states of the `ways` screens through the harness in CI.
 
 ## Testing your changes, by blast radius
 

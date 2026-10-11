@@ -11,12 +11,12 @@ refire: 0.25
 After changing a TUI, drive it and look at it before the PR.
 
 1. Build the harness and the binaries: `cargo build --manifest-path tools/Cargo.toml -p tui-harness -p ways -p ways-agent`, plus `-p attend-chat` for that TUI.
-2. Run the TUI's scenario script. It reaches each screen state with real keys at 80x25 and 120x35 and writes a PNG and a text capture per state under `target/tui-verify/`.
+2. Run the TUI's scenario script. It reaches each screen state with real keys and clicks at 80x25 and 120x35, waits on what the screen shows rather than on the clock, and writes a PNG and a text capture per state under `target/tui-verify/<tui>/<cols>x<rows>/`.
 
    | TUI | Script |
    |---|---|
    | `ways` settings, replay, projects | `tools/ways-cli/shots/verify.sh` |
-   | `attend-chat` | `tools/attend-chat/shots/` |
+   | `attend-chat` column, menus, paste | `tools/attend-chat/shots/shots.sh` |
 
 3. Read each PNG of a state the change touches. Say what it shows: the layout, what is clipped or wrapped at 80x25, colour and focus, and anything that differs from the intent.
 4. List the shots you looked at in the PR description, with what each showed.
