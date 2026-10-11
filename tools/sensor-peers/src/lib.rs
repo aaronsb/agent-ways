@@ -267,6 +267,7 @@ impl PeerSensor {
             key: String,
             signal_id: String,
             content: String,
+            mtime: std::time::SystemTime,
             age: Duration,
         }
         let mut found: Vec<Found> = Vec::new();
@@ -297,17 +298,20 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 }
-                let age = fs::metadata(&path)
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.elapsed().ok())
-                    .unwrap_or_default();
+                let mtime = fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                let age = mtime.elapsed().unwrap_or_default();
                 // The signal's id is its filename stem, the value `re:<id>`
                 // replies reference (ADR-120).
                 let signal_id = filename.strip_suffix(".signal").unwrap_or(&filename).to_string();
-                found.push(Found { room, key, signal_id, content, age });
+                found.push(Found { room, key, signal_id, content, mtime, age });
             }
         }
+        // Oldest first, so the parts of a message sent in parts come out in
+        // order. Parts written within one timestamp tick share an mtime;
+        // their ids carry the send time and order them.
+        found.sort_by_cached_key(|f| (f.mtime, agent_identity::signal_send_order(&f.signal_id), f.signal_id.clone()));
 
         let plan = baselining.then(|| {
             let pending: Vec<_> = found.iter().map(|f| (&scan_dirs[f.room].room, f.age)).collect();

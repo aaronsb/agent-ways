@@ -15,8 +15,14 @@ This document contains the help content for the `attend` command-line program.
 * [`attend keepwarm on`↴](#attend-keepwarm-on)
 * [`attend keepwarm off`↴](#attend-keepwarm-off)
 * [`attend keepwarm status`↴](#attend-keepwarm-status)
+* [`attend keepwarm check`↴](#attend-keepwarm-check)
 * [`attend send`↴](#attend-send)
 * [`attend reply`↴](#attend-reply)
+* [`attend listen`↴](#attend-listen)
+* [`attend listen on`↴](#attend-listen-on)
+* [`attend listen off`↴](#attend-listen-off)
+* [`attend listen status`↴](#attend-listen-status)
+* [`attend unread`↴](#attend-unread)
 * [`attend chat`↴](#attend-chat)
 * [`attend join`↴](#attend-join)
 * [`attend leave`↴](#attend-leave)
@@ -56,6 +62,8 @@ Active awareness for Claude Code sessions
 * `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `send` — Send a signal to peer sessions (defaults to #open base channel)
 * `reply` — Reply to the most recent peer message (auto-threaded)
+* `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
+* `unread` — Count this session's unread messages by room, marking none of them read
 * `chat` — Launch the interactive chat TUI (ADR-120)
 * `join` — Join a channel (creates it if absent)
 * `leave` — Leave a channel
@@ -165,6 +173,7 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `on` — Arm a window: one wake at 50 idle minutes keeps the cache read, not re-written
 * `off` — Disarm and forget the window
 * `status` — Cache state, context size, cold price, window left, and this session's cold writes
+* `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). For a host that polls without `attend run`; prints nothing while an `attend run` holds the session, since its sensor wakes it
 
 
 
@@ -193,6 +202,14 @@ Disarm and forget the window
 Cache state, context size, cold price, window left, and this session's cold writes
 
 **Usage:** `attend keepwarm status`
+
+
+
+## `attend keepwarm check`
+
+Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). For a host that polls without `attend run`; prints nothing while an `attend run` holds the session, since its sensor wakes it
+
+**Usage:** `attend keepwarm check`
 
 
 
@@ -229,6 +246,60 @@ Reply to the most recent peer message (auto-threaded)
 * `--to <PATH>` — Scope send to a specific project path
 * `--channel <NAME>` — Scope send to a named channel
 * `--json` — Print the written signal as one JSON document
+
+
+
+## `attend listen`
+
+Turn listening on or off for this session without joining a channel, or show it (default: status)
+
+**Usage:** `attend listen [OPTIONS] [COMMAND]`
+
+###### **Subcommands:**
+
+* `on` — Listen: the Stop-hook drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back
+* `off` — Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join, `attend run` or `listen on` listens again
+* `status` — Print `listening` or `not listening` (default)
+
+###### **Options:**
+
+* `--json` — Print the state as one JSON document
+
+
+
+## `attend listen on`
+
+Listen: the Stop-hook drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back
+
+**Usage:** `attend listen on`
+
+
+
+## `attend listen off`
+
+Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join, `attend run` or `listen on` listens again
+
+**Usage:** `attend listen off`
+
+
+
+## `attend listen status`
+
+Print `listening` or `not listening` (default)
+
+**Usage:** `attend listen status`
+
+
+
+## `attend unread`
+
+Count this session's unread messages by room, marking none of them read
+
+**Usage:** `attend unread [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Print the counts as one JSON document
 
 
 

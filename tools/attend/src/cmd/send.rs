@@ -147,13 +147,20 @@ fn warn_on_expansion(req: &SendRequest, message_parts: &[String]) {
     }
 }
 
-/// The stderr lines for a signal written: each tray that failed, then the
-/// signal's id.
+/// The stderr lines for a message written: each tray that failed, then the
+/// signal's id, one line per part for a message sent in parts.
 fn report(sent: &send::Sent) {
     for f in &sent.failed {
         eprintln!("[attend] error writing signal to {}: {}", f.dir.display(), f.error);
     }
-    eprintln!("[attend] signal written ({}, {} dirs): {}.signal", sent.scope, sent.dirs, sent.id);
+    let n = sent.parts.len();
+    if n == 1 {
+        eprintln!("[attend] signal written ({}, {} dirs): {}.signal", sent.scope, sent.dirs, sent.id);
+        return;
+    }
+    for (i, id) in sent.parts.iter().enumerate() {
+        eprintln!("[attend] signal written ({}, part {}/{n}): {id}.signal", sent.scope, i + 1);
+    }
 }
 
 const SEND_USAGE: &str = "usage: attend send <message>\n  (reaches every peer and Aaron — no routing flags needed)\n  tip: wrap message in double quotes to avoid shell expansion";
@@ -175,7 +182,6 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
         SendError::InvalidReId => {
             eprintln!("attend send: --re signal id must be non-empty and match [A-Za-z0-9_-]+");
         }
-        SendError::AmbiguousRePrefix { .. } => eprintln!("attend send: {e}"),
         SendError::EmptyMessage => unreachable!("an empty message is refused as usage above"),
         SendError::NoPeerAt { path, peers, suggestion } => {
             eprintln!("error: no active peer at {}", path);
@@ -220,6 +226,7 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
         SendError::ParentChannelLeft { .. }
         | SendError::ParentChannelGone { .. }
         | SendError::ParentRoomUnknown => eprintln!("attend reply: {e}"),
+        SendError::OwnProject { .. } | SendError::Incomplete { .. } => eprintln!("error: {e}"),
     }
     std::process::exit(1);
 }

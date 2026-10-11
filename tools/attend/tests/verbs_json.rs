@@ -57,17 +57,20 @@ fn a_send_round_trips_through_the_inbox_with_its_text_intact() {
     }
 }
 
-/// An unthreaded message that starts `re:<id>|` would reach readers as a
-/// reply threaded under `<id>`, with its text cut. It is refused, and nothing
-/// is written.
+/// An unthreaded message that starts `re:`, even one shaped like a thread
+/// id, goes out and reads back as written, unthreaded: the wire marks it
+/// with an empty thread field.
 #[test]
-fn a_message_that_would_read_as_threaded_is_refused() {
+fn a_message_starting_re_reads_back_as_written() {
     let f = Fixture::new("verbs-json-re-prefix");
-    let out = f.without_session(|| f.attend(&["send", "--json", "re:abc-1|looks threaded"]));
-    assert_eq!(out.status.code(), Some(1));
-    let doc = json(&out);
-    assert_eq!(doc["error"], serde_json::json!({ "kind": "ambiguous_re_prefix", "id": "abc-1" }));
-    assert_eq!(ok_json(&f, &["inbox", "--json"])["total"], 0);
+    for text in ["re:abc-1|looks threaded", "re: the plan"] {
+        let sent = f.without_session(|| ok_json(&f, &["send", "--json", text]));
+        assert_eq!(sent["re"], serde_json::Value::Null, "{text}");
+        let id = sent["id"].as_str().unwrap().to_string();
+        let read = ok_json(&f, &["inbox", &id, "--json"]);
+        assert_eq!(read["message"], text);
+        assert_eq!(read["re"], serde_json::Value::Null, "{text}");
+    }
 }
 
 // Needs `attend send`/`reply`, compiled out without the peers sensor.

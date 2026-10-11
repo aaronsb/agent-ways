@@ -13,6 +13,7 @@ pub(crate) mod channels;
 pub(crate) mod inbox;
 #[cfg(feature = "sensor-keepwarm")]
 pub(crate) mod keepwarm;
+pub(crate) mod listen;
 pub(crate) mod peers;
 pub(crate) mod permissions;
 pub(crate) mod run;

@@ -152,9 +152,10 @@ pub(crate) struct Drained {
     sender_id: String,
     scope: String,
     /// The room it was found in, which a reply to it stays in.
-    #[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
-    room: Room,
+    pub(crate) room: Room,
     pub(crate) id: String,
+    /// The id of the message this one replies to, when it is threaded.
+    re: Option<String>,
     body: String,
     source_cwd: String,
 }
@@ -164,6 +165,7 @@ impl DrainedView for Drained {
     fn sender_id(&self) -> &str { &self.sender_id }
     fn scope(&self) -> &str { &self.scope }
     fn id(&self) -> &str { &self.id }
+    fn re(&self) -> Option<&str> { self.re.as_deref() }
     fn body(&self) -> &str { &self.body }
 }
 
@@ -173,6 +175,8 @@ pub(crate) struct Scan {
     pub(crate) delivered: Vec<Drained>,
     pub(crate) mark: Vec<String>,
     pub(crate) note: Option<String>,
+    /// How many the cold start marks without showing; `note` announces them.
+    pub(crate) held_back: usize,
 }
 
 /// The scope label a drained message carries for its room.
@@ -270,11 +274,13 @@ pub(crate) fn scan_pending(
             scope: room_label(&scan_dirs[f.room].room),
             room: scan_dirs[f.room].room.clone(),
             id: f.path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
+            re: sig.reply_to.map(str::to_string),
             body: sig.message.to_string(),
             source_cwd: sig.cwd.to_string(),
         });
     }
-    Scan { delivered, mark, note: plan.and_then(|p| p.note()) }
+    let held_back = plan.as_ref().map_or(0, |p| p.not_shown);
+    Scan { delivered, mark, note: plan.and_then(|p| p.note()), held_back }
 }
 
 /// Drain pending authored messages for this session: deliver the unseen,
@@ -306,25 +312,13 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         return;
     }
     let session_id = ident.session_id.clone();
-    // Enrollment gate (#720): a session that never ran attend and joined
-    // no channel has chosen not to take part, so the drain delivers it
-    // nothing and writes nothing, not even the heartbeat below.
-    if !attend_presence::enrollment::is_enrolled(&session_id) {
-        // `/clear` gives the process a new id. An enrollment recorded for
-        // this same Claude Code process under its previous id moves here,
-        // with its seen-set and channels, as `attend run` would move it.
-        // The process key costs a `ps` off Linux, so it is computed only
-        // when some enrollment was ever recorded under a process key.
-        let previous = attend_presence::enrollment::any_indexed()
-            .then(|| ident.claude_key())
-            .flatten()
-            .and_then(|key| attend_presence::enrollment::previous_id(&key, &session_id));
-        let Some(old) = previous else { return };
-        crate::util::move_session(&old, &session_id, &ident.origin_path);
-        // The record moved with any pending opt-out; apply it now.
-        if !attend_presence::enrollment::is_enrolled(&session_id) {
-            return;
-        }
+    // Listening gate (#720, ADR-406): a session that is not listening (it
+    // never ran attend, joined no channel and never ran `attend listen on`,
+    // or it ran `attend listen off`) is delivered nothing and has nothing
+    // written, not even the heartbeat below. An enrollment this Claude Code
+    // process made under its id before `/clear` counts, and moves here.
+    if !crate::util::adopt_previous_enrollment(&ident) {
+        return;
     }
     let base = signals_base();
     let r = crate::groups::Groups::new(&base, &session_id);
@@ -367,8 +361,10 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
-    let Scan { mut delivered, mark, note } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
-    delivered.sort_by_key(|d| d.mtime);
+    let Scan { mut delivered, mark, note, .. } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
+    // Oldest first; parts written within one timestamp tick go by id,
+    // which carries the send time.
+    delivered.sort_by_cached_key(|d| (d.mtime, agent_identity::signal_send_order(&d.id), d.id.clone()));
 
     // The cold start is this conduit's first contact with the session, so
     // a delivery there names the session. Only a blocking reason reaches
@@ -420,6 +416,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
             println!("[{}] {}", d.scope, d.sender);
             println!("  when:    {}", d.when);
             println!("  id:      {}", d.id);
+            if let Some(re) = &d.re {
+                println!("  re:      {re}");
+            }
             // The label carries only the cwd basename; the wire `from`
             // (with an external sender's terminal suffix) and the full
             // source path stay reachable here.
@@ -502,12 +501,15 @@ fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>, me: O
         } else {
             format!(", from {}", d.sender_id())
         };
+        // A reply names its parent, so the reader can tell what it answers.
+        let re = d.re().map(|re| format!(", re {re}")).unwrap_or_default();
         out.push_str(&format!(
-            "\n[{}] {} ({}, id {}{}):\n{}\n",
+            "\n[{}] {} ({}, id {}{}{}):\n{}\n",
             d.when(),
             d.sender(),
             d.scope(),
             d.id(),
+            re,
             from,
             d.body()
         ));
@@ -549,6 +551,8 @@ trait DrainedView {
     fn sender_id(&self) -> &str;
     fn scope(&self) -> &str;
     fn id(&self) -> &str;
+    /// The parent's id, for a threaded reply.
+    fn re(&self) -> Option<&str>;
     fn body(&self) -> &str;
 }
 
@@ -636,6 +640,7 @@ mod drain_tests {
         sender_id: String,
         scope: String,
         id: String,
+        re: Option<String>,
         body: String,
     }
     impl DrainedView for FakeMsg {
@@ -644,6 +649,7 @@ mod drain_tests {
         fn sender_id(&self) -> &str { &self.sender_id }
         fn scope(&self) -> &str { &self.scope }
         fn id(&self) -> &str { &self.id }
+        fn re(&self) -> Option<&str> { self.re.as_deref() }
         fn body(&self) -> &str { &self.body }
     }
     fn msg(n: usize) -> FakeMsg {
@@ -653,6 +659,7 @@ mod drain_tests {
             sender_id: format!("claude:session-{n}"),
             scope: "#open".into(),
             id: format!("id-{n}"),
+            re: None,
             body: format!("body {n}"),
         }
     }
@@ -745,7 +752,7 @@ mod drain_tests {
         let k1 = write_signal(&dir, "peer-1", "claude:other-session", "already seen");
         let k2 = write_signal(&dir, "peer-2", "claude:other-session", "new message");
         let seen: std::collections::HashSet<String> = [k1].into_iter().collect();
-        let Scan { delivered, mark, note } = scan_pending(&dirs(&dir, Room::Open), &seen, "my-session", false);
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &seen, "my-session", false);
         assert_eq!(delivered.len(), 1);
         assert_eq!(delivered[0].body, "new message");
         assert_eq!(delivered[0].scope, "#open");
@@ -771,7 +778,7 @@ mod drain_tests {
     fn baseline_delivers_fresh_messages() {
         let dir = scan_fixture("baseline-fresh");
         let k = write_signal(&dir, "peer-1", "claude:other-session", "arrived just now");
-        let Scan { delivered, mark, note } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
         assert_eq!(delivered.len(), 1, "fresh message must survive the baseline");
         assert_eq!(mark, vec![k]);
         assert_eq!(note, None);
@@ -786,7 +793,7 @@ mod drain_tests {
         let k = write_signal(&dir, "peer-1", "claude:other-session", "durable backlog");
         age(&dir, "peer-1", std::time::Duration::from_secs(600));
 
-        let Scan { delivered, mark, note } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
         assert_eq!(note.as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
@@ -870,6 +877,7 @@ mod drain_tests {
             sender_id: "claude:abc123".into(),
             scope: "project".into(),
             id: "abc123-1712345-0".into(),
+            re: None,
             body: "hi".into(),
         };
         let reason = render_drain_reason(&[carried], None, None);
@@ -908,6 +916,16 @@ mod drain_tests {
         assert!(out.starts_with("{\"decision\": \"block\""), "{out}");
         assert!(out.contains("held back"), "the note rides the delivery: {out}");
         assert_eq!(hook_output(&[] as &[FakeMsg], None, Some("Chaucer")), None);
+    }
+
+    /// A reply in the hook reason names the message it answers.
+    #[test]
+    fn drain_reason_names_a_replys_parent() {
+        let mut reply = msg(1);
+        reply.re = Some("parent-1-0".into());
+        let reason = render_drain_reason(&[reply, msg(2)], None, None);
+        assert!(reason.contains("peer-1 (#open, id id-1, re parent-1-0, from claude:session-1):"), "{reason}");
+        assert!(reason.contains("peer-2 (#open, id id-2, from claude:session-2):"), "{reason}");
     }
 
     #[test]

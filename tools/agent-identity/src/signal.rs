@@ -1,5 +1,8 @@
 //! The ADR-120 signal wire format: one line, `from|project|cwd|message`, or
-//! `from|project|cwd|re:<signal-id>|message` for a threaded reply.
+//! `from|project|cwd|re:<signal-id>|message` for a threaded reply. An
+//! unthreaded message whose text itself starts `re:` is written
+//! `from|project|cwd|re:|message`: the empty thread field says "no thread",
+//! so the text after it is read as written, whatever it looks like.
 //!
 //! Lives beside [`crate::signal_filename`], which mints the ids a reply
 //! references, so every reader (the attend CLI, the attend-chat TUI, the
@@ -35,17 +38,19 @@ pub fn is_valid_signal_id(id: &str) -> bool {
 
 /// Parse a single-line signal. The discriminator is a `re:<id>|` prefix on
 /// the field that follows `cwd`, where `<id>` passes [`is_valid_signal_id`].
-/// A malformed or ambiguous `re:` prefix degrades to the legacy reading, so
-/// real prose round-trips intact. Pipes in the message are kept.
+/// An empty one, `re:|`, marks an unthreaded message whose text starts
+/// `re:` ([`format_signal`] writes it), and is dropped. Any other malformed
+/// `re:` prefix degrades to the legacy reading, so prose written before the
+/// marker existed round-trips intact. Pipes in the message are kept.
 pub fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
     let parts: Vec<&str> = content.splitn(4, '|').collect();
     if parts.len() < 4 {
         return None;
     }
     let tail = parts[3];
-    let (reply_to, message) = match tail.strip_prefix("re:").and_then(|rest| rest.split_once('|')) {
-        Some((id, msg)) if is_valid_signal_id(id) => (Some(id), msg),
-        _ => (None, tail),
+    let (reply_to, message) = match tail.strip_prefix(UNTHREADED) {
+        Some(message) => (None, message),
+        None => thread_and_text(tail),
     };
     Some(ParsedSignal {
         from: parts[0],
@@ -54,6 +59,18 @@ pub fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
         reply_to,
         message,
     })
+}
+
+/// The empty thread field: an unthreaded message whose text starts `re:`.
+const UNTHREADED: &str = "re:|";
+
+/// Split the field after `cwd` into its thread id, if it carries one, and
+/// the message text.
+fn thread_and_text(tail: &str) -> (Option<&str>, &str) {
+    match tail.strip_prefix("re:").and_then(|rest| rest.split_once('|')) {
+        Some((id, msg)) if is_valid_signal_id(id) => (Some(id), msg),
+        _ => (None, tail),
+    }
 }
 
 /// A signal file's record without the one newline [`format_signal`] ends it
@@ -66,10 +83,13 @@ pub fn wire_line(content: &str) -> &str {
 }
 
 /// One wire line, newline-terminated: `from|project|cwd|message`, or
-/// `from|project|cwd|re:<id>|message` when `reply_to` is given.
+/// `from|project|cwd|re:<id>|message` when `reply_to` is given. An
+/// unthreaded message that starts `re:` gets the empty thread field,
+/// `re:|`, so no reader can take its text for a thread id.
 pub fn format_signal(from: &str, project: &str, cwd: &str, reply_to: Option<&str>, message: &str) -> String {
     match reply_to {
         Some(id) => format!("{from}|{project}|{cwd}|re:{id}|{message}\n"),
+        None if message.starts_with("re:") => format!("{from}|{project}|{cwd}|{UNTHREADED}{message}\n"),
         None => format!("{from}|{project}|{cwd}|{message}\n"),
     }
 }
@@ -258,10 +278,36 @@ mod tests {
 
     #[test]
     fn a_malformed_re_prefix_keeps_the_raw_tail() {
-        for line in ["claude:a|p|/x|re:alone", "claude:a|p|/x|re:|body", "claude:a|p|/x|re:has spaces|body"] {
+        for line in ["claude:a|p|/x|re:alone", "claude:a|p|/x|re:has spaces|body"] {
             let s = parse_signal(line).unwrap();
             assert_eq!(s.reply_to, None, "{line}");
             assert_eq!(s.message, line.splitn(4, '|').nth(3).unwrap(), "{line}");
         }
+    }
+
+    /// An unthreaded message that starts `re:` reads back as written, even
+    /// when its start looks like a thread id: the writer marks it with the
+    /// empty thread field.
+    #[test]
+    fn an_unthreaded_message_starting_re_round_trips() {
+        for text in ["re:abc-1|looks threaded", "re: the plan", "re:", "re:|already marked"] {
+            let line = format_signal("claude:a", "p", "/x", None, text);
+            let s = parse_signal(wire_line(&line)).unwrap();
+            assert_eq!((s.reply_to, s.message), (None, text), "{line}");
+        }
+        let line = format_signal("claude:a", "p", "/x", Some("id-1"), "re:abc-1|inside a thread");
+        let s = parse_signal(wire_line(&line)).unwrap();
+        assert_eq!((s.reply_to, s.message), (Some("id-1"), "re:abc-1|inside a thread"));
+        assert_eq!(format_signal("claude:a", "p", "/x", None, "plain"), "claude:a|p|/x|plain\n", "only a re: start is marked");
+    }
+
+    #[test]
+    fn send_order_reads_the_time_and_sequence_not_the_sender() {
+        use crate::signal_send_order as order;
+        assert!(order("zed-1791000000000000001-0") < order("abe-1791000000000000002-0"));
+        assert!(order("a-1791000000000000001-9") < order("a-1791000000000000001-10"), "seq compares as a number");
+        assert_eq!(order("aaron-kitty-1791000000000000001-3.signal"), (1791000000000000001, 3));
+        assert_eq!(order("hand-written"), (0, 0));
+        assert_eq!(order("12-3"), (0, 0), "no sender part");
     }
 }
