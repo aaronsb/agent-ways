@@ -61,6 +61,15 @@ agent:
 amends:
   - ADR-501#Decision
   - 'ADR-172#Addendum, 2026-10-01: enrollment and one cold-start rule'
+considered:
+  - operator: aaronsb
+    said: "attend-chat opening wakes all"
+    via: AskUserQuestion, session chat, 2026-10-10; option label written by the agent, chosen by the operator
+    covers: [door]
+  - operator: aaronsb
+    said: "Yes, on everywhere, asleep"
+    via: AskUserQuestion, session chat, 2026-10-10; option label written by the agent, chosen by the operator
+    covers: [default-on]
 status: proposed
 date: 2026-10-10
 deciders:
@@ -79,7 +88,8 @@ related:
 observable:
   - "In an interactive session with the mod installed and nobody calling it, no row is drawn, no turn starts on its own, and attend_send, attend_reply, attend_join and attend_peers are listed"
   - "A message sent to the session's project, an @name, or an invite wakes an idle session within one dormant check, and the turn carries the message framed as peer data"
-  - "Opening attend-chat alone wakes no session"
+  - "Opening attend-chat wakes every interactive session within one dormant check; a `-p` run or an SDK session started while it is open stays dormant"
+  - "With attend-chat closed, an awake session goes dormant after the quiet period and its row disappears"
   - "The operator sees one dim line per delivered message; the model reads the full framed batch"
   - "`ways target disable <dir>` leaves no attend plugin or agent-ways marketplace in that target's `claude plugin list` and settings.json"
 ---
@@ -88,11 +98,11 @@ observable:
 
 ## Summary
 
-- **Decided:** attend's agent-facing side becomes a Claude Code mod, a plugin whose function hooks run inside the session. agent-ways ships it and `ways reconcile` installs, updates and removes it through Claude Code's own plugin CLI, from a local folder marketplace in the app source. The mod loads dormant and wakes only when someone calls the session, the session reaches out itself, or the session joins a channel. Awake, it draws one status row and drives inbound delivery. Its typed tools `attend_send`, `attend_reply`, `attend_join` and `attend_peers` replace the attend tools that ADR-501 planned for `ways-mcp`, and that module stays on hold. Every message still travels through attend's signal store through the attend CLI, so the human reads and writes the same conversation in attend-chat. The mod is a thin driver: routing, enrollment, presence and threading belong to attend.
+- **Decided:** attend's agent-facing side becomes a Claude Code mod, a plugin whose function hooks run inside the session. agent-ways ships it and `ways reconcile` installs, updates and removes it through Claude Code's own plugin CLI, from a local folder marketplace in the app source. The mod loads dormant. It wakes every interactive session when a human is present in attend-chat, and wakes a single session when it is called or reaches out itself. Awake, it draws one status row and drives inbound delivery. Its typed tools `attend_send`, `attend_reply`, `attend_join` and `attend_peers` replace the attend tools that ADR-501 planned for `ways-mcp`, and that module stays on hold. Every message still travels through attend's signal store through the attend CLI, so the human reads and writes the same conversation in attend-chat. The mod is a thin driver: routing, enrollment, presence and threading belong to attend.
 - **Trades away:** a dependency on an early-access Claude Code API that can break on any Claude Code update; a TypeScript component in a Rust suite; a second place, the plugin cache, that holds a copy of shipped code and needs its own update step; and Monitor as the default inbound path in Claude Code.
 - **One-way?** No. Reversible: reconcile can remove the mod in one pass, and Monitor, `/attend` and the Stop-hook drain stay working throughout. It becomes expensive only once the Monitor path is removed, which item 9 holds until a stated condition.
-- **Probes:** *Not confident (door):* Opening attend-chat by itself wakes no session. Sessions wake only when they are called: an invite, an @name, a message sent to their project, or a call to every session. Is that the "busting through the door" moment you meant? *Confident (default-on):* Once agent-ways is installed, the mod is in every Claude Code session on each enabled target, asleep, with its four tools listed. You turn it off in the ways config, and there is no per-project switch to turn it on.
-- **Inversion:** Between a session that is always listening, the Monitor loop that `/attend` starts, and a session that hears nothing until a person starts something by hand. The answer is a session that stays asleep and can be woken by the people and agents in the conversation, without the operator starting anything.
+- **Probes:** *Not confident (door):* Opening attend-chat is the door: while you are present there, every interactive session wakes, and a session called in by name, project or invite wakes even when you are not. *Confident (default-on):* Once agent-ways is installed, the mod is in every Claude Code session on each enabled target, asleep, with its four tools listed. You turn it off in the ways config, and there is no per-project switch to turn it on.
+- **Inversion:** Between a session that is always listening, the Monitor loop that `/attend` starts, and a session that hears nothing until a person starts something by hand. The answer is a session that stays asleep until the human enters attend-chat or someone calls it, without the operator starting anything in the session.
 
 ## Context
 
@@ -106,11 +116,12 @@ The operator set the constraints. Attend matters when several agents work on rel
 
 1. **The mod is attend's agent-facing driver in Claude Code.** It does four jobs: decide whether this session is listening, drive inbound delivery while it is, serve the outbound tools, and show one status row. It holds no message state of its own. Every read and write goes through the attend CLI as an argv array with no shell, and any state the mod keeps (awake or dormant, its delivery counter, the short-id map) is session-local and rebuildable.
 
-2. **Dormant by default.** A session with the mod loaded draws nothing, submits nothing and joins nothing. Its only work while dormant is one read-only check on a slow interval (default 15 seconds) for something addressed to it. It wakes on:
-   - **(a) a call to this session:** a message to its project (`--to`), an @mention of its name, an invitation to a channel (accepted with `attend join`), or a call addressed to every agent session (item 10);
-   - **(b) its own reach-out:** the agent calls `attend_send`, `attend_reply` or `attend_join`.
+2. **Dormant by default.** A session with the mod loaded draws nothing, submits nothing and joins nothing. Its only work while dormant is one read-only check on a slow interval (default 15 seconds) for a human present in attend-chat and for something addressed to it. It wakes on:
+   - **(a) a human present:** attend's presence query (item 10) reports a human in attend-chat, from the heartbeat attend-chat writes. Opening attend-chat is the door, and every interactive session wakes. Interactive sessions only: a `-p` run or an SDK session started while attend-chat is open stays dormant, because it would otherwise poll in a run that exits after one turn;
+   - **(b) a call to this session:** a message to its project (`--to`), an @mention of its name, an invitation to a channel (accepted with `attend join`), or a call addressed to every agent session (item 10). This wakes the session whether or not a human is present;
+   - **(c) its own reach-out:** the agent calls `attend_send`, `attend_reply` or `attend_join`.
 
-   The human having attend-chat open is not a wake trigger. A person who wants agents in the room calls them. Awake, the mod goes dormant again after a quiet period (default 20 minutes) with no turn running, no traffic in or out of this session's channels, and no human present in those channels. Waking and sleeping set attend's listening state for the session (item 10), so the Stop-hook drain follows the mod. A wake from a `-p` run or an SDK host never happens: those sessions keep the tools and never poll.
+   **Going quiet again.** An awake session goes dormant once no human is present in attend-chat (it is closed, or its heartbeat has lapsed) and a quiet period has then passed (default 20 minutes) with no turn running and no traffic in or out of this session's channels. Closing attend-chat therefore quiets every session that only presence had woken, after the quiet period. Waking and sleeping set attend's listening state for the session (item 10), so the Stop-hook drain follows the mod. A `-p` run or an SDK session keeps the tools and never polls unless the configuration allows it (item 11); even then, presence does not wake it.
 
 3. **One status row.** While awake, the mod draws one row above the prompt in the shape of the operator's statusline: peer count, unread count, and the active channels. It omits the session name and project, which the statusline already shows. Dormant, it draws nothing. It uses the `AbovePrompt` slot rather than `$.ui.status`, because only the slot can draw the statusline's coloured segments. The cost is one row, which the person can collapse.
 
@@ -145,7 +156,7 @@ The operator set the constraints. Attend matters when several agents work on rel
 
 10. **What attend must provide.** These are attend's routing model, changed in attend and not worked around in the mod. A workaround in the mod for the reply channel was tried and reverted for this reason.
     - **Listening without joining.** A session can be listening without joining a channel. The mod sets it on wake and clears it on sleep through an attend verb, along the lines of the passive and active state proposed on #538. While the session is not listening, the drain delivers only messages addressed to it, and holds the rest without marking them seen. Today the drain delivers only to a session that ran `attend run` or joined a channel (ADR-172, addendum of 2026-10-01). Until this lands, a wake by an addressed message delivers it from a read-only listing, which does not mark the seen-set.
-    - **A presence query.** An attend command reports which humans are present, from the heartbeat attend-chat already writes (ADR-170). The mod uses it for the quiet-period rule and the row. Until it lands the mod reads nothing about presence; it does not use a host process check, which cannot see a human on another host.
+    - **A presence query.** An attend command reports which humans are present, from the heartbeat attend-chat already writes (ADR-170). The mod uses it for the presence wake (item 2a), the quiet-period rule and the row. It is the first prerequisite to land, since trigger (a) depends on it. Until it lands the mod may fall back to a host process check for attend-chat, which sees only a human on the same host and is removed when the query ships.
     - **A non-consuming unread count** for the row.
     - **A call to every agent session**, an addressee that attend-chat can send and that a dormant mod treats as addressed to it (ADR-401's addressee field).
     - **Replies keep the parent's channel**, and drain lines carry the thread parent.
@@ -159,7 +170,7 @@ The operator set the constraints. Attend matters when several agents work on rel
 
 ### Positive
 
-- Inbound delivery needs no Monitor and no command typed by the operator. A session hears what is meant for it, and only that, until it is called in.
+- Inbound delivery needs no Monitor and no command typed by the operator. Entering attend-chat brings every interactive session into the room; outside that, a session hears only what is addressed to it.
 - Outbound loses shell quoting, hand splitting and the send-or-reply guess, the three near misses the #538 field report recorded.
 - The operator gets a status display for attend where there was none, in one row, only while it matters.
 - The human remains a participant in every exchange, and the store remains the one place where attend traffic is kept and managed.
@@ -171,7 +182,8 @@ The operator set the constraints. Attend matters when several agents work on rel
 - A TypeScript component joins a Rust suite, with its own tests and type checking.
 - The plugin cache holds a copy that is stale until reconcile runs the update step and the session restarts.
 - Until the item 10 prerequisites land, the mod works around attend: a wake delivers from a listing, and the row's unread count covers only what it drained.
-- A Claude Code session that the mod keeps dormant gets nothing from `#open` until it is called or reaches out. That is the intent, and it changes what a session that has the mod but never ran `/attend` sees today.
+- While the human is in attend-chat, every interactive session on the machine is awake and polling, including sessions doing unrelated work. The quiet period after attend-chat closes keeps them awake a while longer.
+- A Claude Code session that the mod keeps dormant gets nothing from `#open` until a human is present, it is called, or it reaches out. That is the intent, and it changes what a session that has the mod but never ran `/attend` sees today.
 
 ### Neutral
 
@@ -186,4 +198,3 @@ The operator set the constraints. Attend matters when several agents work on rel
 - **Claude Code's native session messaging** (`$.session.send` and `session.receive`). Rejected: messages would pass between sessions directly, out of attend-chat's sight and out of the store, which removes the human from the conversation and the single place where attend traffic is managed.
 - **Shipping the mod under `skills/`,** so the user skills folder loads it. Rejected: reconcile projects the whole `skills/` root, so the mod would load in every target with no switch of its own, and no step could update or remove it apart from the skills root. A project `.claude/skills` folder does not load it at all.
 - **`CLAUDE_CODE_PLUGIN_DIRS` written into the settings env block.** Rejected for the reasons in item 8.
-- **Waking when the human opens attend-chat,** as the spike did. Rejected: the operator runs attend-chat at times when agents should stay heads-down, and it also woke `-p` runs.
