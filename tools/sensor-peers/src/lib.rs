@@ -287,7 +287,7 @@ impl PeerSensor {
                 // Read and parse: `from|project|cwd|message` (legacy) or
                 // `from|project|cwd|re:id|message` (threaded, ADR-120).
                 let Ok(content) = fs::read_to_string(&path) else { continue };
-                let Some(sig) = agent_identity::parse_signal(content.trim()) else {
+                let Some(sig) = agent_identity::parse_signal(agent_identity::wire_line(&content)) else {
                     self.seen_signals.insert(key);
                     continue;
                 };
@@ -328,7 +328,7 @@ impl PeerSensor {
                 continue;
             }
             let Some(agent_identity::ParsedSignal { from, cwd: source_cwd, message, .. }) =
-                agent_identity::parse_signal(f.content.trim())
+                agent_identity::parse_signal(agent_identity::wire_line(&f.content))
             else {
                 continue;
             };
@@ -384,7 +384,8 @@ impl PeerSensor {
             // reply` to auto-thread to the agent's own past self.
             if let Some(ref sid) = self.own_session_id {
                 if source_cwd != focus.working_dir {
-                    last_inbound::record(sid, &f.signal_id);
+                    let said = last_inbound::Said::of(&scan_dirs[f.room].room, from, source_cwd);
+                    last_inbound::record(sid, &f.signal_id, &said);
                 }
             }
         }

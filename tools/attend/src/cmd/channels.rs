@@ -3,50 +3,41 @@
 //!
 //! Storage is untouched by the vocabulary: channels are still `@name/`
 //! signal namespaces with membership in `_groups.yaml` (attend-groups).
+//! Join, leave and the listings are `verbs::channels`; this renders them.
+//! The lifecycle verbs below them (dissolve, create, describe, pin) stay
+//! CLI-only.
 
 use crate::util::get_groups;
 
-pub(crate) fn cmd_join(name: &str, pin: bool) {
-    let name = name.trim_start_matches('#');
-    let r = get_groups();
-    // Enrolled first, so a crash between the two never leaves a member
-    // that is not enrolled; a failed join takes the enrollment back.
-    crate::util::enroll_by_join();
-    // The backlog is marked before the membership is written, so no
-    // conduit scans the room while its history is still unseen. A join
-    // that answers an invitation keeps the room's recent history to read;
-    // one that does not, holds back what is older than the fresh window.
-    let note = match attend_groups::validate_group_name(name) {
-        Ok(()) if r.take_invite(name) => crate::util::brief_invited_room(&r, name),
-        Ok(()) => crate::util::backlog_note(crate::util::baseline_joined_room(&r, name)),
-        Err(_) => String::new(),
-    };
-    match r.join(name, pin) {
-        Ok(()) => {
-            let suffix = if pin { " (pinned)" } else { "" };
-            println!("[attend] joined #{name}{suffix}{note}");
-            if let Some(line) = crate::util::you_are_line() {
-                println!("{line}");
+pub(crate) fn cmd_join(name: &str, pin: bool, json: bool) {
+    match crate::verbs::channels::join(name, pin) {
+        Ok(j) if json => crate::cmd::print_json(&j),
+        Ok(j) => {
+            let suffix = if j.pinned { " (pinned)" } else { "" };
+            println!("[attend] joined #{}{suffix}{}", j.name, j.note);
+            if let Some(me) = &j.you_are {
+                println!("you are {me}");
             }
         }
         Err(e) => {
-            crate::util::settle_join_enrollment(&r);
+            if json {
+                crate::cmd::print_json_error(&e, &e.to_string());
+            }
             eprintln!("[attend] join: {e}");
             std::process::exit(1);
         }
     }
 }
 
-pub(crate) fn cmd_leave(name: &str) {
-    let name = name.trim_start_matches('#');
-    let r = get_groups();
-    if !r.my_groups().iter().any(|(n, _)| n == name) {
-        println!("[attend] not in #{name} — nothing to leave");
-        return;
+pub(crate) fn cmd_leave(name: &str, json: bool) {
+    let left = crate::verbs::channels::leave(name);
+    if json {
+        crate::cmd::print_json(&left);
+    } else if left.was_member {
+        println!("[attend] left #{}", left.name);
+    } else {
+        println!("[attend] not in #{} — nothing to leave", left.name);
     }
-    r.leave(name).ok();
-    crate::util::settle_join_enrollment(&r);
-    println!("[attend] left #{name}");
 }
 
 pub(crate) fn cmd_dissolve(name: &str) {
@@ -118,16 +109,18 @@ pub(crate) fn cmd_unpin(name: &str) {
 }
 
 /// Joined channels only. Read-only, so a hook macro can call it on every fire
-/// without `cmd_channels`'s `cleanup_stale` rewriting shared state.
-pub(crate) fn cmd_joined() {
-    let my = get_groups().my_groups();
-    if my.is_empty() {
+/// without `cmd_channels`'s cleanup rewriting shared state.
+pub(crate) fn cmd_joined(json: bool) {
+    let my = crate::verbs::channels::joined();
+    if json {
+        crate::cmd::print_json(&my);
+    } else if my.is_empty() {
         println!("channels: project only");
     } else {
         let mut t = agent_fmt::Table::new(&["Channel", "Pinned"]);
-        for (name, pinned) in &my {
-            let label = format!("#{name}");
-            t.add(vec![&label, if *pinned { "yes" } else { "no" }]);
+        for c in &my {
+            let label = format!("#{}", c.name);
+            t.add(vec![&label, if c.pinned { "yes" } else { "no" }]);
         }
         t.print();
     }
@@ -135,17 +128,12 @@ pub(crate) fn cmd_joined() {
 
 /// All channels with membership marks — the agent-side mirror of the
 /// TUI's `/channels`.
-pub(crate) fn cmd_channels() {
-    let r = get_groups();
-    r.cleanup_stale();
-    let joined: std::collections::HashSet<String> =
-        r.my_groups().into_iter().map(|(n, _)| n).collect();
-    // Single read of the whole file (PR #407 nit): a second read for
-    // descriptions could misalign the column against a concurrent
-    // write. Members/pinned/description all come from this one snapshot.
-    let state = attend_groups::load_groups(&crate::util::signals_base());
-    let mut names: Vec<&String> = state.keys().collect();
-    names.sort();
+pub(crate) fn cmd_channels(json: bool) {
+    let channels = crate::verbs::channels::list();
+    if json {
+        crate::cmd::print_json(&channels);
+        return;
+    }
     let mut t =
         agent_fmt::Table::new(&["Channel", "Members", "Joined", "Pinned", "Description"]);
     t.align(1, agent_fmt::Align::Right);
@@ -153,16 +141,14 @@ pub(crate) fn cmd_channels() {
     // leftmost rule. `(all)` captures the fact that every peer is
     // implicitly subscribed.
     t.add(vec!["#open", "(all)", "(always)", "(base)", "the commons"]);
-    for name in names {
-        let entry = &state[name];
-        let label = format!("#{name}");
-        let desc = entry.description.clone().unwrap_or_default();
+    for c in &channels {
+        let label = format!("#{}", c.name);
         t.add(vec![
             &label,
-            &entry.members.len().to_string(),
-            if joined.contains(name) { "yes" } else { "" },
-            if entry.pinned { "yes" } else { "no" },
-            &desc,
+            &c.members.to_string(),
+            if c.joined { "yes" } else { "" },
+            if c.pinned { "yes" } else { "no" },
+            c.description.as_deref().unwrap_or(""),
         ]);
     }
     t.print();
