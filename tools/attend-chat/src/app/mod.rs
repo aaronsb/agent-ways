@@ -109,9 +109,11 @@ struct Hits {
     compose: (Rect, usize),
     text_width: u16,
     chips: Vec<(Rect, Chip)>,
-    /// The left column's rows, and the column's whole area.
+    /// The left column's rows, the column's whole area, and the rows of
+    /// each of its lists (agents, channels) for the wheel.
     side: Vec<(Rect, sidebar::SideHit)>,
     side_area: Rect,
+    side_lists: [Rect; 2],
 }
 
 /// The chat's state: the messages, the compose box, the shown channel.
@@ -179,6 +181,9 @@ pub struct ChatPane {
     /// The left column's row under the keyboard's cursor, while it has the
     /// focus (F2, then Down).
     side_focus: Option<usize>,
+    /// The first row shown of each of the column's lists, agents then
+    /// channels: the wheel moves them and the cursor keeps itself in view.
+    side_scroll: [usize; 2],
 }
 
 impl ChatPane {
@@ -216,6 +221,7 @@ impl ChatPane {
             sidebar: true,
             shape: Shape::PLAIN,
             side_focus: None,
+            side_scroll: [0, 0],
         }
     }
 
@@ -603,6 +609,15 @@ impl Pane for ChatPane {
 
     fn wheel(&mut self, up: bool) {
         self.scroll_by(up, WHEEL_ROWS);
+    }
+
+    /// The wheel over one of the column's lists scrolls that list; anywhere
+    /// else, the feed.
+    fn wheel_at(&mut self, up: bool, at: Position) {
+        match self.hits.side_lists.iter().position(|r| r.contains(at)) {
+            Some(list) => self.side_wheel(list, up),
+            None => self.wheel(up),
+        }
     }
 
     /// A click on a message selects it and brings it whole into view; on

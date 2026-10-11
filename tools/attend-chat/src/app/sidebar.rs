@@ -116,12 +116,20 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let (ah, ch) = split(inner.height, seen.len(), rows.len());
     let agents = Rect { height: ah, ..inner };
     let channels = Rect { y: inner.y + ah, height: ch, ..inner };
+    // Each list scrolls on its own, keeping the keyboard's cursor in view.
+    let (vis_a, vis_c) = (ah.saturating_sub(1) as usize, ch.saturating_sub(1) as usize);
+    let n_a = seen.len();
+    let sa = in_view(chat.side_scroll[0], n_a, vis_a, focus.filter(|f| *f < n_a));
+    let sc = in_view(chat.side_scroll[1], rows.len(), vis_c, focus.and_then(|f| f.checked_sub(n_a)));
+    chat.side_scroll = [sa, sc];
+    let below = |r: Rect| Rect { y: r.y + 1, height: r.height.saturating_sub(1), ..r };
+    chat.hits.side_lists = [below(agents), below(channels)];
     let live = seen.iter().filter(|s| s.live).count();
-    header(f, agents, &format!("Agents {live}/{}", seen.len()));
+    header(f, agents, &format!("Agents {live}/{n_a}{}", more(sa, vis_a, n_a)));
     let w = inner.width.saturating_sub(1) as usize;
     let mut hits = Vec::new();
-    for (i, s) in seen.iter().enumerate().take(ah.saturating_sub(1) as usize) {
-        let r = Rect { y: agents.y + 1 + i as u16, height: 1, ..agents };
+    for (k, (i, s)) in seen.iter().enumerate().skip(sa).take(vis_a).enumerate() {
+        let r = Rect { y: agents.y + 1 + k as u16, height: 1, ..agents };
         // Marked as Tab would complete it: a claude, not a human.
         let mark = target(Style::new(), s.identity.is_claude && prefix_match(&s.identity.nickname, agent_partial.as_deref()));
         let mut line = agent_line(chat, s, w, mark);
@@ -131,21 +139,47 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         f.render_widget(Paragraph::new(line), r);
         hits.push((r, SideHit::Agent(s.identity.nickname.clone())));
     }
-    header(f, channels, &format!("Channels {}", rows.len()));
+    header(f, channels, &format!("Channels {}{}", rows.len(), more(sc, vis_c, rows.len())));
     let now = chat.now();
-    for (i, (row, live)) in rows.iter().enumerate().take(ch.saturating_sub(1) as usize) {
-        let r = Rect { y: channels.y + 1 + i as u16, height: 1, ..channels };
+    for (k, (i, (row, live))) in rows.iter().enumerate().skip(sc).take(vis_c).enumerate() {
+        let r = Rect { y: channels.y + 1 + k as u16, height: 1, ..channels };
         let shown = fg == Tab::Channel(row.known.group.name.clone());
         let mark = target(Style::new(), prefix_match(&row.known.group.name, channel_partial.as_deref()));
         let age = row.last.and_then(|t| now.duration_since(t).ok()).map(age_label).unwrap_or_default();
         let mut line = channel_line(chat, row, *live, &age, shown, w, mark);
-        if focus == Some(seen.len() + i) {
+        if focus == Some(n_a + i) {
             line.spans[0] = cursor();
         }
         f.render_widget(Paragraph::new(line), r);
         hits.push((r, SideHit::Channel(row.known.group.name.clone())));
     }
     chat.hits.side = hits;
+}
+
+/// The first row to show of a list of `len` rows, `vis` at a time: `top`
+/// held within the list, then moved just enough to show `cursor`.
+pub(super) fn in_view(top: usize, len: usize, vis: usize, cursor: Option<usize>) -> usize {
+    let mut top = top.min(len.saturating_sub(vis));
+    if let Some(c) = cursor {
+        if c < top {
+            top = c;
+        } else if vis > 0 && c >= top + vis {
+            top = c + 1 - vis;
+        }
+    }
+    top
+}
+
+/// A header's marks for rows out of view: `↑` above, `↓` below.
+fn more(top: usize, vis: usize, len: usize) -> String {
+    let mut out = String::new();
+    if top > 0 {
+        out += " ↑";
+    }
+    if top + vis < len {
+        out += " ↓";
+    }
+    out
 }
 
 /// The keyboard's cursor at the left of a row.
@@ -275,6 +309,14 @@ impl ChatPane {
         }
     }
 
+    /// The wheel over list `list` (0 agents, 1 channels): a row at a time.
+    /// The next frame holds it within the list.
+    pub(super) fn side_wheel(&mut self, list: usize, up: bool) {
+        let top = &mut self.side_scroll[list];
+        *top = if up { top.saturating_sub(1) } else { *top + 1 };
+        self.dirty = true;
+    }
+
     /// Show or hide the column.
     pub(super) fn toggle_sidebar(&mut self) {
         self.sidebar = !self.sidebar;
@@ -398,6 +440,18 @@ mod tests {
         assert!(!helper_needed(""), "the agent legend is the column's");
         assert!(!helper_needed("hi #de"), "so is the channel list");
         assert!(helper_needed("/he"), "slash commands stay in the row");
+    }
+
+    #[test]
+    fn a_list_scrolls_to_keep_the_cursor_in_view_and_stays_within_itself() {
+        assert_eq!(in_view(0, 15, 5, None), 0);
+        assert_eq!(in_view(0, 15, 5, Some(7)), 3, "the cursor at the bottom row");
+        assert_eq!(in_view(6, 15, 5, Some(2)), 2, "the cursor at the top row");
+        assert_eq!(in_view(40, 15, 5, None), 10, "the wheel stops at the last row");
+        assert_eq!(in_view(3, 4, 10, None), 0, "a list that fits does not scroll");
+        assert_eq!(more(0, 5, 15), " ↓");
+        assert_eq!(more(10, 5, 15), " ↑");
+        assert_eq!(more(0, 5, 5), "");
     }
 
     #[test]

@@ -1347,6 +1347,58 @@ fn cursor_row(c: &mut Chat, w: u16) -> Option<String> {
     testkit::rows(&testkit::render_screen(c, w, 25)).into_iter().find(|r| r.contains('▸') && !r.starts_with(" ≡"))
 }
 
+/// The column with fifteen more agents than it has rows for.
+fn chat_crowded() -> Chat {
+    let mut c = chat_side();
+    for n in 0..15 {
+        c.push(sig(&format!("claude:dddddddd-0000-4000-8000-{n:012}"), &format!("/work/crowd-{n:02}"), 1000 + n, Channel::Open, "here"));
+    }
+    c
+}
+
+/// Every row of a long list is reachable by keyboard and by mouse: the
+/// cursor scrolls the list to stay in view, and the wheel over a list
+/// scrolls it.
+#[test]
+fn a_long_column_scrolls_with_the_cursor_and_the_wheel() {
+    let mut c = chat_crowded().enhanced(true).dry_run(true);
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let header = rows.iter().find(|r| r.contains("Agents")).expect("the header").clone();
+    assert!(header.contains('↓') && !header.contains('↑'), "rows below, none above: {header}");
+    let first_agent = rows.iter().position(|r| r.contains("Agents")).unwrap() + 1;
+    let top_before = rows[first_agent].clone();
+    // The keyboard: from the first channel, Up into the agents and on past
+    // the rows shown; the cursor is always drawn.
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Down));
+    for _ in 0..19 {
+        press(&mut c, key(KeyCode::Up));
+        assert!(cursor_row(&mut c, 80).is_some(), "the cursor stays in view");
+    }
+    press(&mut c, key(KeyCode::Home));
+    let at = cursor_row(&mut c, 80).expect("the cursor");
+    assert!(at.contains("Laszlo"), "Home reaches the first agent: {at}");
+    press(&mut c, key(KeyCode::End));
+    assert!(cursor_row(&mut c, 80).expect("the cursor").contains("#archive"), "End, the last channel");
+    press(&mut c, key(KeyCode::Esc));
+    // The wheel over the agents scrolls them, and the feed stays put.
+    let mut c = chat_crowded().enhanced(true);
+    testkit::render_screen(&mut c, 80, 25);
+    let ev = |kind| agent_tui::ratatui::crossterm::event::MouseEvent { kind, column: 5, row: first_agent as u16 + 1, modifiers: KeyModifiers::NONE };
+    for _ in 0..30 {
+        c.mouse(ev(MouseEventKind::ScrollDown));
+    }
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert_ne!(rows[first_agent], top_before, "the list moved");
+    let header = rows.iter().find(|r| r.contains("Agents")).unwrap();
+    assert!(header.contains('↑') && !header.contains('↓'), "at the last row: {header}");
+    assert_eq!(c.scroll(), 0, "the feed did not scroll");
+    for _ in 0..30 {
+        c.mouse(ev(MouseEventKind::ScrollUp));
+    }
+    assert_eq!(testkit::rows(&testkit::render_screen(&mut c, 80, 25))[first_agent], top_before, "back to the top");
+}
+
 /// Join and Leave from the menu, with no slash command.
 #[test]
 fn a_channel_menu_joins_a_channel_the_human_is_not_in() {
