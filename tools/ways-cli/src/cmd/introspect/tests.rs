@@ -562,6 +562,21 @@ fn a_heavy_spend_fits_at_80_columns() {
     assert!(text(&render(&mut wide, 80, 25)).contains(SESSION), "without spend the full id stays");
 }
 
+/// A frame that re-discloses more than the context pane holds ends its
+/// note in an ellipsis rather than at the border.
+#[test]
+fn a_long_change_note_is_cut_with_an_ellipsis_at_80_columns() {
+    let mut events = session_events();
+    for w in ["softwaredev/code/performance", "softwaredev/environment/deps", "softwaredev/code/security"] {
+        events.push(ev("2026-07-03T17:52:01Z", "way_redisclosed", w, "semantic:embedding:en"));
+    }
+    let mut s = showing(replay_of(events, false), terminal(), Shape::PLAIN);
+    press(&mut s, &[KeyCode::End]);
+    let t = text(&render(&mut s, 80, 25));
+    let note = t.lines().find(|l| l.starts_with("│+ ")).unwrap_or_else(|| panic!("no change note: {t}"));
+    assert!(note.trim_end().ends_with("…│"), "{note}");
+}
+
 /// Judge calls in two projects over three days and two months; one of
 /// unknown cost.
 fn spend_calls() -> Vec<ways_agent_core::spend::Call> {
