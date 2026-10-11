@@ -109,12 +109,7 @@ impl App {
             out.push(Binding::help("Ctrl+N", format!("{n}, from the compose box or the tab bar")));
         }
         if menus {
-            let click = self.pane.as_ref().is_some_and(|p| p.menu_on_click());
-            let what = match (click, keys.menu_on_repeat) {
-                (true, _) => "its menu; a click shows the tab and opens its menu",
-                (false, true) => "its menu; so does a click on the tab shown",
-                (false, false) => "its menu",
-            };
+            let what = if keys.menu_on_repeat { "its menu; so does a click on the tab shown" } else { "its menu" };
             out.push(Binding::help("right-click a tab", what));
         }
         let quit = self.pane.as_ref().and_then(|p| p.quit_help()).unwrap_or_else(|| "quit; asks first over unsaved work".into());
@@ -124,12 +119,7 @@ impl App {
             Binding::help("middle-click", "pastes only while the mouse is off"),
             Binding::help(k("q Esc ^C", "Esc ^C"), quit),
         ]);
-        let click = if menus && self.pane.as_ref().is_some_and(|p| p.menu_on_click()) {
-            "a tab shows it and opens its menu; the wheel scrolls"
-        } else {
-            "a tab shows it; the wheel scrolls"
-        };
-        out.push(Binding::help("click", click));
+        out.push(Binding::help("click", "a tab shows it; the wheel scrolls"));
         out
     }
 
@@ -287,13 +277,16 @@ impl App {
         // The shell's letter and digit keys: plain, or the Alt chord, which
         // is the only form beside text.
         let shell = k.modifiers == KeyModifiers::ALT || (!text && plain);
-        let digit_jump = (k.modifiers == KeyModifiers::ALT && self.alt_jump()) || (!text && plain);
+        // Alt+digit is Ctrl+digit where Ctrl+digits do not arrive, and the
+        // footer says so: again on the tab shown, its menu.
+        let alt_digit = k.modifiers == KeyModifiers::ALT && self.alt_jump();
         match k.code {
             KeyCode::F(1) => Some(ShellKey::Help),
             KeyCode::Char('?') if !text && plain => Some(ShellKey::Help),
             KeyCode::Char('q') if !text && plain => Some(ShellKey::Quit),
             KeyCode::Char('m') if shell => Some(ShellKey::Mouse),
-            KeyCode::Char(c @ '1'..='9') if digit_jump => Some(ShellKey::Tab(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '1'..='9') if alt_digit => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '1'..='9') if !text && plain => Some(ShellKey::Tab(c as usize - '0' as usize)),
             _ => None,
         }
     }
@@ -400,8 +393,14 @@ impl App {
 
     /// Open what the pane asked for: a report or an error in the response
     /// modal, or a picker whose choice goes back to the pane.
+    ///
+    /// A picker docks under the row the pane names ([`Pane::take_anchor`]),
+    /// else under the tab or menu it was opened from, else in the middle.
     pub(super) fn take_pane_open(&mut self) {
-        let Some(open) = self.pane.as_mut().and_then(|p| p.take_open()) else { return };
+        let from = self.menu_anchor.take();
+        let Some(p) = self.pane.as_mut() else { return };
+        let (open, anchor) = (p.take_open(), p.take_anchor());
+        let Some(open) = open else { return };
         match open {
             Open::Report { label, command, text } => {
                 let printed = Printed { code: Some(0), stdout: text, stderr: String::new() };
@@ -415,9 +414,12 @@ impl App {
                 }
             }
             Open::Pick { id, title, options, multi, chosen } if matches!(self.mode, Mode::Browse) && !options.is_empty() => {
-                self.mode = Mode::Pick(Pick::for_pane(id, title, options, multi, &chosen));
+                let mut pick = Pick::for_pane(id, title, options, multi, &chosen);
+                pick.anchor = anchor.or(from);
+                self.mode = Mode::Pick(pick);
             }
             Open::Pick { .. } => {}
+            Open::Tab(i) => self.pane_tab_or_menu(i),
         }
     }
 
@@ -432,7 +434,8 @@ impl App {
     }
 
     /// The mouse while a pane is shown: a click on a tab shows it, and on
-    /// the tab shown opens its menu, as a right click does; the wheel and a
+    /// the tab shown opens its menu, as Ctrl+digit does and a right click
+    /// does at once; the wheel and a
     /// click inside the pane are the pane's. A middle click
     /// pastes nothing while the shell has the mouse, and the bar says so.
     pub(super) fn pane_mouse(&mut self, m: MouseEvent) {
@@ -446,7 +449,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
                     self.interrupt_pane();
-                    return self.pane_tab_click(i);
+                    return self.pane_tab_or_menu(i);
                 }
                 if self.hits.pane.contains(at) {
                     self.msg.clear();
@@ -567,8 +570,6 @@ mod tests {
         tab_keys: TabKeys,
         /// `Some`: the pane takes Ctrl+N, counting its uses.
         news: Option<usize>,
-        /// A click on a tab shows it and opens its menu.
-        click_menu: bool,
     }
 
     impl Pane for Two {
@@ -589,9 +590,6 @@ mod tests {
         }
         fn has_tab_menus(&self) -> bool {
             true
-        }
-        fn menu_on_click(&self) -> bool {
-            self.click_menu
         }
         fn new_item_label(&self) -> Option<&'static str> {
             self.news.map(|_| "new thing")
@@ -636,7 +634,7 @@ mod tests {
     }
 
     fn app(text: bool) -> App {
-        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, click_menu: false })
+        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None })
     }
 
     #[test]
@@ -939,19 +937,30 @@ mod tests {
     }
 
     #[test]
-    fn where_the_pane_asks_one_click_shows_a_tab_and_opens_its_menu() {
+    fn a_row_of_the_pane_standing_for_a_tab_shows_it_then_opens_its_menu() {
         let mut a = app(false);
-        a.pane_mut::<Two>().expect("the pane").click_menu = true;
         let buf = testkit::render(&mut a, 60, 8);
+        let (_, y) = testkit::find(&buf, "2 two").expect("the tab");
+        let inside = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 5, row: y + 3, modifiers: KeyModifiers::NONE };
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Tab(1));
+        a.mouse(inside);
+        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![]), "the first click shows the tab, as Ctrl+2 does");
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Tab(1));
+        a.mouse(inside);
+        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1]), "a click on the row of the tab shown opens its menu");
+    }
+
+    #[test]
+    fn a_tab_menu_docks_under_its_tab() {
+        let mut a = app(false);
+        let buf = testkit::render(&mut a, 60, 12);
         let (x2, y) = testkit::find(&buf, "2 two").expect("the tab");
-        let (x1, _) = testkit::find(&buf, "1 one").expect("the tab");
-        let ev = |kind, column| MouseEvent { kind, column, row: y, modifiers: KeyModifiers::NONE };
-        a.mouse(ev(MouseEventKind::Down(MouseButton::Left), x2));
-        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1]), "the first click shows the tab and opens its menu");
-        a.mouse(ev(MouseEventKind::Down(MouseButton::Right), x1));
-        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1, 0]), "a right click still opens a menu without showing the tab");
-        a.key(k(KeyCode::F(1), KeyModifiers::NONE));
-        assert!(testkit::text(&testkit::render(&mut a, 100, 24)).contains("a click shows the tab and opens its menu"));
+        a.pane_mut::<Two>().expect("the pane").tab = 1;
+        let open = Open::Pick { id: "m".into(), title: "two".into(), options: vec!["a".into(), "b".into()], multi: false, chosen: Vec::new() };
+        a.pane_mut::<Two>().expect("the pane").open = Some(open);
+        a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), column: x2, row: y, modifiers: KeyModifiers::NONE });
+        let rows = testkit::rows(&testkit::render(&mut a, 60, 12));
+        assert!(rows[usize::from(y) + 1].contains("pick one: two"), "the menu's top on the line under the tab: {rows:#?}");
     }
 
     #[test]
@@ -979,7 +988,7 @@ mod tests {
                 true
             }
         }
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, click_menu: false };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
         let mut a = App::with_pane("asks", Asks(two));
         a.key(k(KeyCode::F(1), KeyModifiers::NONE));
         let off = testkit::text(&testkit::render(&mut a, 140, 24));
@@ -1021,7 +1030,7 @@ mod tests {
 
     #[test]
     fn a_pane_without_tab_menus_gets_no_tab_bar_focus_and_names_none() {
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, click_menu: false };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
         let mut a = App::with_pane("plain", Plain(two));
         a.key(k(KeyCode::F(2), KeyModifiers::NONE));
         assert!(!a.strip_focused(), "F2 is the pane's");
@@ -1113,7 +1122,7 @@ mod tests {
     }
 
     fn described() -> App {
-        let two = Two { tab: 3, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, click_menu: false };
+        let two = Two { tab: 3, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
         App::with_pane("described", Described(two))
     }
 

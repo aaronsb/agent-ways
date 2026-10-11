@@ -162,6 +162,8 @@ pub struct ChatPane {
     hits: Hits,
     /// What a tab's menu asked the shell to open over the pane.
     open: Option<Open>,
+    /// The column's row the menu in `open` docks under.
+    anchor: Option<Rect>,
     /// A menu step, or a quit, waiting for `y`.
     pending: Option<menu::Pending>,
     /// The compose box lent to a channel's name or description, and the
@@ -219,6 +221,7 @@ impl ChatPane {
             day_seen: None,
             hits: Hits::default(),
             open: None,
+            anchor: None,
             pending: None,
             prompt: None,
             enhanced: false,
@@ -697,13 +700,13 @@ impl Pane for ChatPane {
             Binding::help("← → Home End", "move the cursor"),
             Binding::help("Bksp Del", "edit"),
             Binding::help("click a message", "selects it; in the compose box it places the cursor; a chip completes it"),
-            Binding::help("click a side row", "an agent: its menu (address, who, remove); a channel: shows it, opens its menu"),
+            Binding::help("click a side row", "an agent: its menu (address, who, remove); a channel: shows it, and on the channel shown opens its menu"),
         ]);
         if let Some(key) = self.sidebar_key_label() {
             out.push(Binding::help(key, "show or hide the agents and channels column"));
         }
         if self.side_drawn() {
-            out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter opens the row's menu, ↑ at the top or Esc back"));
+            out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter does what a click does, ↑ at the top or Esc back"));
         }
         out
     }
@@ -736,9 +739,10 @@ impl Pane for ChatPane {
         true
     }
 
-    /// Off at the start: what people copy from a chat (a message, a path,
-    /// a command's output) is the terminal's selection, and middle-click
-    /// pastes into the compose box. Alt+m gives the shell the mouse.
+    /// `attend.chat.mouse`, on unless set off: the chat is worked by
+    /// clicks (ADR-405), and Shift-drag still selects text in most
+    /// terminals. Alt+m gives the terminal its mouse back, for selection
+    /// and middle-click paste.
     fn mouse_default(&self) -> bool {
         self.config.mouse
     }
@@ -754,11 +758,6 @@ impl Pane for ChatPane {
 
     fn tab_menu(&mut self, i: usize) {
         self.open_tab_menu(i);
-    }
-
-    /// One click on a channel shows it and opens its menu (ADR-405).
-    fn menu_on_click(&self) -> bool {
-        true
     }
 
     fn below_strip(&self) -> Option<&'static str> {
@@ -796,6 +795,11 @@ impl Pane for ChatPane {
 
     fn take_open(&mut self) -> Option<Open> {
         self.open.take()
+    }
+
+    /// A menu docks under its row in the left column.
+    fn take_anchor(&mut self) -> Option<Rect> {
+        self.anchor.take()
     }
 
     fn picked(&mut self, id: &str, values: Vec<String>) {

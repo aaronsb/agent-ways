@@ -1,20 +1,20 @@
 agent-tui frame 80x25
 | ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
-|╭──────────────────────────────────────────────────────────────────────────────╮|
-|│ │ beta             │ production at 15:00                                     │|
-|│ │ ▽ 13:55          │                                                         │|
+|┌pick one: attend-chat──┐──────────────────────────────────────────────────────╮|
+|│   Theme ▸             │oduction at 15:00                                     │|
+|│   Keybinding set ▸    │                                                      │|
+|│   Mouse off at start  │                                                      │|
+|│   Show column         │                                                      │|
+|│   Settings…           │                                                      │|
+|└───────────────────────┘e shell this ran under: /bin/sh                       │|
+|│ │ aaron            │  file: sh                                               │|
+|│ │ 13:58            │                                                         │|
 |│ ╰──────────────────╯                                                         │|
 |│                                                                              │|
 |│ ╭──────────────────╮                                                         │|
-|│ │ aaron            │ the shell this ran under: /bin/sh                       │|
-|│ │ aaron            │  file: sh                                               │|
-|│ │ 13:58      ┌pick one: attend-chat───────────────────────────┐              │|
-|│ ╰────────────│   Theme ▸                                      │              │|
-|│              │   Keybinding set ▸                             │              │|
-|│ ╭────────────│   Mouse on at start                            │              │|
-|│ │ Laszlo     │   Show column                                  │body wraps    │|
-|│ │ alpha      │   Settings…                                    │h of the row  │|
-|│ │ 13:59      └────────────────────────────────────────────────┘              │|
+|│ │ Laszlo           │ a longer message, so the feed shows how a body wraps    │|
+|│ │ alpha            │ beside its chip when it runs past the width of the row  │|
+|│ │ 13:59            │ it is given                                             │|
 |│ ╰──────────────────╯                                                         │|
 |│                                                                              │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
@@ -34,30 +34,27 @@ styles
   0  45-46  Cyan - -
   0  47-56  White Blue -
   0  59-61  White Blue -
-  1   0-79  - - DIM
-  2   0-0   - - DIM
-  2   2-2   - - DIM
-  2   4-7   - - DIM
-  2  21-21  - - DIM
+  1   0-0   LightBlue - -
+  1   1-21  LightBlue - BOLD
+  1  22-24  LightBlue - -
+  1  25-79  - - DIM
+  2   0-0   LightBlue - -
+  2   1-23  - - BOLD|REVERSED
+  2  24-24  LightBlue - -
   2  79-79  - - DIM
-  3   0-0   - - DIM
-  3   2-2   - - DIM
-  3   4-5   Red - -
-  3   6-10  - - DIM
-  3  21-21  - - DIM
+  3   0-0   LightBlue - -
+  3  24-24  LightBlue - -
   3  79-79  - - DIM
-  4   0-0   - - DIM
-  4   2-21  - - DIM
+  4   0-0   LightBlue - -
+  4  24-24  LightBlue - -
   4  79-79  - - DIM
-  5   0-0   - - DIM
+  5   0-0   LightBlue - -
+  5  24-24  LightBlue - -
   5  79-79  - - DIM
-  6   0-0   - - DIM
-  6   2-21  - - DIM
+  6   0-0   LightBlue - -
+  6  24-24  LightBlue - -
   6  79-79  - - DIM
-  7   0-0   - - DIM
-  7   2-2   - - DIM
-  7   4-8   LightYellow - -
-  7  21-21  - - DIM
+  7   0-24  LightBlue - -
   7  79-79  - - DIM
   8   0-0   - - DIM
   8   2-2   - - DIM
@@ -68,41 +65,30 @@ styles
   9   0-0   - - DIM
   9   2-2   - - DIM
   9   4-8   - - DIM
-  9  15-15  LightBlue - -
-  9  16-36  LightBlue - BOLD
-  9  37-64  LightBlue - -
+  9  21-21  - - DIM
   9  79-79  - - DIM
  10   0-0   - - DIM
- 10   2-14  - - DIM
- 10  15-15  LightBlue - -
- 10  16-63  - - BOLD|REVERSED
- 10  64-64  LightBlue - -
+ 10   2-21  - - DIM
  10  79-79  - - DIM
  11   0-0   - - DIM
- 11  15-15  LightBlue - -
- 11  64-64  LightBlue - -
  11  79-79  - - DIM
  12   0-0   - - DIM
- 12   2-14  - - DIM
- 12  15-15  LightBlue - -
- 12  64-64  LightBlue - -
+ 12   2-21  - - DIM
  12  79-79  - - DIM
  13   0-0   - - DIM
  13   2-2   - - DIM
  13   4-9   Cyan - BOLD
- 13  15-15  LightBlue - -
- 13  64-64  LightBlue - -
+ 13  21-21  - - DIM
  13  79-79  - - DIM
  14   0-0   - - DIM
  14   2-2   - - DIM
  14   4-8   - - DIM
- 14  15-15  LightBlue - -
- 14  64-64  LightBlue - -
+ 14  21-21  - - DIM
  14  79-79  - - DIM
  15   0-0   - - DIM
  15   2-2   - - DIM
  15   4-8   - - DIM
- 15  15-64  LightBlue - -
+ 15  21-21  - - DIM
  15  79-79  - - DIM
  16   0-0   - - DIM
  16   2-21  - - DIM

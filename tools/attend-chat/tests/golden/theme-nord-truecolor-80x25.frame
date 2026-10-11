@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
-| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll  |
 styles
   0   0-2   #2e3440 #bfa2c3 -
   0   5-14  #2e3440 #c99fc1 BOLD
@@ -117,13 +117,13 @@ styles
  23   9-14  #c9e265 - -
  23  16-21  #e07b7b - -
  24   0-5   #2e3440 #c99fc1 BOLD
- 24   7-21  #7c8baa - ITALIC
- 24  22-24  #434c5e - -
- 24  25-27  #c99fc1 - -
- 24  28-34  #7c8baa - ITALIC
- 24  35-40  #c99fc1 - -
- 24  41-47  #7c8baa - ITALIC
- 24  48-51  #c99fc1 - -
- 24  52-62  #7c8baa - ITALIC
- 24  63-72  #c99fc1 - -
- 24  73-78  #7c8baa - ITALIC
+ 24   7-20  #7c8baa - ITALIC
+ 24  21-23  #434c5e - -
+ 24  24-26  #c99fc1 - -
+ 24  27-33  #7c8baa - ITALIC
+ 24  34-39  #c99fc1 - -
+ 24  40-46  #7c8baa - ITALIC
+ 24  47-50  #c99fc1 - -
+ 24  51-61  #7c8baa - ITALIC
+ 24  62-71  #c99fc1 - -
+ 24  72-77  #7c8baa - ITALIC

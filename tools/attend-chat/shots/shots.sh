@@ -42,17 +42,23 @@ mkdir -p "$WORK"
 #   resize:COLS    the terminal narrowed (or widened) to COLS columns
 #   paste:TEXT     a bracketed paste of TEXT, \n for a newline
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
-# The fixture is base, crowd (fifteen more agents), own (the operator in
+# The fixture is base, crowd (fifteen more agents), many (24 more channels,
+# so the last channel row sits at the foot), own (the operator in
 # #deploy) or plain (no Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
 # the column's first `○`, its row being the agents' last.
 SCENARIOS="
 side         | base  | wait:Agents
 off          | base  | wait:Agents F3 gone:Agents
-click        | base  | wait:#infra click:#infra wait:pick
-tab          | base  | wait:#deploy click:#deploy wait:pick
+click        | base  | wait:#infra click:#infra click:#infra wait:pick
+tab          | base  | wait:#deploy click:#deploy click:#deploy wait:pick
+side-show    | base  | wait:Agents side:#infra
+side-menu    | base  | wait:Agents side:#infra side:#infra wait:pick
+key-dock     | base  | wait:Agents M-2 M-2 wait:pick
+foot-keys    | many  | wait:Agents F2 Down End Up Enter Enter wait:pick
+foot-click   | many  | wait:Agents F2 Down End Escape side:#infra side:#infra wait:pick
 keys         | base  | wait:Agents F2 Down Down wait:↑↓_move
-menu-keys    | base  | wait:Agents F2 Down Down Enter wait:pick
+menu-keys    | base  | wait:Agents F2 Down Down Enter Enter wait:pick
 focus-resize | base  | wait:Agents F2 Down Down wait:↑↓_move resize:70 gone:Agents
 agent-menu   | base  | wait:Agents side:○ wait:Address
 crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
@@ -61,7 +67,7 @@ clear-view   | base  | wait:merged click:merged wait:Clear_view Enter wait:clear
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
-own-row      | own   | wait:operator click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
+own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
 quiet-send   | base  | wait:Agents side:○ wait:Address Enter text:are_you_there Enter wait:no_heartbeat
 paste-asked  | base  | wait:merged click:merged wait:Clear_view Enter wait:clear_the_view? paste:yes_please\\nsecond_line wait:kept
 "
@@ -70,7 +76,8 @@ paste-asked  | base  | wait:merged click:merged wait:Clear_view Enter wait:clear
 # with beta in it, an empty #infra, and #archive, which _groups.yaml still
 # names after its directory was swept. The human is `operator`. `crowd`
 # adds fifteen agents, every other one live; `own` puts the operator in
-# #deploy, with a message there; `plain` the plain shape.
+# #deploy, with a message there; `many` adds #ch01 to #ch24; `plain` the
+# plain shape. No attend config is written: the mouse is on by default.
 fixture() { # kind
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
@@ -88,6 +95,9 @@ fixture() { # kind
       mkdir -p "$F/work/crowd-$n"
       [ $((10#$n % 2)) -eq 1 ] && touch "$cache/heartbeat/dddddddd-0000-4000-8000-0000000000$n"
     done
+  fi
+  if [ "$1" = many ]; then
+    for n in $(seq -w 1 24); do mkdir -p "$sig/@ch$n"; done
   fi
   for s in "${sessions[@]}"; do
     printf '{"pid":%d,"sessionId":"%s","cwd":"%s"}\n' "$i" "${s%%:*}" "${s#*:}" > "$F/home/.claude/sessions/$i.json"
@@ -121,7 +131,6 @@ YAML
   msg "$sig/@deploy" s3 300 "claude:$B" "$F/work/beta" "rollout is green on staging"
   [ "$1" = own ] && msg "$sig/@deploy" s4 120 "external:operator@kitty" "$F/work/alpha" "watching the rollout"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
-  printf 'chat:\n  mouse: true\n' > "$F/config/attend/config.yaml"
 }
 
 launch() { # name cols rows

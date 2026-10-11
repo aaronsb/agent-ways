@@ -24,8 +24,13 @@
 //!
 //! Every item that drops something asks first: Clear view, Clear history,
 //! Leave and Delete channel. `y` goes ahead, any other key keeps things as
-//! they are. A click on a tab opens its menu with the first item under the
-//! cursor, so an Enter just after the click must not drop anything. Invite agent asks a live peer to join (it joins
+//! they are. A click opens a menu with the first item under the cursor, so
+//! an Enter just after the click must not drop anything.
+//!
+//! A menu docks on the line under the row it belongs to: a channel's or an
+//! agent's row in the left column, else its tab. Where the lines below
+//! cannot hold it, it ends on the line above the row; where neither side
+//! can, it sits at the foot of the pane. Invite agent asks a live peer to join (it joins
 //! itself, and its join keeps the room's recent history to read). Add
 //! agent, enrolling a member with no answer from it, is ADR-404 D1 and is
 //! not built yet: the item says so.
@@ -234,10 +239,14 @@ impl ChatPane {
         let id = format!("menu:{}", channel.as_deref().unwrap_or(""));
         let me = crate::signal::human_member_id();
         let joined = channel.as_deref().is_some_and(|c| self.world().rows.iter().any(|r| r.known.group.name == c && r.known.membership.members.contains(&me)));
+        // Under the channel's row in the column; merged has none, and the
+        // shell docks a menu with no row under its tab.
+        self.anchor = channel.clone().and_then(|c| self.side_row(&super::sidebar::SideHit::Channel(c)));
         self.open = Some(Open::Pick { id, title, options: items(channel.as_deref(), joined), multi: false, chosen: Vec::new() });
     }
 
     fn common_menu(&mut self) {
+        self.anchor = None;
         let mouse = if self.config.mouse { MOUSE_OFF } else { MOUSE_ON };
         let column = if self.sidebar { HIDE_COLUMN } else { SHOW_COLUMN };
         let options = [THEME, KEYS, mouse, column, SETTINGS].iter().map(|s| s.to_string()).collect();
@@ -351,6 +360,7 @@ impl ChatPane {
         };
         let options = agent_items(&name, listed.as_ref().map(|(c, _)| c.as_str()), member == me);
         self.removable = removable(listed.map(|(_, m)| m).into_iter().collect(), &me);
+        self.anchor = self.side_row(&super::sidebar::SideHit::Agent(member.clone()));
         self.open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), options, multi: false, chosen: Vec::new() });
     }
 

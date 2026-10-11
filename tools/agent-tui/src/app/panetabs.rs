@@ -297,8 +297,9 @@ impl App {
         }
     }
 
-    /// Ctrl+digit or a click on tab `i`: show it, or open its menu when it
-    /// is shown already or is an action slot.
+    /// Ctrl+digit, a click on tab `i`, or a pane's row standing for it
+    /// ([`Open::Tab`]): show it, or open its menu when it is shown already
+    /// or is an action slot.
     pub(super) fn pane_tab_or_menu(&mut self, i: usize) {
         let Some(p) = &mut self.pane else { return };
         let Some(t) = p.tabs().get(i).cloned() else { return };
@@ -310,21 +311,6 @@ impl App {
         }
     }
 
-    /// A left click on tab `i`: where the pane asks for it
-    /// ([`Pane::menu_on_click`]), show the tab and open its menu at once;
-    /// otherwise as Ctrl+digit.
-    pub(super) fn pane_tab_click(&mut self, i: usize) {
-        let Some(p) = &mut self.pane else { return };
-        if !(p.has_tab_menus() && p.menu_on_click()) {
-            return self.pane_tab_or_menu(i);
-        }
-        let Some(t) = p.tabs().get(i).cloned() else { return };
-        if !t.action && p.tab() != i {
-            p.set_tab(i);
-        }
-        self.open_tab_menu(i);
-    }
-
     /// Open tab `i`'s menu, over the pane.
     pub(super) fn open_tab_menu(&mut self, i: usize) {
         if let Some(p) = &mut self.pane {
@@ -333,7 +319,10 @@ impl App {
             }
             p.tab_menu(i);
         }
+        // Docked under the tab, unless the pane names a row of its own.
+        self.menu_anchor = self.hits.tabs.iter().find(|(_, t)| *t == i).map(|(r, _)| *r);
         self.take_pane_open();
+        self.menu_anchor = None;
     }
 
     /// The pane's tabs as the shell draws its own: numbered lozenges, the
