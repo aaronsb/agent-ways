@@ -48,13 +48,10 @@ impl GitSensor {
         let head = git_cmd(dir, &["rev-parse", "--short", "HEAD"])?;
 
         // Uncommitted changes
-        let status_output = git_cmd(dir, &["status", "--porcelain"])?;
-        let mut dirty_files = HashSet::new();
-        for line in status_output.lines() {
-            if line.len() > 3 {
-                dirty_files.insert(line[3..].to_string());
-            }
-        }
+        let dirty_files = match git_cmd(dir, &["status", "--porcelain"]) {
+            Some(out) => dirty_paths(&out),
+            None => HashSet::new(),
+        };
         let dirty_count = dirty_files.len() as u32;
 
         // Branch divergence from upstream
@@ -212,7 +209,21 @@ impl Sensor for GitSensor {
     }
 }
 
-/// Run a git command and return trimmed stdout, or None on failure.
+/// The paths in `git status --porcelain` output. Each line is a two-column
+/// status, a space, then the path, so the path starts at the fourth byte
+/// whatever the status: ` M x`, `M  x` and `?? x` all name `x`.
+fn dirty_paths(porcelain: &str) -> HashSet<String> {
+    porcelain
+        .lines()
+        .filter_map(|line| line.get(3..))
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Run a git command and return its stdout without the trailing newline,
+/// or None on failure or empty output. The start is kept as printed:
+/// porcelain status opens with a space for a change only in the work tree.
 fn git_cmd(dir: &str, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -226,10 +237,54 @@ fn git_cmd(dir: &str, args: &[&str]) -> Option<String> {
         return None;
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if stdout.is_empty() {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim_end().to_string();
+    if stdout.trim_start().is_empty() {
         None
     } else {
         Some(stdout)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set(paths: &[&str]) -> HashSet<String> {
+        paths.iter().map(|p| p.to_string()).collect()
+    }
+
+    #[test]
+    fn every_porcelain_status_shape_keeps_the_whole_path() {
+        let out = " M src/app/mod.rs\nM  staged.rs\n?? new.rs\nMM both.rs";
+        assert_eq!(dirty_paths(out), set(&["src/app/mod.rs", "staged.rs", "new.rs", "both.rs"]));
+    }
+
+    /// The first line of a real status keeps its leading space through
+    /// `git_cmd`, so a file changed only in the work tree loses no letter.
+    #[test]
+    fn a_work_tree_change_on_the_first_line_keeps_its_first_letter() {
+        let dir = std::env::temp_dir().join(format!("attend-git-sensor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = dir.to_str().unwrap();
+        let git = |args: &[&str]| {
+            let ok = Command::new("git")
+                .args(["-C", d, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.join("tools.rs"), "a").unwrap();
+        git(&["add", "tools.rs"]);
+        git(&["commit", "-qm", "init"]);
+        std::fs::write(dir.join("tools.rs"), "b").unwrap();
+        let out = git_cmd(d, &["status", "--porcelain"]).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(out, " M tools.rs");
+        assert_eq!(dirty_paths(&out), set(&["tools.rs"]));
     }
 }
