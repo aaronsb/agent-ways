@@ -28,7 +28,16 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "Under manage"
+    via: AskUserQuestion, session chat, 2026-10-10; option label written by the agent, chosen by the operator
+    covers: [target]
+  - operator: aaronsb
+    said: "One release"
+    via: AskUserQuestion, session chat, 2026-10-10; option label written by the agent, chosen by the operator
+    covers: [window]
+status: accepted
 date: 2026-10-10
 deciders:
   - aaronsb
