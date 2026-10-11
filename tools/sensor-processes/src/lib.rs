@@ -241,8 +241,10 @@ struct HeldExit {
 /// and the parent's exit carries the build event. Any other app stays
 /// visible wherever it runs, so `node` under `npm` or `docker` under
 /// `make` is counted, and recorded as hosted by the tool above it. Every
-/// process is first given its [`canonical_name`].
-fn tally(procs: &[Proc], is_relevant: impl Fn(&str) -> bool, is_watched: impl Fn(&str) -> bool) -> Snapshot {
+/// process is first given its [`canonical_name`]. `is_relevant` is given
+/// the `comm` as `ps` printed it and the canonical name, in that order.
+fn tally(procs: &[Proc], is_relevant: impl Fn(&str, &str) -> bool, is_watched: impl Fn(&str) -> bool) -> Snapshot {
+    let raw: Vec<&str> = procs.iter().map(|p| p.comm.as_str()).collect();
     let procs: Vec<Proc> = procs.iter().map(|p| Proc { comm: canonical_name(&p.comm).to_string(), ..p.clone() }).collect();
     let by_pid: HashMap<u32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
     let watched_above = |p: &Proc| {
@@ -259,7 +261,7 @@ fn tally(procs: &[Proc], is_relevant: impl Fn(&str) -> bool, is_watched: impl Fn
     };
     let mut snap = Snapshot::default();
     let mut hosted: HashMap<u32, HashSet<String>> = HashMap::new();
-    for p in procs.iter().filter(|p| is_watched(&p.comm) || is_relevant(&p.comm)) {
+    for (p, _) in procs.iter().zip(raw).filter(|(p, raw)| is_watched(&p.comm) || is_relevant(raw, &p.comm)) {
         let above = watched_above(p);
         if is_watched(&p.comm) {
             if above.is_empty() {
@@ -379,7 +381,7 @@ impl ProcessSensor {
     /// watched tool under another watched tool is left out (see [`tally`]).
     fn observe(&mut self, rows: Option<Vec<Proc>>, focus: &Focus, now: u64) -> Vec<(f64, String)> {
         let Some(rows) = rows else { return Vec::new() };
-        let current = tally(&rows, |c| Self::is_relevant(c, focus), |c| self.is_watched(c));
+        let current = tally(&rows, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
         if !self.baseline_established {
             eprintln!("[attend] processes: baseline established ({} apps: {})",
                 current.apps.len(),
@@ -460,7 +462,12 @@ impl ProcessSensor {
         observations
     }
 
-    fn is_relevant(comm: &str, focus: &Focus) -> bool {
+    /// Is a process worth events? `raw` is its `comm` as `ps` printed it
+    /// and `name` its [`canonical_name`]. Noise and the tracked list are
+    /// read by `name`. A focus keyword matches either, so a keyword finds
+    /// a process by the title it gave itself or by the name it is tracked
+    /// under.
+    fn is_relevant(raw: &str, name: &str, focus: &Focus) -> bool {
         // Filter out ambient noise: shells, coreutils, attend itself
         let noise = ["ps", "bash", "zsh", "sh", "fish", "attend",
                       "grep", "awk", "sed", "cat", "sleep", "tail", "head",
@@ -473,20 +480,20 @@ impl ProcessSensor {
                       "gjs", "gsd-*", "gnome-*", "xdg-*"];
         if noise.iter().any(|n| {
             if let Some(prefix) = n.strip_suffix('*') {
-                comm.starts_with(prefix)
+                name.starts_with(prefix)
             } else {
-                comm == *n
+                name == *n
             }
         }) {
             return false;
         }
 
         // Focus keywords boost relevance
-        if focus.keywords.iter().any(|kw| comm.contains(kw)) {
+        if focus.keywords.iter().any(|kw| raw.contains(kw) || name.contains(kw)) {
             return true;
         }
 
-        TRACKED.contains(&comm)
+        TRACKED.contains(&name)
     }
 }
 
@@ -754,7 +761,7 @@ mod tests {
     /// A poll of the process table `rows`, with shells left out as noise.
     fn see(rows: &[(u32, u32, &'static str)]) -> Snapshot {
         let s = ProcessSensor::new();
-        tally(&procs(rows), |c| c != "zsh" && c != "sh", |c| s.is_watched(c))
+        tally(&procs(rows), |_, c| c != "zsh" && c != "sh", |c| s.is_watched(c))
     }
 
     /// A sensor whose baseline poll saw `rows`.
@@ -804,7 +811,7 @@ mod tests {
     #[test]
     fn tally_survives_a_parent_cycle() {
         let p = procs(&[(5, 6, "git"), (6, 5, "ssh")]);
-        assert_eq!(tally(&p, |_| true, |_| false).apps.len(), 2);
+        assert_eq!(tally(&p, |_, _| true, |_| false).apps.len(), 2);
     }
 
     /// An app launched by a watched tool is still an app: `node` under
@@ -916,7 +923,7 @@ mod tests {
         assert!(s.diff(see(&first), 0).is_empty(), "the same run, still going");
         let mut second = procs(&first);
         second[2].start = "Sat Oct 10 22:19:02 2026".into();
-        let second = tally(&second, |c| c != "zsh", |c| s.is_watched(c));
+        let second = tally(&second, |_, c| c != "zsh", |c| s.is_watched(c));
         assert_eq!(texts(&s.diff(second, 0)), vec!["cargo finished"]);
     }
 
@@ -1018,7 +1025,7 @@ mod tests {
         let s = ProcessSensor::new();
         let focus = no_focus();
         let poll = |rows: &[(u32, u32, &'static str)]| {
-            tally(&procs(rows), |c| ProcessSensor::is_relevant(c, &focus), |c| s.is_watched(c))
+            tally(&procs(rows), |raw, c| ProcessSensor::is_relevant(raw, c, &focus), |c| s.is_watched(c))
         };
         for (i, name) in DEFAULT_WATCH.iter().enumerate() {
             let pid = 100 + i as u32;
@@ -1034,12 +1041,23 @@ mod tests {
         assert_eq!(texts(&sensor.diff(poll(&[ZSH, NVIM]), 0)), vec!["yarn finished"]);
     }
 
+    #[test]
+    fn a_focus_keyword_matches_the_raw_comm_or_the_name() {
+        let focus = Focus { keywords: vec!["vite".into()], ..no_focus() };
+        assert!(ProcessSensor::is_relevant("npm exec vite", "devsrv", &focus), "raw comm");
+        assert!(ProcessSensor::is_relevant("devsrv-Main", "vite", &focus), "canonical name");
+        assert!(!ProcessSensor::is_relevant("devsrv-Main", "devsrv", &focus));
+        assert!(!ProcessSensor::is_relevant("vite", "zsh", &focus), "noise is read by name");
+        let t = tally(&procs(&[(10, 1, "npm exec vite")]), |raw, name| raw == "npm exec vite" && name == "npx", |_| false);
+        assert_eq!(t.apps, apps(&["npx"]), "tally passes the raw comm and the name");
+    }
+
     /// A user's own watch list is tracked the same way.
     #[test]
     fn a_configured_watched_tool_is_tracked() {
         let s = ProcessSensor::with_watch(vec!["mix".into()]);
         let focus = no_focus();
-        let t = tally(&procs(&[ZSH, (10, 1, "mix")]), |c| ProcessSensor::is_relevant(c, &focus), |c| s.is_watched(c));
+        let t = tally(&procs(&[ZSH, (10, 1, "mix")]), |raw, c| ProcessSensor::is_relevant(raw, c, &focus), |c| s.is_watched(c));
         assert_eq!(t.tools, HashMap::from([(10, tool("mix", &[]))]));
     }
 
@@ -1081,7 +1099,7 @@ mod tests {
         let focus = no_focus();
         let s = ProcessSensor::new();
         let rows = [ZSH, (10, 1, "claude"), (11, 10, "npm exec @foo/mcp"), (12, 11, "node-MainThread")];
-        let t = tally(&procs(&rows), |c| ProcessSensor::is_relevant(c, &focus), |c| s.is_watched(c));
+        let t = tally(&procs(&rows), |raw, c| ProcessSensor::is_relevant(raw, c, &focus), |c| s.is_watched(c));
         assert!(t.tools.is_empty(), "{:?}", t.tools);
         assert_eq!(t.apps, HashMap::from([("claude".into(), 1), ("npx".into(), 1), ("node".into(), 1)]));
     }
@@ -1100,7 +1118,7 @@ mod tests {
         let comms = |name: &str| rows.iter().filter(|p| p.comm == name).count();
         assert_eq!(comms("npm exec @scope"), 8, "the fixture holds the MCP servers");
         assert!(comms("ssh-agent") > 0, "the fixture holds ssh-agent");
-        let t = tally(&rows, |c| ProcessSensor::is_relevant(c, &focus), |c| s.is_watched(c));
+        let t = tally(&rows, |raw, c| ProcessSensor::is_relevant(raw, c, &focus), |c| s.is_watched(c));
         assert!(t.tools.values().all(|tool| tool.name != "npm"), "{:?}", t.tools);
         assert_eq!(t.apps.get("npx"), Some(&8));
         assert_eq!(t.apps.get("ssh").copied().unwrap_or(0) as usize, comms("ssh"), "ssh-agent is not ssh");
@@ -1124,7 +1142,7 @@ mod tests {
     #[test]
     fn tally_sees_npm_and_node_as_this_host_names_them() {
         let s = ProcessSensor::new();
-        let t = tally(&parse_ps(LIVE_NPM), |c| c != "bash", |c| s.is_watched(c));
+        let t = tally(&parse_ps(LIVE_NPM), |_, c| c != "bash", |c| s.is_watched(c));
         assert_eq!(t.apps, HashMap::from([("node".to_string(), 3), ("npx".to_string(), 1)]));
         assert_eq!(t.tools, HashMap::from([(3181672, tool("npm", &["node"])), (3181673, tool("npm", &["node"]))]));
     }
@@ -1132,7 +1150,7 @@ mod tests {
     #[test]
     fn a_live_npm_test_finishes_naming_node() {
         let s = ProcessSensor::new();
-        let poll = |rows: &str| tally(&parse_ps(rows), |c| c != "bash", |c| s.is_watched(c));
+        let poll = |rows: &str| tally(&parse_ps(rows), |_, c| c != "bash", |c| s.is_watched(c));
         let lines: Vec<&str> = LIVE_NPM.lines().collect();
         let idle = format!("{}\n", lines[0]);
         let test_run = format!("{}\n{}\n{}\n", lines[0], lines[1], lines[5]);
