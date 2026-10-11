@@ -1226,6 +1226,22 @@ fn the_column_keeps_the_helper_row_for_commands() {
     assert!(rows[rows.len() - 2].contains("/help"), "{:?}", rows[rows.len() - 2]);
 }
 
+/// Typing a command beside the column keeps the helper row's place, so
+/// the compose box stays put as the command reaches an agent argument.
+#[test]
+fn the_compose_box_stays_put_while_a_command_is_typed() {
+    let mut c = chat_side();
+    let at = |c: &mut Chat| testkit::rows(&testkit::render_screen(c, 80, 25)).iter().position(|r| r.contains("> ")).expect("the prompt");
+    let empty = at(&mut c);
+    let mut rows = Vec::new();
+    for ch in "/whois @L".chars() {
+        typed(&mut c, &ch.to_string());
+        rows.push(at(&mut c));
+    }
+    assert!(rows.iter().all(|r| *r == rows[0]), "the box moved while typing: {rows:?}");
+    assert_eq!(rows[0] + 1, empty, "one row reserved for the command's help");
+}
+
 #[test]
 fn a_click_on_an_agent_row_opens_its_menu_and_on_a_channel_row_the_channels() {
     let mut c = chat_side().enhanced(true);
