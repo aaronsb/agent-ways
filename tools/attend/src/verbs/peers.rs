@@ -1,6 +1,6 @@
 //! `peers`: this session and the live Claude Code sessions around it.
 
-use crate::util::{get_groups, own_session_id};
+use crate::util::{current_session, groups_for};
 use serde::Serialize;
 
 /// A session on the bus.
@@ -45,12 +45,13 @@ pub fn peers() -> Peers {
     // what peers see when they render a signal from us, including when the
     // shell's cwd has drifted. The instance suffix comes from the registry
     // `attend run` writes at startup.
-    let cwd = crate::util::own_origin_cwd();
-    let self_sid = own_session_id();
+    let session = current_session();
+    let cwd = session.origin_path.clone();
+    let self_sid = session.session_resolved.then(|| session.session_id.clone());
     let self_instance = self_sid.as_deref().and_then(|sid| registry.lookup(&cwd, sid));
     let me = agent(self_sid, &cwd, self_instance, "working".to_string(), None, true);
 
-    let channels = get_groups()
+    let channels = groups_for(&session)
         .my_groups()
         .into_iter()
         .map(|(name, pinned)| JoinedChannel { name, pinned })

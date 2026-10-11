@@ -1,7 +1,7 @@
 //! `status`: running sensor loops, pending signal counts, keepwarm and
 //! channel state.
 
-use crate::util::{count_signals, get_groups};
+use crate::util::{count_signals, current_session, groups_for, Session};
 use crate::verbs::peers::JoinedChannel;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -32,11 +32,13 @@ pub struct Status {
 }
 
 pub fn status() -> Status {
+    let me = current_session();
+    let groups = groups_for(&me);
     Status {
         instances: running_instances(),
-        signals: pending(),
-        keepwarm: crate::cmd::keepwarm::status_line(),
-        channels: get_groups().my_groups().into_iter().map(|(name, pinned)| JoinedChannel { name, pinned }).collect(),
+        signals: pending(&me, &groups),
+        keepwarm: crate::cmd::keepwarm::status_line(&me),
+        channels: groups.my_groups().into_iter().map(|(name, pinned)| JoinedChannel { name, pinned }).collect(),
         cache: attend_presence::cache::dir(),
     }
 }
@@ -63,9 +65,8 @@ fn running_instances() -> Vec<Instance> {
         .collect()
 }
 
-fn pending() -> Pending {
-    let cwd = crate::util::own_origin_cwd();
-    let dirs = get_groups().receive_dirs(&cwd);
+fn pending(me: &Session, groups: &crate::groups::Groups) -> Pending {
+    let dirs = groups.receive_dirs(&me.origin_path);
     let count = |room: attend_groups::Room| -> usize {
         dirs.iter().filter(|d| d.room == room).map(|d| count_signals(&d.path)).sum()
     };

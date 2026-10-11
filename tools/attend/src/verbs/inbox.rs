@@ -3,7 +3,7 @@
 //! Listing and reading consult no seen-set and mark nothing: consumption is
 //! the drain's and the peers sensor's (ADR-172, ADR-501 item 4).
 
-use crate::util::{get_groups, own_session_id};
+use crate::util::{current_session, groups_for};
 use agent_identity::{is_valid_signal_id, parse_signal};
 use attend_groups::Room;
 use attend_instances::view::render_sender_label;
@@ -66,13 +66,15 @@ pub struct InboxPage {
 /// List the messages from peers in this session's receive set, the same set
 /// the peers sensor and the drain read, paged newest-first.
 pub fn list(query: InboxQuery) -> InboxPage {
-    let cwd = crate::util::own_origin_cwd();
-    let own_session_id = own_session_id().unwrap_or_default();
+    let me = current_session();
+    // An unresolved session's id is a `pid-` placeholder no sender carries,
+    // so nothing is skipped as its own.
+    let own_session_id = me.session_id.as_str();
     let mut messages: Vec<Message> = Vec::new();
     // One registry snapshot per distinct cwd for this listing.
     let instances = SnapshotCache::new();
 
-    for dir in &get_groups().receive_dirs(&cwd) {
+    for dir in &groups_for(&me).receive_dirs(&me.origin_path) {
         let Ok(dir_entries) = std::fs::read_dir(&dir.path) else { continue };
         let scope = match dir.room {
             Room::Open => "#open",
@@ -164,9 +166,9 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
     if !is_valid_signal_id(id) {
         return Err(ReadError::NotFound);
     }
-    let cwd = crate::util::own_origin_cwd();
+    let me = current_session();
     let target = format!("{id}.signal");
-    for dir in &get_groups().receive_dirs(&cwd) {
+    for dir in &groups_for(&me).receive_dirs(&me.origin_path) {
         let path = dir.path.join(&target);
         if !path.is_file() {
             continue;

@@ -5,7 +5,7 @@
 //! signal namespaces with membership in `_groups.yaml` (attend-groups).
 //! A leading `#` on a name is tolerated everywhere.
 
-use crate::util::get_groups;
+use crate::util::{current_session, groups_for};
 use crate::verbs::peers::JoinedChannel;
 use serde::Serialize;
 
@@ -38,23 +38,24 @@ impl std::error::Error for JoinError {}
 /// recent history to read.
 pub fn join(name: &str, pin: bool) -> Result<Joined, JoinError> {
     let name = name.trim_start_matches('#');
-    let r = get_groups();
+    let me = current_session();
+    let r = groups_for(&me);
     // Enrolled first, so a crash between the two never leaves a member
     // that is not enrolled; a failed join takes the enrollment back.
-    crate::util::enroll_by_join();
+    crate::util::enroll_by_join(&me);
     // The backlog is marked before the membership is written, so no
     // conduit scans the room while its history is still unseen. A join
     // that answers an invitation keeps the room's recent history to read;
     // one that does not, holds back what is older than the fresh window.
     let note = match attend_groups::validate_group_name(name) {
-        Ok(()) if r.take_invite(name) => crate::util::brief_invited_room(&r, name),
-        Ok(()) => crate::util::backlog_note(crate::util::baseline_joined_room(&r, name)),
+        Ok(()) if r.take_invite(name) => crate::util::brief_invited_room(&me, &r, name),
+        Ok(()) => crate::util::backlog_note(crate::util::baseline_joined_room(&me, &r, name)),
         Err(_) => String::new(),
     };
     match r.join(name, pin) {
         Ok(()) => Ok(Joined { name: name.to_string(), pinned: pin, note }),
         Err(message) => {
-            crate::util::settle_join_enrollment(&r);
+            crate::util::settle_join_enrollment(&me, &r);
             Err(JoinError { message })
         }
     }
@@ -71,12 +72,13 @@ pub struct Left {
 /// enrollment.
 pub fn leave(name: &str) -> Left {
     let name = name.trim_start_matches('#');
-    let r = get_groups();
+    let me = current_session();
+    let r = groups_for(&me);
     if !r.my_groups().iter().any(|(n, _)| n == name) {
         return Left { name: name.to_string(), was_member: false };
     }
     r.leave(name).ok();
-    crate::util::settle_join_enrollment(&r);
+    crate::util::settle_join_enrollment(&me, &r);
     Left { name: name.to_string(), was_member: true }
 }
 
@@ -94,7 +96,7 @@ pub struct Channel {
 /// Every named channel, sorted by name. Listing first drops members whose
 /// sessions are gone, as the CLI listing always has.
 pub fn list() -> Vec<Channel> {
-    let r = get_groups();
+    let r = groups_for(&current_session());
     r.cleanup_stale();
     let joined: std::collections::HashSet<String> = r.my_groups().into_iter().map(|(n, _)| n).collect();
     // Single read of the whole file (PR #407 nit): a second read for
@@ -121,5 +123,5 @@ pub fn list() -> Vec<Channel> {
 /// The channels this session is in. Read-only, so a hook macro can call it
 /// on every fire without [`list`]'s cleanup rewriting shared state.
 pub fn joined() -> Vec<JoinedChannel> {
-    get_groups().my_groups().into_iter().map(|(name, pinned)| JoinedChannel { name, pinned }).collect()
+    groups_for(&current_session()).my_groups().into_iter().map(|(name, pinned)| JoinedChannel { name, pinned }).collect()
 }

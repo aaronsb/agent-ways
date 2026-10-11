@@ -1,20 +1,21 @@
 //! `attend scene` / `attend scenes` — named channel presets.
 
 use crate::scenes;
-use crate::util::get_groups;
+use crate::util::{current_session, groups_for, Session};
 
 pub(crate) fn cmd_scene(name: &str) {
-    let r = get_groups();
+    let me = current_session();
+    let r = groups_for(&me);
     let all = scenes::load_scenes();
     // A scene's channels are joined as `attend join` joins one: their old
     // messages are marked seen first, once the scene is known to activate.
     let held = match scenes::checked(&all, name) {
-        Ok(scene) => scene.channels.iter().map(|c| crate::util::baseline_joined_room(&r, c)).sum(),
+        Ok(scene) => scene.channels.iter().map(|c| crate::util::baseline_joined_room(&me, &r, c)).sum(),
         Err(_) => 0,
     };
     match scenes::activate(name, &r) {
         Ok(result) => {
-            settle_scene_enrollment(name, &r);
+            settle_scene_enrollment(&me, name, &r);
             println!("[attend] scene '{name}': {result}{}", crate::util::backlog_note(held));
         }
         Err(e) => {
@@ -28,13 +29,12 @@ pub(crate) fn cmd_scene(name: &str) {
 /// that leaves it in none withdraws the join, and `private` is the explicit
 /// opt-out: it also ends `attend run`'s enrollment, at once when no run
 /// holds the session, or once the live one has gone (#720).
-fn settle_scene_enrollment(name: &str, groups: &crate::groups::Groups) {
+fn settle_scene_enrollment(ident: &Session, name: &str, groups: &crate::groups::Groups) {
     if !groups.my_groups().is_empty() {
-        crate::util::enroll_by_join();
+        crate::util::enroll_by_join(ident);
         return;
     }
-    crate::util::settle_join_enrollment(groups);
-    let ident = attend_presence::session::identity();
+    crate::util::settle_join_enrollment(ident, groups);
     if name == "private" && ident.resolved() {
         attend_presence::enrollment::opt_out(&ident.session_id).ok();
     }

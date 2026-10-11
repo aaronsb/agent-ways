@@ -42,14 +42,32 @@ pub(crate) fn own_session_id() -> Option<String> {
     attend_presence::session::find_own_session_id(std::process::id())
 }
 
+/// The identity of the session this process runs in, as one value.
+pub(crate) type Session = attend_presence::session::SessionIdentity;
+
+/// This process's session, resolved now by process ancestry (ADR-171).
+/// Not the memoized `attend_presence::session::identity()`: a library
+/// caller outlives one verb, and `/clear` can give its session a new id
+/// between two calls. A verb resolves this once at its start and hands the
+/// same value to every helper, so one call never mixes two ids.
+pub(crate) fn current_session() -> Session {
+    attend_presence::session::identity_for_pid(std::process::id())
+}
+
+/// The channel membership view for session `me`.
+pub(crate) fn groups_for(me: &Session) -> groups::Groups {
+    groups::Groups::new(&signals_base(), &me.session_id)
+}
+
 /// The cwd this session is *about* — the session record's origin path
 /// (issue #378), falling back to the process cwd only when no Claude
 /// session owns this process. Every subcommand that means "my
 /// project" (send identity, tray scan, status, registration) resolves
 /// through here, so a stray shell `cd` can no longer put the session
-/// on the bus as a different persona.
+/// on the bus as a different persona. A verb that already holds its
+/// [`Session`] reads `origin_path` from it instead.
 pub(crate) fn own_origin_cwd() -> String {
-    attend_presence::session::identity().origin_path
+    current_session().origin_path
 }
 
 /// Move everything attend keeps under session id `old` to `new`, for a
@@ -74,8 +92,7 @@ pub(crate) fn move_session(old: &str, new: &str, origin: &str) {
 
 /// Record that this session enrolled by joining a channel (#720). Only a
 /// resolved session enrolls: the drain never runs for any other.
-pub(crate) fn enroll_by_join() {
-    let ident = attend_presence::session::identity();
+pub(crate) fn enroll_by_join(ident: &Session) {
     if ident.resolved() {
         attend_presence::enrollment::enroll(&ident.session_id, attend_presence::enrollment::Source::Join).ok();
     }
@@ -88,14 +105,13 @@ pub(crate) fn enroll_by_join() {
 /// live. A channel the session is already in is left alone: what it has
 /// not consumed there is still owed to it. Returns how many were marked;
 /// only a resolved session keeps a seen-set, so any other marks nothing.
-pub(crate) fn baseline_joined_room(groups: &groups::Groups, name: &str) -> usize {
-    let ident = attend_presence::session::identity();
+pub(crate) fn baseline_joined_room(ident: &Session, groups: &groups::Groups, name: &str) -> usize {
     if !ident.resolved() || groups.my_groups().iter().any(|(n, _)| n == name) {
         return 0;
     }
     let backlog = attend_state::cold_start::room_backlog(&groups.group_dir(name));
     let n = backlog.len();
-    attend_state::StateStore::new(Some(ident.session_id)).mark_seen(backlog);
+    attend_state::StateStore::new(Some(ident.session_id.clone())).mark_seen(backlog);
     n
 }
 
@@ -105,8 +121,7 @@ pub(crate) fn baseline_joined_room(groups: &groups::Groups, name: &str) -> usize
 /// is. A session that has not had its cold start yet has it now, over the
 /// rooms it already receives, so the first scan after the join is warm and
 /// does not baseline the briefing away. Returns the line the join prints.
-pub(crate) fn brief_invited_room(groups: &groups::Groups, name: &str) -> String {
-    let ident = attend_presence::session::identity();
+pub(crate) fn brief_invited_room(ident: &Session, groups: &groups::Groups, name: &str) -> String {
     if !ident.resolved() || groups.my_groups().iter().any(|(n, _)| n == name) {
         return String::new();
     }
@@ -148,8 +163,7 @@ pub(crate) fn backlog_note(n: usize) -> String {
 /// After this session's channels changed: a session in no channel any more
 /// withdraws its join enrollment. One that also ran `attend run` stays
 /// enrolled through that.
-pub(crate) fn settle_join_enrollment(groups: &groups::Groups) {
-    let ident = attend_presence::session::identity();
+pub(crate) fn settle_join_enrollment(ident: &Session, groups: &groups::Groups) {
     if ident.resolved() && groups.my_groups().is_empty() {
         attend_presence::enrollment::withdraw(&ident.session_id, attend_presence::enrollment::Source::Join).ok();
     }

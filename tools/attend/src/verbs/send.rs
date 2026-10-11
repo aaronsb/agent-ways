@@ -1,6 +1,6 @@
 //! `send` and `reply`: write one signal to the bus.
 
-use crate::util::{encode_project, get_groups, own_session_id, signals_base};
+use crate::util::{current_session, encode_project, groups_for, signals_base, Session};
 use agent_identity::is_valid_signal_id;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -96,6 +96,11 @@ impl std::error::Error for SendError {}
 /// Code session found by process ancestry, else the external `$USER@<terminal>`
 /// identity a plain terminal has.
 pub fn send(req: &SendRequest) -> Result<Sent, SendError> {
+    send_as(&current_session(), req)
+}
+
+/// [`send`] as session `me`, resolved once by the calling verb.
+fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
     // A signal id must match the same character class the parser uses to
     // disambiguate threaded records from legacy messages that happen to
     // start with "re:". Signal filename stems are
@@ -113,7 +118,8 @@ pub fn send(req: &SendRequest) -> Result<Sent, SendError> {
     let base = signals_base();
     // Wire identity rides this cwd (issue #378): the session record's
     // origin path, so a stray shell `cd` can't relabel our sends.
-    let cwd = crate::util::own_origin_cwd();
+    let cwd = &me.origin_path;
+    let self_id = me.session_resolved.then(|| me.session_id.clone());
 
     // Validate `to` against active peers.
     let resolved_to = req.to.as_ref().map(|path| {
@@ -131,7 +137,7 @@ pub fn send(req: &SendRequest) -> Result<Sent, SendError> {
         }
     }
 
-    let r = get_groups();
+    let r = groups_for(me);
 
     // Validate `channel` against live `_groups.yaml` membership. A signal
     // written to a group nobody is *currently* listening on sits unread in
@@ -142,7 +148,6 @@ pub fn send(req: &SendRequest) -> Result<Sent, SendError> {
     // let the validation pass on a phantom member.
     if let Some(name) = &req.channel {
         let members = r.members(name);
-        let self_id = own_session_id();
         let live_ids = live_session_ids();
         // A member is live if it's a running claude session OR its
         // heartbeat is fresh. The heartbeat arm covers human members
@@ -180,7 +185,7 @@ pub fn send(req: &SendRequest) -> Result<Sent, SendError> {
         (None, None) => (vec![base.join(attend_groups::BROADCAST_DIR)], "#open"),
     };
 
-    let (sender_id, source_kind) = agent_identity::signal::identify_sender(own_session_id());
+    let (sender_id, source_kind) = agent_identity::signal::identify_sender(self_id);
     let from = format!("{}:{}", source_kind, sender_id);
     // Build the filename stem, which doubles as the signal id `re:<id>`
     // replies reference. `signal_filename` normalizes the sender id
@@ -192,8 +197,8 @@ pub fn send(req: &SendRequest) -> Result<Sent, SendError> {
     // Wire format (ADR-120): `from|project|cwd|message`, or with `re:<id>`
     // before the message when threading. attend-chat writes through the
     // same `agent_identity::signal` functions.
-    let project = agent_identity::signal::project_label(&cwd);
-    let content = agent_identity::signal::format_signal(&from, &project, &cwd, req.re.as_deref(), &req.message);
+    let project = agent_identity::signal::project_label(cwd);
+    let content = agent_identity::signal::format_signal(&from, &project, cwd, req.re.as_deref(), &req.message);
 
     let failed = dest_dirs
         .iter()
@@ -230,8 +235,12 @@ pub enum ReplyTarget {
 /// a delivering conduit (the peers sensor or the drain) surfaced to it.
 #[cfg(feature = "sensor-peers")]
 pub fn reply_target() -> ReplyTarget {
-    let session_id = own_session_id().unwrap_or_else(|| format!("pid-{}", std::process::id()));
-    classify_reply_target(sensor_peers::last_inbound::read(&session_id))
+    reply_target_for(&current_session())
+}
+
+#[cfg(feature = "sensor-peers")]
+fn reply_target_for(me: &Session) -> ReplyTarget {
+    classify_reply_target(sensor_peers::last_inbound::read(&me.session_id))
 }
 
 #[cfg(feature = "sensor-peers")]
@@ -248,15 +257,16 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
 /// [`SendError::NoInbound`] when no peer message has arrived.
 #[cfg(feature = "sensor-peers")]
 pub fn reply(req: &SendRequest) -> Result<Sent, SendError> {
+    let me = current_session();
     if req.re.is_some() {
-        return send(req);
+        return send_as(&me, req);
     }
-    let re = match reply_target() {
+    let re = match reply_target_for(&me) {
         ReplyTarget::NoInbound => return Err(SendError::NoInbound),
         ReplyTarget::Unthreaded => None,
         ReplyTarget::Threaded(id) => Some(id),
     };
-    send(&SendRequest { re, ..req.clone() })
+    send_as(&me, &SendRequest { re, ..req.clone() })
 }
 
 #[cfg(feature = "sensor-peers")]

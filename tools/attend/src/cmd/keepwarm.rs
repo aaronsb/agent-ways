@@ -65,8 +65,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
 }
 
 /// The one-line form `attend status` shows.
-pub(crate) fn status_line() -> String {
-    let ident = attend_presence::session::identity();
+pub(crate) fn status_line(ident: &crate::util::Session) -> String {
     if !ident.session_resolved {
         return "no session".to_string();
     }
