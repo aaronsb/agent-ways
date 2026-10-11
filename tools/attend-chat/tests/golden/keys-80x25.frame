@@ -13,7 +13,7 @@ agent-tui frame 80x25
 |│F2                 tabs                                                       │|
 |│Ctrl+T             the tab bar, as F2: ← → move, Enter its menu, Esc back     │|
 |│Ctrl+N             new channel, from the compose box or the tab bar           │|
-|│right-click a tab  its menu; so does a click on the tab shown                 │|
+|│right-click a tab  its menu; a click shows the tab and opens its menu         │|
 |│M-m                mouse on or off (off lets the terminal select text)        │|
 |│Shift-drag         selects text while the mouse is on, in most terminals      │|
 |│middle-click       pastes only while the mouse is off                         │|

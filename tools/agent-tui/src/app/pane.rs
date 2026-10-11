@@ -159,6 +159,13 @@ pub trait Pane: Any {
     /// its action. Nothing by default.
     fn tab_menu(&mut self, _i: usize) {}
 
+    /// Whether a left click on a tab shows it and opens its menu at once,
+    /// rather than opening the menu only on the tab already shown. Only a
+    /// pane with tab menus is asked. Keys keep their own rule.
+    fn menu_on_click(&self) -> bool {
+        false
+    }
+
     /// What Ctrl+N does in this pane, in a few words ("new channel"), when
     /// the pane has such an action. Only a pane with tab menus
     /// ([`Pane::has_tab_menus`]) is asked; with a label the shell takes

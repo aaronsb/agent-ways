@@ -88,7 +88,13 @@ impl App {
             out.push(Binding::help("Ctrl+N", format!("{n}, from the compose box or the tab bar")));
         }
         if menus {
-            out.push(Binding::help("right-click a tab", if keys.menu_on_repeat { "its menu; so does a click on the tab shown" } else { "its menu" }));
+            let click = self.pane.as_ref().is_some_and(|p| p.menu_on_click());
+            let what = match (click, keys.menu_on_repeat) {
+                (true, _) => "its menu; a click shows the tab and opens its menu",
+                (false, true) => "its menu; so does a click on the tab shown",
+                (false, false) => "its menu",
+            };
+            out.push(Binding::help("right-click a tab", what));
         }
         let quit = self.pane.as_ref().and_then(|p| p.quit_help()).unwrap_or_else(|| "quit; asks first over unsaved work".into());
         out.extend([
@@ -362,7 +368,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
                     self.interrupt_pane();
-                    return self.pane_tab_or_menu(i);
+                    return self.pane_tab_click(i);
                 }
                 if self.hits.pane.contains(at) {
                     if let Some(p) = &mut self.pane {
@@ -460,6 +466,8 @@ mod tests {
         tab_keys: TabKeys,
         /// `Some`: the pane takes Ctrl+N, counting its uses.
         news: Option<usize>,
+        /// A click on a tab shows it and opens its menu.
+        click_menu: bool,
     }
 
     impl Pane for Two {
@@ -480,6 +488,9 @@ mod tests {
         }
         fn has_tab_menus(&self) -> bool {
             true
+        }
+        fn menu_on_click(&self) -> bool {
+            self.click_menu
         }
         fn new_item_label(&self) -> Option<&'static str> {
             self.news.map(|_| "new thing")
@@ -524,7 +535,7 @@ mod tests {
     }
 
     fn app(text: bool) -> App {
-        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None })
+        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, click_menu: false })
     }
 
     #[test]
@@ -811,6 +822,22 @@ mod tests {
     }
 
     #[test]
+    fn where_the_pane_asks_one_click_shows_a_tab_and_opens_its_menu() {
+        let mut a = app(false);
+        a.pane_mut::<Two>().expect("the pane").click_menu = true;
+        let buf = testkit::render(&mut a, 60, 8);
+        let (x2, y) = testkit::find(&buf, "2 two").expect("the tab");
+        let (x1, _) = testkit::find(&buf, "1 one").expect("the tab");
+        let ev = |kind, column| MouseEvent { kind, column, row: y, modifiers: KeyModifiers::NONE };
+        a.mouse(ev(MouseEventKind::Down(MouseButton::Left), x2));
+        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1]), "the first click shows the tab and opens its menu");
+        a.mouse(ev(MouseEventKind::Down(MouseButton::Right), x1));
+        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1, 0]), "a right click still opens a menu without showing the tab");
+        a.key(k(KeyCode::F(1), KeyModifiers::NONE));
+        assert!(testkit::text(&testkit::render(&mut a, 100, 24)).contains("a click shows the tab and opens its menu"));
+    }
+
+    #[test]
     fn the_key_help_says_whether_ctrl_digits_arrive() {
         struct Asks(Two);
         impl Pane for Asks {
@@ -835,7 +862,7 @@ mod tests {
                 true
             }
         }
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: true, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, click_menu: false };
         let mut a = App::with_pane("asks", Asks(two));
         a.key(k(KeyCode::F(1), KeyModifiers::NONE));
         let off = testkit::text(&testkit::render(&mut a, 140, 24));
@@ -877,7 +904,7 @@ mod tests {
 
     #[test]
     fn a_pane_without_tab_menus_gets_no_tab_bar_focus_and_names_none() {
-        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None };
+        let two = Two { tab: 0, keys: 0, wheel: 0, dirty: false, text: false, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, click_menu: false };
         let mut a = App::with_pane("plain", Plain(two));
         a.key(k(KeyCode::F(2), KeyModifiers::NONE));
         assert!(!a.strip_focused(), "F2 is the pane's");

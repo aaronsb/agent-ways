@@ -642,6 +642,11 @@ impl Pane for ChatPane {
         self.open_tab_menu(i);
     }
 
+    /// One click on a channel shows it and opens its menu (ADR-405).
+    fn menu_on_click(&self) -> bool {
+        true
+    }
+
     fn new_item_label(&self) -> Option<&'static str> {
         Some("new channel")
     }

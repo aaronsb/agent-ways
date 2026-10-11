@@ -589,12 +589,14 @@ fn backspace_after_esc_edits_the_draft() {
 }
 
 #[test]
-fn a_click_on_a_tab_shows_its_channel() {
+fn a_click_on_a_tab_shows_its_channel_and_opens_its_menu() {
     let mut c = chat();
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"), "one click opens the menu (ADR-405)");
+    assert!(press(&mut c, key(KeyCode::Esc)), "Esc closes the menu");
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "1 merged").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
@@ -875,6 +877,7 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
     let (x, y) = testkit::find(&buf, "2 #open").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert_eq!(c.status(), "kept");
+    press(&mut c, key(KeyCode::Esc));
     press(&mut c, key(KeyCode::Char('y')));
     assert_eq!(c.input().text(), "y");
 }
@@ -1029,12 +1032,10 @@ fn f2_moves_along_the_tab_bar_and_enter_opens_the_menu() {
 }
 
 #[test]
-fn a_second_click_on_the_shown_tab_or_a_right_click_opens_its_menu() {
+fn a_right_click_opens_a_tabs_menu_without_showing_it() {
     let mut c = chat();
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
-    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
-    assert!(!text(&mut c, 80, 25).contains("pick one"));
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert!(text(&mut c, 80, 25).contains("pick one: #deploy"));
     press(&mut c, key(KeyCode::Esc));

@@ -272,6 +272,21 @@ impl App {
         }
     }
 
+    /// A left click on tab `i`: where the pane asks for it
+    /// ([`Pane::menu_on_click`]), show the tab and open its menu at once;
+    /// otherwise as Ctrl+digit.
+    pub(super) fn pane_tab_click(&mut self, i: usize) {
+        let Some(p) = &mut self.pane else { return };
+        if !(p.has_tab_menus() && p.menu_on_click()) {
+            return self.pane_tab_or_menu(i);
+        }
+        let Some(t) = p.tabs().get(i).cloned() else { return };
+        if !t.action && p.tab() != i {
+            p.set_tab(i);
+        }
+        self.open_tab_menu(i);
+    }
+
     /// Open tab `i`'s menu, over the pane.
     pub(super) fn open_tab_menu(&mut self, i: usize) {
         if let Some(p) = &mut self.pane {
