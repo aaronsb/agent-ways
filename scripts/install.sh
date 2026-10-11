@@ -14,7 +14,7 @@
 #                                                # fetch + verify one commit into DIR, install nothing
 #                                                # (`ways manage reinstall` stages with this, ADR-509)
 #
-# The happy path: stage app → make setup → ways reconcile. Everything else is guardrails.
+# The happy path: stage app → make setup → ways manage repair. Everything else is guardrails.
 
 set -euo pipefail
 
@@ -62,7 +62,7 @@ ${CYAN}What it does (1.0 XDG layout):${RESET}
   1. Checks prerequisites (git, jq, make)
   2. Stages the app into \$XDG_DATA_HOME/agent-ways
   3. Builds binaries + embedding model ('make setup')
-  4. Reconciles the projection into ~/.claude ('ways reconcile')
+  4. Reconciles the projection into ~/.claude ('ways manage repair')
      Your Claude Code files (projects/, credentials, settings) are preserved.
      A real skills/, agents/, commands/ or hooks/ways/ directory of your own at
      a projected root stops this step; nothing is deleted.
@@ -230,14 +230,14 @@ is_agent_ways_repo() {
   return 1
 }
 
-# Shown when `ways reconcile` refuses: a real path sits at a projected root.
+# Shown when `ways manage repair` refuses: a real path sits at a projected root.
 print_projection_stopped() {
   echo ""
   echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; nothing in ${DEST} was changed."
   echo "  Read the list above. Move those paths aside (or copy what you want to keep"
   echo "  into a project's .claude/skills/), then run:"
-  echo -e "    ${CYAN}ways reconcile${RESET}            # link the projected roots"
-  echo -e "    ${CYAN}ways reconcile --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
+  echo -e "    ${CYAN}ways manage repair${RESET}            # link the projected roots"
+  echo -e "    ${CYAN}ways manage repair --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
   echo "  If ~/.claude is itself a git clone of agent-ways (pre-1.0), do not use --force;"
   echo "  see ${UPSTREAM_URL}/blob/ways-v1.8.3/docs/migration-1.0.md"
 }
@@ -374,7 +374,7 @@ if is_agent_ways_repo "$APP_DIR"; then
   echo ""
   if [[ -x "$APP_DIR/bin/ways" ]]; then
     echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
-    if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
+    if ! "$APP_DIR/bin/ways" manage repair --source "$APP_DIR" --dest "$DEST"; then
       print_projection_stopped
       exit 1
     fi
@@ -384,7 +384,7 @@ if is_agent_ways_repo "$APP_DIR"; then
     judge_setup
   else
     echo -e "${YELLOW}ways binary not built — projection was NOT reconciled.${RESET}"
-    echo "  Fix the build (cd $APP_DIR && make setup), then run: ways reconcile"
+    echo "  Fix the build (cd $APP_DIR && make setup), then run: ways manage repair"
   fi
   exit 0
 fi
@@ -438,7 +438,7 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   echo -e "${DIM}(symlinks the projected roots; merges settings.json; your files stay; a real directory at a projected root stops it, nothing is deleted)${RESET}"
   echo ""
   mkdir -p "$DEST"
-  if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
+  if ! "$APP_DIR/bin/ways" manage repair --source "$APP_DIR" --dest "$DEST"; then
     print_projection_stopped
     exit 1
   fi

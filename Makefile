@@ -3,7 +3,7 @@
 #
 # Quick start:   make setup
 # Install/update/uninstall/release live in the binary and scripts:
-#   ways update | ways reconcile | ways uninstall | make cut-release
+#   ways manage update | ways manage repair | ways manage uninstall | make cut-release
 
 .DEFAULT_GOAL := help
 .PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-lang test-locales test-multilingual test-live purge-attend-state
@@ -41,7 +41,7 @@ help:
 	@echo "agent-ways"
 	@echo ""
 	@echo "  make setup        Build ways CLI + attend + fetch embedding model + corpus"
-	@echo "                    (install, update and removal: ways update | reconcile | uninstall)"
+	@echo "                    (install, update and removal: ways manage update | repair | uninstall | reinstall)"
 	@echo "  make deps         Install the C++ build toolchain (only if a prebuilt binary"
 	@echo "                    won't run on your platform and you must build from source)"
 	@echo "  make ways         Get ways binary (download or build from source)"
@@ -143,11 +143,11 @@ link:
 		mkdir -p "$(CLAUDE_BIN)"; dst="$(CLAUDE_BIN)/way-embed"; \
 		if [ "$(CURDIR)/$(WAY_EMBED_BIN)" -ef "$$dst" ]; then :; \
 		elif [ -e "$$dst" ] && [ ! -L "$$dst" ]; then \
-			echo "  ⚠ $$dst is a real file; not replacing it (ways reconcile --force moves it aside)"; \
+			echo "  ⚠ $$dst is a real file; not replacing it (ways manage repair --force moves it aside)"; \
 		else $(LINK) "$(CURDIR)/$(WAY_EMBED_BIN)" "$$dst"; fi; \
 	fi
 
-# Install any suite binary the install lacks, then link. `ways update` runs this
+# Install any suite binary the install lacks, then link. `ways manage update` runs this
 # after every pull, from the freshly pulled Makefile, so a component added to the
 # suite reaches an existing install even when the updater predates it: the 1.23.1
 # updater refreshes only the components it knew of, and ways-mcp arrives here.
@@ -165,19 +165,19 @@ relink:
 # already parsed the old Makefile, so its recipe still runs `$(MAKE) install`
 # against this file after `scripts/update.sh` pulls it.
 install: link
-	@echo "note: 'make install' is retired; use 'ways update'."
+	@echo "note: 'make install' is retired; use 'ways manage update'."
 
 # transition: removed by #717 (ADR-506)
 update:
-	@echo "note: 'make update' is retired; running 'ways update'."
-	@./bin/ways update
+	@echo "note: 'make update' is retired; running 'ways manage update'."
+	@./bin/ways manage update
 
 # transition: removed by #717 (ADR-506)
 sync-to-home:
 	@echo "'make sync-to-home' was removed; see https://github.com/aaronsb/agent-ways/blob/ways-v1.8.3/docs/migration-1.0.md" >&2
 	@exit 1
 
-# Force-rebuild every binary `ways update` is responsible for refreshing.
+# Force-rebuild every binary `ways manage update` is responsible for refreshing.
 update-binaries: $(SUITE_BINS:%=%-rebuild) way-embed-rebuild
 
 # --- Build ---
