@@ -18,7 +18,7 @@ FONT=${FONT:-Adwaita Mono}
 SIZES=${SIZES:-80x25 120x35}
 
 A=3f6c2a91-4b7e-4d10-9c55-2e8b7a1d0f42
-P=/home/dev/shop
+P=$FX_USER_HOME/shop
 
 # The scenarios: name | command | keys. Keys are tmux key names, and
 # text:<chars> types literally. A new screen state adds a line here.

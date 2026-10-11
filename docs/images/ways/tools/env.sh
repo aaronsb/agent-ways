@@ -11,6 +11,9 @@ BIN=${CARGO_TARGET_DIR:-$REPO/tools/target}/debug
 WORK=${SHOTS_DIR:-$REPO/target/doc-shots}
 F=$WORK/fx
 REALHOME=$HOME
+# The home the fixture's transcripts name (fixture.py PROJ and the other
+# project paths sit under it). It is a display value, never read from disk.
+FX_USER_HOME=/home/dev
 mkdir -p "$WORK"
 
 # The app sees only the fixture. HOME is the relative path `~`, a link to
