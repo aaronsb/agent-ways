@@ -159,18 +159,34 @@ const TRACKED: &[&str] = &[
     "git",
 ];
 
+/// Process names that a known tool gives itself, each with the name the
+/// tool is tracked under. Node names its main thread, so its `comm` reads
+/// `node-MainThread`. A new renamer is one entry here.
+const ALIASES: &[(&str, &str)] = &[("node-MainThread", "node")];
+
+/// npm subcommands that run a package, as `npx` does. npx itself runs
+/// `npm exec`, and `x` is npm's alias for `exec`.
+const NPM_EXEC: &[&str] = &["exec", "x"];
+
 /// The name a process is tracked under. A process can rename itself, and
-/// some known tools do: npm sets its title to the command line, so its
-/// `comm` reads `npm test` or `npm run dev`, and node names its main thread,
-/// so its `comm` reads `node-MainThread`. The first word of `comm`, and
-/// that word without a trailing `-<suffix>`, are tried after `comm` itself,
-/// and the first of the three that `known` accepts is the name. A process
-/// none of them matches keeps its `comm` as it is, so `Web Content` or
-/// `slack-mcp-linux` is not cut down to a name it does not have.
-fn canonical_name(comm: &str, known: impl Fn(&str) -> bool) -> String {
-    let word = comm.split_whitespace().next().unwrap_or(comm);
-    let base = word.rsplit_once('-').map_or(word, |(base, _)| base);
-    [comm, word, base].into_iter().find(|n| known(n)).unwrap_or(comm).to_string()
+/// a few known tools do. An exact `comm` in [`ALIASES`] takes its alias.
+/// npm sets its title to its command line, so a `comm` whose first word is
+/// `npm` reads `npm test`, `npm run dev` or `npm exec @scope/server`: the
+/// exec form is `npx`, which launches a package and is tracked as an app,
+/// and every other form is `npm`, the build tool. Any other `comm` is kept
+/// as it is, so `ssh-agent` stays `ssh-agent` and is never counted as `ssh`.
+fn canonical_name(comm: &str) -> &str {
+    if let Some((_, name)) = ALIASES.iter().find(|(alias, _)| *alias == comm) {
+        return name;
+    }
+    let mut words = comm.split_whitespace();
+    if words.next() == Some("npm") {
+        return match words.next() {
+            Some(sub) if NPM_EXEC.contains(&sub) => "npx",
+            _ => "npm",
+        };
+    }
+    comm
 }
 
 /// The rows of a `ps` run, or `None` when it could not be read: `ps` did
@@ -225,11 +241,9 @@ struct HeldExit {
 /// and the parent's exit carries the build event. Any other app stays
 /// visible wherever it runs, so `node` under `npm` or `docker` under
 /// `make` is counted, and recorded as hosted by the tool above it. Every
-/// process is first given its [`canonical_name`], against the watched
-/// tools and [`TRACKED`].
+/// process is first given its [`canonical_name`].
 fn tally(procs: &[Proc], is_relevant: impl Fn(&str) -> bool, is_watched: impl Fn(&str) -> bool) -> Snapshot {
-    let known = |n: &str| is_watched(n) || TRACKED.contains(&n);
-    let procs: Vec<Proc> = procs.iter().map(|p| Proc { comm: canonical_name(&p.comm, known), ..p.clone() }).collect();
+    let procs: Vec<Proc> = procs.iter().map(|p| Proc { comm: canonical_name(&p.comm).to_string(), ..p.clone() }).collect();
     let by_pid: HashMap<u32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
     let watched_above = |p: &Proc| {
         let mut tools = Vec::new();
@@ -1030,18 +1044,69 @@ mod tests {
     }
 
     #[test]
-    fn canonical_name_finds_the_tool_inside_a_renamed_process() {
+    fn canonical_name_reads_npm_and_node_titles() {
+        assert_eq!(canonical_name("npm test"), "npm");
+        assert_eq!(canonical_name("npm run dev"), "npm");
+        assert_eq!(canonical_name("npm install"), "npm");
+        assert_eq!(canonical_name("npm ci"), "npm");
+        assert_eq!(canonical_name("npm"), "npm");
+        assert_eq!(canonical_name("npm exec node -"), "npx");
+        assert_eq!(canonical_name("npm exec @scope"), "npx", "comm cut at 15 characters");
+        assert_eq!(canonical_name("npm x cowsay"), "npx");
+        assert_eq!(canonical_name("node-MainThread"), "node");
+        assert_eq!(canonical_name("cargo"), "cargo");
+        assert_eq!(canonical_name("g++"), "g++");
+        assert_eq!(canonical_name("Web Content"), "Web Content");
+        assert_eq!(canonical_name("slack-mcp-linux"), "slack-mcp-linux");
+    }
+
+    /// A tool's companion binary keeps its own name: it is not the tool.
+    #[test]
+    fn canonical_name_keeps_a_companion_binary_whole() {
+        for comm in [
+            "ssh-agent", "cargo-watch", "clang-format", "pip-compile", "docker-proxy",
+            "containerd-shim", "node-gyp", "python3-config", "rustc-wrapper", "gcc-ar",
+        ] {
+            assert_eq!(canonical_name(comm), comm);
+        }
+        let t = see(&[ZSH, (10, 1, "cargo-watch"), (11, 1, "ssh-agent"), (12, 1, "gcc-ar"), (13, 1, "ssh")]);
+        assert!(t.tools.is_empty(), "{:?}", t.tools);
+        assert_eq!(t.apps.get("ssh"), Some(&1));
+    }
+
+    /// An MCP server launched with `npx` under `claude` is an app, not a
+    /// build: it gives no tool, so it never reports `npm finished`.
+    #[test]
+    fn an_npm_exec_under_claude_is_no_tool() {
+        let focus = no_focus();
         let s = ProcessSensor::new();
-        let known = |n: &str| s.is_watched(n) || TRACKED.contains(&n);
-        assert_eq!(canonical_name("npm test", known), "npm");
-        assert_eq!(canonical_name("npm run dev", known), "npm");
-        assert_eq!(canonical_name("npm exec node -", known), "npm");
-        assert_eq!(canonical_name("node-MainThread", known), "node");
-        assert_eq!(canonical_name("cargo", known), "cargo");
-        assert_eq!(canonical_name("g++", known), "g++");
-        // Names that reduce to nothing known stay whole.
-        assert_eq!(canonical_name("Web Content", known), "Web Content");
-        assert_eq!(canonical_name("slack-mcp-linux", known), "slack-mcp-linux");
+        let rows = [ZSH, (10, 1, "claude"), (11, 10, "npm exec @foo/mcp"), (12, 11, "node-MainThread")];
+        let t = tally(&procs(&rows), |c| ProcessSensor::is_relevant(c, &focus), |c| s.is_watched(c));
+        assert!(t.tools.is_empty(), "{:?}", t.tools);
+        assert_eq!(t.apps, HashMap::from([("claude".into(), 1), ("npx".into(), 1), ("node".into(), 1)]));
+    }
+
+    /// This host's process table, captured with
+    /// `LC_ALL=C ps -u $USER -o pid=,ppid=,lstart=,comm=` while eight MCP
+    /// servers launched with `npx` ran under `claude`. The npm scope in
+    /// their titles is redacted to `@scope`.
+    const LIVE_HOST: &str = include_str!("../fixtures/ps-live-host.txt");
+
+    #[test]
+    fn the_live_host_table_names_each_process_as_itself() {
+        let focus = no_focus();
+        let s = ProcessSensor::new();
+        let rows = parse_ps(LIVE_HOST);
+        let comms = |name: &str| rows.iter().filter(|p| p.comm == name).count();
+        assert_eq!(comms("npm exec @scope"), 8, "the fixture holds the MCP servers");
+        assert!(comms("ssh-agent") > 0, "the fixture holds ssh-agent");
+        let t = tally(&rows, |c| ProcessSensor::is_relevant(c, &focus), |c| s.is_watched(c));
+        assert!(t.tools.values().all(|tool| tool.name != "npm"), "{:?}", t.tools);
+        assert_eq!(t.apps.get("npx"), Some(&8));
+        assert_eq!(t.apps.get("ssh").copied().unwrap_or(0) as usize, comms("ssh"), "ssh-agent is not ssh");
+        for p in rows.iter().filter(|p| p.comm == "cargo-watch") {
+            assert!(!t.tools.contains_key(&p.pid), "cargo-watch is no tool");
+        }
     }
 
     /// Rows from `ps -o pid=,ppid=,lstart=,comm=` during a real `npm test`,
@@ -1060,15 +1125,8 @@ mod tests {
     fn tally_sees_npm_and_node_as_this_host_names_them() {
         let s = ProcessSensor::new();
         let t = tally(&parse_ps(LIVE_NPM), |c| c != "bash", |c| s.is_watched(c));
-        assert_eq!(t.apps, HashMap::from([("node".to_string(), 3)]));
-        assert_eq!(
-            t.tools,
-            HashMap::from([
-                (3181672, tool("npm", &["node"])),
-                (3181673, tool("npm", &["node"])),
-                (3181674, tool("npm", &["node"])),
-            ])
-        );
+        assert_eq!(t.apps, HashMap::from([("node".to_string(), 3), ("npx".to_string(), 1)]));
+        assert_eq!(t.tools, HashMap::from([(3181672, tool("npm", &["node"])), (3181673, tool("npm", &["node"]))]));
     }
 
     #[test]
