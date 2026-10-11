@@ -1508,17 +1508,19 @@ mod tests {
         assert_eq!(t.apps, HashMap::from([("claude".into(), 1), ("npx".into(), 1), ("node".into(), 1)]));
     }
 
-    /// This host's process table, captured with
-    /// `LC_ALL=C ps -u $USER -o pid=,ppid=,lstart=,comm=` while eight MCP
-    /// servers launched with `npx` ran under `claude`. The npm scope in
-    /// their titles is redacted to `@scope`.
-    const LIVE_HOST: &str = include_str!("../fixtures/ps-live-host.txt");
+    /// A synthetic process table in the shape of
+    /// `ps -u $USER -o pid=,ppid=,lstart=,comm=` on a desktop host: eight
+    /// MCP servers launched with `npx` under `claude`, some with their
+    /// `node-MainThread`, `ssh` beside `ssh-agent`, `cargo` under
+    /// `cargo-watch`, `clang-format`, and an app whose `comm` has a space.
+    /// The names, pids and times are invented.
+    const HOST: &str = include_str!("../fixtures/ps-host.txt");
 
     #[test]
-    fn the_live_host_table_names_each_process_as_itself() {
+    fn a_host_table_names_each_process_as_itself() {
         let focus = no_focus();
         let s = ProcessSensor::new();
-        let rows = parse_ps(LIVE_HOST, Columns::Lstart);
+        let rows = parse_ps(HOST, Columns::Lstart);
         let comms = |name: &str| rows.iter().filter(|p| p.comm == name).count();
         assert_eq!(comms("npm exec @scope"), 8, "the fixture holds the MCP servers");
         assert!(comms("ssh-agent") > 0, "the fixture holds ssh-agent");
