@@ -86,12 +86,20 @@ ARGS=("$@")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --stage|--from|--rev|--branch)
+      # A value flag takes the next word, which must be there and not a flag.
+      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+        echo "$1 needs a value." >&2
+        exit 2
+      fi ;;
+  esac
+  case "$1" in
     --bootstrap) BOOTSTRAP=true ;;
     --dangerously-clobber) CLOBBER=true ;;
-    --stage) STAGE="${2:-}"; shift ;;
-    --from) STAGE_FROM="${2:-}"; shift ;;
-    --rev) STAGE_REV="${2:-}"; shift ;;
-    --branch) STAGE_BRANCH="${2:-}"; shift ;;
+    --stage) STAGE="$2"; shift ;;
+    --from) STAGE_FROM="$2"; shift ;;
+    --rev) STAGE_REV="$2"; shift ;;
+    --branch) STAGE_BRANCH="$2"; shift ;;
     --help|-h) show_help; exit 0 ;;
   esac
   shift

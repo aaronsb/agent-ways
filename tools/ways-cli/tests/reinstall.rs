@@ -228,3 +228,36 @@ fn a_reinstall_projects_every_enabled_target_the_config_lists() {
         assert_eq!(link, s.app().join("skills"), "{t}");
     }
 }
+
+/// A value flag without its value stops the installer with a usage message
+/// and exit 2, before it fetches or installs anything.
+#[test]
+fn the_installer_refuses_a_value_flag_without_its_value() {
+    let s = Sandbox::new("flags", BUILDS);
+    let stage = s.base.join("staged");
+    let stage = stage.to_str().unwrap();
+    let origin = s.base.join("origin");
+    let origin = origin.to_str().unwrap();
+    for args in [
+        vec!["--stage"],
+        vec!["--branch"],
+        vec!["--stage", stage, "--rev", "abc", "--from"],
+        vec!["--stage", "--from", origin, "--rev", "abc"],
+        vec!["--stage", "", "--from", origin, "--rev", "abc"],
+    ] {
+        let out = Command::new("bash")
+            .arg("scripts/install.sh")
+            .args(&args)
+            .current_dir(s.app())
+            .env("HOME", s.base.join("home"))
+            .env("XDG_DATA_HOME", s.base.join("data"))
+            .env("XDG_CACHE_HOME", s.base.join("cache"))
+            .output()
+            .expect("run install.sh");
+        let t = text(&out);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {t}");
+        assert!(t.contains("needs a value"), "{args:?}: {t}");
+        assert!(!s.base.join("staged").exists() && !s.base.join("data/--from").exists(), "{args:?} staged something: {t}");
+        assert!(!s.app().join("bin").exists(), "{args:?} installed: {t}");
+    }
+}
