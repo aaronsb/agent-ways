@@ -170,8 +170,8 @@ assert "ways on PATH" command -v ways
 
 # --- 3. the documented recovery: reconcile --force --------------------------
 
-section "recovery: ways reconcile --force"
-FORCE_OUT=$(ways reconcile --force 2>&1)
+section "recovery: ways manage repair --force"
+FORCE_OUT=$(ways manage repair --force 2>&1)
 FORCE_RC=$?
 assert_eq "reconcile --force exits 0" "0" "$FORCE_RC"
 assert "skills is now our symlink" test -L "$DEST/skills"
@@ -207,13 +207,13 @@ assert "permissions merged" jq -e '.permissions.allow | index("Bash(ways:*)") !=
 section "target recorded (ADR-184)"
 assert "user config exists" test -f "$CONFIG"
 assert "targets key written" grep -q '^targets:' "$CONFIG"
-TARGETS=$(ways target list --json 2>/dev/null)
+TARGETS=$(ways manage target list --json 2>/dev/null)
 assert_eq "targets are explicit" "true" "$(jq -r .explicit <<<"$TARGETS")"
 assert_eq "one target" "1" "$(jq -r '.targets | length' <<<"$TARGETS")"
 assert_eq "target is ~/.claude" "$DEST" "$(jq -r '.targets[0].dir' <<<"$TARGETS")"
 assert_eq "target enabled" "true" "$(jq -r '.targets[0].enabled' <<<"$TARGETS")"
 assert_eq "target active" "active" "$(jq -r '.targets[0].state' <<<"$TARGETS")"
-assert "ways target list renders" ways target list
+assert "ways manage target list renders" ways manage target list
 
 # --- 6. ways status --------------------------------------------------------
 
@@ -228,15 +228,15 @@ assert_eq "status --json: engine embedding" "embedding" "$(jq -r .engine.active 
 # --- 7. reconcile is idempotent ----------------------------------------------
 
 section "reconcile --dry-run, twice"
-DRY1=$(ways reconcile --dry-run 2>&1); DRY1_RC=$?
-DRY2=$(ways reconcile --dry-run 2>&1); DRY2_RC=$?
+DRY1=$(ways manage repair --dry-run 2>&1); DRY1_RC=$?
+DRY2=$(ways manage repair --dry-run 2>&1); DRY2_RC=$?
 assert_eq "first dry-run exits 0" "0" "$DRY1_RC"
 assert_eq "second dry-run exits 0" "0" "$DRY2_RC"
 assert_eq "dry-run output identical" "$DRY1" "$DRY2"
 assert_contains "dry-run reports up to date" "up to date" "$DRY1"
 if [[ "$DRY1" == *refused* ]]; then fail "dry-run reports no refusal" "$DRY1"; else ok "dry-run reports no refusal"; fi
 SETTINGS_AFTER=$(file_hash "$DEST/settings.json")
-assert "bare reconcile exits 0" ways reconcile --quiet
+assert "bare reconcile exits 0" ways manage repair --quiet
 assert_eq "bare reconcile leaves settings.json alone" "$SETTINGS_AFTER" "$(file_hash "$DEST/settings.json")"
 
 # --- 8. the second config dir ----------------------------------------------
