@@ -207,6 +207,7 @@ fn fail(e: &SendError, json: bool) -> ! {
             eprintln!("  (reply is for responding to a peer message your sensor surfaced.)");
             eprintln!("  if you are starting a new topic, use `attend send` instead.");
         }
+        SendError::ParentChannelLeft { .. } | SendError::ParentChannelGone { .. } => eprintln!("attend reply: {e}"),
     }
     std::process::exit(1);
 }

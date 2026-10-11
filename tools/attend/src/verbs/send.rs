@@ -75,6 +75,11 @@ pub enum SendError {
     NoLivePeers { name: String, only_self: bool, channels: Vec<ChannelCount> },
     /// `reply` found no peer message to thread under.
     NoInbound,
+    /// The parent was said in a channel this session has since left. A
+    /// reply anywhere else would carry a channel's answer out of it.
+    ParentChannelLeft { channel: String },
+    /// The parent was said in a channel that no longer exists.
+    ParentChannelGone { channel: String },
 }
 
 impl std::fmt::Display for SendError {
@@ -93,6 +98,14 @@ impl std::fmt::Display for SendError {
             }
             Self::NoLivePeers { name, .. } => write!(f, "no live peers in channel '{name}'"),
             Self::NoInbound => write!(f, "no prior inbound signal to thread against; to start a new topic, send instead"),
+            Self::ParentChannelLeft { channel } => write!(
+                f,
+                "the message you are replying to was said in channel '{channel}', which you have left; rejoin it (attend join {channel}), pass --channel or --to, or use send"
+            ),
+            Self::ParentChannelGone { channel } => write!(
+                f,
+                "the message you are replying to was said in channel '{channel}', which no longer exists; pass --channel or --to, or use send"
+            ),
         }
     }
 }
@@ -288,22 +301,29 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
 /// A reply stays where its parent was said: in the parent's channel, or,
 /// for a parent another Claude session sent to this project with `--to`,
 /// back to that session's project. A `to` or `channel` in `req` overrides
-/// this. A parent in `#open`, from a sender outside Claude Code, or no
-/// longer on disk, is answered in `#open`.
+/// this. A parent in `#open`, or one from a sender outside Claude Code, is
+/// answered in `#open`. A parent said in a channel is never answered
+/// outside it: when this session has left the channel, or the channel is
+/// gone, the reply is refused.
 #[cfg(feature = "sensor-peers")]
 pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     let me = current_session();
-    let (re, threading) = match &req.re {
-        Some(id) => (Some(id.clone()), Threading::Threaded),
-        None => match classify_reply_target(sensor_peers::last_inbound::read(&me.session_id).map(|l| l.id)) {
-            ReplyTarget::NoInbound => return Err(SendError::NoInbound),
-            ReplyTarget::Unthreaded => (None, Threading::Unthreaded),
-            ReplyTarget::Threaded(id) => (Some(id), Threading::Threaded),
-        },
+    let last = sensor_peers::last_inbound::read(&me.session_id);
+    let (re, threading, said) = match &req.re {
+        Some(id) => (Some(id.clone()), Threading::Threaded, None),
+        None => {
+            let said = last.as_ref().and_then(|l| l.said.as_ref());
+            match classify_reply_target(last.as_ref().map(|l| l.id.clone())) {
+                ReplyTarget::NoInbound => return Err(SendError::NoInbound),
+                ReplyTarget::Unthreaded => (None, Threading::Unthreaded, said),
+                ReplyTarget::Threaded(id) => (Some(id), Threading::Threaded, said),
+            }
+        }
     };
-    let route = match &re {
-        Some(id) if req.to.is_none() && req.channel.is_none() => parent_route(&me, id),
-        _ => Route::Caller,
+    let route = if req.to.is_some() || req.channel.is_some() {
+        Route::Caller
+    } else {
+        parent_route(&me, re.as_deref(), said)?
     };
     let (to, channel) = match route {
         Route::Caller => (req.to.clone(), req.channel.clone()),
@@ -324,27 +344,52 @@ enum Route {
     Project(String),
 }
 
-/// Where the parent message `id` was said, read from the tray this session
-/// received it in.
+/// Where the parent message `id` was said. The tray this session received
+/// it in answers first. A parent not in those trays but in another channel's
+/// directory was said in a channel this session left. A parent whose file
+/// is gone, or whose id cannot be looked up, goes by `recorded`, the room
+/// the conduit noted when it surfaced the message. With neither, the reply
+/// goes to `#open`.
 #[cfg(feature = "sensor-peers")]
-fn parent_route(me: &Session, id: &str) -> Route {
-    let file = format!("{id}.signal");
-    let Some(dir) = groups_for(me).receive_dirs(&me.origin_path).into_iter().find(|d| d.path.join(&file).is_file()) else {
-        return Route::Caller;
+fn parent_route(
+    me: &Session,
+    id: Option<&str>,
+    recorded: Option<&sensor_peers::last_inbound::Said>,
+) -> Result<Route, SendError> {
+    use sensor_peers::last_inbound::Said;
+    let r = groups_for(me);
+    let channel_route = |channel: &str| {
+        if r.members(channel).is_none() {
+            Err(SendError::ParentChannelGone { channel: channel.to_string() })
+        } else if !r.joined_group_names().iter().any(|n| n == channel) {
+            Err(SendError::ParentChannelLeft { channel: channel.to_string() })
+        } else {
+            Ok(Route::Channel(channel.to_string()))
+        }
     };
-    match dir.room {
-        attend_groups::Room::Channel(name) => Route::Channel(name),
-        attend_groups::Room::Open => Route::Caller,
-        // Sent to this project with `--to`: answer the sender's project. An
-        // external sender's cwd is a shell's, where no session listens, so
-        // its directed message is answered in `#open`, where people read.
-        attend_groups::Room::Project => std::fs::read_to_string(dir.path.join(&file))
-            .ok()
-            .and_then(|content| {
-                let sig = agent_identity::parse_signal(agent_identity::wire_line(&content))?;
-                sig.from.starts_with("claude:").then(|| Route::Project(sig.cwd.to_string()))
-            })
-            .unwrap_or(Route::Caller),
+    let said = match id.map(|id| format!("{id}.signal")) {
+        Some(file) => match r.receive_dirs(&me.origin_path).into_iter().find(|d| d.path.join(&file).is_file()) {
+            Some(dir) => {
+                let sig = std::fs::read_to_string(dir.path.join(&file)).ok();
+                let sig = sig.as_deref().and_then(|c| agent_identity::parse_signal(agent_identity::wire_line(c)));
+                // A record that does not parse still names its room; with
+                // no sender to answer, a directed one is answered in `#open`.
+                Some(match sig {
+                    Some(sig) => Said::of(&dir.room, sig.from, sig.cwd),
+                    None => Said::of(&dir.room, "", ""),
+                })
+            }
+            None => match r.channel_holding(&file) {
+                Some(channel) => return channel_route(&channel),
+                None => recorded.cloned(),
+            },
+        },
+        None => recorded.cloned(),
+    };
+    match said {
+        None | Some(Said::Open) | Some(Said::Project(None)) => Ok(Route::Caller),
+        Some(Said::Project(Some(cwd))) => Ok(Route::Project(cwd)),
+        Some(Said::Channel(channel)) => channel_route(&channel),
     }
 }
 
