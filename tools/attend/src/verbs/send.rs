@@ -101,14 +101,14 @@ impl std::fmt::Display for SendError {
                 write!(f, "no live peers in channel '{name}' (you are the only listener)")
             }
             Self::NoLivePeers { name, .. } => write!(f, "no live peers in channel '{name}'"),
-            Self::NoInbound => write!(f, "no prior inbound signal to thread against; to start a new topic, send instead"),
+            Self::NoInbound => write!(f, "no prior inbound signal to thread against; to start a new topic, use attend send"),
             Self::ParentChannelLeft { channel } => write!(
                 f,
-                "the message you are replying to was said in channel '{channel}', which you have left; rejoin it (attend join {channel}), pass --channel or --to, or use send"
+                "the message you are replying to was said in channel '{channel}', which you have left; rejoin it (attend join {channel}), pass --channel or --to, or use attend send"
             ),
             Self::ParentChannelGone { channel } => write!(
                 f,
-                "the message you are replying to was said in channel '{channel}', which no longer exists; pass --channel or --to, or use send"
+                "the message you are replying to was said in channel '{channel}', which no longer exists; pass --channel or --to, or use attend send"
             ),
             Self::ParentRoomUnknown => {
                 write!(f, "can't tell where the parent was said; pass --channel or --to, or use attend send")
