@@ -120,6 +120,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-402](./attend/ADR-402-claude-code-channels-deliver-mcp-server-events-into-the-model-s-turn-and-wake-an-idle-session.md) | Claude Code channels deliver MCP server events into the model's turn and wake an idle session | accepted |
 | [ADR-403](./attend/ADR-403-attend-hosts-sensors-under-one-spec-compiled-command-and-mcp-sensors-in-yaml-files.md) | Attend hosts sensors under one spec: compiled, command and MCP sensors in YAML files | proposed |
 | [ADR-404](./attend/ADR-404-channel-membership-and-history-are-managed-by-any-member-with-scopes-seals-and-an-operator-view.md) | Channel membership and history are managed by any member, with scopes, seals and an operator view | accepted |
+| [ADR-405](./attend/ADR-405-one-click-on-a-channel-selects-it-and-opens-its-menu-and-the-chat-s-left-column-lists-agents-and-channels.md) | One click on a channel selects it and opens its menu, and the chat's left column lists agents and channels | accepted |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_
