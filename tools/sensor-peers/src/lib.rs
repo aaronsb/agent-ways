@@ -384,7 +384,8 @@ impl PeerSensor {
             // reply` to auto-thread to the agent's own past self.
             if let Some(ref sid) = self.own_session_id {
                 if source_cwd != focus.working_dir {
-                    last_inbound::record(sid, &f.signal_id);
+                    let said = last_inbound::Said::of(&scan_dirs[f.room].room, from, source_cwd);
+                    last_inbound::record(sid, &f.signal_id, &said);
                 }
             }
         }

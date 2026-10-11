@@ -11,6 +11,8 @@ use std::sync::{Mutex, MutexGuard};
 
 static LOCK: Mutex<()> = Mutex::new(());
 
+const OPEN: sensor_peers::last_inbound::Said = sensor_peers::last_inbound::Said::Open;
+
 /// Point this process at `f`'s sandbox for the life of the guard.
 fn enter(f: &Fixture) -> MutexGuard<'static, ()> {
     let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -59,14 +61,14 @@ fn reply_reports_how_it_threaded() {
 
     assert!(matches!(reply("too early"), Err(attend::verbs::SendError::NoInbound)));
 
-    sensor_peers::last_inbound::record(&f.sid, "other-session-1-1");
+    sensor_peers::last_inbound::record(&f.sid, "other-session-1-1", &OPEN);
     let threaded = reply("an answer").expect("a threaded reply");
     assert_eq!(threaded.threading, attend::verbs::Threading::Threaded);
     assert_eq!(threaded.sent.re.as_deref(), Some("other-session-1-1"));
 
     // An id from an external sender is not a signal id: the reply still
     // goes out, without a thread, and says so.
-    sensor_peers::last_inbound::record(&f.sid, "someone@kitty-1");
+    sensor_peers::last_inbound::record(&f.sid, "someone@kitty-1", &OPEN);
     let unthreaded = reply("still delivered").expect("an unthreaded reply");
     assert_eq!(unthreaded.threading, attend::verbs::Threading::Unthreaded);
     assert_eq!(unthreaded.sent.re, None);
@@ -85,7 +87,7 @@ fn a_reply_goes_where_its_parent_was_said() {
     attend_presence::heartbeat::touch("peer-sess").unwrap();
 
     f.put("@mod-trial", "peer-sess-1-1", "in the channel", std::time::Duration::ZERO);
-    sensor_peers::last_inbound::record(&f.sid, "peer-sess-1-1");
+    sensor_peers::last_inbound::record(&f.sid, "peer-sess-1-1", &OPEN);
     let sent = reply("answered in the channel").expect("a reply into the channel").sent;
     assert_eq!(sent.scope, "channel");
     assert!(f.signals().join("@mod-trial").join(format!("{}.signal", sent.id)).is_file());
@@ -94,13 +96,13 @@ fn a_reply_goes_where_its_parent_was_said() {
     // `put` writes as a session working in /tmp/elsewhere, where none is
     // live, so the directed reply is refused naming that path.
     f.put(&f.project_tray(), "peer-sess-1-2", "to your project", std::time::Duration::ZERO);
-    sensor_peers::last_inbound::record(&f.sid, "peer-sess-1-2");
+    sensor_peers::last_inbound::record(&f.sid, "peer-sess-1-2", &OPEN);
     match reply("answered in its project") {
         Err(attend::verbs::SendError::NoPeerAt { path, .. }) => assert_eq!(path, "/tmp/elsewhere"),
         other => panic!("expected a reply directed at the sender's project: {other:?}"),
     }
 
-    sensor_peers::last_inbound::record(&f.sid, "peer-sess-1-1");
+    sensor_peers::last_inbound::record(&f.sid, "peer-sess-1-1", &OPEN);
     let req = attend::verbs::SendRequest {
         message: "elsewhere".to_string(),
         to: Some("/nowhere/live".to_string()),

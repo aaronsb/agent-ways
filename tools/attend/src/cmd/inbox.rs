@@ -151,6 +151,8 @@ pub(crate) struct Drained {
     /// display label is presentation over it, never a substitute.
     sender_id: String,
     scope: String,
+    /// The room it was found in, which a reply to it stays in.
+    room: Room,
     pub(crate) id: String,
     body: String,
     source_cwd: String,
@@ -265,6 +267,7 @@ pub(crate) fn scan_pending(
             sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
             sender_id: sig.from.to_string(),
             scope: room_label(&scan_dirs[f.room].room),
+            room: scan_dirs[f.room].room.clone(),
             id: f.path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
             body: sig.message.to_string(),
             source_cwd: sig.cwd.to_string(),
@@ -422,10 +425,12 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     }
 
     // `attend reply` should target what the drain delivered, exactly as
-    // it targets what the sensor surfaced.
+    // it targets what the sensor surfaced, and stay in the room it was
+    // said in.
     #[cfg(feature = "sensor-peers")]
     if let Some(newest) = delivered.iter().rev().find(|d| d.source_cwd != cwd) {
-        sensor_peers::last_inbound::record(&session_id, &newest.id);
+        let said = sensor_peers::last_inbound::Said::of(&newest.room, &newest.sender_id, &newest.source_cwd);
+        sensor_peers::last_inbound::record(&session_id, &newest.id, &said);
     }
     #[cfg(not(feature = "sensor-peers"))]
     let _ = cwd;

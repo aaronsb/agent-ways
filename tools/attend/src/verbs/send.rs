@@ -295,7 +295,7 @@ pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     let me = current_session();
     let (re, threading) = match &req.re {
         Some(id) => (Some(id.clone()), Threading::Threaded),
-        None => match classify_reply_target(sensor_peers::last_inbound::read(&me.session_id)) {
+        None => match classify_reply_target(sensor_peers::last_inbound::read(&me.session_id).map(|l| l.id)) {
             ReplyTarget::NoInbound => return Err(SendError::NoInbound),
             ReplyTarget::Unthreaded => (None, Threading::Unthreaded),
             ReplyTarget::Threaded(id) => (Some(id), Threading::Threaded),
