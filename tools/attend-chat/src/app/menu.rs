@@ -15,11 +15,12 @@
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
 //!   channel, typed in the compose box.
 //! - an agent's row in the left column: Address @Name (puts `@Name ` in
-//!   the compose box), Who is this (what `/whois` says, or what the chat
-//!   knows of one that is not live), and Remove from #channel when the
-//!   shown channel lists the agent, live or quiet. The operator's own row
-//!   offers Leave #channel there instead: Remove never takes out the
-//!   human at the keyboard, here or in the Remove agent picker.
+//!   the compose box), Who is this (what `/whois` says of the session
+//!   the row is, or what the chat knows of one the roster lacks), and
+//!   Remove from #channel when the shown channel lists the agent, live or
+//!   quiet. The operator's own row offers Leave #channel there instead:
+//!   Remove never takes out the human at the keyboard, here or in the
+//!   Remove agent picker.
 //!
 //! Every item that drops something asks first: Clear view, Clear history,
 //! Leave and Delete channel. `y` goes ahead, any other key keeps things as
@@ -164,6 +165,23 @@ pub(super) fn items(channel: Option<&str>, joined: bool) -> Vec<String> {
         Some(_) => &[ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, membership, DELETE],
     };
     items.iter().map(|s| s.to_string()).collect()
+}
+
+/// What Who is this says of `s`. A live claude the roster holds under its
+/// session id is told as `/whois` tells it; the id, not the name, finds it,
+/// since twins share a name and `/whois @name` would pick one of them. A
+/// live claude with no sessions record, a quiet one and a human are told
+/// from what the chat itself has seen.
+pub(super) fn who_line(s: &Seen, roster: &[Peer]) -> String {
+    let name = &s.identity.nickname;
+    if !s.identity.is_claude {
+        return format!("@{name} — a human · from {} · {}", s.identity.cwd, if s.live { "here" } else { "away" });
+    }
+    if let Some(p) = roster.iter().find(|p| s.live && p.session_id == s.member) {
+        return format!("@{} — session {} · root {}", p.display, p.session_id, p.root);
+    }
+    let how = if s.live { "live: no sessions record" } else { "quiet: no heartbeat" };
+    format!("@{name} — session {} · root {} · {how}", s.member, attend_presence::session::normalize_origin(&s.identity.cwd))
 }
 
 impl ChatPane {
@@ -353,23 +371,14 @@ impl ChatPane {
         }
     }
 
-    /// Who an agent of the column is: `/whois` for a live claude, and what
-    /// the chat knows of the rest, which `/whois` cannot resolve.
+    /// Who an agent of the column is ([`who_line`]): the roster is read
+    /// only for a live claude, the one it can hold.
     fn whois(&mut self, member: &str) {
         let Some(s) = self.seen_member(member) else {
             return self.say("that agent is not in the column any more", true);
         };
-        let name = &s.identity.nickname;
-        if s.identity.is_claude && s.live {
-            self.run("whois", SlashOutcome::Whois(name.clone()));
-            return;
-        }
-        let said = if s.identity.is_claude {
-            format!("@{name} — session {} · root {} · quiet: no heartbeat", s.member, attend_presence::session::normalize_origin(&s.identity.cwd))
-        } else {
-            format!("@{name} — a human · from {} · {}", s.identity.cwd, if s.live { "here" } else { "away" })
-        };
-        self.say(said, false);
+        let roster = if s.identity.is_claude && s.live { crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new()) } else { Vec::new() };
+        self.say(who_line(&s, &roster), false);
     }
 
     /// The members of `channel`, from its membership: live or not, the
@@ -654,6 +663,19 @@ mod tests {
         c.dry_run = true;
         c.world = Some(super::super::World { groups: Vec::new(), seen, rows: Vec::new(), live_members: Vec::new(), instances: attend_instances::SnapshotCache::new() });
         c
+    }
+
+    #[test]
+    fn who_is_a_live_twin_is_found_by_its_session_id_not_its_name() {
+        // Two live claudes share the nickname; only s2 holds a sessions
+        // record, so only s2 is on the roster.
+        let roster = [Peer { session_id: "s2".into(), root: "/work/Ada".into(), display: "Ada-two".into() }];
+        let (one, two) = (seen("Ada", "s1", true, true), seen("Ada", "s2", true, true));
+        assert_eq!(who_line(&two, &roster), "@Ada-two — session s2 · root /work/Ada", "the roster's own line, by id");
+        let first = who_line(&one, &roster);
+        assert!(first.starts_with("@Ada — session s1 · root /work/Ada") && first.contains("no sessions record"), "never its twin's line: {first}");
+        assert!(!first.contains("quiet"), "a live claude is not called quiet: {first}");
+        assert!(who_line(&seen("Ada", "s2", false, true), &roster).contains("quiet: no heartbeat"), "a quiet one is told from the column");
     }
 
     #[test]
