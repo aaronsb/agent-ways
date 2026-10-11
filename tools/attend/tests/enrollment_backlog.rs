@@ -8,6 +8,7 @@
 
 mod common;
 use common::{Fixture, MINUTE};
+#[cfg(feature = "sensor-peers")]
 use std::time::Duration;
 
 const ADDRESSED: &str = "addressed ten minutes ago";
@@ -71,6 +72,8 @@ fn join_and_first_delivery_name_the_session() {
     assert!(hook.contains(&format!("(you are {name})")), "the reason names the session: {hook}");
 }
 
+// `attend run` has no sensor to scan the room without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn attend_run_delivers_addressed_and_announces_the_rest() {
     let f = with_backlog("backlog-run");
@@ -96,6 +99,8 @@ fn attend_run_delivers_addressed_and_announces_the_rest() {
 /// message scan (its first poll only baselines peer presence, yet
 /// checkpoints). A drain in that window must still apply the rule: the
 /// 50 cap on addressed mail, old `#open` held back, and the note.
+// `attend run` has no sensor to scan the room without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_drain_before_the_sensor_scans_applies_the_rule() {
     let f = Fixture::with_peers_interval("backlog-window", 30);

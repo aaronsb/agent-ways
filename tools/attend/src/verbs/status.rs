@@ -135,6 +135,12 @@ fn reparented(pid: u32) -> bool {
 
 /// Keepwarm's state for session `me` in one line: armed with its time left,
 /// stopped with the sensor's reason, or off (ADR-182).
+#[cfg(not(feature = "sensor-keepwarm"))]
+fn keepwarm_line(_me: &Session) -> String {
+    "not built".to_string()
+}
+
+#[cfg(feature = "sensor-keepwarm")]
 fn keepwarm_line(me: &Session) -> String {
     use sensor_keepwarm::{fmt_duration, read_arm, read_ledger};
     if !me.session_resolved {

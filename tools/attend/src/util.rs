@@ -15,6 +15,7 @@ pub(crate) fn signals_base() -> std::path::PathBuf {
 
 /// Where keepwarm's per-session arm file and ledger live (ADR-182).
 /// Attend-owned state: the CLI verbs are the only sanctioned readers.
+#[cfg(feature = "sensor-keepwarm")]
 pub(crate) fn keepwarm_dir() -> std::path::PathBuf {
     attend_presence::cache::dir().join("keepwarm")
 }

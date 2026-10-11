@@ -11,8 +11,11 @@ mod common;
 use common::Fixture;
 use std::time::Duration;
 
+#[cfg(feature = "sensor-peers")]
 const NEW: &str = "sess-after-clear";
 
+// `attend run` scans no room without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn attend_run_follows_a_session_id_change() {
     let f = Fixture::new("idchange");
@@ -54,6 +57,8 @@ fn attend_run_follows_a_session_id_change() {
 
 /// #725 re-review, finding 1: a message the sensor has scanned but the
 /// disclosure cooldown still holds must not be lost when the id changes.
+// `attend run` scans no room without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_message_held_in_the_cooldown_survives_an_id_change() {
     let f = Fixture::new("idcooldown");
@@ -127,6 +132,8 @@ fn a_run_started_after_a_move_performs_it() {
 /// #725 third review, finding 1: a run killed before it could hand over,
 /// then started fresh under the new id (no ATTEND_SESSION_MOVED_FROM),
 /// adopts the old id's state through the Claude process key.
+// `attend run` scans no room without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     let f = Fixture::new("idrestart");
@@ -163,6 +170,8 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
 
 /// #725 third review, finding 2: when the hand-over exec fails, the run
 /// says so on the Monitor and exits, instead of staying on the old id.
+// `attend run` scans no room without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_failed_hand_over_exits_with_a_restart_line() {
     let f = Fixture::new("idexecfail");

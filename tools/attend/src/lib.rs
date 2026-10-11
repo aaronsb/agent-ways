@@ -41,7 +41,9 @@ use attend_state as state;
 use attend_config as config;
 
 use clap::Parser;
-use cli::{Cli, Commands, ConfigCmd, KeepwarmCmd, PermissionsCmd};
+use cli::{Cli, Commands, ConfigCmd, PermissionsCmd};
+#[cfg(feature = "sensor-keepwarm")]
+use cli::KeepwarmCmd;
 use sensors::Focus;
 
 /// The clap command tree the binary parses, for renderings outside it
@@ -92,7 +94,13 @@ pub fn cli_main() {
         Commands::Status { json } => cmd::status::cmd_status(json),
         Commands::Whoami { machine, display } => cmd::whoami::cmd_whoami(machine, display),
         Commands::Sensors => cmd::sensors::cmd_sensors(),
+        #[cfg(feature = "sensor-keepwarm")]
         Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status)),
+        #[cfg(not(feature = "sensor-keepwarm"))]
+        Commands::Keepwarm { .. } => {
+            eprintln!("keepwarm: this build of attend has no keepwarm sensor");
+            std::process::exit(1);
+        }
         Commands::Send { to, channel, re, json, message } => {
             cmd::send::reject_flag_like("send", cmd::send::SEND_FLAGS, &message, json);
             cmd::send::cmd_send(to, channel, re, message, json);

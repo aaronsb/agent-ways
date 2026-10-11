@@ -79,6 +79,8 @@ fn send_focus_is_rejected_and_sends_nothing() {
     assert_eq!(signals_written(&home), 0, "nothing may be written");
 }
 
+// `attend reply` is compiled out without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn reply_broadcast_is_rejected_by_the_guard_and_writes_nothing() {
     let (out, home) = attend("rbcast", &["reply", "--broadcast", "hello"]);
