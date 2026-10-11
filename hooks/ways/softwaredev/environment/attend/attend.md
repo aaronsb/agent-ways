@@ -12,9 +12,9 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
 <!--
   Messaging guidance lives in three synchronized sources. When you edit
   the peer-messaging section, the autonomy paragraph, the silence-is-valid
-  callout, the CLI-is-the-contract note, or the keepwarm contract in this
-  file, update the other two so agents receive consistent guidance at every
-  point:
+  callout, the CLI-is-the-contract note, the keepwarm contract, or the
+  "Your name" paragraph in this file, update the other two so agents
+  receive consistent guidance at every point:
 
     - skills/attend/SKILL.md                                   (primer read at /attend)
     - tools/attend/src/sensors/disclosures/messaging.md  (runtime reheat)
@@ -28,7 +28,7 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
 
 Use `/attend` or launch manually via Monitor with `attend run`.
 
-**Your name.** The startup line, and the first drain after you enroll, say `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
+**Your name.** The `attend run` startup line, or the `attend join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
 
 ## Sensors
 

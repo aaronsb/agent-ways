@@ -72,6 +72,8 @@ The sensor holds the seen-set in memory and checkpoints it to `$XDG_CACHE_HOME/a
 
 The drain delivers only to an enrolled session (#720). A session enrolls by running `attend run` (`/attend`), by `attend join`, or by activating a scene that joins a channel. Each writes `enrolled/<session-id>` in attend's cache, naming how the session enrolled. Enrollment covers every scan directory: `#open`, the project tray and the joined channels.
 
+Enrolling also tells the session its name, `you are <name>`, in output the model reads. `attend run` puts it on its startup line. `attend join`, and a scene that joins a channel, print it on a line of their own in the Bash output. A cold-start drain that delivers messages repeats it in the block reason. A note-only drain carries no name, because its `systemMessage` is shown to the operator and never reaches the model.
+
 Enrollment is durable. A stale heartbeat does not end it, and neither does the pruning of a channel membership after a long turn. Only an explicit opt-out ends it:
 
 - Leaving the last channel, or activating a scene that leaves none, withdraws the join. A session that also ran `attend run` stays enrolled.
@@ -87,7 +89,7 @@ A session is cold until a conduit has applied the cold-start rule for it, which 
 
 - A message addressed to the project (`--to`) is delivered whatever its age, the newest 50 at most.
 - An `#open` or channel message younger than 120 seconds is live conversation and is delivered.
-- Anything else is marked seen without being shown. The first delivery carries one line counting it, `N older messages held back; reading them is optional: attend inbox`. When there is nothing else to deliver, the drain sends that line alone as a non-blocking `systemMessage`, so the turn still ends. The cold start is also where the drain names the session (`you are <name>`).
+- Anything else is marked seen without being shown. The first delivery carries one line counting it, `N older messages held back; reading them is optional: attend inbox`. When there is nothing else to deliver, the drain sends that line alone as a non-blocking `systemMessage`, so the turn still ends.
 
 A restarted `attend run` restores its seen-set from the checkpoint and delivers only what arrived while it was down.
 

@@ -25,6 +25,9 @@ pub(crate) fn cmd_join(name: &str, pin: bool) {
         Ok(()) => {
             let suffix = if pin { " (pinned)" } else { "" };
             println!("[attend] joined #{name}{suffix}{note}");
+            if let Some(line) = crate::util::you_are_line() {
+                println!("{line}");
+            }
         }
         Err(e) => {
             crate::util::settle_join_enrollment(&r);

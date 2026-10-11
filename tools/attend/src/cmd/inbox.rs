@@ -475,8 +475,8 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     delivered.sort_by_key(|d| d.mtime);
 
     // The cold start is this conduit's first contact with the session, so
-    // it names the session: a drain-only session (enrolled by a join) has
-    // no startup banner to learn its name from.
+    // a delivery there names the session. Only a blocking reason reaches
+    // the model; the join itself already printed the name as Bash output.
     let me = baselining.then(|| crate::cmd::whoami::display_name(&ident));
 
     if delivered.is_empty() {
@@ -562,10 +562,13 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 /// injects them into a continued turn. A held-back note with nothing
 /// delivered goes as a `systemMessage`, which Claude Code shows without
 /// blocking: blocking on it alone forced an extra turn over messages the
-/// session need not read, and read as an error.
+/// session need not read, and read as an error. `me` rides only the
+/// blocking reason, the one part of the output the model reads.
 fn hook_output(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&str>) -> Option<String> {
     if delivered.is_empty() {
-        let text = render_drain_reason(delivered, Some(note?), me);
+        // A systemMessage is shown to the operator only, never to the
+        // model, so the name, which is for the model, stays out of it.
+        let text = render_drain_reason(delivered, Some(note?), None);
         return Some(format!("{{\"systemMessage\": \"{}\"}}", json_escape(&text)));
     }
     let reason = render_drain_reason(delivered, note, me);
@@ -581,10 +584,10 @@ fn hook_output(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&s
 /// first delivery after enrollment, or goes alone when nothing else does.
 /// `me` is the session's own name, given on that same first contact.
 fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&str>) -> String {
-    let you = me.map(|m| format!(" (you are {m})")).unwrap_or_default();
     if delivered.is_empty() {
-        return format!("[attend]{you} {}", note.unwrap_or("no peer messages"));
+        return format!("[attend] {}", note.unwrap_or("no peer messages"));
     }
+    let you = me.map(|m| format!(" (you are {m})")).unwrap_or_default();
     let mut out = format!(
         "[attend] {} peer message(s) delivered at the turn boundary (ADR-172 drain){you}:\n",
         delivered.len()
@@ -1019,7 +1022,15 @@ mod drain_tests {
         assert!(reason.contains("(+4 more — attend inbox for the rest)"));
     }
 
-    /// The cold start is first contact: it tells the session its own name.
+    /// The name is for the model, and a systemMessage reaches only the
+    /// operator, so a note-only drain carries no name.
+    #[test]
+    fn a_note_only_drain_does_not_name_the_session() {
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend inbox"), Some("Chaucer-alpha")).unwrap();
+        assert!(!out.contains("you are"), "{out}");
+    }
+
+    /// The cold start is first contact: a delivery tells the session its own name.
     #[test]
     fn first_contact_names_the_session() {
         let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();

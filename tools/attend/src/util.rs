@@ -143,6 +143,14 @@ pub(crate) fn backlog_note(n: usize) -> String {
     attend_state::cold_start::held_back_note(n).map(|note| format!(" ({note})")).unwrap_or_default()
 }
 
+/// The line an enrollment prints so the session learns the name peers see
+/// it by: `you are <name>`, on its own line, in the Bash output the model
+/// reads. `None` for an unresolved session, which peers do not see by name.
+pub(crate) fn you_are_line() -> Option<String> {
+    let ident = attend_presence::session::identity();
+    ident.resolved().then(|| format!("you are {}", crate::cmd::whoami::display_name(&ident)))
+}
+
 /// After this session's channels changed: a session in no channel any more
 /// withdraws its join enrollment. One that also ran `attend run` stays
 /// enrolled through that.

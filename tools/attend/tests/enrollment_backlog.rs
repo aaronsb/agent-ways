@@ -38,20 +38,37 @@ fn join_then_drain_delivers_addressed_and_announces_the_rest() {
 }
 
 /// A cold start with only backlog to report delivers nothing, so it must
-/// not block the stop: the note goes as a non-blocking systemMessage, and
-/// it names the session on this first contact.
+/// not block the stop: the note goes as a non-blocking systemMessage. That
+/// reaches the operator only, so the name the model needs comes from the
+/// join's own output, and the systemMessage carries none.
 #[test]
 fn a_note_alone_does_not_block_the_stop() {
     let f = Fixture::new("backlog-note-only");
     f.put("_broadcast", "other-1-open", OLD_OPEN, 10 * MINUTE);
-    f.ok(&["join", "side"]);
+    let joined = f.ok(&["join", "side"]);
+    assert!(joined.lines().any(|l| l.starts_with("you are ")), "the join names the session: {joined}");
 
     let hook = f.drain_hook_with("{}");
     assert!(hook.starts_with("{\"systemMessage\": "), "non-blocking: {hook}");
     assert!(!hook.contains("\"decision\""), "must not block: {hook}");
     assert!(hook.contains(NOTE), "the note: {hook}");
-    assert!(hook.contains("(you are "), "first contact names the session: {hook}");
+    assert!(!hook.contains("you are"), "the operator's UI gets no agent-directed name: {hook}");
     assert_eq!(f.drain_hook_with("{}"), "", "the note goes out once");
+}
+
+/// What the model receives on enrollment by join: the join's Bash output
+/// names the session, and the first blocking drain names it again in the
+/// reason, the only part of the hook output the model reads.
+#[test]
+fn join_and_first_delivery_name_the_session() {
+    let f = with_backlog("backlog-named");
+    let joined = f.ok(&["join", "side"]);
+    let name = joined.lines().find_map(|l| l.strip_prefix("you are ")).unwrap_or_else(|| panic!("no name line: {joined}")).to_string();
+    assert!(!name.is_empty());
+
+    let hook = f.drain_hook_with("{}");
+    assert!(hook.starts_with("{\"decision\": \"block\""), "addressed mail blocks: {hook}");
+    assert!(hook.contains(&format!("(you are {name})")), "the reason names the session: {hook}");
 }
 
 #[test]

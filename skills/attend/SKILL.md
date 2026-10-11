@@ -9,8 +9,8 @@ allowed-tools: Bash, Monitor, Read
 <!--
 Messaging guidance lives in three synchronized sources. When you edit
 the peer-messaging section, the autonomy paragraph, the silence-is-valid
-callout, the CLI-is-the-contract note, or the keepwarm contract, update
-all three:
+callout, the CLI-is-the-contract note, the keepwarm contract, or the
+"Your name" paragraph, update all three:
 
   - skills/attend/SKILL.md                                   (this file — read at /attend invocation)
   - tools/attend/src/sensors/disclosures/messaging.md  (runtime reheat fired by the disclosure sensor)
@@ -47,7 +47,7 @@ Do NOT run `attend run` with the Bash tool. Do NOT use `run_in_background`. Only
 
 On startup, attend emits a usage summary notification. After that, notifications arrive only on meaningful state changes.
 
-**Your name.** The startup line, and the first drain after you enroll, say `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
+**Your name.** The `attend run` startup line, or the `attend join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
 
 ## Step 3: Re-arm on expiry
 
