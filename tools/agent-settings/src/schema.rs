@@ -14,6 +14,9 @@ pub enum Scope {
     Project,
     /// Either; `set` writes the user file unless a project is named.
     Both,
+    /// The user's file or a target's, never a project's: a key that acts per
+    /// Claude Code config directory, such as whether a mod is installed there.
+    Machine,
 }
 
 impl Scope {
@@ -22,6 +25,7 @@ impl Scope {
             Scope::User => "user",
             Scope::Project => "project",
             Scope::Both => "user, project",
+            Scope::Machine => "user, target",
         }
     }
 }
@@ -40,7 +44,10 @@ impl LayerScope {
     pub fn admits(self, scope: Scope) -> bool {
         matches!(
             (self, scope),
-            (_, Scope::Both) | (LayerScope::User, Scope::User) | (LayerScope::Project, Scope::Project)
+            (_, Scope::Both)
+                | (LayerScope::User, Scope::User)
+                | (LayerScope::Project, Scope::Project)
+                | (LayerScope::User | LayerScope::Target, Scope::Machine)
         )
     }
 }

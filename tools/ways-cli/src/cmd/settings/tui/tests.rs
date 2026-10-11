@@ -367,7 +367,7 @@ fn the_tabs_are_the_registry_roots_with_a_toggle_per_corpus_way() {
         fx.file(&format!("corpus/{id}/{name}.md"), &format!("---\ndescription: {name}\n---\n"));
     }
     let r = roots(&fx);
-    assert_eq!(r.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["ways", "matching", "gate", "install", "attend", "sensors"]);
+    assert_eq!(r.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["ways", "matching", "gate", "install", "attend", "sensors", "attend_mod"]);
     // attend's tabs: its sections, and a group per sensor on the next one.
     assert_eq!(r[4].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["governor", "engagement", "cleanup", "chat"]);
     assert_eq!(r[5].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), attend_config::BUILTINS);

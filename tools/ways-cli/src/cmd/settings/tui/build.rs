@@ -38,14 +38,16 @@ impl Tab {
 
 /// The settings tabs, in order; the theme tab follows them. attend's
 /// settings are two tabs beside ways' (ADR-504 §8): its governor, engagement
-/// and cleanup, and its sensors.
-pub const TABS: [Tab; 6] = [
+/// and cleanup, and its sensors. The attend mod's section, which ways owns
+/// (ADR-406), has a tab of its own after them.
+pub const TABS: [Tab; 7] = [
     Tab::root("ways"),
     Tab::root("matching"),
     Tab::root("gate"),
     Tab::root("install"),
     Tab { name: "attend", prefix: "attend", skip: &["attend.sensors"] },
     Tab { name: "sensors", prefix: "attend.sensors", skip: &[] },
+    Tab::root("attend_mod"),
 ];
 
 /// The tab named `name`.
