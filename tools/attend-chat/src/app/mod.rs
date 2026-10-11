@@ -618,12 +618,17 @@ impl Pane for ChatPane {
 
     /// A paste goes into the compose box whole, at the cursor: its lines
     /// stay one draft, and nothing is sent until Enter. A box lent to a
-    /// one-line name or description takes the lines joined by spaces.
+    /// one-line name or description takes the lines joined by spaces. A
+    /// waiting question is dropped, as a typed character drops it, so a
+    /// later `y` in the paste never answers it. Control characters other
+    /// than newline and tab are left out: an escape sequence in the
+    /// clipboard is not drawn into the box or sent.
     fn paste(&mut self, text: &str) {
+        self.drop_question();
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         let text = if self.prompt.is_some() { text.split('\n').collect::<Vec<_>>().join(" ") } else { text };
         self.side_focus = None;
-        for c in text.chars() {
+        for c in text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')) {
             self.input.insert(c);
         }
         self.tab_cycle = None;
@@ -1060,6 +1065,21 @@ mod settings_tests {
         c.sidebar = false;
         c.apply_settings(none);
         assert!(!c.sidebar, "a reload that leaves the key at none keeps what the menu chose");
+    }
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::*;
+
+    #[test]
+    fn a_paste_drops_a_waiting_question_and_leaves_out_control_characters() {
+        let mut c = ChatPane::new(None, Palette::default());
+        c.pending = Some(menu::Pending::Leave("deploy".into()));
+        c.paste("yes\x1b[31m red\x07\tok\r\nnext");
+        assert_eq!(c.pending, None, "the paste is typing, not an answer");
+        assert_eq!(c.status, "kept");
+        assert_eq!(c.input.text(), "yes[31m red\tok\nnext", "escape and bell dropped; tab and newline kept");
     }
 }
 
