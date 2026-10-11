@@ -50,12 +50,6 @@ fn tray_live(projects: &Path, tray: &str) -> bool {
     })
 }
 
-/// Sender cwd from a signal's wire line `from|project|cwd|...`. Returns
-/// `None` if the line is malformed (fewer than three fields).
-fn sender_cwd(content: &str) -> Option<&str> {
-    content.trim().split('|').nth(2)
-}
-
 /// Core cleanup routine, shared by `attend cleanup` and the in-loop sweep.
 ///
 /// Pass 1 reaps signals by project liveness (or every signal, if
@@ -124,11 +118,14 @@ pub(crate) fn run_cleanup_in(
                 true
             } else if shared {
                 // Reap a shared-room signal when its author's project is
-                // gone. Malformed/unreadable lines are left alone.
+                // gone. A record that does not parse, or cannot be read,
+                // is left alone.
                 std::fs::read_to_string(&path)
                     .ok()
-                    .and_then(|c| sender_cwd(&c).map(str::to_string))
-                    .map(|cwd| claude_sessions::find_project_dir_in(projects, &cwd).is_none())
+                    .and_then(|c| {
+                        agent_identity::parse_signal(agent_identity::wire_line(&c))
+                            .map(|sig| claude_sessions::find_project_dir_in(projects, sig.cwd).is_none())
+                    })
                     .unwrap_or(false)
             } else {
                 tray_dead
@@ -238,6 +235,29 @@ mod tests {
         let project = format!("/srv/{}", "b".repeat(250));
         std::fs::create_dir_all(projects.join(claude_sessions::project_slug(&project))).unwrap();
         assert!(tray_live(&projects, &claude_sessions::attend_key(&project)));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// In a shared room each signal goes by its sender's project, read from
+    /// the record the way every other reader parses it.
+    #[test]
+    fn a_shared_room_signal_is_reaped_by_its_senders_project() {
+        let (root, base, projects) = fixture("shared");
+        std::fs::create_dir_all(projects.join("-srv-live")).unwrap();
+        let open = base.join("_broadcast");
+        std::fs::create_dir_all(&open).unwrap();
+        for (name, line) in [
+            ("live.signal", "claude:a|live|/srv/live|hi\n"),
+            ("dead.signal", "claude:b|dead|/srv/dead|re:live|a reply\n"),
+            ("torn.signal", "claude:c|dead|/srv/dead"),
+        ] {
+            std::fs::write(open.join(name), line).unwrap();
+        }
+        let stats = run_cleanup_in(&base, &projects, false, false);
+        assert_eq!(stats.removed, 1);
+        assert!(open.join("live.signal").exists());
+        assert!(!open.join("dead.signal").exists());
+        assert!(open.join("torn.signal").exists(), "a record that does not parse is left alone");
         std::fs::remove_dir_all(&root).ok();
     }
 
