@@ -122,10 +122,10 @@ Read pending messages from peers
   Default value: `1`
 * `--before <TS>` — Cursor: only show messages older than this unix timestamp
 * `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not enrolled by attend run or a channel join (#720). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show
-* `--format <FMT>` — Output format for --drain: `plain` (human/agent readable) or `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`)
+* `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
 
   Default value: `plain`
-* `--json` — Print the listing or the message as one JSON document (not with --drain, which has --format)
+* `--json` — Print the listing, the message, or with --drain the drained messages, held-back count, note and name, as one JSON document
 
 
 
@@ -243,6 +243,7 @@ Reply to the most recent peer message (auto-threaded)
 
 ###### **Options:**
 
+* `--re <ID>` — Reply to this message id instead of the newest one delivered. The reply goes where that message was said, and is refused when that room is left, gone or unknown, as without --re
 * `--to <PATH>` — Scope send to a specific project path
 * `--channel <NAME>` — Scope send to a named channel
 * `--json` — Print the written signal as one JSON document

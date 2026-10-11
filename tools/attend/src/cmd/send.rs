@@ -12,7 +12,7 @@ use crate::verbs::send::{self, SendError, SendRequest};
 /// message by mistake.
 pub(crate) const SEND_FLAGS: &[&str] = &["--to", "--channel", "--re", "--json"];
 /// The flags `attend reply` takes.
-pub(crate) const REPLY_FLAGS: &[&str] = &["--to", "--channel", "--json"];
+pub(crate) const REPLY_FLAGS: &[&str] = &["--re", "--to", "--channel", "--json"];
 
 /// The message is a trailing, hyphen-tolerant argument, so clap hands any
 /// unknown flag (a removed `--broadcast` or `--focus`, or a typo such as
@@ -91,12 +91,13 @@ pub(crate) fn cmd_send(
 /// `attend reply`: the verb is `verbs::send::reply`; this renders it.
 #[cfg(feature = "sensor-peers")]
 pub(crate) fn cmd_reply(
+    re: Option<String>,
     target_dir: Option<String>,
     target_channel: Option<String>,
     message: Vec<String>,
     json: bool,
 ) {
-    let req = SendRequest { message: message.join(" "), to: target_dir, channel: target_channel, re: None };
+    let req = SendRequest { message: message.join(" "), to: target_dir, channel: target_channel, re };
     match send::reply(&req) {
         Ok(replied) => {
             if replied.threading == Threading::Unthreaded {
@@ -122,6 +123,7 @@ pub(crate) fn cmd_reply(
 
 #[cfg(not(feature = "sensor-peers"))]
 pub(crate) fn cmd_reply(
+    _re: Option<String>,
     _target_dir: Option<String>,
     _target_channel: Option<String>,
     _message: Vec<String>,
@@ -166,7 +168,7 @@ fn report(sent: &send::Sent) {
 const SEND_USAGE: &str = "usage: attend send <message>\n  (reaches every peer and Aaron — no routing flags needed)\n  tip: wrap message in double quotes to avoid shell expansion";
 
 #[cfg(feature = "sensor-peers")]
-const REPLY_USAGE: &str = "usage: attend reply <message>\n  (answers the newest peer message delivered to this session, where it was said)\n  tip: wrap message in double quotes to avoid shell expansion";
+const REPLY_USAGE: &str = "usage: attend reply [--re <id>] <message>\n  (answers the newest peer message delivered to this session, or the one --re names, where it was said)\n  tip: wrap message in double quotes to avoid shell expansion";
 
 /// Print why the send wrote nothing, as the CLI always has, and exit 1. An
 /// empty message is a malformed command line: exit 2 with the verb's
