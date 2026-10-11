@@ -962,6 +962,18 @@ fn alt_m_drops_a_waiting_question() {
     y_types(&mut c);
 }
 
+/// A middle click with the mouse on puts its paste hint in the bar: the
+/// question goes first.
+#[test]
+fn a_middle_click_drops_a_waiting_question() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    press(&mut c, alt('m'));
+    ask_delete(&mut c);
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Middle), 10, 20));
+    assert_eq!(c.status(), "kept");
+    y_types(&mut c);
+}
+
 /// F1 opens the key help over the question; any other key closes it.
 #[test]
 fn f1_drops_a_waiting_question() {

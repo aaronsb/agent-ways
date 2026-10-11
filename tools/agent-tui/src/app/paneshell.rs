@@ -466,6 +466,9 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Middle) => {
+                // The hint below takes the bar, so the pane's question goes
+                // first rather than stay armed out of sight.
+                self.interrupt_pane();
                 let key = self.mouse_key();
                 self.msg = format!("middle-click pastes with the mouse off: {key}, paste, {key}");
                 return;
