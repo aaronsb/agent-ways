@@ -121,7 +121,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-403](./attend/ADR-403-attend-hosts-sensors-under-one-spec-compiled-command-and-mcp-sensors-in-yaml-files.md) | Attend hosts sensors under one spec: compiled, command and MCP sensors in YAML files | proposed |
 | [ADR-404](./attend/ADR-404-channel-membership-and-history-are-managed-by-any-member-with-scopes-seals-and-an-operator-view.md) | Channel membership and history are managed by any member, with scopes, seals and an operator view | accepted |
 | [ADR-405](./attend/ADR-405-one-click-on-a-channel-selects-it-and-opens-its-menu-and-the-chat-s-left-column-lists-agents-and-channels.md) | One click on a channel selects it and opens its menu, and the chat's left column lists agents and channels | proposed |
-| [ADR-406](./attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md) | attend reaches agents through a Claude Code mod that agent-ways installs: dormant by default, one status row, transport stays the signal store | proposed |
+| [ADR-406](./attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md) | attend reaches agents through a Claude Code mod that agent-ways installs: dormant by default, one status row, transport stays the signal store | accepted |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_
