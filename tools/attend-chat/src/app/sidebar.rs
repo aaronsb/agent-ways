@@ -47,6 +47,15 @@ pub(super) fn helper_needed(text: &str) -> bool {
     !matches!(helper::derive(text), HelperMode::Agents(_) | HelperMode::Groups(_))
 }
 
+/// What Tab completes, as the column lists it: every claude, live or
+/// quiet, and every channel, swept ones too. A human is listed but not
+/// completed: `@name` routes to a session's inbox, and a human has none.
+pub(super) fn completion_pool(seen: &[Seen], rows: &[ChannelRow]) -> (Vec<String>, Vec<String>) {
+    let agents = agent_order(seen).into_iter().filter(|s| s.identity.is_claude).map(|s| s.identity.nickname.clone()).collect();
+    let channels = rows.iter().map(|r| r.known.group.name.clone()).collect();
+    (agents, channels)
+}
+
 /// The seen identities in the column's order: live ones first, each group
 /// in the registry's order (newest sender first).
 pub(super) fn agent_order(seen: &[Seen]) -> Vec<&Seen> {
@@ -109,7 +118,8 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let mut hits = Vec::new();
     for (i, s) in seen.iter().enumerate().take(ah.saturating_sub(1) as usize) {
         let r = Rect { y: agents.y + 1 + i as u16, height: 1, ..agents };
-        let mark = target(Style::new(), prefix_match(&s.identity.nickname, agent_partial.as_deref()));
+        // Marked as Tab would complete it: a claude, not a human.
+        let mark = target(Style::new(), s.identity.is_claude && prefix_match(&s.identity.nickname, agent_partial.as_deref()));
         let mut line = agent_line(chat, s, w, mark);
         if focus == Some(i) {
             line.spans[0] = cursor();

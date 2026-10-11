@@ -81,7 +81,7 @@ A line that starts with `/` runs a command. The helper row completes the command
 |---|---|
 | Enter | send, or run the slash command |
 | Shift-Enter, Alt-Enter | new line |
-| Tab | on an empty line, the next tab; otherwise complete the `@name`, `#channel` or `/command` being typed |
+| Tab | on an empty line, the next tab; otherwise complete the `@name`, `#channel` or `/command` being typed, over the agents (claudes, live or quiet) and channels (swept ones too) the left column lists |
 | Ctrl-1 … Ctrl-9 | show a tab (1 is merged, 2 is `#open`); on the tab already shown, open its menu. Needs a terminal that speaks the kitty keyboard protocol; the F1 view says whether yours does |
 | Alt-1 … Alt-9 | show a tab where Ctrl and a digit do not arrive; Konsole and GNOME Terminal keep Alt and a digit for their own tabs |
 | F2, Ctrl-T | the tab bar, marked by TABS in the footer and a reversed, ▸-led tab under the cursor: Left and Right move, Enter opens the tab's menu (the `+` slot asks the new channel's name at once), Esc goes back |

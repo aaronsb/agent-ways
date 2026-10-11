@@ -9,8 +9,7 @@ use agent_theme::ColorDepth;
 use crate::chip::{known_identities, resolve_nickname, KnownIdentity};
 use crate::groups::{channels, channels_in, live_peer_count, resolve_group_dir, BASE_CHANNEL_NAME};
 use crate::legend::{
-    all_completions, all_group_completions, apply_completion, find_trailing_mention,
-    parse_addressed, Addressed, Sigil,
+    apply_completion, find_trailing_mention, parse_addressed, Addressed, Sigil,
 };
 use crate::sessions::discover as discover_sessions;
 use crate::signal::{
@@ -759,11 +758,15 @@ pub struct TabResult {
 /// Tab-completion + cycle advance. No-op when the caret is mid-buffer
 /// (avoids surprising mid-sentence edits) or when no completion
 /// applies. Slash completions short-circuit before `@`/`#` parsing.
+/// An `@` completes over `agents` and a `#` over `channels`, in their
+/// order: the names the left column lists (ADR-405), so Tab reaches a
+/// quiet agent and a swept channel as a click does.
 pub fn handle_tab(
     buf: &str,
     cursor: usize,
     current_cycle: Option<TabCycle>,
-    signals: &[Signal],
+    agents: &[String],
+    channels: &[String],
 ) -> TabResult {
     let unchanged = TabResult {
         new_buf: buf.to_string(),
@@ -831,19 +834,12 @@ pub fn handle_tab(
     let Some(mention) = find_trailing_mention(buf) else {
         return unchanged;
     };
-    let caps = ColorDepth::detect();
-    let candidates: Vec<String> = match mention.sigil {
-        Sigil::Agent => {
-            let seeds = discover_sessions();
-            let instance_cache = attend_instances::SnapshotCache::new();
-            let agents = known_identities(signals, &seeds, caps, &instance_cache);
-            all_completions(mention.partial, &agents)
-        }
-        Sigil::Group => {
-            let groups = channels(caps);
-            all_group_completions(mention.partial, &groups)
-        }
+    let pool = match mention.sigil {
+        Sigil::Agent => agents,
+        Sigil::Group => channels,
     };
+    let lc = mention.partial.to_ascii_lowercase();
+    let candidates: Vec<String> = pool.iter().filter(|n| n.to_ascii_lowercase().starts_with(&lc)).cloned().collect();
     if candidates.is_empty() {
         return unchanged;
     }
@@ -1310,9 +1306,23 @@ mod tests {
 
     #[test]
     fn tab_mid_buffer_is_noop_and_resets_cycle() {
-        let res = handle_tab("@foo bar", 3, None, &[]);
+        let res = handle_tab("@foo bar", 3, None, &[], &[]);
         assert_eq!(res.new_buf, "@foo bar");
         assert_eq!(res.new_cursor, 3);
         assert!(res.new_cycle.is_none());
+    }
+
+    #[test]
+    fn tab_completes_over_the_pools_it_is_given_in_their_order() {
+        let agents = ["Laszlo-alpha".to_string(), "Quinn".into(), "Lark".into()];
+        let channels = ["open".to_string(), "deploy".into(), "swept".into()];
+        let r = handle_tab("hi @l", 5, None, &agents, &channels);
+        assert_eq!(r.new_buf, "hi @Laszlo-alpha ");
+        let r = handle_tab(&r.new_buf, r.new_buf.chars().count(), r.new_cycle, &agents, &channels);
+        assert_eq!(r.new_buf, "hi @Lark ", "the next match, a quiet agent the column lists");
+        let r = handle_tab("#sw", 3, None, &agents, &channels);
+        assert_eq!(r.new_buf, "#swept ", "a channel only _groups.yaml names");
+        let r = handle_tab("@zz", 3, None, &agents, &channels);
+        assert_eq!(r.new_buf, "@zz", "nothing listed, nothing completed");
     }
 }

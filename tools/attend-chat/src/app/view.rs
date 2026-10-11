@@ -255,7 +255,8 @@ fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str, group
                 if k.style.italic {
                     st = st.add_modifier(Modifier::ITALIC);
                 }
-                chips.push(Span::styled(format!("@{}", k.nickname), target(st, prefix_match(&k.nickname, p.as_deref()))));
+                // Marked as Tab would complete it: a claude, not a human.
+                chips.push(Span::styled(format!("@{}", k.nickname), target(st, k.is_claude && prefix_match(&k.nickname, p.as_deref()))));
             }
         }
         HelperMode::Groups(p) => {

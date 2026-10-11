@@ -402,7 +402,9 @@ impl ChatPane {
             self.set_tab(tabs::cycle_next(&cur, &names));
             return;
         }
-        let r = handle_tab(self.input.text(), self.input.cursor(), self.tab_cycle.take(), &self.signals);
+        let world = self.world();
+        let (agents, channels) = sidebar::completion_pool(&world.seen, &world.rows);
+        let r = handle_tab(self.input.text(), self.input.cursor(), self.tab_cycle.take(), &agents, &channels);
         self.input.set(r.new_buf, r.new_cursor);
         self.tab_cycle = r.new_cycle;
     }
