@@ -1,7 +1,7 @@
 use sensor_trait::{Focus, Sensor};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Output};
 use std::time::{Duration, SystemTime};
 
 /// Exit status for the most recently completed build command, as reported
@@ -160,6 +160,16 @@ fn canonical_name(comm: &str, known: impl Fn(&str) -> bool) -> String {
     let word = comm.split_whitespace().next().unwrap_or(comm);
     let base = word.rsplit_once('-').map_or(word, |(base, _)| base);
     [comm, word, base].into_iter().find(|n| known(n)).unwrap_or(comm).to_string()
+}
+
+/// The rows of a `ps` run, or `None` when it could not be read: `ps` did
+/// not start, exited non-zero, or listed no process. The user running the
+/// sensor always has at least the sensor itself, so zero rows is a failed
+/// read, never an empty session.
+fn ps_rows(output: std::io::Result<Output>) -> Option<Vec<Proc>> {
+    let output = output.ok().filter(|o| o.status.success())?;
+    let rows = parse_ps(&String::from_utf8_lossy(&output.stdout));
+    (!rows.is_empty()).then_some(rows)
 }
 
 /// How far up the parent chain [`tally`] looks for a watched tool. A build
@@ -332,17 +342,26 @@ impl ProcessSensor {
         }
     }
 
-    /// Snapshot the user's processes as app-name → instance-count, plus
-    /// the watched tools by pid. Tracks applications, not PIDs. Chrome going from 47 to 49
-    /// renderer processes is not a state change. Chrome appearing
-    /// or disappearing entirely is. A watched tool under another watched
-    /// tool is left out (see [`tally`]).
-    fn snapshot(&self, focus: &Focus) -> Snapshot {
-        let Ok(output) = Command::new("ps").args(["-u", &whoami(), "-o", "pid=,ppid=,comm="]).output() else {
-            return Snapshot::default();
-        };
-        let procs = parse_ps(&String::from_utf8_lossy(&output.stdout));
-        tally(&procs, |c| Self::is_relevant(c, focus), |c| self.is_watched(c))
+    /// One poll over the process table `rows`: the first establishes the
+    /// baseline silently, and each later one is diffed against the last.
+    /// `None` means the table could not be read, and the poll is skipped
+    /// with the prior state kept: an empty read diffed as a snapshot would
+    /// report every app and tool as gone. Apps are tracked by name, not by
+    /// pid, so Chrome going from 47 to 49 renderers is not a change, and a
+    /// watched tool under another watched tool is left out (see [`tally`]).
+    fn observe(&mut self, rows: Option<Vec<Proc>>, focus: &Focus, now: u64) -> Vec<(f64, String)> {
+        let Some(rows) = rows else { return Vec::new() };
+        let current = tally(&rows, |c| Self::is_relevant(c, focus), |c| self.is_watched(c));
+        if !self.baseline_established {
+            eprintln!("[attend] processes: baseline established ({} apps: {})",
+                current.apps.len(),
+                current.apps.keys().cloned().collect::<Vec<_>>().join(", "));
+            self.prior = current.apps;
+            self.prior_tools = current.tools;
+            self.baseline_established = true;
+            return Vec::new();
+        }
+        self.diff(current, now)
     }
 
     /// The events between the previous snapshot and `current`, given the
@@ -454,25 +473,13 @@ impl Sensor for ProcessSensor {
     sensor_trait::sensor_metadata!();
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
-        let current = self.snapshot(focus);
+        let rows = ps_rows(Command::new("ps").args(["-u", &whoami(), "-o", "pid=,ppid=,comm="]).output());
         self.refresh_marker();
-
-        // First poll: establish baseline silently
-        if !self.baseline_established {
-            eprintln!("[attend] processes: baseline established ({} apps: {})",
-                current.apps.len(),
-                current.apps.keys().cloned().collect::<Vec<_>>().join(", "));
-            self.prior = current.apps;
-            self.prior_tools = current.tools;
-            self.baseline_established = true;
-            return Vec::new();
-        }
-
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        self.diff(current, now)
+        self.observe(rows, focus, now)
     }
 
     fn emission_threshold(&self) -> f64 {
@@ -902,6 +909,37 @@ mod tests {
         s.prior = apps(&["nvim"]);
         assert!(s.diff(snap(&["nvim", "git"]), 0).is_empty());
         assert!(s.diff(snap(&["nvim"]), 0).is_empty(), "git came and went within a poll");
+    }
+
+    // ── a failed read ──────────────────────────────────────────────────
+
+    fn ps_output(code: i32, stdout: &str) -> std::io::Result<Output> {
+        use std::os::unix::process::ExitStatusExt;
+        Ok(Output { status: std::process::ExitStatus::from_raw(code << 8), stdout: stdout.into(), stderr: Vec::new() })
+    }
+
+    #[test]
+    fn ps_rows_is_none_for_a_failed_or_empty_read() {
+        assert_eq!(ps_rows(ps_output(0, "  10  1 cargo\n")), Some(procs(&[(10, 1, "cargo")])));
+        assert_eq!(ps_rows(ps_output(0, "")), None, "zero rows");
+        assert_eq!(ps_rows(ps_output(0, "garbage\n")), None, "no row parsed");
+        assert_eq!(ps_rows(ps_output(1, "  10  1 cargo\n")), None, "non-zero exit");
+        assert_eq!(ps_rows(Err(std::io::Error::other("no ps"))), None, "did not start");
+    }
+
+    /// A poll whose `ps` read failed reports nothing, and the next good
+    /// poll carries on from the state before it.
+    #[test]
+    fn a_failed_read_skips_the_poll() {
+        let focus = no_focus();
+        let idle = procs(&[ZSH, NVIM]);
+        let running = procs(&[ZSH, NVIM, (10, 1, "npm"), (11, 10, "node")]);
+        let mut s = ProcessSensor::new();
+        assert!(s.observe(Some(idle), &focus, 0).is_empty(), "baseline");
+        assert!(s.observe(Some(running.clone()), &focus, 0).is_empty());
+        assert_eq!(texts(&s.observe(Some(running.clone()), &focus, 0)), vec!["node started"]);
+        assert!(s.observe(None, &focus, 0).is_empty(), "the failed read");
+        assert!(s.observe(Some(running), &focus, 0).is_empty(), "nothing restarted");
     }
 
     // ── names as the host reports them ─────────────────────────────────
