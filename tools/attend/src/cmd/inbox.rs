@@ -11,6 +11,7 @@ use crate::util::signals_base;
 use crate::verbs::inbox::{self, InboxQuery, ReadError};
 
 pub(crate) use agent_identity::parse_signal;
+use agent_identity::wire_line;
 
 pub(crate) fn cmd_inbox_read(msg_id: &str, json: bool) {
     let msg = match inbox::read(msg_id) {
@@ -222,7 +223,7 @@ pub(crate) fn scan_pending(
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(&path) else { continue };
-            let Some(sig) = parse_signal(content.trim()) else { continue };
+            let Some(sig) = parse_signal(wire_line(&content)) else { continue };
             // Own messages: mark (dedup bookkeeping) but never deliver.
             if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
                 mark.push(key);
@@ -252,7 +253,7 @@ pub(crate) fn scan_pending(
         if plan.as_ref().is_some_and(|p| !p.deliver[i]) {
             continue;
         }
-        let Some(sig) = parse_signal(f.content.trim()) else { continue };
+        let Some(sig) = parse_signal(wire_line(&f.content)) else { continue };
         // Escape-free by construction: the drain's output is
         // hook-injection text (or a pipe), never a styled terminal,
         // so it is drawn plain whatever the environment says (#388).

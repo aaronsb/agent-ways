@@ -341,7 +341,7 @@ fn parent_route(me: &Session, id: &str) -> Route {
         attend_groups::Room::Project => std::fs::read_to_string(dir.path.join(&file))
             .ok()
             .and_then(|content| {
-                let sig = agent_identity::parse_signal(content.trim_end_matches('\n'))?;
+                let sig = agent_identity::parse_signal(agent_identity::wire_line(&content))?;
                 sig.from.starts_with("claude:").then(|| Route::Project(sig.cwd.to_string()))
             })
             .unwrap_or(Route::Caller),

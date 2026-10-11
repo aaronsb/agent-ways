@@ -56,6 +56,15 @@ pub fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
     })
 }
 
+/// A signal file's record without the one newline [`format_signal`] ends it
+/// with. Only that newline goes: the message is the rest of the line as the
+/// sender wrote it, trailing spaces and inner newlines included. Every reader
+/// of a `.signal` file passes its content through here before
+/// [`parse_signal`], so a body reads back the same in every surface.
+pub fn wire_line(content: &str) -> &str {
+    content.strip_suffix('\n').unwrap_or(content)
+}
+
 /// One wire line, newline-terminated: `from|project|cwd|message`, or
 /// `from|project|cwd|re:<id>|message` when `reply_to` is given.
 pub fn format_signal(from: &str, project: &str, cwd: &str, reply_to: Option<&str>, message: &str) -> String {

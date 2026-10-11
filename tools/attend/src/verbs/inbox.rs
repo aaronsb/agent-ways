@@ -4,7 +4,7 @@
 //! the drain's and the peers sensor's (ADR-172, ADR-501 item 4).
 
 use crate::util::{current_session, groups_for};
-use agent_identity::{is_valid_signal_id, parse_signal};
+use agent_identity::{is_valid_signal_id, parse_signal, wire_line};
 use attend_groups::Room;
 use attend_instances::view::render_sender_label;
 use attend_instances::SnapshotCache;
@@ -206,13 +206,6 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         });
     }
     Err(ReadError::NotFound)
-}
-
-/// A signal file's record without the one newline `format_signal` ends it
-/// with. Only that newline goes: the message is the rest of the line as the
-/// sender wrote it, trailing spaces and inner newlines included.
-fn wire_line(content: &str) -> &str {
-    content.strip_suffix('\n').unwrap_or(content)
 }
 
 /// Seconds since the epoch for a file mtime (0 if before the epoch).
