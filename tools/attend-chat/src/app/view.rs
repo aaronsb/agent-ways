@@ -43,7 +43,11 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
             let [side, rest] = Layout::horizontal([Constraint::Length(w), Constraint::Min(1)]).areas(area);
             (Some(side), rest)
         }
-        None => (None, area),
+        None => {
+            // Hidden for width: the keyboard cannot stay on what is not drawn.
+            chat.side_focus = None;
+            (None, area)
+        }
     };
     // While the column lists the agents and channels, the helper row
     // shows only what it does not: commands, their arguments and hints.
@@ -59,7 +63,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let [feed, compose, helper] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(helper_h)]).areas(area);
 
     let groups = chat.world().groups.clone();
-    chat.hits = Hits { text_width: inner, ..Hits::default() };
+    chat.hits = Hits { text_width: inner, side_area: side.unwrap_or_default(), ..Hits::default() };
     if let Some(side) = side {
         super::sidebar::draw(chat, f, side);
     }

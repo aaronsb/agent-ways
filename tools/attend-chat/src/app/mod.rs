@@ -109,8 +109,9 @@ struct Hits {
     compose: (Rect, usize),
     text_width: u16,
     chips: Vec<(Rect, Chip)>,
-    /// The left column's rows.
+    /// The left column's rows, and the column's whole area.
     side: Vec<(Rect, sidebar::SideHit)>,
+    side_area: Rect,
 }
 
 /// The chat's state: the messages, the compose box, the shown channel.
@@ -581,8 +582,8 @@ impl Pane for ChatPane {
             self.toggle_sidebar();
             return Keyed::Done;
         }
-        if self.side_focus.is_some() && self.side_key(k) {
-            return Keyed::Done;
+        if let Some(keyed) = self.side_key(k) {
+            return keyed;
         }
         match k.code {
             // Without the keyboard enhancement Ctrl+3 is this same Esc:
@@ -609,6 +610,9 @@ impl Pane for ChatPane {
     /// helper row it completes what is being typed to it.
     fn click(&mut self, at: Position) {
         self.dirty = true;
+        if !self.hits.side_area.contains(at) {
+            self.side_focus = None;
+        }
         if self.hits.feed.contains(at) {
             if let Some(i) = self.feed.entry_at(at.y - self.hits.feed.y) {
                 self.feed.reveal(i);
@@ -646,7 +650,9 @@ impl Pane for ChatPane {
         if let Some(key) = self.sidebar_key_label() {
             out.push(Binding::help(key, "show or hide the agents and channels column"));
         }
-        out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter addresses the agent or opens the channel's menu, Esc back"));
+        if self.side_drawn() {
+            out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter addresses the agent or opens the channel's menu, ↑ at the top or Esc back"));
+        }
         out
     }
 
@@ -660,6 +666,9 @@ impl Pane for ChatPane {
     fn status(&mut self) -> Option<(String, Tone)> {
         if let Some(s) = self.menu_status() {
             return Some((s, Tone::Said));
+        }
+        if self.side_focus.is_some() {
+            return Some((sidebar::FOCUS_HINT.into(), Tone::Said));
         }
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
         let (line, how) = status_slot(fresh, self.status_is_error, crate::slash::contextual_help(self.input.text()), &self.status);
@@ -701,7 +710,7 @@ impl Pane for ChatPane {
     }
 
     fn below_strip(&self) -> Option<&'static str> {
-        self.sidebar.then_some("the column")
+        self.side_drawn().then_some("the column")
     }
 
     fn focus_below(&mut self) -> bool {
@@ -716,8 +725,13 @@ impl Pane for ChatPane {
         self.new_channel();
     }
 
+    /// The shell took a key or a click: a waiting question is dropped,
+    /// and the column gives up the keyboard (F2, a tab, the bottom bar).
     fn interrupted(&mut self) {
         self.drop_question();
+        if self.side_focus.take().is_some() {
+            self.dirty = true;
+        }
     }
 
     fn quit_help(&self) -> Option<String> {

@@ -285,6 +285,10 @@ impl App {
             Keyed::Pass if k.code == KeyCode::Esc => self.quit(),
             Keyed::Pass => true,
             Keyed::Quit => self.quit(),
+            Keyed::Tabs => {
+                self.strip_focus();
+                true
+            }
         }
     }
 
@@ -374,6 +378,10 @@ impl App {
                     if let Some(p) = &mut self.pane {
                         p.click(at);
                     }
+                } else {
+                    // The bottom bar: no target, but a click elsewhere
+                    // still takes the focus from wherever the pane held it.
+                    self.interrupt_pane();
                 }
             }
             MouseEventKind::Down(MouseButton::Right) => {

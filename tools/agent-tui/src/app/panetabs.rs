@@ -241,10 +241,7 @@ impl App {
         }
         if toggle {
             self.interrupt_pane();
-            if let Some(p) = &mut self.pane {
-                self.strip = Some(p.tab());
-                self.msg = strip_hint(p.new_item_label(), p.below_strip());
-            }
+            self.strip_focus();
             return true;
         }
         match k.code {
@@ -255,6 +252,14 @@ impl App {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Give the tab bar the focus, its cursor on the tab shown.
+    pub(super) fn strip_focus(&mut self) {
+        if let Some(p) = &mut self.pane {
+            self.strip = Some(p.tab());
+            self.msg = strip_hint(p.new_item_label(), p.below_strip());
         }
     }
 

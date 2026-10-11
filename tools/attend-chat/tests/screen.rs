@@ -1286,22 +1286,65 @@ fn golden_the_keyboard_walks_the_column() {
     assert!(text(&mut c, 80, 25).contains("pick one: #deploy"), "Enter opens the channel's menu");
     press(&mut c, key(KeyCode::Esc));
 
-    // Up to an agent, Enter addresses it.
+    // Up past the top goes back to the tab bar.
     press(&mut c, key(KeyCode::F(2)));
     press(&mut c, key(KeyCode::Down));
+    assert!(bar(&mut c).contains("↑↓ move · Enter · Esc back"), "the bar says how the column is worked: {}", bar(&mut c));
     for _ in 0..10 {
         press(&mut c, key(KeyCode::Up));
-        if !testkit::rows(&testkit::render_screen(&mut c, 80, 25)).iter().any(|r| r.contains('▸')) {
+        if c.app().strip_focused() {
             break;
         }
     }
-    assert_eq!(c.input().text(), "", "Up past the top gives the focus back, typing nothing");
-    press(&mut c, key(KeyCode::F(2)));
+    assert!(c.app().strip_focused(), "Up past the top focuses the tab bar");
+    assert_eq!(c.input().text(), "", "typing nothing");
     press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Home));
     press(&mut c, key(KeyCode::Enter));
     assert!(c.input().text().starts_with("@Laszlo"), "{:?}", c.input().text());
     g.finish();
+}
+
+/// The column gives up the keyboard when it is hidden for width, when F2
+/// takes the tab bar, and on a click outside it.
+#[test]
+fn the_column_lets_go_of_the_keyboard_when_it_goes_or_focus_moves() {
+    let focused = || {
+        let mut c = chat_side().enhanced(true).dry_run(true);
+        testkit::render_screen(&mut c, 80, 25);
+        press(&mut c, key(KeyCode::F(2)));
+        press(&mut c, key(KeyCode::Down));
+        assert!(cursor_row(&mut c, 80).is_some(), "the column has the keyboard");
+        c
+    };
+    // Narrower than the column and the feed: hidden, and so unfocused.
+    let mut c = focused();
+    let narrow = text(&mut c, 70, 25);
+    assert!(!narrow.contains("↑↓ move"), "no hint for a column not drawn: {narrow}");
+    assert!(cursor_row(&mut c, 80).is_none(), "the cursor does not come back with the width");
+    typed(&mut c, "x");
+    assert_eq!(c.input().text(), "x", "keys go to the compose box");
+    // F2 takes the tab bar from the column.
+    let mut c = focused();
+    press(&mut c, key(KeyCode::F(2)));
+    assert!(c.app().strip_focused() && cursor_row(&mut c, 80).is_none());
+    // A click in the feed.
+    let mut c = focused();
+    left(&mut c, (50, 5));
+    assert!(cursor_row(&mut c, 80).is_none(), "a click outside the column");
+    // The tab bar names the column only while it is drawn.
+    let mut c = chat_side().enhanced(true);
+    testkit::render_screen(&mut c, 70, 25);
+    press(&mut c, key(KeyCode::F(2)));
+    assert!(!bar(&mut c).contains("the column"), "{}", bar(&mut c));
+    press(&mut c, key(KeyCode::Esc));
+    press(&mut c, key(KeyCode::F(1)));
+    assert!(!text(&mut c, 70, 40).contains("F2, then"), "the help leaves out a column not drawn");
+}
+
+/// The row the column's cursor is on, if it has one.
+fn cursor_row(c: &mut Chat, w: u16) -> Option<String> {
+    testkit::rows(&testkit::render_screen(c, w, 25)).into_iter().find(|r| r.contains('▸') && !r.starts_with(" ≡"))
 }
 
 /// Join and Leave from the menu, with no slash command.

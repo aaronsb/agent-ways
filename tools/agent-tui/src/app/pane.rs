@@ -115,6 +115,9 @@ pub enum Keyed {
     Pass,
     /// Quit, as Esc would: the pane confirmed it.
     Quit,
+    /// Give the tab bar the focus, as F2 would: Up past the top of a list
+    /// below the bar ([`Pane::below_strip`]) goes back up to it.
+    Tabs,
 }
 
 /// What a pane asks the shell to open over it ([`Pane::take_open`]).

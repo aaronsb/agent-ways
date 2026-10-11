@@ -17,6 +17,7 @@ use agent_tui::theme::{self, Ground, Seg, Shape};
 use agent_tui::wrap::str_width;
 
 use super::{ChatPane, Chip};
+use agent_tui::Keyed;
 use crate::chip::{color_for, Seen};
 use crate::groups::ChannelRow;
 use crate::helper::{self, HelperMode};
@@ -25,6 +26,9 @@ use crate::tabs::Tab;
 /// The fewest columns the feed keeps beside the column; narrower, the
 /// column hides.
 const MIN_FEED: u16 = 50;
+
+/// What the bottom bar says while the column has the keyboard.
+pub(super) const FOCUS_HINT: &str = "↑↓ move · Enter · Esc back";
 
 /// What a click on a row of the column does.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -301,10 +305,15 @@ impl ChatPane {
         out
     }
 
+    /// Whether the last frame drew the column: shown, and room for it.
+    pub(super) fn side_drawn(&self) -> bool {
+        !self.hits.side_area.is_empty()
+    }
+
     /// Give the column the keyboard: the cursor on its first channel, the
     /// shown one if listed. False when the column is not drawn.
     pub(super) fn focus_side(&mut self) -> bool {
-        if !self.sidebar || self.hits.side.is_empty() {
+        if !self.side_drawn() || self.hits.side.is_empty() {
             return false;
         }
         let items = self.side_items();
@@ -319,17 +328,21 @@ impl ChatPane {
     }
 
     /// A key while the column has the focus: Up and Down move, Home and End
-    /// jump, Enter acts on the row, Esc (or Up past the top) gives the
-    /// focus back to the compose box. False for any other key, which gives
-    /// the focus back and goes on as typing.
-    pub(super) fn side_key(&mut self, k: agent_tui::ratatui::crossterm::event::KeyEvent) -> bool {
+    /// jump, Enter acts on the row, Esc gives the focus back to the compose
+    /// box and Up past the top to the tab bar. `None` for any other key,
+    /// which gives the focus back and goes on as typing, and while the
+    /// column has no focus.
+    pub(super) fn side_key(&mut self, k: agent_tui::ratatui::crossterm::event::KeyEvent) -> Option<Keyed> {
         use agent_tui::ratatui::crossterm::event::KeyCode;
-        let Some(i) = self.side_focus else { return false };
+        let i = self.side_focus?;
         let items = self.side_items();
         let last = items.len().saturating_sub(1);
         self.dirty = true;
         match k.code {
-            KeyCode::Up if i == 0 => self.side_focus = None,
+            KeyCode::Up if i == 0 => {
+                self.side_focus = None;
+                return Some(Keyed::Tabs);
+            }
             KeyCode::Up => self.side_focus = Some(i - 1),
             KeyCode::Down => self.side_focus = Some((i + 1).min(last)),
             KeyCode::Home => self.side_focus = Some(0),
@@ -343,10 +356,10 @@ impl ChatPane {
             }
             _ => {
                 self.side_focus = None;
-                return false;
+                return None;
             }
         }
-        true
+        Some(Keyed::Done)
     }
 
     /// The key that toggles the column, as the help names it.
