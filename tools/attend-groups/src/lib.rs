@@ -136,6 +136,15 @@ impl Groups {
         self.base.join(format!("{GROUP_PREFIX}{name}"))
     }
 
+    /// The channel whose directory holds a file named `file`, searching
+    /// every channel directory on disk, joined or not.
+    pub fn channel_holding(&self, file: &str) -> Option<String> {
+        fs::read_dir(&self.base).ok()?.flatten().find_map(|entry| {
+            let name = entry.file_name().to_str()?.strip_prefix(GROUP_PREFIX)?.to_string();
+            (!name.is_empty() && entry.path().join(file).is_file()).then_some(name)
+        })
+    }
+
     /// Path to the groups state file.
     fn state_path(&self) -> PathBuf {
         self.base.join("_groups.yaml")

@@ -182,6 +182,8 @@ dependencies = [
  "sensor-peers",
  "sensor-processes",
  "sensor-trait",
+ "serde",
+ "serde_json",
  "serde_yaml",
 ]
 

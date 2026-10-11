@@ -202,7 +202,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
 
     // The name peers see this session by. Printed on every startup line so
     // a session never has to guess its own name or run `attend peers`.
-    let me = crate::cmd::whoami::display_name(&ident);
+    let me = crate::util::display_name(&ident);
     match &moved_from {
         Some(old) => println!(
             "[attend] session id changed ({old} → {session_id}): registry slot, enrollment and seen-set carried over — you are {me}"

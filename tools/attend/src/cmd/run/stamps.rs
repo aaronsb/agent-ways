@@ -83,13 +83,16 @@ pub(super) fn sweep_stale(
     max_candidates: usize,
 ) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
-    let keys: HashSet<String> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            SWEPT.iter().find_map(|ext| name.strip_suffix(&format!(".{ext}")).map(str::to_string))
-        })
-        .collect();
+    let mut keys: HashSet<String> = HashSet::new();
+    let mut temps: Vec<PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_last_inbound_temp(&name) {
+            temps.push(entry.path());
+        } else if let Some(key) = SWEPT.iter().find_map(|ext| name.strip_suffix(&format!(".{ext}")).map(str::to_string)) {
+            keys.insert(key);
+        }
+    }
     if keys.len() > max_candidates {
         crate::emit::log(&format!(
             "stamp sweep examined {max_candidates} of {} sessions in {}; the rest wait for a later start",
@@ -115,7 +118,24 @@ pub(super) fn sweep_stale(
             }
         }
     }
+    // A last-inbound write killed between its temp file and the rename
+    // leaves `<key>.last-inbound.<pid>.tmp` behind. It shares the cap with
+    // the keys, so one start does a bounded amount of work.
+    let budget = max_candidates.saturating_sub(keys.len().min(max_candidates));
+    for tmp in temps.iter().take(budget) {
+        let old = std::fs::metadata(tmp)
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| now.duration_since(t).is_ok_and(|age| age > max_age));
+        if old && std::fs::remove_file(tmp).is_ok() {
+            removed += 1;
+        }
+    }
     removed
+}
+
+/// Is `name` a last-inbound temp file, `<key>.last-inbound.<pid>.tmp`?
+fn is_last_inbound_temp(name: &str) -> bool {
+    name.strip_suffix(".tmp").is_some_and(|rest| rest.contains(".last-inbound."))
 }
 
 /// The session ids that have a Claude Code record right now.
@@ -178,6 +198,27 @@ mod tests {
         assert!(dir.join("live.banner").exists() && dir.join("live.last-inbound").exists());
         assert!(!dir.join("gone.banner").exists() && !dir.join("recent.last-inbound").exists());
         assert!(dir.join("gone.state").exists(), "the seen-set is not the sweep's to remove");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A `.last-inbound.<pid>.tmp` left by a killed writer is swept once it
+    /// is older than the age; a fresh one, which a writer may still own,
+    /// and the cap are respected.
+    #[test]
+    fn the_sweep_removes_stale_last_inbound_temp_files() {
+        let dir = scratch("tmp");
+        touch(&dir, "sess.last-inbound.123.tmp");
+        touch(&dir, "sess.last-inbound");
+        let live = |k: &str| k == "sess";
+        let later = SystemTime::now() + STAMP_MAX_AGE * 2;
+        assert_eq!(sweep_stale(&dir, live, SystemTime::now(), STAMP_MAX_AGE, SWEEP_MAX_CANDIDATES), 0, "a fresh temp stays");
+        assert!(dir.join("sess.last-inbound.123.tmp").exists());
+        assert_eq!(sweep_stale(&dir, live, later, STAMP_MAX_AGE, SWEEP_MAX_CANDIDATES), 1);
+        assert!(!dir.join("sess.last-inbound.123.tmp").exists());
+        assert!(dir.join("sess.last-inbound").exists(), "the live session's stamp stays");
+        touch(&dir, "a.last-inbound.1.tmp");
+        touch(&dir, "b.last-inbound.2.tmp");
+        assert_eq!(sweep_stale(&dir, live, later, STAMP_MAX_AGE, 2), 1, "one key plus one temp fill a cap of two");
         std::fs::remove_dir_all(&dir).ok();
     }
 

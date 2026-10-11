@@ -23,6 +23,9 @@ agent-theme = { path = "../agent-theme" }
 agent-settings = { path = "../agent-settings" }
 attend-config = { path = "../attend-config" }
 serde_yaml = "0.9"
+# The verbs' results serialize for `--json` and for library callers.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 attend-groups = { path = "../attend-groups" }
 attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }

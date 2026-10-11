@@ -63,22 +63,3 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
         }
     }
 }
-
-/// The one-line form `attend status` shows.
-pub(crate) fn status_line() -> String {
-    let ident = attend_presence::session::identity();
-    if !ident.session_resolved {
-        return "no session".to_string();
-    }
-    let now = sensor_trait::epoch_secs();
-    let dir = keepwarm_dir();
-    let arm = read_arm(&dir, &ident.session_id);
-    let ledger = read_ledger(&dir, &ident.session_id);
-    match arm {
-        Some(a) if a.deadline > now => format!("on, {} left", fmt_duration(a.deadline - now)),
-        _ => match ledger.and_then(|l| l.stopped) {
-            Some(why) => format!("stopped, {why}"),
-            None => "off".to_string(),
-        },
-    }
-}

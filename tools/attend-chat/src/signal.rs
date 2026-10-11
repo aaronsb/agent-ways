@@ -72,7 +72,7 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
         return None;
     }
     let raw = fs::read_to_string(path).ok()?;
-    let parsed = agent_identity::parse_signal(raw.trim_end_matches('\n'))?;
+    let parsed = agent_identity::parse_signal(agent_identity::wire_line(&raw))?;
 
     let id = path
         .file_stem()

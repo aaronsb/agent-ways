@@ -47,5 +47,12 @@ jobs:
           echo "TUI_HARNESS_REQUIRE_TMUX=1" >> "$GITHUB_ENV"
       - name: test
         run: cargo test --manifest-path tools/Cargo.toml --workspace
+      # attend compiles with any subset of its sensors. The default build
+      # covers all three; these two keep the cut-down builds compiling and
+      # their tests passing.
+      - name: attend without sensors
+        run: cargo test --manifest-path tools/Cargo.toml -p attend --no-default-features
+      - name: attend with only the keepwarm sensor
+        run: cargo test --manifest-path tools/Cargo.toml -p attend --no-default-features --features sensor-keepwarm
       - name: hook tests
         run: make test-hooks

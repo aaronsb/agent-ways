@@ -79,6 +79,8 @@ fn send_focus_is_rejected_and_sends_nothing() {
     assert_eq!(signals_written(&home), 0, "nothing may be written");
 }
 
+// `attend reply` is compiled out without the peers sensor.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn reply_broadcast_is_rejected_by_the_guard_and_writes_nothing() {
     let (out, home) = attend("rbcast", &["reply", "--broadcast", "hello"]);
@@ -87,12 +89,12 @@ fn reply_broadcast_is_rejected_by_the_guard_and_writes_nothing() {
     assert!(err.contains("`--broadcast` is not a flag"), "stderr: {err}");
     assert_eq!(signals_written(&home), 0, "nothing may be written");
 
-    // Control: seed a last-inbound so a plain reply can succeed in this
+    // Control: seed a last-inbound said in #open so a plain reply can succeed in this
     // fixture, and show it writes exactly one signal where the guarded one
     // wrote none.
     let state = home.join("cache").join("attend").join("state");
     std::fs::create_dir_all(&state).unwrap();
-    std::fs::write(state.join("test-session-rbcast.last-inbound"), "peer-1-1").unwrap();
+    std::fs::write(state.join("test-session-rbcast.last-inbound"), "peer-1-1\n#open\n").unwrap();
     let ok = Command::new(env!("CARGO_BIN_EXE_attend"))
         .args(["reply", "hello"])
         .env("HOME", &home)
