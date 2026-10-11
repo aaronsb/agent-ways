@@ -17,7 +17,9 @@
 //! - an agent's row in the left column: Address @Name (puts `@Name ` in
 //!   the compose box), Who is this (what `/whois` says, or what the chat
 //!   knows of one that is not live), and Remove from #channel when the
-//!   shown channel lists the agent, live or quiet.
+//!   shown channel lists the agent, live or quiet. The operator's own row
+//!   offers Leave #channel there instead: Remove never takes out the
+//!   human at the keyboard, here or in the Remove agent picker.
 //!
 //! Every item that drops something asks first: Clear view, Clear history,
 //! Leave and Delete channel. `y` goes ahead, any other key keeps things as
@@ -126,6 +128,23 @@ pub(super) fn members(ids: &[String], roster: &[Peer], seen: &[Seen]) -> Vec<Mem
             }
         })
         .collect()
+}
+
+/// The members a Remove can take out: all but the operator, `me`, who
+/// leaves with Leave instead.
+pub(super) fn removable(members: Vec<Member>, me: &str) -> Vec<Member> {
+    members.into_iter().filter(|m| m.id != me).collect()
+}
+
+/// The items of an agent row's menu: address it, who it is, then for the
+/// shown channel that lists it (`listed`), Remove, or Leave on the
+/// operator's own row.
+pub(super) fn agent_items(name: &str, listed: Option<&str>, operator: bool) -> Vec<String> {
+    let mut out = vec![format!("{ADDRESS} @{name}"), WHO.to_string()];
+    if let Some(c) = listed {
+        out.push(if operator { format!("{LEAVE} #{c}") } else { format!("{REMOVE_FROM} #{c}") });
+    }
+    out
 }
 
 /// What the compose box is lent to, and the draft it held before.
@@ -307,14 +326,13 @@ impl ChatPane {
             return self.say("that agent is not in the column any more", true);
         };
         let name = s.identity.nickname;
-        let mut options = vec![format!("{ADDRESS} @{name}"), WHO.to_string()];
-        self.removable.clear();
-        if let Tab::Channel(c) = self.normal_tab() {
-            if let Some(m) = self.channel_members(&c).into_iter().find(|m| m.id == member) {
-                options.push(format!("{REMOVE_FROM} #{c}"));
-                self.removable = vec![m];
-            }
-        }
+        let me = crate::signal::human_member_id();
+        let listed = match self.normal_tab() {
+            Tab::Channel(c) => self.channel_members(&c).into_iter().find(|m| m.id == member).map(|m| (c, m)),
+            Tab::Merged => None,
+        };
+        let options = agent_items(&name, listed.as_ref().map(|(c, _)| c.as_str()), member == me);
+        self.removable = removable(listed.map(|(_, m)| m).into_iter().collect(), &me);
         self.open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), options, multi: false, chosen: Vec::new() });
     }
 
@@ -330,6 +348,8 @@ impl ChatPane {
             if let Some(m) = self.removable.first().cloned() {
                 self.pending = Some(Pending::Remove(c, m));
             }
+        } else if let Some(c) = item.strip_prefix(LEAVE).map(|c| c.trim().trim_start_matches('#').to_string()) {
+            self.pending = Some(Pending::Leave(c));
         }
     }
 
@@ -352,7 +372,8 @@ impl ChatPane {
         self.say(said, false);
     }
 
-    /// The members of `channel`, from its membership: live or not.
+    /// The members of `channel`, from its membership: live or not, the
+    /// operator among them.
     fn channel_members(&mut self, channel: &str) -> Vec<Member> {
         let ids = attend_groups::load_groups(&crate::signal::signals_base()).get(channel).map(|e| e.members.clone()).unwrap_or_default();
         let roster = crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new());
@@ -379,15 +400,17 @@ impl ChatPane {
         }
     }
 
-    /// The live peers not in `channel` (add), or every member of it, live
-    /// or quiet (remove): a quiet member is removed by its membership id.
+    /// The live peers not in `channel` (add), or every member of it but
+    /// the operator, live or quiet (remove): a quiet member is removed by
+    /// its membership id; the operator leaves with Leave.
     fn peer_menu(&mut self, channel: &str, add: bool) {
         let options: Vec<String> = if add {
             let members = attend_groups::load_groups(&crate::signal::signals_base()).get(channel).map(|e| e.members.clone()).unwrap_or_default();
             let roster = crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new());
             roster.iter().filter(|p| !members.contains(&p.session_id)).map(|p| p.display.clone()).collect()
         } else {
-            self.removable = self.channel_members(channel);
+            let members = self.channel_members(channel);
+            self.removable = removable(members, &crate::signal::human_member_id());
             self.removable.iter().map(Member::option).collect()
         };
         if options.is_empty() {
@@ -609,6 +632,20 @@ mod tests {
         c.item("deploy", LEAVE);
         c.answer(true);
         assert_eq!(c.status, "dry run: /leave not run", "y goes ahead");
+    }
+
+    #[test]
+    fn remove_never_offers_the_operator_and_their_own_row_offers_leave() {
+        assert_eq!(agent_items("Wells", Some("deploy"), false), ["Address @Wells", WHO, "Remove from #deploy"]);
+        assert_eq!(agent_items("aaron", Some("deploy"), true), ["Address @aaron", WHO, "Leave #deploy"], "the operator leaves, never removes themself");
+        assert_eq!(agent_items("Lyra", None, false), ["Address @Lyra", WHO], "not listed: nothing to remove");
+        let m = |id: &str| Member { id: id.into(), label: id.into(), live: true, root: None };
+        let left: Vec<String> = removable(vec![m("s1"), m("aaron"), m("s2")], "aaron").into_iter().map(|m| m.id).collect();
+        assert_eq!(left, ["s1", "s2"], "the Remove agent picker leaves the operator out");
+        let mut c = ChatPane::new(None, Default::default());
+        c.dry_run = true;
+        c.menu_picked("agent:aaron", "Leave #deploy");
+        assert_eq!(c.pending, Some(Pending::Leave("deploy".into())), "Leave asks first, as the channel menu's does");
     }
 
     /// A pane whose world is `seen`, shown on merged.
