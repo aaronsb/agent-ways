@@ -22,7 +22,7 @@ agent-tui frame 80x25
 |│ > half a thought                                                             │|
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
-| @Laszlo @aaron @Wells                                                          |
+| @Laszlo @Wells @aaron                                                          |
 | confirm  quit and drop a draft in the compose box?   Enter quit   Esc back     |
 styles
   0   0-2   White Blue -
@@ -120,8 +120,8 @@ styles
  21  79-79  Cyan - -
  22   0-79  Cyan - -
  23   1-7   Cyan - BOLD
- 23   9-14  LightYellow - -
- 23  16-21  LightCyan - -
+ 23   9-14  LightCyan - -
+ 23  16-21  LightYellow - -
  24   0-8   Black Yellow BOLD
  24  53-64  White Red BOLD
  24  66-75  Black Green BOLD

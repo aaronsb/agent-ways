@@ -182,6 +182,26 @@ fn golden_legends_mark_what_tab_completes() {
     g.finish();
 }
 
+/// The agent chips run in Tab's cycle: live claudes first, so a claude
+/// gone quiet since its last message is not the first chip while Tab
+/// goes to a live one first.
+#[test]
+fn the_agent_chips_run_in_tabs_cycle() {
+    let mut c = chat();
+    c.push(sig("claude:dddddddd-0000-4000-8000-000000000004", "/work/delta", 10, Channel::Open, "gone quiet since"));
+    typed(&mut c, "@");
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 120, 40));
+    let helper = &rows[rows.len() - 2];
+    let chips: Vec<String> = helper.split_whitespace().filter_map(|w| w.strip_prefix('@')).filter(|n| *n != "aaron").map(String::from).collect();
+    let mut cycle: Vec<String> = Vec::new();
+    for _ in 0..chips.len() {
+        press(&mut c, key(KeyCode::Tab));
+        cycle.push(c.input().text().trim().trim_start_matches('@').to_string());
+    }
+    assert_eq!(chips.len(), 3, "two live claudes and the quiet one: {helper}");
+    assert_eq!(chips, cycle, "the chips in Tab's order: {helper}");
+}
+
 #[test]
 fn golden_slash_input_legend_help_and_subcommands() {
     let mut g = goldens();

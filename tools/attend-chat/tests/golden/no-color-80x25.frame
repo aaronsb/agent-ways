@@ -22,7 +22,7 @@ agent-tui frame 80x25
 |│ >                                                                            │|
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
-| @Laszlo @aaron @Wells                                                          |
+| @Laszlo @Wells @aaron                                                          |
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
 styles
   0   0-2   - - REVERSED
@@ -99,7 +99,7 @@ styles
  20   4-4   - - REVERSED
  21  71-77  - - REVERSED
  23   1-7   - - BOLD
- 23  16-21  - - BOLD|ITALIC
+ 23   9-14  - - BOLD|ITALIC
  24   0-5   - - BOLD|REVERSED
  24   7-21  - - DIM|ITALIC
  24  22-24  - - DIM

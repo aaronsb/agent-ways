@@ -254,7 +254,8 @@ fn draw_helper(chat: &mut ChatPane, f: &mut Frame, area: Rect, text: &str) {
     let mut picks: Vec<Chip> = Vec::new();
     match helper::derive(text) {
         HelperMode::Agents(p) => {
-            for s in &chat.world().seen {
+            // In the column's order, which is Tab's cycle.
+            for s in super::sidebar::agent_order(&chat.world().seen) {
                 let k = &s.identity;
                 picks.push(Chip::Agent(k.nickname.clone()));
                 let mut st = if k.is_claude && !s.live { theme::muted() } else { Style::new().fg(color_for(k.palette, depth)) };

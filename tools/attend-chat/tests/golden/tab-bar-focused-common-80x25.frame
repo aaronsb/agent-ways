@@ -22,7 +22,7 @@ agent-tui frame 80x25
 |│ >                                                                            │|
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
-| @Laszlo @aaron @Wells                                                          |
+| @Laszlo @Wells @aaron                                                          |
 | TABS  ← → move · Enter menu · Ctrl+N new channel · Esc back │ F1 keys          |
 styles
   0   0-2   White Blue BOLD|REVERSED
@@ -109,8 +109,8 @@ styles
  21  79-79  Cyan - -
  22   0-79  Cyan - -
  23   1-7   Cyan - BOLD
- 23   9-14  LightYellow - -
- 23  16-21  LightCyan - -
+ 23   9-14  LightCyan - -
+ 23  16-21  LightYellow - -
  24   0-5   Black Cyan BOLD
  24  60-62  - - DIM
  24  63-65  Cyan - -

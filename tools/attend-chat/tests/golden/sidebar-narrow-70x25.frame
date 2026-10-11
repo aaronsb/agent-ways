@@ -22,7 +22,7 @@ agent-tui frame 70x25
 |│ >                                                                  │|
 |│                                                             #open  │|
 |╰────────────────────────────────────────────────────────────────────╯|
-| @Lyra @Laszlo @aaron @Wells                                          |
+| @Laszlo @Wells @Lyra @aaron                                          |
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete          |
 styles
   0   0-2   White Blue -
@@ -107,10 +107,10 @@ styles
  21  61-67  White Blue -
  21  69-69  Cyan - -
  22   0-69  Cyan - -
- 23   1-5   - - DIM
- 23   7-13  Cyan - BOLD
- 23  15-20  LightYellow - -
- 23  22-27  LightCyan - -
+ 23   1-7   Cyan - BOLD
+ 23   9-14  LightCyan - -
+ 23  16-20  - - DIM
+ 23  22-27  LightYellow - -
  24   0-5   Black Cyan BOLD
  24   7-21  - - DIM|ITALIC
  24  22-24  - - DIM
