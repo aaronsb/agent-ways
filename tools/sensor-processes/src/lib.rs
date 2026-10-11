@@ -360,7 +360,13 @@ pub struct ProcessSensor {
     /// Whether `ps` prints `lstart`. Cleared, for the life of the sensor,
     /// when a read with it fails and one without it succeeds.
     ps_has_lstart: bool,
+    /// `ps` reads that have failed in a row.
+    failed_reads: u32,
 }
+
+/// Failed `ps` reads in a row after which the recovering poll establishes
+/// a new baseline rather than diffing against the state before the outage.
+const REBASELINE_AFTER: u32 = 6;
 
 impl ProcessSensor {
     /// Build with the default watch list (`DEFAULT_WATCH`).
@@ -382,6 +388,7 @@ impl ProcessSensor {
             last_marker_mtime: None,
             watch,
             ps_has_lstart: true,
+            failed_reads: 0,
         }
     }
 
@@ -442,18 +449,35 @@ impl ProcessSensor {
     /// baseline silently, and each later one is diffed against the last.
     /// `None` means the table could not be read, and the poll is skipped
     /// with the prior state kept: an empty read diffed as a snapshot would
-    /// report every app and tool as gone. Apps are tracked by name, not by
-    /// pid, so Chrome going from 47 to 49 renderers is not a change, and a
-    /// watched tool under another watched tool is left out (see [`tally`]).
+    /// report every app and tool as gone. The first failed read and the
+    /// recovery are each said once on stderr. After [`REBASELINE_AFTER`]
+    /// failed reads in a row, the prior state is too old to diff, so the
+    /// recovering poll establishes a new baseline silently instead of
+    /// reporting everything that changed during the outage. Apps are
+    /// tracked by name, not by pid, so Chrome going from 47 to 49 renderers
+    /// is not a change, and a watched tool under another watched tool is
+    /// left out (see [`tally`]).
     fn observe(&mut self, rows: Option<Vec<Proc>>, focus: &Focus, now: u64) -> Vec<(f64, String)> {
-        let Some(rows) = rows else { return Vec::new() };
+        let Some(rows) = rows else {
+            self.failed_reads += 1;
+            if self.failed_reads == 1 {
+                eprintln!("[attend] processes: ps read failed; skipping polls until it reads again");
+            }
+            return Vec::new();
+        };
+        let failed = std::mem::take(&mut self.failed_reads);
+        if failed > 0 {
+            eprintln!("[attend] processes: ps reads again after {failed} failed poll(s)");
+        }
         let current = tally(&rows, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
-        if !self.baseline_established {
+        if !self.baseline_established || failed >= REBASELINE_AFTER {
             eprintln!("[attend] processes: baseline established ({} apps: {})",
                 current.apps.len(),
                 current.apps.keys().cloned().collect::<Vec<_>>().join(", "));
             self.prior = current.apps;
             self.prior_tools = current.tools;
+            self.pending_start.clear();
+            self.held_exits.clear();
             self.baseline_established = true;
             return Vec::new();
         }
@@ -1158,6 +1182,38 @@ mod tests {
         assert_eq!(texts(&s.observe(Some(running.clone()), &focus, 0)), vec!["node started"]);
         assert!(s.observe(None, &focus, 0).is_empty(), "the failed read");
         assert!(s.observe(Some(running), &focus, 0).is_empty(), "nothing restarted");
+    }
+
+    /// A sensor whose `ps` failed `failures` times in a row while npm was
+    /// running, and then reads a table where npm is gone and docker runs.
+    fn recover_after(failures: u32) -> Vec<String> {
+        let focus = no_focus();
+        let running = procs(&[ZSH, NVIM, (10, 1, "npm"), (11, 10, "node")]);
+        let mut s = ProcessSensor::new();
+        s.observe(Some(procs(&[ZSH, NVIM])), &focus, 0);
+        s.observe(Some(running.clone()), &focus, 0);
+        s.observe(Some(running), &focus, 0);
+        for _ in 0..failures {
+            assert!(s.observe(None, &focus, 0).is_empty());
+        }
+        let mut after = texts(&s.observe(Some(procs(&[ZSH, NVIM, (20, 1, "docker")])), &focus, 0));
+        after.extend(texts(&s.observe(Some(procs(&[ZSH, NVIM, (20, 1, "docker")])), &focus, 0)));
+        assert_eq!(s.failed_reads, 0);
+        after.sort();
+        after
+    }
+
+    /// A short outage is diffed across: what changed during it is reported.
+    #[test]
+    fn a_short_ps_outage_reports_what_changed() {
+        assert_eq!(recover_after(REBASELINE_AFTER - 1), vec!["docker started", "npm finished (node exited)"]);
+    }
+
+    /// A long outage re-baselines on recovery: no burst of stale events.
+    #[test]
+    fn a_long_ps_outage_rebaselines_silently() {
+        assert!(recover_after(REBASELINE_AFTER).is_empty());
+        assert!(recover_after(50).is_empty());
     }
 
     // ── names as the host reports them ─────────────────────────────────
