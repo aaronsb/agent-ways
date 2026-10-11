@@ -614,6 +614,20 @@ impl Pane for ChatPane {
         self.scroll_by(up, WHEEL_ROWS);
     }
 
+    /// A paste goes into the compose box whole, at the cursor: its lines
+    /// stay one draft, and nothing is sent until Enter. A box lent to a
+    /// one-line name or description takes the lines joined by spaces.
+    fn paste(&mut self, text: &str) {
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let text = if self.prompt.is_some() { text.split('\n').collect::<Vec<_>>().join(" ") } else { text };
+        self.side_focus = None;
+        for c in text.chars() {
+            self.input.insert(c);
+        }
+        self.tab_cycle = None;
+        self.dirty = true;
+    }
+
     /// The wheel over one of the column's lists scrolls that list; anywhere
     /// else, the feed.
     fn wheel_at(&mut self, up: bool, at: Position) {
@@ -955,6 +969,10 @@ impl Screen for Chat {
 
     fn mouse(&mut self, m: MouseEvent) {
         self.app.mouse(m);
+    }
+
+    fn paste(&mut self, text: &str) {
+        self.app.paste(text);
     }
 
     fn tick_every(&self) -> Option<Duration> {

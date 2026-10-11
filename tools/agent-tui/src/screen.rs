@@ -35,6 +35,10 @@ pub trait Screen {
     /// kit's scripts send them to any screen ([`crate::testkit::play`]).
     fn mouse(&mut self, _m: MouseEvent) {}
 
+    /// Text the terminal pasted, whole: one event, never a key per
+    /// character, so a newline in it is not Enter. Nothing by default.
+    fn paste(&mut self, _text: &str) {}
+
     /// How often [`Screen::tick`] runs; `None` never.
     fn tick_every(&self) -> Option<Duration> {
         None
@@ -133,6 +137,7 @@ pub(crate) fn run_on(s: &mut dyn Screen, term: &mut DefaultTerminal, signals: &S
             Err(_) => return Ok(Some(HANGUP)),
             // A repeat is a key too: holding Backspace in a text entry.
             Ok(Some(Event::Key(k))) if k.kind != KeyEventKind::Release && !s.key(k) => return Ok(None),
+            Ok(Some(Event::Paste(text))) => s.paste(&text),
             _ => {}
         }
         if ticker.due(s.tick_every(), Instant::now()) {

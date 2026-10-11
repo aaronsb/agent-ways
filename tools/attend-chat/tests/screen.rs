@@ -1453,6 +1453,21 @@ fn an_agent_row_removes_it_from_the_shown_channel() {
     assert_eq!(c.status(), "dry run: /kick not run");
 }
 
+/// A paste with newlines is one draft in the compose box: nothing sent,
+/// the lines kept, the cursor after them.
+#[test]
+fn a_multi_line_paste_is_one_draft_and_sends_nothing() {
+    let mut c = chat_side();
+    typed(&mut c, "see: ");
+    let before = c.signals().len();
+    assert!(testkit::play(&mut c, &[agent_tui::ratatui::crossterm::event::Event::Paste("a\nb\r\nc".into())], Some((80, 25))));
+    assert_eq!(c.input().text(), "see: a\nb\nc", "one draft, the lines kept");
+    assert_eq!(c.input().cursor(), "see: a\nb\nc".chars().count());
+    assert_eq!((c.signals().len(), c.status()), (before, ""), "nothing sent");
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows.iter().any(|r| r.contains("> see: a")) && rows.iter().any(|r| r.contains("  c")), "the box grows to the lines");
+}
+
 /// The mouse alone shows and hides the column, from the common menu.
 #[test]
 fn the_common_menu_hides_and_shows_the_column() {

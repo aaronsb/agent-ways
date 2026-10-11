@@ -48,7 +48,7 @@ pub fn restore() {
     if KEYBOARD_PUSHED.swap(false, Ordering::SeqCst) {
         let _ = execute!(io::stdout(), ratatui::crossterm::event::PopKeyboardEnhancementFlags);
     }
-    let _ = execute!(io::stdout(), DisableMouseCapture);
+    let _ = execute!(io::stdout(), DisableMouseCapture, ratatui::crossterm::event::DisableBracketedPaste);
     // try_restore: restore() prints its error, and a print to a terminal
     // that hung up panics, which in a drop aborts.
     let _ = ratatui::try_restore();
@@ -72,7 +72,11 @@ impl TermGuard {
     /// restore a second signal makes from its handler.
     pub fn new() -> TermGuard {
         save_termios();
-        TermGuard { term: ManuallyDrop::new(ratatui::init()) }
+        let term = ManuallyDrop::new(ratatui::init());
+        // A paste arrives as one event, not as keys: its newlines would
+        // otherwise read as Enter, one per line.
+        let _ = execute!(io::stdout(), ratatui::crossterm::event::EnableBracketedPaste);
+        TermGuard { term }
     }
 }
 
@@ -107,7 +111,7 @@ fn save_termios() {
         }
     }
     let _ = RESET.get_or_init(|| {
-        ["?1000l", "?1002l", "?1003l", "?1006l", "?1015l", "?1049l", "?25h"]
+        ["?1000l", "?1002l", "?1003l", "?1006l", "?1015l", "?2004l", "?1049l", "?25h"]
             .iter()
             .flat_map(|s| [&[0x1b, b'['][..], s.as_bytes()].concat())
             .collect()
@@ -442,6 +446,7 @@ impl App {
                     return Ok(self.session(None));
                 }
                 Ok(Some(Event::Mouse(m))) => self.mouse(m),
+                Ok(Some(Event::Paste(text))) => self.paste(&text),
                 Ok(_) => {}
             }
             // Timed, not on an idle poll: input arriving all the time would

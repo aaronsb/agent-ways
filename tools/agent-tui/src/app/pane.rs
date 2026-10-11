@@ -249,6 +249,10 @@ pub trait Pane: Any {
     /// A left click at `at`, inside the pane's area.
     fn click(&mut self, _at: Position) {}
 
+    /// Text the terminal pasted, whole, newlines and all. Nothing by
+    /// default.
+    fn paste(&mut self, _text: &str) {}
+
     /// The pane's keys, for the footer and the key help.
     fn bindings(&self) -> Vec<Binding>;
 

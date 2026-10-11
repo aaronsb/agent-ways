@@ -405,6 +405,17 @@ impl App {
         self.take_pane_open();
     }
 
+    /// A paste: the pane's, while nothing is open over it and the tab bar
+    /// does not have the focus. Elsewhere it is dropped, never typed.
+    pub fn paste(&mut self, text: &str) {
+        if !matches!(self.mode, Mode::Browse) || self.strip.is_some() {
+            return;
+        }
+        if let Some(p) = &mut self.pane {
+            p.paste(text);
+        }
+    }
+
     /// One tick of the pane, on its own schedule.
     pub fn tick_pane(&mut self) {
         if let Some(p) = &mut self.pane {
@@ -444,6 +455,10 @@ impl crate::screen::Screen for App {
 
     fn mouse(&mut self, m: MouseEvent) {
         App::mouse(self, m);
+    }
+
+    fn paste(&mut self, text: &str) {
+        App::paste(self, text);
     }
 
     fn tick_every(&self) -> Option<std::time::Duration> {

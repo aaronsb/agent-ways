@@ -187,6 +187,7 @@ pub fn play<S: Screen + ?Sized>(screen: &mut S, events: &[Event], size: Option<(
                 }
             }
             Event::Mouse(m) => screen.mouse(*m),
+            Event::Paste(text) => screen.paste(text),
             _ => {}
         }
     }
