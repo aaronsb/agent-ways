@@ -1,0 +1,21 @@
+{
+  "name": "attend-mod",
+  "version": "0.0.1",
+  "description": "Spike: attend's agent-facing jobs (inbound delivery, send/reply tools, one status row) as a Claude Code mod. Loads dormant. Not a product.",
+  "author": { "name": "Aaron Bockelie" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "pollSeconds": {
+      "type": "number",
+      "title": "Awake poll interval (seconds)",
+      "description": "How often the inbox is drained while the mod is awake and the session idle.",
+      "default": 5
+    },
+    "quietMinutes": {
+      "type": "number",
+      "title": "Quiet period before dormant (minutes)",
+      "description": "With no human in attend-chat and no traffic for this long, the mod goes dormant again.",
+      "default": 20
+    }
+  }
+}
