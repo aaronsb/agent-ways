@@ -193,7 +193,8 @@ struct HeldExit {
     hosts: Vec<u32>,
 }
 
-/// Sort relevant processes into apps and tools. A watched tool running
+/// Sort relevant processes into apps and tools. A watched tool is always
+/// relevant, whatever `is_relevant` says of it. A watched tool running
 /// under another watched tool is left out: `rustc` under `cargo` or `cc`
 /// under `make` is part of the parent's build, not an application of its
 /// own (ADR-113: the sensor tracks application presence, not PID churn),
@@ -220,7 +221,7 @@ fn tally(procs: &[Proc], is_relevant: impl Fn(&str) -> bool, is_watched: impl Fn
     };
     let mut snap = Snapshot::default();
     let mut hosted: HashMap<u32, HashSet<String>> = HashMap::new();
-    for p in procs.iter().filter(|p| is_relevant(&p.comm)) {
+    for p in procs.iter().filter(|p| is_watched(&p.comm) || is_relevant(&p.comm)) {
         let above = watched_above(p);
         if is_watched(&p.comm) {
             if above.is_empty() {
@@ -904,6 +905,43 @@ mod tests {
     }
 
     // ── names as the host reports them ─────────────────────────────────
+
+    fn no_focus() -> Focus {
+        Focus { description: String::new(), working_dir: String::new(), keywords: Vec::new() }
+    }
+
+    /// Every default watched tool is seen, though most (`yarn`, `tsc`,
+    /// `clang`, ...) are not on the tracked list: `yarn build` running
+    /// `tsc` is one yarn tool, and its exit reports.
+    #[test]
+    fn every_watched_tool_is_tracked() {
+        let s = ProcessSensor::new();
+        let focus = no_focus();
+        let poll = |rows: &[(u32, u32, &'static str)]| {
+            tally(&procs(rows), |c| ProcessSensor::is_relevant(c, &focus), |c| s.is_watched(c))
+        };
+        for (i, name) in DEFAULT_WATCH.iter().enumerate() {
+            let pid = 100 + i as u32;
+            assert_eq!(poll(&[ZSH, (pid, 1, name)]).tools, HashMap::from([(pid, tool(name, &[]))]), "{name}");
+        }
+        let build = [ZSH, NVIM, (10, 1, "yarn"), (11, 10, "node"), (12, 11, "tsc")];
+        assert_eq!(poll(&build).tools, HashMap::from([(10, tool("yarn", &["node"]))]));
+        let mut sensor = ProcessSensor::new();
+        let base = poll(&[ZSH, NVIM]);
+        sensor.prior = base.apps;
+        sensor.prior_tools = base.tools;
+        assert!(sensor.diff(poll(&build), 0).is_empty());
+        assert_eq!(texts(&sensor.diff(poll(&[ZSH, NVIM]), 0)), vec!["yarn finished"]);
+    }
+
+    /// A user's own watch list is tracked the same way.
+    #[test]
+    fn a_configured_watched_tool_is_tracked() {
+        let s = ProcessSensor::with_watch(vec!["mix".into()]);
+        let focus = no_focus();
+        let t = tally(&procs(&[ZSH, (10, 1, "mix")]), |c| ProcessSensor::is_relevant(c, &focus), |c| s.is_watched(c));
+        assert_eq!(t.tools, HashMap::from([(10, tool("mix", &[]))]));
+    }
 
     #[test]
     fn canonical_name_finds_the_tool_inside_a_renamed_process() {
