@@ -270,6 +270,11 @@ pub enum KeepwarmCmd {
     Off,
     /// Cache state, context size, cold price, window left, and this session's cold writes
     Status,
+    /// Run the keepwarm judgment once: print the `keepwarm:` wake line when
+    /// one is due, else nothing (exit 0 either way). For a host that polls
+    /// without `attend run`; prints nothing while an `attend run` holds the
+    /// session, since its sensor wakes it.
+    Check,
 }
 
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.
