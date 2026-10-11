@@ -27,7 +27,7 @@ import {
 } from './lib.ts'
 import type { Drain, Listed } from './lib.ts'
 
-const status = atom({ plugin: 'attend-mod', key: 'status' } as const, {
+const DEFAULTS = {
   mode: 'dormant',
   self: null,
   project: null,
@@ -37,7 +37,19 @@ const status = atom({ plugin: 'attend-mod', key: 'status' } as const, {
   channels: [],
   deliveries: 0,
   afterCompaction: false,
-} satisfies AttendModStatus)
+} satisfies AttendModStatus
+
+const status = atom({ plugin: 'attend-mod', key: 'status' } as const, DEFAULTS)
+
+// $.state outlives a reload, so a value an older version stored can lack a
+// field this version reads. Every read and update fills the gaps first.
+async function readStatus($: $): Promise<AttendModStatus> {
+  return { ...DEFAULTS, ...(await read($, status)) }
+}
+
+async function updateStatus($: $, f: (s: AttendModStatus) => AttendModStatus) {
+  await update($, status, s => f({ ...DEFAULTS, ...s }))
+}
 
 // The cheap check: called in, human present, quiet long enough to sleep.
 const CHECK_MS = 15_000
@@ -98,7 +110,7 @@ function rawMessage(body: string): Listed {
 
 async function addChannel($: $, channel: string) {
   const c = `#${channel.replace(/^#/, '')}`
-  await update($, status, s => ({ ...s, channels: [...new Set([...s.channels, c])] }))
+  await updateStatus($, s => ({ ...s, channels: [...new Set([...s.channels, c])] }))
 }
 
 async function learnSelf($: $) {
@@ -106,12 +118,12 @@ async function learnSelf($: $) {
   const machine = parseMachine((await attend($, WHOAMI_MACHINE_ARGV)).stdout)
   const self = display.exitCode === 0 ? display.stdout.trim() || null : null
   const project = machine.origin_path?.split('/').filter(Boolean).pop() ?? null
-  await update($, status, s => ({ ...s, self, project }))
+  await updateStatus($, s => ({ ...s, self, project }))
 }
 
 async function refreshPeers($: $) {
   const r = await attend($, PEERS_ARGV)
-  if (r.exitCode === 0) await update($, status, s => ({ ...s, peers: parsePeerCount(r.stdout) }))
+  if (r.exitCode === 0) await updateStatus($, s => ({ ...s, peers: parsePeerCount(r.stdout) }))
 }
 
 /** Submits one framed batch; resolves as its turn starts, waking an idle
@@ -120,9 +132,9 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[], count: number, l
   mod.lastActivityMs = await $.clock.now()
   for (const m of msgs) mod.ids.set(shortId(m.id), m.id)
   const seen = msgs.map(m => m.scope).filter(c => c.startsWith('#'))
-  const s = await read($, status)
+  const s = await readStatus($)
   const full = isFullPreamble(s.deliveries, s.afterCompaction)
-  await update($, status, t => ({
+  await updateStatus($, t => ({
     ...t,
     deliveries: t.deliveries + 1,
     afterCompaction: false,
@@ -136,29 +148,29 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[], count: number, l
  *  batch. Awake only. Returns what the first drain said. */
 async function poll($: $, mod: Mod): Promise<Drain | undefined> {
   if (mod.isPolling || mod.running.size > 0) return undefined
-  if ((await read($, status)).mode !== 'awake') return undefined
+  if ((await readStatus($)).mode !== 'awake') return undefined
   mod.isPolling = true
   try {
     const first = parseDrain((await attend($, DRAIN_ARGV)).stdout)
-    await update($, status, s => ({ ...s, enrolled: first.kind !== 'silent' }))
+    await updateStatus($, s => ({ ...s, enrolled: first.kind !== 'silent' }))
     if (first.kind !== 'messages') return first
     const msgs = parseListing(first.body)
     if (msgs.length === 0) msgs.push(rawMessage(first.body))
     let count = first.count
-    await update($, status, s => ({ ...s, unread: count }))
+    await updateStatus($, s => ({ ...s, unread: count }))
     await new Promise<void>(resolve => $.clock.after(BATCH_MS, resolve))
     const second = parseDrain((await attend($, DRAIN_ARGV)).stdout)
     if (second.kind === 'messages') {
       const more = parseListing(second.body)
       msgs.push(...(more.length > 0 ? more : [rawMessage(second.body)]))
       count += second.count
-      await update($, status, s => ({ ...s, unread: count }))
+      await updateStatus($, s => ({ ...s, unread: count }))
     }
     await deliver($, mod, msgs, count)
     return first
   } finally {
     mod.isPolling = false
-    await update($, status, s => ({ ...s, unread: 0 }))
+    await updateStatus($, s => ({ ...s, unread: 0 }))
   }
 }
 
@@ -168,9 +180,9 @@ async function poll($: $, mod: Mod): Promise<Drain | undefined> {
 async function wake($: $, mod: Mod, reason: string, hits: readonly Listed[]) {
   const now = await $.clock.now()
   mod.lastActivityMs = now
-  const was = (await read($, status)).mode
+  const was = (await readStatus($)).mode
   if (was === 'awake' && hits.length === 0) return
-  await update($, status, s => ({ ...s, mode: 'awake' as const }))
+  await updateStatus($, s => ({ ...s, mode: 'awake' as const }))
   if (was === 'dormant') await refreshPeers($)
   for (const m of hits) {
     const channel = inviteChannel(m)
@@ -189,7 +201,7 @@ async function wake($: $, mod: Mod, reason: string, hits: readonly Listed[]) {
 
 async function sleep($: $, mod: Mod) {
   mod.sinceMs = await $.clock.now()
-  await update($, status, s => ({ ...s, mode: 'dormant' as const, unread: 0 }))
+  await updateStatus($, s => ({ ...s, mode: 'dormant' as const, unread: 0 }))
 }
 
 /** The periodic cheap check. Dormant: is the human here, or is this session
@@ -200,7 +212,7 @@ async function check($: $, mod: Mod) {
   mod.isChecking = true
   try {
     mod.isChatPresent = (await $.process.run(CHAT_PRESENT_ARGV, { timeoutMs: 5_000 })).exitCode === 0
-    const s = await read($, status)
+    const s = await readStatus($)
     if (s.mode === 'dormant') {
       if (mod.isChatPresent) return await wake($, mod, 'attend-chat is open', [])
       const listed = parseListing((await attend($, LIST_ARGV)).stdout)
@@ -295,7 +307,7 @@ export const register: Register = (on, options) => {
   on('session.compact', async ($, e, next) => {
     const done = await next(e)
     if (e.trigger !== 'precompute' && e.agentId === undefined && done.skip === undefined) {
-      await update($, status, s => ({ ...s, afterCompaction: true }))
+      await updateStatus($, s => ({ ...s, afterCompaction: true }))
     }
     return done
   })
@@ -348,7 +360,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'mcp__attend-mod__attend_peers' }, async $ => {
     const r = await attend($, PEERS_ARGV)
     if (r.exitCode !== 0) return { result: `attend peers failed (${r.exitCode}): ${r.stderr.trim()}`, isError: true }
-    await update($, status, s => ({ ...s, peers: parsePeerCount(r.stdout) }))
+    await updateStatus($, s => ({ ...s, peers: parsePeerCount(r.stdout) }))
     return { result: r.stdout }
   })
 
@@ -357,7 +369,7 @@ export const register: Register = (on, options) => {
   // nothing.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    const s = await read($, status)
+    const s = await readStatus($)
     if (s.mode !== 'awake') return next(e)
     const { Box, Text } = $.ui.resolve(e)
     const state =
