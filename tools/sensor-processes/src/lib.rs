@@ -108,10 +108,10 @@ fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64, hosted_e
 struct Proc {
     pid: u32,
     ppid: u32,
-    /// `lstart` as `ps` prints it, such as `Sat Oct 10 22:18:30 2026`.
-    /// Only compared for equality, so a pid reused by a later process
-    /// reads as a different process.
-    start: String,
+    /// The process's start time in seconds, from `lstart`. Compared within
+    /// [`START_TOLERANCE_SECS`], so a pid reused by a later process reads
+    /// as a different process.
+    start: i64,
     comm: String,
 }
 
@@ -119,6 +119,41 @@ struct Proc {
 /// locale, which [`PS_ENV`] sets.
 const PS_COLUMNS: &str = "pid=,ppid=,lstart=,comm=";
 const PS_ENV: (&str, &str) = ("LC_ALL", "C");
+
+/// How far apart two reads of one process's start time can be. `ps`
+/// derives `lstart` from the wall clock at each read, so a clock step or
+/// a rounding edge moves it by a second or two. The kernel hands a pid
+/// out again only after the pid space wraps, which takes far longer.
+const START_TOLERANCE_SECS: i64 = 2;
+
+/// Do two start times name the same process?
+fn same_start(a: i64, b: i64) -> bool {
+    (a - b).abs() <= START_TOLERANCE_SECS
+}
+
+/// `lstart` words, such as `Sat Oct 10 22:18:30 2026`, as seconds since
+/// the epoch, read as UTC. The local offset is the same in every read, so
+/// a difference between two reads is exact.
+fn parse_lstart(words: &[&str]) -> Option<i64> {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let [_, month, day, time, year] = words else { return None };
+    let month = MONTHS.iter().position(|m| m == month)? as i64 + 1;
+    let day: i64 = day.parse().ok()?;
+    let year: i64 = year.parse().ok()?;
+    let mut hms = time.split(':').map(|n| n.parse::<i64>().ok());
+    let (h, m, s) = (hms.next()??, hms.next()??, hms.next()??);
+    if hms.next().is_some() {
+        return None;
+    }
+    // Days from 1970-01-01 to the date, by Howard Hinnant's civil algorithm.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + h * 3600 + m * 60 + s)
+}
 
 /// Parse `ps -o pid=,ppid=,lstart=,comm=` output. Rows that do not parse
 /// are skipped. The command name is the rest of the row, so a name with a
@@ -130,9 +165,9 @@ fn parse_ps(stdout: &str) -> Vec<Proc> {
             let mut parts = line.split_whitespace();
             let pid = parts.next()?.parse().ok()?;
             let ppid = parts.next()?.parse().ok()?;
-            let start: Vec<&str> = parts.by_ref().take(5).collect();
+            let start = parse_lstart(&parts.by_ref().take(5).collect::<Vec<_>>())?;
             let comm = parts.collect::<Vec<_>>().join(" ");
-            (start.len() == 5 && !comm.is_empty()).then(|| Proc { pid, ppid, start: start.join(" "), comm })
+            (!comm.is_empty()).then_some(Proc { pid, ppid, start, comm })
         })
         .collect()
 }
@@ -210,7 +245,7 @@ struct Tool {
     name: String,
     /// The tool's start time, so a pid reused by a same-name process is
     /// told apart from the run that held it.
-    start: String,
+    start: i64,
     /// Apps (not themselves watched) running under this tool, such as
     /// `node` under `npm run dev` or `docker` under `make up`.
     hosts: HashSet<String>,
@@ -265,7 +300,7 @@ fn tally(procs: &[Proc], is_relevant: impl Fn(&str, &str) -> bool, is_watched: i
         let above = watched_above(p);
         if is_watched(&p.comm) {
             if above.is_empty() {
-                snap.tools.insert(p.pid, Tool { name: p.comm.clone(), start: p.start.clone(), hosts: HashSet::new() });
+                snap.tools.insert(p.pid, Tool { name: p.comm.clone(), start: p.start, hosts: HashSet::new() });
             }
             continue;
         }
@@ -430,7 +465,7 @@ impl ProcessSensor {
         fresh.sort_by(|a, b| a.app.cmp(&b.app));
         exits.extend(fresh);
         let alive = |pid: &u32| {
-            tools.get(pid).is_some_and(|t| self.prior_tools.get(pid).is_some_and(|p| (&p.name, &p.start) == (&t.name, &t.start)))
+            tools.get(pid).is_some_and(|t| self.prior_tools.get(pid).is_some_and(|p| p.name == t.name && same_start(p.start, t.start)))
         };
         let mut finished: Vec<(&u32, &Tool)> = self.prior_tools.iter().filter(|(pid, _)| !alive(pid)).collect();
         finished.sort_by_key(|(pid, _)| **pid);
@@ -739,9 +774,11 @@ mod tests {
 
     /// The start time every test process has, unless a test says otherwise.
     const T0: &str = "Sat Oct 10 22:18:30 2026";
+    /// [`T0`] in seconds since the epoch, read as UTC.
+    const T0_SECS: i64 = 1_791_670_710;
 
     fn procs(rows: &[(u32, u32, &str)]) -> Vec<Proc> {
-        rows.iter().map(|&(pid, ppid, comm)| Proc { pid, ppid, start: T0.into(), comm: comm.into() }).collect()
+        rows.iter().map(|&(pid, ppid, comm)| Proc { pid, ppid, start: T0_SECS, comm: comm.into() }).collect()
     }
 
     fn apps(names: &[&str]) -> HashMap<String, u32> {
@@ -774,7 +811,7 @@ mod tests {
     }
 
     fn tool(name: &str, hosts: &[&str]) -> Tool {
-        Tool { name: name.into(), start: T0.into(), hosts: hosts.iter().map(|h| h.to_string()).collect() }
+        Tool { name: name.into(), start: T0_SECS, hosts: hosts.iter().map(|h| h.to_string()).collect() }
     }
 
     #[test]
@@ -922,9 +959,39 @@ mod tests {
         assert!(s.diff(see(&first), 0).is_empty());
         assert!(s.diff(see(&first), 0).is_empty(), "the same run, still going");
         let mut second = procs(&first);
-        second[2].start = "Sat Oct 10 22:19:02 2026".into();
+        second[2].start = T0_SECS + 32;
         let second = tally(&second, |_, c| c != "zsh", |c| s.is_watched(c));
         assert_eq!(texts(&s.diff(second, 0)), vec!["cargo finished"]);
+    }
+
+    #[test]
+    fn parse_lstart_reads_seconds_since_the_epoch() {
+        let secs = |s: &str| parse_lstart(&s.split_whitespace().collect::<Vec<_>>());
+        assert_eq!(secs(T0), Some(T0_SECS));
+        assert_eq!(secs("Thu Jan  1 00:00:00 1970"), Some(0));
+        assert_eq!(secs("Wed Dec 31 23:59:59 1969"), Some(-1));
+        assert_eq!(secs("Thu Feb 29 23:59:59 2024"), Some(1_709_251_199), "leap day");
+        assert_eq!(secs("Sat Foo 10 22:18:30 2026"), None);
+        assert_eq!(secs("Sat Oct 10 22:18 2026"), None);
+        assert_eq!(secs("Sat Oct 10 22:18:30:01 2026"), None);
+        assert_eq!(secs("Sat Oct 10 22:18:30"), None);
+    }
+
+    /// A wall-clock step moves every `lstart` a little between reads; no
+    /// running tool reads as finished for it.
+    #[test]
+    fn a_clock_step_does_not_finish_a_running_tool() {
+        let rows = [ZSH, NVIM, (10, 1, "cargo")];
+        for step in [-2, -1, 1, 2] {
+            let mut s = sensor_after(&rows);
+            let mut stepped = procs(&rows);
+            stepped[2].start += step;
+            assert!(s.diff(tally(&stepped, |_, c| c != "zsh", |c| s.is_watched(c)), 0).is_empty(), "step {step}");
+        }
+        let mut s = sensor_after(&rows);
+        let mut later = procs(&rows);
+        later[2].start += 3;
+        assert_eq!(texts(&s.diff(tally(&later, |_, c| c != "zsh", |c| s.is_watched(c)), 0)), vec!["cargo finished"]);
     }
 
     /// An app that exits while its tool keeps running is reported one poll
