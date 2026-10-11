@@ -69,7 +69,7 @@ pub(crate) enum Commands {
         format: String,
     },
 
-    /// Show running instances, signals, and channel state
+    /// Show every running `attend run` with the session it serves, signals, and channel state
     Status,
 
     /// Print this session's canonical bus identity (issue #378)

@@ -46,13 +46,28 @@ pub(crate) fn cmd_status() {
     let mut t = agent_fmt::Table::new(&["", "Detail", "Info"]);
     t.align(0, agent_fmt::Align::Left);
 
-    // ── Instances section
+    // ── Instances section. `ps` lists every `attend run` on the machine,
+    // one per session that runs attend, so each row names the session it
+    // serves. Two rows are normal when two sessions run attend.
     if instances.is_empty() {
         t.add(vec!["instances", "(none)", ""]);
     } else {
-        for (i, (pid, cmd)) in instances.iter().enumerate() {
+        let own = attend_presence::session::identity().session_id;
+        let owners: Vec<(String, Option<String>)> = instances
+            .iter()
+            .map(|(pid, _)| {
+                let ident = pid.parse().map(attend_presence::session::identity_for_pid).ok();
+                match ident.filter(|i| i.session_resolved) {
+                    Some(i) => (i.session_id.clone(), Some(crate::cmd::whoami::display_name(&i))),
+                    None => (String::new(), None),
+                }
+            })
+            .collect();
+        for (i, ((pid, _), (sid, name))) in instances.iter().zip(&owners).enumerate() {
             let label = if i == 0 { "instances" } else { "" };
-            t.add(vec![label, &format!("PID {pid}"), cmd]);
+            let runs = owners.iter().filter(|(s, _)| s == sid).count();
+            let info = instance_info(name.as_deref(), sid == &own, runs);
+            t.add(vec![label, &format!("PID {pid}"), &info]);
         }
     }
 
@@ -87,4 +102,38 @@ pub(crate) fn cmd_status() {
     t.print();
     // Printed whole, outside the table, which would cut a long path.
     println!("cache: {}", attend_presence::cache::dir().display());
+}
+
+/// What an `attend run` row says about its owner. `name` is the owning
+/// session's display name, `None` when no Claude Code session owns the
+/// process. `runs` counts the rows with the same owner. The session lock
+/// (ADR-129) allows one run per session, so a second is worth flagging, and
+/// so is a run whose session has gone.
+fn instance_info(name: Option<&str>, mine: bool, runs: usize) -> String {
+    let Some(name) = name else {
+        return "no owning session; a leftover run, safe to stop".to_string();
+    };
+    let whose = if mine { "this session" } else { "another session" };
+    if runs > 1 {
+        format!("{name} ({whose}, duplicate run)")
+    } else {
+        format!("{name} ({whose})")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_run_names_the_session_it_serves() {
+        assert_eq!(instance_info(Some("Chaucer-alpha"), true, 1), "Chaucer-alpha (this session)");
+        assert_eq!(instance_info(Some("McKay"), false, 1), "McKay (another session)");
+    }
+
+    #[test]
+    fn a_second_run_for_one_session_and_an_orphan_are_flagged() {
+        assert_eq!(instance_info(Some("Chaucer"), true, 2), "Chaucer (this session, duplicate run)");
+        assert!(instance_info(None, false, 1).starts_with("no owning session"));
+    }
 }
