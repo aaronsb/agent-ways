@@ -20,7 +20,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 
 use super::uninstall::Uninstall;
-use super::update::{git_head, is_app_checkout, run_step, source_describe};
+use super::update::{build_from_source, git_head, is_app_checkout, run_step, source_describe, tool_present};
 use crate::paths;
 
 /// Where the installed version came from: the origin remote, the commit, and
@@ -111,9 +111,23 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
         u.print();
     }
     println!("3. Install from the stage (scripts/install.sh), then project every target your config lists.");
+    // A detached HEAD is a `manage update --ref` source build. The installer's
+    // setup downloads release binaries, so the suite is built from source again.
+    let source_build = source.branch.is_none();
+    if source_build {
+        println!("   The install is a source build (detached HEAD), so the suite is built from source again, as `ways manage update --ref` did.");
+    }
     if !yes {
         println!("\nNothing changed. Run `ways manage reinstall --yes` to do this.");
         return Ok(());
+    }
+
+    if source_build && !tool_present("cargo") {
+        bail!(
+            "this install was built from source at {}, which needs a Rust toolchain (cargo not found); nothing was removed. \
+             Install it (https://rustup.rs/), then retry.",
+            source.label()
+        );
     }
 
     // 1. A stage left by an earlier run beside a clean app is stale: that run
@@ -186,18 +200,11 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
         .env("AGENT_WAYS_ORIGIN", &source.url)
         .status()
         .map(|s| s.code());
-    match installed {
-        Ok(Some(0)) => {}
+    let stopped = match installed {
+        Ok(Some(0)) => false,
         // The app is built and on PATH; the projection stopped at a real path,
-        // and the installer has named it. The stage is not needed any more.
-        Ok(Some(PROJECTION_STOPPED)) => {
-            let _ = std::fs::remove_dir_all(&stage);
-            eprintln!(
-                "\nagent-ways {} is installed, and no target is projected yet. After you move the paths above, finish with:\n  ways manage repair",
-                source.label()
-            );
-            bail!("the projection stopped at a real path");
-        }
+        // and the installer has named it.
+        Ok(Some(PROJECTION_STOPPED)) => true,
         _ => {
             // A half-made app dir would turn the finishing run into an update,
             // which pulls past the version being put back. It is a fresh clone
@@ -213,8 +220,28 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
             );
             bail!("the install from the stage failed");
         }
-    }
+    };
+    // The app is built, so the stage is not needed any more.
     let _ = std::fs::remove_dir_all(&stage);
+
+    // The binaries of a source build, from the restored source.
+    if source_build {
+        if let Err(e) = build_from_source(&app) {
+            eprintln!(
+                "\nagent-ways {} is installed with release binaries, and the source build failed. Fix the cause above, then run:\n  ways manage update --ref {}",
+                source.label(),
+                source.rev
+            );
+            return Err(e);
+        }
+    }
+    if stopped {
+        eprintln!(
+            "\nagent-ways {} is installed, and no target is projected yet. After you move the paths above, finish with:\n  ways manage repair",
+            source.label()
+        );
+        bail!("the projection stopped at a real path");
+    }
 
     // 4. The installer projects `~/.claude` only, and the uninstall withdrew
     //    every target. A bare repair converges each target the kept config

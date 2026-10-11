@@ -590,26 +590,58 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
         "git checkout",
     )?;
 
-    // 3. Build the Rust suite from source — force (no download for an
-    //    unpublished ref). The *-rebuild targets each cargo-build and relink.
-    //    ways-mcp joins when the ref's Makefile has its target; a ref that
-    //    predates the server has none.
+    // 3-5. Build the suite and way-embed from source, then relink.
+    build_from_source(app)?;
+
+    // 6. Regenerate the corpus (best-effort) and reproject with the newly-built
+    //    ways binary. Reconcile always runs so the checked-out source is projected.
+    if !ways_bin.exists() {
+        bail!("no ways binary at {} after the source build — cannot reconcile.", ways_bin.display());
+    }
+    eprintln!("==> regenerate corpus");
+    if let Err(e) = run_step(Command::new(&ways_bin).args(["corpus", "--quiet"]).current_dir(app), "ways corpus") {
+        eprintln!("  ⚠ corpus not regenerated ({e}); the next session retries.");
+    }
+    eprintln!("==> reconcile projection");
+    run_step(Command::new(&ways_bin).arg("reconcile").current_dir(app), "ways manage repair")?;
+
+    println!("\nUpgraded to {git_ref} (built from source; the checkout is on a detached HEAD).");
+    println!("Return to the release channel with:  ways manage update --ref main");
+    println!("Restart Claude Code to pick up the new version.");
+    judge_setup();
+    Ok(())
+}
+
+/// The `*-rebuild` targets that build the Rust suite from source. ways-mcp
+/// and ways-agent join when the checkout's Makefile has their targets; an
+/// older ref has neither.
+pub(super) fn source_targets(app: &Path) -> Vec<&'static str> {
     let mut targets = vec!["ways-rebuild", "ways-audit-rebuild", "attend-rebuild", "attend-chat-rebuild"];
     if has_make_target(app, "ways-mcp-rebuild") {
         targets.insert(2, "ways-mcp-rebuild");
     }
-    // Likewise ways-agent (the relevance gate); older refs lack the target.
     if has_make_target(app, "ways-agent-rebuild") {
         let at = targets.iter().position(|t| *t == "attend-rebuild").unwrap_or(targets.len());
         targets.insert(at, "ways-agent-rebuild");
     }
+    targets
+}
+
+/// Build the suite and way-embed from the checkout's source, then link the
+/// suite onto PATH: the binaries of a `--ref` install, which no release
+/// publishes. `ways manage reinstall` of such an install builds through here
+/// too.
+pub(super) fn build_from_source(app: &Path) -> Result<()> {
+    // The Rust suite, forced from source: an unpublished ref has no download.
+    // The *-rebuild targets each cargo-build and relink.
+    let targets = source_targets(app);
     eprintln!("==> build the suite from source ({})", targets.join(" "));
     run_step(Command::new("make").args(&targets).current_dir(app), "suite source build")?;
 
-    // 4. Build way-embed from source. Its default make target is a source build
-    //    (cmake), unlike `rebuild-binary` which is download-first — so the ref's
-    //    own matcher is what gets installed. Optional: semantic matching degrades
-    //    to regex without it.
+    // way-embed from source. Its default make target is a source build (cmake),
+    // unlike `rebuild-binary` which is download-first — so the ref's own
+    // matcher is what gets installed. Optional: semantic matching degrades to
+    // regex without it.
     eprintln!("==> build way-embed from source");
     match run_step(
         Command::new("make").args(["-C", "tools/way-embed"]).current_dir(app),
@@ -634,7 +666,7 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
         Err(e) => eprintln!("  ⚠ way-embed not rebuilt ({e}); semantic matching degrades to regex."),
     }
 
-    // 5. Install any suite binary still missing and link the suite onto PATH.
+    // Install any suite binary still missing and link the suite onto PATH.
     eprintln!("==> relink suite binaries onto PATH");
     if let Err(e) = run_step(Command::new("make").arg("relink").current_dir(app), "relink") {
         eprintln!(
@@ -642,23 +674,6 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
             app.display()
         );
     }
-
-    // 6. Regenerate the corpus (best-effort) and reproject with the newly-built
-    //    ways binary. Reconcile always runs so the checked-out source is projected.
-    if !ways_bin.exists() {
-        bail!("no ways binary at {} after the source build — cannot reconcile.", ways_bin.display());
-    }
-    eprintln!("==> regenerate corpus");
-    if let Err(e) = run_step(Command::new(&ways_bin).args(["corpus", "--quiet"]).current_dir(app), "ways corpus") {
-        eprintln!("  ⚠ corpus not regenerated ({e}); the next session retries.");
-    }
-    eprintln!("==> reconcile projection");
-    run_step(Command::new(&ways_bin).arg("reconcile").current_dir(app), "ways manage repair")?;
-
-    println!("\nUpgraded to {git_ref} (built from source; the checkout is on a detached HEAD).");
-    println!("Return to the release channel with:  ways manage update --ref main");
-    println!("Restart Claude Code to pick up the new version.");
-    judge_setup();
     Ok(())
 }
 
@@ -993,7 +1008,7 @@ fn exe(name: &str) -> String {
     }
 }
 
-fn tool_present(tool: &str) -> bool {
+pub(super) fn tool_present(tool: &str) -> bool {
     Command::new(tool)
         .arg("--version")
         .stdout(std::process::Stdio::null())

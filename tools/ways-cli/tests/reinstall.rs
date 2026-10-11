@@ -16,6 +16,10 @@ struct Sandbox {
 
 const BUILDS: &str = "# agent-ways test checkout\nsetup:\n\tmkdir -p bin && printf '#!/bin/sh\\nexit 0\\n' > bin/ways && chmod +x bin/ways\n";
 const FAILS: &str = "# agent-ways test checkout\nsetup:\n\t@echo build failed; exit 1\n";
+/// A setup that downloads a release binary, and the source-build targets
+/// `ways manage update --ref` runs, each leaving a mark of what it built.
+const SOURCE: &str = "# agent-ways test checkout\nsetup:\n\tmkdir -p bin && printf '#!/bin/sh\\nexit 0\\n' > bin/ways && chmod +x bin/ways && echo release > bin/built-by\n\
+%-rebuild:\n\tmkdir -p bin && echo $@ >> bin/rebuilt\nrelink:\n\t@true\n";
 /// Builds a `bin/ways` whose repair refuses, as a real path at a projected
 /// root makes it.
 const REFUSES: &str = "# agent-ways test checkout\nsetup:\n\tmkdir -p bin && printf '#!/bin/sh\\necho refused: skills is a real directory >&2\\nexit 1\\n' > bin/ways && chmod +x bin/ways\n";
@@ -204,6 +208,30 @@ fn an_installer_without_stage_mode_is_not_run() {
     assert!(t.contains("--stage") && t.contains("nothing was removed"), "{t}");
     assert!(!s.app().join("updated").exists(), "the old installer ran: {t}");
     s.untouched();
+}
+
+#[test]
+fn a_detached_source_build_is_rebuilt_from_source() {
+    let s = Sandbox::new("detached", SOURCE);
+    let rev = git(&s.app(), &["rev-parse", "HEAD"]);
+    git(&s.app(), &["checkout", "-q", "--detach"]);
+    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let t = text(&out);
+    assert!(out.status.success(), "{t}");
+    assert_eq!(git(&s.app(), &["rev-parse", "HEAD"]), rev, "{t}");
+    let rebuilt = std::fs::read_to_string(s.app().join("bin/rebuilt")).unwrap_or_default();
+    for target in ["ways-rebuild", "ways-audit-rebuild", "attend-rebuild", "attend-chat-rebuild"] {
+        assert!(rebuilt.lines().any(|l| l == target), "{target} did not run: {rebuilt}\n{t}");
+    }
+}
+
+#[test]
+fn a_branch_install_keeps_the_release_binaries() {
+    let s = Sandbox::new("onbranch", SOURCE);
+    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let t = text(&out);
+    assert!(out.status.success(), "{t}");
+    assert!(!s.app().join("bin/rebuilt").exists(), "a branch install is the release channel: {t}");
 }
 
 #[test]
