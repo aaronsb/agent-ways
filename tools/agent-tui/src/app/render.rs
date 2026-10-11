@@ -346,7 +346,8 @@ impl App {
             .collect();
         let own = self.roots.get(self.tab).and_then(|t| self.adapter.title(&t.name)).unwrap_or_else(|| self.title.clone());
         let title = if self.filter.is_empty() { own } else { format!("{own} — /{}", self.filter) };
-        let block = pane(title);
+        // The border would clip a long title mid-word: cut it between the corners with `…`.
+        let block = pane(crate::wrap::truncate(&title, area.width.saturating_sub(2) as usize));
         self.hits.list = block.inner(area);
         let list = List::new(items)
             .block(block)

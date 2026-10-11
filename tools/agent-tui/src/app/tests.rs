@@ -993,3 +993,20 @@ fn a_tab_bar_that_fits_keeps_whole_names_and_too_narrow_a_one_marks_the_rest() {
     assert!(bar.trim_end().ends_with('›') && bar.contains(" 1 "), "{bar}");
     assert!(app.hits.tabs.len() < 4, "only the tabs drawn are click targets");
 }
+
+#[test]
+fn a_tree_title_wider_than_its_pane_is_cut_with_an_ellipsis_at_80_columns() {
+    let title = "settings · the user layer · this project · the local override";
+    let mut app = App::new(title, tabbed());
+    let f = frame(&mut app, 80, 25);
+    // The tree pane takes 44 of the 80 columns: 42 between its corners.
+    let top: String = f[1].chars().take(44).collect();
+    assert!(top.starts_with("┌settings · the user") && top.ends_with("…┐"), "{top}");
+    keys(&mut app, &[KeyCode::Char('/')]);
+    type_str(&mut app, "al");
+    let top: String = frame(&mut app, 80, 25)[1].chars().take(44).collect();
+    assert!(top.ends_with("…┐"), "a filter's suffix is cut the same way: {top}");
+    // A title that fits is left whole.
+    let mut app = App::new("t", tabbed());
+    assert!(frame(&mut app, 80, 25)[1].starts_with("┌t─"));
+}
