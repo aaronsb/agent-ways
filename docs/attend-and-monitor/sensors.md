@@ -85,13 +85,15 @@ The sensor re-reads `_groups.yaml` on every poll, so `attend join` and `attend l
 
 ## `processes`
 
-Tracks dev-tool processes in `ps` output, not every process. A process produces start and exit events only if its name is on the sensor's tracked list (build tools, runtimes, editors, servers, `ssh`, `git` and similar, in `tools/sensor-processes/src/lib.rs`) or contains one of the session's focus keywords.
+Tracks dev-tool processes in `ps` output, not every process. A process produces start and exit events only if its name is a watched tool, is on the sensor's tracked list (build tools, runtimes, editors, servers, `ssh`, `git` and similar, in `tools/sensor-processes/src/lib.rs`), or contains one of the session's focus keywords.
+
+A process can rename itself, so the name the sensor matches is not always `comm` as `ps` prints it. npm sets its title to its command line, so its `comm` reads `npm test` or `npm run dev`. Node names its main thread, so its `comm` reads `node-MainThread`. The sensor tries `comm` itself, then its first word, then that word without a trailing `-suffix`, and uses the first that is a watched or tracked name. A process none of them match keeps its `comm` unchanged. A `ps` read that fails or lists no process skips that poll.
 
 The sensor tracks application presence, not process churn (ADR-113). Four rules keep a build to one event:
 
 - A watched tool running under another watched tool, such as `rustc` under `cargo` or `cc` under `make`, is part of that build and is not counted. A watched tool run on its own is counted. Any other app is counted wherever it runs, so `node` under `npm` and `docker` under `make` stay visible.
-- A watched build tool announces no start. Its exit is always reported, as `cargo finished`. Each run is tracked by its pid, so concurrent `npm test` and `npm run dev` runs each report their own exit.
-- An app that exits in the same poll as the watched tool it ran under, or one poll before, is named in the tool's event: a server dying under `npm run dev` gives one event, `npm finished (node exited)`. An app that exits while its tool keeps running is reported one poll later as `node exited`.
+- A watched build tool announces no start. Its exit is always reported, as `cargo finished`. Each run is tracked by its pid and start time, so concurrent `npm test` and `npm run dev` runs each report their own exit, and a run whose pid is reused by a new run of the same tool still reports its finish.
+- An app that exits in the same poll as the watched tool it ran under, or one poll before, is named in the tool's event: a server dying under `npm run dev` gives one event, `npm finished (node exited)`. An app that exits while its tool keeps running is reported one poll later as `node exited`. Apps are matched by name, not pid, so an unrelated app of the same name that exits in the same poll can be named in a build's finish. An exit is named in one tool's event only.
 - Any other app announces its start once it is still running at the next poll. The poll interval adapts between 5 and 30 seconds, so the start debounce window is up to 30 seconds. An app that starts and exits within it produces no event at all.
 
 | Event | Magnitude | Example |
@@ -114,7 +116,7 @@ go, npm, yarn, pnpm, tsc,
 mvn, gradle, pip, pip3
 ```
 
-`sensors.processes.watch` replaces the default; it is not merged, and an empty list turns enrichment off. It cannot add a tool to the tracked list: a watched tool that is not tracked (`yarn`, `tsc`, `clang` among the defaults) produces no events at all unless a focus keyword matches it. To enrich only Rust and C builds:
+`sensors.processes.watch` replaces the default; it is not merged, and an empty list turns enrichment off. Every watched tool is tracked, so a name added here produces events even when it is not on the tracked list. To enrich only Rust and C builds:
 
 ```yaml
 sensors:
@@ -140,7 +142,7 @@ attend_build() {
 
 The format is `cmd|exit_code|unix_ts`. When a watched tool exits, the marker's `cmd` matches, and the marker is under 60 seconds old, the exit is enriched; otherwise it falls back to the plain line. The marker is one slot for the whole machine, so concurrent builds overwrite each other. On a network filesystem, write to a temporary file and `mv` it into place.
 
-The sensor does not capture output, and it does not batch a build's child processes: `cargo` and each `rustc` it starts are separate events.
+The sensor does not capture output.
 
 ## `disclosure`
 
