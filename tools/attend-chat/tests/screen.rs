@@ -1227,12 +1227,21 @@ fn the_column_keeps_the_helper_row_for_commands() {
 }
 
 #[test]
-fn a_click_on_an_agent_row_addresses_it_and_on_a_channel_row_opens_its_menu() {
+fn a_click_on_an_agent_row_opens_its_menu_and_on_a_channel_row_the_channels() {
     let mut c = chat_side().enhanced(true);
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "gamma").expect("the agent row");
     left(&mut c, (x, y));
-    assert!(c.input().text().starts_with('@') && c.input().text().ends_with(' '), "{:?}", c.input().text());
+    let menu = text(&mut c, 80, 25);
+    assert!(menu.contains("pick one: @Lyra") && menu.contains("Address @Lyra") && menu.contains("Who is this"), "{menu}");
+    assert!(!menu.contains("Remove from"), "merged shows no channel to remove from: {menu}");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.input().text(), "@Lyra ", "the first item addresses it");
+    // Who is this, for a quiet claude /whois cannot resolve.
+    left(&mut c, (x, y));
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(c.status().contains("session cccccccc") && c.status().contains("quiet"), "{}", c.status());
     let mut c = chat_side().enhanced(true);
 
     let buf = testkit::render_screen(&mut c, 80, 25);
@@ -1325,6 +1334,8 @@ fn golden_the_keyboard_walks_the_column() {
     assert_eq!(c.input().text(), "", "typing nothing");
     press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Home));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(text(&mut c, 80, 25).contains("pick one: @Laszlo"), "Enter on an agent opens its menu");
     press(&mut c, key(KeyCode::Enter));
     assert!(c.input().text().starts_with("@Laszlo"), "{:?}", c.input().text());
     g.finish();
@@ -1422,6 +1433,24 @@ fn a_long_column_scrolls_with_the_cursor_and_the_wheel() {
         c.mouse(ev(MouseEventKind::ScrollUp));
     }
     assert_eq!(testkit::rows(&testkit::render_screen(&mut c, 80, 25))[first_agent], top_before, "back to the top");
+}
+
+/// An agent of the shown channel can be removed from its row, after a y.
+#[test]
+fn an_agent_row_removes_it_from_the_shown_channel() {
+    let mut c = chat_side().enhanced(true).dry_run(true);
+    press(&mut c, ctrl('3'));
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "beta").expect("the member's row");
+    left(&mut c, (x, y));
+    let menu = text(&mut c, 80, 25);
+    assert!(menu.contains("Remove from #deploy"), "{menu}");
+    press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(bar(&mut c).contains("from #deploy? y removes"), "{}", bar(&mut c));
+    press(&mut c, key(KeyCode::Char('y')));
+    assert_eq!(c.status(), "dry run: /kick not run");
 }
 
 /// The mouse alone shows and hides the column, from the common menu.

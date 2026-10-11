@@ -184,6 +184,8 @@ pub struct ChatPane {
     /// The first row shown of each of the column's lists, agents then
     /// channels: the wheel moves them and the cursor keeps itself in view.
     side_scroll: [usize; 2],
+    /// The members a Remove menu listed, for the one picked.
+    removable: Vec<menu::Member>,
 }
 
 impl ChatPane {
@@ -222,6 +224,7 @@ impl ChatPane {
             shape: Shape::PLAIN,
             side_focus: None,
             side_scroll: [0, 0],
+            removable: Vec::new(),
         }
     }
 
@@ -660,13 +663,13 @@ impl Pane for ChatPane {
             Binding::help("← → Home End", "move the cursor"),
             Binding::help("Bksp Del", "edit"),
             Binding::help("click a message", "selects it; in the compose box it places the cursor; a chip completes it"),
-            Binding::help("click a side row", "an agent: @name in the compose box; a channel: shows it, opens its menu"),
+            Binding::help("click a side row", "an agent: its menu (address, who, remove); a channel: shows it, opens its menu"),
         ];
         if let Some(key) = self.sidebar_key_label() {
             out.push(Binding::help(key, "show or hide the agents and channels column"));
         }
         if self.side_drawn() {
-            out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter addresses the agent or opens the channel's menu, ↑ at the top or Esc back"));
+            out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter opens the row's menu, ↑ at the top or Esc back"));
         }
         out
     }

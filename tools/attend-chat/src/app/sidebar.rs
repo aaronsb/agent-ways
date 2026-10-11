@@ -1,7 +1,7 @@
 //! The left column (ADR-405): Agents, every identity the chat has seen,
 //! live ones first and the rest set back; then Channels, every channel,
 //! including empty ones and ones only `_groups.yaml` still names. A click
-//! on an agent puts `@Name ` in the compose box; a click on a channel
+//! on an agent opens its menu (address, who, remove); a click on a channel
 //! shows it and opens its menu. `attend.chat.sidebar_key` shows or hides
 //! it, and a terminal too narrow for it beside the feed hides it.
 
@@ -16,7 +16,7 @@ use agent_tui::ratatui::style::Color;
 use agent_tui::theme::{self, Ground, Seg, Shape};
 use agent_tui::wrap::str_width;
 
-use super::{ChatPane, Chip};
+use super::ChatPane;
 use agent_tui::Keyed;
 use crate::chip::{color_for, Seen};
 use crate::groups::ChannelRow;
@@ -327,7 +327,7 @@ impl ChatPane {
     /// A click on a row of the column.
     pub(super) fn side_click(&mut self, hit: SideHit) {
         match hit {
-            SideHit::Agent(name) => self.complete(Chip::Agent(name)),
+            SideHit::Agent(name) => self.agent_menu(name),
             SideHit::Channel(name) => {
                 let names = self.strip_names();
                 if names.contains(&name) {

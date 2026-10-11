@@ -14,6 +14,10 @@
 //!   not in), Delete channel.
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
 //!   channel, typed in the compose box.
+//! - an agent's row in the left column: Address @Name (puts `@Name ` in
+//!   the compose box), Who is this (what `/whois` says, or what the chat
+//!   knows of one that is not live), and Remove from #channel when the
+//!   shown channel lists the agent, live or quiet.
 //!
 //! Every item that drops something asks first: Clear view, Clear history,
 //! Leave and Delete channel. `y` goes ahead, any other key keeps things as
@@ -25,6 +29,9 @@
 
 use agent_theme::ColorDepth;
 use agent_tui::Open;
+
+use crate::chip::Seen;
+use crate::peers::Peer;
 
 use super::keys::{self, EnterAction};
 use super::ChatPane;
@@ -47,6 +54,9 @@ pub(super) const MOUSE_ON: &str = "Mouse on at start";
 pub(super) const MOUSE_OFF: &str = "Mouse off at start";
 pub(super) const SETTINGS: &str = "Settings…";
 pub(super) const HIDE_COLUMN: &str = "Hide column";
+pub(super) const ADDRESS: &str = "Address";
+pub(super) const WHO: &str = "Who is this";
+pub(super) const REMOVE_FROM: &str = "Remove from";
 pub(super) const SHOW_COLUMN: &str = "Show column";
 
 /// The keybinding presets: a label, then the `attend.chat.tabs.*` values.
@@ -68,8 +78,54 @@ pub(super) enum Pending {
     ClearHistory(String),
     /// Delete the channel (`/dissolve`).
     Delete(String),
+    /// Take a member out of the channel (`/kick`).
+    Remove(String, Member),
     /// Quit: Esc where the terminal sends Ctrl+3 as Esc.
     Quit,
+}
+
+/// A channel member a Remove can take out: its membership id, the name the
+/// status line uses, whether it is live, and a claude's root, where the
+/// notice of its removal goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Member {
+    pub id: String,
+    pub label: String,
+    pub live: bool,
+    pub root: Option<String>,
+}
+
+impl Member {
+    /// How a picker lists it: a member that is not live says so.
+    pub fn option(&self) -> String {
+        if self.live {
+            self.label.clone()
+        } else {
+            format!("{} (quiet)", self.label)
+        }
+    }
+}
+
+/// The members `ids` of a channel, in its order, named as the chat names
+/// them: a live peer by its roster name, one the chat has seen by the
+/// column's name, and any other by its id.
+pub(super) fn members(ids: &[String], roster: &[Peer], seen: &[Seen]) -> Vec<Member> {
+    ids.iter()
+        .map(|id| {
+            if let Some(p) = roster.iter().find(|p| p.session_id == *id) {
+                return Member { id: id.clone(), label: p.display.clone(), live: true, root: Some(p.root.clone()) };
+            }
+            match seen.iter().find(|s| s.member == *id) {
+                Some(s) => Member {
+                    id: id.clone(),
+                    label: s.identity.nickname.clone(),
+                    live: s.live,
+                    root: s.identity.is_claude.then(|| attend_presence::session::normalize_origin(&s.identity.cwd)),
+                },
+                None => Member { id: id.clone(), label: id.clone(), live: false, root: None },
+            }
+        })
+        .collect()
 }
 
 /// What the compose box is lent to, and the draft it held before.
@@ -102,6 +158,7 @@ impl ChatPane {
                     format!("clear #{c} history? deletes what every live agent has read, older than 90 s · y clears · any other key keeps it")
                 }
                 Pending::Delete(c) => format!("delete #{c} and its history? y deletes · any other key keeps it"),
+                Pending::Remove(c, m) => format!("remove @{} from #{c}? y removes · any other key keeps them", m.label),
                 Pending::Quit => "quit? y quits · any other key stays · Ctrl-C quits at once".into(),
             });
         }
@@ -218,6 +275,9 @@ impl ChatPane {
         if let Some(c) = id.strip_prefix("menu:") {
             return self.item(c, value);
         }
+        if let Some(name) = id.strip_prefix("agent:") {
+            return self.agent_item(name, value);
+        }
         // A peer from Invite agent or Remove agent: the label's first word is
         // the display name the commands resolve.
         let peer = value.split_whitespace().next().unwrap_or(value).to_string();
@@ -228,8 +288,62 @@ impl ChatPane {
                 self.say(said, false);
             }
         } else if let Some(c) = id.strip_prefix("remove:") {
-            self.run("kick", SlashOutcome::Kick { member: peer, channel: Some(c.into()) });
+            if let Some(m) = self.removable.iter().find(|m| m.option() == value).cloned() {
+                self.pending = Some(Pending::Remove(c.into(), m));
+            }
         }
+    }
+
+    /// The menu of an agent's row in the left column.
+    pub(super) fn agent_menu(&mut self, name: String) {
+        self.dirty = true;
+        let mut options = vec![format!("{ADDRESS} @{name}"), WHO.to_string()];
+        self.removable.clear();
+        if let Tab::Channel(c) = self.normal_tab() {
+            let id = self.world().seen.iter().find(|s| s.identity.nickname == name).map(|s| s.member.clone());
+            if let Some(m) = self.channel_members(&c).into_iter().find(|m| Some(&m.id) == id.as_ref()) {
+                options.push(format!("{REMOVE_FROM} #{c}"));
+                self.removable = vec![m];
+            }
+        }
+        self.open = Some(Open::Pick { id: format!("agent:{name}"), title: format!("@{name}"), options, multi: false, chosen: Vec::new() });
+    }
+
+    fn agent_item(&mut self, name: &str, item: &str) {
+        if item.starts_with(ADDRESS) {
+            self.complete(super::Chip::Agent(name.into()));
+        } else if item == WHO {
+            self.whois(name);
+        } else if let Some(c) = item.strip_prefix(REMOVE_FROM).map(|c| c.trim().trim_start_matches('#').to_string()) {
+            if let Some(m) = self.removable.first().cloned() {
+                self.pending = Some(Pending::Remove(c, m));
+            }
+        }
+    }
+
+    /// Who an agent of the column is: `/whois` for a live claude, and what
+    /// the chat knows of the rest, which `/whois` cannot resolve.
+    fn whois(&mut self, name: &str) {
+        let Some(s) = self.world().seen.iter().find(|s| s.identity.nickname == name).cloned() else {
+            return self.say(format!("@{name}: not in the column any more"), true);
+        };
+        if s.identity.is_claude && s.live {
+            self.run("whois", SlashOutcome::Whois(name.into()));
+            return;
+        }
+        let said = if s.identity.is_claude {
+            format!("@{name} — session {} · root {} · quiet: no heartbeat", s.member, attend_presence::session::normalize_origin(&s.identity.cwd))
+        } else {
+            format!("@{name} — a human · from {} · {}", s.identity.cwd, if s.live { "here" } else { "away" })
+        };
+        self.say(said, false);
+    }
+
+    /// The members of `channel`, from its membership: live or not.
+    fn channel_members(&mut self, channel: &str) -> Vec<Member> {
+        let ids = attend_groups::load_groups(&crate::signal::signals_base()).get(channel).map(|e| e.members.clone()).unwrap_or_default();
+        let roster = crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new());
+        members(&ids, &roster, &self.world().seen)
     }
 
     fn item(&mut self, channel: &str, item: &str) {
@@ -252,17 +366,19 @@ impl ChatPane {
         }
     }
 
-    /// The live peers not in `channel` (add), or the agents in it (remove).
+    /// The live peers not in `channel` (add), or every member of it, live
+    /// or quiet (remove): a quiet member is removed by its membership id.
     fn peer_menu(&mut self, channel: &str, add: bool) {
-        let members = attend_groups::load_groups(&crate::signal::signals_base()).get(channel).map(|e| e.members.clone()).unwrap_or_default();
-        let roster = crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new());
-        let options: Vec<String> = roster
-            .iter()
-            .filter(|p| members.contains(&p.session_id) != add)
-            .map(|p| p.display.clone())
-            .collect();
+        let options: Vec<String> = if add {
+            let members = attend_groups::load_groups(&crate::signal::signals_base()).get(channel).map(|e| e.members.clone()).unwrap_or_default();
+            let roster = crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new());
+            roster.iter().filter(|p| !members.contains(&p.session_id)).map(|p| p.display.clone()).collect()
+        } else {
+            self.removable = self.channel_members(channel);
+            self.removable.iter().map(Member::option).collect()
+        };
         if options.is_empty() {
-            let what = if add { "no live agent outside" } else { "no live agent in" };
+            let what = if add { "no live agent outside" } else { "no member in" };
             return self.say(format!("{what} #{channel}"), true);
         }
         let (id, title) = if add { (format!("invite:{channel}"), format!("invite to #{channel}")) } else { (format!("remove:{channel}"), format!("remove from #{channel}")) };
@@ -371,6 +487,13 @@ impl ChatPane {
             Pending::Delete(c) => {
                 self.run("dissolve", SlashOutcome::Dissolve(Some(c)));
             }
+            Pending::Remove(c, m) => {
+                if self.dry_run {
+                    self.say("dry run: /kick not run", false);
+                } else {
+                    self.apply(keys::kick_member(&c, &m.id, &m.label, m.root.as_deref()));
+                }
+            }
         }
         false
     }
@@ -384,7 +507,14 @@ impl ChatPane {
             return true;
         }
         let fg = self.normal_tab();
-        let ok = match keys::run_slash(outcome, &fg) {
+        let action = keys::run_slash(outcome, &fg);
+        self.apply(action)
+    }
+
+    /// Show what a command did, and read the settings and the world again.
+    /// True when it succeeded.
+    fn apply(&mut self, action: EnterAction) -> bool {
+        let ok = match action {
             EnterAction::None => true,
             EnterAction::ClearWithStatus(s) => {
                 self.say(s, false);
@@ -426,6 +556,29 @@ mod tests {
         assert_eq!(items(Some("open"), true), [CLEAR_VIEW, CLEAR_HISTORY], "the harmless item first");
         assert_eq!(items(Some("deploy"), true), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE]);
         assert_eq!(items(Some("deploy"), false), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, JOIN, DELETE], "Join to a non-member");
+    }
+
+    fn seen(name: &str, member: &str, live: bool, claude: bool) -> Seen {
+        let identity = crate::chip::KnownIdentity {
+            nickname: name.into(),
+            cwd: format!("/work/{name}"),
+            is_claude: claude,
+            palette: agent_identity::Identity::for_cwd("/w", ColorDepth::Ansi16).palette,
+            style: Default::default(),
+        };
+        Seen { identity, live, member: member.into() }
+    }
+
+    #[test]
+    fn a_channels_members_are_listed_live_or_quiet() {
+        let roster = [Peer { session_id: "s1".into(), root: "/work/a".into(), display: "Ada-x".into() }];
+        let seen = [seen("Bo", "s2", false, true), seen("cy", "cy", true, false)];
+        let ids: Vec<String> = ["s1", "s2", "cy", "s9"].iter().map(|s| s.to_string()).collect();
+        let m = members(&ids, &roster, &seen);
+        let options: Vec<String> = m.iter().map(Member::option).collect();
+        assert_eq!(options, ["Ada-x", "Bo (quiet)", "cy", "s9 (quiet)"], "a quiet member is listed, by the column's name");
+        assert_eq!(m[1].root.as_deref(), Some("/work/Bo"), "a quiet claude is still told");
+        assert_eq!(m[2].root, None, "a human has no inbox");
     }
 
     #[test]

@@ -88,6 +88,9 @@ where
 pub struct Seen {
     pub identity: KnownIdentity,
     pub live: bool,
+    /// The id a channel's membership holds for it: a claude's session id,
+    /// a human's sanitized username (ADR-170).
+    pub member: String,
 }
 
 /// Every identity the chat has seen, live or not: the senders of the
@@ -112,27 +115,28 @@ where
     // also capture its most-recent-seen position.
     let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut out: Vec<Seen> = Vec::new();
-    let mut note = |key: String, identity: KnownIdentity, live: bool, out: &mut Vec<Seen>| match at.get(&key) {
+    let mut note = |key: String, identity: KnownIdentity, live: bool, member: String, out: &mut Vec<Seen>| match at.get(&key) {
         Some(&i) => out[i].live |= live,
         None => {
             at.insert(key, out.len());
-            out.push(Seen { identity, live });
+            out.push(Seen { identity, live, member });
         }
     };
     for sig in signals.iter().rev() {
-        let (primary_label, is_claude, id, live) = if let Some(sid) = sig.from.strip_prefix("claude:") {
+        let (primary_label, is_claude, id, live, member) = if let Some(sid) = sig.from.strip_prefix("claude:") {
             let id = Identity::for_cwd(&sig.cwd, caps);
             // Instance suffix: `@Tamsin-alpha` is the addressable name
             // — same-cwd siblings differ on the suffix and dedupe as
             // distinct entries in the legend.
             let display = with_instance(id.nickname, &sig.cwd, sid, instances);
-            (display, true, id, claude_live(sid))
+            (display, true, id, claude_live(sid), sid.to_string())
         } else if let Some(rest) = sig.from.strip_prefix("external:") {
             let username = rest.split('@').next().unwrap_or(rest).to_string();
             let scope = agent_identity::cwd_basename(&sig.cwd);
             let id = Identity::for_user(&username, &scope, caps);
             let live = human_live(&username);
-            (username, false, id, live)
+            let member = agent_identity::sanitize_id_component(&username);
+            (username, false, id, live, member)
         } else {
             continue; // unknown prefix — don't pollute the legend
         };
@@ -152,7 +156,7 @@ where
             format!("{}\x1f0", primary_label)
         };
         let identity = KnownIdentity { nickname: primary_label, cwd: sig.cwd.clone(), is_claude, palette: id.palette, style: id.style };
-        note(key, identity, live, &mut out);
+        note(key, identity, live, member, &mut out);
     }
 
     // Seed from discovered sessions — any claude cwd we haven't
@@ -165,7 +169,7 @@ where
         let display = with_instance(id.nickname, &seed.cwd, &seed.session_id, instances);
         let key = format!("{}\x1f1\x1f{}", display, seed.cwd);
         let identity = KnownIdentity { nickname: display, cwd: seed.cwd.clone(), is_claude: true, palette: id.palette, style: id.style };
-        note(key, identity, claude_live(&seed.session_id), &mut out);
+        note(key, identity, claude_live(&seed.session_id), seed.session_id.clone(), &mut out);
     }
     out
 }

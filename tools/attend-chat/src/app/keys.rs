@@ -518,12 +518,23 @@ fn run_kick(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAct
         Ok(p) => p,
         Err(e) => return EnterAction::StatusOnly(e),
     };
-    let action = kick_member_in(&signals_base(), &g, &peer.session_id, &peer.display);
-    if matches!(action, EnterAction::ClearWithStatus(_)) {
+    kick_member(&g, &peer.session_id, &peer.display, Some(&peer.root))
+}
+
+/// Remove the member `id` from channel `g`, named `label` on the status
+/// line, live or not: the menus reach a quiet member through its
+/// membership id, where `/kick @name` resolves only live peers. A claude
+/// with a `root` is told in its inbox, which it reads when it next runs.
+pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterAction {
+    if g == BASE_CHANNEL_NAME {
+        return EnterAction::StatusOnly("#open is the base channel — you can't kick from it".into());
+    }
+    let action = kick_member_in(&signals_base(), g, id, label);
+    if let (EnterAction::ClearWithStatus(_), Some(root)) = (&action, root) {
         let notice = format!(
             "you were removed from #{g} by the operator — rejoin with: attend join {g}"
         );
-        let _ = write_signal(&cwd_dir(&peer.root), &notice);
+        let _ = write_signal(&cwd_dir(root), &notice);
     }
     action
 }
