@@ -474,10 +474,17 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let Scan { mut delivered, mark, note } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
     delivered.sort_by_key(|d| d.mtime);
 
-    if delivered.is_empty() && note.is_none() {
-        // Empty drain: reset the re-entry counter (this boundary chain
-        // is ending) and say nothing in hook mode so the turn ends —
-        // the termination property the re-entry design leans on.
+    // The cold start is this conduit's first contact with the session, so
+    // it names the session: a drain-only session (enrolled by a join) has
+    // no startup banner to learn its name from.
+    let me = baselining.then(|| crate::cmd::whoami::display_name(&ident));
+
+    if delivered.is_empty() {
+        // Nothing delivered: reset the re-entry counter (this boundary
+        // chain is ending) and let the turn end. At most the cold start's
+        // held-back note goes out, and it goes non-blocking, so it never
+        // forces a turn — the termination property the re-entry design
+        // leans on.
         reset_drain_rounds(&session_id);
         // A cold start must still persist the (possibly empty) baseline,
         // or the next drain re-baselines and swallows what arrived in
@@ -487,8 +494,18 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         } else {
             store.mark_seen(mark);
         }
-        if !hook_mode {
-            println!("no pending messages");
+        if hook_mode {
+            if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref()) {
+                println!("{out}");
+            }
+        } else {
+            match &note {
+                Some(note) => println!("{note}"),
+                None => println!("no pending messages"),
+            }
+            if let Some(me) = &me {
+                println!("you are {me}");
+            }
         }
         return;
     }
@@ -498,16 +515,10 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // tolerates — at-least-once. The reverse order would mark messages
     // consumed with no conduit having shown them: loss on BOTH conduits,
     // since the sensor imports drain marks (PR #385 review, finding 2).
-    // The cold start is this conduit's first contact with the session, so
-    // it names the session: a drain-only session (enrolled by a join) has
-    // no startup banner to learn its name from.
-    let me = baselining.then(|| crate::cmd::whoami::display_name(&ident));
     if hook_mode {
-        let reason = render_drain_reason(&delivered, note.as_deref(), me.as_deref());
-        println!(
-            "{{\"decision\": \"block\", \"reason\": \"{}\"}}",
-            json_escape(&reason)
-        );
+        if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref()) {
+            println!("{out}");
+        }
     } else {
         for d in &delivered {
             println!("[{}] {}", d.scope, d.sender);
@@ -544,6 +555,21 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     }
     #[cfg(not(feature = "sensor-peers"))]
     let _ = cwd;
+}
+
+/// The Stop-hook JSON for one drain, or `None` to print nothing and let the
+/// turn end. Delivered messages block the stop (`decision: block`), which
+/// injects them into a continued turn. A held-back note with nothing
+/// delivered goes as a `systemMessage`, which Claude Code shows without
+/// blocking: blocking on it alone forced an extra turn over messages the
+/// session need not read, and read as an error.
+fn hook_output(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&str>) -> Option<String> {
+    if delivered.is_empty() {
+        let text = render_drain_reason(delivered, Some(note?), me);
+        return Some(format!("{{\"systemMessage\": \"{}\"}}", json_escape(&text)));
+    }
+    let reason = render_drain_reason(delivered, note, me);
+    Some(format!("{{\"decision\": \"block\", \"reason\": \"{}\"}}", json_escape(&reason)))
 }
 
 /// The injected turn-continuation text. Sober and contract-preserving:
@@ -862,7 +888,7 @@ mod drain_tests {
         let Scan { delivered, mark, note } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
-        assert_eq!(note.as_deref(), Some("1 earlier message not shown; attend inbox"));
+        assert_eq!(note.as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -960,9 +986,27 @@ mod drain_tests {
     /// "0 peer message(s) delivered" header.
     #[test]
     fn note_only_reason_is_the_note() {
-        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 earlier messages not shown; attend inbox"), None);
-        assert!(reason.starts_with("[attend] 3 earlier messages not shown; attend inbox"), "{reason}");
+        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend inbox"), None);
+        assert!(reason.starts_with("[attend] 3 older messages held back; reading them is optional: attend inbox"), "{reason}");
         assert!(!reason.contains("0 peer message"), "{reason}");
+    }
+
+    /// A held-back note with nothing delivered must not block the stop: it
+    /// goes as a systemMessage, so the turn ends.
+    #[test]
+    fn note_only_hook_output_does_not_block() {
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend inbox"), None).unwrap();
+        assert!(out.starts_with("{\"systemMessage\": \"[attend] 3 older messages held back"), "{out}");
+        assert!(!out.contains("decision"), "{out}");
+    }
+
+    #[test]
+    fn delivered_messages_block_and_an_empty_drain_prints_nothing() {
+        let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();
+        let out = hook_output(&msgs, Some("1 older message held back; reading it is optional: attend inbox"), None).unwrap();
+        assert!(out.starts_with("{\"decision\": \"block\""), "{out}");
+        assert!(out.contains("held back"), "the note rides the delivery: {out}");
+        assert_eq!(hook_output(&[] as &[FakeMsg], None, Some("Chaucer")), None);
     }
 
     #[test]

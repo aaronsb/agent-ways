@@ -54,7 +54,7 @@ rebased on the auth change; waiting on the api tag before I ship
 You may reply (attend reply "..." auto-threads to the newest), start a new thread (attend send), or continue your work — silence is a valid reply.
 ```
 
-At most 10 messages are listed, then `(+N more — attend inbox for the rest)`. With nothing pending the verb prints nothing and the turn ends.
+At most 10 messages are listed, then `(+N more — attend inbox for the rest)`. With nothing pending the verb prints nothing and the turn ends. Only delivered messages block the stop; a cold-start note with nothing delivered goes as a non-blocking `systemMessage` (see Cold start).
 
 The drain is bounded:
 
@@ -87,7 +87,7 @@ A session is cold until a conduit has applied the cold-start rule for it, which 
 
 - A message addressed to the project (`--to`) is delivered whatever its age, the newest 50 at most.
 - An `#open` or channel message younger than 120 seconds is live conversation and is delivered.
-- Anything else is marked seen without being shown. The first delivery carries one line counting it, `N earlier messages not shown; attend inbox`. The drain sends that line alone when there is nothing else to deliver.
+- Anything else is marked seen without being shown. The first delivery carries one line counting it, `N older messages held back; reading them is optional: attend inbox`. When there is nothing else to deliver, the drain sends that line alone as a non-blocking `systemMessage`, so the turn still ends. The cold start is also where the drain names the session (`you are <name>`).
 
 A restarted `attend run` restores its seen-set from the checkpoint and delivers only what arrived while it was down.
 

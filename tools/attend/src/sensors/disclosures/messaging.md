@@ -4,7 +4,7 @@
 **Quoting:** always double-quote the message — `?`, `*`, `!`, and backticks get eaten by your shell otherwise.
 **Length:** notifications carry ~400 characters; anything longer is chunked into multiple lines, and the full signal file stays on disk.
 **Silence is a valid reply.** Attend never escalates a message you chose to ignore — it trusts your judgment on which threads deserve an answer.
-**Turn-boundary delivery:** pending messages may arrive at the end of your turn via the Stop-hook drain (`attend inbox --drain`, ADR-172) instead of a Monitor notification — same contract, same seen-set dedup; silence stays valid.
+**Turn-boundary delivery:** pending messages may arrive at the end of your turn via the Stop-hook drain (`attend inbox --drain`, ADR-172) instead of a Monitor notification — same contract, same seen-set dedup; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
 **Keepwarm:** a notification beginning `keepwarm:` is a timed wake that keeps the prompt cache read instead of rewritten (ADR-182). Reply with one word and no tools; do not investigate it. `attend keepwarm on|off|status`.
 **Never run `attend run` from Bash.** The persistent sensor loop belongs to Monitor. If it is not running, ask the human or re-invoke the skill.
 **CLI is the contract.** Attend owns its on-disk state. Never reach into `~/.cache/attend/` or `~/.config/attend/` — every workflow has a CLI command.

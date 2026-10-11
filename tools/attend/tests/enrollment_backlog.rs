@@ -12,7 +12,7 @@ use std::time::Duration;
 
 const ADDRESSED: &str = "addressed ten minutes ago";
 const OLD_OPEN: &str = "open ten minutes ago";
-const NOTE: &str = "1 earlier message not shown; attend inbox";
+const NOTE: &str = "1 older message held back; reading it is optional: attend inbox";
 
 fn with_backlog(tag: &str) -> Fixture {
     let f = Fixture::new(tag);
@@ -35,6 +35,23 @@ fn join_then_drain_delivers_addressed_and_announces_the_rest() {
     assert_eq!(hook_again, "", "nothing is delivered twice");
     // The backlog is still there to read on demand.
     assert!(f.ok(&["inbox"]).contains(OLD_OPEN));
+}
+
+/// A cold start with only backlog to report delivers nothing, so it must
+/// not block the stop: the note goes as a non-blocking systemMessage, and
+/// it names the session on this first contact.
+#[test]
+fn a_note_alone_does_not_block_the_stop() {
+    let f = Fixture::new("backlog-note-only");
+    f.put("_broadcast", "other-1-open", OLD_OPEN, 10 * MINUTE);
+    f.ok(&["join", "side"]);
+
+    let hook = f.drain_hook_with("{}");
+    assert!(hook.starts_with("{\"systemMessage\": "), "non-blocking: {hook}");
+    assert!(!hook.contains("\"decision\""), "must not block: {hook}");
+    assert!(hook.contains(NOTE), "the note: {hook}");
+    assert!(hook.contains("(you are "), "first contact names the session: {hook}");
+    assert_eq!(f.drain_hook_with("{}"), "", "the note goes out once");
 }
 
 #[test]
@@ -76,6 +93,6 @@ fn a_drain_before_the_sensor_scans_applies_the_rule() {
     run.wait_for("the sensor's first checkpoint", Duration::from_secs(10), |_| f.state_file(&f.sid).exists());
     let hook = f.drain_hook_with("{}");
     assert!(hook.contains("50 peer message(s)"), "the 50 cap: {hook}");
-    assert!(hook.contains("8 earlier messages not shown; attend inbox"), "the note: {hook}");
+    assert!(hook.contains("8 older messages held back; reading them is optional: attend inbox"), "the note: {hook}");
     assert!(!hook.contains("old open"), "old #open is held back: {hook}");
 }

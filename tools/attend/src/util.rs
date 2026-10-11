@@ -140,11 +140,7 @@ pub(crate) fn brief_invited_room(groups: &groups::Groups, name: &str) -> String 
 
 /// What a join prints after its line for the backlog it did not hand over.
 pub(crate) fn backlog_note(n: usize) -> String {
-    match n {
-        0 => String::new(),
-        1 => " (1 earlier message not shown; attend inbox)".to_string(),
-        n => format!(" ({n} earlier messages not shown; attend inbox)"),
-    }
+    attend_state::cold_start::held_back_note(n).map(|note| format!(" ({note})")).unwrap_or_default()
 }
 
 /// After this session's channels changed: a session in no channel any more
