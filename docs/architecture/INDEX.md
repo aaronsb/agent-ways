@@ -120,6 +120,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-402](./attend/ADR-402-claude-code-channels-deliver-mcp-server-events-into-the-model-s-turn-and-wake-an-idle-session.md) | Claude Code channels deliver MCP server events into the model's turn and wake an idle session | accepted |
 | [ADR-403](./attend/ADR-403-attend-hosts-sensors-under-one-spec-compiled-command-and-mcp-sensors-in-yaml-files.md) | Attend hosts sensors under one spec: compiled, command and MCP sensors in YAML files | proposed |
 | [ADR-404](./attend/ADR-404-channel-membership-and-history-are-managed-by-any-member-with-scopes-seals-and-an-operator-view.md) | Channel membership and history are managed by any member, with scopes, seals and an operator view | accepted |
+| [ADR-405](./attend/ADR-405-one-click-on-a-channel-selects-it-and-opens-its-menu-and-the-chat-s-left-column-lists-agents-and-channels.md) | One click on a channel selects it and opens its menu, and the chat's left column lists agents and channels | proposed |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_
@@ -158,6 +159,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-506](./platform/ADR-506-the-consolidation-ends-with-no-legacy-compatibility.md) | The consolidation ends with no legacy compatibility | accepted |
 | [ADR-507](./platform/ADR-507-the-ways-commands-regroup-into-operator-commands-and-six-groups-names-another-process-calls-stay-fixed.md) | The ways commands regroup into operator commands and six groups; names another process calls stay fixed | accepted |
 | [ADR-508](./platform/ADR-508-the-live-fixture-runs-locally-its-github-workflow-runs-on-manual-dispatch-only.md) | The live fixture runs locally; its GitHub workflow runs on manual dispatch only | accepted |
+| [ADR-509](./platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md) | Lifecycle commands sit under one ways manage group; the updater's reconcile stays a hidden fixed name | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_
