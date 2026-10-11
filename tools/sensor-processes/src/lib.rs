@@ -108,9 +108,8 @@ fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64, hosted_e
 struct Proc {
     pid: u32,
     ppid: u32,
-    /// The process's start time in seconds, from `lstart`. Compared within
-    /// [`START_TOLERANCE_SECS`], so a pid reused by a later process reads
-    /// as a different process. `None` when `ps` cannot print `lstart`.
+    /// The process's start time in seconds, from `lstart`. `None` when
+    /// `ps` cannot print `lstart`.
     start: Option<i64>,
     comm: String,
 }
@@ -120,26 +119,60 @@ struct Proc {
 const PS_COLUMNS: &str = "pid=,ppid=,lstart=,comm=";
 /// The columns for a `ps` that cannot print `lstart`, such as busybox's.
 const PS_COLUMNS_NO_START: &str = "pid=,ppid=,comm=";
-const PS_ENV: (&str, &str) = ("LC_ALL", "C");
+/// The environment `ps` runs in. `LC_ALL=C` prints `lstart` as five fixed
+/// words. `TZ=UTC0` prints it in UTC, so a change of the host's time zone
+/// does not move it.
+const PS_ENV: &[(&str, &str)] = &[("LC_ALL", "C"), ("TZ", "UTC0")];
 
-/// How far apart two reads of one process's start time can be. `ps`
-/// derives `lstart` from the wall clock at each read, so a clock step or
-/// a rounding edge moves it by a second or two. The kernel hands a pid
-/// out again only after the pid space wraps, which takes far longer.
+/// How far apart two `lstart` reads of one process can be. `ps` derives
+/// `lstart` from the wall clock at each read, so a rounding edge moves it
+/// by a second, and a clock step moves it by the size of the step. A step
+/// within this tolerance does not end a running tool. A larger step reads
+/// as a restart, and the tool reports a finish: a known limit where only
+/// `lstart` is read. On Linux a tool's start is read in clock ticks since
+/// boot instead (see [`start_ticks`]), which no clock step moves.
 const START_TOLERANCE_SECS: i64 = 2;
 
-/// Do two start times name the same process? Without both, only the pid
-/// and name tell processes apart, so any start matches.
-fn same_start(a: Option<i64>, b: Option<i64>) -> bool {
-    match (a, b) {
-        (Some(a), Some(b)) => (a - b).abs() <= START_TOLERANCE_SECS,
+/// Is `now` the same run of a tool as `prior`? The start ticks are
+/// compared exactly when both reads have them, otherwise the `lstart`
+/// seconds within [`START_TOLERANCE_SECS`]. Without either, only the pid
+/// and name tell runs apart, so any start matches.
+fn same_start(prior: &Tool, now: &Tool) -> bool {
+    match (prior.ticks, now.ticks, prior.start, now.start) {
+        (Some(a), Some(b), _, _) => a == b,
+        (_, _, Some(a), Some(b)) => (a - b).abs() <= START_TOLERANCE_SECS,
         _ => true,
     }
 }
 
+/// A process's start time in clock ticks since boot, field 22 of
+/// `/proc/<pid>/stat`. The kernel records it once, at the fork, so no
+/// clock step or time zone change moves it, and a reused pid reads a new
+/// value. `None` when the process is gone or the file does not parse.
+#[cfg(target_os = "linux")]
+fn start_ticks(pid: u32) -> Option<u64> {
+    parse_stat_start_ticks(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
+/// Outside Linux there is no `/proc/<pid>/stat`, and `lstart` alone
+/// tells runs apart.
+#[cfg(not(target_os = "linux"))]
+fn start_ticks(_pid: u32) -> Option<u64> {
+    None
+}
+
+/// Field 22 of a `/proc/<pid>/stat` line. Field 2 is the command name in
+/// parentheses and can hold spaces and parentheses itself, so the fields
+/// are counted from after the last `)`, where field 3 begins.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_stat_start_ticks(stat: &str) -> Option<u64> {
+    let (_, rest) = stat.rsplit_once(')')?;
+    rest.split_whitespace().nth(22 - 3)?.parse().ok()
+}
+
 /// `lstart` words, such as `Sat Oct 10 22:18:30 2026`, as seconds since
-/// the epoch, read as UTC. The local offset is the same in every read, so
-/// a difference between two reads is exact.
+/// the epoch. `ps` runs with `TZ=UTC0` ([`PS_ENV`]), so the words are UTC
+/// and are read as UTC.
 fn parse_lstart(words: &[&str]) -> Option<i64> {
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let [_, month, day, time, year] = words else { return None };
@@ -253,9 +286,12 @@ const MAX_ANCESTRY: usize = 16;
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Tool {
     name: String,
-    /// The tool's start time, so a pid reused by a same-name process is
-    /// told apart from the run that held it.
+    /// The tool's start time from `lstart`, so a pid reused by a same-name
+    /// process is told apart from the run that held it.
     start: Option<i64>,
+    /// The tool's start in clock ticks since boot, on Linux. Compared
+    /// before `start` when both reads have it (see [`same_start`]).
+    ticks: Option<u64>,
     /// Apps (not themselves watched) running under this tool, such as
     /// `node` under `npm run dev` or `docker` under `make up`.
     hosts: HashSet<String>,
@@ -310,7 +346,7 @@ fn tally(procs: &[Proc], is_relevant: impl Fn(&str, &str) -> bool, is_watched: i
         let above = watched_above(p);
         if is_watched(&p.comm) {
             if above.is_empty() {
-                snap.tools.insert(p.pid, Tool { name: p.comm.clone(), start: p.start, hosts: HashSet::new() });
+                snap.tools.insert(p.pid, Tool { name: p.comm.clone(), start: p.start, ticks: None, hosts: HashSet::new() });
             }
             continue;
         }
@@ -456,8 +492,15 @@ impl ProcessSensor {
     /// reporting everything that changed during the outage. Apps are
     /// tracked by name, not by pid, so Chrome going from 47 to 49 renderers
     /// is not a change, and a watched tool under another watched tool is
-    /// left out (see [`tally`]).
-    fn observe(&mut self, rows: Option<Vec<Proc>>, focus: &Focus, now: u64) -> Vec<(f64, String)> {
+    /// left out (see [`tally`]). `ticks` reads a pid's start ticks, and is
+    /// asked only for the watched tools the poll tracks.
+    fn observe(
+        &mut self,
+        rows: Option<Vec<Proc>>,
+        ticks: impl Fn(u32) -> Option<u64>,
+        focus: &Focus,
+        now: u64,
+    ) -> Vec<(f64, String)> {
         let Some(rows) = rows else {
             self.failed_reads += 1;
             if self.failed_reads == 1 {
@@ -469,7 +512,10 @@ impl ProcessSensor {
         if failed > 0 {
             eprintln!("[attend] processes: ps reads again after {failed} failed poll(s)");
         }
-        let current = tally(&rows, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
+        let mut current = tally(&rows, |raw, c| Self::is_relevant(raw, c, focus), |c| self.is_watched(c));
+        for (pid, tool) in current.tools.iter_mut() {
+            tool.ticks = ticks(*pid);
+        }
         if !self.baseline_established || failed >= REBASELINE_AFTER {
             eprintln!("[attend] processes: baseline established ({} apps: {})",
                 current.apps.len(),
@@ -520,7 +566,7 @@ impl ProcessSensor {
         fresh.sort_by(|a, b| a.app.cmp(&b.app));
         exits.extend(fresh);
         let alive = |pid: &u32| {
-            tools.get(pid).is_some_and(|t| self.prior_tools.get(pid).is_some_and(|p| p.name == t.name && same_start(p.start, t.start)))
+            tools.get(pid).is_some_and(|t| self.prior_tools.get(pid).is_some_and(|p| p.name == t.name && same_start(p, t)))
         };
         let mut finished: Vec<(&u32, &Tool)> = self.prior_tools.iter().filter(|(pid, _)| !alive(pid)).collect();
         finished.sort_by_key(|(pid, _)| **pid);
@@ -604,13 +650,13 @@ impl Sensor for ProcessSensor {
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         let user = whoami();
-        let rows = self.read_ps(|columns| Command::new("ps").args(["-u", &user, "-o", columns]).env(PS_ENV.0, PS_ENV.1).output());
+        let rows = self.read_ps(|columns| Command::new("ps").args(["-u", &user, "-o", columns]).envs(PS_ENV.iter().copied()).output());
         self.refresh_marker();
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        self.observe(rows, focus, now)
+        self.observe(rows, start_ticks, focus, now)
     }
 
     fn emission_threshold(&self) -> f64 {
@@ -869,7 +915,7 @@ mod tests {
     }
 
     fn tool(name: &str, hosts: &[&str]) -> Tool {
-        Tool { name: name.into(), start: Some(T0_SECS), hosts: hosts.iter().map(|h| h.to_string()).collect() }
+        Tool { name: name.into(), start: Some(T0_SECS), ticks: None, hosts: hosts.iter().map(|h| h.to_string()).collect() }
     }
 
     #[test]
@@ -910,10 +956,10 @@ mod tests {
         // Without start times, a tool is told apart by pid and name.
         let focus = no_focus();
         let rows = |stdout: &str| Some(parse_ps(stdout, false));
-        assert!(s.observe(rows("  1  0 zsh\n  5  1 nvim\n"), &focus, 0).is_empty(), "baseline");
-        assert!(s.observe(rows("  1  0 zsh\n  5  1 nvim\n  10  1 cargo\n"), &focus, 0).is_empty());
-        assert!(s.observe(rows("  1  0 zsh\n  5  1 nvim\n  10  1 cargo\n"), &focus, 0).is_empty(), "still running");
-        assert_eq!(texts(&s.observe(rows("  1  0 zsh\n  5  1 nvim\n"), &focus, 0)), vec!["cargo finished"]);
+        assert!(s.observe(rows("  1  0 zsh\n  5  1 nvim\n"), no_ticks, &focus, 0).is_empty(), "baseline");
+        assert!(s.observe(rows("  1  0 zsh\n  5  1 nvim\n  10  1 cargo\n"), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows("  1  0 zsh\n  5  1 nvim\n  10  1 cargo\n"), no_ticks, &focus, 0).is_empty(), "still running");
+        assert_eq!(texts(&s.observe(rows("  1  0 zsh\n  5  1 nvim\n"), no_ticks, &focus, 0)), vec!["cargo finished"]);
     }
 
     /// A `ps` that prints `lstart` is read with it, and a read that fails
@@ -1085,8 +1131,10 @@ mod tests {
         assert_eq!(secs("Sat Oct 10 22:18:30"), None);
     }
 
-    /// A wall-clock step moves every `lstart` a little between reads; no
-    /// running tool reads as finished for it.
+    /// Where only `lstart` is read, a wall-clock step moves every start
+    /// between reads. A step within two seconds leaves a running tool
+    /// running; a larger one reads as a restart and reports a finish, a
+    /// known limit outside Linux.
     #[test]
     fn a_clock_step_does_not_finish_a_running_tool() {
         let rows = [ZSH, NVIM, (10, 1, "cargo")];
@@ -1100,6 +1148,63 @@ mod tests {
         let mut later = procs(&rows);
         later[2].start = Some(T0_SECS + 3);
         assert_eq!(texts(&s.diff(tally(&later, |_, c| c != "zsh", |c| s.is_watched(c)), 0)), vec!["cargo finished"]);
+    }
+
+    #[test]
+    fn ps_runs_in_the_c_locale_and_utc() {
+        assert!(PS_ENV.contains(&("LC_ALL", "C")));
+        assert!(PS_ENV.contains(&("TZ", "UTC0")));
+    }
+
+    #[test]
+    fn parse_stat_start_ticks_reads_field_22() {
+        let stat = "4242 (a (b) c) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 1000 10\n";
+        assert_eq!(parse_stat_start_ticks(stat), Some(987_654));
+        assert_eq!(parse_stat_start_ticks("4242 (cargo) S 1 2 3"), None, "too few fields");
+        assert_eq!(parse_stat_start_ticks("4242 cargo S 1"), None, "no command name");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn start_ticks_reads_this_process() {
+        let ticks = start_ticks(std::process::id());
+        assert!(ticks.is_some());
+        assert_eq!(start_ticks(std::process::id()), ticks);
+    }
+
+    /// One poll of a table where `cargo` (pid 10) started at `lstart` and
+    /// at `ticks` clock ticks since boot, as a Linux host reads it.
+    fn poll_with_ticks(s: &mut ProcessSensor, lstart: &str, ticks: u64) -> Vec<String> {
+        let table = format!("  1  0 {lstart} zsh\n  5  1 {lstart} nvim\n  10  1 {lstart} cargo\n");
+        let asked = std::cell::RefCell::new(Vec::new());
+        let read = |pid: u32| {
+            asked.borrow_mut().push(pid);
+            (pid == 10).then_some(ticks)
+        };
+        let seen = texts(&s.observe(Some(parse_ps(&table, true)), read, &no_focus(), 0));
+        assert_eq!(asked.into_inner(), vec![10], "ticks are read for the watched tools only");
+        seen
+    }
+
+    /// A time zone change or a clock step moves `lstart` but not the start
+    /// ticks, so a running tool keeps running.
+    #[test]
+    fn start_ticks_survive_a_time_zone_change_and_a_clock_step() {
+        let mut s = ProcessSensor::new();
+        assert!(poll_with_ticks(&mut s, T0, 4242).is_empty(), "baseline");
+        assert!(poll_with_ticks(&mut s, "Sat Oct 10 23:18:30 2026", 4242).is_empty(), "an hour on: a time zone change");
+        assert!(poll_with_ticks(&mut s, "Sat Oct 10 23:19:15 2026", 4242).is_empty(), "45 s on: a clock step");
+        assert!(poll_with_ticks(&mut s, "Sat Oct 10 21:00:00 2026", 4242).is_empty(), "a step back");
+    }
+
+    /// A pid reused by a new run of the same tool, started within the same
+    /// second, reads new ticks and reports the finish.
+    #[test]
+    fn a_pid_reused_with_new_ticks_reports_a_finish() {
+        let mut s = ProcessSensor::new();
+        assert!(poll_with_ticks(&mut s, T0, 4242).is_empty(), "baseline");
+        assert!(poll_with_ticks(&mut s, T0, 4242).is_empty(), "the same run");
+        assert_eq!(poll_with_ticks(&mut s, T0, 4290), vec!["cargo finished"]);
     }
 
     /// An app that exits while its tool keeps running is reported one poll
@@ -1179,11 +1284,11 @@ mod tests {
         let idle = procs(&[ZSH, NVIM]);
         let running = procs(&[ZSH, NVIM, (10, 1, "npm"), (11, 10, "node")]);
         let mut s = ProcessSensor::new();
-        assert!(s.observe(Some(idle), &focus, 0).is_empty(), "baseline");
-        assert!(s.observe(Some(running.clone()), &focus, 0).is_empty());
-        assert_eq!(texts(&s.observe(Some(running.clone()), &focus, 0)), vec!["node started"]);
-        assert!(s.observe(None, &focus, 0).is_empty(), "the failed read");
-        assert!(s.observe(Some(running), &focus, 0).is_empty(), "nothing restarted");
+        assert!(s.observe(Some(idle), no_ticks, &focus, 0).is_empty(), "baseline");
+        assert!(s.observe(Some(running.clone()), no_ticks, &focus, 0).is_empty());
+        assert_eq!(texts(&s.observe(Some(running.clone()), no_ticks, &focus, 0)), vec!["node started"]);
+        assert!(s.observe(None, no_ticks, &focus, 0).is_empty(), "the failed read");
+        assert!(s.observe(Some(running), no_ticks, &focus, 0).is_empty(), "nothing restarted");
     }
 
     /// A sensor whose `ps` failed `failures` times in a row while npm was
@@ -1192,14 +1297,14 @@ mod tests {
         let focus = no_focus();
         let running = procs(&[ZSH, NVIM, (10, 1, "npm"), (11, 10, "node")]);
         let mut s = ProcessSensor::new();
-        s.observe(Some(procs(&[ZSH, NVIM])), &focus, 0);
-        s.observe(Some(running.clone()), &focus, 0);
-        s.observe(Some(running), &focus, 0);
+        s.observe(Some(procs(&[ZSH, NVIM])), no_ticks, &focus, 0);
+        s.observe(Some(running.clone()), no_ticks, &focus, 0);
+        s.observe(Some(running), no_ticks, &focus, 0);
         for _ in 0..failures {
-            assert!(s.observe(None, &focus, 0).is_empty());
+            assert!(s.observe(None, no_ticks, &focus, 0).is_empty());
         }
-        let mut after = texts(&s.observe(Some(procs(&[ZSH, NVIM, (20, 1, "docker")])), &focus, 0));
-        after.extend(texts(&s.observe(Some(procs(&[ZSH, NVIM, (20, 1, "docker")])), &focus, 0)));
+        let mut after = texts(&s.observe(Some(procs(&[ZSH, NVIM, (20, 1, "docker")])), no_ticks, &focus, 0));
+        after.extend(texts(&s.observe(Some(procs(&[ZSH, NVIM, (20, 1, "docker")])), no_ticks, &focus, 0)));
         assert_eq!(s.failed_reads, 0);
         after.sort();
         after
@@ -1219,6 +1324,11 @@ mod tests {
     }
 
     // ── names as the host reports them ─────────────────────────────────
+
+    /// A start-ticks reader for a host with none, as outside Linux.
+    fn no_ticks(_pid: u32) -> Option<u64> {
+        None
+    }
 
     fn no_focus() -> Focus {
         Focus { description: String::new(), working_dir: String::new(), keywords: Vec::new() }
