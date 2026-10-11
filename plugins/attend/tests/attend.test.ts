@@ -59,6 +59,8 @@ type World = {
   drains?: string[]
   unread?: string
   keepwarm?: string
+  /** An attend without the `listen` verb. */
+  noListen?: boolean
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
@@ -84,6 +86,7 @@ function host(on: On, world: World) {
     argvs.push(argv)
     const cmd = argv.slice(1).join(' ')
     if (argv[0] === 'ways') return ok(configJson(world.config ?? {}))
+    if (cmd.startsWith('listen') && world.noListen) return { ...ok(), exitCode: 2, stderr: "error: unrecognized subcommand 'listen'" }
     if (cmd.startsWith('listen')) return ok(cmd === 'listen off' ? 'not listening\n' : 'listening\n')
     if (cmd === 'peers') return ok('...\n  3 agent(s), 0 channel(s)\n')
     if (cmd === 'unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
@@ -235,6 +238,18 @@ describe('dormant', () => {
     expect(full(h.submitted[0] ?? '')).toBe(true)
     expect(h.submitted[0]).toContain('[project] McKay-alpha (attend-collaborator) 21:21: m0')
     expect(await band($)).toBeDefined()
+  })
+
+  test('attend_listen says so when attend cannot set the session listening', async ($, on) => {
+    mock.clock(on, { now: T0 })
+    host(on, { noListen: true })
+    await $.session.start(INTERACTIVE)
+    const r = (await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)) as { result?: unknown; isError?: boolean }
+    expect(String(r.result)).toContain('could not set this session listening')
+    expect(String(r.result)).not.toContain('is listening')
+    const ui = await $.ui.mount(BAND as never)
+    expect(await ui.find({ text: /attend not listening/ } as never)).toBeDefined()
+    await ui.unmount()
   })
 
   test('a -p run in an active project stays dormant unless headless polling is allowed', async ($, on) => {

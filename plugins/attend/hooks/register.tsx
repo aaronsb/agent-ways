@@ -400,14 +400,18 @@ export const register: Register = on => {
   on('tool.call', { tool: 'mcp__attend__attend_listen' }, async $ => {
     const was = isActive(await readStatus($))
     const r = await activate($, mod)
-    const state = r.exitCode === 0 ? '' : `\nattend listen on failed (${r.exitCode}): ${r.stderr.trim()}`
+    const tools = ' attend_send, attend_reply, attend_join and attend_peers are available.'
+    if (r.exitCode !== 0) {
+      return {
+        result: `attend could not set this session listening, so no message will be delivered to it; the tools can still send.${tools}\nattend listen on failed (${r.exitCode}): ${r.stderr.trim()}`,
+        isError: true,
+      }
+    }
     const lead = was ? 'attend was already listening in this session.' : 'attend is listening for the rest of this session.'
     const poll = mod.canPoll
       ? ' Messages addressed to this project arrive as peer-data turns.'
       : ' This session does not poll (a -p or SDK run); messages arrive at the end of a turn.'
-    return {
-      result: `${lead}${poll} attend_send, attend_reply, attend_join and attend_peers are available.${state}`,
-    }
+    return { result: `${lead}${poll}${tools}` }
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_send' }, async ($, e) => {
