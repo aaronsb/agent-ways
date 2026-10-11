@@ -1088,7 +1088,9 @@ mod paste_tests {
     fn a_paste_drops_a_waiting_question_and_leaves_out_control_characters() {
         let mut c = ChatPane::new(None, Palette::default());
         c.pending = Some(menu::Pending::Leave("deploy".into()));
-        c.paste("yes\x1b[31m red\x07\tok\r\nnext");
+        // An escape sequence as a clipboard can carry one: ESC, then `[31m`.
+        let esc = char::from(0x1b);
+        c.paste(&format!("yes{esc}[31m red\x07\tok\r\nnext"));
         assert_eq!(c.pending, None, "the paste is typing, not an answer");
         assert_eq!(c.status, "kept");
         assert_eq!(c.input.text(), "yes[31m red\tok\nnext", "escape and bell dropped; tab and newline kept");
