@@ -31,7 +31,7 @@ Check that `attend` is installed:
 command -v attend
 ```
 
-If not found, tell the user to run `ways update` (or `make attend link` from the agent-ways app dir). Stop here.
+If not found, tell the user to run `ways manage update` (or `make attend link` from the agent-ways app dir). Stop here.
 
 ## Step 2: Launch via Monitor
 

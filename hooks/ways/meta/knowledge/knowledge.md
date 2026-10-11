@@ -45,7 +45,7 @@ Three way roots (ADR-143) — don't confuse *reading* one with *authoring* in it
 
 - **Framework ways (read-only projection):** `~/.claude/hooks/ways/{domain}/{wayname}/{wayname}.md`
   — a symlink into the app source at `$XDG_DATA_HOME/agent-ways`. Readable here, but
-  **don't author durably in it**: `ways update` pulls the app dir with an autostash, so edits there conflict with upstream. Change these in a dev checkout and reproject (see `docs/development.md`).
+  **don't author durably in it**: `ways manage update` pulls the app dir with an autostash, so edits there conflict with upstream. Change these in a dev checkout and reproject (see `docs/development.md`).
 - **Your own ways (user scope, survives updates):** `$XDG_CONFIG_HOME/agent-ways/ways/{domain}/{wayname}/{wayname}.md`
 - **Project ways:** `$PROJECT/.claude/ways/{domain}/{wayname}/{wayname}.md` — override global ways at the same path
 - Disable domains: `$XDG_CONFIG_HOME/agent-ways/config.yaml` → `disabled_domains: [domain]`
