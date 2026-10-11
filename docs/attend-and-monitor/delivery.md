@@ -31,7 +31,7 @@ flowchart TD
 [attend sensor=peers priority=high] message from Elio (web): rebased on the auth change; waiting on the api tag
 ```
 
-The sender label is the persona name and the basename of the sender's directory, the same label the drain and attend-chat show. A body longer than 260 characters is split at word boundaries into at most three lines marked `(1/3)`, `(2/3)`, `(3/3)`, which stays under Monitor's line limit; `attend inbox` holds the full text. The first message a session receives carries the hint `(reply: attend send <msg>)`.
+The sender label is the persona name and the basename of the sender's directory, the same label the drain and attend-chat show. A body longer than 260 characters is split at word boundaries into at most three lines marked `(1/3)`, `(2/3)`, `(3/3)`, which stays under Monitor's line limit; `attend inbox` holds the full text. The first message a session receives carries the hint `(reply: attend reply "...")`, the verb that threads to it.
 
 When a single poll finds more than 8 messages, it sends one count line instead:
 
