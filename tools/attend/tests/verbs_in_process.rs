@@ -72,3 +72,42 @@ fn reply_reports_how_it_threaded() {
     assert_eq!(unthreaded.sent.re, None);
     assert_eq!(unthreaded.sent.failed.len(), 0);
 }
+
+/// A reply to a message said in a channel goes to that channel, not to
+/// `#open`; one to a message another session sent this project goes back to
+/// that session's project; a destination the caller names wins over both.
+#[test]
+fn a_reply_goes_where_its_parent_was_said() {
+    let f = Fixture::new("inproc-reply-route");
+    let _env = enter(&f);
+    attend::verbs::channels::join("mod-trial", false).expect("join");
+    attend_groups::Groups::new(&f.signals(), "peer-sess").join("mod-trial", false).unwrap();
+    attend_presence::heartbeat::touch("peer-sess").unwrap();
+
+    f.put("@mod-trial", "peer-sess-1-1", "in the channel", std::time::Duration::ZERO);
+    sensor_peers::last_inbound::record(&f.sid, "peer-sess-1-1");
+    let sent = reply("answered in the channel").expect("a reply into the channel").sent;
+    assert_eq!(sent.scope, "channel");
+    assert!(f.signals().join("@mod-trial").join(format!("{}.signal", sent.id)).is_file());
+    assert!(!f.signals().join("_broadcast").join(format!("{}.signal", sent.id)).exists());
+
+    // `put` writes as a session working in /tmp/elsewhere, where none is
+    // live, so the directed reply is refused naming that path.
+    f.put(&f.project_tray(), "peer-sess-1-2", "to your project", std::time::Duration::ZERO);
+    sensor_peers::last_inbound::record(&f.sid, "peer-sess-1-2");
+    match reply("answered in its project") {
+        Err(attend::verbs::SendError::NoPeerAt { path, .. }) => assert_eq!(path, "/tmp/elsewhere"),
+        other => panic!("expected a reply directed at the sender's project: {other:?}"),
+    }
+
+    sensor_peers::last_inbound::record(&f.sid, "peer-sess-1-1");
+    let req = attend::verbs::SendRequest {
+        message: "elsewhere".to_string(),
+        to: Some("/nowhere/live".to_string()),
+        ..Default::default()
+    };
+    match attend::verbs::reply(&req) {
+        Err(attend::verbs::SendError::NoPeerAt { path, .. }) => assert_eq!(path, "/nowhere/live"),
+        other => panic!("the caller's --to wins over the parent's channel: {other:?}"),
+    }
+}

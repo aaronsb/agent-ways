@@ -268,6 +268,12 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
 /// threads under the newest peer message a delivering conduit (the peers
 /// sensor or the drain) surfaced to this session, and fails with
 /// [`SendError::NoInbound`] when none has.
+///
+/// A reply stays where its parent was said: in the parent's channel, or,
+/// for a parent another Claude session sent to this project with `--to`,
+/// back to that session's project. A `to` or `channel` in `req` overrides
+/// this. A parent in `#open`, from a sender outside Claude Code, or no
+/// longer on disk, is answered in `#open`.
 #[cfg(feature = "sensor-peers")]
 pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     let me = current_session();
@@ -279,8 +285,51 @@ pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
             ReplyTarget::Threaded(id) => (Some(id), Threading::Threaded),
         },
     };
-    let sent = send_as(&me, &SendRequest { re, ..req.clone() })?;
+    let route = match &re {
+        Some(id) if req.to.is_none() && req.channel.is_none() => parent_route(&me, id),
+        _ => Route::Caller,
+    };
+    let (to, channel) = match route {
+        Route::Caller => (req.to.clone(), req.channel.clone()),
+        Route::Channel(name) => (None, Some(name)),
+        Route::Project(path) => (Some(path), None),
+    };
+    let sent = send_as(&me, &SendRequest { message: req.message.clone(), to, channel, re })?;
     Ok(Replied { sent, threading })
+}
+
+/// Where a reply goes when the caller names no destination.
+#[cfg(feature = "sensor-peers")]
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    /// The caller's `to` and `channel`, which may both be empty: `#open`.
+    Caller,
+    Channel(String),
+    Project(String),
+}
+
+/// Where the parent message `id` was said, read from the tray this session
+/// received it in.
+#[cfg(feature = "sensor-peers")]
+fn parent_route(me: &Session, id: &str) -> Route {
+    let file = format!("{id}.signal");
+    let Some(dir) = groups_for(me).receive_dirs(&me.origin_path).into_iter().find(|d| d.path.join(&file).is_file()) else {
+        return Route::Caller;
+    };
+    match dir.room {
+        attend_groups::Room::Channel(name) => Route::Channel(name),
+        attend_groups::Room::Open => Route::Caller,
+        // Sent to this project with `--to`: answer the sender's project. An
+        // external sender's cwd is a shell's, where no session listens, so
+        // its directed message is answered in `#open`, where people read.
+        attend_groups::Room::Project => std::fs::read_to_string(dir.path.join(&file))
+            .ok()
+            .and_then(|content| {
+                let sig = agent_identity::parse_signal(content.trim_end_matches('\n'))?;
+                sig.from.starts_with("claude:").then(|| Route::Project(sig.cwd.to_string()))
+            })
+            .unwrap_or(Route::Caller),
+    }
 }
 
 #[cfg(feature = "sensor-peers")]
