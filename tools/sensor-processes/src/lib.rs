@@ -102,16 +102,26 @@ fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64, hosted_e
     )
 }
 
-/// One row of `ps`: a process, its parent, and its command name.
+/// One row of `ps`: a process, its parent, its start time, and its
+/// command name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Proc {
     pid: u32,
     ppid: u32,
+    /// `lstart` as `ps` prints it, such as `Sat Oct 10 22:18:30 2026`.
+    /// Only compared for equality, so a pid reused by a later process
+    /// reads as a different process.
+    start: String,
     comm: String,
 }
 
-/// Parse `ps -o pid=,ppid=,comm=` output. Rows that do not parse are
-/// skipped. The command name is the rest of the row, so a name with a
+/// The `ps` columns [`parse_ps`] reads. `lstart` is five words in the C
+/// locale, which [`PS_ENV`] sets.
+const PS_COLUMNS: &str = "pid=,ppid=,lstart=,comm=";
+const PS_ENV: (&str, &str) = ("LC_ALL", "C");
+
+/// Parse `ps -o pid=,ppid=,lstart=,comm=` output. Rows that do not parse
+/// are skipped. The command name is the rest of the row, so a name with a
 /// space survives.
 fn parse_ps(stdout: &str) -> Vec<Proc> {
     stdout
@@ -120,8 +130,9 @@ fn parse_ps(stdout: &str) -> Vec<Proc> {
             let mut parts = line.split_whitespace();
             let pid = parts.next()?.parse().ok()?;
             let ppid = parts.next()?.parse().ok()?;
+            let start: Vec<&str> = parts.by_ref().take(5).collect();
             let comm = parts.collect::<Vec<_>>().join(" ");
-            (!comm.is_empty()).then_some(Proc { pid, ppid, comm })
+            (start.len() == 5 && !comm.is_empty()).then(|| Proc { pid, ppid, start: start.join(" "), comm })
         })
         .collect()
 }
@@ -181,6 +192,9 @@ const MAX_ANCESTRY: usize = 16;
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Tool {
     name: String,
+    /// The tool's start time, so a pid reused by a same-name process is
+    /// told apart from the run that held it.
+    start: String,
     /// Apps (not themselves watched) running under this tool, such as
     /// `node` under `npm run dev` or `docker` under `make up`.
     hosts: HashSet<String>,
@@ -235,7 +249,7 @@ fn tally(procs: &[Proc], is_relevant: impl Fn(&str) -> bool, is_watched: impl Fn
         let above = watched_above(p);
         if is_watched(&p.comm) {
             if above.is_empty() {
-                snap.tools.insert(p.pid, Tool { name: p.comm.clone(), hosts: HashSet::new() });
+                snap.tools.insert(p.pid, Tool { name: p.comm.clone(), start: p.start.clone(), hosts: HashSet::new() });
             }
             continue;
         }
@@ -398,7 +412,9 @@ impl ProcessSensor {
         }
         fresh.sort_by(|a, b| a.app.cmp(&b.app));
         exits.extend(fresh);
-        let alive = |pid: &u32| tools.get(pid).is_some_and(|t| self.prior_tools.get(pid).is_some_and(|p| p.name == t.name));
+        let alive = |pid: &u32| {
+            tools.get(pid).is_some_and(|t| self.prior_tools.get(pid).is_some_and(|p| (&p.name, &p.start) == (&t.name, &t.start)))
+        };
         let mut finished: Vec<(&u32, &Tool)> = self.prior_tools.iter().filter(|(pid, _)| !alive(pid)).collect();
         finished.sort_by_key(|(pid, _)| **pid);
         let mut named = vec![false; exits.len()];
@@ -473,7 +489,7 @@ impl Sensor for ProcessSensor {
     sensor_trait::sensor_metadata!();
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
-        let rows = ps_rows(Command::new("ps").args(["-u", &whoami(), "-o", "pid=,ppid=,comm="]).output());
+        let rows = ps_rows(Command::new("ps").args(["-u", &whoami(), "-o", PS_COLUMNS]).env(PS_ENV.0, PS_ENV.1).output());
         self.refresh_marker();
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -699,8 +715,11 @@ mod tests {
 
     // ── child churn and start/exit pairs ───────────────────────────────
 
+    /// The start time every test process has, unless a test says otherwise.
+    const T0: &str = "Sat Oct 10 22:18:30 2026";
+
     fn procs(rows: &[(u32, u32, &str)]) -> Vec<Proc> {
-        rows.iter().map(|&(pid, ppid, comm)| Proc { pid, ppid, comm: comm.into() }).collect()
+        rows.iter().map(|&(pid, ppid, comm)| Proc { pid, ppid, start: T0.into(), comm: comm.into() }).collect()
     }
 
     fn apps(names: &[&str]) -> HashMap<String, u32> {
@@ -733,12 +752,14 @@ mod tests {
     }
 
     fn tool(name: &str, hosts: &[&str]) -> Tool {
-        Tool { name: name.into(), hosts: hosts.iter().map(|h| h.to_string()).collect() }
+        Tool { name: name.into(), start: T0.into(), hosts: hosts.iter().map(|h| h.to_string()).collect() }
     }
 
     #[test]
     fn parse_ps_reads_pid_ppid_and_a_spaced_name() {
-        let p = parse_ps("  10     1 cargo\n  11    10 rustc\n bad row\n  12 10 Web Content\n");
+        let p = parse_ps(&format!(
+            "  10     1 {T0} cargo\n  11    10 {T0} rustc\n bad row\n  13 10 Sat Oct 10 rustc\n  12 10 {T0} Web Content\n"
+        ));
         assert_eq!(p, procs(&[(10, 1, "cargo"), (11, 10, "rustc"), (12, 10, "Web Content")]));
     }
 
@@ -858,6 +879,20 @@ mod tests {
         assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["npm finished (node exited)"]);
     }
 
+    /// A tool that exits between polls, its pid taken by a new run of the
+    /// same tool, still reports its finish: the start time differs.
+    #[test]
+    fn a_reused_pid_does_not_hide_a_finish() {
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        let first = [ZSH, NVIM, (10, 1, "cargo")];
+        assert!(s.diff(see(&first), 0).is_empty());
+        assert!(s.diff(see(&first), 0).is_empty(), "the same run, still going");
+        let mut second = procs(&first);
+        second[2].start = "Sat Oct 10 22:19:02 2026".into();
+        let second = tally(&second, |c| c != "zsh", |c| s.is_watched(c));
+        assert_eq!(texts(&s.diff(second, 0)), vec!["cargo finished"]);
+    }
+
     /// An app that exits while its tool keeps running is reported one poll
     /// later, on its own.
     #[test]
@@ -920,10 +955,10 @@ mod tests {
 
     #[test]
     fn ps_rows_is_none_for_a_failed_or_empty_read() {
-        assert_eq!(ps_rows(ps_output(0, "  10  1 cargo\n")), Some(procs(&[(10, 1, "cargo")])));
+        assert_eq!(ps_rows(ps_output(0, &format!("  10  1 {T0} cargo\n"))), Some(procs(&[(10, 1, "cargo")])));
         assert_eq!(ps_rows(ps_output(0, "")), None, "zero rows");
         assert_eq!(ps_rows(ps_output(0, "garbage\n")), None, "no row parsed");
-        assert_eq!(ps_rows(ps_output(1, "  10  1 cargo\n")), None, "non-zero exit");
+        assert_eq!(ps_rows(ps_output(1, &format!("  10  1 {T0} cargo\n"))), None, "non-zero exit");
         assert_eq!(ps_rows(Err(std::io::Error::other("no ps"))), None, "did not start");
     }
 
@@ -996,16 +1031,16 @@ mod tests {
         assert_eq!(canonical_name("slack-mcp-linux", known), "slack-mcp-linux");
     }
 
-    /// Rows from `ps -o pid=,ppid=,comm=` during a real `npm test`,
+    /// Rows from `ps -o pid=,ppid=,lstart=,comm=` during a real `npm test`,
     /// `npm run dev` and `npm exec`, on node v26.10.0 and npm 12.2.0.
     const LIVE_NPM: &str = "\
-3181657 3181656 bash
-3181672 3181657 npm test
-3181673 3181657 npm run dev
-3181674 3181657 npm exec node -
-3181706 3181673 node-MainThread
-3181707 3181672 node-MainThread
-3181721 3181674 node-MainThread
+3181657 3181656 Sat Oct 10 22:18:30 2026 bash
+3181672 3181657 Sat Oct 10 22:18:30 2026 npm test
+3181673 3181657 Sat Oct 10 22:18:30 2026 npm run dev
+3181674 3181657 Sat Oct 10 22:18:30 2026 npm exec node -
+3181706 3181673 Sat Oct 10 22:18:30 2026 node-MainThread
+3181707 3181672 Sat Oct 10 22:18:30 2026 node-MainThread
+3181721 3181674 Sat Oct 10 22:18:30 2026 node-MainThread
 ";
 
     #[test]
@@ -1027,14 +1062,16 @@ mod tests {
     fn a_live_npm_test_finishes_naming_node() {
         let s = ProcessSensor::new();
         let poll = |rows: &str| tally(&parse_ps(rows), |c| c != "bash", |c| s.is_watched(c));
-        let test_run = "3181657 3181656 bash\n3181672 3181657 npm test\n3181707 3181672 node-MainThread\n";
+        let lines: Vec<&str> = LIVE_NPM.lines().collect();
+        let idle = format!("{}\n", lines[0]);
+        let test_run = format!("{}\n{}\n{}\n", lines[0], lines[1], lines[5]);
         let mut sensor = ProcessSensor::new();
-        let base = poll("3181657 3181656 bash\n");
+        let base = poll(&idle);
         sensor.prior = base.apps;
         sensor.prior_tools = base.tools;
-        assert!(sensor.diff(poll(test_run), 0).is_empty());
-        assert_eq!(texts(&sensor.diff(poll(test_run), 0)), vec!["node started"]);
-        assert_eq!(texts(&sensor.diff(poll("3181657 3181656 bash\n"), 0)), vec!["npm finished (node exited)"]);
+        assert!(sensor.diff(poll(&test_run), 0).is_empty());
+        assert_eq!(texts(&sensor.diff(poll(&test_run), 0)), vec!["node started"]);
+        assert_eq!(texts(&sensor.diff(poll(&idle), 0)), vec!["npm finished (node exited)"]);
     }
 
     #[test]
