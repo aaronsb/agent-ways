@@ -36,7 +36,7 @@ pub(super) enum SideHit {
 /// The column's width in a pane `total` columns wide, or `None` when the
 /// pane is too narrow to hold it beside the feed.
 pub(super) fn width(total: u16) -> Option<u16> {
-    let w = (total / 4).clamp(24, 34);
+    let w = (total / 4).clamp(26, 34);
     (total >= w + MIN_FEED).then_some(w)
 }
 
@@ -167,7 +167,7 @@ fn sized(shape: Shape, texts: [&str; 3], w: usize) -> [String; 3] {
     let room = w.saturating_sub(glyphs + str_width(&last));
     let name = format!(" {} ", fit(texts[0], room.saturating_sub(2).max(1)));
     let rest = room.saturating_sub(str_width(&name));
-    if rest < 5 {
+    if rest < 4 {
         return [format!("{name}{}", " ".repeat(rest)), String::new(), last];
     }
     let project = format!(" {}", fit(texts[1], rest - 2));
@@ -222,7 +222,10 @@ fn agent_line(chat: &ChatPane, s: &Seen, w: usize, mark: Style) -> Line<'static>
 fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown: bool, w: usize, mark: Style) -> Line<'static> {
     let g = &row.known.group;
     let active = row.on_disk && (row.known.is_base || live > 0);
-    let figures = if row.known.is_base { age.to_string() } else { format!("{}👤 {age}", row.known.membership.members.len()).trim_end().to_string() };
+    // A Nerd Font's person glyph beside the lozenge glyphs it already
+    // needs; the emoji where the shape is plain.
+    let person = if chat.shape.join.is_empty() { "👤" } else { "\u{f007}" };
+    let figures = if row.known.is_base { age.to_string() } else { format!("{}{person} {age}", row.known.membership.members.len()).trim_end().to_string() };
     let name = format!("{} #{}", g.glyph, g.name);
     let dot = if active { "●" } else { "○" };
     let texts = sized(chat.shape, [&name, &figures, dot], w);
@@ -352,11 +355,11 @@ mod tests {
 
     #[test]
     fn the_column_hides_when_the_feed_would_get_too_narrow() {
-        assert_eq!(width(80), Some(24));
+        assert_eq!(width(80), Some(26));
         assert_eq!(width(120), Some(30));
         assert_eq!(width(200), Some(34));
-        assert_eq!(width(73), None, "24 + 50 columns is the least that holds it");
-        assert_eq!(width(74), Some(24));
+        assert_eq!(width(75), None, "26 + 50 columns is the least that holds it");
+        assert_eq!(width(76), Some(26));
     }
 
     #[test]
@@ -388,7 +391,7 @@ mod tests {
         assert_eq!(width(&t) + 4, 22, "cap and three joins");
         let t = sized(Shape::PLAIN, ["Laszlo", "alpha", "●"], 22);
         assert_eq!(width(&t), 22, "plain draws no glyphs");
-        let t = sized(Shape::ROUND, ["Shannon-alpha", "omnibus", "○"], 22);
+        let t = sized(Shape::ROUND, ["Shannon-alphabet", "omnibus", "○"], 22);
         assert_eq!((t[1].as_str(), width(&t) + 4), ("", 22), "no room to read the project: it goes");
     }
 

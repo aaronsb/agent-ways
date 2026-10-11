@@ -1,28 +1,28 @@
 agent-tui frame 80x25
 | ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
-| Agents 2/4            │╭──────────────────────────────────────────────────────╮|
-|  Laszlo  alpha      ● ││ │ aaron            │ the shell this ran under:       │|
-|  Wells  beta        ● ││ │ aaron            │ /bin/sh                         │|
-|  Lyra  gamma        ○ ││ │ 13:58            │  file: sh                       │|
-|  aaron  aaron       ○ ││ ╰──────────────────╯                                 │|
-| Channels 4            ││                                                      │|
-|  ◆ #open            ● ││ ╭──────────────────╮                                 │|
-|  ▽ #deploy  1👤      ● ││ │ Laszlo           │ a longer message, so the feed   │|
-|  ♦ #infra  0👤       ○ ││ │ alpha            │ shows how a body wraps beside   │|
-|  ♦ #archive  1👤     ○ ││ │ 13:59            │ its chip when it runs past the  │|
-|                       ││ ╰──────────────────╯ width of the row it is given    │|
-|                       ││                                                      │|
-|                       ││ ╭──────────────────╮                                 │|
-|                       ││ │ Lyra             │ signing off                     │|
-|                       ││ │ gamma            │                                 │|
-|                       ││ │ 13:45            │                                 │|
-|                       ││ ╰──────────────────╯                                 │|
-|                       ││                                                      │|
-|                       │╰──────────────────────────────────────────────────────╯|
-|                       │╭──────────────────────────────────────────────────────╮|
-|                       ││ >                                                    │|
-|                       ││                                               #open  │|
-|                       │╰──────────────────────────────────────────────────────╯|
+| Agents 2/4              │╭────────────────────────────────────────────────────╮|
+|  Laszlo  alpha        ● ││ │ aaron            │ /bin/sh                       │|
+|  Wells  beta          ● ││ │ 13:58            │  file: sh                     │|
+|  Lyra  gamma          ○ ││ ╰──────────────────╯                               │|
+|  aaron  aaron         ○ ││                                                    │|
+| Channels 4              ││ ╭──────────────────╮                               │|
+|  ◆ #open              ● ││ │ Laszlo           │ a longer message, so the      │|
+|  ▽ #deploy  1👤        ● ││ │ alpha            │ feed shows how a body wraps   │|
+|  ♦ #infra  0👤         ○ ││ │ 13:59            │ beside its chip when it runs  │|
+|  ♦ #archive  1👤       ○ ││ ╰──────────────────╯ past the width of the row it  │|
+|                         ││                      is given                      │|
+|                         ││                                                    │|
+|                         ││ ╭──────────────────╮                               │|
+|                         ││ │ Lyra             │ signing off                   │|
+|                         ││ │ gamma            │                               │|
+|                         ││ │ 13:45            │                               │|
+|                         ││ ╰──────────────────╯                               │|
+|                         ││                                                    │|
+|                         │╰────────────────────────────────────────────────────╯|
+|                         │╭────────────────────────────────────────────────────╮|
+|                         ││ >                                                  │|
+|                         ││                                             #open  │|
+|                         │╰────────────────────────────────────────────────────╯|
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
 styles
   0   0-2   White Blue -
@@ -35,108 +35,105 @@ styles
   0  47-56  White Blue -
   0  59-61  White Blue -
   1   0-10  - - BOLD|DIM
-  1  23-79  - - DIM
+  1  25-79  - - DIM
   2   1-8   Black Cyan -
-  2   9-19  White DarkGray DIM
-  2  20-22  White DarkGray -
-  2  23-24  - - DIM
-  2  26-26  - - DIM
-  2  28-32  LightYellow - -
-  2  45-45  - - DIM
+  2   9-21  White DarkGray DIM
+  2  22-24  White DarkGray -
+  2  25-26  - - DIM
+  2  28-28  - - DIM
+  2  30-34  - - DIM
+  2  47-47  - - DIM
   2  79-79  - - DIM
   3   1-7   Black LightCyan -
-  3   8-19  White DarkGray DIM
-  3  20-22  White DarkGray -
-  3  23-24  - - DIM
-  3  26-26  - - DIM
-  3  28-32  - - DIM
-  3  45-45  - - DIM
+  3   8-21  White DarkGray DIM
+  3  22-24  White DarkGray -
+  3  25-26  - - DIM
+  3  28-28  - - DIM
+  3  30-34  - - DIM
+  3  47-47  - - DIM
+  3  49-58  White DarkGray -
   3  79-79  - - DIM
-  4   1-22  White DarkGray DIM
-  4  23-24  - - DIM
-  4  26-26  - - DIM
-  4  28-32  - - DIM
-  4  45-45  - - DIM
-  4  47-56  White DarkGray -
+  4   1-24  White DarkGray DIM
+  4  25-26  - - DIM
+  4  28-47  - - DIM
   4  79-79  - - DIM
-  5   1-22  White DarkGray DIM
-  5  23-24  - - DIM
-  5  26-45  - - DIM
+  5   1-24  White DarkGray DIM
+  5  25-26  - - DIM
   5  79-79  - - DIM
   6   0-10  - - BOLD|DIM
-  6  23-24  - - DIM
+  6  25-26  - - DIM
+  6  28-47  - - DIM
   6  79-79  - - DIM
   7   1-9   Black Cyan -
-  7  10-19  White Blue -
-  7  20-22  White DarkGray -
-  7  23-24  - - DIM
-  7  26-45  - - DIM
+  7  10-21  White Blue -
+  7  22-24  White DarkGray -
+  7  25-26  - - DIM
+  7  28-28  - - DIM
+  7  30-35  Cyan - BOLD
+  7  47-47  - - DIM
   7  79-79  - - DIM
   8   1-11  Black Cyan -
   8  12-14  White Blue -
-  8  16-19  White Blue -
-  8  20-22  White DarkGray -
-  8  23-24  - - DIM
-  8  26-26  - - DIM
-  8  28-33  Cyan - BOLD
-  8  45-45  - - DIM
+  8  16-21  White Blue -
+  8  22-24  White DarkGray -
+  8  25-26  - - DIM
+  8  28-28  - - DIM
+  8  30-34  - - DIM
+  8  47-47  - - DIM
   8  79-79  - - DIM
   9   1-13  White DarkGray DIM
-  9  15-22  White DarkGray DIM
-  9  23-24  - - DIM
-  9  26-26  - - DIM
-  9  28-32  - - DIM
-  9  45-45  - - DIM
+  9  15-24  White DarkGray DIM
+  9  25-26  - - DIM
+  9  28-28  - - DIM
+  9  30-34  - - DIM
+  9  47-47  - - DIM
   9  79-79  - - DIM
  10   1-15  White DarkGray DIM
- 10  17-22  White DarkGray DIM
- 10  23-24  - - DIM
- 10  26-26  - - DIM
- 10  28-32  - - DIM
- 10  45-45  - - DIM
+ 10  17-24  White DarkGray DIM
+ 10  25-26  - - DIM
+ 10  28-47  - - DIM
  10  79-79  - - DIM
- 11  23-24  - - DIM
- 11  26-45  - - DIM
+ 11  25-26  - - DIM
  11  79-79  - - DIM
- 12  23-24  - - DIM
+ 12  25-26  - - DIM
  12  79-79  - - DIM
- 13  23-24  - - DIM
- 13  26-45  - - DIM
+ 13  25-26  - - DIM
+ 13  28-47  - - DIM
  13  79-79  - - DIM
- 14  23-24  - - DIM
- 14  26-26  - - DIM
- 14  28-31  Magenta - -
- 14  45-45  - - DIM
+ 14  25-26  - - DIM
+ 14  28-28  - - DIM
+ 14  30-33  Magenta - -
+ 14  47-47  - - DIM
  14  79-79  - - DIM
- 15  23-24  - - DIM
- 15  26-26  - - DIM
- 15  28-32  - - DIM
- 15  45-45  - - DIM
+ 15  25-26  - - DIM
+ 15  28-28  - - DIM
+ 15  30-34  - - DIM
+ 15  47-47  - - DIM
  15  79-79  - - DIM
- 16  23-24  - - DIM
- 16  26-26  - - DIM
- 16  28-32  - - DIM
- 16  45-45  - - DIM
+ 16  25-26  - - DIM
+ 16  28-28  - - DIM
+ 16  30-34  - - DIM
+ 16  47-47  - - DIM
  16  79-79  - - DIM
- 17  23-24  - - DIM
- 17  26-45  - - DIM
+ 17  25-26  - - DIM
+ 17  28-47  - - DIM
  17  79-79  - - DIM
- 18  23-24  - - DIM
+ 18  25-26  - - DIM
  18  79-79  - - DIM
- 19  23-79  - - DIM
- 20  23-23  - - DIM
- 20  24-79  Cyan - -
- 21  23-23  - - DIM
- 21  24-24  Cyan - -
- 21  26-27  Cyan - -
- 21  28-28  - - REVERSED
+ 19  25-79  - - DIM
+ 20  25-25  - - DIM
+ 20  26-79  Cyan - -
+ 21  25-25  - - DIM
+ 21  26-26  Cyan - -
+ 21  28-29  Cyan - -
+ 21  30-30  - - REVERSED
  21  79-79  Cyan - -
- 22  23-23  - - DIM
- 22  24-24  Cyan - -
+ 22  25-25  - - DIM
+ 22  26-26  Cyan - -
  22  71-77  White Blue -
  22  79-79  Cyan - -
- 23  23-23  - - DIM
- 23  24-79  Cyan - -
+ 23  25-25  - - DIM
+ 23  26-79  Cyan - -
  24   0-5   Black Cyan BOLD
  24   7-21  - - DIM|ITALIC
  24  22-24  - - DIM
