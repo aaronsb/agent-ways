@@ -18,7 +18,7 @@ pub(crate) fn cmd_join(name: &str, pin: bool, json: bool) {
         }
         Err(e) => {
             if json {
-                crate::cmd::print_json_error(&e, &e.message);
+                crate::cmd::print_json_error(&e, &e.to_string());
             }
             eprintln!("[attend] join: {e}");
             std::process::exit(1);

@@ -18,15 +18,21 @@ pub struct Joined {
     pub note: String,
 }
 
-/// Why a join wrote nothing.
+/// Why a join did not take.
 #[derive(Debug, Clone, Serialize)]
-pub struct JoinError {
-    pub message: String,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JoinError {
+    /// The name is not a valid channel name. Nothing was written.
+    InvalidName { message: String },
+    /// Writing the membership or the channel's directory failed.
+    WriteFailed { message: String },
 }
 
 impl std::fmt::Display for JoinError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
+        match self {
+            Self::InvalidName { message } | Self::WriteFailed { message } => f.write_str(message),
+        }
     }
 }
 
@@ -38,6 +44,7 @@ impl std::error::Error for JoinError {}
 /// recent history to read.
 pub fn join(name: &str, pin: bool) -> Result<Joined, JoinError> {
     let name = name.trim_start_matches('#');
+    attend_groups::validate_group_name(name).map_err(|message| JoinError::InvalidName { message })?;
     let me = current_session();
     let r = groups_for(&me);
     // Enrolled first, so a crash between the two never leaves a member
@@ -47,16 +54,16 @@ pub fn join(name: &str, pin: bool) -> Result<Joined, JoinError> {
     // conduit scans the room while its history is still unseen. A join
     // that answers an invitation keeps the room's recent history to read;
     // one that does not, holds back what is older than the fresh window.
-    let note = match attend_groups::validate_group_name(name) {
-        Ok(()) if r.take_invite(name) => crate::util::brief_invited_room(&me, &r, name),
-        Ok(()) => crate::util::backlog_note(crate::util::baseline_joined_room(&me, &r, name)),
-        Err(_) => String::new(),
+    let note = if r.take_invite(name) {
+        crate::util::brief_invited_room(&me, &r, name)
+    } else {
+        crate::util::backlog_note(crate::util::baseline_joined_room(&me, &r, name))
     };
     match r.join(name, pin) {
         Ok(()) => Ok(Joined { name: name.to_string(), pinned: pin, note }),
         Err(message) => {
             crate::util::settle_join_enrollment(&me, &r);
-            Err(JoinError { message })
+            Err(JoinError::WriteFailed { message })
         }
     }
 }
