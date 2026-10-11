@@ -388,6 +388,12 @@ fn install_targets() -> (Vec<crate::config::Target>, bool) {
 
 fn install_line() -> String {
     let (targets, explicit) = install_targets();
+    install_summary(&targets, explicit)
+}
+
+/// The Install line: a one-line summary that points to `ways manage target
+/// list` for the per-target detail (ADR-509 §6).
+fn install_summary(targets: &[crate::config::Target], explicit: bool) -> String {
     let enabled: Vec<&crate::config::Target> = targets.iter().filter(|t| t.enabled).collect();
     if enabled.is_empty() {
         return "installed, inactive (no enabled target; `ways manage target add <dir>` activates one)".to_string();
@@ -397,7 +403,7 @@ fn install_line() -> String {
         .map(|t| format!("{} [{}]", t.path, crate::cmd::target::state(t)))
         .collect();
     format!(
-        "active, {} of {} target{} enabled: {}{}",
+        "active, {} of {} target{} enabled: {}{}; `ways manage target list` shows each",
         enabled.len(),
         targets.len(),
         if targets.len() == 1 { "" } else { "s" },
@@ -548,7 +554,7 @@ fn gate_json() -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{sidecar_json, sidecar_line};
+    use super::{install_summary, sidecar_json, sidecar_line};
     use crate::cmd::scan::sidecar::Fallback;
     use serde_json::json;
 
@@ -578,5 +584,12 @@ mod tests {
         let file = Path::new("/k/anthropic");
         assert_eq!(key_phrase(Some(file), Some("valid"), None), "key from /k/anthropic, checked valid");
         assert!(key_phrase(Some(file), Some("invalid"), None).ends_with("last check invalid: fails open"));
+    }
+
+    #[test]
+    fn the_install_line_points_to_the_target_list() {
+        let t = crate::config::Target { path: "/nonexistent/.claude".into(), enabled: true, observe: None, config: None };
+        assert!(install_summary(&[t], true).ends_with("; `ways manage target list` shows each"));
+        assert!(install_summary(&[], true).contains("`ways manage target add <dir>`"));
     }
 }
