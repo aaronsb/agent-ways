@@ -88,6 +88,27 @@ fn powershell(script: &str) -> Option<String> {
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// The working directory of `pid`, or `None` when it cannot be read.
+/// Linux reads the `/proc/<pid>/cwd` link; other Unix systems ask `lsof`.
+pub fn cwd(pid: u32) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    if proc_mounted() {
+        return std::fs::read_link(format!("/proc/{pid}/cwd")).ok().map(|p| p.to_string_lossy().into_owned());
+    }
+    cwd_by_command(pid)
+}
+
+#[cfg(not(windows))]
+fn cwd_by_command(pid: u32) -> Option<String> {
+    let out = Command::new("lsof").args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"]).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.strip_prefix('n').map(str::to_string))
+}
+
+#[cfg(windows)]
+fn cwd_by_command(_pid: u32) -> Option<String> {
+    None
+}
+
 /// When `pid` started, as an opaque string that differs between two
 /// processes that had the same pid. `None` when the process is gone.
 pub fn start_time(pid: u32) -> Option<String> {

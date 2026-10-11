@@ -42,7 +42,7 @@ pub struct SessionIdentity {
     pub session_id: String,
     /// The session's ROOT path — the record's cwd normalized through
     /// [`normalize_origin`] (managed-worktree hops stripped), or the
-    /// process cwd when unresolved. One session record = one persona
+    /// resolved process's own cwd when unresolved (empty when unreadable). One session record = one persona
     /// at one root (issue #394).
     pub origin_path: String,
     /// True iff `session_id` came from a real session record.
@@ -95,10 +95,15 @@ pub fn identity_for_pid(pid: u32) -> SessionIdentity {
 /// uses the real process table — tests pass their own pid with a
 /// session record naming it directly.
 pub fn identity_in(dir: &Path, pid: u32) -> SessionIdentity {
+    // The fallback origin is `pid`'s own working directory, never the
+    // caller's: `attend status` resolves other processes, and its own cwd
+    // says nothing about theirs. Empty when it cannot be read.
     let process_cwd = || {
-        std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default()
+        if pid == std::process::id() {
+            std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+        } else {
+            crate::process::cwd(pid).unwrap_or_default()
+        }
     };
     match find_session_in(dir, pid) {
         Some((sid, claude_pid)) => {
@@ -274,6 +279,26 @@ mod tests {
         assert!(!id.origin_resolved);
         assert!(!id.resolved());
         assert_eq!(id.session_id, "sess-nocwd");
+    }
+
+    /// A record without a cwd for another process: the origin is that
+    /// process's own working directory, never the resolver's (`attend
+    /// status` resolving a peer's run).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_foreign_pid_without_a_record_cwd_takes_its_own_cwd() {
+        let dir = tempdir_like();
+        let work = dir.join("elsewhere");
+        fs::create_dir_all(&work).unwrap();
+        let mut child = std::process::Command::new("sleep").arg("5").current_dir(&work).spawn().unwrap();
+        let pid = child.id();
+        std::fs::write(dir.join("sess-peer.json"), format!(r#"{{"sessionId":"sess-peer","pid":{pid}}}"#)).unwrap();
+        let id = identity_in(&dir, pid);
+        child.kill().ok();
+        child.wait().ok();
+        assert!(id.session_resolved && !id.origin_resolved);
+        assert_eq!(id.origin_path, work.canonicalize().unwrap().to_string_lossy());
+        assert_ne!(id.origin_path, std::env::current_dir().unwrap().to_string_lossy());
     }
 
     #[test]
