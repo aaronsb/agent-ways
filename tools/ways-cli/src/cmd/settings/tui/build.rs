@@ -47,7 +47,7 @@ pub const TABS: [Tab; 7] = [
     Tab::root("install"),
     Tab { name: "attend", prefix: "attend", skip: &["attend.sensors"] },
     Tab { name: "sensors", prefix: "attend.sensors", skip: &[] },
-    Tab::root("attend_mod"),
+    Tab { name: "mod", prefix: "attend_mod", skip: &[] },
 ];
 
 /// The tab named `name`.

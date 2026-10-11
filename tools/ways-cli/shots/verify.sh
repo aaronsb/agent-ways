@@ -34,6 +34,7 @@ projects   | ways projects                                  | / text:shop
 settings   | ways settings --project $P                     |
 matching   | ways settings matching --project $P            | Down Down e C-u text:0.2 Enter
 picker     | ways settings gate --project $P                | Down Down Down Right Down Right Down Down Enter
+mod        | ways settings mod --project $P                 |
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null

@@ -154,7 +154,8 @@ fn settings_matching_edit() {
     let s = fx.launch("settings", &["settings", "matching", "--project", &proj]);
 
     let pane = s.wait_for("keyword_floor_probability", WAIT).unwrap();
-    assert!(pane.contains("2 matching") && pane.contains("detail"), "pane was:\n{pane}");
+    // At 80 columns the eight tab names are cut to fit, the shown one too.
+    assert!(pane.contains("2 match") && pane.contains("detail"), "pane was:\n{pane}");
 
     s.send(&["Down", "Down", "e", "C-u"]).unwrap();
     s.send(&["-l", "0.2"]).unwrap();

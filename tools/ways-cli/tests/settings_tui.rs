@@ -521,13 +521,13 @@ fn bare_settings_in_a_pipe_prints_list_and_a_tab_needs_a_terminal() {
     assert!(err.contains("need a terminal"), "{err}");
     let (_, err, code) = fx.run(&["settings", "nope", "--snap", "80x25"]);
     assert_eq!(code, 2);
-    assert!(err.contains("invalid value 'nope'") && err.contains("[possible values: ways, matching, gate, install, attend, sensors, theme]"), "{err}");
+    assert!(err.contains("invalid value 'nope'") && err.contains("[possible values: ways, matching, gate, install, attend, sensors, mod, theme]"), "{err}");
 }
 
 #[test]
 fn the_help_overlay_shows_the_text_settings_help_prints() {
     let fx = Fx::new();
-    for tab in ["ways", "matching", "gate", "install", "attend", "sensors", "theme"] {
+    for tab in ["ways", "matching", "gate", "install", "attend", "sensors", "mod", "theme"] {
         let (help, _, code) = fx.run(&["settings", "help", tab]);
         assert_eq!(code, 0);
         let f = glyphs(&fx.snap(tab, "?", "160x60", "16"));

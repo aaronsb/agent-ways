@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| 1 ways   2 matching   3 gate   4 install   5 attend   6 sensors   7 theme      |
+| 1 ways   2 match…   3 gate   4 insta…   5 attend   6 senso…   7 mod   8 theme  |
 |┌ ways settings — ~/proj ──────────────────┐┌detail────────────────────────────┐|
 |│ ▾ settings              value            ││matching.keyword_floor_probability│|
 |│     semantic_fire_probability 0.5        ││                                  │|
@@ -26,12 +26,13 @@ agent-tui frame 80x25
 | browse  0 changed │ 0 queued │ mouse on (m)  ? keys · Tab 1-9 tabs · / filters…|
 styles
   0   0-7   White Blue -
-  0   9-20  Black Cyan BOLD
-  0  22-29  White Blue -
-  0  31-41  White Blue -
-  0  43-52  White Blue -
-  0  54-64  White Blue -
-  0  66-74  White Blue -
+  0   9-18  Black Cyan BOLD
+  0  20-27  White Blue -
+  0  29-38  White Blue -
+  0  40-49  White Blue -
+  0  51-60  White Blue -
+  0  62-68  White Blue -
+  0  70-78  White Blue -
   1   0-0   - - DIM
   1   1-24  LightBlue - BOLD|DIM
   1  25-44  - - DIM
