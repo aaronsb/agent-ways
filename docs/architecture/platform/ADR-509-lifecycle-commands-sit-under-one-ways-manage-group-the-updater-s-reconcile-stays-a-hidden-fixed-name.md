@@ -135,9 +135,9 @@ Found with `grep -rnE '\bways (update|reconcile|uninstall|target)\b'` across the
 - `tools/ways-cli/src/main.rs`: the `Commands` enum and the bare-group dispatch at :1309 (`target` becomes `manage`).
 - `tools/ways-cli/src/cmd/update.rs:525-529, 652-656`: keep spawning `reconcile` (item 4). Its 13 messages naming `ways update` or `ways reconcile` move.
 - `tools/ways-cli/src/cmd/settings/tui/mod.rs:488`: spawns `target plan` and becomes `manage target plan`.
-- `scripts/install.sh:338, 401`: run `bin/ways reconcile --source … --dest …` and become `manage repair`. The binary comes from the same checkout. Its messages at :14, 62, 194-201 and 348 move as well.
+- `scripts/install.sh:338, 401`: run `bin/ways reconcile --source … --dest …` and keep the fixed name `reconcile` (item 4). The binary does not come from the same checkout: `make setup` keeps or downloads the latest release's prebuilt, which can predate `ways manage`, so the installer is a cross-release caller like the updater. Its messages at :14, 62, 194-201 and 348 move to `manage repair`.
 - `Makefile:6, 44, 146, 150, 168, 172-173, 180`: comments, help text and the transitional `update` target, which #717 removes anyway. Until then it runs `./bin/ways manage update`.
-- `hooks/ways/check-setup.sh:29, 88`: repair text that runs `make setup` and then the fresh binary, which becomes `manage repair`.
+- `hooks/ways/check-setup.sh:29, 88`: repair text that runs `make setup` and then the fresh binary. That binary can be a release that predates `ways manage`, so the text keeps `reconcile`.
 
 **Messages in other code**
 

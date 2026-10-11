@@ -386,7 +386,9 @@ if is_agent_ways_repo "$APP_DIR"; then
   echo ""
   if [[ -x "$APP_DIR/bin/ways" ]]; then
     echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
-    if ! "$APP_DIR/bin/ways" manage repair --source "$APP_DIR" --dest "$DEST"; then
+    # The fixed name: `make setup` may install the latest release, which can
+    # predate `ways manage` (ADR-509 §4).
+    if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
       print_projection_stopped
       exit 3
     fi
@@ -450,7 +452,9 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   echo -e "${DIM}(symlinks the projected roots; merges settings.json; your files stay; a real directory at a projected root stops it, nothing is deleted)${RESET}"
   echo ""
   mkdir -p "$DEST"
-  if ! "$APP_DIR/bin/ways" manage repair --source "$APP_DIR" --dest "$DEST"; then
+  # The fixed name: `make setup` may install the latest release, which can
+  # predate `ways manage` (ADR-509 §4).
+  if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
     print_projection_stopped
     exit 3
   fi
@@ -469,7 +473,7 @@ else
   echo -e "${YELLOW}ways binary not built — projection not created.${RESET}"
   echo "  The application is staged at $APP_DIR. To finish:"
   echo -e "    ${CYAN}cd $APP_DIR && make setup${RESET}      # build the binary"
-  echo -e "    ${CYAN}\"$APP_DIR/bin/ways\" manage repair${RESET}   # materialize the projection"
+  echo -e "    ${CYAN}\"$APP_DIR/bin/ways\" reconcile${RESET}   # materialize the projection"
   echo ""
   exit 1
 fi

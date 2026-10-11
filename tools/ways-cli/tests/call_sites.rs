@@ -279,6 +279,23 @@ const SCREEN_GROUPS: &[&str] = &["session", "manage"];
 const MOVED: &[&str] = &["update", "reconcile", "uninstall", "target"];
 const UPDATER: &str = "tools/ways-cli/src/cmd/update.rs (spawn)";
 
+/// The installer and check-setup run the app's freshly set-up binary, which
+/// `make setup` downloads from the latest release, not from the checkout they
+/// ship in. They are cross-release callers like the updater, so they run the
+/// fixed name `reconcile` (ADR-509 §4). Each entry is a file and the exact
+/// invocation it may use there.
+const CROSS_RELEASE: &[(&str, &str)] =
+    &[("scripts/install.sh", "\"$APP_DIR/bin/ways\" reconcile"), ("hooks/ways/check-setup.sh", "\"$APP_DIR/bin/ways\" reconcile")];
+
+/// Whether a `reconcile` place is one of the CROSS_RELEASE invocations, in
+/// code or in an echoed command.
+fn cross_release(root: &Path, place: &str) -> bool {
+    let Some((path, line)) = place.rsplit_once(':') else { return false };
+    let Some((_, form)) = CROSS_RELEASE.iter().find(|(p, _)| *p == path) else { return false };
+    let Ok(n) = line.parse::<usize>() else { return false };
+    std::fs::read_to_string(root.join(path)).ok().and_then(|t| t.lines().nth(n - 1).map(|l| l.replace("\\\"", "\"").contains(form))).unwrap_or(false)
+}
+
 /// Files that quote what a person types rather than call ways: the firing
 /// panel's prompts.
 const PROMPTS: &[&str] = &["tools/scripts/fire-panel.json"];
@@ -326,8 +343,11 @@ fn every_ways_call_site_names_a_command_the_cli_accepts() {
             continue;
         }
         if MOVED.contains(&a.as_str()) {
-            let left: Vec<&str> =
-                places.iter().map(|(p, _)| p.as_str()).filter(|p| !(a == "reconcile" && *p == UPDATER)).collect();
+            let left: Vec<&str> = places
+                .iter()
+                .map(|(p, _)| p.as_str())
+                .filter(|p| !(a == "reconcile" && (*p == UPDATER || cross_release(&root, p))))
+                .collect();
             if !left.is_empty() {
                 let shown = left.iter().take(3).copied().collect::<Vec<_>>().join(", ");
                 bad.push(format!("ways {a} moved under `ways manage` (ADR-509)  ({shown})"));
@@ -354,6 +374,29 @@ fn every_ways_call_site_names_a_command_the_cli_accepts() {
         }
     }
     assert!(bad.is_empty(), "call sites the CLI rejects:\n  {}", bad.join("\n  "));
+}
+
+/// The installer and check-setup repair through the fixed name, which every
+/// release's binary accepts. `manage repair` there breaks every install whose
+/// downloaded release predates `ways manage`.
+#[test]
+fn cross_release_callers_run_the_fixed_name() {
+    let root = repo_root();
+    for (path, want) in [("scripts/install.sh", 3), ("hooks/ways/check-setup.sh", 2)] {
+        let text = std::fs::read_to_string(root.join(path)).unwrap();
+        // An echoed command escapes its quotes: `\"$APP_DIR/bin/ways\" reconcile`.
+        let text = text.replace("\\\"", "\"");
+        let runs: Vec<&str> = text.lines().filter(|l| l.contains("\"$APP_DIR/bin/ways\" ") && !l.contains("bin/ways\" status")).collect();
+        let fixed = runs.iter().filter(|l| l.contains("\"$APP_DIR/bin/ways\" reconcile")).count();
+        assert!(runs.iter().all(|l| !l.contains("bin/ways\" manage")), "{path} runs `manage` on a release binary:\n{}", runs.join("\n"));
+        assert_eq!(fixed, want, "{path}: the repair invocations that run `reconcile`:\n{}", runs.join("\n"));
+    }
+    // The scan sees them, so the exemption excuses real sites.
+    let sites = call_sites(&root);
+    let places = sites.get(&("reconcile".to_string(), None)).cloned().unwrap_or_default();
+    for (path, _) in CROSS_RELEASE {
+        assert!(places.iter().any(|(p, _)| p.starts_with(&format!("{path}:")) && cross_release(&root, p)), "the scan missed {path}");
+    }
 }
 
 #[test]
