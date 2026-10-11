@@ -11,14 +11,17 @@ import {
   WHOAMI_MACHINE_ARGV,
   callsIn,
   chunk,
-  formatListed,
+  formatMessage,
   frameInbound,
   inviteChannel,
+  isFullPreamble,
   joinArgv,
   parseDrain,
   parseListing,
   parseMachine,
+  peerLines,
   parsePeerCount,
+  shortId,
   replyArgv,
   sendArgv,
 } from './lib.ts'
@@ -31,6 +34,9 @@ const status = atom({ plugin: 'attend-mod', key: 'status' } as const, {
   enrolled: null,
   peers: 0,
   unread: 0,
+  channels: [],
+  deliveries: 0,
+  afterCompaction: false,
 } satisfies AttendModStatus)
 
 // The cheap check: called in, human present, quiet long enough to sleep.
@@ -40,8 +46,6 @@ const CHECK_MS = 15_000
 const BATCH_MS = 2_000
 
 // agent-ways theme (tools/agent-theme/themes/agent-ways.theme).
-const ACCENT = '#5ac8fa'
-const GROUND = '#1c1c1e'
 const SUBTLE = '#3a3a3c'
 const FG = '#d0d0d0'
 
@@ -62,6 +66,8 @@ type Mod = {
   /** The last inbound delivery or outbound tool call while awake. */
   lastActivityMs: number
   isChatPresent: boolean
+  /** Short `~id` handles of delivered messages, to their full ids. */
+  ids: Map<string, string>
 }
 
 async function attend($: $, argv: readonly string[]) {
@@ -85,6 +91,16 @@ async function sendParts($: $, argvs: readonly string[][]) {
   return { text: header + lines.join('\n'), isError }
 }
 
+/** A body the listing parser cannot read, kept as one line of its own. */
+function rawMessage(body: string): Listed {
+  return { scope: 'attend', sender: 'unparsed', id: body, when: '', message: body, sentMs: 0 }
+}
+
+async function addChannel($: $, channel: string) {
+  const c = `#${channel.replace(/^#/, '')}`
+  await update($, status, s => ({ ...s, channels: [...new Set([...s.channels, c])] }))
+}
+
 async function learnSelf($: $) {
   const display = await attend($, WHOAMI_ARGV)
   const machine = parseMachine((await attend($, WHOAMI_MACHINE_ARGV)).stdout)
@@ -100,9 +116,19 @@ async function refreshPeers($: $) {
 
 /** Submits one framed batch; resolves as its turn starts, waking an idle
  *  session. */
-async function deliver($: $, mod: Mod, bodies: readonly string[], count: number, lead?: string) {
+async function deliver($: $, mod: Mod, msgs: readonly Listed[], count: number, lead?: string) {
   mod.lastActivityMs = await $.clock.now()
-  const framed = frameInbound(bodies, count)
+  for (const m of msgs) mod.ids.set(shortId(m.id), m.id)
+  const seen = msgs.map(m => m.scope).filter(c => c.startsWith('#'))
+  const s = await read($, status)
+  const full = isFullPreamble(s.deliveries, s.afterCompaction)
+  await update($, status, t => ({
+    ...t,
+    deliveries: t.deliveries + 1,
+    afterCompaction: false,
+    channels: [...new Set([...t.channels, ...seen])],
+  }))
+  const framed = frameInbound(msgs.map(formatMessage), count, full)
   await $.prompt.submit({ text: lead ? `${lead}\n\n${framed}` : framed })
 }
 
@@ -116,17 +142,19 @@ async function poll($: $, mod: Mod): Promise<Drain | undefined> {
     const first = parseDrain((await attend($, DRAIN_ARGV)).stdout)
     await update($, status, s => ({ ...s, enrolled: first.kind !== 'silent' }))
     if (first.kind !== 'messages') return first
-    const bodies = [first.body]
+    const msgs = parseListing(first.body)
+    if (msgs.length === 0) msgs.push(rawMessage(first.body))
     let count = first.count
     await update($, status, s => ({ ...s, unread: count }))
     await new Promise<void>(resolve => $.clock.after(BATCH_MS, resolve))
     const second = parseDrain((await attend($, DRAIN_ARGV)).stdout)
     if (second.kind === 'messages') {
-      bodies.push(second.body)
+      const more = parseListing(second.body)
+      msgs.push(...(more.length > 0 ? more : [rawMessage(second.body)]))
       count += second.count
       await update($, status, s => ({ ...s, unread: count }))
     }
-    await deliver($, mod, bodies, count)
+    await deliver($, mod, msgs, count)
     return first
   } finally {
     mod.isPolling = false
@@ -146,11 +174,14 @@ async function wake($: $, mod: Mod, reason: string, hits: readonly Listed[]) {
   if (was === 'dormant') await refreshPeers($)
   for (const m of hits) {
     const channel = inviteChannel(m)
-    if (channel) await attend($, joinArgv(channel))
+    if (channel) {
+      await attend($, joinArgv(channel))
+      await addChannel($, channel)
+    }
   }
   const drained = await poll($, mod)
   if (hits.length > 0 && (drained === undefined || drained.kind === 'silent')) {
-    await deliver($, mod, hits.map(formatListed), hits.length, `attend: this session was called in (${reason}).`)
+    await deliver($, mod, hits, hits.length, `attend: this session was called in (${reason}).`)
   }
   // Called-in messages are handled; the next check looks past them.
   mod.sinceMs = Math.max(mod.sinceMs, ...hits.map(m => m.sentMs))
@@ -200,6 +231,7 @@ export const register: Register = (on, options) => {
     sinceMs: 0,
     lastActivityMs: 0,
     isChatPresent: false,
+    ids: new Map(),
   }
 
   on('session.start', async ($, e, next) => {
@@ -221,12 +253,12 @@ export const register: Register = (on, options) => {
     await $.tool.register({
       name: 'attend_reply',
       description:
-        'Reply to a peer message over attend. Threads to the most recent inbound message, or to the message id given as `re`. Messages over 400 characters are sent in numbered parts.',
+        'Reply to a peer message over attend. Threads to the most recent inbound message, or to the message given as `re` (the `~id` at the end of a line, or a full id). Messages over 400 characters are sent in numbered parts.',
       inputSchema: {
         type: 'object',
         properties: {
           message: { type: 'string', description: 'The reply body.' },
-          re: { type: 'string', description: 'The id of the message replied to (the `id:` line of a delivery).' },
+          re: { type: 'string', description: 'The id of the message replied to (the `~id` at the end of a delivery line).' },
         },
         required: ['message'],
       },
@@ -258,6 +290,16 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // A compaction drops the earlier preamble from the model's view, so the
+  // next delivery shows it in full. A precompute installs nothing.
+  on('session.compact', async ($, e, next) => {
+    const done = await next(e)
+    if (e.trigger !== 'precompute' && e.agentId === undefined && done.skip === undefined) {
+      await update($, status, s => ({ ...s, afterCompaction: true }))
+    }
+    return done
+  })
+
   on('turn.start', ($, e, next) => {
     mod.running.add(e.turnId)
     return next(e)
@@ -286,7 +328,8 @@ export const register: Register = (on, options) => {
     const input = e as unknown as { message?: unknown; re?: unknown }
     const message = String(input.message ?? '')
     if (message.trim() === '') return { result: 'message is empty; nothing sent', isError: true }
-    const re = typeof input.re === 'string' && input.re !== '' ? input.re : undefined
+    const raw = typeof input.re === 'string' ? input.re.replace(/^~/, '') : ''
+    const re = raw === '' ? undefined : mod.ids.get(raw) ?? raw
     const sent = await sendParts($, chunk(message).map(p => replyArgv(p, re)))
     $.clock.after(0, () => void wake($, mod, 'this session replied', []))
     return toolText(sent)
@@ -297,6 +340,7 @@ export const register: Register = (on, options) => {
     const channel = String(input.channel ?? '').trim()
     if (channel === '') return { result: 'channel is empty; nothing joined', isError: true }
     const joined = await sendParts($, [joinArgv(channel)])
+    if (!joined.isError) await addChannel($, channel)
     $.clock.after(0, () => void wake($, mod, 'this session joined a channel', []))
     return toolText(joined)
   })
@@ -308,31 +352,46 @@ export const register: Register = (on, options) => {
     return { result: r.stdout }
   })
 
-  // One row of lozenges while awake: name ▸ project ▸ marker and unread.
-  // Dormant draws nothing.
+  // One lozenge while awake: the attend state only (peers, unread, channels).
+  // The operator's statusline already shows name and project. Dormant draws
+  // nothing.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const s = await read($, status)
     if (s.mode !== 'awake') return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const marker = s.enrolled === false ? '○ not enrolled' : `● ${s.peers}`
+    const state =
+      s.enrolled === false ? '○ not enrolled' : `● ${s.peers} peers ✉ ${s.unread} unread`
+    const channels = s.channels.length > 0 ? ` ${s.channels.join(' ')}` : ''
     return (
       <Box flexDirection="row">
-        <Text color={ACCENT}>{''}</Text>
-        <Text color={GROUND} backgroundColor={ACCENT} bold>
-          {s.self ?? 'attend'}
-        </Text>
-        <Text color={ACCENT} backgroundColor={SUBTLE}>{''}</Text>
+        <Text color={SUBTLE}>{'\ue0b6'}</Text>
         <Text color={FG} backgroundColor={SUBTLE}>
           {' '}
-          {s.project ?? ''}{' '}
+          {state}
+          {channels}{' '}
         </Text>
-        <Text color={SUBTLE} backgroundColor={GROUND}>{''}</Text>
-        <Text color={FG} backgroundColor={GROUND}>
-          {' '}
-          {marker} ✉ {s.unread}{' '}
-        </Text>
-        <Text color={GROUND}>{''}</Text>
+        <Text color={SUBTLE}>{'\ue0b4'}</Text>
+      </Box>
+    )
+  })
+
+  // The human's row for a delivery this plugin submitted: one dim line per
+  // peer message. ctrl+o (isExpanded) and rows of any other origin keep the
+  // engine's drawing. The model still reads the full framed text.
+  on('ui.render', { component: 'UserMessage' }, ($, e, next) => {
+    const { origin, isExpanded, text } = e.props
+    if (isExpanded || origin.kind !== 'plugin' || origin.name !== 'attend-mod') return next(e)
+    const lines = peerLines(text)
+    if (!lines) return next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {lines.map((l, i) => (
+          <Text key={i} dimColor wrap="truncate-end">
+            {l}
+          </Text>
+        ))}
       </Box>
     )
   })

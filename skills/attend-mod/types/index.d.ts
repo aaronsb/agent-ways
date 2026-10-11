@@ -11,6 +11,12 @@ export type AttendModStatus = {
   peers: number
   /** Messages drained and waiting for their turn to start. */
   unread: number
+  /** Channels this session joined or has seen messages on, for the band. */
+  channels: string[]
+  /** Deliveries made so far; the full preamble shows on 0 and every 10th. */
+  deliveries: number
+  /** A compaction happened since the last delivery: the next shows the full preamble. */
+  afterCompaction: boolean
 }
 
 declare module 'claude-code' {
