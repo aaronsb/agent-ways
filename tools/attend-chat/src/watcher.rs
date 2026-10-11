@@ -105,7 +105,9 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
             }
         }
     }
-    backfill.sort_by_key(|(t, _)| *t);
+    // Ties on mtime (the parts of a long message, written within one
+    // timestamp tick) go by path, whose id carries the send time.
+    backfill.sort();
     for (_, path) in backfill {
         if let Some(sig) = parse_file(&path) {
             let _ = tx.send(sig);

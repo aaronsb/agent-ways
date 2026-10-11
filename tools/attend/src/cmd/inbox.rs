@@ -368,7 +368,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 
     let cwd = ident.origin_path.clone();
     let Scan { mut delivered, mark, note } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
-    delivered.sort_by_key(|d| d.mtime);
+    // Oldest first; parts written within one timestamp tick go by id,
+    // which carries the send time.
+    delivered.sort_by(|a, b| a.mtime.cmp(&b.mtime).then_with(|| a.id.cmp(&b.id)));
 
     // The cold start is this conduit's first contact with the session, so
     // a delivery there names the session. Only a blocking reason reaches
