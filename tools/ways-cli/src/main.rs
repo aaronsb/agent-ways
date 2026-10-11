@@ -1208,7 +1208,7 @@ fn update(args: UpdateArgs) -> Result<()> {
     cmd::update::run(args.dry_run, args.git_ref)
 }
 
-/// `ways manage repair` and the hidden fixed `ways reconcile`: one function,
+/// `ways manage repair` and the hidden fixed name `reconcile`: one function,
 /// so the two cannot drift (ADR-509 §4).
 fn repair(a: RepairArgs) -> Result<()> {
     cmd::reconcile::run(a.source, a.dest, a.mode, a.dry_run, a.quiet, a.force)

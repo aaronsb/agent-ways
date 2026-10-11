@@ -259,17 +259,28 @@ fn ways_help(args: &[&str]) -> (bool, String) {
 /// Groups that open a screen when run bare on a terminal (ADR-507 §7, note
 /// of 2026-10-02). Their usage line reads `[COMMAND]`, but in a script, as a
 /// call site is, they still need a verb: bare in a pipe they exit 2.
-const SCREEN_GROUPS: &[&str] = &["session", "target"];
+const SCREEN_GROUPS: &[&str] = &["session", "manage"];
+
+/// The lifecycle names ADR-509 moved under `ways manage`. The one-release
+/// aliases keep them running, so the CLI still accepts them, but no caller in
+/// the repository may use them. The exception is the updater's spawn of
+/// `reconcile`: the fixed name every successor binary keeps, because the
+/// previous release's updater calls it (ADR-509 §4).
+const MOVED: &[&str] = &["update", "reconcile", "uninstall", "target"];
+const UPDATER: &str = "tools/ways-cli/src/cmd/update.rs (spawn)";
 
 #[test]
 fn every_ways_call_site_names_a_command_the_cli_accepts() {
     let root = repo_root();
     let sites = call_sites(&root);
     // Positive control: callers the scan must see, or it found nothing to check.
-    for must in [("corpus", None), ("author", Some("lint")), ("settings", Some("set"))] {
+    for must in [("corpus", None), ("author", Some("lint")), ("settings", Some("set")), ("manage", Some("repair"))] {
         let key = (must.0.to_string(), must.1.map(str::to_string));
         assert!(sites.contains_key(&key), "the scan missed `ways {} {}`", must.0, must.1.unwrap_or(""));
     }
+    // The updater's spawn is seen, so the exception above excuses a real site.
+    let updater = sites.get(&("reconcile".to_string(), None));
+    assert!(updater.is_some_and(|p| p.iter().any(|(at, _)| at == UPDATER)), "the scan missed the updater's spawn");
 
     // Per command: None when the CLI rejects it, else whether it needs a verb
     // (its usage line reads `<COMMAND>`, as `tune` does, or it opens a screen
@@ -280,6 +291,15 @@ fn every_ways_call_site_names_a_command_the_cli_accepts() {
         // Named as removed, in the docs that record their removal and in the
         // tests that keep them rejected.
         if REMOVED.contains(&a.as_str()) {
+            continue;
+        }
+        if MOVED.contains(&a.as_str()) {
+            let left: Vec<&str> =
+                places.iter().map(|(p, _)| p.as_str()).filter(|p| !(a == "reconcile" && *p == UPDATER)).collect();
+            if !left.is_empty() {
+                let shown = left.iter().take(3).copied().collect::<Vec<_>>().join(", ");
+                bad.push(format!("ways {a} moved under `ways manage` (ADR-509)  ({shown})"));
+            }
             continue;
         }
         // `ways agent …` hands its arguments to the ways-agent binary.
@@ -325,5 +345,6 @@ fn the_scan_reads_each_call_site_form() {
         spawns("Command::new(ways_bin).args([\"corpus\", \"--quiet\"])"),
         [("corpus".into(), None)]
     );
-    assert_eq!(spawns("Command::new(exe).args([\"target\", \"plan\"])"), [("target".into(), Some("plan".into()))]);
+    assert_eq!(spawns("Command::new(exe).args([\"manage\", \"target\", \"plan\"])"), [("manage".into(), Some("target".into()))]);
+    assert_eq!(spawns("Command::new(ways_bin).arg(\"reconcile\")"), [("reconcile".into(), None)]);
 }
