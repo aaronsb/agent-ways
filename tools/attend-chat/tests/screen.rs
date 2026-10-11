@@ -1523,6 +1523,15 @@ fn an_agent_row_removes_it_from_the_shown_channel() {
     assert_eq!(c.status(), "dry run: /kick not run");
 }
 
+/// The compose box's flag marks a swept channel, as it marks a quiet
+/// agent: Enter would be refused.
+#[test]
+fn the_destination_flag_marks_a_swept_channel() {
+    let mut c = chat_side();
+    typed(&mut c, "#archive hi");
+    assert!(text(&mut c, 80, 25).contains(" #archive (swept) "), "{}", text(&mut c, 80, 25));
+}
+
 /// A menu closed unchanged leaves "unchanged" in the bar; a question a
 /// later pick asks replaces it, so the `y` that answers it is never blind.
 /// By keys: #deploy's menu, Esc, its menu again, Delete channel.

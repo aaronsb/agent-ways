@@ -398,7 +398,8 @@ impl ChatPane {
             None => {
                 let scope = tabs::send_scope(&self.normal_tab());
                 let quiet = keys::quiet_names(&self.world().seen);
-                let to = destination_label(&text, &scope, &quiet).unwrap_or(format!("#{scope}"));
+                let swept = keys::swept_names(&self.world().rows);
+                let to = destination_label(&text, &scope, &quiet, &swept).unwrap_or(format!("#{scope}"));
                 format!("dry run: not sent to {to}")
             }
         };

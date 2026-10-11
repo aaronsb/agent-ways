@@ -180,6 +180,13 @@ pub(super) fn quiet_names(seen: &[Seen]) -> Vec<String> {
     seen.iter().filter(|s| s.identity.is_claude && !s.live && !live(&s.identity.nickname)).map(|s| s.identity.nickname.clone()).collect()
 }
 
+/// The channels `_groups.yaml` still names whose directory was swept, by
+/// name. Tab completes them and the column lists them; a send to one is
+/// refused, and the destination flag marks it.
+pub(super) fn swept_names(rows: &[crate::groups::ChannelRow]) -> Vec<String> {
+    rows.iter().filter(|r| !r.on_disk).map(|r| r.known.group.name.clone()).collect()
+}
+
 /// Addressed-send core shared by the explicit `@`/`#` prefix path and
 /// the foreground-tab scoped path. Resolves every recipient up front
 /// and rejects the entire send if any address is bad, so one typo
@@ -675,8 +682,9 @@ fn purge_channel_in(
 /// misrouted broadcast is the failure it exists to prevent. `None`
 /// while a slash command is being composed (commands don't send).
 /// `scope` is the channel an unaddressed message targets. An agent named
-/// in `quiet` ([`quiet_names`]) is marked: the send would be refused.
-pub fn destination_label(input: &str, scope: &str, quiet: &[String]) -> Option<String> {
+/// in `quiet` ([`quiet_names`]) and a channel named in `swept`
+/// ([`swept_names`]) are marked: the send would be refused.
+pub fn destination_label(input: &str, scope: &str, quiet: &[String], swept: &[String]) -> Option<String> {
     if slash::parse(input).is_some() || slash::find_slash_partial(input).is_some() {
         return None;
     }
@@ -689,6 +697,7 @@ pub fn destination_label(input: &str, scope: &str, quiet: &[String]) -> Option<S
         .zip(recipient_labels(&recipients))
         .map(|(r, label)| match r {
             Addressed::Agent(name) if quiet.iter().any(|q| q.eq_ignore_ascii_case(name)) => format!("{label} (quiet)"),
+            Addressed::Group(name) if swept.iter().any(|s| s == name) => format!("{label} (swept)"),
             _ => label,
         })
         .collect();
@@ -1323,7 +1332,7 @@ mod tests {
     #[test]
     fn destination_label_tracks_routing_live() {
         // Unaddressed → the scope channel.
-        let destination_label = |i: &str, s: &str| destination_label(i, s, &[]);
+        let destination_label = |i: &str, s: &str| destination_label(i, s, &[], &[]);
         assert_eq!(destination_label("", "open"), Some("#open".into()));
         assert_eq!(destination_label("hello", "open"), Some("#open".into()));
         assert_eq!(destination_label("hello", "deploy"), Some("#deploy".into()));
@@ -1341,9 +1350,17 @@ mod tests {
     #[test]
     fn the_destination_flag_marks_a_quiet_agent() {
         let quiet = ["Lark".to_string()];
-        assert_eq!(destination_label("@lark hi", "open", &quiet), Some("@lark (quiet)".into()));
-        assert_eq!(destination_label("@Tamsin @Lark hi", "open", &quiet), Some("@Tamsin @Lark (quiet)".into()));
-        assert_eq!(destination_label("hi", "open", &quiet), Some("#open".into()));
+        assert_eq!(destination_label("@lark hi", "open", &quiet, &[]), Some("@lark (quiet)".into()));
+        assert_eq!(destination_label("@Tamsin @Lark hi", "open", &quiet, &[]), Some("@Tamsin @Lark (quiet)".into()));
+        assert_eq!(destination_label("hi", "open", &quiet, &[]), Some("#open".into()));
+    }
+
+    #[test]
+    fn the_destination_flag_marks_a_swept_channel() {
+        let swept = ["ghost".to_string()];
+        assert_eq!(destination_label("#ghost hi", "open", &[], &swept), Some("#ghost (swept)".into()));
+        assert_eq!(destination_label("#infra #ghost hi", "open", &[], &swept), Some("#infra #ghost (swept)".into()));
+        assert_eq!(destination_label("#ghostly hi", "open", &[], &swept), Some("#ghostly".into()), "the name, not a prefix of it");
     }
 
     fn ident(name: &str, cwd: &str) -> KnownIdentity {
@@ -1365,7 +1382,7 @@ mod tests {
 
     #[test]
     fn destination_label_hides_while_composing_slash() {
-        let destination_label = |i: &str, s: &str| destination_label(i, s, &[]);
+        let destination_label = |i: &str, s: &str| destination_label(i, s, &[], &[]);
         assert_eq!(destination_label("/", "open"), None);
         assert_eq!(destination_label("/jo", "open"), None);
         assert_eq!(destination_label("/join #deploy", "open"), None);

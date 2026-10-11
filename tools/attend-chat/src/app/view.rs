@@ -234,7 +234,8 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'
     f.render_widget(Paragraph::new(lines), Rect { height: text_h, ..inner });
     let scope = tabs::send_scope(fg);
     let quiet = super::keys::quiet_names(&chat.world().seen);
-    if let Some(label) = super::destination_label(chat.input.text(), &scope, &quiet) {
+    let swept = super::keys::swept_names(&chat.world().rows);
+    if let Some(label) = super::destination_label(chat.input.text(), &scope, &quiet, &swept) {
         let flag = format!(" {label} ");
         let w = (str_width(&flag) as u16).min(inner.width);
         let at = Rect { x: inner.x + inner.width - w, y: inner.y + text_h, width: w, height: flag_h };
