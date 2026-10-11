@@ -470,6 +470,50 @@ impl ServerSession {
     }
 }
 
+/// `root` made absolute, with its longest existing ancestor canonicalised
+/// and the components past it (which hold no links, being absent) resolved
+/// by name.
+fn normalise(root: PathBuf) -> PathBuf {
+    use std::path::Component;
+    let abs = if root.is_absolute() {
+        root
+    } else {
+        match std::env::current_dir() {
+            Ok(d) => d.join(root),
+            Err(_) => return root,
+        }
+    };
+    let mut base = abs.as_path();
+    let mut rest = Vec::new();
+    let mut out = loop {
+        if let Ok(c) = base.canonicalize() {
+            break c;
+        }
+        match (base.parent(), base.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(PathBuf::from(name));
+                base = parent;
+            }
+            // `..` or `.` as the last component: step past it by name.
+            (Some(parent), None) => {
+                rest.push(PathBuf::from(base.components().next_back().unwrap().as_os_str()));
+                base = parent;
+            }
+            (None, _) => break PathBuf::from("/"),
+        }
+    };
+    for part in rest.iter().rev() {
+        match part.components().next() {
+            Some(Component::ParentDir) => {
+                out.pop();
+            }
+            Some(Component::CurDir) | None => {}
+            Some(_) => out.push(part),
+        }
+    }
+    out
+}
+
 /// A state root holding `sessions/<name>/env` and `shots/`.
 #[derive(Clone, Debug)]
 pub struct Harness {
@@ -477,9 +521,15 @@ pub struct Harness {
 }
 
 impl Harness {
-    /// A harness rooted at `root`.
+    /// A harness rooted at `root`, normalised once here: made absolute
+    /// against the current directory, its existing part canonicalised and
+    /// any `.` or `..` in the rest resolved by name. Every spelling of one
+    /// root then tags and finds its sessions alike, whether the directory
+    /// existed at launch or not.
     pub fn new(root: impl Into<PathBuf>) -> Harness {
-        Harness { root: root.into() }
+        Harness {
+            root: normalise(root.into()),
+        }
     }
 
     /// A harness rooted at [`default_state_dir`].
@@ -502,14 +552,7 @@ impl Harness {
     /// The value sessions of this root are tagged with: the root's
     /// canonical path, so two spellings of one root agree.
     pub fn root_tag(&self) -> String {
-        let abs = if self.root.is_absolute() {
-            self.root.clone()
-        } else {
-            std::env::current_dir()
-                .map(|d| d.join(&self.root))
-                .unwrap_or_else(|_| self.root.clone())
-        };
-        abs.canonicalize().unwrap_or(abs).display().to_string()
+        self.root.display().to_string()
     }
 
     /// Start `cmd` in a detached tmux session of the requested geometry,

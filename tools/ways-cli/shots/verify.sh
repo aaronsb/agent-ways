@@ -12,7 +12,7 @@
 # SIZES overrides the sizes, e.g. SIZES="100x30".
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-export SHOTS_DIR=${SHOTS_DIR:-$(cd "$HERE/../../.." && pwd)/target/tui-verify/ways}
+export SHOTS_DIR=${SHOTS_DIR:-$HERE/../../../target/tui-verify/ways}
 . "$HERE/../../../docs/images/ways/tools/env.sh"
 FONT=${FONT:-Adwaita Mono}
 SIZES=${SIZES:-80x25 120x35}

@@ -453,3 +453,42 @@ fn a_launch_whose_state_is_removed_midway_fails() {
         "the session was left running"
     );
 }
+
+/// A root spelled through `..`, whose directory does not exist until the
+/// launch creates it, owns the session it launched: later commands from the
+/// same spelling, and from the plain one, reach it.
+#[test]
+fn a_root_spelled_through_dotdot_owns_its_session() {
+    if !tmux_or_skip("a_root_spelled_through_dotdot_owns_its_session") {
+        return;
+    }
+    let mut scratch = Scratch::new("dotdot");
+    let name = scratch.name("dotdot");
+    std::fs::create_dir_all(scratch.path("x")).unwrap();
+    let spelled = scratch.path("x/../th");
+    ok(&cli(&spelled)
+        .args(["launch", &name, "--cols", "40", "--rows", "4", "--"])
+        .args(marker_cmd("dotdot-ok"))
+        .output()
+        .unwrap());
+    for root in [spelled.clone(), scratch.path("th")] {
+        let s = Harness::new(&root).session(&name).unwrap();
+        assert!(s.owned(), "{} calls its own session foreign", root.display());
+        s.wait_for("dotdot-ok", WAIT).unwrap();
+    }
+    ok(&cli(&spelled).args(["text", &name]).output().unwrap());
+    ok(&cli(&spelled).args(["down", &name]).output().unwrap());
+}
+
+/// `Harness::new` stores one spelling of a root: absolute, with `.` and
+/// `..` resolved, whether or not the directory exists yet.
+#[test]
+fn the_root_is_normalised_at_construction() {
+    let scratch = Scratch::new("normalise");
+    std::fs::create_dir_all(scratch.path("x")).unwrap();
+    let plain = scratch.root.canonicalize().unwrap().join("th");
+    for spelled in ["x/../th", "./x/./../th", "th/sub/.."] {
+        assert_eq!(Harness::new(scratch.path(spelled)).root(), plain, "{spelled}");
+    }
+    assert!(Harness::new("rel/../th").root().is_absolute());
+}
