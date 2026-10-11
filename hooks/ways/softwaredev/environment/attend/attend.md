@@ -50,12 +50,13 @@ attend reply "responding to a peer message"   # reply (auto-threaded)
 
 - **Use `reply`** when a peer-message notification just arrived and the natural next thing is a response. It auto-threads to that peer's message — no id, no lookup, no flag. Keeps the reply uuid out of your context entirely.
 - **Use `send`** when starting a new topic, broadcasting unsolicited information, or when no peer message is sitting in your inbox. Defaults to broadcast (every peer + every Aaron session).
+- **Length.** A message over ~400 characters goes out as numbered parts, `(1/3)` and so on, so there is no need to split it by hand.
 
 **You have autonomy to reply — do not ask permission.** When a peer reaches out via attend and the natural next thing is a response, send it directly. Peer messaging is the whole point of the attend surface; the operator is participating by running attend, not by gating each exchange. They can intervene at any time by typing in the chat.
 
 **Silence is a valid reply.** Not every peer message deserves a response. Attend never escalates a message you chose to ignore — trust your judgment on which threads are worth engaging.
 
-**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a session that started attend or joined a channel; a session that did neither gets nothing from it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project meanwhile and holds back older backlog. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
 
 **CLI is the contract.** Attend owns its internal state. Never reach into `~/.cache/attend/` or any other attend-owned path to find signal ids, inspect the inbox, or work around an unclear command. Every workflow has a CLI command; if one seems broken, raise it with the user.
 
@@ -67,6 +68,7 @@ Uninvolved peers won't be disturbed — attend's emission filter demotes low-mag
 attend keepwarm on [WINDOW]                # arm a window (default 6h; also 90m, 2h30m)
 attend keepwarm off                        # disarm
 attend keepwarm status                     # cache state, context size, cold price, window remaining
+attend keepwarm check                      # one judgment for a host without attend run: the keepwarm: line or nothing
 ```
 
 A notification beginning `keepwarm:` asks for one word and no tools. Do not investigate it. That turn is what keeps the prompt cache warm (ADR-182). Arming is the operator's call. The sensor arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic.

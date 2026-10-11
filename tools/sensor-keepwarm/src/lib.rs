@@ -15,8 +15,12 @@
 //! - the ledger, written by the sensor and read by `attend keepwarm
 //!   status` for the card
 //!
-//! The pure decision lives in [`State::step`], with the file and
-//! process reads around it in [`KeepwarmSensor::poll`].
+//! The pure decision lives in [`State::step`]. Two callers run it: the
+//! sensor's [`KeepwarmSensor::poll`] under `attend run`, which holds its
+//! state in memory, and [`check_once`] for `attend keepwarm check`, which a
+//! host polling without `attend run` calls (ADR-406 item 13) and which
+//! carries the state between calls in the ledger's cursor. Both settle a
+//! step's outcome through [`settle`].
 
 use sensor_trait::{Focus, Sensor};
 use serde::{Deserialize, Serialize};
@@ -156,6 +160,21 @@ pub struct Ledger {
     pub stopped: Option<String>,
     pub pinged_at: Option<u64>,
     pub updated_at: u64,
+    /// Where the last step left the clock, for [`check_once`] to resume
+    /// from. The sensor writes it and does not read it: a restarted sensor
+    /// baselines afresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<Cursor>,
+}
+
+/// The part of [`State`] a step reads back: the idle clock, the context
+/// and model it last saw, and the deadline it last knew.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Cursor {
+    pub last_seen_at: u64,
+    pub ctx: u64,
+    pub model: String,
+    pub deadline: u64,
 }
 
 pub fn arm_path(dir: &Path, session_id: &str) -> PathBuf {
@@ -290,6 +309,22 @@ impl State {
         s
     }
 
+    /// A state that picks up where the last step left it, so a one-shot
+    /// check scores and wakes as the sensor's loop would. Without a cursor
+    /// the first step baselines, as a sensor's first poll does.
+    pub fn resume(ledger: Option<Ledger>) -> Self {
+        let cursor = ledger.as_ref().and_then(|l| l.cursor.clone());
+        let mut s = State::from_ledger(ledger);
+        if let Some(c) = cursor {
+            s.baselined = true;
+            s.last_seen_at = c.last_seen_at;
+            s.ctx = c.ctx;
+            s.model = c.model;
+            s.deadline = c.deadline;
+        }
+        s
+    }
+
     pub fn is_cold(&self, now: u64) -> bool {
         self.last_seen_at > 0 && now.saturating_sub(self.last_seen_at) >= TTL_SECS
     }
@@ -371,11 +406,15 @@ impl State {
                 out.changed = true;
                 let mut line = format!("cold write of {} tokens paid ({})", fmt_tok(entry.cache_creation), fmt_usd(usd));
                 // Only a context the floor can serve is worth holding warm.
-                if entry.context() >= BIG_TOKENS && self.deadline < now + AUTO_WARM_SECS {
-                    self.deadline = now + AUTO_WARM_SECS;
+                // The window runs from the write, not from when it was
+                // scored: a check that resumes after hours away scores an
+                // old write, whose window may already have run out.
+                let until = entry.at_epoch + AUTO_WARM_SECS;
+                if entry.context() >= BIG_TOKENS && until > now && self.deadline < until {
+                    self.deadline = until;
                     self.stopped = None;
                     out.arm_write = Some(self.deadline);
-                    line.push_str(&format!(", keeping the cache warm for {} so it is not paid again today", fmt_duration(AUTO_WARM_SECS)));
+                    line.push_str(&format!(", keeping the cache warm for {} so it is not paid again today", fmt_duration(until - now)));
                 }
                 out.logs.push(line);
             }
@@ -472,6 +511,12 @@ impl State {
             stopped: self.stopped.clone(),
             pinged_at: self.pinged_at,
             updated_at: now,
+            cursor: self.baselined.then(|| Cursor {
+                last_seen_at: self.last_seen_at,
+                ctx: self.ctx,
+                model: self.model.clone(),
+                deadline: self.deadline,
+            }),
         }
     }
 }
@@ -539,6 +584,57 @@ pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, n
     lines
 }
 
+// ── Settling a step ────────────────────────────────────────────
+
+/// Apply what one step decided: log it on stderr, write a new arm deadline,
+/// and rewrite the ledger when the step changed it.
+pub fn settle(dir: &Path, session_id: &str, state: &State, arm_before: Option<&ArmFile>, out: &Outcome, now: u64) {
+    for line in &out.logs {
+        eprintln!("[attend] keepwarm: {line}");
+    }
+    if let Some(deadline) = out.arm_write {
+        // The operator may have armed or disarmed while `ways context`
+        // ran. Their word is newer than this step's, so write only if the
+        // file still says what the step started from.
+        let started_from = arm_before.map(|a| a.deadline).unwrap_or(0);
+        let on_disk = read_arm(dir, session_id).map(|a| a.deadline).unwrap_or(0);
+        if on_disk != started_from {
+            eprintln!("[attend] keepwarm: arm file changed during the poll, leaving it");
+        } else {
+            let file = ArmFile { deadline, armed_at: now, window_secs: deadline.saturating_sub(now) };
+            if let Err(e) = write_arm(dir, session_id, &file) {
+                eprintln!("[attend] keepwarm: could not write the arm file: {e}");
+            }
+        }
+    }
+    if out.changed {
+        if let Err(e) = write_ledger(dir, session_id, &state.ledger(now)) {
+            eprintln!("[attend] keepwarm: could not write the ledger: {e}");
+        }
+    }
+}
+
+/// Run the keepwarm judgment once for `session_id`, as one sensor poll
+/// would, and return the `keepwarm:` wake line when one is due. The state
+/// between calls is the ledger's cursor, so successive checks see the
+/// same rules as the sensor's loop: the arm window, the wake at 50 idle
+/// minutes on a large context, disarm when no turn follows a wake, and the
+/// auto-arm after a paid cold write. `None` when no wake is due or the
+/// transcript cannot be read.
+pub fn check_once(session_id: &str, dir: &Path, working_dir: &str, now: u64) -> Option<String> {
+    let Some(reading) = read_context(session_id, working_dir) else {
+        eprintln!("[attend] keepwarm: could not read the session transcript through `ways context`");
+        return None;
+    };
+    let mut state = State::resume(read_ledger(dir, session_id));
+    let arm = read_arm(dir, session_id);
+    let mut out = state.step(&reading, arm.as_ref(), now);
+    // The cursor moves with every step, and the next check reads it back.
+    out.changed = true;
+    settle(dir, session_id, &state, arm.as_ref(), &out, now);
+    out.observations.into_iter().next().map(|(_, line)| line)
+}
+
 // ── The sensor ─────────────────────────────────────────────────
 
 pub struct KeepwarmSensor {
@@ -570,29 +666,7 @@ impl Sensor for KeepwarmSensor {
         let now = sensor_trait::epoch_secs();
         let arm = read_arm(&self.dir, &self.session_id);
         let out = self.state.step(&reading, arm.as_ref(), now);
-        for line in &out.logs {
-            eprintln!("[attend] keepwarm: {line}");
-        }
-        if let Some(deadline) = out.arm_write {
-            // The operator may have armed or disarmed while `ways context`
-            // ran. Their word is newer than this poll's, so write only if
-            // the file still says what the step started from.
-            let started_from = arm.as_ref().map(|a| a.deadline).unwrap_or(0);
-            let on_disk = read_arm(&self.dir, &self.session_id).map(|a| a.deadline).unwrap_or(0);
-            if on_disk != started_from {
-                eprintln!("[attend] keepwarm: arm file changed during the poll, leaving it");
-            } else {
-                let file = ArmFile { deadline, armed_at: now, window_secs: deadline.saturating_sub(now) };
-                if let Err(e) = write_arm(&self.dir, &self.session_id, &file) {
-                    eprintln!("[attend] keepwarm: could not write the arm file: {e}");
-                }
-            }
-        }
-        if out.changed {
-            if let Err(e) = write_ledger(&self.dir, &self.session_id, &self.state.ledger(now)) {
-                eprintln!("[attend] keepwarm: could not write the ledger: {e}");
-            }
-        }
+        settle(&self.dir, &self.session_id, &self.state, arm.as_ref(), &out, now);
         out.observations
     }
 
@@ -646,6 +720,22 @@ mod tests {
         assert!(out.observations.is_empty());
         assert!(s.baselined);
         (s, r)
+    }
+
+    /// A state resumed from the ledger steps as the one that wrote it would:
+    /// the wake fires on the resumed clock, not after a fresh baseline.
+    #[test]
+    fn a_resumed_state_steps_as_the_one_that_wrote_the_ledger() {
+        let (mut s, r) = warm_state();
+        s.step(&r, Some(&armed(1000 + DEFAULT_WINDOW_SECS)), 1000);
+        let mut resumed = State::resume(Some(s.ledger(1000)));
+        let at = 1000 + PING_AFTER_SECS;
+        assert_eq!(
+            resumed.step(&r, Some(&armed(1000 + DEFAULT_WINDOW_SECS)), at),
+            s.step(&r, Some(&armed(1000 + DEFAULT_WINDOW_SECS)), at),
+        );
+        assert_eq!(resumed, s);
+        assert!(!State::resume(None).baselined);
     }
 
     #[test]
@@ -745,8 +835,19 @@ mod tests {
         let out = s.step(&r2, None, back + 30);
         assert_eq!(s.misses.len(), 1);
         assert_eq!(s.misses[0].usd.map(|u| (u * 100.0).round() / 100.0), Some(4.01));
-        assert_eq!(out.arm_write, Some(back + 30 + AUTO_WARM_SECS));
-        assert!(out.logs[0].contains("cold write of 201k tokens paid ($4.01), keeping the cache warm for 3h00m"));
+        assert_eq!(out.arm_write, Some(back + AUTO_WARM_SECS), "the window runs from the write");
+        assert!(out.logs[0].contains("cold write of 201k tokens paid ($4.01), keeping the cache warm for 3h00m"), "{:?}", out.logs);
+    }
+
+    /// A write scored after its window ran out is scored and arms nothing.
+    #[test]
+    fn a_cold_write_scored_after_its_window_arms_nothing() {
+        let (mut s, _) = warm_state();
+        let back = 1000 + TTL_SECS + 600;
+        let r2 = reading(vec![entry(1000, 200_000, 500), entry(back, 0, 200_700)]);
+        let out = s.step(&r2, None, back + AUTO_WARM_SECS + 60);
+        assert_eq!(s.misses.len(), 1);
+        assert_eq!(out.arm_write, None);
     }
 
     #[test]

@@ -84,9 +84,9 @@ attend reply "responding to the last peer message" # reply (auto-threaded)
 
 **Silence is a valid reply.** Attend never escalates a message you chose to ignore. Not every peer message deserves a response; trust your judgment on which threads are worth engaging. Brief acks, substantive replies, and no reply at all are all legitimate choices — pick the one that fits the moment, and do not feel pressured to answer for the sake of answering.
 
-**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a session that started attend or joined a channel; a session that did neither gets nothing from it. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project meanwhile and holds back older backlog. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
 
-Always wrap the message in double quotes to prevent shell metacharacter expansion (`?`, `*`, `!`). Keep messages under ~400 characters — peer notifications are one-per-line and longer payloads get truncated in-flight.
+Always wrap the message in double quotes to prevent shell metacharacter expansion (`?`, `*`, `!`). A message over ~400 characters goes out as numbered parts, `(1/3)`, `(2/3)`, `(3/3)`, so there is no need to split it by hand; if a part cannot be written, the error names the parts that went out.
 
 **CLI is the whole interface.** Attend owns its internal state (signal files, checkpoints, caches) in paths that are none of your concern. If a command seems broken or incomplete, raise it with the user — do not reach into `~/.cache/attend/`, `~/.config/attend/`, or any other attend-owned directory to work around it. Those paths are implementation details and can change at any time. The CLI is the contract.
 
@@ -127,6 +127,7 @@ attend status                        # instances, signals, and channel state
 attend keepwarm on [WINDOW]          # arm a window (default 6h; also 90m, 2h30m)
 attend keepwarm off                  # disarm
 attend keepwarm status               # cache state, context size, cold price, window remaining, cold writes
+attend keepwarm check                # one judgment for a host without attend run: prints the keepwarm: line or nothing
 ```
 
 A notification beginning `keepwarm:` asks for one word and no tools. Do not investigate it. The turn it produces is what keeps the prompt cache warm (ADR-182). Arming is the operator's call. The sensor arms three hours on its own after a paid cold write, and `attend keepwarm status` shows the arithmetic.

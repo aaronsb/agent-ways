@@ -5,12 +5,15 @@
 use crate::cli::KeepwarmCmd;
 use crate::util::keepwarm_dir;
 use sensor_keepwarm::{
-    card, fmt_duration, parse_duration, read_arm, read_context, read_ledger, write_arm, ArmFile,
+    card, check_once, fmt_duration, parse_duration, read_arm, read_context, read_ledger, write_arm, ArmFile,
     DEFAULT_WINDOW_SECS, PING_AFTER_SECS,
 };
 
 pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
     let ident = attend_presence::session::identity();
+    if let KeepwarmCmd::Check = sub {
+        return check(&ident);
+    }
     if !ident.session_resolved {
         eprintln!("keepwarm: no Claude session owns this process, nothing to warm");
         std::process::exit(1);
@@ -50,6 +53,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             }
             println!("keepwarm is off");
         }
+        KeepwarmCmd::Check => unreachable!("handled above"),
         KeepwarmCmd::Status => {
             let Some(reading) = read_context(sid, &ident.origin_path) else {
                 eprintln!("keepwarm: could not read the session transcript through `ways context`");
@@ -61,5 +65,31 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 println!("{line}");
             }
         }
+    }
+}
+
+/// `attend keepwarm check`: the sensor's judgment, once. Prints the
+/// `keepwarm:` line when a wake is due and nothing otherwise, and exits 0
+/// either way, so a polling host reads stdout alone. Why nothing printed
+/// goes to stderr.
+fn check(ident: &attend_presence::session::SessionIdentity) {
+    if !ident.session_resolved {
+        eprintln!("keepwarm: no Claude session owns this process, nothing to warm");
+        return;
+    }
+    let sid = ident.session_id.as_str();
+    // Under `attend run` the sensor holds the state and wakes the session;
+    // a second judge would wake it twice.
+    if attend_presence::heartbeat::run_is_live(sid) {
+        eprintln!("keepwarm: an attend run holds this session; its sensor keeps the cache warm");
+        return;
+    }
+    let cfg = crate::config::Config::load(&ident.origin_path);
+    if !cfg.sensors.get("keepwarm").map(|s| s.enabled).unwrap_or(true) {
+        eprintln!("keepwarm: the keepwarm sensor is off in attend's config");
+        return;
+    }
+    if let Some(line) = check_once(sid, &keepwarm_dir(), &ident.origin_path, sensor_trait::epoch_secs()) {
+        println!("{line}");
     }
 }

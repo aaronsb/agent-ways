@@ -118,8 +118,10 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
         }
     }
 
-    // Sort chronologically — oldest first (ledger order)
-    messages.sort_by_key(|m| m.mtime);
+    // Sort chronologically, oldest first (ledger order). Signals written
+    // within one timestamp tick, such as the parts of a long message, share
+    // an mtime; their ids carry the send time and order them.
+    messages.sort_by_cached_key(|m| (m.mtime, agent_identity::signal_send_order(&m.id), m.id.clone()));
     if let Some(ts) = query.before {
         messages.retain(|m| m.ts < ts);
     }

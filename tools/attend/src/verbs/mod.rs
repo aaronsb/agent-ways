@@ -15,13 +15,17 @@
 //!
 //! The inbound side stays outside: `attend run` (the Monitor sensor loop)
 //! and `attend inbox --drain` (the Stop hook) own delivery and the seen-set
-//! (ADR-172). `inbox::list` and `inbox::read` here mark nothing.
+//! (ADR-172). `inbox::list`, `inbox::read` and `unread::unread` here mark
+//! nothing read. `listen` sets whether the drain delivers to this session at
+//! all (ADR-406 item 10).
 
 pub mod channels;
 pub mod inbox;
+pub mod listen;
 pub mod peers;
 pub mod send;
 pub mod status;
+pub mod unread;
 
 #[cfg(feature = "sensor-peers")]
 pub use send::reply;

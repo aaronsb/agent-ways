@@ -138,6 +138,23 @@ pub fn signal_filename(sender_id: &str) -> String {
     format!("{}-{}-{}.signal", sanitize_id_component(sender_id), nanos, seq)
 }
 
+/// The send order a signal id carries: its `(nanos, seq)` tail, compared
+/// as numbers, for ordering signals whose files share an mtime (the parts
+/// of one long message, or any two signals on a store with coarse
+/// timestamps). The sender prefix plays no part, so two senders' signals
+/// order by when they were sent. An id without that tail orders as
+/// `(0, 0)`, before every minted one.
+pub fn signal_send_order(id: &str) -> (u128, u64) {
+    let id = id.strip_suffix(".signal").unwrap_or(id);
+    let mut tail = id.rsplitn(3, '-');
+    let seq = tail.next().and_then(|s| s.parse::<u64>().ok());
+    let nanos = tail.next().and_then(|s| s.parse::<u128>().ok());
+    match (nanos, seq, tail.next()) {
+        (Some(nanos), Some(seq), Some(_)) => (nanos, seq),
+        _ => (0, 0),
+    }
+}
+
 /// FNV-1a 64-bit: the workspace's stable content hash. Deterministic across
 /// runs, targets and Rust releases — the property every persisted hash needs,
 /// and why none uses `std::hash::DefaultHasher`, whose algorithm may change

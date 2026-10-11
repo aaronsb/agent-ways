@@ -93,11 +93,49 @@ pub(crate) fn move_session(old: &str, new: &str, origin: &str) {
     attend_presence::heartbeat::clear(old).ok();
 }
 
-/// Record that this session enrolled by joining a channel (#720). Only a
-/// resolved session enrolls: the drain never runs for any other.
+/// When session `ident` is not enrolled but its Claude Code process enrolled
+/// under an earlier id (`/clear` gives the process a new one), move that
+/// enrollment here with its seen-set and channels, as `attend run` would.
+/// Returns whether `ident` is enrolled afterwards. The process key costs a
+/// `ps` off Linux, so it is computed only when some enrollment was ever
+/// recorded under a process key.
+pub(crate) fn adopt_previous_enrollment(ident: &Session) -> bool {
+    use attend_presence::enrollment;
+    if enrollment::is_enrolled(&ident.session_id) {
+        return true;
+    }
+    let previous = enrollment::any_indexed()
+        .then(|| ident.claude_key())
+        .flatten()
+        .and_then(|key| enrollment::previous_id(&key, &ident.session_id));
+    let Some(old) = previous else { return false };
+    move_session(&old, &ident.session_id, &ident.origin_path);
+    // The record moved with any pending opt-out; this applies it.
+    enrollment::is_enrolled(&ident.session_id)
+}
+
+/// Enroll session `ident` by `source`: `attend listen on`, a channel join,
+/// or `attend run`. A session that was not listening before has its cold
+/// start reopened (`StateStore::reopen_cold_start`), so whichever way it
+/// listens again, the next conduit delivers what was addressed to its
+/// project meanwhile and holds back the older `#open` and channel backlog.
+/// An enrollment this Claude Code process made under its id before
+/// `/clear` counts as listening, and moves here first. Returns whether the
+/// session was listening before. Only a resolved session enrolls: the
+/// drain never runs for any other.
+pub(crate) fn enroll_as(ident: &Session, source: attend_presence::enrollment::Source) -> std::io::Result<bool> {
+    let was = adopt_previous_enrollment(ident);
+    attend_presence::enrollment::enroll(&ident.session_id, source)?;
+    if !was {
+        attend_state::StateStore::new(Some(ident.session_id.clone())).reopen_cold_start();
+    }
+    Ok(was)
+}
+
+/// Record that this session enrolled by joining a channel (#720).
 pub(crate) fn enroll_by_join(ident: &Session) {
     if ident.resolved() {
-        attend_presence::enrollment::enroll(&ident.session_id, attend_presence::enrollment::Source::Join).ok();
+        enroll_as(ident, attend_presence::enrollment::Source::Join).ok();
     }
 }
 

@@ -116,9 +116,11 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // `pid-<pid>` fallback runner is not one, and registering it
     // would allocate a Greek slot to a persona nobody can address.
     // Enrollment (#720): a resolved session that starts attend is enrolled
-    // until it opts out, whatever its liveness does later.
+    // until it opts out, whatever its liveness does later. One that was not
+    // listening has its cold start reopened here, before the state below is
+    // restored into the peers sensor.
     if ident.resolved() {
-        attend_presence::enrollment::enroll(&session_id, attend_presence::enrollment::Source::Run).ok();
+        crate::util::enroll_as(&ident, attend_presence::enrollment::Source::Run).ok();
     }
     let my_instance = if ident.resolved() {
         match instance_registry.register(&focus.working_dir, &session_id) {

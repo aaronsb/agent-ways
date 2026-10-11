@@ -17,6 +17,9 @@ pub const LEAVE: &str = "Leave a channel";
 /// themselves under it in `--help`.
 pub const CHANNELS: &str = "List every channel, marking the ones this session is in";
 
+pub const LISTEN: &str = "Turn listening on or off for this session without joining a channel, or show it (default: status)";
+pub const UNREAD: &str = "Count this session's unread messages by room, marking none of them read";
+
 /// Every message verb with its description, by the CLI name.
 pub const VERBS: &[(&str, &str)] = &[
     ("send", SEND),
@@ -27,4 +30,6 @@ pub const VERBS: &[(&str, &str)] = &[
     ("join", JOIN),
     ("leave", LEAVE),
     ("channels", CHANNELS),
+    ("listen", LISTEN),
+    ("unread", UNREAD),
 ];

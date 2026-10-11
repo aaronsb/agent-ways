@@ -122,6 +122,15 @@ impl Fixture {
         self.command().args(args).output().expect("run attend")
     }
 
+    /// [`Fixture::attend`] with extra environment.
+    pub fn attend_with(&self, args: &[&str], env: &[(&str, &std::ffi::OsStr)]) -> Output {
+        let mut cmd = self.command();
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        cmd.args(args).output().expect("run attend")
+    }
+
     pub fn ok(&self, args: &[&str]) -> String {
         let out = self.attend(args);
         assert!(out.status.success(), "attend {args:?}: {}", String::from_utf8_lossy(&out.stderr));

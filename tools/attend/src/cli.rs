@@ -150,6 +150,23 @@ pub(crate) enum Commands {
         message: Vec<String>,
     },
 
+    #[command(about = describe::LISTEN)]
+    Listen {
+        #[command(subcommand)]
+        sub: Option<ListenCmd>,
+
+        /// Print the state as one JSON document
+        #[arg(long, global = true)]
+        json: bool,
+    },
+
+    #[command(about = describe::UNREAD)]
+    Unread {
+        /// Print the counts as one JSON document
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Launch the interactive chat TUI (ADR-120)
     Chat {
         /// Arguments passed through to the `attend-chat` binary
@@ -252,6 +269,26 @@ pub enum KeepwarmCmd {
     /// Disarm and forget the window
     Off,
     /// Cache state, context size, cold price, window left, and this session's cold writes
+    Status,
+    /// Run the keepwarm judgment once: print the `keepwarm:` wake line when
+    /// one is due, else nothing (exit 0 either way). For a host that polls
+    /// without `attend run`; prints nothing while an `attend run` holds the
+    /// session, since its sensor wakes it.
+    Check,
+}
+
+/// Subcommands for `attend listen`. With no subcommand, defaults to `status`.
+#[derive(Subcommand, Clone, Copy)]
+pub enum ListenCmd {
+    /// Listen: the Stop-hook drain delivers to this session. Messages
+    /// addressed to its project while it was not listening are delivered by
+    /// the next drain; older #open and channel backlog is held back
+    On,
+    /// Stop listening: the drain delivers nothing and marks nothing read.
+    /// Channel memberships are kept; a later join, `attend run` or
+    /// `listen on` listens again
+    Off,
+    /// Print `listening` or `not listening` (default)
     Status,
 }
 
