@@ -201,43 +201,88 @@ impl App {
     /// One lozenge per root: its number and name, then its pending count and
     /// a discard mark as a badge segment when non-zero. The shown tab takes the
     /// accent; in review, a tab with nothing pending is dimmed.
+    ///
+    /// The bar keeps to its width. When the tabs overflow it, the gaps tighten
+    /// first, then the names are cut shorter, down to the number alone; the
+    /// numbers and badges always stay. Tabs that still do not fit are left
+    /// off behind a `›` marker, so none goes missing unannounced.
     fn draw_tabs(&mut self, f: &mut Frame, area: Rect, active: usize, review: bool) {
-        let mut spans = Vec::new();
-        self.hits.tabs.clear();
-        for (i, r) in self.roots.iter().enumerate() {
-            let label = format!(" {} {} ", i + 1, r.name);
-            let pending = tree::pending(r, &self.queue);
-            let mut segs = vec![if review && pending == 0 && i != active {
-                Seg::faded(label)
-            } else {
-                crate::strip::tab_seg(label, i == active)
-            }];
-            if pending > 0 {
-                segs.push(Seg::on(format!(" ●{pending} ↺ "), Ground::Warn).bold());
+        /// A tab before layout: its index, name and badge, and whether the
+        /// badge is a discard target.
+        struct Tab {
+            i: usize,
+            name: String,
+            badge: Option<String>,
+            faded: bool,
+            discard: bool,
+        }
+        let mut tabs: Vec<Tab> = self
+            .roots
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let pending = tree::pending(r, &self.queue);
+                let badge = (pending > 0).then(|| format!(" ●{pending} ↺ "));
+                Tab { i, name: r.name.clone(), badge, faded: review && pending == 0 && i != active, discard: true }
+            })
+            .collect();
+        // The theme tab: no review, so dimmed there; a badge for unsaved edits, with no discard mark.
+        let badge = self.theme_dirty().then(|| " ●1 ".to_string());
+        tabs.push(Tab { i: self.theme_tab(), name: "theme".into(), badge, faded: review, discard: false });
+
+        let sh = self.shape;
+        // A tab's lozenge with its name cut to `cap` columns; a cap of 0 leaves the number alone.
+        let lozenge = |t: &Tab, cap: usize| {
+            let label = if cap == 0 { format!(" {} ", t.i + 1) } else { format!(" {} {} ", t.i + 1, crate::wrap::truncate(&t.name, cap)) };
+            let mut segs = vec![if t.faded { Seg::faded(label) } else { crate::strip::tab_seg(label, t.i == active) }];
+            if let Some(b) = &t.badge {
+                segs.push(Seg::on(b.clone(), Ground::Warn).bold());
             }
-            let tab = self.shape.lozenge(&segs);
+            sh.lozenge(&segs)
+        };
+        let span = |lozs: &[Vec<Span>], gap: u16| lozs.iter().map(|l| width(l)).sum::<u16>() + gap * lozs.len().saturating_sub(1) as u16;
+        let longest = tabs.iter().map(|t| crate::wrap::str_width(&t.name)).max().unwrap_or(0);
+        // Whole names at the usual gap, then at one column, then names cut
+        // shorter. A cap of 1 would leave a bare `…`, so below 2 the name goes.
+        let mut plan = None;
+        'fit: for cap in (0..=longest).rev().filter(|c| *c != 1) {
+            let lozs: Vec<_> = tabs.iter().map(|t| lozenge(t, cap)).collect();
+            let gaps: &[u16] = if cap == longest { &[2, 1] } else { &[1] };
+            for &gap in gaps {
+                if span(&lozs, gap) <= area.width {
+                    plan = Some((lozs, gap, false));
+                    break 'fit;
+                }
+            }
+        }
+        // Even the numbers alone overflow: as many as fit, then the marker.
+        let (lozs, gap, more) = plan.unwrap_or_else(|| {
+            let mut lozs: Vec<_> = tabs.iter().map(|t| lozenge(t, 0)).collect();
+            while !lozs.is_empty() && span(&lozs, 1) + 2 > area.width {
+                lozs.pop();
+            }
+            (lozs, 1, true)
+        });
+
+        self.hits.tabs.clear();
+        let mut spans = Vec::new();
+        for (k, (t, tab)) in tabs.iter().zip(lozs).enumerate() {
+            if k > 0 {
+                spans.push(Span::raw(" ".repeat(gap as usize)));
+            }
             let x = area.x + width(&spans);
-            if pending > 0 {
+            if t.discard && t.badge.is_some() {
                 // The badge is the discard target: everything in the lozenge from its first glyph on.
                 let at = tab.iter().position(|sp| sp.content.starts_with(" ●")).unwrap_or(0);
                 let bx = x + width(&tab[..at]);
-                self.hits.discard_tabs.push((Rect { x: bx, y: area.y, width: tab[at].width() as u16, height: 1 }.intersection(area), i));
+                self.hits.discard_tabs.push((Rect { x: bx, y: area.y, width: tab[at].width() as u16, height: 1 }.intersection(area), t.i));
             }
-            let rect = Rect { x, y: area.y, width: width(&tab), height: 1 }.intersection(area);
-            self.hits.tabs.push((rect, i));
+            self.hits.tabs.push((Rect { x, y: area.y, width: width(&tab), height: 1 }.intersection(area), t.i));
             spans.extend(tab);
-            spans.push(Span::raw("  "));
         }
-        // The theme tab: no review, so dimmed there; a badge for unsaved edits, with no discard mark.
-        let i = self.theme_tab();
-        let label = format!(" {} theme ", i + 1);
-        let mut segs = vec![if review { Seg::faded(label) } else { crate::strip::tab_seg(label, i == active) }];
-        if self.theme_dirty() {
-            segs.push(Seg::on(" ●1 ", Ground::Warn).bold());
+        if more {
+            spans.push(Span::styled(" ›", theme::hint()));
         }
-        let tab = self.shape.lozenge(&segs);
-        self.hits.tabs.push((Rect { x: area.x + width(&spans), y: area.y, width: width(&tab), height: 1 }.intersection(area), i));
-        spans.extend(tab);
         f.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
