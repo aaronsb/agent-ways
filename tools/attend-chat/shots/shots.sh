@@ -42,7 +42,10 @@ mkdir -p "$WORK"
 #   resize:COLS    the terminal narrowed (or widened) to COLS columns
 #   paste:TEXT     a bracketed paste of TEXT, \n for a newline
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
-# The fixture is base, crowd (fifteen more agents) or plain (no Nerd Font).
+# The fixture is base, crowd (fifteen more agents), own (the operator in
+# #deploy) or plain (no Nerd Font). An agent's name comes from the temp
+# path, and a long one cuts its project, so the quiet agent is clicked by
+# the column's first `○`, its row being the agents' last.
 SCENARIOS="
 side         | base  | wait:Agents
 off          | base  | wait:Agents F3 gone:Agents
@@ -51,19 +54,23 @@ tab          | base  | wait:#deploy click:#deploy wait:pick
 keys         | base  | wait:Agents F2 Down Down wait:↑↓_move
 menu-keys    | base  | wait:Agents F2 Down Down Enter wait:pick
 focus-resize | base  | wait:Agents F2 Down Down wait:↑↓_move resize:70 gone:Agents
-agent-menu   | base  | wait:gamma side:gamma wait:Address
+agent-menu   | base  | wait:Agents side:○ wait:Address
 crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
 common       | base  | wait:Agents click:≡ wait:Hide_column
 clear-view   | base  | wait:merged click:merged wait:Clear_view Enter wait:clear_the_view?
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
+own-row      | own   | wait:operator click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
+quiet-send   | base  | wait:Agents side:○ wait:Address Enter text:are_you_there Enter wait:no_heartbeat
+paste-asked  | base  | wait:merged click:merged wait:Clear_view Enter wait:clear_the_view? paste:yes_please\\nsecond_line wait:kept
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
 # with beta in it, an empty #infra, and #archive, which _groups.yaml still
 # names after its directory was swept. The human is `operator`. `crowd`
-# adds fifteen agents, every other one live; `plain` the plain shape.
+# adds fifteen agents, every other one live; `own` puts the operator in
+# #deploy, with a message there; `plain` the plain shape.
 fixture() { # kind
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
@@ -87,11 +94,14 @@ fixture() { # kind
     i=$((i + 1))
   done
   touch "$cache/heartbeat/$A" "$cache/heartbeat/$B"
+  local own=
+  [ "$1" = own ] && own="
+    - operator"
   cat > "$sig/_groups.yaml" <<YAML
 deploy:
   pinned: true
   members:
-    - $B
+    - $B$own
   description: rollout coordination
 infra:
   pinned: true
@@ -109,6 +119,7 @@ YAML
   msg "$sig/_broadcast" s1 900 "claude:$C" "$F/work/gamma" "signing off for today"
   msg "$sig/_broadcast" s2 600 "claude:$A" "$F/work/alpha" "starting the theme port; the legend moves first"
   msg "$sig/@deploy" s3 300 "claude:$B" "$F/work/beta" "rollout is green on staging"
+  [ "$1" = own ] && msg "$sig/@deploy" s4 120 "external:operator@kitty" "$F/work/alpha" "watching the rollout"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
   printf 'chat:\n  mouse: true\n' > "$F/config/attend/config.yaml"
 }
