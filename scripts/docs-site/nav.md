@@ -77,6 +77,7 @@
     * Messaging
         * [Messaging explained](explanation/attend-messaging/)
         * [Delivery](attend-and-monitor/delivery.md)
+        * [The attend mod](attend-and-monitor/mod.md)
         * [Channels](attend-and-monitor/channels.md)
     * [Chat (attend-chat)](attend-and-monitor/tui.md)
     * Reference

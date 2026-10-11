@@ -31,7 +31,7 @@ The settings screens have their own keys, listed under [settings screens](#setti
 
 **Run from:** Anywhere.
 
-**Tells you:** The binary and embedding model paths with their state, the corpus size split by English and multilingual entries, and the ways each known project holds.
+**Tells you:** The binary and embedding model paths with their state, the MCP registration and the attend mod's installed and shipped versions in each enabled target, the corpus size split by English and multilingual entries, and the ways each known project holds.
 
 ```
 ways status
@@ -84,7 +84,7 @@ ways settings theme delete glacier
 
 ### Settings screens
 
-Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors` or `theme`. Bare `ways agent` opens the gate tab, and bare `ways manage` or `ways manage target` opens the install tab. The data is what `ways settings list --json` prints.
+Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors`, `mod` (the `attend_mod` section) or `theme`. Bare `ways agent` opens the gate tab, and bare `ways manage` or `ways manage target` opens the install tab. The data is what `ways settings list --json` prints.
 
 ![the matching tab with one change pending](../images/ways/settings-matching.png)
 
@@ -664,6 +664,8 @@ ways manage update --ref ways-v1.32.0
 **Tells you:** Which projection roots it linked or relinked, one line each, and a summary unless `--quiet`. It stops with a non-zero exit, before touching anything, when a projected root (`skills/`, `agents/`, `commands/`, `hooks/ways/`, `hooks/check-config-updates.sh`, `bin/*`) is a real directory or file rather than a symlink, and lists the paths. It never deletes a real path.
 
 With no `--dest`, it runs over every target in the user config ([ADR-184](../architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). Each enabled target is converged. Each disabled one is withdrawn: our symlinks are unlinked, and our hooks block and permissions are removed from its `settings.json` through the same merge base that wrote them. An explicit `--dest` is a single-target run and leaves the list alone.
+
+Last in each enabled target it installs the attend mod through Claude Code's plugin CLI ([ADR-406](../architecture/attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md)): it adds the `agent-ways` marketplace from the app's `plugins/` folder and installs `attend@agent-ways` when they are missing, and updates both when the installed version is older than the shipped one. A disabled target, and every target once `attend_mod.install` is false, has the mod uninstalled and the marketplace removed. An `attend` plugin from another marketplace is reported and left alone, and a missing `claude` binary or a failed call is reported without failing the repair. See [the attend mod](../attend-and-monitor/mod.md).
 
 ```
 ways manage repair                       # every target in config.yaml; default: ~/.claude
