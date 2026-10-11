@@ -93,6 +93,27 @@ pub(crate) fn move_session(old: &str, new: &str, origin: &str) {
     attend_presence::heartbeat::clear(old).ok();
 }
 
+/// When session `ident` is not enrolled but its Claude Code process enrolled
+/// under an earlier id (`/clear` gives the process a new one), move that
+/// enrollment here with its seen-set and channels, as `attend run` would.
+/// Returns whether `ident` is enrolled afterwards. The process key costs a
+/// `ps` off Linux, so it is computed only when some enrollment was ever
+/// recorded under a process key.
+pub(crate) fn adopt_previous_enrollment(ident: &Session) -> bool {
+    use attend_presence::enrollment;
+    if enrollment::is_enrolled(&ident.session_id) {
+        return true;
+    }
+    let previous = enrollment::any_indexed()
+        .then(|| ident.claude_key())
+        .flatten()
+        .and_then(|key| enrollment::previous_id(&key, &ident.session_id));
+    let Some(old) = previous else { return false };
+    move_session(&old, &ident.session_id, &ident.origin_path);
+    // The record moved with any pending opt-out; this applies it.
+    enrollment::is_enrolled(&ident.session_id)
+}
+
 /// Record that this session enrolled by joining a channel (#720). Only a
 /// resolved session enrolls: the drain never runs for any other.
 pub(crate) fn enroll_by_join(ident: &Session) {

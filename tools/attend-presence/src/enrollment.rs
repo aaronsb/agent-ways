@@ -1,15 +1,16 @@
 //! Whether a session enrolled in attend (#720).
 //!
-//! A session enrolls by running `attend run` (`/attend`) or by joining a
-//! channel. Enrollment is what the Stop-hook drain delivers to, and it is a
+//! A session enrolls by running `attend run` (`/attend`), by joining a
+//! channel, or by turning listening on (`attend listen on`, ADR-406). Enrollment is what the Stop-hook drain delivers to, and it is a
 //! durable fact about the session, kept apart from liveness: a stale
 //! heartbeat, or `cleanup_stale` pruning a channel membership, does not
 //! un-enroll a session. Only an explicit opt-out does.
 //!
 //! The record is `<cache>/enrolled/<session-id>`, one line each for:
-//! - every way the session enrolled (`run`, `join`);
-//! - `optout`, when `attend scene private` ran while an `attend run` held
-//!   the session: the run's enrollment ends once no run holds it;
+//! - every way the session enrolled (`run`, `join`, `listen`);
+//! - `optout`, when `attend scene private` or `attend listen off` ran while
+//!   an `attend run` held the session: the run's enrollment ends once no
+//!   run holds it;
 //! - `claude <key>`, the Claude Code process the session ran in (pid and
 //!   start time), so a session whose id changes under the same process
 //!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it.
@@ -29,13 +30,18 @@ pub enum Source {
     Run,
     /// `attend join`, or a scene that joins a channel.
     Join,
+    /// `attend listen on`: listening without joining a channel.
+    Listen,
 }
 
 impl Source {
-    fn as_str(self) -> &'static str {
+    /// The word the record keeps it under, also what `attend listen
+    /// status --json` reports.
+    pub fn as_str(self) -> &'static str {
         match self {
             Source::Run => "run",
             Source::Join => "join",
+            Source::Listen => "listen",
         }
     }
 }
@@ -55,6 +61,7 @@ impl Record {
             match line {
                 "run" => r.sources.push(Source::Run),
                 "join" => r.sources.push(Source::Join),
+                "listen" => r.sources.push(Source::Listen),
                 "optout" => r.optout = true,
                 _ => {
                     if let Some(key) = line.strip_prefix("claude ") {
@@ -169,13 +176,14 @@ pub fn withdraw(session_id: &str, source: Source) -> io::Result<()> {
     edit(session_id, |r| r.sources.retain(|s| *s != source))
 }
 
-/// `attend scene private`: the explicit opt-out. Withdraws the join, and
-/// the run too unless an `attend run` holds the session; then the run's
-/// enrollment ends once it no longer does ([`is_enrolled`] applies it).
+/// `attend scene private` and `attend listen off`: the explicit opt-out.
+/// Withdraws the join and the listen, and the run too unless an `attend
+/// run` holds the session; then the run's enrollment ends once it no longer
+/// does ([`is_enrolled`] applies it).
 pub fn opt_out(session_id: &str) -> io::Result<()> {
     let live = crate::heartbeat::run_is_live(session_id);
     edit(session_id, |r| {
-        r.sources.retain(|s| *s != Source::Join);
+        r.sources.retain(|s| *s == Source::Run);
         if live && r.sources.contains(&Source::Run) {
             r.optout = true;
         } else {
@@ -281,6 +289,18 @@ mod tests {
                 b.join().unwrap();
                 assert_eq!(sources(&sid), vec![Source::Run], "round {round}");
             }
+        });
+    }
+
+    #[test]
+    fn listening_enrolls_and_the_opt_out_ends_it() {
+        with_cache(|| {
+            enroll("s", Source::Listen).unwrap();
+            enroll("s", Source::Join).unwrap();
+            assert!(is_enrolled("s"));
+            assert_eq!(Record::parse(&read("s").unwrap().render()).sources, vec![Source::Listen, Source::Join]);
+            opt_out("s").unwrap();
+            assert!(!is_enrolled("s"), "no run holds it, so every way ends");
         });
     }
 

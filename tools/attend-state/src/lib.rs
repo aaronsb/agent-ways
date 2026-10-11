@@ -269,6 +269,25 @@ impl StateStore {
         self.write_merged(&snap, true)
     }
 
+    /// Make the session cold again: clear `baselined` and keep the seen-set,
+    /// so the next conduit applies the cold-start rule (`cold_start`) to
+    /// what arrived since. A session that turns listening back on after a
+    /// stretch of not listening gets its addressed mail, not the whole
+    /// backlog of the rooms it kept. Returns whether the file now says cold;
+    /// no file is cold already.
+    pub fn reopen_cold_start(&self) -> bool {
+        let Some(path) = self.state_path() else { return false };
+        let _lock = LockGuard::acquire(&path.with_extension("state.lock"));
+        let Ok(content) = fs::read_to_string(&path) else { return true };
+        let mut snap = StateSnapshot::deserialize(&content);
+        if !snap.baselined {
+            return true;
+        }
+        snap.baselined = false;
+        let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+        fs::write(&tmp, snap.serialize()).is_ok() && fs::rename(&tmp, &path).is_ok()
+    }
+
     /// Shared read-union-prune-write cycle under the advisory lock.
     /// `fields_from_disk` selects which side's non-seen fields survive;
     /// `baselined` survives from either. Returns whether the file was
