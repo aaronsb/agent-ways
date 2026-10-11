@@ -87,15 +87,16 @@ The sensor re-reads `_groups.yaml` on every poll, so `attend join` and `attend l
 
 Tracks dev-tool processes in `ps` output, not every process. A process produces start and exit events only if its name is on the sensor's tracked list (build tools, runtimes, editors, servers, `ssh`, `git` and similar, in `tools/sensor-processes/src/lib.rs`) or contains one of the session's focus keywords.
 
-The sensor tracks application presence, not process churn (ADR-113). Three rules keep a build to one event:
+The sensor tracks application presence, not process churn (ADR-113). Four rules keep a build to one event:
 
-- A process running under a watched build tool, such as `rustc` under `cargo` or `cc` under `make`, is part of that build and is not counted. A watched tool run on its own is counted.
+- A watched tool running under another watched tool, such as `rustc` under `cargo` or `cc` under `make`, is part of that build and is not counted. A watched tool run on its own is counted. Any other app is counted wherever it runs, so `node` under `npm` and `docker` under `make` stay visible.
 - A watched build tool announces no start. Its exit is the build event, `cargo finished`.
-- Any other app announces its start once it is still running at the next poll. An app that starts and exits between two polls produces no event at all.
+- A watched tool that has hosted an app for a poll or more, such as `npm run dev` serving `node`, is a launcher. When the server dies the event is `node exited`, and npm's exit adds no `npm finished`.
+- Any other app announces its start once it is still running at the next poll. The poll interval adapts between 5 and 30 seconds, so the start debounce window is up to 30 seconds. An app that starts and exits within it produces no event at all.
 
 | Event | Magnitude | Example |
 |---|---|---|
-| app started (still running one poll later) | 2.0 | `docker started` |
+| app started (still running one poll later, up to 30 s) | 2.0 | `docker started` |
 | app exited | 2.0 | `nvim exited` |
 | watched build tool finished, no marker | 2.5 | ``cargo finished. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps`` |
 | watched build tool finished, success | 2.5 | `cargo finished (success). …` |
