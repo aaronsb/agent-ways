@@ -82,7 +82,7 @@ The mouse started off (`attend.chat.mouse` defaulted to false), so the terminal 
 
 ## Amendment (2026-10-11): a menu docks where its input came from
 
-Review of the change refined (a) and (c). This note records the result; the decision text above stands as accepted.
+Review of the change refined (a) and (c); the docking rule in (a) was the agent's call, made from the operator's report quoted above ("dock on the next line under the clicked channel"). This note records the result; the decision text above stands as accepted.
 
 - **Where a menu docks follows the input.** A click or right click on a tab docks the menu under the tab, even where the left column shows that channel's row. Enter on the focused tab bar does the same. A click on a column row docks under that row. Keyboard input from elsewhere (Ctrl+digit, Alt+digit, Enter on a column row) docks under the channel's column row when the column shows it, and under its tab otherwise. The placement rule in (c) is unchanged. A row that a resize has left outside the pane is clamped into it.
 - **`attend.chat.tabs.menu_on_repeat: false` governs keys only.** With it off, a second Ctrl+digit or Alt+digit, or a click on the tab already shown, only shows the tab. A click on the shown channel's column row, or Enter on that row, still opens its menu, since the row has no other action on the channel already shown.
