@@ -76,31 +76,30 @@ fn build_marker_path() -> Option<PathBuf> {
 }
 
 /// Format a build-tool exit event, optionally enriched with success/
-/// failure context from a marker. Pure function — the sensor's
-/// `poll()` delegates here so the enrichment arms get direct unit
-/// test coverage without needing a real filesystem.
+/// failure context from a marker and with the hosted apps that exited
+/// with the tool. Pure function — the sensor's `poll()` delegates here so
+/// the enrichment arms get direct unit test coverage without needing a
+/// real filesystem.
 ///
 /// The success case sits at 2.5 rather than the issue spec's 2.0 on
 /// purpose: that's the same magnitude the sensor emits when no marker
 /// is present, so opting into the wrapper never *lowers* an exit's
 /// visibility. Failures stay at 3.5 to break through refractory gating.
-fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64) -> (f64, String) {
+fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64, hosted_exits: &[String]) -> (f64, String) {
     const MARKER_WINDOW_SECS: u64 = 60;
     let matched = marker.filter(|m| marker_matches(m, app, now, MARKER_WINDOW_SECS));
-    match matched {
-        Some(m) if m.code == 0 => (
-            2.5,
-            format!("{app} finished (success). Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps"),
-        ),
-        Some(m) => (
-            3.5,
-            format!("{app} finished (failure, code {}). Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps", m.code),
-        ),
-        None => (
-            2.5,
-            format!("{app} finished. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps"),
-        ),
-    }
+    let (mag, status) = match matched {
+        Some(m) if m.code == 0 => (2.5, Some("success".to_string())),
+        Some(m) => (3.5, Some(format!("failure, code {}", m.code))),
+        None => (2.5, None),
+    };
+    let exits = (!hosted_exits.is_empty()).then(|| format!("{} exited", hosted_exits.join(", ")));
+    let notes: Vec<String> = status.into_iter().chain(exits).collect();
+    let notes = if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) };
+    (
+        mag,
+        format!("{app} finished{notes}. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps"),
+    )
 }
 
 /// One row of `ps`: a process, its parent, and its command name.
@@ -132,23 +131,39 @@ fn parse_ps(stdout: &str) -> Vec<Proc> {
 /// bounds the walk per process (ADR-137) and stops a pid cycle.
 const MAX_ANCESTRY: usize = 16;
 
+/// A watched tool at the top of a build, such as one `npm test` run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Tool {
+    name: String,
+    /// Apps (not themselves watched) running under this tool, such as
+    /// `node` under `npm run dev` or `docker` under `make up`.
+    hosts: HashSet<String>,
+}
+
 /// One poll's view of the session's processes.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct Snapshot {
-    /// App name → instance count.
+    /// App name → instance count, for apps that are not watched tools.
     apps: HashMap<String, u32>,
-    /// Watched tool → the apps (not themselves watched) running under it,
-    /// such as `node` under `npm run dev` or `docker` under `make up`.
-    hosts: HashMap<String, HashSet<String>>,
+    /// Watched tools not under another watched tool, by pid, so two
+    /// concurrent `npm` runs are two tools.
+    tools: HashMap<u32, Tool>,
 }
 
-/// Count relevant processes by name. A watched tool running under another
-/// watched tool is left out: `rustc` under `cargo` or `cc` under `make` is
-/// part of the parent's build, not an application of its own (ADR-113: the
-/// sensor tracks application presence, not PID churn), and the parent's
-/// exit carries the build event. Any other app stays visible wherever it
-/// runs, so `node` under `npm` or `docker` under `make` is counted, and
-/// recorded as hosted by each watched tool above it.
+/// An app's exit, with the pids of the watched tools it ran under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HeldExit {
+    app: String,
+    hosts: Vec<u32>,
+}
+
+/// Sort relevant processes into apps and tools. A watched tool running
+/// under another watched tool is left out: `rustc` under `cargo` or `cc`
+/// under `make` is part of the parent's build, not an application of its
+/// own (ADR-113: the sensor tracks application presence, not PID churn),
+/// and the parent's exit carries the build event. Any other app stays
+/// visible wherever it runs, so `node` under `npm` or `docker` under
+/// `make` is counted, and recorded as hosted by the tool above it.
 fn tally(procs: &[Proc], is_relevant: impl Fn(&str) -> bool, is_watched: impl Fn(&str) -> bool) -> Snapshot {
     let by_pid: HashMap<u32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
     let watched_above = |p: &Proc| {
@@ -157,24 +172,30 @@ fn tally(procs: &[Proc], is_relevant: impl Fn(&str) -> bool, is_watched: impl Fn
         for _ in 0..MAX_ANCESTRY {
             let Some(parent) = by_pid.get(&ppid) else { break };
             if is_watched(&parent.comm) {
-                tools.push(parent.comm.as_str());
+                tools.push(parent.pid);
             }
             ppid = parent.ppid;
         }
         tools
     };
     let mut snap = Snapshot::default();
+    let mut hosted: HashMap<u32, HashSet<String>> = HashMap::new();
     for p in procs.iter().filter(|p| is_relevant(&p.comm)) {
         let above = watched_above(p);
-        let watched = is_watched(&p.comm);
-        if watched && !above.is_empty() {
+        if is_watched(&p.comm) {
+            if above.is_empty() {
+                snap.tools.insert(p.pid, Tool { name: p.comm.clone(), hosts: HashSet::new() });
+            }
             continue;
         }
         *snap.apps.entry(p.comm.clone()).or_insert(0) += 1;
-        if !watched {
-            for tool in above {
-                snap.hosts.entry(tool.to_string()).or_default().insert(p.comm.clone());
-            }
+        for pid in above {
+            hosted.entry(pid).or_default().insert(p.comm.clone());
+        }
+    }
+    for (pid, apps) in hosted {
+        if let Some(tool) = snap.tools.get_mut(&pid) {
+            tool.hosts = apps;
         }
     }
     snap
@@ -190,13 +211,12 @@ pub struct ProcessSensor {
     /// later; an app gone by then was a short-lived run, and its start and
     /// exit both stay silent.
     pending_start: HashSet<String>,
-    /// Previous snapshot's hosted apps, per watched tool.
-    prior_hosts: HashMap<String, HashSet<String>>,
-    /// Watched tools that have hosted an app for at least a poll, such as
-    /// `npm` running a dev server. Such a tool is a launcher, not a build:
-    /// its exit follows the app's and is not reported as `finished`. Kept
-    /// until the tool exits.
-    hosting: HashSet<String>,
+    /// Previous snapshot's watched tools, by pid.
+    prior_tools: HashMap<u32, Tool>,
+    /// Apps that exited on the last poll while a tool that hosted them was
+    /// still running. Each is held one poll, so a tool exiting right after
+    /// names it in its own event; otherwise it is reported on its own.
+    held_exits: Vec<HeldExit>,
     /// First poll establishes baseline silently
     baseline_established: bool,
     /// Most recently parsed build-status marker (opt-in, from a user
@@ -226,8 +246,8 @@ impl ProcessSensor {
         Self {
             prior: HashMap::new(),
             pending_start: HashSet::new(),
-            prior_hosts: HashMap::new(),
-            hosting: HashSet::new(),
+            prior_tools: HashMap::new(),
+            held_exits: Vec::new(),
             baseline_established: false,
             last_marker: None,
             last_marker_mtime: None,
@@ -271,8 +291,8 @@ impl ProcessSensor {
         }
     }
 
-    /// Snapshot the user's processes as app-name → instance-count.
-    /// Tracks applications, not PIDs. Chrome going from 47 to 49
+    /// Snapshot the user's processes as app-name → instance-count, plus
+    /// the watched tools by pid. Tracks applications, not PIDs. Chrome going from 47 to 49
     /// renderer processes is not a state change. Chrome appearing
     /// or disappearing entirely is. A watched tool under another watched
     /// tool is left out (see [`tally`]).
@@ -285,22 +305,17 @@ impl ProcessSensor {
     }
 
     /// The events between the previous snapshot and `current`, given the
-    /// current marker and time. A watched build tool never announces its
-    /// start; its exit is the one build event, unless it hosted an app for
-    /// a poll or more, in which case the app's own exit is the event. Any
-    /// other app announces its start once it has lasted a poll, and an app
-    /// that came and went within one poll produces nothing.
+    /// current marker and time. A watched tool never announces its start,
+    /// and its exit is always `<tool> finished`. A hosted app whose exit is
+    /// seen in the same poll as its tool's, or one poll before, is named in
+    /// that one event, as in `npm finished (node exited)`. Any other app
+    /// announces its start once it has lasted a poll, and an app that came
+    /// and went within one poll produces nothing.
     fn diff(&mut self, current: Snapshot, now: u64) -> Vec<(f64, String)> {
-        let Snapshot { apps: current, hosts } = current;
-        for (tool, hosted) in &hosts {
-            if self.prior_hosts.get(tool).is_some_and(|before| !before.is_disjoint(hosted)) {
-                self.hosting.insert(tool.clone());
-            }
-        }
-        self.prior_hosts = hosts;
+        let Snapshot { apps: current, tools } = current;
         let mut observations = Vec::new();
         for app in current.keys() {
-            if self.is_watched(app) || (self.prior.contains_key(app) && !self.pending_start.contains(app)) {
+            if self.prior.contains_key(app) && !self.pending_start.contains(app) {
                 continue;
             }
             if self.pending_start.remove(app) {
@@ -309,19 +324,48 @@ impl ProcessSensor {
                 self.pending_start.insert(app.clone());
             }
         }
+        // App exits seen this poll, each with the pids of the tools it ran
+        // under, after the ones held from the last poll.
+        let held = std::mem::take(&mut self.held_exits);
+        let held_count = held.len();
+        let mut exits = held;
+        let mut fresh: Vec<HeldExit> = Vec::new();
         for app in self.prior.keys() {
-            if current.contains_key(app) {
+            if !current.contains_key(app) && !self.pending_start.remove(app) {
+                let hosts = self.prior_tools.iter().filter(|(_, t)| t.hosts.contains(app)).map(|(pid, _)| *pid).collect();
+                fresh.push(HeldExit { app: app.clone(), hosts });
+            }
+        }
+        fresh.sort_by(|a, b| a.app.cmp(&b.app));
+        exits.extend(fresh);
+        let alive = |pid: &u32| tools.get(pid).is_some_and(|t| self.prior_tools.get(pid).is_some_and(|p| p.name == t.name));
+        let mut finished: Vec<(&u32, &Tool)> = self.prior_tools.iter().filter(|(pid, _)| !alive(pid)).collect();
+        finished.sort_by_key(|(pid, _)| **pid);
+        let mut named = vec![false; exits.len()];
+        for (pid, tool) in finished {
+            let mut with: Vec<String> = Vec::new();
+            for (i, exit) in exits.iter().enumerate() {
+                if exit.hosts.contains(pid) {
+                    named[i] = true;
+                    if !with.contains(&exit.app) {
+                        with.push(exit.app.clone());
+                    }
+                }
+            }
+            observations.push(format_build_exit(&tool.name, self.last_marker.as_ref(), now, &with));
+        }
+        for (i, exit) in exits.into_iter().enumerate() {
+            if named[i] {
                 continue;
             }
-            if self.is_watched(app) {
-                if !self.hosting.remove(app) {
-                    observations.push(format_build_exit(app, self.last_marker.as_ref(), now));
-                }
-            } else if !self.pending_start.remove(app) {
-                observations.push((2.0, format!("{app} exited")));
+            if i >= held_count && exit.hosts.iter().any(alive) {
+                self.held_exits.push(exit);
+            } else {
+                observations.push((2.0, format!("{} exited", exit.app)));
             }
         }
         self.prior = current;
+        self.prior_tools = tools;
         observations
     }
 
@@ -398,7 +442,7 @@ impl Sensor for ProcessSensor {
                 current.apps.len(),
                 current.apps.keys().cloned().collect::<Vec<_>>().join(", "));
             self.prior = current.apps;
-            self.prior_hosts = current.hosts;
+            self.prior_tools = current.tools;
             self.baseline_established = true;
             return Vec::new();
         }
@@ -528,7 +572,7 @@ mod tests {
 
     #[test]
     fn format_build_exit_no_marker_falls_back_to_legacy_text() {
-        let (mag, text) = format_build_exit("cargo", None, 1000);
+        let (mag, text) = format_build_exit("cargo", None, 1000, &[]);
         assert_eq!(mag, 2.5);
         assert!(text.starts_with("cargo finished. "));
         assert!(!text.contains("success"));
@@ -540,7 +584,7 @@ mod tests {
         // Stale marker (outside the 60s window) must not enrich — the
         // filter inside format_build_exit is the only gate.
         let m = BuildMarker { cmd: "cargo".into(), code: 0, ts: 100 };
-        let (mag, text) = format_build_exit("cargo", Some(&m), 1000);
+        let (mag, text) = format_build_exit("cargo", Some(&m), 1000, &[]);
         assert_eq!(mag, 2.5);
         assert!(!text.contains("success"));
     }
@@ -549,7 +593,7 @@ mod tests {
     fn format_build_exit_marker_wrong_cmd_falls_back_to_legacy_text() {
         // Marker for a different command must not tag this exit.
         let m = BuildMarker { cmd: "rustc".into(), code: 0, ts: 1000 };
-        let (mag, text) = format_build_exit("cargo", Some(&m), 1010);
+        let (mag, text) = format_build_exit("cargo", Some(&m), 1010, &[]);
         assert_eq!(mag, 2.5);
         assert!(!text.contains("success"));
     }
@@ -557,7 +601,7 @@ mod tests {
     #[test]
     fn format_build_exit_matching_success_marker() {
         let m = BuildMarker { cmd: "cargo".into(), code: 0, ts: 1000 };
-        let (mag, text) = format_build_exit("cargo", Some(&m), 1010);
+        let (mag, text) = format_build_exit("cargo", Some(&m), 1010, &[]);
         assert_eq!(mag, 2.5);
         assert!(text.contains("(success)"));
     }
@@ -565,7 +609,7 @@ mod tests {
     #[test]
     fn format_build_exit_matching_failure_marker_is_louder() {
         let m = BuildMarker { cmd: "cargo".into(), code: 101, ts: 1000 };
-        let (mag, text) = format_build_exit("cargo", Some(&m), 1010);
+        let (mag, text) = format_build_exit("cargo", Some(&m), 1010, &[]);
         assert_eq!(mag, 3.5);
         assert!(text.contains("(failure, code 101)"));
     }
@@ -574,7 +618,7 @@ mod tests {
     fn format_build_exit_non_zero_even_if_tiny_is_failure() {
         // Any non-zero code is a failure — don't assume 1-255.
         let m = BuildMarker { cmd: "cargo".into(), code: 1, ts: 1000 };
-        let (mag, _) = format_build_exit("cargo", Some(&m), 1010);
+        let (mag, _) = format_build_exit("cargo", Some(&m), 1010, &[]);
         assert_eq!(mag, 3.5);
     }
 
@@ -636,13 +680,32 @@ mod tests {
     }
 
     fn snap(names: &[&str]) -> Snapshot {
-        Snapshot { apps: apps(names), hosts: HashMap::new() }
+        Snapshot { apps: apps(names), tools: HashMap::new() }
     }
 
     fn texts(obs: &[(f64, String)]) -> Vec<String> {
         let mut t: Vec<String> = obs.iter().map(|(_, s)| s.split('.').next().unwrap().to_string()).collect();
         t.sort();
         t
+    }
+
+    /// A poll of the process table `rows`, with shells left out as noise.
+    fn see(rows: &[(u32, u32, &'static str)]) -> Snapshot {
+        let s = ProcessSensor::new();
+        tally(&procs(rows), |c| c != "zsh" && c != "sh", |c| s.is_watched(c))
+    }
+
+    /// A sensor whose baseline poll saw `rows`.
+    fn sensor_after(rows: &[(u32, u32, &'static str)]) -> ProcessSensor {
+        let mut s = ProcessSensor::new();
+        let base = see(rows);
+        s.prior = base.apps;
+        s.prior_tools = base.tools;
+        s
+    }
+
+    fn tool(name: &str, hosts: &[&str]) -> Tool {
+        Tool { name: name.into(), hosts: hosts.iter().map(|h| h.to_string()).collect() }
     }
 
     #[test]
@@ -653,9 +716,8 @@ mod tests {
 
     #[test]
     fn tally_drops_a_build_tools_children() {
-        let s = ProcessSensor::new();
-        // zsh → cargo → rustc ×2, and cc under make under make.
-        let p = procs(&[
+        // zsh → cargo → rustc ×2, and gcc under make under make.
+        let t = see(&[
             (1, 0, "zsh"),
             (10, 1, "cargo"),
             (11, 10, "rustc"),
@@ -665,16 +727,14 @@ mod tests {
             (22, 21, "gcc"),
             (30, 1, "nvim"),
         ]);
-        let t = tally(&p, |c| c != "zsh", |c| s.is_watched(c));
-        assert_eq!(t.apps, HashMap::from([("cargo".into(), 1), ("make".into(), 1), ("nvim".into(), 1)]));
-        assert!(t.hosts.is_empty(), "{:?}", t.hosts);
+        assert_eq!(t.apps, apps(&["nvim"]));
+        assert_eq!(t.tools, HashMap::from([(10, tool("cargo", &[])), (20, tool("make", &[]))]));
     }
 
     #[test]
     fn tally_counts_a_watched_tool_run_on_its_own() {
-        let s = ProcessSensor::new();
-        let p = procs(&[(1, 0, "zsh"), (5, 1, "rustc")]);
-        assert_eq!(tally(&p, |c| c != "zsh", |c| s.is_watched(c)).apps, apps(&["rustc"]));
+        let t = see(&[(1, 0, "zsh"), (5, 1, "rustc")]);
+        assert_eq!(t.tools, HashMap::from([(5, tool("rustc", &[]))]));
     }
 
     #[test]
@@ -684,63 +744,135 @@ mod tests {
     }
 
     /// An app launched by a watched tool is still an app: `node` under
-    /// `npm run dev` and `docker` under `make up` stay visible.
+    /// `npm run dev` and `docker` under `make up` stay visible, and each
+    /// tool records what it hosts.
     #[test]
     fn tally_keeps_an_app_under_a_watched_tool() {
-        let s = ProcessSensor::new();
-        let p = procs(&[(1, 0, "zsh"), (10, 1, "npm"), (11, 10, "sh"), (12, 11, "node"), (20, 1, "make"), (21, 20, "docker")]);
-        let t = tally(&p, |c| c != "zsh" && c != "sh", |c| s.is_watched(c));
-        assert_eq!(t.apps, apps(&["npm", "node", "make", "docker"]));
-        assert_eq!(t.hosts["npm"], HashSet::from(["node".to_string()]));
-        assert_eq!(t.hosts["make"], HashSet::from(["docker".to_string()]));
+        let t = see(&[(1, 0, "zsh"), (10, 1, "npm"), (11, 10, "sh"), (12, 11, "node"), (20, 1, "make"), (21, 20, "docker")]);
+        assert_eq!(t.apps, apps(&["node", "docker"]));
+        assert_eq!(t.tools, HashMap::from([(10, tool("npm", &["node"])), (20, tool("make", &["docker"]))]));
     }
 
-    fn npm_dev(node: bool) -> Snapshot {
-        let s = ProcessSensor::new();
-        let mut rows = vec![(1, 0, "zsh"), (5, 1, "nvim"), (10, 1, "npm")];
-        if node {
-            rows.push((11, 10, "node"));
-        }
-        tally(&procs(&rows), |c| c != "zsh", |c| s.is_watched(c))
-    }
+    const NVIM: (u32, u32, &str) = (5, 1, "nvim");
+    const ZSH: (u32, u32, &str) = (1, 0, "zsh");
 
-    /// A server dying under `npm run dev` is the app exiting. npm's own
-    /// exit right after is the launcher going, not a finished build.
+    /// `npm test` running for 60 seconds, with node lasting several polls,
+    /// still ends in `npm finished`.
     #[test]
-    fn a_server_dying_under_npm_run_dev_is_the_app_exiting() {
-        let mut s = ProcessSensor::new();
-        s.prior = apps(&["nvim"]);
-        assert!(s.diff(npm_dev(true), 0).is_empty());
-        assert_eq!(texts(&s.diff(npm_dev(true), 0)), vec!["node started"]);
-        assert!(s.diff(npm_dev(true), 0).is_empty());
-        assert_eq!(texts(&s.diff(snap(&["nvim"]), 0)), vec!["node exited"], "no npm finished");
-        // The server can also go first, with npm lingering a poll.
-        let mut s = ProcessSensor::new();
-        s.prior = apps(&["nvim"]);
-        for _ in 0..3 {
-            s.diff(npm_dev(true), 0);
+    fn a_long_npm_test_still_finishes() {
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        let running = [ZSH, NVIM, (10, 1, "npm"), (11, 10, "node")];
+        assert!(s.diff(see(&running), 0).is_empty());
+        assert_eq!(texts(&s.diff(see(&running), 0)), vec!["node started"]);
+        for _ in 0..10 {
+            assert!(s.diff(see(&running), 0).is_empty());
         }
-        assert_eq!(texts(&s.diff(npm_dev(false), 0)), vec!["node exited"]);
-        assert!(s.diff(snap(&["nvim"]), 0).is_empty(), "no npm finished");
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["npm finished (node exited)"]);
+    }
+
+    /// The same run with an unrelated `node` already in the baseline: the
+    /// name never disappears, and npm's exit is still reported.
+    #[test]
+    fn a_long_npm_test_finishes_beside_an_unrelated_node() {
+        let other = (50, 1, "node");
+        let mut s = sensor_after(&[ZSH, NVIM, other]);
+        let running = [ZSH, NVIM, other, (10, 1, "npm"), (11, 10, "node")];
+        for _ in 0..6 {
+            assert!(s.diff(see(&running), 0).is_empty());
+        }
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM, other]), 0)), vec!["npm finished"]);
+    }
+
+    /// `npm run dev` and `npm test` side by side: each npm's exit is its
+    /// own event, and only the run whose node exited names it.
+    #[test]
+    fn concurrent_npm_runs_finish_separately() {
+        let dev = [(10, 1, "npm"), (11, 10, "node")];
+        let test = [(20, 1, "npm"), (21, 20, "node")];
+        let both: Vec<_> = [ZSH, NVIM].into_iter().chain(dev).chain(test).collect();
+        let only_dev: Vec<_> = [ZSH, NVIM].into_iter().chain(dev).collect();
+        let only_test: Vec<_> = [ZSH, NVIM].into_iter().chain(test).collect();
+
+        // The test run ends first; the dev server keeps node present.
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        for _ in 0..4 {
+            s.diff(see(&both), 0);
+        }
+        assert_eq!(texts(&s.diff(see(&only_dev), 0)), vec!["npm finished"]);
+        assert!(s.diff(see(&only_dev), 0).is_empty());
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["npm finished (node exited)"]);
+
+        // The dev server ends first; the test run's node is still there.
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        for _ in 0..4 {
+            s.diff(see(&both), 0);
+        }
+        assert_eq!(texts(&s.diff(see(&only_test), 0)), vec!["npm finished"]);
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["npm finished (node exited)"]);
+    }
+
+    /// A server dying under `npm run dev` gives one event, whether npm
+    /// exits in the same poll or lingers one poll.
+    #[test]
+    fn a_server_dying_under_npm_run_dev_is_one_event() {
+        let running = [ZSH, NVIM, (10, 1, "npm"), (11, 10, "node")];
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        for _ in 0..3 {
+            s.diff(see(&running), 0);
+        }
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["npm finished (node exited)"]);
+
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        for _ in 0..3 {
+            s.diff(see(&running), 0);
+        }
+        assert!(s.diff(see(&[ZSH, NVIM, (10, 1, "npm")]), 0).is_empty(), "node's exit waits a poll for npm");
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["npm finished (node exited)"]);
+    }
+
+    /// An app that exits while its tool keeps running is reported one poll
+    /// later, on its own.
+    #[test]
+    fn an_app_exiting_under_a_running_tool_is_reported_a_poll_later() {
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        let up = [ZSH, NVIM, (20, 1, "make"), (21, 20, "docker")];
+        let make = [ZSH, NVIM, (20, 1, "make")];
+        for _ in 0..3 {
+            s.diff(see(&up), 0);
+        }
+        assert!(s.diff(see(&make), 0).is_empty());
+        assert_eq!(texts(&s.diff(see(&make), 0)), vec!["docker exited"]);
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["make finished"]);
     }
 
     /// `npm test` whose node lasts less than a poll is still a build: its
-    /// exit is `npm finished`.
+    /// exit is `npm finished`, and node's start and exit stay silent.
     #[test]
     fn a_short_npm_run_still_finishes() {
-        let mut s = ProcessSensor::new();
-        s.prior = apps(&["nvim"]);
-        assert!(s.diff(npm_dev(true), 0).is_empty());
-        assert_eq!(texts(&s.diff(snap(&["nvim"]), 0)), vec!["npm finished"]);
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        assert!(s.diff(see(&[ZSH, NVIM, (10, 1, "npm"), (11, 10, "node")]), 0).is_empty());
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["npm finished"]);
+    }
+
+    /// rustc processes coming and going under cargo produce nothing; the
+    /// build is one `cargo finished`.
+    #[test]
+    fn rustc_under_cargo_stays_silent() {
+        let mut s = sensor_after(&[ZSH, NVIM]);
+        assert!(s.diff(see(&[ZSH, NVIM, (10, 1, "cargo")]), 0).is_empty(), "no start for a build tool");
+        for pid in 11..16 {
+            assert!(s.diff(see(&[ZSH, NVIM, (10, 1, "cargo"), (pid, 10, "rustc")]), 0).is_empty());
+            assert!(s.diff(see(&[ZSH, NVIM, (10, 1, "cargo")]), 0).is_empty());
+        }
+        assert_eq!(texts(&s.diff(see(&[ZSH, NVIM]), 0)), vec!["cargo finished"]);
     }
 
     #[test]
-    fn a_build_emits_one_finished_event_and_no_start() {
-        let mut s = ProcessSensor::new();
-        s.prior = apps(&["nvim"]);
-        assert!(s.diff(snap(&["nvim", "cargo"]), 0).is_empty(), "no start for a build tool");
-        assert!(s.diff(snap(&["nvim", "cargo"]), 0).is_empty(), "nor a deferred one");
-        assert_eq!(texts(&s.diff(snap(&["nvim"]), 0)), vec!["cargo finished"]);
+    fn format_build_exit_names_hosted_exits_after_the_status() {
+        let m = BuildMarker { cmd: "npm".into(), code: 1, ts: 1000 };
+        let (mag, text) = format_build_exit("npm", Some(&m), 1010, &["node".into()]);
+        assert_eq!(mag, 3.5);
+        assert!(text.starts_with("npm finished (failure, code 1; node exited). "), "{text}");
     }
 
     #[test]
@@ -762,4 +894,3 @@ mod tests {
         assert_eq!(texts(&s.diff(snap(&[]), 0)), vec!["docker exited"]);
     }
 }
-

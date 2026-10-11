@@ -90,8 +90,8 @@ Tracks dev-tool processes in `ps` output, not every process. A process produces 
 The sensor tracks application presence, not process churn (ADR-113). Four rules keep a build to one event:
 
 - A watched tool running under another watched tool, such as `rustc` under `cargo` or `cc` under `make`, is part of that build and is not counted. A watched tool run on its own is counted. Any other app is counted wherever it runs, so `node` under `npm` and `docker` under `make` stay visible.
-- A watched build tool announces no start. Its exit is the build event, `cargo finished`.
-- A watched tool that has hosted an app for a poll or more, such as `npm run dev` serving `node`, is a launcher. When the server dies the event is `node exited`, and npm's exit adds no `npm finished`.
+- A watched build tool announces no start. Its exit is always reported, as `cargo finished`. Each run is tracked by its pid, so concurrent `npm test` and `npm run dev` runs each report their own exit.
+- An app that exits in the same poll as the watched tool it ran under, or one poll before, is named in the tool's event: a server dying under `npm run dev` gives one event, `npm finished (node exited)`. An app that exits while its tool keeps running is reported one poll later as `node exited`.
 - Any other app announces its start once it is still running at the next poll. The poll interval adapts between 5 and 30 seconds, so the start debounce window is up to 30 seconds. An app that starts and exits within it produces no event at all.
 
 | Event | Magnitude | Example |
@@ -101,6 +101,7 @@ The sensor tracks application presence, not process churn (ADR-113). Four rules 
 | watched build tool finished, no marker | 2.5 | ``cargo finished. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps`` |
 | watched build tool finished, success | 2.5 | `cargo finished (success). …` |
 | watched build tool finished, failure | 3.5 | `cargo finished (failure, code 101). …` |
+| watched build tool finished with a hosted app | 2.5, or 3.5 on a failure marker | `npm finished (node exited). …` |
 
 ### The watch list
 
