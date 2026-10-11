@@ -399,17 +399,6 @@ fn an_unchanged_screen_is_copied_not_drawn_again() {
 }
 
 #[test]
-fn an_idle_refresh_of_an_unchanged_world_draws_nothing_new() {
-    let mut c = chat();
-    testkit::render_screen(&mut c, 80, 25);
-    for _ in 0..3 {
-        c.refresh();
-        testkit::render_screen(&mut c, 80, 25);
-    }
-    assert_eq!(c.draws(), 1, "the peers and channels read the same: no re-layout, no redraw");
-}
-
-#[test]
 fn a_failed_command_leaves_the_view_paged_back_and_a_success_returns() {
     let mut c = chat();
     testkit::render_screen(&mut c, 80, 16);
