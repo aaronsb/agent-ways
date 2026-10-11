@@ -93,7 +93,15 @@ considered:
     said: "sorry for the orthangonal answer here but: claude invoked in a project where it's dormant will essentially be have as regular claude code. if the setting is changed to active, or the user asks claude to use the mod, it becomes active. if the user asks claude to use the mod then for that session it's active. if the setting isn't confgiured to active (it remains dormant) the next invocation of claude in that dir will be dormant again. Since we are discussing things that attend can do to claude's session attention, let's also add a toggle config for the keepalive that attend offers. I believe the keepalive is something like an extend for some number of hours then stop (not sure of the exact settings, but lets keep whats defined time-wise)"
     via: AskUserQuestion free-text answer, 2026-10-10
     covers: [door]
-status: proposed
+  - operator: aaronsb
+    said: "Yes"
+    via: AskUserQuestion, session chat, 2026-10-10; option label written by the agent, chosen by the operator
+    covers: [door]
+  - operator: aaronsb
+    said: "yes, AND - disabling it in ways config makes the mod unavailable for claude code"
+    via: AskUserQuestion free-text answer, 2026-10-10
+    covers: [default-on]
+status: accepted
 date: 2026-10-10
 deciders:
   - aaronsb
@@ -187,7 +195,7 @@ The operator set the constraints. Attend matters when several agents work on rel
     - **Replies keep the parent's channel**, and drain lines carry the thread parent.
     - **Smaller defects:** `send --to` with the session's own path fails with "no active peer"; a partly failed multi-part send does not say which parts went out; a body starting with `re:` is ambiguous on the wire; and splitting a long body belongs in `attend send`.
 
-11. **Configuration in the ways config.** One section, `attend_mod`, is described in the settings registry (ADR-503), and the same name is used at every layer: `listening` (`active` or `dormant`, default `dormant`; set at user, target or project scope, project wins), `keepwarm` (`on` or `off`, default `on`; same layers, project wins; item 13), `install` (default true; user and target scope only, since reconcile acts per target and not per project; reconcile reads it), the slow poll interval, the awake poll interval, the quiet period, the preamble's repeat span in turns, and whether a `-p` or SDK session may poll (default false). The mod reads its section through the ways CLI at session start and again on activation, so a change applies without a reinstall. Turning `install` off and reconciling removes the mod from every target.
+11. **Configuration in the ways config.** One section, `attend_mod`, is described in the settings registry (ADR-503), and the same name is used at every layer: `listening` (`active` or `dormant`, default `dormant`; set at user, target or project scope, project wins), `keepwarm` (`on` or `off`, default `on`; same layers, project wins; item 13), `install` (default true; user and target scope only, since reconcile acts per target and not per project; reconcile reads it), the slow poll interval, the awake poll interval, the quiet period, the preamble's repeat span in turns, and whether a `-p` or SDK session may poll (default false). The mod reads its section through the ways CLI at session start and again on activation, so a change applies without a reinstall. Turning `install` off and reconciling removes the mod from every target. With `install` off the mod is unavailable to Claude Code: no attend tool is listed, nothing listens, and `/attend` falls back to the Monitor path.
 
 12. **A remote store.** The signal store may be a mounted remote directory. The mod therefore polls and never watches files: change notification is unreliable on network mounts. Each poll is one attend process with a timeout; a dormant session never polls and an idle active one polls slowly; and every liveness judgment comes from data in the store (heartbeats), never from processes on this host. Intervals are configuration so a slow mount can be given longer ones.
 
