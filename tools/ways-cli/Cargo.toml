@@ -46,3 +46,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 # SIGPIPE back to its default, so a closed pipe ends the process quietly.
 # The tests also use it for a pty that signals the settings screens mid-apply.
 libc = "0.2"
+
+[dev-dependencies]
+# tests/tui_smoke.rs drives the screens in a real tmux pane. Its binary is
+# built separately (cargo build -p tui-harness); the library finds it.
+tui-harness = { path = "../tui-harness" }
