@@ -84,7 +84,8 @@ pub(super) fn sweep_stale(
 ) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
     let keys: HashSet<String> = entries
-        .flatten()        .filter_map(|entry| {
+        .flatten()
+        .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
             SWEPT.iter().find_map(|ext| name.strip_suffix(&format!(".{ext}")).map(str::to_string))
         })
