@@ -257,8 +257,9 @@ mod tests {
 
     #[test]
     fn one_name_seen_under_two_sessions_keeps_the_id_a_channel_lists() {
-        // `old` is in a channel; `new` is the same cwd's later session,
-        // newest first in the buffer.
+        // `old` is in a channel; `new` is the same cwd's later session.
+        // The buffer is newest last, and the walk goes in reverse, so
+        // `new` is met first.
         let buf = vec![sig("claude:old", "/home/x"), sig("claude:new", "/home/x")];
         let member = |in_channel: &dyn Fn(&str) -> bool| {
             let seen = seen_identities(&buf, &[], ColorDepth::TrueColor, |_| true, |_| false, in_channel, &empty_cache());
