@@ -81,12 +81,20 @@ pub struct Binding {
     pub label: String,
     /// Shown on the footer when it fits; otherwise only in the key help.
     pub footer: bool,
+    /// A shorter label the footer falls back to, so the key keeps its
+    /// place where the whole label would push it or a later key off.
+    pub short: Option<String>,
 }
 
 impl Binding {
     /// A key the footer shows.
     pub fn new(keys: impl Into<String>, label: impl Into<String>) -> Binding {
-        Binding { keys: keys.into(), label: label.into(), footer: true }
+        Binding { keys: keys.into(), label: label.into(), footer: true, short: None }
+    }
+
+    /// The same key, with a shorter label for a footer short of room.
+    pub fn short(self, label: impl Into<String>) -> Binding {
+        Binding { short: Some(label.into()), ..self }
     }
 
     /// A key only the key help lists.

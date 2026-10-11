@@ -68,8 +68,8 @@ impl App {
         let (ctrl, alt) = (self.ctrl_shown(), self.alt_jump());
         match (text, ctrl, alt) {
             (false, _, _) => out.push(Binding::new("1-9", "tabs")),
-            (true, true, _) => out.push(Binding::new("Ctrl+1-9", again)),
-            (true, false, true) => out.push(Binding::new("Alt+1-9", again)),
+            (true, true, _) => out.push(Binding::new("Ctrl+1-9", again).short("tab")),
+            (true, false, true) => out.push(Binding::new("Alt+1-9", again).short("tab")),
             (true, false, false) => {}
         }
         if let Some(f) = keys.focus_label().filter(|_| menus) {
@@ -192,9 +192,10 @@ impl App {
             }
             None => spans.extend(lozenge),
         }
-        // The mouse, then the keys, each whole, while they fit. The key
-        // help comes first among the keys, and takes the mouse's place when
-        // only one of them fits.
+        // The mouse, then the keys while they fit. The key help comes first
+        // among the keys, and takes the mouse's place when only one of them
+        // fits. A key with a short label takes it when that keeps a later
+        // key on the bar, and its whole label wherever there is room.
         let mouse = Span::styled(mouse, theme::hint());
         let keys = |n: usize| footer_spans(footer[..n].iter().map(|b| (b.keys.as_str(), b.label.as_str())));
         let sep = |first: bool| if first && said.is_none() { Span::raw(" ") } else { theme::sep() };
@@ -205,16 +206,25 @@ impl App {
             spans.extend([sep(true), mouse]);
             first = false;
         }
-        let mut shown = 0;
-        for n in 1..=footer.len() {
-            if width(&spans) + width(&[sep(first)]) + width(&keys(n)) > area.width {
+        let fits = |items: &[(&str, &str)]| width(&spans) + width(&[sep(first)]) + width(&footer_spans(items.iter().copied())) <= area.width;
+        let mut shown: Vec<(&str, &str)> = Vec::new();
+        for b in &footer {
+            shown.push((b.keys.as_str(), b.short.as_deref().unwrap_or(&b.label)));
+            if !fits(&shown) {
+                shown.pop();
                 break;
             }
-            shown = n;
         }
-        if shown > 0 {
+        for (i, b) in footer.iter().enumerate().take(shown.len()) {
+            let short = std::mem::replace(&mut shown[i].1, b.label.as_str());
+            if !fits(&shown) {
+                shown[i].1 = short;
+            }
+        }
+        if !shown.is_empty() {
+            let keys = footer_spans(shown);
             spans.push(sep(first));
-            spans.extend(keys(shown));
+            spans.extend(keys);
         }
         spans
     }
@@ -729,6 +739,22 @@ mod tests {
         a.set_keyboard_enhanced(true);
         let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
         assert!(footer.contains("Ctrl+1-9 tab (again: menu)") && !footer.contains("Alt+1-9"), "auto: Ctrl where the terminal reports it: {footer}");
+    }
+
+    #[test]
+    fn a_footer_short_of_room_shortens_a_label_before_it_drops_a_key() {
+        let mut a = app(true);
+        a.key(k(KeyCode::Char('m'), KeyModifiers::ALT));
+        let bar = |a: &mut App, w: u16| testkit::rows(&testkit::render(a, w, 6)).pop().expect("a bar");
+        let wide = bar(&mut a, 160);
+        assert!(wide.contains("Alt+1-9 tab (again: menu) · F2 tabs"), "{wide}");
+        let full = str_width(wide.trim_end()) as u16;
+        let short = bar(&mut a, full - 5);
+        assert!(short.contains("Alt+1-9 tab · F2 tabs") && !short.contains("again"), "the short label keeps both keys: {short}");
+        for w in 40..=160 {
+            let b = bar(&mut a, w);
+            assert!(!b.contains("(again: menu)") || b.contains("F2 tabs"), "the whole label never costs a later key at {w}: {b}");
+        }
     }
 
     #[test]
