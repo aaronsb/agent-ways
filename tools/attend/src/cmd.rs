@@ -36,3 +36,16 @@ pub(crate) fn print_json<T: serde::Serialize>(value: &T) {
 pub(crate) fn print_json_error<T: serde::Serialize>(error: &T, message: &str) {
     print_json(&serde_json::json!({ "error": error, "message": message }));
 }
+
+/// Refuse a malformed command line and exit 2, the usage code (ADR-185).
+/// `line` is the human wording for stderr; with `--json`, the refusal is
+/// also the one document on stdout, `{"error":{"kind":"usage"},"message":
+/// <why>}`. Argument errors clap raises itself (an unknown flag, two flags
+/// that conflict) stay clap's text: exit 2, no JSON.
+pub(crate) fn refuse_usage(line: &str, why: &str, json: bool) -> ! {
+    if json {
+        print_json_error(&serde_json::json!({ "kind": "usage" }), why);
+    }
+    eprintln!("{line}");
+    std::process::exit(2);
+}

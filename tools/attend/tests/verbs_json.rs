@@ -74,6 +74,41 @@ fn a_refusal_is_one_json_error_document_with_the_exit_code_unchanged() {
     let out = f.attend(&["inbox", "no-such-id", "--json"]);
     assert_eq!(out.status.code(), Some(0), "a missing message is a benign race");
     assert_eq!(json(&out)["error"]["kind"], "not_found");
+
+    let out = f.attend(&["join", "bad name!", "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(json(&out)["error"]["kind"], "invalid_name");
+}
+
+/// Exit 2 is usage; under `--json` its document is `{"error":{"kind":
+/// "usage"},"message":...}` and nothing is sent (ADR-185, note of
+/// 2026-10-10).
+#[test]
+fn a_usage_refusal_under_json_is_kind_usage_with_exit_2() {
+    let f = Fixture::new("verbs-json-usage");
+    let usage = |args: &[&str]| {
+        let out = f.attend(args);
+        assert_eq!(out.status.code(), Some(2), "attend {args:?}");
+        let doc = json(&out);
+        assert_eq!(doc["error"], serde_json::json!({ "kind": "usage" }), "attend {args:?}");
+        assert!(doc["message"].as_str().is_some_and(|m| !m.is_empty()));
+        assert!(!out.stderr.is_empty(), "the human wording stays on stderr");
+    };
+    usage(&["send", "--json", "--chanel", "x", "hello"]);
+    usage(&["channels", "--json", "pin", "x"]);
+    // A conflict clap raises itself is exit 2 in clap's text, with no JSON.
+    let out = f.attend(&["inbox", "--drain", "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    // `--json` after the message is caught, not sent as text, and still
+    // answers in JSON.
+    usage(&["send", "hello", "--json"]);
+    usage(&["reply", "thanks", "--json"]);
+    let out = f.attend(&["send", "hello", "--channel", "deploy"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("after the message"));
+    assert_eq!(ok_json(&f, &["inbox", "--json"])["total"], 0, "nothing was sent");
 }
 
 #[test]

@@ -82,8 +82,8 @@ pub fn cli_main() {
         Commands::Peers { json } => cmd::peers::cmd_peers(json),
         Commands::Inbox { msg_id, limit, page, before, drain, format, json } => match (drain, msg_id) {
             (true, Some(_)) => {
-                eprintln!("--drain drains everything pending; it cannot be combined with a message id");
-                std::process::exit(2);
+                let why = "--drain drains everything pending; it cannot be combined with a message id";
+                cmd::refuse_usage(why, why, json);
             }
             (true, None) => cmd::inbox::cmd_inbox_drain(&format),
             (false, Some(id)) => cmd::inbox::cmd_inbox_read(&id, json),
@@ -94,11 +94,11 @@ pub fn cli_main() {
         Commands::Sensors => cmd::sensors::cmd_sensors(),
         Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status)),
         Commands::Send { to, channel, re, json, message } => {
-            cmd::send::reject_flag_like("send", &message);
+            cmd::send::reject_flag_like("send", cmd::send::SEND_FLAGS, &message, json);
             cmd::send::cmd_send(to, channel, re, message, json);
         }
         Commands::Reply { to, channel, json, message } => {
-            cmd::send::reject_flag_like("reply", &message);
+            cmd::send::reject_flag_like("reply", cmd::send::REPLY_FLAGS, &message, json);
             cmd::send::cmd_reply(to, channel, message, json);
         }
         Commands::Chat { passthrough } => exec_chat(passthrough),
@@ -109,8 +109,8 @@ pub fn cli_main() {
         Commands::Leave { name, json } => cmd::channels::cmd_leave(&name, json),
         Commands::Channels { joined: true, json, sub: None } => cmd::channels::cmd_joined(json),
         Commands::Channels { json: true, sub: Some(sub), .. } if !matches!(sub, cli::ChannelsCmd::List) => {
-            eprintln!("--json applies to the channel listing, not to its lifecycle subcommands");
-            std::process::exit(2);
+            let why = "--json applies to the channel listing, not to its lifecycle subcommands";
+            cmd::refuse_usage(why, why, true);
         }
         Commands::Channels { sub, json, .. } => match sub {
             None | Some(cli::ChannelsCmd::List) => cmd::channels::cmd_channels(json),

@@ -70,3 +70,14 @@ Reversibility: reversible. Each verb converts on its own; a verb not yet convert
 - **JSON by default, human on a flag.** Rejected: the first reader of every verb is the operator at the terminal, and a guiding Claude reading the output prefers the labeled form too.
 - **A third format such as YAML for round trips.** Rejected: one machine format keeps the pair test simple, and the apply verb writes the config file's YAML.
 - **Leave output to each verb.** The status quo. Rejected by the defect that opened this decision.
+
+## Note, 2026-10-10: the shape of a refusal under `--json`
+
+Appended after acceptance; nothing above is changed. It writes down how a refusal reads under `--json`, which items 2 and 5 left open.
+
+- A verb that refuses under `--json` still emits one document on stdout: `{"error": {"kind": "<kind>", ...}, "message": "<one line>"}`. `kind` is a snake_case tag, and any other fields in `error` belong to that kind. A caller tells a refusal from a result by the `error` key, and branches on `error.kind`. The person's wording still goes to stderr.
+- Exit 2 means usage. A usage refusal under `--json` has `error.kind` set to `usage` and no other fields: `{"error": {"kind": "usage"}, "message": "<why>"}`. Exit 1 is a failure the verb reports, with its own kind.
+- An argument error the parser raises itself, such as an unknown flag or two flags that conflict, exits 2 in the parser's own text, with no JSON document. A caller that sees exit 2 and no document on stdout has met one.
+- A benign miss keeps its exit code. `attend inbox <id> --json` for a message already reaped exits 0 with `{"error": {"kind": "not_found"}, ...}`.
+
+attend's message verbs follow this from PR #900: `send`, `reply`, `inbox`, `join` and `channels`.

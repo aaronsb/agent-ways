@@ -8,42 +8,57 @@ use crate::verbs::send::Threading;
 use crate::verbs::send::{self, SendError, SendRequest};
 
 
+/// The flags `attend send` takes, as a caller might write them after the
+/// message by mistake.
+pub(crate) const SEND_FLAGS: &[&str] = &["--to", "--channel", "--re", "--json"];
+/// The flags `attend reply` takes.
+pub(crate) const REPLY_FLAGS: &[&str] = &["--to", "--channel", "--json"];
+
 /// The message is a trailing, hyphen-tolerant argument, so clap hands any
 /// unknown flag (a removed `--broadcast` or `--focus`, or a typo such as
-/// `--chanel`) over as message text, and the send would go out with the flag in
-/// its body. A leading token shaped like a long flag is refused unless a `--`
-/// sits immediately before it in the raw arguments (the escape hatch for a
-/// message that really starts with one); a later `--` in the text does not
-/// count.
-fn flag_like_refusal(message: &[String], raw_args: &[String]) -> Option<String> {
+/// `--chanel`) over as message text, and the send would go out with the flag
+/// in its body. So does any of the verb's own flags (`own_flags`) written
+/// after the message: `attend send hi --json` would send "hi --json". A
+/// leading token shaped like a long flag, or one of the verb's own flags
+/// anywhere in the message, is refused unless a `--` sits immediately before
+/// the message in the raw arguments (the escape hatch for a message that
+/// really contains one); a later `--` in the text does not count.
+fn flag_like_refusal(own_flags: &[&str], message: &[String], raw_args: &[String]) -> Option<String> {
     let first = message.first()?.as_str();
-    let name = first.split('=').next().unwrap_or(first);
+    if raw_args.windows(2).any(|w| w[0] == "--" && w[1] == first) {
+        return None;
+    }
+    let name_of = |token: &str| token.split('=').next().unwrap_or(token).to_string();
+    let name = name_of(first);
     let flag_like = name.len() > 2
         && name.starts_with("--")
         && name[2..].starts_with(|c: char| c.is_ascii_lowercase())
         && name[2..].chars().all(|c| c.is_ascii_lowercase() || c == '-');
-    let escaped = raw_args.windows(2).any(|w| w[0] == "--" && w[1] == first);
-    if !flag_like || escaped {
-        return None;
+    if flag_like {
+        let hint = match name.as_str() {
+            // transition: removed by #717 (ADR-506)
+            "--broadcast" => " It was removed: a send with no routing flag already reaches everyone.",
+            // transition: removed by #717 (ADR-506)
+            "--focus" => " It was removed: use --channel.",
+            _ => "",
+        };
+        return Some(format!(
+            "`{name}` is not a flag this command accepts.{hint} To send it as text, put `--` before the message."
+        ));
     }
-    let hint = match name {
-        // transition: removed by #717 (ADR-506)
-        "--broadcast" => " It was removed: a send with no routing flag already reaches everyone.",
-        // transition: removed by #717 (ADR-506)
-        "--focus" => " It was removed: use --channel.",
-        _ => "",
-    };
+    let late = message[1..].iter().map(|t| name_of(t)).find(|n| own_flags.contains(&n.as_str()))?;
     Some(format!(
-        "`{name}` is not a flag this command accepts.{hint} To send it as text, put `--` before the message."
+        "`{late}` comes after the message, so it would be sent as text. Put flags before the message; to send it as text, put `--` before the message."
     ))
 }
 
-/// Exit 2 when `message` leads with a flag-shaped token and no `--` escape.
-pub(crate) fn reject_flag_like(verb: &str, message: &[String]) {
+/// Exit 2 when `message` carries a flag-shaped token and no `--` escape. A
+/// refusal is JSON when `--json` was given, before the message or caught in it.
+pub(crate) fn reject_flag_like(verb: &str, own_flags: &[&str], message: &[String], json: bool) {
     let raw: Vec<String> = std::env::args().collect();
-    if let Some(why) = flag_like_refusal(message, &raw) {
-        eprintln!("attend {verb}: {why}");
-        std::process::exit(2);
+    if let Some(why) = flag_like_refusal(own_flags, message, &raw) {
+        let json = json || message.iter().any(|t| t == "--json");
+        crate::cmd::refuse_usage(&format!("attend {verb}: {why}"), &why, json);
     }
 }
 
@@ -106,10 +121,10 @@ pub(crate) fn cmd_reply(
     _target_dir: Option<String>,
     _target_channel: Option<String>,
     _message: Vec<String>,
-    _json: bool,
+    json: bool,
 ) {
-    eprintln!("attend reply: sensor-peers feature is not compiled in this build");
-    std::process::exit(1);
+    let why = "sensor-peers feature is not compiled in this build";
+    crate::cmd::refuse_usage(&format!("attend reply: {why}"), why, json);
 }
 
 /// Fence: detect probable shell glob expansion. If any message part is an
@@ -197,10 +212,14 @@ fn fail(e: &SendError, json: bool) -> ! {
 
 #[cfg(test)]
 mod removed_flag_tests {
-    use super::flag_like_refusal;
+    use super::{flag_like_refusal as refusal, REPLY_FLAGS, SEND_FLAGS};
 
     fn v(words: &[&str]) -> Vec<String> {
         words.iter().map(|w| w.to_string()).collect()
+    }
+
+    fn flag_like_refusal(message: &[String], raw: &[String]) -> Option<String> {
+        refusal(SEND_FLAGS, message, raw)
     }
 
     #[test]
@@ -214,9 +233,22 @@ mod removed_flag_tests {
     }
 
     #[test]
+    fn the_verbs_own_flags_after_the_message_are_refused() {
+        let raw = v(&["attend", "send"]);
+        for late in ["--json", "--to", "--to=/x", "--channel", "--re"] {
+            let why = flag_like_refusal(&v(&["hello", late, "x"]), &raw).unwrap_or_else(|| panic!("{late}"));
+            assert!(why.contains("after the message"), "{why}");
+        }
+        assert!(refusal(REPLY_FLAGS, &v(&["thanks", "--json"]), &raw).is_some());
+        assert!(refusal(REPLY_FLAGS, &v(&["see", "--re"]), &raw).is_none(), "reply takes no --re");
+    }
+
+    #[test]
     fn explicit_double_dash_escapes() {
         let raw = v(&["attend", "send", "--", "--broadcast", "is", "gone"]);
         assert!(flag_like_refusal(&v(&["--broadcast", "is", "gone"]), &raw).is_none());
+        let raw = v(&["attend", "send", "--", "pass", "--json", "to", "it"]);
+        assert!(flag_like_refusal(&v(&["pass", "--json", "to", "it"]), &raw).is_none());
     }
 
     #[test]
@@ -224,6 +256,8 @@ mod removed_flag_tests {
         let raw = v(&["attend", "send", "--chanel", "deploy", "deploying", "now", "--", "ETA", "5m"]);
         let msg = v(&["--chanel", "deploy", "deploying", "now", "--", "ETA", "5m"]);
         assert!(flag_like_refusal(&msg, &raw).is_some());
+        let raw = v(&["attend", "send", "hi", "--", "--json"]);
+        assert!(flag_like_refusal(&v(&["hi", "--", "--json"]), &raw).is_some());
     }
 
     #[test]
@@ -233,6 +267,7 @@ mod removed_flag_tests {
         assert!(flag_like_refusal(&v(&["--"]), &raw).is_none());
         assert!(flag_like_refusal(&v(&["--2x", "text"]), &raw).is_none());
         assert!(flag_like_refusal(&v(&["-5", "degrees"]), &raw).is_none());
+        assert!(flag_like_refusal(&v(&["pass", "--jsonish", "--total"]), &raw).is_none());
         assert!(flag_like_refusal(&[], &raw).is_none());
     }
 }
