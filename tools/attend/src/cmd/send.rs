@@ -84,7 +84,7 @@ pub(crate) fn cmd_send(
                 crate::cmd::print_json(&sent);
             }
         }
-        Err(e) => fail(&e, json),
+        Err(e) => fail(&e, json, SEND_USAGE),
     }
 }
 
@@ -112,10 +112,10 @@ pub(crate) fn cmd_reply(
         }
         // Nothing to reply to: the caller needs to start a new topic, and
         // the glob warning about a message it will not send is noise.
-        Err(e @ SendError::NoInbound) => fail(&e, json),
+        Err(e @ SendError::NoInbound) => fail(&e, json, REPLY_USAGE),
         Err(e) => {
             warn_on_expansion(&req, &message);
-            fail(&e, json)
+            fail(&e, json, REPLY_USAGE)
         }
     }
 }
@@ -156,16 +156,17 @@ fn report(sent: &send::Sent) {
     eprintln!("[attend] signal written ({}, {} dirs): {}.signal", sent.scope, sent.dirs, sent.id);
 }
 
+const SEND_USAGE: &str = "usage: attend send <message>\n  (reaches every peer and Aaron — no routing flags needed)\n  tip: wrap message in double quotes to avoid shell expansion";
+
+#[cfg(feature = "sensor-peers")]
+const REPLY_USAGE: &str = "usage: attend reply <message>\n  (answers the newest peer message delivered to this session, where it was said)\n  tip: wrap message in double quotes to avoid shell expansion";
+
 /// Print why the send wrote nothing, as the CLI always has, and exit 1. An
-/// empty message is a malformed command line: exit 2, `kind: usage` under
-/// `--json` (ADR-185, note of 2026-10-10).
-fn fail(e: &SendError, json: bool) -> ! {
+/// empty message is a malformed command line: exit 2 with the verb's
+/// `usage`, `kind: usage` under `--json` (ADR-185, note of 2026-10-10).
+fn fail(e: &SendError, json: bool, usage: &str) -> ! {
     if let SendError::EmptyMessage = e {
-        crate::cmd::refuse_usage(
-            "usage: attend send <message>\n  (reaches every peer and Aaron — no routing flags needed)\n  tip: wrap message in double quotes to avoid shell expansion",
-            &e.to_string(),
-            json,
-        );
+        crate::cmd::refuse_usage(usage, &e.to_string(), json);
     }
     if json {
         crate::cmd::print_json_error(e, &e.to_string());

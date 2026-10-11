@@ -315,6 +315,11 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
 /// room cannot be told is refused too, never guessed to be `#open`.
 #[cfg(feature = "sensor-peers")]
 pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
+    // An empty message is refused before anything is looked up, as `send`
+    // refuses it, whatever this session has received.
+    if req.message.is_empty() {
+        return Err(SendError::EmptyMessage);
+    }
     let me = current_session();
     let last = sensor_peers::last_inbound::read(&me.session_id);
     let (re, threading, said) = match &req.re {

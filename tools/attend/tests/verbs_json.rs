@@ -121,6 +121,13 @@ fn a_usage_refusal_under_json_is_kind_usage_with_exit_2() {
     let out = f.attend(&["send", ""]);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("usage: attend send"));
+    // An empty reply is the same refusal, under its own verb's usage, even
+    // with nothing received to reply to.
+    usage(&["reply", "--json", ""]);
+    let out = f.attend(&["reply", ""]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("usage: attend reply") && !err.contains("attend send <"), "{err}");
     // A conflict clap raises itself is exit 2 in clap's text, with no JSON.
     let out = f.attend(&["inbox", "--drain", "--json"]);
     assert_eq!(out.status.code(), Some(2));
