@@ -4,8 +4,9 @@
 //! The order is what makes it safe. The same commit, from the source the
 //! install came from, is fetched and verified into a stage beside the app
 //! first. Only then does ADR-198's uninstall run, without `--purge`, followed
-//! by the staged installer. A failed fetch or verification removes nothing. A
-//! failed install keeps the stage and prints the line that finishes from it.
+//! by the staged installer and a repair of every target the kept config
+//! lists. A failed fetch or verification removes nothing. A failed install
+//! keeps the stage and prints the line that finishes from it.
 //!
 //! The fetch and its check are the installer's own (`install.sh --stage`, the
 //! function its bootstrap fetches through). The checkout test and the HEAD
@@ -96,7 +97,7 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     if let Some(u) = &uninstall {
         u.print();
     }
-    println!("3. Install from the stage (scripts/install.sh), which projects every target your config lists.");
+    println!("3. Install from the stage (scripts/install.sh), then project every target your config lists.");
     if !yes {
         println!("\nNothing changed. Run `ways manage reinstall --yes` to do this.");
         return Ok(());
@@ -163,6 +164,15 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
         bail!("the install from the stage failed");
     }
     let _ = std::fs::remove_dir_all(&stage);
+
+    // 4. The installer projects `~/.claude` only, and the uninstall withdrew
+    //    every target. A bare repair converges each target the kept config
+    //    lists.
+    eprintln!("==> project every target");
+    if let Err(e) = super::reconcile::run(Some(app.to_string_lossy().into_owned()), None, None, false, false, false) {
+        eprintln!("\nagent-ways {} is installed, but a target was not projected. Fix the cause above, then run:\n  ways manage repair", source.label());
+        return Err(e);
+    }
     println!("\nagent-ways {} is reinstalled. Restart Claude Code to pick it up.", source.label());
     Ok(())
 }

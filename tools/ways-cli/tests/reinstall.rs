@@ -44,6 +44,7 @@ impl Sandbox {
         write(&origin.join("scripts/install.sh"), &std::fs::read_to_string(installer).unwrap());
         write(&origin.join("hooks/check-config-updates.sh"), "#!/bin/sh\n");
         write(&origin.join("tools/suite-bins"), "ways\n");
+        write(&origin.join("skills/x/SKILL.md"), "x\n");
         write(&origin.join("Makefile"), makefile);
         git(&origin, &["init", "-q"]);
         git(&origin, &["add", "."]);
@@ -192,4 +193,21 @@ fn a_reinstall_puts_back_the_same_commit_branch_and_origin() {
     assert!(s.app().join("bin/ways").is_file(), "the staged installer ran: {t}");
     assert!(!s.stage().exists(), "the stage is removed after a good install");
     s.kept_what_the_operator_owns();
+}
+
+#[test]
+fn a_reinstall_projects_every_enabled_target_the_config_lists() {
+    let s = Sandbox::new("targets", BUILDS);
+    let (home, work) = (s.base.join("home/.claude"), s.base.join("home/work-claude"));
+    write(
+        &s.base.join("config/agent-ways/config.yaml"),
+        &format!("targets:\n  - path: {}\n  - path: {}\n", home.display(), work.display()),
+    );
+    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let t = text(&out);
+    assert!(out.status.success(), "{t}");
+    for dir in [&home, &work] {
+        let link = std::fs::read_link(dir.join("skills")).unwrap_or_else(|e| panic!("{} is not projected: {e}\n{t}", dir.display()));
+        assert_eq!(link, s.app().join("skills"), "{t}");
+    }
 }
