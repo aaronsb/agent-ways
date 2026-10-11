@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |                         ││ >                                                  │|
 |                         ││                                             #open  │|
 |                         │╰────────────────────────────────────────────────────╯|
-| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
+| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · F2 ↓ column      |
 styles
   0   0-2   White Blue -
   0   5-14  Black Cyan BOLD
@@ -143,5 +143,5 @@ styles
  24  41-47  - - DIM|ITALIC
  24  48-51  Cyan - -
  24  52-62  - - DIM|ITALIC
- 24  63-72  Cyan - -
- 24  73-78  - - DIM|ITALIC
+ 24  63-67  Cyan - -
+ 24  68-73  - - DIM|ITALIC

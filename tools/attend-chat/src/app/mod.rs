@@ -683,16 +683,21 @@ impl Pane for ChatPane {
     }
 
     fn bindings(&self) -> Vec<Binding> {
-        let mut out = vec![
-            Binding::new("Enter", "send"),
-            Binding::new("Tab", "complete"),
+        let mut out = vec![Binding::new("Enter", "send"), Binding::new("Tab", "complete")];
+        // The column's way in, on the footer while the column is drawn and
+        // does not have the keyboard: at 80 columns it takes the place of
+        // the scroll keys, which the key help still lists.
+        if self.side_drawn() && self.side_focus.is_none() {
+            out.push(Binding::new("F2 ↓", "column"));
+        }
+        out.extend([
             Binding::new("PgUp PgDn", "scroll"),
             Binding::help("S-Enter M-Enter", "new line"),
             Binding::help("← → Home End", "move the cursor"),
             Binding::help("Bksp Del", "edit"),
             Binding::help("click a message", "selects it; in the compose box it places the cursor; a chip completes it"),
             Binding::help("click a side row", "an agent: its menu (address, who, remove); a channel: shows it, opens its menu"),
-        ];
+        ]);
         if let Some(key) = self.sidebar_key_label() {
             out.push(Binding::help(key, "show or hide the agents and channels column"));
         }

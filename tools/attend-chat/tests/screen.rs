@@ -1440,6 +1440,22 @@ fn a_long_column_scrolls_with_the_cursor_and_the_wheel() {
     assert_eq!(testkit::rows(&testkit::render_screen(&mut c, 80, 25))[first_agent], top_before, "back to the top");
 }
 
+/// The footer names the way into the column while it is drawn and does
+/// not have the keyboard, at 80 columns too.
+#[test]
+fn the_footer_names_the_way_into_the_column_while_it_is_drawn() {
+    let footer = |c: &mut Chat, w: u16| testkit::rows(&testkit::render_screen(c, w, 25)).pop().expect("a bottom bar");
+    let mut c = chat_side().enhanced(true);
+    assert!(footer(&mut c, 80).contains("F2 ↓ column"), "{}", footer(&mut c, 80));
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Down));
+    assert!(!footer(&mut c, 80).contains("F2 ↓ column"), "in the column already: {}", footer(&mut c, 80));
+    let mut c = chat_side().enhanced(true);
+    assert!(!footer(&mut c, 70).contains("F2 ↓ column"), "no column drawn at 70: {}", footer(&mut c, 70));
+    let mut c = chat();
+    assert!(!footer(&mut c, 80).contains("column"), "the column hidden: {}", footer(&mut c, 80));
+}
+
 /// The cursor stays on its row when a refresh moves the row, and the wheel
 /// over a focused list moves the list away from the cursor without the
 /// next frame snapping it back.
