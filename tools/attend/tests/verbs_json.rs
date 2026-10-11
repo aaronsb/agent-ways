@@ -54,6 +54,7 @@ fn a_reply_threads_under_the_message_the_drain_delivered() {
 
     let sent = ok_json(&f, &["reply", "--json", "an answer"]);
     assert_eq!(sent["re"], "other-session-1-1");
+    assert_eq!(sent["threading"], "threaded");
 }
 
 #[test]

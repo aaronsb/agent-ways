@@ -6,9 +6,10 @@
 //! through `attend <verb> --json`) run the same body and see the same
 //! result. Results derive `Serialize`; their JSON is what `--json` prints.
 //!
-//! Every call derives the session afresh by process ancestry (ADR-171) and
-//! reads the bus from disk, holding nothing for the next call (ADR-501
-//! items 1 and 4). The caller's process must therefore run inside the Claude Code
+//! Every call derives the session afresh by process ancestry (ADR-171), once
+//! per call, and reads the bus from disk, holding nothing for the next call
+//! (ADR-501 items 1 and 4); a session id changed by `/clear` is the new id on
+//! the next call. The caller's process must therefore run inside the Claude Code
 //! session it acts for; a process with no session ancestry acts as the
 //! external `$USER@<terminal>` sender, as a plain terminal does.
 //!
@@ -24,4 +25,4 @@ pub mod status;
 
 #[cfg(feature = "sensor-peers")]
 pub use send::reply;
-pub use send::{send, SendError, SendRequest, Sent};
+pub use send::{send, Replied, SendError, SendRequest, Sent, Threading};

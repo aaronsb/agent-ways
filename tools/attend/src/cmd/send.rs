@@ -4,7 +4,7 @@
 //! message fence, the glob-expansion warning, and the CLI's wording.
 
 #[cfg(feature = "sensor-peers")]
-use crate::verbs::send::ReplyTarget;
+use crate::verbs::send::Threading;
 use crate::verbs::send::{self, SendError, SendRequest};
 
 
@@ -58,10 +58,18 @@ pub(crate) fn cmd_send(
 ) {
     let req = SendRequest { message: message_parts.join(" "), to: target_dir, channel: target_channel, re: reply_to };
     warn_on_expansion(&req, &message_parts);
-    finish(send::send(&req), json);
+    match send::send(&req) {
+        Ok(sent) => {
+            report(&sent);
+            if json {
+                crate::cmd::print_json(&sent);
+            }
+        }
+        Err(e) => fail(&e, json),
+    }
 }
 
-/// `attend reply`: `send` threaded under the newest peer message.
+/// `attend reply`: the verb is `verbs::send::reply`; this renders it.
 #[cfg(feature = "sensor-peers")]
 pub(crate) fn cmd_reply(
     target_dir: Option<String>,
@@ -69,29 +77,28 @@ pub(crate) fn cmd_reply(
     message: Vec<String>,
     json: bool,
 ) {
-    let re = match send::reply_target() {
-        // Genuine "nothing to reply to" — the agent needs to do something
-        // different (start a new topic), so this stays a hard error.
-        ReplyTarget::NoInbound => fail(&SendError::NoInbound, json),
-        // There *is* a prior inbound, but its recorded id is not
-        // threadable. A standing guard, not a transition shim: whatever
-        // the source of a bad id (a stale pre-#368 record from an external
-        // `$USER@<terminal>` sender, a hand-edited state file, some future
-        // writer that skips `signal_filename`), the agent did nothing
-        // wrong and can't fix it, so we never punish it with the internal
-        // `send --re` validation error. Threading is cosmetic —
-        // `parse_signal` drops the `re:` id and no peer renders it — so
-        // degrading to an unthreaded send is lossless: the message still
-        // lands. Note it on stderr and carry on.
-        ReplyTarget::Unthreaded => {
-            eprintln!(
-                "[attend] note: last inbound id is not threadable; sending unthreaded (message still delivered)."
-            );
-            None
+    let req = SendRequest { message: message.join(" "), to: target_dir, channel: target_channel, re: None };
+    match send::reply(&req) {
+        Ok(replied) => {
+            if replied.threading == Threading::Unthreaded {
+                eprintln!(
+                    "[attend] note: last inbound id is not threadable; sending unthreaded (message still delivered)."
+                );
+            }
+            warn_on_expansion(&req, &message);
+            report(&replied.sent);
+            if json {
+                crate::cmd::print_json(&replied);
+            }
         }
-        ReplyTarget::Threaded(id) => Some(id),
-    };
-    cmd_send(target_dir, target_channel, re, message, json);
+        // Nothing to reply to: the caller needs to start a new topic, and
+        // the glob warning about a message it will not send is noise.
+        Err(e @ SendError::NoInbound) => fail(&e, json),
+        Err(e) => {
+            warn_on_expansion(&req, &message);
+            fail(&e, json)
+        }
+    }
 }
 
 #[cfg(not(feature = "sensor-peers"))]
@@ -121,18 +128,13 @@ fn warn_on_expansion(req: &SendRequest, message_parts: &[String]) {
     }
 }
 
-fn finish(result: Result<send::Sent, SendError>, json: bool) {
-    let sent = match result {
-        Ok(sent) => sent,
-        Err(e) => fail(&e, json),
-    };
+/// The stderr lines for a signal written: each tray that failed, then the
+/// signal's id.
+fn report(sent: &send::Sent) {
     for f in &sent.failed {
         eprintln!("[attend] error writing signal to {}: {}", f.dir.display(), f.error);
     }
     eprintln!("[attend] signal written ({}, {} dirs): {}.signal", sent.scope, sent.dirs, sent.id);
-    if json {
-        crate::cmd::print_json(&sent);
-    }
 }
 
 /// Print why the send wrote nothing, as the CLI always has, and exit 1.

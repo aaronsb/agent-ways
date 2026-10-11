@@ -45,3 +45,30 @@ fn a_join_after_an_id_change_enrolls_and_joins_as_the_new_id() {
     assert!(f.marker(new).exists(), "the second join enrolls the new id");
     assert_eq!(members(&f, "after"), vec![new.to_string()], "and writes its membership under it");
 }
+
+fn reply(text: &str) -> Result<attend::verbs::Replied, attend::verbs::SendError> {
+    attend::verbs::reply(&attend::verbs::SendRequest { message: text.to_string(), ..Default::default() })
+}
+
+/// `reply` threads under the newest message a conduit delivered, reports
+/// how it threaded, and refuses when nothing has been delivered.
+#[test]
+fn reply_reports_how_it_threaded() {
+    let f = Fixture::new("inproc-reply");
+    let _env = enter(&f);
+
+    assert!(matches!(reply("too early"), Err(attend::verbs::SendError::NoInbound)));
+
+    sensor_peers::last_inbound::record(&f.sid, "other-session-1-1");
+    let threaded = reply("an answer").expect("a threaded reply");
+    assert_eq!(threaded.threading, attend::verbs::Threading::Threaded);
+    assert_eq!(threaded.sent.re.as_deref(), Some("other-session-1-1"));
+
+    // An id from an external sender is not a signal id: the reply still
+    // goes out, without a thread, and says so.
+    sensor_peers::last_inbound::record(&f.sid, "someone@kitty-1");
+    let unthreaded = reply("still delivered").expect("an unthreaded reply");
+    assert_eq!(unthreaded.threading, attend::verbs::Threading::Unthreaded);
+    assert_eq!(unthreaded.sent.re, None);
+    assert_eq!(unthreaded.sent.failed.len(), 0);
+}

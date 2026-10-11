@@ -218,29 +218,41 @@ fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
     })
 }
 
+/// How a reply was threaded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Threading {
+    /// Under the parent message's id.
+    Threaded,
+    /// The parent's recorded id cannot be threaded, so the reply went out
+    /// without one. It still landed: threading is cosmetic, `parse_signal`
+    /// drops the id and no peer renders it.
+    Unthreaded,
+}
+
+/// A reply written to the bus, and how it threads.
+#[derive(Debug, Clone, Serialize)]
+pub struct Replied {
+    #[serde(flatten)]
+    pub sent: Sent,
+    pub threading: Threading,
+}
+
 /// How a reply threads, given this session's newest peer message.
 #[cfg(feature = "sensor-peers")]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReplyTarget {
+enum ReplyTarget {
     /// No peer message has reached this session: nothing to reply to.
     NoInbound,
-    /// One has, but its id can't be threaded; the reply goes out unthreaded
-    /// rather than failing on an id the caller can't fix.
+    /// One has, but its id can't be threaded. A standing guard, not a
+    /// transition shim: whatever the source of a bad id (a stale pre-#368
+    /// record from an external `$USER@<terminal>` sender, a hand-edited state
+    /// file, a writer that skips `signal_filename`), the caller did nothing
+    /// wrong and can't fix it, so the reply degrades to unthreaded rather
+    /// than failing on `send`'s `re` validation.
     Unthreaded,
     /// A threadable id.
     Threaded(String),
-}
-
-/// The peer message a reply from this session threads under: the newest one
-/// a delivering conduit (the peers sensor or the drain) surfaced to it.
-#[cfg(feature = "sensor-peers")]
-pub fn reply_target() -> ReplyTarget {
-    reply_target_for(&current_session())
-}
-
-#[cfg(feature = "sensor-peers")]
-fn reply_target_for(me: &Session) -> ReplyTarget {
-    classify_reply_target(sensor_peers::last_inbound::read(&me.session_id))
 }
 
 #[cfg(feature = "sensor-peers")]
@@ -252,21 +264,23 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
     }
 }
 
-/// Send `req` as a reply. An explicit `re` threads there; otherwise the
-/// reply threads under [`reply_target`], and fails with
-/// [`SendError::NoInbound`] when no peer message has arrived.
+/// Send `req` as a reply. An explicit `re` threads there; otherwise the reply
+/// threads under the newest peer message a delivering conduit (the peers
+/// sensor or the drain) surfaced to this session, and fails with
+/// [`SendError::NoInbound`] when none has.
 #[cfg(feature = "sensor-peers")]
-pub fn reply(req: &SendRequest) -> Result<Sent, SendError> {
+pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     let me = current_session();
-    if req.re.is_some() {
-        return send_as(&me, req);
-    }
-    let re = match reply_target_for(&me) {
-        ReplyTarget::NoInbound => return Err(SendError::NoInbound),
-        ReplyTarget::Unthreaded => None,
-        ReplyTarget::Threaded(id) => Some(id),
+    let (re, threading) = match &req.re {
+        Some(id) => (Some(id.clone()), Threading::Threaded),
+        None => match classify_reply_target(sensor_peers::last_inbound::read(&me.session_id)) {
+            ReplyTarget::NoInbound => return Err(SendError::NoInbound),
+            ReplyTarget::Unthreaded => (None, Threading::Unthreaded),
+            ReplyTarget::Threaded(id) => (Some(id), Threading::Threaded),
+        },
     };
-    send_as(&me, &SendRequest { re, ..req.clone() })
+    let sent = send_as(&me, &SendRequest { re, ..req.clone() })?;
+    Ok(Replied { sent, threading })
 }
 
 #[cfg(feature = "sensor-peers")]
