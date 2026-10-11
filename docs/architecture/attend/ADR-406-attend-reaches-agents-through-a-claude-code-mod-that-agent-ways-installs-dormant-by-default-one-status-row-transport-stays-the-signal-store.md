@@ -74,7 +74,7 @@ considered:
     said: "Yes, on everywhere, asleep"
     via: AskUserQuestion, session chat, 2026-10-10; option label written by the agent, chosen by the operator
     covers: [default-on]
-status: accepted
+status: proposed
 date: 2026-10-10
 deciders:
   - aaronsb
