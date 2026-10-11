@@ -37,7 +37,7 @@ pub fn status() -> Status {
     Status {
         instances: running_instances(),
         signals: pending(&me, &groups),
-        keepwarm: crate::cmd::keepwarm::status_line(&me),
+        keepwarm: keepwarm_line(&me),
         channels: groups.my_groups().into_iter().map(|(name, pinned)| JoinedChannel { name, pinned }).collect(),
         cache: attend_presence::cache::dir(),
     }
@@ -63,6 +63,24 @@ fn running_instances() -> Vec<Instance> {
             Some(Instance { pid: pid.trim().to_string(), command: args.trim().to_string() })
         })
         .collect()
+}
+
+/// Keepwarm's state for session `me` in one line: armed with its time left,
+/// stopped with the sensor's reason, or off (ADR-182).
+fn keepwarm_line(me: &Session) -> String {
+    use sensor_keepwarm::{fmt_duration, read_arm, read_ledger};
+    if !me.session_resolved {
+        return "no session".to_string();
+    }
+    let now = sensor_trait::epoch_secs();
+    let dir = crate::util::keepwarm_dir();
+    match read_arm(&dir, &me.session_id) {
+        Some(a) if a.deadline > now => format!("on, {} left", fmt_duration(a.deadline - now)),
+        _ => match read_ledger(&dir, &me.session_id).and_then(|l| l.stopped) {
+            Some(why) => format!("stopped, {why}"),
+            None => "off".to_string(),
+        },
+    }
 }
 
 fn pending(me: &Session, groups: &crate::groups::Groups) -> Pending {
