@@ -4,7 +4,9 @@
 //! does the same thing ([`keys::run_slash`]); the commands stay.
 //!
 //! - `≡`, the common menu: Theme ▸ (this session's look), Keybinding set ▸
-//!   (presets over `attend.chat.tabs.*`), the mouse at start, Settings… .
+//!   (presets over `attend.chat.tabs.*`), the mouse at start, Hide column
+//!   or Show column (the left column, as `attend.chat.sidebar_key` toggles
+//!   it), Settings… .
 //! - merged: Clear view.
 //! - `#open`: Clear history, Clear view.
 //! - a named channel: Add agent ▸, Invite agent ▸, Remove agent ▸,
@@ -44,6 +46,8 @@ pub(super) const KEYS: &str = "Keybinding set ▸";
 pub(super) const MOUSE_ON: &str = "Mouse on at start";
 pub(super) const MOUSE_OFF: &str = "Mouse off at start";
 pub(super) const SETTINGS: &str = "Settings…";
+pub(super) const HIDE_COLUMN: &str = "Hide column";
+pub(super) const SHOW_COLUMN: &str = "Show column";
 
 /// The keybinding presets: a label, then the `attend.chat.tabs.*` values.
 pub(super) const PRESETS: &[(&str, &str, &str)] = &[
@@ -141,7 +145,8 @@ impl ChatPane {
 
     fn common_menu(&mut self) {
         let mouse = if self.config.mouse { MOUSE_OFF } else { MOUSE_ON };
-        let options = [THEME, KEYS, mouse, SETTINGS].iter().map(|s| s.to_string()).collect();
+        let column = if self.sidebar { HIDE_COLUMN } else { SHOW_COLUMN };
+        let options = [THEME, KEYS, mouse, column, SETTINGS].iter().map(|s| s.to_string()).collect();
         self.open = Some(Open::Pick { id: "common".into(), title: "attend-chat".into(), options, multi: false, chosen: Vec::new() });
     }
 
@@ -161,6 +166,7 @@ impl ChatPane {
                 let on = item == MOUSE_ON;
                 self.run("config", SlashOutcome::Config { key: Some("mouse".into()), value: Some(on.to_string()) });
             }
+            HIDE_COLUMN | SHOW_COLUMN => self.toggle_sidebar(),
             SETTINGS => {
                 self.run("config", SlashOutcome::Config { key: None, value: None });
             }

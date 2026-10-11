@@ -1424,6 +1424,27 @@ fn a_long_column_scrolls_with_the_cursor_and_the_wheel() {
     assert_eq!(testkit::rows(&testkit::render_screen(&mut c, 80, 25))[first_agent], top_before, "back to the top");
 }
 
+/// The mouse alone shows and hides the column, from the common menu.
+#[test]
+fn the_common_menu_hides_and_shows_the_column() {
+    let mut c = chat_side().enhanced(true);
+    let open_common = |c: &mut Chat| {
+        let buf = testkit::render_screen(c, 80, 25);
+        let at = testkit::find(&buf, "≡").expect("the common slot");
+        left(c, at);
+        text(c, 80, 25)
+    };
+    let menu = open_common(&mut c);
+    assert!(menu.contains("Hide column") && !menu.contains("Show column"), "{menu}");
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let at = testkit::find(&buf, "Hide column").expect("the item");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), at.0, at.1));
+    assert!(!c.sidebar_shown(), "hidden");
+    let menu = open_common(&mut c);
+    assert!(menu.contains("Show column"), "{menu}");
+    press(&mut c, key(KeyCode::Esc));
+}
+
 /// Join and Leave from the menu, with no slash command.
 #[test]
 fn a_channel_menu_joins_a_channel_the_human_is_not_in() {

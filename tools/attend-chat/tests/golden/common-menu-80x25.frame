@@ -12,9 +12,9 @@ agent-tui frame 80x25
 |│ ╰────────────│   Theme ▸                                      │              │|
 |│              │   Keybinding set ▸                             │              │|
 |│ ╭────────────│   Mouse on at start                            │              │|
-|│ │ Laszlo     │   Settings…                                    │body wraps    │|
-|│ │ alpha      └────────────────────────────────────────────────┘h of the row  │|
-|│ │ 13:59            │ it is given                                             │|
+|│ │ Laszlo     │   Show column                                  │body wraps    │|
+|│ │ alpha      │   Settings…                                    │h of the row  │|
+|│ │ 13:59      └────────────────────────────────────────────────┘              │|
 |│ ╰──────────────────╯                                                         │|
 |│                                                                              │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
@@ -96,12 +96,13 @@ styles
  14   0-0   - - DIM
  14   2-2   - - DIM
  14   4-8   - - DIM
- 14  15-64  LightBlue - -
+ 14  15-15  LightBlue - -
+ 14  64-64  LightBlue - -
  14  79-79  - - DIM
  15   0-0   - - DIM
  15   2-2   - - DIM
  15   4-8   - - DIM
- 15  21-21  - - DIM
+ 15  15-64  LightBlue - -
  15  79-79  - - DIM
  16   0-0   - - DIM
  16   2-21  - - DIM
