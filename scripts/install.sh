@@ -17,7 +17,8 @@
 # The happy path: stage app → make setup → ways manage repair. Everything else is guardrails.
 #
 # Exit codes: 0 done; 1 failed; 2 usage; 3 the app is built and on PATH, and the
-# projection stopped at a real path (finish with `ways manage repair`).
+# repair after the build failed, most often at a real path in a projected root
+# (fix the cause it names, then finish with `ways manage repair`).
 
 set -euo pipefail
 
@@ -241,13 +242,15 @@ is_agent_ways_repo() {
   return 1
 }
 
-# Shown when `ways manage repair` refuses: a real path sits at a projected root.
-# The caller exits 3, so `ways manage reinstall` keeps the built app.
+# Shown when the repair after the build fails, most often because a real path
+# sits at a projected root. The caller exits 3, so `ways manage reinstall` keeps
+# the built app.
 print_projection_stopped() {
   echo ""
-  echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; nothing in ${DEST} was changed."
-  echo "  Read the list above. Move those paths aside (or copy what you want to keep"
-  echo "  into a project's .claude/skills/), then run:"
+  echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; the repair of ${DEST} did not finish."
+  echo "  Read the error above. When it lists real paths at projected roots, move those"
+  echo "  aside (or copy what you want to keep into a project's .claude/skills/)."
+  echo "  Then run:"
   echo -e "    ${CYAN}ways manage repair${RESET}            # link the projected roots"
   echo -e "    ${CYAN}ways manage repair --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
   echo "  If ~/.claude is itself a git clone of agent-ways (pre-1.0), do not use --force;"

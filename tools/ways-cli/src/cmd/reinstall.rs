@@ -7,8 +7,8 @@
 //! by the staged installer and a repair of every target the kept config
 //! lists. A failed fetch or verification removes nothing. A failed install
 //! keeps the stage and prints the line that finishes from it. An install that
-//! built the app and stopped at a real path in a target keeps the app, and
-//! `ways manage repair` finishes it.
+//! built the app and whose repair failed, most often at a real path in a
+//! target, keeps the app, and `ways manage repair` finishes it.
 //!
 //! The fetch and its check are the installer's own (`install.sh --stage`, the
 //! function its bootstrap fetches through). The checkout test and the HEAD
@@ -74,9 +74,9 @@ fn finish_line(stage: &Path, url: &str) -> String {
     format!("cd {s} && AGENT_WAYS_ORIGIN={} bash scripts/install.sh && rm -rf {s}", quote(url))
 }
 
-/// The installer's exit code when the app is built and on PATH and the
-/// projection stopped at a real path (`scripts/install.sh`).
-const PROJECTION_STOPPED: i32 = 3;
+/// The installer's exit code when the app is built and on PATH and the repair
+/// after the build failed, most often at a real path (`scripts/install.sh`).
+const REPAIR_FAILED: i32 = 3;
 
 /// A word for a POSIX shell, single-quoted.
 fn quote(s: &str) -> String {
@@ -202,9 +202,9 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
         .map(|s| s.code());
     let stopped = match installed {
         Ok(Some(0)) => false,
-        // The app is built and on PATH; the projection stopped at a real path,
-        // and the installer has named it.
-        Ok(Some(PROJECTION_STOPPED)) => true,
+        // The app is built and on PATH; the repair after the build failed,
+        // and the installer has named the cause.
+        Ok(Some(REPAIR_FAILED)) => true,
         _ => {
             // A half-made app dir would turn the finishing run into an update,
             // which pulls past the version being put back. It is a fresh clone
@@ -237,10 +237,10 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
     }
     if stopped {
         eprintln!(
-            "\nagent-ways {} is installed, and no target is projected yet. After you move the paths above, finish with:\n  ways manage repair",
+            "\nagent-ways {} is installed, and no target is projected yet. Fix the cause above, then finish with:\n  ways manage repair",
             source.label()
         );
-        bail!("the projection stopped at a real path");
+        bail!("the repair after the install failed");
     }
 
     // 4. The installer projects `~/.claude` only, and the uninstall withdrew

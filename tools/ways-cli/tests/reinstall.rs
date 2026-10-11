@@ -193,6 +193,7 @@ fn a_projection_stop_keeps_the_built_app_and_names_repair_as_the_finish() {
     assert!(s.app().join("bin/ways").is_file(), "the built app is kept: {t}");
     assert!(!s.stage().exists(), "the stage is not needed once the app is built: {t}");
     assert!(t.contains("Projection stopped") && t.contains("ways manage repair"), "{t}");
+    assert!(t.contains("Fix the cause above") && !t.contains("nothing in"), "a failed repair names no cause of its own: {t}");
     assert!(!t.contains("bash scripts/install.sh"), "the finish is a repair, not a reinstall from the stage: {t}");
     s.kept_what_the_operator_owns();
 }
