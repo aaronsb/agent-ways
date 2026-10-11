@@ -110,6 +110,11 @@ pub fn path(session_id: &str) -> PathBuf {
 /// whose cwd is not [`Said::routable_cwd`] is not recorded: the record keeps
 /// the id alone, and a reply to it is refused rather than guessed.
 ///
+/// The record goes to a temporary file renamed into place, as
+/// `agent_identity::write_signal_file` writes a signal, so a reader never
+/// sees half of one. The temporary name carries the writer's pid, since the
+/// peers sensor and the drain may record at once.
+///
 /// Errors are ignored: the callers (the peers sensor, the drain) cannot
 /// usefully recover from a failed write here, and a missing file on the
 /// reply side degrades to "no threaded reply," not a crash.
@@ -122,7 +127,10 @@ pub fn record(session_id: &str, signal_id: &str, said: &Said) {
         Said::Project(Some(cwd)) if !Said::routable_cwd(cwd) => format!("{signal_id}\n"),
         _ => format!("{signal_id}\n{}\n", said.encode()),
     };
-    fs::write(&p, content).ok();
+    let tmp = p.with_extension(format!("last-inbound.{}.tmp", std::process::id()));
+    if fs::write(&tmp, content).and_then(|()| fs::rename(&tmp, &p)).is_err() {
+        fs::remove_file(&tmp).ok();
+    }
 }
 
 /// Read the last-inbound signal for `session_id`, if one exists and its id
@@ -193,6 +201,24 @@ mod tests {
         // Spaces in a cwd are its own; only the line terminator goes.
         record(&sid, "parent-abc-1234", &Said::Project(Some("/a b ".to_string())));
         assert_eq!(read(&sid).and_then(|l| l.said), Some(Said::Project(Some("/a b ".to_string()))));
+        fs::remove_file(path(&sid)).ok();
+    }
+
+    /// The record lands by rename: the file is whole and no temporary
+    /// file is left beside it.
+    #[test]
+    fn record_replaces_the_file_and_leaves_no_temporary() {
+        let sid = format!("test-ri-tmp-{}", std::process::id());
+        record(&sid, "parent-abc-1234", &Said::Open);
+        record(&sid, "parent-abc-5678", &Said::Channel("deploy".to_string()));
+        assert_eq!(fs::read_to_string(path(&sid)).unwrap(), "parent-abc-5678\n@deploy\n");
+        let stray: Vec<String> = fs::read_dir(path(&sid).parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(&sid) && n.ends_with(".tmp"))
+            .collect();
+        assert!(stray.is_empty(), "{stray:?}");
         fs::remove_file(path(&sid)).ok();
     }
 
