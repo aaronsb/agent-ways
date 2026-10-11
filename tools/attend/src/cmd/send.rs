@@ -175,7 +175,6 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
         SendError::InvalidReId => {
             eprintln!("attend send: --re signal id must be non-empty and match [A-Za-z0-9_-]+");
         }
-        SendError::AmbiguousRePrefix { .. } => eprintln!("attend send: {e}"),
         SendError::EmptyMessage => unreachable!("an empty message is refused as usage above"),
         SendError::NoPeerAt { path, peers, suggestion } => {
             eprintln!("error: no active peer at {}", path);
