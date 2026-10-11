@@ -171,6 +171,12 @@ pub fn all_channels_in(base: &Path, caps: ColorDepth) -> Vec<ChannelRow> {
     out
 }
 
+/// The channels the tab bar shows, from the column's rows: those on disk,
+/// in the rows' order. The same list as [`channels`], without a second scan.
+pub fn tab_channels(rows: &[ChannelRow]) -> Vec<KnownGroup> {
+    rows.iter().filter(|r| r.on_disk).map(|r| r.known.clone()).collect()
+}
+
 /// Return the set of group names a given member (session UUID for
 /// claudes, username for humans — ADR-170) is in. Pure filter over
 /// the scanned groups.
@@ -393,6 +399,9 @@ mod tests {
         let shown: Vec<(&str, bool, bool)> = rows.iter().map(|r| (r.known.group.name.as_str(), r.on_disk, r.last.is_some())).collect();
         assert_eq!(shown, [("open", true, false), ("busy", true, true), ("empty", true, false), ("zz-swept", false, false)]);
         assert_eq!(rows[3].known.membership.members, ["aaron"], "a swept channel keeps its members");
+        let tabs: Vec<String> = tab_channels(&rows).into_iter().map(|k| k.group.name).collect();
+        let scanned: Vec<String> = channels_in(&base, ColorDepth::TrueColor).into_iter().map(|k| k.group.name).collect();
+        assert_eq!(tabs, scanned, "the tab bar's channels come from the same rows");
     }
 
     #[test]

@@ -19,6 +19,6 @@ pub mod registry;
 pub mod render;
 pub mod routing;
 
-pub use registry::{known_identities, known_identities_with_liveness, seen_identities, KnownIdentity, Seen};
+pub use registry::{known_identities, known_identities_with_liveness, known_of, seen_identities, KnownIdentity, Seen};
 pub use render::{chip_for, color_for, ChipInfo, CHIP_WIDTH};
 pub use routing::resolve_nickname;

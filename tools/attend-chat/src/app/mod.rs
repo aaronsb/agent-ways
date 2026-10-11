@@ -33,8 +33,8 @@ use agent_tui::theme::{Palette, Shape};
 use agent_tui::{App, Binding, Keyed, Open, Pane, PaneTab, Tone};
 use attend_instances::SnapshotCache;
 
-use crate::chip::{known_identities_with_liveness, seen_identities, KnownIdentity, Seen};
-use crate::groups::{all_channels, channels, ChannelRow, KnownGroup};
+use crate::chip::{known_of, seen_identities, KnownIdentity, Seen};
+use crate::groups::{all_channels, tab_channels, ChannelRow, KnownGroup};
 use crate::sessions::discover as discover_sessions;
 use crate::signal::Signal;
 use crate::tabs::{self, Tab};
@@ -283,12 +283,14 @@ impl ChatPane {
             let instances = SnapshotCache::new();
             let alive = |id: &str| attend_presence::alive(id, &Default::default());
             let human = |u: &str| alive(&agent_identity::sanitize_id_component(u));
+            // One pass each: the sessions read and the signals walked once,
+            // the channels scanned once; the legend and the tab bar take
+            // their lists from the column's.
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, &instances);
-            // The legend and completion keep live claudes and every human.
-            let known = known_identities_with_liveness(&self.signals, &discover_sessions(), depth, alive, &instances);
+            let known = known_of(&seen);
             let rows = all_channels(depth);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
-            self.world = Some(World { groups: channels(depth), known, seen, rows, live_members, instances });
+            self.world = Some(World { groups: tab_channels(&rows), known, seen, rows, live_members, instances });
         }
         self.world.as_ref().expect("just built")
     }

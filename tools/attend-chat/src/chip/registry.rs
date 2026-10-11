@@ -83,6 +83,14 @@ where
         .collect()
 }
 
+/// What the legend and completion of a pool of `seen` identities keep:
+/// the live claudes and every human, in their order. The same list
+/// [`known_identities_with_liveness`] builds, taken from a pool already
+/// built for the left column instead of a second walk of the signals.
+pub fn known_of(seen: &[Seen]) -> Vec<KnownIdentity> {
+    seen.iter().filter(|s| s.live || !s.identity.is_claude).map(|s| s.identity.clone()).collect()
+}
+
 /// An identity the chat has seen, and whether it is live now.
 #[derive(Clone, Debug)]
 pub struct Seen {
@@ -224,6 +232,17 @@ mod tests {
         // most-recent cwd first so active peers lead the legend.
         let y_id = Identity::for_cwd("/home/y", ColorDepth::TrueColor);
         assert_eq!(reg[0].nickname, y_id.nickname);
+    }
+
+    #[test]
+    fn the_legend_from_the_seen_pool_is_the_legend_built_afresh() {
+        let buf = vec![sig("claude:a", "/home/x"), sig("external:aaron@kitty", "/home/aaron"), sig("claude:b", "/home/y")];
+        let alive = |sid: &str| sid == "a";
+        let seen = seen_identities(&buf, &[], ColorDepth::TrueColor, alive, |_| false, &empty_cache());
+        let names = |v: Vec<KnownIdentity>| v.into_iter().map(|k| k.nickname).collect::<Vec<_>>();
+        let fresh = names(known_identities_with_liveness(&buf, &[], ColorDepth::TrueColor, alive, &empty_cache()));
+        assert_eq!(names(known_of(&seen)), fresh, "live claudes and every human, away or not");
+        assert_eq!(fresh.len(), 2);
     }
 
     #[test]
