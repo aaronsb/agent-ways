@@ -334,7 +334,7 @@ impl App {
             ShellKey::StripFocus => self.strip_focus(),
             ShellKey::TabOrMenu(n) => {
                 if let Some(i) = self.numbered(n) {
-                    self.pane_tab_or_menu(i);
+                    self.pane_tab_or_menu(i, false);
                 }
             }
             ShellKey::Tab(n) => {
@@ -395,11 +395,14 @@ impl App {
     /// modal, or a picker whose choice goes back to the pane.
     ///
     /// A picker docks under the row the pane names ([`Pane::take_anchor`]),
-    /// else under the tab or menu it was opened from, else in the middle.
+    /// else under the tab or menu it was opened from, else in the middle;
+    /// a menu a click on its tab opened docks under the tab.
     pub(super) fn take_pane_open(&mut self) {
         let from = self.menu_anchor.take();
+        let at_tab = std::mem::take(&mut self.menu_at_tab);
         let Some(p) = self.pane.as_mut() else { return };
-        let (open, anchor) = (p.take_open(), p.take_anchor());
+        let (open, row) = (p.take_open(), p.take_anchor());
+        let anchor = if at_tab { from.or(row) } else { row.or(from) };
         let Some(open) = open else { return };
         match open {
             Open::Report { label, command, text } => {
@@ -415,11 +418,11 @@ impl App {
             }
             Open::Pick { id, title, options, multi, chosen } if matches!(self.mode, Mode::Browse) && !options.is_empty() => {
                 let mut pick = Pick::for_pane(id, title, options, multi, &chosen);
-                pick.anchor = anchor.or(from);
+                pick.anchor = anchor;
                 self.mode = Mode::Pick(pick);
             }
             Open::Pick { .. } => {}
-            Open::Tab(i) => self.pane_tab_or_menu(i),
+            Open::Tab(i) => self.pane_tab_or_menu(i, false),
         }
     }
 
@@ -449,7 +452,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
                     self.interrupt_pane();
-                    return self.pane_tab_or_menu(i);
+                    return self.pane_tab_or_menu(i, true);
                 }
                 if self.hits.pane.contains(at) {
                     self.msg.clear();
@@ -465,7 +468,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Right) => {
                 if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
                     self.interrupt_pane();
-                    return self.open_tab_menu(i);
+                    return self.open_tab_menu(i, true);
                 }
             }
             MouseEventKind::Down(MouseButton::Middle) => {

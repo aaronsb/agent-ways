@@ -898,6 +898,13 @@ impl Chat {
         self.pane().sidebar
     }
 
+    /// `attend.chat.tabs.menu_on_repeat` for this chat, whatever the
+    /// settings file says.
+    pub fn menu_on_repeat(mut self, on: bool) -> Chat {
+        self.pane_mut().config.menu_on_repeat = on;
+        self
+    }
+
     /// Keep the human's presence heartbeat, or not.
     pub fn heartbeat(mut self, on: bool) -> Chat {
         self.pane_mut().heartbeat = on;

@@ -624,6 +624,26 @@ fn a_click_on_a_tab_shows_its_channel_and_a_second_opens_its_menu() {
     assert_eq!(c.foreground(), &Tab::Merged);
 }
 
+/// A menu docks where the input came from: a click on the tab docks it
+/// under the tab even while the column shows the channel's row; the key
+/// docks it under that row.
+#[test]
+fn a_tab_click_docks_the_menu_under_the_tab_and_the_key_under_the_row() {
+    let mut c = chat_side().enhanced(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
+    left(&mut c, (x, y));
+    left(&mut c, (x, y));
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let title = rows.iter().position(|r| r.contains("pick one: #deploy")).expect("the menu is drawn");
+    assert_eq!(title, usize::from(y) + 1, "under the tab: {rows:#?}");
+    press(&mut c, key(KeyCode::Esc));
+    let row = testkit::rows(&testkit::render_screen(&mut c, 80, 25)).iter().position(|r| r.contains("#deploy") && !r.starts_with(" ≡")).expect("the column's row");
+    press(&mut c, ctrl('3'));
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows[row + 1].starts_with("┌pick one: #deploy"), "Ctrl+3 docks under the column's row: {rows:#?}");
+}
+
 #[test]
 fn golden_a_tab_clicked() {
     let mut g = goldens();

@@ -361,17 +361,27 @@ impl ChatPane {
     }
 
     /// A click on a row of the column, or Enter on it. An agent's row opens
-    /// its menu. A channel's row with a tab goes the way Ctrl+digit takes
-    /// that tab, through the shell ([`agent_tui::Open::Tab`]): the first
-    /// click shows the channel, a click on the channel shown opens its
-    /// menu. A channel with no tab cannot be shown, so its menu opens.
+    /// its menu. A channel's row opens the menu of the channel shown, and
+    /// shows any other channel with a tab, through the shell as Ctrl+digit
+    /// shows it ([`agent_tui::Open::Tab`]). The menu opens whatever
+    /// `attend.chat.tabs.menu_on_repeat` says: that setting is about keys.
+    /// A channel with no tab cannot be shown, so its menu opens.
+    ///
     /// A waiting question is dropped first: a menu closed unchanged puts
     /// "unchanged" over the bar, and a `y` must never answer a question
-    /// out of sight.
+    /// out of sight. While the column has the keyboard, its cursor moves
+    /// to the row clicked.
     pub(super) fn side_click(&mut self, hit: SideHit) {
         self.drop_question();
+        if self.side_focus.is_some() {
+            let items = self.side_items();
+            if let Some(i) = items.iter().position(|h| *h == hit) {
+                self.focus_at(&items, i);
+            }
+        }
         match hit {
             SideHit::Agent(member) => self.agent_menu(member),
+            SideHit::Channel(name) if self.normal_tab() == Tab::Channel(name.clone()) => self.channel_menu(Some(name)),
             SideHit::Channel(name) => match self.strip_names().iter().position(|n| *n == name) {
                 // The bar's index: 0 is `≡`, 1 merged, then the channels.
                 Some(i) => {

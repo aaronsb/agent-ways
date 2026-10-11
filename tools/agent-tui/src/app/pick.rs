@@ -177,8 +177,9 @@ impl App {
 /// row, from the row's left edge, as wide as its title and items need.
 /// Where the lines below cannot hold it, it ends on the line above the row,
 /// so the row stays in sight; where neither side can, it sits at the foot
-/// of `area`. It is moved left as far as it must to end inside `area`, and
-/// it is never taller or wider than `area`.
+/// of `area`. It is moved as far as it must to lie inside `area`, which a
+/// row left outside it by a resize needs, and it is never taller or wider
+/// than `area`.
 pub(super) fn docked(area: Rect, row: Rect, title: &str, items: &[(String, String)]) -> Rect {
     use crate::wrap::str_width;
     // Borders, the item's lead space, its mark and a space, and a column
@@ -195,6 +196,7 @@ pub(super) fn docked(area: Rect, row: Rect, title: &str, items: &[(String, Strin
     } else {
         area.bottom() - h
     };
+    let y = y.clamp(area.y, area.bottom() - h);
     let x = row.x.clamp(area.x, area.right() - w);
     Rect { x, y, width: w, height: h }
 }
@@ -346,6 +348,8 @@ mod tests {
         let r = docked(area, Rect { x: 70, y: 0, width: 8, height: 1 }, "pick one: #infra", &items);
         assert_eq!(r.right(), 80, "moved left to end inside the area");
         assert!(r.width >= 24 && r.width <= 80);
+        let r = docked(Rect { height: 23, ..area }, row(31), "pick one: #infra", &items);
+        assert_eq!((r.y, r.bottom()), (15, 24), "a row below the area after a resize: the menu ends at its foot");
         let narrow = Rect { width: 20, ..area };
         assert_eq!(docked(narrow, row(3), "a long title for a narrow screen", &items).width, 20, "never wider than the area");
     }
