@@ -234,7 +234,7 @@ fn judge_setup() {
 }
 
 /// Current HEAD sha of the app checkout, or None if git can't answer.
-fn git_head(app: &Path) -> Option<String> {
+pub(super) fn git_head(app: &Path) -> Option<String> {
     Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(app)
@@ -891,7 +891,7 @@ fn run_make(dir: &Path, args: &[&str]) -> bool {
 /// list in build.rs (`WAYS_BUILD`): the guard compares shas derived from both, so
 /// the abbreviation length and `--long`/`--match` flags must be identical or it
 /// keys off divergent strings.
-fn source_describe(app: &Path) -> Option<String> {
+pub(super) fn source_describe(app: &Path) -> Option<String> {
     Command::new("git")
         .args(["describe", "--tags", "--always", "--long", "--dirty", "--match", "ways-v*"])
         .current_dir(app)
@@ -1005,14 +1005,14 @@ fn tool_present(tool: &str) -> bool {
 
 /// True if `dir` is an agent-ways git checkout (has `.git` and a Makefile that
 /// mentions agent-ways).
-fn is_app_checkout(dir: &Path) -> bool {
+pub(super) fn is_app_checkout(dir: &Path) -> bool {
     dir.join(".git").exists()
         && std::fs::read_to_string(dir.join("Makefile"))
             .map(|m| m.contains("agent-ways"))
             .unwrap_or(false)
 }
 
-fn run_step(cmd: &mut Command, label: &str) -> Result<()> {
+pub(super) fn run_step(cmd: &mut Command, label: &str) -> Result<()> {
     let status = cmd
         .status()
         .with_context(|| format!("running `{label}` (is it installed?)"))?;

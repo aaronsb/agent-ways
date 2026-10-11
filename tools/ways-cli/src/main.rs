@@ -147,9 +147,9 @@ enum Commands {
         #[arg(long)]
         if_stale: bool,
     },
-    /// Update, repair or remove agent-ways (ADR-509)
+    /// Update, repair, reinstall or remove agent-ways (ADR-509)
     ///
-    /// The install's lifecycle: update, repair, uninstall and the
+    /// The install's lifecycle: update, repair, uninstall, reinstall and the
     /// config directories agent-ways is active in. Run bare on a terminal, it
     /// opens the settings screens on their install tab; in a pipe, it prints
     /// this help.
@@ -1028,6 +1028,20 @@ enum ManageCommand {
     /// commands and delete the app. Your config and state stay unless --purge.
     /// Prints the plan and changes nothing without --yes.
     Uninstall(UninstallArgs),
+    /// Put the installed version back; without --yes, print the plan only
+    ///
+    /// Fetch and verify the installed version, from the source it came from,
+    /// into a staging directory; then uninstall, keeping your config and
+    /// state, and install from the stage. A failed fetch removes nothing.
+    /// Prints the plan and changes nothing without --yes.
+    Reinstall {
+        /// Do it. Without this flag the plan is printed and nothing changes.
+        #[arg(long)]
+        yes: bool,
+        /// Refused: a reinstall keeps your config and state
+        #[arg(long, hide = true)]
+        purge: bool,
+    },
     /// Claude Code config directories agent-ways is active in (ADR-184)
     ///
     /// Run bare on a terminal, it opens the settings screens on their install
@@ -1383,6 +1397,7 @@ fn run() -> Result<()> {
             ManageCommand::Update(args) => update(args),
             ManageCommand::Repair(args) => repair(args),
             ManageCommand::Uninstall(args) => uninstall(args),
+            ManageCommand::Reinstall { yes, purge } => cmd::reinstall::run(yes, purge),
             ManageCommand::Target { action } => target(action),
         },
         Commands::Update(args) => {

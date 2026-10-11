@@ -1,4 +1,4 @@
-//! `ways uninstall`: the last step of the install lifecycle (ADR-198).
+//! `ways manage uninstall`: the last step of the install lifecycle (ADR-198).
 //!
 //! Withdraws agent-ways from every target and from `~/.claude`, stops the ways
 //! agent, removes the command links that point into the app, and deletes the
@@ -173,65 +173,99 @@ fn print_plan(p: &Plan, app_present: bool, purge: bool) {
     }
 }
 
-pub fn run(yes: bool, purge: bool) -> Result<()> {
-    let roots = Roots::from_env();
-    let project = std::env::var("PWD").unwrap_or_else(|_| ".".to_string());
-    let links: Vec<PathBuf> = bin_dirs(&roots.home)
-        .iter()
-        .filter_map(|d| std::fs::read_dir(d).ok())
-        .flat_map(|rd| rd.flatten().map(|e| e.path()))
-        .filter(|l| is_our_link(l, &roots.data))
-        .collect();
-    let p = plan_from(&roots, Config::load(&project).targets(), links, purge)?;
-    if p.targets.is_empty() && p.links.is_empty() && p.remove.is_empty() {
-        println!("agent-ways is not installed: nothing to remove.");
-        return Ok(());
-    }
-    print_plan(&p, roots.data.exists(), purge);
-    if !yes {
-        println!("\nNothing changed. Run `ways uninstall --yes` to do this.");
-        return Ok(());
+/// One uninstall, planned from the environment and not yet applied. `ways
+/// manage reinstall` prints and applies the same one (ADR-509 §3).
+pub(crate) struct Uninstall {
+    plan: Plan,
+    app_present: bool,
+    purge: bool,
+}
+
+impl Uninstall {
+    /// Plans the uninstall; None when nothing of agent-ways is installed.
+    pub(crate) fn plan(purge: bool) -> Result<Option<Uninstall>> {
+        let roots = Roots::from_env();
+        let project = std::env::var("PWD").unwrap_or_else(|_| ".".to_string());
+        let links: Vec<PathBuf> = bin_dirs(&roots.home)
+            .iter()
+            .filter_map(|d| std::fs::read_dir(d).ok())
+            .flat_map(|rd| rd.flatten().map(|e| e.path()))
+            .filter(|l| is_our_link(l, &roots.data))
+            .collect();
+        let plan = plan_from(&roots, Config::load(&project).targets(), links, purge)?;
+        if plan.targets.is_empty() && plan.links.is_empty() && plan.remove.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Uninstall { plan, app_present: roots.data.exists(), purge }))
     }
 
-    // Withdraw as `target disable` does, without editing the config: a kept
-    // config keeps its targets, so a later install activates them again. A
-    // failure stops before anything is deleted; targets withdrawn before it
-    // stay withdrawn, and a reinstall projects them again.
-    for target in &p.targets {
-        let mut withdrawn = target.clone();
-        withdrawn.enabled = false;
-        if let Err(e) = crate::cmd::reconcile::run_for_targets(&[withdrawn], false, false, false) {
-            eprintln!("withdrawing from {} failed: {e:#}; nothing was deleted", target.dir().display());
-            return Err(e);
-        }
-        // Directories withdrawal emptied and nothing else uses.
-        for sub in ["hooks", "bin"] {
-            let _ = std::fs::remove_dir(target.dir().join(sub));
-        }
+    pub(crate) fn print(&self) {
+        print_plan(&self.plan, self.app_present, self.purge);
     }
-    // Stopping the agent keeps a running process from outliving its binary.
-    let _ = ways_agent_core::client::call(ways_agent_core::protocol::Request::Shutdown, Duration::from_secs(2), false);
-    for link in &p.links {
-        if std::fs::remove_file(link).is_ok() {
-            println!("removed {}", link.display());
-        }
+
+    /// Whether the plan keeps the operator's config or state.
+    pub(crate) fn keeps_anything(&self) -> bool {
+        !self.purge && !self.plan.keep.is_empty()
     }
-    let mut failed = 0;
-    for dir in &p.remove {
-        match std::fs::remove_dir_all(dir) {
-            Ok(()) => println!("deleted {}", dir.display()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => {
-                failed += 1;
-                eprintln!("could not delete {}: {e}", dir.display());
+
+    /// Withdraw, stop the agent, unlink and delete, in that order.
+    pub(crate) fn apply(&self) -> Result<()> {
+        let p = &self.plan;
+        // Withdraw as `manage target disable` does, without editing the
+        // config: a kept config keeps its targets, so a later install
+        // activates them again. A failure stops before anything is deleted;
+        // targets withdrawn before it stay withdrawn, and a reinstall
+        // projects them again.
+        for target in &p.targets {
+            let mut withdrawn = target.clone();
+            withdrawn.enabled = false;
+            if let Err(e) = crate::cmd::reconcile::run_for_targets(&[withdrawn], false, false, false) {
+                eprintln!("withdrawing from {} failed: {e:#}; nothing was deleted", target.dir().display());
+                return Err(e);
+            }
+            // Directories withdrawal emptied and nothing else uses.
+            for sub in ["hooks", "bin"] {
+                let _ = std::fs::remove_dir(target.dir().join(sub));
             }
         }
+        // Stopping the agent keeps a running process from outliving its binary.
+        let _ = ways_agent_core::client::call(ways_agent_core::protocol::Request::Shutdown, Duration::from_secs(2), false);
+        for link in &p.links {
+            if std::fs::remove_file(link).is_ok() {
+                println!("removed {}", link.display());
+            }
+        }
+        let mut failed = 0;
+        for dir in &p.remove {
+            match std::fs::remove_dir_all(dir) {
+                Ok(()) => println!("deleted {}", dir.display()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    failed += 1;
+                    eprintln!("could not delete {}: {e}", dir.display());
+                }
+            }
+        }
+        if failed > 0 {
+            bail!("{failed} path(s) could not be deleted; fix the cause and run `ways manage uninstall --yes` again");
+        }
+        Ok(())
     }
-    if failed > 0 {
-        bail!("{failed} path(s) could not be deleted; fix the cause and run `ways uninstall --yes` again");
+}
+
+pub fn run(yes: bool, purge: bool) -> Result<()> {
+    let Some(uninstall) = Uninstall::plan(purge)? else {
+        println!("agent-ways is not installed: nothing to remove.");
+        return Ok(());
+    };
+    uninstall.print();
+    if !yes {
+        println!("\nNothing changed. Run `ways manage uninstall --yes` to do this.");
+        return Ok(());
     }
+    uninstall.apply()?;
     println!("\nagent-ways is uninstalled. Restart Claude Code so running sessions drop the hooks.");
-    if !purge && !p.keep.is_empty() {
+    if uninstall.keeps_anything() {
         println!("Your config and state are kept; a later install picks them up.");
     }
     Ok(())

@@ -65,7 +65,7 @@ fn a_group_with_no_verb_prints_its_help_and_exits_2() {
 /// like a group that needs a verb (ADR-507 §7, notes of 2026-10-02).
 #[test]
 fn a_bare_screen_group_in_a_pipe_prints_its_help_and_exits_2() {
-    for (group, verb) in [(&["session"][..], "replay"), (&["manage"], "repair"), (&["manage", "target"], "plan")] {
+    for (group, verb) in [(&["session"][..], "replay"), (&["manage"], "reinstall"), (&["manage", "target"], "plan")] {
         let out = ways(group);
         let name = group.join(" ");
         assert_eq!(out.status.code(), Some(2), "{name}");
