@@ -132,6 +132,45 @@ pub fn channels_in(base: &Path, caps: ColorDepth) -> Vec<KnownGroup> {
     out
 }
 
+/// One row of the left column's channel list (ADR-405): a channel, when
+/// its newest message was written, and whether its directory exists.
+#[derive(Debug, Clone)]
+pub struct ChannelRow {
+    pub known: KnownGroup,
+    pub last: Option<std::time::SystemTime>,
+    /// False for a channel `_groups.yaml` still names but whose directory
+    /// was swept: it is listed, set back, and has no tab.
+    pub on_disk: bool,
+}
+
+/// Every channel, for the left column: `#open`, then the channels the tab
+/// bar shows, then those only `_groups.yaml` names, by name.
+pub fn all_channels(caps: ColorDepth) -> Vec<ChannelRow> {
+    all_channels_in(&signals_base(), caps)
+}
+
+/// Test-seam counterpart to [`all_channels`].
+pub fn all_channels_in(base: &Path, caps: ColorDepth) -> Vec<ChannelRow> {
+    let mut out: Vec<ChannelRow> = channels_in(base, caps)
+        .into_iter()
+        .map(|known| {
+            let dir = if known.is_base { base.join(attend_groups::BROADCAST_DIR) } else { base.join(format!("{GROUP_PREFIX}{}", known.group.name)) };
+            ChannelRow { last: last_activity(&dir), known, on_disk: true }
+        })
+        .collect();
+    let mut rest: Vec<(String, GroupEntry)> = attend_groups::load_groups(base)
+        .into_iter()
+        .filter(|(name, _)| name != BASE_CHANNEL_NAME && !out.iter().any(|r| r.known.group.name == *name))
+        .collect();
+    rest.sort_by(|a, b| a.0.cmp(&b.0));
+    out.extend(rest.into_iter().map(|(name, membership)| ChannelRow {
+        known: KnownGroup { group: Group::for_name(&name, caps), membership, is_base: false },
+        last: None,
+        on_disk: false,
+    }));
+    out
+}
+
 /// Return the set of group names a given member (session UUID for
 /// claudes, username for humans — ADR-170) is in. Pure filter over
 /// the scanned groups.
@@ -341,6 +380,19 @@ mod tests {
         assert_eq!(live_peer_count_with(&base, "solo", "aaron", |_| true), 0);
         // A different sender sees aaron as a live peer.
         assert_eq!(live_peer_count_with(&base, "solo", "someone-else", |_| true), 1);
+    }
+
+    #[test]
+    fn all_channels_lists_empty_and_swept_channels_after_the_tabs() {
+        let base = tempdir_like();
+        fs::create_dir_all(base.join("@busy")).unwrap();
+        fs::File::create(base.join("@busy/m.signal")).unwrap();
+        fs::create_dir_all(base.join("@empty")).unwrap();
+        write_yaml(&base, "zz-swept:\n  pinned: false\n  members:\n    - aaron\nbusy:\n  pinned: false\n  members: []\n");
+        let rows = all_channels_in(&base, ColorDepth::TrueColor);
+        let shown: Vec<(&str, bool, bool)> = rows.iter().map(|r| (r.known.group.name.as_str(), r.on_disk, r.last.is_some())).collect();
+        assert_eq!(shown, [("open", true, false), ("busy", true, true), ("empty", true, false), ("zz-swept", false, false)]);
+        assert_eq!(rows[3].known.membership.members, ["aaron"], "a swept channel keeps its members");
     }
 
     #[test]

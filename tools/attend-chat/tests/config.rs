@@ -40,7 +40,7 @@ fn config_lists_sets_refuses_and_applies_at_once() {
     enter(&mut c, "/config");
     assert_eq!(
         c.status(),
-        "tabs.jump = auto (default) · tabs.menu_on_repeat = true (default) · tabs.focus_key = both (default) · mouse = false (default) · /config <key> <value> sets one"
+        "tabs.jump = auto (default) · tabs.menu_on_repeat = true (default) · tabs.focus_key = both (default) · mouse = false (default) · sidebar_key = ctrl-b (default) · /config <key> <value> sets one"
     );
     assert!(bar(&mut c).contains("Ctrl+1-9 tab (again: menu)"), "{}", bar(&mut c));
 

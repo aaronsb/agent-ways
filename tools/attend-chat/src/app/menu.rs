@@ -113,6 +113,13 @@ impl ChatPane {
                 None => return,
             },
         };
+        self.channel_menu(channel);
+    }
+
+    /// The menu of `channel`, or merged's for `None`: from its tab, or its
+    /// row in the left column, which lists channels that have no tab.
+    pub(super) fn channel_menu(&mut self, channel: Option<String>) {
+        self.dirty = true;
         let title = channel.as_ref().map_or("merged".to_string(), |c| format!("#{c}"));
         let id = format!("menu:{}", channel.as_deref().unwrap_or(""));
         self.open = Some(Open::Pick { id, title, options: items(channel.as_deref()), multi: false, chosen: Vec::new() });

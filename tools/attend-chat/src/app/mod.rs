@@ -15,6 +15,7 @@
 
 mod keys;
 mod menu;
+mod sidebar;
 mod view;
 
 use std::sync::mpsc::Receiver;
@@ -32,8 +33,8 @@ use agent_tui::theme::{Palette, Shape};
 use agent_tui::{App, Binding, Keyed, Open, Pane, PaneTab, Tone};
 use attend_instances::SnapshotCache;
 
-use crate::chip::{known_identities, KnownIdentity};
-use crate::groups::{channels, KnownGroup};
+use crate::chip::{known_identities_with_liveness, seen_identities, KnownIdentity, Seen};
+use crate::groups::{all_channels, channels, ChannelRow, KnownGroup};
 use crate::sessions::discover as discover_sessions;
 use crate::signal::Signal;
 use crate::tabs::{self, Tab};
@@ -80,6 +81,11 @@ enum Clock {
 struct World {
     groups: Vec<KnownGroup>,
     known: Vec<KnownIdentity>,
+    /// Every identity seen, live or not, for the left column (ADR-405).
+    seen: Vec<Seen>,
+    /// Every channel, for the left column, and each one's live members.
+    rows: Vec<ChannelRow>,
+    live_members: Vec<usize>,
     /// The instance registry, for each chip's `-<instance>` suffix
     /// (ADR-129). Built afresh with the world, never kept across it.
     instances: SnapshotCache,
@@ -103,6 +109,8 @@ struct Hits {
     compose: (Rect, usize),
     text_width: u16,
     chips: Vec<(Rect, Chip)>,
+    /// The left column's rows.
+    side: Vec<(Rect, sidebar::SideHit)>,
 }
 
 /// The chat's state: the messages, the compose box, the shown channel.
@@ -163,6 +171,8 @@ pub struct ChatPane {
     /// The chat's settings (`attend.chat.*`), read at start and again
     /// after a command, so `/config` applies at once.
     config: attend_config::ChatConfig,
+    /// Whether the left column is shown (`attend.chat.sidebar_key`).
+    sidebar: bool,
 }
 
 impl ChatPane {
@@ -197,6 +207,7 @@ impl ChatPane {
             prompt: None,
             enhanced: false,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
+            sidebar: true,
         }
     }
 
@@ -253,8 +264,14 @@ impl ChatPane {
         if self.world.is_none() {
             let depth = self.palette.depth();
             let instances = SnapshotCache::new();
-            let known = known_identities(&self.signals, &discover_sessions(), depth, &instances);
-            self.world = Some(World { groups: channels(depth), known, instances });
+            let alive = |id: &str| attend_presence::alive(id, &Default::default());
+            let human = |u: &str| alive(&agent_identity::sanitize_id_component(u));
+            let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, &instances);
+            // The legend and completion keep live claudes and every human.
+            let known = known_identities_with_liveness(&self.signals, &discover_sessions(), depth, alive, &instances);
+            let rows = all_channels(depth);
+            let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
+            self.world = Some(World { groups: channels(depth), known, seen, rows, live_members, instances });
         }
         self.world.as_ref().expect("just built")
     }
@@ -541,6 +558,10 @@ impl Pane for ChatPane {
             }
             return Keyed::Done;
         }
+        if self.is_sidebar_key(&k) {
+            self.toggle_sidebar();
+            return Keyed::Done;
+        }
         match k.code {
             // Without the keyboard enhancement Ctrl+3 is this same Esc:
             // ask, so a tab key never closes the chat.
@@ -582,11 +603,15 @@ impl Pane for ChatPane {
         }
         if let Some((_, chip)) = self.hits.chips.iter().find(|(r, _)| r.contains(at)).cloned() {
             self.complete(chip);
+            return;
+        }
+        if let Some((_, hit)) = self.hits.side.iter().find(|(r, _)| r.contains(at)).cloned() {
+            self.side_click(hit);
         }
     }
 
     fn bindings(&self) -> Vec<Binding> {
-        vec![
+        let mut out = vec![
             Binding::new("Enter", "send"),
             Binding::new("Tab", "complete"),
             Binding::new("PgUp PgDn", "scroll"),
@@ -594,7 +619,12 @@ impl Pane for ChatPane {
             Binding::help("← → Home End", "move the cursor"),
             Binding::help("Bksp Del", "edit"),
             Binding::help("click a message", "selects it; in the compose box it places the cursor; a chip completes it"),
-        ]
+            Binding::help("click a side row", "an agent: @name in the compose box; a channel: shows it, opens its menu"),
+        ];
+        if let Some(key) = self.sidebar_key_label() {
+            out.push(Binding::help(key, "show or hide the agents and channels column"));
+        }
+        out
     }
 
     fn mode(&self) -> String {
@@ -752,6 +782,19 @@ impl Chat {
         self
     }
 
+    /// Show the left column of agents and channels, or not (ADR-405);
+    /// shown by default.
+    pub fn sidebar(mut self, on: bool) -> Chat {
+        self.pane_mut().sidebar = on;
+        self
+    }
+
+    /// Whether the left column is shown, as `attend.chat.sidebar_key`
+    /// last left it.
+    pub fn sidebar_shown(&self) -> bool {
+        self.pane().sidebar
+    }
+
     /// Keep the human's presence heartbeat, or not.
     pub fn heartbeat(mut self, on: bool) -> Chat {
         self.pane_mut().heartbeat = on;
@@ -867,8 +910,11 @@ impl World {
         for g in &self.groups {
             out += &format!("#{}|{:?}|{:?}\n", g.group.name, g.membership.members, g.membership.description);
         }
-        for k in &self.known {
-            out += &format!("@{}|{}|{}\n", k.nickname, k.cwd, k.is_claude);
+        for s in &self.seen {
+            out += &format!("@{}|{}|{}|{}\n", s.identity.nickname, s.identity.cwd, s.identity.is_claude, s.live);
+        }
+        for (r, live) in self.rows.iter().zip(&self.live_members) {
+            out += &format!("={}|{:?}|{}|{live}\n", r.known.group.name, r.last, r.on_disk);
         }
         out
     }

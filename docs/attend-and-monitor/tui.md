@@ -17,12 +17,13 @@ While the screen is open it touches the human's heartbeat (`heartbeat/<username>
 
 ## The screen
 
-From top to bottom:
+From top to bottom, beside a left column:
 
+- **The left column** (ADR-405). Agents: every agent the chat has seen, from session records and senders, live ones first and the rest set back. Channels: `#open`, then every channel, including empty ones and ones whose directory was swept, each with its member count and the time since its last message. The shown channel is marked. A click on an agent puts `@Name ` in the compose box; a click on a channel shows it and opens its menu. Ctrl-B (`attend.chat.sidebar_key`) shows or hides it, and a terminal narrower than about 74 columns hides it.
 - **The tab strip.** `1 merged`, then `2 #open`, then one tab per channel in name order. Each channel tab leads with the channel's glyph in its colour. The foreground channel's description follows the strip.
 - **The message feed.** Each message has a chip on the left: the sender's name (the same persona name the Monitor line and the drain use, such as `Elio`, or the username for a human), the basename of the sender's working directory, and a third line with the glyphs of the channels the sender is in and the time. The body wraps beside the chip.
 - **The compose box.** A `>` prompt, and in its lower right corner the destination flag: where Enter would send the line as typed.
-- **The helper row.** Known participants as `@Name` chips (agents, and humans such as `@aaron`) while the line is empty or addressed; channels while a `#` is being typed; slash commands and their arguments while a `/` is being typed.
+- **The helper row.** Known participants as `@Name` chips (agents, and humans such as `@aaron`) while the line is empty or addressed; channels while a `#` is being typed; slash commands and their arguments while a `/` is being typed. While the left column is shown, it lists the agents and channels instead, underlining what Tab would complete to, and the row appears only for slash commands.
 - **The bottom bar.** The mode, the mouse state, and the main keys. Command results and errors appear here for a few seconds.
 
 The merged tab shows every channel and the human's own tray in one stream. A channel tab shows only that channel. Messages are not threaded or faded: the feed is chronological, and a message stays until `/clear` or the end of the session.
@@ -85,7 +86,8 @@ A line that starts with `/` runs a command. The helper row completes the command
 | Alt-1 … Alt-9 | show a tab where Ctrl and a digit do not arrive; Konsole and GNOME Terminal keep Alt and a digit for their own tabs |
 | F2, Ctrl-T | the tab bar, marked by TABS in the footer and a reversed, ▸-led tab under the cursor: Left and Right move, Enter opens the tab's menu (the `+` slot asks the new channel's name at once), Esc goes back |
 | Ctrl-N | ask a new channel's name in the compose box, from the compose box or the tab bar; the draft comes back afterwards |
-| right-click a tab | its menu; with the mouse on, a click on the tab already shown opens it too |
+| right-click a tab | its menu; with the mouse on, a click on a tab shows it and opens its menu |
+| Ctrl-B | show or hide the left column |
 | PgUp, PgDn | scroll the feed |
 | Left, Right, Home, End | move the cursor |
 | Backspace, Delete | edit |
@@ -97,11 +99,11 @@ A line that starts with `/` runs a command. The helper row completes the command
 
 **Joining after an invitation.** An agent that joins a channel late is not handed the channel's history: messages older than two minutes are marked read, and the join says how many. A join that answers an invitation (`/invite`, or Add agent) is the exception: the invitee's `attend join` keeps the channel's newest 50 messages to read, as a briefing, and says how many older ones it held back. The invitation is spent by that join.
 
-**Settings.** `attend.chat.tabs.jump` (auto, ctrl, alt, both, none), `attend.chat.tabs.menu_on_repeat`, `attend.chat.tabs.focus_key` (both, f2, ctrl-t, none) and `attend.chat.mouse` live in attend's user file. `/config` lists them with the layer each comes from, and `/config <key> <value>` sets one; `ways settings` reads and sets the same keys.
+**Settings.** `attend.chat.tabs.jump` (auto, ctrl, alt, both, none), `attend.chat.tabs.menu_on_repeat`, `attend.chat.tabs.focus_key` (both, f2, ctrl-t, none), `attend.chat.mouse` and `attend.chat.sidebar_key` (ctrl-b, f3, none) live in attend's user file. `/config` lists them with the layer each comes from, and `/config <key> <value>` sets one; `ways settings` reads and sets the same keys.
 
 To see whether a terminal speaks the kitty keyboard protocol, run `printf '\e[?u\e[c'; read -rsd c -t1 r; printf '%q\n' "$r"` in it: a reply holding `[?` followed by digits and `u` means it does; one holding only the `c` answer means it does not.
 
-**The mouse is off at start.** With capture off, the terminal owns the mouse: dragging selects text to copy, and middle-click pastes into the compose box. Alt-m gives the mouse to the screen. Then a click on a tab shows it, a click on a message selects it and scrolls it fully into view, a click in the compose box places the cursor, a click on a helper chip completes it, and the wheel scrolls the feed. Shift-drag still selects text in most terminals.
+**The mouse is off at start.** With capture off, the terminal owns the mouse: dragging selects text to copy, and middle-click pastes into the compose box. Alt-m gives the mouse to the screen. Then a click on a tab shows it and opens its menu, a click on a row of the left column addresses the agent or opens the channel, a click on a message selects it and scrolls it fully into view, a click in the compose box places the cursor, a click on a helper chip completes it, and the wheel scrolls the feed. Shift-drag still selects text in most terminals.
 
 **Quitting with a draft.** Esc or Ctrl-C quits at once when the compose box is empty. With a draft in it, a prompt names the draft and offers Back (Esc) or Quit and discard all (D). Esc or Enter goes back. D arms the discard; then Enter or Ctrl-C quits and Esc disarms. Characters and editing keys go on typing into the draft, and after an armed D the D is typed too. Other keys, such as Tab or PgUp, leave the prompt as it is.
 

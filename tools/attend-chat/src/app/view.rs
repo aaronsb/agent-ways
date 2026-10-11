@@ -36,6 +36,18 @@ const INPUT_ROWS: usize = 10;
 pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let fg = chat.normal_tab();
     let text = chat.input.text().to_string();
+    // The left column (ADR-405), when shown and there is room for it.
+    let side_w = chat.side_width(area.width);
+    let (side, area) = match side_w {
+        Some(w) => {
+            let [side, rest] = Layout::horizontal([Constraint::Length(w), Constraint::Min(1)]).areas(area);
+            (Some(side), rest)
+        }
+        None => (None, area),
+    };
+    // While the column lists the agents and channels, the helper row
+    // shows only what it does not: commands, their arguments and hints.
+    let helper_h = u16::from(side.is_none() || super::sidebar::helper_needed(&text));
     let attachments = attach::existing_attachments(&text);
     // The compose box: its rows at the box's inner width less the prompt,
     // the attachment row when a dropped file is in the buffer, and the
@@ -44,13 +56,18 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let rows = chat.input.rows(inner, theme::body());
     let shown = rows.len().clamp(1, INPUT_ROWS);
     let input_h = shown as u16 + 3 + u16::from(!attachments.is_empty());
-    let [feed, compose, helper] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(1)]).areas(area);
+    let [feed, compose, helper] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(helper_h)]).areas(area);
 
     let groups = chat.world().groups.clone();
     chat.hits = Hits { text_width: inner, ..Hits::default() };
+    if let Some(side) = side {
+        super::sidebar::draw(chat, f, side);
+    }
     draw_feed(chat, f, feed, &fg);
     draw_compose(chat, f, compose, rows, &attachments, &fg);
-    draw_helper(chat, f, helper, &text, &groups);
+    if helper_h > 0 {
+        draw_helper(chat, f, helper, &text, &groups);
+    }
 }
 
 /// The tab bar the shell draws: the common menu's `≡` slot, merged, then

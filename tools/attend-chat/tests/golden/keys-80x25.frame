@@ -9,6 +9,8 @@ agent-tui frame 80x25
 |│← → Home End       move the cursor                                            │|
 |│Bksp Del           edit                                                       │|
 |│click a message    selects it; in the compose box it places the cursor; a chip│|
+|│click a side row   an agent: @name in the compose box; a channel: shows it, op│|
+|│Ctrl+B             show or hide the agents and channels column                │|
 |│Alt+1-9            tab (again: menu)                                          │|
 |│F2                 tabs                                                       │|
 |│Ctrl+T             the tab bar, as F2: ← → move, Enter its menu, Esc back     │|
@@ -20,8 +22,6 @@ agent-tui frame 80x25
 |│Esc ^C             quit; asks over a draft; else Esc asks and y quits         │|
 |│click              a tab shows it; the wheel scrolls                          │|
 |│                                                                              │|
-|│help: chat                                                                    │|
-|│Enter sends to the shown channel; merged sends to #open. @name or #channel    │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
 styles
@@ -92,9 +92,10 @@ styles
  19   1-19  Cyan - -
  19  79-79  LightBlue - -
  20   0-0   LightBlue - -
+ 20   1-19  Cyan - -
  20  79-79  LightBlue - -
  21   0-0   LightBlue - -
- 21   1-10  - - BOLD
+ 21   1-19  Cyan - -
  21  79-79  LightBlue - -
  22   0-0   LightBlue - -
  22  79-79  LightBlue - -

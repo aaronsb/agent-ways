@@ -100,6 +100,12 @@ const FOCUS_VALUES: &[SubCommand] = &[
     SubCommand { name: "none", description: "no key gives the tab bar the focus", grammar: &[] },
 ];
 
+const SIDEBAR_VALUES: &[SubCommand] = &[
+    SubCommand { name: "ctrl-b", description: "Ctrl+B", grammar: &[] },
+    SubCommand { name: "f3", description: "F3", grammar: &[] },
+    SubCommand { name: "none", description: "no key; the column stays shown", grammar: &[] },
+];
+
 /// `/config`'s keys, each a choice of its values: the chat's settings
 /// (`attend.chat.*`, crate::settings).
 pub const CONFIG_SUBS: &[SubCommand] = &[
@@ -107,6 +113,7 @@ pub const CONFIG_SUBS: &[SubCommand] = &[
     SubCommand { name: "tabs.menu_on_repeat", description: "Jumping to the shown tab opens its menu", grammar: &[Token::Subcommands(BOOL_VALUES)] },
     SubCommand { name: "tabs.focus_key", description: "The key that focuses the tab bar", grammar: &[Token::Subcommands(FOCUS_VALUES)] },
     SubCommand { name: "mouse", description: "Start with the mouse on", grammar: &[Token::Subcommands(BOOL_VALUES)] },
+    SubCommand { name: "sidebar_key", description: "The key that shows or hides the left column", grammar: &[Token::Subcommands(SIDEBAR_VALUES)] },
 ];
 
 /// Every slash command the TUI knows about. Implemented ones

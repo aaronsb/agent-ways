@@ -70,35 +70,69 @@ pub fn known_identities_with_liveness<F>(
 where
     F: Fn(&str) -> bool,
 {
+    // Liveness gate (ADR-129): a claude whose attend has not touched its
+    // heartbeat within grace is dropped. Its messages stay in history
+    // (with their dim chips), but `@`-completion and the agent legend
+    // should not point at peers nobody can reach. Humans are not
+    // liveness-filtered: they have no session, and an `@<user>` mention
+    // does not route to a session inbox.
+    seen_identities(signals, seeds, caps, is_live, |_| true, instances)
+        .into_iter()
+        .filter(|s| s.live)
+        .map(|s| s.identity)
+        .collect()
+}
+
+/// An identity the chat has seen, and whether it is live now.
+#[derive(Clone, Debug)]
+pub struct Seen {
+    pub identity: KnownIdentity,
+    pub live: bool,
+}
+
+/// Every identity the chat has seen, live or not: the senders of the
+/// buffered signals, newest first, then the seeded sessions. A claude is
+/// live when `claude_live` holds for its session id; a human when
+/// `human_live` holds for its username. An entry seen twice is live when
+/// either sighting is. The left column lists these (ADR-405); the legend
+/// and completion keep the live ones ([`known_identities_with_liveness`]).
+pub fn seen_identities<F, H>(
+    signals: &[Signal],
+    seeds: &[DiscoveredSession],
+    caps: ColorDepth,
+    claude_live: F,
+    human_live: H,
+    instances: &SnapshotCache,
+) -> Vec<Seen>
+where
+    F: Fn(&str) -> bool,
+    H: Fn(&str) -> bool,
+{
     // Walk from newest to oldest so the first time we see a cwd we
-    // also capture its most-recent-seen position. A HashSet of cwd
-    // strings keeps dedup O(n) without depending on a hasher.
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<KnownIdentity> = Vec::new();
+    // also capture its most-recent-seen position.
+    let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut out: Vec<Seen> = Vec::new();
+    let mut note = |key: String, identity: KnownIdentity, live: bool, out: &mut Vec<Seen>| match at.get(&key) {
+        Some(&i) => out[i].live |= live,
+        None => {
+            at.insert(key, out.len());
+            out.push(Seen { identity, live });
+        }
+    };
     for sig in signals.iter().rev() {
-        let (primary_label, is_claude, id) = if let Some(sid) = sig.from.strip_prefix("claude:") {
-            // Liveness gate (ADR-129): a claude whose attend has not
-            // touched its heartbeat within grace is dropped from the
-            // legend. The signal stays in history (with its dim chip),
-            // but `@`-completion and the agent legend should not point
-            // at peers nobody can reach.
-            if !is_live(sid) {
-                continue;
-            }
+        let (primary_label, is_claude, id, live) = if let Some(sid) = sig.from.strip_prefix("claude:") {
             let id = Identity::for_cwd(&sig.cwd, caps);
             // Instance suffix: `@Tamsin-alpha` is the addressable name
             // — same-cwd siblings differ on the suffix and dedupe as
             // distinct entries in the legend.
             let display = with_instance(id.nickname, &sig.cwd, sid, instances);
-            (display, true, id)
+            (display, true, id, claude_live(sid))
         } else if let Some(rest) = sig.from.strip_prefix("external:") {
-            // Humans are not liveness-filtered — they have no heartbeat
-            // and an `@<user>` mention does not route to a session
-            // inbox. Their legend entry is informational only.
             let username = rest.split('@').next().unwrap_or(rest).to_string();
             let scope = agent_identity::cwd_basename(&sig.cwd);
             let id = Identity::for_user(&username, &scope, caps);
-            (username, false, id)
+            let live = human_live(&username);
+            (username, false, id, live)
         } else {
             continue; // unknown prefix — don't pollute the legend
         };
@@ -117,38 +151,21 @@ where
         } else {
             format!("{}\x1f0", primary_label)
         };
-        if seen.insert(key) {
-            out.push(KnownIdentity {
-                nickname: primary_label,
-                cwd: sig.cwd.clone(),
-                is_claude,
-                palette: id.palette,
-                style: id.style,
-            });
-        }
+        let identity = KnownIdentity { nickname: primary_label, cwd: sig.cwd.clone(), is_claude, palette: id.palette, style: id.style };
+        note(key, identity, live, &mut out);
     }
 
     // Seed from discovered sessions — any claude cwd we haven't
     // already registered from a signal. Keys match the signal-
     // branch format so the same cwd doesn't double-register.
-    // Same liveness gate applies: a session.json on disk is not
-    // sufficient evidence that attend is running for that session.
+    // A session.json on disk is not sufficient evidence that attend is
+    // running for that session: liveness is the heartbeat's.
     for seed in seeds {
-        if !is_live(&seed.session_id) {
-            continue;
-        }
         let id = Identity::for_cwd(&seed.cwd, caps);
         let display = with_instance(id.nickname, &seed.cwd, &seed.session_id, instances);
         let key = format!("{}\x1f1\x1f{}", display, seed.cwd);
-        if seen.insert(key) {
-            out.push(KnownIdentity {
-                nickname: display,
-                cwd: seed.cwd.clone(),
-                is_claude: true,
-                palette: id.palette,
-                style: id.style,
-            });
-        }
+        let identity = KnownIdentity { nickname: display, cwd: seed.cwd.clone(), is_claude: true, palette: id.palette, style: id.style };
+        note(key, identity, claude_live(&seed.session_id), &mut out);
     }
     out
 }

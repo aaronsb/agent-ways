@@ -17,7 +17,7 @@ use agent_tui::{Jump, TabKeys};
 use attend_config::{ChatConfig, Config, SCHEMA};
 
 /// The chat's keys, by their short names under `attend.chat.`.
-pub const KEYS: &[&str] = &["tabs.jump", "tabs.menu_on_repeat", "tabs.focus_key", "mouse"];
+pub const KEYS: &[&str] = &["tabs.jump", "tabs.menu_on_repeat", "tabs.focus_key", "mouse", "sidebar_key"];
 
 const PREFIX: &str = "attend.chat.";
 

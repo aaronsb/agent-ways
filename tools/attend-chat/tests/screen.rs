@@ -62,6 +62,10 @@ fn fixture() -> &'static Fixture {
         g.join("deploy", true).unwrap();
         g.set_description("deploy", "rollout coordination").unwrap();
         attend_groups::Groups::new(&base, "").create("infra", None).unwrap();
+        // A channel `_groups.yaml` still names after its directory was
+        // swept: the left column lists it, set back (ADR-405).
+        attend_groups::Groups::new(&base, ALPHA_SID).join("archive", false).unwrap();
+        let _ = std::fs::remove_dir_all(base.join("@archive"));
         for sid in [ALPHA_SID, BETA_SID] {
             attend_presence::heartbeat::touch(sid).unwrap();
         }
@@ -104,7 +108,10 @@ fn chat_at(depth: ColorDepth, theme: Option<&str>) -> Chat {
     let f = fixture();
     let dir = f.root.join("config/agent-ways/themes");
     let (painter, _) = agent_theme::Painter::named_in(theme, &dir, depth);
+    // The frames before the left column (ADR-405) keep the legend row;
+    // the column's own tests turn it on (`chat_side`).
     let mut c = Chat::new(None, Palette { painter }, Shape::PLAIN)
+        .sidebar(false)
         .heartbeat(false)
         .pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0);
     for s in transcript() {
@@ -1135,4 +1142,93 @@ fn the_common_menu_offers_themes_and_keybinding_sets() {
     assert!(sets.contains("ctrl: Ctrl+1-9, F2, Ctrl+T") && sets.contains("fallback only: F2, Ctrl+T, Tab"), "{sets}");
     press(&mut c, key(KeyCode::Enter));
     assert_eq!(c.status(), "dry run: /config not run", "a set is written through /config");
+}
+
+// ── The left column (ADR-405) ───────────────────────────────────────
+
+/// A claude that has gone quiet: no heartbeat, so set back in the column.
+const GAMMA: &str = "/work/gamma";
+const GAMMA_SID: &str = "cccccccc-0000-4000-8000-000000000003";
+
+/// The chat with the left column shown, and a sender with no heartbeat.
+fn chat_side() -> Chat {
+    let mut c = chat().sidebar(true);
+    c.push(sig(&format!("claude:{GAMMA_SID}"), GAMMA, 900, Channel::Open, "signing off"));
+    c
+}
+
+#[test]
+fn golden_the_column_lists_every_agent_and_channel() {
+    let mut g = goldens();
+    let mut c = chat_side();
+    let shown = text(&mut c, 80, 25);
+    for row in ["Agents 2/4", "Channels 4", "#open", "#deploy", "#infra", "#archive"] {
+        assert!(shown.contains(row), "{row}: {shown}");
+    }
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let gamma = rows.iter().find(|r| r.contains("gamma")).expect("the quiet agent is listed");
+    assert!(gamma.contains('○'), "set back: {gamma}");
+    assert!(!rows[rows.len() - 2].contains("@aaron"), "the legend row is the column's: {:?}", rows[rows.len() - 2]);
+    for (w, h) in SIZES {
+        g.check(&format!("sidebar-{w}x{h}"), &testkit::render_screen(&mut c, w, h));
+    }
+    g.finish();
+}
+
+#[test]
+fn golden_the_sidebar_key_and_a_narrow_terminal_give_the_legend_row_back() {
+    let mut g = goldens();
+    let mut c = chat_side();
+    press(&mut c, ctrl('b'));
+    assert!(!c.sidebar_shown());
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows[rows.len() - 2].contains("@"), "the legend row is back: {:?}", rows[rows.len() - 2]);
+    g.check("sidebar-off-80x25", &testkit::render_screen(&mut c, 80, 25));
+    press(&mut c, ctrl('b'));
+    assert!(c.sidebar_shown());
+    let narrow = text(&mut c, 70, 25);
+    assert!(!narrow.contains("Agents"), "too narrow for the column: {narrow}");
+    g.check("sidebar-narrow-70x25", &testkit::render_screen(&mut c, 70, 25));
+    g.finish();
+}
+
+#[test]
+fn the_column_keeps_the_helper_row_for_commands() {
+    let mut c = chat_side();
+    typed(&mut c, "/he");
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows[rows.len() - 2].contains("/help"), "{:?}", rows[rows.len() - 2]);
+}
+
+#[test]
+fn a_click_on_an_agent_row_addresses_it_and_on_a_channel_row_opens_its_menu() {
+    let mut c = chat_side().enhanced(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "gamma").expect("the agent row");
+    left(&mut c, (x, y));
+    assert!(c.input().text().starts_with('@') && c.input().text().ends_with(' '), "{:?}", c.input().text());
+    let mut c = chat_side().enhanced(true);
+
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#infra").expect("the channel row");
+    left(&mut c, (x, y));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+    assert!(text(&mut c, 80, 25).contains("pick one: #infra"));
+    press(&mut c, key(KeyCode::Esc));
+
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#archive").expect("the swept channel's row");
+    left(&mut c, (x, y));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()), "a channel with no tab is not shown");
+    assert!(text(&mut c, 80, 25).contains("pick one: #archive"), "its menu opens");
+}
+
+#[test]
+fn a_partial_name_marks_its_rows_in_the_column() {
+    let mut c = chat_side();
+    typed(&mut c, "hi #de");
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#deploy").expect("the row");
+    let cell = buf.cell((x, y)).expect("a cell");
+    assert!(cell.modifier.contains(agent_tui::ratatui::style::Modifier::UNDERLINED), "Tab's target is marked");
 }
