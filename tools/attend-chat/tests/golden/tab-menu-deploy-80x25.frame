@@ -13,7 +13,7 @@ agent-tui frame 80x25
 |│              │   Remove agent ▸                               │              │|
 |│              │   Describe…                                    │              │|
 |│              │   Clear history                                │              │|
-|│              │   Leave                                        │              │|
+|│              │   Join                                         │              │|
 |│              │   Delete channel                               │              │|
 |│              └────────────────────────────────────────────────┘              │|
 |│                                                                              │|

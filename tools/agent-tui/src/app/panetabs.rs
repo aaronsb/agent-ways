@@ -102,11 +102,15 @@ impl TabKeys {
 
 /// What the bottom bar says while the tab bar has the focus, after its
 /// `TABS` lozenge; `new` is the pane's Ctrl+N action, if it has one.
-fn strip_hint(new: Option<&str>) -> String {
-    match new {
-        Some(n) => format!("← → move · Enter menu · Ctrl+N {n} · Esc back"),
-        None => "← → move · Enter menu · Esc back".into(),
+fn strip_hint(new: Option<&str>, below: Option<&str>) -> String {
+    let mut out = String::from("← → move · Enter menu");
+    if let Some(b) = below {
+        out += &format!(" · ↓ {b}");
     }
+    if let Some(n) = new {
+        out += &format!(" · Ctrl+N {n}");
+    }
+    out + " · Esc back"
 }
 
 fn width(spans: &[Span]) -> u16 {
@@ -197,6 +201,11 @@ impl App {
                     self.open_tab_menu(at);
                 }
                 KeyCode::Esc => self.strip_blur(),
+                KeyCode::Down if self.pane.as_ref().is_some_and(|p| p.below_strip().is_some()) => {
+                    if self.pane.as_mut().is_some_and(|p| p.focus_below()) {
+                        self.strip_blur();
+                    }
+                }
                 _ if toggle => self.strip_blur(),
                 _ => {
                     self.strip_blur();
@@ -209,7 +218,7 @@ impl App {
             self.interrupt_pane();
             if let Some(p) = &mut self.pane {
                 self.strip = Some(p.tab());
-                self.msg = strip_hint(p.new_item_label());
+                self.msg = strip_hint(p.new_item_label(), p.below_strip());
             }
             return true;
         }

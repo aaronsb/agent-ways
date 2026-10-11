@@ -175,6 +175,9 @@ pub struct ChatPane {
     sidebar: bool,
     /// The lozenge shape the left column's rows are drawn in, the shell's.
     shape: Shape,
+    /// The left column's row under the keyboard's cursor, while it has the
+    /// focus (F2, then Down).
+    side_focus: Option<usize>,
 }
 
 impl ChatPane {
@@ -211,6 +214,7 @@ impl ChatPane {
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
             sidebar: true,
             shape: Shape::PLAIN,
+            side_focus: None,
         }
     }
 
@@ -565,6 +569,9 @@ impl Pane for ChatPane {
             self.toggle_sidebar();
             return Keyed::Done;
         }
+        if self.side_focus.is_some() && self.side_key(k) {
+            return Keyed::Done;
+        }
         match k.code {
             // Without the keyboard enhancement Ctrl+3 is this same Esc:
             // ask, so a tab key never closes the chat.
@@ -627,6 +634,7 @@ impl Pane for ChatPane {
         if let Some(key) = self.sidebar_key_label() {
             out.push(Binding::help(key, "show or hide the agents and channels column"));
         }
+        out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter addresses the agent or opens the channel's menu, Esc back"));
         out
     }
 
@@ -678,6 +686,14 @@ impl Pane for ChatPane {
     /// One click on a channel shows it and opens its menu (ADR-405).
     fn menu_on_click(&self) -> bool {
         true
+    }
+
+    fn below_strip(&self) -> Option<&'static str> {
+        self.sidebar.then_some("the column")
+    }
+
+    fn focus_below(&mut self) -> bool {
+        self.focus_side()
     }
 
     fn new_item_label(&self) -> Option<&'static str> {

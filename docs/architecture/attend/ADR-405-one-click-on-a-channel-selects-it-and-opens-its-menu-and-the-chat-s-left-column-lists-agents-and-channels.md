@@ -17,6 +17,10 @@ basis:
     level: directed
     said: "additionally the formatting style of our statusline is a style approach I'd like to pick up"
     via: chat, relayed by the main session, 2026-10-10
+  - operator: aaronsb
+    level: directed
+    said: "as the human, I need to be able to use ui/ux conventions to get around - submitting rapid command line calls isn't really my thing"
+    via: attend-chat, relayed by the main session, 2026-10-10
   - precedent: ADR-404
   - precedent: ADR-504
 agent:
@@ -55,6 +59,7 @@ D9 is amended as follows.
 
 - **Agents:** every agent the chat has seen, from session records and message senders. Live agents come first. An inactive agent is drawn in the muted variant. A row is a lozenge with the nickname on the agent's identity colour, the project directory on a darker step of that colour, and a state marker on the darkest step. The steps are derived from the identity colour as the status line derives them. A click on a row inserts `@Name ` into the compose box. While the column is shown, the legend row under the compose box is dropped whenever it would list agents or channels, and the column marks what Tab would complete to. The row still shows slash commands and argument hints.
 - **Channels:** `#open`, then every channel with a directory or a `_groups.yaml` entry, including empty ones and ones whose directory was swept. A row is a lozenge on the accent: the name, then the member count and the time since the last message. Unread counts, seals and scope nesting are drawn when D3, D4 and D5 provide the data. Until then the list is flat.
+- Every action a row stands for is reachable without a slash command, by mouse and by keyboard. F2 or Ctrl+T focus the tab bar, and Down moves into the column. Up and Down move along the rows, Enter acts as a click does, and Esc or Up past the first row returns to the compose box. A channel's menu offers Join to a channel the human is not in, and Leave to one it is in.
 - With the shape set to `plain`, or without colour, the lozenges lose their Nerd Font glyphs, as every other lozenge in agent-tui does.
 
 ## Consequences

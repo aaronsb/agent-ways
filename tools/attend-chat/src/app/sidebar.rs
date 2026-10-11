@@ -92,6 +92,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         _ => (None, None),
     };
     let fg = chat.normal_tab();
+    let focus = chat.side_focus;
     let world = chat.world();
     let seen: Vec<Seen> = agent_order(&world.seen).into_iter().cloned().collect();
     let rows: Vec<(ChannelRow, usize)> = world.rows.iter().cloned().zip(world.live_members.iter().copied()).collect();
@@ -109,7 +110,11 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     for (i, s) in seen.iter().enumerate().take(ah.saturating_sub(1) as usize) {
         let r = Rect { y: agents.y + 1 + i as u16, height: 1, ..agents };
         let mark = target(Style::new(), prefix_match(&s.identity.nickname, agent_partial.as_deref()));
-        f.render_widget(Paragraph::new(agent_line(chat, s, w, mark)), r);
+        let mut line = agent_line(chat, s, w, mark);
+        if focus == Some(i) {
+            line.spans[0] = cursor();
+        }
+        f.render_widget(Paragraph::new(line), r);
         hits.push((r, SideHit::Agent(s.identity.nickname.clone())));
     }
     header(f, channels, &format!("Channels {}", rows.len()));
@@ -119,10 +124,19 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         let shown = fg == Tab::Channel(row.known.group.name.clone());
         let mark = target(Style::new(), prefix_match(&row.known.group.name, channel_partial.as_deref()));
         let age = row.last.and_then(|t| now.duration_since(t).ok()).map(age_label).unwrap_or_default();
-        f.render_widget(Paragraph::new(channel_line(chat, row, *live, &age, shown, w, mark)), r);
+        let mut line = channel_line(chat, row, *live, &age, shown, w, mark);
+        if focus == Some(seen.len() + i) {
+            line.spans[0] = cursor();
+        }
+        f.render_widget(Paragraph::new(line), r);
         hits.push((r, SideHit::Channel(row.known.group.name.clone())));
     }
     chat.hits.side = hits;
+}
+
+/// The keyboard's cursor at the left of a row.
+fn cursor() -> Span<'static> {
+    Span::styled("▸", theme::accent().add_modifier(Modifier::BOLD))
 }
 
 /// A time since, in its largest whole unit: `40s`, `4m`, `3h`, `2d`.
@@ -247,6 +261,7 @@ impl ChatPane {
     /// Show or hide the column.
     pub(super) fn toggle_sidebar(&mut self) {
         self.sidebar = !self.sidebar;
+        self.side_focus = None;
         self.invalidate();
     }
 
@@ -262,6 +277,63 @@ impl ChatPane {
                 self.channel_menu(Some(name));
             }
         }
+    }
+
+    /// The column's rows in order, agents then channels, as the keyboard
+    /// walks them.
+    pub(super) fn side_items(&mut self) -> Vec<SideHit> {
+        let world = self.world();
+        let mut out: Vec<SideHit> = agent_order(&world.seen).into_iter().map(|s| SideHit::Agent(s.identity.nickname.clone())).collect();
+        out.extend(world.rows.iter().map(|r| SideHit::Channel(r.known.group.name.clone())));
+        out
+    }
+
+    /// Give the column the keyboard: the cursor on its first channel, the
+    /// shown one if listed. False when the column is not drawn.
+    pub(super) fn focus_side(&mut self) -> bool {
+        if !self.sidebar || self.hits.side.is_empty() {
+            return false;
+        }
+        let items = self.side_items();
+        let shown = match self.normal_tab() {
+            Tab::Channel(c) => items.iter().position(|h| matches!(h, SideHit::Channel(n) if *n == c)),
+            Tab::Merged => None,
+        };
+        let first = items.iter().position(|h| matches!(h, SideHit::Channel(_)));
+        self.side_focus = shown.or(first).or((!items.is_empty()).then_some(0));
+        self.dirty = true;
+        self.side_focus.is_some()
+    }
+
+    /// A key while the column has the focus: Up and Down move, Home and End
+    /// jump, Enter acts on the row, Esc (or Up past the top) gives the
+    /// focus back to the compose box. False for any other key, which gives
+    /// the focus back and goes on as typing.
+    pub(super) fn side_key(&mut self, k: agent_tui::ratatui::crossterm::event::KeyEvent) -> bool {
+        use agent_tui::ratatui::crossterm::event::KeyCode;
+        let Some(i) = self.side_focus else { return false };
+        let items = self.side_items();
+        let last = items.len().saturating_sub(1);
+        self.dirty = true;
+        match k.code {
+            KeyCode::Up if i == 0 => self.side_focus = None,
+            KeyCode::Up => self.side_focus = Some(i - 1),
+            KeyCode::Down => self.side_focus = Some((i + 1).min(last)),
+            KeyCode::Home => self.side_focus = Some(0),
+            KeyCode::End => self.side_focus = Some(last),
+            KeyCode::Esc => self.side_focus = None,
+            KeyCode::Enter => {
+                self.side_focus = None;
+                if let Some(hit) = items.get(i).cloned() {
+                    self.side_click(hit);
+                }
+            }
+            _ => {
+                self.side_focus = None;
+                return false;
+            }
+        }
+        true
     }
 
     /// The key that toggles the column, as the help names it.

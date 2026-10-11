@@ -795,9 +795,10 @@ fn ctrl_digit_shows_a_tab_and_a_second_press_opens_its_menu() {
     assert!(!text(&mut c, 80, 25).contains("pick one"), "the first press only shows the tab");
     drawn(&mut c, &[ctrl('3')], 80, 25);
     let shown = text(&mut c, 80, 25);
-    for item in ["pick one: #deploy", "Add agent ▸", "Invite agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Leave", "Delete channel"] {
+    for item in ["pick one: #deploy", "Add agent ▸", "Invite agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Join", "Delete channel"] {
         assert!(shown.contains(item), "{item}: {shown}");
     }
+    assert!(!shown.contains("Leave"), "the human is not in #deploy: Join, not Leave");
     g.check("tab-menu-deploy-80x25", &testkit::render_screen(&mut c, 80, 25));
     assert!(press(&mut c, key(KeyCode::Esc)), "Esc closes the menu, not the chat");
     assert!(!text(&mut c, 80, 25).contains("pick one"));
@@ -1261,4 +1262,59 @@ fn golden_the_column_draws_lozenges_in_the_round_shape() {
     assert_ne!(live_bg, gone_bg);
     g.check("sidebar-round-truecolor-80x25", &buf);
     g.finish();
+}
+
+/// The column without the mouse: F2, then Down into the column; Up and
+/// Down move, Enter acts on the row, Esc goes back (ADR-405).
+#[test]
+fn golden_the_keyboard_walks_the_column() {
+    let mut g = goldens();
+    let mut c = chat_side().enhanced(true).dry_run(true);
+    testkit::render_screen(&mut c, 80, 25);
+    press(&mut c, key(KeyCode::F(2)));
+    assert!(bar(&mut c).contains("↓ the column"), "the tab bar names the way down: {}", bar(&mut c));
+    press(&mut c, key(KeyCode::Down));
+    assert!(!c.app().strip_focused(), "the focus left the tab bar");
+    press(&mut c, key(KeyCode::Down));
+    let shown = testkit::render_screen(&mut c, 80, 25);
+    g.check("sidebar-keyboard-80x25", &shown);
+    let rows = testkit::rows(&shown);
+    let at = rows.iter().find(|r| r.contains('▸')).expect("the cursor is drawn");
+    assert!(at.contains("#deploy"), "Down from #open is #deploy: {at}");
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"), "Enter opens the channel's menu");
+    press(&mut c, key(KeyCode::Esc));
+
+    // Up to an agent, Enter addresses it.
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Down));
+    for _ in 0..10 {
+        press(&mut c, key(KeyCode::Up));
+        if !testkit::rows(&testkit::render_screen(&mut c, 80, 25)).iter().any(|r| r.contains('▸')) {
+            break;
+        }
+    }
+    assert_eq!(c.input().text(), "", "Up past the top gives the focus back, typing nothing");
+    press(&mut c, key(KeyCode::F(2)));
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Home));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(c.input().text().starts_with("@Laszlo"), "{:?}", c.input().text());
+    g.finish();
+}
+
+/// Join and Leave from the menu, with no slash command.
+#[test]
+fn a_channel_menu_joins_a_channel_the_human_is_not_in() {
+    let mut c = chat_side().enhanced(true).dry_run(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#deploy").expect("the row");
+    left(&mut c, (x, y));
+    let shown = text(&mut c, 80, 25);
+    assert!(shown.contains("Join") && !shown.contains("Leave"), "{shown}");
+    press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Up));
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: /join not run");
 }

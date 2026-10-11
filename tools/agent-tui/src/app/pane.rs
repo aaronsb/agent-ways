@@ -159,6 +159,19 @@ pub trait Pane: Any {
     /// its action. Nothing by default.
     fn tab_menu(&mut self, _i: usize) {}
 
+    /// What lies below the tab bar for Down to reach, in a word or two
+    /// ("the column"), when the pane has such a list. Only a pane with tab
+    /// menus is asked; the tab bar's hint names it.
+    fn below_strip(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Down on the focused tab bar: take the focus into the list
+    /// [`Pane::below_strip`] names. False leaves the focus on the bar.
+    fn focus_below(&mut self) -> bool {
+        false
+    }
+
     /// Whether a left click on a tab shows it and opens its menu at once,
     /// rather than opening the menu only on the tab already shown. Only a
     /// pane with tab menus is asked. Keys keep their own rule.

@@ -8,7 +8,8 @@
 //! - merged: Clear view.
 //! - `#open`: Clear history, Clear view.
 //! - a named channel: Add agent ▸, Invite agent ▸, Remove agent ▸,
-//!   Describe…, Clear history, Leave, Delete channel.
+//!   Describe…, Clear history, Leave (Join for a channel the human is
+//!   not in), Delete channel.
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
 //!   channel, typed in the compose box.
 //!
@@ -34,6 +35,7 @@ pub(super) const INVITE_AGENT: &str = "Invite agent ▸";
 pub(super) const REMOVE_AGENT: &str = "Remove agent ▸";
 pub(super) const DESCRIBE: &str = "Describe…";
 pub(super) const LEAVE: &str = "Leave";
+pub(super) const JOIN: &str = "Join";
 pub(super) const DELETE: &str = "Delete channel";
 pub(super) const THEME: &str = "Theme ▸";
 pub(super) const KEYS: &str = "Keybinding set ▸";
@@ -67,12 +69,14 @@ pub(super) enum Prompt {
     Describe(String),
 }
 
-/// The items of a tab's menu, by the channel it shows (`None`: merged).
-pub(super) fn items(channel: Option<&str>) -> Vec<String> {
+/// The items of a tab's menu, by the channel it shows (`None`: merged):
+/// a named channel offers Leave to a member and Join to anyone else.
+pub(super) fn items(channel: Option<&str>, joined: bool) -> Vec<String> {
+    let membership = if joined { LEAVE } else { JOIN };
     let items: &[&str] = match channel {
         None => &[CLEAR_VIEW],
         Some(BASE_CHANNEL_NAME) => &[CLEAR_VIEW, CLEAR_HISTORY],
-        Some(_) => &[ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE],
+        Some(_) => &[ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, membership, DELETE],
     };
     items.iter().map(|s| s.to_string()).collect()
 }
@@ -122,7 +126,9 @@ impl ChatPane {
         self.dirty = true;
         let title = channel.as_ref().map_or("merged".to_string(), |c| format!("#{c}"));
         let id = format!("menu:{}", channel.as_deref().unwrap_or(""));
-        self.open = Some(Open::Pick { id, title, options: items(channel.as_deref()), multi: false, chosen: Vec::new() });
+        let me = crate::signal::human_member_id();
+        let joined = channel.as_deref().is_some_and(|c| self.world().rows.iter().any(|r| r.known.group.name == c && r.known.membership.members.contains(&me)));
+        self.open = Some(Open::Pick { id, title, options: items(channel.as_deref(), joined), multi: false, chosen: Vec::new() });
     }
 
     fn common_menu(&mut self) {
@@ -222,6 +228,11 @@ impl ChatPane {
             DELETE => self.pending = chan().map(Pending::Delete),
             LEAVE => {
                 self.run("leave", SlashOutcome::Leave(chan()));
+            }
+            JOIN => {
+                if let Some(c) = chan() {
+                    self.run("join", SlashOutcome::Join(c));
+                }
             }
             DESCRIBE => self.start_prompt(Prompt::Describe(channel.into())),
             ADD_AGENT => self.say("Add agent enrolls without asking: ADR-404 D1, not built yet; Invite agent ▸ asks them", true),
@@ -395,8 +406,9 @@ mod tests {
 
     #[test]
     fn each_tab_offers_what_its_channel_allows() {
-        assert_eq!(items(None), [CLEAR_VIEW]);
-        assert_eq!(items(Some("open")), [CLEAR_VIEW, CLEAR_HISTORY], "the harmless item first");
-        assert_eq!(items(Some("deploy")), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE]);
+        assert_eq!(items(None, false), [CLEAR_VIEW]);
+        assert_eq!(items(Some("open"), true), [CLEAR_VIEW, CLEAR_HISTORY], "the harmless item first");
+        assert_eq!(items(Some("deploy"), true), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, DELETE]);
+        assert_eq!(items(Some("deploy"), false), [ADD_AGENT, INVITE_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, JOIN, DELETE], "Join to a non-member");
     }
 }
