@@ -236,6 +236,19 @@ fn a_branch_install_keeps_the_release_binaries() {
 }
 
 #[test]
+fn an_app_without_git_beside_a_stage_names_the_finish() {
+    let s = Sandbox::new("nogit", BUILDS);
+    git(&s.base.join("data"), &["clone", "-q", s.base.join("origin").to_str().unwrap(), "agent-ways.reinstall"]);
+    std::fs::remove_dir_all(s.app().join(".git")).unwrap();
+    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let t = text(&out);
+    assert!(!out.status.success(), "{t}");
+    let finish = format!("cd '{}' && AGENT_WAYS_ORIGIN='{}' bash scripts/install.sh", s.stage().display(), s.base.join("origin").display());
+    assert!(t.contains(&finish), "{t}");
+    assert!(s.stage().join("scripts/install.sh").is_file(), "the stage is kept: {t}");
+}
+
+#[test]
 fn a_relative_origin_resolves_from_the_app_dir() {
     let s = Sandbox::new("relorigin", BUILDS);
     git(&s.app(), &["remote", "set-url", "origin", "../../origin"]);

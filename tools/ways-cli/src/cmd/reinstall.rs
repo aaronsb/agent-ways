@@ -92,11 +92,21 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
         std::process::exit(2);
     }
     let app = paths::data_root();
+    let stage = stage_dir(&app);
     if !is_app_checkout(&app) {
+        // An uninstall that stopped partway can take the app's .git and leave
+        // the stage as the only good copy.
+        if let Some(url) = is_app_checkout(&stage).then(|| git(&stage, &["remote", "get-url", "origin"])).flatten() {
+            eprintln!(
+                "A stage from an earlier reinstall is at {}. If that reinstall stopped partway, delete what is left of {}, then finish from the stage:\n  {}",
+                stage.display(),
+                app.display(),
+                finish_line(&stage, &url)
+            );
+        }
         bail!("no agent-ways app source at {} to reinstall; run the installer instead", app.display());
     }
     let source = Source::read(&app)?;
-    let stage = stage_dir(&app);
     let uninstall = Uninstall::plan(false)?;
 
     println!("Reinstall {} from {}:\n", source.label(), source.url);
