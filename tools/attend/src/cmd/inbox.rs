@@ -474,10 +474,17 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let Scan { mut delivered, mark, note } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
     delivered.sort_by_key(|d| d.mtime);
 
-    if delivered.is_empty() && note.is_none() {
-        // Empty drain: reset the re-entry counter (this boundary chain
-        // is ending) and say nothing in hook mode so the turn ends —
-        // the termination property the re-entry design leans on.
+    // The cold start is this conduit's first contact with the session, so
+    // a delivery there names the session. Only a blocking reason reaches
+    // the model; the join itself already printed the name as Bash output.
+    let me = baselining.then(|| crate::cmd::whoami::display_name(&ident));
+
+    if delivered.is_empty() {
+        // Nothing delivered: reset the re-entry counter (this boundary
+        // chain is ending) and let the turn end. At most the cold start's
+        // held-back note goes out, and it goes non-blocking, so it never
+        // forces a turn — the termination property the re-entry design
+        // leans on.
         reset_drain_rounds(&session_id);
         // A cold start must still persist the (possibly empty) baseline,
         // or the next drain re-baselines and swallows what arrived in
@@ -487,8 +494,18 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         } else {
             store.mark_seen(mark);
         }
-        if !hook_mode {
-            println!("no pending messages");
+        if hook_mode {
+            if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref()) {
+                println!("{out}");
+            }
+        } else {
+            match &note {
+                Some(note) => println!("{note}"),
+                None => println!("no pending messages"),
+            }
+            if let Some(me) = &me {
+                println!("you are {me}");
+            }
         }
         return;
     }
@@ -499,11 +516,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // consumed with no conduit having shown them: loss on BOTH conduits,
     // since the sensor imports drain marks (PR #385 review, finding 2).
     if hook_mode {
-        let reason = render_drain_reason(&delivered, note.as_deref());
-        println!(
-            "{{\"decision\": \"block\", \"reason\": \"{}\"}}",
-            json_escape(&reason)
-        );
+        if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref()) {
+            println!("{out}");
+        }
     } else {
         for d in &delivered {
             println!("[{}] {}", d.scope, d.sender);
@@ -519,6 +534,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         }
         if let Some(note) = &note {
             println!("{note}");
+        }
+        if let Some(me) = &me {
+            println!("you are {me}");
         }
         println!("{} message(s) drained and marked consumed", delivered.len());
     }
@@ -539,6 +557,24 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let _ = cwd;
 }
 
+/// The Stop-hook JSON for one drain, or `None` to print nothing and let the
+/// turn end. Delivered messages block the stop (`decision: block`), which
+/// injects them into a continued turn. A held-back note with nothing
+/// delivered goes as a `systemMessage`, which Claude Code shows without
+/// blocking: blocking on it alone forced an extra turn over messages the
+/// session need not read, and read as an error. `me` rides only the
+/// blocking reason, the one part of the output the model reads.
+fn hook_output(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&str>) -> Option<String> {
+    if delivered.is_empty() {
+        // A systemMessage is shown to the operator only, never to the
+        // model, so the name, which is for the model, stays out of it.
+        let text = render_drain_reason(delivered, Some(note?), None);
+        return Some(format!("{{\"systemMessage\": \"{}\"}}", json_escape(&text)));
+    }
+    let reason = render_drain_reason(delivered, note, me);
+    Some(format!("{{\"decision\": \"block\", \"reason\": \"{}\"}}", json_escape(&reason)))
+}
+
 /// The injected turn-continuation text. Sober and contract-preserving:
 /// a drained message informs the turn — the standing messaging
 /// guidance (reply autonomy, silence-is-valid) rides along verbatim so
@@ -546,12 +582,14 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
 ///
 /// `note` is the cold start's count of messages it held back; it rides the
 /// first delivery after enrollment, or goes alone when nothing else does.
-fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>) -> String {
+/// `me` is the session's own name, given on that same first contact.
+fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&str>) -> String {
     if delivered.is_empty() {
         return format!("[attend] {}", note.unwrap_or("no peer messages"));
     }
+    let you = me.map(|m| format!(" (you are {m})")).unwrap_or_default();
     let mut out = format!(
-        "[attend] {} peer message(s) delivered at the turn boundary (ADR-172 drain):\n",
+        "[attend] {} peer message(s) delivered at the turn boundary (ADR-172 drain){you}:\n",
         delivered.len()
     );
     if let Some(note) = note {
@@ -752,7 +790,7 @@ mod drain_tests {
     #[test]
     fn drain_reason_renders_messages_and_contract_line() {
         let msgs = vec![msg(1), msg(2)];
-        let reason = render_drain_reason(&msgs, None);
+        let reason = render_drain_reason(&msgs, None, None);
         assert!(reason.contains("2 peer message(s)"));
         assert!(reason.contains("peer-1 (#open, id id-1, from claude:session-1):"));
         assert!(reason.contains("body 2"));
@@ -853,7 +891,7 @@ mod drain_tests {
         let Scan { delivered, mark, note } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
-        assert_eq!(note.as_deref(), Some("1 earlier message not shown; attend inbox"));
+        assert_eq!(note.as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -936,7 +974,7 @@ mod drain_tests {
             id: "abc123-1712345-0".into(),
             body: "hi".into(),
         };
-        let reason = render_drain_reason(&[carried], None);
+        let reason = render_drain_reason(&[carried], None, None);
         assert!(reason.contains("Jovan-alpha (ws) (project, id abc123-1712345-0):"), "{reason}");
         assert!(!reason.contains("from claude:"), "{reason}");
 
@@ -951,18 +989,54 @@ mod drain_tests {
     /// "0 peer message(s) delivered" header.
     #[test]
     fn note_only_reason_is_the_note() {
-        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 earlier messages not shown; attend inbox"));
-        assert!(reason.starts_with("[attend] 3 earlier messages not shown; attend inbox"), "{reason}");
+        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend inbox"), None);
+        assert!(reason.starts_with("[attend] 3 older messages held back; reading them is optional: attend inbox"), "{reason}");
         assert!(!reason.contains("0 peer message"), "{reason}");
+    }
+
+    /// A held-back note with nothing delivered must not block the stop: it
+    /// goes as a systemMessage, so the turn ends.
+    #[test]
+    fn note_only_hook_output_does_not_block() {
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend inbox"), None).unwrap();
+        assert!(out.starts_with("{\"systemMessage\": \"[attend] 3 older messages held back"), "{out}");
+        assert!(!out.contains("decision"), "{out}");
+    }
+
+    #[test]
+    fn delivered_messages_block_and_an_empty_drain_prints_nothing() {
+        let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();
+        let out = hook_output(&msgs, Some("1 older message held back; reading it is optional: attend inbox"), None).unwrap();
+        assert!(out.starts_with("{\"decision\": \"block\""), "{out}");
+        assert!(out.contains("held back"), "the note rides the delivery: {out}");
+        assert_eq!(hook_output(&[] as &[FakeMsg], None, Some("Chaucer")), None);
     }
 
     #[test]
     fn drain_reason_caps_render_and_counts_remainder() {
         let msgs: Vec<FakeMsg> = (0..14).map(msg).collect();
-        let reason = render_drain_reason(&msgs, None);
+        let reason = render_drain_reason(&msgs, None, None);
         assert!(reason.contains("14 peer message(s)"));
         assert!(reason.contains("body 9"));
         assert!(!reason.contains("body 10"));
         assert!(reason.contains("(+4 more — attend inbox for the rest)"));
+    }
+
+    /// The name is for the model, and a systemMessage reaches only the
+    /// operator, so a note-only drain carries no name.
+    #[test]
+    fn a_note_only_drain_does_not_name_the_session() {
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend inbox"), Some("Chaucer-alpha")).unwrap();
+        assert!(!out.contains("you are"), "{out}");
+    }
+
+    /// The cold start is first contact: a delivery tells the session its own name.
+    #[test]
+    fn first_contact_names_the_session() {
+        let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();
+        let reason = render_drain_reason(&msgs, None, Some("Chaucer-alpha"));
+        assert!(reason.lines().next().unwrap().contains("(you are Chaucer-alpha)"), "{reason}");
+        let warm = render_drain_reason(&msgs, None, None);
+        assert!(!warm.contains("you are"), "{warm}");
     }
 }

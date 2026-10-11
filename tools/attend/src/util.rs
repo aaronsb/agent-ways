@@ -55,9 +55,9 @@ pub(crate) fn own_origin_cwd() -> String {
 /// Move everything attend keeps under session id `old` to `new`, for a
 /// session whose id changed under the same Claude Code process (`/clear`):
 /// the seen-set and cold-start mark, the enrollment record, the registry
-/// slot with its instance name, channel memberships and the last-inbound
-/// record. The old heartbeat is cleared. Idempotent: a move already done,
-/// or done in part, completes.
+/// slot with its instance name, channel memberships, the last-inbound
+/// record and the banner stamp. The old heartbeat is cleared. Idempotent:
+/// a move already done, or done in part, completes.
 pub(crate) fn move_session(old: &str, new: &str, origin: &str) {
     let old_store = attend_state::StateStore::new(Some(old.to_string()));
     if let Some(snapshot) = old_store.load() {
@@ -68,7 +68,9 @@ pub(crate) fn move_session(old: &str, new: &str, origin: &str) {
     attend_instances::Registry::new().rename(origin, old, new).ok();
     groups::Groups::new(&signals_base(), new).rename_member(old, new);
     let state_dir = attend_presence::cache::state_dir();
-    std::fs::rename(state_dir.join(format!("{old}.last-inbound")), state_dir.join(format!("{new}.last-inbound"))).ok();
+    for ext in ["last-inbound", "banner"] {
+        std::fs::rename(state_dir.join(format!("{old}.{ext}")), state_dir.join(format!("{new}.{ext}"))).ok();
+    }
     attend_presence::heartbeat::clear(old).ok();
 }
 
@@ -138,11 +140,15 @@ pub(crate) fn brief_invited_room(groups: &groups::Groups, name: &str) -> String 
 
 /// What a join prints after its line for the backlog it did not hand over.
 pub(crate) fn backlog_note(n: usize) -> String {
-    match n {
-        0 => String::new(),
-        1 => " (1 earlier message not shown; attend inbox)".to_string(),
-        n => format!(" ({n} earlier messages not shown; attend inbox)"),
-    }
+    attend_state::cold_start::held_back_note(n).map(|note| format!(" ({note})")).unwrap_or_default()
+}
+
+/// The line an enrollment prints so the session learns the name peers see
+/// it by: `you are <name>`, on its own line, in the Bash output the model
+/// reads. `None` for an unresolved session, which peers do not see by name.
+pub(crate) fn you_are_line() -> Option<String> {
+    let ident = attend_presence::session::identity();
+    ident.resolved().then(|| format!("you are {}", crate::cmd::whoami::display_name(&ident)))
 }
 
 /// After this session's channels changed: a session in no channel any more

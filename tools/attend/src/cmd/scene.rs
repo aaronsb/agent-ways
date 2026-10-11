@@ -16,6 +16,13 @@ pub(crate) fn cmd_scene(name: &str) {
         Ok(result) => {
             settle_scene_enrollment(name, &r);
             println!("[attend] scene '{name}': {result}{}", crate::util::backlog_note(held));
+            // A scene that leaves the session in a channel enrolls it, so
+            // it names the session as `attend join` does.
+            if !r.my_groups().is_empty() {
+                if let Some(line) = crate::util::you_are_line() {
+                    println!("{line}");
+                }
+            }
         }
         Err(e) => {
             eprintln!("[attend] scene: {e}");

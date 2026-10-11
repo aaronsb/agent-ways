@@ -33,7 +33,7 @@ fn a_late_join_holds_back_the_rooms_old_messages_and_says_so() {
     f.put("@testing", "other-live", LIVE, Duration::from_secs(5));
 
     let joined = f.ok(&["join", "testing"]);
-    assert!(joined.contains("joined #testing (40 earlier messages not shown; attend inbox)"), "{joined}");
+    assert!(joined.contains("joined #testing (40 older messages held back; reading them is optional: attend inbox)"), "{joined}");
 
     let drained = f.drain("plain");
     assert!(drained.contains(LIVE), "a live message in the room is still delivered: {drained}");
@@ -49,7 +49,7 @@ fn rejoining_a_channel_already_joined_keeps_what_is_owed() {
     f.ok(&["join", "testing"]);
     f.put("@testing", "other-unread", OLD, 10 * MINUTE);
     let again = f.ok(&["join", "testing"]);
-    assert!(!again.contains("not shown"), "{again}");
+    assert!(!again.contains("held back"), "{again}");
     assert!(f.drain("plain").contains(OLD), "a member's unconsumed message is still delivered");
 }
 
@@ -60,7 +60,7 @@ fn a_late_join_under_attend_run_holds_back_the_history_too() {
     // marks its first message scan done.
     f.put("_broadcast", "other-open", "old open", 60 * MINUTE);
     let run = f.run();
-    run.wait_for("the cold start", Duration::from_secs(30), |r| r.output().contains("1 earlier message not shown"));
+    run.wait_for("the cold start", Duration::from_secs(30), |r| r.output().contains("1 older message held back"));
     for i in 0..12 {
         f.put("@testing", &format!("other-old-{i:02}"), &format!("{OLD} {i}"), 24 * 60 * MINUTE);
     }
@@ -100,7 +100,7 @@ fn a_join_that_answers_an_invitation_delivers_the_rooms_recent_history() {
     // The invitation is spent: leaving and joining again is a self-join.
     f.ok(&["leave", "testing"]);
     f.put("@testing", "other-later", "later history", 10 * MINUTE);
-    assert!(f.ok(&["join", "testing"]).contains("1 earlier message not shown"));
+    assert!(f.ok(&["join", "testing"]).contains("1 older message held back"));
 }
 
 #[test]
@@ -126,6 +126,6 @@ fn a_scene_holds_back_its_channels_history_and_says_so() {
     // A scene that cannot activate marks nothing.
     assert!(!f.attend(&["scene", "legacy"]).status.success());
     let out = f.ok(&["scene", "workroom"]);
-    assert!(out.contains("joined: testing (3 earlier messages not shown; attend inbox)"), "{out}");
+    assert!(out.contains("joined: testing (3 older messages held back; reading them is optional: attend inbox)"), "{out}");
     assert!(!f.drain("plain").contains(OLD));
 }

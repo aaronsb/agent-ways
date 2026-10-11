@@ -40,7 +40,6 @@ Signal files live under attend's cache, `$XDG_CACHE_HOME/attend/signals/` (`~/.c
 │   ├── claude-0b6f3d2e-…-1790949600123456789-0.signal
 │   └── external-aaron-kitty-1790949642000000000-0.signal
 ├── _groups.yaml                                  # channel state
-├── _last_banner                                  # startup banner fingerprint
 ├── @deploy/                                      # a channel
 │   └── claude-7c41a9e0-…-1790949700000000000-1.signal
 ├── -home-aaron-Projects-api-service-1x2k9q/      # a project tray
@@ -57,7 +56,7 @@ Three kinds of subdirectories:
 
 **Reserved names:**
 
-- Anything starting with `_` (e.g., `_broadcast`, `_groups.yaml`, `_last_banner`) is a system file or dir, never interpreted as a project dir. Cleanup never removes these directories or non-`.signal` files; it can remove individual `.signal` files inside `_broadcast/` (see Phase 5).
+- Anything starting with `_` (e.g., `_broadcast`, `_groups.yaml`) is a system file or dir, never interpreted as a project dir. Cleanup never removes these directories or non-`.signal` files; it can remove individual `.signal` files inside `_broadcast/` (see Phase 5).
 - Anything starting with `@` is a channel dir. The whole directory is removed when the channel is dissolved, or when a leave, kick, unpin, or dead-member prune leaves it with no members and unpinned (see "Channel directories" under the lifecycle).
 
 ## Filename convention

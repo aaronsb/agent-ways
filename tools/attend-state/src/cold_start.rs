@@ -46,11 +46,18 @@ pub struct Plan {
 impl Plan {
     /// The line that announces the messages not shown, if any.
     pub fn note(&self) -> Option<String> {
-        match self.not_shown {
-            0 => None,
-            1 => Some("1 earlier message not shown; attend inbox".to_string()),
-            n => Some(format!("{n} earlier messages not shown; attend inbox")),
-        }
+        held_back_note(self.not_shown)
+    }
+}
+
+/// The line that announces `n` messages marked seen without being shown.
+/// It says the session may read them and need not: they are backlog from
+/// before it enrolled or joined, and nothing in them is owed a reply.
+pub fn held_back_note(n: usize) -> Option<String> {
+    match n {
+        0 => None,
+        1 => Some("1 older message held back; reading it is optional: attend inbox".to_string()),
+        n => Some(format!("{n} older messages held back; reading them is optional: attend inbox")),
     }
 }
 
@@ -154,7 +161,7 @@ mod tests {
     fn addressed_mail_is_delivered_whatever_its_age() {
         let p = plan(&[(&Room::Project, 10 * HOUR), (&Room::Open, 10 * HOUR), (&Room::Open, Duration::ZERO)]);
         assert_eq!(p.deliver, vec![true, false, true]);
-        assert_eq!(p.note().as_deref(), Some("1 earlier message not shown; attend inbox"));
+        assert_eq!(p.note().as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
     }
 
     #[test]
@@ -173,7 +180,7 @@ mod tests {
         // Input runs oldest first, so the three oldest are the ones held back.
         assert_eq!(p.deliver[..3], [false, false, false]);
         assert!(p.deliver[3..].iter().all(|d| *d));
-        assert_eq!(p.note().as_deref(), Some("3 earlier messages not shown; attend inbox"));
+        assert_eq!(p.note().as_deref(), Some("3 older messages held back; reading them is optional: attend inbox"));
     }
 
     #[test]
