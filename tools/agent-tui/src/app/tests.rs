@@ -992,6 +992,11 @@ fn a_tab_bar_that_fits_keeps_whole_names_and_too_narrow_a_one_marks_the_rest() {
     let bar = frame(&mut app, 14, 25)[0].clone();
     assert!(bar.trim_end().ends_with('›') && bar.contains(" 1 "), "{bar}");
     assert!(app.hits.tabs.len() < 4, "only the tabs drawn are click targets");
+    // The tab shown is never the one left off.
+    app.tab = 3;
+    let bar = frame(&mut app, 14, 25)[0].clone();
+    assert!(bar.contains(" 4 ") && bar.trim_end().ends_with('›'), "the theme tab, shown, stays: {bar}");
+    assert_eq!(app.hits.tabs.last().map(|(_, i)| *i), Some(3));
 }
 
 #[test]

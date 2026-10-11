@@ -1029,6 +1029,18 @@ mod tests {
     }
 
     #[test]
+    fn a_bar_too_narrow_for_every_number_keeps_the_tab_shown() {
+        let mut a = described();
+        a.pane_mut::<Described>().expect("the pane").0.tab = 4;
+        let bar = testkit::rows(&testkit::render(&mut a, 20, 10))[0].clone();
+        assert!(bar.contains(" 4 ") && bar.trim_end().ends_with('›'), "#infra, shown, stays; others go: {bar}");
+        assert!(!bar.contains(" 3 "), "the last tab other than the one shown went: {bar}");
+        let (rect, i) = *a.hits.tabs.last().expect("a tab drawn");
+        assert_eq!(i, 4, "its click target is its own tab, not its place on the bar");
+        assert!(rect.right() <= 20);
+    }
+
+    #[test]
     fn a_long_trailer_is_cut_with_an_ellipsis_at_80_columns() {
         let mut a = described();
         let bar = testkit::rows(&testkit::render(&mut a, 80, 10))[0].clone();

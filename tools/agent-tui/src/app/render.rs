@@ -209,7 +209,8 @@ impl App {
     /// The bar keeps to its width. When the tabs overflow it, the gaps tighten
     /// first, then the names are cut shorter, down to the number alone; the
     /// numbers and badges always stay. Tabs that still do not fit are left
-    /// off behind a `›` marker, so none goes missing unannounced.
+    /// off behind a `›` marker, so none goes missing unannounced; the tab
+    /// shown is never one of them.
     fn draw_tabs(&mut self, f: &mut Frame, area: Rect, active: usize, review: bool) {
         /// A tab before layout: its index, name and badge, and whether the
         /// badge is a discard target.
@@ -244,13 +245,13 @@ impl App {
             }
             sh.lozenge(&segs)
         };
-        let span = |lozs: &[Vec<Span>], gap: u16| lozs.iter().map(|l| width(l)).sum::<u16>() + gap * lozs.len().saturating_sub(1) as u16;
+        let span = |lozs: &[(&Tab, Vec<Span>)], gap: u16| lozs.iter().map(|(_, l)| width(l)).sum::<u16>() + gap * lozs.len().saturating_sub(1) as u16;
         let longest = tabs.iter().map(|t| crate::wrap::str_width(&t.name)).max().unwrap_or(0);
         // Whole names at the usual gap, then at one column, then names cut
         // shorter. A cap of 1 would leave a bare `…`, so below 2 the name goes.
         let mut plan = None;
         'fit: for cap in (0..=longest).rev().filter(|c| *c != 1) {
-            let lozs: Vec<_> = tabs.iter().map(|t| lozenge(t, cap)).collect();
+            let lozs: Vec<_> = tabs.iter().map(|t| (t, lozenge(t, cap))).collect();
             let gaps: &[u16] = if cap == longest { &[2, 1] } else { &[1] };
             for &gap in gaps {
                 if span(&lozs, gap) <= area.width {
@@ -260,17 +261,19 @@ impl App {
             }
         }
         // Even the numbers alone overflow: as many as fit, then the marker.
+        // The last tab other than the one shown goes first.
         let (lozs, gap, more) = plan.unwrap_or_else(|| {
-            let mut lozs: Vec<_> = tabs.iter().map(|t| lozenge(t, 0)).collect();
+            let mut lozs: Vec<_> = tabs.iter().map(|t| (t, lozenge(t, 0))).collect();
             while !lozs.is_empty() && span(&lozs, 1) + 2 > area.width {
-                lozs.pop();
+                let last = lozs.iter().rposition(|(t, _)| t.i != active).unwrap_or(lozs.len() - 1);
+                lozs.remove(last);
             }
             (lozs, 1, true)
         });
 
         self.hits.tabs.clear();
         let mut spans = Vec::new();
-        for (k, (t, tab)) in tabs.iter().zip(lozs).enumerate() {
+        for (k, (t, tab)) in lozs.into_iter().enumerate() {
             if k > 0 {
                 spans.push(Span::raw(" ".repeat(gap as usize)));
             }
