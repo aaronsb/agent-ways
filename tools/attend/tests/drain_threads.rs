@@ -4,7 +4,6 @@
 
 mod common;
 use common::Fixture;
-use std::time::Duration;
 
 /// Write a signal from `peer-sess` into `tray`, threaded under `re` when given.
 fn put_from_peer(f: &Fixture, tray: &str, id: &str, re: Option<&str>, body: &str) {
@@ -15,6 +14,7 @@ fn put_from_peer(f: &Fixture, tray: &str, id: &str, re: Option<&str>, body: &str
 }
 
 /// `peer-sess` in channel `room`, and alive by its heartbeat.
+#[cfg(feature = "sensor-peers")]
 fn peer_in(f: &Fixture, room: &str) {
     attend_groups::Groups::new(&f.signals(), "peer-sess").join(room, false).unwrap();
     let hb = f.heartbeat("peer-sess");
@@ -48,7 +48,7 @@ fn a_reply_to_a_drained_channel_message_stays_in_the_channel() {
     f.ok(&["join", "room"]);
     f.drain("plain");
     peer_in(&f, "room");
-    f.put("@room", "peer-sess-1-1", "said in the room", Duration::ZERO);
+    f.put("@room", "peer-sess-1-1", "said in the room", std::time::Duration::ZERO);
     assert!(f.drain("plain").contains("said in the room"));
 
     let out = f.attend(&["reply", "--json", "answered in the room"]);

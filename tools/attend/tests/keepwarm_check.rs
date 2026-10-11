@@ -5,8 +5,28 @@
 
 mod common;
 use common::Fixture;
+
+/// A build without the keepwarm sensor cannot judge: `check` prints
+/// nothing and exits 0, so a polling host reads "no wake due", and the
+/// arming verbs refuse.
+#[cfg(not(feature = "sensor-keepwarm"))]
+#[test]
+fn without_the_sensor_the_check_prints_nothing_and_exits_0() {
+    let f = Fixture::new("kw-no-sensor");
+    let out = f.attend(&["keepwarm", "check"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no keepwarm sensor"));
+    assert_eq!(f.attend(&["keepwarm", "on"]).status.code(), Some(1));
+}
+
+/// The judgment itself, in a build with the sensor.
+#[cfg(feature = "sensor-keepwarm")]
+mod judged {
+use super::*;
 use std::ffi::OsString;
 use std::path::PathBuf;
+
 
 const MIN: u64 = 60;
 
@@ -226,4 +246,5 @@ fn a_cold_write_scored_late_arms_from_its_own_time() {
     assert_eq!(w.check(), "");
     let status = w.status_line();
     assert!(status.starts_with("keepwarm    on, 2h40m left") || status.starts_with("keepwarm    on, 2h39m left"), "{status}");
+}
 }

@@ -42,7 +42,6 @@ use attend_config as config;
 
 use clap::Parser;
 use cli::{Cli, Commands, ConfigCmd, ListenCmd, PermissionsCmd};
-#[cfg(feature = "sensor-keepwarm")]
 use cli::KeepwarmCmd;
 use sensors::Focus;
 
@@ -96,10 +95,15 @@ pub fn cli_main() {
         Commands::Sensors => cmd::sensors::cmd_sensors(),
         #[cfg(feature = "sensor-keepwarm")]
         Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status)),
+        // A build without the sensor cannot judge. `check` is polled by a
+        // host that reads stdout alone, so it prints nothing and exits 0,
+        // as it does whenever no wake is due; the arming verbs refuse.
         #[cfg(not(feature = "sensor-keepwarm"))]
-        Commands::Keepwarm { .. } => {
+        Commands::Keepwarm { sub } => {
             eprintln!("keepwarm: this build of attend has no keepwarm sensor");
-            std::process::exit(1);
+            if !matches!(sub, Some(KeepwarmCmd::Check)) {
+                std::process::exit(1);
+            }
         }
         Commands::Send { to, channel, re, json, message } => {
             cmd::send::reject_flag_like("send", cmd::send::SEND_FLAGS, &message, json);
