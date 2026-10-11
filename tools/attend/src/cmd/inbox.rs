@@ -1,223 +1,112 @@
-//! `attend inbox` — read pending messages from peers.
+//! `attend inbox` — read messages from peers.
 //!
-//! Re-exports agent-identity's ADR-120 wire-format parser for its callers
-//! here; `cmd::send` consults `is_valid_signal_id` when validating `--re`
-//! ids, so the parser owns what a valid id looks like.
+//! The listing and the single read are `verbs::inbox`; this renders them.
+//! The drain, `attend inbox --drain`, is CLI machinery the Stop hook runs
+//! and stays here whole (ADR-172).
 
 use attend_groups::Room;
 use attend_instances::view::render_sender_label;
 use attend_instances::SnapshotCache;
-use crate::util::{get_groups, own_session_id, signals_base};
+use crate::util::signals_base;
+use crate::verbs::inbox::{self, InboxQuery, ReadError};
 
-pub(crate) use agent_identity::{is_valid_signal_id, parse_signal};
+pub(crate) use agent_identity::parse_signal;
 
-pub(crate) fn cmd_inbox_read(msg_id: &str) {
-    let cwd = crate::util::own_origin_cwd();
-    let scan_dirs = get_groups().receive_dirs(&cwd);
-
-    // Search for the signal file by ID
-    let target = format!("{msg_id}.signal");
-    for dir in &scan_dirs {
-        let path = dir.path.join(&target);
-        if !path.is_file() {
-            continue;
-        }
-        // File exists: from here on, any failure is a corrupt-file
-        // condition, not a benign "already consumed" miss. Distinguish
-        // them so operators can tell partial-write / disk-full bugs
-        // from ordinary races.
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("(signal {msg_id} exists but could not be read: {e})");
-                return;
+pub(crate) fn cmd_inbox_read(msg_id: &str, json: bool) {
+    let msg = match inbox::read(msg_id) {
+        Ok(msg) => msg,
+        Err(e) => {
+            if json {
+                crate::cmd::print_json_error(&e, &e.to_string());
             }
-        };
-        let sig = match parse_signal(content.trim()) {
-            Some(s) => s,
-            None => {
-                eprintln!("(signal {msg_id} exists but its wire format is corrupt)");
-                return;
+            match e {
+                // Benign miss — message may already be consumed or expired.
+                // Exit 0 so callers don't treat a normal race as an error.
+                ReadError::NotFound if !json => println!("(no message by that id — already consumed or expired)"),
+                ReadError::NotFound => {}
+                ReadError::Unreadable { error } => eprintln!("(signal {msg_id} exists but could not be read: {error})"),
+                ReadError::Corrupt => eprintln!("(signal {msg_id} exists but its wire format is corrupt)"),
             }
-        };
-        // The process painter is plain on a pipe (#388).
-        let instances = SnapshotCache::new();
-        let sender = render_sender_label(sig.from, sig.cwd, &agent_theme::painter(), &instances);
-        println!("From: {sender}");
-        println!("ID:   {msg_id}");
-        if let Some(re_id) = sig.reply_to {
-            println!("Re:   {re_id}");
+            return;
         }
-        println!();
-        println!("{}", sig.message);
+    };
+    if json {
+        crate::cmd::print_json(&msg);
         return;
     }
-    // Benign miss — message may already be consumed or expired.
-    // Exit 0 so callers don't treat a normal race as an error.
-    println!("(no message by that id — already consumed or expired)");
+    // The process painter is plain on a pipe (#388).
+    let sender = render_sender_label(&msg.from, &msg.source, &agent_theme::painter(), &SnapshotCache::new());
+    println!("From: {sender}");
+    println!("ID:   {msg_id}");
+    if let Some(re_id) = &msg.re {
+        println!("Re:   {re_id}");
+    }
+    println!();
+    println!("{}", msg.message);
 }
 
-pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>) {
-    let cwd = crate::util::own_origin_cwd();
-    let own_session_id = own_session_id().unwrap_or_default();
-
-    // The same receive set as the peer sensor and the drain.
-    let scan_dirs = get_groups().receive_dirs(&cwd);
-
-    // Collect all messages with mtime for chronological ordering
-    struct InboxEntry {
-        mtime: std::time::SystemTime,
-        scope: String,
-        sender: String,
-        message: String,
-        source: String,
-        id: String,
-        re: String,
+pub(crate) fn cmd_inbox(limit: usize, page: usize, before: Option<u64>, json: bool) {
+    let listing = inbox::list(InboxQuery { limit, page, before });
+    if json {
+        crate::cmd::print_json(&listing);
+        return;
     }
-    let mut entries: Vec<InboxEntry> = Vec::new();
-    // One registry snapshot per distinct cwd for this listing.
-    let instances = SnapshotCache::new();
-
-    for dir in &scan_dirs {
-        let dir_entries = match std::fs::read_dir(&dir.path) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        let scope = match dir.room {
-            Room::Open => "#open",
-            Room::Project => "project",
-            Room::Channel(_) => "channel",
-        };
-
-        for entry in dir_entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("signal") {
-                continue;
-            }
-
-            let mtime = std::fs::metadata(&path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .unwrap_or(std::time::UNIX_EPOCH);
-
-            let content = match std::fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            let content = content.trim().to_string();
-            let sig = match parse_signal(&content) {
-                Some(s) => s,
-                None => continue,
-            };
-
-            // Skip own messages
-            if let Some((_, identity)) = sig.from.split_once(':') {
-                if identity == own_session_id {
-                    continue;
-                }
-            }
-
-            // The process painter is plain on a pipe (#388); a TTY keeps
-            // the identity colors.
-            let sender = render_sender_label(sig.from, sig.cwd, &agent_theme::painter(), &instances);
-
-            let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-
-            entries.push(InboxEntry {
-                mtime,
-                scope: scope.to_string(),
-                sender,
-                message: sig.message.to_string(),
-                source: sig.cwd.to_string(),
-                id,
-                re: sig.reply_to.map(|s| s.to_string()).unwrap_or_default(),
-            });
-        }
-    }
-
-    // Sort chronologically — oldest first (ledger order)
-    entries.sort_by_key(|e| e.mtime);
-
-    // Cursor filter: keep only entries strictly older than `before`.
-    if let Some(ts) = before {
-        entries.retain(|e| mtime_secs(e.mtime) < ts);
-    }
-
-    if entries.is_empty() {
+    if listing.total == 0 {
         println!("no messages");
         return;
     }
-
-    // Page over the oldest-first ledger; page 1 = the newest `limit`, and
-    // higher page numbers walk back into history. The never-reaped ledger
-    // can be long, so a bounded page keeps `attend inbox` (and the digest's
-    // "attend inbox for detail" pull) usable.
-    let limit = limit.max(1);
-    let page = page.max(1);
-    let total = entries.len();
-    let end = total.saturating_sub((page - 1) * limit);
-    let start = end.saturating_sub(limit);
-    if start >= end {
-        let pages = total.div_ceil(limit);
-        println!("no messages on page {page} ({total} total, {pages} page(s))");
+    if listing.messages.is_empty() {
+        println!("no messages on page {} ({} total, {} page(s))", listing.page, listing.total, listing.pages);
         return;
     }
-    let older = start; // entries older than this page's oldest
-    let page_entries = &entries[start..end];
-    // Cursor for the next-older page = the oldest entry shown here.
-    let cursor_ts = mtime_secs(page_entries[0].mtime);
+    // The process painter is plain on a pipe (#388); a TTY keeps the
+    // identity colors. One registry snapshot per distinct cwd.
+    let instances = SnapshotCache::new();
+    let painter = agent_theme::painter();
+    let sender = |m: &inbox::Message| render_sender_label(&m.from, &m.source, &painter, &instances);
+    let now = std::time::SystemTime::now();
+    let cursor_ts = listing.cursor.unwrap_or(0);
 
     // Pipe-aware output: when stdout is a real terminal, render the
-    // compact 6-column table (nice at-a-glance scan for humans). When
-    // stdout is piped — Claude's Bash tool, `| less`, `>file`, etc. —
-    // render one untruncated block per message so ids and bodies stay
-    // legible. Mirrors the behavior of `ls` switching to one-per-line
-    // output when it detects a pipe.
+    // compact table (nice at-a-glance scan for humans). When stdout is
+    // piped — Claude's Bash tool, `| less`, `>file`, etc. — render one
+    // untruncated block per message so ids and bodies stay legible.
+    // Mirrors the behavior of `ls` switching to one-per-line output when
+    // it detects a pipe.
     use std::io::IsTerminal;
     if std::io::stdout().is_terminal() {
-        let now = std::time::SystemTime::now();
         let mut t = agent_fmt::Table::new(&["When", "Scope", "From", "ID", "Re", "Message", "Source"]);
         t.max_width(1, 10);
         t.max_width(2, 24);
         t.max_width(3, 20);
         t.max_width(4, 20);
-        for entry in page_entries {
+        for m in &listing.messages {
             t.add(vec![
-                &agent_fmt::compact_time(entry.mtime, now),
-                &entry.scope,
-                &entry.sender,
-                &entry.id,
-                &entry.re,
-                &entry.message,
-                &entry.source,
+                &agent_fmt::compact_time(m.mtime, now),
+                m.scope,
+                &sender(m),
+                &m.id,
+                m.re.as_deref().unwrap_or(""),
+                &m.message,
+                &m.source,
             ]);
         }
         t.print();
-        print_inbox_footer(page, total, page_entries.len(), older, cursor_ts);
     } else {
         // Non-TTY: one block per message, full-width fields.
-        let now = std::time::SystemTime::now();
-        for entry in page_entries {
-            println!("[{}] {}", entry.scope, entry.sender);
-            println!("  when:    {}", agent_fmt::compact_time(entry.mtime, now));
-            println!("  id:      {}", entry.id);
-            if !entry.re.is_empty() {
-                println!("  re:      {}", entry.re);
+        for m in &listing.messages {
+            println!("[{}] {}", m.scope, sender(m));
+            println!("  when:    {}", agent_fmt::compact_time(m.mtime, now));
+            println!("  id:      {}", m.id);
+            if let Some(re) = m.re.as_deref().filter(|re| !re.is_empty()) {
+                println!("  re:      {}", re);
             }
-            println!("  source:  {}", entry.source);
-            println!("  message: {}", entry.message);
+            println!("  source:  {}", m.source);
+            println!("  message: {}", m.message);
             println!();
         }
-        print_inbox_footer(page, total, page_entries.len(), older, cursor_ts);
     }
-}
-
-/// Seconds since the epoch for a file mtime (0 if before the epoch).
-fn mtime_secs(t: std::time::SystemTime) -> u64 {
-    t.duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    print_inbox_footer(listing.page, listing.total, listing.messages.len(), listing.older, cursor_ts);
 }
 
 /// Pagination footer: what page this is, and how to walk further back.

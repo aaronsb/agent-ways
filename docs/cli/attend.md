@@ -86,7 +86,11 @@ Start the sensor loop (use with Monitor for async delivery)
 
 List active Claude Code sessions and their channels
 
-**Usage:** `attend peers`
+**Usage:** `attend peers [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Print the result as one JSON document
 
 
 
@@ -113,6 +117,7 @@ Read pending messages from peers
 * `--format <FMT>` — Output format for --drain: `plain` (human/agent readable) or `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`)
 
   Default value: `plain`
+* `--json` — Print the listing or the message as one JSON document (not with --drain, which has --format)
 
 
 
@@ -120,7 +125,11 @@ Read pending messages from peers
 
 Show running instances, signals, and channel state
 
-**Usage:** `attend status`
+**Usage:** `attend status [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Print the result as one JSON document
 
 
 
@@ -201,6 +210,7 @@ Send a signal to peer sessions (defaults to #open base channel)
 
 * `--to <PATH>` — Scope send to a specific project path
 * `--channel <NAME>` — Scope send to a named channel
+* `--json` — Print the written signal as one JSON document
 
 
 
@@ -218,6 +228,7 @@ Reply to the most recent peer message (auto-threaded)
 
 * `--to <PATH>` — Scope send to a specific project path
 * `--channel <NAME>` — Scope send to a named channel
+* `--json` — Print the written signal as one JSON document
 
 
 
@@ -246,6 +257,7 @@ Join a channel (creates it if absent)
 ###### **Options:**
 
 * `--pin` — Pin so the channel persists across scene changes
+* `--json` — Print the result as one JSON document
 
 
 
@@ -253,11 +265,15 @@ Join a channel (creates it if absent)
 
 Leave a channel
 
-**Usage:** `attend leave <NAME>`
+**Usage:** `attend leave [OPTIONS] <NAME>`
 
 ###### **Arguments:**
 
 * `<NAME>` — Channel name (with or without the # prefix)
+
+###### **Options:**
+
+* `--json` — Print the result as one JSON document
 
 
 
@@ -278,6 +294,7 @@ Channel lifecycle (default: list all, joined ones marked)
 ###### **Options:**
 
 * `--joined` — List only the channels this session has joined (read-only: no cleanup)
+* `--json` — Print the listing as one JSON document
 
 
 

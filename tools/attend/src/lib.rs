@@ -3,7 +3,7 @@
 //! [`verbs`] holds the message verb bodies (send, reply, inbox, peers,
 //! status, join, leave, channels). Each takes typed arguments, derives the
 //! session afresh, and returns a value: nothing in it prints or exits, so
-//! any frontend can call it (ADR-501 item 2, ADR-187 item 3). The `attend`
+//! any frontend can call it (ADR-501 items 2 and 4). The `attend`
 //! binary is one such frontend; [`cli_main`] is its whole body.
 //!
 //! Argv parsing is handled by clap-derive (matches ADR-111's pattern for
@@ -23,11 +23,13 @@
 
 mod cli;
 mod cmd;
+pub mod describe;
 mod emit;
 mod groups;
 mod scenes;
 mod sensors;
 mod util;
+pub mod verbs;
 
 /// Seen-set/state persistence now lives in the shared `attend-state`
 /// crate (ADR-172): the drain verb, the sensor loop, and attend-chat's
@@ -77,37 +79,41 @@ pub fn cli_main() {
 
     match command {
         Commands::Run { catchup } => cmd::run::cmd_run_with_catchup(catchup),
-        Commands::Peers => cmd::peers::cmd_peers(),
-        Commands::Inbox { msg_id, limit, page, before, drain, format } => match (drain, msg_id) {
+        Commands::Peers { json } => cmd::peers::cmd_peers(json),
+        Commands::Inbox { msg_id, limit, page, before, drain, format, json } => match (drain, msg_id) {
             (true, Some(_)) => {
                 eprintln!("--drain drains everything pending; it cannot be combined with a message id");
                 std::process::exit(2);
             }
             (true, None) => cmd::inbox::cmd_inbox_drain(&format),
-            (false, Some(id)) => cmd::inbox::cmd_inbox_read(&id),
-            (false, None) => cmd::inbox::cmd_inbox(limit, page, before),
+            (false, Some(id)) => cmd::inbox::cmd_inbox_read(&id, json),
+            (false, None) => cmd::inbox::cmd_inbox(limit, page, before, json),
         },
-        Commands::Status => cmd::status::cmd_status(),
+        Commands::Status { json } => cmd::status::cmd_status(json),
         Commands::Whoami { machine, display } => cmd::whoami::cmd_whoami(machine, display),
         Commands::Sensors => cmd::sensors::cmd_sensors(),
         Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status)),
-        Commands::Send { to, channel, re, message } => {
+        Commands::Send { to, channel, re, json, message } => {
             cmd::send::reject_flag_like("send", &message);
-            cmd::send::cmd_send(to, channel, re, message);
+            cmd::send::cmd_send(to, channel, re, message, json);
         }
-        Commands::Reply { to, channel, message } => {
+        Commands::Reply { to, channel, json, message } => {
             cmd::send::reject_flag_like("reply", &message);
-            cmd::send::cmd_reply(to, channel, message);
+            cmd::send::cmd_reply(to, channel, message, json);
         }
         Commands::Chat { passthrough } => exec_chat(passthrough),
         // Chat-idiom primary verbs (ADR-173). The `#` prefix is
         // tolerated so `attend join "#deploy"` works; bare names stay
         // primary because an unquoted `#` starts a shell comment.
-        Commands::Join { name, pin } => cmd::channels::cmd_join(name.trim_start_matches('#'), pin),
-        Commands::Leave { name } => cmd::channels::cmd_leave(name.trim_start_matches('#')),
-        Commands::Channels { joined: true, sub: None } => cmd::channels::cmd_joined(),
-        Commands::Channels { sub, .. } => match sub {
-            None | Some(cli::ChannelsCmd::List) => cmd::channels::cmd_channels(),
+        Commands::Join { name, pin, json } => cmd::channels::cmd_join(&name, pin, json),
+        Commands::Leave { name, json } => cmd::channels::cmd_leave(&name, json),
+        Commands::Channels { joined: true, json, sub: None } => cmd::channels::cmd_joined(json),
+        Commands::Channels { json: true, sub: Some(sub), .. } if !matches!(sub, cli::ChannelsCmd::List) => {
+            eprintln!("--json applies to the channel listing, not to its lifecycle subcommands");
+            std::process::exit(2);
+        }
+        Commands::Channels { sub, json, .. } => match sub {
+            None | Some(cli::ChannelsCmd::List) => cmd::channels::cmd_channels(json),
             Some(cli::ChannelsCmd::Pin { name }) => cmd::channels::cmd_pin(&name),
             Some(cli::ChannelsCmd::Unpin { name }) => cmd::channels::cmd_unpin(&name),
             Some(cli::ChannelsCmd::Create { name, description }) => {
