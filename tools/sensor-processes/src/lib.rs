@@ -114,11 +114,16 @@ struct Proc {
     comm: String,
 }
 
-/// The `ps` columns [`parse_ps`] reads. `lstart` is five words in the C
-/// locale, which [`PS_ENV`] sets.
-const PS_COLUMNS: &str = "pid=,ppid=,lstart=,comm=";
-/// The columns for a `ps` that cannot print `lstart`, such as busybox's.
-const PS_COLUMNS_NO_START: &str = "pid=,ppid=,comm=";
+/// The `ps` arguments for the session user's processes, read with the
+/// columns [`Columns::Lstart`] parses.
+fn ps_args(user: &str) -> [&str; 4] {
+    ["-u", user, "-o", "pid=,ppid=,lstart=,comm="]
+}
+/// The `ps` arguments for a `ps` that cannot print `lstart`, read with the
+/// columns [`Columns::OwnedBy`] parses. Busybox's `ps` takes no `-u`, so
+/// every process is listed with its owner, and [`parse_ps`] keeps the
+/// session user's rows.
+const PS_ARGS_NO_START: [&str; 2] = ["-o", "pid=,ppid=,user=,comm="];
 /// The environment `ps` runs in. `LC_ALL=C` prints `lstart` as five fixed
 /// words. `TZ=UTC0` prints it in UTC, so a change of the host's time zone
 /// does not move it.
@@ -194,20 +199,49 @@ fn parse_lstart(words: &[&str]) -> Option<i64> {
     Some(days * 86_400 + h * 3600 + m * 60 + s)
 }
 
-/// Parse `ps -o pid=,ppid=,lstart=,comm=` output, or with `with_start`
-/// false, `ps -o pid=,ppid=,comm=` output. Rows that do not parse are
-/// skipped. The command name is the rest of the row, so a name with a
-/// space survives.
-fn parse_ps(stdout: &str, with_start: bool) -> Vec<Proc> {
+/// The columns of one `ps` read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Columns<'a> {
+    /// `pid=,ppid=,lstart=,comm=`, from a `ps` that already kept to the
+    /// session user's processes.
+    Lstart,
+    /// `pid=,ppid=,user=,comm=`, every process with its owner. Only the
+    /// rows this user owns are kept.
+    OwnedBy(&'a str),
+}
+
+/// Does a `user` column name `user`? Busybox cuts the column to eight
+/// characters, and procps prints a longer name as seven and a `+`, so a
+/// longer name also matches those forms.
+fn owner_matches(column: &str, user: &str) -> bool {
+    if column == user {
+        return true;
+    }
+    if user.chars().count() <= 8 {
+        return false;
+    }
+    let cut: String = user.chars().take(8).collect();
+    column == cut || column.strip_suffix('+').is_some_and(|head| !head.is_empty() && user.starts_with(head))
+}
+
+/// Parse `ps` output with `columns`. Rows that do not parse are skipped,
+/// and with [`Columns::OwnedBy`], so are rows another user owns. The
+/// command name is the rest of the row, so a name with a space survives.
+fn parse_ps(stdout: &str, columns: Columns) -> Vec<Proc> {
     stdout
         .lines()
         .filter_map(|line| {
             let mut parts = line.split_whitespace();
             let pid = parts.next()?.parse().ok()?;
             let ppid = parts.next()?.parse().ok()?;
-            let start = match with_start {
-                true => Some(parse_lstart(&parts.by_ref().take(5).collect::<Vec<_>>())?),
-                false => None,
+            let start = match columns {
+                Columns::Lstart => Some(parse_lstart(&parts.by_ref().take(5).collect::<Vec<_>>())?),
+                Columns::OwnedBy(user) => {
+                    if !owner_matches(parts.next()?, user) {
+                        return None;
+                    }
+                    None
+                }
             };
             let comm = parts.collect::<Vec<_>>().join(" ");
             (!comm.is_empty()).then_some(Proc { pid, ppid, start, comm })
@@ -271,9 +305,9 @@ fn canonical_name(comm: &str) -> &str {
 /// not start, exited non-zero, or listed no process. The user running the
 /// sensor always has at least the sensor itself, so zero rows is a failed
 /// read, never an empty session.
-fn ps_rows(output: std::io::Result<Output>, with_start: bool) -> Option<Vec<Proc>> {
+fn ps_rows(output: std::io::Result<Output>, columns: Columns) -> Option<Vec<Proc>> {
     let output = output.ok().filter(|o| o.status.success())?;
-    let rows = parse_ps(&String::from_utf8_lossy(&output.stdout), with_start);
+    let rows = parse_ps(&String::from_utf8_lossy(&output.stdout), columns);
     (!rows.is_empty()).then_some(rows)
 }
 
@@ -393,8 +427,9 @@ pub struct ProcessSensor {
     /// from `DEFAULT_WATCH`. Not merged — explicit-replace is the
     /// documented contract.
     watch: Vec<String>,
-    /// Whether `ps` prints `lstart`. Cleared, for the life of the sensor,
-    /// when a read with it fails and one without it succeeds.
+    /// Whether `ps` prints `lstart` and takes `-u`. Cleared, for the life
+    /// of the sensor, when a read with them fails and one without them
+    /// succeeds.
     ps_has_lstart: bool,
     /// `ps` reads that have failed in a row.
     failed_reads: u32,
@@ -433,21 +468,24 @@ impl ProcessSensor {
         self.watch.iter().any(|w| w == name)
     }
 
-    /// Read the process table with `run`, which runs `ps -o <columns>`.
-    /// A `ps` that cannot print `lstart`, such as busybox's, fails the
-    /// first read; the sensor then reads without it from then on, tells
-    /// processes apart by pid and name only, and says so once on stderr.
-    fn read_ps(&mut self, mut run: impl FnMut(&str) -> std::io::Result<Output>) -> Option<Vec<Proc>> {
+    /// Read `user`'s processes with `run`, which runs `ps` with the
+    /// arguments it is given. A `ps` that cannot print `lstart` or take
+    /// `-u`, such as busybox's, fails the first read; the sensor then
+    /// reads every process with its owner from then on, keeps `user`'s
+    /// rows, and says so once on stderr. Without `lstart`, a tool's run is
+    /// told apart by its start ticks on Linux and by pid and name only
+    /// elsewhere.
+    fn read_ps(&mut self, user: &str, mut run: impl FnMut(&[&str]) -> std::io::Result<Output>) -> Option<Vec<Proc>> {
         if self.ps_has_lstart {
-            if let Some(rows) = ps_rows(run(PS_COLUMNS), true) {
+            if let Some(rows) = ps_rows(run(&ps_args(user)), Columns::Lstart) {
                 return Some(rows);
             }
-            let rows = ps_rows(run(PS_COLUMNS_NO_START), false)?;
-            eprintln!("[attend] processes: ps cannot print lstart; telling processes apart by pid and name only");
+            let rows = ps_rows(run(&PS_ARGS_NO_START), Columns::OwnedBy(user))?;
+            eprintln!("[attend] processes: ps cannot print lstart or take -u; reading every process with its owner");
             self.ps_has_lstart = false;
             return Some(rows);
         }
-        ps_rows(run(PS_COLUMNS_NO_START), false)
+        ps_rows(run(&PS_ARGS_NO_START), Columns::OwnedBy(user))
     }
 
     /// Refresh `self.last_marker` from the marker file if it has been
@@ -650,7 +688,7 @@ impl Sensor for ProcessSensor {
 
     fn poll(&mut self, focus: &Focus) -> Vec<(f64, String)> {
         let user = whoami();
-        let rows = self.read_ps(|columns| Command::new("ps").args(["-u", &user, "-o", columns]).envs(PS_ENV.iter().copied()).output());
+        let rows = self.read_ps(&user, |args| Command::new("ps").args(args).envs(PS_ENV.iter().copied()).output());
         self.refresh_marker();
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -922,44 +960,93 @@ mod tests {
     fn parse_ps_reads_pid_ppid_and_a_spaced_name() {
         let p = parse_ps(&format!(
             "  10     1 {T0} cargo\n  11    10 {T0} rustc\n bad row\n  13 10 Sat Oct 10 rustc\n  12 10 {T0} Web Content\n"
-        ), true);
+        ), Columns::Lstart);
         assert_eq!(p, procs(&[(10, 1, "cargo"), (11, 10, "rustc"), (12, 10, "Web Content")]));
     }
 
     #[test]
-    fn parse_ps_reads_rows_without_a_start_time() {
-        let p = parse_ps("  10     1 cargo\n  12 10 Web Content\n bad row\n", false);
+    fn parse_ps_reads_rows_owned_by_the_user() {
+        let p = parse_ps("  10     1 me  cargo\n  11 1 root sshd\n  12 10 me Web Content\n bad row\n  13 1 me\n", Columns::OwnedBy("me"));
         let mut want = procs(&[(10, 1, "cargo"), (12, 10, "Web Content")]);
         want.iter_mut().for_each(|p| p.start = None);
         assert_eq!(p, want);
     }
 
-    /// A `ps` that cannot print `lstart`, as busybox's cannot, fails the
-    /// first read; the sensor reads without it from then on.
     #[test]
-    fn a_ps_without_lstart_falls_back_to_pid_and_name() {
-        let mut s = ProcessSensor::new();
-        let mut asked: Vec<String> = Vec::new();
-        let mut run = |columns: &str| {
-            asked.push(columns.to_string());
-            match columns {
-                PS_COLUMNS => ps_output(1, ""),
-                _ => ps_output(0, "  1  0 zsh\n  10  1 cargo\n"),
-            }
-        };
-        let rows = s.read_ps(&mut run).expect("the fallback read");
-        assert_eq!(rows.iter().map(|p| (p.pid, p.start)).collect::<Vec<_>>(), vec![(1, None), (10, None)]);
-        assert!(!s.ps_has_lstart);
-        assert!(s.read_ps(&mut run).is_some());
-        assert_eq!(asked, vec![PS_COLUMNS, PS_COLUMNS_NO_START, PS_COLUMNS_NO_START]);
+    fn owner_matches_a_cut_user_column() {
+        assert!(owner_matches("me", "me"));
+        assert!(!owner_matches("mel", "me"));
+        assert!(!owner_matches("me", "mel"));
+        assert!(owner_matches("verylong", "verylongname"), "busybox cuts at eight");
+        assert!(owner_matches("verylon+", "verylongname"), "procps marks a cut with +");
+        assert!(!owner_matches("verylon+", "verylon"), "a name of eight or fewer matches only itself");
+        assert!(!owner_matches("+", "verylongname"));
+    }
 
-        // Without start times, a tool is told apart by pid and name.
+    /// `ps` as busybox's parses its arguments: no `-u`, and `-o` with
+    /// `pid`, `ppid`, `user` and `comm` but no `lstart`. Every process is
+    /// listed, whoever owns it.
+    fn busybox_ps(args: &[&str]) -> std::io::Result<Output> {
+        const SUPPORTED: &[&str] = &["user", "group", "comm", "args", "pid", "ppid", "pgid", "etime", "nice", "rgroup", "ruser", "time", "tty", "vsz", "sid", "stat", "rss"];
+        let mut columns: Vec<&str> = Vec::new();
+        let mut args = args.iter();
+        while let Some(arg) = args.next() {
+            match *arg {
+                "-o" => columns.extend(args.next().map_or("", |v| v).split(',').map(|c| c.split('=').next().unwrap())),
+                "-T" => {}
+                _ => return ps_output(1, ""),
+            }
+        }
+        if columns.iter().any(|c| !SUPPORTED.contains(c)) {
+            return ps_output(1, "");
+        }
+        let table = [(1, 0, "root", "init"), (40, 1, "root", "sshd"), (50, 1, "me", "zsh"), (60, 50, "me", "cargo"), (70, 1, "other", "cargo")];
+        let out: String = table
+            .iter()
+            .map(|&(pid, ppid, user, comm)| {
+                let cell = |c: &str| match c {
+                    "pid" => format!("{pid:>5}"),
+                    "ppid" => format!("{ppid:>5}"),
+                    "user" => format!("{user:<8}"),
+                    "comm" => comm.to_string(),
+                    _ => "?".to_string(),
+                };
+                columns.iter().map(|c| cell(c)).collect::<Vec<_>>().join(" ") + "\n"
+            })
+            .collect();
+        ps_output(0, &out)
+    }
+
+    /// A `ps` that takes no `-u` and cannot print `lstart`, as busybox's,
+    /// fails the first read; the sensor then reads every process with its
+    /// owner and keeps the user's own rows.
+    #[test]
+    fn a_busybox_ps_falls_back_to_rows_owned_by_the_user() {
+        let mut s = ProcessSensor::new();
+        let mut asked: Vec<Vec<String>> = Vec::new();
+        let mut run = |args: &[&str]| {
+            asked.push(args.iter().map(|a| a.to_string()).collect());
+            busybox_ps(args)
+        };
+        let rows = s.read_ps("me", &mut run).expect("the fallback read");
+        assert_eq!(rows.iter().map(|p| (p.pid, p.start)).collect::<Vec<_>>(), vec![(50, None), (60, None)]);
+        assert!(!s.ps_has_lstart);
+        assert!(s.read_ps("me", &mut run).is_some());
+        let fallback: Vec<String> = PS_ARGS_NO_START.iter().map(|a| a.to_string()).collect();
+        assert_eq!(asked, vec![ps_args("me").iter().map(|a| a.to_string()).collect(), fallback.clone(), fallback]);
+    }
+
+    /// Without start times or start ticks, a tool is told apart by pid and
+    /// name.
+    #[test]
+    fn without_start_times_a_tool_is_told_apart_by_pid_and_name() {
+        let mut s = ProcessSensor::new();
         let focus = no_focus();
-        let rows = |stdout: &str| Some(parse_ps(stdout, false));
-        assert!(s.observe(rows("  1  0 zsh\n  5  1 nvim\n"), no_ticks, &focus, 0).is_empty(), "baseline");
-        assert!(s.observe(rows("  1  0 zsh\n  5  1 nvim\n  10  1 cargo\n"), no_ticks, &focus, 0).is_empty());
-        assert!(s.observe(rows("  1  0 zsh\n  5  1 nvim\n  10  1 cargo\n"), no_ticks, &focus, 0).is_empty(), "still running");
-        assert_eq!(texts(&s.observe(rows("  1  0 zsh\n  5  1 nvim\n"), no_ticks, &focus, 0)), vec!["cargo finished"]);
+        let rows = |stdout: &str| Some(parse_ps(stdout, Columns::OwnedBy("me")));
+        assert!(s.observe(rows("  1  0 me zsh\n  5  1 me nvim\n"), no_ticks, &focus, 0).is_empty(), "baseline");
+        assert!(s.observe(rows("  1  0 me zsh\n  5  1 me nvim\n  10  1 me cargo\n"), no_ticks, &focus, 0).is_empty());
+        assert!(s.observe(rows("  1  0 me zsh\n  5  1 me nvim\n  10  1 me cargo\n"), no_ticks, &focus, 0).is_empty(), "still running");
+        assert_eq!(texts(&s.observe(rows("  1  0 me zsh\n  5  1 me nvim\n"), no_ticks, &focus, 0)), vec!["cargo finished"]);
     }
 
     /// A `ps` that prints `lstart` is read with it, and a read that fails
@@ -967,11 +1054,11 @@ mod tests {
     #[test]
     fn a_failed_read_keeps_lstart() {
         let mut s = ProcessSensor::new();
-        assert!(s.read_ps(|_| ps_output(1, "")).is_none());
+        assert!(s.read_ps("me", |_| ps_output(1, "")).is_none());
         assert!(s.ps_has_lstart);
-        let rows = s.read_ps(|columns| match columns {
-            PS_COLUMNS => ps_output(0, &format!("  10  1 {T0} cargo\n")),
-            _ => ps_output(0, "  10  1 cargo\n"),
+        let rows = s.read_ps("me", |args| match args.contains(&"-u") {
+            true => ps_output(0, &format!("  10  1 {T0} cargo\n")),
+            false => ps_output(0, "  10  1 me cargo\n"),
         });
         assert_eq!(rows, Some(procs(&[(10, 1, "cargo")])));
     }
@@ -1181,7 +1268,7 @@ mod tests {
             asked.borrow_mut().push(pid);
             (pid == 10).then_some(ticks)
         };
-        let seen = texts(&s.observe(Some(parse_ps(&table, true)), read, &no_focus(), 0));
+        let seen = texts(&s.observe(Some(parse_ps(&table, Columns::Lstart)), read, &no_focus(), 0));
         assert_eq!(asked.into_inner(), vec![10], "ticks are read for the watched tools only");
         seen
     }
@@ -1269,11 +1356,11 @@ mod tests {
 
     #[test]
     fn ps_rows_is_none_for_a_failed_or_empty_read() {
-        assert_eq!(ps_rows(ps_output(0, &format!("  10  1 {T0} cargo\n")), true), Some(procs(&[(10, 1, "cargo")])));
-        assert_eq!(ps_rows(ps_output(0, ""), true), None, "zero rows");
-        assert_eq!(ps_rows(ps_output(0, "garbage\n"), true), None, "no row parsed");
-        assert_eq!(ps_rows(ps_output(1, &format!("  10  1 {T0} cargo\n")), true), None, "non-zero exit");
-        assert_eq!(ps_rows(Err(std::io::Error::other("no ps")), true), None, "did not start");
+        assert_eq!(ps_rows(ps_output(0, &format!("  10  1 {T0} cargo\n")), Columns::Lstart), Some(procs(&[(10, 1, "cargo")])));
+        assert_eq!(ps_rows(ps_output(0, ""), Columns::Lstart), None, "zero rows");
+        assert_eq!(ps_rows(ps_output(0, "garbage\n"), Columns::Lstart), None, "no row parsed");
+        assert_eq!(ps_rows(ps_output(1, &format!("  10  1 {T0} cargo\n")), Columns::Lstart), None, "non-zero exit");
+        assert_eq!(ps_rows(Err(std::io::Error::other("no ps")), Columns::Lstart), None, "did not start");
     }
 
     /// A poll whose `ps` read failed reports nothing, and the next good
@@ -1431,7 +1518,7 @@ mod tests {
     fn the_live_host_table_names_each_process_as_itself() {
         let focus = no_focus();
         let s = ProcessSensor::new();
-        let rows = parse_ps(LIVE_HOST, true);
+        let rows = parse_ps(LIVE_HOST, Columns::Lstart);
         let comms = |name: &str| rows.iter().filter(|p| p.comm == name).count();
         assert_eq!(comms("npm exec @scope"), 8, "the fixture holds the MCP servers");
         assert!(comms("ssh-agent") > 0, "the fixture holds ssh-agent");
@@ -1459,7 +1546,7 @@ mod tests {
     #[test]
     fn tally_sees_npm_and_node_as_this_host_names_them() {
         let s = ProcessSensor::new();
-        let t = tally(&parse_ps(LIVE_NPM, true), |_, c| c != "bash", |c| s.is_watched(c));
+        let t = tally(&parse_ps(LIVE_NPM, Columns::Lstart), |_, c| c != "bash", |c| s.is_watched(c));
         assert_eq!(t.apps, HashMap::from([("node".to_string(), 3), ("npx".to_string(), 1)]));
         assert_eq!(t.tools, HashMap::from([(3181672, tool("npm", &["node"])), (3181673, tool("npm", &["node"]))]));
     }
@@ -1467,7 +1554,7 @@ mod tests {
     #[test]
     fn a_live_npm_test_finishes_naming_node() {
         let s = ProcessSensor::new();
-        let poll = |rows: &str| tally(&parse_ps(rows, true), |_, c| c != "bash", |c| s.is_watched(c));
+        let poll = |rows: &str| tally(&parse_ps(rows, Columns::Lstart), |_, c| c != "bash", |c| s.is_watched(c));
         let lines: Vec<&str> = LIVE_NPM.lines().collect();
         let idle = format!("{}\n", lines[0]);
         let test_run = format!("{}\n{}\n{}\n", lines[0], lines[1], lines[5]);
