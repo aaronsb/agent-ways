@@ -91,7 +91,7 @@ pub fn list(query: InboxQuery) -> InboxPage {
                 .and_then(|m| m.modified().ok())
                 .unwrap_or(std::time::UNIX_EPOCH);
             let Ok(content) = std::fs::read_to_string(&path) else { continue };
-            let Some(sig) = parse_signal(content.trim()) else { continue };
+            let Some(sig) = parse_signal(wire_line(&content)) else { continue };
             // Skip own messages
             if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
                 continue;
@@ -178,7 +178,7 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         // them so operators can tell partial-write / disk-full bugs
         // from ordinary races.
         let content = std::fs::read_to_string(&path).map_err(|e| ReadError::Unreadable { error: e.to_string() })?;
-        let sig = parse_signal(content.trim()).ok_or(ReadError::Corrupt)?;
+        let sig = parse_signal(wire_line(&content)).ok_or(ReadError::Corrupt)?;
         let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()).unwrap_or(std::time::UNIX_EPOCH);
         let scope = match dir.room {
             Room::Open => "#open",
@@ -198,6 +198,13 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         });
     }
     Err(ReadError::NotFound)
+}
+
+/// A signal file's record without the one newline `format_signal` ends it
+/// with. Only that newline goes: the message is the rest of the line as the
+/// sender wrote it, trailing spaces and inner newlines included.
+fn wire_line(content: &str) -> &str {
+    content.strip_suffix('\n').unwrap_or(content)
 }
 
 /// Seconds since the epoch for a file mtime (0 if before the epoch).

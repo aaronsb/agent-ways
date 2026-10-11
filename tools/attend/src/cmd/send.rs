@@ -161,6 +161,7 @@ fn fail(e: &SendError, json: bool) -> ! {
         SendError::InvalidReId => {
             eprintln!("attend send: --re signal id must be non-empty and match [A-Za-z0-9_-]+");
         }
+        SendError::AmbiguousRePrefix { .. } => eprintln!("attend send: {e}"),
         SendError::EmptyMessage => {
             eprintln!("usage: attend send <message>");
             eprintln!("  (reaches every peer and Aaron — no routing flags needed)");

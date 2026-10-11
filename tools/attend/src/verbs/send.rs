@@ -63,6 +63,9 @@ pub enum SendError {
     /// `re` is empty or outside `[A-Za-z0-9_-]+`.
     InvalidReId,
     EmptyMessage,
+    /// An unthreaded message that starts with `re:<id>|`: on the wire it
+    /// would read as a reply threaded under `<id>`, with the rest as its text.
+    AmbiguousRePrefix { id: String },
     /// No live peer works at the `to` path.
     NoPeerAt { path: String, peers: Vec<PeerAt>, suggestion: Option<String> },
     /// No channel has the `channel` name.
@@ -79,6 +82,10 @@ impl std::fmt::Display for SendError {
         match self {
             Self::InvalidReId => write!(f, "re must be a signal id matching [A-Za-z0-9_-]+"),
             Self::EmptyMessage => write!(f, "the message is empty"),
+            Self::AmbiguousRePrefix { id } => write!(
+                f,
+                "a message starting with `re:{id}|` would be read as a reply to signal {id}; reword its start"
+            ),
             Self::NoPeerAt { path, .. } => write!(f, "no active peer at {path}"),
             Self::NoChannel { name, .. } => write!(f, "no channel named '{name}'"),
             Self::NoLivePeers { name, only_self: true, .. } => {
@@ -113,6 +120,15 @@ fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
     }
     if req.message.is_empty() {
         return Err(SendError::EmptyMessage);
+    }
+    // The wire has no escape for a message that itself starts `re:<id>|`.
+    // Under a thread the parser takes the first `re:` and the text after it
+    // is intact; without one, the text's own prefix would become the thread
+    // and the reader would see a different message from the one sent.
+    if req.re.is_none() {
+        if let Some(id) = agent_identity::parse_signal(&format!("-|-|-|{}", req.message)).and_then(|s| s.reply_to) {
+            return Err(SendError::AmbiguousRePrefix { id: id.to_string() });
+        }
     }
 
     let base = signals_base();

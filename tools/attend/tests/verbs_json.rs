@@ -18,28 +18,55 @@ fn ok_json(f: &Fixture, args: &[&str]) -> Value {
     json(&out)
 }
 
-/// Text a shell would mangle reaches the bus as written when it is passed as
-/// an argument, and comes back out of the inbox the same.
+/// A message passed to `send` as one argv element comes back from `inbox
+/// --json`, listed and read, byte for byte. No shell runs here: this proves
+/// attend keeps the text it is handed, not how a shell would pass it.
 #[test]
 fn a_send_round_trips_through_the_inbox_with_its_text_intact() {
     let f = Fixture::new("verbs-json-roundtrip");
-    let text = r#"quotes "double" 'single', `backticks`, $HOME and $(date), history !! and a | pipe"#;
-    let sent = f.without_session(|| ok_json(&f, &["send", "--json", text]));
-    assert_eq!(sent["scope"], "#open");
-    assert_eq!(sent["dirs"], 1);
-    assert_eq!(sent["failed"], serde_json::json!([]));
-    let id = sent["id"].as_str().expect("an id");
+    let texts = [
+        r#"quotes "double" 'single', `backticks`, $HOME and $(date), history !! and a | pipe"#,
+        "trailing spaces   ",
+        "  leading spaces",
+        "line one\nline two\n",
+        "non-ASCII: héllo, wörld, 日本語, 🚀",
+        r"backslashes C:\path\to\file and a literal \n",
+        "re: a reply-shaped start with no id",
+        "re:not an id|so not a thread",
+    ];
+    for (n, text) in texts.iter().enumerate() {
+        let sent = f.without_session(|| ok_json(&f, &["send", "--json", "--", text]));
+        assert_eq!(sent["scope"], "#open");
+        assert_eq!(sent["dirs"], 1);
+        assert_eq!(sent["failed"], serde_json::json!([]));
+        assert_eq!(sent["re"], Value::Null);
+        let id = sent["id"].as_str().expect("an id");
 
-    let listing = ok_json(&f, &["inbox", "--json"]);
-    assert_eq!(listing["total"], 1);
-    let msg = &listing["messages"][0];
-    assert_eq!(msg["id"], id);
-    assert_eq!(msg["message"], text);
-    assert!(msg["from"].as_str().unwrap().starts_with("external:"), "{msg}");
+        let listing = ok_json(&f, &["inbox", "--json"]);
+        assert_eq!(listing["total"], n + 1);
+        let msg = listing["messages"].as_array().unwrap().iter().find(|m| m["id"] == id).expect("listed");
+        assert_eq!(msg["message"], *text, "listed");
+        assert_eq!(msg["re"], Value::Null, "the reader sees no thread: {text:?}");
+        assert!(msg["from"].as_str().unwrap().starts_with("external:"), "{msg}");
 
-    let read = ok_json(&f, &["inbox", id, "--json"]);
-    assert_eq!(read["message"], text);
-    assert_eq!(read["id"], id);
+        let read = ok_json(&f, &["inbox", id, "--json"]);
+        assert_eq!(read["message"], *text, "read");
+        assert_eq!(read["re"], Value::Null);
+        assert_eq!(read["id"], id);
+    }
+}
+
+/// An unthreaded message that starts `re:<id>|` would reach readers as a
+/// reply threaded under `<id>`, with its text cut. It is refused, and nothing
+/// is written.
+#[test]
+fn a_message_that_would_read_as_threaded_is_refused() {
+    let f = Fixture::new("verbs-json-re-prefix");
+    let out = f.without_session(|| f.attend(&["send", "--json", "re:abc-1|looks threaded"]));
+    assert_eq!(out.status.code(), Some(1));
+    let doc = json(&out);
+    assert_eq!(doc["error"], serde_json::json!({ "kind": "ambiguous_re_prefix", "id": "abc-1" }));
+    assert_eq!(ok_json(&f, &["inbox", "--json"])["total"], 0);
 }
 
 #[test]
