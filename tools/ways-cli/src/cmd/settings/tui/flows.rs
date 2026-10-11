@@ -25,7 +25,7 @@ pub struct Env {
     /// The Claude config directory whose `projects/` lists sessions.
     pub claude: PathBuf,
     pub project: PathBuf,
-    /// The text `ways target plan <dir>` prints.
+    /// The text `ways manage target plan <dir>` prints.
     pub plan: Rc<dyn Fn(&Path) -> String>,
 }
 
@@ -141,7 +141,7 @@ pub fn activate_flow(env: &Env) -> Flow {
                 .map(|c| {
                     let off = targets.iter().any(|(p, on)| !on && expand(p, &home).display().to_string() == c.id);
                     let verb = if off { "enable" } else { "add" };
-                    Out::new(verb, format!("ways target {verb} {}", quote(&c.id)), true)
+                    Out::new(verb, format!("ways manage target {verb} {}", quote(&c.id)), true)
                 })
                 .collect()
         },
@@ -152,7 +152,7 @@ pub fn activate_flow(env: &Env) -> Flow {
     })
     .notes(
         "Claude config directories to activate; active ones are listed for reference",
-        "the real plan from `ways target plan`; nothing has run",
+        "the real plan from `ways manage target plan`; nothing has run",
         "finishing queues these on the install tab; its review applies them",
     )
 }
@@ -175,7 +175,7 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
-/// `ways target plan` output as styled lines: each root by its verb
+/// `ways manage target plan` output as styled lines: each root by its verb
 /// (linked is kept, link adds, relink replaces, refused is refused), then the
 /// settings merge by its verb (kept, add, replace, REMOVE). A refused root
 /// carries the note that `--force` moves the real path aside.
@@ -397,7 +397,7 @@ pub mod testkit {
         }
     }
 
-    /// What `ways target plan` printed on a terminal, with the
+    /// What `ways manage target plan` printed on a terminal, with the
     /// table's colour sequences in.
     pub fn sample_plan(dir: &str) -> String {
         let esc = '\u{1b}';

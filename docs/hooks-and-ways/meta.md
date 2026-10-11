@@ -7,7 +7,7 @@ The `meta` domain holds guidance about the system itself and about how Claude wo
 | `attend/*` | Responding to attend signals: a finished build, context pressure, an overdue reflection | attend signals |
 | `choices` | Putting real decisions to the human as explicit choices | prompt pattern ("which option", "let me decide") |
 | `compaction-checkpoint` | Summarizing and checking in with the human before compaction | context 85% full |
-| `deployment` | How agent-ways installs, updates and reconciles into `~/.claude` | prompt pattern (agent-ways, `ways update`, `~/.claude`) |
+| `deployment` | How agent-ways installs, updates and reconciles into `~/.claude` | prompt pattern (agent-ways, `ways manage update`, `~/.claude`) |
 | `develop` | Routing a piece of work through the development loop and the `/develop` skill | prompt pattern ("how should we approach") |
 | `goals` | When to set a `/goal` and what goal mode changes | semantic |
 | `governance` | Citing the real controls behind a practice | semantic |

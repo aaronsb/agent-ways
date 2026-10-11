@@ -163,7 +163,7 @@ pub fn converge(source_root: &Path, dest_root: &Path, default_root: &Path, dry_r
         return Some(format!("mcp: would {verb} {SERVER} → {desired}"));
     }
     let Some(claude) = claude_bin() else {
-        return Some(format!("mcp: {SERVER} not registered: `claude` is not on PATH; re-run `ways reconcile` once it is"));
+        return Some(format!("mcp: {SERVER} not registered: `claude` is not on PATH; re-run `ways manage repair` once it is"));
     };
     let spec = serde_json::json!({ "type": "stdio", "command": desired, "args": [] }).to_string();
     let result = (|| {

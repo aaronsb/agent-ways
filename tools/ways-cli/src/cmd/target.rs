@@ -1,4 +1,4 @@
-//! `ways target` (ADR-184, ADR-185, ADR-507): the projection targets, the
+//! `ways manage target` (ADR-184, ADR-185, ADR-507): the projection targets, the
 //! Claude Code config directories agent-ways is active in.
 //!
 //! Output follows ADR-185: tables for people, one JSON document under
@@ -70,8 +70,8 @@ pub fn list(json: bool) -> Result<()> {
     }
     if list.is_empty() {
         println!("no targets: agent-ways is installed and inactive.");
-        println!("  ways target plan <dir>   # what activating a Claude Code config dir would do");
-        println!("  ways target add <dir>    # activate it (default dir: ~/.claude)");
+        println!("  ways manage target plan <dir>   # what activating a Claude Code config dir would do");
+        println!("  ways manage target add <dir>    # activate it (default dir: ~/.claude)");
         return Ok(());
     }
     let mut t = Table::new(&["Target", "Enabled", "Observe", "State", "Config"]);
@@ -214,8 +214,8 @@ pub fn add(dir: &str, force: bool, dry_run: bool, json: bool) -> Result<()> {
     // to stderr.
     if let Err(e) = reconcile::run_for_targets(&[target], false, json, force) {
         eprintln!(
-            "target recorded in {} but the reconcile failed; `ways reconcile` retries it, \
-             `ways target remove` forgets it",
+            "target recorded in {} but the reconcile failed; `ways manage repair` retries it, \
+             `ways manage target remove` forgets it",
             path.display()
         );
         return Err(e);
@@ -239,7 +239,7 @@ fn set_enabled(dir: &str, enabled: bool) -> Result<()> {
         Some(list)
     })?;
     if missing {
-        bail!("{dir} is not a target; `ways target list` lists them, `ways target add` adds one");
+        bail!("{dir} is not a target; `ways manage target list` lists them, `ways manage target add` adds one");
     }
     let target = chosen.expect("set when found");
     if enabled && !target.dir().is_dir() {

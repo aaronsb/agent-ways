@@ -21,6 +21,7 @@ pub mod projects;
 pub mod screen_host;
 pub mod mcp_register;
 pub mod reconcile;
+pub mod reinstall;
 pub mod reflow;
 pub mod render;
 pub mod reset;

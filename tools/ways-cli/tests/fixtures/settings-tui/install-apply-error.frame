@@ -1,8 +1,8 @@
 agent-tui frame 100x30
 | 1 ways    2 matching    3 gate    4 install  ●1 ↺    5 attend    6 sensors    7 theme              |
 |┌ ways settings — ~/proj — review ────────────────────┐┌detail─────────────────────────────────────┐|
-|│   ▾ queued  ●1                                      ││$ ways target add /tmp/x                   │|
-|│▌✗     1. $ ways target add /tmp/x  ▲                ││                                           │|
+|│   ▾ queued  ●1                                      ││$ ways manage target add /tmp/x            │|
+|│▌✗     1. $ ways manage target add /tmp/x  ▲         ││                                           │|
 |│                                                     ││Records the directory as a target and      │|
 |│                                                     ││projects agent-ways into it.               │|
 |│                                                     ││                                           │|
@@ -11,7 +11,7 @@ agent-tui frame 100x30
 |│                                                     ││          les                              │|
 |│                                                     ││touches   the directory given              │|
 |│                 ┌add: error────────────────────────────────────────────────────┐                 │|
-|│                 │ $ ways target add /tmp/x                                     │add /tmp/x       │|
+|│                 │ $ ways manage target add /tmp/x                              │target add /tmp/x│|
 |│                 │                                                              │dd: ~/x is not a │|
 |│                 │ target add: ~/x is not a Claude config directory             │rectory          │|
 |│                 │ adding ~/x as a target                                       │                 │|
@@ -47,15 +47,15 @@ styles
   2   4-11  - - BOLD
   2  12-15  LightRed - -
   2  54-55  - - DIM
-  2  56-79  LightRed - BOLD
+  2  56-86  LightRed - BOLD
   2  99-99  - - DIM
   3   0-0   - - DIM
   3   1-1   Cyan - BOLD|REVERSED
   3   2-3   Red - BOLD|REVERSED
   3   4-12  - - BOLD|REVERSED
-  3  13-34  LightRed - BOLD|REVERSED
-  3  35-37  Yellow - BOLD|REVERSED
-  3  38-53  - - BOLD|REVERSED
+  3  13-41  LightRed - BOLD|REVERSED
+  3  42-44  Yellow - BOLD|REVERSED
+  3  45-53  - - BOLD|REVERSED
   3  54-55  - - DIM
   3  99-99  - - DIM
   4   0-0   - - DIM
@@ -88,8 +88,8 @@ styles
  11  99-99  - - DIM
  12   0-0   - - DIM
  12  18-18  Red - -
- 12  20-43  - - DIM|ITALIC
- 12  81-91  Red - -
+ 12  20-50  - - DIM|ITALIC
+ 12  81-98  Red - -
  12  99-99  - - DIM
  13   0-0   - - DIM
  13  18-18  Red - -

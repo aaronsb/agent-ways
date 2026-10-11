@@ -7,7 +7,9 @@
 //! or JSON value, a fenced block or backticked span in markdown, a quoted
 //! string or backticked span in Rust, or a spawn of the ways binary. Prose is
 //! skipped, since "how ways match" is English. Each distinct command, and each
-//! verb of a group, is checked with `ways <command> [<verb>] --help`.
+//! verb of a group, is checked with `ways <command> [<verb>] --help`. The names
+//! ADR-509 moved under `ways manage` are matched in messages as well: any
+//! `ways <name>` in a shell or Rust line.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -127,7 +129,8 @@ fn invocations(code: &str) -> Vec<(String, Option<String>)> {
     }
     let mut found = Vec::new();
     for end in ends {
-        let rest = code[end..].trim_start_matches('"');
+        // `"$APP/bin/ways" x`, or `\"$APP/bin/ways\" x` inside an echo.
+        let rest = code[end..].trim_start_matches(['\\', '"']);
         let Some(rest) = rest.strip_prefix(' ') else { continue };
         let Some(a) = word(rest) else { continue };
         found.push((a.to_string(), second(&rest[a.len()..])));
@@ -230,6 +233,13 @@ fn call_sites(root: &Path) -> Sites {
                     }
                 }
             }
+            if k != Kind::Markdown && !PROMPTS.contains(&path.as_str()) {
+                for name in moved_mentions(line) {
+                    if !found.iter().any(|(a, _)| a == name) {
+                        found.push((name.to_string(), None));
+                    }
+                }
+            }
             for site in found {
                 sites.entry(site).or_default().push((format!("{path}:{}", n + 1), shell));
             }
@@ -259,17 +269,67 @@ fn ways_help(args: &[&str]) -> (bool, String) {
 /// Groups that open a screen when run bare on a terminal (ADR-507 §7, note
 /// of 2026-10-02). Their usage line reads `[COMMAND]`, but in a script, as a
 /// call site is, they still need a verb: bare in a pipe they exit 2.
-const SCREEN_GROUPS: &[&str] = &["session", "target"];
+const SCREEN_GROUPS: &[&str] = &["session", "manage"];
+
+/// The lifecycle names ADR-509 moved under `ways manage`. The one-release
+/// aliases keep them running, so the CLI still accepts them, but no caller in
+/// the repository may use them. The exception is the updater's spawn of
+/// `reconcile`: the fixed name every successor binary keeps, because the
+/// previous release's updater calls it (ADR-509 §4).
+const MOVED: &[&str] = &["update", "reconcile", "uninstall", "target"];
+const UPDATER: &str = "tools/ways-cli/src/cmd/update.rs (spawn)";
+
+/// The installer and check-setup run the app's freshly set-up binary, which
+/// `make setup` downloads from the latest release, not from the checkout they
+/// ship in. They are cross-release callers like the updater, so they run the
+/// fixed name `reconcile` (ADR-509 §4). Each entry is a file and the exact
+/// invocation it may use there.
+const CROSS_RELEASE: &[(&str, &str)] =
+    &[("scripts/install.sh", "\"$APP_DIR/bin/ways\" reconcile"), ("hooks/ways/check-setup.sh", "\"$APP_DIR/bin/ways\" reconcile")];
+
+/// Whether a `reconcile` place is one of the CROSS_RELEASE invocations, in
+/// code or in an echoed command.
+fn cross_release(root: &Path, place: &str) -> bool {
+    let Some((path, line)) = place.rsplit_once(':') else { return false };
+    let Some((_, form)) = CROSS_RELEASE.iter().find(|(p, _)| *p == path) else { return false };
+    let Ok(n) = line.parse::<usize>() else { return false };
+    std::fs::read_to_string(root.join(path)).ok().and_then(|t| t.lines().nth(n - 1).map(|l| l.replace("\\\"", "\"").contains(form))).unwrap_or(false)
+}
+
+/// Files that quote what a person types rather than call ways: the firing
+/// panel's prompts.
+const PROMPTS: &[&str] = &["tools/scripts/fire-panel.json"];
+
+/// The MOVED names after `ways ` anywhere in a line, so a message a person
+/// reads is held to them too: an `echo "… ways update"`, or a Rust string
+/// that does not start with `ways `. `ways manage update` does not match.
+fn moved_mentions(line: &str) -> Vec<&'static str> {
+    let mut found = Vec::new();
+    for (start, _) in line.match_indices("ways ") {
+        let boundary = line[..start].chars().next_back().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        if !boundary {
+            continue;
+        }
+        let rest = &line[start + 5..];
+        if let Some(name) = word(rest).and_then(|w| MOVED.iter().find(|m| **m == w)) {
+            found.push(*name);
+        }
+    }
+    found
+}
 
 #[test]
 fn every_ways_call_site_names_a_command_the_cli_accepts() {
     let root = repo_root();
     let sites = call_sites(&root);
     // Positive control: callers the scan must see, or it found nothing to check.
-    for must in [("corpus", None), ("author", Some("lint")), ("settings", Some("set"))] {
+    for must in [("corpus", None), ("author", Some("lint")), ("settings", Some("set")), ("manage", Some("repair"))] {
         let key = (must.0.to_string(), must.1.map(str::to_string));
         assert!(sites.contains_key(&key), "the scan missed `ways {} {}`", must.0, must.1.unwrap_or(""));
     }
+    // The updater's spawn is seen, so the exception above excuses a real site.
+    let updater = sites.get(&("reconcile".to_string(), None));
+    assert!(updater.is_some_and(|p| p.iter().any(|(at, _)| at == UPDATER)), "the scan missed the updater's spawn");
 
     // Per command: None when the CLI rejects it, else whether it needs a verb
     // (its usage line reads `<COMMAND>`, as `tune` does, or it opens a screen
@@ -280,6 +340,18 @@ fn every_ways_call_site_names_a_command_the_cli_accepts() {
         // Named as removed, in the docs that record their removal and in the
         // tests that keep them rejected.
         if REMOVED.contains(&a.as_str()) {
+            continue;
+        }
+        if MOVED.contains(&a.as_str()) {
+            let left: Vec<&str> = places
+                .iter()
+                .map(|(p, _)| p.as_str())
+                .filter(|p| !(a == "reconcile" && (*p == UPDATER || cross_release(&root, p))))
+                .collect();
+            if !left.is_empty() {
+                let shown = left.iter().take(3).copied().collect::<Vec<_>>().join(", ");
+                bad.push(format!("ways {a} moved under `ways manage` (ADR-509)  ({shown})"));
+            }
             continue;
         }
         // `ways agent …` hands its arguments to the ways-agent binary.
@@ -304,6 +376,29 @@ fn every_ways_call_site_names_a_command_the_cli_accepts() {
     assert!(bad.is_empty(), "call sites the CLI rejects:\n  {}", bad.join("\n  "));
 }
 
+/// The installer and check-setup repair through the fixed name, which every
+/// release's binary accepts. `manage repair` there breaks every install whose
+/// downloaded release predates `ways manage`.
+#[test]
+fn cross_release_callers_run_the_fixed_name() {
+    let root = repo_root();
+    for (path, want) in [("scripts/install.sh", 3), ("hooks/ways/check-setup.sh", 2)] {
+        let text = std::fs::read_to_string(root.join(path)).unwrap();
+        // An echoed command escapes its quotes: `\"$APP_DIR/bin/ways\" reconcile`.
+        let text = text.replace("\\\"", "\"");
+        let runs: Vec<&str> = text.lines().filter(|l| l.contains("\"$APP_DIR/bin/ways\" ") && !l.contains("bin/ways\" status")).collect();
+        let fixed = runs.iter().filter(|l| l.contains("\"$APP_DIR/bin/ways\" reconcile")).count();
+        assert!(runs.iter().all(|l| !l.contains("bin/ways\" manage")), "{path} runs `manage` on a release binary:\n{}", runs.join("\n"));
+        assert_eq!(fixed, want, "{path}: the repair invocations that run `reconcile`:\n{}", runs.join("\n"));
+    }
+    // The scan sees them, so the exemption excuses real sites.
+    let sites = call_sites(&root);
+    let places = sites.get(&("reconcile".to_string(), None)).cloned().unwrap_or_default();
+    for (path, _) in CROSS_RELEASE {
+        assert!(places.iter().any(|(p, _)| p.starts_with(&format!("{path}:")) && cross_release(&root, p)), "the scan missed {path}");
+    }
+}
+
 #[test]
 fn the_scan_reads_each_call_site_form() {
     assert_eq!(invocations("ways author lint --check"), [("author".into(), Some("lint".into()))]);
@@ -325,5 +420,22 @@ fn the_scan_reads_each_call_site_form() {
         spawns("Command::new(ways_bin).args([\"corpus\", \"--quiet\"])"),
         [("corpus".into(), None)]
     );
-    assert_eq!(spawns("Command::new(exe).args([\"target\", \"plan\"])"), [("target".into(), Some("plan".into()))]);
+    assert_eq!(spawns("Command::new(exe).args([\"manage\", \"target\", \"plan\"])"), [("manage".into(), Some("target".into()))]);
+    assert_eq!(spawns("Command::new(ways_bin).arg(\"reconcile\")"), [("reconcile".into(), None)]);
+    // An escaped quote closing a path in an `echo -e` message.
+    assert_eq!(
+        invocations(r#"echo -e "    ${CYAN}\"$APP_DIR/bin/ways\" reconcile${RESET}""#),
+        [("reconcile".into(), None)]
+    );
+}
+
+#[test]
+fn the_scan_reads_moved_names_in_messages() {
+    // Positive controls: messages a person reads, which `invocations` skips.
+    assert_eq!(moved_mentions(r#"echo "  then run ways update to refresh""#), ["update"]);
+    assert_eq!(moved_mentions(r#"bail!("run `ways reconcile --force` or ways uninstall")"#), ["reconcile", "uninstall"]);
+    assert_eq!(moved_mentions(r#"eprintln!("see ways target list")"#), ["target"]);
+    // The new forms, other words, and the skill's name are not moved names.
+    assert!(moved_mentions("ways manage update && ways manage target list").is_empty());
+    assert!(moved_mentions("always update the cache; ways-update skill; ways updated").is_empty());
 }

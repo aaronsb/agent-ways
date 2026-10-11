@@ -85,9 +85,9 @@ const SECTIONS: &[SectionSpec] = &[
         file: FILE,
         top: &["targets"],
         per_entry: true, entry: None,
-        repair: Some("`ways target add|enable|disable|remove <dir>`"),
+        repair: Some("`ways manage target add|enable|disable|remove <dir>`"),
         columns: Some(("target", "state")),
-        doc: "Where agent-ways is active. Changed by `ways target`, which reconciles.",
+        doc: "Where agent-ways is active. Changed by `ways manage target`, which reconciles.",
     },
     SectionSpec {
         name: "install.secret_path_deny",
@@ -310,7 +310,7 @@ const KEYS: &[KeySpec] = &[
         scope: Scope::User,
         check: Some(check_targets),
         doc: "The Claude Code config directories agent-ways is active in.",
-        long: "Changed by actions, since each change reconciles: `ways target add|enable|disable|remove <dir>` (ADR-184). Absent means the default ~/.claude, enabled.",
+        long: "Changed by actions, since each change reconciles: `ways manage target add|enable|disable|remove <dir>` (ADR-184). Absent means the default ~/.claude, enabled.",
         ..BASE
     },
     agent_theme::settings::ACTIVE,

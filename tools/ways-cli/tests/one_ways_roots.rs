@@ -1,6 +1,6 @@
 //! One definition of the ways roots (#797).
 //!
-//! `ways reconcile` points the projection (`~/.claude/hooks/ways`) at a dev
+//! `ways manage repair` points the projection (`~/.claude/hooks/ways`) at a dev
 //! checkout, so the shipped ways a session reads are the checkout's, and the
 //! app copy under `$XDG_DATA` is stale. Every reader must see the projected
 //! tree and none the stale copy. Each test runs the real binary in a fixture

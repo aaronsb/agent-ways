@@ -29,7 +29,7 @@ const USER_CONTEXT_STUB: &str = "<!-- user / feedback / reference entries only -
 /// comparison against it.
 ///
 /// NOTE: this asset lives OUTSIDE `tools/`, so a change to it changes the `ways`
-/// binary without touching any `tools/` path. `ways update`'s rebuild classifier
+/// binary without touching any `tools/` path. `ways manage update`'s rebuild classifier
 /// (`update.rs`, `EMBEDDED_ASSET_PREFIXES`) lists `hooks/memory-seed/` for exactly
 /// this reason — keep them in sync, or a seed edit would ship without a rebuild.
 const SEED_BODY_V1: &str = include_str!("../../../../hooks/memory-seed/seed-v1.md");

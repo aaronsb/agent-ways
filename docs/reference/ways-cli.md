@@ -10,7 +10,7 @@ Bare `ways` prints this help, under the banner on a terminal. When the relevance
 
 ## The screens
 
-`ways settings`, `ways session`, `ways projects`, `ways agent` and `ways target` open a full-screen view when run bare on a terminal. Each screen is a view over commands that print the same data with `--json`. A table's bottom border names its command, with the scope the screen is showing, so an agent can read what the operator sees. In a pipe, each prints its help or its default listing instead.
+`ways settings`, `ways session`, `ways projects`, `ways agent` and `ways manage` open a full-screen view when run bare on a terminal. Each screen is a view over commands that print the same data with `--json`. A table's bottom border names its command, with the scope the screen is showing, so an agent can read what the operator sees. In a pipe, each prints its help or its default listing instead.
 
 The session and projects screens share these keys:
 
@@ -84,7 +84,7 @@ ways settings theme delete glacier
 
 ### Settings screens
 
-Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors` or `theme`. Bare `ways agent` opens the gate tab, and bare `ways target` opens the install tab. The data is what `ways settings list --json` prints.
+Bare `ways settings` on a terminal opens the settings screens. `ways settings <tab>` opens them on a tab: `ways`, `matching`, `gate`, `install`, `attend`, `sensors` or `theme`. Bare `ways agent` opens the gate tab, and bare `ways manage` or `ways manage target` opens the install tab. The data is what `ways settings list --json` prints.
 
 ![the matching tab with one change pending](../images/ways/settings-matching.png)
 
@@ -108,7 +108,7 @@ Each tab is a tree of settings on the left and the selected key's detail on the 
 
 In the tree, colour marks a row's state: a changed value, a value that differs from its default, a read-only row, a queued action. The `?` help lists the states. `[a]` marks a row with actions and `!` a lint finding.
 
-Some tabs have keys of their own, which the footer names. On the ways tab, `s` sets up agent-ways in a project, and `p` switches between this project's and all projects' switched-off ways. On the install tab, `t` activates a target, `A` adds one and `p` shows a target's plan (see [`ways target`](#ways-target)).
+Some tabs have keys of their own, which the footer names. On the ways tab, `s` sets up agent-ways in a project, and `p` switches between this project's and all projects' switched-off ways. On the install tab, `t` activates a target, `A` adds one and `p` shows a target's plan (see [`ways manage target`](#ways-manage-target)).
 
 On the theme tab, ↑↓ previews a theme, Enter uses it and `e` edits it (a bundled one through a copy you name). `a` opens the theme's actions:
 
@@ -126,32 +126,6 @@ A refused name keeps the prompt open with the reason in the bar. Theme files are
 **The model picker.** Enter on a choice key opens a picker. `gate.profiles.<profile>.model` offers the models the provider serves once [`ways agent models`](#ways-agent) has fetched and cached the list. Until then the key takes any model id as text.
 
 ![the model picker on gate.profiles.anthropic.model](../images/ways/settings-model-picker.png)
-
-## `ways target`
-
-**When:** Finding out where agent-ways is active on this machine, or activating and deactivating it for a Claude Code config directory ([ADR-184](../architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)).
-
-**Run from:** Anywhere.
-
-**Tells you:** `list` prints each target with its enabled and observe flags, its converged state (`active`, `pending`, `partial`, `refused`, `stale` or `withdrawn`), and its own config file when one exists. With no `targets` key in the user config, the one target is `~/.claude`.
-
-`plan <dir>` previews activation and touches nothing. It shows every projection root as `linked`, `link`, `relink` or `refused`, and the settings merge as what is kept of yours, what is added, what of a prior install is replaced and what would be removed. `add <dir>` prints that plan and stops with exit 3 when a real path sits at a root or an entry of yours would go; `--force` moves real paths aside and proceeds. `disable` withdraws and keeps the record; `enable` reconciles into it again; `remove` withdraws and drops the record. `list`, `plan` and `add` take `--json`.
-
-A target can carry its own configuration: a `config.yaml` at `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml`, or the path in the entry's `config:` field. It has the same keys as the user config and is layered over it for sessions under that target's config directory. `ways settings list` names the layer it applied.
-
-A project can switch ways off for itself with `enabled: false` in its `.claude/ways.yaml`. Every scan lane then injects nothing there.
-
-```
-ways target list
-ways target plan ~/.claude-work
-ways target add ~/.claude-work            # record, then reconcile into it
-ways target add ~/.claude-work --dry-run  # the plan only
-ways target disable ~/.claude-work        # withdraw our links and hooks
-ways target enable ~/.claude-work
-ways target remove ~/.claude-work
-```
-
-Bare `ways target` on a terminal opens the settings screens on their install tab. In a pipe it prints its help and exits 2.
 
 ## `ways agent`
 
@@ -661,23 +635,29 @@ ways corpus --verbose               # trace every phase; diagnose a stalled buil
 
 The phases, in order: path resolution; the user and core way scans; per-project resolution, each project named as it is resolved (a stalled network mount or a cloud-storage placeholder directory hangs here, under that project's name); the corpus write; the three `way-embed generate` passes (`en`, `multi`, then `combined`, which re-embeds what the first two did and takes longest); the two calibration lanes; and the manifest write.
 
-## `ways update`
+## `ways manage`
+
+The install's lifecycle, under one group ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)): `update`, `repair`, `uninstall`, `reinstall` and `target`. Bare `ways manage` on a terminal opens the settings screens on their install tab. In a pipe it prints its help and exits 2.
+
+For one release the old top-level names `update`, `uninstall` and `target` still run. Each prints the new form on stderr, then runs it with the same arguments and exit code. The old `reconcile` stays as a hidden fixed name for the previous release's updater (see [Plumbing](#plumbing)).
+
+### `ways manage update`
 
 **When:** Updating agent-ways to the latest release.
 
 **Run from:** Anywhere. The app source in `$XDG_DATA_HOME/agent-ways` must be an agent-ways git checkout; an install from before 1.0 is refused and needs migrating first.
 
-**Tells you:** Each step as it runs: pull the app source, refresh every binary of the suite (a pre-built download first, a build from source as the fallback), rebuild the corpus, run `ways reconcile`, and check the judge's keys. A binary that fails to refresh is put back, so a failed update leaves the old install working. `--dry-run` prints the steps and runs nothing. `--ref <branch|tag|commit>` pins the install to that ref and builds the whole suite from source, leaving the release channel until `ways update --ref main`.
+**Tells you:** Each step as it runs: pull the app source, refresh every binary of the suite (a pre-built download first, a build from source as the fallback), rebuild the corpus, run `ways manage repair`, and check the judge's keys. A binary that fails to refresh is put back, so a failed update leaves the old install working. `--dry-run` prints the steps and runs nothing. `--ref <branch|tag|commit>` pins the install to that ref and builds the whole suite from source, leaving the release channel until `ways manage update --ref main`.
 
 ```
-ways update
-ways update --dry-run
-ways update --ref ways-v1.32.0
+ways manage update
+ways manage update --dry-run
+ways manage update --ref ways-v1.32.0
 ```
 
-## `ways reconcile`
+### `ways manage repair`
 
-**When:** Repairing the `~/.claude` projection ([ADR-144](../architecture/platform/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md)). The installer and `ways update` run it for you; run it by hand after pulling the app source, or when a projected root is missing.
+**When:** Repairing the `~/.claude` projection ([ADR-144](../architecture/platform/ADR-144-install-repair-migrate-as-one-manifest-reconciler.md)). The installer and `ways manage update` run it for you; run it by hand after pulling the app source, or when a projected root is missing.
 
 **Run from:** Anywhere.
 
@@ -686,15 +666,15 @@ ways update --ref ways-v1.32.0
 With no `--dest`, it runs over every target in the user config ([ADR-184](../architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)). Each enabled target is converged. Each disabled one is withdrawn: our symlinks are unlinked, and our hooks block and permissions are removed from its `settings.json` through the same merge base that wrote them. An explicit `--dest` is a single-target run and leaves the list alone.
 
 ```
-ways reconcile                       # every target in config.yaml; default: ~/.claude
-ways reconcile --dry-run             # preview; prints "refused <root>" for real paths, exit 0
-ways reconcile --force               # rename each real path to <name>.ways-backup-<seconds>, then link
-ways reconcile --source <checkout> --dest <dir>   # dogfood a development checkout
-ways reconcile --mode copy           # copy files instead of symlinking (default: symlink)
-ways reconcile --quiet               # no summary line
+ways manage repair                       # every target in config.yaml; default: ~/.claude
+ways manage repair --dry-run             # preview; prints "refused <root>" for real paths, exit 0
+ways manage repair --force               # rename each real path to <name>.ways-backup-<seconds>, then link
+ways manage repair --source <checkout> --dest <dir>   # dogfood a development checkout
+ways manage repair --mode copy           # copy files instead of symlinking (default: symlink)
+ways manage repair --quiet               # no summary line
 ```
 
-## `ways uninstall`
+### `ways manage uninstall`
 
 **When:** Removing agent-ways from the machine ([ADR-198](../architecture/ways/ADR-198-uninstall-is-a-lifecycle-command-that-keeps-what-the-operator-owns.md)).
 
@@ -703,10 +683,49 @@ ways reconcile --quiet               # no summary line
 **Tells you:** The plan: every target it withdraws from, the agent it stops, the command links it removes, and the app and cache directories it deletes. Without `--yes` it prints the plan and changes nothing. Your config (your ways, API keys and settings) and state (events) stay unless `--purge` is given. A plan that would delete anything but the app's own directories is refused.
 
 ```
-ways uninstall                 # the plan only
-ways uninstall --yes
-ways uninstall --yes --purge   # also your config and state
+ways manage uninstall                 # the plan only
+ways manage uninstall --yes
+ways manage uninstall --yes --purge   # also your config and state
 ```
+
+### `ways manage reinstall`
+
+**When:** An install looks damaged, or a cache or a stale projection is suspected, and you want the same version back cleanly ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). Moving to another version is `ways manage update`.
+
+**Run from:** Anywhere. It needs the network and room for a second copy of the app.
+
+**Tells you:** The plan: the commit it puts back and the source it fetches it from, the uninstall it runs, and the install that follows. Without `--yes` it prints the plan and changes nothing. With `--yes` it fetches and verifies that commit into `agent-ways.reinstall` beside the app first; if that fails, nothing has been removed. It then uninstalls, keeping your config and state, and runs the staged installer, which projects every target your config lists. It does not take `--purge`. If the install step fails, the staged copy is kept and the last line is the command that finishes the install from it.
+
+```
+ways manage reinstall          # the plan only
+ways manage reinstall --yes
+```
+
+### `ways manage target`
+
+**When:** Finding out where agent-ways is active on this machine, or activating and deactivating it for a Claude Code config directory ([ADR-184](../architecture/platform/ADR-184-installation-and-activation-are-separate-states-targets-as-the-unit-of-activation.md)).
+
+**Run from:** Anywhere.
+
+**Tells you:** `list` prints each target with its enabled and observe flags, its converged state (`active`, `pending`, `partial`, `refused`, `stale` or `withdrawn`), and its own config file when one exists. With no `targets` key in the user config, the one target is `~/.claude`.
+
+`plan <dir>` previews activation and touches nothing. It shows every projection root as `linked`, `link`, `relink` or `refused`, and the settings merge as what is kept of yours, what is added, what of a prior install is replaced and what would be removed. `add <dir>` prints that plan and stops with exit 3 when a real path sits at a root or an entry of yours would go; `--force` moves real paths aside and proceeds. `disable` withdraws and keeps the record; `enable` reconciles into it again; `remove` withdraws and drops the record. `list`, `plan` and `add` take `--json`.
+
+A target can carry its own configuration: a `config.yaml` at `$XDG_CONFIG_HOME/agent-ways/targets/<key>/config.yaml`, or the path in the entry's `config:` field. It has the same keys as the user config and is layered over it for sessions under that target's config directory. `ways settings list` names the layer it applied.
+
+A project can switch ways off for itself with `enabled: false` in its `.claude/ways.yaml`. Every scan lane then injects nothing there.
+
+```
+ways manage target list
+ways manage target plan ~/.claude-work
+ways manage target add ~/.claude-work            # record, then reconcile into it
+ways manage target add ~/.claude-work --dry-run  # the plan only
+ways manage target disable ~/.claude-work        # withdraw our links and hooks
+ways manage target enable ~/.claude-work
+ways manage target remove ~/.claude-work
+```
+
+Bare `ways manage target` on a terminal opens the settings screens on their install tab. In a pipe it prints its help and exits 2.
 
 ## Plumbing
 
@@ -725,8 +744,9 @@ The hooks call these. They are hidden from `ways --help`, and their names stay f
 | `ways sessions-root` | Scripts the binary does not run (`gh-tasks`). Macros and postchecks get it as `WAYS_SESSIONS_ROOT`. |
 | `ways project-slug [path]` | Macros that read per-project state (`meta/memory/macro.sh`). |
 | `ways events-log-path` | Scripts outside the binary that read the event log. |
-| `ways manifest` | Debugging `reconcile`: the projection manifest it converges toward. |
-| `ways judge-setup` | The installer and the end of `ways update`: checks the judge's keys and, on a terminal, offers to add one. |
+| `ways manifest` | Debugging `ways manage repair`: the projection manifest it converges toward. |
+| `reconcile` | The previous release's updater, which spawns it on the newly installed binary. It runs the same code as `ways manage repair`, with the same flags and exit codes, and prints no notice ([ADR-509](../architecture/platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md)). |
+| `ways judge-setup` | The installer and the end of `ways manage update`: checks the judge's keys and, on a terminal, offers to add one. |
 
 **Testing a way by hand.** `ways scan prompt` runs the same code as the UserPromptSubmit hook and prints the markdown that would be injected; no output means nothing crossed a threshold. `ways show way` prints a way as Claude receives it. Both need `--session`; any string, such as `dummy`, makes a dry run that touches no real session. Both are session-aware, so a second call with the same session prints nothing for a way already shown. `--project <dir>` adds that project's ways.
 

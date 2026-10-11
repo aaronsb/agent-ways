@@ -28,7 +28,7 @@ Rule of thumb: **a way teaches Claude how to behave; a skill gives Claude someth
 
 ## The scope caveat — `skills/` here projects into personal scope
 
-`skills/` in this repo is **projected into `~/.claude/skills/`** (ADR-142) — the live personal scope. Once a skill here reaches your install (via `ways reconcile` / update, or immediately if you're editing the symlinked projection), it is available in **every** project on this machine. Two consequences:
+`skills/` in this repo is **projected into `~/.claude/skills/`** (ADR-142) — the live personal scope. Once a skill here reaches your install (via `ways manage repair` / update, or immediately if you're editing the symlinked projection), it is available in **every** project on this machine. Two consequences:
 
 - **Triggers must be tight.** A loose `description` on a global skill hijacks unrelated requests everywhere. Name the specific task and the words a user would actually say, and say what it's *not* for. (`ways-update` ends its description with "Not for editing or authoring individual ways… or upgrading project dependencies" precisely to stay in its lane.)
 - **A global skill must be location-independent.** It can't assume cwd. Resolve the target up front — e.g. `ROOT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"` — and verify it's the repo you expect before acting.

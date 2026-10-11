@@ -56,7 +56,7 @@ struct Outcome {
     detail: String,
 }
 
-/// `ways reconcile` entrypoint.
+/// `ways manage repair` entrypoint.
 ///
 /// The real-path guard: a projection root that is already a real directory or
 /// file (a user's own `~/.claude/skills`, a pre-1.0 in-place clone's tree) is
@@ -109,7 +109,7 @@ pub fn run(
 
     // Migration (ADR-184 item 2): an install from before the targets key has
     // just converged its implicit default. Record it, so the install is
-    // explicit from here and `ways target list` reads the truth.
+    // explicit from here and `ways manage target list` reads the truth.
     if !cfg.targets_explicit() && !dry_run {
         // Under the lock, and only if the key is still absent: an operator's
         // `target add` that landed meanwhile wins.
@@ -156,8 +156,8 @@ pub(crate) fn run_targets_in(
         if !quiet {
             eprintln!(
                 "no targets: agent-ways is installed and inactive. \
-                 `ways target add <dir>` activates a Claude Code config directory; \
-                 `ways target list` lists them."
+                 `ways manage target add <dir>` activates a Claude Code config directory; \
+                 `ways manage target list` lists them."
             );
         }
         return Ok(());
@@ -185,7 +185,7 @@ pub(crate) fn run_targets_in(
 }
 
 /// Resolve the source and roots once and run the given targets. The config
-/// verbs (`ways target …`) reach reconcile through here.
+/// verbs (`ways manage target …`) reach reconcile through here.
 pub fn run_for_targets(targets: &[crate::config::Target], dry_run: bool, quiet: bool, force: bool) -> Result<()> {
     let source_root = paths::data_root();
     if !source_root.is_dir() {

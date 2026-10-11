@@ -10,8 +10,15 @@
 #   scripts/install.sh --bootstrap               # clone latest + install
 #   curl ... | bash -s -- --bootstrap            # self-bootstrap from internet
 #   scripts/install.sh --dangerously-clobber     # nuke ~/.claude + app dir, reinstall
+#   scripts/install.sh --stage DIR --from URL --rev SHA [--branch B]
+#                                                # fetch + verify one commit into DIR, install nothing
+#                                                # (`ways manage reinstall` stages with this, ADR-509)
 #
-# The happy path: stage app → make setup → ways reconcile. Everything else is guardrails.
+# The happy path: stage app → make setup → ways manage repair. Everything else is guardrails.
+#
+# Exit codes: 0 done; 1 failed; 2 usage; 3 the app is built and on PATH, and the
+# repair after the build failed, most often at a real path in a projected root
+# (fix the cause it names, then finish with `ways manage repair`).
 
 set -euo pipefail
 
@@ -59,7 +66,7 @@ ${CYAN}What it does (1.0 XDG layout):${RESET}
   1. Checks prerequisites (git, jq, make)
   2. Stages the app into \$XDG_DATA_HOME/agent-ways
   3. Builds binaries + embedding model ('make setup')
-  4. Reconciles the projection into ~/.claude ('ways reconcile')
+  4. Reconciles the projection into ~/.claude ('ways manage repair')
      Your Claude Code files (projects/, credentials, settings) are preserved.
      A real skills/, agents/, commands/ or hooks/ways/ directory of your own at
      a projected root stops this step; nothing is deleted.
@@ -75,17 +82,32 @@ HELP
 
 BOOTSTRAP=false
 CLOBBER=false
+STAGE="" STAGE_FROM="" STAGE_REV="" STAGE_BRANCH=""
+ARGS=("$@")
 
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --stage|--from|--rev|--branch)
+      # A value flag takes the next word, which must be there and not a flag.
+      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+        echo "$1 needs a value." >&2
+        exit 2
+      fi ;;
+  esac
+  case "$1" in
     --bootstrap) BOOTSTRAP=true ;;
     --dangerously-clobber) CLOBBER=true ;;
+    --stage) STAGE="$2"; shift ;;
+    --from) STAGE_FROM="$2"; shift ;;
+    --rev) STAGE_REV="$2"; shift ;;
+    --branch) STAGE_BRANCH="$2"; shift ;;
     --help|-h) show_help; exit 0 ;;
   esac
+  shift
 done
 
 # No flags at all → show help
-if [[ "$BOOTSTRAP" == "false" ]] && [[ ! -f "hooks/check-config-updates.sh" ]]; then
+if [[ "$BOOTSTRAP" == "false" && -z "$STAGE" ]] && [[ ! -f "hooks/check-config-updates.sh" ]]; then
   show_help
   exit 0
 fi
@@ -111,6 +133,48 @@ check_prereqs() {
   fi
 }
 
+# --- Fetch and verify ---
+
+# Clone URL into DEST and check that it is agent-ways. With REV, check out that
+# one commit, and fail if the source does not have it; with BRANCH as well, the
+# branch name is kept on it, tracking origin, so a later pull works. Both the
+# bootstrap and `ways manage reinstall` fetch through here.
+fetch_verified() {
+  local url="$1" dest="$2" rev="${3:-}" branch="${4:-}"
+  if [[ -z "$rev" ]]; then
+    git clone --depth 1 "$url" "$dest" 2>&1 || { echo -e "${RED}Failed to clone ${url}${RESET}"; return 1; }
+  else
+    git clone --no-checkout "$url" "$dest" 2>&1 || { echo -e "${RED}Failed to clone ${url}${RESET}"; return 1; }
+    if [[ -n "$branch" ]]; then
+      git -C "$dest" checkout -q -B "$branch" "$rev" 2>&1 &&
+        { git -C "$dest" branch -q --set-upstream-to="origin/$branch" 2>/dev/null || true; }
+    else
+      git -C "$dest" -c advice.detachedHead=false checkout -q --detach "$rev" 2>&1
+    fi || { echo -e "${RED}${url} does not have ${rev}${RESET}"; return 1; }
+  fi
+  if [[ ! -f "$dest/hooks/check-config-updates.sh" ]]; then
+    echo -e "${RED}Clone doesn't look like agent-ways.${RESET}"
+    return 1
+  fi
+  echo -e "Verified: ${DIM}$(git -C "$dest" log --oneline -1 2>/dev/null)${RESET}"
+}
+
+# --- Stage: fetch and verify one commit, install nothing ---
+
+if [[ -n "$STAGE" ]]; then
+  if [[ -z "$STAGE_FROM" || -z "$STAGE_REV" ]]; then
+    echo -e "${RED}--stage needs --from URL and --rev SHA.${RESET}"
+    exit 2
+  fi
+  if [[ -e "$STAGE" ]]; then
+    echo -e "${RED}${STAGE} already exists.${RESET}"
+    exit 1
+  fi
+  check_prereqs
+  fetch_verified "$STAGE_FROM" "$STAGE" "$STAGE_REV" "$STAGE_BRANCH" || { rm -rf "$STAGE"; exit 1; }
+  exit 0
+fi
+
 # --- Self-bootstrap ---
 
 if [[ "$BOOTSTRAP" == "true" ]]; then
@@ -124,26 +188,13 @@ if [[ "$BOOTSTRAP" == "true" ]]; then
   BOOTSTRAP_DIR=$(mktemp -d)
   trap 'rm -rf "$BOOTSTRAP_DIR"' EXIT
 
-  if ! git clone --depth 1 "$UPSTREAM_URL" "$BOOTSTRAP_DIR/agent-ways" 2>&1; then
-    echo -e "${RED}Failed to clone ${UPSTREAM_URL}${RESET}"
-    exit 1
-  fi
-
   CLONE="$BOOTSTRAP_DIR/agent-ways"
-
-  # Verify the clone
-  if [[ ! -f "$CLONE/hooks/check-config-updates.sh" ]]; then
-    echo -e "${RED}Clone doesn't look like agent-ways.${RESET}"
-    exit 1
-  fi
-
-  CLONE_HEAD=$(git -C "$CLONE" log --oneline -1 2>/dev/null)
-  echo -e "Verified: ${DIM}${CLONE_HEAD}${RESET}"
+  fetch_verified "$UPSTREAM_URL" "$CLONE" || exit 1
   echo ""
 
   # Forward flags (minus --bootstrap) to the verified copy
   FORWARD_ARGS=()
-  for arg in "$@"; do
+  for arg in "${ARGS[@]}"; do
     [[ "$arg" != "--bootstrap" ]] && FORWARD_ARGS+=("$arg")
   done
 
@@ -191,14 +242,17 @@ is_agent_ways_repo() {
   return 1
 }
 
-# Shown when `ways reconcile` refuses: a real path sits at a projected root.
+# Shown when the repair after the build fails, most often because a real path
+# sits at a projected root. The caller exits 3, so `ways manage reinstall` keeps
+# the built app.
 print_projection_stopped() {
   echo ""
-  echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; nothing in ${DEST} was changed."
-  echo "  Read the list above. Move those paths aside (or copy what you want to keep"
-  echo "  into a project's .claude/skills/), then run:"
-  echo -e "    ${CYAN}ways reconcile${RESET}            # link the projected roots"
-  echo -e "    ${CYAN}ways reconcile --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
+  echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; the repair of ${DEST} did not finish."
+  echo "  Read the error above. When it lists real paths at projected roots, move those"
+  echo "  aside (or copy what you want to keep into a project's .claude/skills/)."
+  echo "  Then run:"
+  echo -e "    ${CYAN}ways manage repair${RESET}            # link the projected roots"
+  echo -e "    ${CYAN}ways manage repair --force${RESET}    # or: rename each real path to <name>.ways-backup-<seconds> first"
   echo "  If ~/.claude is itself a git clone of agent-ways (pre-1.0), do not use --force;"
   echo "  see ${UPSTREAM_URL}/blob/ways-v1.8.3/docs/migration-1.0.md"
 }
@@ -335,9 +389,11 @@ if is_agent_ways_repo "$APP_DIR"; then
   echo ""
   if [[ -x "$APP_DIR/bin/ways" ]]; then
     echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
+    # The fixed name: `make setup` may install the latest release, which can
+    # predate `ways manage` (ADR-509 §4).
     if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
       print_projection_stopped
-      exit 1
+      exit 3
     fi
     echo ""
     echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
@@ -345,7 +401,7 @@ if is_agent_ways_repo "$APP_DIR"; then
     judge_setup
   else
     echo -e "${YELLOW}ways binary not built — projection was NOT reconciled.${RESET}"
-    echo "  Fix the build (cd $APP_DIR && make setup), then run: ways reconcile"
+    echo "  Fix the build (cd $APP_DIR && make setup), then run: ways manage repair"
   fi
   exit 0
 fi
@@ -370,8 +426,9 @@ else
   mkdir -p "$(dirname "$APP_DIR")"
   git clone "$SRC" "$APP_DIR" 2>&1
   # Only rewrite origin when we cloned from a temp/bootstrap source — never
-  # clobber the remote of a checkout we were run from.
-  git -C "$APP_DIR" remote set-url origin "$UPSTREAM_URL" 2>/dev/null || true
+  # clobber the remote of a checkout we were run from. A reinstall names the
+  # source its install came from in AGENT_WAYS_ORIGIN (ADR-509).
+  git -C "$APP_DIR" remote set-url origin "${AGENT_WAYS_ORIGIN:-$UPSTREAM_URL}" 2>/dev/null || true
 fi
 find "$APP_DIR/hooks" -name '*.sh' -exec chmod +x {} + 2>/dev/null || true
 
@@ -398,9 +455,11 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   echo -e "${DIM}(symlinks the projected roots; merges settings.json; your files stay; a real directory at a projected root stops it, nothing is deleted)${RESET}"
   echo ""
   mkdir -p "$DEST"
+  # The fixed name: `make setup` may install the latest release, which can
+  # predate `ways manage` (ADR-509 §4).
   if ! "$APP_DIR/bin/ways" reconcile --source "$APP_DIR" --dest "$DEST"; then
     print_projection_stopped
-    exit 1
+    exit 3
   fi
   echo ""
   echo -e "${BOLD}Done.${RESET} ~/.claude is now a projection of ${DIM}${APP_DIR}${RESET}"

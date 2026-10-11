@@ -168,7 +168,7 @@ fn exec_chat(passthrough: Vec<String>) -> ! {
             .args(&passthrough)
             .exec();
         eprintln!("attend chat: failed to launch attend-chat: {}", err);
-        eprintln!("  (is `attend-chat` on PATH? run `ways update` to install it)");
+        eprintln!("  (is `attend-chat` on PATH? run `ways manage update` to install it)");
         std::process::exit(1);
     }
     #[cfg(not(unix))]
@@ -180,7 +180,7 @@ fn exec_chat(passthrough: Vec<String>) -> ! {
             Ok(status) => std::process::exit(status.code().unwrap_or(0)),
             Err(err) => {
                 eprintln!("attend chat: failed to launch attend-chat: {}", err);
-                eprintln!("  (is `attend-chat` on PATH? run `ways update` to install it)");
+                eprintln!("  (is `attend-chat` on PATH? run `ways manage update` to install it)");
                 std::process::exit(1);
             }
         }

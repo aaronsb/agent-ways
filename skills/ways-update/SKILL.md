@@ -1,6 +1,6 @@
 ---
 name: ways-update
-description: Update the agent-ways installation to the latest version — pull the app source in $XDG_DATA, rebuild the Rust binaries (ways/attend/way-embed) and corpus, and refresh the ~/.claude projection with `ways reconcile`. Use when the user wants to update agent-ways, pull the latest ways/hooks, or refresh their ways framework install. Not for editing or authoring individual ways (that is the ways skill) or upgrading project dependencies.
+description: Update the agent-ways installation to the latest version — pull the app source in $XDG_DATA, rebuild the Rust binaries (ways/attend/way-embed) and corpus, and refresh the ~/.claude projection with `ways manage repair`. Use when the user wants to update agent-ways, pull the latest ways/hooks, or refresh their ways framework install. Not for editing or authoring individual ways (that is the ways skill) or upgrading project dependencies.
 allowed-tools: Bash, Read
 ---
 
@@ -18,17 +18,17 @@ doesn't do.
 cd "$XDG_DATA_HOME/agent-ways"
 git pull --ff-only        # (or fetch/merge upstream for a fork — see step 2)
 make update-binaries      # FORCE-rebuild ways/attend/way-embed (make setup skips existing binaries)
-./bin/ways reconcile      # refresh the ~/.claude projection + re-merge settings.json
+./bin/ways manage repair  # refresh the ~/.claude projection + re-merge settings.json
 ```
 
 The pull is done here (step 1/2), so this uses `make update-binaries` — a force
 rebuild — rather than `make setup`, which short-circuits any binary that already
-exists and would silently leave you on the old build. `ways update` bundles the pull and the rebuild, but this skill does its own guarded pull first.
+exists and would silently leave you on the old build. `ways manage update` bundles the pull and the rebuild, but this skill does its own guarded pull first.
 The embedding corpus self-heals on the next session via the `ways corpus --if-stale`
 `SessionStart` hook; regenerate it eagerly with `make -C "$APP" setup` if you want.
 
 Because the projected roots are symlinks into the app dir, a pull is *live* for
-existing files the moment it lands; `ways reconcile` is what catches **structural**
+existing files the moment it lands; `ways manage repair` is what catches **structural**
 changes (a new skill/way directory to link) and re-runs the `settings.json`
 three-way merge. A **running Claude Code session keeps the old hooks and ways in
 memory** — always finish by telling the user to restart.
@@ -106,7 +106,7 @@ in the `SessionStart` hook). To refresh it now — e.g. ways changed — run
 ### 4. Refresh the projection
 
 ```bash
-"$APP/bin/ways" reconcile --source "$APP" --dest "$HOME/.claude"
+"$APP/bin/ways" manage repair --source "$APP" --dest "$HOME/.claude"
 ```
 
 Idempotent and silent when nothing structural changed; relinks any new projected

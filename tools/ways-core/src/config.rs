@@ -261,7 +261,7 @@ pub struct Config {
     /// resolves by looking up the preset here and multiplying by the
     /// operator's current context window.
     pub refire_presets: HashMap<String, f64>,
-    /// Whether `ways reconcile` projects the framework's secret-path
+    /// Whether `ways manage repair` projects the framework's secret-path
     /// `permissions.deny` baseline into `settings.json` (ADR-152). Default
     /// `true` — secure by default. Set `secret_path_deny: false` to suppress the
     /// baseline entirely (the one explicit opt-out; a Claude Code deny cannot be

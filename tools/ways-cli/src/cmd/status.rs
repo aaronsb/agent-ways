@@ -196,7 +196,7 @@ pub fn run(json_output: bool) -> Result<()> {
         println!("  ways-mcp:  {}", mcp_binary_line());
         match crate::cmd::agent::resolve() {
             Some(p) => println!("  ways-agent: {}", p.display()),
-            None => println!("  ways-agent: not found — the relevance gate is off until `ways update` installs it"),
+            None => println!("  ways-agent: not found — the relevance gate is off until `ways manage update` installs it"),
         }
         for t in install_targets().0.iter().filter(|t| t.enabled) {
             println!("  mcp:       {} in {}", mcp_registration(&t.dir()), t.path);
@@ -388,16 +388,22 @@ fn install_targets() -> (Vec<crate::config::Target>, bool) {
 
 fn install_line() -> String {
     let (targets, explicit) = install_targets();
+    install_summary(&targets, explicit)
+}
+
+/// The Install line: a one-line summary that points to `ways manage target
+/// list` for the per-target detail (ADR-509 §6).
+fn install_summary(targets: &[crate::config::Target], explicit: bool) -> String {
     let enabled: Vec<&crate::config::Target> = targets.iter().filter(|t| t.enabled).collect();
     if enabled.is_empty() {
-        return "installed, inactive (no enabled target; `ways target add <dir>` activates one)".to_string();
+        return "installed, inactive (no enabled target; `ways manage target add <dir>` activates one)".to_string();
     }
     let names: Vec<String> = enabled
         .iter()
         .map(|t| format!("{} [{}]", t.path, crate::cmd::target::state(t)))
         .collect();
     format!(
-        "active, {} of {} target{} enabled: {}{}",
+        "active, {} of {} target{} enabled: {}{}; `ways manage target list` shows each",
         enabled.len(),
         targets.len(),
         if targets.len() == 1 { "" } else { "s" },
@@ -441,7 +447,7 @@ fn mcp_binary_line() -> String {
     let bin = crate::paths::data_root().join("bin").join("ways-mcp");
     match version_of(&bin) {
         Some(v) => format!("{} ({v})", bin.display()),
-        None => "not installed (`make ways-mcp` in the app directory, or `ways update`)".to_string(),
+        None => "not installed (`make ways-mcp` in the app directory, or `ways manage update`)".to_string(),
     }
 }
 
@@ -457,7 +463,7 @@ fn settings_findings() -> Vec<String> {
 fn mcp_registration(dir: &std::path::Path) -> String {
     match crate::cmd::mcp_register::status(dir, &crate::paths::projection_root()) {
         Some(cmd) => format!("{} → {cmd}", crate::cmd::mcp_register::SERVER),
-        None => format!("{} not registered (`ways reconcile` registers it)", crate::cmd::mcp_register::SERVER),
+        None => format!("{} not registered (`ways manage repair` registers it)", crate::cmd::mcp_register::SERVER),
     }
 }
 
@@ -548,7 +554,7 @@ fn gate_json() -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{sidecar_json, sidecar_line};
+    use super::{install_summary, sidecar_json, sidecar_line};
     use crate::cmd::scan::sidecar::Fallback;
     use serde_json::json;
 
@@ -560,7 +566,7 @@ mod tests {
             sidecar_line(&incomplete),
             "Body sidecar: not used, confirmation embeds per call — incomplete (missing a; stale b, c, d and 1 more); run `ways corpus`"
         );
-        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("the corpus was built with a way-embed that cannot return chunk vectors, which way-embed 1.2.0 adds; `ways update` installs it once it is published and rebuilds the corpus"));
+        assert!(sidecar_line(&Err(Fallback::NoVectors)).ends_with("the corpus was built with a way-embed that cannot return chunk vectors, which way-embed 1.2.0 adds; `ways manage update` installs it once it is published and rebuilds the corpus"));
         assert!(sidecar_line(&Err(Fallback::BuiltWithoutVectors)).ends_with("built without chunk vectors; run `ways corpus`"));
         assert!(sidecar_line(&Err(Fallback::BuildFailed("boom".into()))).ends_with("build failed: boom"));
         assert_eq!(sidecar_json(&Err(Fallback::Absent)), json!({ "used": false, "reason": "absent; run `ways corpus`" }));
@@ -578,5 +584,12 @@ mod tests {
         let file = Path::new("/k/anthropic");
         assert_eq!(key_phrase(Some(file), Some("valid"), None), "key from /k/anthropic, checked valid");
         assert!(key_phrase(Some(file), Some("invalid"), None).ends_with("last check invalid: fails open"));
+    }
+
+    #[test]
+    fn the_install_line_points_to_the_target_list() {
+        let t = crate::config::Target { path: "/nonexistent/.claude".into(), enabled: true, observe: None, config: None };
+        assert!(install_summary(&[t], true).ends_with("; `ways manage target list` shows each"));
+        assert!(install_summary(&[], true).contains("`ways manage target add <dir>`"));
     }
 }
