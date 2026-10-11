@@ -19,13 +19,13 @@ Point `statusLine` at the copy inside the app install:
 }
 ```
 
-The shell expands the command on each host, so it finds the install wherever `XDG_DATA_HOME` puts it, and `ways update` refreshes the script along with the rest of the app.
+The shell expands the command on each host, so it finds the install wherever `XDG_DATA_HOME` puts it, and `ways manage update` refreshes the script along with the rest of the app.
 
 ## When dotfiles manage your config
 
 ADR-164 requires a file carried through a config pipeline such as dotfiles to travel by value. A symlink from dotfiles into the app directory dangles on a host with a different layout, and it leaves the app as the owner of the content. Two setups meet that rule:
 
-- **Copy.** Put a copy of `statusline.sh` in your dotfiles and point `statusLine` at the deployed copy. It stays fixed until you update it; diff it against the repo after `ways update`.
+- **Copy.** Put a copy of `statusline.sh` in your dotfiles and point `statusLine` at the deployed copy. It stays fixed until you update it; diff it against the repo after `ways manage update`.
 - **Source.** Keep your own script in dotfiles and source the app's copy from it, as below. Your script owns the layout, it resolves the app path on each host, and the segments update with the app. Guard the `source` with `[[ -r ... ]]` when a host may lack agent-ways.
 
 The plain `statusLine` command above carries no file through the pipeline, only a setting whose path the shell expands per host.

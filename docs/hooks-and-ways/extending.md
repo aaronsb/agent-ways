@@ -15,12 +15,12 @@ A session reads ways from three roots, in this order:
 ```mermaid
 flowchart LR
     P["Project<br/>.claude/ways/"] --> U["Personal<br/>$XDG_CONFIG_HOME/agent-ways/ways/"] --> S["Shipped<br/>~/.claude/hooks/ways/"]
-    S -. "symlink into the app;<br/>ways update replaces it" .-> A["$XDG_DATA_HOME/agent-ways/hooks/ways"]
+    S -. "symlink into the app;<br/>ways manage update replaces it" .-> A["$XDG_DATA_HOME/agent-ways/hooks/ways"]
 ```
 
 A way's id is its path under the root, such as `softwaredev/code/testing`. When two roots hold the same id, the earlier root wins: a project way overrides your personal way, and your personal way overrides the shipped one. Only the winning copy fires.
 
-Do not author in `~/.claude/hooks/ways/`. It is a symlink into the app's own copy under `$XDG_DATA_HOME/agent-ways`, and `ways update` replaces it.
+Do not author in `~/.claude/hooks/ways/`. It is a symlink into the app's own copy under `$XDG_DATA_HOME/agent-ways`, and `ways manage update` replaces it.
 
 ## Creating a way
 

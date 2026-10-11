@@ -4,7 +4,7 @@ How contextual guidance gets injected into Claude Code sessions. The diagrams of
 
 ## Hook Events
 
-The hooks are declared in the `hooks` block of the repo's [`settings.json`](../settings.json). `ways reconcile` three-way merges that block into the `settings.json` of each target it projects to (`~/.claude` by default, ADR-184), so edit the repo copy, not the projected one. Scripts run in the order listed.
+The hooks are declared in the `hooks` block of the repo's [`settings.json`](../settings.json). `ways manage repair` three-way merges that block into the `settings.json` of each target it projects to (`~/.claude` by default, ADR-184), so edit the repo copy, not the projected one. Scripts run in the order listed.
 
 | Event | Matcher | Scripts |
 |-------|---------|---------|
@@ -414,11 +414,11 @@ Ways resolve through three roots, highest first: the project's `$PROJECT/.claude
 
 ## Switching Ways Off
 
-Several switches turn ways off at different reaches. Each is checked by `ways hook` before a lane runs, except `ways target disable`, which removes the hooks themselves, and the domain and per-way switches, which drop ways when the candidates are collected (so a disabled way never boosts a child or takes a judge slot) and are checked again when a way is shown.
+Several switches turn ways off at different reaches. Each is checked by `ways hook` before a lane runs, except `ways manage target disable`, which removes the hooks themselves, and the domain and per-way switches, which drop ways when the candidates are collected (so a disabled way never boosts a child or takes a judge slot) and are checked again when a way is shown.
 
 | Switch | Reach | Where it is set |
 |---|---|---|
-| `ways target disable <dir>` | Everything for that target: the hooks block and the links are withdrawn, so no ways hook runs at all | The target's `settings.json` and projection (see the [install guide](install-guide.md)) |
+| `ways manage target disable <dir>` | Everything for that target: the hooks block and the links are withdrawn, so no ways hook runs at all | The target's `settings.json` and projection (see the [install guide](install-guide.md)) |
 | `ways.enabled: false` | Every injecting hook in a project, or everywhere. Session upkeep (clearing, the response record) still runs (ADR-184). | `enabled:` in the project's `.claude/ways.yaml`, the user `config.yaml`, or a target's `config.yaml` |
 | `ways.subagents: false` | Every lane that injects into a subagent or teammate. The main agent keeps its ways. Logged as `injection_suppressed`. | `subagents:` in the same files |
 | `ways session subagents off` | The same, for one session, until switched back on | `$XDG_STATE_HOME/agent-ways/subagent-switch/<session_id>` |

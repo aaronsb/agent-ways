@@ -162,14 +162,14 @@ The installer:
 
 - stages the app into `$XDG_DATA_HOME/agent-ways` and builds the binaries, fetching the embedding model (~21MB);
 - links the suite binaries into `~/.local/bin`;
-- runs `ways reconcile`, which symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, merges its hook entries and permissions into `settings.json`, and registers the `agent-ways` MCP server in `~/.claude.json`;
+- runs `ways manage repair`, which symlinks the projected roots (`skills/`, `agents/`, `commands/`, `hooks/ways/`, built binaries) into `~/.claude`, merges its hook entries and permissions into `settings.json`, and registers the `agent-ways` MCP server in `~/.claude.json`;
 - checks for a relevance-judge key and, on a terminal, offers to add one.
 
 Your existing `~/.claude` (sessions, credentials, your own `settings.json` values, `projects/`) is preserved. If one of the projected root paths is already a real directory of yours, reconcile stops and names it; it never deletes it. The [install guide](docs/install-guide.md) covers that case, forks and previous installs. Restart Claude Code and the ways are active.
 
 To customize, add your own ways under `$XDG_CONFIG_HOME/agent-ways/ways/` (see [Creating Ways](#creating-ways)). To replace the shipped corpus, fork the repo and install from your fork. To work on agent-ways itself, set up a [development checkout](docs/development.md).
 
-To remove it, `ways uninstall` lists what it would do: withdraw from `~/.claude` and your other targets, remove the MCP registration, unlink the commands, delete the app and its caches. `ways uninstall --yes` does it. Your own ways, API keys and event log stay unless you add `--purge` (ADR-198).
+To remove it, `ways manage uninstall` lists what it would do: withdraw from `~/.claude` and your other targets, remove the MCP registration, unlink the commands, delete the app and its caches. `ways manage uninstall --yes` does it. Your own ways, API keys and event log stay unless you add `--purge` (ADR-198). To put the same version back cleanly, `ways manage reinstall --yes` fetches it first, then uninstalls and installs, keeping what is yours.
 
 > **Stop and read this** if you're letting an AI agent run the installer. You are about to let an agent modify `~/.claude/` — the directory that controls how Claude Code behaves. The agent is editing its own configuration. Review the repo first. You are responsible for the result.
 
@@ -229,7 +229,7 @@ Ways load from three roots. When the same way id (its path under the root) exist
 |---|---|---|
 | Project | `$PROJECT/.claude/ways/{domain}/{wayname}/` | Ways for one repository, checked in with it |
 | User | `$XDG_CONFIG_HOME/agent-ways/ways/{domain}/{wayname}/` | Your own ways, and overrides of shipped ways; updates never touch it |
-| Core | the app's `hooks/ways/`, projected to `~/.claude/hooks/ways/` | The shipped corpus; change it in a fork, since a local edit can block `ways update` |
+| Core | the app's `hooks/ways/`, projected to `~/.claude/hooks/ways/` | The shipped corpus; change it in a fork, since a local edit can block `ways manage update` |
 
 Each way is a `{wayname}.md` file with YAML frontmatter:
 
@@ -368,17 +368,17 @@ For the attention mechanics: [context-decay.md](docs/hooks-and-ways/context-deca
 The app source lives in `$XDG_DATA_HOME/agent-ways`. Update it with:
 
 ```bash
-ways update              # pull, refresh binaries, regenerate the corpus, reproject ~/.claude
-ways update --dry-run    # show what it would run
-ways update --ref REF    # pin to a branch, tag or commit and build from source
-ways update --ref main   # return to the release channel
+ways manage update              # pull, refresh binaries, regenerate the corpus, reproject ~/.claude
+ways manage update --dry-run    # show what it would run
+ways manage update --ref REF    # pin to a branch, tag or commit and build from source
+ways manage update --ref main   # return to the release channel
 ```
 
-`ways update` pulls the app source, prefers prebuilt binaries over a source build, regenerates the corpus, relinks, reprojects `~/.claude` (`ways reconcile`), and ends with the judge key check. Re-running the installer one-liner does the same and is idempotent. The [install guide](docs/install-guide.md#scenario-a-previous-agent-ways-install) covers the flags and older installs.
+`ways manage update` pulls the app source, prefers prebuilt binaries over a source build, regenerates the corpus, relinks, reprojects `~/.claude` (`ways manage repair`), and ends with the judge key check. Re-running the installer one-liner does the same and is idempotent. The [install guide](docs/install-guide.md#scenario-a-previous-agent-ways-install) covers the flags and older installs.
 
-A fork fetches and merges upstream in the app dir (`git fetch upstream && git merge upstream/main`), then runs `make update-binaries && ways reconcile`. The corpus rebuilds itself at the next session start.
+A fork fetches and merges upstream in the app dir (`git fetch upstream && git merge upstream/main`), then runs `make update-binaries && ways manage repair`. The corpus rebuilds itself at the next session start.
 
-At session start, `check-config-updates.sh` flags when the app source is behind upstream (`aaronsb/agent-ways`), fetching at most once per hour. A fork or a non-GitHub origin gets no nudge. There is no off switch yet that survives the next `ways reconcile`: deleting the script or its `settings.json` entry is undone by reconcile ([#816](https://github.com/aaronsb/agent-ways/issues/816)).
+At session start, `check-config-updates.sh` flags when the app source is behind upstream (`aaronsb/agent-ways`), fetching at most once per hour. A fork or a non-GitHub origin gets no nudge. There is no off switch yet that survives the next `ways manage repair`: deleting the script or its `settings.json` entry is undone by reconcile ([#816](https://github.com/aaronsb/agent-ways/issues/816)).
 
 ## Documentation
 

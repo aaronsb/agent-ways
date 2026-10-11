@@ -12,7 +12,7 @@ Two names recur below:
 | Root | Path | Holds |
 |---|---|---|
 | App | `$XDG_DATA_HOME/agent-ways` | The source checkout, the built binaries, and the shipped ways under `hooks/ways/`. Replaced on update. |
-| Projection | `~/.claude` (and each extra target) | `hooks/ways`, `skills`, `agents`, `commands` and each binary under `bin/` are linked (or copied) from the app. `ways reconcile` three-way merges the repo's `settings.json` hooks block into the target's `settings.json` (ADR-142, ADR-184). |
+| Projection | `~/.claude` (and each extra target) | `hooks/ways`, `skills`, `agents`, `commands` and each binary under `bin/` are linked (or copied) from the app. `ways manage repair` three-way merges the repo's `settings.json` hooks block into the target's `settings.json` (ADR-142, ADR-184). |
 | User config | `$XDG_CONFIG_HOME/agent-ways` | `config.yaml`, your own ways under `ways/`, the judge settings in `agent.yaml`, and per-target `targets/<key>/config.yaml`. Survives updates. |
 | State | `$XDG_STATE_HOME/agent-ways` | `events.jsonl`, and the per-session subagent switches under `subagent-switch/`. |
 | Cache | `$XDG_CACHE_HOME/agent-ways/user` | The embedding corpora (`ways-corpus-en.jsonl`, `ways-corpus-multi.jsonl`), `embed-manifest.json` with the calibration, and the GGUF models. Regenerable. |
