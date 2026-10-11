@@ -87,13 +87,19 @@ The sensor re-reads `_groups.yaml` on every poll, so `attend join` and `attend l
 
 Tracks dev-tool processes in `ps` output, not every process. A process produces start and exit events only if its name is on the sensor's tracked list (build tools, runtimes, editors, servers, `ssh`, `git` and similar, in `tools/sensor-processes/src/lib.rs`) or contains one of the session's focus keywords.
 
+The sensor tracks application presence, not process churn (ADR-113). Three rules keep a build to one event:
+
+- A process running under a watched build tool, such as `rustc` under `cargo` or `cc` under `make`, is part of that build and is not counted. A watched tool run on its own is counted.
+- A watched build tool announces no start. Its exit is the build event, `cargo finished`.
+- Any other app announces its start once it is still running at the next poll. An app that starts and exits between two polls produces no event at all.
+
 | Event | Magnitude | Example |
 |---|---|---|
-| process started | 2.0 | `cargo started` |
-| process exited | 2.0 | `nvim exited` |
-| watched build tool exited, no marker | 2.5 | ``cargo exited. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps`` |
-| watched build tool exited, success | 2.5 | `cargo exited (success). …` |
-| watched build tool exited, failure | 3.5 | `cargo exited (failure, code 101). …` |
+| app started (still running one poll later) | 2.0 | `docker started` |
+| app exited | 2.0 | `nvim exited` |
+| watched build tool finished, no marker | 2.5 | ``cargo finished. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps`` |
+| watched build tool finished, success | 2.5 | `cargo finished (success). …` |
+| watched build tool finished, failure | 3.5 | `cargo finished (failure, code 101). …` |
 
 ### The watch list
 

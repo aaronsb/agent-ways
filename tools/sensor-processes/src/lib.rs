@@ -1,5 +1,5 @@
 use sensor_trait::{Focus, Sensor};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
@@ -90,17 +90,73 @@ fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64) -> (f64,
     match matched {
         Some(m) if m.code == 0 => (
             2.5,
-            format!("{app} exited (success). Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps"),
+            format!("{app} finished (success). Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps"),
         ),
         Some(m) => (
             3.5,
-            format!("{app} exited (failure, code {}). Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps", m.code),
+            format!("{app} finished (failure, code {}). Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps", m.code),
         ),
         None => (
             2.5,
-            format!("{app} exited. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps"),
+            format!("{app} finished. Use `ways show attend build-complete --session $CLAUDE_SESSION_ID` for next steps"),
         ),
     }
+}
+
+/// One row of `ps`: a process, its parent, and its command name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Proc {
+    pid: u32,
+    ppid: u32,
+    comm: String,
+}
+
+/// Parse `ps -o pid=,ppid=,comm=` output. Rows that do not parse are
+/// skipped. The command name is the rest of the row, so a name with a
+/// space survives.
+fn parse_ps(stdout: &str) -> Vec<Proc> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let pid = parts.next()?.parse().ok()?;
+            let ppid = parts.next()?.parse().ok()?;
+            let comm = parts.collect::<Vec<_>>().join(" ");
+            (!comm.is_empty()).then_some(Proc { pid, ppid, comm })
+        })
+        .collect()
+}
+
+/// How far up the parent chain [`tally`] looks for a watched tool. A build
+/// tree is a few levels deep (cargo → rustc, make → cc → cc1); the cap
+/// bounds the walk per process (ADR-137) and stops a pid cycle.
+const MAX_ANCESTRY: usize = 16;
+
+/// Count relevant processes by name, leaving out each one that runs under
+/// a watched build tool. `rustc` under `cargo` or `cc` under `make` is part
+/// of the parent's build, not an application of its own (ADR-113: the
+/// sensor tracks application presence, not PID churn); the parent's exit
+/// carries the build event. A watched tool run on its own still counts.
+fn tally(procs: &[Proc], is_relevant: impl Fn(&str) -> bool, is_watched: impl Fn(&str) -> bool) -> HashMap<String, u32> {
+    let by_pid: HashMap<u32, &Proc> = procs.iter().map(|p| (p.pid, p)).collect();
+    let under_watched = |p: &Proc| {
+        let mut ppid = p.ppid;
+        for _ in 0..MAX_ANCESTRY {
+            let Some(parent) = by_pid.get(&ppid) else { return false };
+            if is_watched(&parent.comm) {
+                return true;
+            }
+            ppid = parent.ppid;
+        }
+        false
+    };
+    let mut apps: HashMap<String, u32> = HashMap::new();
+    for p in procs {
+        if is_relevant(&p.comm) && !under_watched(p) {
+            *apps.entry(p.comm.clone()).or_insert(0) += 1;
+        }
+    }
+    apps
 }
 
 /// Watches user session processes. Detects new/exited processes and
@@ -108,6 +164,11 @@ fn format_build_exit(app: &str, marker: Option<&BuildMarker>, now: u64) -> (f64,
 pub struct ProcessSensor {
     /// Previous snapshot: app name → instance count
     prior: HashMap<String, u32>,
+    /// Apps that appeared on the last poll and have not been announced.
+    /// A start is announced only when the app is still there one poll
+    /// later; an app gone by then was a short-lived run, and its start and
+    /// exit both stay silent.
+    pending_start: HashSet<String>,
     /// First poll establishes baseline silently
     baseline_established: bool,
     /// Most recently parsed build-status marker (opt-in, from a user
@@ -136,6 +197,7 @@ impl ProcessSensor {
     pub fn with_watch(watch: Vec<String>) -> Self {
         Self {
             prior: HashMap::new(),
+            pending_start: HashSet::new(),
             baseline_established: false,
             last_marker: None,
             last_marker_mtime: None,
@@ -182,28 +244,45 @@ impl ProcessSensor {
     /// Snapshot the user's processes as app-name → instance-count.
     /// Tracks applications, not PIDs. Chrome going from 47 to 49
     /// renderer processes is not a state change. Chrome appearing
-    /// or disappearing entirely is.
+    /// or disappearing entirely is. Children of a watched build tool are
+    /// left out (see [`tally`]).
     fn snapshot(&self, focus: &Focus) -> HashMap<String, u32> {
-        let mut apps: HashMap<String, u32> = HashMap::new();
-
-        let output = Command::new("ps")
-            .args(["-u", &whoami(), "-o", "comm="])
-            .output();
-
-        let output = match output {
-            Ok(o) => o,
-            Err(_) => return apps,
+        let Ok(output) = Command::new("ps").args(["-u", &whoami(), "-o", "pid=,ppid=,comm="]).output() else {
+            return HashMap::new();
         };
+        let procs = parse_ps(&String::from_utf8_lossy(&output.stdout));
+        tally(&procs, |c| Self::is_relevant(c, focus), |c| self.is_watched(c))
+    }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let comm = line.trim().to_string();
-            if !comm.is_empty() && Self::is_relevant(&comm, focus) {
-                *apps.entry(comm).or_insert(0) += 1;
+    /// The events between the previous snapshot and `current`, given the
+    /// current marker and time. A watched build tool never announces its
+    /// start; its exit is the one build event. Any other app announces its
+    /// start once it has lasted a poll, and an app that came and went
+    /// within one poll produces nothing.
+    fn diff(&mut self, current: HashMap<String, u32>, now: u64) -> Vec<(f64, String)> {
+        let mut observations = Vec::new();
+        for app in current.keys() {
+            if self.is_watched(app) || (self.prior.contains_key(app) && !self.pending_start.contains(app)) {
+                continue;
+            }
+            if self.pending_start.remove(app) {
+                observations.push((2.0, format!("{app} started")));
+            } else {
+                self.pending_start.insert(app.clone());
             }
         }
-
-        apps
+        for app in self.prior.keys() {
+            if current.contains_key(app) {
+                continue;
+            }
+            if self.is_watched(app) {
+                observations.push(format_build_exit(app, self.last_marker.as_ref(), now));
+            } else if !self.pending_start.remove(app) {
+                observations.push((2.0, format!("{app} exited")));
+            }
+        }
+        self.prior = current;
+        observations
     }
 
     fn is_relevant(comm: &str, focus: &Focus) -> bool {
@@ -283,36 +362,11 @@ impl Sensor for ProcessSensor {
             return Vec::new();
         }
 
-        let mut observations = Vec::new();
-
-        // New applications (not in prior at all)
-        for app in current.keys() {
-            if !self.prior.contains_key(app) {
-                observations.push((2.0, format!("{app} started")));
-            }
-        }
-
-        // Exited applications (were in prior, gone now). Processes on the
-        // watch list get enriched build-event treatment (success/failure
-        // magnitudes, marker correlation); everything else gets a plain
-        // `X exited` at 2.0.
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-
-        for app in self.prior.keys() {
-            if !current.contains_key(app) {
-                if self.is_watched(app) {
-                    observations.push(format_build_exit(app, self.last_marker.as_ref(), now));
-                } else {
-                    observations.push((2.0, format!("{app} exited")));
-                }
-            }
-        }
-
-        self.prior = current;
-        observations
+        self.diff(current, now)
     }
 
     fn emission_threshold(&self) -> f64 {
@@ -435,7 +489,7 @@ mod tests {
     fn format_build_exit_no_marker_falls_back_to_legacy_text() {
         let (mag, text) = format_build_exit("cargo", None, 1000);
         assert_eq!(mag, 2.5);
-        assert!(text.starts_with("cargo exited. "));
+        assert!(text.starts_with("cargo finished. "));
         assert!(!text.contains("success"));
         assert!(!text.contains("failure"));
     }
@@ -528,6 +582,87 @@ mod tests {
         assert_eq!(DEFAULT_WATCH.len(), 20);
         assert!(DEFAULT_WATCH.contains(&"cargo"));
         assert!(DEFAULT_WATCH.contains(&"pip3"));
+    }
+
+    // ── child churn and start/exit pairs ───────────────────────────────
+
+    fn procs(rows: &[(u32, u32, &str)]) -> Vec<Proc> {
+        rows.iter().map(|&(pid, ppid, comm)| Proc { pid, ppid, comm: comm.into() }).collect()
+    }
+
+    fn apps(names: &[&str]) -> HashMap<String, u32> {
+        names.iter().map(|n| (n.to_string(), 1)).collect()
+    }
+
+    fn texts(obs: &[(f64, String)]) -> Vec<String> {
+        let mut t: Vec<String> = obs.iter().map(|(_, s)| s.split('.').next().unwrap().to_string()).collect();
+        t.sort();
+        t
+    }
+
+    #[test]
+    fn parse_ps_reads_pid_ppid_and_a_spaced_name() {
+        let p = parse_ps("  10     1 cargo\n  11    10 rustc\n bad row\n  12 10 Web Content\n");
+        assert_eq!(p, procs(&[(10, 1, "cargo"), (11, 10, "rustc"), (12, 10, "Web Content")]));
+    }
+
+    #[test]
+    fn tally_drops_a_build_tools_children() {
+        let s = ProcessSensor::new();
+        // zsh → cargo → rustc ×2, and cc under make under make.
+        let p = procs(&[
+            (1, 0, "zsh"),
+            (10, 1, "cargo"),
+            (11, 10, "rustc"),
+            (12, 10, "rustc"),
+            (20, 1, "make"),
+            (21, 20, "make"),
+            (22, 21, "gcc"),
+            (30, 1, "nvim"),
+        ]);
+        let t = tally(&p, |c| c != "zsh", |c| s.is_watched(c));
+        assert_eq!(t, HashMap::from([("cargo".into(), 1), ("make".into(), 1), ("nvim".into(), 1)]));
+    }
+
+    #[test]
+    fn tally_counts_a_watched_tool_run_on_its_own() {
+        let s = ProcessSensor::new();
+        let p = procs(&[(1, 0, "zsh"), (5, 1, "rustc")]);
+        assert_eq!(tally(&p, |c| c != "zsh", |c| s.is_watched(c)), apps(&["rustc"]));
+    }
+
+    #[test]
+    fn tally_survives_a_parent_cycle() {
+        let p = procs(&[(5, 6, "git"), (6, 5, "ssh")]);
+        assert_eq!(tally(&p, |_| true, |_| false).len(), 2);
+    }
+
+    #[test]
+    fn a_build_emits_one_finished_event_and_no_start() {
+        let mut s = ProcessSensor::new();
+        s.prior = apps(&["nvim"]);
+        assert!(s.diff(apps(&["nvim", "cargo"]), 0).is_empty(), "no start for a build tool");
+        assert!(s.diff(apps(&["nvim", "cargo"]), 0).is_empty(), "nor a deferred one");
+        assert_eq!(texts(&s.diff(apps(&["nvim"]), 0)), vec!["cargo finished"]);
+    }
+
+    #[test]
+    fn a_short_lived_app_is_silent() {
+        let mut s = ProcessSensor::new();
+        s.prior = apps(&["nvim"]);
+        assert!(s.diff(apps(&["nvim", "git"]), 0).is_empty());
+        assert!(s.diff(apps(&["nvim"]), 0).is_empty(), "git came and went within a poll");
+    }
+
+    #[test]
+    fn a_lasting_app_starts_one_poll_late_and_exits() {
+        let mut s = ProcessSensor::new();
+        s.prior = apps(&["nvim"]);
+        assert!(s.diff(apps(&["nvim", "docker"]), 0).is_empty());
+        assert_eq!(texts(&s.diff(apps(&["nvim", "docker"]), 0)), vec!["docker started"]);
+        assert!(s.diff(apps(&["nvim", "docker"]), 0).is_empty());
+        assert_eq!(texts(&s.diff(apps(&["docker"]), 0)), vec!["nvim exited"]);
+        assert_eq!(texts(&s.diff(apps(&[]), 0)), vec!["docker exited"]);
     }
 }
 
