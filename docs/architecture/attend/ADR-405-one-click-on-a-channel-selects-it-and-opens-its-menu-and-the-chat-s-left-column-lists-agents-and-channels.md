@@ -19,8 +19,12 @@ basis:
     via: chat, relayed by the main session, 2026-10-10
   - operator: aaronsb
     level: directed
-    said: "as the human, I need to be able to use ui/ux conventions to get around - submitting rapid command line calls isn't really my thing"
+    said: "as the human, I need to be able to use ui/ux conventions to get around - submitting rapit command line calls isn't really my thing"
     via: attend-chat, relayed by the main session, 2026-10-10
+  - operator: aaronsb
+    level: directed
+    said: "*rapid"
+    via: attend-chat, a separate message correcting "rapit" in the one above, relayed by the main session, 2026-10-10
   - precedent: ADR-404
   - precedent: ADR-504
 agent:
@@ -42,7 +46,7 @@ related:
 - **Decided:** in attend-chat a single left click on a channel, on the tab bar or in the left column, shows that channel and opens its menu. The left column has two stacked sections: Agents, every agent the chat has seen, inactive ones set back; and Channels, every channel including inactive and empty ones. Rows are drawn as segmented lozenges in the style of the operator's Claude Code status line. While the column is shown, the agent legend below the compose box gives its row back to the feed.
 - **Trades away:** a click that only switches channels. Reading a channel without its menu opening takes a keyboard jump, Tab, or Esc after the click.
 - **One-way?** No. Both are drawing and input handling in attend-chat; nothing on disk changes.
-- **Probes:** *Confident:* a click should do both at once, never one per click. *Not confident:* a click on an agent row should insert `@Name ` into the compose box, the same as a click on its chip in the legend did.
+- **Probes:** *Confident:* a click should do both at once, never one per click. *Not confident:* a click on an agent row should open a menu (Address @Name, Who is this, Remove from the shown channel) rather than put `@Name ` in the compose box at once, as a click on its chip in the legend did; addressing then takes a click and an Enter.
 - **Inversion:** the ends are a chat with no navigation chrome, where channels and agents are reached by typing, and a chat whose chrome lists everything and acts on every click. This sits near the second end, with `attend.chat.sidebar_key` to hide the column.
 
 ## Context
@@ -55,11 +59,13 @@ D9 is amended as follows.
 
 **(a) Click.** A left click on a channel tab or a Channels row shows the channel and opens its menu, the same menu as the tab's. A right click still opens the menu. A click on merged does the same with merged's menu. The action slots (`≡`, `+`) are unchanged. Keyboard paths are unchanged: Ctrl or Alt plus a digit shows a tab and opens its menu when repeated, and F2 or Ctrl+T focus the tab bar.
 
-**(b) The left column.** `attend.chat.sidebar_key` toggles it. It is shown at start and hidden automatically when the terminal is too narrow to hold it beside the feed.
+**(b) The left column.** `attend.chat.sidebar_key` toggles it, F3 by default (Ctrl+B is tmux's prefix); the `≡` menu's Hide column and Show column do the same with the mouse. It is shown at start and hidden automatically when the terminal is too narrow to hold it beside the feed. With the key set to `none` it is shown, and only the menu hides it.
 
-- **Agents:** every agent the chat has seen, from session records and message senders. Live agents come first. An inactive agent is drawn in the muted variant. A row is a lozenge with the nickname on the agent's identity colour, the project directory on a darker step of that colour, and a state marker on the darkest step. The steps are derived from the identity colour as the status line derives them. A click on a row inserts `@Name ` into the compose box. While the column is shown, the legend row under the compose box is dropped whenever it would list agents or channels, and the column marks what Tab would complete to. The row still shows slash commands and argument hints.
-- **Channels:** `#open`, then every channel with a directory or a `_groups.yaml` entry, including empty ones and ones whose directory was swept. A row is a lozenge on the accent: the name, then the member count and the time since the last message. Unread counts, seals and scope nesting are drawn when D3, D4 and D5 provide the data. Until then the list is flat.
-- Every action a row stands for is reachable without a slash command, by mouse and by keyboard. F2 or Ctrl+T focus the tab bar, and Down moves into the column. Up and Down move along the rows, Enter acts as a click does, and Esc or Up past the first row returns to the compose box. A channel's menu offers Join to a channel the human is not in, and Leave to one it is in.
+- **Agents:** every agent the chat has seen, from session records and message senders. Live agents come first. An inactive agent is drawn in the muted variant. A row is a lozenge with the nickname on the agent's identity colour, the project directory on a darker step of that colour, and a state marker on the darkest step. The steps are derived from the identity colour as the status line derives them. A click on a row, or Enter on it, opens the agent's menu: Address @Name puts `@Name ` in the compose box; Who is this shows what `/whois` says, or for an agent that is not live what the chat knows of it; Remove from #channel, offered when the shown channel lists the agent, removes it by its membership id, live or quiet, after a `y`. While the column is shown, the legend row under the compose box is dropped whenever it would list agents or channels, and the column underlines what Tab would complete to. Tab completes over the column's own lists: every claude, live or quiet, and every channel, swept ones too. A human is listed but neither underlined nor completed, since `@name` routes to a session's inbox. The legend row still shows slash commands and argument hints, and keeps its place while a command is typed.
+- **Channels:** `#open`, then every channel with a directory or a `_groups.yaml` entry, including empty ones and ones whose directory was swept. A row is a lozenge on the accent in three segments: the glyph and name; the member count and the time since the last message; and `●` when the channel is active (on disk, and either `#open` or with a live member) or `○` when it is not, the place D5's seal marker will take. An inactive channel's row is set back. Unread counts, seals and scope nesting are drawn when D3, D4 and D5 provide the data. Until then the list is flat.
+- Each list scrolls when it is longer than its rows: the keyboard's cursor keeps itself in view, the wheel over a list scrolls it, and its header marks rows out of view with `↑` and `↓`.
+- The column's rows are reached by mouse and by keyboard. F2 or Ctrl+T focus the tab bar, and Down moves into the column; the bottom bar then reads `↑↓ move · Enter · Esc back`. Up and Down move along the rows, Enter acts as a click does, Up past the first row returns to the tab bar and Esc to the compose box. F2, a click outside the column, or the column hiding for width takes the keyboard back from it. A channel's menu offers Join to a channel the human is not in, and Leave to one it is in. Each menu item that drops something (Clear view, Clear history, Leave, Delete channel, Remove) asks for `y` first, since a click opens a menu with its first item under the cursor.
+- What still takes a slash command or is not built: Add agent, which enrols a member without asking, is ADR-404 D1 and says so; sealing and scopes are D4 and D5; the `≡` menu's Settings item shows the `/config` listing and sets nothing, so `attend.chat.sidebar_key` and the other keys are set with `/config <key> <value>`. Tab completes a quiet agent or a swept channel, and a send to one is refused as before (ADR-129): the completion reaches it, the send does not.
 - With the shape set to `plain`, or without colour, the lozenges lose their Nerd Font glyphs, as every other lozenge in agent-tui does.
 
 ## Consequences
@@ -78,7 +84,7 @@ D9 is amended as follows.
 ### Neutral
 
 - `attend.chat.sidebar_key` joins attend's schema beside the other `attend.chat.*` keys (ADR-404 D8).
-- agent-tui gains a pane hook for opening a tab's menu on the first click. Other panes keep the second-click rule.
+- agent-tui gains a pane hook for opening a tab's menu on the first click, and a way for a pane to hand the keyboard back to the tab bar. Other panes keep the second-click rule.
 
 ## Alternatives Considered
 
