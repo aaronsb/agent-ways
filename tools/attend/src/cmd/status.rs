@@ -47,10 +47,9 @@ pub(crate) fn cmd_status() {
         let owners: Vec<(String, Option<String>)> = instances
             .iter()
             .map(|&pid| {
-                let i = attend_presence::session::identity_for_pid(pid);
-                if !i.session_resolved {
+                let Some(i) = attend_presence::session::session_identity_for_pid(pid) else {
                     return (String::new(), None);
-                }
+                };
                 // A name derives from the origin; with none readable, the
                 // session id stands in rather than a guessed name.
                 let name = if i.origin_path.is_empty() {
