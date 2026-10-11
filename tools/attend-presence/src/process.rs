@@ -100,7 +100,9 @@ pub fn cwd(pid: u32) -> Option<String> {
 
 #[cfg(not(windows))]
 fn cwd_by_command(pid: u32) -> Option<String> {
-    let out = Command::new("lsof").args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"]).output().ok()?;
+    // `-b` skips the kernel calls that can block on a hung network mount;
+    // `-w` drops the warnings `-b` then prints.
+    let out = Command::new("lsof").args(["-b", "-w", "-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"]).output().ok()?;
     String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.strip_prefix('n').map(str::to_string))
 }
 
