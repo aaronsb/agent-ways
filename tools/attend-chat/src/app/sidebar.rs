@@ -218,11 +218,16 @@ fn sized(shape: Shape, bare: bool, texts: [&str; 3], w: usize) -> [String; 3] {
     // join after each one.
     let glyphs = |n: usize| if bare { 0 } else { usize::from(!shape.cap.is_empty()) + n * usize::from(!shape.join.is_empty()) };
     let last = format!(" {} ", texts[2]);
-    let room = w.saturating_sub(glyphs(3) + str_width(&last));
-    let name = format!(" {} ", fit(texts[0], room.saturating_sub(2).max(1)));
-    let rest = room.saturating_sub(str_width(&name));
+    // The columns the name has beside the last segment and `n` segments'
+    // glyphs, and the name cut to them.
+    let room = |n: usize| w.saturating_sub(glyphs(n) + str_width(&last));
+    let named = |room: usize| format!(" {} ", fit(texts[0], room.saturating_sub(2).max(1)));
+    let name = named(room(3));
+    let rest = room(3).saturating_sub(str_width(&name));
     if rest < 4 {
-        let pad = w.saturating_sub(glyphs(2) + str_width(&last) + str_width(&name));
+        // Two segments: the name is cut to the room the dropped join leaves.
+        let name = named(room(2));
+        let pad = room(2).saturating_sub(str_width(&name));
         return [format!("{name}{}", " ".repeat(pad)), String::new(), last];
     }
     let project = format!(" {}", fit(texts[1], rest - 2));
@@ -548,6 +553,7 @@ mod tests {
         assert_eq!(width(&t), 22, "plain draws no glyphs");
         let t = sized(Shape::ROUND, false, ["Shannon-alphabet", "omnibus", "○"], 22);
         assert_eq!((t[1].as_str(), width(&t) + 3), ("", 22), "no room to read the project: it goes, and its join with it");
+        assert_eq!(t[0], " Shannon-alpha… ", "the name takes the join's column, cut for two segments' glyphs, not three");
         let t = sized(Shape::ROUND, true, ["Laszlo", "alpha", "●"], 22);
         assert_eq!(width(&t), 22, "without colour the lozenge draws no glyphs, in any shape");
     }
