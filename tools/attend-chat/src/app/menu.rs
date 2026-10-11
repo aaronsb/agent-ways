@@ -275,8 +275,8 @@ impl ChatPane {
         if let Some(c) = id.strip_prefix("menu:") {
             return self.item(c, value);
         }
-        if let Some(name) = id.strip_prefix("agent:") {
-            return self.agent_item(name, value);
+        if let Some(member) = id.strip_prefix("agent:") {
+            return self.agent_item(member, value);
         }
         // A peer from Invite agent or Remove agent: the label's first word is
         // the display name the commands resolve.
@@ -294,26 +294,38 @@ impl ChatPane {
         }
     }
 
-    /// The menu of an agent's row in the left column.
-    pub(super) fn agent_menu(&mut self, name: String) {
+    /// The column's agent whose membership id is `member`.
+    fn seen_member(&mut self, member: &str) -> Option<Seen> {
+        self.world().seen.iter().find(|s| s.member == member).cloned()
+    }
+
+    /// The menu of an agent's row in the left column, the agent named by
+    /// its membership id: two agents can share a name, never an id.
+    pub(super) fn agent_menu(&mut self, member: String) {
         self.dirty = true;
+        let Some(s) = self.seen_member(&member) else {
+            return self.say("that agent is not in the column any more", true);
+        };
+        let name = s.identity.nickname;
         let mut options = vec![format!("{ADDRESS} @{name}"), WHO.to_string()];
         self.removable.clear();
         if let Tab::Channel(c) = self.normal_tab() {
-            let id = self.world().seen.iter().find(|s| s.identity.nickname == name).map(|s| s.member.clone());
-            if let Some(m) = self.channel_members(&c).into_iter().find(|m| Some(&m.id) == id.as_ref()) {
+            if let Some(m) = self.channel_members(&c).into_iter().find(|m| m.id == member) {
                 options.push(format!("{REMOVE_FROM} #{c}"));
                 self.removable = vec![m];
             }
         }
-        self.open = Some(Open::Pick { id: format!("agent:{name}"), title: format!("@{name}"), options, multi: false, chosen: Vec::new() });
+        self.open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), options, multi: false, chosen: Vec::new() });
     }
 
-    fn agent_item(&mut self, name: &str, item: &str) {
+    fn agent_item(&mut self, member: &str, item: &str) {
         if item.starts_with(ADDRESS) {
-            self.complete(super::Chip::Agent(name.into()));
+            match self.seen_member(member) {
+                Some(s) => self.complete(super::Chip::Agent(s.identity.nickname)),
+                None => self.say("that agent is not in the column any more", true),
+            }
         } else if item == WHO {
-            self.whois(name);
+            self.whois(member);
         } else if let Some(c) = item.strip_prefix(REMOVE_FROM).map(|c| c.trim().trim_start_matches('#').to_string()) {
             if let Some(m) = self.removable.first().cloned() {
                 self.pending = Some(Pending::Remove(c, m));
@@ -323,12 +335,13 @@ impl ChatPane {
 
     /// Who an agent of the column is: `/whois` for a live claude, and what
     /// the chat knows of the rest, which `/whois` cannot resolve.
-    fn whois(&mut self, name: &str) {
-        let Some(s) = self.world().seen.iter().find(|s| s.identity.nickname == name).cloned() else {
-            return self.say(format!("@{name}: not in the column any more"), true);
+    fn whois(&mut self, member: &str) {
+        let Some(s) = self.seen_member(member) else {
+            return self.say("that agent is not in the column any more", true);
         };
+        let name = &s.identity.nickname;
         if s.identity.is_claude && s.live {
-            self.run("whois", SlashOutcome::Whois(name.into()));
+            self.run("whois", SlashOutcome::Whois(name.clone()));
             return;
         }
         let said = if s.identity.is_claude {
@@ -596,5 +609,28 @@ mod tests {
         c.item("deploy", LEAVE);
         c.answer(true);
         assert_eq!(c.status, "dry run: /leave not run", "y goes ahead");
+    }
+
+    /// A pane whose world is `seen`, shown on merged.
+    fn pane_with(seen: Vec<Seen>) -> ChatPane {
+        let mut c = ChatPane::new(None, Default::default());
+        c.dry_run = true;
+        let known = crate::chip::known_of(&seen);
+        c.world = Some(super::super::World { groups: Vec::new(), known, seen, rows: Vec::new(), live_members: Vec::new(), instances: attend_instances::SnapshotCache::new() });
+        c
+    }
+
+    #[test]
+    fn an_agent_row_is_found_by_its_id_when_two_share_a_name() {
+        let mut c = pane_with(vec![seen("Ada", "s1", false, true), seen("Ada", "s2", false, true)]);
+        c.agent_menu("s2".into());
+        match c.open.take() {
+            Some(Open::Pick { id, title, .. }) => assert_eq!((id.as_str(), title.as_str()), ("agent:s2", "@Ada")),
+            other => panic!("no menu: {other:?}"),
+        }
+        c.menu_picked("agent:s2", WHO);
+        assert!(c.status.contains("session s2"), "who is the row picked, not the first of its name: {}", c.status);
+        c.agent_menu("gone".into());
+        assert!(c.open.is_none() && c.status_is_error, "a row gone since is said, not guessed");
     }
 }

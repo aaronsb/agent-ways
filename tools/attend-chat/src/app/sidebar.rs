@@ -30,7 +30,9 @@ const MIN_FEED: u16 = 50;
 /// What the bottom bar says while the column has the keyboard.
 pub(super) const FOCUS_HINT: &str = "↑↓ move · Enter · Esc back";
 
-/// What a click on a row of the column does.
+/// A row of the column, as a click or the keyboard acts on it: an agent
+/// by its membership id (a session id, a human's username), which two
+/// agents never share as they can a name; a channel by its name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SideHit {
     Agent(String),
@@ -137,7 +139,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
             line.spans[0] = cursor();
         }
         f.render_widget(Paragraph::new(line), r);
-        hits.push((r, SideHit::Agent(s.identity.nickname.clone())));
+        hits.push((r, SideHit::Agent(s.member.clone())));
     }
     header(f, channels, &format!("Channels {}{}", rows.len(), more(sc, vis_c, rows.len())));
     let now = chat.now();
@@ -331,7 +333,7 @@ impl ChatPane {
     /// A click on a row of the column.
     pub(super) fn side_click(&mut self, hit: SideHit) {
         match hit {
-            SideHit::Agent(name) => self.agent_menu(name),
+            SideHit::Agent(member) => self.agent_menu(member),
             SideHit::Channel(name) => {
                 let names = self.strip_names();
                 if names.contains(&name) {
@@ -346,7 +348,7 @@ impl ChatPane {
     /// walks them.
     pub(super) fn side_items(&mut self) -> Vec<SideHit> {
         let world = self.world();
-        let mut out: Vec<SideHit> = agent_order(&world.seen).into_iter().map(|s| SideHit::Agent(s.identity.nickname.clone())).collect();
+        let mut out: Vec<SideHit> = agent_order(&world.seen).into_iter().map(|s| SideHit::Agent(s.member.clone())).collect();
         out.extend(world.rows.iter().map(|r| SideHit::Channel(r.known.group.name.clone())));
         out
     }

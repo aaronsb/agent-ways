@@ -286,9 +286,10 @@ impl ChatPane {
             // One pass each: the sessions read and the signals walked once,
             // the channels scanned once; the legend and the tab bar take
             // their lists from the column's.
-            let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, &instances);
-            let known = known_of(&seen);
             let rows = all_channels(depth);
+            let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
+            let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
+            let known = known_of(&seen);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
             self.world = Some(World { groups: tab_channels(&rows), known, seen, rows, live_members, instances });
         }

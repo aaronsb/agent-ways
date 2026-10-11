@@ -76,7 +76,7 @@ where
     // should not point at peers nobody can reach. Humans are not
     // liveness-filtered: they have no session, and an `@<user>` mention
     // does not route to a session inbox.
-    seen_identities(signals, seeds, caps, is_live, |_| true, instances)
+    seen_identities(signals, seeds, caps, is_live, |_| true, |_| false, instances)
         .into_iter()
         .filter(|s| s.live)
         .map(|s| s.identity)
@@ -105,26 +105,36 @@ pub struct Seen {
 /// buffered signals, newest first, then the seeded sessions. A claude is
 /// live when `claude_live` holds for its session id; a human when
 /// `human_live` holds for its username. An entry seen twice is live when
-/// either sighting is. The left column lists these (ADR-405); the legend
-/// and completion keep the live ones ([`known_identities_with_liveness`]).
-pub fn seen_identities<F, H>(
+/// either sighting is. One seen under two session ids (a session
+/// restarted in the same cwd) keeps the id a channel lists, as
+/// `in_channel` says, so a menu acting on its membership finds it. The
+/// left column lists these (ADR-405); the legend and completion keep the
+/// live ones ([`known_identities_with_liveness`]).
+pub fn seen_identities<F, H, M>(
     signals: &[Signal],
     seeds: &[DiscoveredSession],
     caps: ColorDepth,
     claude_live: F,
     human_live: H,
+    in_channel: M,
     instances: &SnapshotCache,
 ) -> Vec<Seen>
 where
     F: Fn(&str) -> bool,
     H: Fn(&str) -> bool,
+    M: Fn(&str) -> bool,
 {
     // Walk from newest to oldest so the first time we see a cwd we
     // also capture its most-recent-seen position.
     let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut out: Vec<Seen> = Vec::new();
     let mut note = |key: String, identity: KnownIdentity, live: bool, member: String, out: &mut Vec<Seen>| match at.get(&key) {
-        Some(&i) => out[i].live |= live,
+        Some(&i) => {
+            out[i].live |= live;
+            if !in_channel(&out[i].member) && in_channel(&member) {
+                out[i].member = member;
+            }
+        }
         None => {
             at.insert(key, out.len());
             out.push(Seen { identity, live, member });
@@ -238,11 +248,26 @@ mod tests {
     fn the_legend_from_the_seen_pool_is_the_legend_built_afresh() {
         let buf = vec![sig("claude:a", "/home/x"), sig("external:aaron@kitty", "/home/aaron"), sig("claude:b", "/home/y")];
         let alive = |sid: &str| sid == "a";
-        let seen = seen_identities(&buf, &[], ColorDepth::TrueColor, alive, |_| false, &empty_cache());
+        let seen = seen_identities(&buf, &[], ColorDepth::TrueColor, alive, |_| false, |_| false, &empty_cache());
         let names = |v: Vec<KnownIdentity>| v.into_iter().map(|k| k.nickname).collect::<Vec<_>>();
         let fresh = names(known_identities_with_liveness(&buf, &[], ColorDepth::TrueColor, alive, &empty_cache()));
         assert_eq!(names(known_of(&seen)), fresh, "live claudes and every human, away or not");
         assert_eq!(fresh.len(), 2);
+    }
+
+    #[test]
+    fn one_name_seen_under_two_sessions_keeps_the_id_a_channel_lists() {
+        // `old` is in a channel; `new` is the same cwd's later session,
+        // newest first in the buffer.
+        let buf = vec![sig("claude:old", "/home/x"), sig("claude:new", "/home/x")];
+        let member = |in_channel: &dyn Fn(&str) -> bool| {
+            let seen = seen_identities(&buf, &[], ColorDepth::TrueColor, |_| true, |_| false, in_channel, &empty_cache());
+            assert_eq!(seen.len(), 1, "one name and cwd is one row");
+            seen[0].member.clone()
+        };
+        assert_eq!(member(&|id| id == "old"), "old", "the id the channel holds");
+        assert_eq!(member(&|id| id == "new"), "new");
+        assert_eq!(member(&|_| false), "new", "in no channel: the newest");
     }
 
     #[test]
