@@ -19,7 +19,7 @@ While the screen is open it touches the human's heartbeat (`heartbeat/<username>
 
 From top to bottom, beside a left column:
 
-- **The left column** (ADR-405). Agents: every agent the chat has seen, from session records and senders, live ones first and the rest set back. Channels: `#open`, then every channel, including empty ones and ones whose directory was swept, each with its member count and the time since its last message. The shown channel is marked. A click on an agent puts `@Name ` in the compose box; a click on a channel shows it and opens its menu. From the keyboard, F2 then Down moves into the column: Up and Down move, Enter does what a click does, Esc goes back. Ctrl-B (`attend.chat.sidebar_key`) shows or hides it, and a terminal narrower than 76 columns hides it.
+- **The left column** (ADR-405). Agents: every agent the chat has seen, from session records and senders, live ones first and the rest set back. Channels: `#open`, then every channel, including empty ones and ones whose directory was swept, each with its member count and the time since its last message. The shown channel is marked. A click on an agent puts `@Name ` in the compose box; a click on a channel shows it and opens its menu. From the keyboard, F2 then Down moves into the column: Up and Down move, Enter does what a click does, Esc goes back. F3 (`attend.chat.sidebar_key`) shows or hides it, and a terminal narrower than 76 columns hides it.
 - **The tab strip.** `1 merged`, then `2 #open`, then one tab per channel in name order. Each channel tab leads with the channel's glyph in its colour. The foreground channel's description follows the strip.
 - **The message feed.** Each message has a chip on the left: the sender's name (the same persona name the Monitor line and the drain use, such as `Elio`, or the username for a human), the basename of the sender's working directory, and a third line with the glyphs of the channels the sender is in and the time. The body wraps beside the chip.
 - **The compose box.** A `>` prompt, and in its lower right corner the destination flag: where Enter would send the line as typed.
@@ -87,7 +87,7 @@ A line that starts with `/` runs a command. The helper row completes the command
 | F2, Ctrl-T | the tab bar, marked by TABS in the footer and a reversed, ▸-led tab under the cursor: Left and Right move, Enter opens the tab's menu (the `+` slot asks the new channel's name at once), Esc goes back |
 | Ctrl-N | ask a new channel's name in the compose box, from the compose box or the tab bar; the draft comes back afterwards |
 | right-click a tab | its menu; with the mouse on, a click on a tab shows it and opens its menu |
-| Ctrl-B | show or hide the left column |
+| F3 | show or hide the left column |
 | PgUp, PgDn | scroll the feed |
 | Left, Right, Home, End | move the cursor |
 | Backspace, Delete | edit |
@@ -99,7 +99,7 @@ A line that starts with `/` runs a command. The helper row completes the command
 
 **Joining after an invitation.** An agent that joins a channel late is not handed the channel's history: messages older than two minutes are marked read, and the join says how many. A join that answers an invitation (`/invite`, or Add agent) is the exception: the invitee's `attend join` keeps the channel's newest 50 messages to read, as a briefing, and says how many older ones it held back. The invitation is spent by that join.
 
-**Settings.** `attend.chat.tabs.jump` (auto, ctrl, alt, both, none), `attend.chat.tabs.menu_on_repeat`, `attend.chat.tabs.focus_key` (both, f2, ctrl-t, none), `attend.chat.mouse` and `attend.chat.sidebar_key` (ctrl-b, f3, none) live in attend's user file. `/config` lists them with the layer each comes from, and `/config <key> <value>` sets one; `ways settings` reads and sets the same keys.
+**Settings.** `attend.chat.tabs.jump` (auto, ctrl, alt, both, none), `attend.chat.tabs.menu_on_repeat`, `attend.chat.tabs.focus_key` (both, f2, ctrl-t, none), `attend.chat.mouse` and `attend.chat.sidebar_key` (f3, ctrl-b, none; Ctrl+B is tmux's prefix, and none keeps the column shown) live in attend's user file. `/config` lists them with the layer each comes from, and `/config <key> <value>` sets one; `ways settings` reads and sets the same keys.
 
 To see whether a terminal speaks the kitty keyboard protocol, run `printf '\e[?u\e[c'; read -rsd c -t1 r; printf '%q\n' "$r"` in it: a reply holding `[?` followed by digits and `u` means it does; one holding only the `c` answer means it does not.
 

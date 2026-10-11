@@ -10,7 +10,7 @@ agent-tui frame 80x25
 |│Bksp Del           edit                                                       │|
 |│click a message    selects it; in the compose box it places the cursor; a chip│|
 |│click a side row   an agent: @name in the compose box; a channel: shows it, op│|
-|│Ctrl+B             show or hide the agents and channels column                │|
+|│F3                 show or hide the agents and channels column                │|
 |│F2, then ↓         the column: ↑ ↓ move, Enter addresses the agent or opens th│|
 |│Alt+1-9            tab (again: menu)                                          │|
 |│F2                 tabs                                                       │|

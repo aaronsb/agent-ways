@@ -266,11 +266,11 @@ const KEYS: &[KeySpec] = &[
         name: "attend.chat.sidebar_key",
         section: "attend.chat",
         path: &["chat", "sidebar_key"],
-        kind: Kind::Choice(&["ctrl-b", "f3", "none"]),
-        default: DefaultValue::Yaml("ctrl-b"),
+        kind: Kind::Choice(&["f3", "ctrl-b", "none"]),
+        default: DefaultValue::Yaml("f3"),
         scope: Scope::User,
-        doc: "The key that shows or hides the left column of agents and channels: ctrl-b, f3 or none.",
-        long: "The column is shown at start, and hidden on a terminal too narrow to hold it beside the feed (ADR-405).",
+        doc: "The key that shows or hides the left column of agents and channels: f3, ctrl-b or none.",
+        long: "The column is shown at start, and hidden on a terminal too narrow to hold it beside the feed (ADR-405). Ctrl+B is tmux's prefix, so f3 is the default; none keeps the column shown, and the common menu still hides it.",
         ..BASE
     },
     KeySpec {

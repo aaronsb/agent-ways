@@ -101,9 +101,9 @@ const FOCUS_VALUES: &[SubCommand] = &[
 ];
 
 const SIDEBAR_VALUES: &[SubCommand] = &[
-    SubCommand { name: "ctrl-b", description: "Ctrl+B", grammar: &[] },
     SubCommand { name: "f3", description: "F3", grammar: &[] },
-    SubCommand { name: "none", description: "no key; the column stays shown", grammar: &[] },
+    SubCommand { name: "ctrl-b", description: "Ctrl+B (tmux's prefix)", grammar: &[] },
+    SubCommand { name: "none", description: "no key; the column is shown, and ≡ still hides it", grammar: &[] },
 ];
 
 /// `/config`'s keys, each a choice of its values: the chat's settings

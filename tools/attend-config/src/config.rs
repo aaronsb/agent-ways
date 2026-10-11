@@ -31,7 +31,7 @@ pub struct ChatConfig {
     /// `both`, `f2`, `ctrl-t` or `none`.
     pub focus_key: String,
     pub mouse: bool,
-    /// `ctrl-b`, `f3` or `none`: the key that toggles the left column.
+    /// `f3`, `ctrl-b` or `none`: the key that toggles the left column.
     pub sidebar_key: String,
 }
 
@@ -152,7 +152,7 @@ impl Config {
             menu_on_repeat: get("attend.chat.tabs.menu_on_repeat", layers).and_then(|v| v.as_bool()).unwrap_or(true),
             focus_key: text("attend.chat.tabs.focus_key", "both"),
             mouse: get("attend.chat.mouse", layers).and_then(|v| v.as_bool()).unwrap_or(false),
-            sidebar_key: text("attend.chat.sidebar_key", "ctrl-b"),
+            sidebar_key: text("attend.chat.sidebar_key", "f3"),
         };
         Config { governor, engagement, cleanup, sensors, chat }
     }

@@ -356,7 +356,17 @@ impl ChatPane {
 
     /// Read the chat's settings again: a `/config` set applies at once.
     fn reload_settings(&mut self) {
-        self.config = crate::settings::load(&std::env::current_dir().unwrap_or_default());
+        self.apply_settings(crate::settings::load(&std::env::current_dir().unwrap_or_default()));
+    }
+
+    /// Take `config` as the chat's settings. A `sidebar_key` newly set to
+    /// `none` shows the column: no key would bring a hidden one back.
+    fn apply_settings(&mut self, config: attend_config::ChatConfig) {
+        if config.sidebar_key == "none" && self.config.sidebar_key != "none" {
+            self.sidebar = true;
+            self.invalidate();
+        }
+        self.config = config;
     }
 
     /// Enter in a dry run: say what would happen, change nothing.
@@ -977,6 +987,25 @@ mod status_slot_tests {
         assert_eq!(how, None);
         let (text, _) = status_slot(false, true, None, "err");
         assert_eq!(text, "err");
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn a_sidebar_key_set_to_none_shows_a_hidden_column() {
+        let mut c = ChatPane::new(None, Palette::default());
+        c.config.sidebar_key = "f3".into();
+        c.sidebar = false;
+        let mut none = c.config.clone();
+        none.sidebar_key = "none".into();
+        c.apply_settings(none.clone());
+        assert!(c.sidebar, "no key could show it again");
+        c.sidebar = false;
+        c.apply_settings(none);
+        assert!(!c.sidebar, "a reload that leaves the key at none keeps what the menu chose");
     }
 }
 

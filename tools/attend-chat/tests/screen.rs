@@ -1180,12 +1180,12 @@ fn golden_the_column_lists_every_agent_and_channel() {
 fn golden_the_sidebar_key_and_a_narrow_terminal_give_the_legend_row_back() {
     let mut g = goldens();
     let mut c = chat_side();
-    press(&mut c, ctrl('b'));
+    press(&mut c, key(KeyCode::F(3)));
     assert!(!c.sidebar_shown());
     let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
     assert!(rows[rows.len() - 2].contains("@"), "the legend row is back: {:?}", rows[rows.len() - 2]);
     g.check("sidebar-off-80x25", &testkit::render_screen(&mut c, 80, 25));
-    press(&mut c, ctrl('b'));
+    press(&mut c, key(KeyCode::F(3)));
     assert!(c.sidebar_shown());
     let narrow = text(&mut c, 70, 25);
     assert!(!narrow.contains("Agents"), "too narrow for the column: {narrow}");
