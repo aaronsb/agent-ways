@@ -1503,6 +1503,40 @@ fn an_agent_row_removes_it_from_the_shown_channel() {
     assert_eq!(c.status(), "dry run: /kick not run");
 }
 
+/// A menu closed unchanged leaves "unchanged" in the bar; a question a
+/// later pick asks replaces it, so the `y` that answers it is never blind.
+/// By keys: #deploy's menu, Esc, its menu again, Delete channel.
+#[test]
+fn a_question_after_a_menu_closed_unchanged_is_shown_by_keys() {
+    let mut c = chat().enhanced(true).dry_run(true);
+    drawn(&mut c, &[ctrl('3'), ctrl('3'), key(KeyCode::Esc)], 80, 25);
+    assert!(bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
+    // Ctrl+3 on the tab shown opens its menu; Join is item 6, Delete 7.
+    let mut keys = vec![ctrl('3')];
+    keys.extend(std::iter::repeat_n(key(KeyCode::Down), 6));
+    keys.push(key(KeyCode::Enter));
+    drawn(&mut c, &keys, 80, 25);
+    let shown = bar(&mut c);
+    assert!(shown.contains("delete #deploy and its history? y deletes") && !shown.contains("unchanged"), "{shown}");
+}
+
+/// The same by the mouse: a menu closed unchanged, then Remove from an
+/// agent's row.
+#[test]
+fn a_question_after_a_menu_closed_unchanged_is_shown_by_the_mouse() {
+    let mut c = chat_side().enhanced(true).dry_run(true);
+    drawn(&mut c, &[ctrl('3'), ctrl('3'), key(KeyCode::Esc)], 80, 25);
+    assert!(bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let row = testkit::find(&buf, "beta").expect("the member's row");
+    left(&mut c, row);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let item = testkit::find(&buf, "Remove from #deploy").expect("the menu's item");
+    left(&mut c, item);
+    let shown = bar(&mut c);
+    assert!(shown.contains("from #deploy? y removes") && !shown.contains("unchanged"), "{shown}");
+}
+
 /// A paste with newlines is one draft in the compose box: nothing sent,
 /// the lines kept, the cursor after them.
 #[test]

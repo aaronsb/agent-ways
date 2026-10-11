@@ -169,8 +169,10 @@ impl App {
         // While the tab bar has the focus the bar says so, over the pane's mode.
         let (mode, ground) = if focused { ("TABS".to_string(), theme::Ground::Accent) } else { (p.mode(), p.mode_ground()) };
         let lozenge = self.shape.lozenge(&[Seg::on(format!(" {mode} "), ground).bold()]);
-        // What the shell said last (the mouse toggled) until the next key
-        // reaches the pane; else the pane's own.
+        // What the shell said last (the mouse toggled, a menu closed
+        // unchanged) until input next reaches the pane: a key, a click in
+        // it, or a pick from a menu it opened. Else the pane's own, so a
+        // question the pane asks after a pick is always the one shown.
         let said = if self.msg.is_empty() { p.status() } else { Some((self.msg.clone(), Tone::Said)) };
         let said = said.filter(|(t, _)| !t.is_empty());
         let mut spans = Vec::new();
@@ -354,8 +356,10 @@ impl App {
         }
     }
 
-    /// The pane's picker set `values`.
+    /// The pane's picker set `values`. The pick is input to the pane, so
+    /// what the shell said before gives way to what the pane says now.
     pub(super) fn pane_picked(&mut self, id: &str, values: Vec<String>) {
+        self.msg.clear();
         if let Some(p) = &mut self.pane {
             p.picked(id, values);
         }
@@ -380,6 +384,7 @@ impl App {
                     return self.pane_tab_click(i);
                 }
                 if self.hits.pane.contains(at) {
+                    self.msg.clear();
                     if let Some(p) = &mut self.pane {
                         p.click(at);
                     }
