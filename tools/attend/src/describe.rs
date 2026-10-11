@@ -12,7 +12,10 @@ pub const PEERS: &str = "List active Claude Code sessions and their channels";
 pub const STATUS: &str = "Show running instances, signals, and channel state";
 pub const JOIN: &str = "Join a channel (creates it if absent)";
 pub const LEAVE: &str = "Leave a channel";
-pub const CHANNELS: &str = "Channel lifecycle (default: list all, joined ones marked)";
+/// What the verb does with no subcommand, which is all a tool offers. The
+/// CLI's lifecycle subcommands (create, describe, pin, unpin) list
+/// themselves under it in `--help`.
+pub const CHANNELS: &str = "List every channel, marking the ones this session is in";
 
 /// Every message verb with its description, by the CLI name.
 pub const VERBS: &[(&str, &str)] = &[

@@ -59,7 +59,7 @@ Active awareness for Claude Code sessions
 * `chat` — Launch the interactive chat TUI (ADR-120)
 * `join` — Join a channel (creates it if absent)
 * `leave` — Leave a channel
-* `channels` — Channel lifecycle (default: list all, joined ones marked)
+* `channels` — List every channel, marking the ones this session is in
 * `dissolve` — Dissolve a channel (removes it for every member)
 * `scene` — Activate a named scene (reconfigure channel membership; `scene private` leaves all channels)
 * `scenes` — List available scenes
@@ -279,7 +279,7 @@ Leave a channel
 
 ## `attend channels`
 
-Channel lifecycle (default: list all, joined ones marked)
+List every channel, marking the ones this session is in
 
 **Usage:** `attend channels [OPTIONS] [COMMAND]`
 
