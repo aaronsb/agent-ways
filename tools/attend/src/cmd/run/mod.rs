@@ -214,11 +214,13 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
             stamps::banner_stamp_path(&session_id, ident.session_resolved).as_deref(),
         ),
     }
+    let live = stamps::live_sessions();
     let swept = stamps::sweep_stale(
         &attend_presence::cache::state_dir(),
-        &stamps::live_sessions(),
+        |key| stamps::is_live(key, &live),
         std::time::SystemTime::now(),
         stamps::STAMP_MAX_AGE,
+        stamps::SWEEP_MAX_CANDIDATES,
     );
     if swept > 0 {
         emit::log(&format!("removed {swept} stamp file(s) of sessions gone for over a week"));

@@ -13,9 +13,10 @@ use std::time::{Duration, SystemTime};
 /// How long a session's stamps outlive its last sign of life.
 pub(super) const STAMP_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
-/// The most state-dir entries one sweep examines (ADR-137): the sweep runs
-/// on every start, and the directory grows with every session ever seen.
-const SWEEP_MAX_ENTRIES: usize = 2000;
+/// The most candidate stamp keys one sweep examines (ADR-137): each costs
+/// a liveness check and a few metadata reads, the sweep runs on every
+/// start, and the directory grows with every session ever seen.
+pub(super) const SWEEP_MAX_CANDIDATES: usize = 2000;
 
 /// The stamps the sweep removes. The seen-set (`.state`) has its own
 /// lifecycle and is only read here, as a sign of life.
@@ -37,6 +38,25 @@ pub(super) fn stamp_key(session_id: &str, resolved: bool, claude: Option<(u32, S
     claude.map(|(pid, start)| format!("claude-{pid}-{start}"))
 }
 
+/// Is the session filed under stamp `key` still alive? A resolved session
+/// is alive while it has a Claude Code record in `live`. A pid-fallback key
+/// `claude-<pid>-<start>` has no record to find, so it is alive while that
+/// pid runs with the same start time; `start_time` reads it.
+fn key_is_live(key: &str, live: &HashSet<String>, start_time: impl Fn(u32) -> Option<String>) -> bool {
+    if live.contains(key) {
+        return true;
+    }
+    let Some((pid, start)) = key.strip_prefix("claude-").and_then(|rest| rest.split_once('-')) else {
+        return false;
+    };
+    pid.parse().ok().and_then(start_time).is_some_and(|now| now == start)
+}
+
+/// [`key_is_live`] against the running system.
+pub(super) fn is_live(key: &str, live: &HashSet<String>) -> bool {
+    key_is_live(key, live, attend_presence::process::start_time)
+}
+
 /// The banner stamp path for this process's session, if it can keep one.
 pub(super) fn banner_stamp_path(session_id: &str, resolved: bool) -> Option<PathBuf> {
     let claude = if resolved {
@@ -49,28 +69,38 @@ pub(super) fn banner_stamp_path(session_id: &str, resolved: bool) -> Option<Path
     Some(attend_presence::cache::state_dir().join(format!("{key}.banner")))
 }
 
-/// Remove the banner and last-inbound stamps of every session that has no
-/// live Claude Code record in `live` and has shown no sign of life (any of
-/// its state files touched) for `max_age`. Examines at most
-/// [`SWEEP_MAX_ENTRIES`] entries and says so when it stops short. Returns
-/// how many files it removed.
-pub(super) fn sweep_stale(dir: &Path, live: &HashSet<String>, now: SystemTime, max_age: Duration) -> usize {
+/// Remove the banner and last-inbound stamps of every session that
+/// `is_live` reports gone and that has shown no sign of life (any of its
+/// state files touched) for `max_age`. Examines at most `max_candidates`
+/// stamp keys, and logs when it leaves some for a later start; a set's
+/// iteration order differs between runs, so successive starts reach the
+/// rest. Returns how many files it removed.
+pub(super) fn sweep_stale(
+    dir: &Path,
+    is_live: impl Fn(&str) -> bool,
+    now: SystemTime,
+    max_age: Duration,
+    max_candidates: usize,
+) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
-    let mut keys: HashSet<String> = HashSet::new();
-    let mut examined = 0;
-    for entry in entries.flatten() {
-        examined += 1;
-        if examined > SWEEP_MAX_ENTRIES {
-            crate::emit::log(&format!("stamp sweep stopped at {SWEEP_MAX_ENTRIES} entries in {}; the rest wait for the next start", dir.display()));
-            break;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if let Some((key, _)) = SWEPT.iter().find_map(|ext| name.strip_suffix(&format!(".{ext}")).map(|k| (k.to_string(), ext))) {
-            keys.insert(key);
-        }
+    let keys: HashSet<String> = entries
+        .flatten()        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            SWEPT.iter().find_map(|ext| name.strip_suffix(&format!(".{ext}")).map(str::to_string))
+        })
+        .collect();
+    if keys.len() > max_candidates {
+        crate::emit::log(&format!(
+            "stamp sweep examined {max_candidates} of {} sessions in {}; the rest wait for a later start",
+            keys.len(),
+            dir.display()
+        ));
     }
     let mut removed = 0;
-    for key in keys.iter().filter(|k| !live.contains(*k)) {
+    for key in keys.iter().take(max_candidates) {
+        if is_live(key) {
+            continue;
+        }
         let newest = LIFE_SIGNS
             .iter()
             .filter_map(|ext| std::fs::metadata(dir.join(format!("{key}.{ext}"))).ok()?.modified().ok())
@@ -141,8 +171,9 @@ mod tests {
         // Eight days on, "gone" and "recent" are both past the age; only
         // a live record keeps "live".
         let later = SystemTime::now() + week + Duration::from_secs(24 * 3600);
-        assert_eq!(sweep_stale(&dir, &live, SystemTime::now(), week), 0, "nothing is old yet");
-        assert_eq!(sweep_stale(&dir, &live, later, week), 4);
+        let is_live = |k: &str| live.contains(k);
+        assert_eq!(sweep_stale(&dir, is_live, SystemTime::now(), week, SWEEP_MAX_CANDIDATES), 0, "nothing is old yet");
+        assert_eq!(sweep_stale(&dir, is_live, later, week, SWEEP_MAX_CANDIDATES), 4);
         assert!(dir.join("live.banner").exists() && dir.join("live.last-inbound").exists());
         assert!(!dir.join("gone.banner").exists() && !dir.join("recent.last-inbound").exists());
         assert!(dir.join("gone.state").exists(), "the seen-set is not the sweep's to remove");
@@ -152,6 +183,62 @@ mod tests {
     #[test]
     fn a_missing_state_dir_sweeps_nothing() {
         let dir = std::env::temp_dir().join(format!("attend-stamps-none-{}", std::process::id()));
-        assert_eq!(sweep_stale(&dir, &HashSet::new(), SystemTime::now(), STAMP_MAX_AGE), 0);
+        assert_eq!(sweep_stale(&dir, |_| false, SystemTime::now(), STAMP_MAX_AGE, SWEEP_MAX_CANDIDATES), 0);
+    }
+
+    /// A pid-fallback key is live while its Claude Code process runs with
+    /// the same start time; a reused pid or a gone process is not.
+    #[test]
+    fn a_pid_fallback_key_is_live_while_its_process_runs() {
+        let none = HashSet::new();
+        let running = |pid: u32| (pid == 42).then(|| "123".to_string());
+        assert!(key_is_live("claude-42-123", &none, running));
+        assert!(!key_is_live("claude-42-999", &none, running), "the pid was reused");
+        assert!(!key_is_live("claude-7-123", &none, running), "the process is gone");
+        assert!(!key_is_live("claude-x-123", &none, running));
+        assert!(key_is_live("sess-a", &HashSet::from(["sess-a".to_string()]), running));
+        assert!(!key_is_live("sess-b", &none, running));
+    }
+
+    /// The sweep keeps a live pid-fallback session's stamps however old.
+    #[test]
+    fn the_sweep_keeps_a_live_pid_fallback_sessions_stamps() {
+        let dir = scratch("pidkey");
+        touch(&dir, "claude-42-123.banner");
+        touch(&dir, "claude-42-77.banner");
+        let none = HashSet::new();
+        let running = |pid: u32| (pid == 42).then(|| "123".to_string());
+        let later = SystemTime::now() + STAMP_MAX_AGE * 2;
+        let removed = sweep_stale(&dir, |k| key_is_live(k, &none, running), later, STAMP_MAX_AGE, SWEEP_MAX_CANDIDATES);
+        assert_eq!(removed, 1);
+        assert!(dir.join("claude-42-123.banner").exists());
+        assert!(!dir.join("claude-42-77.banner").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The cap counts stamp keys, not directory entries: seen-set files
+    /// do not use it up, so a sweep under the cap clears every stale key.
+    #[test]
+    fn the_cap_counts_stamp_keys_not_entries() {
+        let dir = scratch("cap");
+        // Seen-set files written before and after the stamps, so they
+        // come first whichever order the filesystem lists entries in.
+        for i in 0..20 {
+            touch(&dir, &format!("seen-{i}.state"));
+        }
+        for i in 0..5 {
+            touch(&dir, &format!("old-{i}.banner"));
+        }
+        for i in 20..40 {
+            touch(&dir, &format!("seen-{i}.state"));
+        }
+        let later = SystemTime::now() + STAMP_MAX_AGE * 2;
+        assert_eq!(sweep_stale(&dir, |_| false, later, STAMP_MAX_AGE, 5), 5, "all five keys fit under a cap of five");
+        for i in 0..5 {
+            touch(&dir, &format!("again-{i}.banner"));
+        }
+        assert_eq!(sweep_stale(&dir, |_| false, later, STAMP_MAX_AGE, 3), 3, "a cap of three examines three keys");
+        assert_eq!(sweep_stale(&dir, |_| false, later, STAMP_MAX_AGE, 3), 2, "the next start takes the rest");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
