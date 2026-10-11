@@ -6,7 +6,9 @@
 //! first. Only then does ADR-198's uninstall run, without `--purge`, followed
 //! by the staged installer and a repair of every target the kept config
 //! lists. A failed fetch or verification removes nothing. A failed install
-//! keeps the stage and prints the line that finishes from it.
+//! keeps the stage and prints the line that finishes from it. An install that
+//! built the app and stopped at a real path in a target keeps the app, and
+//! `ways manage repair` finishes it.
 //!
 //! The fetch and its check are the installer's own (`install.sh --stage`, the
 //! function its bootstrap fetches through). The checkout test and the HEAD
@@ -65,6 +67,10 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 fn stage_dir(app: &Path) -> PathBuf {
     app.with_file_name("agent-ways.reinstall")
 }
+
+/// The installer's exit code when the app is built and on PATH and the
+/// projection stopped at a real path (`scripts/install.sh`).
+const PROJECTION_STOPPED: i32 = 3;
 
 /// A word for a POSIX shell, single-quoted.
 fn quote(s: &str) -> String {
@@ -143,25 +149,38 @@ pub fn run(yes: bool, purge: bool) -> Result<()> {
         .current_dir(&stage)
         .env("AGENT_WAYS_ORIGIN", &source.url)
         .status()
-        .is_ok_and(|s| s.success());
-    if !installed {
-        // A half-made app dir would turn the finishing run into an update,
-        // which pulls past the version being put back. It is a fresh clone of
-        // the stage and holds nothing of the operator's.
-        if app.exists() {
-            let _ = std::fs::remove_dir_all(&app);
+        .map(|s| s.code());
+    match installed {
+        Ok(Some(0)) => {}
+        // The app is built and on PATH; the projection stopped at a real path,
+        // and the installer has named it. The stage is not needed any more.
+        Ok(Some(PROJECTION_STOPPED)) => {
+            let _ = std::fs::remove_dir_all(&stage);
+            eprintln!(
+                "\nagent-ways {} is installed, and no target is projected yet. After you move the paths above, finish with:\n  ways manage repair",
+                source.label()
+            );
+            bail!("the projection stopped at a real path");
         }
-        let s = stage.to_string_lossy();
-        eprintln!(
-            "\nThe install did not finish. The staged copy is kept at {}.\n\
-             Fix the cause above, then finish the install with:\n  \
-             cd {} && AGENT_WAYS_ORIGIN={} bash scripts/install.sh && rm -rf {}",
-            stage.display(),
-            quote(&s),
-            quote(&source.url),
-            quote(&s)
-        );
-        bail!("the install from the stage failed");
+        _ => {
+            // A half-made app dir would turn the finishing run into an update,
+            // which pulls past the version being put back. It is a fresh clone
+            // of the stage and holds nothing of the operator's.
+            if app.exists() {
+                let _ = std::fs::remove_dir_all(&app);
+            }
+            let s = stage.to_string_lossy();
+            eprintln!(
+                "\nThe install did not finish. The staged copy is kept at {}.\n\
+                 Fix the cause above, then finish the install with:\n  \
+                 cd {} && AGENT_WAYS_ORIGIN={} bash scripts/install.sh && rm -rf {}",
+                stage.display(),
+                quote(&s),
+                quote(&source.url),
+                quote(&s)
+            );
+            bail!("the install from the stage failed");
+        }
     }
     let _ = std::fs::remove_dir_all(&stage);
 

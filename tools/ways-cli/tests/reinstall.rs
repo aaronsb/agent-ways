@@ -2,8 +2,9 @@
 //! tree against a local origin. The app is a clone of a small agent-ways
 //! checkout carrying the repository's real `scripts/install.sh`, whose stage
 //! mode fetches and verifies and whose fresh path installs. Its Makefile's
-//! `setup` stands in for the build: it writes a `bin/ways` that exits 0, or
-//! fails, so the install succeeds or fails on purpose.
+//! `setup` stands in for the build: it writes a `bin/ways` that exits 0 or
+//! refuses to project, or the build fails, so the install succeeds or stops on
+//! purpose.
 #![cfg(unix)]
 
 use std::path::{Path, PathBuf};
@@ -15,6 +16,9 @@ struct Sandbox {
 
 const BUILDS: &str = "# agent-ways test checkout\nsetup:\n\tmkdir -p bin && printf '#!/bin/sh\\nexit 0\\n' > bin/ways && chmod +x bin/ways\n";
 const FAILS: &str = "# agent-ways test checkout\nsetup:\n\t@echo build failed; exit 1\n";
+/// Builds a `bin/ways` whose repair refuses, as a real path at a projected
+/// root makes it.
+const REFUSES: &str = "# agent-ways test checkout\nsetup:\n\tmkdir -p bin && printf '#!/bin/sh\\necho refused: skills is a real directory >&2\\nexit 1\\n' > bin/ways && chmod +x bin/ways\n";
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -173,6 +177,19 @@ fn a_failed_install_keeps_the_stage_and_prints_the_finishing_line() {
     let finish = format!("cd '{}' && AGENT_WAYS_ORIGIN='{}' bash scripts/install.sh", s.stage().display(), s.base.join("origin").display());
     assert!(t.contains(&finish), "{t}");
     assert!(!s.app().exists(), "a half-made app would turn the finishing run into an update");
+    s.kept_what_the_operator_owns();
+}
+
+#[test]
+fn a_projection_stop_keeps_the_built_app_and_names_repair_as_the_finish() {
+    let s = Sandbox::new("refused", REFUSES);
+    let out = s.ways(&["manage", "reinstall", "--yes"]);
+    let t = text(&out);
+    assert!(!out.status.success(), "{t}");
+    assert!(s.app().join("bin/ways").is_file(), "the built app is kept: {t}");
+    assert!(!s.stage().exists(), "the stage is not needed once the app is built: {t}");
+    assert!(t.contains("Projection stopped") && t.contains("ways manage repair"), "{t}");
+    assert!(!t.contains("bash scripts/install.sh"), "the finish is a repair, not a reinstall from the stage: {t}");
     s.kept_what_the_operator_owns();
 }
 

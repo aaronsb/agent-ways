@@ -15,6 +15,9 @@
 #                                                # (`ways manage reinstall` stages with this, ADR-509)
 #
 # The happy path: stage app → make setup → ways manage repair. Everything else is guardrails.
+#
+# Exit codes: 0 done; 1 failed; 2 usage; 3 the app is built and on PATH, and the
+# projection stopped at a real path (finish with `ways manage repair`).
 
 set -euo pipefail
 
@@ -231,6 +234,7 @@ is_agent_ways_repo() {
 }
 
 # Shown when `ways manage repair` refuses: a real path sits at a projected root.
+# The caller exits 3, so `ways manage reinstall` keeps the built app.
 print_projection_stopped() {
   echo ""
   echo -e "${YELLOW}Projection stopped.${RESET} The app is staged in ${CYAN}${APP_DIR}${RESET}; nothing in ${DEST} was changed."
@@ -376,7 +380,7 @@ if is_agent_ways_repo "$APP_DIR"; then
     echo -e "Reconciling projection → ${CYAN}${DEST}${RESET}..."
     if ! "$APP_DIR/bin/ways" manage repair --source "$APP_DIR" --dest "$DEST"; then
       print_projection_stopped
-      exit 1
+      exit 3
     fi
     echo ""
     echo -e "${GREEN}Updated.${RESET} Restart Claude Code for changes to take effect."
@@ -440,7 +444,7 @@ if [[ -x "$APP_DIR/bin/ways" ]]; then
   mkdir -p "$DEST"
   if ! "$APP_DIR/bin/ways" manage repair --source "$APP_DIR" --dest "$DEST"; then
     print_projection_stopped
-    exit 1
+    exit 3
   fi
   echo ""
   echo -e "${BOLD}Done.${RESET} ~/.claude is now a projection of ${DIM}${APP_DIR}${RESET}"

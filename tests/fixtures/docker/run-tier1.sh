@@ -149,7 +149,7 @@ case "$FLAVOR" in
 esac
 INSTALL_OUT=$(cat "$HOME/install.out")
 
-assert_eq "installer exits 1 on the real skills dir" "1" "$INSTALL_RC"
+assert_eq "installer exits 3 on the real skills dir" "3" "$INSTALL_RC"
 assert_contains "installer names the refusal" "Projection stopped" "$INSTALL_OUT"
 assert "app staged" test -x "$APP_DIR/bin/ways"
 # The image carries no C++ toolchain, so the only way to a working way-embed
