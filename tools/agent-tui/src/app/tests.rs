@@ -1010,3 +1010,21 @@ fn a_tree_title_wider_than_its_pane_is_cut_with_an_ellipsis_at_80_columns() {
     let mut app = App::new("t", tabbed());
     assert!(frame(&mut app, 80, 25)[1].starts_with("┌t─"));
 }
+
+#[test]
+fn a_status_message_beside_the_call_to_action_is_cut_to_its_room_or_goes() {
+    let s = Setting::new(Kind::Bool, "true", "user").default("true").store("user", "/c/a.yaml".into(), "k");
+    let tree = vec![Node::group("ways", "", vec![Node::leaf("a_rather_long_setting_name_for_the_status_line", "", s)]).opened()];
+    let mut app = App::new("t", tree);
+    keys(&mut app, &[KeyCode::Enter]);
+    assert_eq!(app.msg, "a_rather_long_setting_name_for_the_status_line = false");
+    // At 80 columns the call to action leaves too little: the message goes
+    // whole, rather than a letter or two of it showing.
+    let line = bottom(&mut app, 80, 25);
+    let before = line.split("● 1 unsaved").next().unwrap();
+    assert!(before.trim_end().ends_with('│'), "nothing between the counts and the call to action: {line}");
+    // Wider, it is cut in the middle and keeps its value.
+    let line = bottom(&mut app, 110, 25);
+    let before = line.split("● 1 unsaved").next().unwrap().trim_end();
+    assert!(before.contains("a_ra") && before.contains('…') && before.ends_with("= false"), "{line}");
+}

@@ -78,6 +78,10 @@ pub(super) fn modal_rect(area: Rect, w: u16, h: u16) -> Rect {
     Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
 }
 
+/// The fewest columns a status message is shown in: in fewer, the cut
+/// leaves too little of it to read, so it goes.
+const MSG_MIN: usize = 8;
+
 /// The most dots the masked entry draws; past it a count follows, so the
 /// hint beside the entry stays on screen for a long key.
 const MASK_DOTS: usize = 24;
@@ -692,13 +696,18 @@ impl App {
                     spans.push(hint(if self.mouse { "mouse on (m)" } else { "mouse off (m)" }));
                 }
                 // A row's actions take the place of the opening hint when
-                // both do not fit; a message said since comes first, so it
-                // is never cut off.
+                // both do not fit; a message said since comes first. It is
+                // cut in the middle to the room left of the call to action,
+                // and goes when too little is left to read.
                 let here = self.footer_actions();
                 let room = area.width.saturating_sub(cta.as_ref().map_or(0, |c| width(c)));
                 let fits = |here: &[Span]| width(&spans) + msg.width() as u16 + width(&[theme::sep()]) + width(here) <= room;
                 if self.msg != crate::app::HINT || here.as_deref().is_none_or(fits) {
-                    spans.push(msg);
+                    // Two columns lead the message; it needs eight past them.
+                    let left = room.saturating_sub(width(&spans)) as usize;
+                    if left >= 2 + MSG_MIN {
+                        spans.push(Span::styled(format!("  {}", elide(&self.msg, left - 2)), msg.style));
+                    }
                 }
                 if let Some(here) = here {
                     spans.push(theme::sep());
