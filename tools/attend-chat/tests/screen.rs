@@ -1232,3 +1232,33 @@ fn a_partial_name_marks_its_rows_in_the_column() {
     let cell = buf.cell((x, y)).expect("a cell");
     assert!(cell.modifier.contains(agent_tui::ratatui::style::Modifier::UNDERLINED), "Tab's target is marked");
 }
+
+/// In the round shape at full colour each row is a lozenge: a cap, the
+/// name on the identity colour, joins, and an inactive agent on the
+/// desaturated steps of its colour.
+#[test]
+fn golden_the_column_draws_lozenges_in_the_round_shape() {
+    let mut g = goldens();
+    let f = fixture();
+    let dir = f.root.join("config/agent-ways/themes");
+    let (painter, _) = agent_theme::Painter::named_in(Some("nord"), &dir, ColorDepth::TrueColor);
+    let mut c = Chat::new(None, Palette { painter }, Shape::ROUND).heartbeat(false).pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0);
+    for s in transcript() {
+        c.push(s);
+    }
+    c.push(sig(&format!("claude:{GAMMA_SID}"), GAMMA, 900, Channel::Open, "signing off"));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let rows = testkit::rows(&buf);
+    let laszlo = rows.iter().position(|r| r.contains("Laszlo") && r.contains('\u{e0b6}')).expect("a capped lozenge");
+    assert!(rows[laszlo].matches('\u{e0b4}').count() == 3, "three joins: {}", rows[laszlo]);
+    let (x, y) = testkit::find(&buf, "Laszlo").expect("the row");
+    let live_bg = buf.cell((x, y)).unwrap().bg;
+    let (x, y) = testkit::find(&buf, "Lyra").expect("the quiet agent's row");
+    let gone_bg = buf.cell((x, y)).unwrap().bg;
+    let lyra = agent_identity::Identity::for_cwd(GAMMA, ColorDepth::TrueColor).palette.rgb;
+    let faded = agent_theme::IdentitySteps::of(agent_theme::Rgb(lyra.0, lyra.1, lyra.2), false).name.bg;
+    assert_eq!(gone_bg, agent_tui::ratatui::style::Color::Rgb(faded.0, faded.1, faded.2), "the desaturated step");
+    assert_ne!(live_bg, gone_bg);
+    g.check("sidebar-round-truecolor-80x25", &buf);
+    g.finish();
+}

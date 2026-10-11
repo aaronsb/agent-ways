@@ -11,7 +11,9 @@ use agent_tui::ratatui::text::{Line, Span};
 use agent_tui::ratatui::widgets::Paragraph;
 use agent_tui::ratatui::Frame;
 use agent_tui::strip::{prefix_match, target};
-use agent_tui::theme;
+use agent_theme::{IdentitySteps, Rgb};
+use agent_tui::ratatui::style::Color;
+use agent_tui::theme::{self, Ground, Seg, Shape};
 use agent_tui::wrap::str_width;
 
 use super::{ChatPane, Chip};
@@ -141,47 +143,85 @@ fn header(f: &mut Frame, area: Rect, label: &str) {
     f.render_widget(Paragraph::new(Span::styled(format!(" {label}"), theme::muted().add_modifier(Modifier::BOLD))), Rect { height: 1, ..area });
 }
 
-/// An agent's row: its name in its identity colour, its project set back,
-/// and `●` live or `○` not. An inactive agent is muted whole.
+/// Lozenge segments sized to `w` columns in `shape`: the first two hold
+/// `texts[0]` and `texts[1]` cut or padded so the row fills `w`, the last
+/// holds `texts[2]` whole. A project too narrow to read is dropped into the
+/// name's padding.
+fn sized(shape: Shape, texts: [&str; 3], w: usize) -> [String; 3] {
+    let glyphs = usize::from(!shape.cap.is_empty()) + if shape.join.is_empty() { 0 } else { 3 };
+    let last = format!(" {} ", texts[2]);
+    let room = w.saturating_sub(glyphs + str_width(&last));
+    let name = format!(" {} ", fit(texts[0], room.saturating_sub(2).max(1)));
+    let rest = room.saturating_sub(str_width(&name));
+    if rest < 5 {
+        return [format!("{name}{}", " ".repeat(rest)), String::new(), last];
+    }
+    let project = format!(" {}", fit(texts[1], rest - 2));
+    let pad = rest.saturating_sub(str_width(&project));
+    [name, format!("{project}{}", " ".repeat(pad)), last]
+}
+
+/// The segments of a sized row, leaving out an empty middle one.
+fn segs(texts: [String; 3], styles: [Style; 3]) -> Vec<Seg> {
+    texts.into_iter().zip(styles).filter(|(t, _)| !t.is_empty()).map(|(t, st)| Seg::styled(t, st)).collect()
+}
+
+/// A colour of the identity palette at the chat's depth.
+fn at(c: Rgb, depth: agent_theme::ColorDepth) -> Color {
+    agent_theme::Color::Rgb(c).at(depth).map(agent_theme::ratatui::color).unwrap_or(Color::Reset)
+}
+
+/// An agent's row, a lozenge in the status line's style: the name on the
+/// identity colour, the project on a darker step of it, and `●` live or
+/// `○` not on the darkest. An inactive agent wears the desaturated steps.
+/// At 16 colours the name keeps its ANSI colour and the rest is set back.
 fn agent_line(chat: &ChatPane, s: &Seen, w: usize, mark: Style) -> Line<'static> {
     let depth = chat.palette.depth();
     let k = &s.identity;
     let project = agent_identity::cwd_basename(&k.cwd);
-    let name_w = w.saturating_sub(4).min(str_width(&k.nickname));
-    let name = fit(&k.nickname, name_w);
-    let rest = w.saturating_sub(str_width(&name) + 4);
     let dot = if s.live { "●" } else { "○" };
-    let style = if s.live { Style::new().fg(color_for(k.palette, depth)) } else { theme::muted() };
-    let mut spans = vec![Span::raw(" "), Span::styled(name, style.patch(mark))];
-    if rest >= 3 {
-        spans.push(Span::styled(format!(" {}", fit(&project, rest - 1)), theme::muted()));
-    }
-    let used: usize = spans.iter().map(|s| s.width()).sum();
-    spans.push(Span::raw(" ".repeat(w.saturating_sub(used + 1))));
-    spans.push(Span::styled(dot, style));
+    let texts = sized(chat.shape, [&k.nickname, &project, dot], w);
+    let styles = if agent_identity::is_rich(depth) {
+        let st = IdentitySteps::of(Rgb(k.palette.rgb.0, k.palette.rgb.1, k.palette.rgb.2), s.live);
+        let cell = |x: agent_theme::Step| Style::new().fg(at(x.fg, depth)).bg(at(x.bg, depth));
+        let mut name = cell(st.name);
+        if s.live && k.style.bold {
+            name = name.add_modifier(Modifier::BOLD);
+        }
+        [name.patch(mark), cell(st.project), cell(st.mark)]
+    } else if s.live {
+        let name = Style::new().fg(Color::Black).bg(color_for(k.palette, depth));
+        [name.patch(mark), Seg::faded("").style, Seg::on("", Ground::Rule).style]
+    } else {
+        [Seg::faded("").style.patch(mark), Seg::faded("").style, Seg::faded("").style]
+    };
+    let mut spans = vec![Span::raw(" ")];
+    spans.extend(chat.shape.lozenge(&segs(texts, styles)));
     Line::from(spans)
 }
 
-/// A channel's row: the shown channel marked, then its glyph and name,
-/// its member count and the time since its last message. A channel with
-/// no live member, or none on disk, is set back.
+/// A channel's row, the same shape on the accent: its glyph and name, then
+/// its member count and the time since its last message, then `●` when a
+/// member is live (where D5's seal marker will go). The shown channel is
+/// marked at the left. A channel with no live member, or none on disk, is
+/// set back.
 fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown: bool, w: usize, mark: Style) -> Line<'static> {
-    let depth = chat.palette.depth();
     let g = &row.known.group;
     let active = row.on_disk && (row.known.is_base || live > 0);
-    let style = if active { Style::new().fg(color_for(g.palette, depth)) } else { theme::muted() };
     let figures = if row.known.is_base { age.to_string() } else { format!("{}👤 {age}", row.known.membership.members.len()).trim_end().to_string() };
+    let name = format!("{} #{}", g.glyph, g.name);
+    let dot = if active { "●" } else { "○" };
+    let texts = sized(chat.shape, [&name, &figures, dot], w);
+    let styles = if active {
+        let name = Seg::on("", Ground::Accent).style;
+        [if shown { name.add_modifier(Modifier::BOLD) } else { name }.patch(mark), Seg::on("", Ground::AccentDim).style, Seg::on("", Ground::Rule).style]
+    } else {
+        [Seg::faded("").style.patch(mark), Seg::faded("").style, Seg::faded("").style]
+    };
     let lead = if shown { Span::styled(theme::SELECTED_MARK, theme::accent()) } else { Span::raw(" ") };
-    let name_w = w.saturating_sub(str_width(&figures) + 4);
-    let name = fit(&format!("{} #{}", g.glyph, g.name), name_w.max(4));
-    let name_style = if shown { style.add_modifier(Modifier::BOLD) } else { style };
-    let used = 1 + str_width(&name);
-    Line::from(vec![
-        lead,
-        Span::styled(name, name_style.patch(mark)),
-        Span::raw(" ".repeat(w.saturating_sub(used + str_width(&figures)).max(1))),
-        Span::styled(figures, theme::muted()),
-    ])
+    let mut spans = vec![lead];
+    spans.extend(chat.shape.lozenge(&segs(texts, styles)));
+    Line::from(spans)
 }
 
 impl ChatPane {
@@ -266,6 +306,18 @@ mod tests {
     fn an_age_is_its_largest_whole_unit() {
         let a = |s| age_label(std::time::Duration::from_secs(s));
         assert_eq!([a(5), a(240), a(7200), a(200_000)], ["5s", "4m", "2h", "2d"]);
+    }
+
+    #[test]
+    fn a_row_fills_its_width_in_any_shape() {
+        let width = |t: &[String; 3]| t.iter().map(|x| str_width(x)).sum::<usize>();
+        let t = sized(Shape::ROUND, ["Laszlo", "alpha", "●"], 22);
+        assert_eq!(t, [" Laszlo ".to_string(), " alpha ".into(), " ● ".into()]);
+        assert_eq!(width(&t) + 4, 22, "cap and three joins");
+        let t = sized(Shape::PLAIN, ["Laszlo", "alpha", "●"], 22);
+        assert_eq!(width(&t), 22, "plain draws no glyphs");
+        let t = sized(Shape::ROUND, ["Shannon-alpha", "omnibus", "○"], 22);
+        assert_eq!((t[1].as_str(), width(&t) + 4), ("", 22), "no room to read the project: it goes");
     }
 
     #[test]

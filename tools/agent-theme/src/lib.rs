@@ -29,6 +29,7 @@ mod derive;
 mod model;
 mod oklab;
 mod paint;
+mod steps;
 #[cfg(feature = "ratatui")]
 pub mod ratatui;
 #[cfg(feature = "settings")]
@@ -45,4 +46,5 @@ pub use derive::{contrast, text_on, Roles, SegPair, MIN_DISTINCT, MIN_MUTED, MIN
 pub use model::{Background, Kind, Overrides, Rgb, Slots, Theme};
 pub use oklab::delta_e;
 pub use paint::{install, pair, paint, painter, reset, scoped, sgr, Ink, Painter, Resolved, Role, Scope, Style, RESET};
+pub use steps::{hsl_at, scale, IdentitySteps, Step};
 pub use text::{parse, to_text, validate, ThemeError};

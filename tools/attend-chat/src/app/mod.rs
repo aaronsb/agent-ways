@@ -173,6 +173,8 @@ pub struct ChatPane {
     config: attend_config::ChatConfig,
     /// Whether the left column is shown (`attend.chat.sidebar_key`).
     sidebar: bool,
+    /// The lozenge shape the left column's rows are drawn in, the shell's.
+    shape: Shape,
 }
 
 impl ChatPane {
@@ -208,6 +210,7 @@ impl ChatPane {
             enhanced: false,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
             sidebar: true,
+            shape: Shape::PLAIN,
         }
     }
 
@@ -765,7 +768,9 @@ pub struct Chat {
 impl Chat {
     /// A chat fed by `rx`, drawn with `palette` and lozenges in `shape`.
     pub fn new(rx: Option<Receiver<Signal>>, palette: Palette, shape: Shape) -> Chat {
-        Chat { app: App::with_pane("chat", ChatPane::new(rx, palette)).shape(shape) }
+        let mut pane = ChatPane::new(rx, palette);
+        pane.shape = shape;
+        Chat { app: App::with_pane("chat", pane).shape(shape) }
     }
 
     fn pane(&self) -> &ChatPane {
