@@ -156,8 +156,17 @@ fn report(sent: &send::Sent) {
     eprintln!("[attend] signal written ({}, {} dirs): {}.signal", sent.scope, sent.dirs, sent.id);
 }
 
-/// Print why the send wrote nothing, as the CLI always has, and exit 1.
+/// Print why the send wrote nothing, as the CLI always has, and exit 1. An
+/// empty message is a malformed command line: exit 2, `kind: usage` under
+/// `--json` (ADR-185, note of 2026-10-10).
 fn fail(e: &SendError, json: bool) -> ! {
+    if let SendError::EmptyMessage = e {
+        crate::cmd::refuse_usage(
+            "usage: attend send <message>\n  (reaches every peer and Aaron — no routing flags needed)\n  tip: wrap message in double quotes to avoid shell expansion",
+            &e.to_string(),
+            json,
+        );
+    }
     if json {
         crate::cmd::print_json_error(e, &e.to_string());
     }
@@ -166,11 +175,7 @@ fn fail(e: &SendError, json: bool) -> ! {
             eprintln!("attend send: --re signal id must be non-empty and match [A-Za-z0-9_-]+");
         }
         SendError::AmbiguousRePrefix { .. } => eprintln!("attend send: {e}"),
-        SendError::EmptyMessage => {
-            eprintln!("usage: attend send <message>");
-            eprintln!("  (reaches every peer and Aaron — no routing flags needed)");
-            eprintln!("  tip: wrap message in double quotes to avoid shell expansion");
-        }
+        SendError::EmptyMessage => unreachable!("an empty message is refused as usage above"),
         SendError::NoPeerAt { path, peers, suggestion } => {
             eprintln!("error: no active peer at {}", path);
             if peers.is_empty() {

@@ -87,13 +87,6 @@ fn a_reply_threads_under_the_message_the_drain_delivered() {
 #[test]
 fn a_refusal_is_one_json_error_document_with_the_exit_code_unchanged() {
     let f = Fixture::new("verbs-json-refusal");
-    let out = f.attend(&["send", "--json", ""]);
-    assert_eq!(out.status.code(), Some(1));
-    let doc = json(&out);
-    assert_eq!(doc["error"]["kind"], "empty_message");
-    assert!(doc["message"].is_string());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("usage: attend send"), "the human wording stays on stderr");
-
     let out = f.attend(&["reply", "--json", "nothing to answer"]);
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(json(&out)["error"]["kind"], "no_inbound");
@@ -123,6 +116,11 @@ fn a_usage_refusal_under_json_is_kind_usage_with_exit_2() {
     };
     usage(&["send", "--json", "--chanel", "x", "hello"]);
     usage(&["channels", "--json", "pin", "x"]);
+    // An empty message is a malformed command line, not a failed send.
+    usage(&["send", "--json", ""]);
+    let out = f.attend(&["send", ""]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("usage: attend send"));
     // A conflict clap raises itself is exit 2 in clap's text, with no JSON.
     let out = f.attend(&["inbox", "--drain", "--json"]);
     assert_eq!(out.status.code(), Some(2));
