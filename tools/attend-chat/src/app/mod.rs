@@ -13,6 +13,7 @@
 //! (in [`view`]) paints the pane. The Enter and Tab logic lives in
 //! [`keys`] as free functions; the editing keys are the shared input's.
 
+mod activate;
 mod keys;
 mod menu;
 mod sidebar;
@@ -116,6 +117,8 @@ struct Hits {
     side: Vec<(Rect, sidebar::SideHit)>,
     side_area: Rect,
     side_lists: [Rect; 2],
+    /// The compose box's destination flag, when drawn.
+    flag: Rect,
 }
 
 /// The chat's state: the messages, the compose box, the shown channel.
@@ -140,8 +143,10 @@ pub struct ChatPane {
     clock: Clock,
     world: Option<World>,
     /// The feed's entries for the foreground tab, rebuilt when the world,
-    /// the messages, the tab or the palette change.
+    /// the messages, the tab or the palette change, and each one's
+    /// sender by membership id.
     entries: Option<Vec<Entry>>,
+    entry_members: Vec<Option<String>>,
     /// Whether to keep `heartbeat/<username>` fresh (ADR-170). Off for a
     /// headless frame, which is no presence.
     heartbeat: bool,
@@ -217,6 +222,7 @@ impl ChatPane {
             clock: Clock::Live,
             world: None,
             entries: None,
+            entry_members: Vec::new(),
             heartbeat: true,
             refreshed: None,
             generation: 0,
@@ -701,6 +707,9 @@ impl Pane for ChatPane {
                 return;
             }
         }
+        if self.hits.flag.contains(at) {
+            return self.flag_menu();
+        }
         if self.hits.feed.contains(at) {
             if let Some(i) = self.feed.entry_at(at.y - self.hits.feed.y) {
                 self.feed.reveal(i);
@@ -743,21 +752,17 @@ impl Pane for ChatPane {
         // does not have the keyboard: at 80 columns it takes the place of
         // the scroll keys, which the key help still lists.
         if self.side_drawn() && self.side_focus.is_none() {
-            out.push(Binding::new("F2 ↓", "column"));
+            out.push(Binding::new("F2 ↓", "the column: ↑ ↓ move, Enter acts, ↑ at the top or Esc back").short("column"));
         }
         out.extend([
             Binding::new("PgUp PgDn", "scroll"),
             Binding::help("S-Enter M-Enter", "new line"),
             Binding::help("← → Home End", "move the cursor"),
             Binding::help("Bksp Del", "edit"),
-            Binding::help("click a message", "selects it; in the compose box it places the cursor; a chip completes it"),
-            Binding::help("click a side row", "an agent: its menu (address, who, remove); a channel: shows it, and on the channel shown opens its menu"),
+            Binding::help("click a message", "selects it; a chip completes; the compose box: the cursor"),
         ]);
         if let Some(key) = self.sidebar_key_label() {
             out.push(Binding::help(key, "show or hide the agents and channels column"));
-        }
-        if self.side_drawn() {
-            out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter does what a click does, ↑ at the top or Esc back"));
         }
         out
     }
@@ -823,10 +828,22 @@ impl Pane for ChatPane {
         true
     }
 
-    /// A tab's menu gives a lent compose box back, as a click on the tab
-    /// does; the `+` slot's is the box lent again.
-    fn tab_menu(&mut self, i: usize) {
-        self.open_tab_menu(i);
+    /// A tab's digit, a click on it, a right click on it or Enter on the
+    /// focused bar: the one activation path ([`ChatPane::activate`]). A
+    /// repeat on the tab shown opens its menu when
+    /// `attend.chat.tabs.menu_on_repeat` says so.
+    fn activate_tab(&mut self, i: usize, menu: bool) {
+        if let Some(target) = self.tab_target(i) {
+            let how = if menu { activate::How::Menu } else { activate::How::Select { repeat: self.config.menu_on_repeat } };
+            self.activate(target, how, None);
+        }
+    }
+
+    /// A right click: the menu of the column row, the destination flag or
+    /// the sender's name under it, at once.
+    fn context(&mut self, at: Position) {
+        self.dirty = true;
+        self.context_at(at);
     }
 
     fn below_strip(&self) -> Option<&'static str> {
@@ -857,6 +874,18 @@ impl Pane for ChatPane {
         if self.side_focus.take().is_some() {
             self.dirty = true;
         }
+    }
+
+    /// A click on a tab or a channel row shows it and again opens its menu;
+    /// an agent's row and the destination flag open theirs at once.
+    fn click_help(&self) -> Option<String> {
+        Some("a channel shows it, again its menu; agent, flag: its menu".into())
+    }
+
+    /// A right click opens the menu at once on a tab, a column row or a
+    /// sender's name in the feed.
+    fn right_click_help(&self) -> Option<String> {
+        Some("a tab, a row or a sender's name: its menu at once".into())
     }
 
     fn quit_help(&self) -> Option<String> {

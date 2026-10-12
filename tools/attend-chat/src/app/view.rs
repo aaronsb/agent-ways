@@ -133,7 +133,9 @@ fn when(clock: Clock, ts: u64) -> String {
 /// One message as a feed entry: the sender's chip (name, scope, then the
 /// channel glyphs of the sender's memberships and the time) beside the
 /// body, with a chip per attached file that exists now (#390).
-fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGroup>>) -> Entry {
+/// With the entry, the sender's membership id, for a right click on its
+/// name ([`ChatPane::context_at`]).
+fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGroup>>) -> (Entry, Option<String>) {
     let depth = chat.palette.depth();
     let world = chat.world.as_ref().expect("the world is read before the feed");
     let chip = chip_for(&s.from, &s.project, &s.cwd, depth, &world.instances);
@@ -162,7 +164,7 @@ fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGrou
     if !files.is_empty() {
         body.push(attachment_line(chat, &files));
     }
-    Entry { label, body }
+    (Entry { label, body }, key)
 }
 
 /// A chip per attached file: its name on the rule's ground, so a file
@@ -191,9 +193,10 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
                 memberships.entry(m.as_str()).or_default().push(kg);
             }
         }
-        let entries: Vec<Entry> =
-            chat.signals.iter().filter(|s| tabs::visible_in(&s.channel, fg)).map(|s| entry(chat, s, &memberships)).collect();
+        let (entries, members): (Vec<Entry>, Vec<Option<String>>) =
+            chat.signals.iter().filter(|s| tabs::visible_in(&s.channel, fg)).map(|s| entry(chat, s, &memberships)).unzip();
         chat.entries = Some(entries);
+        chat.entry_members = members;
     }
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(theme::rule()).padding(Padding::horizontal(1));
     let inner = block.inner(area);
@@ -253,6 +256,8 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, lead: &str, rows
         let w = (str_width(&flag) as u16).min(inner.width);
         let at = Rect { x: inner.x + inner.width - w, y: inner.y + text_h, width: w, height: flag_h };
         f.render_widget(Paragraph::new(Span::styled(flag, theme::badge(Ground::Info))), at);
+        // A click on it opens the menu of the channel it names.
+        chat.hits.flag = at;
     }
 }
 

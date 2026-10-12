@@ -913,7 +913,7 @@ fn a_click_then_enter_on_merged_asks_before_clearing_the_view() {
     // The key help names what a click on a tab does.
     press(&mut c, key(KeyCode::F(1)));
     let help = text(&mut c, 100, 60);
-    assert!(help.contains("so does a click on the tab shown"), "{help}");
+    assert!(help.contains("a channel shows it, again its menu"), "{help}");
 }
 
 /// #deploy's menu, then Delete channel: the question waits for its `y`.

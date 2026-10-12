@@ -50,7 +50,10 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             off, the terminal selects text and middle-click pastes
   F1                        the keys
   mouse (on)                click a tab or a channel in the column to show it,
-                            and again for its menu; a message to select it; the
+                            and again for its menu; a right click on a tab, a
+                            column row or a sender's name opens its menu at
+                            once; the destination flag, the menu of the
+                            channel it names; a message to select it; the
                             compose box to place the cursor; a chip to complete it;
                             the wheel scrolls the messages; Shift-drag selects
                             text in most terminals

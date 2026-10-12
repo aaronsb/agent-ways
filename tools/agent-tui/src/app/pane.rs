@@ -200,10 +200,6 @@ pub enum Open {
     /// is picked comes back through [`Pane::picked`] under `id`. Esc or a
     /// click outside closes it with nothing.
     Pick { id: String, title: String, items: Vec<Item>, multi: bool, anchor: Anchor },
-    /// Tab `i` as Ctrl+digit takes it: shown, or its menu opened when it
-    /// is shown already. For a row of the pane that stands for a tab, so a
-    /// click on the row and the key share one rule.
-    Tab(usize),
     /// A question on the bottom bar, answered with `y` or `n`, or a click
     /// on either answer, which the bar draws as lozenges: `yes` and `no`
     /// name what each does ("clear", "keep"). Esc, a click elsewhere, or
@@ -243,6 +239,29 @@ pub trait Pane: Any {
     /// its action. Nothing by default.
     fn tab_menu(&mut self, _i: usize) {}
 
+    /// Tab `i` activated: by its digit or a left click on it (`menu`
+    /// false), or by a right click on it or Enter on the focused tab bar
+    /// (`menu` true). The one place a tab's input becomes showing it or
+    /// opening its menu. By default the shell's rule: a menu when asked
+    /// for, on an action slot, or on the tab shown when
+    /// [`crate::TabKeys::menu_on_repeat`] says so; else the tab shown. A
+    /// pane with targets of its own beyond the tabs (the chat's column)
+    /// routes them all through one path of its own here.
+    fn activate_tab(&mut self, i: usize, menu: bool) {
+        let Some(t) = self.tabs().get(i).cloned() else { return };
+        let repeat = self.tab() == i && self.tab_keys().menu_on_repeat;
+        if self.has_tab_menus() && (menu || t.action || repeat) {
+            self.tab_menu(i);
+        } else if !menu {
+            self.set_tab(i);
+        }
+    }
+
+    /// A right click at `at` inside the pane, outside any overlay: open the
+    /// menu a left click there would eventually reach, through
+    /// [`Pane::take_open`]. Nothing by default.
+    fn context(&mut self, _at: Position) {}
+
     /// What lies below the tab bar for Down to reach, in a word or two
     /// ("the column"), when the pane has such a list. Only a pane with tab
     /// menus is asked; the tab bar's hint names it.
@@ -274,6 +293,18 @@ pub trait Pane: Any {
     /// got the focus, a tab was clicked. A pane holding the keyboard in a
     /// list of its own lets go of it.
     fn interrupted(&mut self) {}
+
+    /// How the key help describes a click, when the pane's targets say more
+    /// than the shell's line (a tab shows it, the wheel scrolls).
+    fn click_help(&self) -> Option<String> {
+        None
+    }
+
+    /// How the key help describes a right click, when the pane's reaches
+    /// more than a tab: it then takes the shell's `right-click a tab` line.
+    fn right_click_help(&self) -> Option<String> {
+        None
+    }
 
     /// How the key help describes quitting, when the pane's differs from
     /// the shell's (asking first over unsaved work).
