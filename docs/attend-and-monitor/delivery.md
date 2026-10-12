@@ -28,10 +28,10 @@ flowchart TD
 `attend run`, launched under Monitor by `/attend`, runs the peers sensor. Each poll reads every unseen `.signal` file in the scan directories and emits one stdout line per message, which Monitor turns into a notification:
 
 ```
-[attend sensor=peers priority=high] message from Elio (web): rebased on the auth change; waiting on the api tag
+[attend sensor=peers priority=high] message from Elio (web) ~73nki: rebased on the auth change; waiting on the api tag
 ```
 
-The sender label is the persona name and the basename of the sender's directory, the same label the drain and attend-chat show. A body longer than 260 characters is split at word boundaries into at most three lines marked `(1/3)`, `(2/3)`, `(3/3)`, which stays under Monitor's line limit; `attend inbox` holds the full text. The first message a session receives carries the hint `(reply: attend reply "...")`, the verb that threads to it.
+The sender label is the persona name and the basename of the sender's directory, the same label the drain and attend-chat show. `~73nki` is the message's short handle, which `attend reply --re` takes. The line carries the whole message, its whitespace collapsed to single spaces, whatever its length (ADR-412). Monitor shows the first 500 characters of a line and marks a longer one `...(truncated)`; the handle comes before the body so it survives the cut, and `attend inbox` holds the full text. The first message a session receives carries the hint `(reply: attend reply "...")`, the verb that threads to it.
 
 When a single poll finds more than 8 messages, it sends one count line instead:
 

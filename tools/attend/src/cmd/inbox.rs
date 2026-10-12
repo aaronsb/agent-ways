@@ -1108,7 +1108,7 @@ mod drain_tests {
         let _ = sensor.poll(&focus); // first poll: peer-presence baseline, emits nothing
         let observations = sensor.poll(&focus);
 
-        let expected = format!("message from {}: same name on both", drained.sender);
+        let expected = format!("message from {} ~{}: same name on both", drained.sender, short_id("peer-1"));
         assert!(
             observations.iter().any(|(_, line)| line == &expected),
             "Monitor conduit did not emit {expected:?}; got {:?}",

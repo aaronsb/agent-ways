@@ -174,7 +174,7 @@ If the lane's governor permits, the loop builds a batch:
 3. Append `(sensor_name, priority, observations)` to the batch.
 4. Hand the batch to `emit::emit_batch()` which formats each event as a single Monitor-visible line.
 
-Medium and high events print to stdout as `[attend sensor=<name> priority=<p>] <event>`, one line each, and Monitor delivers each line as a notification. Low events go to stderr; when a batch has both, one `[attend] also: N quiet event(s) from …` line counts the low ones, and a batch of only low events wakes nothing. Monitor truncates lines around 400 characters, which is why the peers sensor splits long messages.
+Medium and high events print to stdout as `[attend sensor=<name> priority=<p>] <event>`, one line each, and Monitor delivers each line as a notification. Low events go to stderr; when a batch has both, one `[attend] also: N quiet event(s) from …` line counts the low ones, and a batch of only low events wakes nothing. Monitor shows the first 500 characters of each line and marks a longer one `...(truncated)` (measured on Claude Code 2.1.296); a peer message goes out as one line whatever its length (ADR-412, [`delivery.md`](delivery.md#the-monitor-line)).
 
 After emission, the loop records a disclosure on that lane's governor. On the event lane it also records engagement for every sensor whose magnitude reached 3.0, so quiet filler does not escalate the refractory. The message lane records no engagement.
 

@@ -8,7 +8,7 @@ export const WAYS = 'ways'
 // ── argv ─────────────────────────────────────────────────────────────────
 // Every call is an argv array with no shell. A body is one element after
 // `--`, so no quoting rule applies to it and a body that starts with a dash
-// stays a body. attend splits a long body into numbered parts itself.
+// stays a body. attend sends a long body as one message.
 
 /** `attend send [--channel C] [--to P] -- <message>`. */
 export function sendArgv(message: string, channel?: string, to?: string): string[] {

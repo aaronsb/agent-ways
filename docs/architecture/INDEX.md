@@ -127,6 +127,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-409](./attend/ADR-409-esc-in-the-chat-never-quits-and-the-compose-box-lent-to-a-name-says-what-it-is-lent-to.md) | Esc in the chat never quits, and the compose box lent to a name says what it is lent to | accepted |
 | [ADR-410](./attend/ADR-410-a-chat-message-opens-with-one-header-band-in-the-sender-s-colour-across-the-feed-a-rule-under-it-and-the-body-at-full-width.md) | A chat message opens with one header band in the sender's colour across the feed, a rule under it, and the body at full width | accepted |
 | [ADR-411](./attend/ADR-411-a-session-that-listened-comes-back-listening-when-its-session-id-is-resumed.md) | A session that listened comes back listening when its session id is resumed | accepted |
+| [ADR-412](./attend/ADR-412-one-message-is-one-signal-and-no-conduit-splits-it.md) | One message is one signal, and no conduit splits it | accepted |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_

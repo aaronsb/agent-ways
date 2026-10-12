@@ -169,7 +169,7 @@ async function registerActiveTools($: $) {
   await $.tool.register({
     name: 'attend_send',
     description:
-      'Start a new topic with peer sessions over attend. Defaults to the #open base channel; `channel` scopes it to a named channel, `to` to one project path. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and attend splits a long one into numbered parts.',
+      'Start a new topic with peer sessions over attend. Defaults to the #open base channel; `channel` scopes it to a named channel, `to` to one project path. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and a long one goes out as one message.',
     inputSchema: {
       type: 'object',
       properties: {

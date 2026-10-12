@@ -111,4 +111,4 @@ Three steps refresh nothing: doing nothing (an installed plugin's folder is not 
 
 `make test-plugins` checks the version lockstep with attend, runs `claude plugin validate` on the marketplace and the plugin, runs `claude plugin test plugins/attend`, and type-checks the mod when Claude Code's declarations are found (`CLAUDE_CODE_TYPES`, or the copy a session laid). CI runs the same target against Claude Code 2.1.296, the build the mod's early-access API was written against.
 
-The mod depends on attend's `listen`, `unread` and `keepwarm check` verbs and on attend splitting long bodies itself. Against an attend without them, the row shows `attend not listening` and the unread count stays at zero.
+The mod depends on attend's `listen`, `unread` and `keepwarm check` verbs and on attend sending a long body as one message. Against an attend without them, the row shows `attend not listening` and the unread count stays at zero.

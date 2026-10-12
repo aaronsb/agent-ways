@@ -162,6 +162,37 @@ pub fn identify_sender(session_id: Option<String>) -> (String, &'static str) {
     }
 }
 
+/// The short handle a delivery line shows for message `id`, written `~` and
+/// five base-36 characters: FNV-1a (32-bit) over the id's UTF-16 code units,
+/// the last five digits. The attend mod's `shortId` (plugins/attend/hooks/
+/// lib.ts) computes the same handle, so a line the mod formats and a line
+/// the drain formats name a message alike (ADR-406 item 5), and the
+/// Monitor line of the peers sensor carries it too (ADR-412).
+pub fn short_id(id: &str) -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for unit in id.encode_utf16() {
+        h = (h ^ u32::from(unit)).wrapping_mul(0x0100_0193);
+    }
+    let mut digits = Vec::new();
+    loop {
+        digits.push(char::from_digit(h % 36, 36).expect("a base-36 digit"));
+        h /= 36;
+        if h == 0 {
+            break;
+        }
+    }
+    while digits.len() < 5 {
+        digits.push('0');
+    }
+    digits.iter().take(5).rev().collect()
+}
+
+/// Whether `s` has a short handle's shape: five base-36 characters. A
+/// signal id always carries a `-`, so no full id has this shape.
+pub fn is_short_id(s: &str) -> bool {
+    s.len() == 5 && s.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
