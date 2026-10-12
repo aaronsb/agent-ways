@@ -225,7 +225,8 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
             eprintln!("  (reply is for responding to a peer message your sensor surfaced.)");
             eprintln!("  if you are starting a new topic, use `attend send` instead.");
         }
-        SendError::ParentChannelLeft { .. }
+        SendError::UnknownHandle { .. }
+        | SendError::ParentChannelLeft { .. }
         | SendError::ParentChannelGone { .. }
         | SendError::ParentRoomUnknown => eprintln!("attend reply: {e}"),
         SendError::OwnProject { .. } | SendError::Incomplete { .. } => eprintln!("error: {e}"),

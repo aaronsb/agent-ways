@@ -289,13 +289,26 @@ pub enum ListenCmd {
     /// Listen: the Stop-hook drain delivers to this session. Messages
     /// addressed to its project while it was not listening are delivered by
     /// the next drain; older #open and channel backlog is held back
-    On,
+    On {
+        /// What hosts delivery, when not Monitor or a shell: `mod`, the
+        /// attend mod, whose agent answers with attend_reply and attend_send.
+        /// The drain then delivers in the mod's format and names those tools
+        #[arg(long, value_enum)]
+        host: Option<ListenHost>,
+    },
     /// Stop listening: the drain delivers nothing and marks nothing read.
     /// Channel memberships are kept; a later join, `attend run` or
     /// `listen on` listens again
     Off,
     /// Print `listening` or `not listening` (default)
     Status,
+}
+
+/// A host `attend listen on --host` records.
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+pub enum ListenHost {
+    /// The attend mod (ADR-406)
+    Mod,
 }
 
 /// Subcommands for `attend channels`. With no subcommand, defaults to

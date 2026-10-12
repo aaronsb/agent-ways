@@ -272,7 +272,16 @@ Turn listening on or off for this session without joining a channel, or show it 
 
 Listen: the Stop-hook drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back
 
-**Usage:** `attend listen on`
+**Usage:** `attend listen on [OPTIONS]`
+
+###### **Options:**
+
+* `--host <HOST>` — What hosts delivery, when not Monitor or a shell: `mod`, the attend mod, whose agent answers with attend_reply and attend_send. The drain then delivers in the mod's format and names those tools
+
+  Possible values:
+  - `mod`:
+    The attend mod (ADR-406)
+
 
 
 

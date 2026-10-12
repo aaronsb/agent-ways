@@ -3,7 +3,7 @@
 //! Listing and reading consult no seen-set and mark nothing: consumption is
 //! the drain's and the peers sensor's (ADR-172, ADR-501 item 4).
 
-use crate::util::{current_session, groups_for};
+use crate::util::{current_session, groups_for, Session};
 use agent_identity::{is_valid_signal_id, parse_signal, wire_line};
 use attend_groups::Room;
 use attend_instances::view::render_sender_label;
@@ -210,7 +210,77 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
     Err(ReadError::NotFound)
 }
 
+/// The short handle a delivery line shows for message `id`, written `~` and
+/// five base-36 characters: FNV-1a (32-bit) over the id's UTF-16 code units,
+/// the last five digits. The attend mod's `shortId` (plugins/attend/hooks/
+/// lib.ts) computes the same handle, so a line the mod formats and a line
+/// the drain formats name a message alike (ADR-406 item 5).
+pub fn short_id(id: &str) -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for unit in id.encode_utf16() {
+        h = (h ^ u32::from(unit)).wrapping_mul(0x0100_0193);
+    }
+    let mut digits = Vec::new();
+    loop {
+        digits.push(char::from_digit(h % 36, 36).expect("a base-36 digit"));
+        h /= 36;
+        if h == 0 {
+            break;
+        }
+    }
+    while digits.len() < 5 {
+        digits.push('0');
+    }
+    digits.iter().take(5).rev().collect()
+}
+
+/// Whether `s` has a short handle's shape: five base-36 characters. A
+/// signal id always carries a `-`, so no full id has this shape.
+pub fn is_short_id(s: &str) -> bool {
+    s.len() == 5 && s.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
+}
+
+/// The full id of the message in `me`'s receive set whose handle is
+/// `handle`, its own messages included (a reply's parent may be one). Where
+/// two share a handle, the newest wins.
+pub fn resolve_short_id(me: &Session, handle: &str) -> Option<String> {
+    let mut best: Option<(SystemTime, String)> = None;
+    for dir in &groups_for(me).receive_dirs(&me.origin_path) {
+        let Ok(entries) = std::fs::read_dir(&dir.path) else { continue };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".signal")) else { continue };
+            if short_id(id) != handle {
+                continue;
+            }
+            let mtime = entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            if best.as_ref().is_none_or(|(t, _)| mtime > *t) {
+                best = Some((mtime, id.to_string()));
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
 /// Seconds since the epoch for a file mtime (0 if before the epoch).
 fn mtime_secs(t: SystemTime) -> u64 {
     t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The vectors the attend mod's `shortId` test pins too
+    /// (plugins/attend/tests/attend.test.ts), so the two never drift.
+    #[test]
+    fn short_id_matches_the_mods_handle() {
+        assert_eq!(short_id("peer-sess-1-1"), "73nki");
+        assert_eq!(short_id(""), "tntfp");
+        assert_eq!(short_id("\u{e9}-x"), "zer0p");
+        assert_eq!(short_id("a"), "9wi7g");
+        assert!(is_short_id("73nki"));
+        assert!(!is_short_id("peer-sess-1-1"));
+        assert!(!is_short_id("AB12C"));
+    }
 }

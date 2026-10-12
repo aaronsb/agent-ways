@@ -20,6 +20,7 @@ import {
   KEEPWARM_CHECK_ARGV,
   LISTEN_OFF_ARGV,
   LISTEN_ON_ARGV,
+  LISTEN_ON_PLAIN_ARGV,
   PEERS_ARGV,
   UNREAD_ARGV,
   configArgv,
@@ -197,11 +198,12 @@ async function registerActiveTools($: $, mod: Mod) {
   })
 }
 
-/** Tells attend this session is listening; the next drain applies the
- *  cold-start rule, so messages addressed to the project while it was
- *  dormant arrive. */
+/** Tells attend this session is listening, with the mod as its host; the
+ *  next drain applies the cold-start rule, so messages addressed to the
+ *  project while it was dormant arrive. */
 async function listenOn($: $): Promise<ProcessRunResult> {
-  const r = await run($, LISTEN_ON_ARGV)
+  let r = await run($, LISTEN_ON_ARGV)
+  if (r.exitCode === 2) r = await run($, LISTEN_ON_PLAIN_ARGV)
   await updateStatus($, s => ({ ...s, listening: r.exitCode === 0 }))
   return r
 }
@@ -473,6 +475,8 @@ export const register: Register = on => {
     const a = input<{ message: unknown; re: unknown }>(e)
     const message = typeof a.message === 'string' ? a.message : ''
     if (message.trim() === '') return { result: 'message is empty; nothing sent', isError: true }
+    // A handle this module delivered maps here; any other (one the Stop-hook
+    // drain printed) goes to attend as written, which resolves it.
     const raw = typeof a.re === 'string' ? a.re.trim().replace(/^~/, '') : ''
     const re = raw === '' ? undefined : mod.ids.get(raw) ?? raw
     mod.lastActivityMs = await $.clock.now()

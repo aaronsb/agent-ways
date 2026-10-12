@@ -34,7 +34,12 @@ function bareChannel(channel: string): string {
   return channel.trim().replace(/^[#@]/, '')
 }
 
-export const LISTEN_ON_ARGV = [ATTEND, 'listen', 'on'] as const
+/** `listen on` names the mod as the host, so attend's Stop-hook drain speaks
+ *  the mod's format and tools in this session. An attend older than
+ *  `--host` refuses the flag as a usage error (exit 2); the mod then turns
+ *  listening on without it. */
+export const LISTEN_ON_ARGV = [ATTEND, 'listen', 'on', '--host', 'mod'] as const
+export const LISTEN_ON_PLAIN_ARGV = [ATTEND, 'listen', 'on'] as const
 export const LISTEN_OFF_ARGV = [ATTEND, 'listen', 'off'] as const
 export const DRAIN_ARGV = [ATTEND, 'inbox', '--drain', '--json'] as const
 export const UNREAD_ARGV = [ATTEND, 'unread', '--json'] as const
@@ -215,7 +220,10 @@ export function keepwarmLine(stdout: string): string | undefined {
 
 // ── the view ─────────────────────────────────────────────────────────────
 
-/** Short stable handle for a message id; `attend_reply`'s `re` takes it. */
+/** Short stable handle for a message id; `attend_reply`'s `re` takes it.
+ *  attend computes the same handle (`short_id` in tools/attend/src/verbs/
+ *  inbox.rs) for the lines its Stop-hook drain prints in a mod host, and
+ *  `attend reply --re` resolves one this module never mapped. */
 export function shortId(id: string): string {
   let h = 0x811c9dc5
   for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) >>> 0

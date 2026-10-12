@@ -120,7 +120,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // listening has its cold start reopened here, before the state below is
     // restored into the peers sensor.
     if ident.resolved() {
-        crate::util::enroll_as(&ident, attend_presence::enrollment::Source::Run).ok();
+        crate::util::enroll_as(&ident, attend_presence::enrollment::Source::Run, None).ok();
     }
     let my_instance = if ident.resolved() {
         match instance_registry.register(&focus.working_dir, &session_id) {

@@ -11,6 +11,9 @@
 //! - `optout`, when `attend scene private` or `attend listen off` ran while
 //!   an `attend run` held the session: the run's enrollment ends once no
 //!   run holds it;
+//! - `host <name>`, what hosts the session's delivery when it is not the
+//!   default (Monitor or a shell): `host mod` when the attend mod turned
+//!   listening on (ADR-406), so the drain speaks that host's tools;
 //! - `claude <key>`, the Claude Code process the session ran in (pid and
 //!   start time), so a session whose id changes under the same process
 //!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it.
@@ -46,11 +49,39 @@ impl Source {
     }
 }
 
+/// What hosts a session's delivery, when it is not the default. The default
+/// host is Monitor (`attend run`) or a shell, whose agent answers with the
+/// `attend` CLI; it is recorded as no host at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Host {
+    /// The attend mod (ADR-406): the agent answers with the `attend_reply`
+    /// and `attend_send` tools, and reads deliveries in the mod's format.
+    Mod,
+}
+
+impl Host {
+    /// The word the record keeps it under, also what `attend listen
+    /// status --json` reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Host::Mod => "mod",
+        }
+    }
+
+    fn parse(word: &str) -> Option<Self> {
+        match word {
+            "mod" => Some(Host::Mod),
+            _ => None,
+        }
+    }
+}
+
 /// One session's enrollment record.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 struct Record {
     sources: Vec<Source>,
     optout: bool,
+    host: Option<Host>,
     claude: Option<String>,
 }
 
@@ -66,6 +97,8 @@ impl Record {
                 _ => {
                     if let Some(key) = line.strip_prefix("claude ") {
                         r.claude = Some(key.to_string());
+                    } else if let Some(host) = line.strip_prefix("host ") {
+                        r.host = Host::parse(host);
                     }
                 }
             }
@@ -77,6 +110,9 @@ impl Record {
         let mut out: String = self.sources.iter().map(|s| format!("{}\n", s.as_str())).collect();
         if self.optout {
             out.push_str("optout\n");
+        }
+        if let Some(host) = self.host {
+            out.push_str(&format!("host {}\n", host.as_str()));
         }
         if let Some(key) = &self.claude {
             out.push_str(&format!("claude {key}\n"));
@@ -157,17 +193,29 @@ pub fn sources(session_id: &str) -> Vec<Source> {
 
 /// Record that `session_id` enrolled by `source`. Idempotent. Enrolling
 /// again clears a pending opt-out, and records the Claude Code process.
-pub fn enroll(session_id: &str, source: Source) -> io::Result<()> {
+/// `host`, when given, records what hosts the session's delivery; `None`
+/// keeps whatever host the record holds, so a join or a shell's `listen on`
+/// in a mod-hosted session leaves it mod-hosted.
+pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Result<()> {
     let claude = own_claude_key();
     edit(session_id, |r| {
         if !r.sources.contains(&source) {
             r.sources.push(source);
         }
         r.optout = false;
+        if host.is_some() {
+            r.host = host;
+        }
         if claude.is_some() {
             r.claude = claude;
         }
     })
+}
+
+/// What hosts `session_id`'s delivery, when it is enrolled and not hosted
+/// by the default (Monitor or a shell).
+pub fn host(session_id: &str) -> Option<Host> {
+    read(session_id).filter(|r| !r.sources.is_empty()).and_then(|r| r.host)
 }
 
 /// Withdraw one way `session_id` enrolled. The session stays enrolled while
@@ -203,6 +251,9 @@ pub fn carry(old: &str, new: &str) -> io::Result<()> {
             }
         }
         r.optout |= from.optout;
+        if r.host.is_none() {
+            r.host = from.host;
+        }
         if r.claude.is_none() {
             r.claude = from.claude.clone();
         }
@@ -249,9 +300,9 @@ mod tests {
     fn enrollment_lasts_until_its_last_way_is_withdrawn() {
         with_cache(|| {
             assert!(!is_enrolled("s"));
-            enroll("s", Source::Join).unwrap();
-            enroll("s", Source::Run).unwrap();
-            enroll("s", Source::Join).unwrap();
+            enroll("s", Source::Join, None).unwrap();
+            enroll("s", Source::Run, None).unwrap();
+            enroll("s", Source::Join, None).unwrap();
             assert_eq!(sources("s"), vec![Source::Join, Source::Run]);
             withdraw("s", Source::Join).unwrap();
             assert!(is_enrolled("s"), "run still holds it");
@@ -269,13 +320,13 @@ mod tests {
         with_cache(|| {
             for round in 0..1000 {
                 let sid = format!("race-{round}");
-                enroll(&sid, Source::Join).unwrap();
+                enroll(&sid, Source::Join, None).unwrap();
                 let go = std::sync::Arc::new(std::sync::Barrier::new(2));
                 let a = {
                     let (sid, go) = (sid.clone(), go.clone());
                     std::thread::spawn(move || {
                         go.wait();
-                        enroll(&sid, Source::Run).unwrap()
+                        enroll(&sid, Source::Run, None).unwrap()
                     })
                 };
                 let b = {
@@ -295,8 +346,8 @@ mod tests {
     #[test]
     fn listening_enrolls_and_the_opt_out_ends_it() {
         with_cache(|| {
-            enroll("s", Source::Listen).unwrap();
-            enroll("s", Source::Join).unwrap();
+            enroll("s", Source::Listen, None).unwrap();
+            enroll("s", Source::Join, None).unwrap();
             assert!(is_enrolled("s"));
             assert_eq!(Record::parse(&read("s").unwrap().render()).sources, vec![Source::Listen, Source::Join]);
             opt_out("s").unwrap();
@@ -307,11 +358,29 @@ mod tests {
     #[test]
     fn carry_moves_every_way_to_the_new_id() {
         with_cache(|| {
-            enroll("old", Source::Run).unwrap();
-            enroll("old", Source::Join).unwrap();
+            enroll("old", Source::Run, None).unwrap();
+            enroll("old", Source::Join, Some(Host::Mod)).unwrap();
             carry("old", "new").unwrap();
             assert!(!is_enrolled("old"));
             assert_eq!(sources("new"), vec![Source::Run, Source::Join]);
+            assert_eq!(host("new"), Some(Host::Mod), "the host moves with the ways");
+        });
+    }
+
+    /// ADR-406: the mod records itself as the host when it turns listening
+    /// on; a later join or a shell's `listen on` keeps it, and the opt-out
+    /// that ends the enrollment ends the host with it.
+    #[test]
+    fn the_host_is_kept_until_the_enrollment_ends() {
+        with_cache(|| {
+            enroll("s", Source::Listen, None).unwrap();
+            assert_eq!(host("s"), None, "a shell's listen on is the default host");
+            enroll("s", Source::Listen, Some(Host::Mod)).unwrap();
+            enroll("s", Source::Join, None).unwrap();
+            assert_eq!(host("s"), Some(Host::Mod));
+            assert_eq!(Record::parse(&read("s").unwrap().render()).host, Some(Host::Mod));
+            opt_out("s").unwrap();
+            assert_eq!(host("s"), None);
         });
     }
 }
