@@ -89,6 +89,7 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    agent_fmt::exit_quietly_on_closed_pipe();
     let cli = Cli::parse();
 
     // Determine ways directory: project-local first, then global.

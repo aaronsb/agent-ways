@@ -19,7 +19,9 @@ use std::sync::mpsc;
 
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
-        println!("ways-mcp {}", server::VERSION);
+        // A closed stdout is no error here; the server loop below already
+        // stops on a failed write.
+        let _ = writeln!(io::stdout(), "ways-mcp {}", server::VERSION);
         return;
     }
 
