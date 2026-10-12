@@ -297,7 +297,7 @@ mod tests {
         let (target, home) = (tempdir_like(), tempdir_like());
         let pid = std::process::id();
         write_session(&target, "sess-target", pid, "/work/b");
-        let only_home = identity_in_dirs(&[home.clone()], pid, |_| false);
+        let only_home = identity_in_dirs(std::slice::from_ref(&home), pid, |_| false);
         assert!(!only_home.resolved(), "~/.claude alone does not know it");
         let id = identity_in_dirs(&[target.clone(), home.clone()], pid, |_| false);
         assert_eq!((id.session_id.as_str(), id.origin_path.as_str()), ("sess-target", "/work/b"));
@@ -320,11 +320,11 @@ mod tests {
         write_session(&home, "sess-outer", outer, "/work/outer");
         // This process stands for the inner Claude Code process.
         let inner = |pid: u32| pid == own;
-        assert_eq!(find_session_in_dirs(&[home.clone()], own, inner), None);
-        assert!(!identity_in_dirs(&[home.clone()], own, inner).resolved());
+        assert_eq!(find_session_in_dirs(std::slice::from_ref(&home), own, inner), None);
+        assert!(!identity_in_dirs(std::slice::from_ref(&home), own, inner).resolved());
         // The control: with no Claude Code process on the way, the walk
         // climbs to the outer record.
-        assert_eq!(find_session_in_dirs(&[home.clone()], own, |_| false), Some(("sess-outer".to_string(), outer)));
+        assert_eq!(find_session_in_dirs(std::slice::from_ref(&home), own, |_| false), Some(("sess-outer".to_string(), outer)));
         fs::remove_dir_all(&home).ok();
     }
 
