@@ -1469,6 +1469,107 @@ mod tests {
         assert!(!two(&a).dirty, "the work was dropped");
     }
 
+    /// A pane that logs what the shell tells it opened and closed over it,
+    /// and opens `next` when its menu is picked from.
+    #[derive(Default)]
+    struct Rec {
+        open: Option<Open>,
+        next: Option<Open>,
+        log: Vec<String>,
+    }
+
+    impl Pane for Rec {
+        fn palette(&self) -> theme::Palette {
+            theme::Palette::default()
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            vec![PaneTab::new("one")]
+        }
+        fn tab(&mut self) -> usize {
+            0
+        }
+        fn set_tab(&mut self, _: usize) {}
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, _: KeyEvent) -> Keyed {
+            Keyed::Done
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+        fn take_open(&mut self) -> Option<Open> {
+            self.open.take()
+        }
+        fn picked(&mut self, _: &str, _: Vec<String>) {
+            self.open = self.next.take();
+        }
+        fn overlay_opened(&mut self, o: Overlay) {
+            self.log.push(format!("+{o:?}"));
+        }
+        fn overlay_closed(&mut self, o: Overlay) {
+            self.log.push(format!("-{o:?}"));
+        }
+    }
+
+    /// Open `o` from the pane with a key, and draw a frame.
+    fn open_from(a: &mut App, o: Open) {
+        a.pane_mut::<Rec>().expect("the pane").open = Some(o);
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        testkit::render(a, 60, 12);
+    }
+
+    /// Press `key` and draw a frame.
+    fn press(a: &mut App, code: KeyCode, m: KeyModifiers) {
+        a.key(k(code, m));
+        testkit::render(a, 60, 12);
+    }
+
+    /// What the pane was told since it was last asked, in order.
+    fn told(a: &mut App) -> Vec<String> {
+        std::mem::take(&mut a.pane_mut::<Rec>().expect("the pane").log)
+    }
+
+    /// The shell tells the pane each overlay that opens and closes over it,
+    /// by kind and id, at the next frame: closes top down, then opens.
+    #[test]
+    fn the_shell_reports_each_overlay_opened_and_closed() {
+        let pick = || Open::Pick { id: "m".into(), title: "menu".into(), items: vec![Item::new("a")], multi: false, anchor: Anchor::Center };
+        let mut a = App::with_pane("rec", Rec::default());
+        testkit::render(&mut a, 60, 12);
+        assert_eq!(told(&mut a), Vec::<String>::new(), "nothing open at start");
+
+        // A menu, then nothing.
+        open_from(&mut a, pick());
+        assert_eq!(told(&mut a), [r#"+Menu { id: "m" }"#]);
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"-Menu { id: "m" }"#]);
+
+        // A menu replaced by the question its pick asks, within one frame.
+        a.pane_mut::<Rec>().expect("the pane").next = Some(Open::Ask { id: "q".into(), question: "sure?".into(), yes: "yes".into(), no: "no".into() });
+        open_from(&mut a, pick());
+        told(&mut a);
+        press(&mut a, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"-Menu { id: "m" }"#, r#"+Ask { id: "q" }"#]);
+        press(&mut a, KeyCode::Char('n'), KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"-Ask { id: "q" }"#]);
+
+        // An entry with text typed, the guard over it, back to it, then nothing.
+        open_from(&mut a, Open::Entry { id: "e".into(), title: "name".into(), value: String::new(), error: None, anchor: Anchor::Center });
+        assert_eq!(told(&mut a), [r#"+Entry { id: "e" }"#]);
+        press(&mut a, KeyCode::Char('z'), KeyModifiers::NONE);
+        press(&mut a, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(told(&mut a), ["+Guard"], "the entry stays under the guard");
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), ["-Guard"], "back to the entry, still open");
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"-Entry { id: "e" }"#]);
+
+        // The key help, closed by Esc.
+        press(&mut a, KeyCode::F(1), KeyModifiers::NONE);
+        assert_eq!(told(&mut a), ["+Help"]);
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), ["-Help"]);
+    }
+
     #[test]
     fn a_click_on_a_tab_and_the_wheel_over_the_pane() {
         let mut a = app(false);
