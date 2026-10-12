@@ -123,6 +123,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-405](./attend/ADR-405-one-click-on-a-channel-selects-it-and-opens-its-menu-and-the-chat-s-left-column-lists-agents-and-channels.md) | One click on a channel selects it and opens its menu, and the chat's left column lists agents and channels | accepted |
 | [ADR-406](./attend/ADR-406-attend-reaches-agents-through-a-claude-code-mod-that-agent-ways-installs-dormant-by-default-one-status-row-transport-stays-the-signal-store.md) | attend reaches agents through a Claude Code mod that agent-ways installs: dormant by default, one status row, transport stays the signal store | accepted |
 | [ADR-407](./attend/ADR-407-a-click-on-a-channel-shows-it-and-a-second-click-opens-its-menu-which-docks-under-its-row-and-the-chat-starts-with-the-mouse-on.md) | A click on a channel shows it and a second click opens its menu, which docks under its row, and the chat starts with the mouse on | accepted |
+| [ADR-408](./attend/ADR-408-a-question-on-the-chat-s-bar-is-answered-by-a-click-as-by-a-key-and-one-rule-closes-every-overlay.md) | A question on the chat's bar is answered by a click as by a key, and one rule closes every overlay | accepted |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_

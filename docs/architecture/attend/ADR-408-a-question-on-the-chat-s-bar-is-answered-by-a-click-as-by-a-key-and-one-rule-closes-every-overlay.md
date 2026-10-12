@@ -84,3 +84,13 @@ ADR-405's rule that a destructive item asks first stands. ADR-407 (e), the quest
 - **Make the chat's bar text clickable in place.** It would keep two implementations of one confirm, which the operator asked to avoid.
 - **Swallow every click outside an overlay.** Each overlay would cost a click before the next action, which is what the operator reported as unexpected.
 - **Pass every outside click through, including the feed.** A click to dismiss a menu would select a message behind it.
+
+## Correction (2026-10-11): what other panes get, and the review's refinements
+
+Review of the change corrected the Neutral bullet and refined (a) and (c). The decision text above stands as accepted.
+
+- **Other panes are not untouched.** `ways introspect` and `ways projects` pass no part of their own area through, but the rule in (b) and (c) is the shell's. On them too, a click on the tab bar that closes an overlay then acts on the tab, and a right click outside an overlay closes it as a left click does.
+- **Only a left click gives an answer.** A middle or right click on an answer lozenge answers no, as a press of any button elsewhere does.
+- **A click on a menu's own anchor only closes it.** The row or tab a menu docks under does not act on the click that closes the menu, which would open the same menu again.
+- **Left and right clicks dismiss alike.** A right click in the pane outside a lent compose box gives it back, as a left click does. The hook is `Pane::dismiss(at)`, which replaces the `Pane::clicked_outside` named in (c).
+- **Ctrl-C over a question** answers it no before the exit guard asks, so the pane says "kept" and holds nothing for an answer that will not come.
