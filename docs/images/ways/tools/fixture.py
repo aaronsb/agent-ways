@@ -142,6 +142,12 @@ transcript("-home-dev-infra", "71d3e5a2-9f0b-4c86-a4d7-3e1b8c0f6a29", "2026-09-3
            now - 3.5 * 86400, "rotate the staging certificates")
 os.makedirs(os.path.join(HOME, ".claude/projects/-home-dev-scratch"), exist_ok=True)
 
+# The shop on disk, for the settings screens: `ways settings --project`
+# takes a directory that exists inside a project. It sits in the fixture home
+# as ~/shop, a project root by its CLAUDE.md beside .claude/.
+os.makedirs(os.path.join(HOME, "shop/.claude"), exist_ok=True)
+open(os.path.join(HOME, "shop/CLAUDE.md"), "w").close()
+
 # The shipped ways, so the why view shows a way's text.
 os.makedirs(os.path.join(HOME, ".claude/hooks"), exist_ok=True)
 os.symlink(os.path.join(REPO, "hooks/ways"), os.path.join(HOME, ".claude/hooks/ways"))

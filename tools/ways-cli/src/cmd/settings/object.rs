@@ -4,10 +4,15 @@ use super::*;
 
 // ── object mode ────────────────────────────────────────────────
 
+/// The accepted keys bound for one file, with their values.
+type Accepted = Vec<(Bound, Value)>;
+
 /// `apply`: write a settings object. Prints a JSON report of what each key
 /// did and the fragment written; exits 3 when any key is rejected, 4 when an
 /// accepted key is overridden, 5 when a write fails.
 pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out {
+    let project = resolve_project(project)?;
+    let project = project.as_deref();
     let text = match file {
         Some(p) => std::fs::read_to_string(p).map_err(|e| fail(exit::USAGE, format!("reading {}: {e}", p.display())))?,
         None => {
@@ -50,12 +55,12 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
         }
     }
     // Group the accepted keys by the file they are written to.
-    let mut by_file: Vec<(PathBuf, Vec<(Bound, Value)>)> = Vec::new();
+    let mut by_file: Vec<(PathBuf, LayerScope, Accepted)> = Vec::new();
     for (b, v) in accepted {
         match target_file(&b, project) {
-            Ok((p, _)) => match by_file.iter_mut().find(|(f, _)| *f == p) {
-                Some((_, list)) => list.push((b, v)),
-                None => by_file.push((p, vec![(b, v)])),
+            Ok((p, scope)) => match by_file.iter_mut().find(|(f, _, _)| *f == p) {
+                Some((_, _, list)) => list.push((b, v)),
+                None => by_file.push((p, scope, vec![(b, v)])),
             },
             Err(e) => {
                 rejected.push(json!({ "key": b.name(), "message": e.message }));
@@ -65,7 +70,7 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
     let mut written = serde_json::Map::new();
     let mut accepted_names = Vec::new();
     let mut error = None;
-    for (path, list) in &by_file {
+    for (path, scope, list) in &by_file {
         let mut fragment = json!({});
         for (b, v) in list {
             insert_path(&mut fragment, &b.path(), to_json(v));
@@ -83,11 +88,12 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
                 break;
             }
         }
+        touched(*scope, path, dry_run);
         written.insert(path.display().to_string(), fragment);
     }
     let mut over = Vec::new();
     if !dry_run && error.is_none() {
-        for (path, list) in &by_file {
+        for (path, _, list) in &by_file {
             for (b, _) in list {
                 if let Some(why) = overridden(b, path, project) {
                     over.push(json!({ "key": b.name(), "why": why }));

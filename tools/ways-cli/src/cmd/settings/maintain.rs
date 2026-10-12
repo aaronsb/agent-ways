@@ -5,6 +5,8 @@ use super::*;
 // ── emit, lint, fix ────────────────────────────────────────────
 
 pub fn emit(prefix: Option<&str>, effective: bool, project: Option<&Path>) -> Out {
+    let project = resolve_project(project)?;
+    let project = project.as_deref();
     let reg = registry();
     let prefix = prefix.unwrap_or("");
     let layers = if effective { Some(live_layers(&project_dir(project))) } else { None };
@@ -84,6 +86,8 @@ pub(super) fn file_label(file: &str) -> &'static str {
 /// Check the files. A finding exits 3; a warning is printed and leaves the
 /// exit alone, since the file is valid and loads as written.
 pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
+    let project = resolve_project(project)?;
+    let project = project.as_deref();
     agent_settings::load::trace("lint");
     let layers = layers_for(file, project)?;
     let mut n = 0;
@@ -173,6 +177,8 @@ fn sections_for(reg: &Registry, arg: &str) -> Vec<(&'static agent_settings::Sche
 ///
 /// The file is checked again after the edit; exit 3 if a finding remains.
 pub fn fix(section: &str, project: Option<&Path>) -> Out {
+    let project = resolve_project(project)?;
+    let project = project.as_deref();
     let reg = registry();
     let sections = sections_for(&reg, section);
     if sections.is_empty() {
@@ -251,6 +257,7 @@ pub fn fix(section: &str, project: Option<&Path>) -> Out {
                 format!("{f}; fix cannot repair an entry's name, so nothing was written. Edit the file by hand: {hint}. Until then the section fails closed in that file"),
             ));
         }
+        touched(scope, path, false);
         // Check again: what fix could not repair is reported, with its command.
         let text = std::fs::read_to_string(path).unwrap_or_default();
         if let Ok(doc) = agent_settings::load::parse_text(&text, Some(path)) {

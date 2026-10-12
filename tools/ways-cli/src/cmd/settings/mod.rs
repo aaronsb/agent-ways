@@ -95,11 +95,70 @@ pub(super) fn is_user_file(path: &Path) -> bool {
     path == ways_core::paths::user_config() || path == ways_agent_core::profile::user_layer_path() || path == attend_config::user_path()
 }
 
+/// The project a verb reads and writes. `--project` is resolved by
+/// [`resolve_project`] at each verb's entry, so `opt` is already a root;
+/// without one it is [`implicit_project`], else the working directory, whose
+/// project layer is then absent.
 pub(super) fn project_dir(opt: Option<&Path>) -> PathBuf {
     match opt {
         Some(p) => p.to_path_buf(),
-        None => PathBuf::from(crate::util::project_dir()),
+        None => implicit_project().unwrap_or_else(|| PathBuf::from(crate::util::project_dir())),
     }
+}
+
+/// The project with no `--project`: `CLAUDE_PROJECT_DIR`, as the hooks read
+/// it, else the project enclosing the working directory. `None` outside any
+/// project, and in the home directory, whose `.claude/` is the user's.
+pub(super) fn implicit_project() -> Option<PathBuf> {
+    if let Some(env) = crate::util::env_project_dir() {
+        return Some(PathBuf::from(env));
+    }
+    let cwd = PathBuf::from(crate::util::project_dir());
+    ways_core::util::project_root_of(&cwd).filter(|r| !is_home(r))
+}
+
+/// The project root a `--project` path names: the path made absolute with
+/// symlinks resolved, then the nearest ancestor that is a project root
+/// ([`ways_core::util::project_root_of`], the rule `project_root` walks the
+/// working directory by). `--project .` from a subdirectory is the project.
+/// A path that does not exist, or that no project encloses, is exit 2, so
+/// nothing creates a `.claude/` in a directory that is not a project's.
+pub(super) fn resolve_project(given: Option<&Path>) -> Result<Option<PathBuf>, Failure> {
+    let Some(p) = given else { return Ok(None) };
+    #[cfg(windows)]
+    let real = std::path::absolute(p).ok().filter(|a| a.is_dir());
+    #[cfg(not(windows))]
+    let real = std::fs::canonicalize(p).ok().filter(|a| a.is_dir());
+    let real = real.ok_or_else(|| fail(exit::USAGE, format!("--project {}: no such directory", p.display())))?;
+    match ways_core::util::project_root_of(&real).filter(|r| !is_home(r)) {
+        Some(root) => Ok(Some(root)),
+        None => Err(fail(
+            exit::USAGE,
+            format!(
+                "--project {}: no project encloses {}; a project root holds .claude/settings.json, .claude/ways.yaml, CLAUDE.md beside .claude/, or .git",
+                p.display(),
+                real.display()
+            ),
+        )),
+    }
+}
+
+/// Whether `dir` is the home directory, which is never a project.
+fn is_home(dir: &Path) -> bool {
+    let canon = |q: &Path| std::fs::canonicalize(q).unwrap_or_else(|_| q.to_path_buf());
+    canon(dir) == canon(&claude_sessions::home_dir())
+}
+
+/// The line a write puts on stderr naming the file it touched, so stdout
+/// keeps its contract: `project: <path>` or `user: <path>`.
+pub(super) fn touched(scope: LayerScope, path: &Path, dry_run: bool) {
+    let layer = match scope {
+        LayerScope::Project => "project",
+        LayerScope::Target => "target",
+        LayerScope::User => "user",
+    };
+    let note = if dry_run { " (dry run, nothing written)" } else { "" };
+    eprintln!("{layer}: {}{note}", path.display());
 }
 
 /// The live layers of every file, lowest first.
@@ -219,6 +278,12 @@ pub(super) fn target_file(b: &Bound, project: Option<&Path>) -> Result<(PathBuf,
     // The agent's keys live in the user file alone, whatever their scope says.
     let scope = if b.spec.file == ways_agent_core::settings::FILE { Scope::User } else { b.spec.scope };
     match file_of(b.spec.file, scope, project) {
+        // With no --project a project file is the enclosing project's; in
+        // no project there is none to write.
+        Some(Ok((_, LayerScope::Project))) if project.is_none() && implicit_project().is_none() => Err(fail(
+            exit::USAGE,
+            format!("{name} is set in a project's file, and no project encloses {}; pass --project <dir>", crate::util::project_dir()),
+        )),
         Some(Ok(t)) => Ok(t),
         Some(Err(Scope::Machine)) => {
             Err(fail(exit::USAGE, format!("{name} is set in the user file or a target's, never a project's; drop --project")))

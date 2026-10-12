@@ -42,21 +42,21 @@ ways status --json
 
 **When:** Reading or changing any setting: matching thresholds, the language, the relevance gate's engine, model and mode, or a way switched off in one project ([ADR-503](../architecture/platform/ADR-503-settings-are-files-described-by-one-typed-registry-the-cli-and-the-tui-are-two-ways-in.md)).
 
-**Run from:** Anywhere. Keys under `ways.project` write the project's `.claude/ways.yaml`. The project is `--project <dir>`, else `CLAUDE_PROJECT_DIR`, else the working directory.
+**Run from:** Anywhere. Keys under `ways.project` write the project's `.claude/ways.yaml`. The project is the one enclosing `--project <path>`, else `CLAUDE_PROJECT_DIR`, else the one enclosing the working directory. The project enclosing a path is its nearest ancestor holding `.claude/settings.json`, `.claude/settings.local.json`, `.claude/ways.yaml`, `.claude/attend.yaml`, a `CLAUDE.md` beside `.claude/`, or `.git`, so `--project .` from a subdirectory names the project's root. The home directory is never a project. A `--project` path that does not exist, or that no project encloses, exits 2 and writes nothing.
 
 **Tells you:** Settings live in files, and every verb reads or writes those files.
 
 | Verb | Does |
 |---|---|
 | `get <key>` | Print the value in effect. `--json` adds its layer, default and file. |
-| `set <key> <value>` | Write a key. Prints nothing on success. `--project` writes the project file. |
-| `unset <key>` | Remove a key so the layer below applies. |
+| `set <key> <value>` | Write a key. Prints nothing on stdout; stderr names the file written, as `project: <path>` or `user: <path>`. `--project` writes the project file. |
+| `unset <key>` | Remove a key so the layer below applies. Stderr names the file, as `set` does. |
 | `list [prefix]` | Print `key=value` lines in effect. `--json` prints a fragment keyed by the file each key lives in, and `--effective` adds the defaults. |
 | `help [topic]` | Say what a key or section does, and list a choice key's options. |
 | `emit [prefix]` | Print the canonical fragment, shaped like its file, with comments. `--effective` prints the values in effect. |
 | `lint` | Check the settings files against the schema. Exits 3 with findings. |
-| `apply` | Write a settings object (YAML or JSON, from stdin or `--file`) and answer with a JSON report. `--dry-run` writes nothing. |
-| `fix <section>` | Rewrite one section of a file from canonical. |
+| `apply` | Write a settings object (YAML or JSON, from stdin or `--file`) and answer with a JSON report, whose `written` is keyed by each file's absolute path. Stderr names each file, as `set` does. `--dry-run` writes nothing. |
+| `fix <section>` | Rewrite one section of a file from canonical. Stderr names each file, as `set` does. |
 | `theme list` | List the themes: name, source (`bundled`, `user`, or `override` for a user file with a bundled name) and the active one. `--json` adds each one's label and file. |
 | `theme copy <from> <to>` | Copy any theme, bundled or yours, to a new user theme file `<to>`. |
 | `theme rename <old> <new>` | Rename a user theme: its file and its `THEME_NAME`. `theme.active` follows when it named the theme. |

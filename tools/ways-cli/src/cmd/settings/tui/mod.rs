@@ -109,11 +109,14 @@ pub struct Ways {
     /// The other projects with ways, found once: finding them probes the
     /// filesystem.
     others: RefCell<Option<Rc<Vec<Other>>>>,
+    /// The files each tab writes, as its title names them, found once per
+    /// tab: the title is asked at every draw.
+    writes: RefCell<std::collections::BTreeMap<String, String>>,
 }
 
 impl Ways {
     pub fn new(ctx: Ctx) -> Ways {
-        Ways { ctx, reg: registry(), watched: RefCell::default(), all_projects: Cell::new(false), others: RefCell::default() }
+        Ways { ctx, reg: registry(), watched: RefCell::default(), all_projects: Cell::new(false), others: RefCell::default(), writes: RefCell::default() }
     }
 
     pub fn layers(&self) -> Vec<Layer> {
@@ -405,9 +408,12 @@ impl Adapter for Ways {
         Ok(Some(if all { "all projects shown" } else { "this project shown" }.into()))
     }
 
-    /// The ways tab names the view it shows.
+    /// Every tab names the files its keys write, by layer; the ways tab
+    /// names the view it shows too.
     fn title(&self, tab: &str) -> Option<String> {
-        (tab == "ways").then(|| title(&self.ctx, Some(if self.all_projects.get() { "all projects" } else { "this project" })))
+        let view = (tab == "ways").then_some(if self.all_projects.get() { "all projects" } else { "this project" });
+        let writes = self.writes.borrow_mut().entry(tab.to_string()).or_insert_with(|| self.tab_writes(tab)).clone();
+        Some(title(&self.ctx, view, &writes))
     }
 
     fn help(&self, tab: &str) -> Option<String> {
@@ -583,11 +589,13 @@ fn depth_of(s: Option<&str>) -> Result<ColorDepth, Failure> {
     })
 }
 
-/// The app over the live files, opened on `tab`.
-/// The tree pane's title: the project, and the view a tab names.
-fn title(ctx: &Ctx, view: Option<&str>) -> String {
+/// The tree pane's title: the layers the tab's keys write
+/// (`Ways::tab_writes`), the project, and the view a tab names. The layers
+/// come first, so a narrow pane cuts the path rather than them.
+fn title(ctx: &Ctx, view: Option<&str>, writes: &str) -> String {
     let view = view.map(|v| format!(" · {v}")).unwrap_or_default();
-    format!(" ways settings — {}{view} ", tilde(&ctx.project, &ctx.home))
+    let writes = if writes.is_empty() { String::new() } else { format!(" · {writes}") };
+    format!(" ways settings{writes} — {}{view} ", tilde(&ctx.project, &ctx.home))
 }
 
 /// The screens' tabs in order: the settings tabs, then theme. `ways
@@ -608,7 +616,7 @@ pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Fail
     let roots = ways.build(&layers);
     let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::PLAIN);
     let themes = themes(&ways, &layers, depth);
-    let title = title(&ways.ctx, None);
+    let title = title(&ways.ctx, None, "");
     let names = tab_names();
     let at = match tab {
         None => 0,
@@ -623,7 +631,8 @@ pub fn open(o: &Open) -> Out {
     if !headless && !(std::io::stdout().is_terminal() && std::io::stdin().is_terminal()) {
         return Err(fail(exit::USAGE, "the settings screens need a terminal; `ways settings list` prints the values"));
     }
-    let ways = Ways::new(Ctx::from_env(o.project.as_deref()));
+    let project = super::resolve_project(o.project.as_deref())?;
+    let ways = Ways::new(Ctx::from_env(project.as_deref()));
     let depth = depth_of(o.depth.as_deref())?;
     let mut app = app(ways, o.tab.as_deref(), depth)?;
     if !headless {

@@ -34,7 +34,10 @@ impl Fx {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("home/.claude")).unwrap();
         std::fs::create_dir_all(root.join("xdg/config")).unwrap();
-        std::fs::create_dir_all(root.join("proj")).unwrap();
+        // The project: a root `--project` and the walk up from a working
+        // directory both find (`ways_core::util::is_project_root`).
+        std::fs::create_dir_all(root.join("proj/.claude")).unwrap();
+        std::fs::write(root.join("proj/CLAUDE.md"), "").unwrap();
         Fx { root }
     }
 
@@ -145,7 +148,7 @@ fn a_project_switch_round_trips_through_settings_and_keeps_comments() {
     let f = Fx::new();
     let ov = f.overlay();
     f.write(&ov, "# overlay\nlanguage: en\n\nways:\n  # keep me\n  meta/introspection: false\n");
-    assert_eq!(f.run(&["settings", "set", "ways.project.itops/incident", "false"]), (String::new(), String::new(), 0));
+    assert_eq!(f.run(&["settings", "set", "ways.project.itops/incident", "false"]), (String::new(), "project: <ROOT>/proj/.claude/ways.yaml\n".to_string(), 0));
     let text = std::fs::read_to_string(&ov).unwrap();
     assert!(text.starts_with("# overlay\n") && text.contains("  # keep me\n"), "{text}");
     assert_eq!(f.run(&["settings", "get", "ways.project.itops/incident"]).0, "false\n");
@@ -164,8 +167,8 @@ fn a_project_switch_round_trips_through_settings_and_keeps_comments() {
 #[test]
 fn set_exit_codes() {
     let f = Fx::new();
-    // 0: done, and nothing printed.
-    assert_eq!(f.run(&["settings", "set", "matching.semantic_fire_probability", "0.4"]), (String::new(), String::new(), 0));
+    // 0: done: nothing on stdout, and stderr names the file written.
+    assert_eq!(f.run(&["settings", "set", "matching.semantic_fire_probability", "0.4"]), (String::new(), "user: <ROOT>/xdg/config/agent-ways/config.yaml\n".to_string(), 0));
     // 2: unknown key, usage error.
     let (_, err, code) = f.run(&["settings", "set", "matching.nope", "1"]);
     assert_eq!(code, 2);
@@ -335,7 +338,7 @@ fn the_engine_is_one_of_the_profiles_in_effect() {
     assert_eq!(f.run(&["settings", "set", "gate.engine", "openrouter"]).2, 0);
     // A profile of the user's own becomes a choice.
     f.write(&agent, "profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n");
-    assert_eq!(f.run(&["settings", "set", "gate.engine", "mine"]), (String::new(), String::new(), 0));
+    assert_eq!(f.run(&["settings", "set", "gate.engine", "mine"]), (String::new(), "user: <ROOT>/xdg/config/agent-ways/agent.yaml\n".to_string(), 0));
     let (out, _, _) = f.run(&["settings", "help", "gate.engine"]);
     assert!(out.contains("type:    one of anthropic, openrouter, mine"), "{out}");
     let v: serde_json::Value = serde_json::from_str(&f.run(&["settings", "get", "gate.engine", "--json"]).0).unwrap();
@@ -1064,4 +1067,103 @@ fn status_says_nothing_of_toggles_when_each_names_a_way() {
     let (out, _, _) = f.run(&["status"]);
     assert!(!out.contains("naming no way"), "{out}");
     assert!(out.contains("Disabled ways:    data/schema-docs, local/mine "), "{out}");
+}
+
+// ── --project names the project enclosing a path ──────────────
+
+/// stdout, stderr and exit code of `args` run from `dir` under the fixture
+/// root, as an operator's shell runs it: no `CLAUDE_PROJECT_DIR`.
+fn run_from(f: &Fx, dir: &str, args: &[&str], input: Option<&str>) -> (String, String, i32) {
+    let cwd = f.root.join(dir);
+    std::fs::create_dir_all(&cwd).unwrap();
+    let mut c = f.cmd(args);
+    c.current_dir(&cwd).env_remove("CLAUDE_PROJECT_DIR");
+    c.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = c.spawn().unwrap();
+    if let Some(i) = input {
+        use std::io::Write;
+        child.stdin.take().unwrap().write_all(i.as_bytes()).unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+    (f.norm(&out.stdout), f.norm(&out.stderr), out.status.code().unwrap_or(-1))
+}
+
+#[test]
+fn project_dot_from_a_subdirectory_is_the_project_root() {
+    let f = Fx::new();
+    let obj = r#"{"attend_mod":{"keepwarm":"off"}}"#;
+    let (out, err, code) = run_from(&f, "proj/tools", &["settings", "apply", "--dry-run", "--project", "."], Some(obj));
+    assert_eq!(code, 0, "{err}");
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let written: Vec<&String> = report["written"].as_object().unwrap().keys().collect();
+    assert_eq!(written, ["<ROOT>/proj/.claude/ways.yaml"], "the root's file, by its absolute path");
+    assert_eq!(err, "project: <ROOT>/proj/.claude/ways.yaml (dry run, nothing written)\n");
+    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
+    assert!(std::fs::read_to_string(f.overlay()).unwrap().contains("keepwarm: off"));
+    assert!(!f.root.join("proj/tools/.claude").exists(), "nothing is written under the subdirectory");
+}
+
+#[test]
+fn a_relative_project_path_resolves_against_the_working_directory() {
+    let f = Fx::new();
+    std::fs::create_dir_all(f.root.join("proj/tools/deep")).unwrap();
+    let (_, err, code) = run_from(&f, "home", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "../proj/tools/deep"], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
+    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "unset", "attend_mod.keepwarm", "--project", ".."], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
+}
+
+#[test]
+fn a_project_path_that_is_no_project_is_a_usage_error_and_writes_nothing() {
+    let f = Fx::new();
+    // A path that does not exist.
+    let (_, err, code) = run_from(&f, "proj", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "nope"], None);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("--project nope: no such directory"), "{err}");
+    // A directory no project encloses, such as a scratch directory.
+    let scratch = f.root.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let at = scratch.to_str().unwrap();
+    for args in [
+        vec!["settings", "set", "attend_mod.keepwarm", "off", "--project", at],
+        vec!["settings", "unset", "attend_mod.keepwarm", "--project", at],
+        vec!["settings", "fix", "ways", "--project", at],
+        vec!["settings", "get", "attend_mod.keepwarm", "--project", at],
+        vec!["settings", "list", "attend_mod", "--project", at],
+        vec!["settings", "lint", "--project", at],
+        vec!["settings", "emit", "--project", at],
+        vec!["settings", "mod", "--snap", "80x25", "--project", at],
+    ] {
+        let (_, err, code) = run_from(&f, "home", &args, None);
+        assert_eq!(code, 2, "{args:?}: {err}");
+        assert!(err.contains("no project encloses <ROOT>/scratch"), "{args:?}: {err}");
+    }
+    let (out, err, code) = run_from(&f, "home", &["settings", "apply", "--project", at], Some("attend_mod:\n  keepwarm: off\n"));
+    assert_eq!((out.as_str(), code), ("", 2), "{err}");
+    assert!(!scratch.join(".claude").exists(), "no .claude/ is made in a directory that is not a project's");
+    // With no --project, a project-scope key outside any project has no file.
+    let (_, err, code) = run_from(&f, "scratch", &["settings", "set", "ways.project.itops/incident", "false"], None);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("no project encloses <ROOT>/scratch; pass --project <dir>"), "{err}");
+    assert!(!scratch.join(".claude").exists());
+}
+
+#[test]
+fn a_project_write_reads_back_from_the_project_layer() {
+    let f = Fx::new();
+    let set = run_from(&f, "proj/tools", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    assert_eq!(set.2, 0, "{}", set.1);
+    let (out, err, code) = run_from(&f, "proj/tools", &["settings", "list", "attend_mod", "--effective", "--json", "--project", "."], None);
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let k = &v["keys"]["attend_mod.keepwarm"];
+    assert_eq!((k["value"].as_str(), k["layer"].as_str()), (Some("off"), Some("project")), "{k}");
+    assert_eq!(k["file"].as_str(), Some("<ROOT>/proj/.claude/ways.yaml"), "{k}");
+    // Without --project, the working directory's project is read the same way.
+    let (out, _, _) = run_from(&f, "proj/tools", &["settings", "get", "attend_mod.keepwarm"], None);
+    assert_eq!(out, "off\n");
+    // And a project-scope key written from the subdirectory lands at the root.
+    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "set", "ways.project.itops/incident", "false"], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
 }

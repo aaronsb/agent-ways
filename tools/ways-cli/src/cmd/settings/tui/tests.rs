@@ -638,10 +638,10 @@ fn back_to_this_project_is_refused_while_an_edit_elsewhere_is_pending() {
     let here = section(project_group(&r), "shipped").children[0].children[0].setting.clone().unwrap().store.unwrap();
     let e = ways.view("projects", &[&here, &elsewhere]).expect_err("the edit to work/other would be dropped");
     assert_eq!(e, "1 pending change to other projects' ways.yaml would be dropped; review and apply, or undo, it first");
-    assert_eq!(ways.title("ways").unwrap(), " ways settings — ~/work/current · all projects ", "the view stays");
+    assert!(ways.title("ways").unwrap().ends_with(" — ~/work/current · all projects "), "the view stays");
     assert!(ways.view("projects", &[&here]).is_ok(), "an edit to this project's file shows in both views");
-    assert_eq!(ways.title("ways").unwrap(), " ways settings — ~/work/current · this project ");
-    assert_eq!(ways.title("matching"), None, "only the ways tab has views");
+    assert!(ways.title("ways").unwrap().ends_with(" — ~/work/current · this project "));
+    assert!(!ways.title("matching").unwrap().contains("this project"), "only the ways tab has views");
 }
 
 #[test]
@@ -943,13 +943,17 @@ fn leaf<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
     node.children.iter().find_map(|c| leaf(c, name))
 }
 
+// The write checks the value against the live layers, the user file among
+// them, so it runs in a fixture of its own: the operator's own
+// `attend_mod.listening` must not decide it.
 #[test]
-fn the_mod_tab_writes_how_this_project_starts_to_its_own_file() {
-    let fx = Fixture::home();
-    let mut ways = Ways::new(ctx_of(&fx));
-    let tabs = ways.build(&[]);
+#[ignore = "run by the_mod_tab_writes_how_this_project_starts_to_its_own_file"]
+fn child_writes_how_this_project_starts() {
+    let Some((mut ways, user)) = child() else { return };
+    std::fs::write(&user, "# the user's own\n").unwrap();
+    let tabs = ways.build(&ways.layers());
     let tab = tabs.iter().find(|t| t.name == "mod").expect("the mod tab");
-    let project_file = fx.root.join("work/current/.claude/ways.yaml");
+    let project_file = ways.ctx.project.join(".claude/ways.yaml");
     let store_of = |name: &str| leaf(tab, name).and_then(|n| n.setting.as_ref()).and_then(|s| s.store.clone()).unwrap_or_else(|| panic!("{name}"));
     for key in ["listening", "keepwarm"] {
         assert_eq!(store_of(key).file, project_file, "{key} goes to this project's ways.yaml");
@@ -959,4 +963,32 @@ fn the_mod_tab_writes_how_this_project_starts_to_its_own_file() {
     let listening = store_of("listening");
     ways.write(&project_file, &[Write { store: &listening, value: "active", loaded: "dormant" }]).expect("the project's file takes it");
     assert!(std::fs::read_to_string(&project_file).unwrap().ends_with("attend_mod:\n  listening: active\n"));
+    assert_eq!(std::fs::read_to_string(&user).unwrap(), "# the user's own\n", "the user file is untouched");
+}
+
+#[test]
+fn the_mod_tab_writes_how_this_project_starts_to_its_own_file() {
+    let _ = std::fs::remove_dir_all(in_fixture("child_writes_how_this_project_starts"));
+}
+
+// The title names the layers each tab writes, so a write to the user file
+// shows as one before it is made.
+#[test]
+#[ignore = "run by each_tab_s_title_names_the_layers_it_writes"]
+fn child_titles_name_the_layers_written() {
+    let Some((ways, _)) = child() else { return };
+    let project = super::build::tilde(&ways.ctx.project, &ways.ctx.home);
+    let t = |w: &Ways, tab: &str| w.title(tab).unwrap();
+    assert_eq!(t(&ways, "mod"), format!(" ways settings · writes project + user — {project} "), "opened for a project, how it starts goes to the project");
+    assert_eq!(t(&ways, "matching"), format!(" ways settings · writes user — {project} "));
+    assert_eq!(t(&ways, "gate"), format!(" ways settings · writes user — {project} "));
+    assert_eq!(t(&ways, "ways"), format!(" ways settings · writes project + user — {project} · this project "));
+    // Opened for no project, the mod tab's keys all go to the user file.
+    let user_only = Ways::new(Ctx { for_project: false, ..ways.ctx.clone() });
+    assert_eq!(t(&user_only, "mod"), format!(" ways settings · writes user — {project} "));
+}
+
+#[test]
+fn each_tab_s_title_names_the_layers_it_writes() {
+    let _ = std::fs::remove_dir_all(in_fixture("child_titles_name_the_layers_written"));
 }

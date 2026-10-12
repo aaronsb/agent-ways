@@ -24,9 +24,11 @@ impl Fx {
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!("ways-settings-attend-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        for d in ["home/.claude", "xdg/config", "proj"] {
+        for d in ["home/.claude", "xdg/config", "proj/.claude"] {
             std::fs::create_dir_all(root.join(d)).unwrap();
         }
+        // proj is a project root, as `--project .` resolves it.
+        std::fs::write(root.join("proj/CLAUDE.md"), "").unwrap();
         Fx { root }
     }
 

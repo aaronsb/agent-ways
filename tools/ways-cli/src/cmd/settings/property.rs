@@ -5,6 +5,8 @@ use super::*;
 // ── property mode ──────────────────────────────────────────────
 
 pub fn get(key: &str, as_json: bool, file: Option<&Path>, project: Option<&Path>) -> Out {
+    let project = resolve_project(project)?;
+    let project = project.as_deref();
     let reg = registry();
     let b = lookup(&reg, key)?;
     let layers = layers_for(file, project)?;
@@ -21,6 +23,8 @@ pub fn get(key: &str, as_json: bool, file: Option<&Path>, project: Option<&Path>
 }
 
 pub fn list(prefix: Option<&str>, as_json: bool, effective: bool, file: Option<&Path>, project: Option<&Path>) -> Out {
+    let project = resolve_project(project)?;
+    let project = project.as_deref();
     let reg = registry();
     let prefix = prefix.unwrap_or("");
     let layers = layers_for(file, project)?;
@@ -65,6 +69,8 @@ pub fn list(prefix: Option<&str>, as_json: bool, effective: bool, file: Option<&
 }
 
 pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
+    let project = resolve_project(project)?;
+    let project = project.as_deref();
     let reg = registry();
     let b = lookup(&reg, key)?;
     let layers = live_layers(&project_dir(project));
@@ -72,8 +78,9 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
         .spec
         .parse_cli(value, &layers, &b.bound)
         .map_err(|m| fail(exit::REJECTED, format!("{key}: {m}; `ways settings help {key}`")))?;
-    let (path, _) = target_file(&b, project)?;
+    let (path, scope) = target_file(&b, project)?;
     write_file(&path, &[(b.path(), v)])?;
+    touched(scope, &path, false);
     if let Some(why) = overridden(&b, &path, project) {
         return Err(fail(exit::OVERRIDDEN, format!("{key} written to {}, but {why}", path.display())));
     }
@@ -81,14 +88,17 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
 }
 
 pub fn unset(key: &str, project: Option<&Path>) -> Out {
+    let project = resolve_project(project)?;
+    let project = project.as_deref();
     let reg = registry();
     let b = lookup(&reg, key)?;
     if matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) {
         return Err(fail(exit::REJECTED, format!("{key} is changed by its action command; `ways settings help {key}`")));
     }
-    let (path, _) = target_file(&b, project)?;
+    let (path, scope) = target_file(&b, project)?;
     let kp = b.path();
     agent_settings::writer::edit_file(&path, None, |d| d.unset(&kp)).map_err(write_failed)?;
+    touched(scope, &path, false);
     let layers = live_layers(&project_dir(project));
     let r = resolve(b.spec, &b.bound, &layers);
     if let Some(p) = r.layer.and_then(|i| layers[i].path.clone()) {

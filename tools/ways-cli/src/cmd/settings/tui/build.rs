@@ -13,7 +13,7 @@ use agent_settings::{Bound, Kind};
 use agent_tui::tree::{quote, Action, Arg, Kind as TKind, Node, Setting};
 use serde_yaml::Value;
 
-use super::super::{help_text, layer_label, plain, target_file};
+use super::super::{help_text, layer_label, live_layers, plain, target_file};
 use super::{Ctx, Ways};
 
 /// A settings tab: its name, the prefix of the keys it shows, and the
@@ -56,9 +56,12 @@ pub fn tab_named(name: &str) -> Option<&'static Tab> {
 }
 
 /// `p` with the home directory as `~` and `/` between parts, as the
-/// screens show paths.
+/// screens show paths. A canonical `p`, such as a resolved `--project`, is
+/// matched against the home as the filesystem resolves it too.
 pub fn tilde(p: &Path, home: &Path) -> String {
-    let s = match p.strip_prefix(home) {
+    let real = || std::fs::canonicalize(home).ok().and_then(|h| p.strip_prefix(h).ok().map(Path::to_path_buf));
+    let under = p.strip_prefix(home).map(Path::to_path_buf).ok().or_else(real).ok_or(());
+    let s = match under.as_deref() {
         Ok(r) if r.as_os_str().is_empty() => "~".to_string(),
         Ok(r) if !home.as_os_str().is_empty() => format!("~/{}", r.display()),
         _ => p.display().to_string(),
@@ -345,6 +348,34 @@ impl Ways {
             }
         }
         keys
+    }
+
+    /// The layers a tab's settable keys are written to, as its title names
+    /// them: `writes user`, `writes project`, or `writes project + user`.
+    /// A key the screens keep per project shows the layer it lands in before
+    /// it is written; each key's detail names its file.
+    pub(super) fn tab_writes(&self, tab: &str) -> String {
+        use agent_settings::LayerScope;
+        let layers = live_layers(&self.ctx.project);
+        let mut keys = match tab_named(tab) {
+            Some(t) => self.keys_of(t, &layers, &BTreeMap::new()),
+            None => self.reg.concrete(tab, &layers),
+        };
+        if tab == "ways" {
+            keys.extend(self.reg.lookup("ways.project.x"));
+        }
+        let scopes: BTreeSet<&str> = keys
+            .iter()
+            .filter(|b| !matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) && b.spec.computed.is_none())
+            .filter_map(|b| target_file(b, super::writes_project(b, &self.ctx).then_some(self.ctx.project.as_path())).ok())
+            .map(|(_, scope)| if scope == LayerScope::Project { "project" } else { "user" })
+            .collect();
+        match (scopes.contains("project"), scopes.contains("user")) {
+            (true, true) => "writes project + user".into(),
+            (true, false) => "writes project".into(),
+            (false, true) => "writes user".into(),
+            (false, false) => String::new(),
+        }
     }
 
     /// The tree: one root per tab.
