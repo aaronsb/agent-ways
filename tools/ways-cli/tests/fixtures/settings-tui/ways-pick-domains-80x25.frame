@@ -1,6 +1,6 @@
 agent-tui frame 80x25
 | 1 ways   2 match…   3 gate   4 insta…   5 attend   6 senso…   7 mod   8 theme  |
-|┌ ways settings — ~/proj · this project ───┐┌detail────────────────────────────┐|
+|┌ this project · writes project+user — ~/p…┐┌detail────────────────────────────┐|
 |│ ▾ settings              value            ││ways.disabled_domains             │|
 |│     enabled             true             ││                                  │|
 |│     subagents           true             ││Domains switched off everywhere,  │|
@@ -34,8 +34,8 @@ styles
   0  62-68  White Blue -
   0  70-78  White Blue -
   1   0-0   - - DIM
-  1   1-39  LightBlue - BOLD|DIM
-  1  40-44  - - DIM
+  1   1-42  LightBlue - BOLD|DIM
+  1  43-44  - - DIM
   1  45-50  LightBlue - BOLD|DIM
   1  51-79  - - DIM
   2   0-0   - - DIM

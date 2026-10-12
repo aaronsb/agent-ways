@@ -30,7 +30,7 @@ use agent_tui::adapter::{Ended, Job, Printed};
 use agent_tui::{Adapter, App, Themes, Write};
 use serde_yaml::Value;
 
-use super::{fail, live_layers, lookup, project_dir, registry, target_file, write_file, write_file_checked, Failure, Out};
+use super::{fail, live_layers, lookup, registry, target_file, write_file, write_file_checked, Failure, Out};
 use build::{display, tilde, TABS};
 use others::Other;
 
@@ -39,7 +39,12 @@ use others::Other;
 /// guided flows search.
 #[derive(Debug, Clone)]
 pub struct Ctx {
+    /// The project the screens show: its root, or with none the directory
+    /// they were opened at.
     pub project: PathBuf,
+    /// Whether `project` is a project. Without one there is no project
+    /// layer, and a key written to a project's file has nowhere to go.
+    pub in_project: bool,
     /// Whether the screens were opened for a project (`--project`, or
     /// `CLAUDE_PROJECT_DIR`), never the home directory. Without one, keys the
     /// screens keep per project go to the user file.
@@ -67,20 +72,23 @@ pub(super) fn writes_project(b: &agent_settings::Bound, ctx: &Ctx) -> bool {
 /// Whether `given` (the `--project`, else `CLAUDE_PROJECT_DIR`) opens the
 /// screens for a project: one is named and it is not the home directory.
 pub(super) fn opened_for_project(given: Option<&Path>, home: &Path) -> bool {
-    given.is_some_and(|p| {
-        let canon = |q: &Path| std::fs::canonicalize(q).unwrap_or_else(|_| q.to_path_buf());
-        !p.as_os_str().is_empty() && canon(p) != canon(home)
-    })
+    given.is_some_and(|p| !p.as_os_str().is_empty() && !super::is_home(p, home))
 }
 
 impl Ctx {
-    pub fn from_env(project: Option<&Path>) -> Ctx {
+    /// The screens' context for `--project` as given: the project enclosing
+    /// it, read as `ways settings list --project` reads it. A path no project
+    /// encloses opens the screens with no project layer.
+    pub fn from_env(given: Option<&Path>) -> Ctx {
         let home = claude_sessions::home_dir();
         let xdg_config = ways_core::paths::xdg_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
         let env_project = std::env::var_os("CLAUDE_PROJECT_DIR").filter(|v| !v.is_empty()).map(PathBuf::from);
-        let for_project = opened_for_project(project.or(env_project.as_deref()), &home);
+        let for_project = opened_for_project(given.or(env_project.as_deref()), &home);
+        let root = super::read_project(given);
+        let opened_at = || given.and_then(super::real_dir).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()));
         Ctx {
-            project: project_dir(project),
+            in_project: root.is_some(),
+            project: root.unwrap_or_else(opened_at),
             for_project,
             corpus: ways_core::paths::shipped_ways_root(),
             user_ways: ways_core::paths::user_ways_root(),
@@ -90,6 +98,13 @@ impl Ctx {
             xdg_config,
             home,
         }
+    }
+}
+
+impl Ctx {
+    /// The project whose layer the screens read; `None` with no project.
+    pub fn project_layer(&self) -> Option<&Path> {
+        self.in_project.then_some(self.project.as_path())
     }
 }
 
@@ -109,15 +124,18 @@ pub struct Ways {
     /// The other projects with ways, found once: finding them probes the
     /// filesystem.
     others: RefCell<Option<Rc<Vec<Other>>>>,
+    /// The files each tab writes, as its title names them, found once per
+    /// tab: the title is asked at every draw.
+    writes: RefCell<std::collections::BTreeMap<String, String>>,
 }
 
 impl Ways {
     pub fn new(ctx: Ctx) -> Ways {
-        Ways { ctx, reg: registry(), watched: RefCell::default(), all_projects: Cell::new(false), others: RefCell::default() }
+        Ways { ctx, reg: registry(), watched: RefCell::default(), all_projects: Cell::new(false), others: RefCell::default(), writes: RefCell::default() }
     }
 
     pub fn layers(&self) -> Vec<Layer> {
-        let layers = live_layers(&self.ctx.project);
+        let layers = live_layers(self.ctx.project_layer());
         let mut paths: Vec<PathBuf> = layers.iter().filter_map(|l| l.path.clone()).collect();
         paths.push(ways_agent_core::profile::user_layer_path());
         paths.push(ways_core::paths::config_root().join("keys"));
@@ -166,7 +184,7 @@ impl Ways {
     /// the key is written to.
     fn set_one(&self, key: &str, text: &str) -> Result<(), String> {
         let b = lookup(&self.reg, key).map_err(|f| f.message)?;
-        let v = b.spec.parse_cli(text, &live_layers(&self.ctx.project), &b.bound).map_err(|m| format!("{key}: {m}"))?;
+        let v = b.spec.parse_cli(text, &live_layers(self.ctx.project_layer()), &b.bound).map_err(|m| format!("{key}: {m}"))?;
         let (path, _) = target_file(&b, None).map_err(|f| f.message)?;
         self.refuse_broken(&path)?;
         write_file(&path, &[(b.path(), v)]).map(|_| ()).map_err(|f| self.short(&f.message))
@@ -194,7 +212,7 @@ impl Ways {
         let text = doc.text();
         // Another project's switch was read from its own file alone.
         let mut layers = if project == self.ctx.project {
-            live_layers(project)
+            live_layers(self.ctx.project_layer())
         } else {
             vec![Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, file)]
         };
@@ -232,7 +250,7 @@ impl Ways {
 impl Adapter for Ways {
     fn validate(&self, store: &Store, text: &str) -> Option<Result<String, String>> {
         let b = self.reg.lookup(&store.key)?;
-        Some(b.spec.parse_cli(text, &live_layers(&self.ctx.project), &b.bound).map(|v| display(Some(&v), b.spec.kind)))
+        Some(b.spec.parse_cli(text, &live_layers(self.ctx.project_layer()), &b.bound).map(|v| display(Some(&v), b.spec.kind)))
     }
 
     /// One locked edit of `file`, each value parsed by the schema exactly as
@@ -245,12 +263,19 @@ impl Adapter for Ways {
         // names.
         let mut project = self.ctx.project.clone();
         let mut edits = Vec::new();
-        let layers = live_layers(&self.ctx.project);
+        let layers = live_layers(self.ctx.project_layer());
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
             let v = b.spec.parse_cli(w.value, &layers, &b.bound).map_err(|m| format!("{}: {m}", w.store.key))?;
             let at = |p: &Path| target_file(&b, writes_project(&b, &self.ctx).then_some(p)).map(|t| t.0).map_err(|f| f.message);
             let mut path = at(&self.ctx.project)?;
+            if path == file && !self.ctx.in_project && writes_project(&b, &self.ctx) {
+                return Err(self.short(&format!(
+                    "{} is set in a project's file, and no project encloses {}; nothing was written",
+                    w.store.key,
+                    self.ctx.project.display()
+                )));
+            }
             if path != file && b.spec.scope == Scope::Project {
                 match self.other_owning(file) {
                     Some(other) => {
@@ -407,9 +432,12 @@ impl Adapter for Ways {
         Ok(Some(if all { "all projects shown" } else { "this project shown" }.into()))
     }
 
-    /// The ways tab names the view it shows.
+    /// Every tab names the files its keys write, by layer; the ways tab
+    /// names the view it shows too.
     fn title(&self, tab: &str) -> Option<String> {
-        (tab == "ways").then(|| title(&self.ctx, Some(if self.all_projects.get() { "all projects" } else { "this project" })))
+        let view = (tab == "ways").then_some(if self.all_projects.get() { "all projects" } else { "this project" });
+        let writes = self.writes.borrow_mut().entry(tab.to_string()).or_insert_with(|| self.tab_writes(tab)).clone();
+        Some(title(&self.ctx, view, &writes))
     }
 
     fn help(&self, tab: &str) -> Option<String> {
@@ -585,11 +613,13 @@ fn depth_of(s: Option<&str>) -> Result<ColorDepth, Failure> {
     })
 }
 
-/// The app over the live files, opened on `tab`.
-/// The tree pane's title: the project, and the view a tab names.
-fn title(ctx: &Ctx, view: Option<&str>) -> String {
-    let view = view.map(|v| format!(" · {v}")).unwrap_or_default();
-    format!(" ways settings — {}{view} ", tilde(&ctx.project, &ctx.home))
+/// The tree pane's title: the view a tab names, the layers its keys write
+/// (`Ways::tab_writes`), then the project, so a narrow pane cuts the path
+/// and keeps the rest: ` this project · writes project+user — ~/p `.
+fn title(ctx: &Ctx, view: Option<&str>, writes: &str) -> String {
+    let parts: Vec<&str> = [view.unwrap_or_default(), writes].into_iter().filter(|p| !p.is_empty()).collect();
+    let head = if parts.is_empty() { "ways settings".to_string() } else { parts.join(" · ") };
+    format!(" {head} — {} ", tilde(&ctx.project, &ctx.home))
 }
 
 /// The screens' tabs in order: the settings tabs, then theme. `ways
@@ -610,12 +640,12 @@ pub fn app(ways: Ways, tab: Option<&str>, depth: ColorDepth) -> Result<App, Fail
     let roots = ways.build(&layers);
     let shape = ways.value("theme.shape", &layers).and_then(|v| v.as_str().map(Shape::named)).unwrap_or(Shape::PLAIN);
     let themes = themes(&ways, &layers, depth);
-    let title = title(&ways.ctx, None);
     let names = tab_names();
     let at = match tab {
         None => 0,
         Some(t) => names.iter().position(|n| *n == t).ok_or_else(|| fail(exit::USAGE, format!("no tab {t}; the tabs are {}", names.join(", "))))?,
     };
+    let title = ways.title(names[at]).unwrap_or_else(|| title(&ways.ctx, None, ""));
     Ok(App::new(title, roots).shape(shape).themes(themes).adapter(ways).on_tab(at))
 }
 

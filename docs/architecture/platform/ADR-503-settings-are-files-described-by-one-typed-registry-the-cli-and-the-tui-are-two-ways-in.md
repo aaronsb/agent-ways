@@ -210,3 +210,7 @@ Appended after acceptance; nothing above is changed. The first build (PR #713, i
 
   Hooks never fail over it. Each hook that reads the file prints one line on stderr naming the file, the line and the parse error, and saying the whole file fails closed until its syntax is fixed by hand. `ways status` and `ways settings lint` show the same finding. `ways settings fix` cannot edit such a file; it exits 5, writes nothing, and says to fix the syntax by hand.
 - **`ways settings fix` repairs only what has a finding.** A switch takes its closed reading. In a project or target file, a bad key is removed. In the user file, it takes its canonical value. A section named exactly is fixed alone; a prefix covers the sections under it.
+
+## Addendum, 2026-10-12: §8 and §9 amended by ADR-510
+
+Appended after acceptance; nothing above is changed. ADR-510 amends §8 and §9: `--project <path>` names the project enclosing the path, a read of a path in no project has no project layer and succeeds while a write exits 2, and every write names its file on stderr.

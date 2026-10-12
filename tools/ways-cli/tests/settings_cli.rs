@@ -11,6 +11,10 @@ static SEQ: AtomicUsize = AtomicUsize::new(0);
 
 struct Fx {
     root: PathBuf,
+    /// The root as the filesystem resolves it: on macOS `/tmp` is a link to
+    /// `/private/tmp`, and the binary prints a `--project` it resolved in
+    /// this form. Elsewhere it is `root`.
+    real: PathBuf,
 }
 
 impl Fx {
@@ -34,8 +38,18 @@ impl Fx {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("home/.claude")).unwrap();
         std::fs::create_dir_all(root.join("xdg/config")).unwrap();
-        std::fs::create_dir_all(root.join("proj")).unwrap();
-        Fx { root }
+        // The project: a root `--project` and the walk up from a working
+        // directory both find (`settings_root_of` in cmd/settings).
+        std::fs::create_dir_all(root.join("proj/.claude")).unwrap();
+        std::fs::write(root.join("proj/CLAUDE.md"), "").unwrap();
+        // The root stays as written, the length above; the resolved form is
+        // kept beside it for `norm`. Windows resolves to a `\\?\` path the
+        // binary never prints, so there it is the root itself.
+        #[cfg(not(windows))]
+        let real = std::fs::canonicalize(&root).unwrap();
+        #[cfg(windows)]
+        let real = root.clone();
+        Fx { root, real }
     }
 
     fn user(&self) -> PathBuf {
@@ -92,14 +106,15 @@ impl Fx {
         (self.norm(&out.stdout), self.norm(&out.stderr), out.status.code().unwrap_or(-1))
     }
 
-    /// Output with the fixture root as `<ROOT>`. On Windows the path that
-    /// follows the root is written with `/`, so goldens and assertions read
-    /// the same on every platform; nothing but those paths is changed.
+    /// Output with the fixture root as `<ROOT>`, in its resolved form and as
+    /// written. On Windows the path that follows the root is written with
+    /// `/`, so goldens and assertions read the same on every platform;
+    /// nothing but those paths is changed.
     fn norm(&self, b: &[u8]) -> String {
         let text = String::from_utf8_lossy(b).to_string();
         let root = self.root.to_string_lossy().to_string();
         #[cfg(not(windows))]
-        return text.replace(&root, "<ROOT>");
+        return text.replace(&*self.real.to_string_lossy(), "<ROOT>").replace(&root, "<ROOT>");
         #[cfg(windows)]
         {
             // JSON escapes each backslash, so the root appears in three forms.
@@ -145,7 +160,7 @@ fn a_project_switch_round_trips_through_settings_and_keeps_comments() {
     let f = Fx::new();
     let ov = f.overlay();
     f.write(&ov, "# overlay\nlanguage: en\n\nways:\n  # keep me\n  meta/introspection: false\n");
-    assert_eq!(f.run(&["settings", "set", "ways.project.itops/incident", "false"]), (String::new(), String::new(), 0));
+    assert_eq!(f.run(&["settings", "set", "ways.project.itops/incident", "false"]), (String::new(), "project: <ROOT>/proj/.claude/ways.yaml\n".to_string(), 0));
     let text = std::fs::read_to_string(&ov).unwrap();
     assert!(text.starts_with("# overlay\n") && text.contains("  # keep me\n"), "{text}");
     assert_eq!(f.run(&["settings", "get", "ways.project.itops/incident"]).0, "false\n");
@@ -164,8 +179,8 @@ fn a_project_switch_round_trips_through_settings_and_keeps_comments() {
 #[test]
 fn set_exit_codes() {
     let f = Fx::new();
-    // 0: done, and nothing printed.
-    assert_eq!(f.run(&["settings", "set", "matching.semantic_fire_probability", "0.4"]), (String::new(), String::new(), 0));
+    // 0: done: nothing on stdout, and stderr names the file written.
+    assert_eq!(f.run(&["settings", "set", "matching.semantic_fire_probability", "0.4"]), (String::new(), "user: <ROOT>/xdg/config/agent-ways/config.yaml\n".to_string(), 0));
     // 2: unknown key, usage error.
     let (_, err, code) = f.run(&["settings", "set", "matching.nope", "1"]);
     assert_eq!(code, 2);
@@ -335,7 +350,7 @@ fn the_engine_is_one_of_the_profiles_in_effect() {
     assert_eq!(f.run(&["settings", "set", "gate.engine", "openrouter"]).2, 0);
     // A profile of the user's own becomes a choice.
     f.write(&agent, "profiles:\n  mine:\n    provider: anthropic\n    model: claude-sonnet-5-5\n");
-    assert_eq!(f.run(&["settings", "set", "gate.engine", "mine"]), (String::new(), String::new(), 0));
+    assert_eq!(f.run(&["settings", "set", "gate.engine", "mine"]), (String::new(), "user: <ROOT>/xdg/config/agent-ways/agent.yaml\n".to_string(), 0));
     let (out, _, _) = f.run(&["settings", "help", "gate.engine"]);
     assert!(out.contains("type:    one of anthropic, openrouter, mine"), "{out}");
     let v: serde_json::Value = serde_json::from_str(&f.run(&["settings", "get", "gate.engine", "--json"]).0).unwrap();
@@ -1064,4 +1079,178 @@ fn status_says_nothing_of_toggles_when_each_names_a_way() {
     let (out, _, _) = f.run(&["status"]);
     assert!(!out.contains("naming no way"), "{out}");
     assert!(out.contains("Disabled ways:    data/schema-docs, local/mine "), "{out}");
+}
+
+// ── --project names the project enclosing a path ──────────────
+
+/// stdout, stderr and exit code of `args` run from `dir` under the fixture
+/// root, as an operator's shell runs it: no `CLAUDE_PROJECT_DIR`.
+fn run_from(f: &Fx, dir: &str, args: &[&str], input: Option<&str>) -> (String, String, i32) {
+    let cwd = f.root.join(dir);
+    std::fs::create_dir_all(&cwd).unwrap();
+    let mut c = f.cmd(args);
+    c.current_dir(&cwd).env_remove("CLAUDE_PROJECT_DIR");
+    c.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = c.spawn().unwrap();
+    if let Some(i) = input {
+        use std::io::Write;
+        child.stdin.take().unwrap().write_all(i.as_bytes()).unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+    (f.norm(&out.stdout), f.norm(&out.stderr), out.status.code().unwrap_or(-1))
+}
+
+#[test]
+fn project_dot_from_a_subdirectory_is_the_project_root() {
+    let f = Fx::new();
+    let obj = r#"{"attend_mod":{"keepwarm":"off"}}"#;
+    let (out, err, code) = run_from(&f, "proj/tools", &["settings", "apply", "--dry-run", "--project", "."], Some(obj));
+    assert_eq!(code, 0, "{err}");
+    let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let written: Vec<&String> = report["written"].as_object().unwrap().keys().collect();
+    assert_eq!(written, ["<ROOT>/proj/.claude/ways.yaml"], "the root's file, by its absolute path");
+    assert_eq!(err, "project: <ROOT>/proj/.claude/ways.yaml (dry run, nothing written)\n");
+    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
+    assert!(std::fs::read_to_string(f.overlay()).unwrap().contains("keepwarm: off"));
+    assert!(!f.root.join("proj/tools/.claude").exists(), "nothing is written under the subdirectory");
+}
+
+#[test]
+fn a_relative_project_path_resolves_against_the_working_directory() {
+    let f = Fx::new();
+    std::fs::create_dir_all(f.root.join("proj/tools/deep")).unwrap();
+    let (_, err, code) = run_from(&f, "home", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "../proj/tools/deep"], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
+    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "unset", "attend_mod.keepwarm", "--project", ".."], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
+}
+
+/// Whether no directory above the fixture root is a project root as the
+/// settings resolver sees one, so a directory under it with no marker of
+/// its own is in no project. A temp directory inside a checkout (some CI and
+/// nix setups) encloses everything; tests that need no project skip there.
+fn outside_any_project(f: &Fx) -> bool {
+    use ways_core::util::{is_project_root, SETTINGS_OVERLAYS};
+    let marked = |d: &Path| is_project_root(d, SETTINGS_OVERLAYS) || d.join(".git").exists();
+    let clear = !f.real.ancestors().any(marked);
+    if !clear {
+        eprintln!("skipped: a directory above {} is a project root", f.root.display());
+    }
+    clear
+}
+
+#[test]
+fn a_write_to_a_project_path_that_is_no_project_is_a_usage_error_and_writes_nothing() {
+    let f = Fx::new();
+    // A path that does not exist.
+    let (_, err, code) = run_from(&f, "proj", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "nope"], None);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("--project nope: no such directory"), "{err}");
+    if !outside_any_project(&f) {
+        return;
+    }
+    // A directory no project encloses, such as a scratch directory.
+    let scratch = f.root.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let at = scratch.to_str().unwrap();
+    for args in [
+        vec!["settings", "set", "attend_mod.keepwarm", "off", "--project", at],
+        vec!["settings", "unset", "attend_mod.keepwarm", "--project", at],
+        vec!["settings", "fix", "ways", "--project", at],
+    ] {
+        let (_, err, code) = run_from(&f, "home", &args, None);
+        assert_eq!(code, 2, "{args:?}: {err}");
+        assert!(err.contains("no project encloses <ROOT>/scratch; a project root holds .claude/settings.json, .claude/settings.local.json, .claude/ways.yaml, .claude/attend.yaml, or CLAUDE.md beside .claude/; failing those, a .git"), "{args:?}: {err}");
+    }
+    let (out, err, code) = run_from(&f, "home", &["settings", "apply", "--project", at], Some("attend_mod:\n  keepwarm: off\n"));
+    assert_eq!((out.as_str(), code), ("", 2), "{err}");
+    // With no --project, a project-scope key outside any project has no file.
+    let (_, err, code) = run_from(&f, "scratch", &["settings", "set", "ways.project.itops/incident", "false"], None);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("no project encloses <ROOT>/scratch; pass --project <dir>"), "{err}");
+    assert!(!scratch.join(".claude").exists(), "no .claude/ is made in a directory that is not a project's");
+}
+
+// The attend mod and keepwarm read `list attend_mod --effective --project
+// <session dir>`, and a session may start in the home directory or a
+// scratch one: a read there has no project layer and keeps the user's.
+#[test]
+fn a_read_of_a_project_path_that_is_no_project_keeps_the_user_layer() {
+    let f = Fx::new();
+    f.write(&f.user(), "attend_mod:\n  listening: active\n");
+    let scratch = f.root.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let home = f.root.join("home");
+    for at in [scratch.to_str().unwrap(), home.to_str().unwrap(), "nope"] {
+        let args = ["settings", "list", "attend_mod", "--json", "--effective", "--project", at];
+        let (out, err, code) = run_from(&f, "home", &args, None);
+        assert_eq!(code, 0, "{at}: {err}");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let k = &v["keys"]["attend_mod.listening"];
+        assert_eq!((k["value"].as_str(), k["layer"].as_str()), (Some("active"), Some("user")), "{at}: {k}");
+        assert_eq!(run_from(&f, "home", &["settings", "get", "attend_mod.listening", "--project", at], None).0, "active\n", "{at}");
+    }
+    if !outside_any_project(&f) {
+        return;
+    }
+    let at = scratch.to_str().unwrap();
+    for args in [vec!["settings", "lint", "--project", at], vec!["settings", "emit", "attend_mod", "--effective", "--project", at]] {
+        let (_, err, code) = run_from(&f, "home", &args, None);
+        assert_eq!(code, 0, "{args:?}: {err}");
+    }
+    // The screens open, with a project's keys not applicable and how a
+    // session starts left where it is.
+    let (out, err, code) = run_from(&f, "home", &["settings", "mod", "--snap", "100x30", "--project", at], None);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("writes user — <ROOT>/scratch"), "{out}");
+    let (out, err, code) = run_from(&f, "home", &["settings", "mod", "--snap", "160x30", "--keys", "down", "--project", at], None);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("not applicable"), "{out}");
+    assert!(!scratch.join(".claude").exists());
+}
+
+// The settings resolver walks to the nearest marker root before it takes a
+// git checkout: a vendored checkout inside a project is the project's.
+#[test]
+fn a_nested_checkout_under_a_project_resolves_to_the_project() {
+    let f = Fx::new();
+    std::fs::create_dir_all(f.root.join("proj/vendor/lib/.git")).unwrap();
+    std::fs::create_dir_all(f.root.join("proj/vendor/lib/x")).unwrap();
+    let (_, err, code) = run_from(&f, "proj/vendor/lib/x", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
+    assert!(!f.root.join("proj/vendor/lib/.claude").exists());
+}
+
+// A fresh repository with no .claude/ markers takes its first project write
+// at its top level.
+#[test]
+fn a_repository_with_no_markers_resolves_to_its_top_level() {
+    let f = Fx::new();
+    if !outside_any_project(&f) {
+        return;
+    }
+    std::fs::create_dir_all(f.root.join("repo/.git")).unwrap();
+    std::fs::create_dir_all(f.root.join("repo/src")).unwrap();
+    let (_, err, code) = run_from(&f, "repo/src", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/repo/.claude/ways.yaml\n", 0));
+}
+
+#[test]
+fn a_project_write_reads_back_from_the_project_layer() {
+    let f = Fx::new();
+    let set = run_from(&f, "proj/tools", &["settings", "set", "attend_mod.keepwarm", "off", "--project", "."], None);
+    assert_eq!(set.2, 0, "{}", set.1);
+    let (out, err, code) = run_from(&f, "proj/tools", &["settings", "list", "attend_mod", "--effective", "--json", "--project", "."], None);
+    assert_eq!(code, 0, "{err}");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let k = &v["keys"]["attend_mod.keepwarm"];
+    assert_eq!((k["value"].as_str(), k["layer"].as_str()), (Some("off"), Some("project")), "{k}");
+    assert_eq!(k["file"].as_str(), Some("<ROOT>/proj/.claude/ways.yaml"), "{k}");
+    // Without --project, the working directory's project is read the same way.
+    let (out, _, _) = run_from(&f, "proj/tools", &["settings", "get", "attend_mod.keepwarm"], None);
+    assert_eq!(out, "off\n");
+    // And a project-scope key written from the subdirectory lands at the root.
+    let (_, err, code) = run_from(&f, "proj/tools", &["settings", "set", "ways.project.itops/incident", "false"], None);
+    assert_eq!((err.as_str(), code), ("project: <ROOT>/proj/.claude/ways.yaml\n", 0));
 }

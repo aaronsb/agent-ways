@@ -48,7 +48,7 @@ pub fn help_text(topic: Option<&str>) -> Result<String, Failure> {
         let _ = writeln!(out, "  {}", s.doc);
         // The choices of a computed choice come from the files.
         let layers = match s.kind {
-            Kind::ChoiceOf { .. } => live_layers(&project_dir(None)),
+            Kind::ChoiceOf { .. } => live_layers(project_dir(None).as_deref()),
             _ => Vec::new(),
         };
         let _ = writeln!(out, "  type:    {}", s.kind.describe(&layers, &b.bound));

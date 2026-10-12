@@ -161,21 +161,36 @@ pub fn project_root() -> Option<String> {
     env_project_dir().or_else(detect_project_dir)
 }
 
-/// Detect the project root by walking up from cwd looking for .claude/settings.json or CLAUDE.md.
+/// Detect the project root by walking up from the current directory
+/// ([`project_root_of`]).
 pub fn detect_project_dir() -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
-    let mut dir = cwd.as_path();
-    loop {
-        let claude_dir = dir.join(".claude");
-        if claude_dir.is_dir()
-            && (claude_dir.join("settings.json").exists()
-                || dir.join("CLAUDE.md").exists()
-                || claude_dir.join("settings.local.json").exists())
-        {
-            return Some(dir.to_string_lossy().to_string());
-        }
-        dir = dir.parent()?;
-    }
+    project_root_of(&cwd).map(|p| p.to_string_lossy().into_owned())
+}
+
+/// The files in a `.claude/` that mark its directory a project root, as a
+/// `CLAUDE.md` beside it does too ([`is_project_root`]).
+pub const CLAUDE_MARKERS: &[&str] = &["settings.json", "settings.local.json"];
+
+/// The `.claude/` overlays a settings write leaves. The settings resolver
+/// passes them to [`is_project_root`] as extra markers; the walk from the
+/// working directory does not.
+pub const SETTINGS_OVERLAYS: &[&str] = &["ways.yaml", "attend.yaml"];
+
+/// The root of the project enclosing `start`: the nearest directory at or
+/// above it that [`is_project_root`] with no extra markers. `None` when no
+/// ancestor is one. `start` is walked as given.
+pub fn project_root_of(start: &Path) -> Option<PathBuf> {
+    start.ancestors().find(|d| is_project_root(d, &[])).map(Path::to_path_buf)
+}
+
+/// Whether `dir` is a project's root: it has a `.claude/` holding one of
+/// [`CLAUDE_MARKERS`] or `extra`, or a `.claude/` beside a `CLAUDE.md`. The
+/// settings resolver passes its overlay files as `extra`; the walk from the
+/// working directory passes none.
+pub fn is_project_root(dir: &Path, extra: &[&str]) -> bool {
+    let claude = dir.join(".claude");
+    claude.is_dir() && (dir.join("CLAUDE.md").exists() || CLAUDE_MARKERS.iter().chain(extra).any(|f| claude.join(f).exists()))
 }
 
 /// Load excluded path segments from frontmatter-schema.yaml.
@@ -278,6 +293,35 @@ mod tests {
         assert_eq!(project_dir_from(Some("/env/p".into()), pwd.clone(), None), "/env/p");
         assert_eq!(project_dir_from(None, Some(String::new()), Some(PathBuf::from("/cwd"))), "/cwd");
         assert_eq!(project_dir_from(None, None, None), ".");
+    }
+
+    /// A directory's project is the nearest ancestor that is a project root.
+    /// Whatever encloses the temp directory, a directory under a fresh base
+    /// with no marker of its own resolves where the base does.
+    #[test]
+    fn project_root_of_walks_up_to_the_nearest_root() {
+        let base = std::env::temp_dir().join(format!("ways-root-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let proj = base.join("proj");
+        let sub = proj.join("tools/deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        let outside = project_root_of(&base);
+        assert_eq!(project_root_of(&sub), outside, "nothing under the base marks a root");
+        std::fs::create_dir_all(proj.join(".claude")).unwrap();
+        assert_eq!(project_root_of(&sub), outside, "an empty .claude/ marks nothing");
+        std::fs::create_dir_all(base.join("repo/.git")).unwrap();
+        std::fs::create_dir_all(base.join("repo/src")).unwrap();
+        assert_eq!(project_root_of(&base.join("repo/src")), outside, "a .git is no marker of this walk");
+        std::fs::write(proj.join(".claude/ways.yaml"), "").unwrap();
+        assert_eq!(project_root_of(&sub), outside, "an overlay marks a root only as an extra marker");
+        assert!(is_project_root(&proj, &["ways.yaml"]));
+        std::fs::write(proj.join("CLAUDE.md"), "").unwrap();
+        assert_eq!(project_root_of(&sub), Some(proj.clone()));
+        assert_eq!(project_root_of(&proj), Some(proj.clone()));
+        std::fs::remove_file(proj.join("CLAUDE.md")).unwrap();
+        std::fs::write(proj.join(".claude/settings.local.json"), "{}").unwrap();
+        assert_eq!(project_root_of(&sub), Some(proj.clone()));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

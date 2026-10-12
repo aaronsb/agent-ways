@@ -24,9 +24,11 @@ impl Fx {
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!("ways-settings-attend-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        for d in ["home/.claude", "xdg/config", "proj"] {
+        for d in ["home/.claude", "xdg/config", "proj/.claude"] {
             std::fs::create_dir_all(root.join(d)).unwrap();
         }
+        // proj is a project root, as `--project .` resolves it.
+        std::fs::write(root.join("proj/CLAUDE.md"), "").unwrap();
         Fx { root }
     }
 
@@ -63,8 +65,11 @@ impl Fx {
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
+        // The root as written and as resolved: macOS's temp directory sits
+        // behind a link, and the binary prints a `--project` it resolved.
         let root = self.root.to_string_lossy().to_string();
-        let s = |b: &[u8]| String::from_utf8_lossy(b).replace(&root, "<ROOT>");
+        let real = std::fs::canonicalize(&self.root).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| root.clone());
+        let s = |b: &[u8]| String::from_utf8_lossy(b).replace(&real, "<ROOT>").replace(&root, "<ROOT>");
         (s(&o.stdout), s(&o.stderr), o.status.code().unwrap_or(-1))
     }
 }
@@ -210,4 +215,20 @@ fn the_chat_keys_are_listed_set_and_refused_like_any_attend_key() {
     // The chat's keys are the user's: a project file cannot set them.
     let (_, _, code) = fx.run(&["settings", "set", "attend.chat.mouse", "true", "--project", "."]);
     assert_ne!(code, 0, "a project cannot set a user key");
+}
+
+// The attend mod and keepwarm read `list attend_mod --json --effective
+// --project <session dir>`. A session started in the home directory or a
+// scratch one is in no project: the read keeps the user's value, exit 0.
+#[test]
+fn a_session_dir_in_no_project_reads_the_user_layer() {
+    let fx = Fx::new();
+    fx.write(&fx.root.join("xdg/config/agent-ways/config.yaml"), "attend_mod:\n  listening: active\n");
+    std::fs::create_dir_all(fx.root.join("scratch")).unwrap();
+    for dir in ["home", "scratch"] {
+        let at = fx.root.join(dir);
+        let (out, err, code) = fx.run(&["settings", "list", "attend_mod", "--json", "--effective", "--project", at.to_str().unwrap()]);
+        assert_eq!(code, 0, "{dir}: {err}");
+        assert!(out.contains("\"attend_mod.listening\": {\n      \"value\": \"active\""), "{dir}: {out}");
+    }
 }

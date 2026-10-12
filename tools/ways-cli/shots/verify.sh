@@ -19,6 +19,9 @@ SIZES=${SIZES:-80x25 120x35}
 
 A=3f6c2a91-4b7e-4d10-9c55-2e8b7a1d0f42
 P=$FX_USER_HOME/shop
+# The settings screens take a project on disk: the fixture's ~/shop, where
+# HOME is the link `~` (env.sh). The tilde is literal, not expanded.
+PS='~/shop'
 
 # The scenarios: name | command | keys. Keys are tmux key names, and
 # text:<chars> types literally. A new screen state adds a line here.
@@ -31,10 +34,10 @@ spend      | ways session replay --project $P               | 4
 stats      | ways session replay --project $P               | 5
 precision  | ways session replay --project $P               | 6
 projects   | ways projects                                  | / text:shop
-settings   | ways settings --project $P                     |
-matching   | ways settings matching --project $P            | Down Down e C-u text:0.2 Enter
-picker     | ways settings gate --project $P                | Down Down Down Right Down Right Down Down Enter
-mod        | ways settings mod --project $P                 |
+settings   | ways settings --project $PS                    |
+matching   | ways settings matching --project $PS           | Down Down e C-u text:0.2 Enter
+picker     | ways settings gate --project $PS               | Down Down Down Right Down Right Down Down Enter
+mod        | ways settings mod --project $PS                |
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null
