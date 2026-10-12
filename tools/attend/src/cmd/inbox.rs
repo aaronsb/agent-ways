@@ -284,7 +284,7 @@ pub(crate) fn scan_pending(
         delivered.push(Drained {
             when: agent_fmt::compact_time(f.mtime, std::time::SystemTime::now()),
             mtime: f.mtime,
-            sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
+            sender: render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
             sender_id: sig.from.to_string(),
             scope: room_label(&scan_dirs[f.room].room),
             room: scan_dirs[f.room].room.clone(),

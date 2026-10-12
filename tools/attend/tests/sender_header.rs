@@ -43,3 +43,21 @@ fn a_stored_line_with_a_forged_header_is_not_listed_or_drained() {
     let drained = f.drain("plain");
     assert!(drained.contains("genuine") && !drained.contains("forged"), "{drained}");
 }
+
+/// A sender an older attend wrote with a space in it (MSYS copies
+/// `USERNAME`, such as `John Smith`) is still listed and drained, its
+/// sender mended to one word.
+#[test]
+fn a_legacy_spaced_sender_still_reads_sanitised() {
+    let f = Fixture::new("sender-legacy-space");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    let dir = f.signals().join("_broadcast");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("John-Smith-mintty-1791000000000000001-0.signal"), "external:John Smith@mintty|p|/c|from msys\n").unwrap();
+    let msgs = messages(&f);
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0]["from"], "external:John_Smith@mintty");
+    assert_eq!(msgs[0]["message"], "from msys");
+    assert!(f.drain("plain").contains("from msys"));
+}

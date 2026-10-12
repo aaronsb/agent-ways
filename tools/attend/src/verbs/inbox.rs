@@ -107,7 +107,7 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
             messages.push(Message {
                 id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
                 scope,
-                sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), instances),
+                sender: render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), instances),
                 from: sig.from.to_string(),
                 source: sig.cwd.to_string(),
                 message: sig.message.to_string(),
@@ -198,7 +198,7 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         return Ok(Message {
             id: id.to_string(),
             scope,
-            sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), &SnapshotCache::new()),
+            sender: render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), &SnapshotCache::new()),
             from: sig.from.to_string(),
             source: sig.cwd.to_string(),
             message: sig.message.to_string(),

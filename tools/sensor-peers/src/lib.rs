@@ -371,7 +371,7 @@ impl PeerSensor {
             // (and get suppressed when the peer sensor is refractory).
             // This is the "auto-grouping" mechanism — conversation
             // emerges from observed traffic rather than explicit config.
-            let boost = self.peer_engagement_boost(from);
+            let boost = self.peer_engagement_boost(&from);
             let magnitude = base_magnitude * boost;
 
             // Defer emission: collect now, decide individual-vs-digest
@@ -400,7 +400,7 @@ impl PeerSensor {
             // reply` to auto-thread to the agent's own past self.
             if let Some(ref sid) = self.own_session_id {
                 if source_cwd != focus.working_dir {
-                    let said = last_inbound::Said::of(&scan_dirs[f.room].room, from, source_cwd);
+                    let said = last_inbound::Said::of(&scan_dirs[f.room].room, &from, source_cwd);
                     last_inbound::record(sid, &f.signal_id, &said);
                 }
             }

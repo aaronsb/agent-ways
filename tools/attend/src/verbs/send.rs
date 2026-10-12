@@ -423,7 +423,7 @@ fn parent_route(
                 // In this project's tray it names no sender, and so no
                 // place to answer.
                 match (sig, &dir.room) {
-                    (Some(sig), room) => Some(Said::of(room, sig.from, sig.cwd)),
+                    (Some(sig), room) => Some(Said::of(room, &sig.from, sig.cwd)),
                     (None, attend_groups::Room::Project) => None,
                     (None, room) => Some(Said::of(room, "", "")),
                 }
