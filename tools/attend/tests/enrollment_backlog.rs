@@ -1,8 +1,9 @@
 //! Messages that arrived before a session enrolled (#725 review, finding 2).
 //!
 //! One cold-start rule for both conduits: a message addressed to the
-//! project (`--to`) is delivered on enrollment whatever its age, while an
-//! old `#open` message is baselined and announced, never consumed silently.
+//! project (`--to`) since the session began is delivered on enrollment
+//! whatever its age, while older addressed mail and an old `#open` message
+//! are baselined and announced, never consumed silently.
 //! Each enrollment path is covered: `attend join` (the drain runs first) and
 //! `/attend` (the peers sensor under `attend run` runs first).
 
@@ -70,6 +71,83 @@ fn join_and_first_delivery_name_the_session() {
     let hook = f.drain_hook_with("{}");
     assert!(hook.starts_with("{\"hookSpecificOutput\": "), "addressed mail continues the turn: {hook}");
     assert!(hook.contains(&format!("(you are {name})")), "the delivery names the session: {hook}");
+}
+
+fn drain_doc(out: &str) -> serde_json::Value {
+    serde_json::from_str(out).unwrap_or_else(|e| panic!("{e}: {out}"))
+}
+
+fn bodies(d: &serde_json::Value) -> Vec<String> {
+    d["messages"].as_array().unwrap().iter().map(|m| m["message"].as_str().unwrap().to_string()).collect()
+}
+
+/// Observed on attend 0.20.0 with the attend mod: a session started fresh in
+/// a project, listening from its config, was handed its predecessor's whole
+/// conversation, mail addressed to the project that the predecessor had
+/// already read and answered. Mail addressed to a project is addressed to
+/// the sessions live there when it was sent (ADR-401), and a new agent is
+/// replayed nothing from before it began (ADR-404 D3b): the new session
+/// gets the held-back note, not the messages.
+#[test]
+fn a_new_session_is_not_replayed_its_predecessors_project_mail() {
+    let f = Fixture::new("backlog-successor");
+    let tray = f.project_tray();
+    for i in 0..7 {
+        f.put(&tray, &format!("other-1-to-{i}"), &format!("for the predecessor {i}"), 10 * MINUTE);
+    }
+    // Session A, live for a day, listens and reads them, as the mod does.
+    f.ok(&["listen", "on"]);
+    let a = drain_doc(&f.ok(&["inbox", "--drain", "--json"]));
+    assert_eq!(bodies(&a).len(), 7, "A was live when they were sent, so they are A's: {a}");
+
+    // Session B: a new Claude Code process in the same project, started
+    // a minute ago, turns listening on and drains, as the mod does at start.
+    let b_sid = "sess-backlog-successor-b";
+    f.attend_in_process(b_sid, Some(MINUTE), &["listen", "on"]);
+    let b = drain_doc(&f.attend_in_process(b_sid, Some(MINUTE), &["inbox", "--drain", "--json"]));
+    assert_eq!(b["status"], "drained", "{b}");
+    assert!(bodies(&b).is_empty(), "B is replayed none of A's mail: {b}");
+    assert_eq!(b["held_back"], 7, "{b}");
+    assert!(b["note"].as_str().is_some_and(|n| n.contains("7 older messages held back")), "{b}");
+
+    // What is addressed to the project from here on is B's too.
+    f.put(&tray, "other-1-to-new", "for whoever is here now", std::time::Duration::ZERO);
+    let next = drain_doc(&f.attend_in_process(b_sid, Some(MINUTE), &["inbox", "--drain", "--json"]));
+    assert_eq!(bodies(&next), vec!["for whoever is here now".to_string()], "{next}");
+}
+
+/// Mail addressed to the project while no session listened: what was sent
+/// while this session was live, though not listening, was addressed to it
+/// and arrives when it listens ("delivers what was addressed to your
+/// project meanwhile"); what was sent before it began was addressed to
+/// whoever was live then, and is held back like any other backlog.
+#[test]
+fn mail_from_before_the_session_began_is_held_back_though_nobody_read_it() {
+    let f = Fixture::new("backlog-nobody");
+    let tray = f.project_tray();
+    f.put(&tray, "other-1-before", "sent before this session began", 30 * MINUTE);
+    f.put(&tray, "other-1-meanwhile", "sent while it was dormant", 5 * MINUTE);
+    let sid = "sess-backlog-nobody-b";
+    f.attend_in_process(sid, Some(10 * MINUTE), &["listen", "on"]);
+    let d = drain_doc(&f.attend_in_process(sid, Some(10 * MINUTE), &["inbox", "--drain", "--json"]));
+    assert_eq!(bodies(&d), vec!["sent while it was dormant".to_string()], "{d}");
+    assert_eq!(d["held_back"], 1, "{d}");
+}
+
+/// A session record with no start time (an older Claude Code) cannot say
+/// whom old project mail was for, so it is held back as old `#open`
+/// backlog is; a message younger than the fresh window still arrives.
+#[test]
+fn without_a_start_time_old_project_mail_is_held_back() {
+    let f = Fixture::new("backlog-unknown-start");
+    let tray = f.project_tray();
+    f.put(&tray, "other-1-old", "old project mail", 30 * MINUTE);
+    f.put(&tray, "other-1-live", "live project mail", std::time::Duration::ZERO);
+    let sid = "sess-backlog-unknown-start-b";
+    f.attend_in_process(sid, None, &["listen", "on"]);
+    let d = drain_doc(&f.attend_in_process(sid, None, &["inbox", "--drain", "--json"]));
+    assert_eq!(bodies(&d), vec!["live project mail".to_string()], "{d}");
+    assert_eq!(d["held_back"], 1, "{d}");
 }
 
 // `attend run` has no sensor to scan the room without the peers sensor.

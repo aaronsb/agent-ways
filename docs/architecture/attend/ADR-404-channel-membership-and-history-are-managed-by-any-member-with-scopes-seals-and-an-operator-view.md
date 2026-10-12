@@ -40,6 +40,7 @@ basis:
     via: relayed by the main session, 2026-10-10
     paraphrase: true
   - evidence: "/purge keeps any signal a live consumer has not seen (tools/attend-chat/src/app/keys.rs, purge_channel_in) and never reaches a project tray; the cold-start rule delivers addressed project-tray mail whatever its age, the newest 50 (tools/attend-state/src/cold_start.rs, plan); a reproduction in an isolated cache showed a new agent drained all 30 day-old addressed messages after #open and channel history were deleted"
+  - evidence: "observed on attend 0.20.0 with the attend mod, 2026-10-12: a fresh Claude Code session (a new session id) started in ~/Projects/ai/harness/attend-collaborator with attend_mod.listening active, and before the operator typed anything its first turn was an idle delivery of 7 old messages addressed to [project], the previous session's conversation with Chaucer (test instructions, a channel invite, replies) that it had already read and answered. The files' mtimes were genuine (sent 22:02:35 to 22:03:31 on 10-11); the cold-start rule delivered project-tray mail whatever its age to a session with no seen-set (tools/attend-state/src/cold_start.rs, plan)"
   - evidence: "/invite writes a directed signal and the invitee must run attend join itself (tools/attend-chat/src/app/keys.rs, run_invite: consent asymmetry, issue #393); /kick removes without consent"
   - precedent: ADR-136
   - precedent: ADR-170
@@ -88,7 +89,7 @@ related:
 An operator cleaned up attend's rooms from attend-chat and found that a new agent was still caught up on old messages. The causes, in this codebase as of this record:
 
 - A session that joined a channel after its first scan was handed the channel's whole backlog: the cold-start rule ran only on the first scan. Fixed in the same change as this record (below).
-- Addressed mail in a project's tray is delivered to a new session whatever its age, the newest 50 (ADR-172, addendum of 2026-10-01). A tray is per project, so mail written to one session reaches every later session in that directory. Nothing the operator can run clears a tray: `/purge` reaches `#open` and channels only, and a tray lives as long as its project (ADR-136 Decision 3).
+- Addressed mail in a project's tray is delivered to a new session whatever its age, the newest 50 (ADR-172, addendum of 2026-10-01). A tray is per project, so mail written to one session reaches every later session in that directory. Fixed for the tray since (below). Nothing the operator can run clears a tray: `/purge` reaches `#open` and channels only, and a tray lives as long as its project (ADR-136 Decision 3).
 - `/purge` keeps every message a live consumer has not seen (ADR-172 Decision 5). An idle but live member holds the history open.
 - `attend inbox` lists every message in the receive set, and the cold-start note points new agents at it.
 
@@ -245,6 +246,7 @@ These fit ADR-124, ADR-136, ADR-170 and ADR-172 as accepted and need none of the
 These shipped with the record and stand on the decisions named; rejecting a decision takes its item out:
 
 - D1 and D3c, interim: attend-chat's `/invite` and Invite agent record a pending invitation beside the room's signals, and the invitee's `attend join` spends it and keeps the room's newest 50 messages deliverable, whatever their age, running a cold session's cold start at once so its first scan does not baseline them away. D3c's replay-from point (60 minutes before the invitation, or `--since`) replaces the age-blind newest 50 when D3 is built. Add agent is a stub that names D1: enrolling a session that has not started attend needs its cold start run for it, and that scan lives in the attend binary, out of attend-chat's reach. Clear history still runs today's `/purge`, which keeps messages younger than 90 seconds and any a live agent has not read.
+- D3b, interim, for directed mail: until signals carry ADR-401's `to` field, the cold start reads a project-tray message as addressed to the session when it was sent after the session began, its Claude Code session record's `startedAt`, since `--to` addresses the sessions live at the path. Older tray mail is backlog, held back with the count note, whether or not the session it was for read it; a new session is replayed none of it. A session record with no `startedAt` judges tray mail by the 120-second window, as `#open`. In the attend mod, a session its config starts listening submits no turn before the operator's first prompt: what is pending rides that prompt as context, and the row counts it meanwhile.
 - D9, the tab keys and menus: Ctrl+1-9 under the kitty keyboard protocol (Esc on an empty line asks before quitting where Ctrl+3 arrives as Esc), F2 and Ctrl+T, menus on a second click or a right click, the `+` slot, and the `≡` common menu.
 - D8, the `attend.chat.*` keys with `/config`, the Keybinding set presets and the mouse item. The theme item holds for the session only.
 

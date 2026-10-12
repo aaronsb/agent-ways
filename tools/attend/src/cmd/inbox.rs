@@ -202,9 +202,10 @@ fn room_label(room: &Room) -> String {
 /// Own messages are marked without delivering (dedup bookkeeping). Under
 /// `baselining` (no seen-set yet) the messages from others go through
 /// `attend_state::cold_start`, the rule the peers sensor applies too:
-/// addressed mail is delivered whatever its age, old `#open` and channel
-/// backlog is marked without being shown, and the scan reports a note
-/// counting what it held back.
+/// addressed mail sent since the session began is delivered whatever its
+/// age, older addressed mail and old `#open` and channel backlog is marked
+/// without being shown, and the scan reports a note counting what it held
+/// back.
 pub(crate) fn scan_pending(
     scan_dirs: &[attend_groups::ReceiveDir],
     seen: &std::collections::HashSet<String>,
@@ -264,7 +265,7 @@ pub(crate) fn scan_pending(
             .iter()
             .map(|f| (&scan_dirs[f.room].room, f.mtime.elapsed().unwrap_or_default()))
             .collect();
-        attend_state::cold_start::plan(&pending)
+        attend_state::cold_start::plan(&pending, attend_state::cold_start::session_age(own_session_id))
     });
 
     let mut delivered: Vec<Drained> = Vec::new();
@@ -1074,16 +1075,18 @@ mod drain_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Addressed mail survives a cold start whatever its age.
+    /// Addressed mail an hour old, for a session no record dates: nothing
+    /// says it was sent to this session, so the cold start holds it back.
+    /// (A dated session is covered end to end in tests/enrollment_backlog.rs.)
     #[test]
-    fn baseline_delivers_old_addressed_mail() {
+    fn baseline_holds_back_old_addressed_mail_of_an_undated_session() {
         let dir = scan_fixture("baseline-addressed");
         write_signal(&dir, "peer-1", "claude:other-session", "sent with --to an hour ago");
         age(&dir, "peer-1", std::time::Duration::from_secs(3600));
 
         let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), "my-session", true);
-        assert_eq!(scan.delivered.len(), 1);
-        assert_eq!(scan.note, None);
+        assert!(scan.delivered.is_empty());
+        assert_eq!(scan.note.as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
         std::fs::remove_dir_all(&dir).ok();
     }
 

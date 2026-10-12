@@ -116,6 +116,11 @@ type Mod = {
   /** A /clear or a /resume moved the session to an id attend has not been
    *  told is listening yet; the poll holds its drain until it has. */
   isRelistening: boolean
+  /** The session started listening from its project's config and the
+   *  operator has not prompted yet. The poll submits no turn: what is
+   *  pending rides as context on the operator's first prompt, and the row
+   *  counts it meanwhile. */
+  isAwaitingOperator: boolean
 }
 
 async function readStatus($: $): Promise<AttendStatus> {
@@ -294,7 +299,7 @@ async function tick($: $, mod: Mod, force: boolean) {
     const interval = pollInterval(mod.config, now - mod.lastActivityMs, isTurnRunning)
     if (!force && now - mod.lastPollMs < interval) return
     mod.lastPollMs = now
-    if (!isTurnRunning && !mod.isRelistening) await poll($, mod)
+    if (!isTurnRunning && !mod.isRelistening && !mod.isAwaitingOperator) await poll($, mod)
     await refreshUnread($, mod)
     if (force || now - mod.lastPeersMs >= PEERS_EVERY_MS) await refreshPeers($, mod)
     if (mod.config.keepwarm === 'on' && mod.running.size === 0 && now - mod.lastKeepwarmMs >= KEEPWARM_EVERY_MS) {
@@ -373,6 +378,25 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean
   return true
 }
 
+/** The operator's first prompt in a session that started listening from
+ *  config: one drain, its messages attached to the prompt as context rather
+ *  than submitted as a turn of their own. */
+async function drainIntoPrompt($: $, mod: Mod): Promise<string | undefined> {
+  const d = parseDrain((await run($, DRAIN_ARGV)).stdout)
+  if (!d) return undefined
+  if ((await readStatus($)).listening !== (d.status === 'drained')) await updateStatus($, s => ({ ...s, listening: d.status === 'drained' }))
+  if (d.messages.length === 0) return undefined
+  for (const m of d.messages) {
+    mod.ids.set(shortId(m.id), m.id)
+    if (m.re) mod.ids.set(shortId(m.re), m.re)
+  }
+  await updateStatus($, t => ({ ...t, deliveries: t.deliveries + 1, afterCompaction: false, turnsSinceFull: 0 }))
+  return frameInbound(d.messages.map(formatMessage), d.messages.length, true)
+}
+
+/** Origins that are the operator's own prompt. */
+const OPERATOR_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
+
 async function refreshUnread($: $, mod: Mod) {
   const u = parseUnread((await run($, UNREAD_ARGV)).stdout)
   const joined = [...mod.joined]
@@ -433,6 +457,7 @@ export const register: Register = on => {
     joined: new Set(),
     isStarted: false,
     isRelistening: false,
+    isAwaitingOperator: false,
   }
 
   on('session.start', async ($, e, next) => {
@@ -449,8 +474,11 @@ export const register: Register = on => {
     const wasActive = isActive(await readStatus($)) || (await readListened($)).includes(id)
     if (wasActive || (mod.config.listening === 'active' && mod.canPoll)) {
       // Listed by turn one; listening and the first drain follow the hook.
-      // Active from here, so a /clear before activate runs keeps it.
+      // Active from here, so a /clear before activate runs keeps it. A
+      // session the config starts listening has had no prompt yet: nothing
+      // it finds pending starts a turn before the operator's first prompt.
       mod.active = true
+      mod.isAwaitingOperator = !wasActive
       await registerActiveTools($)
       $.clock.after(0, () => void activate($, mod, id))
     } else {
@@ -496,6 +524,17 @@ export const register: Register = on => {
       await updateStatus($, s => ({ ...s, afterCompaction: true }))
     }
     return done
+  })
+
+  // The operator's first prompt in a session the config started listening:
+  // what is pending enters beside it, read in the same turn, rather than as
+  // a turn the operator never asked for.
+  on('prompt.submit', async ($, e, next) => {
+    if (!mod.isAwaitingOperator || !OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    mod.isAwaitingOperator = false
+    if (!(await isOn($, mod))) return next(e)
+    const pending = await drainIntoPrompt($, mod)
+    return next(pending ? { ...e, context: [...(e.context ?? []), pending] } : e)
   })
 
   on('turn.start', async ($, e, next) => {

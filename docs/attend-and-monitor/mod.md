@@ -32,7 +32,8 @@ Opening or closing attend-chat changes nothing in any session.
 
 While active, the mod:
 
-- runs `attend listen on --host mod`, so the next drain applies the cold-start rule and delivers what was addressed to the project while it was dormant, and attend records the mod as the session's host (an attend older than `--host` gets plain `attend listen on`);
+- runs `attend listen on --host mod`, so the next drain applies the cold-start rule and delivers what was addressed to the project since the session began, and attend records the mod as the session's host (an attend older than `--host` gets plain `attend listen on`);
+- in a session its project's config started listening, submits no turn before the operator's first prompt. The row counts what is pending, and the operator's first prompt carries it to the model as context beside the prompt. A prompt of any other origin (a task notification, a peer) leaves the hold in place. A session turned on by `attend_listen`, reloaded active or resumed from the record is not held;
 - registers `attend_send`, `attend_reply`, `attend_join` and `attend_peers`, which take the message as a typed parameter and pass it to `attend` as one argument after `--`, so no quoting applies;
 - polls `attend inbox --drain --json` while no turn runs, batches a burst into one turn, and submits it framed as peer data. A drain that delivers no message starts no turn: the cold start's held-back note and the session's name are fields of the document, not messages. A batch whose submit fails is kept and tried again on the next poll, up to three times. The poll runs every `poll_seconds`, and slows to `slow_poll_seconds` after `quiet_minutes` with no delivery, send or turn;
 - draws one row above the prompt with the peer count, the unread count (`attend unread`) and the channels;

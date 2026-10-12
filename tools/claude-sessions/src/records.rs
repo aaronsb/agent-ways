@@ -13,6 +13,9 @@ pub struct SessionRecord {
     pub session_id: String,
     /// The session's working directory, when the record names one.
     pub cwd: Option<String>,
+    /// When the session's process started (`startedAt`), in milliseconds
+    /// since the epoch, when the record says.
+    pub started_at_ms: Option<u64>,
     /// The record file.
     pub path: PathBuf,
 }
@@ -24,7 +27,8 @@ pub fn parse_session_record(content: &str, path: &Path) -> Option<SessionRecord>
     let pid = u32::try_from(v.get("pid")?.as_u64()?).ok()?;
     let session_id = v.get("sessionId")?.as_str()?.to_string();
     let cwd = v.get("cwd").and_then(|c| c.as_str()).map(str::to_string);
-    Some(SessionRecord { pid, session_id, cwd, path: path.to_path_buf() })
+    let started_at_ms = v.get("startedAt").and_then(serde_json::Value::as_u64);
+    Some(SessionRecord { pid, session_id, cwd, started_at_ms, path: path.to_path_buf() })
 }
 
 /// Every readable record in `dir` (`*.json` only), sorted by file name.
@@ -63,6 +67,9 @@ mod tests {
         let ids: Vec<(u32, &str, Option<&str>)> =
             got.iter().map(|r| (r.pid, r.session_id.as_str(), r.cwd.as_deref())).collect();
         assert_eq!(ids, vec![(1, "a", Some("/p")), (2, "b", Some("/q")), (6, "c", None)]);
+        assert!(got.iter().all(|r| r.started_at_ms.is_none()));
+        let r = parse_session_record(r#"{"pid":7,"sessionId":"d","startedAt":1791774137947}"#, Path::new("7.json")).unwrap();
+        assert_eq!(r.started_at_ms, Some(1_791_774_137_947));
     }
 
     #[test]

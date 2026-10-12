@@ -95,7 +95,7 @@ To stop both conduits, run `attend scene private` and stop the Monitor running `
 
 A session is cold until a conduit has applied the cold-start rule for it, which it records as `baselined: true` in the state file. The peers sensor and the drain apply the same rule, `attend_state::cold_start`:
 
-- A message addressed to the project (`--to`) is delivered whatever its age, the newest 50 at most.
+- A message addressed to the project (`--to`) since the session began is delivered whatever its age, the newest 50 at most. `--to` addresses the sessions live in the project when it is sent (ADR-401), so a session reads its start from its Claude Code session record (`startedAt`), and mail from before then is backlog, whether or not the session it was for read it (ADR-404 D3b). A session record with no start time leaves addressed mail to the age rule below.
 - An `#open` or channel message younger than 120 seconds is live conversation and is delivered.
 - Anything else is marked seen without being shown. The first delivery carries one line counting it, `N older messages held back; reading them is optional: attend inbox`. When there is nothing else to deliver, the drain sends that line alone as a `systemMessage`, so the turn still ends.
 

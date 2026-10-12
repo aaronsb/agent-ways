@@ -152,7 +152,13 @@ function host(on: On, world: World) {
     if (cmd.startsWith('inbox --drain')) return ok(world.drains?.shift() ?? DRAIN_EMPTY)
     return ok('[attend] sent\n')
   }
+  // The operator's prompts, with the context the hooks attached.
+  const prompts: { text: string; context: readonly string[] }[] = []
   on('prompt.submit', ($, e) => {
+    if (e.origin.kind !== 'plugin') {
+      prompts.push({ text: e.text, context: e.context ?? [] })
+      return { text: e.text, context: e.context }
+    }
     if ((world.submitFails ?? 0) > 0) {
       world.submitFails = (world.submitFails ?? 0) - 1
       throw new Error('the session refused the prompt')
@@ -164,7 +170,12 @@ function host(on: On, world: World) {
   const count = (cmd: string) => argvs.filter(a => a.slice(1).join(' ').startsWith(cmd)).length
   const ran = (cmd: string) => count(cmd) > 0
   const mode = () => (state.value as { mode?: string } | undefined)?.mode
-  return { argvs, submitted, origins, tools, count, ran, mode, clearState, store, storeWrites, logs, world }
+  return { argvs, submitted, origins, prompts, tools, count, ran, mode, clearState, store, storeWrites, logs, world }
+}
+
+/** The operator types a prompt and presses Enter. */
+async function typed($: Engine, text = 'hello') {
+  await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
 }
 
 /** A /clear or an in-session /resume as Claude Code 2.1.296 runs it:
@@ -512,9 +523,11 @@ describe('activation and delivery against attend\'s real drain', () => {
 
   test('a submit that fails keeps the batch and delivers it on the next poll, without draining it again', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const world: World = { config: { listening: 'active', keepwarm: 'off' }, drains: [one(7), DRAIN_EMPTY], submitFails: 1 }
+    const world: World = { config: { listening: 'active', keepwarm: 'off' }, drains: [DRAIN_EMPTY], submitFails: 1 }
     const h = host(on, world)
     await $.session.start(INTERACTIVE)
+    await typed($)
+    world.drains?.push(one(7), DRAIN_EMPTY)
     await clock.advance(4_000)
     expect(h.submitted).toEqual([])
     for (let i = 0; i < 5 && h.submitted.length === 0; i++) await clock.advance(5_000)
@@ -530,6 +543,7 @@ describe('the drain\'s status on the row', () => {
     const drains: string[] = []
     host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
     await $.session.start(INTERACTIVE)
+    await typed($)
     await clock.advance(6_000)
     const shows = async (text: RegExp) => {
       const ui = await $.ui.mount(BAND as never)
@@ -556,6 +570,7 @@ describe('active', () => {
     const h = host(on, { config: { listening: 'active' }, drains })
     await $.session.start(INTERACTIVE)
     expect(h.tools).toEqual(['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers'])
+    await typed($)
     await clock.advance(1_000)
     expect(h.ran('listen on')).toBe(true)
     expect(await band($)).toBeDefined()
@@ -570,6 +585,7 @@ describe('active', () => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active' } })
     await $.session.start(INTERACTIVE)
+    await typed($)
     await clock.advance(60_000)
     const awake = h.count('inbox')
     expect(awake >= 10).toBe(true)
@@ -584,6 +600,7 @@ describe('active', () => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active' } })
     await $.session.start(INTERACTIVE)
+    await typed($)
     await clock.advance(1_000)
     await $.turn.start({ text: 'work', turnId: 't1' } as never)
     const before = h.count('inbox')
@@ -611,8 +628,9 @@ describe('active', () => {
 
   test('send and reply run one attend call with the body after --; reply maps ~id', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active' }, drains: [one(3), DRAIN_EMPTY] })
+    const h = host(on, { config: { listening: 'active' }, drains: [DRAIN_EMPTY, one(3), DRAIN_EMPTY] })
     await $.session.start(INTERACTIVE)
+    await typed($)
     await clock.advance(5_000)
     const message = 'z'.repeat(900)
     await $.tool.call({ tool: 'mcp__attend__attend_send', message, channel: '#ship' } as never)
@@ -628,6 +646,76 @@ describe('active', () => {
     // attend as written, and attend resolves it.
     await $.tool.call({ tool: 'mcp__attend__attend_reply', message: 'ok', re: '~73nki' } as never)
     expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--re', '73nki', '--', 'ok'])
+  })
+})
+
+// Observed on attend 0.20.0: a session the config started listening, with no
+// prompt typed, had its first turn submitted by the mod for messages already
+// pending at start. Nothing pending at start opens a turn on its own.
+describe('before the operator\'s first prompt', () => {
+  test('nothing pending at start is submitted; the row counts it, and it rides the first prompt as context', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {
+      config: { listening: 'active', keepwarm: 'off' },
+      drains: [one(1, 'project'), DRAIN_EMPTY],
+      unread: '{"unread":1,"held_back":0,"listening":true,"rooms":[]}',
+    })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(10 * 60_000)
+    expect(h.ran('listen on')).toBe(true)
+    expect(h.count('inbox --drain')).toBe(0)
+    expect(h.submitted).toEqual([])
+    const ui = await $.ui.mount(BAND as never)
+    expect(await ui.find({ text: /1 unread/ } as never)).toBeDefined()
+    await ui.unmount()
+
+    await typed($, 'what were we doing?')
+    expect(h.submitted).toEqual([])
+    expect(h.prompts.length).toBe(1)
+    expect(h.prompts[0]?.text).toBe('what were we doing?')
+    const context = h.prompts[0]?.context ?? []
+    expect(context.length).toBe(1)
+    expect(context[0]?.startsWith(OPENS)).toBe(true)
+    expect(context[0]).toContain(`[project] ${SENDER} 21:21: m1`)
+    expect(full(context[0] ?? '')).toBe(true)
+    // A handle delivered there maps for attend_reply as one submitted would.
+    await $.tool.call({ tool: 'mcp__attend__attend_reply', message: 'ok', re: `~${shortId(idOf(1))}` } as never)
+    expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--re', idOf(1), '--', 'ok'])
+  })
+
+  test('after the first prompt, what arrives while idle is a turn again', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    expect(h.prompts[0]?.context).toEqual([])
+    drains.push(one(2), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m2')
+  })
+
+  test('a prompt that is not the operator\'s does not lift the hold', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [one(4), DRAIN_EMPTY] })
+    await $.session.start(INTERACTIVE)
+    await $.prompt.submit({ text: 'done', wait: false, origin: { kind: 'task-notification' } } as never)
+    await clock.advance(30_000)
+    expect(h.count('inbox --drain')).toBe(0)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a session turned on by attend_listen, or reloaded active, is not held', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { drains })
+    await $.session.start(INTERACTIVE)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await $.session.start(INTERACTIVE)
+    drains.push(one(5), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
   })
 })
 
@@ -892,6 +980,7 @@ describe('preamble cadence through deliveries', () => {
     const h = host(on, { config: { listening: 'active', preamble_every_turns: 3, keepwarm: 'off' }, drains })
     on('session.compact', () => ({ messages: [SUMMARY] }) as never)
     await $.session.start(INTERACTIVE)
+    await typed($)
     const deliverNext = async (n: number) => {
       drains.push(one(n), DRAIN_EMPTY)
       const want = h.submitted.length + 1
