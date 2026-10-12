@@ -18,9 +18,10 @@
 //! asserted and never blessed, in any run, CI included. A drift or a
 //! missing golden prints a one-line note. Settled goldens are always
 //! asserted. The weakening stays visible as a reviewed file in the diff.
-//! [`Goldens::finish`] warns about a listed name that no check reached and
-//! that has no `.frame` file, since such an entry is stale. To promote a
-//! frame, delete its line, then bless and review it as usual.
+//! [`Goldens::finish`] warns, once per process, about a listed name that has
+//! no `.frame` file and that no check in the process has reached so far:
+//! an entry a rename or a typo left behind. To promote a frame, delete its
+//! line, then bless and review it as usual.
 //!
 //! Interaction goes through the app's real key and mouse handlers.
 
@@ -28,6 +29,7 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Mutex;
 
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -326,9 +328,13 @@ pub struct Goldens {
     blessed: Vec<String>,
     /// The names in the directory's `PROVISIONAL` file, read once.
     provisional: BTreeSet<String>,
-    /// The provisional names a check has reached.
-    reached: BTreeSet<String>,
 }
+
+/// Provisional frames a check has reached, across every [`Goldens`] in the
+/// process, since each test usually builds its own.
+static REACHED: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+/// Stale entries already warned about in this process.
+static WARNED: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
 
 impl Goldens {
     /// Frames under `dir`, as `<name>.frame`, with its `PROVISIONAL` list.
@@ -343,7 +349,7 @@ impl Goldens {
             .map(|l| l.split('#').next().unwrap_or("").trim().to_string())
             .filter(|l| !l.is_empty())
             .collect();
-        Goldens { dir, bless: on("AGENT_TUI_BLESS"), dump, drift: Vec::new(), blessed: Vec::new(), provisional, reached: BTreeSet::new() }
+        Goldens { dir, bless: on("AGENT_TUI_BLESS"), dump, drift: Vec::new(), blessed: Vec::new(), provisional }
     }
 
     /// Whether `name` is listed in the directory's `PROVISIONAL` file.
@@ -351,10 +357,11 @@ impl Goldens {
         self.provisional.contains(name)
     }
 
-    /// Listed names that no check has reached and that have no `.frame`
-    /// file: entries left behind by a rename or a typo.
+    /// Listed names that have no `.frame` file and that no check in this
+    /// process has reached so far: entries left behind by a rename or a typo.
     pub fn stale(&self) -> Vec<String> {
-        self.provisional.iter().filter(|n| !self.reached.contains(*n) && !self.path(n).exists()).cloned().collect()
+        let reached = REACHED.lock().unwrap_or_else(|e| e.into_inner());
+        self.provisional.iter().filter(|n| !reached.contains(&self.path(n)) && !self.path(n).exists()).cloned().collect()
     }
 
     /// Record frames instead of checking them, whatever the environment says.
@@ -382,7 +389,7 @@ impl Goldens {
         }
         let path = self.path(name);
         if self.is_provisional(name) {
-            self.reached.insert(name.to_string());
+            REACHED.lock().unwrap_or_else(|e| e.into_inner()).insert(path.clone());
             let state = match std::fs::read_to_string(&path) {
                 Err(_) => "has no golden",
                 Ok(e) if e == actual => return,
@@ -410,11 +417,14 @@ impl Goldens {
         }
     }
 
-    /// Fail with every drifted, missing or blessed frame. Warn about each
-    /// stale provisional entry ([`Goldens::stale`]); a stale entry does not fail.
+    /// Fail with every drifted, missing or blessed frame. Warn once about
+    /// each stale provisional entry ([`Goldens::stale`]); a stale entry does
+    /// not fail.
     pub fn finish(self) {
         for n in self.stale() {
-            eprintln!("agent-tui: PROVISIONAL lists {n}, but no check reached it and {} does not exist", self.path(&n).display());
+            if WARNED.lock().unwrap_or_else(|e| e.into_inner()).insert(self.path(&n)) {
+                eprintln!("agent-tui: PROVISIONAL lists {n}, but {} does not exist and no check has reached it so far", self.path(&n).display());
+            }
         }
         let mut out = String::new();
         if !self.drift.is_empty() {
