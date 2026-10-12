@@ -66,13 +66,15 @@ impl Pick {
 
     /// A picker a pane opened over `items`, the current ones marked, the
     /// choice going back to the pane under `id`. The cursor starts on the
-    /// first current item that can be picked, else the first that can.
+    /// first current item, even one that cannot be picked, so an Enter at
+    /// once changes nothing; with none current, on the first that can be
+    /// picked.
     pub(crate) fn for_pane(id: String, title: String, items: Vec<Item>, multi: bool) -> Pick {
         let marked: Vec<bool> = items.iter().map(|i| i.current).collect();
         let waits: Vec<Option<String>> = items.iter().map(|i| (!i.enabled).then(|| i.reason.clone().unwrap_or_default())).collect();
         let options: Vec<String> = items.into_iter().map(|i| i.label).collect();
         let open = |i: &usize| waits[*i].is_none();
-        let sel = (0..options.len()).filter(open).find(|i| marked[*i]).or_else(|| (0..options.len()).find(open)).unwrap_or(0);
+        let sel = (0..options.len()).find(|i| marked[*i]).or_else(|| (0..options.len()).find(open)).unwrap_or(0);
         let known = options.len();
         Pick { path: Vec::new(), options, known, multi, sel, marked, waits, was: String::new(), pane: Some((id, title)), dock: None }
     }
@@ -126,14 +128,22 @@ impl Pick {
     /// The (label, tag) rows the popup draws. An option that cannot be
     /// picked yet carries why as its tag.
     fn items(&self) -> Vec<(String, String)> {
-        // Where an option says why it waits, the labels pad to the widest so
-        // each reason starts in one column.
-        let pad = if self.waits.iter().any(Option::is_some) { self.options.iter().map(|o| o.chars().count() + 2).max().unwrap_or(0) } else { 0 };
-        self.options
-            .iter()
+        use crate::wrap::str_width;
+        let mark = |m: bool| match (self.multi, m) {
+            (true, true) => "[x]",
+            (true, false) => "[ ]",
+            (false, true) => "●",
+            (false, false) => " ",
+        };
+        let labels: Vec<String> = self.options.iter().zip(&self.marked).map(|(o, m)| format!("{} {o}", mark(*m))).collect();
+        // Where an option says why it waits, the labels pad to the widest, in
+        // screen cells, so each reason starts in one column.
+        let pad = if self.waits.iter().any(Option::is_some) { labels.iter().map(|l| str_width(l)).max().unwrap_or(0) } else { 0 };
+        labels
+            .into_iter()
             .zip(&self.marked)
             .enumerate()
-            .map(|(i, (o, m))| {
+            .map(|(i, (label, m))| {
                 let tag = match (i >= self.known, !self.multi && *m) {
                     _ if !self.open(i) => format!("  {}", self.waits[i].as_deref().unwrap_or_default()),
                     (true, true) => "  current, not a choice".into(),
@@ -141,13 +151,7 @@ impl Pick {
                     (false, true) => "  current".into(),
                     (false, false) => String::new(),
                 };
-                let mark = match (self.multi, m) {
-                    (true, true) => "[x]",
-                    (true, false) => "[ ]",
-                    (false, true) => "●",
-                    (false, false) => " ",
-                };
-                (format!("{:<pad$}", format!("{mark} {o}")), tag)
+                (crate::wrap::pad_to(&label, pad), tag)
             })
             .collect()
     }
@@ -259,7 +263,7 @@ pub(super) fn docked(area: Rect, dock: Dock, title: &str, items: &[(String, Stri
     use crate::wrap::str_width;
     // Borders, the item's lead space, its mark and a space, and a column
     // of padding: the rows `draw_menu_items_in` draws.
-    let widest = items.iter().map(|(l, t)| 1 + str_width(&format!("{l:<10}")) + str_width(t) + 1).max().unwrap_or(0);
+    let widest = items.iter().map(|(l, t)| 1 + str_width(l).max(10) + str_width(t) + 1).max().unwrap_or(0);
     let want = (widest.max(str_width(title) + 2) + 2).max(24);
     let w = (want.min(usize::from(u16::MAX)) as u16).min(area.width);
     let h = (items.len() as u16 + 2).min(area.height);
@@ -421,6 +425,17 @@ mod tests {
         app.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: at.x + 2, row: at.y, modifiers: KeyModifiers::NONE });
         assert!(matches!(app.mode, Mode::Browse), "{}", app.msg);
         assert_eq!(value(&app, 0), "openrouter");
+    }
+
+    /// The reasons start in one screen column whatever the labels hold:
+    /// a wide character takes two cells, an emoji two.
+    #[test]
+    fn reasons_line_up_by_display_width() {
+        use crate::wrap::str_width;
+        let items = vec![Item::new("Join"), Item::disabled("数据 channel", "needs D1"), Item::disabled("🚀 launch", "needs D4"), Item::new("Delete channel")];
+        let p = Pick::for_pane("m".into(), "t".into(), items, false);
+        let widths: Vec<usize> = p.items().iter().map(|(label, _)| str_width(label)).collect();
+        assert!(widths.windows(2).all(|w| w[0] == w[1]), "every label pads to one width: {widths:?} {:#?}", p.items());
     }
 
     #[test]

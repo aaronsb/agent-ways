@@ -169,6 +169,47 @@ fn a_click_on_an_item_that_waits_does_nothing() {
     }
 }
 
+/// Open `≡` and pick `item` by clicks; the submenu's rows.
+fn submenu(c: &mut Chat, item: &str) -> Vec<String> {
+    let slot = at(c, "≡");
+    click(c, slot);
+    let i = at(c, item);
+    click(c, i);
+    items(c)
+}
+
+/// Keys no preset matches: Keybinding set says what they are on a first
+/// row, marked current, that cannot be picked. The cursor starts there, so
+/// an Enter at once replaces nothing.
+#[test]
+fn custom_keys_show_as_the_current_row_and_enter_keeps_them() {
+    let mut c = chat().tab_keys("auto", "f2");
+    let shown = submenu(&mut c, "Keybinding set");
+    assert!(shown[0].contains("● custom") && shown[0].contains("jump=auto, focus=f2"), "{shown:#?}");
+    assert_eq!(shown.iter().filter(|r| r.contains('●')).count(), 1, "no preset marked: {shown:#?}");
+    assert!(highlighted(&mut c).contains("custom"), "the cursor starts on what is in use");
+    key(&mut c, KeyCode::Enter);
+    assert!(menu(&mut c).is_some(), "Enter on it picks nothing");
+    assert_eq!(c.status(), "", "nothing set");
+    key(&mut c, KeyCode::Down);
+    assert!(highlighted(&mut c).starts_with("ctrl:"), "Down reaches the presets");
+}
+
+/// A theme that did not load is not marked: the menu marks what the screen
+/// shows, the terminal's palette it fell back to. One that loads is marked.
+#[test]
+fn the_theme_menu_marks_the_theme_in_use_not_one_that_failed() {
+    let mut c = chat().theme(Some("no-such-theme"));
+    let shown = submenu(&mut c, "Theme");
+    let marked: Vec<&String> = shown.iter().filter(|r| r.contains('●')).collect();
+    assert!(marked.len() == 1 && marked[0].contains("terminal"), "{shown:#?}");
+    assert!(c.status().contains("no-such-theme"), "the fallback is said: {}", c.status());
+
+    let mut c = chat().theme(Some("nord"));
+    let shown = submenu(&mut c, "Theme");
+    assert!(shown.iter().any(|r| r.contains("● nord")), "{shown:#?}");
+}
+
 /// `≡` opens over its slot; Theme ▸ and Keybinding set ▸ dock beside the
 /// row they were picked from and mark the current value.
 #[test]

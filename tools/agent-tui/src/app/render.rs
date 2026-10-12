@@ -13,6 +13,7 @@ use super::theme::{self, Ground, Seg, Shape};
 use super::apply::Outcome;
 use super::{App, Btn, Mode};
 use crate::tree::{self, Arg, Kind, Row};
+use crate::wrap::pad_to;
 
 /// A bordered pane in the theme: rule-coloured border, accent title.
 pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
@@ -535,12 +536,12 @@ impl App {
             .enumerate()
             .map(|(i, (label, tag))| {
                 let style = match (i == sel, waits.get(i).copied().unwrap_or(false)) {
-                    (_, true) => theme::muted(),
-                    (true, false) => theme::picked(),
+                    (true, _) => theme::picked(),
+                    (false, true) => theme::muted(),
                     (false, false) => Style::new(),
                 };
                 // Padded to the popup's inside, so the selection fills the row.
-                Line::styled(format!("{:<1$}", format!(" {label:<10}{tag}"), w.saturating_sub(2) as usize), style)
+                Line::styled(pad_to(&format!(" {}{tag}", pad_to(label, 10)), w.saturating_sub(2) as usize), style)
             })
             .collect();
         let inner = r.inner(ratatui::layout::Margin::new(1, 1));

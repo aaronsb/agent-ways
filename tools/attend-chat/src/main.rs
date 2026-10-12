@@ -3,6 +3,7 @@ use std::io::{IsTerminal, Write};
 use agent_theme::ColorDepth;
 use agent_tui::screen::Screen;
 use agent_tui::testkit;
+use agent_tui::theme::Palette;
 use attend_chat::app::Chat;
 use attend_chat::{signal, theme, watcher};
 
@@ -145,11 +146,7 @@ fn main() {
 
     let choice = theme::choice();
     let depth = args.depth.unwrap_or_else(ColorDepth::detect);
-    let (palette, warning) = theme::palette(choice.active.as_deref(), depth);
-    let mut chat = Chat::new(Some(rx), palette, choice.shape).theme(choice.active.as_deref());
-    if let Some(w) = warning {
-        chat.say(format!("theme: {w}"), true);
-    }
+    let chat = Chat::new(Some(rx), Palette::terminal(depth), choice.shape).theme(choice.active.as_deref());
 
     if let Some((w, h)) = args.snap {
         // Headless: the backlog the watcher read at start, the keys, one

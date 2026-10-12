@@ -81,6 +81,7 @@ pub(super) const WHO: &str = "Who is this";
 pub(super) const REMOVE_FROM: &str = "Remove from";
 pub(super) const SHOW_COLUMN: &str = "Show column";
 pub(super) const QUIT: &str = "Quit";
+pub(super) const CUSTOM_KEYS: &str = "custom";
 
 /// The keybinding presets: a label, then the `attend.chat.tabs.*` values.
 pub(super) const PRESETS: &[(&str, &str, &str)] = &[
@@ -325,7 +326,14 @@ impl ChatPane {
             }
             KEYS => {
                 let current = self.preset();
-                let items = PRESETS.iter().map(|(l, _, _)| Item::new(*l).current(current == Some(*l))).collect();
+                // Keys no preset matches are named on a first row, current
+                // and not pickable, so nothing below reads as what is in use
+                // and an Enter at once replaces nothing.
+                let mut items: Vec<Item> = Vec::new();
+                if current.is_none() {
+                    items.push(Item::disabled(CUSTOM_KEYS, format!("jump={}, focus={}", self.config.jump, self.config.focus_key)).current(true));
+                }
+                items.extend(PRESETS.iter().map(|(l, _, _)| Item::new(*l).current(current == Some(*l))));
                 self.open = Some(Open::Pick { id: "keys".into(), title: "keybinding set".into(), items, multi: false, anchor: Anchor::Parent });
             }
             MOUSE_ON | MOUSE_OFF => {
@@ -352,16 +360,24 @@ impl ChatPane {
     /// for this session; the stored choice is ways' `theme.active`, which
     /// the chat reads and does not write (ADR-504).
     fn theme_picked(&mut self, name: &str) {
-        let depth = self.palette.depth();
-        let active = (name != "terminal").then_some(name);
-        let (palette, warning) = crate::theme::palette(active, depth);
-        self.palette = palette;
-        self.theme = name.to_string();
-        self.invalidate();
-        match warning {
+        match self.use_theme((name != "terminal").then_some(name)) {
             Some(w) => self.say(format!("theme: {w}"), true),
             None => self.say(format!("theme {name} for this session; `ways settings set theme.active {name}` keeps it"), false),
         }
+    }
+
+    /// Draw with the theme `active` names (`None`: the terminal's own
+    /// palette) at the chat's depth, and remember the theme in use for the
+    /// Theme menu to mark. A theme that did not load falls back, with a
+    /// warning returned: the name kept is what the screen shows, the bundled
+    /// theme of that name where one is drawn, else `terminal`.
+    pub(super) fn use_theme(&mut self, active: Option<&str>) -> Option<String> {
+        let (palette, warning) = crate::theme::palette(active, self.palette.depth());
+        let drawn = warning.is_none() || palette.roles().is_some();
+        self.theme = active.filter(|_| drawn).unwrap_or("terminal").to_string();
+        self.palette = palette;
+        self.invalidate();
+        warning
     }
 
     /// A menu item, or a submenu's peer, was chosen; or a question was

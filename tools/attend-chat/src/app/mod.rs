@@ -950,10 +950,14 @@ impl Chat {
         self
     }
 
-    /// The theme the palette was drawn from, by name, or `None` for the
-    /// terminal's own palette: the Theme menu marks it.
+    /// Draw with the theme `name` names, or the terminal's own palette for
+    /// `None`, at the depth the chat was made with. A theme that did not
+    /// load falls back and the status line says so; the Theme menu marks
+    /// what the screen shows.
     pub fn theme(mut self, name: Option<&str>) -> Chat {
-        self.pane_mut().theme = name.unwrap_or("terminal").to_string();
+        if let Some(w) = self.pane_mut().use_theme(name) {
+            self.say(format!("theme: {w}"), true);
+        }
         self
     }
 
@@ -974,6 +978,15 @@ impl Chat {
     /// settings file says.
     pub fn menu_on_repeat(mut self, on: bool) -> Chat {
         self.pane_mut().config.menu_on_repeat = on;
+        self
+    }
+
+    /// `attend.chat.tabs.jump` and `attend.chat.tabs.focus_key` for this
+    /// chat, whatever the settings file says.
+    pub fn tab_keys(mut self, jump: &str, focus_key: &str) -> Chat {
+        let config = &mut self.pane_mut().config;
+        config.jump = jump.into();
+        config.focus_key = focus_key.into();
         self
     }
 
