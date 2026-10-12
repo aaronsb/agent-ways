@@ -187,5 +187,10 @@ fn main() {
             1
         }
     };
+    // The person leaves with the chat: without this their heartbeat stays
+    // fresh for its grace window, and an agent's send to a channel they
+    // were the only other member of passes as read (ADR-170). A second
+    // chat under the same name touches it again within its refresh.
+    let _ = attend_presence::heartbeat::clear(&signal::human_member_id());
     std::process::exit(code);
 }

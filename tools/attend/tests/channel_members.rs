@@ -3,6 +3,12 @@
 //! peers` name each channel's members, through the CLI the attend_peers
 //! tool runs. A person in attend-chat is a member like an agent, marked
 //! `(attend-chat)`, and a live one is a listener a send or reply reaches.
+//!
+//! These seed the person's membership with `Groups::join`, as attend-chat
+//! writes it: they hold attend's side, the label and the liveness rule.
+//! The bug observed on 0.21.0 was on attend-chat's side, which wrote no
+//! membership when the person posted; its reproduction drives a post
+//! through the chat in `tools/attend-chat/tests/human_member.rs`.
 
 mod common;
 use common::Fixture;

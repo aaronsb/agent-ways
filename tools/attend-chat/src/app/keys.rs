@@ -206,14 +206,17 @@ fn send_to_recipients(
         Ok(dests) => dests,
         Err(refusal) => return EnterAction::StatusOnly(refusal),
     };
+    // Posting in a channel makes the person its member, before the
+    // message is written, so the membership precedes what an agent
+    // answers (ADR-404 D1).
+    for r in recipients {
+        if let (Addressed::Group(name), Some(member)) = (r, person) {
+            enter_channel(member, name);
+        }
+    }
     let sent = dests.iter().try_for_each(|dir| write_signal(dir, msg).map(|_| ())).map(|()| dests);
     match sent {
         Ok(dests) => {
-            for r in recipients {
-                if let (Addressed::Group(name), Some(member)) = (r, person) {
-                    enter_channel(member, name);
-                }
-            }
             let status = format!("sent → {}", recipient_labels(recipients).join(" "));
             // Echo only when the message reaches NO inbox the sender's
             // own watcher already surfaces — otherwise it round-trips
@@ -247,19 +250,20 @@ fn run_join(name: &str) -> EnterAction {
 }
 
 /// Make the person at the chat, `member`, a member of channel `name` when
-/// they post in it or open it (ADR-404 D1): being in a channel is being its
-/// member, as `/join` makes it, so an agent alone in the channel with them
-/// can answer. The heartbeat is touched first, as `/join` does, so the
+/// they post in it (ADR-404 D1), as `/join` makes them, so an agent alone in
+/// the channel with them can answer. Showing a channel joins nothing: the
+/// tab bar is walked, cycled and advanced past channels nobody chose, and a
+/// Leave must hold. The heartbeat is touched first, as `/join` does, so the
 /// membership is live at once.
-pub(super) fn enter_channel(member: &str, name: &str) {
+fn enter_channel(member: &str, name: &str) {
     let _ = attend_presence::heartbeat::touch(member);
     enter_channel_in(&signals_base(), member, name);
 }
 
 /// Filesystem-effect core of [`enter_channel`]. Only a channel that exists,
-/// with its entry and its directory, is entered: opening a swept or
-/// unknown channel does not bring it back, as `/join` would. Returns
-/// whether it wrote a membership.
+/// with its entry and its directory, is entered: a swept or unknown channel
+/// is not brought back, as `/join` would. Returns whether it wrote a
+/// membership.
 fn enter_channel_in(base: &std::path::Path, member: &str, name: &str) -> bool {
     let groups = attend_groups::Groups::new(base, member);
     match groups.members(name) {

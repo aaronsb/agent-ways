@@ -343,11 +343,6 @@ impl ChatPane {
 
     fn set_tab(&mut self, t: Tab) {
         if t != self.foreground {
-            // Opening a channel makes the person at the chat its member
-            // (ADR-404 D1).
-            if let (Tab::Channel(name), Some(me)) = (&t, self.person()) {
-                keys::enter_channel(&me, name);
-            }
             self.foreground = t;
             self.feed = FeedState::default();
             self.invalidate();
