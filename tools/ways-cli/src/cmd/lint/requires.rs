@@ -39,9 +39,14 @@ pub(super) fn scan_macro_requires(path: &Path) -> Vec<String> {
             }
             continue;
         }
+        // Quoted text is data: `echo "a && touch b"` runs no `touch`. The
+        // masked line keeps byte positions, so the delimiter below is read
+        // from the original.
+        let masked = mask_quoted(trimmed);
+
         // Detect here-doc start: cat <<EOF, cat <<'EOF', cat <<"EOF".
         // A `<<<` here-string has no body and is not one.
-        if let Some(pos) = heredoc_start(trimmed) {
+        if let Some(pos) = heredoc_start(&masked) {
             let after = trimmed[pos + 2..].trim_start_matches(&['-', '~'][..]);
             let delim = after
                 .trim_start_matches('\'').trim_start_matches('"')
@@ -65,7 +70,7 @@ pub(super) fn scan_macro_requires(path: &Path) -> Vec<String> {
 
         // Look for external commands: word boundaries in the line
         for cmd in EXTERNAL_COMMANDS {
-            if line_uses_command(trimmed, cmd) && !found.contains(cmd) {
+            if line_uses_command(&masked, cmd) && !found.contains(cmd) {
                 found.push(cmd);
             }
         }
@@ -88,6 +93,78 @@ pub(super) fn scan_macro_requires(path: &Path) -> Vec<String> {
     }
 
     perms
+}
+
+/// `line` with the literal text inside quotes replaced by `x`, byte for byte:
+/// single-quoted text whole, double-quoted text except a `$( )` or backtick
+/// substitution inside it, whose commands do run. The quote marks stay, so a
+/// quoted string reads as one word that is never a command name. Quote state
+/// does not carry across lines.
+fn mask_quoted(line: &str) -> String {
+    #[derive(PartialEq)]
+    enum Ctx {
+        Code,
+        Subst,
+        Backtick,
+        Single,
+        Double,
+    }
+    let bytes = line.as_bytes();
+    let mut out = bytes.to_vec();
+    let mut stack = vec![Ctx::Code];
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let top = stack.last().unwrap_or(&Ctx::Code);
+        match top {
+            Ctx::Single => {
+                if b == b'\'' {
+                    stack.pop();
+                } else {
+                    out[i] = b'x';
+                }
+            }
+            Ctx::Double => match b {
+                b'"' => {
+                    stack.pop();
+                }
+                b'\\' => {
+                    out[i] = b'x';
+                    if i + 1 < bytes.len() {
+                        out[i + 1] = b'x';
+                    }
+                    i += 1;
+                }
+                b'$' if bytes.get(i + 1) == Some(&b'(') => {
+                    stack.push(Ctx::Subst);
+                    i += 1;
+                }
+                b'`' => stack.push(Ctx::Backtick),
+                _ => out[i] = b'x',
+            },
+            Ctx::Code | Ctx::Subst | Ctx::Backtick => match b {
+                b'\\' => i += 1,
+                b'\'' => stack.push(Ctx::Single),
+                b'"' => stack.push(Ctx::Double),
+                b'$' if bytes.get(i + 1) == Some(&b'(') => {
+                    stack.push(Ctx::Subst);
+                    i += 1;
+                }
+                b')' if *top == Ctx::Subst => {
+                    stack.pop();
+                }
+                b'`' if *top == Ctx::Backtick => {
+                    stack.pop();
+                }
+                b'`' => stack.push(Ctx::Backtick),
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    // Every byte of a multi-byte character shares one context, so each is
+    // replaced or none is, and the result stays valid UTF-8.
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Where the first here-doc operator `<<` in `line` starts, skipping each
@@ -274,6 +351,15 @@ mod tests {
     fn a_heredoc_body_is_skipped() {
         let got = scan("heredoc", "cat <<'EOF'\ngit status\nEOF\nwc -l x\n");
         assert_eq!(got, ["Read", "Bash(cat:*)", "Bash(wc:*)"]);
+    }
+
+    #[test]
+    fn quoted_text_names_no_command_but_a_substitution_in_it_does() {
+        // The adr macro's decline hint (adr/macro.sh) once gave a false `touch`.
+        let got = scan("quoted", "echo \"To decline: \\`mkdir -p .claude && touch .claude/no-adr\\`\"\nX=\"$(attend status | grep x)\"\nawk '{ print $1 } && sort' f | wc -l\necho 'then git'\n");
+        assert_eq!(got, ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(wc:*)"]);
+        assert_eq!(mask_quoted("a \"b c\" 'd' e"), "a \"xxx\" 'x' e");
+        assert_eq!(mask_quoted("cat <<'EOF'").len(), "cat <<'EOF'".len());
     }
 
     #[test]
