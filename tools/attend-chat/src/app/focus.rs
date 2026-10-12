@@ -96,9 +96,9 @@ impl ChatPane {
     /// Put the focus on `f`. Landing on a tab shows it, as moving along the
     /// tab bar always has; a slot (`≡`, `+`) is only pointed at. What the
     /// walk shows is a preview: leaving the bar for the column, the feed or
-    /// the box by walking puts back the tab shown before, so the draft's
-    /// destination does not change on its way past. Enter, Esc or a digit on
-    /// the bar keeps the tab shown ([`ChatPane::keep_tab`]).
+    /// the box puts back the tab shown before, so the draft's destination does
+    /// not change on its way past; Esc from the bar cancels the same way.
+    /// Enter or a digit on the bar keeps the tab shown ([`ChatPane::keep_tab`]).
     pub(super) fn focus_on(&mut self, f: Focus) {
         let on_bar = matches!(self.focus, Focus::Tab(_));
         match (&f, on_bar) {
@@ -150,6 +150,15 @@ impl ChatPane {
     /// The tab shown stays shown: the walk along the bar was a choice.
     pub(super) fn keep_tab(&mut self) {
         self.bar_entry = None;
+    }
+
+    /// A tab chosen by its digit or a click while the focus is on the bar:
+    /// the focus goes to that tab, so Enter acts on the tab shown.
+    pub(super) fn follow_on_bar(&mut self, slot: &Slot) {
+        if matches!(self.focus, Focus::Tab(_)) {
+            self.focus = Focus::Tab(slot.clone());
+            self.dirty = true;
+        }
     }
 
     /// After the world is read again, a focused tab whose channel is gone
@@ -221,10 +230,8 @@ impl ChatPane {
             KeyCode::Down => self.nav_vertical(true),
             KeyCode::Home | KeyCode::End => self.nav_end(k.code == KeyCode::End),
             KeyCode::Enter => self.activate_focus(),
-            KeyCode::Esc => {
-                self.keep_tab();
-                self.focus_on(Focus::Compose);
-            }
+            // Esc cancels: off the bar it puts back the tab shown before.
+            KeyCode::Esc => self.focus_on(Focus::Compose),
             KeyCode::PageUp => self.page(true),
             KeyCode::PageDown => self.page(false),
             // A character is typing: it goes to the compose box. Backspace

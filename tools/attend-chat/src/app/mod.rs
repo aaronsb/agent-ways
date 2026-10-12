@@ -562,8 +562,11 @@ impl Pane for ChatPane {
     /// and an index past the tabs do nothing.
     fn set_tab(&mut self, i: usize) {
         self.keep_tab();
-        if let Some(tabs::Slot::Tab(t)) = tabs::bar(&self.strip_names()).get(i).cloned() {
-            ChatPane::set_tab(self, t);
+        if let Some(slot @ tabs::Slot::Tab(_)) = tabs::bar(&self.strip_names()).get(i).cloned() {
+            self.follow_on_bar(&slot);
+            if let tabs::Slot::Tab(t) = slot {
+                ChatPane::set_tab(self, t);
+            }
         }
     }
 
@@ -780,6 +783,9 @@ impl Pane for ChatPane {
     /// `attend.chat.tabs.menu_on_repeat` says so.
     fn activate_tab(&mut self, i: usize, menu: bool) {
         self.keep_tab();
+        if let Some(slot) = tabs::bar(&self.strip_names()).get(i).cloned() {
+            self.follow_on_bar(&slot);
+        }
         if let Some(target) = self.tab_target(i) {
             let how = if menu { activate::How::Menu } else { activate::How::Select { repeat: self.config.menu_on_repeat } };
             self.activate(target, how, None);

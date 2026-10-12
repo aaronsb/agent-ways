@@ -413,13 +413,41 @@ fn walking_off_the_bar_puts_back_the_tab_shown() {
     }
     assert!(focused(&mut c).starts_with("row "), "{}", focused(&mut c));
     assert_eq!(c.foreground(), &Tab::Merged, "off the bar: the tab shown before");
-    // Esc on a tab keeps it.
+    // Esc cancels the preview, as F2 back to the box does.
+    for back in [KeyCode::Esc, KeyCode::F(2)] {
+        let mut c = chat();
+        press(&mut c, KeyCode::F(2));
+        press(&mut c, KeyCode::Left);
+        assert_eq!(c.foreground(), &Tab::Channel("open".into()));
+        press(&mut c, back);
+        let f = focused(&mut c);
+        assert_eq!((c.foreground().clone(), f), (Tab::Merged, "mode chat".to_string()), "{back:?}");
+    }
+    // Enter keeps it: the menu opens, then Esc closes the menu and leaves
+    // the tab chosen.
     let mut c = chat();
     press(&mut c, KeyCode::F(2));
     press(&mut c, KeyCode::Left);
+    press(&mut c, KeyCode::Enter);
     press(&mut c, KeyCode::Esc);
-    let f = focused(&mut c);
-    assert_eq!((c.foreground().clone(), f), (Tab::Channel("open".into()), "mode chat".to_string()));
+    press(&mut c, KeyCode::Esc);
+    assert_eq!(c.foreground(), &Tab::Channel("open".into()), "Enter committed it");
+}
+
+/// A digit on the bar shows its tab and takes the focus there, so Enter
+/// opens the menu of the tab shown.
+#[test]
+fn a_digit_on_the_bar_moves_the_focus_to_its_tab() {
+    let mut c = chat();
+    press(&mut c, KeyCode::F(2));
+    press(&mut c, KeyCode::Char('2'));
+    assert_eq!((c.foreground().clone(), focused(&mut c)), (Tab::Channel("infra".into()), "tab #infra".to_string()));
+    press(&mut c, KeyCode::Enter);
+    assert!(screen(&mut c).contains("pick one: #infra"), "{}", screen(&mut c));
+    // And the digit keeps it when the focus leaves the bar.
+    press(&mut c, KeyCode::Esc);
+    press(&mut c, KeyCode::Esc);
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
 }
 
 /// At the exit guard over the entry dialog, typing goes on into the
