@@ -43,6 +43,17 @@ The assertion passes while the bug lives and flips red the moment the bug is fix
 
 A snapshot is an assertion whose expected side was captured from the subject. It becomes a witness once a person has reviewed the baseline and the review is on record. Capture it before the change, with volatile leaves masked (timestamps, ids, tokens). After the change, allow only an enumerated list of intended deltas, each with its reason. An unexplained diff is a red to explain before the gate is green. Re-recording the snapshot to make it pass turns the baseline back into an echo.
 
+## Rapid iteration phase
+
+Recording a golden asserts that its layout is settled. While the operator is still deciding the flow or layout, that claim is false. Each round of polish feedback would then re-record dozens of frames, which misstates what is settled and costs effort every round.
+
+- Record a handful of anchor states as settled goldens.
+- Mark the rest provisional, so a mismatch in them is noted and does not fail.
+- Cover behaviour with state and transition tests, such as table tests of a pure step function.
+- Promote the provisional goldens to settled once the operator accepts the layout. That acceptance ends the phase.
+
+A refactor with no change in behaviour still requires every settled golden to stay byte-identical. The default run asserts every golden, provisional or not.
+
 ## See Also
 
 - code/testing/gates(softwaredev) — parent: gate states, positive controls, and the report format

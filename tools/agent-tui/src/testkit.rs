@@ -10,6 +10,16 @@
 //! the same way. `AGENT_TUI_DUMP=<dir>` also writes every frame checked to
 //! `<dir>`, for review as images or text.
 //!
+//! A golden is settled unless its name is listed in `PROVISIONAL`, a
+//! sidecar file in the golden directory: one frame name per line, `#`
+//! starting a comment. Provisional goldens serve a rapid iteration phase,
+//! while flow or layout is still being decided. With `AGENT_TUI_RAPID=1`
+//! (or [`Goldens::rapid`]) a provisional frame that drifts or is missing
+//! prints a one-line note and does not fail. It is never written, even
+//! under `AGENT_TUI_BLESS`. Settled goldens are always asserted. Rapid mode
+//! is off by default, so a plain run asserts every golden. To promote a
+//! frame, delete its line, then bless and review it as usual.
+//!
 //! Interaction goes through the app's real key and mouse handlers.
 
 use std::cell::RefCell;
@@ -309,6 +319,7 @@ pub fn compare(expected: &str, actual: &str) -> Option<String> {
 pub struct Goldens {
     dir: PathBuf,
     bless: bool,
+    rapid: bool,
     dump: Option<PathBuf>,
     drift: Vec<String>,
     blessed: Vec<String>,
@@ -320,7 +331,19 @@ impl Goldens {
     pub fn new(dir: impl Into<PathBuf>) -> Goldens {
         let on = |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty() && v != "0");
         let dump = std::env::var_os("AGENT_TUI_DUMP").filter(|v| !v.is_empty()).map(PathBuf::from);
-        Goldens { dir: dir.into(), bless: on("AGENT_TUI_BLESS"), dump, drift: Vec::new(), blessed: Vec::new() }
+        Goldens { dir: dir.into(), bless: on("AGENT_TUI_BLESS"), rapid: on("AGENT_TUI_RAPID"), dump, drift: Vec::new(), blessed: Vec::new() }
+    }
+
+    /// Leave provisional frames unasserted, whatever the environment says.
+    pub fn rapid(mut self, on: bool) -> Goldens {
+        self.rapid = on;
+        self
+    }
+
+    /// Whether `name` is listed in the directory's `PROVISIONAL` sidecar.
+    pub fn is_provisional(&self, name: &str) -> bool {
+        std::fs::read_to_string(self.dir.join("PROVISIONAL"))
+            .is_ok_and(|s| s.lines().map(|l| l.split('#').next().unwrap_or("").trim()).any(|l| l == name))
     }
 
     /// Record frames instead of checking them, whatever the environment says.
@@ -347,6 +370,15 @@ impl Goldens {
             let _ = std::fs::write(d.join(format!("{name}.frame")), &actual);
         }
         let path = self.path(name);
+        if self.rapid && self.is_provisional(name) {
+            let state = match std::fs::read_to_string(&path) {
+                Err(_) => "has no golden",
+                Ok(e) if e == actual => return,
+                Ok(_) => "drifted",
+            };
+            eprintln!("agent-tui: provisional frame {name} {state}; not asserted in rapid mode");
+            return;
+        }
         if self.bless {
             let same = std::fs::read_to_string(&path).is_ok_and(|e| e == actual);
             if !same {
@@ -547,6 +579,42 @@ mod tests {
         let e = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| g.finish())).expect_err("a drift fails");
         let m = e.downcast_ref::<String>().cloned().unwrap_or_default();
         assert!(m.contains("one drifted") && m.contains("|ax|"), "{m}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn rapid_mode_skips_provisional_frames_and_still_asserts_settled_ones() {
+        let d = scratch("rapid");
+        std::fs::create_dir_all(&d).unwrap();
+        for n in ["draft", "anchor"] {
+            std::fs::write(d.join(format!("{n}.frame")), frame(&buf(&["ab"]))).unwrap();
+        }
+        std::fs::write(d.join("PROVISIONAL"), "# still deciding the layout\ndraft\nfresh  # no golden yet\n").unwrap();
+        let fails = |g: Goldens| std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| g.finish())).is_err();
+
+        // Rapid: a provisional drift or absence passes and writes nothing.
+        let mut g = Goldens::new(&d).blessing(false).rapid(true);
+        g.check("draft", &buf(&["ax"]));
+        g.check("fresh", &buf(&["ax"]));
+        assert!(!fails(g), "a provisional mismatch does not fail in rapid mode");
+        let mut g = Goldens::new(&d).blessing(true).rapid(true);
+        g.check("draft", &buf(&["ax"]));
+        g.check("fresh", &buf(&["ax"]));
+        assert!(!fails(g), "rapid mode never blesses a provisional frame");
+        assert_eq!(std::fs::read_to_string(d.join("draft.frame")).unwrap(), frame(&buf(&["ab"])));
+        assert!(!d.join("fresh.frame").exists());
+
+        // Rapid: a settled drift still fails.
+        let mut g = Goldens::new(&d).blessing(false).rapid(true);
+        g.check("anchor", &buf(&["ax"]));
+        assert!(fails(g), "a settled mismatch fails in rapid mode");
+
+        // Default: both fail.
+        for n in ["draft", "anchor"] {
+            let mut g = Goldens::new(&d).blessing(false).rapid(false);
+            g.check(n, &buf(&["ax"]));
+            assert!(fails(g), "{n} fails outside rapid mode");
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 }

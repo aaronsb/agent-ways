@@ -22,3 +22,7 @@ After changing a TUI, drive it and look at it before the PR.
 4. List the shots you looked at in the PR description, with what each showed.
 
 A new screen state adds a scenario to the script's list in the same change. `cargo test -p ways --test tui_smoke` checks key states of the `ways` screens in CI; extend it when a state is load-bearing.
+
+## Provisional golden frames
+
+While a screen's layout is in a rapid iteration phase (code/testing/gates/assertions), list its unsettled frames in a `PROVISIONAL` file in the golden directory, one frame name per line. `AGENT_TUI_RAPID=1` leaves those frames unasserted and never re-records them, even under `AGENT_TUI_BLESS=1`. Settled frames are always asserted. CI runs without `AGENT_TUI_RAPID`, so it asserts every frame. Once the operator accepts the layout, delete the frame's line, bless it, and review it.
