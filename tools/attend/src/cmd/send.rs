@@ -263,7 +263,8 @@ mod removed_flag_tests {
             assert!(why.contains("after the message"), "{why}");
         }
         assert!(refusal(REPLY_FLAGS, &v(&["thanks", "--json"]), &raw).is_some());
-        assert!(refusal(REPLY_FLAGS, &v(&["see", "--re"]), &raw).is_none(), "reply takes no --re");
+        assert!(refusal(REPLY_FLAGS, &v(&["see", "--re"]), &raw).is_some(), "reply takes --re, so one after the message is refused");
+        assert!(refusal(REPLY_FLAGS, &v(&["see", "--focus"]), &raw).is_none(), "a flag reply does not take is not one of its own");
     }
 
     #[test]

@@ -139,7 +139,7 @@ fn a_usage_refusal_under_json_is_kind_usage_with_exit_2() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("usage: attend reply") && !err.contains("attend send <"), "{err}");
     // A conflict clap raises itself is exit 2 in clap's text, with no JSON.
-    let out = f.attend(&["inbox", "--drain", "--json"]);
+    let out = f.attend(&["inbox", "--drain", "--format", "hook", "--json"]);
     assert_eq!(out.status.code(), Some(2));
     assert!(out.stdout.is_empty());
     // `--json` after the message is caught, not sent as text, and still
