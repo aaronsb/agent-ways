@@ -285,8 +285,8 @@ pub(crate) fn scan_pending(
 
 /// Drain pending authored messages for this session: deliver the unseen,
 /// record their consumption in the shared seen-set, and (in `hook`
-/// format) emit the Stop-hook block JSON that injects them into the
-/// ending turn. Every guard degrades to "deliver nothing, mark nothing":
+/// format) emit the Stop-hook JSON that continues the ending turn with
+/// them. Every guard degrades to "deliver nothing, mark nothing":
 /// unresolved identity and the re-entry ceiling leave the tray for the
 /// Monitor conduit; a cold start applies `attend_state::cold_start`,
 /// announces what it held back, and always persists the state file so it
@@ -527,12 +527,19 @@ fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note:
 }
 
 /// The Stop-hook JSON for one drain, or `None` to print nothing and let the
-/// turn end. Delivered messages block the stop (`decision: block`), which
-/// injects them into a continued turn. A held-back note with nothing
-/// delivered goes as a `systemMessage`, which Claude Code shows without
-/// blocking: blocking on it alone forced an extra turn over messages the
-/// session need not read, and read as an error. `me` rides only the
-/// blocking reason, the one part of the output the model reads.
+/// turn end. Delivered messages go as the Stop hook's `additionalContext`,
+/// which continues the turn with them under the same loop guards as a block
+/// (`stop_hook_active`, Claude Code's continuation cap). A `decision: block`
+/// did the same, but Claude Code records a block as a hook error: the
+/// transcript held each delivery twice, as `Stop hook feedback` and as a
+/// `Stop hook blocking error`, and the session showed `Stop hook error`
+/// over an ordinary delivery. `additionalContext` is shown once, as
+/// `Stop hook feedback`, with no error.
+///
+/// A held-back note with nothing delivered goes as a `systemMessage`, which
+/// Claude Code shows without continuing the turn: continuing on it alone
+/// forced an extra turn over messages the session need not read. `me`
+/// rides only the delivery, the one part of the output the model reads.
 fn hook_output(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&str>) -> Option<String> {
     if delivered.is_empty() {
         // A systemMessage is shown to the operator only, never to the
@@ -540,8 +547,11 @@ fn hook_output(delivered: &[impl DrainedView], note: Option<&str>, me: Option<&s
         let text = render_drain_reason(delivered, Some(note?), None);
         return Some(format!("{{\"systemMessage\": \"{}\"}}", json_escape(&text)));
     }
-    let reason = render_drain_reason(delivered, note, me);
-    Some(format!("{{\"decision\": \"block\", \"reason\": \"{}\"}}", json_escape(&reason)))
+    let text = render_drain_reason(delivered, note, me);
+    Some(format!(
+        "{{\"hookSpecificOutput\": {{\"hookEventName\": \"Stop\", \"additionalContext\": \"{}\"}}}}",
+        json_escape(&text)
+    ))
 }
 
 /// The injected turn-continuation text. Sober and contract-preserving:
@@ -981,12 +991,19 @@ mod drain_tests {
         assert!(!out.contains("decision"), "{out}");
     }
 
+    /// Delivered messages continue the turn as `additionalContext`, never as
+    /// a `decision: block`, which Claude Code records and shows as a hook
+    /// error (the clean-slate test's finding 1).
     #[test]
-    fn delivered_messages_block_and_an_empty_drain_prints_nothing() {
+    fn delivered_messages_continue_the_turn_as_context_and_an_empty_drain_prints_nothing() {
         let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();
         let out = hook_output(&msgs, Some("1 older message held back; reading it is optional: attend inbox"), None).unwrap();
-        assert!(out.starts_with("{\"decision\": \"block\""), "{out}");
-        assert!(out.contains("held back"), "the note rides the delivery: {out}");
+        let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
+        assert_eq!(doc["hookSpecificOutput"]["hookEventName"], "Stop", "{out}");
+        let ctx = doc["hookSpecificOutput"]["additionalContext"].as_str().expect(&out);
+        assert!(ctx.contains("body 0"), "{ctx}");
+        assert!(ctx.contains("held back"), "the note rides the delivery: {ctx}");
+        assert!(doc.get("decision").is_none() && doc.get("reason").is_none(), "{out}");
         assert_eq!(hook_output(&[] as &[FakeMsg], None, Some("Chaucer")), None);
     }
 

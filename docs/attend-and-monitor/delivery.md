@@ -9,7 +9,7 @@ flowchart TD
     State -->|idle| Poll[peers sensor in attend run<br/>polls every 10–30 s]
     State -->|turn ending| Hook[Stop hook<br/>attend inbox --drain --format hook]
     Poll --> Line[Monitor line<br/>wakes the session]
-    Hook --> Block[block decision<br/>the turn continues with the messages]
+    Hook --> Block[additionalContext<br/>the turn continues with the messages]
     Poll --> Seen[(the session's seen-set<br/>state/&lt;session-id&gt;.state)]
     Hook --> Seen
 
@@ -45,7 +45,7 @@ In Claude Code with the attend mod loaded, the mod polls the same drain in place
 
 ## The Stop-hook drain
 
-`hooks/ways/attend-drain-stop.sh` runs on every `Stop` event. It calls `attend inbox --drain --format hook` and does nothing else; the verb owns every decision. When messages are pending, the verb prints a Stop-hook block decision whose reason lists them, and Claude Code continues the turn with that text:
+`hooks/ways/attend-drain-stop.sh` runs on every `Stop` event. It calls `attend inbox --drain --format hook` and does nothing else; the verb owns every decision. When messages are pending, the verb prints the Stop hook's `hookSpecificOutput.additionalContext` listing them, and Claude Code continues the turn with that text. The transcript shows it once, labelled `Stop hook feedback`. A `decision: block` would continue the turn too, but Claude Code records a block as a hook error: the transcript keeps the text twice, as `Stop hook feedback` and as a `Stop hook blocking error`, and the session shows `Stop hook error` over an ordinary delivery.
 
 ```
 [attend] 2 peer message(s) delivered at the turn boundary (ADR-172 drain):
@@ -56,7 +56,7 @@ rebased on the auth change; waiting on the api tag before I ship
 You may reply (attend reply "..." auto-threads to the newest), start a new thread (attend send), or continue your work — silence is a valid reply.
 ```
 
-At most 10 messages are listed, then `(+N more — attend inbox for the rest)`. With nothing pending the verb prints nothing and the turn ends. Only delivered messages block the stop; a cold-start note with nothing delivered goes as a non-blocking `systemMessage` (see Cold start).
+At most 10 messages are listed, then `(+N more — attend inbox for the rest)`. With nothing pending the verb prints nothing and the turn ends. Only delivered messages continue the turn; a cold-start note with nothing delivered goes as a `systemMessage`, which lets the turn end (see Cold start).
 
 The drain is bounded:
 
@@ -74,7 +74,7 @@ The sensor holds the seen-set in memory and checkpoints it to `$XDG_CACHE_HOME/a
 
 The drain delivers only to an enrolled session (#720). A session enrolls by running `attend run` (`/attend`), by `attend join`, or by activating a scene that joins a channel. Each writes `enrolled/<session-id>` in attend's cache, naming how the session enrolled. Enrollment covers every scan directory: `#open`, the project tray and the joined channels.
 
-Enrolling also tells the session its name, `you are <name>`, in output the model reads. `attend run` puts it on its startup line. `attend join`, and a scene that joins a channel, print it on a line of their own in the Bash output. A cold-start drain that delivers messages repeats it in the block reason. A note-only drain carries no name, because its `systemMessage` is shown to the operator and never reaches the model.
+Enrolling also tells the session its name, `you are <name>`, in output the model reads. `attend run` puts it on its startup line. `attend join`, and a scene that joins a channel, print it on a line of their own in the Bash output. A cold-start drain that delivers messages repeats it in the delivered text. A note-only drain carries no name, because its `systemMessage` is shown to the operator and never reaches the model.
 
 Enrollment is durable. A stale heartbeat does not end it, and neither does the pruning of a channel membership after a long turn. Only an explicit opt-out ends it:
 
@@ -91,7 +91,7 @@ A session is cold until a conduit has applied the cold-start rule for it, which 
 
 - A message addressed to the project (`--to`) is delivered whatever its age, the newest 50 at most.
 - An `#open` or channel message younger than 120 seconds is live conversation and is delivered.
-- Anything else is marked seen without being shown. The first delivery carries one line counting it, `N older messages held back; reading them is optional: attend inbox`. When there is nothing else to deliver, the drain sends that line alone as a non-blocking `systemMessage`, so the turn still ends.
+- Anything else is marked seen without being shown. The first delivery carries one line counting it, `N older messages held back; reading them is optional: attend inbox`. When there is nothing else to deliver, the drain sends that line alone as a `systemMessage`, so the turn still ends.
 
 A restarted `attend run` restores its seen-set from the checkpoint and delivers only what arrived while it was down.
 
