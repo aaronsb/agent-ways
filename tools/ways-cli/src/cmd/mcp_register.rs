@@ -17,6 +17,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 /// The name Claude Code knows the server by; tools appear as
 /// `mcp__agent-ways__<tool>`.
@@ -125,8 +126,13 @@ fn run_claude(claude: &Path, config_dir: Option<&Path>, args: &[&str]) -> Result
     claude_stdout(claude, config_dir, args).map(|_| ())
 }
 
+/// How long one `claude` call may run before it is killed. The calls are
+/// local (the CLI's own config files and a folder marketplace), so a call
+/// past this is hung, and a repair must not hang with it.
+pub(crate) const CLAUDE_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Run the `claude` CLI under `config_dir` (unset for the default target) and
-/// answer its stdout, or its stderr when it fails.
+/// answer its stdout, or its stderr when it fails or times out.
 pub(crate) fn claude_stdout(claude: &Path, config_dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new(claude);
     cmd.args(args);
@@ -134,12 +140,46 @@ pub(crate) fn claude_stdout(claude: &Path, config_dir: Option<&Path>, args: &[&s
         Some(d) => cmd.env("CLAUDE_CONFIG_DIR", d),
         None => cmd.env_remove("CLAUDE_CONFIG_DIR"),
     };
-    let out = cmd.output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    output_within(cmd, CLAUDE_TIMEOUT)
+}
+
+/// Run `cmd` with its output captured, killing it once `limit` has passed.
+/// Its stdout on success; its stderr, its exit code, or the timeout otherwise.
+pub(crate) fn output_within(mut cmd: Command, limit: Duration) -> Result<String, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
+    // Read both pipes on threads, so a child that fills one never blocks.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let out = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let err = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(status) => break status,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("timed out after {}s", limit.as_secs()));
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    };
+    let stdout = out.join().unwrap_or_default();
+    let stderr = err.join().unwrap_or_default();
+    if status.success() {
+        Ok(String::from_utf8_lossy(&stdout).into_owned())
     } else {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        Err(if err.is_empty() { format!("exit {}", out.status.code().unwrap_or(-1)) } else { err })
+        let e = String::from_utf8_lossy(&stderr).trim().to_string();
+        Err(if e.is_empty() { format!("exit {}", status.code().unwrap_or(-1)) } else { e })
     }
 }
 
@@ -251,6 +291,23 @@ mod tests {
         assert_eq!(config_for(home, home, Some(home)), (Some(home.to_path_buf()), home.to_path_buf()));
         // One naming somewhere else leaves the default target's file alone.
         assert_eq!(config_for(home, home, Some(Path::new("/elsewhere"))), (None, PathBuf::from("/home/u")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_call_is_killed_at_its_limit() {
+        let mut slow = Command::new("sh");
+        slow.args(["-c", "sleep 5"]);
+        let started = Instant::now();
+        let e = output_within(slow, Duration::from_millis(200)).unwrap_err();
+        assert!(e.contains("timed out"), "{e}");
+        assert!(started.elapsed() < Duration::from_secs(3), "killed, not waited out");
+        let mut fine = Command::new("sh");
+        fine.args(["-c", "echo out; echo err >&2"]);
+        assert_eq!(output_within(fine, Duration::from_secs(5)).unwrap(), "out\n");
+        let mut failing = Command::new("sh");
+        failing.args(["-c", "echo why >&2; exit 3"]);
+        assert_eq!(output_within(failing, Duration::from_secs(5)).unwrap_err(), "why");
     }
 
     #[test]

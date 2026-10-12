@@ -18,7 +18,8 @@ case "$*" in
   "plugin marketplace list --json") cat "$m" ;;
   "plugin list --json") cat "$p" ;;
   "plugin marketplace add "*) printf '[{"name":"agent-ways","source":"directory","path":"%s"}]\n' "$4" > "$m" ;;
-  "plugin marketplace remove agent-ways") echo '[]' > "$m" ;;
+  # Claude Code uninstalls a marketplace's plugins when it removes the marketplace.
+  "plugin marketplace remove agent-ways") echo '[]' > "$m"; echo '[]' > "$p" ;;
   "plugin marketplace update agent-ways") ;;
   "plugin install attend@agent-ways --scope user"|"plugin update attend@agent-ways --scope user")
     printf '[{"id":"attend@agent-ways","version":"%s","scope":"user"}]\n' "$STUB_SHIPPED" > "$p" ;;
@@ -45,6 +46,7 @@ impl Fx {
         write(&src.join("hooks/check-config-updates.sh"), "#!/bin/sh\n");
         write(&src.join("plugins/.claude-plugin/marketplace.json"), r#"{"name":"agent-ways","plugins":[{"name":"attend","source":"./attend"}]}"#);
         write(&src.join("plugins/attend/.claude-plugin/plugin.json"), r#"{"name":"attend","version":"0.17.0"}"#);
+        copy_dir(&src, &root.join("moved"));
         let stub = root.join("stubbin/claude");
         write(&stub, STUB);
         std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -90,10 +92,15 @@ impl Fx {
 
     /// `ways manage repair` against the one destination.
     fn repair(&self) -> Output {
+        self.repair_from(&self.src())
+    }
+
+    /// `ways manage repair` from the app source at `src`.
+    fn repair_from(&self, src: &Path) -> Output {
         let out = self
             .ways(&self.stub_path())
             .args(["manage", "repair", "--source"])
-            .arg(self.src())
+            .arg(src)
             .arg("--dest")
             .arg(self.dest())
             .output()
@@ -121,6 +128,18 @@ impl Fx {
 impl Drop for Fx {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let dst = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &dst);
+        } else {
+            std::fs::create_dir_all(to).unwrap();
+            std::fs::copy(entry.path(), dst).unwrap();
+        }
     }
 }
 
@@ -217,4 +236,41 @@ fn a_failed_call_or_a_missing_claude_never_fails_the_repair() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         assert!(String::from_utf8_lossy(&out.stderr).contains("`claude` is not on PATH"));
     }
+}
+
+#[test]
+fn a_moved_app_reinstalls_the_mod_in_one_repair() {
+    let fx = Fx::new("moved");
+    fx.repair();
+    fx.changes();
+    let moved = fx.root.join("moved");
+    fx.repair_from(&moved);
+    let dest = fx.dest().display().to_string();
+    let plugins = moved.join("plugins").display().to_string();
+    assert_eq!(
+        fx.changes(),
+        vec![
+            format!("{dest}|plugin marketplace remove agent-ways"),
+            format!("{dest}|plugin marketplace add {plugins} --scope user"),
+            format!("{dest}|plugin install attend@agent-ways --scope user"),
+        ]
+    );
+    // One repair converged: the next changes nothing.
+    fx.repair_from(&moved);
+    assert_eq!(fx.changes(), Vec::<String>::new());
+}
+
+#[test]
+fn an_agent_ways_marketplace_this_app_never_added_is_left_alone() {
+    let fx = Fx::new("foreign-market");
+    write(&fx.state().join("markets.json"), r#"[{"name":"agent-ways","source":"directory","path":"/dev/checkout/plugins"}]"#);
+    write(&fx.state().join("plugins.json"), r#"[{"id":"attend@agent-ways","version":"0.1.0"}]"#);
+    let out = fx.repair();
+    assert_eq!(fx.changes(), Vec::<String>::new());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("/dev/checkout/plugins"));
+    // Disabling the target leaves it alone too.
+    write(&fx.user_config(), &format!("targets:\n  - path: {}\n    enabled: false\n", fx.dest().display()));
+    let out = fx.ways(&fx.stub_path()).args(["manage", "repair", "--source"]).arg(fx.src()).output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(fx.changes(), Vec::<String>::new());
 }
