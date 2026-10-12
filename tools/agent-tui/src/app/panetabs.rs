@@ -299,14 +299,16 @@ impl App {
 
     /// Ctrl+digit, a click on tab `i` (`at_tab`), or a pane's row standing
     /// for it ([`Open::Tab`]): show it, or open its menu when it is shown
-    /// already or is an action slot.
+    /// already or is an action slot. Without a menu on repeat, the tab shown
+    /// is shown again, so the pane hears of the key as it hears of a click
+    /// on the tab (ADR-409 (d)).
     pub(super) fn pane_tab_or_menu(&mut self, i: usize, at_tab: bool) {
         let Some(p) = &mut self.pane else { return };
         let Some(t) = p.tabs().get(i).cloned() else { return };
         let menus = p.has_tab_menus();
         if menus && (t.action || (p.tab() == i && p.tab_keys().menu_on_repeat)) {
             self.open_tab_menu(i, at_tab);
-        } else if p.tab() != i {
+        } else {
             p.set_tab(i);
         }
     }

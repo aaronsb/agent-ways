@@ -122,11 +122,12 @@ impl App {
             out.push(Binding::help("right-click a tab", what));
         }
         let quit = self.pane.as_ref().and_then(|p| p.quit_help()).unwrap_or_else(|| "quit; asks first over unsaved work".into());
+        let quit_keys = if self.pane.as_ref().is_none_or(|p| p.esc_quits()) { k("q Esc ^C", "Esc ^C") } else { k("q ^C", "^C") };
         out.extend([
             Binding::help(self.mouse_key(), "mouse on or off (off lets the terminal select text)"),
             Binding::help("Shift-drag", "selects text while the mouse is on, in most terminals"),
             Binding::help("middle-click", "pastes only while the mouse is off"),
-            Binding::help(k("q Esc ^C", "Esc ^C"), quit),
+            Binding::help(quit_keys, quit),
         ]);
         out.push(Binding::help("click", "a tab shows it; the wheel scrolls"));
         out
@@ -327,7 +328,7 @@ impl App {
         self.take_pane_open();
         match keyed {
             Keyed::Done => true,
-            Keyed::Pass if k.code == KeyCode::Esc => self.quit(),
+            Keyed::Pass if k.code == KeyCode::Esc && self.pane.as_ref().is_some_and(|p| p.esc_quits()) => self.quit(),
             Keyed::Pass => true,
             Keyed::Quit => self.quit(),
             Keyed::Tabs => {
@@ -513,13 +514,17 @@ impl App {
     /// A click or a right click on the tab bar or the bottom bar, and a
     /// right click in the pane, first closes what the pane holds open over
     /// its content ([`Pane::dismiss`]), as a left click in the pane does.
+    /// An action slot (`≡`, `+`) is the exception: its own action decides,
+    /// as its key does, so a click and the key land in the same state.
     /// A middle click pastes nothing while the shell has the mouse, and the
     /// bar says so.
     pub(super) fn pane_mouse(&mut self, m: MouseEvent) {
         let at = Position::new(m.column, m.row);
         let inside = self.hits.pane.contains(at);
         let right = m.kind == MouseEventKind::Down(MouseButton::Right);
-        if Self::is_press(&m) && (!inside || right) {
+        let slot = self.hits.tabs.iter().find(|(r, _)| r.contains(at)).map(|&(_, i)| i);
+        let on_action = slot.is_some_and(|i| self.pane.as_mut().is_some_and(|p| p.tabs().get(i).is_some_and(|t| t.action)));
+        if Self::is_press(&m) && (!inside || right) && !on_action {
             if let Some(p) = &mut self.pane {
                 p.dismiss(inside.then_some(at));
             }
@@ -1243,6 +1248,47 @@ mod tests {
         a.key(k(KeyCode::Char('?'), KeyModifiers::NONE));
         let help = testkit::text(&testkit::render(&mut a, 140, 30));
         assert!(!help.contains("right-click") && !help.contains("Ctrl+T"), "{help}");
+    }
+
+    /// A pane that owns text and passes every key on, but says Esc does
+    /// not quit, as the chat does (ADR-409).
+    struct KeepsEsc;
+    impl Pane for KeepsEsc {
+        fn palette(&self) -> theme::Palette {
+            theme::Palette::default()
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            vec![PaneTab::new("one")]
+        }
+        fn tab(&mut self) -> usize {
+            0
+        }
+        fn set_tab(&mut self, _: usize) {}
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, _: KeyEvent) -> Keyed {
+            Keyed::Pass
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+        fn owns_text(&self) -> bool {
+            true
+        }
+        fn esc_quits(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn a_pane_can_keep_esc_from_quitting_and_the_help_says_so() {
+        let mut a = App::with_pane("keeps", KeepsEsc);
+        assert!(a.key(k(KeyCode::Esc, KeyModifiers::NONE)), "Esc passed on quits nothing");
+        assert!(!a.guarding());
+        a.key(k(KeyCode::F(1), KeyModifiers::NONE));
+        let help = testkit::text(&testkit::render(&mut a, 140, 30));
+        assert!(help.contains("^C") && !help.contains("Esc ^C"), "{help}");
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(!a.key(ctrl('c')), "Ctrl-C still quits");
     }
 
     #[test]

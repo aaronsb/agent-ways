@@ -447,29 +447,6 @@ fn esc_gives_a_lent_compose_box_back_saying_nothing() {
     assert!(!bar(&mut c).contains("new channel") && !bar(&mut c).contains("cancelled"), "{}", bar(&mut c));
 }
 
-/// Where Ctrl+3 arrives as Esc, Esc on an empty box asks before quitting;
-/// a click on the yes answer quits, as `y` does.
-#[test]
-fn a_click_on_quit_ends_the_session_as_y_does() {
-    let mut c = chat().enhanced(false);
-    key(&mut c, KeyCode::Esc);
-    assert!(bar(&mut c).contains("quit the chat?"), "{}", bar(&mut c));
-    let yes = at(&mut c, " y quit ");
-    click(&mut c, yes);
-    assert!(c.app().ended(), "the click quit");
-
-    let mut c = chat().enhanced(false);
-    key(&mut c, KeyCode::Esc);
-    assert!(!key(&mut c, KeyCode::Char('y')), "y quits");
-
-    let mut c = chat().enhanced(false);
-    key(&mut c, KeyCode::Esc);
-    let no = at(&mut c, " n stay ");
-    click(&mut c, no);
-    assert!(!c.app().ended());
-    assert_eq!(c.status(), "stayed");
-}
-
 /// A paste over a question answers it no, then lands in the compose box:
 /// the `y` in it never answers.
 #[test]
@@ -481,4 +458,253 @@ fn a_paste_over_a_question_answers_no_then_pastes() {
     assert_eq!(c.status(), "kept");
     assert_eq!(c.input().text(), "yes please");
     assert!(!c.signals().is_empty());
+}
+
+/// The compose box's rows inside its border, right of the left column: its
+/// text rows, then the destination flag's row.
+fn compose(c: &mut Chat) -> Vec<String> {
+    let shown = rows(c);
+    let top = shown.iter().rposition(|r| r.contains('╭')).expect("the compose box");
+    let bottom = shown.iter().rposition(|r| r.contains('╰')).expect("the compose box");
+    shown[top + 1..bottom].iter().map(|r| r.split_once('│').map_or(r.as_str(), |(_, rest)| rest).to_string()).collect()
+}
+
+fn typed(c: &mut Chat, text: &str) {
+    for ch in text.chars() {
+        key(c, KeyCode::Char(ch));
+    }
+}
+
+/// The compose box lent to a new channel's name says so where the text is
+/// typed, in place of `>`, and draws no destination flag: what Enter does
+/// is not a send.
+#[test]
+fn the_box_lent_to_a_new_channel_says_so_and_drops_the_flag() {
+    for by_click in [false, true] {
+        let mut c = chat();
+        if by_click {
+            let plus = at(&mut c, "+");
+            click(&mut c, plus);
+        } else {
+            press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        }
+        typed(&mut c, "abc");
+        let shown = compose(&mut c);
+        assert!(shown[0].contains("new channel name > abc"), "click {by_click}: the box names what it is lent to: {shown:#?}");
+        assert!(!shown.iter().any(|r| r.contains("#open")), "click {by_click}: no destination flag: {shown:#?}");
+        key(&mut c, KeyCode::Esc);
+        let shown = compose(&mut c);
+        assert!(shown[0].contains("> ") && !shown[0].contains("new channel name"), "Esc gives the box back: {shown:#?}");
+        assert!(shown.iter().any(|r| r.contains("#open")), "and its flag: {shown:#?}");
+    }
+}
+
+/// The same for a description, which names its channel.
+#[test]
+fn the_box_lent_to_a_description_names_its_channel() {
+    let mut c = chat();
+    let deploy = row_of(&mut c, "#deploy");
+    click(&mut c, deploy);
+    click(&mut c, deploy);
+    let d = at(&mut c, "Describe");
+    click(&mut c, d);
+    typed(&mut c, "rollouts");
+    let shown = compose(&mut c);
+    assert!(shown[0].contains("describe #deploy > rollouts"), "{shown:#?}");
+    assert!(!shown.iter().any(|r| r.contains("#deploy ") && !r.contains("describe")), "no destination flag: {shown:#?}");
+}
+
+/// Finding 3 of the audit: click `+`, click the #infra row, Esc, type
+/// `abc`, Enter. The row's click gives the box back, Esc quits nothing,
+/// and `abc` goes to #infra; no channel #abc is made.
+#[test]
+fn a_click_on_a_row_then_esc_never_makes_a_channel_of_a_message() {
+    let mut c = chat();
+    let plus = at(&mut c, "+");
+    click(&mut c, plus);
+    let infra = row_of(&mut c, "#infra");
+    click(&mut c, infra);
+    assert!(key(&mut c, KeyCode::Esc), "Esc does not end the chat");
+    typed(&mut c, "abc");
+    assert!(compose(&mut c)[0].contains("> abc") && !compose(&mut c)[0].contains("new channel"), "{:#?}", compose(&mut c));
+    key(&mut c, KeyCode::Enter);
+    assert_eq!(c.status(), "dry run: not sent to #infra", "a message, not a channel");
+}
+
+/// The keyboard form of finding 3: Ctrl+N, then Ctrl+3 twice opens
+/// #deploy's menu, Esc closes it. Showing a tab gives the box back, as a
+/// click on the tab does, so `abc` then Enter is a message to #deploy.
+#[test]
+fn a_tab_key_gives_a_lent_box_back_as_a_click_on_the_tab_does() {
+    let mut c = chat();
+    press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
+    assert!(menu_open(&mut c));
+    key(&mut c, KeyCode::Esc);
+    typed(&mut c, "abc");
+    key(&mut c, KeyCode::Enter);
+    assert_eq!(c.status(), "dry run: not sent to #deploy", "a message, not a channel");
+}
+
+/// F2, then Down into the column, gives a lent box back: the column's keys
+/// then act on its rows, never on the name being typed.
+#[test]
+fn the_column_taking_the_keyboard_gives_a_lent_box_back() {
+    let mut c = chat();
+    typed(&mut c, "draft");
+    press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
+    typed(&mut c, "x");
+    key(&mut c, KeyCode::F(2));
+    key(&mut c, KeyCode::Down);
+    assert!(!compose(&mut c)[0].contains("new channel name"), "{:#?}", compose(&mut c));
+    key(&mut c, KeyCode::Enter);
+    assert_ne!(c.status(), "dry run: /channels create not run", "Enter acted on a row, not the name");
+    key(&mut c, KeyCode::Esc);
+    assert_eq!(c.input().text(), "draft", "the draft came back");
+}
+
+/// Esc never quits: not on an empty box, not twice, not over a draft, and
+/// not where Ctrl+3 arrives as Esc. It closes what is open and clears the
+/// selection and the bar; nothing asks.
+#[test]
+fn esc_never_quits() {
+    for enhanced in [true, false] {
+        let mut c = chat().enhanced(enhanced);
+        for _ in 0..3 {
+            assert!(key(&mut c, KeyCode::Esc), "enhanced {enhanced}: Esc keeps the chat");
+        }
+        assert!(!c.app().ended() && !c.app().guarding(), "enhanced {enhanced}: nothing asks");
+        assert!(!bar(&mut c).contains("quit"), "enhanced {enhanced}: {}", bar(&mut c));
+
+        typed(&mut c, "half");
+        assert!(key(&mut c, KeyCode::Esc));
+        assert!(!c.app().guarding(), "enhanced {enhanced}: no guard over a draft either");
+        assert_eq!(c.input().text(), "half", "the draft stays");
+    }
+}
+
+/// A double Esc after a menu, a common habit to be sure it closed, leaves
+/// the chat as it was.
+#[test]
+fn a_double_esc_after_a_menu_is_safe() {
+    for enhanced in [true, false] {
+        let mut c = chat().enhanced(enhanced);
+        let infra = row_of(&mut c, "#infra");
+        click(&mut c, infra);
+        click(&mut c, infra);
+        assert!(menu_open(&mut c));
+        assert!(key(&mut c, KeyCode::Esc) && key(&mut c, KeyCode::Esc), "enhanced {enhanced}");
+        assert!(!menu_open(&mut c) && !c.app().ended() && !c.app().guarding());
+        assert!(!bar(&mut c).contains("quit"), "{}", bar(&mut c));
+    }
+}
+
+/// Esc with nothing open clears the message selected and what the bar
+/// said.
+#[test]
+fn esc_clears_the_selection_and_the_bar() {
+    let mut c = chat();
+    let m = at(&mut c, "a message in the feed");
+    click(&mut c, m);
+    c.say("joined #deploy", false);
+    let selected = rows(&mut c);
+    key(&mut c, KeyCode::Esc);
+    assert_eq!(c.status(), "");
+    assert_ne!(rows(&mut c), selected, "the selection is cleared");
+}
+
+/// Open `≡` and pick Quit: by keys, F2, Left to `≡`, Enter, then the item.
+fn quit_by_keys(c: &mut Chat) -> bool {
+    key(c, KeyCode::F(2));
+    key(c, KeyCode::Left);
+    key(c, KeyCode::Enter);
+    let shown = rows(c);
+    let title = shown.iter().position(|r| r.contains("pick one")).expect("the ≡ menu is open");
+    let row = shown.iter().skip(title + 1).position(|r| r.contains("Quit")).unwrap_or_else(|| panic!("no Quit in {shown:#?}"));
+    key(c, KeyCode::Home);
+    for _ in 0..row {
+        key(c, KeyCode::Down);
+    }
+    key(c, KeyCode::Enter)
+}
+
+/// Quit on the `≡` menu ends the chat, by click or by key, and asks first
+/// over a draft as Ctrl-C does.
+#[test]
+fn quit_on_the_common_menu_ends_the_chat() {
+    let mut c = chat();
+    let menu = at(&mut c, "≡");
+    click(&mut c, menu);
+    let quit = at(&mut c, "Quit");
+    click(&mut c, quit);
+    assert!(c.app().ended(), "the click quit");
+
+    let mut c = chat();
+    assert!(!quit_by_keys(&mut c), "Enter on Quit ends the session");
+
+    let mut c = chat();
+    typed(&mut c, "half");
+    assert!(quit_by_keys(&mut c), "a draft keeps the chat open");
+    assert!(c.app().guarding(), "and the exit guard asks, as Ctrl-C does");
+}
+
+/// With `menu_on_repeat` off, Ctrl+digit on the tab already shown gives a
+/// lent box back, as a click on that tab does.
+#[test]
+fn a_tab_key_on_the_shown_tab_gives_a_lent_box_back_with_repeat_off() {
+    for by_click in [false, true] {
+        let mut c = chat().menu_on_repeat(false);
+        typed(&mut c, "hello");
+        press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        typed(&mut c, "abc");
+        if by_click {
+            let merged = at(&mut c, "1 merged");
+            click(&mut c, merged);
+        } else {
+            press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+        }
+        assert_eq!(c.foreground(), &Tab::Merged);
+        assert!(!compose(&mut c)[0].contains("new channel name"), "click {by_click}: {:#?}", compose(&mut c));
+        assert_eq!(c.input().text(), "hello", "click {by_click}: the draft came back");
+    }
+}
+
+/// Open `≡` by a click on its slot and click Quit.
+fn quit_by_clicks(c: &mut Chat) {
+    let menu = at(c, "≡");
+    click(c, menu);
+    let quit = at(c, "Quit");
+    click(c, quit);
+}
+
+/// A name typed in the lent box is unsaved work to every quit: Ctrl-C,
+/// `≡` → Quit by clicks and by keys each open the exit guard, and going
+/// back finds the box still lent with the name.
+#[test]
+fn every_quit_asks_over_a_name_typed_in_the_lent_box() {
+    for how in ["ctrl-c", "keys", "clicks"] {
+        let mut c = chat();
+        press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        typed(&mut c, "abc");
+        match how {
+            "ctrl-c" => assert!(press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            "clicks" => quit_by_clicks(&mut c),
+            _ => assert!(quit_by_keys(&mut c)),
+        }
+        assert!(!c.app().ended(), "{how}: the chat stays open");
+        assert!(c.app().guarding(), "{how}: the exit guard asks");
+        key(&mut c, KeyCode::Esc);
+        assert!(!c.app().guarding());
+        assert!(compose(&mut c)[0].contains("new channel name > abc"), "{how}: back to the lent box: {:#?}", compose(&mut c));
+    }
+}
+
+/// Ctrl-C still quits, at once with nothing unsaved.
+#[test]
+fn ctrl_c_still_quits() {
+    for enhanced in [true, false] {
+        let mut c = chat().enhanced(enhanced);
+        assert!(!press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL), "enhanced {enhanced}");
+    }
 }

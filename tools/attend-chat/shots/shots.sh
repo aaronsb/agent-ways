@@ -79,7 +79,14 @@ ask-long     | base  | wait:#open click:#open click:#open wait:Clear_history Dow
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
 menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
 prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc click:signing gone:new_channel
-quit-ask     | base  | wait:Agents Escape wait:quit_the_chat
+lent-name    | base  | wait:Agents text:draft C-n wait:new_channel_name text:release
+lent-desc    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Describe wait:describe_#deploy text:rollouts
+lent-tab     | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc M-3 gone:new_channel_name
+lent-row     | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name Escape text:abc
+esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape gone:pick
+common-quit  | base  | wait:Agents click:≡ wait:Quit
+quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:discards
+quit-lent    | base  | wait:Agents C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy

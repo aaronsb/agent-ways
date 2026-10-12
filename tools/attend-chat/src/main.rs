@@ -10,9 +10,12 @@ const HELP: &str = "attend-chat — interactive chat TUI for attend (ADR-120)
 
 usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
 
-  Esc / Ctrl-C              exit; with a draft in the compose box, asks first. Where
-                            the terminal does not report Ctrl+digits, Ctrl+3 is Esc,
-                            so Esc asks first there too: y quits
+  Ctrl-C                    exit; with a draft in the compose box, asks first.
+                            ≡ → Quit does the same
+  Esc                       closes a menu, a question or the help, gives back the
+                            compose box lent to a name, or clears the selection
+                            and the status line. It never exits, so Ctrl+3
+                            arriving as Esc cannot close the chat
   Enter                     send to the foreground channel
   Ctrl+1..9                 show tab N (1 = merged, 2 = #open, ...); again on the
                             shown tab, its menu. Needs a terminal that speaks the
@@ -23,10 +26,12 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             reversed behind a ▸): Left Right move, Enter the tab's
                             menu, Esc back to the compose box
   Ctrl+N                    ask for a new channel's name in the compose box, from
-                            the compose box or the tab bar; a draft comes back after
+                            the compose box or the tab bar; the box reads
+                            `new channel name >` until Enter, Esc, a click
+                            elsewhere or another tab; a draft comes back after
   Tab                       next tab (empty input) / complete @name #channel /command
   tab menus                 ≡ (left of merged, no number): Theme, Keybinding set,
-                            Mouse at start, Settings. merged: Clear view.
+                            Mouse at start, Settings, Quit. merged: Clear view.
                             #open: Clear view, Clear history. A channel: Add
                             agent (not built yet), Invite agent, Remove agent,
                             Describe, Clear history, Leave, Delete channel.
