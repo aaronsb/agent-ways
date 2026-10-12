@@ -247,4 +247,37 @@ fn a_cold_write_scored_late_arms_from_its_own_time() {
     let status = w.status_line();
     assert!(status.starts_with("keepwarm    on, 2h40m left") || status.starts_with("keepwarm    on, 2h39m left"), "{status}");
 }
+
+/// With `attend_mod.keepwarm: off` the attend mod never runs `keepwarm
+/// check` (the mod's own test holds that), and only the check and `attend
+/// run`'s sensor arm keepwarm (ADR-406 item 13). So the verbs the mod does
+/// run leave a paid cold write unarmed; the check on the same readings, run
+/// afterwards as the control, arms it.
+#[test]
+fn the_verbs_a_mod_with_keepwarm_off_runs_never_arm_after_a_cold_write() {
+    let w = Warm::new("kw-mod-off");
+    let mod_verbs: [&[&str]; 6] = [
+        &["listen", "on"],
+        &["inbox", "--drain", "--json"],
+        &["unread", "--json"],
+        &["peers"],
+        &["keepwarm", "status"],
+        &["listen", "status", "--json"],
+    ];
+    w.reading(&[(30 * MIN, 200_000, 500)]);
+    for v in mod_verbs {
+        assert!(w.run(v).status.success(), "attend {v:?}");
+    }
+    w.reading(&[(30 * MIN, 200_000, 500), (MIN, 0, 200_500)]);
+    for v in mod_verbs {
+        assert!(w.run(v).status.success(), "attend {v:?}");
+    }
+    assert!(w.status_line().contains("off"), "nothing armed: {}", w.status_line());
+
+    w.reading(&[(30 * MIN, 200_000, 500)]);
+    w.check();
+    w.reading(&[(30 * MIN, 200_000, 500), (MIN, 0, 200_500)]);
+    w.check();
+    assert!(w.status_line().contains(" on, "), "the check arms: {}", w.status_line());
+}
 }

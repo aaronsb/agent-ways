@@ -15,7 +15,7 @@ attend keepwarm off         # disarm
 attend keepwarm status      # the card below; also what bare `attend keepwarm` prints
 ```
 
-These verbs act on the Claude session that runs them, so run them from inside the session (the agent's Bash tool, or `!` in the prompt). Outside a session they print `keepwarm: no Claude session owns this process, nothing to warm` and exit 1. The sensor itself runs inside `attend run`, so attend must be running under Monitor for anything to wake.
+These verbs act on the Claude session that runs them, so run them from inside the session (the agent's Bash tool, or `!` in the prompt). Outside a session they print `keepwarm: no Claude session owns this process, nothing to warm` and exit 1. The sensor itself runs inside `attend run`, so attend must be running under Monitor for anything to wake. In a session the attend mod is listening in, the mod runs the same judgment with `attend keepwarm check` on its poll instead ([`mod.md`](mod.md)).
 
 **Auto-arm.** When the sensor sees a paid cold write (below) on a context of at least 50k tokens, it arms three hours on its own if no window already covers them. A session that has paid one rewrite has shown it comes back, and the second rewrite is not paid that day.
 
@@ -108,6 +108,8 @@ sensors:
   keepwarm:
     enabled: false
 ```
+
+`attend_mod.keepwarm: off` in the ways config (a project's `.claude/ways.yaml` wins) does the same for the attend mod: its sessions run no check, so nothing wakes and a paid cold write arms nothing. A dormant mod session never gets a keepwarm wake.
 
 A disabled sensor neither wakes nor auto-arms. The arm file and the ledger live under `$XDG_CACHE_HOME/attend/keepwarm/`; only the `attend keepwarm` verbs and the sensor read them.
 

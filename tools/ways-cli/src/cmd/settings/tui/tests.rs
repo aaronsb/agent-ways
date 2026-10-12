@@ -40,6 +40,7 @@ impl Adapter for Fixtured {
 fn roots(fx: &Fixture) -> Vec<Node> {
     let ctx = Ctx {
         project: fx.root.join("work/current"),
+        for_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -367,7 +368,7 @@ fn the_tabs_are_the_registry_roots_with_a_toggle_per_corpus_way() {
         fx.file(&format!("corpus/{id}/{name}.md"), &format!("---\ndescription: {name}\n---\n"));
     }
     let r = roots(&fx);
-    assert_eq!(r.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["ways", "matching", "gate", "install", "attend", "sensors"]);
+    assert_eq!(r.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["ways", "matching", "gate", "install", "attend", "sensors", "mod"]);
     // attend's tabs: its sections, and a group per sensor on the next one.
     assert_eq!(r[4].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["governor", "engagement", "cleanup", "chat"]);
     assert_eq!(r[5].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), attend_config::BUILTINS);
@@ -451,6 +452,7 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
     let project = agent_settings::Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, &file);
     let ctx = Ctx {
         project: fx.root.join("work/current"),
+        for_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -471,6 +473,7 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
 fn ctx_of(fx: &Fixture) -> Ctx {
     Ctx {
         project: fx.root.join("work/current"),
+        for_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -888,6 +891,7 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
     let project = agent_settings::Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, &file);
     let ctx = Ctx {
         project: fx.root.join("work/current"),
+        for_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -908,4 +912,51 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
     let prefixes = section(project, "prefixes");
     assert_eq!(prefixes.children[0].children[0].setting.as_ref().unwrap().store.as_ref().unwrap().key, "ways.project.a/*");
     assert!(project.children.iter().all(|n| n.name != "not found"), "a prefix is not a missing way");
+}
+
+/// Opened without a project, the screens write listening and keepwarm to
+/// the user file, as `ways settings set` does; the home directory is never a
+/// project.
+#[test]
+fn the_mod_tab_opened_without_a_project_writes_the_user_file() {
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.for_project = false;
+    let ways = Ways::new(ctx);
+    let tabs = ways.build(&[]);
+    let tab = tabs.iter().find(|t| t.name == "mod").expect("the mod tab");
+    let project_file = fx.root.join("work/current/.claude/ways.yaml");
+    for key in ["listening", "keepwarm"] {
+        let store = leaf(tab, key).and_then(|n| n.setting.as_ref()).and_then(|s| s.store.clone()).unwrap();
+        assert_ne!(store.file, project_file, "{key} goes to the user file");
+        assert!(store.file.ends_with("agent-ways/config.yaml"), "{key}: {}", store.file.display());
+    }
+    assert!(!super::opened_for_project(None, &fx.root));
+    assert!(!super::opened_for_project(Some(&fx.root), &fx.root), "home is never a project");
+    assert!(super::opened_for_project(Some(&fx.root.join("work/current")), &fx.root));
+}
+
+fn leaf<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
+    if node.name == name && node.setting.is_some() {
+        return Some(node);
+    }
+    node.children.iter().find_map(|c| leaf(c, name))
+}
+
+#[test]
+fn the_mod_tab_writes_how_this_project_starts_to_its_own_file() {
+    let fx = Fixture::home();
+    let mut ways = Ways::new(ctx_of(&fx));
+    let tabs = ways.build(&[]);
+    let tab = tabs.iter().find(|t| t.name == "mod").expect("the mod tab");
+    let project_file = fx.root.join("work/current/.claude/ways.yaml");
+    let store_of = |name: &str| leaf(tab, name).and_then(|n| n.setting.as_ref()).and_then(|s| s.store.clone()).unwrap_or_else(|| panic!("{name}"));
+    for key in ["listening", "keepwarm"] {
+        assert_eq!(store_of(key).file, project_file, "{key} goes to this project's ways.yaml");
+    }
+    let install = store_of("install");
+    assert_ne!(install.file, project_file, "install is set in the user or a target's file, never a project's");
+    let listening = store_of("listening");
+    ways.write(&project_file, &[Write { store: &listening, value: "active", loaded: "dormant" }]).expect("the project's file takes it");
+    assert!(std::fs::read_to_string(&project_file).unwrap().ends_with("attend_mod:\n  listening: active\n"));
 }

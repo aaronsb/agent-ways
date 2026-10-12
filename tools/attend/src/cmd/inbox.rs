@@ -292,14 +292,16 @@ pub(crate) fn scan_pending(
 /// announces what it held back, and always persists the state file so it
 /// happens exactly once.
 pub(crate) fn cmd_inbox_drain(format: &str) {
-    let hook_mode = match format {
-        "hook" => true,
-        "plain" => false,
+    let mode = match format {
+        "hook" => DrainMode::Hook,
+        "plain" => DrainMode::Plain,
+        "json" => DrainMode::Json,
         other => {
-            eprintln!("unknown --format '{other}' for --drain (expected plain|hook)");
+            eprintln!("unknown --format '{other}' for --drain (expected plain|hook|json)");
             std::process::exit(2);
         }
     };
+    let hook_mode = mode == DrainMode::Hook;
 
     // Resolved-gate (ADR-172 Decision 4): marking consumption under a
     // pid-fallback identity would alias sessions and corrupt the shared
@@ -308,6 +310,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     if !ident.resolved() {
         if !hook_mode {
             eprintln!("(identity unresolved — drain is a no-op; the Monitor poller still delivers)");
+        }
+        if mode == DrainMode::Json {
+            print_drain_json("unresolved", &[], 0, None, None);
         }
         return;
     }
@@ -318,6 +323,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // written, not even the heartbeat below. An enrollment this Claude Code
     // process made under its id before `/clear` counts, and moves here.
     if !crate::util::adopt_previous_enrollment(&ident) {
+        if mode == DrainMode::Json {
+            print_drain_json("not_listening", &[], 0, None, None);
+        }
         return;
     }
     let base = signals_base();
@@ -345,6 +353,8 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         }
         None => 1,
     };
+    // Only the hook path reads stop_hook_active, so only a hook drain counts
+    // rounds past 1: a JSON drain never reaches this ceiling.
     if rounds > MAX_DRAIN_ROUNDS {
         eprintln!("(drain round {rounds} > {MAX_DRAIN_ROUNDS} — deferring to the Monitor conduit)");
         return;
@@ -361,7 +371,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
-    let Scan { mut delivered, mark, note, .. } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
+    let Scan { mut delivered, mark, note, held_back } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
     // Oldest first; parts written within one timestamp tick go by id,
     // which carries the send time.
     delivered.sort_by_cached_key(|d| (d.mtime, agent_identity::signal_send_order(&d.id), d.id.clone()));
@@ -386,7 +396,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         } else {
             store.mark_seen(mark);
         }
-        if hook_mode {
+        if mode == DrainMode::Json {
+            print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref());
+        } else if hook_mode {
             if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref()) {
                 println!("{out}");
             }
@@ -407,7 +419,9 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     // tolerates — at-least-once. The reverse order would mark messages
     // consumed with no conduit having shown them: loss on BOTH conduits,
     // since the sensor imports drain marks (PR #385 review, finding 2).
-    if hook_mode {
+    if mode == DrainMode::Json {
+        print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref());
+    } else if hook_mode {
         if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref()) {
             println!("{out}");
         }
@@ -452,6 +466,64 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     }
     #[cfg(not(feature = "sensor-peers"))]
     let _ = cwd;
+}
+
+/// How a drain prints what it delivered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrainMode {
+    /// Text for a person or an agent reading a pipe.
+    Plain,
+    /// The Stop hook's JSON decision.
+    Hook,
+    /// One JSON document with each part in a field of its own, for a
+    /// program such as the attend mod (ADR-406): the messages, the cold
+    /// start's held-back count and note, and the session's name.
+    Json,
+}
+
+/// The version of the `--drain --json` document; a reader refuses another.
+const DRAIN_JSON_SCHEMA: u32 = 1;
+
+/// One drained message in `--drain --json`.
+#[derive(serde::Serialize)]
+struct DrainedJson<'a> {
+    scope: &'a str,
+    sender: &'a str,
+    sender_id: &'a str,
+    id: &'a str,
+    re: Option<&'a str>,
+    when: &'a str,
+    cwd: &'a str,
+    message: &'a str,
+}
+
+/// The `--drain --json` document, `schema` 1. `status` is `drained` when
+/// the drain ran (with or without messages), else why it delivered nothing:
+/// `unresolved` identity, or `not_listening`. (The re-entry ceiling defers
+/// only a hook drain, which carries the Stop hook's `stop_hook_active`.)
+/// `you_are` is set on the cold start, the drain's first contact.
+fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Option<&str>, me: Option<&str>) {
+    let messages: Vec<DrainedJson> = delivered
+        .iter()
+        .map(|d| DrainedJson {
+            scope: &d.scope,
+            sender: &d.sender,
+            sender_id: &d.sender_id,
+            id: &d.id,
+            re: d.re.as_deref(),
+            when: &d.when,
+            cwd: &d.source_cwd,
+            message: &d.body,
+        })
+        .collect();
+    crate::cmd::print_json(&serde_json::json!({
+        "schema": DRAIN_JSON_SCHEMA,
+        "status": status,
+        "messages": messages,
+        "held_back": held_back,
+        "note": note,
+        "you_are": me,
+    }));
 }
 
 /// The Stop-hook JSON for one drain, or `None` to print nothing and let the

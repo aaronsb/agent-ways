@@ -64,15 +64,15 @@ pub(crate) enum Commands {
         #[arg(long)]
         drain: bool,
 
-        /// Output format for --drain: `plain` (human/agent readable) or
+        /// Output format for --drain: `plain` (human/agent readable),
         /// `hook` (Claude Code Stop-hook JSON; reads the hook's stdin
-        /// payload for `stop_hook_active`)
+        /// payload for `stop_hook_active`) or `json` (the same as --json)
         #[arg(long, default_value = "plain", value_name = "FMT")]
         format: String,
 
-        /// Print the listing or the message as one JSON document (not with
-        /// --drain, which has --format)
-        #[arg(long, conflicts_with_all = ["drain", "format"])]
+        /// Print the listing, the message, or with --drain the drained
+        /// messages, held-back count, note and name, as one JSON document
+        #[arg(long, conflicts_with = "format")]
         json: bool,
     },
 
@@ -133,6 +133,12 @@ pub(crate) enum Commands {
 
     #[command(about = describe::REPLY)]
     Reply {
+        /// Reply to this message id instead of the newest one delivered.
+        /// The reply goes where that message was said, and is refused when
+        /// that room is left, gone or unknown, as without --re
+        #[arg(long, value_name = "ID")]
+        re: Option<String>,
+
         /// Scope send to a specific project path
         #[arg(long, value_name = "PATH")]
         to: Option<String>,

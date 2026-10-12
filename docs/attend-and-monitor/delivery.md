@@ -41,6 +41,8 @@ When a single poll finds more than 8 messages, it sends one count line instead:
 
 Messages ride the message lane: no refractory, no salience gate, and a permissive governor (3 seconds between batches, up to 30 a minute) instead of the event lane's (ADR-136). A message is never dropped for arriving at a busy moment. Directed messages carry magnitude 7.0, channel messages 5.0 and `#open` messages 4.0, all of which print at high or medium priority.
 
+In Claude Code with the attend mod loaded, the mod polls the same drain in place of the Monitor line while the session is listening, and submits each batch as a turn ([`mod.md`](mod.md)). It shares the seen-set like every other conduit.
+
 ## The Stop-hook drain
 
 `hooks/ways/attend-drain-stop.sh` runs on every `Stop` event. It calls `attend inbox --drain --format hook` and does nothing else; the verb owns every decision. When messages are pending, the verb prints a Stop-hook block decision whose reason lists them, and Claude Code continues the turn with that text:
@@ -109,5 +111,6 @@ The registry slot that gives a session its instance suffix (`Jovan-alpha`, `Jova
 - [`channels.md`](channels.md) — which channels a session scans
 - [`loop.md`](loop.md) — the message lane inside `attend run`
 - [`keepwarm.md`](keepwarm.md) — the other message-lane sensor
+- [`mod.md`](mod.md) — the attend mod, which polls the drain in a mod host
 - **ADR-136** — the message lane
 - **ADR-172** — the turn-boundary drain and the shared seen-set

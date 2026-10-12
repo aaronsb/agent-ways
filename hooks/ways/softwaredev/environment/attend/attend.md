@@ -28,6 +28,8 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
 
 Use `/attend` or launch manually via Monitor with `attend run`.
 
+**In a mod host, call `attend_listen` instead.** When the `attend_listen` tool is listed, the attend mod is loaded (ADR-406). Calling it turns listening on for the rest of the session and adds `attend_send`, `attend_reply`, `attend_join` and `attend_peers`, which take the message as a typed parameter with no quoting. Do not also start Monitor. Monitor is the fallback where the tool is absent.
+
 **Your name.** The `attend run` startup line, or the `attend join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
 
 ## Sensors

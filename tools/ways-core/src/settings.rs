@@ -105,6 +105,16 @@ const SECTIONS: &[SectionSpec] = &[
         columns: Some(("way", "enabled")),
         doc: "Per-way switches for one project (ADR-131), in its .claude/ways.yaml. Each entry falls back alone.",
     },
+    // Not in HOOK_SECTIONS: the attend mod reads it through `ways settings
+    // list attend_mod`, and reconcile reads `install` per target.
+    SectionSpec {
+        name: "attend_mod",
+        file: FILE,
+        top: &["attend_mod"],
+        per_entry: false, entry: None, repair: None,
+        columns: None,
+        doc: "The attend mod in Claude Code (ADR-406): whether a session starts listening, keepwarm, whether the mod is installed, and its poll timing.",
+    },
     // Not in HOOK_SECTIONS: no hook path reads a theme (ADR-504 §11). Declared
     // in agent-theme, so attend reads the same keys (one source).
     agent_theme::settings::SECTION,
@@ -316,6 +326,90 @@ const KEYS: &[KeySpec] = &[
     agent_theme::settings::ACTIVE,
     agent_theme::settings::SHAPE,
     KeySpec {
+        name: "attend_mod.listening",
+        section: "attend_mod",
+        fail_closed: Some(closed_dormant),
+        path: &["attend_mod", "listening"],
+        kind: Kind::Choice(&["active", "dormant"]),
+        default: DefaultValue::Yaml("dormant"),
+        doc: "How a Claude Code session starts: active (listening over attend) or dormant.",
+        long: "dormant is plain Claude Code: the attend mod lists only attend_listen, polls nothing and draws nothing, and a session listens only once the user asks for attend. active listens from session start until Claude Code exits. Set it in a project's .claude/ways.yaml for the projects where several agents work together; the project wins over a target's and the user's file (ADR-406).",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.keepwarm",
+        section: "attend_mod",
+        fail_closed: Some(closed_keepwarm),
+        path: &["attend_mod", "keepwarm"],
+        kind: Kind::Choice(&["on", "off"]),
+        default: DefaultValue::Yaml("on"),
+        doc: "Whether an active session runs attend's keepwarm check: on or off.",
+        long: "on keeps ADR-182's wakes in sessions that are listening: one wake after 50 idle minutes while a window is armed, and the three-hour window a paid cold write arms. off means no keepwarm wake in that project's sessions and arms nothing. A dormant session never gets one (ADR-406 item 13).",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.install",
+        section: "attend_mod",
+        fail_closed: Some(closed_uninstalled),
+        path: &["attend_mod", "install"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("true"),
+        scope: Scope::Machine,
+        doc: "Whether `ways manage repair` installs the attend mod in Claude Code.",
+        long: "Read per target, from the user file and the target's own file; a project cannot set it. false and a repair uninstall the mod and remove the agent-ways marketplace from every target it applies to, and the mod lists nothing where it is still loaded; /attend then falls back to Monitor (ADR-406 item 11).",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.poll_seconds",
+        section: "attend_mod",
+        path: &["attend_mod", "poll_seconds"],
+        kind: Kind::Int { min: 1, max: 3600 },
+        default: DefaultValue::Yaml("5"),
+        doc: "Seconds between polls of attend while an active session is awake.",
+        long: "Each poll is one attend process: a drain while no turn runs, and the unread count for the status row.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.slow_poll_seconds",
+        section: "attend_mod",
+        path: &["attend_mod", "slow_poll_seconds"],
+        kind: Kind::Int { min: 1, max: 3600 },
+        default: DefaultValue::Yaml("60"),
+        doc: "Seconds between polls once an active session has been quiet.",
+        long: "After the quiet period the poll slows to this interval and returns to poll_seconds on the next delivery, send or turn. A store on a slow mounted directory can be given a longer one (ADR-406 item 12).",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.quiet_minutes",
+        section: "attend_mod",
+        path: &["attend_mod", "quiet_minutes"],
+        kind: Kind::Int { min: 1, max: 1440 },
+        default: DefaultValue::Yaml("20"),
+        doc: "Minutes with no delivery, send or turn before the poll slows.",
+        long: "The session keeps listening; only the interval changes.",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.preamble_every_turns",
+        section: "attend_mod",
+        path: &["attend_mod", "preamble_every_turns"],
+        kind: Kind::Int { min: 1, max: 10_000 },
+        default: DefaultValue::Yaml("20"),
+        doc: "Turns before a delivery carries the full preamble again.",
+        long: "The full preamble goes with the first delivery of a session and the first after a compaction, then with the first delivery once this many turns have passed. Every other delivery carries one line (ADR-406 item 4).",
+        ..BASE
+    },
+    KeySpec {
+        name: "attend_mod.headless_poll",
+        section: "attend_mod",
+        path: &["attend_mod", "headless_poll"],
+        kind: Kind::Bool,
+        default: DefaultValue::Yaml("false"),
+        doc: "Whether a claude -p run or an SDK session may poll attend.",
+        long: "Such a run exits after one turn, so by default it lists attend_listen and never polls, whatever the project's start state.",
+        ..BASE
+    },
+    KeySpec {
         name: "install.secret_path_deny",
         section: "install.secret_path_deny",
         fail_closed: Some(closed_deny),
@@ -416,6 +510,21 @@ fn closed_toggle(v: &Value) -> Option<Value> {
     (!on).then_some(Value::Bool(false))
 }
 
+/// `attend_mod.listening`: anything but `active` reads as dormant.
+fn closed_dormant(v: &Value) -> Option<Value> {
+    (v.as_str() != Some("active")).then(|| Value::String("dormant".into()))
+}
+
+/// `attend_mod.keepwarm`: anything but `on` reads as off.
+fn closed_keepwarm(v: &Value) -> Option<Value> {
+    (v.as_str() != Some("on")).then(|| Value::String("off".into()))
+}
+
+/// `attend_mod.install`: anything but `true` reads as not installed.
+fn closed_uninstalled(v: &Value) -> Option<Value> {
+    (v != &Value::Bool(true)).then_some(Value::Bool(false))
+}
+
 /// `secret_path_deny`: the closed side is the deny baseline merged, so
 /// only a valid `false` opts out.
 fn closed_deny(v: &Value) -> Option<Value> {
@@ -452,6 +561,27 @@ pub static SCHEMA: Schema = Schema {
     keys: KEYS,
 };
 
+/// Keys of both scopes that the settings screens write to the project's
+/// `.claude/ways.yaml`, not the user file: how a project's sessions start
+/// is decided per project (ADR-406 item 2). `ways settings set` still writes
+/// the user file unless `--project` is given.
+pub const SCREENS_WRITE_PROJECT: &[&str] = &["attend_mod.listening", "attend_mod.keepwarm"];
+
+/// Whether the attend mod is installed in a target (ADR-406 item 11): the
+/// user file, then the target's own file. A project cannot set it.
+pub fn attend_mod_install(target_config: &Path) -> bool {
+    let layers = [
+        Layer::read(&SCHEMA, "user", FILE, LayerScope::User, &crate::paths::user_config()),
+        Layer::read(&SCHEMA, "target", FILE, LayerScope::Target, target_config),
+    ];
+    attend_mod_install_in(&layers)
+}
+
+fn attend_mod_install_in(layers: &[Layer]) -> bool {
+    let Some(spec) = SCHEMA.keys.iter().find(|k| k.name == "attend_mod.install") else { return true };
+    agent_settings::load::resolve(spec, &[], layers).value.and_then(|v| v.as_bool()).unwrap_or(true)
+}
+
 /// The project overlay file of a project directory.
 pub fn project_file(project_dir: &Path) -> PathBuf {
     project_dir.join(".claude").join("ways.yaml")
@@ -477,4 +607,62 @@ pub fn layers(project_dir: &Path) -> Vec<Layer> {
     }
     out.push(Layer::read(&SCHEMA, "project", FILE, LayerScope::Project, &project_file(project_dir)));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn layer(name: &str, scope: LayerScope, text: &str) -> Layer {
+        Layer::from_text(&SCHEMA, name, FILE, scope, None, text)
+    }
+
+    fn resolved(name: &str, layers: &[Layer]) -> Option<Value> {
+        let spec = SCHEMA.keys.iter().find(|k| k.name == name).unwrap();
+        agent_settings::load::resolve(spec, &[], layers).value
+    }
+
+    #[test]
+    fn attend_mod_defaults_dormant_keepwarm_on_installed() {
+        assert_eq!(resolved("attend_mod.listening", &[]), Some(Value::String("dormant".into())));
+        assert_eq!(resolved("attend_mod.keepwarm", &[]), Some(Value::String("on".into())));
+        assert_eq!(resolved("attend_mod.install", &[]), Some(Value::Bool(true)));
+        assert_eq!(resolved("attend_mod.quiet_minutes", &[]), Some(Value::Number(20.into())));
+        assert_eq!(resolved("attend_mod.preamble_every_turns", &[]), Some(Value::Number(20.into())));
+        assert_eq!(resolved("attend_mod.headless_poll", &[]), Some(Value::Bool(false)));
+        assert!(attend_mod_install_in(&[]));
+    }
+
+    #[test]
+    fn the_project_wins_for_listening_and_keepwarm() {
+        let layers = [
+            layer("user", LayerScope::User, "attend_mod:\n  listening: dormant\n  keepwarm: on\n"),
+            layer("target", LayerScope::Target, "attend_mod:\n  keepwarm: off\n"),
+            layer("project", LayerScope::Project, "attend_mod: { listening: active }\n"),
+        ];
+        assert_eq!(resolved("attend_mod.listening", &layers), Some(Value::String("active".into())));
+        assert_eq!(resolved("attend_mod.keepwarm", &layers), Some(Value::String("off".into())));
+    }
+
+    #[test]
+    fn install_is_read_from_the_user_and_target_files_never_a_project() {
+        let user_off = layer("user", LayerScope::User, "attend_mod:\n  install: false\n");
+        assert!(!attend_mod_install_in(std::slice::from_ref(&user_off)));
+        let target_on = layer("target", LayerScope::Target, "attend_mod:\n  install: true\n");
+        assert!(attend_mod_install_in(&[user_off.clone(), target_on]));
+        let project_off = layer("project", LayerScope::Project, "attend_mod:\n  install: false\n");
+        assert!(!project_off.findings.is_empty(), "a project file may not set install");
+        assert!(attend_mod_install_in(&[project_off]));
+    }
+
+    #[test]
+    fn a_bad_value_keeps_an_off_switch_off() {
+        // A bad poll interval fails the section; the switches it held keep
+        // their closed reading, so keepwarm stays off and install false.
+        let l = layer("user", LayerScope::User, "attend_mod:\n  keepwarm: off\n  install: false\n  poll_seconds: soon\n");
+        assert_eq!(resolved("attend_mod.keepwarm", std::slice::from_ref(&l)), Some(Value::String("off".into())));
+        assert!(!attend_mod_install_in(std::slice::from_ref(&l)));
+        let bad = layer("project", LayerScope::Project, "attend_mod:\n  listening: loud\n");
+        assert_eq!(resolved("attend_mod.listening", &[bad]), Some(Value::String("dormant".into())));
+    }
 }

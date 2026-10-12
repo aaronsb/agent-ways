@@ -451,7 +451,28 @@ fn converge_one(
         eprintln!("{line}");
     }
 
+    // The attend mod (ADR-406), last: installed, updated, or with
+    // attend_mod.install false removed, through Claude Code's plugin CLI.
+    let target_config = target_config_path(dest_root);
+    let install = ways_core::settings::attend_mod_install(&target_config);
+    for line in crate::cmd::attend_mod::converge(source_root, dest_root, &paths::projection_root(), install, dry_run) {
+        if !quiet {
+            eprintln!("{line}");
+        }
+    }
+
     Ok(())
+}
+
+/// The config file of the target at `dest_root`: its own `config:` when the
+/// targets list names one, else the default under the target config root.
+fn target_config_path(dest_root: &Path) -> PathBuf {
+    crate::config::global()
+        .targets()
+        .into_iter()
+        .find(|t| t.matches_dir(dest_root))
+        .map(|t| t.config_path())
+        .unwrap_or_else(|| paths::target_config_root(dest_root).join("config.yaml"))
 }
 
 /// Withdraw from a disabled target (ADR-184 item 4): remove every symlink of
@@ -476,8 +497,10 @@ fn withdraw_one(
             settings_summary = Some(crate::cmd::settings_merge::withdraw_from_files(&src_settings, &dest_settings, base_path)?);
         }
     }
-    // The MCP registration goes before the links, so it never names a removed binary.
+    // The MCP registration and the attend mod go before the links, so neither
+    // names a removed path.
     let mcp_line = crate::cmd::mcp_register::withdraw(dest_root, &paths::projection_root(), dry_run);
+    let mod_lines = crate::cmd::attend_mod::withdraw(source_root, dest_root, &paths::projection_root(), dry_run);
     let mut outcomes = Vec::new();
     for root in roots {
         let src = source_root.join(&root.rel);
@@ -510,6 +533,9 @@ fn withdraw_one(
         eprintln!("{summary}");
     }
     if let (Some(line), false) = (mcp_line, quiet) {
+        eprintln!("{line}");
+    }
+    for line in mod_lines.into_iter().filter(|_| !quiet) {
         eprintln!("{line}");
     }
     Ok(())

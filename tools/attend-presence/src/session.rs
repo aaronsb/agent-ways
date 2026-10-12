@@ -87,14 +87,14 @@ pub fn identity() -> SessionIdentity {
 
 /// Resolve the identity of an arbitrary pid (test seam + tooling).
 pub fn identity_for_pid(pid: u32) -> SessionIdentity {
-    identity_in(&sessions_dir(), pid)
+    identity_in_dirs(&sessions_dirs(), pid, crate::process::is_claude_program)
 }
 
 /// The identity of `pid` when a Claude Code session record owns it, or
 /// `None` without reading anything more. `attend status` names each run by
 /// this, and a run with no record costs no working-directory lookup.
 pub fn session_identity_for_pid(pid: u32) -> Option<SessionIdentity> {
-    session_identity_in(&sessions_dir(), pid)
+    session_identity_in_dirs(&sessions_dirs(), pid, crate::process::is_claude_program)
 }
 
 /// The working directory of `pid`, the fallback origin. It is `pid`'s
@@ -113,7 +113,14 @@ fn process_cwd(pid: u32) -> String {
 /// uses the real process table — tests pass their own pid with a
 /// session record naming it directly.
 pub fn identity_in(dir: &Path, pid: u32) -> SessionIdentity {
-    session_identity_in(dir, pid).unwrap_or_else(|| SessionIdentity {
+    identity_in_dirs(&[dir.to_path_buf()], pid, |_| false)
+}
+
+/// [`identity_in`] over several sessions directories, the first naming a
+/// pid winning, with the ancestry walk stopping at a Claude Code process
+/// `is_claude` recognizes (see [`find_session_in_dirs`]).
+pub fn identity_in_dirs(dirs: &[PathBuf], pid: u32, is_claude: impl Fn(u32) -> bool) -> SessionIdentity {
+    session_identity_in_dirs(dirs, pid, is_claude).unwrap_or_else(|| SessionIdentity {
         session_id: format!("pid-{pid}"),
         origin_path: process_cwd(pid),
         session_resolved: false,
@@ -122,11 +129,11 @@ pub fn identity_in(dir: &Path, pid: u32) -> SessionIdentity {
     })
 }
 
-/// [`session_identity_for_pid`] against an arbitrary sessions directory.
+/// [`session_identity_for_pid`] against arbitrary sessions directories.
 /// The process's cwd is read only when the record has none.
-fn session_identity_in(dir: &Path, pid: u32) -> Option<SessionIdentity> {
-    let (sid, claude_pid) = find_session_in(dir, pid)?;
-    let origin = origin_path_in(dir, &sid);
+fn session_identity_in_dirs(dirs: &[PathBuf], pid: u32, is_claude: impl Fn(u32) -> bool) -> Option<SessionIdentity> {
+    let (sid, claude_pid) = find_session_in_dirs(dirs, pid, is_claude)?;
+    let origin = dirs.iter().find_map(|d| origin_path_in(d, &sid));
     let origin_resolved = origin.is_some();
     Some(SessionIdentity {
         origin_path: origin.unwrap_or_else(|| process_cwd(pid)),
@@ -140,7 +147,7 @@ fn session_identity_in(dir: &Path, pid: u32) -> Option<SessionIdentity> {
 /// Find the Claude Code session owning `own_pid` by climbing its
 /// process ancestry against the session records' pids.
 pub fn find_own_session_id(own_pid: u32) -> Option<String> {
-    find_session_id_in(&sessions_dir(), own_pid)
+    find_session_in_dirs(&sessions_dirs(), own_pid, crate::process::is_claude_program).map(|(sid, _)| sid)
 }
 
 /// Test-seam counterpart to [`find_own_session_id`].
@@ -151,15 +158,30 @@ pub fn find_session_id_in(dir: &Path, own_pid: u32) -> Option<String> {
 /// The session owning `own_pid` and the ancestor pid whose record matched:
 /// the Claude Code process itself.
 pub fn find_own_session(own_pid: u32) -> Option<(String, u32)> {
-    find_session_in(&sessions_dir(), own_pid)
+    find_session_in_dirs(&sessions_dirs(), own_pid, crate::process::is_claude_program)
 }
 
-/// Test-seam counterpart to [`find_own_session`].
+/// Test-seam counterpart to [`find_own_session`], over one directory and
+/// with no Claude Code process recognized on the way.
 pub fn find_session_in(dir: &Path, own_pid: u32) -> Option<(String, u32)> {
-    let pid_to_session: HashMap<u32, String> = claude_sessions::read_session_records(dir)
-        .into_iter()
-        .map(|r| (r.pid, r.session_id))
-        .collect();
+    find_session_in_dirs(&[dir.to_path_buf()], own_pid, |_| false)
+}
+
+/// The session owning `own_pid`: climb its ancestry and take the first pid
+/// a record in `dirs` names (an earlier directory wins for one pid).
+///
+/// The walk stops at the first Claude Code process, `is_claude`, whether or
+/// not a record names it. That process is the session `own_pid` runs in;
+/// when no record names it (its config directory is one this process cannot
+/// see), the session is unresolved rather than taken for an outer session
+/// further up, which would send as that session and read its messages.
+pub fn find_session_in_dirs(dirs: &[PathBuf], own_pid: u32, is_claude: impl Fn(u32) -> bool) -> Option<(String, u32)> {
+    let mut pid_to_session: HashMap<u32, String> = HashMap::new();
+    for dir in dirs {
+        for r in claude_sessions::read_session_records(dir) {
+            pid_to_session.entry(r.pid).or_insert(r.session_id);
+        }
+    }
     if pid_to_session.is_empty() {
         return None;
     }
@@ -169,7 +191,7 @@ pub fn find_session_in(dir: &Path, own_pid: u32) -> Option<(String, u32)> {
         if let Some(sid) = pid_to_session.get(&pid) {
             return Some((sid.clone(), pid));
         }
-        if pid <= 1 {
+        if is_claude(pid) || pid <= 1 {
             break;
         }
         match crate::process::parent_pid(pid) {
@@ -182,7 +204,7 @@ pub fn find_session_in(dir: &Path, own_pid: u32) -> Option<(String, u32)> {
 
 /// The origin path recorded for `session_id`, from its session record.
 pub fn origin_path(session_id: &str) -> Option<String> {
-    origin_path_in(&sessions_dir(), session_id)
+    sessions_dirs().iter().find_map(|d| origin_path_in(d, session_id))
 }
 
 /// Test-seam counterpart to [`origin_path`].
@@ -209,8 +231,24 @@ pub fn normalize_origin(cwd: &str) -> String {
     }
 }
 
-fn sessions_dir() -> PathBuf {
-    claude_sessions::ClaudeDir::user().sessions_dir()
+/// The sessions directories a session record can be in: the config
+/// directory this process runs under (`CLAUDE_CONFIG_DIR`, which Claude Code
+/// passes to what it runs), then `~/.claude`.
+pub fn sessions_dirs() -> Vec<PathBuf> {
+    sessions_dirs_for(std::env::var_os("CLAUDE_CONFIG_DIR").as_deref().map(Path::new), &claude_sessions::home_dir())
+}
+
+/// [`sessions_dirs`] for a given `CLAUDE_CONFIG_DIR` and home.
+pub fn sessions_dirs_for(config_dir: Option<&Path>, home: &Path) -> Vec<PathBuf> {
+    let default = claude_sessions::ClaudeDir::at(home.join(".claude")).sessions_dir();
+    let mut out = Vec::new();
+    if let Some(d) = config_dir.filter(|d| !d.as_os_str().is_empty()) {
+        out.push(claude_sessions::ClaudeDir::at(d).sessions_dir());
+    }
+    if !out.contains(&default) {
+        out.push(default);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -238,6 +276,94 @@ mod tests {
         write_session(&dir, "sess-parent", parent, "/via/hop");
         assert_eq!(find_session_in(&dir, std::process::id()), Some(("sess-parent".to_string(), parent)));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_config_dir_is_read_before_home() {
+        let home = Path::new("/home/u");
+        assert_eq!(sessions_dirs_for(None, home), vec![PathBuf::from("/home/u/.claude/sessions")]);
+        assert_eq!(
+            sessions_dirs_for(Some(Path::new("/t/claude-b")), home),
+            vec![PathBuf::from("/t/claude-b/sessions"), PathBuf::from("/home/u/.claude/sessions")]
+        );
+        assert_eq!(sessions_dirs_for(Some(Path::new("/home/u/.claude")), home), vec![PathBuf::from("/home/u/.claude/sessions")]);
+        assert_eq!(sessions_dirs_for(Some(Path::new("")), home), vec![PathBuf::from("/home/u/.claude/sessions")]);
+    }
+
+    /// A session under a non-default config directory resolves to itself,
+    /// and its record wins over one in `~/.claude` naming the same pid.
+    #[test]
+    fn a_session_under_a_non_default_config_dir_resolves_to_itself() {
+        let (target, home) = (tempdir_like(), tempdir_like());
+        let pid = std::process::id();
+        write_session(&target, "sess-target", pid, "/work/b");
+        let only_home = identity_in_dirs(std::slice::from_ref(&home), pid, |_| false);
+        assert!(!only_home.resolved(), "~/.claude alone does not know it");
+        let id = identity_in_dirs(&[target.clone(), home.clone()], pid, |_| false);
+        assert_eq!((id.session_id.as_str(), id.origin_path.as_str()), ("sess-target", "/work/b"));
+        write_session(&home, "sess-home", pid, "/work/a");
+        assert_eq!(identity_in_dirs(&[target.clone(), home.clone()], pid, |_| false).session_id, "sess-target");
+        fs::remove_dir_all(&target).ok();
+        fs::remove_dir_all(&home).ok();
+    }
+
+    /// A session under a non-default config directory, started from inside
+    /// a default-target session: the inner Claude Code process has no record
+    /// this process can see, and the walk stops there instead of taking the
+    /// outer session's identity.
+    #[cfg(unix)]
+    #[test]
+    fn a_nested_session_does_not_take_the_outer_identity() {
+        let home = tempdir_like();
+        let own = std::process::id();
+        let outer = std::os::unix::process::parent_id();
+        write_session(&home, "sess-outer", outer, "/work/outer");
+        // This process stands for the inner Claude Code process.
+        let inner = |pid: u32| pid == own;
+        assert_eq!(find_session_in_dirs(std::slice::from_ref(&home), own, inner), None);
+        assert!(!identity_in_dirs(std::slice::from_ref(&home), own, inner).resolved());
+        // The control: with no Claude Code process on the way, the walk
+        // climbs to the outer record.
+        assert_eq!(find_session_in_dirs(std::slice::from_ref(&home), own, |_| false), Some(("sess-outer".to_string(), outer)));
+        fs::remove_dir_all(&home).ok();
+    }
+
+    /// A node or bun hook under a `.claude/hooks/` folder that runs attend is
+    /// not the Claude Code program: the walk climbs past it to the session.
+    #[cfg(unix)]
+    #[test]
+    fn a_node_hook_under_a_claude_folder_resolves_through_to_the_session() {
+        let home = tempdir_like();
+        let own = std::process::id();
+        let session = std::os::unix::process::parent_id();
+        write_session(&home, "sess-outer", session, "/work/proj");
+        for hook in [["node", "/home/u/.claude/hooks/hook.js"], ["bun", "/home/u/proj/.claude/statusline.ts"]] {
+            let argv: Vec<String> = hook.iter().map(|s| s.to_string()).collect();
+            // This process stands for the hook; its parent for the session.
+            let is_claude = |pid: u32| pid == own && crate::process::is_claude_argv(&argv);
+            assert_eq!(find_session_in_dirs(std::slice::from_ref(&home), own, is_claude), Some(("sess-outer".to_string(), session)), "{argv:?}");
+        }
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn claude_code_is_told_from_what_mentions_it() {
+        let v = |args: &[&str]| crate::process::is_claude_argv(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        // Claude Code itself.
+        assert!(v(&["claude", "-p", "hi"]));
+        assert!(v(&["/home/u/.local/share/claude/versions/2.1.296"]));
+        assert!(v(&["node", "/usr/bin/claude"]), "npm-global");
+        assert!(v(&["node", "/home/u/.npm-global/bin/claude", "--resume"]), "npm-global under the home");
+        assert!(v(&["node", "--no-warnings", "/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js"]));
+        assert!(v(&["node", "/app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js"]), "the Agent SDK's CLI");
+        assert!(v(&["C:\\Users\\u\\AppData\\Roaming\\npm\\claude.exe"]));
+        // What only mentions it.
+        assert!(!v(&["node", "/home/u/.claude/hooks/hook.js"]));
+        assert!(!v(&["bun", "/home/u/proj/.claude/statusline.ts"]));
+        assert!(!v(&["node", "/app/node_modules/@anthropic-ai/claude-agent-sdk/index.js"]), "an SDK host, not its CLI");
+        assert!(!v(&["bash", "-c", "source /home/u/.claude/shell-snapshots/s.sh && attend"]));
+        assert!(!v(&["timeout", "240", "claude", "-p"]));
+        assert!(!v(&[]));
     }
 
     fn write_session(dir: &Path, sid: &str, pid: u32, cwd: &str) {

@@ -1,0 +1,12 @@
+{
+  "name": "agent-ways",
+  "owner": { "name": "Aaron Bockelie" },
+  "description": "The Claude Code mods agent-ways ships. `ways manage repair` adds this marketplace and installs from it (ADR-406).",
+  "plugins": [
+    {
+      "name": "attend",
+      "source": "./attend",
+      "description": "attend's agent-facing driver: dormant by default, one status row while listening, typed send, reply, join and peers tools over the attend CLI."
+    }
+  ]
+}

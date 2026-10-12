@@ -242,3 +242,9 @@ The operator set the constraints. Attend matters when several agents work on rel
 - **Keepwarm configured only through `attend keepwarm` and attend's own config.** Rejected: the toggle is about what attend does to a session's attention, the same question `listening` answers, so it sits beside `listening` and resolves per project the same way.
 - **Shipping the mod under `skills/`,** so the user skills folder loads it. Rejected: reconcile projects the whole `skills/` root, so the mod would load in every target with no switch of its own, and no step could update or remove it apart from the skills root. A project `.claude/skills` folder does not load it at all.
 - **`CLAUDE_CODE_PLUGIN_DIRS` written into the settings env block.** Rejected for the reasons in item 8.
+
+## Addendum, 2026-10-12: installed hooks modules sit behind a rollout flag
+
+Appended after acceptance; nothing above is changed. It adds to the early-access risk in the Negative consequences and in item 8.
+
+On Claude Code 2.1.296 the debug log of a session with `attend@agent-ways` installed says `installed plugins' hooks modules held 1ms for the rollout flag (tengu_plugin_hooks_modules): the fetch settled with no payload`. An installed mod's hooks module therefore loads behind a server-side rollout flag, which a `--plugin-dir` load does not wait for. In that run the session was logged out, the flag fetch returned no payload, and the mod still loaded. Whether a flag that is fetched and set to off would stop an installed mod from loading is untested. If it would, the Monitor fallback of item 9 is the path for those sessions, as it is for any host that cannot run the mod.

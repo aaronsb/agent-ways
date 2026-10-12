@@ -75,8 +75,8 @@ pub(super) fn file_of(kind: &str, scope: Scope, project: Option<&Path>) -> Optio
     if !known.contains(&kind) {
         return None;
     }
-    if project.is_some() && scope == Scope::User {
-        return Some(Err(Scope::User));
+    if project.is_some() && matches!(scope, Scope::User | Scope::Machine) {
+        return Some(Err(scope));
     }
     let to_project = matches!((scope, project), (Scope::Project, _) | (Scope::Both, Some(_)));
     let dir = || project_dir(project);
@@ -220,6 +220,9 @@ pub(super) fn target_file(b: &Bound, project: Option<&Path>) -> Result<(PathBuf,
     let scope = if b.spec.file == ways_agent_core::settings::FILE { Scope::User } else { b.spec.scope };
     match file_of(b.spec.file, scope, project) {
         Some(Ok(t)) => Ok(t),
+        Some(Err(Scope::Machine)) => {
+            Err(fail(exit::USAGE, format!("{name} is set in the user file or a target's, never a project's; drop --project")))
+        }
         Some(Err(_)) => Err(fail(exit::USAGE, format!("{name} is set in the user file only; drop --project"))),
         None => Err(fail(exit::REJECTED, format!("{name} is not stored in a settings file; `ways settings help {name}`"))),
     }

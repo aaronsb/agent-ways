@@ -200,6 +200,7 @@ pub fn run(json_output: bool) -> Result<()> {
         }
         for t in install_targets().0.iter().filter(|t| t.enabled) {
             println!("  mcp:       {} in {}", mcp_registration(&t.dir()), t.path);
+            println!("  mod:       {} in {}", crate::cmd::attend_mod::status_line(&attend_mod_status(t)), t.path);
         }
         println!();
 
@@ -424,8 +425,15 @@ fn install_json() -> serde_json::Value {
             "observe": t.observes(),
             "state": crate::cmd::target::state(t),
             "mcp_command": crate::cmd::mcp_register::status(&t.dir(), &crate::paths::projection_root()),
+            "attend_mod": if t.enabled { attend_mod_status(t) } else { serde_json::Value::Null },
         })).collect::<Vec<_>>(),
     })
+}
+
+/// The attend mod in one target (ADR-406 item 8): the installed and the
+/// shipped version.
+fn attend_mod_status(t: &crate::config::Target) -> serde_json::Value {
+    crate::cmd::attend_mod::status(&crate::paths::data_root(), &t.dir(), &crate::paths::projection_root())
 }
 
 /// `bin` with what its `--version` prints, if it answers.

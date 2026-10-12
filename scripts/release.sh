@@ -12,6 +12,11 @@
 # Usage:
 #   scripts/release.sh bump <ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat> <patch|minor|major>
 #   scripts/release.sh tag  <ways|ways-audit|ways-mcp|ways-agent|attend|attend-chat> [--push]
+#   scripts/release.sh check <component>
+#
+# Both bump and tag refuse a release whose range, from the component's last tag
+# to HEAD, changed plugins/attend/ without moving the plugin's version; `check`
+# runs that check alone. Bumping attend moves the plugin's version with it.
 #
 # `tag` without --push creates the annotated tag locally and prints the push
 # command (keeps the publish deliberate); `--push` pushes it. way-embed is out of
@@ -45,6 +50,43 @@ lock_version() {
   ' tools/Cargo.lock 2>/dev/null
 }
 
+# The attend mod (ADR-406) carries attend's version and is released with
+# attend. Claude Code updates its plugin cache only when the version moves,
+# so a change under plugins/attend/ with the same version never reaches an
+# install that already has the mod.
+PLUGIN_MANIFEST="plugins/attend/.claude-plugin/plugin.json"
+
+plugin_version_of() {
+  # The first "version" field, wherever it sits on its line, so a manifest
+  # written on one line reads the same.
+  grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"([^"]*)"$/\1/'
+}
+
+# True when version $1 sorts before $2 (numeric fields, as sort -V orders them).
+version_lt() {
+  [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]
+}
+
+# Refuse a release whose range changed plugins/attend/ without moving the
+# plugin's version forward: the range runs from this component's last tag to
+# HEAD. It fails closed: a version it cannot read on either side refuses,
+# and so does one that moved backwards.
+check_plugin_bump() {
+  [[ -f "$PLUGIN_MANIFEST" ]] || return 0
+  local prev old new
+  prev="$(git describe --tags --abbrev=0 --match "${TAG_PREFIX}*" HEAD 2>/dev/null)" || return 0
+  git diff --quiet "$prev" HEAD -- plugins/attend && return 0
+  new="$(plugin_version_of < "$PLUGIN_MANIFEST")"
+  [[ -n "$new" ]] || die "cannot read the plugin's version from $PLUGIN_MANIFEST"
+  # A plugin that did not exist at the last tag is new: any version moves.
+  git cat-file -e "$prev:$PLUGIN_MANIFEST" 2>/dev/null || return 0
+  old="$(git show "$prev:$PLUGIN_MANIFEST" | plugin_version_of)"
+  [[ -n "$old" ]] || die "cannot read the plugin's version from $PLUGIN_MANIFEST at $prev"
+  version_lt "$new" "$old" && die "$PLUGIN_MANIFEST moved backwards since $prev: $old to $new"
+  [[ "$old" != "$new" ]] || die "plugins/attend/ changed since $prev but $PLUGIN_MANIFEST is still $new; release attend first (make cut-release COMPONENT=attend), which moves the plugin's version with attend's"
+  return 0
+}
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -65,6 +107,10 @@ case "$MODE" in
     git fetch --quiet origin main
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
       || die "local main is not in sync with origin/main — pull/push first"
+
+    # attend's own bump moves the plugin's version; any other component's
+    # release must not ship a plugin change under an old version.
+    [[ "$COMPONENT" == "attend" ]] || check_plugin_bump
 
     CURRENT="$(current_version "$MANIFEST")"
     [[ "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || die "unparseable version '$CURRENT' in $MANIFEST"
@@ -100,7 +146,16 @@ case "$MODE" in
     [[ "$GOT" == "$NEXT" ]] \
       || die "Cargo.lock still records $PKG=${GOT:-none}, not $NEXT — refusing to commit a stale lockfile. Run 'cargo update -p $PKG --manifest-path tools/Cargo.toml' and retry."
 
-    git add "$MANIFEST" tools/Cargo.lock
+    FILES=("$MANIFEST" tools/Cargo.lock)
+    if [[ "$COMPONENT" == "attend" && -f "$PLUGIN_MANIFEST" ]]; then
+      awk -v ver="$NEXT" '
+        !done && /^[[:space:]]*"version"[[:space:]]*:/ { sub(/"version"[[:space:]]*:[[:space:]]*"[^"]+"/, "\"version\": \"" ver "\""); done=1 }
+        { print }
+      ' "$PLUGIN_MANIFEST" > "$PLUGIN_MANIFEST.tmp" && mv "$PLUGIN_MANIFEST.tmp" "$PLUGIN_MANIFEST"
+      [[ "$(plugin_version_of < "$PLUGIN_MANIFEST")" == "$NEXT" ]] || die "could not move $PLUGIN_MANIFEST to $NEXT"
+      FILES+=("$PLUGIN_MANIFEST")
+    fi
+    git add "${FILES[@]}"
     git commit -q -m "release(${COMPONENT}): bump to ${NEXT}"
     git push -q -u origin "$BRANCH"
     gh pr create --title "release(${COMPONENT}): v${NEXT}" \
@@ -129,6 +184,11 @@ EOF
     GOT="$(lock_version "$PKG")"
     [[ "$GOT" == "$VERSION" ]] || die "Cargo.lock records $PKG=${GOT:-none} but manifest is $VERSION — is the bump PR merged?"
     TAG="${TAG_PREFIX}${VERSION}"
+    if [[ "$COMPONENT" == "attend" && -f "$PLUGIN_MANIFEST" ]]; then
+      PV="$(plugin_version_of < "$PLUGIN_MANIFEST")"
+      [[ "$PV" == "$VERSION" ]] || die "$PLUGIN_MANIFEST is $PV but attend is $VERSION; they release together"
+    fi
+    check_plugin_bump
 
     git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null && die "tag ${TAG} already exists locally"
     git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1 && die "tag ${TAG} already exists on origin"
@@ -149,5 +209,11 @@ EOF
     fi
     ;;
 
-  *) die "unknown mode '$MODE' (bump|tag)" ;;
+  check)
+    # The plugin check alone, as bump and tag run it, on the checkout as it is.
+    check_plugin_bump
+    echo "release: plugins/attend/ is releasable with ${COMPONENT}"
+    ;;
+
+  *) die "unknown mode '$MODE' (bump|tag|check)" ;;
 esac

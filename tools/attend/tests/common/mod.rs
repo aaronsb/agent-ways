@@ -112,6 +112,7 @@ impl Fixture {
             .env("XDG_DATA_HOME", self.home.join("data"))
             .env("USER", "fixture-human")
             .env_remove("CLAUDE_SESSION_ID")
+            .env_remove("CLAUDE_CONFIG_DIR")
             .env_remove("ATTEND_RELOADED_FROM")
             .current_dir(&self.origin)
             .stdin(Stdio::null());

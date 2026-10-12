@@ -17,6 +17,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 /// The name Claude Code knows the server by; tools appear as
 /// `mcp__agent-ways__<tool>`.
@@ -75,7 +76,7 @@ fn config_for(dest_root: &Path, default_root: &Path, inherited: Option<&Path>) -
     }
 }
 
-fn config_dir(dest_root: &Path, default_root: &Path) -> (Option<PathBuf>, PathBuf) {
+pub(crate) fn config_dir(dest_root: &Path, default_root: &Path) -> (Option<PathBuf>, PathBuf) {
     let inherited = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
     config_for(dest_root, default_root, inherited.as_deref())
 }
@@ -112,7 +113,7 @@ fn is_executable(p: &Path) -> bool {
 
 /// The `claude` binary: `WAYS_CLAUDE_BIN` when set (tests), else the first
 /// executable `claude` on PATH.
-fn claude_bin() -> Option<PathBuf> {
+pub(crate) fn claude_bin() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("WAYS_CLAUDE_BIN") {
         return Some(PathBuf::from(p));
     }
@@ -122,17 +123,78 @@ fn claude_bin() -> Option<PathBuf> {
 }
 
 fn run_claude(claude: &Path, config_dir: Option<&Path>, args: &[&str]) -> Result<(), String> {
+    claude_stdout(claude, config_dir, args).map(|_| ())
+}
+
+/// How long one `claude` call may run before it is killed. The calls are
+/// local (the CLI's own config files and a folder marketplace), so a call
+/// past this is hung, and a repair must not hang with it.
+pub(crate) const CLAUDE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Run the `claude` CLI under `config_dir` (unset for the default target) and
+/// answer its stdout, or its stderr when it fails or times out.
+pub(crate) fn claude_stdout(claude: &Path, config_dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new(claude);
     cmd.args(args);
     match config_dir {
         Some(d) => cmd.env("CLAUDE_CONFIG_DIR", d),
         None => cmd.env_remove("CLAUDE_CONFIG_DIR"),
     };
-    let out = cmd.output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
+    output_within(cmd, CLAUDE_TIMEOUT)
+}
+
+/// Run `cmd` with its output captured, killing it once `limit` has passed:
+/// on Unix its whole process group, so what it started dies with it.
+/// Its stdout on success; its stderr, its exit code, or the timeout otherwise.
+///
+/// The group is its own, so a Ctrl-C at the terminal stops `ways` and not
+/// the `claude` call in flight, which finishes on its own. That is the
+/// wanted side: each call is one short local edit of Claude Code's plugin
+/// or MCP config, which a signal mid-write could leave half done, and the
+/// next repair reads what it left and converges from there.
+pub(crate) fn output_within(mut cmd: Command, limit: Duration) -> Result<String, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
+    // Read both pipes on threads, so a child that fills one never blocks.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let out = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let err = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let deadline = Instant::now() + limit;
+    let status = loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(status) => break status,
+            None if Instant::now() >= deadline => {
+                #[cfg(unix)]
+                let _ = Command::new("kill")
+                    .args(["-KILL", "--", &format!("-{}", child.id())])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("timed out after {}s", limit.as_secs()));
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    };
+    let stdout = out.join().unwrap_or_default();
+    let stderr = err.join().unwrap_or_default();
+    if status.success() {
+        Ok(String::from_utf8_lossy(&stdout).into_owned())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        let e = String::from_utf8_lossy(&stderr).trim().to_string();
+        Err(if e.is_empty() { format!("exit {}", status.code().unwrap_or(-1)) } else { e })
     }
 }
 
@@ -244,6 +306,45 @@ mod tests {
         assert_eq!(config_for(home, home, Some(home)), (Some(home.to_path_buf()), home.to_path_buf()));
         // One naming somewhere else leaves the default target's file alone.
         assert_eq!(config_for(home, home, Some(Path::new("/elsewhere"))), (None, PathBuf::from("/home/u")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_call_is_killed_at_its_limit() {
+        let mut slow = Command::new("sh");
+        slow.args(["-c", "sleep 5"]);
+        let started = Instant::now();
+        let e = output_within(slow, Duration::from_millis(200)).unwrap_err();
+        assert!(e.contains("timed out"), "{e}");
+        assert!(started.elapsed() < Duration::from_secs(3), "killed, not waited out");
+        let mut fine = Command::new("sh");
+        fine.args(["-c", "echo out; echo err >&2"]);
+        assert_eq!(output_within(fine, Duration::from_secs(5)).unwrap(), "out\n");
+        let mut failing = Command::new("sh");
+        failing.args(["-c", "echo why >&2; exit 3"]);
+        assert_eq!(output_within(failing, Duration::from_secs(5)).unwrap_err(), "why");
+    }
+
+    /// What the timed-out call started dies with it: its process group is
+    /// killed, not only the direct child.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_timeout_kills_what_the_call_started() {
+        let pidfile = std::env::temp_dir().join(format!("ways-output-within-{}", std::process::id()));
+        let mut slow = Command::new("sh");
+        slow.args(["-c", &format!("sleep 30 & echo $! > {}; wait", pidfile.display())]);
+        assert!(output_within(slow, Duration::from_millis(300)).unwrap_err().contains("timed out"));
+        let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
+        std::fs::remove_file(&pidfile).ok();
+        // Reaped by init once killed; give the kernel a moment.
+        let alive = || std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| !s.contains(") Z "));
+        for _ in 0..50 {
+            if !alive() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(), "the grandchild {pid} outlived the timeout");
     }
 
     #[test]

@@ -483,7 +483,7 @@ fn installed_version(bin: &Path) -> Option<String> {
 /// Whether version `a` is older than `b`: numeric `X.Y.Z` cores compared in
 /// order, and at an equal core a pre-release (`1.2.0-rc1`) is older than the
 /// release. Versions that do not parse are older when they differ.
-fn version_older(a: &str, b: &str) -> bool {
+pub(crate) fn version_older(a: &str, b: &str) -> bool {
     fn parse(v: &str) -> Option<(Vec<u64>, bool)> {
         let (core, pre) = match v.split_once('-') {
             Some((c, _)) => (c, true),

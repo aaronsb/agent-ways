@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use agent_settings::load::{resolve, Finding, Layer};
-use agent_settings::{Bound, Kind, Scope};
+use agent_settings::{Bound, Kind};
 use agent_tui::tree::{quote, Action, Arg, Kind as TKind, Node, Setting};
 use serde_yaml::Value;
 
@@ -38,14 +38,16 @@ impl Tab {
 
 /// The settings tabs, in order; the theme tab follows them. attend's
 /// settings are two tabs beside ways' (ADR-504 §8): its governor, engagement
-/// and cleanup, and its sensors.
-pub const TABS: [Tab; 6] = [
+/// and cleanup, and its sensors. The attend mod's section, which ways owns
+/// (ADR-406), has a tab of its own after them.
+pub const TABS: [Tab; 7] = [
     Tab::root("ways"),
     Tab::root("matching"),
     Tab::root("gate"),
     Tab::root("install"),
     Tab { name: "attend", prefix: "attend", skip: &["attend.sensors"] },
     Tab { name: "sensors", prefix: "attend.sensors", skip: &[] },
+    Tab { name: "mod", prefix: "attend_mod", skip: &[] },
 ];
 
 /// The tab named `name`.
@@ -413,7 +415,7 @@ impl Ways {
             }
             let settable = !matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) && b.spec.computed.is_none();
             if settable {
-                let project = (b.spec.scope == Scope::Project).then_some(self.ctx.project.as_path());
+                let project = super::writes_project(&b, &self.ctx).then_some(self.ctx.project.as_path());
                 if let Ok((path, scope)) = target_file(&b, project) {
                     let layer = if scope == agent_settings::LayerScope::Project { "project" } else { "user" };
                     if broken.iter().any(|(f, _)| *f == path) {

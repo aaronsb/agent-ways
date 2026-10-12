@@ -14,6 +14,9 @@ on:
       - 'Makefile'
       - 'scripts/install.sh'
       - 'scripts/workflow-paths.sh'
+      - 'scripts/release.sh'
+      - 'scripts/check-plugins.sh'
+      - 'plugins/**'
       - '.github/workflows/build-*.yml'
       - '.github/workflows/reusable-build.yml'
       - '.github/workflows/test.yml'
@@ -25,6 +28,9 @@ on:
       - 'Makefile'
       - 'scripts/install.sh'
       - 'scripts/workflow-paths.sh'
+      - 'scripts/release.sh'
+      - 'scripts/check-plugins.sh'
+      - 'plugins/**'
       - '.github/workflows/build-*.yml'
       - '.github/workflows/reusable-build.yml'
       - '.github/workflows/test.yml'
@@ -61,3 +67,19 @@ jobs:
         run: cargo test --manifest-path tools/Cargo.toml -p attend --no-default-features --features sensor-keepwarm
       - name: hook tests
         run: make test-hooks
+
+  plugins:
+    # The Claude Code mods in plugins/ (ADR-406): version lockstep with
+    # attend, `claude plugin validate`, and `claude plugin test`. The build is
+    # pinned to the one the mod's early-access API was written against; move
+    # it when the mod is checked against a newer Claude Code. Type checking
+    # needs the declarations Claude Code lays beside a mod it loads in a
+    # session, which a runner has none of, so the script reports it skipped.
+    name: plugins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.296
+      - name: validate and test
+        run: make test-plugins

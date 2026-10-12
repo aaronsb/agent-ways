@@ -86,7 +86,7 @@ pub fn cli_main() {
                 let why = "--drain drains everything pending; it cannot be combined with a message id";
                 cmd::refuse_usage(why, why, json);
             }
-            (true, None) => cmd::inbox::cmd_inbox_drain(&format),
+            (true, None) => cmd::inbox::cmd_inbox_drain(if json { "json" } else { &format }),
             (false, Some(id)) => cmd::inbox::cmd_inbox_read(&id, json),
             (false, None) => cmd::inbox::cmd_inbox(limit, page, before, json),
         },
@@ -109,9 +109,9 @@ pub fn cli_main() {
             cmd::send::reject_flag_like("send", cmd::send::SEND_FLAGS, &message, json);
             cmd::send::cmd_send(to, channel, re, message, json);
         }
-        Commands::Reply { to, channel, json, message } => {
+        Commands::Reply { re, to, channel, json, message } => {
             cmd::send::reject_flag_like("reply", cmd::send::REPLY_FLAGS, &message, json);
-            cmd::send::cmd_reply(to, channel, message, json);
+            cmd::send::cmd_reply(re, to, channel, message, json);
         }
         Commands::Listen { sub, json } => cmd::listen::cmd_listen(sub.unwrap_or(ListenCmd::Status), json),
         Commands::Unread { json } => cmd::listen::cmd_unread(json),
