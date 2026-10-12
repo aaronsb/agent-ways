@@ -208,16 +208,25 @@ fn send_to_recipients(
     };
     // Posting in a channel makes the person its member, before the
     // message is written, so the membership precedes what an agent
-    // answers (ADR-404 D1).
+    // answers (ADR-404 D1). A refused join does not hold the post back;
+    // the status says it.
+    let mut not_joined = Vec::new();
     for r in recipients {
         if let (Addressed::Group(name), Some(member)) = (r, person) {
-            enter_channel(member, name);
+            if let Err(e) = enter_channel(member, name) {
+                not_joined.push((name, e));
+            }
         }
     }
     let sent = dests.iter().try_for_each(|dir| write_signal(dir, msg).map(|_| ())).map(|()| dests);
     match sent {
         Ok(dests) => {
-            let status = format!("sent → {}", recipient_labels(recipients).join(" "));
+            let mut status = format!("sent → {}", recipient_labels(recipients).join(" "));
+            // One channel needs no name in its note; several do.
+            let named = recipients.iter().filter(|r| matches!(r, Addressed::Group(_))).count() > 1;
+            for (name, e) in not_joined {
+                status += &if named { format!(" (not joined #{name}: {e})") } else { format!(" (not joined: {e})") };
+            }
             // Echo only when the message reaches NO inbox the sender's
             // own watcher already surfaces — otherwise it round-trips
             // and a synthetic echo would double-render it. `#open`
@@ -266,22 +275,22 @@ fn writing_groups(base: &std::path::Path, member: &str) -> attend_groups::Groups
 /// tab bar is walked, cycled and advanced past channels nobody chose, and a
 /// Leave must hold. The heartbeat is touched first, as `/join` does, so the
 /// membership is live at once.
-fn enter_channel(member: &str, name: &str) {
+fn enter_channel(member: &str, name: &str) -> Result<bool, String> {
     let _ = attend_presence::heartbeat::touch(member);
-    enter_channel_in(&signals_base(), member, name);
+    enter_channel_in(&signals_base(), member, name)
 }
 
 /// Filesystem-effect core of [`enter_channel`]. Only a channel that exists,
 /// with its entry and its directory, is entered: a swept or unknown channel
 /// is not brought back, as `/join` would. Returns whether it wrote a
-/// membership.
-fn enter_channel_in(base: &std::path::Path, member: &str, name: &str) -> bool {
+/// membership, or the join's refusal.
+fn enter_channel_in(base: &std::path::Path, member: &str, name: &str) -> Result<bool, String> {
     let groups = writing_groups(base, member);
     match groups.members(name) {
         Some(members) if !members.iter().any(|m| m == member) && groups.group_dir(name).is_dir() => {
-            groups.join(name, false).is_ok()
+            groups.join(name, false).map(|()| true)
         }
-        _ => false,
+        _ => Ok(false),
     }
 }
 
@@ -1090,16 +1099,16 @@ mod tests {
     #[test]
     fn entering_joins_only_a_channel_that_exists() {
         let base = tempdir_like();
-        assert!(!enter_channel_in(&base, "aaron", "ghost"), "an unknown channel is not made");
+        assert_eq!(enter_channel_in(&base, "aaron", "ghost"), Ok(false), "an unknown channel is not made");
         assert!(!base.join("@ghost").exists());
         let agent = attend_groups::Groups::new(&base, "agent");
         agent.join("deploy", false).unwrap();
         agent.join("swept", false).unwrap();
         std::fs::remove_dir_all(base.join("@swept")).unwrap();
-        assert!(!enter_channel_in(&base, "aaron", "swept"), "a swept channel is not brought back");
+        assert_eq!(enter_channel_in(&base, "aaron", "swept"), Ok(false), "a swept channel is not brought back");
         assert!(!base.join("@swept").exists());
-        assert!(enter_channel_in(&base, "aaron", "deploy"));
-        assert!(!enter_channel_in(&base, "aaron", "deploy"), "a member is not written twice");
+        assert_eq!(enter_channel_in(&base, "aaron", "deploy"), Ok(true));
+        assert_eq!(enter_channel_in(&base, "aaron", "deploy"), Ok(false), "a member is not written twice");
         assert_eq!(agent.members("deploy").unwrap(), vec!["agent", "aaron"]);
     }
 
