@@ -462,4 +462,20 @@ for view in "" 1; do
         "**Note**: Could not reach GitHub API" "$(cat "$WORK/gh.out")"
 done
 
+# A macro past the 3 s deadline is killed: its way is delivered without the
+# macro's output, and the timeout is logged by the way's name.
+mkdir -p "$CORE/slowdom/slow"
+printf -- '---\ndescription: test way\nscope: subagent\nrefire: 0.15\nmacro: append\n---\n# Slow way body\n' > "$CORE/slowdom/slow/slow.md"
+printf '#!/bin/bash\necho early\nsleep 20\necho late\n' > "$CORE/slowdom/slow/macro.sh"
+rm -rf "$SESSIONS"
+mkdir -p "$SESSIONS/sess-slow/subagent-stash"
+echo '{"ways":["slowdom/slow"],"channels":["prompt"]}' > "$SESSIONS/sess-slow/subagent-stash/001.json"
+secs=$( { time ( jq -cn --arg c "$PROJ" '{session_id:"sess-slow",agent_id:"agent-s",cwd:$c}' \
+    | bash "$HOOKS/inject-subagent.sh" | jq -r '.hookSpecificOutput.additionalContext // empty' > "$WORK/slow.ctx" ); } 2>&1 )
+check "a macro past the deadline is cut off near 3 s (took ${secs} s)" "yes" "$(under "$secs" 5)"
+check "a macro past the deadline adds nothing to its way" "# Slow way body" "$(cat "$WORK/slow.ctx")"
+check "a macro past the deadline is logged by its way" "slowdom/slow" \
+    "$(jq -r 'select(.event=="macro_timeout") | .way' "$XDG_STATE_HOME/agent-ways/events.jsonl" 2>/dev/null)"
+rm -rf "$CORE/slowdom"
+
 exit $fail

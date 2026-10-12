@@ -154,17 +154,43 @@ pub(crate) fn is_executable(path: &Path) -> bool {
 /// waits on, so a macro still running then (a hung CLI it calls, say) is
 /// killed with what it started and adds nothing. The same bound as a
 /// PostToolUse postcheck (`hook::post_tool::DEADLINE`). The run goes through
-/// [`crate::cmd::mcp_register::output_within`], which kills the macro's
-/// process group, so a CLI the macro started dies with it.
+/// [`crate::cmd::proc::output_within`], which kills the macro's process
+/// group, so a CLI the macro started dies with it.
+///
+/// No macro in the shipped corpus needs longer: the slowest, the github
+/// way's, bounds its own network calls to fit. A macro whose hook Claude
+/// Code kills before the deadline is not reached by it, and runs on as an
+/// orphan (see `output_within`).
 pub(crate) const MACRO_DEADLINE: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Execute a macro shell script with [`macro_env`] and return its stdout:
-/// `None` when it fails, prints nothing, or outlives [`MACRO_DEADLINE`].
+/// `None` when it fails, prints nothing, or outlives [`MACRO_DEADLINE`]. A
+/// timeout is logged as a `macro_timeout` event naming the way, so it is
+/// told apart from a macro that had nothing to say.
 pub(crate) fn run_macro(macro_file: &Path, run: &MacroRun) -> Option<String> {
-    run_macro_within(macro_file, run, MACRO_DEADLINE)
+    match run_macro_within(macro_file, run, MACRO_DEADLINE) {
+        Ok(out) => (!out.is_empty()).then_some(out),
+        Err(crate::cmd::proc::ProcError::TimedOut(limit)) => {
+            crate::session::log_event(&[
+                ("event", "macro_timeout"),
+                ("way", &macro_way_name(macro_file)),
+                ("limit_ms", &limit.as_millis().to_string()),
+                ("scope", run.scope),
+                ("project", run.project_dir),
+                ("session", run.session_id),
+            ]);
+            None
+        }
+        Err(_) => None,
+    }
 }
 
-fn run_macro_within(macro_file: &Path, run: &MacroRun, limit: std::time::Duration) -> Option<String> {
+/// The macro's trimmed stdout, or why there is none.
+fn run_macro_within(
+    macro_file: &Path,
+    run: &MacroRun,
+    limit: std::time::Duration,
+) -> Result<String, crate::cmd::proc::ProcError> {
     let source = std::fs::read_to_string(macro_file).unwrap_or_default();
     let mut cmd = Command::new("bash");
     cmd.arg(macro_file);
@@ -174,9 +200,20 @@ fn run_macro_within(macro_file: &Path, run: &MacroRun, limit: std::time::Duratio
             None => cmd.env_remove(name),
         };
     }
-    let out = crate::cmd::mcp_register::output_within(cmd, limit).ok()?;
-    let out = out.trim();
-    (!out.is_empty()).then(|| out.to_string())
+    crate::cmd::proc::output_within(cmd, limit).map(|out| out.trim().to_string())
+}
+
+/// The way a macro belongs to, for a log line: its directory below the last
+/// `ways` component (`softwaredev/delivery/github`), or `core` for the
+/// macro at a ways root.
+fn macro_way_name(macro_file: &Path) -> String {
+    let dir = macro_file.parent().unwrap_or(macro_file);
+    let parts: Vec<_> = dir.components().map(|c| c.as_os_str().to_string_lossy()).collect();
+    match parts.iter().rposition(|p| p == "ways") {
+        Some(i) if i + 1 == parts.len() => "core".to_string(),
+        Some(i) => parts[i + 1..].join("/"),
+        None => dir.display().to_string(),
+    }
 }
 
 /// Check whether a project directory is in the trusted-project-macros list.
@@ -263,12 +300,22 @@ mod tests {
         let slow = dir.join("slow.sh");
         std::fs::write(&slow, "echo partial\nsleep 30\necho late\n").unwrap();
         let started = std::time::Instant::now();
-        assert_eq!(run_macro_within(&slow, &run, std::time::Duration::from_millis(300)), None);
+        let limit = std::time::Duration::from_millis(300);
+        assert_eq!(run_macro_within(&slow, &run, limit), Err(crate::cmd::proc::ProcError::TimedOut(limit)));
         assert!(started.elapsed() < std::time::Duration::from_secs(3), "took {:?}", started.elapsed());
         let fine = dir.join("fine.sh");
         std::fs::write(&fine, "echo done\n").unwrap();
-        assert_eq!(run_macro_within(&fine, &run, std::time::Duration::from_secs(5)).as_deref(), Some("done"));
+        assert_eq!(run_macro_within(&fine, &run, std::time::Duration::from_secs(5)).as_deref(), Ok("done"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_timed_out_macro_is_logged_by_its_way() {
+        let name = |p: &str| macro_way_name(Path::new(p));
+        assert_eq!(name("/h/.claude/hooks/ways/softwaredev/delivery/github/macro.sh"), "softwaredev/delivery/github");
+        assert_eq!(name("/h/.claude/hooks/ways/macro.sh"), "core");
+        assert_eq!(name("/p/.claude/ways/projdom/local/macro.sh"), "projdom/local");
+        assert_eq!(name("/elsewhere/x/macro.sh"), "/elsewhere/x");
     }
 
     #[test]

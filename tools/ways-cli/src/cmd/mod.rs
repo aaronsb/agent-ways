@@ -21,6 +21,7 @@ pub mod projects;
 pub mod screen_host;
 pub mod attend_mod;
 pub mod mcp_register;
+pub(crate) mod proc;
 pub mod reconcile;
 pub mod reinstall;
 pub mod reflow;
