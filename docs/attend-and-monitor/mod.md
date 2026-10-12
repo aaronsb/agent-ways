@@ -21,7 +21,14 @@ A session becomes **active** in one of two ways:
 
 - The user asks Claude to use attend, and the agent calls `attend_listen`. `/attend` does this in a mod host instead of starting Monitor.
 
-An active session stays active until Claude Code exits, through `/compact`, `/clear` and `/reload-plugins`. The mod records each session id that listened in its own store, which outlives the process, and keeps the newest 50. So `claude --resume` of a session that listened, or `/resume` to one inside a running session, comes back listening. A `/clear` carries the record to the new id. Any other new session id in a dormant project starts dormant. Opening or closing attend-chat changes nothing in any session.
+An active session stays active until Claude Code exits, through `/compact`, `/clear` and `/reload-plugins`.
+
+When a session listens and its project's config would not start it listening, the mod records the session id in its own store, which outlives the process. That covers an `attend_listen` call in a dormant project, and a `/clear` of such a session. The record keeps the newest 50 ids.
+- `claude --resume` of a recorded session comes back listening, and so does `/resume` to one inside a running session (ADR-411).
+- Any other new session id in a dormant project starts dormant. That includes a `--fork-session` child, which does not name the session it forked from.
+- A store write that fails is logged as a transcript line, and the session goes on listening.
+
+Opening or closing attend-chat changes nothing in any session.
 
 While active, the mod:
 
@@ -80,7 +87,9 @@ Load a working copy for one session:
 claude --plugin-dir <checkout>/plugins/attend
 ```
 
-Where `attend@agent-ways` is installed too, the working copy takes its place for that session: Claude Code 2.1.296 logs `Plugin "attend" from --plugin-dir overrides installed version` and loads one `attend` hooks module, `attend@inline`, so there is nothing to disable first. Sessions started without the flag keep the installed one. An interactive session reloads the mod when a file in the folder changes, and lays Claude Code's API declarations in `plugins/attend/.claude-plugin/types/` for the editor and `tsc`.
+Where `attend@agent-ways` is installed too, the working copy takes its place for that session: Claude Code 2.1.296 logs `Plugin "attend" from --plugin-dir overrides installed version` and loads one `attend` hooks module, `attend@inline`, so there is nothing to disable first. Sessions started without the flag keep the installed one.
+
+The record of sessions that listened is kept per plugin identity, so `attend@inline` keeps a record separate from `attend@agent-ways`. A session that listened under `--plugin-dir` comes back dormant when it is resumed without the flag, and the reverse holds as well. An interactive session reloads the mod when a file in the folder changes, and lays Claude Code's API declarations in `plugins/attend/.claude-plugin/types/` for the editor and `tsc`.
 
 ### Trying a branch in a running session
 

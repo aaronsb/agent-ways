@@ -127,7 +127,7 @@ related:
 observable:
   - "In a dormant project (no `attend_mod.listening` key, or `dormant`), nothing from attend appears: no row, no delivery, no turn started by attend, no poll runs, and the only attend tool listed is attend_listen"
   - "The user says 'use attend' in a dormant project; the agent calls attend_listen, the row appears, messages addressed to the project while it was dormant are delivered, and the session listens until Claude Code exits"
-  - "The next `claude` started in that dormant project is dormant again; `claude --resume` of the session that listened comes back listening"
+  - "The next `claude` started in that dormant project is dormant again"
   - "In a project whose .claude/ways.yaml sets `attend_mod: { listening: active }`, a new interactive session listens from session start and is still listening after an hour idle"
   - "Opening or closing attend-chat changes nothing in any session"
   - "With `attend_mod.keepwarm: off`, an active session idle for 50 minutes with a large context gets no keepwarm wake, and a paid cold write arms nothing"
@@ -155,11 +155,11 @@ The operator set the constraints. Attend matters when several agents work on rel
 
 ## Decision
 
-1. **The mod is attend's agent-facing driver in Claude Code.** It does five jobs: decide whether this session is listening, drive inbound delivery while it is, serve the outbound tools, show one status row, and drive keepwarm wakes (item 13). It holds no message state of its own. Every read and write goes through the attend CLI as an argv array with no shell, and any state the mod keeps (active or dormant, its delivery counter, the short-id map) lives in the session's process and is never persisted, save the record of session ids that listened (item 2, amended by the addendum of 2026-10-12 on resume).
+1. **The mod is attend's agent-facing driver in Claude Code.** It does five jobs: decide whether this session is listening, drive inbound delivery while it is, serve the outbound tools, show one status row, and drive keepwarm wakes (item 13). It holds no message state of its own. Every read and write goes through the attend CLI as an argv array with no shell, and any state the mod keeps (active or dormant, its delivery counter, the short-id map) lives in the session's process and is never persisted.
 
 2. **Start state per project, dormant by default.** The key `attend_mod.listening` is `active` or `dormant`. It is read through the ways config layers (ADR-115): the user config, then the target's config, then the project overlay `{project}/.claude/ways.yaml`, which wins. With no key at any layer the session is dormant.
    - **Dormant is inert.** The session behaves as plain Claude Code. The mod polls nothing, delivers nothing, draws nothing, joins nothing and submits nothing, and no event wakes it: not a message to its project, an @name, an invite, a call to every session, or the agent's own wish to send. Messages addressed to it wait in the store, where attend-chat can show them as unread. At session start the mod sets the session not listening in attend (item 10), so the Stop-hook drain delivers nothing either.
-   - **Becoming active.** A session is active from session start when its project resolves to `active`. Otherwise it becomes active when the user asks Claude to use attend and the agent calls `attend_listen`. Either way it stays active for the rest of the process's life, through `/compact` and `/clear`. Amended by the addendum of 2026-10-12 on resume: the mod records the session id, and a resume of that id (`claude --resume`, or `/resume` in a running session) comes back listening; a `/clear` carries the record to its new id. A new session id in a dormant project starts dormant, so the next `claude` there is dormant again.
+   - **Becoming active.** A session is active from session start when its project resolves to `active`. Otherwise it becomes active when the user asks Claude to use attend and the agent calls `attend_listen`. Either way it stays active for the rest of the process's life, through `/compact` and `/clear`, and ends when Claude Code exits. Nothing is persisted per session: the next `claude` in a dormant project starts dormant again.
    - **Active listens until exit.** The mod sets the session listening, draws the row, and polls. There is no sleep inside a session. After a quiet period (default 20 minutes) with no delivery, no send, reply or join of its own and no turn running, it slows its poll to the slow interval, and returns to the awake interval on the next delivery or turn. That keeps the load on a remote store bounded (item 12) without missing idle-time messages, which are the point of an active session. On activation the cold-start rule delivers the messages addressed to the project while it was dormant (ADR-172, addendum of 2026-10-01).
    - **attend-chat plays no part.** Opening it wakes no session and closing it quiets none.
 
@@ -270,16 +270,7 @@ Consequences:
 - `ways status` reported the installed version from Claude Code's record, which can trail what runs. It now reports the version sessions run: the shipped version when `attend@agent-ways` is installed from this app's `plugins/` folder, with the recorded version beside it when the two differ, and the record alone where the marketplace is some other folder.
 - The plugin cache is no longer a cost of this route. A session that has not run `/reload-plugins` keeps the module it loaded, which is the remaining sense in which a running session keeps its version.
 
-## Addendum, 2026-10-12: a resumed session comes back listening
 
-Appended after acceptance. It amends item 2's "ends when Claude Code exits" and item 1's "never persisted"; both now point here.
+## Addendum, 2026-10-12: resume is decided in ADR-411
 
-A session activated with `attend_listen` and then resumed with `claude --resume` came back dormant: a resume is a new process, `$.state` starts empty, and the project's start state was dormant. The conversation still believed it was on attend and waited for messages that never arrived. The operator chose that a resume restores listening ("Resume restores (Recommended)", and "resume should definitely resume attend"; see `considered`).
-
-- **The record.** On activation the mod adds the session id to a list in its own `$.store`, which Claude Code keeps on disk across processes, and keeps the newest 50 ids. It holds no message state and nothing else about the session.
-- **Resume.** At session start the mod reads the session as active when `$.state` says so (a reload) or when the record lists the session id (`claude --resume`, which keeps the id). An in-session `/resume` raises the settings SessionStart with source `resume` and the resumed id after Claude Code empties `$.state`; a resume to an id the record lists turns the session on, and an active session stays active.
-- **`/clear`.** The new id goes into the record, so a later resume of it listens too.
-- **New ids.** Any other new session id starts as the project's start state says, so a fresh `claude` in a dormant project is dormant.
-- **No deactivation.** The mod has no verb that turns listening off, so nothing removes an id; the cap bounds the record.
-
-A test on Claude Code 2.1.296 with a probe mod in a throwaway config showed: `$.store` written in one process reads the same after the process exits and `claude --resume <id>` starts a new one, where `$.session.id()` at session start is the resumed id; an in-session `/resume` ends the old session with reason `resume`, empties `$.state`, and raises the settings SessionStart (source `resume`) whose `session_id` is the resumed id while `$.session.id()` still reads the old one until the event settles.
+Appended after acceptance; nothing above is changed. The operator's answers recorded as `considered` entries 7 and 8 reverse the `door` probe's "until Claude exits" for a resumed session id. ADR-411 records that change: it amends items 1 and 2 of the Decision, so that a session that listened comes back listening when its session id is resumed.

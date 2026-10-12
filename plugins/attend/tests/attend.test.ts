@@ -80,6 +80,8 @@ type World = {
   status?: Record<string, unknown>
   /** What the plugin's `$.store` holds at the start. */
   store?: Record<string, unknown>
+  /** A store whose writes fail, as on a full disk. */
+  storeFails?: boolean
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
@@ -102,8 +104,16 @@ function host(on: On, world: World) {
   })
   const store: Record<string, unknown> = { ...(world.store ?? {}) }
   on('store.get', ($, e) => ({ value: store[e.key] }) as never)
+  const storeWrites: string[] = []
   on('store.set', ($, e) => {
+    if (world.storeFails) throw new Error('ENOSPC: no space left on device')
+    storeWrites.push(e.key)
     store[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined } as never
+  })
+  const logs: string[] = []
+  on('ui.log', ($, e) => {
+    logs.push(e.text)
     return { value: undefined } as never
   })
   on('session.id', () => ({ value: world.sessionId ?? 's1' }) as never)
@@ -149,7 +159,7 @@ function host(on: On, world: World) {
   const count = (cmd: string) => argvs.filter(a => a.slice(1).join(' ').startsWith(cmd)).length
   const ran = (cmd: string) => count(cmd) > 0
   const mode = () => (state.value as { mode?: string } | undefined)?.mode
-  return { argvs, submitted, tools, count, ran, mode, clearState, store, world }
+  return { argvs, submitted, tools, count, ran, mode, clearState, store, storeWrites, logs, world }
 }
 
 /** A /clear or an in-session /resume as Claude Code 2.1.296 runs it:
@@ -677,6 +687,81 @@ describe('a resume', () => {
     expect(resume.tools()).toEqual(ACTIVE_TOOLS.slice(1))
     expect(resume.ran('listen on')).toBe(true)
     expect(h.mode()).toBe('active')
+  })
+
+  test('a store that fails leaves listening, the poll and the drain running, and says so', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1', storeFails: true })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    const r = (await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)) as { isError?: boolean }
+    expect(r.isError).toBeUndefined()
+    expect(h.ran('listen on')).toBe(true)
+    expect(h.logs.some(l => l.includes('could not record'))).toBe(true)
+    await clear($, h, 's2')
+    await clock.advance(1_000)
+    const after = since(h)
+    await clock.advance(10_000)
+    expect(after.ran('inbox --drain')).toBe(true)
+  })
+
+  test('a store that fails on an in-session /resume still turns the session on and drains', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    h.world.storeFails = true
+    await clear($, h, 's1', 'resume')
+    await clock.advance(1_000)
+    expect(h.ran('listen on')).toBe(true)
+    const after = since(h)
+    await clock.advance(10_000)
+    expect(after.ran('inbox --drain')).toBe(true)
+  })
+
+  test('the record is written only for what config would not reproduce', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active' }, sessionId: 's1' })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clear($, h, 's2')
+    await clock.advance(1_000)
+    expect(h.storeWrites).toEqual([])
+  })
+
+  test('a reload or a resume of a listed id writes nothing', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1', store: { [LISTENED]: ['s1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.ran('listen on')).toBe(true)
+    expect(h.storeWrites).toEqual([])
+  })
+
+  test('at process start the resume SessionStart comes first and session.start alone activates', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1', store: { [LISTENED]: ['s1'] } })
+    await $.classic.SessionStart({ source: 'resume', session_id: 's1' } as never)
+    await clock.advance(2_000)
+    expect(h.tools).toEqual([])
+    expect(h.count('listen on')).toBe(0)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(2_000)
+    expect([...new Set(h.tools)]).toEqual(ACTIVE_TOOLS)
+    expect(h.count('listen on')).toBe(1)
+  })
+
+  test('a fork gets a new id the record does not list, and starts dormant', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 'fork1', store: { [LISTENED]: ['s1'] } })
+    await $.classic.SessionStart({ source: 'fork', session_id: 'fork1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.tools).toEqual(['attend_listen'])
+    expect(h.ran('listen on')).toBe(false)
   })
 
   test('an in-session /resume to a session that never listened leaves a dormant one dormant', async ($, on) => {
