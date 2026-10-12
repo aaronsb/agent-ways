@@ -771,6 +771,20 @@ mod tests {
         assert_eq!(two(&a).keys, 1, "the picker's keys are not the pane's");
     }
 
+    /// A list whose first current item cannot be changed: the cursor starts
+    /// on it, Space there toggles nothing, and Enter sets the list at once,
+    /// the item that cannot change kept.
+    #[test]
+    fn enter_sets_a_list_from_a_row_that_cannot_change() {
+        let mut a = app(false);
+        let items = vec![Item::disabled("d", "fixed").current(true), Item::new("a"), Item::new("c").current(true)];
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Pick { id: "to".into(), title: "send to".into(), items, multi: true, anchor: Anchor::Center });
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        a.key(k(KeyCode::Char(' '), KeyModifiers::NONE));
+        a.key(k(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(two(&a).picked, ["to=d", "to=c"], "Space left d marked; Enter set the list");
+    }
+
     /// One way to answer a question.
     type Answer = fn(&mut App);
 

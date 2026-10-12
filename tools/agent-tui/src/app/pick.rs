@@ -185,7 +185,10 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => p.sel = p.step(p.sel, true),
             KeyCode::Home | KeyCode::Char('g') => p.sel = p.end(true),
             KeyCode::End | KeyCode::Char('G') => p.sel = p.end(false),
-            KeyCode::Enter | KeyCode::Char(' ') if !p.open(p.sel) => {}
+            // A row that cannot change takes no Space. Enter on one picks
+            // nothing from one choice, and on a list sets the marks as they are.
+            KeyCode::Char(' ') if !p.open(p.sel) => {}
+            KeyCode::Enter if !p.multi && !p.open(p.sel) => {}
             KeyCode::Char(' ') if p.multi => p.marked[p.sel] = !p.marked[p.sel],
             KeyCode::Enter | KeyCode::Char(' ') => return self.pick_set(p),
             _ => {}

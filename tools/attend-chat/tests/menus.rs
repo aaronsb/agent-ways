@@ -17,6 +17,11 @@ const ALPHA_SID: &str = "aaaaaaaa-0000-4000-8000-000000000001";
 const SIZE: (u16, u16) = (80, 25);
 
 fn chat() -> Chat {
+    chat_with(Palette::default())
+}
+
+/// [`chat`] drawn with `palette`.
+fn chat_with(palette: Palette) -> Chat {
     support::fixture("menus", |base| {
         support::pin_alive(ALPHA_SID);
         let alpha = attend_groups::Groups::new(base, ALPHA_SID);
@@ -25,7 +30,7 @@ fn chat() -> Chat {
         attend_groups::Groups::new(base, &attend_chat::signal::human_member_id()).join("deploy", true).unwrap();
         attend_groups::Groups::new(base, "").create("infra", None).unwrap();
     });
-    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(true);
+    let mut c = Chat::new(None, palette, Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(true);
     c.push(Signal {
         id: "t-1".into(),
         from: format!("claude:{ALPHA_SID}"),
@@ -196,7 +201,9 @@ fn custom_keys_show_as_the_current_row_and_enter_keeps_them() {
 }
 
 /// A theme that did not load is not marked: the menu marks what the screen
-/// shows, the terminal's palette it fell back to. One that loads is marked.
+/// shows, the terminal's palette it fell back to. One that loads is marked
+/// where it is drawn, at 256 colours or more; at 16 the terminal's own
+/// palette is what shows, with no warning, and that is what is marked.
 #[test]
 fn the_theme_menu_marks_the_theme_in_use_not_one_that_failed() {
     let mut c = chat().theme(Some("no-such-theme"));
@@ -205,9 +212,15 @@ fn the_theme_menu_marks_the_theme_in_use_not_one_that_failed() {
     assert!(marked.len() == 1 && marked[0].contains("terminal"), "{shown:#?}");
     assert!(c.status().contains("no-such-theme"), "the fallback is said: {}", c.status());
 
-    let mut c = chat().theme(Some("nord"));
+    let mut c = chat_with(Palette::terminal(agent_theme::ColorDepth::TrueColor)).theme(Some("nord"));
     let shown = submenu(&mut c, "Theme");
     assert!(shown.iter().any(|r| r.contains("● nord")), "{shown:#?}");
+
+    let mut c = chat().theme(Some("nord"));
+    let shown = submenu(&mut c, "Theme");
+    let marked: Vec<&String> = shown.iter().filter(|r| r.contains('●')).collect();
+    assert!(marked.len() == 1 && marked[0].contains("terminal"), "16 colours draw no theme: {shown:#?}");
+    assert_eq!(c.status(), "", "and nothing failed");
 }
 
 /// `≡` opens over its slot; Theme ▸ and Keybinding set ▸ dock beside the
