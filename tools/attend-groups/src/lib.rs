@@ -162,6 +162,7 @@ impl Groups {
     pub fn join(&self, name: &str, pin: bool) -> Result<(), String> {
         validate_group_name(name)?;
 
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         let entry = state.entry(name.to_string()).or_insert(GroupEntry {
             pinned: false,
@@ -197,6 +198,7 @@ impl Groups {
             Some(d) => normalize_description(d)?,
             None => None,
         };
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         if state.contains_key(name) {
             return Err(format!("#{name} already exists"));
@@ -219,6 +221,7 @@ impl Groups {
     /// contract — the yaml wire format is line-oriented.
     pub fn set_description(&self, name: &str, text: &str) -> Result<(), String> {
         let normalized = normalize_description(text)?;
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         let Some(entry) = state.get_mut(name) else {
             return Err(format!("#{name}: unknown group"));
@@ -231,6 +234,7 @@ impl Groups {
     /// Move every membership of `old` to `new`, for a member whose id
     /// changed under it (Claude Code's `/clear` gives a session a new id).
     pub fn rename_member(&self, old: &str, new: &str) {
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         let mut changed = false;
         for entry in state.values_mut() {
@@ -272,6 +276,7 @@ impl Groups {
 
     /// Leave a named group.
     pub fn leave(&self, name: &str) -> Result<(), String> {
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
             entry.members.retain(|m| m != &self.member_id);
@@ -303,6 +308,7 @@ impl Groups {
         if is_agent_member(&self.member_id) && !is_agent_member(member) {
             return Err("agents cannot kick a human member".to_string());
         }
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         let Some(entry) = state.get_mut(name) else {
             return Err(format!("#{name}: unknown group"));
@@ -325,6 +331,7 @@ impl Groups {
 
     /// Pin a group so it persists when empty.
     pub fn pin(&self, name: &str) {
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
             entry.pinned = true;
@@ -334,6 +341,7 @@ impl Groups {
 
     /// Unpin a group.
     pub fn unpin(&self, name: &str) {
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
             entry.pinned = false;
@@ -351,6 +359,7 @@ impl Groups {
 
     /// Dissolve a group — remove it and notify members.
     pub fn dissolve(&self, name: &str) -> Vec<String> {
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         let members = state
             .remove(name)
@@ -431,6 +440,7 @@ impl Groups {
         is_live: F,
         orphan_grace: std::time::Duration,
     ) {
+        let _lock = self.lock_state();
         let mut state = self.load_state();
         let mut changed = false;
 
@@ -509,14 +519,23 @@ impl Groups {
         load_groups(&self.base)
     }
 
+    /// Hold `_groups.yaml` for one read-modify-write. Every method that
+    /// saves the state takes this before it loads, so two writers (attend
+    /// sessions, a chat instance, two threads of one process) apply their
+    /// edits in turn: without it, each saves the state it loaded, and the
+    /// later save drops the earlier one's membership. `None` when the lock
+    /// file cannot be made, in which case the save cannot land either.
+    fn lock_state(&self) -> Option<agent_settings::writer::Lock> {
+        agent_settings::writer::Lock::acquire(&self.state_path()).ok()
+    }
+
     fn save_state(&self, state: &HashMap<String, GroupEntry>) {
         let path = self.state_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).ok();
         }
-        // Atomic, through a temporary file unique to the writer: two
-        // concurrent writers (attend sessions, a chat instance) end in plain
-        // last-writer-wins on the rename, never a torn hybrid.
+        // Atomic, through a temporary file unique to the writer, so a
+        // reader never sees a torn file.
         agent_settings::writer::write_atomic(&path, serialize_groups_yaml(state)).ok();
     }
 }
@@ -891,6 +910,24 @@ mod tests {
         assert_eq!(Groups::new(&base, "new").joined_group_names().len(), 2);
         assert!(Groups::new(&base, "old").joined_group_names().is_empty());
         assert_eq!(Groups::new(&base, "x").members("b").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn concurrent_joins_all_land() {
+        // #960: each join loads, edits and saves the whole file; unlocked,
+        // a join saving what it loaded before another's save drops that one.
+        let base = tempdir_like();
+        std::thread::scope(|s| {
+            for t in 0..8 {
+                let base = &base;
+                s.spawn(move || {
+                    for i in 0..20 {
+                        Groups::new(base, &format!("m{t}")).join(&format!("c{t}-{i}"), false).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(load_groups(&base).len(), 160, "every join's channel is in the file");
     }
 
     #[test]
