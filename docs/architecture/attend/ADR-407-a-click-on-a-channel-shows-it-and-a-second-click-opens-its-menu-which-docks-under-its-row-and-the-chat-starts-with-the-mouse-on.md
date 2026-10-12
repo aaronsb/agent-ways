@@ -102,7 +102,7 @@ Review of the change refined (a) and (c); the docking rule in (a) was the agent'
 
 - **Where a menu docks follows the input.** A click or right click on a tab docks the menu under the tab, even where the left column shows that channel's row. Enter on the focused tab bar does the same. A click on a column row docks under that row. Keyboard input from elsewhere (Ctrl+digit, Alt+digit, Enter on a column row) docks under the channel's column row when the column shows it, and under its tab otherwise. The placement rule in (c) is unchanged. A row that a resize has left outside the pane is clamped into it.
 - **`attend.chat.tabs.menu_on_repeat: false` governs keys only.** With it off, a second Ctrl+digit or Alt+digit, or a click on the tab already shown, only shows the tab. A click on the shown channel's column row, or Enter on that row, still opens its menu, since the row has no other action on the channel already shown.
-- **A click in the column moves its keyboard cursor.** While the column has the keyboard, a click on one of its rows puts the cursor on that row.
+- **A click in the column moves its keyboard cursor.** A click on one of its rows puts the keyboard's cursor on that row, from wherever the keyboard was (ADR-405, Keys).
 
 ## Amendment (2026-10-12): Enter on a focused element opens its menu at once
 

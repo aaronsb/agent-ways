@@ -499,12 +499,12 @@ impl<'a> Step<'a> {
     /// A left click in the pane. The keyboard goes back to the compose box,
     /// the walk's preview kept as chosen, but for a click on the column
     /// while it has the focus and one on the feed while the feed has it. A
-    /// click on a column row moves the column's cursor to it, while the
-    /// column has the keyboard, and selects it ([`ChatPane::activate`]):
-    /// an agent's row opens its menu; a channel's row shows its channel, and
-    /// on the channel shown opens its menu, whatever
-    /// `attend.chat.tabs.menu_on_repeat` says, since that setting is about
-    /// keys.
+    /// click on a column row puts the keyboard on that row, from wherever it
+    /// was, so ↑, ↓ and Enter go on from the row clicked, and selects it
+    /// ([`ChatPane::activate`]): an agent's row opens its menu; a channel's
+    /// row shows its channel, and on the channel shown opens its menu,
+    /// whatever `attend.chat.tabs.menu_on_repeat` says, since that setting
+    /// is about keys.
     fn click(&mut self, column: bool, feed: bool, row: Option<SideHit>) -> R {
         let keeps = match self.ix.focus {
             Focus::Row(_) => column,
@@ -515,10 +515,8 @@ impl<'a> Step<'a> {
             self.set(Focus::Compose);
         }
         if let Some(hit) = row {
-            if self.ix.side_focus().is_some() {
-                if let Some(i) = self.world()?.rows.iter().position(|h| *h == hit) {
-                    self.focus_at(i)?;
-                }
+            if let Some(i) = self.world()?.rows.iter().position(|h| *h == hit) {
+                self.focus_at(i)?;
             }
             self.fx.push(Effect::Activate { target: Target::of(hit), how: How::Select { repeat: true }, under_tab: None });
         }
