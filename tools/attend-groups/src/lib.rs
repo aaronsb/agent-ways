@@ -21,6 +21,9 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use agent_settings::writer::Lock;
 
 /// Group membership entry.
 #[derive(Debug, Clone, Default)]
@@ -41,9 +44,16 @@ pub struct GroupEntry {
 pub struct Groups {
     base: PathBuf,
     member_id: String,
+    /// How long a write waits for another writer's lock; `None` waits for
+    /// as long as it is held ([`Groups::waiting_at_most`]).
+    lock_wait: Option<Duration>,
 }
 
 const GROUP_PREFIX: &str = "@";
+
+/// The refusal of a write that waited its [`Groups::waiting_at_most`]
+/// limit for another writer's lock.
+pub const BUSY: &str = "channels are busy; try again";
 
 /// The directory under the signals base that backs `#open`, the base
 /// channel every enrolled member receives (ADR-124).
@@ -111,7 +121,18 @@ impl Groups {
         Self {
             base: signals_base.to_path_buf(),
             member_id: member_id.to_string(),
+            lock_wait: None,
         }
+    }
+
+    /// Wait at most `limit` for another writer to release `_groups.yaml`.
+    /// A write that waits longer is refused with [`BUSY`] and changes
+    /// nothing; a method that returns no `Result` skips its write. For a
+    /// caller on a screen's own thread, which must not hang on a stuck
+    /// holder.
+    pub fn waiting_at_most(mut self, limit: Duration) -> Self {
+        self.lock_wait = Some(limit);
+        self
     }
 
     /// Every directory this member receives from, in a fixed order: the
@@ -152,17 +173,13 @@ impl Groups {
 
     /// Join a named group. Creates the group if it doesn't exist.
     ///
-    /// The yaml entry is saved *before* the dir is created: the orphan
-    /// sweep in [`Groups::cleanup_stale`] treats "dir with no yaml
-    /// entry" as removable, and `create_dir_all` on a pre-existing
-    /// orphan dir does not bump its mtime — so writing the entry first
-    /// means a concurrent sweep that re-reads the yaml sees the join,
-    /// and a sweep that already deleted the old dir loses to our
-    /// `create_dir_all` after it.
+    /// The entry and the directory are both written under the state lock,
+    /// which the orphan sweep in [`Groups::cleanup_stale`] also holds, so
+    /// the sweep never sees a joined channel's directory without its entry.
     pub fn join(&self, name: &str, pin: bool) -> Result<(), String> {
         validate_group_name(name)?;
 
-        let _lock = self.lock_state();
+        let _lock = self.lock_state()?;
         let mut state = self.load_state();
         let entry = state.entry(name.to_string()).or_insert(GroupEntry {
             pinned: false,
@@ -198,7 +215,7 @@ impl Groups {
             Some(d) => normalize_description(d)?,
             None => None,
         };
-        let _lock = self.lock_state();
+        let _lock = self.lock_state()?;
         let mut state = self.load_state();
         if state.contains_key(name) {
             return Err(format!("#{name} already exists"));
@@ -221,7 +238,7 @@ impl Groups {
     /// contract — the yaml wire format is line-oriented.
     pub fn set_description(&self, name: &str, text: &str) -> Result<(), String> {
         let normalized = normalize_description(text)?;
-        let _lock = self.lock_state();
+        let _lock = self.lock_state()?;
         let mut state = self.load_state();
         let Some(entry) = state.get_mut(name) else {
             return Err(format!("#{name}: unknown group"));
@@ -234,7 +251,7 @@ impl Groups {
     /// Move every membership of `old` to `new`, for a member whose id
     /// changed under it (Claude Code's `/clear` gives a session a new id).
     pub fn rename_member(&self, old: &str, new: &str) {
-        let _lock = self.lock_state();
+        let Ok(_lock) = self.lock_state() else { return };
         let mut state = self.load_state();
         let mut changed = false;
         for entry in state.values_mut() {
@@ -276,7 +293,7 @@ impl Groups {
 
     /// Leave a named group.
     pub fn leave(&self, name: &str) -> Result<(), String> {
-        let _lock = self.lock_state();
+        let _lock = self.lock_state()?;
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
             entry.members.retain(|m| m != &self.member_id);
@@ -308,7 +325,7 @@ impl Groups {
         if is_agent_member(&self.member_id) && !is_agent_member(member) {
             return Err("agents cannot kick a human member".to_string());
         }
-        let _lock = self.lock_state();
+        let _lock = self.lock_state()?;
         let mut state = self.load_state();
         let Some(entry) = state.get_mut(name) else {
             return Err(format!("#{name}: unknown group"));
@@ -331,7 +348,7 @@ impl Groups {
 
     /// Pin a group so it persists when empty.
     pub fn pin(&self, name: &str) {
-        let _lock = self.lock_state();
+        let Ok(_lock) = self.lock_state() else { return };
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
             entry.pinned = true;
@@ -341,7 +358,7 @@ impl Groups {
 
     /// Unpin a group.
     pub fn unpin(&self, name: &str) {
-        let _lock = self.lock_state();
+        let Ok(_lock) = self.lock_state() else { return };
         let mut state = self.load_state();
         if let Some(entry) = state.get_mut(name) {
             entry.pinned = false;
@@ -358,8 +375,8 @@ impl Groups {
     }
 
     /// Dissolve a group — remove it and notify members.
-    pub fn dissolve(&self, name: &str) -> Vec<String> {
-        let _lock = self.lock_state();
+    pub fn dissolve(&self, name: &str) -> Result<Vec<String>, String> {
+        let _lock = self.lock_state()?;
         let mut state = self.load_state();
         let members = state
             .remove(name)
@@ -372,7 +389,7 @@ impl Groups {
         if dir.is_dir() {
             fs::remove_dir_all(&dir).ok();
         }
-        members
+        Ok(members)
     }
 
     /// List channels this member has joined.
@@ -418,13 +435,10 @@ impl Groups {
     /// see: a `@name/` directory with no `_groups.yaml` entry at all.
     /// Those accumulate when an entry is removed without the dir (or
     /// was never written) and would otherwise render in the chat's
-    /// channel bar forever. Two guards narrow racing a concurrent
-    /// `join` to a sub-millisecond window: only dirs older than the
-    /// grace window are candidates, and the yaml is re-read
-    /// immediately before each removal (`join` saves its entry before
-    /// touching the dir). The residual window self-heals — signal
-    /// writers `create_dir_all` their target, and the chat's group
-    /// resolver falls back to the yaml entry.
+    /// channel bar forever. Only dirs older than the grace window are
+    /// candidates. The sweep holds the state lock, as `join` does from
+    /// its entry through its directory, so a join never lands between
+    /// the sweep's read of the yaml and its removal.
     ///
     /// A reserved name (`open`, `broadcast`) can never be a group, so an
     /// `@open/` or `@broadcast/` dir is an orphan and is swept like one.
@@ -440,7 +454,7 @@ impl Groups {
         is_live: F,
         orphan_grace: std::time::Duration,
     ) {
-        let _lock = self.lock_state();
+        let Ok(_lock) = self.lock_state() else { return };
         let mut state = self.load_state();
         let mut changed = false;
 
@@ -502,13 +516,6 @@ impl Groups {
             if !old_enough {
                 continue;
             }
-            // Re-read the yaml at the last moment: a `join` that
-            // completed after our snapshot has already saved its
-            // entry (entry-before-dir ordering), so this check is
-            // what keeps a just-joined orphan dir out of the sweep.
-            if load_groups(&self.base).contains_key(bare) {
-                continue;
-            }
             fs::remove_dir_all(&path).ok();
         }
     }
@@ -523,10 +530,27 @@ impl Groups {
     /// saves the state takes this before it loads, so two writers (attend
     /// sessions, a chat instance, two threads of one process) apply their
     /// edits in turn: without it, each saves the state it loaded, and the
-    /// later save drops the earlier one's membership. `None` when the lock
-    /// file cannot be made, in which case the save cannot land either.
-    fn lock_state(&self) -> Option<agent_settings::writer::Lock> {
-        agent_settings::writer::Lock::acquire(&self.state_path()).ok()
+    /// later save drops the earlier one's membership.
+    ///
+    /// `Ok(None)` when the lock cannot be taken: the lock file cannot be
+    /// made, in which case the save cannot land either, or the OS refuses
+    /// the lock itself (`ENOLCK` on a network filesystem), in which case
+    /// the write goes ahead unlocked and can lose a concurrent writer's
+    /// change. Nothing reports that: this crate has no channel for a
+    /// warning, and stderr would draw over attend-chat's screen. `Err` only
+    /// when [`Groups::waiting_at_most`] set a wait and another writer held
+    /// the lock past it.
+    fn lock_state(&self) -> Result<Option<Lock>, String> {
+        let path = self.state_path();
+        let taken = match self.lock_wait {
+            None => Lock::acquire(&path).map(Some),
+            Some(limit) => Lock::acquire_within(&path, limit),
+        };
+        match taken {
+            Ok(Some(lock)) => Ok(Some(lock)),
+            Ok(None) => Err(BUSY.to_string()),
+            Err(_) => Ok(None),
+        }
     }
 
     fn save_state(&self, state: &HashMap<String, GroupEntry>) {
@@ -913,21 +937,49 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_joins_all_land() {
-        // #960: each join loads, edits and saves the whole file; unlocked,
-        // a join saving what it loaded before another's save drops that one.
+    fn concurrent_joins_and_sweeps_lose_nothing() {
+        // #955, #960: each write loads, edits and saves the whole file;
+        // unlocked, a write saving what it loaded before another's save
+        // drops that one. A sweep runs beside the joiners, as attend's
+        // cleanup does beside attend-chat's joins.
         let base = tempdir_like();
+        let joining = std::sync::atomic::AtomicBool::new(true);
         std::thread::scope(|s| {
-            for t in 0..8 {
-                let base = &base;
-                s.spawn(move || {
-                    for i in 0..20 {
-                        Groups::new(base, &format!("m{t}")).join(&format!("c{t}-{i}"), false).unwrap();
-                    }
-                });
+            s.spawn(|| {
+                while joining.load(std::sync::atomic::Ordering::Relaxed) {
+                    Groups::new(&base, "x").cleanup_stale_with(|_| true, Duration::ZERO);
+                }
+            });
+            let joiners: Vec<_> = (0..8)
+                .map(|t| {
+                    let base = &base;
+                    s.spawn(move || {
+                        for i in 0..20 {
+                            Groups::new(base, &format!("m{t}")).join(&format!("c{t}-{i}"), false).unwrap();
+                        }
+                    })
+                })
+                .collect();
+            for j in joiners {
+                j.join().unwrap();
             }
+            joining.store(false, std::sync::atomic::Ordering::Relaxed);
         });
-        assert_eq!(load_groups(&base).len(), 160, "every join's channel is in the file");
+        let state = load_groups(&base);
+        assert_eq!(state.len(), 160, "every join's channel is in the file");
+        let swept: Vec<_> = state.keys().filter(|n| !base.join(format!("@{n}")).is_dir()).collect();
+        assert!(swept.is_empty(), "the sweep removed joined channels' dirs: {swept:?}");
+    }
+
+    #[test]
+    fn a_bounded_write_is_refused_while_another_holds_the_lock() {
+        let base = tempdir_like();
+        let held = Lock::acquire(&base.join("_groups.yaml")).unwrap();
+        let g = Groups::new(&base, "m").waiting_at_most(Duration::from_millis(30));
+        assert_eq!(g.join("deploy", false), Err(BUSY.to_string()));
+        assert!(load_groups(&base).is_empty(), "the refused join wrote nothing");
+        drop(held);
+        assert_eq!(g.join("deploy", false), Ok(()));
     }
 
     #[test]

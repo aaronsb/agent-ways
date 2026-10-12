@@ -249,6 +249,17 @@ fn run_join(name: &str) -> EnterAction {
     join_group_in(&signals_base(), &member, name)
 }
 
+/// How long a channel write from a key handler waits for another writer to
+/// release `_groups.yaml` before it reports the channels busy.
+const GROUPS_LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The group state as this screen writes it: each write waits at most
+/// [`GROUPS_LOCK_WAIT`], so a stuck writer elsewhere cannot hang the key
+/// handler, and a refused write reaches the status row as its error.
+fn writing_groups(base: &std::path::Path, member: &str) -> attend_groups::Groups {
+    attend_groups::Groups::new(base, member).waiting_at_most(GROUPS_LOCK_WAIT)
+}
+
 /// Make the person at the chat, `member`, a member of channel `name` when
 /// they post in it (ADR-404 D1), as `/join` makes them, so an agent alone in
 /// the channel with them can answer. Showing a channel joins nothing: the
@@ -265,7 +276,7 @@ fn enter_channel(member: &str, name: &str) {
 /// is not brought back, as `/join` would. Returns whether it wrote a
 /// membership.
 fn enter_channel_in(base: &std::path::Path, member: &str, name: &str) -> bool {
-    let groups = attend_groups::Groups::new(base, member);
+    let groups = writing_groups(base, member);
     match groups.members(name) {
         Some(members) if !members.iter().any(|m| m == member) && groups.group_dir(name).is_dir() => {
             groups.join(name, false).is_ok()
@@ -294,7 +305,7 @@ fn run_leave(channel: Option<String>, foreground: &Tab) -> EnterAction {
 /// already happened in `slash::dispatch`; `Groups::join` re-validates
 /// as defense in depth.
 fn join_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterAction {
-    match attend_groups::Groups::new(base, member).join(name, false) {
+    match writing_groups(base, member).join(name, false) {
         Ok(()) => EnterAction::ClearWithStatus(format!("joined #{name}")),
         Err(e) => EnterAction::StatusOnly(format!("/join failed: {e}")),
     }
@@ -305,7 +316,7 @@ fn join_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterActio
 /// silent no-op — `Groups::leave` itself succeeds on a group you were
 /// never in.
 fn leave_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterAction {
-    let groups = attend_groups::Groups::new(base, member);
+    let groups = writing_groups(base, member);
     match groups.members(name) {
         None => EnterAction::StatusOnly(format!("#{name}: unknown group")),
         Some(members) if !members.iter().any(|m| m == member) => {
@@ -372,7 +383,7 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
 ) -> EnterAction {
     // Member id is irrelevant for dissolve — it acts on the group,
     // not on this member's entry.
-    let groups = attend_groups::Groups::new(base, "");
+    let groups = writing_groups(base, "");
     let members = groups.members(name);
     let dir_exists = groups.group_dir(name).is_dir();
     if members.is_none() && !dir_exists {
@@ -389,8 +400,10 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
             if live == 1 { "" } else { "s" }
         ));
     }
-    groups.dissolve(name);
-    EnterAction::ClearWithStatus(format!("dissolved #{name}"))
+    match groups.dissolve(name) {
+        Ok(_) => EnterAction::ClearWithStatus(format!("dissolved #{name}")),
+        Err(e) => EnterAction::StatusOnly(format!("/dissolve: {e}")),
+    }
 }
 
 /// Filesystem-effect core of `/channels create` (#404), parameterized
@@ -404,7 +417,7 @@ fn create_channel_in(
     name: &str,
     description: Option<&str>,
 ) -> EnterAction {
-    match attend_groups::Groups::new(base, "").create(name, description) {
+    match writing_groups(base, "").create(name, description) {
         Ok(()) => EnterAction::ClearWithStatus(match description {
             Some(d) => format!("created #{name} — {d}"),
             None => format!("created #{name}"),
@@ -417,7 +430,7 @@ fn create_channel_in(
 /// clears the description — same contract as the CLI's `describe`.
 /// `set_description` owns existence checking and its error strings.
 fn describe_channel_in(base: &std::path::Path, name: &str, text: &str) -> EnterAction {
-    match attend_groups::Groups::new(base, "").set_description(name, text) {
+    match writing_groups(base, "").set_description(name, text) {
         Ok(()) if text.trim().is_empty() => {
             EnterAction::ClearWithStatus(format!("cleared #{name} description"))
         }
@@ -630,7 +643,7 @@ fn kick_member_in(
     member_id: &str,
     label: &str,
 ) -> EnterAction {
-    match attend_groups::Groups::new(base, "").kick(name, member_id) {
+    match writing_groups(base, "").kick(name, member_id) {
         Ok(()) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}")),
         Err(e) => EnterAction::StatusOnly(format!("/kick: {e}")),
     }
@@ -1060,6 +1073,18 @@ mod tests {
             .members("deploy")
             .unwrap();
         assert_eq!(members, vec!["aaron"]);
+    }
+
+    #[test]
+    fn a_join_while_another_writer_holds_the_channels_reports_busy() {
+        let base = tempdir_like();
+        let held = agent_settings::writer::Lock::acquire(&base.join("_groups.yaml")).unwrap();
+        match join_group_in(&base, "aaron", "deploy") {
+            EnterAction::StatusOnly(s) => assert!(s.contains(attend_groups::BUSY), "{s}"),
+            _ => panic!("a join that waited out the lock should report it and keep the input"),
+        }
+        drop(held);
+        assert!(attend_groups::Groups::new(&base, "aaron").members("deploy").is_none(), "nothing was written");
     }
 
     #[test]
