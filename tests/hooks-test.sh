@@ -448,19 +448,82 @@ check "attend macro: attend not installed" \
     "$(PATH="$SYSBIN" "$BASH_BIN" "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1)"
 check "attend macro: calls attend only with the argv it expects" "" "$(cat "$WORK/attend-unexpected" 2>/dev/null)"
 
-# The github macro fits under the 3 s macro deadline when GitHub hangs: a
-# stand-in `gh` sleeps, so each call runs to its own timeout.
+# The github macro fits under the 3 s macro deadline, and a check whose
+# call timed out or failed is never shown as missing. A stand-in `gh`
+# answers each endpoint with canned JSON and logs each network call to
+# $GH_LOG. GH_SLOW names an endpoint that hangs (`all` hangs every call),
+# GH_404 is a space-separated list that answers 404, GH_SECURITY is the
+# security policy answer, and GH_NOT_REPO makes gh refuse the directory.
 GH_SHIMS="$WORK/gh-shims"
 mkdir -p "$GH_SHIMS"
-printf '#!/bin/sh\n[ "$1" = repo ] && [ -n "$GH_VIEW_OK" ] && exit 0\nsleep 10\n' > "$GH_SHIMS/gh"
+cat > "$GH_SHIMS/gh" <<'SHIM'
+#!/bin/sh
+case "$1 $2" in
+    "config get") echo me; exit 0 ;;
+    "api repos/:owner/:repo") key=repo ;;
+    "api repos/:owner/:repo/community/profile") key=community ;;
+    "api repos/:owner/:repo/contributors") key=contributors ;;
+    "api repos/:owner/:repo/labels") key=labels ;;
+    "api graphql") key=security ;;
+    "api repos/:owner/:repo/branches/"*) key=protection ;;
+    *) echo "unexpected: $*" >> "$GH_LOG"; exit 2 ;;
+esac
+echo "$key" >> "$GH_LOG"
+[ -n "$GH_NOT_REPO" ] && { echo "unable to expand placeholder in path: failed to run git: fatal: not a git repository" >&2; exit 1; }
+[ "$GH_SLOW" = all ] || [ "$GH_SLOW" = "$key" ] && sleep 10
+case " $GH_404 " in *" $key "*) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;; esac
+case $key in
+    repo) echo '{"description":"d","topics":["t"],"permissions":{"push":true,"admin":true},"full_name":"o/r"}' ;;
+    community) echo '{"files":{"readme":{},"license":{},"code_of_conduct":{},"contributing":{},"issue_template":{},"pull_request_template":{}}}' ;;
+    contributors) echo '[{"login":"a"}]' ;;
+    labels) echo '[{"default":false}]' ;;
+    security) echo "${GH_SECURITY:-true}" ;;
+    protection) echo https://api.github.com/protection ;;
+esac
+exit 0
+SHIM
 chmod +x "$GH_SHIMS/gh"
-for view in "" 1; do
-    secs=$( { time ( cd "$WORK" && GH_VIEW_OK="$view" PATH="$GH_SHIMS:$PATH" \
+export GH_LOG="$WORK/gh.log"
+gh_macro() {  # env assignments... ; output in $WORK/gh.out, seconds in $secs
+    secs=$( { time ( cd "$WORK" && env "$@" PATH="${GH_PATH:-$GH_SHIMS:$PATH}" \
         bash "$HOOKS/softwaredev/delivery/github/macro.sh" > "$WORK/gh.out" 2>/dev/null ); } 2>&1 )
-    check "github macro under a hung gh (repo view ok: ${view:-no}) ends under 3 s (took ${secs} s)" "yes" "$(under "$secs" 3)"
-    check "github macro under a hung gh (repo view ok: ${view:-no}) says the API is unreachable" \
-        "**Note**: Could not reach GitHub API" "$(cat "$WORK/gh.out")"
-done
+}
+health() { grep '^\*\*Repo health\*\*\|^| Branch protection' "$WORK/gh.out"; }
+gh_macro GH_SLOW=all
+check "github macro under a hung gh ends under 3 s (took ${secs} s)" "yes" "$(under "$secs" 3)"
+check "github macro under a hung gh says the API is unreachable" "**Note**: Could not reach GitHub API" "$(cat "$WORK/gh.out")"
+gh_macro GH_SLOW=repo
+check "github macro: a hung repo check is an unreachable API" "**Note**: Could not reach GitHub API" "$(cat "$WORK/gh.out")"
+gh_macro GH_NOT_REPO=1
+check "github macro: a refused repo check is not a GitHub repo" \
+    "**Note**: Not a GitHub repository - GitHub commands won't work" "$(cat "$WORK/gh.out")"
+gh_macro GH_SLOW=protection
+check "github macro: a hung check ends under 3 s (took ${secs} s)" "yes" "$(under "$secs" 3)"
+check "github macro: a hung check is couldn't check, never missing" \
+    $'**Repo health**: 10/12 — missing: README badges (you have push access)\n**Repo health**: couldn\'t check Branch protection (the GitHub call failed or timed out)' "$(health)"
+gh_macro GH_404=protection
+check "github macro: a 404 check is missing" \
+    "**Repo health**: 10/12 — missing: Branch protection, README badges (you have push access)" "$(health)"
+gh_macro GH_SLOW=community
+check "github macro: a hung community profile leaves its six checks unknown" \
+    $'**Repo health**: 5/12 — missing: README badges (you have push access)\n**Repo health**: couldn\'t check README, License, Code of conduct, Contributing guide, Issue templates, PR template (the GitHub call failed or timed out)' \
+    "$(health)"
+# In the full table (four or more missing), an unknown row says so.
+gh_macro GH_SLOW=community GH_404="protection labels" GH_SECURITY=false
+check "github macro: the full table shows a hung check as couldn't check" "| README | couldn't check | — |" \
+    "$(grep '^| README |' "$WORK/gh.out")"
+# Without `timeout` (stock macOS) the macro still runs, its calls unbounded.
+GH_NOTIMEOUT="$WORK/gh-notimeout"
+mkdir -p "$GH_NOTIMEOUT"
+for t in bash cat cut git grep head jq mktemp rm sed sleep sort tr wc; do ln -s "$(command -v "$t")" "$GH_NOTIMEOUT/$t"; done
+check "the no-timeout PATH has no timeout" "" "$(PATH="$GH_SHIMS:$GH_NOTIMEOUT" command -v timeout)"
+rm -f "$GH_LOG"
+GH_PATH="$GH_SHIMS:$GH_NOTIMEOUT" gh_macro GH_X=1
+check "github macro without timeout reads the repo" \
+    "**Repo health**: 11/12 — missing: README badges (you have push access)" "$(health)"
+# Six network calls at most: more concurrent gh processes stall on some hosts.
+check "github macro makes six calls, each one it expects" \
+    "community contributors labels protection repo security" "$(sort "$GH_LOG" | tr '\n' ' ' | sed 's/ $//')"
 
 # A macro past the 3 s deadline is killed: its way is delivered without the
 # macro's output, and the timeout is logged by the way's name.

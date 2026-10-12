@@ -4,25 +4,33 @@
 #   1. Project scope (solo vs team) and workflow recommendations
 #   2. Repository health — how well-configured is this repo?
 
-# Time budget: ways kills a macro at 3 s and keeps none of its output, so
-# the network calls are bounded to fit under it: 1 s for the repo check,
-# then one parallel batch of 1.5 s.
-
-# Early exit if not a GitHub repo. A timeout (124) is an unreachable API,
-# not a missing repo.
-timeout 1 gh repo view --json name &>/dev/null
-case $? in
-  0) ;;
-  124) echo "**Note**: Could not reach GitHub API"; exit 0 ;;
-  *) echo "**Note**: Not a GitHub repository - GitHub commands won't work"; exit 0 ;;
-esac
-
-# --- Parallel API calls ---
-# We need: repo details, community profile, labels, branch protection
-# Fire them all at once and collect results
+# Time budget: ways kills a macro at 3 s and keeps none of its output. Every
+# GitHub call runs in one parallel batch bounded to 2 s per call, so the
+# batch ends by about 2.1 s. The batch is six calls: on some hosts more than
+# six concurrent `gh` processes stall the extras for seconds (seen: 6 calls
+# in 0.4 s, the 7th to 9th in 5.3 s), so the current user is read from gh's
+# local config and the security policy is one GraphQL field.
+#
+# Stock macOS has no `timeout`. There the stand-in below runs each call
+# unbounded, and only ways' 3 s macro deadline bounds the macro as a whole.
+command -v timeout >/dev/null 2>&1 || timeout() { shift; "$@"; }
 
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
+
+# One bounded `gh` call: stdout in NAME.out, stderr in NAME.err, exit
+# status in NAME.rc. A call killed before it wrote NAME.rc has none.
+call() {
+  local name=$1; shift
+  timeout 2 gh "$@" >"$WORK_DIR/$name.out" 2>"$WORK_DIR/$name.err"
+  echo $? >"$WORK_DIR/$name.rc"
+}
+# The call answered.
+ok() { [[ $(cat "$WORK_DIR/$1.rc" 2>/dev/null) == 0 ]]; }
+# The API answered that the thing is not there (HTTP 404). A timeout or any
+# other failure is neither ok nor absent: the check is unknown.
+absent() { ! ok "$1" && [[ -s "$WORK_DIR/$1.rc" ]] && grep -q 'HTTP 404' "$WORK_DIR/$1.err" 2>/dev/null; }
+out() { cat "$WORK_DIR/$1.out" 2>/dev/null; }
 
 # The default branch for the protection call, read locally so that call
 # can join the batch instead of waiting on the repo details.
@@ -30,47 +38,48 @@ PROTECT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
 PROTECT_BRANCH=${PROTECT_BRANCH#origin/}
 PROTECT_BRANCH=${PROTECT_BRANCH:-main}
 
-# Repo details (description, topics, permissions, default branch, full_name for badges)
-timeout 1.5 gh api repos/:owner/:repo \
+# --- Parallel API calls ---
+# Repo details (description, topics, permissions, full_name for badges). Its
+# failure also says whether this is a GitHub repo at all.
+call repo api repos/:owner/:repo \
   --jq '{
     description: .description,
     topics: .topics,
-    default_branch: .default_branch,
     permissions: .permissions,
-    has_issues: .has_issues,
-    has_discussions: .has_discussions,
     full_name: .full_name
-  }' >"$WORK_DIR/repo.json" 2>/dev/null &
-
-# Community profile (README, license, CoC, contributing, templates, security)
-timeout 1.5 gh api repos/:owner/:repo/community/profile \
-  >"$WORK_DIR/community.json" 2>/dev/null &
-
+  }' &
+# Community profile (README, license, CoC, contributing, templates)
+call community api repos/:owner/:repo/community/profile &
 # Contributors (save full response for reuse in team path)
-timeout 1.5 gh api repos/:owner/:repo/contributors \
-  >"$WORK_DIR/contributors.json" 2>/dev/null &
-
-# Labels — paginate returns per-page jq results, so pipe aggregate through jq
-timeout 1.5 gh api repos/:owner/:repo/labels --paginate \
-  >"$WORK_DIR/labels.json" 2>/dev/null &
-
-# Security policy (not in community profile): both common locations at once
-timeout 1.5 gh api repos/:owner/:repo/contents/SECURITY.md --jq '.name' >"$WORK_DIR/security-root.txt" 2>/dev/null &
-timeout 1.5 gh api repos/:owner/:repo/contents/.github/SECURITY.md --jq '.name' >"$WORK_DIR/security-github.txt" 2>/dev/null &
-
-# Current user
-timeout 1.5 gh api user --jq '.login' >"$WORK_DIR/user.txt" 2>/dev/null &
-
-# Branch protection: a success with a url means protected
-(timeout 1.5 gh api "repos/:owner/:repo/branches/$PROTECT_BRANCH/protection" \
-  --jq '.url' >"$WORK_DIR/protection.txt" 2>/dev/null && touch "$WORK_DIR/protection.ok") &
-
+call contributors api repos/:owner/:repo/contributors &
+# Labels — paginate returns per-page results, aggregated through jq below
+call labels api repos/:owner/:repo/labels --paginate &
+# Security policy (not in community profile): GitHub's own answer, which
+# covers SECURITY.md at the root, in .github or docs, and an org default
+call security api graphql \
+  -f query='query($owner:String!,$name:String!){repository(owner:$owner,name:$name){isSecurityPolicyEnabled}}' \
+  -F owner='{owner}' -F name='{repo}' --jq '.data.repository.isSecurityPolicyEnabled' &
+# Branch protection: a success with a url means protected, a 404 means none
+call protection api "repos/:owner/:repo/branches/$PROTECT_BRANCH/protection" --jq '.url' &
 wait
+
+# Not a GitHub repo: the repo call failed without a timeout or a network
+# error, so gh could not map this directory to a GitHub repo.
+if ! ok repo; then
+  if [[ ! -s "$WORK_DIR/repo.rc" || $(cat "$WORK_DIR/repo.rc") == 124 ]] \
+    || grep -qiE 'error connecting|could not resolve|timeout|timed out|HTTP 5' "$WORK_DIR/repo.err" 2>/dev/null; then
+    echo "**Note**: Could not reach GitHub API"
+  else
+    echo "**Note**: Not a GitHub repository - GitHub commands won't work"
+  fi
+  exit 0
+fi
 
 # --- Parse results ---
 
-CONTRIBUTORS=$(jq -r 'length' "$WORK_DIR/contributors.json" 2>/dev/null)
-CURRENT_USER=$(cat "$WORK_DIR/user.txt" 2>/dev/null)
+CONTRIBUTORS=$(out contributors | jq -r 'length' 2>/dev/null)
+# The current user, from gh's local config: no call
+CURRENT_USER=$(gh config get user -h github.com 2>/dev/null)
 
 # Active contributors — anyone who committed in the last 90 days
 # Local git log is faster and more accurate than API for this
@@ -78,44 +87,31 @@ ACTIVE_CONTRIBUTORS=$(git log --since="90 days ago" --format='%aN' 2>/dev/null |
 ACTIVE_CONTRIBUTORS=${ACTIVE_CONTRIBUTORS:-0}
 
 # Repo details
-DESCRIPTION=$(jq -r '.description // empty' "$WORK_DIR/repo.json" 2>/dev/null)
-TOPICS=$(jq -r '.topics | length' "$WORK_DIR/repo.json" 2>/dev/null)
-CAN_PUSH=$(jq -r '.permissions.push // false' "$WORK_DIR/repo.json" 2>/dev/null)
-CAN_ADMIN=$(jq -r '.permissions.admin // false' "$WORK_DIR/repo.json" 2>/dev/null)
-REPO_FULL_NAME=$(jq -r '.full_name // empty' "$WORK_DIR/repo.json" 2>/dev/null)
+DESCRIPTION=$(out repo | jq -r '.description // empty' 2>/dev/null)
+TOPICS=$(out repo | jq -r '.topics | length' 2>/dev/null)
+CAN_PUSH=$(out repo | jq -r '.permissions.push // false' 2>/dev/null)
+CAN_ADMIN=$(out repo | jq -r '.permissions.admin // false' 2>/dev/null)
+REPO_FULL_NAME=$(out repo | jq -r '.full_name // empty' 2>/dev/null)
 
 # Community profile checks — normalize to "yes" or "" for clean truthiness
-HAS_README=$(jq -r 'if .files.readme then "yes" else "" end' "$WORK_DIR/community.json" 2>/dev/null)
-HAS_LICENSE=$(jq -r 'if .files.license then "yes" else "" end' "$WORK_DIR/community.json" 2>/dev/null)
-HAS_COC=$(jq -r 'if .files.code_of_conduct then "yes" else "" end' "$WORK_DIR/community.json" 2>/dev/null)
-HAS_CONTRIBUTING=$(jq -r 'if .files.contributing then "yes" else "" end' "$WORK_DIR/community.json" 2>/dev/null)
-HAS_ISSUE_TEMPLATE=$(jq -r 'if .files.issue_template then "yes" else "" end' "$WORK_DIR/community.json" 2>/dev/null)
-HAS_PR_TEMPLATE=$(jq -r 'if .files.pull_request_template then "yes" else "" end' "$WORK_DIR/community.json" 2>/dev/null)
-# Security policy — populated by parallel call above
-HAS_SECURITY_POLICY=$(cat "$WORK_DIR/security-root.txt" "$WORK_DIR/security-github.txt" 2>/dev/null | head -1)
+community_has() { out community | jq -r "if .files.$1 then \"yes\" else \"\" end" 2>/dev/null; }
+HAS_README=$(community_has readme)
+HAS_LICENSE=$(community_has license)
+HAS_COC=$(community_has code_of_conduct)
+HAS_CONTRIBUTING=$(community_has contributing)
+HAS_ISSUE_TEMPLATE=$(community_has issue_template)
+HAS_PR_TEMPLATE=$(community_has pull_request_template)
 
 # Labels — aggregate paginated JSON and count non-defaults
-CUSTOM_LABELS=$(jq -s '[.[][] | select(.default == false)] | length' "$WORK_DIR/labels.json" 2>/dev/null)
+CUSTOM_LABELS=$(out labels | jq -s '[.[][] | select(.default == false)] | length' 2>/dev/null)
 
-# Branch protection — from the parallel call above
-HAS_BRANCH_PROTECTION=""
-if [[ -e "$WORK_DIR/protection.ok" ]] && [[ -s "$WORK_DIR/protection.txt" ]]; then
-  HAS_BRANCH_PROTECTION="yes"
-fi
-
-# README badges (shields.io)
+# README badges (shields.io), read locally
 HAS_BADGES=""
 README_PATH=$(git rev-parse --show-toplevel 2>/dev/null)/README.md
 if [[ -f "$README_PATH" ]]; then
   if grep -qiE 'img\.shields\.io|badge\.fury\.io|badgen\.net' "$README_PATH" 2>/dev/null; then
     HAS_BADGES="yes"
   fi
-fi
-
-# --- Bail if API didn't respond ---
-if [[ -z "$CONTRIBUTORS" ]] && [[ ! -s "$WORK_DIR/repo.json" ]]; then
-  echo "**Note**: Could not reach GitHub API"
-  exit 0
 fi
 
 # ============================================================
@@ -130,7 +126,7 @@ if [[ -n "$CONTRIBUTORS" ]]; then
     echo "- Lightweight PRs are fine: a title and a few bullet points"
   else
     # Reuse saved contributors response instead of re-fetching
-    REVIEWERS=$(jq -r '.[0:5][].login' "$WORK_DIR/contributors.json" 2>/dev/null \
+    REVIEWERS=$(out contributors | jq -r '.[0:5][].login' 2>/dev/null \
       | grep -v "$CURRENT_USER" | head -3 | tr '\n' ', ' | sed 's/,$//')
     echo "**Context**: Team project ($ACTIVE_CONTRIBUTORS active, $CONTRIBUTORS total contributors)"
     echo "- PR required for all changes — review before merge"
@@ -145,78 +141,79 @@ fi
 # SECTION 2: Repository health checks
 # ============================================================
 
-# Build array of checks: name, status (pass/fail)
+# Each check is pass, fail, or unknown. Unknown means the call behind it
+# timed out or failed: it is never shown as missing, since the way offers to
+# add what is missing, and a file that exists would be offered again.
 declare -a CHECK_NAMES=()
 declare -a CHECK_STATUS=()
 declare -a CHECK_NEEDS_ADMIN=()
 
-add_check() {
-  local name="$1"
-  local value="$2"
-  local needs_admin="${3:-false}"
+add_check() {  # name value needs-admin answered
+  local name="$1" value="$2" needs_admin="${3:-false}" answered="${4:-yes}"
   CHECK_NAMES+=("$name")
   CHECK_NEEDS_ADMIN+=("$needs_admin")
   # Guard against empty, "null", "0", and "false" — all mean absent
   if [[ -n "$value" ]] && [[ "$value" != "null" ]] && [[ "$value" != "0" ]] && [[ "$value" != "false" ]]; then
     CHECK_STATUS+=("pass")
-  else
+  elif [[ "$answered" == "yes" ]]; then
     CHECK_STATUS+=("fail")
+  else
+    CHECK_STATUS+=("unknown")
   fi
 }
+answered() { { ok "$1" || absent "$1"; } && echo yes || echo no; }
 
-add_check "README"              "$HAS_README"             "false"
-add_check "License"             "$HAS_LICENSE"            "false"
-add_check "Description"         "$DESCRIPTION"            "false"
-add_check "Topics"              "$TOPICS"                 "false"
-add_check "Code of conduct"     "$HAS_COC"                "false"
-add_check "Contributing guide"  "$HAS_CONTRIBUTING"       "false"
-add_check "Issue templates"     "$HAS_ISSUE_TEMPLATE"     "false"
-add_check "PR template"         "$HAS_PR_TEMPLATE"        "false"
-add_check "Security policy"     "$HAS_SECURITY_POLICY"    "false"
-add_check "Custom labels"       "$CUSTOM_LABELS"          "false"
-add_check "Branch protection"   "$HAS_BRANCH_PROTECTION"  "true"
-add_check "README badges"       "$HAS_BADGES"             "false"
+# Security policy: GitHub's true or false, or unknown when the call failed.
+HAS_SECURITY_POLICY=$(ok security && out security)
+SECURITY_ANSWERED=$(ok security && [[ $(out security) =~ ^(true|false)$ ]] && echo yes || echo no)
+# Branch protection: protected, a 404, or unknown.
+HAS_BRANCH_PROTECTION=$(ok protection && [[ -n $(out protection) ]] && echo yes)
+PROTECTION_ANSWERED=$(absent protection && echo yes || echo no)
 
-# Count passes and failures
+add_check "README"              "$HAS_README"             "false" "$(answered community)"
+add_check "License"             "$HAS_LICENSE"            "false" "$(answered community)"
+add_check "Description"         "$DESCRIPTION"            "false" "$(answered repo)"
+add_check "Topics"              "$TOPICS"                 "false" "$(answered repo)"
+add_check "Code of conduct"     "$HAS_COC"                "false" "$(answered community)"
+add_check "Contributing guide"  "$HAS_CONTRIBUTING"       "false" "$(answered community)"
+add_check "Issue templates"     "$HAS_ISSUE_TEMPLATE"     "false" "$(answered community)"
+add_check "PR template"         "$HAS_PR_TEMPLATE"        "false" "$(answered community)"
+add_check "Security policy"     "$HAS_SECURITY_POLICY"    "false" "$SECURITY_ANSWERED"
+add_check "Custom labels"       "$CUSTOM_LABELS"          "false" "$(answered labels)"
+add_check "Branch protection"   "$HAS_BRANCH_PROTECTION"  "true"  "$PROTECTION_ANSWERED"
+add_check "README badges"       "$HAS_BADGES"             "false" "yes"
+
+# Count passes, failures and checks that could not be made
 TOTAL=${#CHECK_NAMES[@]}
 PASS_COUNT=0
 FAIL_COUNT=0
 ADMIN_NEEDED=0
 declare -a MISSING_NAMES=()
-declare -a MISSING_FIXABLE=()
+declare -a UNKNOWN_NAMES=()
 
 for i in "${!CHECK_STATUS[@]}"; do
-  if [[ "${CHECK_STATUS[$i]}" == "pass" ]]; then
-    ((PASS_COUNT++))
-  else
-    ((FAIL_COUNT++))
-    MISSING_NAMES+=("${CHECK_NAMES[$i]}")
-    # Determine if user can fix this
-    if [[ "${CHECK_NEEDS_ADMIN[$i]}" == "true" ]]; then
-      if [[ "$CAN_ADMIN" == "true" ]]; then
-        MISSING_FIXABLE+=("yes")
-      else
-        MISSING_FIXABLE+=("needs admin")
+  case "${CHECK_STATUS[$i]}" in
+    pass) ((PASS_COUNT++)) ;;
+    unknown) UNKNOWN_NAMES+=("${CHECK_NAMES[$i]}") ;;
+    fail)
+      ((FAIL_COUNT++))
+      MISSING_NAMES+=("${CHECK_NAMES[$i]}")
+      if [[ "${CHECK_NEEDS_ADMIN[$i]}" == "true" && "$CAN_ADMIN" != "true" ]]; then
         ((ADMIN_NEEDED++))
       fi
-    else
-      if [[ "$CAN_PUSH" == "true" ]]; then
-        MISSING_FIXABLE+=("yes")
-      else
-        MISSING_FIXABLE+=("read-only")
-      fi
-    fi
-  fi
+      ;;
+  esac
 done
+join_names() { local s; printf -v s ', %s' "$@"; printf '%s' "${s:2}"; }
 
 # --- Tiered output ---
 
 if [[ "$FAIL_COUNT" -eq 0 ]]; then
-  # Silent — everything configured
+  # Silent — everything checked is configured
   :
 elif [[ "$FAIL_COUNT" -le 3 ]]; then
   # Brief hint with per-item fixability awareness
-  MISSING_LIST=$(printf '%s' "${MISSING_NAMES[0]}"; printf ', %s' "${MISSING_NAMES[@]:1}")
+  MISSING_LIST=$(join_names "${MISSING_NAMES[@]}")
   if [[ "$CAN_PUSH" == "true" ]]; then
     RIGHTS="you have push access"
   else
@@ -237,27 +234,25 @@ else
   echo "|-------|--------|---------|"
   for i in "${!CHECK_NAMES[@]}"; do
     NAME="${CHECK_NAMES[$i]}"
-    if [[ "${CHECK_STATUS[$i]}" == "pass" ]]; then
-      STATUS="ok"
-      FIXABLE="—"
-    else
-      STATUS="missing"
-      if [[ "${CHECK_NEEDS_ADMIN[$i]}" == "true" ]]; then
-        if [[ "$CAN_ADMIN" == "true" ]]; then
-          FIXABLE="yes"
+    case "${CHECK_STATUS[$i]}" in
+      pass) STATUS="ok"; FIXABLE="—" ;;
+      unknown) STATUS="couldn't check"; FIXABLE="—" ;;
+      fail)
+        STATUS="missing"
+        if [[ "${CHECK_NEEDS_ADMIN[$i]}" == "true" ]]; then
+          if [[ "$CAN_ADMIN" == "true" ]]; then FIXABLE="yes"; else FIXABLE="needs admin"; fi
         else
-          FIXABLE="needs admin"
+          if [[ "$CAN_PUSH" == "true" ]]; then FIXABLE="yes"; else FIXABLE="read-only"; fi
         fi
-      else
-        if [[ "$CAN_PUSH" == "true" ]]; then
-          FIXABLE="yes"
-        else
-          FIXABLE="read-only"
-        fi
-      fi
-    fi
+        ;;
+    esac
     echo "| $NAME | $STATUS | $FIXABLE |"
   done
+fi
+# Outside the table, a check that could not be made gets its own line.
+if [[ ${#UNKNOWN_NAMES[@]} -gt 0 && "$FAIL_COUNT" -le 3 ]]; then
+  [[ "$FAIL_COUNT" -eq 0 ]] && echo ""
+  echo "**Repo health**: couldn't check $(join_names "${UNKNOWN_NAMES[@]}") (the GitHub call failed or timed out)"
 fi
 
 # --- Badge recommendation when missing ---
