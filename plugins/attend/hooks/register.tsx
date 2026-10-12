@@ -534,7 +534,7 @@ export const register: Register = on => {
   // session that listened, puts the mode back at once, so a reload finds it
   // active, records the id, and tells attend the id is listening. The poll
   // holds its drain until then. The model's context changed as at a
-  // compaction, so the next delivery carries the full preamble. At process
+  // compaction, so the next delivery carries the preamble line. At process
   // start this event comes before session.start, which handles that case.
   on('classic.SessionStart', async ($, e, next) => {
     const done = await next(e)

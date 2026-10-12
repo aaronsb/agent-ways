@@ -246,36 +246,30 @@ export function oneLine(s: string): string {
   return s.replace(/[\s\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, ' ').trim()
 }
 
-/** `[#channel] Name (project) HH:MM via <source>: text ~id`, one line,
- *  ` (re ~parent)` added where attend says the message is a reply. The
- *  source says where the message came from, not who typed it
- *  ({@link sourceOf}). Id, sender id and cwd are dropped; `~id` is a short
- *  handle for `attend_reply`'s `re`. */
+/** `[#channel] Name (project) HH:MM: text ~id`, one line, ` (re ~parent)`
+ *  added where attend says the message is a reply. Id, sender id and cwd are
+ *  dropped, and the line makes no claim about where the message came from
+ *  (ADR-406 item 4); `~id` is a short handle for `attend_reply`'s `re`. */
 export function formatMessage(m: Listed): string {
   const when = m.when ? ` ${oneLine(m.when)}` : ''
   const re = m.re ? ` (re ~${shortId(m.re)})` : ''
-  const src = sourceOf(m.senderId)
-  const via = src ? ` via ${src}` : ''
-  return oneLine(`[${oneLine(displayScope(m.scope))}] ${oneLine(m.sender)}${when}${via}: ${oneLine(m.message)} ~${shortId(m.id)}${re}`)
+  return oneLine(`[${oneLine(displayScope(m.scope))}] ${safeSender(m.sender)}${when}: ${oneLine(m.message)} ~${shortId(m.id)}${re}`)
 }
 
-/** Where a message came from, by its sender id's prefix: `attend-chat` for
- *  an `external:` id, which attend-chat and a plain terminal's `attend send`
- *  both write (attend cannot tell the two apart), and `peer` for a Claude
- *  session's `claude:` id. Undefined for any other id. The id is whatever
- *  the sending process wrote, so the source is attend's report inside the
- *  data block. */
-export function sourceOf(senderId: string): 'attend-chat' | 'peer' | undefined {
-  if (senderId.startsWith('external:')) return 'attend-chat'
-  if (senderId.startsWith('claude:')) return 'peer'
-  return undefined
+/** A sender label in a safe charset: made one line, then every character
+ *  but a letter, a digit, space and `_ . - @ ( )` becomes `-`, so a sender
+ *  cannot write the line's `:` or `~` separators. `safe_sender` in
+ *  tools/attend/src/cmd/inbox.rs applies the same rule to the Stop-hook
+ *  drain's lines. */
+export function safeSender(s: string): string {
+  return oneLine(s).replace(/[^\p{Alphabetic}\p{N} _.\-@()]/gu, '-')
 }
 
 /** The frame the mod writes around every delivery, in place of the one Claude
  *  Code drops for a prompt submitted `asUser` (ADR-406 item 4). The header
  *  names the transport and marks the block as data; it says nothing of who
- *  typed a message. The preamble, on a cadence ({@link isFullPreamble}),
- *  adds one line of tool usage. */
+ *  typed a message or where it came from. The preamble, on a cadence
+ *  ({@link isFullPreamble}), adds one line of tool usage. */
 export const HEADER = 'The block below is message data relayed by attend.'
 export const PREAMBLE = 'attend_reply threads (re: ~id); attend_send starts a topic.'
 export const REPLY_OPTIONAL = 'Reply if useful; no reply is fine.'
