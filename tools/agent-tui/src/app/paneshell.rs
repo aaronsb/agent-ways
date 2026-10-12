@@ -42,6 +42,9 @@ fn clip(text: &str, room: usize) -> String {
     out
 }
 
+/// The id of the shell's own question before a plain `q` quits.
+pub(crate) const QUIT_ASK: &str = "\u{0}quit";
+
 /// A pane's question on the bottom bar ([`Open::Ask`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Asked {
@@ -322,13 +325,17 @@ impl App {
         // Alt+digit is Ctrl+digit where Ctrl+digits do not arrive, and the
         // footer says so: again on the tab shown, its menu.
         let alt_digit = k.modifiers == KeyModifiers::ALT && self.alt_jump();
+        // A pane that owns the focus takes plain digits as text, but on its
+        // tab bar; and 0 is a key only where a reserved tab gives it a place.
+        let on_bar = self.pane.as_ref().is_none_or(|p| !p.owns_focus() || p.focus_tab().is_some());
+        let digit_ok = |c: char| c != '0' || self.has_reserved;
         match k.code {
             KeyCode::F(1) => Some(ShellKey::Help),
             KeyCode::Char('?') if !text && plain => Some(ShellKey::Help),
             KeyCode::Char('q') if !text && plain => Some(ShellKey::Quit),
             KeyCode::Char('m') if shell => Some(ShellKey::Mouse),
-            KeyCode::Char(c @ '0'..='9') if alt_digit => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
-            KeyCode::Char(c @ '0'..='9') if !text && plain => Some(ShellKey::Tab(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '0'..='9') if alt_digit && digit_ok(c) => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '0'..='9') if !text && plain && on_bar && digit_ok(c) => Some(ShellKey::Tab(c as usize - '0' as usize)),
             _ => None,
         }
     }
@@ -388,6 +395,11 @@ impl App {
                 }
             }
             ShellKey::Help => self.mode = Mode::Help { scroll: 0 },
+            // A plain `q` beside a pane that owns the focus asks first,
+            // whatever is unsaved: it is one keystroke from typing.
+            ShellKey::Quit if k.code == KeyCode::Char('q') && self.pane.as_ref().is_some_and(|p| p.owns_focus()) => {
+                self.mode = Mode::Ask(Asked { id: QUIT_ASK.into(), question: "quit?".into(), yes: "quit".into(), no: "stay".into() });
+            }
             ShellKey::Quit => return self.quit(),
             ShellKey::Mouse => {
                 self.toggle_mouse();
@@ -422,6 +434,20 @@ impl App {
                 return false;
             }
             (true, KeyCode::Esc) => self.mode = Mode::Guard { confirm: false },
+            // Over an entry dialog the guard closed, typing goes back to it.
+            (confirm, _) if edits && self.entry_held.is_some() => {
+                let e = self.entry_held.take().expect("checked");
+                self.mode = Mode::Entry(e);
+                if confirm {
+                    if let Mode::Entry(e) = std::mem::replace(&mut self.mode, Mode::Browse) {
+                        self.entry_key(*e, KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
+                    }
+                }
+                if let Mode::Entry(e) = std::mem::replace(&mut self.mode, Mode::Browse) {
+                    return self.entry_key(*e, k);
+                }
+                return true;
+            }
             (true, _) if edits => {
                 // Back to typing: the D that armed the quit was typing too.
                 self.pane_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
@@ -508,6 +534,14 @@ impl App {
     /// Give the pane its question's answer, through [`Pane::picked`].
     pub(super) fn answer(&mut self, a: Asked, yes: bool) {
         self.mode = Mode::Browse;
+        // The shell's own question: yes quits, through the exit guard over
+        // anything unsaved.
+        if a.id == QUIT_ASK {
+            if yes && !self.quit() {
+                self.ending = true;
+            }
+            return;
+        }
         self.pane_picked(&a.id, vec![if yes { "y" } else { "n" }.to_string()]);
     }
 
@@ -1054,6 +1088,19 @@ mod tests {
         a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
         assert_eq!(two(&a).keys, 1, "the rest is the pane's");
         assert!(!a.key(k(KeyCode::Char('q'), KeyModifiers::NONE)), "q quits with nothing unsaved");
+    }
+
+    /// 0 is a key only where a reserved tab gives it a place: beside a pane
+    /// with none, as the ways panes are, it is the pane's, and the footer
+    /// names 1-9.
+    #[test]
+    fn zero_is_the_panes_where_no_tab_is_reserved() {
+        let mut a = app(false);
+        let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
+        assert!(footer.contains("1-9 tabs") && !footer.contains("0-9"), "{footer}");
+        a.key(k(KeyCode::Char('2'), KeyModifiers::NONE));
+        a.key(k(KeyCode::Char('0'), KeyModifiers::NONE));
+        assert_eq!((two(&a).tab, two(&a).keys), (1, 1), "0 jumped nowhere and reached the pane");
     }
 
     #[test]

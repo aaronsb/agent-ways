@@ -221,7 +221,7 @@ impl App {
         }
         match k.code {
             _ if toggle => Some(ShellKey::StripFocus),
-            KeyCode::Char(c @ '0'..='9') if ctrl && self.ctrl_jump() => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '0'..='9') if ctrl && self.ctrl_jump() && (c != '0' || self.has_reserved) => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
             _ => None,
         }
     }
