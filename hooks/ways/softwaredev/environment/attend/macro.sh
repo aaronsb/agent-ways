@@ -3,7 +3,8 @@
 # through the attend CLI (never attend's cache). `attend listen status`
 # resolves the session from the process that runs it, the Claude Code
 # process this hook runs under. A subagent runs in its parent's process, so
-# under WAYS_SCOPE=subagent the state is the parent's: it is reported as
+# for a subagent (WAYS_SCOPE=subagent at dispatch, or CLAUDE_AGENT_ID set on
+# its own tool call) the state is the parent's: it is reported as
 # information, with no action, since listening and sending are the head
 # agent's (#932). Any failure prints nothing rather than a guess.
 
@@ -22,7 +23,7 @@ LISTENING=$(field "$LISTEN" listening)
 MOD_HOST=$([[ $LISTENING == true && $(field "$LISTEN" host) == '"mod"' ]] && echo true)
 RUN_LIVE=$(field "$LISTEN" run_live)
 
-if [[ ${WAYS_SCOPE:-} == subagent ]]; then
+if [[ ${WAYS_SCOPE:-} == subagent || -n ${CLAUDE_AGENT_ID:-} ]]; then
   WHO="the parent session"
   if [[ $RUN_LIVE == true && $MOD_HOST == true ]]; then
     echo "**Status**: the parent session is listening through the attend mod, and its \`attend run\` is also live under Monitor."

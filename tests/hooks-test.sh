@@ -379,7 +379,7 @@ attend_macro() {  # scope listen-json channels-json enabled-plugins [unread-json
     [[ -n "$2" ]] && printf '%s\n' "$2" > "$FIX/listen"
     printf '%s\n' "$3" > "$FIX/channels"
     [[ -n "${5:-}" ]] && printf '%s\n' "$5" > "$FIX/unread"
-    FIX="$FIX" WAYS_SCOPE="$1" WAYS_ENABLED_PLUGINS="$4" PATH="$ATTEND_SHIMS:$SYSBIN" \
+    FIX="$FIX" WAYS_SCOPE="$1" CLAUDE_AGENT_ID="${AGENT_ID:-}" WAYS_ENABLED_PLUGINS="$4" PATH="$ATTEND_SHIMS:$SYSBIN" \
         "$BASH_BIN" "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1
 }
 listen() {  # listening host run_live
@@ -432,6 +432,14 @@ check "attend macro: subagent, parent at turn end only" \
 check "attend macro: subagent, parent not listening" \
     $'**Status**: the parent session is not listening. Listening is the head agent\'s call.\n**Unread**: 2 for the parent session' \
     "$(attend_macro subagent "$(listen false null false)" '[]' "$MOD_ON" '{"unread":2}')"
+# A subagent's own tool call reaches the macro as WAYS_SCOPE=agent with its
+# CLAUDE_AGENT_ID set: still the parent's state, still no action.
+check "attend macro: a subagent's own call, parent not listening" \
+    $'**Status**: the parent session is not listening. Listening is the head agent\'s call.' \
+    "$(AGENT_ID=a123 attend_macro agent "$(listen false null false)" '[]' "$MOD_ON")"
+check "attend macro: a subagent's own call, parent listening through the mod" \
+    $'**Status**: the parent session is listening through the attend mod.\n**Channels**: the parent session hears project, #open' \
+    "$(AGENT_ID=a123 attend_macro agent "$(listen true '"mod"' false)" '[]' "$MOD_ON")"
 check "attend macro: says nothing for an unresolved session" "" \
     "$(attend_macro agent '{"session_id":"x","resolved":false,"listening":false,"via":[],"host":null,"run_live":false}' '[]' "$MOD_ON")"
 check "attend macro: says nothing when listen status fails" "" "$(attend_macro agent '' '[]' "$MOD_ON")"
