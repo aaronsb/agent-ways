@@ -6,7 +6,7 @@ commands: attend
 refire: 0.15
 macro: append
 scope: agent, subagent
-requires: ["Bash(attend:*)", "Bash(cut:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(paste:*)", "Bash(sed:*)", "Bash(ways:*)"]
+requires: ["Bash(attend:*)", "Bash(cut:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(paste:*)", "Bash(sed:*)"]
 ---
 <!-- epistemic: tool-knowledge -->
 <!--
