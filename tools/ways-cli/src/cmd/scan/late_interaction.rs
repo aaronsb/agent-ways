@@ -43,7 +43,6 @@
 //! the single-vector path. The matcher never partially decides.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -851,7 +850,8 @@ pub(crate) fn chunk_sections(content: &str) -> Vec<String> {
 fn run_stdin(mut cmd: Command, input: &str) -> Option<String> {
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     let mut child = cmd.spawn().ok()?;
-    child.stdin.take()?.write_all(input.as_bytes()).ok()?;
+    // A child that exits early is a failed run, not the end of `ways`.
+    agent_fmt::write_to_child(&mut child.stdin.take()?, input.as_bytes()).ok()?;
     let out = child.wait_with_output().ok()?;
     if !out.status.success() {
         return None;

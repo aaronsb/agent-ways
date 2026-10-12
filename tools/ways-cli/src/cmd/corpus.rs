@@ -1474,8 +1474,10 @@ fn batch_similarity(bin: &Path, model: &Path, pairs: &[String], verbose: bool) -
         .ok()?;
     {
         let mut stdin = child.stdin.take()?;
-        stdin.write_all(pairs.join("\n").as_bytes()).ok()?;
-        stdin.write_all(b"\n").ok()?;
+        let mut input = pairs.join("\n");
+        input.push('\n');
+        // A way-embed that exits early is a failed batch, not the end of `ways`.
+        agent_fmt::write_to_child(&mut stdin, input.as_bytes()).ok()?;
     } // stdin dropped here → EOF, so way-embed can finish
     let out = child.wait_with_output().ok()?;
     if !out.status.success() {

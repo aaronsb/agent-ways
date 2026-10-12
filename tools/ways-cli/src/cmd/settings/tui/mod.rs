@@ -342,7 +342,9 @@ impl Adapter for Ways {
         let home = self.ctx.home.clone();
         let mut proc = Proc { child, out, err, home, printed: None };
         if let (Some(secret), Some(mut pipe)) = (&q.stdin, proc.child.stdin.take()) {
-            if let Err(e) = pipe.write_all(secret.reveal().as_bytes()) {
+            // A command that exits unread gives an error here, so the screen
+            // stops it and puts the terminal back rather than dying raw.
+            if let Err(e) = agent_fmt::write_to_child(&mut pipe, secret.reveal().as_bytes()) {
                 // Never leave the command, or anything it started, behind.
                 proc.stop();
                 return ended(Err(format!("{line}: writing its stdin: {e}")));
