@@ -1,8 +1,7 @@
 agent-tui frame 80x25
 | ≡   ▽  1 #deploy   ♦  2 #infra    +                            ◆  #open   ⋯all |
 |╭───────────────────┌pick one: #infra────────────────────┐─────────────────────╮|
-|│                   │   Invite agent ▸                   │                     │|
-|│                   │   Add agent       needs ADR-404 D1 │                     │|
+|│                   │   Add agent ▸                      │                     │|
 |│                   │   Remove agent ▸                   │                     │|
 |│                   │   Describe…                        │                     │|
 |│                   │   Clear history                    │                     │|
@@ -10,6 +9,7 @@ agent-tui frame 80x25
 |│                   │   Seal            needs ADR-404 D4 │                     │|
 |│                   │   Delete channel                   │                     │|
 |│                   └────────────────────────────────────┘                     │|
+|│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -46,7 +46,6 @@ styles
   2  79-79  - - DIM
   3   0-0   - - DIM
   3  20-20  LightBlue - -
-  3  21-56  - - DIM
   3  57-57  LightBlue - -
   3  79-79  - - DIM
   4   0-0   - - DIM
@@ -63,19 +62,17 @@ styles
   6  79-79  - - DIM
   7   0-0   - - DIM
   7  20-20  LightBlue - -
+  7  21-56  - - DIM
   7  57-57  LightBlue - -
   7  79-79  - - DIM
   8   0-0   - - DIM
   8  20-20  LightBlue - -
-  8  21-56  - - DIM
   8  57-57  LightBlue - -
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9  20-20  LightBlue - -
-  9  57-57  LightBlue - -
+  9  20-57  LightBlue - -
   9  79-79  - - DIM
  10   0-0   - - DIM
- 10  20-57  LightBlue - -
  10  79-79  - - DIM
  11   0-0   - - DIM
  11  79-79  - - DIM

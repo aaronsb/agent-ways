@@ -288,7 +288,7 @@ fn tab_on_an_empty_input_cycles_the_tabs_and_alt_digits_jump() {
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
     press(&mut c, KeyEvent::new(KeyCode::Char('9'), KeyModifiers::ALT));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "an empty slot does nothing");
-    press(&mut c, KeyEvent::new(KeyCode::Char('0'), KeyModifiers::ALT));
+    drawn(&mut c, &[KeyEvent::new(KeyCode::Char('0'), KeyModifiers::ALT)], 80, 25);
     assert_eq!(c.foreground(), &Tab::Merged, "0 is the bar's last tab, the operator view");
     assert!(c.input().is_empty(), "Alt+digit types nothing");
 }
@@ -826,7 +826,7 @@ fn ctrl_digit_shows_a_tab_and_a_second_press_opens_its_menu() {
     assert!(!text(&mut c, 80, 25).contains("pick one"), "the first press only shows the tab");
     drawn(&mut c, &[ctrl('1')], 80, 25);
     let shown = text(&mut c, 80, 25);
-    for item in ["pick one: #deploy", "Invite agent ▸", "Add agent", "needs ADR-404 D1", "Remove agent ▸", "Describe…", "Clear history", "Join", "Seal", "needs ADR-404 D4", "Delete channel"] {
+    for item in ["pick one: #deploy", "Add agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Join", "Seal", "needs ADR-404 D4", "Delete channel"] {
         assert!(shown.contains(item), "{item}: {shown}");
     }
     assert!(!shown.contains("Leave"), "the human is not in #deploy: Join, not Leave");
@@ -860,7 +860,7 @@ fn to_tab(c: &mut Chat, label: &str) {
 #[test]
 fn the_menus_differ_by_tab() {
     let mut c = chat().enhanced(true);
-    press(&mut c, ctrl('0'));
+    drawn(&mut c, &[ctrl('0')], 80, 25);
     let view = text(&mut c, 80, 25);
     assert!(view.contains("pick one: ⋯all") && view.contains("Clear view") && !view.contains("Clear history"), "{view}");
     press(&mut c, key(KeyCode::Esc));
@@ -1113,7 +1113,7 @@ fn ctrl_n_never_throws_away_a_description_being_typed() {
     let mut c = chat().enhanced(true).dry_run(true);
     typed(&mut c, "a draft");
     drawn(&mut c, &[ctrl('1'), ctrl('1')], 80, 25);
-    // Invite agent, then Remove agent and Describe…: Add agent waits.
+    // Add agent, then Remove agent, then Describe….
     for _ in 0..2 {
         press(&mut c, key(KeyCode::Down));
     }
@@ -1261,7 +1261,7 @@ fn the_common_menu_leads_the_bar_and_the_operator_view_is_zero() {
     let shown = text(&mut c, 80, 25);
     assert!(shown.starts_with(" ≡ ") && shown.contains("1 #deploy"), "{shown}");
     press(&mut c, ctrl('1'));
-    press(&mut c, ctrl('0'));
+    drawn(&mut c, &[ctrl('0')], 80, 25);
     assert_eq!(c.foreground(), &Tab::Merged, "Ctrl+0 is the bar's last tab, the operator view");
     // ≡ is the first slot: ← from the operator view walks the bar back to it.
     drawn(&mut c, &[key(KeyCode::F(2)), key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Left)], 80, 25);
@@ -1592,7 +1592,7 @@ fn a_long_column_scrolls_with_the_cursor_and_the_wheel() {
 fn the_footer_says_how_to_leave_the_box_and_how_to_work_the_column() {
     let footer = |c: &mut Chat, w: u16| testkit::rows(&testkit::render_screen(c, w, 25)).pop().expect("a bottom bar");
     let mut c = chat_side().enhanced(true);
-    assert!(footer(&mut c, 80).contains("Shift+Tab or ↑ at the top leaves the box"), "{}", footer(&mut c, 80));
+    assert!(footer(&mut c, 80).contains("Enter send · Tab complete · S-Tab or ↑"), "{}", footer(&mut c, 80));
     press(&mut c, key(KeyCode::F(2)));
     press(&mut c, key(KeyCode::Down));
     let f = footer(&mut c, 80);

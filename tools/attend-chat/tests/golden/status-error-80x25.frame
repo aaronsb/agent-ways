@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                              │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | /help /whois /peers /join /leave /dissolve /channels /invite /kick /purge /conf|
-| chat  unknown: /bogus (try /help) │ mouse on (M-m) │ F1 keys                   |
+| chat  unknown: /bogus (try /help) │ mouse on (M-m) │ F1 keys · Enter send      |
 styles
   0   0-2   White Blue -
   0   5-6   Red - -
@@ -104,4 +104,6 @@ styles
  24  37-50  - - DIM|ITALIC
  24  51-53  - - DIM
  24  54-56  Cyan - -
- 24  57-60  - - DIM|ITALIC
+ 24  57-63  - - DIM|ITALIC
+ 24  64-69  Cyan - -
+ 24  70-73  - - DIM|ITALIC

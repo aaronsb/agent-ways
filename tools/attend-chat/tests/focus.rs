@@ -119,7 +119,8 @@ fn walk(c: &mut Chat, code: KeyCode, stop: &str) -> Vec<String> {
 fn the_ring_walks_the_tab_bar_in_order_then_the_column_the_feed_and_the_box() {
     let mut c = chat();
     assert_eq!(focused(&mut c), "mode chat", "the chat opens typing");
-    // ↓ at the end of the (empty) box leaves it forward, round to the bar.
+    // ↓ at the end of a box with text leaves it forward, round to the bar.
+    press(&mut c, KeyCode::Char('x'));
     press(&mut c, KeyCode::Down);
     let ring = {
         let mut r = vec![focused(&mut c)];
@@ -199,14 +200,21 @@ fn menu(c: &mut Chat) -> Option<String> {
 
 /// Walk forward from the box's ↓ exit until `want` has the focus.
 fn focus_to(c: &mut Chat, want: &str) {
-    if focused(c) == "mode chat" {
-        press(c, KeyCode::Down);
-    }
-    for _ in 0..40 {
-        if focused(c) == want {
-            return;
+    // The tab bar backward from the tab shown, then the ring forward from it.
+    for code in [KeyCode::BackTab, KeyCode::Tab] {
+        if focused(c) != "mode chat" {
+            press(c, KeyCode::Esc);
         }
-        press(c, KeyCode::Tab);
+        press(c, KeyCode::F(2));
+        for _ in 0..40 {
+            if focused(c) == want {
+                return;
+            }
+            if focused(c) == "mode chat" {
+                break;
+            }
+            press(c, code);
+        }
     }
     panic!("never reached {want}");
 }
@@ -272,9 +280,10 @@ fn outside_the_box_every_single_key_the_help_names_works() {
     press(&mut c, KeyCode::BackTab);
     press(&mut c, KeyCode::Char('m'));
     assert!(bar(&mut c).contains("mouse off"), "{}", bar(&mut c));
-    // A digit shows that created channel; 0 the bar's last tab, the operator view.
+    // On the tab bar a digit shows that created channel; 0 the bar's last
+    // tab, the operator view.
     let mut c = chat();
-    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::F(2));
     press(&mut c, KeyCode::Char('1'));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
     press(&mut c, KeyCode::Char('0'));
@@ -306,10 +315,138 @@ fn outside_the_box_every_single_key_the_help_names_works() {
     press(&mut c, KeyCode::BackTab);
     press(&mut c, KeyCode::Char('h'));
     assert_eq!((focused(&mut c), c.input().text()), ("mode chat".to_string(), "h"));
-    // `q` quits, with nothing unsaved.
+    // `q` asks first, even with nothing unsaved: `n` stays, `y` quits.
     let mut c = chat();
     press(&mut c, KeyCode::BackTab);
-    assert!(!press(&mut c, KeyCode::Char('q')), "q quits outside the box");
+    assert!(press(&mut c, KeyCode::Char('q')), "q asks before it quits");
+    assert!(bar(&mut c).contains("quit?") && bar(&mut c).contains(" y quit "), "{}", bar(&mut c));
+    assert!(press(&mut c, KeyCode::Char('n')) && !c.app().ended(), "n stays");
+    press(&mut c, KeyCode::Char('q'));
+    assert!(!press(&mut c, KeyCode::Char('y')), "y quits");
+}
+
+/// The reviewer's reproduction: ↑ on an empty box, then `1` and `x`. The
+/// arrow does not leave an empty box, so both characters are typed and no
+/// channel is switched (ADR-409, Guarded).
+#[test]
+fn an_arrow_on_an_empty_box_never_turns_the_next_keys_into_commands() {
+    for arrow in [KeyCode::Up, KeyCode::Down] {
+        let mut c = chat();
+        press(&mut c, arrow);
+        typed(&mut c, "1x");
+        let f = focused(&mut c);
+        assert_eq!((f, c.input().text(), c.foreground().clone()), ("mode chat".to_string(), "1x", Tab::Merged), "{arrow:?}");
+        // q and m are text there too.
+        typed(&mut c, "qm");
+        assert_eq!(c.input().text(), "1xqm");
+        assert!(!c.app().ended() && c.app().mouse_on());
+    }
+}
+
+/// With a draft, ↑ twice (to the start, then out) and a digit: the digit is
+/// typed into the draft, which keeps its destination.
+#[test]
+fn a_digit_after_leaving_a_draft_is_typed_not_a_tab_switch() {
+    let mut c = chat();
+    typed(&mut c, "hi");
+    press(&mut c, KeyCode::Up);
+    press(&mut c, KeyCode::Up);
+    assert_eq!(focused(&mut c), "mode feed");
+    press(&mut c, KeyCode::Char('1'));
+    let f = focused(&mut c);
+    assert_eq!((c.foreground().clone(), c.input().text(), f), (Tab::Merged, "1hi", "mode chat".to_string()), "typed at the draft's cursor, the destination kept");
+}
+
+/// `q` outside the box over a draft: the question, then the exit guard.
+#[test]
+fn q_outside_the_box_goes_through_the_exit_guard_over_a_draft() {
+    let mut c = chat();
+    typed(&mut c, "draft");
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::Char('q'));
+    assert!(bar(&mut c).contains("quit?"), "{}", bar(&mut c));
+    assert!(press(&mut c, KeyCode::Char('y')), "the draft keeps the chat open");
+    assert!(c.app().guarding(), "the exit guard asks over the draft");
+    press(&mut c, KeyCode::Esc);
+    assert!(!c.app().guarding() && !c.app().ended());
+    assert_eq!(c.input().text(), "draft");
+}
+
+/// Esc leaves an empty box, backward, as Shift+Tab does.
+#[test]
+fn esc_leaves_an_empty_box() {
+    let mut c = chat();
+    press(&mut c, KeyCode::Esc);
+    assert_eq!(focused(&mut c), "mode feed");
+    let mut c = chat();
+    typed(&mut c, "x");
+    press(&mut c, KeyCode::Esc);
+    assert_eq!(focused(&mut c), "mode chat", "with text, Esc only clears the bar");
+}
+
+/// Backspace and Delete outside the box go back to it and leave the draft.
+#[test]
+fn backspace_outside_the_box_does_not_edit_the_draft() {
+    for k in [KeyCode::Backspace, KeyCode::Delete] {
+        let mut c = chat();
+        typed(&mut c, "abc");
+        press(&mut c, KeyCode::BackTab);
+        press(&mut c, k);
+        let f = focused(&mut c);
+        assert_eq!((f, c.input().text()), ("mode chat".to_string(), "abc"), "{k:?}");
+    }
+}
+
+/// Walking the bar previews each tab; walking off it without choosing puts
+/// back the tab shown before, so the draft's destination stays. Esc on a
+/// tab keeps it.
+#[test]
+fn walking_off_the_bar_puts_back_the_tab_shown() {
+    let mut c = chat();
+    typed(&mut c, "x");
+    press(&mut c, KeyCode::Down);
+    assert_eq!(focused(&mut c), "tab ≡");
+    press(&mut c, KeyCode::Tab);
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "the walk previews #deploy");
+    for _ in 0..6 {
+        press(&mut c, KeyCode::Tab);
+    }
+    assert!(focused(&mut c).starts_with("row "), "{}", focused(&mut c));
+    assert_eq!(c.foreground(), &Tab::Merged, "off the bar: the tab shown before");
+    // Esc on a tab keeps it.
+    let mut c = chat();
+    press(&mut c, KeyCode::F(2));
+    press(&mut c, KeyCode::Left);
+    press(&mut c, KeyCode::Esc);
+    let f = focused(&mut c);
+    assert_eq!((c.foreground().clone(), f), (Tab::Channel("open".into()), "mode chat".to_string()));
+}
+
+/// At the exit guard over the entry dialog, typing goes on into the
+/// dialog, never the compose draft.
+#[test]
+fn typing_at_the_guard_over_the_dialog_goes_back_to_the_dialog() {
+    let mut c = chat();
+    key(&mut c, KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
+    typed(&mut c, "rel");
+    key(&mut c, KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(c.app().guarding());
+    typed(&mut c, "ease");
+    assert!(!c.app().guarding());
+    assert_eq!(c.input().text(), "", "the draft is untouched");
+    assert!(screen(&mut c).contains("release"), "{}", screen(&mut c));
+}
+
+/// The compose footer keeps its verbs first at 80 and 60 columns.
+#[test]
+fn the_compose_footer_keeps_enter_and_tab_first() {
+    let mut c = chat();
+    for w in [80, 60] {
+        let b = testkit::rows(&testkit::render_screen(&mut c, w, 25)).pop().unwrap();
+        assert!(b.contains("Enter send"), "{w}: {b}");
+    }
+    let b = testkit::rows(&testkit::render_screen(&mut c, 80, 25)).pop().unwrap();
+    assert!(b.contains("Enter send · Tab complete"), "{b}");
 }
 
 #[test]
@@ -318,7 +455,7 @@ fn the_help_names_the_single_keys_outside_the_box_and_the_chords_inside() {
     press(&mut c, KeyCode::F(1));
     let inside = screen(&mut c);
     assert!(inside.contains("Alt+0-9") || inside.contains("Ctrl+0-9"), "{inside}");
-    assert!(inside.contains("Shift+Tab") && inside.contains("leaves the box"), "{inside}");
+    assert!(inside.contains("S-Tab") && inside.contains("leaves the box"), "{inside}");
     press(&mut c, KeyCode::Esc);
     press(&mut c, KeyCode::BackTab);
     press(&mut c, KeyCode::F(1));
@@ -331,12 +468,12 @@ fn the_help_names_the_single_keys_outside_the_box_and_the_chords_inside() {
 #[test]
 fn the_footer_says_what_the_focused_element_takes() {
     let mut c = chat();
-    assert!(bar(&mut c).contains("Shift+Tab or ↑ at the top leaves the box"), "{}", bar(&mut c));
+    assert!(bar(&mut c).contains("S-Tab or ↑") && bar(&mut c).contains("leaves"), "{}", bar(&mut c));
     for (element, want) in [("tab #deploy", "Enter its menu"), ("tab ⋯all", "Enter its menu"), ("tab ≡", "Enter the menu"), ("tab +", "Enter new channel"), ("row #infra", "↑ ↓ move"), ("mode feed", "Enter sender's menu")] {
         let mut c = chat();
         focus_to(&mut c, element);
         let b = bar(&mut c);
-        assert!(b.contains(want) && b.contains("Tab next") && b.contains("Shift+Tab back"), "{element}: {b}");
+        assert!(b.contains(want) && b.contains("Tab next") && b.contains("S-Tab back"), "{element}: {b}");
         assert!(!b.contains("leaves the box"), "{element}: {b}");
     }
     let mut c = chat();
@@ -431,7 +568,6 @@ fn describe_asks_its_line_in_the_same_dialog() {
         press(&mut c, KeyCode::Down);
     }
     assert!(screen(&mut c).contains("Describe…"));
-    // Down past Add agent (set back) to Describe….
     let s = screen(&mut c);
     let _ = s;
     // Pick Describe… by its row.

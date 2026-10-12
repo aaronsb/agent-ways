@@ -23,7 +23,7 @@ agent-tui frame 70x25
 |│                                                             #open  │|
 |╰────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @Lyra @aaron                                          |
-| chat  mouse on (M-m) │ F1 keys                                       |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete           |
 styles
   0   0-2   White Blue -
   0   5-6   Red - -
@@ -94,4 +94,8 @@ styles
  24   7-20  - - DIM|ITALIC
  24  21-23  - - DIM
  24  24-26  Cyan - -
- 24  27-30  - - DIM|ITALIC
+ 24  27-33  - - DIM|ITALIC
+ 24  34-39  Cyan - -
+ 24  40-46  - - DIM|ITALIC
+ 24  47-50  Cyan - -
+ 24  51-58  - - DIM|ITALIC

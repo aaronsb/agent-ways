@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                     #deploy  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
-| tabs  mouse on (m) │ ? keys · Enter its menu · Tab next · Shift+Tab back       |
+| tabs  mouse on (m) │ ? keys · Enter its menu · Tab next · S-Tab back           |
 styles
   0   0-2   White Blue -
   0   5-6   Red - -
@@ -93,5 +93,5 @@ styles
  24  37-47  - - DIM|ITALIC
  24  48-51  Cyan - -
  24  52-58  - - DIM|ITALIC
- 24  59-68  Cyan - -
- 24  69-72  - - DIM|ITALIC
+ 24  59-64  Cyan - -
+ 24  65-68  - - DIM|ITALIC

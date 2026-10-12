@@ -642,12 +642,16 @@ fn esc_clears_the_selection_and_the_bar() {
     assert_ne!(rows(&mut c), selected, "the selection is cleared");
 }
 
-/// Open `≡` and pick Quit by keys: ↓ out of the compose box (its cursor at
-/// the end of its last line) lands on `≡`, the bar's first slot, then
-/// Enter and the item.
+/// Open `≡` and pick Quit by keys: F2, ← along the bar to `≡`, Enter, then
+/// the item.
 fn quit_by_keys(c: &mut Chat) -> bool {
-    key(c, KeyCode::End);
-    key(c, KeyCode::Down);
+    key(c, KeyCode::F(2));
+    for _ in 0..8 {
+        if rows(c)[0].contains("▸≡") {
+            break;
+        }
+        key(c, KeyCode::Left);
+    }
     key(c, KeyCode::Enter);
     let shown = rows(c);
     let title = shown.iter().position(|r| r.contains("pick one")).expect("the ≡ menu is open");

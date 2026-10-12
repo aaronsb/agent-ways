@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                                                                                             #deploy  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                                                                  |
-| chat  mouse on (M-m) │ F1 keys · Shift+Tab or ↑ at the top leaves the box · Enter send · Tab complete · Alt+0-9 tab    |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · S-Tab or ↑ leaves · Alt+0-9 tab (again: menu) · F2 tabs   |
 styles
   0   0-2   White Blue -
   0   5-6   Red - -
@@ -135,11 +135,13 @@ styles
  39  21-23  - - DIM
  39  24-26  Cyan - -
  39  27-33  - - DIM|ITALIC
- 39  34-43  Cyan - -
- 39  44-76  - - DIM|ITALIC
- 39  77-82  Cyan - -
- 39  83-89  - - DIM|ITALIC
- 39  90-93  Cyan - -
- 39  94-104 - - DIM|ITALIC
- 39 105-112 Cyan - -
- 39 113-115 - - DIM|ITALIC
+ 39  34-39  Cyan - -
+ 39  40-46  - - DIM|ITALIC
+ 39  47-50  Cyan - -
+ 39  51-61  - - DIM|ITALIC
+ 39  62-67  Cyan - -
+ 39  68-81  - - DIM|ITALIC
+ 39  82-89  Cyan - -
+ 39  90-109 - - DIM|ITALIC
+ 39 110-112 Cyan - -
+ 39 113-116 - - DIM|ITALIC

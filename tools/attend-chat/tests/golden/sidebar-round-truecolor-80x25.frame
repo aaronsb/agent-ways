@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |                         ││ >                                                  │|
 |                         ││                                             #open  │|
 |                         │╰────────────────────────────────────────────────────╯|
-| chat  mouse on (M-m) │ F1 keys · Shift+Tab or ↑ at the top leaves the box    |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete                   |
 styles
   0   0-0   #bfa2c3 - -
   0   1-3   #2e3440 #bfa2c3 -
@@ -189,5 +189,7 @@ styles
  24  23-25  #434c5e - -
  24  26-28  #c99fc1 - -
  24  29-35  #7c8baa - ITALIC
- 24  36-45  #c99fc1 - -
- 24  46-75  #7c8baa - ITALIC
+ 24  36-41  #c99fc1 - -
+ 24  42-48  #7c8baa - ITALIC
+ 24  49-52  #c99fc1 - -
+ 24  53-60  #7c8baa - ITALIC

@@ -83,8 +83,15 @@ fn config_lists_sets_refuses_and_applies_at_once() {
     // The ≡ menu's keybinding set writes its keys in one go. jump=both
     // matches no preset, so the cursor starts on the custom row: Down to
     // ctrl, Down to alt.
-    // ↓ out of the empty compose box lands on ≡, the bar's first slot.
-    for k in [KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Down, KeyCode::Enter] {
+    // F2, then ← along the bar to ≡, its first slot.
+    testkit::drive(&mut c, &[key(KeyCode::F(2))]);
+    for _ in 0..8 {
+        if testkit::rows(&testkit::render_screen(&mut c, 120, 25))[0].contains("▸≡") {
+            break;
+        }
+        testkit::drive(&mut c, &[key(KeyCode::Left)]);
+    }
+    for k in [KeyCode::Enter, KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Down, KeyCode::Enter] {
         testkit::drive(&mut c, &[key(k)]);
     }
     assert!(c.status().starts_with("keybinding set: alt"), "{}", c.status());

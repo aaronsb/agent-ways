@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
-| chat  mouse on (M-m) │ F1 keys · Shift+Tab or ↑ at the top leaves the box      |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · S-Tab or ↑ leaves |
 styles
   0   0-2   i237 i249 -
   0   5-6   i174 - -
@@ -103,5 +103,9 @@ styles
  24  21-23  i239 - -
  24  24-26  i181 - -
  24  27-33  i103 - ITALIC
- 24  34-43  i181 - -
- 24  44-73  i103 - ITALIC
+ 24  34-39  i181 - -
+ 24  40-46  i103 - ITALIC
+ 24  47-50  i181 - -
+ 24  51-61  i103 - ITALIC
+ 24  62-67  i181 - -
+ 24  68-78  i103 - ITALIC

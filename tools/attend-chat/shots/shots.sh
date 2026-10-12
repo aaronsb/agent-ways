@@ -92,7 +92,7 @@ entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gon
 esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape gone:pick
 common-quit  | base  | wait:Agents click:≡ wait:Quit
 quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:discards
-menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_D1 Down
+menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_D4 Down
 theme-sub    | base  | wait:Agents click:≡ wait:Theme click:Theme wait:theme_for
 keys-sub     | base  | wait:Agents click:≡ wait:Keybinding click:Keybinding wait:keybinding_set
 remove-sub   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Remove_agent wait:remove_from
@@ -118,7 +118,7 @@ focus-view   | base  | wait:Agents F2 wait:▸⋯all
 focus-open   | base  | wait:Agents F2 Left wait:▸#open
 focus-plus   | base  | wait:Agents F2 Left Left wait:▸+
 focus-tab    | base  | wait:Agents F2 Left Left Left Left wait:▸1_#deploy
-focus-common | base  | wait:Agents Down wait:▸≡
+focus-common | base  | wait:Agents text:x Down wait:▸≡
 focus-agent  | base  | wait:Agents F2 Down wait:_column_
 focus-row    | base  | wait:Agents F2 Down End Up wait:_column_
 focus-feed   | base  | wait:Agents BTab wait:_feed_
@@ -132,6 +132,10 @@ add-menu     | base  | wait:Agents rside:● wait:Add_agent_to_chat
 add-pick     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel
 add-done     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel Enter wait:invite
 narrow-bar   | many  | wait:Agents resize:60 wait:⋯all
+arrow-empty  | base  | wait:Agents Up text:1x wait:>_1x
+q-asks       | base  | wait:Agents BTab q wait:quit?
+walk-back    | base  | wait:Agents text:x Down Tab wait:rollout_is_green Tab Tab Tab Tab Tab Tab wait:_column_
+add-chan     | base  | wait:Agents side:#infra side:#infra wait:pick click:Add_agent wait:add_to_#infra
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy

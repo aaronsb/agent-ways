@@ -1,15 +1,15 @@
 agent-tui frame 80x25
 | ≡   ▽  1 #deploy   ♦  2 #infra    +   — rollout coordination   ◆  #open   ⋯all |
 |╭────┌pick one: #deploy───────────────────┐────────────────────────────────────╮|
-|│  ▽ │   Invite agent ▸                   │                                    │|
-|│ ───│   Add agent       needs ADR-404 D1 │─────────────────────────────────── │|
-|│ rol│   Remove agent ▸                   │                                    │|
-|│ pro│   Describe…                        │                                    │|
-|│    │   Clear history                    │                                    │|
+|│  ▽ │   Add agent ▸                      │                                    │|
+|│ ───│   Remove agent ▸                   │─────────────────────────────────── │|
+|│ rol│   Describe…                        │                                    │|
+|│ pro│   Clear history                    │                                    │|
 |│    │   Join                             │                                    │|
 |│    │   Seal            needs ADR-404 D4 │                                    │|
 |│    │   Delete channel                   │                                    │|
 |│    └────────────────────────────────────┘                                    │|
+|│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -50,7 +50,6 @@ styles
   3   0-0   - - DIM
   3   2-4   - - DIM
   3   5-5   LightBlue - -
-  3   6-41  - - DIM
   3  42-42  LightBlue - -
   3  43-77  - - DIM
   3  79-79  - - DIM
@@ -68,19 +67,17 @@ styles
   6  79-79  - - DIM
   7   0-0   - - DIM
   7   5-5   LightBlue - -
+  7   6-41  - - DIM
   7  42-42  LightBlue - -
   7  79-79  - - DIM
   8   0-0   - - DIM
   8   5-5   LightBlue - -
-  8   6-41  - - DIM
   8  42-42  LightBlue - -
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9   5-5   LightBlue - -
-  9  42-42  LightBlue - -
+  9   5-42  LightBlue - -
   9  79-79  - - DIM
  10   0-0   - - DIM
- 10   5-42  LightBlue - -
  10  79-79  - - DIM
  11   0-0   - - DIM
  11  79-79  - - DIM

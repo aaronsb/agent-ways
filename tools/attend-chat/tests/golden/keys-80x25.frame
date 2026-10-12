@@ -2,9 +2,9 @@ agent-tui frame 80x25
 | ≡   ▽  1 #deploy   ♦  2 #infra    +                            ◆  #open   ⋯all |
 |┌keys · ↑↓ scroll · any other key closes───────────────────────────────────────┐|
 |│F1                 keys                                                       │|
-|│Shift+Tab          or ↑ at the top leaves the box                             │|
 |│Enter              send                                                       │|
 |│Tab                complete                                                   │|
+|│S-Tab              or ↑ at the top leaves the box                             │|
 |│← →                move the cursor; outside the box, the element before or nex│|
 |│↑ ↓                between the box's lines; outside it, a column row or a feed│|
 |│Esc                clears the selection and the bar; outside the box, back to │|
@@ -21,9 +21,9 @@ agent-tui frame 80x25
 |│M-m                mouse on or off (off lets the terminal select text)        │|
 |│Shift-drag         selects text while the mouse is on, in most terminals      │|
 |│middle-click       pastes only while the mouse is off                         │|
-|│^C                 quit; asks first over a draft; so does ≡ → Quit            │|
+|│^C                 quit; q asks first, ^C over a draft; so does ≡ → Quit      │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-| chat  mouse on (M-m) │ F1 keys · Shift+Tab or ↑ at the top leaves the box      |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · S-Tab or ↑ leaves |
 styles
   0   0-2   White Blue -
   0   5-6   Red - -
@@ -106,5 +106,9 @@ styles
  24  21-23  - - DIM
  24  24-26  Cyan - -
  24  27-33  - - DIM|ITALIC
- 24  34-43  Cyan - -
- 24  44-73  - - DIM|ITALIC
+ 24  34-39  Cyan - -
+ 24  40-46  - - DIM|ITALIC
+ 24  47-50  Cyan - -
+ 24  51-61  - - DIM|ITALIC
+ 24  62-67  Cyan - -
+ 24  68-78  - - DIM|ITALIC
