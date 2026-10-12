@@ -65,7 +65,7 @@ fn the_focused_tab_is_kept_by_what_it_is() {
         press(&mut c, KeyCode::Left);
     }
     assert!(rows(&mut c)[0].contains("▸3 #infra"), "{}", rows(&mut c)[0]);
-    attend_groups::Groups::new(&base(), "").dissolve("infra");
+    attend_groups::Groups::new(&base(), "").dissolve("infra").unwrap();
     let _ = std::fs::remove_dir_all(base().join("@infra"));
     c.refresh();
     let top = rows(&mut c)[0].clone();
