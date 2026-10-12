@@ -79,7 +79,7 @@ pub(super) fn file_of(kind: &str, scope: Scope, project: Option<&Path>) -> Optio
         return Some(Err(scope));
     }
     let to_project = matches!((scope, project), (Scope::Project, _) | (Scope::Both, Some(_)));
-    let dir = || project_dir(project);
+    let dir = || project_dir(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()));
     Some(Ok(match kind {
         f if f == ways_agent_core::settings::FILE => (ways_agent_core::profile::user_layer_path(), LayerScope::User),
         f if f == ways_core::settings::FILE && to_project => (ways_core::settings::project_file(&dir()), LayerScope::Project),
@@ -95,62 +95,91 @@ pub(super) fn is_user_file(path: &Path) -> bool {
     path == ways_core::paths::user_config() || path == ways_agent_core::profile::user_layer_path() || path == attend_config::user_path()
 }
 
-/// The project a verb reads and writes. `--project` is resolved by
-/// [`resolve_project`] at each verb's entry, so `opt` is already a root;
-/// without one it is [`implicit_project`], else the working directory, whose
-/// project layer is then absent.
-pub(super) fn project_dir(opt: Option<&Path>) -> PathBuf {
-    match opt {
-        Some(p) => p.to_path_buf(),
-        None => implicit_project().unwrap_or_else(|| PathBuf::from(crate::util::project_dir())),
-    }
+/// The project layer a writer reads beside the file it writes: `--project`
+/// resolved by [`resolve_project`] at the verb's entry, else
+/// [`implicit_project`]. `None` is no project layer.
+pub(super) fn project_dir(opt: Option<&Path>) -> Option<PathBuf> {
+    opt.map(Path::to_path_buf).or_else(implicit_project)
 }
 
 /// The project with no `--project`: `CLAUDE_PROJECT_DIR`, as the hooks read
-/// it, else the project enclosing the working directory. `None` outside any
-/// project, and in the home directory, whose `.claude/` is the user's.
+/// it, else the project enclosing the working directory ([`settings_root_of`]).
+/// `None` outside any project.
 pub(super) fn implicit_project() -> Option<PathBuf> {
     if let Some(env) = crate::util::env_project_dir() {
         return Some(PathBuf::from(env));
     }
-    let cwd = PathBuf::from(crate::util::project_dir());
-    ways_core::util::project_root_of(&cwd).filter(|r| !is_home(r))
+    settings_root_of(Path::new(&crate::util::project_dir()))
 }
 
-/// The project root a `--project` path names: the path made absolute with
-/// symlinks resolved, then the nearest ancestor that is a project root
-/// ([`ways_core::util::project_root_of`], the rule `project_root` walks the
-/// working directory by). `--project .` from a subdirectory is the project.
-/// A path that does not exist, or that no project encloses, is exit 2, so
-/// nothing creates a `.claude/` in a directory that is not a project's.
-pub(super) fn resolve_project(given: Option<&Path>) -> Result<Option<PathBuf>, Failure> {
-    let Some(p) = given else { return Ok(None) };
+/// The `.claude/` overlays a settings write leaves, which mark a project
+/// root for the settings resolver beside [`ways_core::util::CLAUDE_MARKERS`].
+const OVERLAYS: &[&str] = &["ways.yaml", "attend.yaml"];
+
+/// The project root settings resolve `start` to: the nearest ancestor that
+/// is a project root with the overlays as markers too
+/// ([`ways_core::util::is_project_root`]), and only when none is, the nearest
+/// git checkout, so a fresh repository takes its first project write. An
+/// outer project wins over a nested checkout. The home directory is never a
+/// project: its `.claude/` is the user's.
+pub(super) fn settings_root_of(start: &Path) -> Option<PathBuf> {
+    let home = claude_sessions::home_dir();
+    let candidates = || start.ancestors().filter(|d| !is_home(d, &home));
+    candidates()
+        .find(|d| ways_core::util::is_project_root(d, OVERLAYS))
+        .or_else(|| candidates().find(|d| d.join(".git").exists()))
+        .map(Path::to_path_buf)
+}
+
+/// What marks a project root, for a message naming why none was found.
+fn markers() -> String {
+    let files: Vec<String> = ways_core::util::CLAUDE_MARKERS.iter().chain(OVERLAYS).map(|f| format!(".claude/{f}")).collect();
+    format!("a project root holds {}, or CLAUDE.md beside .claude/; failing those, a .git", files.join(", "))
+}
+
+/// `given`, absolute with symlinks resolved, when it is a directory.
+pub(super) fn real_dir(given: &Path) -> Option<PathBuf> {
     #[cfg(windows)]
-    let real = std::path::absolute(p).ok().filter(|a| a.is_dir());
+    let real = std::path::absolute(given).ok();
     #[cfg(not(windows))]
-    let real = std::fs::canonicalize(p).ok().filter(|a| a.is_dir());
-    let real = real.ok_or_else(|| fail(exit::USAGE, format!("--project {}: no such directory", p.display())))?;
-    match ways_core::util::project_root_of(&real).filter(|r| !is_home(r)) {
-        Some(root) => Ok(Some(root)),
-        None => Err(fail(
-            exit::USAGE,
-            format!(
-                "--project {}: no project encloses {}; a project root holds .claude/settings.json, .claude/ways.yaml, CLAUDE.md beside .claude/, or .git",
-                p.display(),
-                real.display()
-            ),
-        )),
+    let real = std::fs::canonicalize(given).ok();
+    real.filter(|a| a.is_dir())
+}
+
+/// The project layer a reader reads: the root of the project enclosing
+/// `--project` ([`settings_root_of`]), else [`implicit_project`]. A
+/// `--project` no project encloses reads no project layer, the user, target
+/// and default layers intact: the attend mod reads its settings with the
+/// session's directory, which may be the home directory or a scratch one.
+pub(super) fn read_project(given: Option<&Path>) -> Option<PathBuf> {
+    match given {
+        Some(p) => real_dir(p).and_then(|r| settings_root_of(&r)),
+        None => implicit_project(),
     }
 }
 
-/// Whether `dir` is the home directory, which is never a project.
-fn is_home(dir: &Path) -> bool {
+/// The project root a writer's `--project` names ([`settings_root_of`]), so
+/// `--project .` from a subdirectory is the project. A path that does not
+/// exist, or that no project encloses, is exit 2, so no write makes a
+/// `.claude/` in a directory that is not a project's.
+pub(super) fn resolve_project(given: Option<&Path>) -> Result<Option<PathBuf>, Failure> {
+    let Some(p) = given else { return Ok(None) };
+    let real = real_dir(p).ok_or_else(|| fail(exit::USAGE, format!("--project {}: no such directory", p.display())))?;
+    match settings_root_of(&real) {
+        Some(root) => Ok(Some(root)),
+        None => Err(fail(exit::USAGE, format!("--project {}: no project encloses {}; {}", p.display(), real.display(), markers()))),
+    }
+}
+
+/// Whether `dir` is the home directory `home`, which is never a project.
+pub(super) fn is_home(dir: &Path, home: &Path) -> bool {
     let canon = |q: &Path| std::fs::canonicalize(q).unwrap_or_else(|_| q.to_path_buf());
-    canon(dir) == canon(&claude_sessions::home_dir())
+    canon(dir) == canon(home)
 }
 
 /// The line a write puts on stderr naming the file it touched, so stdout
-/// keeps its contract: `project: <path>` or `user: <path>`.
+/// keeps its contract: `project: <path>`, `user: <path>` or
+/// `target: <path>` (ADR-503 §9).
 pub(super) fn touched(scope: LayerScope, path: &Path, dry_run: bool) {
     let layer = match scope {
         LayerScope::Project => "project",
@@ -161,12 +190,17 @@ pub(super) fn touched(scope: LayerScope, path: &Path, dry_run: bool) {
     eprintln!("{layer}: {}{note}", path.display());
 }
 
-/// The live layers of every file, lowest first.
-pub(super) fn live_layers(project: &Path) -> Vec<Layer> {
+/// The live layers of every file, lowest first, with `project`'s layers
+/// when there is a project and none of a project's when there is not.
+pub(super) fn live_layers(project: Option<&Path>) -> Vec<Layer> {
     agent_settings::load::trace("tree");
-    let mut out = ways_core::settings::layers(project);
+    let dir = project.map(Path::to_path_buf).unwrap_or_default();
+    let mut out = ways_core::settings::layers(&dir);
     out.extend(ways_agent_core::settings::layers());
-    out.extend(attend_config::layers(project));
+    out.extend(attend_config::layers(&dir));
+    if project.is_none() {
+        out.retain(|l| l.scope != LayerScope::Project);
+    }
     with_choices(out)
 }
 
@@ -200,10 +234,12 @@ pub(super) fn file_layers(path: &Path) -> Result<Vec<Layer>, Failure> {
     Ok(with_choices(vec![layer]))
 }
 
+/// The layers a reader reads: one file alone, or the live layers with the
+/// project `--project` names ([`read_project`]).
 pub(super) fn layers_for(file: Option<&Path>, project: Option<&Path>) -> Result<Vec<Layer>, Failure> {
     match file {
         Some(f) => file_layers(f),
-        None => Ok(live_layers(&project_dir(project))),
+        None => Ok(live_layers(read_project(project).as_deref())),
     }
 }
 
@@ -347,7 +383,7 @@ pub(super) fn write_failed(e: agent_settings::writer::WriteError) -> Failure {
 
 /// After a write to `written`, whether `b` resolves from somewhere else.
 pub(super) fn overridden(b: &Bound, written: &Path, project: Option<&Path>) -> Option<String> {
-    let layers = live_layers(&project_dir(project));
+    let layers = live_layers(project_dir(project).as_deref());
     let r = resolve(b.spec, &b.bound, &layers);
     let from = r.layer.and_then(|i| layers[i].path.clone());
     if from.as_deref() == Some(written) {

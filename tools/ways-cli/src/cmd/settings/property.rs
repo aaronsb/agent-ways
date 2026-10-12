@@ -5,8 +5,6 @@ use super::*;
 // ── property mode ──────────────────────────────────────────────
 
 pub fn get(key: &str, as_json: bool, file: Option<&Path>, project: Option<&Path>) -> Out {
-    let project = resolve_project(project)?;
-    let project = project.as_deref();
     let reg = registry();
     let b = lookup(&reg, key)?;
     let layers = layers_for(file, project)?;
@@ -23,8 +21,6 @@ pub fn get(key: &str, as_json: bool, file: Option<&Path>, project: Option<&Path>
 }
 
 pub fn list(prefix: Option<&str>, as_json: bool, effective: bool, file: Option<&Path>, project: Option<&Path>) -> Out {
-    let project = resolve_project(project)?;
-    let project = project.as_deref();
     let reg = registry();
     let prefix = prefix.unwrap_or("");
     let layers = layers_for(file, project)?;
@@ -73,7 +69,7 @@ pub fn set(key: &str, value: &str, project: Option<&Path>) -> Out {
     let project = project.as_deref();
     let reg = registry();
     let b = lookup(&reg, key)?;
-    let layers = live_layers(&project_dir(project));
+    let layers = live_layers(project_dir(project).as_deref());
     let v = b
         .spec
         .parse_cli(value, &layers, &b.bound)
@@ -99,7 +95,7 @@ pub fn unset(key: &str, project: Option<&Path>) -> Out {
     let kp = b.path();
     agent_settings::writer::edit_file(&path, None, |d| d.unset(&kp)).map_err(write_failed)?;
     touched(scope, &path, false);
-    let layers = live_layers(&project_dir(project));
+    let layers = live_layers(project_dir(project).as_deref());
     let r = resolve(b.spec, &b.bound, &layers);
     if let Some(p) = r.layer.and_then(|i| layers[i].path.clone()) {
         if is_higher(&layers, &p, &path) {

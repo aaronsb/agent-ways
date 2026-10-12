@@ -1,6 +1,6 @@
 agent-tui frame 80x25
 | 1 ways   2 match…   3 gate   4 insta…   5 attend   6 senso…   7 mod   8 theme  |
-|┌ ways settings · writes project + user — …┐┌detail────────────────────────────┐|
+|┌ this project · writes project+user — ~/p…┐┌detail────────────────────────────┐|
 |│ ▾ settings              value            ││ways.disabled_domains             │|
 |│     enabled             true             ││                                  │|
 |│     subagents           true             ││Domains switched off everywhere,  │|

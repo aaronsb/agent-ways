@@ -5,11 +5,9 @@ use super::*;
 // ── emit, lint, fix ────────────────────────────────────────────
 
 pub fn emit(prefix: Option<&str>, effective: bool, project: Option<&Path>) -> Out {
-    let project = resolve_project(project)?;
-    let project = project.as_deref();
     let reg = registry();
     let prefix = prefix.unwrap_or("");
-    let layers = if effective { Some(live_layers(&project_dir(project))) } else { None };
+    let layers = if effective { Some(live_layers(read_project(project).as_deref())) } else { None };
     if let Some(l) = &layers {
         report(l);
     }
@@ -52,7 +50,7 @@ fn choice_notes(reg: &Registry, prefix: &str, layers: Option<&[Layer]>) -> Vec<(
     let layers = match layers {
         Some(l) => l,
         None => {
-            live = live_layers(&project_dir(None));
+            live = live_layers(project_dir(None).as_deref());
             &live
         }
     };
@@ -86,8 +84,6 @@ pub(super) fn file_label(file: &str) -> &'static str {
 /// Check the files. A finding exits 3; a warning is printed and leaves the
 /// exit alone, since the file is valid and loads as written.
 pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
-    let project = resolve_project(project)?;
-    let project = project.as_deref();
     agent_settings::load::trace("lint");
     let layers = layers_for(file, project)?;
     let mut n = 0;
@@ -99,7 +95,7 @@ pub fn lint(file: Option<&Path>, project: Option<&Path>) -> Out {
             n += 1;
             fixable += f.lint_note().is_empty() as usize;
         }
-        for w in unmatched_toggles(l, &project_dir(project)) {
+        for w in unmatched_toggles(l, &read_project(project).unwrap_or_else(|| PathBuf::from(crate::util::project_dir()))) {
             println!("{w}");
         }
     }

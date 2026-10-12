@@ -41,6 +41,7 @@ fn roots(fx: &Fixture) -> Vec<Node> {
     let ctx = Ctx {
         project: fx.root.join("work/current"),
         for_project: true,
+        in_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -453,6 +454,7 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
     let ctx = Ctx {
         project: fx.root.join("work/current"),
         for_project: true,
+        in_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -474,6 +476,7 @@ fn ctx_of(fx: &Fixture) -> Ctx {
     Ctx {
         project: fx.root.join("work/current"),
         for_project: true,
+        in_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -638,9 +641,9 @@ fn back_to_this_project_is_refused_while_an_edit_elsewhere_is_pending() {
     let here = section(project_group(&r), "shipped").children[0].children[0].setting.clone().unwrap().store.unwrap();
     let e = ways.view("projects", &[&here, &elsewhere]).expect_err("the edit to work/other would be dropped");
     assert_eq!(e, "1 pending change to other projects' ways.yaml would be dropped; review and apply, or undo, it first");
-    assert!(ways.title("ways").unwrap().ends_with(" — ~/work/current · all projects "), "the view stays");
+    assert!(ways.title("ways").unwrap().starts_with(" all projects · "), "the view stays");
     assert!(ways.view("projects", &[&here]).is_ok(), "an edit to this project's file shows in both views");
-    assert!(ways.title("ways").unwrap().ends_with(" — ~/work/current · this project "));
+    assert!(ways.title("ways").unwrap().starts_with(" this project · "));
     assert!(!ways.title("matching").unwrap().contains("this project"), "only the ways tab has views");
 }
 
@@ -892,6 +895,7 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
     let ctx = Ctx {
         project: fx.root.join("work/current"),
         for_project: true,
+        in_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -979,13 +983,16 @@ fn child_titles_name_the_layers_written() {
     let Some((ways, _)) = child() else { return };
     let project = super::build::tilde(&ways.ctx.project, &ways.ctx.home);
     let t = |w: &Ways, tab: &str| w.title(tab).unwrap();
-    assert_eq!(t(&ways, "mod"), format!(" ways settings · writes project + user — {project} "), "opened for a project, how it starts goes to the project");
-    assert_eq!(t(&ways, "matching"), format!(" ways settings · writes user — {project} "));
-    assert_eq!(t(&ways, "gate"), format!(" ways settings · writes user — {project} "));
-    assert_eq!(t(&ways, "ways"), format!(" ways settings · writes project + user — {project} · this project "));
+    assert_eq!(t(&ways, "mod"), format!(" writes project+user — {project} "), "opened for a project, how it starts goes to the project");
+    assert_eq!(t(&ways, "matching"), format!(" writes user — {project} "));
+    assert_eq!(t(&ways, "gate"), format!(" writes user — {project} "));
+    assert_eq!(t(&ways, "ways"), format!(" this project · writes project+user — {project} "), "the view comes first");
     // Opened for no project, the mod tab's keys all go to the user file.
     let user_only = Ways::new(Ctx { for_project: false, ..ways.ctx.clone() });
-    assert_eq!(t(&user_only, "mod"), format!(" ways settings · writes user — {project} "));
+    assert_eq!(t(&user_only, "mod"), format!(" writes user — {project} "));
+    // In no project, a project's keys have no file: the title names none.
+    let nowhere = Ways::new(Ctx { in_project: false, ..ways.ctx.clone() });
+    assert_eq!(t(&nowhere, "mod"), format!(" writes user — {project} "));
 }
 
 #[test]

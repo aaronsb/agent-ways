@@ -351,12 +351,12 @@ impl Ways {
     }
 
     /// The layers a tab's settable keys are written to, as its title names
-    /// them: `writes user`, `writes project`, or `writes project + user`.
+    /// them: `writes user`, `writes project`, or `writes project+user`.
     /// A key the screens keep per project shows the layer it lands in before
     /// it is written; each key's detail names its file.
     pub(super) fn tab_writes(&self, tab: &str) -> String {
         use agent_settings::LayerScope;
-        let layers = live_layers(&self.ctx.project);
+        let layers = live_layers(self.ctx.project_layer());
         let mut keys = match tab_named(tab) {
             Some(t) => self.keys_of(t, &layers, &BTreeMap::new()),
             None => self.reg.concrete(tab, &layers),
@@ -367,11 +367,12 @@ impl Ways {
         let scopes: BTreeSet<&str> = keys
             .iter()
             .filter(|b| !matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) && b.spec.computed.is_none())
+            .filter(|b| self.ctx.in_project || !super::writes_project(b, &self.ctx))
             .filter_map(|b| target_file(b, super::writes_project(b, &self.ctx).then_some(self.ctx.project.as_path())).ok())
             .map(|(_, scope)| if scope == LayerScope::Project { "project" } else { "user" })
             .collect();
         match (scopes.contains("project"), scopes.contains("user")) {
-            (true, true) => "writes project + user".into(),
+            (true, true) => "writes project+user".into(),
             (true, false) => "writes project".into(),
             (false, true) => "writes user".into(),
             (false, false) => String::new(),
@@ -445,7 +446,13 @@ impl Ways {
                 s = s.default(display(Some(d), b.spec.kind));
             }
             let settable = !matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) && b.spec.computed.is_none();
-            if settable {
+            if settable && !self.ctx.in_project && super::writes_project(&b, &self.ctx) {
+                // No project: the key has no file to go to.
+                s = s.lock(format!(
+                    "not applicable: no project encloses {}, so a project's file has nowhere to be. Open the screens inside a project, or with --project <dir>",
+                    tilde(&self.ctx.project, home)
+                ));
+            } else if settable {
                 let project = super::writes_project(&b, &self.ctx).then_some(self.ctx.project.as_path());
                 if let Ok((path, scope)) = target_file(&b, project) {
                     let layer = if scope == agent_settings::LayerScope::Project { "project" } else { "user" };
@@ -516,7 +523,7 @@ impl Ways {
     /// `ways settings lint` over the files the screens read: a pass, or the
     /// findings it prints and a fail.
     fn lint(&self) -> Action {
-        let here = self.ctx.project == super::super::project_dir(None);
+        let here = super::super::project_dir(None).as_deref() == Some(self.ctx.project.as_path());
         let project = if here { String::new() } else { format!(" --project {}", quote(&self.ctx.project.display().to_string())) };
         Action::new("lint", format!("ways settings lint{project}"))
             .reads()

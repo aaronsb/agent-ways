@@ -1,6 +1,6 @@
 agent-tui frame 80x25
 | 1 ways   2 match…   3 gate   4 insta…   5 attend   6 senso…   7 mod   8 theme  |
-|┌ ways settings · writes user — ~/proj ────┐┌detail────────────────────────────┐|
+|┌ writes user — ~/proj ────────────────────┐┌detail────────────────────────────┐|
 |│ ▾ settings              value            ││matching.keyword_floor_probability│|
 |│     semantic_fire_probability 0.5        ││                                  │|
 |│▌    keyword_floor_probability 0.15       ││Calibrated probability a keyword  │|
@@ -34,8 +34,8 @@ styles
   0  62-68  White Blue -
   0  70-78  White Blue -
   1   0-0   - - DIM
-  1   1-38  LightBlue - BOLD|DIM
-  1  39-44  - - DIM
+  1   1-22  LightBlue - BOLD|DIM
+  1  23-44  - - DIM
   1  45-50  LightBlue - BOLD|DIM
   1  51-79  - - DIM
   2   0-0   - - DIM

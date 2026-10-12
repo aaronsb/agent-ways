@@ -33,7 +33,7 @@ pub fn apply(file: Option<&Path>, dry_run: bool, project: Option<&Path>) -> Out 
     let reg = registry();
     // A choice is checked against the files and the object together: a
     // profile the object adds may be the engine it names.
-    let mut layers = live_layers(&project_dir(project));
+    let mut layers = live_layers(project_dir(project).as_deref());
     for doc in &docs {
         let text = serde_yaml::to_string(doc).unwrap_or_default();
         let schema = &ways_agent_core::settings::SCHEMA;
