@@ -150,8 +150,21 @@ pub(crate) fn is_executable(path: &Path) -> bool {
     }
 }
 
-/// Execute a macro shell script with [`macro_env`] and return its stdout.
+/// How long one macro may run. A macro runs inside a hook, which the session
+/// waits on, so a macro still running then (a hung CLI it calls, say) is
+/// killed with what it started and adds nothing. The same bound as a
+/// PostToolUse postcheck (`hook::post_tool::DEADLINE`). The run goes through
+/// [`crate::cmd::mcp_register::output_within`], which kills the macro's
+/// process group, so a CLI the macro started dies with it.
+pub(crate) const MACRO_DEADLINE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Execute a macro shell script with [`macro_env`] and return its stdout:
+/// `None` when it fails, prints nothing, or outlives [`MACRO_DEADLINE`].
 pub(crate) fn run_macro(macro_file: &Path, run: &MacroRun) -> Option<String> {
+    run_macro_within(macro_file, run, MACRO_DEADLINE)
+}
+
+fn run_macro_within(macro_file: &Path, run: &MacroRun, limit: std::time::Duration) -> Option<String> {
     let source = std::fs::read_to_string(macro_file).unwrap_or_default();
     let mut cmd = Command::new("bash");
     cmd.arg(macro_file);
@@ -161,18 +174,9 @@ pub(crate) fn run_macro(macro_file: &Path, run: &MacroRun) -> Option<String> {
             None => cmd.env_remove(name),
         };
     }
-    let output = cmd.stderr(std::process::Stdio::null()).output().ok()?;
-
-    if output.status.success() {
-        let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if out.is_empty() {
-            None
-        } else {
-            Some(out)
-        }
-    } else {
-        None
-    }
+    let out = crate::cmd::mcp_register::output_within(cmd, limit).ok()?;
+    let out = out.trim();
+    (!out.is_empty()).then(|| out.to_string())
 }
 
 /// Check whether a project directory is in the trusted-project-macros list.
@@ -246,6 +250,25 @@ mod tests {
 
     fn value<'a>(env: &'a [(&str, Option<String>)], name: &str) -> Option<&'a str> {
         env.iter().find(|(n, _)| *n == name).and_then(|(_, v)| v.as_deref())
+    }
+
+    /// #932 review: a macro that hangs (a hung CLI it calls) is killed at
+    /// the deadline and adds nothing; one that finishes keeps its output.
+    #[cfg(unix)]
+    #[test]
+    fn a_sleeping_macro_is_killed_at_the_deadline_and_adds_nothing() {
+        let dir = std::env::temp_dir().join(format!("ways-macro-deadline-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = MacroRun { session_id: "s", project_dir: "/srv/p", scope: "agent" };
+        let slow = dir.join("slow.sh");
+        std::fs::write(&slow, "echo partial\nsleep 30\necho late\n").unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(run_macro_within(&slow, &run, std::time::Duration::from_millis(300)), None);
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "took {:?}", started.elapsed());
+        let fine = dir.join("fine.sh");
+        std::fs::write(&fine, "echo done\n").unwrap();
+        assert_eq!(run_macro_within(&fine, &run, std::time::Duration::from_secs(5)).as_deref(), Some("done"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
