@@ -213,6 +213,8 @@ fn up_and_down_move_along_the_column_and_the_feed() {
         cell("↑ in the column", on_row(2), Ev::Key(key(KeyCode::Up)), view(), on_row(1), vec![Follow, Redraw]),
         cell("↓ in the column", on_row(2), Ev::Key(key(KeyCode::Down)), view(), on_row(3), vec![Follow, Redraw]),
         cell("↓ from the last row is the feed", on_row(4), Ev::Key(key(KeyCode::Down)), view(), at(Focus::Feed), vec![Redraw]),
+        cell("↓ from the last agent is the first channel, as drawn", on_row(1), Ev::Key(key(KeyCode::Down)), view(), on_row(2), vec![Follow, Redraw]),
+        cell("↑ from the first channel is the last agent", on_row(2), Ev::Key(key(KeyCode::Up)), view(), on_row(1), vec![Follow, Redraw]),
         cell("Home in the column", on_row(3), Ev::Key(key(KeyCode::Home)), view(), on_row(0), vec![Follow, Redraw]),
         cell("End in the column", on_row(1), Ev::Key(key(KeyCode::End)), view(), on_row(4), vec![Follow, Redraw]),
         cell("↑ into the feed selects the newest", at(Focus::Feed), Ev::Key(key(KeyCode::Up)), view(), at(Focus::Feed), vec![Reveal(2)]),
@@ -276,7 +278,17 @@ fn a_click_takes_the_keyboard_to_the_box_but_where_it_keeps_it() {
             on_row(3),
             vec![Follow, select(Target::Channel("deploy".into()))],
         ),
-        cell("a click on a row from the box selects it, the box keeping the keyboard", compose.clone(), pane(true, false, Some(agent("a1"))), view(), compose.clone(), vec![select(Target::Agent("a1".into()))]),
+        cell("a click on a row from the box puts the keyboard on it and selects it", compose.clone(), pane(true, false, Some(agent("a1"))), view(), on_row(0), vec![Follow, select(Target::Agent("a1".into()))]),
+        cell("a click on a row from the feed puts the keyboard on it", at(Focus::Feed), pane(true, false, Some(row("infra"))), view(), on_row(4), vec![Follow, select(Target::Channel("infra".into()))]),
+        cell(
+            "a click on a row from the bar puts the keyboard on it, the walk's tab kept",
+            walked(Slot::Tab(chan("deploy"))),
+            pane(true, false, Some(row("deploy"))),
+            view(),
+            on_row(3),
+            vec![Follow, select(Target::Channel("deploy".into()))],
+        ),
+        cell("a click on a row the world no longer lists selects it from the box", compose.clone(), pane(true, false, Some(row("gone"))), view(), compose.clone(), vec![select(Target::Channel("gone".into()))]),
         cell("a click in the column off its rows keeps the column's keyboard", on_row(2), pane(true, false, None), view(), on_row(2), vec![]),
         cell("a click on a message keeps the feed's keyboard", at(Focus::Feed), pane(false, true, None), view(), at(Focus::Feed), vec![]),
         cell("a click on the feed from the column is the box", on_row(2), pane(false, true, None), view(), compose.clone(), vec![]),
@@ -397,6 +409,7 @@ fn a_step_asks_for_the_world_only_where_it_reads_it() {
     // The ring, the column's rows and the tab shown are the world's.
     assert!(need(at(Focus::Compose), Ev::Key(key(KeyCode::BackTab))));
     assert!(need(on_row(1), Ev::Key(key(KeyCode::Up))));
+    assert!(need(at(Focus::Compose), Ev::Click(Click::Pane { column: true, feed: false, row: Some(row("open")) })));
     assert!(need(at(Focus::Compose), Ev::ToggleBar));
     assert!(need(at(Focus::Compose), Ev::Jump(1)));
 }

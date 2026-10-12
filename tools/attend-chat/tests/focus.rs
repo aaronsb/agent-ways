@@ -656,3 +656,99 @@ fn add_agent_to_chat_lists_the_channels_the_agent_is_not_in_and_invites_it() {
     let items = picker(&mut c, "add to channel");
     assert!(items.iter().any(|r| r.contains("#infra")) && !items.iter().any(|r| r.contains("#deploy")), "{items:?}");
 }
+
+/// A left click on the first `text` left of the column's rule, below the
+/// tab bar: a row of the column.
+fn side_click(c: &mut Chat, text: &str) {
+    let rows = rows(c);
+    let (x, y) = rows
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(y, r)| {
+            let col = r.split('│').next()?;
+            col.find(text).map(|b| (col[..b].chars().count() as u16, y as u16))
+        })
+        .unwrap_or_else(|| panic!("no {text} in the column"));
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+}
+
+/// The open menu's box as drawn: where it sits, and its lines.
+fn menu_box(c: &mut Chat) -> Option<(usize, usize, Vec<String>)> {
+    let rows: Vec<Vec<char>> = rows(c).iter().map(|r| r.chars().collect()).collect();
+    let (y, x) = rows.iter().enumerate().find_map(|(y, r)| {
+        let s: String = r.iter().collect();
+        s.find("┌pick one").map(|b| (y, s[..b].chars().count()))
+    })?;
+    let w = rows[y][x..].iter().position(|ch| *ch == '┐')? + 1;
+    let mut out = Vec::new();
+    for r in &rows[y..] {
+        let line: String = r[x..x + w].iter().collect();
+        let end = line.starts_with('└');
+        out.push(line);
+        if end {
+            break;
+        }
+    }
+    Some((x, y, out))
+}
+
+#[test]
+fn a_click_on_a_row_gives_it_the_keyboard_and_the_arrows_move_from_it() {
+    let mut c = chat();
+    side_click(&mut c, "#open");
+    assert_eq!(focused(&mut c), "row #open", "the clicked row has the keyboard");
+    assert!(bar(&mut c).trim_start().starts_with("column"), "{}", bar(&mut c));
+    let mut seen = Vec::new();
+    for code in [KeyCode::Down, KeyCode::Down, KeyCode::Up] {
+        press(&mut c, code);
+        seen.push(focused(&mut c));
+    }
+    assert_eq!(seen, ["row #deploy", "row #infra", "row #deploy"], "↓↓↑ along the column as drawn");
+}
+
+#[test]
+fn enter_on_a_row_or_on_the_common_slot_opens_the_menu_a_click_opens_where_it_opens() {
+    // A channel's row: the click that opens its menu is the second, on the
+    // channel the first showed; Enter on the row the first click focused.
+    let mut clicked = chat();
+    side_click(&mut clicked, "#infra");
+    side_click(&mut clicked, "#infra");
+    let mut keyed = chat();
+    side_click(&mut keyed, "#infra");
+    press(&mut keyed, KeyCode::Enter);
+    let want = menu_box(&mut clicked).expect("the click opens #infra's menu");
+    assert!(want.2[0].contains("#infra"), "{want:?}");
+    assert_eq!(menu_box(&mut keyed), Some(want), "Enter: the same menu, docked in the same place");
+    // An agent's row: one click opens its menu. Esc closes it, the row
+    // keeping the keyboard, and Enter opens it again where it was.
+    let mut c = chat();
+    side_click(&mut c, "beta");
+    let want = menu_box(&mut c).expect("the click opens the agent's menu");
+    assert!(want.2[0].contains('@'), "{want:?}");
+    press(&mut c, KeyCode::Esc);
+    assert_eq!(menu_box(&mut c), None);
+    assert!(focused(&mut c).starts_with("row "), "{}", focused(&mut c));
+    press(&mut c, KeyCode::Enter);
+    assert_eq!(menu_box(&mut c), Some(want), "Enter: the same menu, docked in the same place");
+    // ≡, reached as the operator reaches it: Shift+Tab from the box, with
+    // and without a draft.
+    let mut clicked = chat();
+    let buf = testkit::render_screen(&mut clicked, W, H);
+    let (x, y) = testkit::find(&buf, "≡").unwrap();
+    clicked.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    let want = menu_box(&mut clicked).expect("a click on ≡ opens its menu");
+    for draft in ["", "x"] {
+        let mut keyed = chat();
+        typed(&mut keyed, draft);
+        for _ in 0..40 {
+            if focused(&mut keyed) == "tab ≡" {
+                break;
+            }
+            press(&mut keyed, KeyCode::BackTab);
+        }
+        assert_eq!(focused(&mut keyed), "tab ≡");
+        press(&mut keyed, KeyCode::Enter);
+        assert_eq!(menu_box(&mut keyed), Some(want.clone()), "draft {draft:?}: Enter on ≡ opens the menu a click opens");
+    }
+}

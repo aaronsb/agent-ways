@@ -58,6 +58,8 @@ off          | base  | wait:Agents F3 gone:Agents
 click        | base  | wait:#infra click:#infra click:#infra wait:pick
 tab          | base  | wait:#deploy click:#deploy click:#deploy wait:pick
 side-show    | base  | wait:Agents side:#infra
+side-arrows  | base  | wait:Agents side:#open Down Down Up wait:_column_
+side-enter   | base  | wait:Agents side:#infra Enter wait:pick_one:_#infra
 side-menu    | base  | wait:Agents side:#infra side:#infra wait:pick
 key-dock     | base  | wait:Agents M-1 M-1 wait:pick
 foot-keys    | many  | wait:Agents F2 Down End Up Enter wait:pick
