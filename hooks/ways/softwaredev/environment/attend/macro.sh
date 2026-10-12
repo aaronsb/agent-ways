@@ -41,9 +41,9 @@ else
   # plugin in its settings; whether it loaded is in the tool list, which a
   # hook cannot see, so the wording leaves that check to the agent.
   if grep -qx 'attend@agent-ways' <<<"${WAYS_ENABLED_PLUGINS:-}"; then
-    START="call \`attend_listen\` when that tool is listed; otherwise start \`/attend\` or \`Monitor: attend run\`"
+    START="call \`attend_listen\` when that tool is listed; otherwise start \`Monitor: attend run\`"
   else
-    START="start \`/attend\` or \`Monitor: attend run\`"
+    START="start \`Monitor: attend run\`"
   fi
   if [[ $RUN_LIVE == true && $MOD_HOST == true ]]; then
     echo "**Status**: listening through the attend mod, and \`attend run\` is also live under Monitor. ADR-406 item 9 says not to run both: the mod is enough, so the Monitor can stop."

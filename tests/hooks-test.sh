@@ -386,8 +386,8 @@ listen() {  # listening host run_live
     printf '{"session_id":"s1","resolved":true,"listening":%s,"via":[],"host":%s,"run_live":%s}' "$1" "$2" "$3"
 }
 MOD_ON=$'other@x\nattend@agent-ways'
-START_MOD='call `attend_listen` when that tool is listed; otherwise start `/attend` or `Monitor: attend run`'
-START_MON='start `/attend` or `Monitor: attend run`'
+START_MOD='call `attend_listen` when that tool is listed; otherwise start `Monitor: attend run`'
+START_MON='start `Monitor: attend run`'
 DEPLOY='[{"name":"deploy","pinned":false}]'
 check "attend macro: listening through the mod" \
     $'**Status**: listening through the attend mod. Send with `attend_send` and `attend_reply`; do not start Monitor.\n**Channels**: this session hears project, #open, #deploy' \
