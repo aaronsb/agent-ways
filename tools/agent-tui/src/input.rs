@@ -81,6 +81,15 @@ impl Input {
         self.cursor = self.snap(self.cursor + 1);
     }
 
+    /// Insert `s` at the cursor in one splice, the cursor after it. A paste
+    /// takes this path: inserting it a character at a time re-reads the
+    /// whole text per character, which a 64 KiB paste pays for in minutes.
+    pub fn insert_str(&mut self, s: &str) {
+        let at = byte_at(&self.text, self.cursor);
+        self.text.insert_str(at, s);
+        self.cursor = self.snap(self.cursor + s.chars().count());
+    }
+
     pub fn newline(&mut self) {
         self.insert('\n');
     }
@@ -369,5 +378,20 @@ mod tests {
         // A cluster under the cursor is drawn whole.
         let rows = at("cafe\u{301}!", 3).rows(10, Style::new());
         assert!(rows[0].spans.iter().any(|s| s.content == "e\u{301}" && s.style.add_modifier.contains(Modifier::REVERSED)));
+    }
+
+    /// A paste splices in at the cursor in one step, the cursor after it,
+    /// and a 64 KiB paste is quick.
+    #[test]
+    fn insert_str_splices_at_the_cursor() {
+        let mut i = Input::new();
+        i.set("ad", 1);
+        i.insert_str("bc");
+        assert_eq!((i.text(), i.cursor()), ("abcd", 3));
+        let big = "x".repeat(64 * 1024);
+        let t = std::time::Instant::now();
+        i.insert_str(&big);
+        assert!(t.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(i.cursor(), 3 + big.len());
     }
 }

@@ -178,6 +178,9 @@ pub(crate) struct Scan {
     pub(crate) note: Option<String>,
     /// How many the cold start marks without showing; `note` announces them.
     pub(crate) held_back: usize,
+    /// One note per signal file skipped for its size. Only the drain, which
+    /// commits `mark`, prints them, so each file is noted once.
+    pub(crate) skipped: Vec<String>,
 }
 
 /// The scope label a drained message carries for its room.
@@ -216,6 +219,7 @@ pub(crate) fn scan_pending(
         content: String,
     }
     let mut mark: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     let mut found: Vec<Found> = Vec::new();
     for (room, dir) in scan_dirs.iter().enumerate() {
         let Ok(entries) = std::fs::read_dir(&dir.path) else { continue };
@@ -235,7 +239,7 @@ pub(crate) fn scan_pending(
                 // A file no attend could have written: mark it so it is
                 // skipped once, with a note, not on every drain.
                 Err(e) if e.kind() == std::io::ErrorKind::FileTooLarge => {
-                    eprintln!("[attend] skipped {filename}: {e}");
+                    skipped.push(format!("[attend] skipped {filename}: {e}"));
                     mark.push(key);
                     continue;
                 }
@@ -291,7 +295,7 @@ pub(crate) fn scan_pending(
         });
     }
     let held_back = plan.as_ref().map_or(0, |p| p.not_shown);
-    Scan { delivered, mark, note: plan.and_then(|p| p.note()), held_back }
+    Scan { delivered, mark, note: plan.and_then(|p| p.note()), held_back, skipped }
 }
 
 /// Drain pending authored messages for this session: deliver the unseen,
@@ -388,9 +392,12 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
-    let Scan { mut delivered, mark, note, held_back } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
-    // Oldest first; parts written within one timestamp tick go by id,
-    // which carries the send time.
+    let Scan { mut delivered, mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
+    for line in &skipped {
+        eprintln!("{line}");
+    }
+    // Oldest first; signals that share an mtime order by the send time in
+    // their ids, so legacy numbered parts still read in order.
     delivered.sort_by_cached_key(|d| (d.mtime, agent_identity::signal_send_order(&d.id), d.id.clone()));
 
     // The cold start is this conduit's first contact with the session, so

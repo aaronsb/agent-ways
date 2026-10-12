@@ -671,9 +671,8 @@ impl Pane for ChatPane {
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         let text = if self.prompt.is_some() { text.split('\n').collect::<Vec<_>>().join(" ") } else { text };
         self.side_focus = None;
-        for c in text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')) {
-            self.input.insert(c);
-        }
+        let kept: String = text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();
+        self.input.insert_str(&kept);
         self.tab_cycle = None;
         self.dirty = true;
     }

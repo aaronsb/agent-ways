@@ -98,11 +98,7 @@ impl std::fmt::Display for SendError {
         match self {
             Self::InvalidReId => write!(f, "re must be a signal id matching [A-Za-z0-9_-]+"),
             Self::EmptyMessage => write!(f, "the message is empty"),
-            Self::TooLong { bytes, max } => write!(
-                f,
-                "the message is {bytes} bytes, over attend's limit of {max} bytes ({} KiB); shorten it, or write it to a file and send the path",
-                max / 1024
-            ),
+            Self::TooLong { bytes, max } => agent_identity::signal::TooLong { bytes: *bytes, max: *max }.fmt(f),
             Self::NoPeerAt { path, .. } => write!(f, "no active peer at {path}"),
             Self::OwnProject { path } => write!(
                 f,
@@ -158,10 +154,8 @@ fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
     if req.message.is_empty() {
         return Err(SendError::EmptyMessage);
     }
-    let max = agent_identity::signal::MAX_MESSAGE_BYTES;
-    if req.message.len() > max {
-        return Err(SendError::TooLong { bytes: req.message.len(), max });
-    }
+    agent_identity::signal::check_message_len(&req.message)
+        .map_err(|t| SendError::TooLong { bytes: t.bytes, max: t.max })?;
     // A message that itself starts `re:` needs nothing here: the wire
     // marks an unthreaded one with an empty thread field
     // (`agent_identity::format_signal`), so it reads back as written.

@@ -45,6 +45,7 @@ mkdir -p "$WORK"
 #   resize:COLS    the terminal narrowed (or widened) to COLS columns
 #   paste:TEXT     a bracketed paste of TEXT, \n for a newline
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
+#   bigpaste:N     a bracketed paste of N x characters
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row) or
@@ -109,6 +110,7 @@ header-human | own   | wait:watching_the
 header-pick  | base  | wait:signing_off click:signing_off
 header-chan  | base  | wait:Agents M-3 wait:rollout_is_green
 quit-lent    | base  | wait:Agents C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
+too-long     | base  | wait:Agents bigpaste:65537 wait:xxxxxxxxxx Enter wait:over_attend's_limit
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
@@ -256,6 +258,15 @@ step() { # name step
     resize:*) resize "$n" "$arg" ;;
     paste:*) $TH send "$n" -l $'\e[200~'"$(printf '%b' "$arg")"$'\e[201~' ;;
     rawpaste:*) $TH send "$n" -l "$(printf '%b' "$arg")" ;;
+    bigpaste:*) # in pieces: tmux refuses one send-keys this long
+      local left=$arg piece
+      $TH send "$n" -l $'\e[200~'
+      while [ "$left" -gt 0 ]; do
+        piece=$((left < 4000 ? left : 4000))
+        $TH send "$n" -l "$(head -c "$piece" /dev/zero | tr '\0' x)"
+        left=$((left - piece))
+      done
+      $TH send "$n" -l $'\e[201~' ;;
     *) $TH send "$n" "$k" ;;
   esac
   settle "$n"
