@@ -256,7 +256,7 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, lead: &str, rows
         let w = (str_width(&flag) as u16).min(inner.width);
         let at = Rect { x: inner.x + inner.width - w, y: inner.y + text_h, width: w, height: flag_h };
         f.render_widget(Paragraph::new(Span::styled(flag, theme::badge(Ground::Info))), at);
-        // A click on it opens the shown channel's menu.
+        // A click on it opens the menu of the channel it names.
         chat.hits.flag = at;
     }
 }

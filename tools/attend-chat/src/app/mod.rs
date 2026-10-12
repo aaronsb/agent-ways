@@ -752,23 +752,17 @@ impl Pane for ChatPane {
         // does not have the keyboard: at 80 columns it takes the place of
         // the scroll keys, which the key help still lists.
         if self.side_drawn() && self.side_focus.is_none() {
-            out.push(Binding::new("F2 ↓", "column"));
+            out.push(Binding::new("F2 ↓", "the column: ↑ ↓ move, Enter acts, ↑ at the top or Esc back").short("column"));
         }
         out.extend([
             Binding::new("PgUp PgDn", "scroll"),
             Binding::help("S-Enter M-Enter", "new line"),
             Binding::help("← → Home End", "move the cursor"),
             Binding::help("Bksp Del", "edit"),
-            Binding::help("click a message", "selects it; in the compose box it places the cursor; a chip completes it"),
-            Binding::help("click a side row", "an agent: its menu (address, who, remove); a channel: shows it, and on the channel shown opens its menu"),
-            Binding::help("right-click a row", "a column row or a sender's name: its menu at once"),
-            Binding::help("click the flag", "under the compose box: the shown channel's menu"),
+            Binding::help("click a message", "selects it; a chip completes; the compose box: the cursor"),
         ]);
         if let Some(key) = self.sidebar_key_label() {
             out.push(Binding::help(key, "show or hide the agents and channels column"));
-        }
-        if self.side_drawn() {
-            out.push(Binding::help("F2, then ↓", "the column: ↑ ↓ move, Enter does what a click does, ↑ at the top or Esc back"));
         }
         out
     }
@@ -880,6 +874,18 @@ impl Pane for ChatPane {
         if self.side_focus.take().is_some() {
             self.dirty = true;
         }
+    }
+
+    /// A click on a tab or a channel row shows it and again opens its menu;
+    /// an agent's row and the destination flag open theirs at once.
+    fn click_help(&self) -> Option<String> {
+        Some("a channel shows it, again its menu; agent, flag: its menu".into())
+    }
+
+    /// A right click opens the menu at once on a tab, a column row or a
+    /// sender's name in the feed.
+    fn right_click_help(&self) -> Option<String> {
+        Some("a tab, a row or a sender's name: its menu at once".into())
     }
 
     fn quit_help(&self) -> Option<String> {

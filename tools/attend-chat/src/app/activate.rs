@@ -9,7 +9,8 @@
 //!   column's always do (ADR-407). A channel with no tab cannot be shown, so
 //!   its menu opens at once.
 //! - Menu (a right click, Enter on the focused tab bar, the destination
-//!   flag) opens the menu at once and shows nothing.
+//!   flag) opens the menu at once and shows nothing. The flag acts on the
+//!   channel it names: `#open` on merged.
 //! - An agent has no shown state: either opens its menu (ADR-405).
 //! - `≡` opens the common menu over a lent compose box; `+` lends the box.
 //!   Every other activation gives a lent box back first (ADR-409 (d)).
@@ -65,14 +66,6 @@ impl ChatPane {
         }
     }
 
-    /// The channel shown, as a target.
-    pub(super) fn shown_target(&mut self) -> Target {
-        match self.normal_tab() {
-            Tab::Merged => Target::Merged,
-            Tab::Channel(c) => Target::Channel(c),
-        }
-    }
-
     /// Act on `target` as `how` says. A menu docks under `at` when given,
     /// else under the target's column row, else its tab.
     pub(super) fn activate(&mut self, target: Target, how: How, at: Option<Rect>) {
@@ -106,12 +99,13 @@ impl ChatPane {
         }
     }
 
-    /// The destination flag clicked: the shown channel's menu, docked at
-    /// the flag.
+    /// The destination flag clicked: the menu of the channel it names, the
+    /// shown tab's send scope (`#open` on merged), docked at the flag. A
+    /// clicked element acts on what it shows.
     pub(super) fn flag_menu(&mut self) {
-        let target = self.shown_target();
+        let scope = crate::tabs::send_scope(&self.normal_tab());
         let flag = self.hits.flag;
-        self.activate(target, How::Menu, Some(flag));
+        self.activate(Target::Channel(scope), How::Menu, Some(flag));
     }
 
     /// A right click at `at`: the menu of what is under it, at once. A

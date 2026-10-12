@@ -119,7 +119,10 @@ impl App {
         }
         if menus {
             let what = if keys.menu_on_repeat { "its menu; so does a click on the tab shown" } else { "its menu" };
-            out.push(Binding::help("right-click a tab", what));
+            match self.pane.as_ref().and_then(|p| p.right_click_help()) {
+                Some(h) => out.push(Binding::help("right-click", h)),
+                None => out.push(Binding::help("right-click a tab", what)),
+            }
         }
         let quit = self.pane.as_ref().and_then(|p| p.quit_help()).unwrap_or_else(|| "quit; asks first over unsaved work".into());
         let quit_keys = if self.pane.as_ref().is_none_or(|p| p.esc_quits()) { k("q Esc ^C", "Esc ^C") } else { k("q ^C", "^C") };
@@ -129,7 +132,8 @@ impl App {
             Binding::help("middle-click", "pastes only while the mouse is off"),
             Binding::help(quit_keys, quit),
         ]);
-        out.push(Binding::help("click", "a tab shows it; the wheel scrolls"));
+        let click = self.pane.as_ref().and_then(|p| p.click_help()).unwrap_or_else(|| "a tab shows it; the wheel scrolls".into());
+        out.push(Binding::help("click", click));
         out
     }
 

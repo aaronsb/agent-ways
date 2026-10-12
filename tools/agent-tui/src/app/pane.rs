@@ -294,6 +294,18 @@ pub trait Pane: Any {
     /// list of its own lets go of it.
     fn interrupted(&mut self) {}
 
+    /// How the key help describes a click, when the pane's targets say more
+    /// than the shell's line (a tab shows it, the wheel scrolls).
+    fn click_help(&self) -> Option<String> {
+        None
+    }
+
+    /// How the key help describes a right click, when the pane's reaches
+    /// more than a tab: it then takes the shell's `right-click a tab` line.
+    fn right_click_help(&self) -> Option<String> {
+        None
+    }
+
     /// How the key help describes quitting, when the pane's differs from
     /// the shell's (asking first over unsaved work).
     fn quit_help(&self) -> Option<String> {

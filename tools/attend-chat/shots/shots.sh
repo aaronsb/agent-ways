@@ -100,7 +100,8 @@ rclick-row   | base  | wait:Agents rside:#infra wait:pick_one:_#infra
 rclick-agent | base  | wait:Agents rside:● wait:Address
 rclick-name  | base  | wait:signing rfeed:gamma wait:Address
 flag-click   | base  | wait:Agents M-3 wait:rollout_is_green last:#deploy wait:pick_one:_#deploy
-flag-merged  | base  | wait:Agents last:#open wait:pick_one:_merged
+flag-merged  | base  | wait:Agents last:#open wait:pick_one:_#open
+key-help     | base  | wait:Agents F1 wait:any_other_key
 quit-lent    | base  | wait:Agents C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
 "
 

@@ -132,10 +132,11 @@ fn a_right_click_on_a_senders_name_opens_the_agents_menu() {
     assert!(rows(&mut c).iter().any(|r| r.contains(&format!("Address @{name}"))));
 }
 
-/// A click on the destination flag opens the shown channel's menu, docked
-/// at the flag; a right click does the same.
+/// A click on the destination flag opens the menu of the channel it names,
+/// docked at the flag; a right click does the same. A clicked element acts
+/// on what it shows.
 #[test]
-fn a_click_on_the_destination_flag_opens_the_shown_channels_menu() {
+fn a_click_on_the_destination_flag_opens_the_menu_of_the_channel_it_names() {
     for b in [MouseButton::Left, MouseButton::Right] {
         let mut c = chat();
         press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
@@ -148,11 +149,12 @@ fn a_click_on_the_destination_flag_opens_the_shown_channels_menu() {
         assert!(y < flag.1 as usize, "{b:?}: docked at the flag, above it where the foot has no room");
         assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
     }
-    // On merged, merged's menu.
+    // On merged the flag reads #open: #open's menu, and merged stays shown.
     let mut c = chat();
     let flag = rows(&mut c).iter().enumerate().rev().find_map(|(y, r)| r.rfind("#open").map(|x| (r[..x].chars().count() as u16, y as u16))).expect("the flag");
     click(&mut c, flag);
-    assert_eq!(menu(&mut c).map(|(t, _)| t), Some("merged".into()));
+    assert_eq!(menu(&mut c).map(|(t, _)| t), Some("#open".into()));
+    assert_eq!(c.foreground(), &Tab::Merged);
 }
 
 /// No visible change: the tab, its digit and the column row reach the same
