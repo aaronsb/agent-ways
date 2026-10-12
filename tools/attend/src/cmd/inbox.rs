@@ -353,11 +353,10 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
         }
         None => 1,
     };
+    // Only the hook path reads stop_hook_active, so only a hook drain counts
+    // rounds past 1: a JSON drain never reaches this ceiling.
     if rounds > MAX_DRAIN_ROUNDS {
         eprintln!("(drain round {rounds} > {MAX_DRAIN_ROUNDS} — deferring to the Monitor conduit)");
-        if mode == DrainMode::Json {
-            print_drain_json("deferred", &[], 0, None, None);
-        }
         return;
     }
 
@@ -482,6 +481,9 @@ enum DrainMode {
     Json,
 }
 
+/// The version of the `--drain --json` document; a reader refuses another.
+const DRAIN_JSON_SCHEMA: u32 = 1;
+
 /// One drained message in `--drain --json`.
 #[derive(serde::Serialize)]
 struct DrainedJson<'a> {
@@ -495,9 +497,10 @@ struct DrainedJson<'a> {
     message: &'a str,
 }
 
-/// The `--drain --json` document. `status` is `drained` when the drain ran
-/// (with or without messages), else why it delivered nothing: `unresolved`
-/// identity, `not_listening`, or `deferred` past the re-entry ceiling.
+/// The `--drain --json` document, `schema` 1. `status` is `drained` when
+/// the drain ran (with or without messages), else why it delivered nothing:
+/// `unresolved` identity, or `not_listening`. (The re-entry ceiling defers
+/// only a hook drain, which carries the Stop hook's `stop_hook_active`.)
 /// `you_are` is set on the cold start, the drain's first contact.
 fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Option<&str>, me: Option<&str>) {
     let messages: Vec<DrainedJson> = delivered
@@ -514,6 +517,7 @@ fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note:
         })
         .collect();
     crate::cmd::print_json(&serde_json::json!({
+        "schema": DRAIN_JSON_SCHEMA,
         "status": status,
         "messages": messages,
         "held_back": held_back,

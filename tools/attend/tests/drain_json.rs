@@ -19,6 +19,7 @@ fn a_cold_start_with_nothing_pending_has_no_messages_and_names_the_session() {
     let f = Fixture::new("drain-json-empty");
     f.ok(&["listen", "on"]);
     let d = drain_json(&f);
+    assert_eq!(d["schema"], 1);
     assert_eq!(d["status"], "drained");
     assert_eq!(d["messages"], serde_json::json!([]));
     assert_eq!(d["held_back"], 0);
@@ -56,6 +57,18 @@ fn a_cold_start_with_backlog_gives_messages_note_and_count_apart() {
 
     let again = drain_json(&f);
     assert_eq!(again["messages"], serde_json::json!([]), "drained messages are marked read");
+}
+
+#[test]
+fn an_unresolved_session_says_so() {
+    let f = Fixture::new("drain-json-unresolved");
+    f.ok(&["listen", "on"]);
+    f.put("_broadcast", "other-1-1-fresh", "fresh open", Duration::ZERO);
+    let out = f.without_session(|| f.attend(&["inbox", "--drain", "--json"]));
+    assert!(out.status.success());
+    let d: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!((d["schema"].as_u64(), d["status"].as_str()), (Some(1), Some("unresolved")), "{d}");
+    assert_eq!(d["messages"], serde_json::json!([]));
 }
 
 #[test]
@@ -97,6 +110,9 @@ fn the_mod_fixtures_are_the_real_attend_output() {
     };
 
     let f = Fixture::new("fixtures-cold");
+    let unresolved = f.without_session(|| f.attend(&["inbox", "--drain", "--json"]));
+    assert!(unresolved.status.success());
+    put("DRAIN_UNRESOLVED", norm(serde_json::from_slice(&unresolved.stdout).unwrap()));
     put("DRAIN_NOT_LISTENING", norm(drain_json(&f)));
     f.ok(&["listen", "on"]);
     put("DRAIN_COLD_EMPTY", norm(drain_json(&f)));
