@@ -10,6 +10,12 @@
 //! it, and declares its keys as [`Binding`]s, which the footer and the key
 //! help both read.
 //!
+//! The overlays follow one rule. Esc, or a click outside, closes the one on
+//! top (a menu, a picker, a question, the key help, the response modal)
+//! and says nothing. A click that closes one on the tab bar, or on a part
+//! of the pane that passes clicks through ([`Pane::click_through`]), then
+//! does what it would have done with nothing open.
+//!
 //! A pane that owns text ([`Pane::owns_text`]) types every plain key, so the
 //! shell's own keys take their Alt form there: Alt+1-9 for a tab, Alt+m for
 //! the mouse. F1 opens the key help, and Esc and Ctrl-C quit, asking first
@@ -144,6 +150,15 @@ pub enum Open {
     /// is shown already. For a row of the pane that stands for a tab, so a
     /// click on the row and the key share one rule.
     Tab(usize),
+    /// A question on the bottom bar, answered with `y` or `n`, or a click
+    /// on either answer, which the bar draws as lozenges: `yes` and `no`
+    /// name what each does ("clear", "keep"). Esc, a click elsewhere, or
+    /// any other key answers no; a character the pane would type, and a
+    /// key the shell takes, then go on as typed. The answer comes back
+    /// through [`Pane::picked`] under `id`, as `["y"]` or `["n"]`.
+    Ask { id: String, question: String, yes: String, no: String },
+    /// Quit, as Ctrl-C does: asking first over unsaved work.
+    Quit,
 }
 
 /// What an application supplies for a screen that is not a tree. `Any`
@@ -253,6 +268,19 @@ pub trait Pane: Any {
 
     /// A left click at `at`, inside the pane's area.
     fn click(&mut self, _at: Position) {}
+
+    /// Whether a click at `at`, inside the pane's area, that closes an
+    /// overlay goes on to act, as a click on the tab bar does: true for a
+    /// list of targets beside the content, such as the chat's column.
+    /// Elsewhere such a click only closes the overlay.
+    fn click_through(&self, _at: Position) -> bool {
+        false
+    }
+
+    /// A click landed outside the pane's area, on the tab bar or the
+    /// bottom bar: close what the pane holds open over its own content,
+    /// such as a text entry lent to a name, and say nothing.
+    fn clicked_outside(&mut self) {}
 
     /// Text the terminal pasted, whole, newlines and all. Nothing by
     /// default.

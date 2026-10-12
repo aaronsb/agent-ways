@@ -2,7 +2,7 @@
 //! the bottom bar with the footer, and the keys and clicks the shell takes
 //! before the pane gets the rest. The overlays (the key help, the exit
 //! guard, the response modal, the picker) are the tree shell's own; a pane
-//! opens the modal and the picker through [`Pane::take_open`].
+//! opens the modal, the picker and a question through [`Pane::take_open`].
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -40,6 +40,15 @@ fn clip(text: &str, room: usize) -> String {
     }
     out.push('…');
     out
+}
+
+/// A pane's question on the bottom bar ([`Open::Ask`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Asked {
+    pub id: String,
+    pub question: String,
+    pub yes: String,
+    pub no: String,
 }
 
 /// A key the shell takes before the pane, read by [`App::shell_key`].
@@ -261,6 +270,8 @@ impl App {
         let scroll = scroll.min((lines.len() as u16).saturating_sub(room));
         f.render_widget(Clear, r);
         f.render_widget(Paragraph::new(lines).scroll((scroll, 0)).block(bordered("keys · ↑↓ scroll · any other key closes").border_style(theme::modal_border())), r);
+        // Its rect, so a click outside it is told from one on it.
+        self.hits.menu = Some((r, Vec::new()));
     }
 
     /// The key `k` names when the shell takes it before the pane, or None
@@ -422,8 +433,68 @@ impl App {
                 self.mode = Mode::Pick(pick);
             }
             Open::Pick { .. } => {}
+            Open::Ask { id, question, yes, no } if matches!(self.mode, Mode::Browse) => {
+                self.mode = Mode::Ask(Asked { id, question, yes, no });
+            }
+            Open::Ask { .. } => {}
             Open::Tab(i) => self.pane_tab_or_menu(i, false),
+            Open::Quit => {
+                if !self.quit() {
+                    self.ending = true;
+                }
+            }
         }
+    }
+
+    /// A key while the pane's question waits. `y` answers yes; `n` and Esc
+    /// answer no; any other key answers no, and then a character the pane
+    /// types, or a key the shell takes, goes on as if nothing were asked.
+    /// Enter and the other editing keys only answer, so an Enter meant for
+    /// the question never sends a draft. False ends the session.
+    pub(super) fn ask_key(&mut self, a: Asked, k: KeyEvent) -> bool {
+        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        match k.code {
+            KeyCode::Char('y' | 'Y') if plain => self.answer(a, true),
+            KeyCode::Char('n' | 'N') if plain => self.answer(a, false),
+            KeyCode::Esc => self.answer(a, false),
+            _ => {
+                let typed = plain && matches!(k.code, KeyCode::Char(_)) && self.owns_text();
+                let goes_on = typed || self.shell_key(k).is_some();
+                self.answer(a, false);
+                if goes_on && matches!(self.mode, Mode::Browse) {
+                    return self.pane_key(k);
+                }
+            }
+        }
+        true
+    }
+
+    /// Give the pane its question's answer, through [`Pane::picked`].
+    pub(super) fn answer(&mut self, a: Asked, yes: bool) {
+        self.mode = Mode::Browse;
+        self.pane_picked(&a.id, vec![if yes { "y" } else { "n" }.to_string()]);
+    }
+
+    /// The bottom bar while the pane's question waits: the question, cut
+    /// to leave room for its answers, then the answers as lozenges, each a
+    /// click target, as the shell's own confirms draw theirs.
+    pub(super) fn ask_status(&mut self, area: Rect, a: &Asked) -> Vec<Span<'static>> {
+        let sh = self.shape;
+        let yes = format!(" y {} ", a.yes);
+        let no = format!(" n {} ", a.no);
+        let answers = width(&sh.lozenge(&[Seg::on(yes.clone(), theme::Ground::Err)])) + width(&sh.lozenge(&[Seg::on(no.clone(), theme::Ground::Ok)])) + 2;
+        let lozenge = sh.lozenge(&[Seg::on(" confirm ", theme::Ground::Warn).bold()]);
+        let mut spans = Vec::new();
+        // The answers are the click targets: the lozenge, then the
+        // question, give way before they do.
+        let room = |used: u16| (area.width.saturating_sub(used + answers + 3)) as usize;
+        if str_width(&a.question) <= room(width(&lozenge)) {
+            spans.extend(lozenge);
+        }
+        let question = clip(&a.question, room(width(&spans)));
+        spans.push(Span::raw(format!(" {question}  ")));
+        super::render::answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, &yes, theme::Ground::Err), (false, &no, theme::Ground::Ok)]);
+        spans
     }
 
     /// The pane's picker set `values`. The pick is input to the pane, so
@@ -438,11 +509,17 @@ impl App {
 
     /// The mouse while a pane is shown: a click on a tab shows it, and on
     /// the tab shown opens its menu, as Ctrl+digit does and a right click
-    /// does at once; the wheel and a
-    /// click inside the pane are the pane's. A middle click
-    /// pastes nothing while the shell has the mouse, and the bar says so.
+    /// does at once; the wheel and a click inside the pane are the pane's.
+    /// A click on the tab bar or the bottom bar first closes what the pane
+    /// holds open over its content ([`Pane::clicked_outside`]). A middle
+    /// click pastes nothing while the shell has the mouse, and the bar says so.
     pub(super) fn pane_mouse(&mut self, m: MouseEvent) {
         let at = Position::new(m.column, m.row);
+        if Self::is_press(&m) && !self.hits.pane.contains(at) {
+            if let Some(p) = &mut self.pane {
+                p.clicked_outside();
+            }
+        }
         match m.kind {
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if self.hits.pane.contains(at) => {
                 if let Some(p) = &mut self.pane {
@@ -472,8 +549,6 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Middle) => {
-                // The hint below takes the bar, so the pane's question goes
-                // first rather than stay armed out of sight.
                 self.interrupt_pane();
                 let key = self.mouse_key();
                 self.msg = format!("middle-click pastes with the mouse off: {key}, paste, {key}");
@@ -484,9 +559,37 @@ impl App {
         self.take_pane_open();
     }
 
+    /// A click or a right click outside an overlay, which has closed: on the
+    /// tab bar, or on a part of the pane that passes clicks through
+    /// ([`Pane::click_through`]), it goes on and acts as it would with
+    /// nothing open. Elsewhere it has done its work by closing.
+    pub(super) fn click_through(&mut self, m: MouseEvent) {
+        if !matches!(self.mode, Mode::Browse) || self.pane.is_none() {
+            return;
+        }
+        let at = Position::new(m.column, m.row);
+        let on_tab = self.hits.tabs.iter().any(|(r, _)| r.contains(at));
+        let through = self.hits.pane.contains(at) && self.pane.as_ref().is_some_and(|p| p.click_through(at));
+        if on_tab || through {
+            self.pane_mouse(m);
+        }
+    }
+
+    /// Whether `m` presses the left or the right button: what closes an
+    /// overlay when it lands outside it.
+    pub(super) fn is_press(m: &MouseEvent) -> bool {
+        matches!(m.kind, MouseEventKind::Down(MouseButton::Left | MouseButton::Right))
+    }
+
     /// A paste: the pane's, while nothing is open over it and the tab bar
-    /// does not have the focus. Elsewhere it is dropped, never typed.
+    /// does not have the focus. A question waiting is answered no first, as
+    /// typing answers it, and the paste goes on to the pane. Elsewhere it
+    /// is dropped, never typed.
     pub fn paste(&mut self, text: &str) {
+        if let Mode::Ask(a) = &self.mode {
+            let a = a.clone();
+            self.answer(a, false);
+        }
         if !matches!(self.mode, Mode::Browse) || self.strip.is_some() {
             return;
         }
@@ -663,6 +766,96 @@ mod tests {
         a.key(k(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(two(&a).picked, ["to=b"]);
         assert_eq!(two(&a).keys, 1, "the picker's keys are not the pane's");
+    }
+
+    /// One way to answer a question.
+    type Answer = fn(&mut App);
+
+    fn ask() -> Open {
+        Open::Ask { id: "q".into(), question: "drop it?".into(), yes: "drop".into(), no: "keep".into() }
+    }
+
+    /// A pane's question shows on the bar with its answers as lozenges; `y`,
+    /// `n`, Esc and a click on either answer all reach the pane by one path.
+    #[test]
+    fn a_panes_question_is_answered_by_key_or_by_a_click_on_its_answer() {
+        let answers: [(&str, Answer); 5] = [
+            ("y", |a: &mut App| assert!(a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)))),
+            ("n", |a: &mut App| assert!(a.key(k(KeyCode::Char('n'), KeyModifiers::NONE)))),
+            ("n", |a: &mut App| assert!(a.key(k(KeyCode::Esc, KeyModifiers::NONE)))),
+            ("y", |a: &mut App| click_text(a, " y drop ")),
+            ("n", |a: &mut App| click_text(a, " n keep ")),
+        ];
+        for (want, answer) in answers {
+            let mut a = app(true);
+            a.pane_mut::<Two>().expect("the pane").open = Some(ask());
+            a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+            let bar = testkit::rows(&testkit::render(&mut a, 80, 6)).pop().expect("a bar");
+            assert!(bar.contains("drop it?") && bar.contains(" y drop ") && bar.contains(" n keep "), "{bar}");
+            answer(&mut a);
+            assert_eq!(two(&a).picked, [format!("q={want}")]);
+            assert_eq!(two(&a).keys, 1, "the answer typed nothing");
+            assert!(matches!(a.mode, Mode::Browse), "nothing left asking");
+        }
+    }
+
+    fn click_text(a: &mut App, text: &str) {
+        let buf = testkit::render(a, 80, 6);
+        let (x, y) = testkit::find(&buf, text).expect("the answer is drawn");
+        a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    }
+
+    /// Any other key answers no; beside text a character then types, and
+    /// Enter only answers, so it never sends what the question was over.
+    #[test]
+    fn another_key_answers_no_and_a_character_goes_on_as_typed() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(ask());
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        a.key(k(KeyCode::Char('z'), KeyModifiers::NONE));
+        assert_eq!((two(&a).picked.clone(), two(&a).keys), (vec!["q=n".to_string()], 2), "z answered no, then typed");
+        a.pane_mut::<Two>().expect("the pane").open = Some(ask());
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        a.key(k(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(two(&a).keys, 3, "Enter only answered");
+    }
+
+    /// A click anywhere but an answer answers no; on a tab it then acts.
+    #[test]
+    fn a_click_off_the_answers_answers_no_and_on_a_tab_acts() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(ask());
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        click_text(&mut a, "2 two");
+        assert_eq!((two(&a).picked.clone(), two(&a).tab), (vec!["q=n".to_string()], 1));
+    }
+
+    /// A pane asks the shell to quit: at once with nothing unsaved, which a
+    /// click cannot return, so [`App::ended`] says it; over unsaved work,
+    /// the exit guard asks.
+    #[test]
+    fn a_pane_quits_through_the_shell() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Quit);
+        assert!(!a.key(k(KeyCode::Char('x'), KeyModifiers::NONE)), "the key that quit ends the session");
+        assert!(a.ended());
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").dirty = true;
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Quit);
+        assert!(a.key(k(KeyCode::Char('x'), KeyModifiers::NONE)));
+        assert!(a.guarding() && !a.ended());
+    }
+
+    /// A pane's menu closed with Esc says nothing over the bar.
+    #[test]
+    fn a_panes_menu_closes_saying_nothing() {
+        let mut a = app(false);
+        let open = Open::Pick { id: "to".into(), title: "send to".into(), options: vec!["a".into()], multi: false, chosen: Vec::new() };
+        a.pane_mut::<Two>().expect("the pane").open = Some(open);
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(a.msg.is_empty(), "{}", a.msg);
+        assert!(two(&a).picked.is_empty());
     }
 
     /// Armed, any key but y disarms the quit: D has to be followed by y.

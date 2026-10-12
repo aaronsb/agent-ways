@@ -9,7 +9,7 @@ impl App {
     pub fn key(&mut self, k: KeyEvent) -> bool {
         let on = self.key_event(k);
         self.open_held();
-        on
+        on && !self.ending
     }
 
     fn key_event(&mut self, k: KeyEvent) -> bool {
@@ -193,6 +193,7 @@ impl App {
                 // Any key but y disarms it: D has to be followed by y.
                 _ => self.mode = Mode::Guard { confirm: false },
             },
+            Mode::Ask(a) => return self.ask_key(a, k),
             Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
             Mode::Browse => return self.browse(k),
@@ -382,6 +383,10 @@ impl App {
     /// the same paths a key does, so the confirm and secret rules hold.
     /// During text, secret or filter entry and a confirm, only the confirm's
     /// answers respond.
+    ///
+    /// Over a pane, every overlay closes on a click outside it, as on Esc,
+    /// and a click that closes one on the tab bar or on a part of the pane
+    /// that passes clicks through then acts ([`App::click_through`]).
     pub fn mouse(&mut self, m: MouseEvent) {
         self.mouse_event(m);
         self.open_held();
@@ -395,6 +400,8 @@ impl App {
             _ => None,
         };
         let click = m.kind == MouseEventKind::Down(MouseButton::Left);
+        // Beside a pane a right click closes an overlay as a left one does.
+        let closes = click || (self.pane.is_some() && Self::is_press(&m));
         let press = |c| KeyEvent::new(c, KeyModifiers::NONE);
         if let Mode::Flow(flow) = &mut self.mode {
             let ev = match (wheel, click) {
@@ -405,6 +412,7 @@ impl App {
             self.flow_event(ev);
             return;
         }
+        let in_menu = self.hits.menu.as_ref().is_some_and(|(r, _)| r.contains(at));
         match &mut self.mode {
             Mode::Browse if self.pane.is_some() => self.pane_mouse(m),
             Mode::Browse if self.tab == self.roots.len() => self.theme_mouse(m),
@@ -431,15 +439,32 @@ impl App {
             Mode::Pick(p) => {
                 if let Some(k) = wheel {
                     self.key(press(k));
-                } else if click {
-                    let Some((menu, items)) = &self.hits.menu else { return };
+                } else if click && in_menu {
+                    let Some((_, items)) = &self.hits.menu else { return };
                     if let Some(i) = items.iter().position(|r| r.contains(at)) {
                         // A click picks the row: on a list it marks it, as Space does.
                         p.sel = i;
                         let k = if p.multi { KeyCode::Char(' ') } else { KeyCode::Enter };
                         self.key(press(k));
-                    } else if !menu.contains(at) {
-                        self.key(press(KeyCode::Esc));
+                    }
+                } else if closes && !in_menu {
+                    self.key(press(KeyCode::Esc));
+                    self.click_through(m);
+                }
+            }
+            // A pane's question: a click on an answer gives it; a click of
+            // any button anywhere else answers no and, on the tab bar or
+            // the column, acts. The wheel scrolls what is under it, as
+            // with nothing asked.
+            Mode::Ask(a) => {
+                if wheel.is_some() {
+                    self.pane_mouse(m);
+                } else if matches!(m.kind, MouseEventKind::Down(_)) {
+                    let a = a.clone();
+                    let answer = self.hits.answers.iter().find(|(r, _)| r.contains(at)).map(|&(_, yes)| yes);
+                    self.answer(a, answer == Some(true));
+                    if answer.is_none() {
+                        self.click_through(m);
                     }
                 }
             }
@@ -462,13 +487,21 @@ impl App {
                 }
             }
             Mode::Guard { confirm: false } | Mode::ThemeUnsaved if click => self.click_button(at),
-            Mode::Help { .. } if click => self.mode = Mode::Browse,
+            // Any key closes the key help, and so does any click; one
+            // outside it goes on.
+            Mode::Help { .. } if closes => {
+                self.mode = Mode::Browse;
+                if !in_menu {
+                    self.click_through(m);
+                }
+            }
             Mode::Response(_) => {
                 if let Some(k) = wheel {
                     self.key(press(k));
-                } else if click && !self.hits.menu.as_ref().is_some_and(|(r, _)| r.contains(at)) {
+                } else if closes && !in_menu {
                     // A click outside closes it; inside, the text stays put.
                     self.key(press(KeyCode::Esc));
+                    self.click_through(m);
                 }
             }
             _ => {}

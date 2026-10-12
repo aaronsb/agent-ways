@@ -445,7 +445,14 @@ impl App {
                     self.stop_run("stopped: the screen closed");
                     return Ok(self.session(None));
                 }
-                Ok(Some(Event::Mouse(m))) => self.mouse(m),
+                Ok(Some(Event::Mouse(m))) => {
+                    self.mouse(m);
+                    // A click that quit ([`crate::Open::Quit`]).
+                    if self.ended() {
+                        self.stop_run("stopped: the screen closed");
+                        return Ok(self.session(None));
+                    }
+                }
                 Ok(Some(Event::Paste(text))) => self.paste(&text),
                 Ok(_) => {}
             }

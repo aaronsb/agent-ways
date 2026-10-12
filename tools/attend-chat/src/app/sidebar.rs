@@ -367,12 +367,10 @@ impl ChatPane {
     /// `attend.chat.tabs.menu_on_repeat` says: that setting is about keys.
     /// A channel with no tab cannot be shown, so its menu opens.
     ///
-    /// A waiting question is dropped first: a menu closed unchanged puts
-    /// "unchanged" over the bar, and a `y` must never answer a question
-    /// out of sight. While the column has the keyboard, its cursor moves
-    /// to the row clicked.
+    /// A question waiting on the bar is the shell's: a click here answers
+    /// it no before it reaches the row. While the column has the keyboard,
+    /// its cursor moves to the row clicked.
     pub(super) fn side_click(&mut self, hit: SideHit) {
-        self.drop_question();
         if self.side_focus.is_some() {
             let items = self.side_items();
             if let Some(i) = items.iter().position(|h| *h == hit) {

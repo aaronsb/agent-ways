@@ -47,9 +47,9 @@ pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Bt
 }
 
 /// A confirm's two answers as lozenges, each recorded as a click target.
-pub(super) fn answer_lozenges(sh: Shape, area: Rect, spans: &mut Vec<Span<'static>>, hits: &mut Vec<(Rect, bool)>, answers: [(bool, &'static str, Ground); 2]) {
+pub(super) fn answer_lozenges(sh: Shape, area: Rect, spans: &mut Vec<Span<'static>>, hits: &mut Vec<(Rect, bool)>, answers: [(bool, &str, Ground); 2]) {
     for (yes, text, g) in answers {
-        let target = sh.lozenge(&[Seg::on(text, g).bold()]);
+        let target = sh.lozenge(&[Seg::on(text.to_string(), g).bold()]);
         let x = area.x + width(spans);
         hits.push((Rect { x, y: area.y, width: width(&target), height: 1 }.intersection(area), yes));
         spans.extend(target);
@@ -666,6 +666,10 @@ impl App {
             Mode::ThemeUnsaved => {
                 spans.extend(mode("unsaved", Ground::Warn));
                 spans.push(hint("  s save · d discard · Esc back to the editor"));
+            }
+            Mode::Ask(a) => {
+                let a = a.clone();
+                spans.extend(self.ask_status(area, &a));
             }
             Mode::Browse | Mode::Help { .. } if self.pane.is_some() => spans.extend(self.pane_status(area)),
             Mode::Browse | Mode::Help { .. } if self.on_theme_tab() => {
