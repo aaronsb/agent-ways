@@ -74,7 +74,7 @@ Load a working copy for one session:
 claude --plugin-dir <checkout>/plugins/attend
 ```
 
-An interactive session reloads the mod when a file in the folder changes, and lays Claude Code's API declarations in `plugins/attend/.claude-plugin/types/` for the editor and `tsc`.
+Where `attend@agent-ways` is installed too, the working copy takes its place for that session: Claude Code 2.1.296 logs `Plugin "attend" from --plugin-dir overrides installed version` and loads one `attend` hooks module, `attend@inline`, so there is nothing to disable first. Sessions started without the flag keep the installed one. An interactive session reloads the mod when a file in the folder changes, and lays Claude Code's API declarations in `plugins/attend/.claude-plugin/types/` for the editor and `tsc`.
 
 `make test-plugins` checks the version lockstep with attend, runs `claude plugin validate` on the marketplace and the plugin, runs `claude plugin test plugins/attend`, and type-checks the mod when Claude Code's declarations are found (`CLAUDE_CODE_TYPES`, or the copy a session laid). CI runs the same target against Claude Code 2.1.296, the build the mod's early-access API was written against.
 
