@@ -59,7 +59,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         None => {
             // Hidden for width: the keyboard cannot stay on what is not drawn.
             if chat.side_focus().is_some() {
-                chat.focus = super::focus::Focus::Compose;
+                chat.dispatch(super::ix::Ev::ColumnHidden);
             }
             (None, area)
         }
@@ -230,7 +230,7 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
         chat.entries = Some(entries);
         chat.entry_members = members;
     }
-    let focused = chat.focus == super::focus::Focus::Feed && !chat.overlaid;
+    let focused = chat.ix.focus == super::focus::Focus::Feed && !chat.ix.overlaid();
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(border(focused)).padding(Padding::horizontal(1));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -252,7 +252,7 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
 /// drawn; with the focus elsewhere the border is the rule's subdued colour
 /// and no caret shows, so the focus is drawn in one place (ADR-405).
 fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, lead: &str, rows: Vec<Line<'static>>, files: &[String], fg: &Tab) {
-    let focused = chat.focus == super::focus::Focus::Compose && !chat.overlaid;
+    let focused = chat.ix.owns_text() && !chat.ix.overlaid();
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(border(focused)).padding(Padding::horizontal(1));
     let inner = block.inner(area);
     f.render_widget(block, area);

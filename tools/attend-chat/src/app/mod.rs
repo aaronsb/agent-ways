@@ -15,6 +15,7 @@
 
 mod activate;
 mod focus;
+mod ix;
 mod keys;
 mod menu;
 mod sidebar;
@@ -189,16 +190,10 @@ pub struct ChatPane {
     sidebar: bool,
     /// The lozenge shape the left column's rows are drawn in, the shell's.
     shape: Shape,
-    /// Where the keyboard is: one focus owner ([`focus`]).
-    focus: focus::Focus,
-    /// An overlay of the shell's holds the keyboard over the pane.
-    overlaid: bool,
-    /// The tab shown when the focus walked onto the tab bar, put back when
-    /// it walks off without choosing ([`ChatPane::focus_on`]).
-    bar_entry: Option<Tab>,
-    /// The column row the focus is on, while it is on one: a refresh that
-    /// moves the row keeps the focus on it ([`ChatPane::refocus`]).
-    side_focus_hit: Option<sidebar::SideHit>,
+    /// The interaction state: where the keyboard is, the walk's preview,
+    /// the column row under the focus, what the shell holds open ([`ix`]).
+    /// Only [`ChatPane::dispatch`] writes it.
+    ix: ix::Ix,
     /// The first row shown of each of the column's lists, agents then
     /// channels: the wheel moves them, and the cursor keeps itself in view
     /// while `side_follow`, until the wheel moves the list away from it.
@@ -243,10 +238,7 @@ impl ChatPane {
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
             sidebar: true,
             shape: Shape::PLAIN,
-            focus: focus::Focus::Compose,
-            overlaid: false,
-            bar_entry: None,
-            side_focus_hit: None,
+            ix: ix::Ix::default(),
             side_scroll: [0, 0],
             side_follow: true,
             removable: Vec::new(),
@@ -324,7 +316,6 @@ impl ChatPane {
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
             self.world = Some(World { groups: tab_channels(&rows), seen, rows, live_members, instances });
             self.refocus();
-            self.refocus_tab();
         }
         self.world.as_ref().expect("just built")
     }
@@ -568,13 +559,7 @@ impl Pane for ChatPane {
     /// Show the bar's tab `i`: a channel or the operator view. The slots
     /// and an index past the tabs do nothing.
     fn set_tab(&mut self, i: usize) {
-        self.keep_tab();
-        if let Some(slot @ tabs::Slot::Tab(_)) = tabs::bar(&self.strip_names()).get(i).cloned() {
-            self.follow_on_bar(&slot);
-            if let tabs::Slot::Tab(t) = slot {
-                ChatPane::set_tab(self, t);
-            }
-        }
+        self.dispatch(ix::Ev::Jump(i));
     }
 
     fn trailer(&mut self) -> Vec<Span<'static>> {
@@ -625,11 +610,7 @@ impl Pane for ChatPane {
             self.toggle_sidebar();
             return Keyed::Done;
         }
-        if self.focus == focus::Focus::Compose {
-            self.compose_key(k);
-        } else {
-            self.nav_key(k);
-        }
+        self.dispatch(ix::Ev::Key(k));
         Keyed::Done
     }
 
@@ -644,20 +625,17 @@ impl Pane for ChatPane {
     /// An overlay holds the keyboard: the compose box draws no caret and
     /// its border is set back, so the focus shows in one place.
     fn overlaid(&mut self, on: bool) {
-        if self.overlaid != on {
-            self.overlaid = on;
-            self.dirty = true;
-        }
+        self.dispatch(ix::Ev::Overlaid(on));
     }
 
     fn focus_tab(&self) -> Option<usize> {
-        let focus::Focus::Tab(slot) = &self.focus else { return None };
+        let focus::Focus::Tab(slot) = &self.ix.focus else { return None };
         let names = self.world.as_ref().map(|w| tabs::strip_names(&w.groups)).unwrap_or_default();
         tabs::bar(&names).iter().position(|s| s == slot)
     }
 
     fn focus_tabs(&mut self) {
-        self.toggle_tabs();
+        self.dispatch(ix::Ev::ToggleBar);
     }
 
     /// Esc with nothing open over the chat: never quit (ADR-409).
@@ -673,7 +651,7 @@ impl Pane for ChatPane {
     /// clipboard is not drawn into the box or sent.
     fn paste(&mut self, text: &str) {
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
-        self.focus_on(focus::Focus::Compose);
+        self.dispatch(ix::Ev::Paste);
         let kept: String = text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();
         self.input.insert_str(&kept);
         self.tab_cycle = None;
@@ -699,35 +677,29 @@ impl Pane for ChatPane {
     fn click(&mut self, at: Position) {
         self.dirty = true;
         let (text, start) = self.hits.compose;
-        let keeps = match self.focus {
-            focus::Focus::Row(_) => self.hits.side_area.contains(at),
-            focus::Focus::Feed => self.hits.feed.contains(at),
-            _ => false,
-        };
-        if !keeps {
-            self.focus = focus::Focus::Compose;
-        }
-        if self.hits.flag.contains(at) {
+        let flag = self.hits.flag.contains(at);
+        let feed = self.hits.feed.contains(at);
+        let compose = self.compose_rect().contains(at);
+        let chip = self.hits.chips.iter().find(|(r, _)| r.contains(at)).map(|(_, c)| c.clone());
+        let row = (!flag && !feed && !compose && chip.is_none()).then(|| self.hits.side.iter().find(|(r, _)| r.contains(at)).map(|(_, h)| h.clone())).flatten();
+        self.dispatch(ix::Ev::Click(ix::Click::Pane { column: self.hits.side_area.contains(at), feed, row }));
+        if flag {
             return self.flag_menu();
         }
-        if self.hits.feed.contains(at) {
+        if feed {
             if let Some(i) = self.feed.entry_at(at.y - self.hits.feed.y) {
                 self.feed.reveal(i);
             }
             return;
         }
-        if self.compose_rect().contains(at) {
+        if compose {
             let col = at.x.saturating_sub(text.x) as usize;
             self.input.click(self.hits.text_width, start + (at.y - text.y) as usize, col);
             self.tab_cycle = None;
             return;
         }
-        if let Some((_, chip)) = self.hits.chips.iter().find(|(r, _)| r.contains(at)).cloned() {
+        if let Some(chip) = chip {
             self.complete(chip);
-            return;
-        }
-        if let Some((_, hit)) = self.hits.side.iter().find(|(r, _)| r.contains(at)).cloned() {
-            self.side_click(hit);
         }
     }
 
@@ -764,7 +736,7 @@ impl Pane for ChatPane {
     /// The compose box types every plain key while it has the focus; away
     /// from it the shell's single keys work as the key help names them.
     fn owns_text(&self) -> bool {
-        self.focus == focus::Focus::Compose
+        self.ix.owns_text()
     }
 
     /// `attend.chat.mouse`, on unless set off: the chat is worked by
@@ -789,14 +761,7 @@ impl Pane for ChatPane {
     /// repeat on the tab shown opens its menu when
     /// `attend.chat.tabs.menu_on_repeat` says so.
     fn activate_tab(&mut self, i: usize, menu: bool) {
-        self.keep_tab();
-        if let Some(slot) = tabs::bar(&self.strip_names()).get(i).cloned() {
-            self.follow_on_bar(&slot);
-        }
-        if let Some(target) = self.tab_target(i) {
-            let how = if menu { activate::How::Menu } else { activate::How::Select { repeat: self.config.menu_on_repeat } };
-            self.activate(target, how, None);
-        }
+        self.dispatch(ix::Ev::TabActivated { i, menu });
     }
 
     /// A right click: the menu of the column row, the destination flag or
@@ -817,10 +782,7 @@ impl Pane for ChatPane {
     /// The shell took a click (a tab, the bottom bar): the keyboard goes
     /// back to the compose box, as a click in the pane sends it.
     fn interrupted(&mut self) {
-        if self.focus != focus::Focus::Compose {
-            self.focus = focus::Focus::Compose;
-            self.dirty = true;
-        }
+        self.dispatch(ix::Ev::Click(ix::Click::Shell));
     }
 
     /// A click on a tab or a channel row shows it and again opens its menu;

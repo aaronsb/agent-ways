@@ -19,7 +19,7 @@ use agent_tui::ratatui::layout::{Position, Rect};
 
 use super::sidebar::SideHit;
 use super::ChatPane;
-use crate::tabs::{self, Slot, Tab};
+use crate::tabs::{Slot, Tab};
 
 /// What an input acts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,20 +50,19 @@ impl Target {
             SideHit::Channel(name) => Target::Channel(name),
         }
     }
-}
 
-impl ChatPane {
-    /// The tab bar's slot `i`, in [`tabs::bar`]'s order: `≡`, the created
-    /// channels, `+`, then `#open` and the operator view.
-    pub(super) fn tab_target(&mut self, i: usize) -> Option<Target> {
-        Some(match tabs::bar(&self.strip_names()).get(i)? {
+    /// The target a slot of the tab bar stands for.
+    pub(super) fn of_slot(slot: &Slot) -> Target {
+        match slot {
             Slot::Common => Target::Common,
             Slot::New => Target::NewChannel,
             Slot::Tab(Tab::Merged) => Target::Merged,
             Slot::Tab(Tab::Channel(c)) => Target::Channel(c.clone()),
-        })
+        }
     }
+}
 
+impl ChatPane {
     /// Act on `target` as `how` says. A menu docks under `at` when given,
     /// else under the target's column row, else its tab.
     pub(super) fn activate(&mut self, target: Target, how: How, at: Option<Rect>) {

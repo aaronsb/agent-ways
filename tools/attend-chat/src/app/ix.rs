@@ -1,0 +1,556 @@
+//! The chat's interaction state as one value, and the one function that
+//! moves it (ADR-407 §Interaction state).
+//!
+//! [`Ix`] is where the keyboard is ([`Focus`]), the tab the walk along the
+//! tab bar is previewing over, the column row the focus is on, and what the
+//! shell holds open over the pane. Nothing else writes it: every input that
+//! can move the focus reaches [`step`] as an [`Ev`], with a [`View`] of what
+//! the screen lays out, and gets back the next `Ix` and the [`Effect`]s to
+//! carry out, in order. `step` is pure, so each cell of the interaction
+//! table is a unit test with no terminal ([`ChatPane::dispatch`] is the
+//! only caller that carries the effects out).
+//!
+//! The rules are those of [`super::focus`]: in the compose box every key
+//! edits but for the ways out; outside it the keys walk the ring, a
+//! character goes back to the box and is typed there, and Esc goes back to
+//! the box. The walk along the tab bar shows each tab it lands on as a
+//! preview: leaving the bar puts back the tab shown before
+//! ([`Ix::preview_from`]), unless Enter, a digit or a click chose one.
+//!
+//! The world (the channels, the agents) is read lazily, as the chat always
+//! has: a `View` carries it only when it is already read. A step that needs
+//! it and finds it absent answers [`NeedWorld`]; the dispatcher reads the
+//! world, which refocuses ([`Ev::WorldChanged`]), and steps again.
+
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use super::activate::{How, Target};
+use super::focus::Focus;
+use super::sidebar::SideHit;
+use crate::tabs::{Slot, Tab};
+
+/// The chat's interaction state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Ix {
+    /// Where the keyboard is.
+    pub(super) focus: Focus,
+    /// The tab shown when the focus walked onto the tab bar, put back when
+    /// it walks off without choosing. Never set while the focus is off the
+    /// bar.
+    pub(super) preview_from: Option<Tab>,
+    /// The column row the focus is on, while it is on one: a refresh that
+    /// moves the row keeps the focus on it.
+    pub(super) row_hit: Option<SideHit>,
+    /// What holds the keyboard over the pane, as the shell last reported it.
+    pub(super) overlay: Option<Overlay>,
+}
+
+/// What the shell holds open over the pane. The shell reports only that an
+/// overlay is up (`Pane::overlaid`, at each frame), not which, so this has
+/// the one kind; the menu, entry, question, help and guard kinds come with
+/// the contract that reports them (ADR-407 §Interaction state, PR B).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Overlay {
+    Shell,
+}
+
+impl Ix {
+    /// The compose box types every plain key while it has the focus.
+    pub(super) fn owns_text(&self) -> bool {
+        self.focus == Focus::Compose
+    }
+
+    /// An overlay of the shell's holds the keyboard over the pane.
+    pub(super) fn overlaid(&self) -> bool {
+        self.overlay.is_some()
+    }
+
+    pub(super) fn on_bar(&self) -> bool {
+        matches!(self.focus, Focus::Tab(_))
+    }
+
+    /// The column's row under the focus, if it is there.
+    pub(super) fn side_focus(&self) -> Option<usize> {
+        match self.focus {
+            Focus::Row(i) => Some(i),
+            _ => None,
+        }
+    }
+}
+
+/// An input that can move the interaction state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Ev {
+    /// A key the shell left to the pane.
+    Key(KeyEvent),
+    Click(Click),
+    /// A paste: the text goes into the compose box, and the focus with it.
+    Paste,
+    /// F2 or Ctrl+T: the focus to the tab shown, or from the bar to the box.
+    ToggleBar,
+    /// A tab's digit: the bar's slot `i` is shown (`Pane::set_tab`).
+    Jump(usize),
+    /// The bar's slot `i` activated: Ctrl+digit, a click on it, a right click
+    /// (`menu`) (`Pane::activate_tab`).
+    TabActivated { i: usize, menu: bool },
+    /// The world was read again: a focused row follows its row, a focused tab
+    /// whose channel is gone moves to the tab shown.
+    WorldChanged,
+    /// The column is hidden, by its key or for want of width.
+    ColumnHidden,
+    /// The shell's overlay is up, or down (`Pane::overlaid`).
+    Overlaid(bool),
+}
+
+/// A left click.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Click {
+    /// In the pane: whether it is in the column and in the feed, and the
+    /// column row it lands on when nothing drawn over the column takes it.
+    Pane { column: bool, feed: bool, row: Option<SideHit> },
+    /// One the shell took: a tab, the bottom bar, a middle click.
+    Shell,
+}
+
+/// What a step asks the chat to do, in the order given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Effect {
+    /// The key edits the compose box.
+    Type(KeyEvent),
+    /// The caret up or down a row of the compose box.
+    Caret { up: bool },
+    /// Enter in the box: send, or run the command.
+    Send,
+    /// Tab in the box: complete, or on an empty line show the next tab.
+    Complete,
+    /// Esc in the box: the message selected and the status cleared.
+    Clear,
+    Page { up: bool },
+    /// Show this tab.
+    ShowTab(Tab),
+    /// Put back the tab shown before the walk along the bar.
+    RestoreTab(Tab),
+    /// The column's list keeps its cursor in view again.
+    Follow,
+    /// The one activation path; a menu docks under the bar's slot when given.
+    Activate { target: Target, how: How, under_tab: Option<usize> },
+    /// Enter on the feed: the selected message's sender's menu.
+    FeedMenu,
+    /// Select the feed's message `i` and bring it into view.
+    Reveal(usize),
+    /// No message selected.
+    Deselect,
+    /// The pane is drawn afresh on the next frame.
+    Redraw,
+}
+
+/// What a step reads of the screen besides the interaction state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct View {
+    /// The tab bar and the column, when the world is read.
+    pub(super) world: Option<Laid>,
+    /// Whether the last frame drew the column.
+    pub(super) side_drawn: bool,
+    pub(super) draft_empty: bool,
+    /// The caret at the start, or the end, of the draft: ↑ or ↓ has nowhere
+    /// left to go in the text.
+    pub(super) caret_start: bool,
+    pub(super) caret_end: bool,
+    pub(super) feed_len: usize,
+    pub(super) feed_selected: Option<usize>,
+    /// `attend.chat.tabs.menu_on_repeat`.
+    pub(super) menu_on_repeat: bool,
+}
+
+/// The tab bar and the column as the world lays them out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Laid {
+    /// The bar's slots in order ([`crate::tabs::bar`]).
+    pub(super) bar: Vec<Slot>,
+    /// The column's rows, agents then channels, drawn or not.
+    pub(super) rows: Vec<SideHit>,
+    /// The tab shown, against the live strip.
+    pub(super) shown: Tab,
+}
+
+/// The step needs the world, and the view had none: read it and step again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct NeedWorld;
+
+/// The interaction state after `ev`, and what to do, in order.
+pub(super) fn step(ix: &Ix, ev: Ev, v: &View) -> Result<(Ix, Vec<Effect>), NeedWorld> {
+    let mut s = Step { ix: ix.clone(), fx: Vec::new(), v };
+    s.ev(ev)?;
+    Ok((s.ix, s.fx))
+}
+
+struct Step<'a> {
+    ix: Ix,
+    fx: Vec<Effect>,
+    v: &'a View,
+}
+
+type R = Result<(), NeedWorld>;
+
+impl<'a> Step<'a> {
+    fn world(&self) -> Result<&'a Laid, NeedWorld> {
+        self.v.world.as_ref().ok_or(NeedWorld)
+    }
+
+    fn ev(&mut self, ev: Ev) -> R {
+        match ev {
+            Ev::Key(k) if self.ix.owns_text() => self.compose_key(k),
+            Ev::Key(k) => self.nav_key(k),
+            Ev::Click(Click::Pane { column, feed, row }) => self.click(column, feed, row),
+            Ev::Click(Click::Shell) => {
+                if self.ix.focus != Focus::Compose {
+                    self.set(Focus::Compose);
+                    self.fx.push(Effect::Redraw);
+                }
+                Ok(())
+            }
+            Ev::Paste => self.go(Focus::Compose),
+            Ev::ToggleBar if self.ix.on_bar() => self.go(Focus::Compose),
+            Ev::ToggleBar => {
+                let shown = self.world()?.shown.clone();
+                self.go(Focus::Tab(Slot::Tab(shown)))
+            }
+            Ev::Jump(i) => {
+                self.ix.preview_from = None;
+                if let Some(slot @ Slot::Tab(_)) = self.world()?.bar.get(i).cloned() {
+                    self.follow_on_bar(&slot);
+                    if let Slot::Tab(t) = slot {
+                        self.fx.push(Effect::ShowTab(t));
+                    }
+                }
+                Ok(())
+            }
+            Ev::TabActivated { i, menu } => {
+                self.ix.preview_from = None;
+                if let Some(slot) = self.world()?.bar.get(i).cloned() {
+                    self.follow_on_bar(&slot);
+                    let how = if menu { How::Menu } else { How::Select { repeat: self.v.menu_on_repeat } };
+                    self.fx.push(Effect::Activate { target: Target::of_slot(&slot), how, under_tab: None });
+                }
+                Ok(())
+            }
+            Ev::WorldChanged => self.refocus(),
+            Ev::ColumnHidden => {
+                if self.ix.side_focus().is_some() {
+                    self.set(Focus::Compose);
+                }
+                Ok(())
+            }
+            Ev::Overlaid(on) => {
+                let overlay = on.then_some(Overlay::Shell);
+                if self.ix.overlay != overlay {
+                    self.ix.overlay = overlay;
+                    self.fx.push(Effect::Redraw);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The focus is `f`, and nothing else is done: what is no longer true
+    /// of the state goes with the old focus.
+    fn set(&mut self, f: Focus) {
+        if !matches!(f, Focus::Tab(_)) {
+            self.ix.preview_from = None;
+        }
+        if !matches!(f, Focus::Row(_)) {
+            self.ix.row_hit = None;
+        }
+        self.ix.focus = f;
+    }
+
+    /// Put the focus on `f`. Landing on a tab shows it, as moving along the
+    /// tab bar always has; a slot (`≡`, `+`) is only pointed at. What the
+    /// walk shows is a preview: leaving the bar for the column, the feed or
+    /// the box puts back the tab shown before, so the draft's destination
+    /// does not change on its way past.
+    fn go(&mut self, f: Focus) -> R {
+        let on_bar = self.ix.on_bar();
+        match (&f, on_bar) {
+            (Focus::Tab(_), false) => self.ix.preview_from = Some(self.world()?.shown.clone()),
+            (Focus::Tab(_), true) => {}
+            (_, true) => {
+                if let Some(t) = self.ix.preview_from.take() {
+                    self.fx.push(Effect::RestoreTab(t));
+                }
+            }
+            (_, false) => {}
+        }
+        if let Focus::Tab(Slot::Tab(t)) = &f {
+            self.fx.push(Effect::ShowTab(t.clone()));
+        }
+        match f {
+            Focus::Row(i) => self.focus_at(i)?,
+            f => self.set(f),
+        }
+        self.fx.push(Effect::Redraw);
+        Ok(())
+    }
+
+    /// The focus on row `i`, and the list it is in where the cursor shows.
+    fn focus_at(&mut self, i: usize) -> R {
+        let hit = self.world()?.rows.get(i).cloned();
+        self.set(Focus::Row(i));
+        self.ix.row_hit = hit;
+        self.fx.push(Effect::Follow);
+        Ok(())
+    }
+
+    /// A slot chosen by its digit or a click while the focus is on the bar:
+    /// the focus goes to that slot, so Enter acts on the tab shown.
+    fn follow_on_bar(&mut self, slot: &Slot) {
+        if self.ix.on_bar() {
+            self.set(Focus::Tab(slot.clone()));
+            self.fx.push(Effect::Redraw);
+        }
+    }
+
+    /// The ring of focusable elements, in order: the tab bar's slots, the
+    /// column's rows while it is drawn, the feed, the compose box.
+    fn ring(&self) -> Result<Vec<Focus>, NeedWorld> {
+        let w = self.world()?;
+        let mut out: Vec<Focus> = w.bar.iter().cloned().map(Focus::Tab).collect();
+        if self.v.side_drawn {
+            out.extend((0..w.rows.len()).map(Focus::Row));
+        }
+        out.extend([Focus::Feed, Focus::Compose]);
+        Ok(out)
+    }
+
+    /// One step along the ring, forward or back, wrapping.
+    fn walk(&mut self, forward: bool) -> R {
+        let ring = self.ring()?;
+        let n = ring.len();
+        let at = ring.iter().position(|f| *f == self.ix.focus).unwrap_or(n - 1);
+        let to = if forward { (at + 1) % n } else { (at + n - 1) % n };
+        self.go(ring[to].clone())
+    }
+
+    /// A key while the compose box has the focus: every key edits, but for
+    /// the ways out. Shift+Tab leaves backward. ↑ at the very top and ↓ at
+    /// the very end leave a box that holds text; in an empty box they do
+    /// nothing, and Esc leaves an empty box instead (ADR-409).
+    fn compose_key(&mut self, k: KeyEvent) -> R {
+        let v = self.v;
+        match k.code {
+            KeyCode::Esc => {
+                self.fx.push(Effect::Clear);
+                if v.draft_empty {
+                    return self.walk(false);
+                }
+            }
+            KeyCode::Enter if !k.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.fx.push(Effect::Send),
+            KeyCode::Tab => self.fx.push(Effect::Complete),
+            KeyCode::BackTab => return self.walk(false),
+            KeyCode::Up if !v.caret_start => self.fx.push(Effect::Caret { up: true }),
+            KeyCode::Up if !v.draft_empty => return self.walk(false),
+            KeyCode::Down if !v.caret_end => self.fx.push(Effect::Caret { up: false }),
+            KeyCode::Down if !v.draft_empty => return self.walk(true),
+            KeyCode::Up | KeyCode::Down => {}
+            KeyCode::PageUp => self.fx.push(Effect::Page { up: true }),
+            KeyCode::PageDown => self.fx.push(Effect::Page { up: false }),
+            _ => self.fx.push(Effect::Type(k)),
+        }
+        Ok(())
+    }
+
+    /// A key while the focus is outside the compose box.
+    fn nav_key(&mut self, k: KeyEvent) -> R {
+        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        match k.code {
+            KeyCode::Tab | KeyCode::Right => self.walk(true),
+            KeyCode::BackTab | KeyCode::Left => self.walk(false),
+            KeyCode::Up => self.vertical(false),
+            KeyCode::Down => self.vertical(true),
+            KeyCode::Home | KeyCode::End => self.end(k.code == KeyCode::End),
+            KeyCode::Enter => self.activate(),
+            // Esc cancels: off the bar it puts back the tab shown before.
+            KeyCode::Esc => self.go(Focus::Compose),
+            KeyCode::PageUp => {
+                self.fx.push(Effect::Page { up: true });
+                Ok(())
+            }
+            KeyCode::PageDown => {
+                self.fx.push(Effect::Page { up: false });
+                Ok(())
+            }
+            // A character is typing: it goes to the compose box. Backspace
+            // and Delete only go back to the box, the draft untouched.
+            KeyCode::Char(_) if plain => {
+                self.go(Focus::Compose)?;
+                self.fx.push(Effect::Type(k));
+                Ok(())
+            }
+            KeyCode::Backspace | KeyCode::Delete => self.go(Focus::Compose),
+            _ => Ok(()),
+        }
+    }
+
+    /// ↑ or ↓ outside the compose box: along the column, through the feed's
+    /// messages, from the tab bar down into the column.
+    fn vertical(&mut self, down: bool) -> R {
+        match self.ix.focus.clone() {
+            Focus::Tab(slot) if down => {
+                // Into the column: the row of the tab's channel, else the
+                // first row; past a hidden column, the feed.
+                if !self.v.side_drawn {
+                    return self.go(Focus::Feed);
+                }
+                let rows = &self.world()?.rows;
+                if rows.is_empty() {
+                    return self.go(Focus::Feed);
+                }
+                let row = match slot {
+                    Slot::Tab(Tab::Channel(c)) => rows.iter().position(|h| *h == SideHit::Channel(c.clone())),
+                    _ => None,
+                };
+                self.go(Focus::Row(row.unwrap_or(0)))
+            }
+            Focus::Tab(_) | Focus::Compose => Ok(()),
+            Focus::Row(i) => {
+                let last = self.world()?.rows.len().saturating_sub(1);
+                match (down, i) {
+                    (false, 0) => {
+                        let shown = self.world()?.shown.clone();
+                        self.go(Focus::Tab(Slot::Tab(shown)))
+                    }
+                    (false, i) => self.go(Focus::Row(i - 1)),
+                    (true, i) if i >= last => self.go(Focus::Feed),
+                    (true, i) => self.go(Focus::Row(i + 1)),
+                }
+            }
+            Focus::Feed => self.feed_move(down),
+        }
+    }
+
+    /// Home or End outside the compose box: the column's first or last row,
+    /// the feed's oldest or newest message.
+    fn end(&mut self, end: bool) -> R {
+        match self.ix.focus {
+            Focus::Row(_) => {
+                let last = self.world()?.rows.len().saturating_sub(1);
+                self.go(Focus::Row(if end { last } else { 0 }))
+            }
+            Focus::Feed => {
+                let n = self.v.feed_len;
+                if n > 0 {
+                    self.fx.push(Effect::Reveal(if end { n - 1 } else { 0 }));
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// ↑ or ↓ in the feed: the selection moves to the older or newer
+    /// message, starting from the newest. Past the newest, the compose box.
+    fn feed_move(&mut self, down: bool) -> R {
+        let n = self.v.feed_len;
+        if n == 0 {
+            return if down { self.go(Focus::Compose) } else { Ok(()) };
+        }
+        let to = match (self.v.feed_selected, down) {
+            (None, false) => Some(n - 1),
+            (None, true) => None,
+            (Some(i), false) => Some(i.saturating_sub(1)),
+            (Some(i), true) if i + 1 < n => Some(i + 1),
+            (Some(_), true) => None,
+        };
+        match to {
+            Some(i) => {
+                self.fx.push(Effect::Reveal(i));
+                Ok(())
+            }
+            None => {
+                self.fx.push(Effect::Deselect);
+                self.go(Focus::Compose)
+            }
+        }
+    }
+
+    /// Enter outside the compose box: the focused element's menu, the one a
+    /// click (or a right click) on it opens, through the one activation
+    /// path. Enter on the bar keeps the tab shown, and its menu docks under
+    /// its slot.
+    fn activate(&mut self) -> R {
+        match self.ix.focus.clone() {
+            Focus::Tab(slot) => {
+                self.ix.preview_from = None;
+                if let Some(i) = self.world()?.bar.iter().position(|s| *s == slot) {
+                    self.fx.push(Effect::Activate { target: Target::of_slot(&slot), how: How::Menu, under_tab: Some(i) });
+                }
+            }
+            Focus::Row(i) => {
+                if let Some(hit) = self.world()?.rows.get(i).cloned() {
+                    self.fx.push(Effect::Activate { target: Target::of(hit), how: How::Menu, under_tab: None });
+                }
+            }
+            Focus::Feed => self.fx.push(Effect::FeedMenu),
+            Focus::Compose => {}
+        }
+        Ok(())
+    }
+
+    /// A left click in the pane. The keyboard goes back to the compose box,
+    /// the walk's preview kept as chosen, but for a click on the column
+    /// while it has the focus and one on the feed while the feed has it. A
+    /// click on a column row moves the column's cursor to it, while the
+    /// column has the keyboard, and selects it ([`ChatPane::activate`]):
+    /// an agent's row opens its menu; a channel's row shows its channel, and
+    /// on the channel shown opens its menu, whatever
+    /// `attend.chat.tabs.menu_on_repeat` says, since that setting is about
+    /// keys.
+    fn click(&mut self, column: bool, feed: bool, row: Option<SideHit>) -> R {
+        let keeps = match self.ix.focus {
+            Focus::Row(_) => column,
+            Focus::Feed => feed,
+            _ => false,
+        };
+        if !keeps {
+            self.set(Focus::Compose);
+        }
+        if let Some(hit) = row {
+            if self.ix.side_focus().is_some() {
+                if let Some(i) = self.world()?.rows.iter().position(|h| *h == hit) {
+                    self.focus_at(i)?;
+                }
+            }
+            self.fx.push(Effect::Activate { target: Target::of(hit), how: How::Select { repeat: true }, under_tab: None });
+        }
+        Ok(())
+    }
+
+    /// After the world is read again, the column's cursor follows its row to
+    /// where it is now; a row gone since leaves it at the same place, held
+    /// within a list that may have shrunk. A focused tab whose channel is
+    /// gone moves to the tab shown, which falls back to `#open` the same way.
+    fn refocus(&mut self) -> R {
+        if let (Some(i), Some(hit)) = (self.ix.side_focus(), self.ix.row_hit.clone()) {
+            let rows = &self.world()?.rows;
+            match rows.iter().position(|h| *h == hit) {
+                Some(at) => self.ix.focus = Focus::Row(at),
+                None if rows.is_empty() => self.set(Focus::Compose),
+                None => {
+                    let at = i.min(rows.len() - 1);
+                    self.focus_at(at)?;
+                }
+            }
+        }
+        if let Focus::Tab(slot) = &self.ix.focus {
+            let w = self.world()?;
+            if !w.bar.contains(slot) {
+                self.ix.focus = Focus::Tab(Slot::Tab(w.shown.clone()));
+                self.fx.push(Effect::Redraw);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests;
