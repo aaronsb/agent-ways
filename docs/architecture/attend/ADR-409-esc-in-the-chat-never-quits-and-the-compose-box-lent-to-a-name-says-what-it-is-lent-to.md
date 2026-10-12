@@ -6,6 +6,14 @@ capability: attend
 amends: [ADR-408#Decision, 'ADR-504#Note (2026-10-02): a screen that is not a tree is a pane inside `App`']
 basis:
   - operator: aaronsb
+    level: directed
+    said: "we should have the new channel name entry be consistent with the other context entry dialogs, not appearing in the chat box"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
+    said: "the chat box is reserved for chatting, not a general entry interface"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
     level: guided
     said: "we should go through the feature list of attend-chat and make sure it's consistent in application of ui/ux conventions (I see the nav bar for agents and channels). its kind of expected that the mouse click should work on elements"
     via: chat, relayed by the main session, 2026-10-11
@@ -23,6 +31,9 @@ considered:
     said: "Never quits (Recommended)"
     via: AskUserQuestion, session chat, 2026-10-11; option label written by the agent, chosen by the operator
     covers: [esc-never-quits]
+  - operator: aaronsb
+    said: "the chat box is reserved for chatting, not a general entry interface"
+    via: chat, relayed by the main session, 2026-10-12
 status: accepted
 date: 2026-10-11
 deciders:
@@ -100,3 +111,12 @@ Review of the change refined (d) so that (b) and (d) hold together. The decision
 - **The `≡` menu opens over a lent box.** Its items give the box back when picked, except Quit, which leaves it lent. The shell's quit then counts a name typed there as unsaved and opens the exit guard, as Ctrl-C does, and Back returns to the lent box. Opening `≡` no longer gives the box back on its own.
 - **A click on an action slot does not dismiss.** A click on `≡` or `+` acts as the slot's key does: `≡` opens its menu over the lent box, and `+` lends the box or keeps it lent, as Ctrl+N does.
 - **Ctrl+digit on the shown tab** with `attend.chat.tabs.menu_on_repeat` off shows the tab again, so it gives the box back as a click on that tab does.
+
+## Amendment (2026-10-12): the chat box is for chatting; names and descriptions are typed in an entry dialog
+
+The operator said: "we should have the new channel name entry be consistent with the other context entry dialogs, not appearing in the chat box", and stated the principle: "the chat box is reserved for chatting, not a general entry interface".
+
+- The compose box is never lent. The lend mechanism (decision (b)'s `new channel name >` and `describe #deploy >` leads) is removed.
+- A line that is not a chat message is typed in one shared entry dialog, `agent_tui::Open::Entry`, docked where a menu docks: the new channel's name (from `+` or Ctrl+N) under the `+` slot, a channel's description (Describe…) beside its menu item, opened on the line the channel has now. Enter gives the text to the chat; a name it refuses opens the dialog again with the name and the reason inside it. Esc or a click outside closes it with nothing, and Esc never quits. While it is open it holds the keyboard; the compose box and its draft are untouched throughout.
+- A name typed in the dialog is unsaved work: Ctrl-C's exit guard names it ("new channel name being typed"), and going back opens the dialog again with the name.
+- Entry points moved: the new channel's name (`+`, Ctrl+N), and a channel's description (Describe…). Slash commands typed as chat stay in the compose box, since the operator typed them there. Confirmations were already the shell's question on the bottom bar (ADR-408).
