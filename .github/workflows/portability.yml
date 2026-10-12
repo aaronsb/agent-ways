@@ -58,8 +58,10 @@ jobs:
       # session layer works cross-platform. Single-threaded for deterministic
       # shared-fixture setup (matches build-ways.yml). ways-core runs too: it
       # owns the archives' lock, which only Windows enforces as mandatory.
-      - name: Run ways + ways-core tests (unit + integration)
-        run: cargo test --manifest-path tools/Cargo.toml -p ways -p ways-core -- --test-threads=1
+      # agent-fmt runs too: its child-pipe write blocks SIGPIPE one way on
+      # Linux and another on macOS.
+      - name: Run ways + ways-core + agent-fmt tests (unit + integration)
+        run: cargo test --manifest-path tools/Cargo.toml -p ways -p ways-core -p agent-fmt -- --test-threads=1
 
       - name: Portability lint (incl. sessions_root agreement)
         run: bash scripts/check-portability.sh

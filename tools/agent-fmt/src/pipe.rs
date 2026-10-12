@@ -28,11 +28,34 @@ pub fn exit_quietly_on_closed_pipe() {
 /// Writes all of `bytes` to a child's stdin. A child that exited without
 /// reading gives an EPIPE error here, whatever the SIGPIPE disposition.
 ///
-/// SIGPIPE is blocked in the calling thread for the write. The kernel sends
-/// it to the writing thread, so it stays pending there, and it is taken off
-/// with `sigwait` before the thread's mask is put back.
-#[cfg(unix)]
-pub fn write_to_child<W: Write + ?Sized>(pipe: &mut W, bytes: &[u8]) -> io::Result<()> {
+/// On Apple systems the pipe's descriptor is set not to raise SIGPIPE. XNU
+/// raises it on the process, where any thread that has it unblocked takes it,
+/// so a thread's mask cannot hold it.
+#[cfg(target_vendor = "apple")]
+pub fn write_to_child<W: Write + std::os::fd::AsFd>(pipe: &mut W, bytes: &[u8]) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    /// `F_SETNOSIGPIPE` in XNU's `bsd/sys/fcntl.h`; libc does not carry it
+    /// for Apple targets.
+    const F_SETNOSIGPIPE: libc::c_int = 73;
+    // SAFETY: fcntl on a descriptor `pipe` owns for the length of the call.
+    if unsafe { libc::fcntl(pipe.as_fd().as_raw_fd(), F_SETNOSIGPIPE, 1) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    pipe.write_all(bytes)
+}
+
+/// Writes all of `bytes` to a child's stdin. A child that exited without
+/// reading gives an EPIPE error here, whatever the SIGPIPE disposition.
+///
+/// SIGPIPE is blocked in the calling thread for the write. Linux sends it to
+/// the writing thread, so it stays pending there, and it is taken off with
+/// `sigwait` before the thread's mask is put back.
+///
+/// Not handled: an outside `kill -PIPE` is process-directed. If it arrives
+/// while two threads are inside this function, both see it pending, one
+/// takes it, and the other's `sigwait` waits for a second one.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+pub fn write_to_child<W: Write + std::os::fd::AsFd>(pipe: &mut W, bytes: &[u8]) -> io::Result<()> {
     // SAFETY: sigset calls on zeroed sets this function owns; the thread's
     // mask is restored to what it was on every path.
     unsafe {
@@ -58,6 +81,6 @@ pub fn write_to_child<W: Write + ?Sized>(pipe: &mut W, bytes: &[u8]) -> io::Resu
 
 /// Windows has no SIGPIPE: a closed pipe is already an error.
 #[cfg(not(unix))]
-pub fn write_to_child<W: Write + ?Sized>(pipe: &mut W, bytes: &[u8]) -> io::Result<()> {
+pub fn write_to_child<W: Write>(pipe: &mut W, bytes: &[u8]) -> io::Result<()> {
     pipe.write_all(bytes)
 }
