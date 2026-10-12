@@ -125,6 +125,7 @@ _Session awareness: sensors, peers, messaging, keepwarm_
 | [ADR-407](./attend/ADR-407-a-click-on-a-channel-shows-it-and-a-second-click-opens-its-menu-which-docks-under-its-row-and-the-chat-starts-with-the-mouse-on.md) | A click on a channel shows it and a second click opens its menu, which docks under its row, and the chat starts with the mouse on | accepted |
 | [ADR-408](./attend/ADR-408-a-question-on-the-chat-s-bar-is-answered-by-a-click-as-by-a-key-and-one-rule-closes-every-overlay.md) | A question on the chat's bar is answered by a click as by a key, and one rule closes every overlay | accepted |
 | [ADR-409](./attend/ADR-409-esc-in-the-chat-never-quits-and-the-compose-box-lent-to-a-name-says-what-it-is-lent-to.md) | Esc in the chat never quits, and the compose box lent to a name says what it is lent to | accepted |
+| [ADR-410](./attend/ADR-410-a-chat-message-opens-with-one-header-band-in-the-sender-s-colour-across-the-feed-a-rule-under-it-and-the-body-at-full-width.md) | A chat message opens with one header band in the sender's colour across the feed, a rule under it, and the body at full width | accepted |
 
 ## Platform
 _Install, update, configuration, permissions, the CLI contract, testing_

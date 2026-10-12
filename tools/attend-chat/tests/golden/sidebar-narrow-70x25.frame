@@ -1,21 +1,21 @@
 agent-tui frame 70x25
 | ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +         |
 |╭────────────────────────────────────────────────────────────────────╮|
-|│ │ aaron            │  file: sh                                     │|
-|│ │ 13:58            │                                               │|
-|│ ╰──────────────────╯                                               │|
+|│ production at 15:00                                                │|
 |│                                                                    │|
-|│ ╭──────────────────╮                                               │|
-|│ │ Laszlo           │ a longer message, so the feed shows how a     │|
-|│ │ alpha            │ body wraps beside its chip when it runs past  │|
-|│ │ 13:59            │ the width of the row it is given              │|
-|│ ╰──────────────────╯                                               │|
+|│  13:58  aaron  aaron                                               │|
+|│ ────────────────────────────────────────────────────────────────── │|
+|│ the shell this ran under: /bin/sh                                  │|
+|│  file: sh                                                          │|
 |│                                                                    │|
-|│ ╭──────────────────╮                                               │|
-|│ │ Lyra             │ signing off                                   │|
-|│ │ gamma            │                                               │|
-|│ │ 13:45            │                                               │|
-|│ ╰──────────────────╯                                               │|
+|│  13:59  Laszlo  alpha                                              │|
+|│ ────────────────────────────────────────────────────────────────── │|
+|│ a longer message, so the feed shows how a body wraps beside its    │|
+|│ chip when it runs past the width of the row it is given            │|
+|│                                                                    │|
+|│  13:45  Lyra  gamma                                                │|
+|│ ────────────────────────────────────────────────────────────────── │|
+|│ signing off                                                        │|
 |│                                                                    │|
 |╰────────────────────────────────────────────────────────────────────╯|
 |╭────────────────────────────────────────────────────────────────────╮|
@@ -36,64 +36,43 @@ styles
   0  59-61  White Blue -
   1   0-69  - - DIM
   2   0-0   - - DIM
-  2   2-2   - - DIM
-  2   4-8   - - DIM
-  2  21-21  - - DIM
-  2  23-32  White DarkGray -
   2  69-69  - - DIM
   3   0-0   - - DIM
-  3   2-2   - - DIM
-  3   4-8   - - DIM
-  3  21-21  - - DIM
   3  69-69  - - DIM
   4   0-0   - - DIM
-  4   2-21  - - DIM
+  4   2-67  White DarkGray DIM
   4  69-69  - - DIM
   5   0-0   - - DIM
+  5   2-67  - - DIM
   5  69-69  - - DIM
   6   0-0   - - DIM
-  6   2-21  - - DIM
   6  69-69  - - DIM
   7   0-0   - - DIM
-  7   2-2   - - DIM
-  7   4-9   Cyan - BOLD
-  7  21-21  - - DIM
+  7   2-11  White DarkGray -
   7  69-69  - - DIM
   8   0-0   - - DIM
-  8   2-2   - - DIM
-  8   4-8   - - DIM
-  8  21-21  - - DIM
   8  69-69  - - DIM
   9   0-0   - - DIM
-  9   2-2   - - DIM
-  9   4-8   - - DIM
-  9  21-21  - - DIM
+  9   2-8   White DarkGray -
+  9   9-16  Black Cyan -
+  9  17-67  White DarkGray DIM
   9  69-69  - - DIM
  10   0-0   - - DIM
- 10   2-21  - - DIM
+ 10   2-67  - - DIM
  10  69-69  - - DIM
  11   0-0   - - DIM
  11  69-69  - - DIM
  12   0-0   - - DIM
- 12   2-21  - - DIM
  12  69-69  - - DIM
  13   0-0   - - DIM
- 13   2-2   - - DIM
- 13   4-7   Magenta - -
- 13  21-21  - - DIM
  13  69-69  - - DIM
  14   0-0   - - DIM
- 14   2-2   - - DIM
- 14   4-8   - - DIM
- 14  21-21  - - DIM
+ 14   2-67  White DarkGray DIM
  14  69-69  - - DIM
  15   0-0   - - DIM
- 15   2-2   - - DIM
- 15   4-8   - - DIM
- 15  21-21  - - DIM
+ 15   2-67  - - DIM
  15  69-69  - - DIM
  16   0-0   - - DIM
- 16   2-21  - - DIM
  16  69-69  - - DIM
  17   0-0   - - DIM
  17  69-69  - - DIM

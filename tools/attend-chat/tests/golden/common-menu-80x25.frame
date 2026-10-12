@@ -1,21 +1,21 @@
 agent-tui frame 80x25
 | ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
 |┌pick one: attend-chat──┐──────────────────────────────────────────────────────╮|
-|│   Theme ▸             │oduction at 15:00                                     │|
+|│   Theme ▸             │                                                      │|
 |│   Keybinding set ▸    │                                                      │|
-|│   Mouse off at start  │                                                      │|
-|│   Show column         │                                                      │|
+|│   Mouse off at start  │───────────────────────────────────────────────────── │|
+|│   Show column         │ging                                                  │|
 |│   Settings…           │                                                      │|
-|│   Quit                │e shell this ran under: /bin/sh                       │|
-|└───────────────────────┘ile: sh                                               │|
-|│ │ 13:58            │                                                         │|
-|│ ╰──────────────────╯                                                         │|
+|│   Quit                │                                                      │|
+|└───────────────────────┘                                                      │|
+|│ ──────────────────────────────────────────────────────────────────────────── │|
+|│ the shell this ran under: /bin/sh                                            │|
+|│  file: sh                                                                    │|
 |│                                                                              │|
-|│ ╭──────────────────╮                                                         │|
-|│ │ Laszlo           │ a longer message, so the feed shows how a body wraps    │|
-|│ │ alpha            │ beside its chip when it runs past the width of the row  │|
-|│ │ 13:59            │ it is given                                             │|
-|│ ╰──────────────────╯                                                         │|
+|│  13:59  Laszlo  alpha                                                        │|
+|│ ──────────────────────────────────────────────────────────────────────────── │|
+|│ a longer message, so the feed shows how a body wraps beside its chip when it │|
+|│ runs past the width of the row it is given                                   │|
 |│                                                                              │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
@@ -44,9 +44,11 @@ styles
   2  79-79  - - DIM
   3   0-0   LightBlue - -
   3  24-24  LightBlue - -
+  3  25-77  White DarkGray DIM
   3  79-79  - - DIM
   4   0-0   LightBlue - -
   4  24-24  LightBlue - -
+  4  25-77  - - DIM
   4  79-79  - - DIM
   5   0-0   LightBlue - -
   5  24-24  LightBlue - -
@@ -58,38 +60,29 @@ styles
   7  24-24  LightBlue - -
   7  79-79  - - DIM
   8   0-24  LightBlue - -
-  8  25-32  White DarkGray -
+  8  25-77  White DarkGray DIM
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9   2-2   - - DIM
-  9   4-8   - - DIM
-  9  21-21  - - DIM
+  9   2-77  - - DIM
   9  79-79  - - DIM
  10   0-0   - - DIM
- 10   2-21  - - DIM
  10  79-79  - - DIM
  11   0-0   - - DIM
+ 11   2-11  White DarkGray -
  11  79-79  - - DIM
  12   0-0   - - DIM
- 12   2-21  - - DIM
  12  79-79  - - DIM
  13   0-0   - - DIM
- 13   2-2   - - DIM
- 13   4-9   Cyan - BOLD
- 13  21-21  - - DIM
+ 13   2-8   White DarkGray -
+ 13   9-16  Black Cyan -
+ 13  17-77  White DarkGray DIM
  13  79-79  - - DIM
  14   0-0   - - DIM
- 14   2-2   - - DIM
- 14   4-8   - - DIM
- 14  21-21  - - DIM
+ 14   2-77  - - DIM
  14  79-79  - - DIM
  15   0-0   - - DIM
- 15   2-2   - - DIM
- 15   4-8   - - DIM
- 15  21-21  - - DIM
  15  79-79  - - DIM
  16   0-0   - - DIM
- 16   2-21  - - DIM
  16  79-79  - - DIM
  17   0-0   - - DIM
  17  79-79  - - DIM

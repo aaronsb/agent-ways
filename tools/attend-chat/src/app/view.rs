@@ -15,12 +15,12 @@ use agent_tui::ratatui::widgets::{Block, BorderType, Padding, Paragraph};
 use agent_tui::ratatui::Frame;
 use agent_tui::strip::{prefix_match, target};
 use agent_tui::PaneTab;
-use agent_tui::theme::{self, Ground};
+use agent_tui::theme::{self, Ground, Seg};
 use agent_tui::wrap::str_width;
 
 use super::{Chip, ChatPane, Clock, Hits};
 use crate::attach;
-use crate::chip::{chip_for, color_for, CHIP_WIDTH};
+use crate::chip::{chip_for, color_for};
 use crate::groups::KnownGroup;
 use crate::helper::{self, HelperMode};
 use crate::legend::{find_trailing_mention, Sigil};
@@ -130,22 +130,17 @@ fn when(clock: Clock, ts: u64) -> String {
     }
 }
 
-/// One message as a feed entry: the sender's chip (name, scope, then the
-/// channel glyphs of the sender's memberships and the time) beside the
-/// body, with a chip per attached file that exists now (#390).
-/// With the entry, the sender's membership id, for a right click on its
-/// name ([`ChatPane::context_at`]).
+/// One message as a feed entry: a header band in the sender's colour, as
+/// the left column draws its row (ADR-410): the channel glyphs of the
+/// sender's memberships and the time on the darkest step, the name on the
+/// identity colour, the project on the step between. Then the body, with a
+/// chip per attached file that exists now (#390). With the entry, the
+/// sender's membership id, for a right click on its header
+/// ([`ChatPane::context_at`]).
 fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGroup>>) -> (Entry, Option<String>) {
     let depth = chat.palette.depth();
     let world = chat.world.as_ref().expect("the world is read before the feed");
     let chip = chip_for(&s.from, &s.project, &s.cwd, depth, &world.instances);
-    let mut name = Style::new().fg(color_for(chip.palette, depth));
-    if chip.style.bold {
-        name = name.add_modifier(Modifier::BOLD);
-    }
-    if chip.style.italic {
-        name = name.add_modifier(Modifier::ITALIC);
-    }
     // Claudes are members by session id; humans by their sanitized
     // username (ADR-170), the id `/join` writes.
     let key: Option<String> = chip.session_id.clone().or_else(|| {
@@ -153,18 +148,22 @@ fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGrou
             .strip_prefix("external:")
             .map(|rest| agent_identity::sanitize_id_component(rest.split('@').next().unwrap_or(rest)))
     });
-    let mut third: Vec<Span<'static>> = Vec::new();
-    for g in key.as_deref().and_then(|k| memberships.get(k)).into_iter().flatten() {
-        third.push(Span::styled(format!("{} ", g.group.glyph), Style::new().fg(color_for(g.group.palette, depth))));
-    }
-    third.push(Span::styled(when(chat.clock, s.ts), theme::muted()));
-    let label = vec![Line::styled(chip.primary, name), Line::styled(chip.secondary, theme::muted()), Line::from(third)];
+    // Live as the column has it: a sender the column sets back is set back here.
+    let live = key.as_deref().and_then(|k| world.seen.iter().find(|x| x.member == k)).is_none_or(|x| x.live);
+    let [name, project, mark] = super::sidebar::identity_styles(depth, chip.palette, live, chip.style.bold);
+    let name = if chip.style.italic { name.add_modifier(Modifier::ITALIC) } else { name };
+    let glyphs: String = key.as_deref().and_then(|k| memberships.get(k)).into_iter().flatten().map(|g| format!("{} ", g.group.glyph)).collect();
+    let header = vec![
+        Seg::styled(format!(" {glyphs}{} ", when(chat.clock, s.ts)), mark),
+        Seg::styled(format!(" {} ", chip.primary), name),
+        Seg::styled(format!(" {} ", chip.secondary), project),
+    ];
     let mut body: Vec<Line<'static>> = s.message.split('\n').map(|l| Line::styled(l.to_string(), theme::body())).collect();
     let files = attach::existing_attachments(&s.message);
     if !files.is_empty() {
         body.push(attachment_line(chat, &files));
     }
-    (Entry { label, body }, key)
+    (Entry { header, body }, key)
 }
 
 /// A chip per attached file: its name on the rule's ground, so a file
@@ -204,7 +203,7 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
     chat.feed_rows = inner.height;
     chat.hits.feed = inner;
     let entries = chat.entries.as_deref().unwrap_or_default();
-    let feed = Feed::new(entries).label_width(CHIP_WIDTH).border(theme::rule()).selected(theme::accent()).generation(chat.generation);
+    let feed = Feed::new(entries).shape(chat.shape).rule(theme::rule()).selected(theme::accent()).generation(chat.generation);
     f.render_stateful_widget(feed, inner, &mut chat.feed);
 }
 

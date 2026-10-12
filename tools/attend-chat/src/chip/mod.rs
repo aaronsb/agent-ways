@@ -5,7 +5,7 @@
 //! re-exported here so `crate::chip::*` keeps the same import surface
 //! the rest of the crate already uses.
 //!
-//! - `render` — `chip_for`, `ChipInfo`, `color_for`, `CHIP_WIDTH`.
+//! - `render` — `chip_for`, `ChipInfo`, `color_for`.
 //!   Pure display: takes a wire `from`/`project`/`cwd` triple, returns
 //!   the colored bordered chip the message list draws.
 //! - `registry` — `KnownIdentity`, `known_identities`,
@@ -20,5 +20,5 @@ pub mod render;
 pub mod routing;
 
 pub use registry::{known_identities, known_identities_with_liveness, known_of, seen_identities, KnownIdentity, Seen};
-pub use render::{chip_for, color_for, ChipInfo, CHIP_WIDTH};
+pub use render::{chip_for, color_for, ChipInfo};
 pub use routing::resolve_nickname;

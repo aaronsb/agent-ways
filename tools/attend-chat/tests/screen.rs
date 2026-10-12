@@ -735,7 +735,7 @@ fn left(c: &mut Chat, (x, y): (u16, u16)) {
 }
 
 /// A click on a message cut off at the top of the feed selects it and
-/// scrolls it whole into view; its box is drawn in the accent.
+/// scrolls it whole into view; the rule under its header turns heavy.
 #[test]
 fn a_click_on_a_message_selects_it_and_brings_it_into_view() {
     let mut c = chat();
@@ -748,7 +748,7 @@ fn a_click_on_a_message_selects_it_and_brings_it_into_view() {
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), 10, top));
     assert!(c.scroll() > 0, "scrolled back to show the message whole: {rows:#?}");
     let after = testkit::rows(&testkit::render_screen(&mut c, 80, 18));
-    assert!(after[top as usize].contains('╭'), "the message's box starts at the top: {after:?}");
+    assert!(after[top as usize + 1].contains("━━━━"), "the message's header starts at the top, its rule heavy: {after:?}");
 }
 
 /// A click in the compose box puts the cursor on the character under it;
@@ -1604,6 +1604,19 @@ fn the_columns_cursor_keeps_its_row_and_the_wheel_is_not_undone() {
     assert!(cursor_row(&mut c, 80).is_some(), "a key move brings the cursor back into view");
 }
 
+/// The first cell showing `text` left of the column's rule: a row of the
+/// column, not a message's header.
+fn in_column(buf: &agent_tui::ratatui::buffer::Buffer, text: &str) -> (u16, u16) {
+    let rows = testkit::rows(buf);
+    for (y, r) in rows.iter().enumerate() {
+        let rule = r.find('│').unwrap_or(0);
+        if let Some(x) = r.find(text).filter(|x| *x < rule) {
+            return (r[..x].chars().count() as u16, y as u16);
+        }
+    }
+    panic!("no {text:?} in the column: {rows:#?}");
+}
+
 /// An agent of the shown channel can be removed from its row, after a y.
 #[test]
 fn an_agent_row_removes_it_from_the_shown_channel() {
@@ -1611,7 +1624,7 @@ fn an_agent_row_removes_it_from_the_shown_channel() {
     press(&mut c, ctrl('3'));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
     let buf = testkit::render_screen(&mut c, 80, 25);
-    let (x, y) = testkit::find(&buf, "beta").expect("the member's row");
+    let (x, y) = in_column(&buf, "beta");
     left(&mut c, (x, y));
     let menu = text(&mut c, 80, 25);
     assert!(menu.contains("Remove from #deploy"), "{menu}");
@@ -1657,7 +1670,7 @@ fn a_question_after_a_menu_closed_unchanged_is_shown_by_the_mouse() {
     drawn(&mut c, &[ctrl('3'), ctrl('3'), key(KeyCode::Esc)], 80, 25);
     assert!(!bar(&mut c).contains("unchanged"), "closing says nothing: {}", bar(&mut c));
     let buf = testkit::render_screen(&mut c, 80, 25);
-    let row = testkit::find(&buf, "beta").expect("the member's row");
+    let row = in_column(&buf, "beta");
     left(&mut c, row);
     let buf = testkit::render_screen(&mut c, 80, 25);
     let item = testkit::find(&buf, "Remove from #deploy").expect("the menu's item");

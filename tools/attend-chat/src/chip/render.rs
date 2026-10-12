@@ -11,10 +11,6 @@ use agent_theme::ColorDepth;
 use attend_instances::SnapshotCache;
 use agent_tui::ratatui::style::Color;
 
-/// Width of the chip box in columns. Interior width for text =
-/// `CHIP_WIDTH - 2 (border) - 2 (padding)`.
-pub const CHIP_WIDTH: u16 = 20;
-
 /// Display-layer facts for one signal's sender chip.
 pub struct ChipInfo {
     /// First line — bold, colored with the identity palette.
@@ -54,7 +50,6 @@ pub fn chip_for(
     caps: ColorDepth,
     instances: &SnapshotCache,
 ) -> ChipInfo {
-    let interior = (CHIP_WIDTH as usize).saturating_sub(4);
     let scope_src = if cwd.is_empty() { project } else { cwd };
     let scope_segment = scope_src.rsplit('/').next().unwrap_or(scope_src);
     let scope = if scope_segment.is_empty() {
@@ -71,8 +66,8 @@ pub fn chip_for(
         let id = Identity::for_cwd(cwd, caps);
         let display = with_instance(id.nickname, cwd, uuid, instances);
         ChipInfo {
-            primary: truncate(&display, interior),
-            secondary: truncate(&scope, interior),
+            primary: display.clone(),
+            secondary: scope.clone(),
             palette: id.palette,
             style: id.style,
             session_id: Some(uuid.to_string()),
@@ -83,8 +78,8 @@ pub fn chip_for(
         let username = rest.split('@').next().unwrap_or(rest);
         let id = Identity::for_user(username, &scope, caps);
         ChipInfo {
-            primary: truncate(username, interior),
-            secondary: truncate(&scope, interior),
+            primary: username.to_string(),
+            secondary: scope.clone(),
             palette: id.palette,
             style: id.style,
             session_id: None,
@@ -95,8 +90,8 @@ pub fn chip_for(
         // all landing on a default.
         let id = Identity::for_user(from, &scope, caps);
         ChipInfo {
-            primary: truncate(from, interior),
-            secondary: truncate(&scope, interior),
+            primary: from.to_string(),
+            secondary: scope.clone(),
             palette: id.palette,
             style: id.style,
             session_id: None,
@@ -125,18 +120,6 @@ pub fn color_for(p: PaletteEntry, depth: ColorDepth) -> Color {
 /// `registry` submodule keeps building the legend's display strings
 /// through the chip's own path.
 pub(super) use attend_instances::view::with_instance;
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else if max <= 1 {
-        s.chars().take(max).collect()
-    } else {
-        let mut out: String = s.chars().take(max - 1).collect();
-        out.push('…');
-        out
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -187,18 +170,12 @@ mod tests {
         assert_eq!(chip.primary, "aaron");
     }
 
+    /// The chip keeps a long scope whole: the feed's header band cuts what
+    /// does not fit its row.
     #[test]
-    fn scope_truncates_long_segment() {
-        // Interior is 16 chars for CHIP_WIDTH=20 (2 borders + 2 padding).
-        let chip = chip_for(
-            "external:aaron",
-            "x",
-            "/tmp/some-very-long-directory-name",
-            ColorDepth::TrueColor,
-            &empty_cache(),
-        );
-        assert!(chip.secondary.chars().count() <= 16);
-        assert!(chip.secondary.ends_with('…'));
+    fn scope_is_kept_whole() {
+        let chip = chip_for("external:aaron", "x", "/tmp/some-very-long-directory-name", ColorDepth::TrueColor, &empty_cache());
+        assert_eq!(chip.secondary, "some-very-long-directory-name");
     }
 
     #[test]
