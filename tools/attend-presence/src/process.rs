@@ -149,6 +149,22 @@ pub fn is_claude(pid: u32) -> bool {
     })
 }
 
+/// Whether `pid` runs the Claude Code program itself, not a process whose
+/// command line merely mentions it: the program (`argv[0]`) is `claude` or
+/// a path under a `claude/versions/` install, or a node, bun or deno whose
+/// script is Claude Code's. A shell sourcing a snapshot under `~/.claude/`,
+/// and a wrapper such as `timeout claude`, are not it.
+pub fn is_claude_program(pid: u32) -> bool {
+    let Some(args) = argv(pid) else { return false };
+    let program = args.first().map(String::as_str).unwrap_or_default();
+    let base = std::path::Path::new(program).file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let base = base.trim_end_matches(".exe");
+    if base == "claude" || program.replace('\\', "/").contains("/claude/versions/") {
+        return true;
+    }
+    matches!(base, "node" | "bun" | "deno") && args.get(1).is_some_and(|a| a.contains("claude-code") || a.contains("claude/"))
+}
+
 /// The nearest ancestor of `pid` that is the Claude Code program itself,
 /// within 15 hops. A shell whose command line merely mentions `claude`
 /// (the Bash tool sources a snapshot under `~/.claude/`) is skipped.

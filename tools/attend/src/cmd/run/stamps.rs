@@ -138,10 +138,12 @@ fn is_last_inbound_temp(name: &str) -> bool {
     name.strip_suffix(".tmp").is_some_and(|rest| rest.contains(".last-inbound."))
 }
 
-/// The session ids that have a Claude Code record right now.
+/// The session ids that have a Claude Code record right now, in this
+/// process's config directory and in `~/.claude`.
 pub(super) fn live_sessions() -> HashSet<String> {
-    claude_sessions::read_session_records(&claude_sessions::ClaudeDir::user().sessions_dir())
-        .into_iter()
+    attend_presence::session::sessions_dirs()
+        .iter()
+        .flat_map(|d| claude_sessions::read_session_records(d))
         .map(|r| r.session_id)
         .collect()
 }
