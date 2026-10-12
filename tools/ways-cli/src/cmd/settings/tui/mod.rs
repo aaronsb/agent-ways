@@ -53,6 +53,12 @@ pub struct Ctx {
     pub claude: PathBuf,
 }
 
+/// Whether the screens write `b` to the project's file: a project-scope key,
+/// or one the ways schema names for the screens to keep per project.
+pub(super) fn writes_project(b: &agent_settings::Bound) -> bool {
+    b.spec.scope == Scope::Project || ways_core::settings::SCREENS_WRITE_PROJECT.contains(&b.spec.name)
+}
+
 impl Ctx {
     pub fn from_env(project: Option<&Path>) -> Ctx {
         let home = claude_sessions::home_dir();
@@ -226,7 +232,7 @@ impl Adapter for Ways {
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
             let v = b.spec.parse_cli(w.value, &layers, &b.bound).map_err(|m| format!("{}: {m}", w.store.key))?;
-            let at = |p: &Path| target_file(&b, (b.spec.scope == Scope::Project).then_some(p)).map(|t| t.0).map_err(|f| f.message);
+            let at = |p: &Path| target_file(&b, writes_project(&b).then_some(p)).map(|t| t.0).map_err(|f| f.message);
             let mut path = at(&self.ctx.project)?;
             if path != file && b.spec.scope == Scope::Project {
                 match self.other_owning(file) {

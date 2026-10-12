@@ -561,6 +561,12 @@ pub static SCHEMA: Schema = Schema {
     keys: KEYS,
 };
 
+/// Keys of both scopes that the settings screens write to the project's
+/// `.claude/ways.yaml`, not the user file: how a project's sessions start
+/// is decided per project (ADR-406 item 2). `ways settings set` still writes
+/// the user file unless `--project` is given.
+pub const SCREENS_WRITE_PROJECT: &[&str] = &["attend_mod.listening", "attend_mod.keepwarm"];
+
 /// Whether the attend mod is installed in a target (ADR-406 item 11): the
 /// user file, then the target's own file. A project cannot set it.
 pub fn attend_mod_install(target_config: &Path) -> bool {

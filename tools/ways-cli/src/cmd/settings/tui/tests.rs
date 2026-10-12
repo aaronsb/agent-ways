@@ -909,3 +909,28 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
     assert_eq!(prefixes.children[0].children[0].setting.as_ref().unwrap().store.as_ref().unwrap().key, "ways.project.a/*");
     assert!(project.children.iter().all(|n| n.name != "not found"), "a prefix is not a missing way");
 }
+
+fn leaf<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {
+    if node.name == name && node.setting.is_some() {
+        return Some(node);
+    }
+    node.children.iter().find_map(|c| leaf(c, name))
+}
+
+#[test]
+fn the_mod_tab_writes_how_this_project_starts_to_its_own_file() {
+    let fx = Fixture::home();
+    let mut ways = Ways::new(ctx_of(&fx));
+    let tabs = ways.build(&[]);
+    let tab = tabs.iter().find(|t| t.name == "mod").expect("the mod tab");
+    let project_file = fx.root.join("work/current/.claude/ways.yaml");
+    let store_of = |name: &str| leaf(tab, name).and_then(|n| n.setting.as_ref()).and_then(|s| s.store.clone()).unwrap_or_else(|| panic!("{name}"));
+    for key in ["listening", "keepwarm"] {
+        assert_eq!(store_of(key).file, project_file, "{key} goes to this project's ways.yaml");
+    }
+    let install = store_of("install");
+    assert_ne!(install.file, project_file, "install is set in the user or a target's file, never a project's");
+    let listening = store_of("listening");
+    ways.write(&project_file, &[Write { store: &listening, value: "active", loaded: "dormant" }]).expect("the project's file takes it");
+    assert!(std::fs::read_to_string(&project_file).unwrap().ends_with("attend_mod:\n  listening: active\n"));
+}
