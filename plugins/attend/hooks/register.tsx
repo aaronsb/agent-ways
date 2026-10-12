@@ -192,7 +192,7 @@ async function registerActiveTools($: $, mod: Mod) {
   })
   await $.tool.register({
     name: 'attend_peers',
-    description: 'List the active Claude Code sessions on this machine and their channels.',
+    description: "List the active Claude Code sessions on this machine and their channels, and who is in each of this session's channels.",
     inputSchema: { type: 'object', properties: {} },
     isDeferred: false,
   })
