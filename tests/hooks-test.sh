@@ -352,4 +352,60 @@ check "a subagent leaves the parent's density queue" "present" \
     "$([[ -s $SESSIONS/sess-env/markdown-density/pending ]] && echo present || echo absent)"
 rm -rf "$CORE/envdom" "$CORE/documentation"
 
+# #932: the attend macro reports this session's attend state through the
+# CLI. Stand-ins for `attend` and `ways` print canned JSON from $FIX. PATH
+# holds only them and the system tools, so the real ones stay out of reach.
+ATTEND_SHIMS="$WORK/attend-shims" FIX="$WORK/attend-fix"
+mkdir -p "$ATTEND_SHIMS" "$FIX" "$WORK/no-attend"
+cat > "$ATTEND_SHIMS/attend" <<'SHIM'
+#!/bin/sh
+case "$1 $2" in
+    "listen status") f=listen ;;
+    "channels --joined") f=channels ;;
+    "unread --json") f=unread ;;
+    *) exit 2 ;;
+esac
+[ -e "$FIX/$f" ] || exit 1
+cat "$FIX/$f"
+SHIM
+cat > "$ATTEND_SHIMS/ways" <<'SHIM'
+#!/bin/sh
+[ "$*" = "settings get attend_mod.install" ] && [ -e "$FIX/install" ] && exec cat "$FIX/install"
+exit 1
+SHIM
+chmod +x "$ATTEND_SHIMS/attend" "$ATTEND_SHIMS/ways"
+attend_macro() {  # listen-json channels-json [install] [unread-json]
+    rm -f "$FIX"/*
+    [[ -n "$1" ]] && printf '%s\n' "$1" > "$FIX/listen"
+    printf '%s\n' "$2" > "$FIX/channels"
+    [[ -n "${3:-}" ]] && printf '%s\n' "$3" > "$FIX/install"
+    [[ -n "${4:-}" ]] && printf '%s\n' "$4" > "$FIX/unread"
+    FIX="$FIX" PATH="$ATTEND_SHIMS:/usr/bin:/bin" bash "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1
+}
+L='"session_id":"s1","resolved":true'
+check "attend macro: listening through the mod" \
+    $'**Status**: listening through the attend mod. Send with `attend_send` and `attend_reply`; do not start Monitor.\n**Channels**: project, #open, #deploy' \
+    "$(attend_macro "{$L,\"listening\":true,\"via\":[\"listen\",\"join\"],\"host\":\"mod\",\"run_live\":false}" '[{"name":"deploy","pinned":false}]' true)"
+check "attend macro: attend run under Monitor" \
+    $'**Status**: `attend run` is live under Monitor for this session.\n**Channels**: project, #open' \
+    "$(attend_macro "{$L,\"listening\":true,\"via\":[\"run\"],\"host\":null,\"run_live\":true}" '[]' false)"
+check "attend macro: listening at turn end only, mod installed" \
+    $'**Status**: listening at the end of each turn only; nothing wakes an idle session. For that, call `attend_listen`.\n**Channels**: project, #open' \
+    "$(attend_macro "{$L,\"listening\":true,\"via\":[\"listen\"],\"host\":null,\"run_live\":false}" '[]' true)"
+check "attend macro: dormant in a mod host" \
+    $'**Status**: dormant. If the user asks to use attend, call `attend_listen`; do not start Monitor.\n**Unread**: 3 (`attend unread`)' \
+    "$(attend_macro "{$L,\"listening\":false,\"via\":[],\"host\":null,\"run_live\":false}" '[]' true '{"unread":3,"held_back":0,"listening":false,"rooms":[]}')"
+check "attend macro: not listening without the mod" \
+    $'**Status**: not listening. Start with `/attend` or `Monitor: attend run`.\n**Channels**: joined #deploy; nothing is delivered until the session listens' \
+    "$(attend_macro "{$L,\"listening\":false,\"via\":[],\"host\":null,\"run_live\":false}" '[{"name":"deploy","pinned":true}]' false '{"unread":0}')"
+check "attend macro: not listening, mod unknown" \
+    '**Status**: not listening. If the user asks to use attend, call `attend_listen` when that tool is listed, else start `/attend` or `Monitor: attend run`.' \
+    "$(attend_macro "{$L,\"listening\":false,\"via\":[],\"host\":null,\"run_live\":false}" '[]')"
+check "attend macro: says nothing for an unresolved session" "" \
+    "$(attend_macro '{"session_id":"x","resolved":false,"listening":false,"via":[],"host":null,"run_live":false}' '[]' true)"
+check "attend macro: says nothing when listen status fails" "" "$(attend_macro '' '[]' true)"
+check "attend macro: attend not installed" \
+    '**Note**: attend is not installed. Run `ways manage update` to install it.' \
+    "$(PATH="$WORK/no-attend:/usr/bin:/bin" bash "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1)"
+
 exit $fail
