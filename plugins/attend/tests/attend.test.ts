@@ -74,16 +74,56 @@ type World = {
   noHostFlag?: boolean
   /** Submits that fail before one enters. */
   submitFails?: number
+  /** The session id `$.session.id()` reads; `s1` when not given. */
+  sessionId?: string
+  /** What $.state holds at the start, as a reload hands it to a fresh module. */
+  status?: Record<string, unknown>
+  /** What the plugin's `$.store` holds at the start. */
+  store?: Record<string, unknown>
+  /** A store whose writes fail, as on a full disk. */
+  storeFails?: boolean
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
- *  every argv, registered tool and submitted prompt recorded. */
+ *  every argv, registered tool and submitted prompt recorded. It holds the
+ *  plugin's `status` in $.state as the session does, and `clearState`
+ *  empties it as Claude Code 2.1.296 does at a /clear or a /resume. It
+ *  holds the plugin's `$.store`, which outlives the process, and answers
+ *  `$.session.id()` from `world.sessionId`. */
 function host(on: On, world: World) {
   const argvs: string[][] = []
   const submitted: string[] = []
   const tools: string[] = []
+  const state: { value: unknown; version: number } = world.status ? { value: world.status, version: 1 } : { value: undefined, version: 0 }
+  on('state.get', { plugin: 'attend', key: 'status' }, () => ({ value: { value: state.value, version: state.version } }) as never)
+  on('state.set', { plugin: 'attend', key: 'status' }, ($, e) => {
+    if (e.ifVersion !== undefined && e.ifVersion !== state.version) return { value: { isSet: false, version: state.version } } as never
+    state.value = e.value
+    state.version += 1
+    return { value: { isSet: true, version: state.version } } as never
+  })
+  const store: Record<string, unknown> = { ...(world.store ?? {}) }
+  on('store.get', ($, e) => ({ value: store[e.key] }) as never)
+  const storeWrites: string[] = []
+  on('store.set', ($, e) => {
+    if (world.storeFails) throw new Error('ENOSPC: no space left on device')
+    storeWrites.push(e.key)
+    store[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined } as never
+  })
+  const logs: string[] = []
+  on('ui.log', ($, e) => {
+    logs.push(e.text)
+    return { value: undefined } as never
+  })
+  on('session.id', () => ({ value: world.sessionId ?? 's1' }) as never)
+  const clearState = () => {
+    state.value = undefined
+    state.version = 0
+  }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('classic.SessionStart', () => ({}))
   on('tool.register', ($, e) => {
     tools.push(e.name)
     return { value: { tool: `mcp__attend__${e.name}` } }
@@ -118,7 +158,31 @@ function host(on: On, world: World) {
   })
   const count = (cmd: string) => argvs.filter(a => a.slice(1).join(' ').startsWith(cmd)).length
   const ran = (cmd: string) => count(cmd) > 0
-  return { argvs, submitted, tools, count, ran }
+  const mode = () => (state.value as { mode?: string } | undefined)?.mode
+  return { argvs, submitted, tools, count, ran, mode, clearState, store, storeWrites, logs, world }
+}
+
+/** A /clear or an in-session /resume as Claude Code 2.1.296 runs it:
+ *  `session.end` with that reason, the plugin's $.state emptied, then the
+ *  settings SessionStart under the session id that goes on (the new one, or
+ *  the resumed one). No `session.start` follows. */
+async function clear($: Engine, h: ReturnType<typeof host>, to = 's2', source: 'clear' | 'resume' = 'clear') {
+  await $.session.end({ reason: source, sessionId: h.world.sessionId ?? 's1' } as never)
+  h.clearState()
+  h.world.sessionId = to
+  await $.classic.SessionStart({ source, session_id: to } as never)
+}
+
+const ACTIVE_TOOLS = ['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers']
+/** The store key that names the sessions that listened. */
+const LISTENED = 'listened'
+
+/** The calls and tools a step added, to read what a reload did. */
+function since(h: ReturnType<typeof host>) {
+  const argvs = h.argvs.length
+  const tools = h.tools.length
+  const ran = (cmd: string) => h.argvs.slice(argvs).some(a => a.slice(1).join(' ').startsWith(cmd))
+  return { ran, tools: () => [...new Set(h.tools.slice(tools))] }
 }
 
 /** A drained message in the shape the real attend prints (attend-output.ts). */
@@ -480,6 +544,240 @@ describe('active', () => {
   })
 })
 
+// A reload of a changed module runs register and session.start again, and a
+// fresh module knows only what $.state holds. The kit loads the module once,
+// so these raise session.start again over $.state as the host left it.
+describe('a reload', () => {
+  test('an active session reloads active: all tools listed, listening on, never off', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    const reload = since(h)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(0)
+    expect(reload.tools()).toEqual(['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers'])
+    expect(reload.ran('listen on')).toBe(true)
+    expect(reload.ran('listen off')).toBe(false)
+  })
+
+  test('after a /clear, with no poll or turn since, a reload still finds the session active', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clear($, h)
+    expect(h.mode()).toBe('active')
+    const reload = since(h)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(0)
+    expect(reload.tools()).toEqual(['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers'])
+    expect(reload.ran('listen on')).toBe(true)
+    expect(reload.ran('listen off')).toBe(false)
+    expect(h.mode()).toBe('active')
+  })
+
+  test('a /clear tells attend the new session id is listening', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    const after = since(h)
+    await clear($, h)
+    await clock.advance(1_000)
+    expect(after.ran('listen on')).toBe(true)
+  })
+
+  test('a dormant session stays dormant through a /clear and a reload', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h)
+    await clock.advance(1_000)
+    const reload = since(h)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(0)
+    expect(reload.tools()).toEqual(['attend_listen'])
+    expect(reload.ran('listen off')).toBe(true)
+    expect(reload.ran('listen on')).toBe(false)
+    expect(h.mode()).not.toBe('active')
+  })
+})
+
+// A reload's fresh module has only $.state to go on: here session.start
+// finds it seeded, never having seen attend_listen, and a /clear comes
+// before activation has run (it waits on the config read), then a second
+// reload.
+describe('a fresh module', () => {
+  test('restored from $.state, it stays active through an early /clear and another reload', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { status: { mode: 'active' } })
+    await $.session.start(INTERACTIVE)
+    await clear($, h)
+    const reload = since(h)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(reload.tools()).toEqual(ACTIVE_TOOLS)
+    expect(reload.ran('listen on')).toBe(true)
+    expect(reload.ran('listen off')).toBe(false)
+    expect(h.mode()).toBe('active')
+  })
+})
+
+// Activation is kept per session id in $.store, which outlives the process,
+// so `claude --resume` and an in-session /resume bring a session that
+// listened back listening (ADR-406, addendum of 2026-10-12).
+describe('a resume', () => {
+  test('claude --resume of a session that listened starts listening', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1', store: { [LISTENED]: ['s0', 's1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect([...new Set(h.tools)]).toEqual(ACTIVE_TOOLS)
+    expect(h.ran('listen on')).toBe(true)
+    expect(h.ran('listen off')).toBe(false)
+    expect(h.mode()).toBe('active')
+  })
+
+  test('a session id that never listened starts dormant', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s0', 's1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.tools).toEqual(['attend_listen'])
+    expect(h.ran('listen off')).toBe(true)
+    expect(h.ran('listen on')).toBe(false)
+  })
+
+  test('attend_listen records the session id, and the record keeps the newest 50', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const old = Array.from({ length: 60 }, (_, i) => `old${i}`)
+    const h = host(on, { sessionId: 's1', store: { [LISTENED]: old } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    const ids = h.store[LISTENED] as string[]
+    expect(ids.length).toBe(50)
+    expect(ids[ids.length - 1]).toBe('s1')
+    expect(ids).not.toContain('old0')
+  })
+
+  test('a /clear carries the activation to the new session id', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1' })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clear($, h, 's2')
+    expect(h.store[LISTENED]).toEqual(['s1', 's2'])
+  })
+
+  test('an in-session /resume to a session that listened turns a dormant session on', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    const resume = since(h)
+    await clear($, h, 's1', 'resume')
+    await clock.advance(1_000)
+    expect(resume.tools()).toEqual(ACTIVE_TOOLS.slice(1))
+    expect(resume.ran('listen on')).toBe(true)
+    expect(h.mode()).toBe('active')
+  })
+
+  test('a store that fails leaves listening, the poll and the drain running, and says so', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1', storeFails: true })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    const r = (await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)) as { isError?: boolean }
+    expect(r.isError).toBeUndefined()
+    expect(h.ran('listen on')).toBe(true)
+    expect(h.logs.some(l => l.includes('could not record'))).toBe(true)
+    await clear($, h, 's2')
+    await clock.advance(1_000)
+    const after = since(h)
+    await clock.advance(10_000)
+    expect(after.ran('inbox --drain')).toBe(true)
+  })
+
+  test('a store that fails on an in-session /resume still turns the session on and drains', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    h.world.storeFails = true
+    await clear($, h, 's1', 'resume')
+    await clock.advance(1_000)
+    expect(h.ran('listen on')).toBe(true)
+    const after = since(h)
+    await clock.advance(10_000)
+    expect(after.ran('inbox --drain')).toBe(true)
+  })
+
+  test('the record is written only for what config would not reproduce', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active' }, sessionId: 's1' })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clear($, h, 's2')
+    await clock.advance(1_000)
+    expect(h.storeWrites).toEqual([])
+  })
+
+  test('a reload or a resume of a listed id writes nothing', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1', store: { [LISTENED]: ['s1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.ran('listen on')).toBe(true)
+    expect(h.storeWrites).toEqual([])
+  })
+
+  test('at process start the resume SessionStart comes first and session.start alone activates', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1', store: { [LISTENED]: ['s1'] } })
+    await $.classic.SessionStart({ source: 'resume', session_id: 's1' } as never)
+    await clock.advance(2_000)
+    expect(h.tools).toEqual([])
+    expect(h.count('listen on')).toBe(0)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(2_000)
+    expect([...new Set(h.tools)]).toEqual(ACTIVE_TOOLS)
+    expect(h.count('listen on')).toBe(1)
+  })
+
+  test('a fork gets a new id the record does not list, and starts dormant', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 'fork1', store: { [LISTENED]: ['s1'] } })
+    await $.classic.SessionStart({ source: 'fork', session_id: 'fork1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.tools).toEqual(['attend_listen'])
+    expect(h.ran('listen on')).toBe(false)
+  })
+
+  test('an in-session /resume to a session that never listened leaves a dormant one dormant', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    const resume = since(h)
+    await clear($, h, 's8', 'resume')
+    await clock.advance(1_000)
+    expect(resume.tools()).toEqual([])
+    expect(resume.ran('listen on')).toBe(false)
+    expect(h.mode()).not.toBe('active')
+  })
+})
+
 describe('keepwarm', () => {
   test('on: an active session runs the check and submits the wake line', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
@@ -532,7 +830,7 @@ describe('preamble cadence through deliveries', () => {
     await deliverNext(5)
     expect(full(h.submitted[5] ?? '')).toBe(false)
     // A /clear empties the model's context as a compaction does.
-    await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+    await clear($, h)
     await deliverNext(6)
     expect(full(h.submitted[6] ?? '')).toBe(true)
   })

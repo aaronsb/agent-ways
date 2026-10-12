@@ -101,6 +101,14 @@ considered:
     said: "yes, AND - disabling it in ways config makes the mod unavailable for claude code"
     via: AskUserQuestion free-text answer, 2026-10-10
     covers: [default-on]
+  - operator: aaronsb
+    said: "Resume restores (Recommended)"
+    via: "AskUserQuestion through the coordinator session, 2026-10-12; question: \"An attend_listen activation currently ends when Claude Code exits, so `claude --resume` comes back dormant (ADR-406 item 2). That's what happened to McKay. Should a resumed session come back listening?\"; option label and text written by the agent, chosen by the operator: \"The mod keeps the mode in $.store, keyed by session id, which --resume preserves. A resumed conversation already believes it's on attend, so coming back silently dormant leaves it waiting for messages that never arrive. This amends ADR-406 item 2 via adr consider; a new session id still starts dormant.\""
+    covers: [door]
+  - operator: aaronsb
+    said: "resume should definitely resume attend"
+    via: session chat through the coordinator, 2026-10-12, added to the Resume restores answer
+    covers: [door]
 status: accepted
 date: 2026-10-10
 deciders:
@@ -262,3 +270,6 @@ Consequences:
 - `ways status` reported the installed version from Claude Code's record, which can trail what runs. It now reports the version sessions run: the shipped version when `attend@agent-ways` is installed from this app's `plugins/` folder, with the recorded version beside it when the two differ, and the record alone where the marketplace is some other folder.
 - The plugin cache is no longer a cost of this route. A session that has not run `/reload-plugins` keeps the module it loaded, which is the remaining sense in which a running session keeps its version.
 
+## Addendum, 2026-10-12: resume is decided in ADR-411
+
+Appended after acceptance; nothing above is changed. The operator's answers recorded as `considered` entries 7 and 8 reverse the `door` probe's "until Claude exits" for a resumed session id. ADR-411 records that change: it amends items 1 and 2 of the Decision, so that a session that listened comes back listening when its session id is resumed.
