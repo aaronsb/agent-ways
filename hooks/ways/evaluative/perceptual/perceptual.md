@@ -34,8 +34,13 @@ Capture at the sizes people use: a phone in portrait, a tablet, a desktop window
 
 Each feature adds a named scenario that drives to it, asserts on state, and contributes captures. Scenario names, debug keys, and the playtest list derive from one registry so they cannot drift apart. A bug a person hits in play becomes a scenario before the fix.
 
+## While the layout is still being decided
+
+Keep few frozen captures while the operator is still deciding the layout: a handful of anchor states, with the rest provisional. Assert behaviour on the exposed state, which stays strict through the phase. Promote the provisional captures once the operator accepts the layout (code/testing/gates/assertions, rapid iteration phase).
+
 ## See Also
 
 - evaluative(evaluative) — parent: author and judge, the shared core, choosing the loop
 - code/testing/evaluation(softwaredev) — drive the path the real program takes
 - code/testing/evaluation/screens(softwaredev) — the same loop for terminal screens
+- code/testing/gates/assertions(softwaredev) — golden baselines and the rapid iteration phase

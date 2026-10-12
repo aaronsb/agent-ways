@@ -1,0 +1,56 @@
+# Provisional golden frames (ADR-407, amendment of 2026-10-12).
+#
+# The chat's layout is in a rapid iteration phase. The operator asked for
+# "an escape valve for golden repro - until we're sure of the flow/layout etc
+# we should be more sparse in recording/checking golden layouts. we could
+# call that a rapid iteration phase". Their reason: "otherwise we're making
+# changes and then the repo recording path is essentially treating that as
+# 'ok we've finally got it' when actually we haven't".
+#
+# A frame listed here is never asserted or blessed, in CI too. A drift or a
+# missing golden prints one note. Every frame not listed is settled and
+# always asserted. The anchors are the default chat view, with the column
+# shown, at 80x25 and at the reference size: sidebar-80x25, sidebar-120x40.
+# The interaction behaviour is pinned by the table and property tests of
+# `step` (tools/attend-chat/src/app/ix.rs).
+#
+# The phase ends when the operator accepts the layout. Then delete each line,
+# bless the frame and review it. Names match exactly, size suffix included.
+channel-deploy-120x40
+channel-deploy-80x25
+channel-infra-80x25
+clicked-feed-compose-80x25
+clicked-infra-80x25
+common-menu-80x25
+compose-deploy-80x25
+compose-multiline-80x25
+ctrl-n-new-channel-draft-80x25
+guard-armed-80x25
+guard-draft-80x25
+keys-80x25
+legend-agents-80x25
+legend-groups-80x25
+merged-120x40
+merged-80x25
+mouse-on-80x25
+new-channel-prompt-80x25
+no-color-80x25
+scrolled-back-80x25
+sent-deploy-80x25
+sidebar-keyboard-80x25
+sidebar-narrow-70x25
+sidebar-off-80x25
+sidebar-round-truecolor-80x25
+slash-80x25
+slash-help-ran-80x25
+slash-partial-80x25
+slash-subcommands-80x25
+status-error-80x25
+tab-bar-focused-80x25
+tab-bar-focused-common-80x25
+tab-bar-focused-plus-80x25
+tab-menu-confirm-120x40
+tab-menu-deploy-80x25
+theme-nord-256-80x25
+theme-nord-truecolor-120x40
+theme-nord-truecolor-80x25

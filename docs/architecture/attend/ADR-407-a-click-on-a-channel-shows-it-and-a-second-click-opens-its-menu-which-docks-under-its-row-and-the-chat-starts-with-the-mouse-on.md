@@ -38,6 +38,9 @@ considered:
   - operator: aaronsb
     said: "we can use enter to raise the context menu for any element. (the same context menu that the mouse click affords)"
     via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    said: "List is the switch (Recommended)"
+    via: "the review of PR #963 (option: Frames named in the committed PROVISIONAL file are never asserted or blessed, in CI too. The weakening stays visible as a reviewed file in the diff. Settled frames stay strict everywhere. Anchors for the chat: the default view at 80x25 and 120x35.), relayed by the main session, 2026-10-12"
 status: accepted
 date: 2026-10-11
 deciders:
@@ -131,7 +134,9 @@ The operator chose the order of the work that follows the review of the chat's f
 
 The operator asked for "an escape valve for golden repro - until we're sure of the flow/layout etc we should be more sparse in recording/checking golden layouts. we could call that a rapid iteration phase". The reason, in the operator's words: "otherwise we're making changes and then the repo recording path is essentially treating that as 'ok we've finally got it' when actually we haven't". Recording a golden asserts that the layout is settled. The chat's layout is still taking polish feedback each round.
 
-- **Provisional frames.** A frame named in `tools/attend-chat/tests/golden/PROVISIONAL` is provisional. With `AGENT_TUI_RAPID=1`, agent-tui's golden check prints a note for a provisional frame that drifts or is missing, and does not fail or re-record it. Every other frame is settled and always asserted. A run without `AGENT_TUI_RAPID` asserts every frame, so CI stays strict.
-- **What carries behaviour.** The table and property tests of `step` (amendment above) carry the chat's interaction behaviour. A handful of anchor frames stay settled.
+- **The list is the switch.** The review of #963 offered two designs. The operator chose "List is the switch (Recommended)", which read: "Frames named in the committed PROVISIONAL file are never asserted or blessed, in CI too. The weakening stays visible as a reviewed file in the diff. Settled frames stay strict everywhere. Anchors for the chat: the default view at 80x25 and 120x35."
+- **Provisional frames.** A frame named in `tools/attend-chat/tests/golden/PROVISIONAL` is never asserted and never blessed by agent-tui's golden check, in any run, CI included. A drift or a missing golden prints one note. A listed name with no `.frame` file that no check reaches prints a stale-entry warning. Every other frame is settled and always asserted.
+- **The anchors.** The two settled frames are the default view: the chat with its left column shown, as it starts, at 80x25 (`sidebar-80x25`) and at the suite's reference size (`sidebar-120x40`). The suite has no 120x35 size. Its reference size is 120x40, so that frame stands for the operator's "120x35". Every other chat frame is listed.
+- **What carries behaviour.** The table and property tests of `step` (amendment above) carry the chat's interaction behaviour.
 - **Leaving the phase.** The phase ends when the operator accepts the layout. Each provisional frame is then removed from the list, blessed and reviewed.
 - **The refactor bar stands.** A change with no change in behaviour still leaves every settled golden byte-identical.

@@ -47,12 +47,12 @@ A snapshot is an assertion whose expected side was captured from the subject. It
 
 Recording a golden asserts that its layout is settled. While the operator is still deciding the flow or layout, that claim is false. Each round of polish feedback would then re-record dozens of frames, which misstates what is settled and costs effort every round.
 
-- Record a handful of anchor states as settled goldens.
-- Mark the rest provisional, so a mismatch in them is noted and does not fail.
+- Keep a handful of anchor states as settled goldens.
+- List the rest as provisional in a committed, reviewed file. A provisional golden is never asserted or re-recorded, in any run. A drift in one is noted and does not fail.
 - Cover behaviour with state and transition tests, such as table tests of a pure step function.
 - Promote the provisional goldens to settled once the operator accepts the layout. That acceptance ends the phase.
 
-A refactor with no change in behaviour still requires every settled golden to stay byte-identical. The default run asserts every golden, provisional or not.
+A provisional golden is not yet a judge, so changing one during the phase does not touch the judge. Adding a frame to the provisional list weakens the gate, and promoting one creates a judge. Each is a reviewed change. A refactor with no change in behaviour still leaves every settled golden byte-identical.
 
 ## See Also
 
