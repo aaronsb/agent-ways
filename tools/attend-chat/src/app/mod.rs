@@ -343,10 +343,22 @@ impl ChatPane {
 
     fn set_tab(&mut self, t: Tab) {
         if t != self.foreground {
+            // Opening a channel makes the person at the chat its member
+            // (ADR-404 D1).
+            if let (Tab::Channel(name), Some(me)) = (&t, self.person()) {
+                keys::enter_channel(&me, name);
+            }
             self.foreground = t;
             self.feed = FeedState::default();
             self.invalidate();
         }
+    }
+
+    /// The membership id of the person at this chat (ADR-170), or `None`
+    /// when the chat is no live person: without its heartbeat (`--snap`, a
+    /// test's chat) or in a dry run, it joins nothing.
+    fn person(&self) -> Option<String> {
+        (self.heartbeat && !self.dry_run).then(crate::signal::human_member_id)
     }
 
     fn enter(&mut self) {
@@ -358,7 +370,7 @@ impl ChatPane {
         // destination flag, which has degraded to #open.
         let fg = self.normal_tab();
         let sets_jump = self.input.text().trim_start().starts_with("/config tabs.jump");
-        match handle_enter(self.input.text(), &self.signals, &fg) {
+        match handle_enter(self.input.text(), &self.signals, &fg, self.person().as_deref()) {
             EnterAction::None => {}
             EnterAction::ClearWithStatus(s) => {
                 self.say(s, false);

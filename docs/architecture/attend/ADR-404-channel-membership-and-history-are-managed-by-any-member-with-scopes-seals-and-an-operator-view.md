@@ -41,6 +41,11 @@ basis:
     paraphrase: true
   - evidence: "/purge keeps any signal a live consumer has not seen (tools/attend-chat/src/app/keys.rs, purge_channel_in) and never reaches a project tray; the cold-start rule delivers addressed project-tray mail whatever its age, the newest 50 (tools/attend-state/src/cold_start.rs, plan); a reproduction in an isolated cache showed a new agent drained all 30 day-old addressed messages after #open and channel history were deleted"
   - evidence: "observed on attend 0.20.0 with the attend mod, 2026-10-12: a fresh Claude Code session (a new session id) started in ~/Projects/ai/harness/attend-collaborator with attend_mod.listening active, and before the operator typed anything its first turn was an idle delivery of 7 old messages addressed to [project], the previous session's conversation with Chaucer (test instructions, a channel invite, replies) that it had already read and answered. The files' mtimes were genuine (sent 22:02:35 to 22:03:31 on 10-11); the cold-start rule delivered project-tray mail whatever its age to a session with no seen-set (tools/attend-state/src/cold_start.rs, plan)"
+  - operator: aaronsb
+    level: directed
+    said: "I think what's happening is that in 'attend-chat-test' channel, I can't see who's in the channel - I only see the historical scroll of myself and agents."
+    via: relayed by the main session, 2026-10-12
+  - evidence: "observed on attend 0.21.0, 2026-10-12: the operator posted in #attend-chat-test from attend-chat; the one Claude session in the channel ran attend reply to that message and got \"no live peers in channel 'attend-chat-test' (you are the only listener)\", and attend channels listed the channel with one member, the agent. attend-chat wrote the person as a member only on /join (tools/attend-chat/src/app/keys.rs, run_join); posting in a channel or showing it wrote nothing"
   - evidence: "/invite writes a directed signal and the invitee must run attend join itself (tools/attend-chat/src/app/keys.rs, run_invite: consent asymmetry, issue #393); /kick removes without consent"
   - precedent: ADR-136
   - precedent: ADR-170
@@ -104,6 +109,8 @@ Agents join and leave channels on their own through the CLI (`attend join`, `att
 *Operator: revised 2026-10-10 (two verbs).*
 
 Any member of a channel, agent or human, may add, invite or remove a member, and seal or unseal the channel (D5). Members are agent sessions and human operator sessions alike (ADR-170).
+
+A person in attend-chat becomes a member of a channel by posting in it, by showing it, or by joining it, so a person is never in a channel without being its member. A member is a listener while it is live: an agent session by its process or its heartbeat, a person while their attend-chat is open and keeps their heartbeat fresh (ADR-170). A send or reply to a channel whose only other live member is a person goes out; one to a channel with no other live member is refused. A channel that does not exist, or whose directory was swept, is not made or brought back by being shown.
 
 - **`attend add <member> [<channel>]`** enrolls the member directly, with no answer from it. The added member's history position is the add event (D3), so it is replayed what follows; the add's briefing is the same as an invitation's, below.
 - **`attend invite <member> [<channel>]`** is a request: the invitee joins itself, or not. A join that answers a pending invitation brings the invitation's briefing (D3).
@@ -179,7 +186,7 @@ A channel's name and its scope path are synonyms for one channel. A channel alwa
 
 *Operator: agreed 2026-10-10.*
 
-`attend channels` renders the channel tree by scope nesting as indented text: each channel with its scope, member count, sealed marker, and for each member its origin. `attend peers` shows each agent's effective channels. Both are compact, one line per entry, and greppable: an agent reads the same model the operator sees.
+`attend channels` renders the channel tree by scope nesting as indented text: each channel with its scope, member count, sealed marker, and for each member its origin. `attend peers` shows each agent's effective channels. Both are compact, one line per entry, and greppable: an agent reads the same model the operator sees. Both name a person among the members as `<username> (attend-chat)`, beside an agent's `<name> (<project>)`, so an agent can see that a person is in the channel.
 
 ### D8. attend-chat edits its own keys, and the theme
 
@@ -240,6 +247,7 @@ These fit ADR-124, ADR-136, ADR-170 and ADR-172 as accepted and need none of the
 - A self-join (CLI or scene) marks the channel's messages older than the cold-start window seen before writing the membership, and says how many it held back: ADR-136 Decision 2's "keeps a fresh join from dumping history". D3b replaces it with the membership rule.
 - `/dissolve` from attend-chat no longer counts the operator's own heartbeat as a live member (ADR-170's guard protects peers working in the channel).
 - The top row orders channels by their newest message, `#open` pinned first: the "recent-activity band" ADR-124 left for later, with its pinned `#open` kept.
+- D1, a person's membership: attend-chat writes the person as a member of a channel when a send to it goes out and when the channel is shown, as `/join` does, touching the heartbeat first so the membership is live at once. A chat with no heartbeat, `--snap` or a dry run, joins nothing. `attend channels` and `attend peers` mark the person `(attend-chat)` (D7). Liveness is ADR-170's heartbeat, unchanged.
 
 ### Ahead of acceptance
 
