@@ -98,7 +98,7 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .unwrap_or(std::time::UNIX_EPOCH);
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let Ok(content) = agent_identity::signal::read_signal_file(&path) else { continue };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
             // Skip own messages
             if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
@@ -187,7 +187,7 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         // condition, not a benign "already consumed" miss. Distinguish
         // them so operators can tell partial-write / disk-full bugs
         // from ordinary races.
-        let content = std::fs::read_to_string(&path).map_err(|e| ReadError::Unreadable { error: e.to_string() })?;
+        let content = agent_identity::signal::read_signal_file(&path).map_err(|e| ReadError::Unreadable { error: e.to_string() })?;
         let sig = parse_signal(wire_line(&content)).ok_or(ReadError::Corrupt)?;
         let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()).unwrap_or(std::time::UNIX_EPOCH);
         let scope = match dir.room {

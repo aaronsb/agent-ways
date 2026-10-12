@@ -120,7 +120,7 @@ pub(crate) fn run_cleanup_in(
                 // Reap a shared-room signal when its author's project is
                 // gone. A record that does not parse, or cannot be read,
                 // is left alone.
-                std::fs::read_to_string(&path)
+                agent_identity::signal::read_signal_file(&path)
                     .ok()
                     .and_then(|c| {
                         agent_identity::parse_signal(agent_identity::wire_line(&c))

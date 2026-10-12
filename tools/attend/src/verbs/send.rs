@@ -63,6 +63,8 @@ pub enum SendError {
     /// `re` is empty or outside `[A-Za-z0-9_-]+`.
     InvalidReId,
     EmptyMessage,
+    /// The body is longer than [`agent_identity::signal::MAX_MESSAGE_BYTES`].
+    TooLong { bytes: usize, max: usize },
     /// No live peer works at the `to` path.
     NoPeerAt { path: String, peers: Vec<PeerAt>, suggestion: Option<String> },
     /// The `to` path is this session's own project, and no other session
@@ -96,6 +98,11 @@ impl std::fmt::Display for SendError {
         match self {
             Self::InvalidReId => write!(f, "re must be a signal id matching [A-Za-z0-9_-]+"),
             Self::EmptyMessage => write!(f, "the message is empty"),
+            Self::TooLong { bytes, max } => write!(
+                f,
+                "the message is {bytes} bytes, over attend's limit of {max} bytes ({} KiB); shorten it, or write it to a file and send the path",
+                max / 1024
+            ),
             Self::NoPeerAt { path, .. } => write!(f, "no active peer at {path}"),
             Self::OwnProject { path } => write!(
                 f,
@@ -150,6 +157,10 @@ fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
     }
     if req.message.is_empty() {
         return Err(SendError::EmptyMessage);
+    }
+    let max = agent_identity::signal::MAX_MESSAGE_BYTES;
+    if req.message.len() > max {
+        return Err(SendError::TooLong { bytes: req.message.len(), max });
     }
     // A message that itself starts `re:` needs nothing here: the wire
     // marks an unthreaded one with an empty thread field
@@ -412,7 +423,7 @@ fn parent_route(
     let said = match id.map(|id| format!("{id}.signal")) {
         Some(file) => match r.receive_dirs(&me.origin_path).into_iter().find(|d| d.path.join(&file).is_file()) {
             Some(dir) => {
-                let sig = std::fs::read_to_string(dir.path.join(&file)).ok();
+                let sig = agent_identity::signal::read_signal_file(&dir.path.join(&file)).ok();
                 let sig = sig.as_deref().and_then(|c| agent_identity::parse_signal(agent_identity::wire_line(c)));
                 // A record that does not parse still names a shared room.
                 // In this project's tray it names no sender, and so no

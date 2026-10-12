@@ -216,3 +216,76 @@ fn signals_with_one_mtime_list_in_send_order_across_senders() {
     let bodies: Vec<String> = open_messages(&f).iter().map(|m| m["message"].as_str().unwrap().to_string()).collect();
     assert_eq!(bodies, ["first", "second"]);
 }
+
+/// A body over the 64 KiB cap is refused with `too_long`, naming the limit,
+/// and nothing is written; a body at the cap goes out.
+#[test]
+fn a_body_over_the_cap_is_refused_and_one_at_the_cap_goes_out() {
+    let max = agent_identity::signal::MAX_MESSAGE_BYTES;
+    let f = Fixture::new("one-signal-cap");
+    let over = "x".repeat(max + 1);
+    let out = f.without_session(|| f.attend(&["send", "--json", "--", &over]));
+    assert_eq!(out.status.code(), Some(1));
+    let doc = json(&out);
+    assert_eq!(doc["error"]["kind"], "too_long");
+    assert_eq!(doc["error"]["max"], max);
+    let msg = doc["message"].as_str().unwrap();
+    assert!(msg.contains(&format!("{} bytes", max + 1)) && msg.contains("64 KiB"), "{msg}");
+    assert!(!f.signals().join("_broadcast").exists() || open_tray_files(&f).is_empty(), "nothing written");
+
+    let at = "x".repeat(max);
+    let out = f.without_session(|| f.attend(&["send", "--json", "--", &at]));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(open_tray_files(&f).len(), 1);
+}
+
+/// A signal file over the read limit, which no attend writes, is skipped
+/// with a note on the first drain and not again; the messages around it
+/// are delivered.
+#[test]
+fn an_oversize_signal_file_is_skipped_with_a_note() {
+    let f = Fixture::new("one-signal-oversize");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    let huge = "y".repeat(agent_identity::signal::MAX_SIGNAL_FILE_BYTES as usize + 10);
+    put_from_peer(&f, "_broadcast", "peer-sess-1791000000000000001-0", &huge);
+    put_from_peer(&f, "_broadcast", "peer-sess-1791000000000000002-0", "a normal one");
+    let out = f.attend(&["inbox", "--drain", "--format", "plain"]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("a normal one"), "{stdout}");
+    assert!(!stdout.contains("yyyy"), "not delivered");
+    assert!(stderr.contains("skipped peer-sess-1791000000000000001-0.signal") && stderr.contains("read limit"), "{stderr}");
+    let again = f.attend(&["inbox", "--drain", "--format", "plain"]);
+    assert!(!String::from_utf8_lossy(&again.stderr).contains("skipped"), "noted once");
+}
+
+/// Under `attend run`, numbered parts an older peer sent come out as three
+/// lines in send order, each its own message.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn legacy_numbered_parts_come_out_in_order_on_the_monitor_line() {
+    let f = Fixture::new("one-signal-legacy-run");
+    let dir = f.signals().join("_broadcast");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mtime = std::time::SystemTime::now() - Duration::from_secs(2);
+    let parts = [
+        ("old-peer-1791000000000000001-0", "(1/3) the first third"),
+        ("old-peer-1791000000000000002-0", "(2/3) the second third"),
+        ("old-peer-1791000000000000003-0", "(3/3) the last third"),
+    ];
+    for (id, body) in parts.iter().rev() {
+        let path = dir.join(format!("{id}.signal"));
+        std::fs::write(&path, format!("claude:old-peer|p|/tmp/p|{body}\n")).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(mtime).unwrap();
+    }
+    let run = f.run();
+    run.wait_for("the last part", Duration::from_secs(30), |r| r.output().contains("the last third"));
+    let out = run.output();
+    let at: Vec<usize> = parts.iter().map(|(_, b)| out.find(b).unwrap_or_else(|| panic!("{b}: {out}"))).collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "in order: {out}");
+    for (id, _) in parts {
+        assert!(out.contains(&format!("~{}", attend::verbs::inbox::short_id(id))), "each its own handle: {out}");
+    }
+}

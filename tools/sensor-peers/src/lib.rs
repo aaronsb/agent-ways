@@ -289,7 +289,17 @@ impl PeerSensor {
                 }
                 // Read and parse: `from|project|cwd|message` (legacy) or
                 // `from|project|cwd|re:id|message` (threaded, ADR-120).
-                let Ok(content) = fs::read_to_string(&path) else { continue };
+                let content = match agent_identity::signal::read_signal_file(&path) {
+                    Ok(content) => content,
+                    // A file no attend could have written: noted on stderr
+                    // once and marked seen, never loaded.
+                    Err(e) if e.kind() == std::io::ErrorKind::FileTooLarge => {
+                        eprintln!("[attend] skipped {filename}: {e}");
+                        self.seen_signals.insert(key);
+                        continue;
+                    }
+                    Err(_) => continue,
+                };
                 let Some(sig) = agent_identity::parse_signal(agent_identity::wire_line(&content)) else {
                     self.seen_signals.insert(key);
                     continue;
@@ -310,9 +320,8 @@ impl PeerSensor {
                 found.push(Found { room, key, signal_id, content, mtime, age });
             }
         }
-        // Oldest first, so the parts of a message sent in parts come out in
-        // order. Parts written within one timestamp tick share an mtime;
-        // their ids carry the send time and order them.
+        // Oldest first; signals that share an mtime order by the send time
+        // in their ids, so legacy numbered parts still read in order.
         found.sort_by_cached_key(|f| (f.mtime, agent_identity::signal_send_order(&f.signal_id), f.signal_id.clone()));
 
         let plan = baselining.then(|| {
@@ -746,15 +755,16 @@ fn session_file(record: claude_sessions::SessionRecord) -> Option<SessionFile> {
 // ── The Monitor line ────────────────────────────────────────────
 
 /// One message as the Monitor line shows it: `message from {sender}
-/// ~{handle}: {body}`, the body on one line with its whitespace collapsed,
-/// and the reply hint after it on the first message a session sees. The
+/// ~{handle}{hint}: {body}`, the body on one line with its whitespace
+/// collapsed. The reply hint rides the first message a session sees. The
 /// line carries the whole message, whatever its length (ADR-412). The
-/// handle leads the body, so a line Monitor truncates still names the
-/// message `attend reply --re` threads to.
+/// handle and the hint come before the body, so a line Monitor cuts at 500
+/// characters still names the message and still shows the hint the
+/// session sees once.
 fn monitor_line(sender: &str, signal_id: &str, body: &str, reply_hint: bool) -> String {
     let text = body.split_whitespace().collect::<Vec<_>>().join(" ");
     let hint = if reply_hint { REPLY_HINT } else { "" };
-    format!("message from {sender} ~{}: {text}{hint}", agent_identity::signal::short_id(signal_id))
+    format!("message from {sender} ~{}{hint}: {text}", agent_identity::signal::short_id(signal_id))
 }
 
 /// Appended to the first peer message a session sees. It names `attend
@@ -914,10 +924,21 @@ mod tests {
     }
 
     #[test]
-    fn a_monitor_line_collapses_newlines_and_carries_the_hint_last() {
+    fn a_monitor_line_collapses_newlines_and_carries_the_hint_before_the_body() {
         let line = monitor_line("J (ws)", "peer-sess-1-1", "one\n\n  two", true);
-        assert_eq!(line, format!("message from J (ws) ~73nki: one two{REPLY_HINT}"));
+        assert_eq!(line, format!("message from J (ws) ~73nki{REPLY_HINT}: one two"));
         assert_eq!(line.lines().count(), 1);
+    }
+
+    /// A long first message keeps its handle and the once-per-session hint
+    /// inside the 500 characters Monitor shows of a line.
+    #[test]
+    fn a_long_first_message_keeps_the_hint_inside_monitors_cut() {
+        let body = "word ".repeat(400);
+        let line = format!("[attend sensor=peers priority=high] {}", monitor_line("Jovan-alpha (ws)", "peer-sess-1-1", &body, true));
+        let shown: String = line.chars().take(500).collect();
+        assert!(shown.contains("~73nki"), "{shown}");
+        assert!(shown.contains(REPLY_HINT), "{shown}");
     }
 
     #[test]

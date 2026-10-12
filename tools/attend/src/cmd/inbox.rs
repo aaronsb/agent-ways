@@ -230,7 +230,17 @@ pub(crate) fn scan_pending(
             if seen.contains(&key) {
                 continue;
             }
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let content = match agent_identity::signal::read_signal_file(&path) {
+                Ok(content) => content,
+                // A file no attend could have written: mark it so it is
+                // skipped once, with a note, not on every drain.
+                Err(e) if e.kind() == std::io::ErrorKind::FileTooLarge => {
+                    eprintln!("[attend] skipped {filename}: {e}");
+                    mark.push(key);
+                    continue;
+                }
+                Err(_) => continue,
+            };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
             // Own messages: mark (dedup bookkeeping) but never deliver.
             if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {

@@ -10,7 +10,7 @@
 //! writers (`attend send`, attend-chat) produce the same line, the same
 //! sender identity and the same atomic file.
 
-use std::io;
+use std::io::{self, Read};
 use std::path::Path;
 
 /// A parsed signal line. Legacy signals have no `reply_to`; threaded replies
@@ -98,6 +98,35 @@ pub fn format_signal(from: &str, project: &str, cwd: &str, reply_to: Option<&str
 /// segment, or `?` when there is none.
 pub fn project_label(cwd: &str) -> String {
     cwd.rsplit('/').find(|seg| !seg.is_empty()).unwrap_or("?").to_string()
+}
+
+/// The longest message body `attend send` and `attend reply` take, in
+/// bytes: 64 KiB. Linux caps one argv element at 128 KiB (`MAX_ARG_STRLEN`),
+/// and both the CLI and the attend mod pass the body as one argument, so a
+/// body past that fails at exec before attend runs. Half of it leaves room
+/// for the signal's header, and a drain delivers at most about 16k tokens
+/// per message into the receiving session (ADR-412).
+pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+
+/// The largest signal file a reader loads, in bytes: 256 KiB. That is above
+/// anything an attend wrote, the 128 KiB argv ceiling included, so the
+/// limit only turns away a file no attend could have written. A reader skips
+/// such a file rather than load it unbounded.
+pub const MAX_SIGNAL_FILE_BYTES: u64 = 256 * 1024;
+
+/// Read the signal file at `path` as text, loading at most
+/// [`MAX_SIGNAL_FILE_BYTES`] plus one byte. A larger file is an error of
+/// kind [`io::ErrorKind::FileTooLarge`], which readers skip with a note.
+pub fn read_signal_file(path: &Path) -> io::Result<String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?.take(MAX_SIGNAL_FILE_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_SIGNAL_FILE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::FileTooLarge,
+            format!("signal file is over the {} KiB read limit", MAX_SIGNAL_FILE_BYTES / 1024),
+        ));
+    }
+    String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Write `content` into `dest` as `filename`, creating `dest` first. The

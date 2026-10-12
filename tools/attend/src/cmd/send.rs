@@ -222,7 +222,7 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
         | SendError::ParentChannelLeft { .. }
         | SendError::ParentChannelGone { .. }
         | SendError::ParentRoomUnknown => eprintln!("attend reply: {e}"),
-        SendError::OwnProject { .. } | SendError::NotWritten { .. } => eprintln!("error: {e}"),
+        SendError::OwnProject { .. } | SendError::NotWritten { .. } | SendError::TooLong { .. } => eprintln!("error: {e}"),
     }
     std::process::exit(1);
 }

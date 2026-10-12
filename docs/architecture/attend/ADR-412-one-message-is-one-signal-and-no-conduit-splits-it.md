@@ -25,6 +25,7 @@ agent:
   model: claude-opus-5-5
 amends:
   - ADR-406#Decision
+  - ADR-122#Decision
 considered:
   - operator: aaronsb
     said: "Accept the cut (Recommended)"
@@ -68,7 +69,8 @@ The Monitor limit was measured directly for this decision. On Claude Code 2.1.29
 2. **Delivery.** No conduit splits a message. The drain and the mod show it on one line ending in ` ~id`. attend-chat shows it as it shows any message. The Monitor line of `attend run` is `message from <sender> ~<id>: <body>`. The body's whitespace collapses to single spaces, so one message is one line. The handle comes ahead of the body, so a line Monitor cuts still names the message. `attend inbox` holds the full text.
 3. **One delivery.** A message is one signal file, so it is one entry in the seen-set and counts as one in `attend unread` and in the cold-start plan, whichever conduit carries it (ADR-172).
 4. **Legacy parts.** Readers keep ordering signals that share an mtime by the send time in their ids. Parts that an older peer sent as numbered parts still read in order. Each part stays its own message with its own id; nothing rejoins them.
-5. **Guidance.** The messaging guidance says that a message goes out as one message, that there is no need to split it by hand, and that a reader under Monitor sees about the first 500 characters of its line.
+5. **A bounded size.** One argv element is capped at 128 KiB on Linux (`MAX_ARG_STRLEN`), and the CLI and the mod both pass the body as one, so a larger body never reached attend. `attend send` and `attend reply` refuse a body over 64 KiB with a `too_long` error that names the limit: half the argv ceiling leaves room for the header, and a drain injects at most about 16k tokens per message. Readers load a signal file only up to 256 KiB, above anything an attend wrote, and skip a larger one with a note on stderr, marking it seen so the note comes once.
+6. **Guidance.** The messaging guidance says that a message goes out as one message, that there is no need to split it by hand, and that a reader under Monitor sees about the first 500 characters of its line.
 
 ## Consequences
 

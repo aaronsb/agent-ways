@@ -5,7 +5,6 @@
 //! filename are shared through agent-identity; the paths and I/O around
 //! them are duplicated here.
 
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -71,7 +70,7 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
     if path.extension().and_then(|s| s.to_str()) != Some("signal") {
         return None;
     }
-    let raw = fs::read_to_string(path).ok()?;
+    let raw = agent_identity::signal::read_signal_file(path).ok()?;
     let parsed = agent_identity::parse_signal(agent_identity::wire_line(&raw))?;
 
     let id = path
@@ -232,6 +231,7 @@ pub fn human_member_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::io::Write;
 
     fn tmp_signal(dir: &Path, name: &str, body: &str) -> PathBuf {
