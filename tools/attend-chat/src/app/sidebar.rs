@@ -19,7 +19,6 @@ use agent_tui::wrap::str_width;
 
 use super::activate::{How, Target};
 use super::ChatPane;
-use agent_tui::Keyed;
 use crate::chip::{color_for, Seen};
 use crate::groups::ChannelRow;
 use crate::helper::{self, HelperMode};
@@ -28,9 +27,6 @@ use crate::tabs::Tab;
 /// The fewest columns the feed keeps beside the column; narrower, the
 /// column hides.
 const MIN_FEED: u16 = 50;
-
-/// What the bottom bar says while the column has the keyboard.
-pub(super) const FOCUS_HINT: &str = "↑↓ move · Enter · Esc back";
 
 /// A row of the column, as a click or the keyboard acts on it: an agent
 /// by its membership id (a session id, a human's username), which two
@@ -109,7 +105,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         _ => (None, None),
     };
     let fg = chat.normal_tab();
-    let focus = chat.side_focus;
+    let focus = chat.side_focus();
     let world = chat.world();
     let seen: Vec<Seen> = agent_order(&world.seen).into_iter().cloned().collect();
     let rows: Vec<(ChannelRow, usize)> = world.rows.iter().cloned().zip(world.live_members.iter().copied()).collect();
@@ -137,8 +133,9 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         let r = Rect { y: agents.y + 1 + k as u16, height: 1, ..agents };
         // Marked as Tab would complete it: a claude, not a human.
         let mark = target(Style::new(), s.identity.is_claude && prefix_match(&s.identity.nickname, agent_partial.as_deref()));
-        let mut line = agent_line(chat, s, w, mark);
-        if focus == Some(i) {
+        let focused = focus == Some(i);
+        let mut line = agent_line(chat, s, w, mark, focused);
+        if focused {
             line.spans[0] = cursor();
         }
         f.render_widget(Paragraph::new(line), r);
@@ -151,8 +148,9 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         let shown = fg == Tab::Channel(row.known.group.name.clone());
         let mark = target(Style::new(), prefix_match(&row.known.group.name, channel_partial.as_deref()));
         let age = row.last.and_then(|t| now.duration_since(t).ok()).map(age_label).unwrap_or_default();
-        let mut line = channel_line(chat, row, *live, &age, shown, w, mark);
-        if focus == Some(n_a + i) {
+        let focused = focus == Some(n_a + i);
+        let mut line = channel_line(chat, row, *live, &age, shown, w, mark, focused);
+        if focused {
             line.spans[0] = cursor();
         }
         f.render_widget(Paragraph::new(line), r);
@@ -190,6 +188,17 @@ fn more(top: usize, vis: usize, len: usize) -> String {
 /// The keyboard's cursor at the left of a row.
 fn cursor() -> Span<'static> {
     Span::styled("▸", theme::accent().add_modifier(Modifier::BOLD))
+}
+
+/// A row's segment styles drawn focused, as the tab bar draws its focused
+/// tab: reversed and bold, so the focus reads as strongly in the column as
+/// on the bar, with or without colour.
+fn focused_styles(styles: [Style; 3], on: bool) -> [Style; 3] {
+    if on {
+        styles.map(|s| s.add_modifier(Modifier::REVERSED | Modifier::BOLD))
+    } else {
+        styles
+    }
 }
 
 /// A time since, in its largest whole unit: `40s`, `4m`, `3h`, `2d`.
@@ -251,14 +260,14 @@ fn at(c: Rgb, depth: agent_theme::ColorDepth) -> Color {
 /// identity colour, the project on a darker step of it, and `●` live or
 /// `○` not on the darkest. An inactive agent wears the desaturated steps.
 /// At 16 colours the name keeps its ANSI colour and the rest is set back.
-fn agent_line(chat: &ChatPane, s: &Seen, w: usize, mark: Style) -> Line<'static> {
+fn agent_line(chat: &ChatPane, s: &Seen, w: usize, mark: Style, focused: bool) -> Line<'static> {
     let depth = chat.palette.depth();
     let k = &s.identity;
     let project = agent_identity::cwd_basename(&k.cwd);
     let dot = if s.live { "●" } else { "○" };
     let texts = sized(chat.shape, theme::colourless(), [&k.nickname, &project, dot], w);
     let [name, project, dot] = identity_styles(depth, k.palette, s.live, k.style.bold);
-    let styles = [name.patch(mark), project, dot];
+    let styles = focused_styles([name.patch(mark), project, dot], focused);
     let mut spans = vec![Span::raw(" ")];
     spans.extend(chat.shape.lozenge(&segs(texts, styles)));
     Line::from(spans)
@@ -288,7 +297,8 @@ pub(super) fn identity_styles(depth: agent_theme::ColorDepth, palette: agent_ide
 /// member is live (where D5's seal marker will go). The shown channel is
 /// marked at the left. A channel with no live member, or none on disk, is
 /// set back.
-fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown: bool, w: usize, mark: Style) -> Line<'static> {
+#[allow(clippy::too_many_arguments)]
+fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown: bool, w: usize, mark: Style, focused: bool) -> Line<'static> {
     let g = &row.known.group;
     let active = row.on_disk && (row.known.is_base || live > 0);
     // A Nerd Font's person glyph beside the lozenge glyphs it already
@@ -304,6 +314,7 @@ fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown
     } else {
         [Seg::faded("").style.patch(mark), Seg::faded("").style, Seg::faded("").style]
     };
+    let styles = focused_styles(styles, focused);
     let lead = if shown { Span::styled(theme::SELECTED_MARK, theme::accent()) } else { Span::raw(" ") };
     let mut spans = vec![lead];
     spans.extend(chat.shape.lozenge(&segs(texts, styles)));
@@ -340,10 +351,10 @@ impl ChatPane {
         self.dirty = true;
     }
 
-    /// Put the keyboard's cursor on row `i` of `items`, and the list it is
-    /// in where the cursor shows.
+    /// Put the focus on row `i` of `items`, and the list it is in where the
+    /// cursor shows.
     fn focus_at(&mut self, items: &[SideHit], i: usize) {
-        self.side_focus = Some(i);
+        self.focus = super::focus::Focus::Row(i);
         self.side_focus_hit = items.get(i).cloned();
         self.side_follow = true;
     }
@@ -352,11 +363,11 @@ impl ChatPane {
     /// it is now; a row gone since leaves it at the same place, held within
     /// a list that may have shrunk.
     pub(super) fn refocus(&mut self) {
-        let (Some(i), Some(hit)) = (self.side_focus, self.side_focus_hit.clone()) else { return };
+        let (Some(i), Some(hit)) = (self.side_focus(), self.side_focus_hit.clone()) else { return };
         let items = self.side_items();
         match items.iter().position(|h| *h == hit) {
-            Some(at) => self.side_focus = Some(at),
-            None if items.is_empty() => self.side_focus = None,
+            Some(at) => self.focus = super::focus::Focus::Row(at),
+            None if items.is_empty() => self.focus = super::focus::Focus::Compose,
             None => self.focus_at(&items, i.min(items.len() - 1)),
         }
     }
@@ -364,7 +375,9 @@ impl ChatPane {
     /// Show or hide the column.
     pub(super) fn toggle_sidebar(&mut self) {
         self.sidebar = !self.sidebar;
-        self.side_focus = None;
+        if self.side_focus().is_some() {
+            self.focus = super::focus::Focus::Compose;
+        }
         self.invalidate();
     }
 
@@ -379,7 +392,7 @@ impl ChatPane {
     /// it no before it reaches the row. While the column has the keyboard,
     /// its cursor moves to the row clicked.
     pub(super) fn side_click(&mut self, hit: SideHit) {
-        if self.side_focus.is_some() {
+        if self.side_focus().is_some() {
             let items = self.side_items();
             if let Some(i) = items.iter().position(|h| *h == hit) {
                 self.focus_at(&items, i);
@@ -407,67 +420,6 @@ impl ChatPane {
     /// Whether the last frame drew the column: shown, and room for it.
     pub(super) fn side_drawn(&self) -> bool {
         !self.hits.side_area.is_empty()
-    }
-
-    /// Give the column the keyboard: the cursor on its first channel, the
-    /// shown one if listed. False when the column is not drawn.
-    pub(super) fn focus_side(&mut self) -> bool {
-        if !self.side_drawn() || self.hits.side.is_empty() {
-            return false;
-        }
-        let items = self.side_items();
-        let shown = match self.normal_tab() {
-            Tab::Channel(c) => items.iter().position(|h| matches!(h, SideHit::Channel(n) if *n == c)),
-            Tab::Merged => None,
-        };
-        let first = items.iter().position(|h| matches!(h, SideHit::Channel(_)));
-        match shown.or(first).or((!items.is_empty()).then_some(0)) {
-            Some(i) => self.focus_at(&items, i),
-            None => self.side_focus = None,
-        }
-        self.dirty = true;
-        self.side_focus.is_some()
-    }
-
-    /// A key while the column has the focus: Up and Down move, Home and End
-    /// jump, Enter acts on the row, Esc gives the focus back to the compose
-    /// box and Up past the top to the tab bar. `None` for any other key,
-    /// which gives the focus back and goes on as typing, and while the
-    /// column has no focus.
-    pub(super) fn side_key(&mut self, k: agent_tui::ratatui::crossterm::event::KeyEvent) -> Option<Keyed> {
-        use agent_tui::ratatui::crossterm::event::KeyCode;
-        self.side_focus?;
-        // Read first: a world read again may move the cursor with its row.
-        let items = self.side_items();
-        let i = self.side_focus?;
-        let last = items.len().saturating_sub(1);
-        self.dirty = true;
-        match k.code {
-            KeyCode::Up if i == 0 => {
-                self.side_focus = None;
-                return Some(Keyed::Tabs);
-            }
-            KeyCode::Up => self.focus_at(&items, i - 1),
-            KeyCode::Down => self.focus_at(&items, (i + 1).min(last)),
-            KeyCode::Home => self.focus_at(&items, 0),
-            KeyCode::End => self.focus_at(&items, last),
-            KeyCode::Esc => self.side_focus = None,
-            KeyCode::Enter => {
-                if let Some(hit) = items.get(i).cloned() {
-                    self.side_click(hit);
-                }
-                // A channel shown keeps the cursor on its row, so a second
-                // Enter opens its menu; a menu takes the keyboard.
-                if self.open.is_some() {
-                    self.side_focus = None;
-                }
-            }
-            _ => {
-                self.side_focus = None;
-                return None;
-            }
-        }
-        Some(Keyed::Done)
     }
 
     /// The key that toggles the column, as the help names it.
@@ -544,11 +496,11 @@ mod tests {
         let items = c.side_items();
         c.focus_at(&items, 1);
         with_agents(&mut c, &["New", "Ada", "Bo", "Cy"]);
-        assert_eq!((c.side_focus, c.side_focus_hit.clone()), (Some(2), Some(SideHit::Agent("id-Bo".into()))), "on Bo, moved down a row");
+        assert_eq!((c.side_focus(), c.side_focus_hit.clone()), (Some(2), Some(SideHit::Agent("id-Bo".into()))), "on Bo, moved down a row");
         with_agents(&mut c, &["Ada"]);
-        assert_eq!((c.side_focus, c.side_focus_hit.clone()), (Some(0), Some(SideHit::Agent("id-Ada".into()))), "Bo gone: held within the list");
+        assert_eq!((c.side_focus(), c.side_focus_hit.clone()), (Some(0), Some(SideHit::Agent("id-Ada".into()))), "Bo gone: held within the list");
         with_agents(&mut c, &[]);
-        assert_eq!(c.side_focus, None, "nothing left to be on");
+        assert_eq!(c.side_focus(), None, "nothing left to be on");
     }
 
     #[test]
