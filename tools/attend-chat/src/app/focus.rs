@@ -30,8 +30,10 @@ use crate::tabs::{self, Slot, Tab};
 /// Where the keyboard is.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) enum Focus {
-    /// The tab bar's slot `i`, in [`tabs::bar`]'s order.
-    Tab(usize),
+    /// A slot of the tab bar ([`tabs::bar`]), kept by what it is, so a
+    /// channel created or dissolved under the focus leaves it on the same
+    /// slot ([`ChatPane::refocus_tab`]).
+    Tab(Slot),
     /// The column's row `i`, agents then channels ([`ChatPane::side_items`]).
     Row(usize),
     Feed,
@@ -56,8 +58,7 @@ impl ChatPane {
     /// The ring of focusable elements, in order: the tab bar's slots, the
     /// column's rows while it is drawn, the feed, the compose box.
     pub(super) fn ring(&mut self) -> Vec<Focus> {
-        let slots = tabs::bar(&self.strip_names()).len();
-        let mut out: Vec<Focus> = (0..slots).map(Focus::Tab).collect();
+        let mut out: Vec<Focus> = tabs::bar(&self.strip_names()).into_iter().map(Focus::Tab).collect();
         if self.side_drawn() {
             out.extend((0..self.side_items().len()).map(Focus::Row));
         }
@@ -77,11 +78,11 @@ impl ChatPane {
     pub(super) fn focus_kind(&self) -> Kind {
         let world = self.world.as_ref();
         match self.focus.clone() {
-            Focus::Tab(i) => match tabs::bar(&world.map(|w| tabs::strip_names(&w.groups)).unwrap_or_default()).get(i) {
-                Some(Slot::Common) => Kind::Common,
-                Some(Slot::New) => Kind::New,
-                Some(Slot::Tab(Tab::Merged)) => Kind::View,
-                _ => Kind::ChannelTab,
+            Focus::Tab(slot) => match slot {
+                Slot::Common => Kind::Common,
+                Slot::New => Kind::New,
+                Slot::Tab(Tab::Merged) => Kind::View,
+                Slot::Tab(_) => Kind::ChannelTab,
             },
             Focus::Row(i) => match world {
                 Some(w) if i < w.seen.len() => Kind::AgentRow,
@@ -93,11 +94,26 @@ impl ChatPane {
     }
 
     /// Put the focus on `f`. Landing on a tab shows it, as moving along the
-    /// tab bar always has; a slot (`≡`, `+`) is only pointed at.
+    /// tab bar always has; a slot (`≡`, `+`) is only pointed at. What the
+    /// walk shows is a preview: leaving the bar for the column, the feed or
+    /// the box by walking puts back the tab shown before, so the draft's
+    /// destination does not change on its way past. Enter, Esc or a digit on
+    /// the bar keeps the tab shown ([`ChatPane::keep_tab`]).
     pub(super) fn focus_on(&mut self, f: Focus) {
+        let on_bar = matches!(self.focus, Focus::Tab(_));
+        match (&f, on_bar) {
+            (Focus::Tab(_), false) => self.bar_entry = Some(self.normal_tab()),
+            (Focus::Tab(_), true) => {}
+            (_, true) => {
+                if let Some(t) = self.bar_entry.take() {
+                    self.set_tab(t);
+                }
+            }
+            (_, false) => {}
+        }
         match &f {
-            Focus::Tab(i) => {
-                if let Some(Slot::Tab(t)) = tabs::bar(&self.strip_names()).get(*i).cloned() {
+            Focus::Tab(slot) => {
+                if let Slot::Tab(t) = slot.clone() {
                     self.set_tab(t);
                 }
             }
@@ -121,9 +137,32 @@ impl ChatPane {
         self.focus_on(ring[to].clone());
     }
 
-    /// The tab bar's slot showing `tab`.
+    /// The tab bar's index of slot `slot`.
+    pub(super) fn slot_index(&mut self, slot: &Slot) -> Option<usize> {
+        tabs::bar(&self.strip_names()).iter().position(|s| s == slot)
+    }
+
+    /// The tab bar's index of the slot showing `tab`.
     pub(super) fn slot_of(&mut self, tab: &Tab) -> Option<usize> {
-        tabs::bar(&self.strip_names()).iter().position(|s| *s == Slot::Tab(tab.clone()))
+        self.slot_index(&Slot::Tab(tab.clone()))
+    }
+
+    /// The tab shown stays shown: the walk along the bar was a choice.
+    pub(super) fn keep_tab(&mut self) {
+        self.bar_entry = None;
+    }
+
+    /// After the world is read again, a focused tab whose channel is gone
+    /// moves to the tab shown, which falls back to `#open` the same way.
+    pub(super) fn refocus_tab(&mut self) {
+        let Focus::Tab(slot) = self.focus.clone() else { return };
+        let names = self.world.as_ref().map(|w| tabs::strip_names(&w.groups)).unwrap_or_default();
+        let bar = tabs::bar(&names);
+        if !bar.contains(&slot) {
+            let shown = tabs::normalize(self.foreground.clone(), &names);
+            self.focus = Focus::Tab(Slot::Tab(shown));
+            self.dirty = true;
+        }
     }
 
     /// F2 or Ctrl+T: the focus to the tab shown, or from the tab bar back to
@@ -133,27 +172,34 @@ impl ChatPane {
             return self.focus_on(Focus::Compose);
         }
         let shown = self.normal_tab();
-        let at = self.slot_of(&shown).unwrap_or(0);
-        self.focus_on(Focus::Tab(at));
+        self.focus_on(Focus::Tab(Slot::Tab(shown)));
     }
 
     /// A key while the compose box has the focus: every key edits, but for
-    /// the ways out (Shift+Tab, ↑ at the very top, ↓ at the very end).
+    /// the ways out. Shift+Tab leaves backward. ↑ at the very top and ↓ at
+    /// the very end leave a box that holds text; in an empty box they do
+    /// nothing, so an arrow pressed from habit never turns the next keys
+    /// into commands, and Esc leaves an empty box instead (ADR-409).
     pub(super) fn compose_key(&mut self, k: KeyEvent) {
         let m = k.modifiers;
         let width = self.hits.text_width;
         match k.code {
-            KeyCode::Esc => self.clear(),
+            KeyCode::Esc => {
+                self.clear();
+                if self.input.is_empty() {
+                    self.step(false);
+                }
+            }
             KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.enter(),
             KeyCode::Tab => self.tab_key(),
             KeyCode::BackTab => self.step(false),
             KeyCode::Up => {
-                if !self.input.up(width) {
+                if !self.input.up(width) && !self.input.is_empty() {
                     self.step(false);
                 }
             }
             KeyCode::Down => {
-                if !self.input.down(width) {
+                if !self.input.down(width) && !self.input.is_empty() {
                     self.step(true);
                 }
             }
@@ -175,14 +221,19 @@ impl ChatPane {
             KeyCode::Down => self.nav_vertical(true),
             KeyCode::Home | KeyCode::End => self.nav_end(k.code == KeyCode::End),
             KeyCode::Enter => self.activate_focus(),
-            KeyCode::Esc => self.focus_on(super::focus::Focus::Compose),
+            KeyCode::Esc => {
+                self.keep_tab();
+                self.focus_on(Focus::Compose);
+            }
             KeyCode::PageUp => self.page(true),
             KeyCode::PageDown => self.page(false),
-            // Anything else is typing: it goes to the compose box.
-            KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete if plain => {
+            // A character is typing: it goes to the compose box. Backspace
+            // and Delete only go back to the box, the draft untouched.
+            KeyCode::Char(_) if plain => {
                 self.focus_on(Focus::Compose);
                 self.compose_key(k);
             }
+            KeyCode::Backspace | KeyCode::Delete => self.focus_on(Focus::Compose),
             _ => {}
         }
     }
@@ -191,11 +242,11 @@ impl ChatPane {
     /// messages, from the tab bar down into the column.
     fn nav_vertical(&mut self, down: bool) {
         match self.focus.clone() {
-            Focus::Tab(i) if down => {
+            Focus::Tab(slot) if down => {
                 // Into the column: the row of the tab's channel, else the
                 // first row; past a hidden column, the feed.
-                let tab = match tabs::bar(&self.strip_names()).get(i) {
-                    Some(Slot::Tab(Tab::Channel(c))) => Some(c.clone()),
+                let tab = match slot {
+                    Slot::Tab(Tab::Channel(c)) => Some(c),
                     _ => None,
                 };
                 if !self.side_drawn() || self.side_items().is_empty() {
@@ -211,8 +262,7 @@ impl ChatPane {
                 match (down, i) {
                     (false, 0) => {
                         let shown = self.normal_tab();
-                        let at = self.slot_of(&shown).unwrap_or(0);
-                        self.focus_on(Focus::Tab(at));
+                        self.focus_on(Focus::Tab(Slot::Tab(shown)));
                     }
                     (false, i) => self.focus_on(Focus::Row(i - 1)),
                     (true, i) if i >= last => self.focus_on(Focus::Feed),
@@ -275,7 +325,9 @@ impl ChatPane {
     /// path. A menu from the tab bar docks under its tab.
     pub(super) fn activate_focus(&mut self) {
         match self.focus.clone() {
-            Focus::Tab(i) => {
+            Focus::Tab(slot) => {
+                self.keep_tab();
+                let Some(i) = self.slot_index(&slot) else { return };
                 let Some(target) = self.tab_target(i) else { return };
                 self.activate(target, How::Menu, None);
                 if let Some(Open::Pick { anchor, .. } | Open::Entry { anchor, .. }) = &mut self.open {
@@ -319,9 +371,9 @@ impl ChatPane {
         let mut out = Vec::new();
         if kind == Kind::Compose {
             out.extend([
-                Binding::new("Shift+Tab", "or ↑ at the top leaves the box"),
                 Binding::new("Enter", "send"),
                 Binding::new("Tab", "complete"),
+                Binding::new("S-Tab", "or ↑ at the top leaves the box").short("or ↑ leaves"),
                 Binding::help("← →", "move the cursor; outside the box, the element before or next"),
                 Binding::help("↑ ↓", "between the box's lines; outside it, a column row or a feed message"),
                 Binding::help("Esc", "clears the selection and the bar; outside the box, back to it"),
@@ -337,7 +389,7 @@ impl ChatPane {
                 Binding::new("Enter", enter),
                 on(Binding::new("↑ ↓", if kind == Kind::Feed { "select" } else { "move" }), list),
                 Binding::new("Tab", "next"),
-                Binding::new("Shift+Tab", "back"),
+                Binding::new("S-Tab", "back"),
                 Binding::new("Esc", "the box"),
                 Binding::help("← →", "the element before or next; in the box, the cursor"),
             ]);

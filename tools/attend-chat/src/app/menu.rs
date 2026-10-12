@@ -11,7 +11,8 @@
 //! - the operator view (`⋯all`, every channel together): Clear view. It is
 //!   not a channel, so it offers no channel's items (ADR-405).
 //! - `#open`: Clear view, Clear history.
-//! - a named channel: Invite agent ▸, Add agent, Remove agent ▸,
+//! - a named channel: Add agent ▸ (invites a live peer, which joins
+//!   itself, as the agent menu's Add agent to chat does), Remove agent ▸,
 //!   Describe…, Clear history, Leave (Join for a channel the human is
 //!   not in), Seal, Delete channel.
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
@@ -23,7 +24,7 @@
 //!   the compose box), Who is this (what `/whois` says of the session
 //!   the row is, or what the chat knows of one the roster lacks), Add
 //!   agent to chat ▸ (a picker, `add to channel`, of the channels the
-//!   agent is not in; the pick invites it, as Invite agent does), and
+//!   agent is not in; the pick invites it, as Add agent ▸ does), and
 //!   Remove from #channel when the shown channel lists the agent, live or
 //!   quiet. The operator's own row offers Leave #channel there instead:
 //!   Remove never takes out the human at the keyboard, here or in the
@@ -41,14 +42,14 @@
 //! agent's row in the left column, else its tab ([`agent_tui::Anchor`]).
 //! Where the lines below cannot hold it, it ends on the line above the row;
 //! where neither side can, it sits at the foot of the pane. A menu an item
-//! leads to (Theme ▸, Invite agent ▸) docks beside that item's row. A
-//! picker marks the current value. Invite agent asks a live peer to join
+//! leads to (Theme ▸, Add agent ▸) docks beside that item's row. A
+//! picker marks the current value. Add agent asks a live peer to join
 //! (it joins itself, and its join keeps the room's recent history to read).
 //!
-//! Two items wait on attend work and are drawn set back with what they wait
-//! on, passed over by the highlight and deaf to a click: Add agent,
-//! enrolling a member with no answer from it (ADR-404 D1), and Seal
-//! (ADR-404 D4). Neither is ever the first item.
+//! One item waits on attend work and is drawn set back with what it waits
+//! on, passed over by the highlight and deaf to a click: Seal (ADR-404 D4),
+//! never the first item. Adding an agent is an invitation it answers by
+//! joining until attend can enrol a member without asking (ADR-404 D1).
 
 use agent_theme::ColorDepth;
 use agent_tui::ratatui::layout::Rect;
@@ -65,9 +66,8 @@ use crate::tabs::{self, Slot, Tab};
 
 pub(super) const CLEAR_VIEW: &str = "Clear view";
 pub(super) const CLEAR_HISTORY: &str = "Clear history";
-pub(super) const ADD_AGENT: &str = "Add agent";
+pub(super) const ADD_AGENT: &str = "Add agent ▸";
 pub(super) const SEAL: &str = "Seal";
-pub(super) const INVITE_AGENT: &str = "Invite agent ▸";
 pub(super) const REMOVE_AGENT: &str = "Remove agent ▸";
 pub(super) const DESCRIBE: &str = "Describe…";
 pub(super) const LEAVE: &str = "Leave";
@@ -216,8 +216,7 @@ pub(super) fn items(channel: Option<&str>, joined: bool) -> Vec<Item> {
         None => vec![CLEAR_VIEW.into()],
         Some(BASE_CHANNEL_NAME) => vec![CLEAR_VIEW.into(), CLEAR_HISTORY.into()],
         Some(_) => vec![
-            INVITE_AGENT.into(),
-            Item::disabled(ADD_AGENT, "needs ADR-404 D1"),
+            ADD_AGENT.into(),
             REMOVE_AGENT.into(),
             DESCRIBE.into(),
             CLEAR_HISTORY.into(),
@@ -395,7 +394,7 @@ impl ChatPane {
         if let Some(member) = id.strip_prefix("addto:") {
             return self.add_to(member, value.trim_start_matches('#'));
         }
-        // A peer from Invite agent or Remove agent: the label's first word is
+        // A peer from Add agent or Remove agent: the label's first word is
         // the display name the commands resolve.
         let peer = value.split_whitespace().next().unwrap_or(value).to_string();
         if let Some(c) = id.strip_prefix("invite:") {
@@ -495,7 +494,7 @@ impl ChatPane {
                 }
             }
             DESCRIBE => self.describe(channel),
-            INVITE_AGENT => self.peer_menu(channel, true),
+            ADD_AGENT => self.peer_menu(channel, true),
             REMOVE_AGENT => self.peer_menu(channel, false),
             _ => {}
         }
@@ -518,7 +517,7 @@ impl ChatPane {
             let what = if add { "no live agent outside" } else { "no member in" };
             return self.say(format!("{what} #{channel}"), true);
         }
-        let (id, title) = if add { (format!("invite:{channel}"), format!("invite to #{channel}")) } else { (format!("remove:{channel}"), format!("remove from #{channel}")) };
+        let (id, title) = if add { (format!("invite:{channel}"), format!("add to #{channel}")) } else { (format!("remove:{channel}"), format!("remove from #{channel}")) };
         let items = options.into_iter().map(Item::from).collect();
         self.open = Some(Open::Pick { id, title, items, multi: false, anchor: Anchor::Parent });
     }
@@ -548,11 +547,14 @@ impl ChatPane {
             return self.say("already in every channel", true);
         }
         let items = channels.into_iter().map(|c| Item::new(format!("#{c}"))).collect();
-        self.open = Some(Open::Pick { id: format!("addto:{member}"), title: "add to channel".into(), items, multi: false, anchor: Anchor::Parent });
+        // Under the agent's row, where its menu was; beside the closed menu
+        // only when the row is not drawn.
+        let anchor = self.side_row(&super::sidebar::SideHit::Agent(member.to_string())).map_or(Anchor::Parent, Anchor::Row);
+        self.open = Some(Open::Pick { id: format!("addto:{member}"), title: "add to channel".into(), items, multi: false, anchor });
     }
 
     /// The channel picked for an agent: it is invited there, by its session,
-    /// as Invite agent invites, and joins itself (ADR-404).
+    /// as Add agent ▸ invites, and joins itself (ADR-404).
     fn add_to(&mut self, member: &str, channel: &str) {
         if self.dry_run {
             return self.say("dry run: /invite not run", false);
@@ -725,11 +727,11 @@ mod tests {
     fn each_tab_offers_what_its_channel_allows() {
         assert_eq!(labels(&items(None, false)), [CLEAR_VIEW]);
         assert_eq!(labels(&items(Some("open"), true)), [CLEAR_VIEW, CLEAR_HISTORY], "the harmless item first");
-        assert_eq!(labels(&items(Some("deploy"), true)), [INVITE_AGENT, ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, SEAL, DELETE]);
-        assert_eq!(labels(&items(Some("deploy"), false)), [INVITE_AGENT, ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, JOIN, SEAL, DELETE], "Join to a non-member");
+        assert_eq!(labels(&items(Some("deploy"), true)), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, SEAL, DELETE]);
+        assert_eq!(labels(&items(Some("deploy"), false)), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, JOIN, SEAL, DELETE], "Join to a non-member");
         let deploy = items(Some("deploy"), true);
         let waiting: Vec<(&str, Option<&str>)> = deploy.iter().filter(|i| !i.enabled).map(|i| (i.label.as_str(), i.reason.as_deref())).collect();
-        assert_eq!(waiting, [(ADD_AGENT, Some("needs ADR-404 D1")), (SEAL, Some("needs ADR-404 D4"))], "what waits on attend says so");
+        assert_eq!(waiting, [(SEAL, Some("needs ADR-404 D4"))], "what waits on attend says so; Add agent invites, as the agent menu's Add agent to chat does");
     }
 
     fn seen(name: &str, member: &str, live: bool, claude: bool) -> Seen {

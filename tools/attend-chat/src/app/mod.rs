@@ -193,6 +193,9 @@ pub struct ChatPane {
     focus: focus::Focus,
     /// An overlay of the shell's holds the keyboard over the pane.
     overlaid: bool,
+    /// The tab shown when the focus walked onto the tab bar, put back when
+    /// it walks off without choosing ([`ChatPane::focus_on`]).
+    bar_entry: Option<Tab>,
     /// The column row the focus is on, while it is on one: a refresh that
     /// moves the row keeps the focus on it ([`ChatPane::refocus`]).
     side_focus_hit: Option<sidebar::SideHit>,
@@ -242,6 +245,7 @@ impl ChatPane {
             shape: Shape::PLAIN,
             focus: focus::Focus::Compose,
             overlaid: false,
+            bar_entry: None,
             side_focus_hit: None,
             side_scroll: [0, 0],
             side_follow: true,
@@ -320,6 +324,7 @@ impl ChatPane {
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
             self.world = Some(World { groups: tab_channels(&rows), seen, rows, live_members, instances });
             self.refocus();
+            self.refocus_tab();
         }
         self.world.as_ref().expect("just built")
     }
@@ -556,6 +561,7 @@ impl Pane for ChatPane {
     /// Show the bar's tab `i`: a channel or the operator view. The slots
     /// and an index past the tabs do nothing.
     fn set_tab(&mut self, i: usize) {
+        self.keep_tab();
         if let Some(tabs::Slot::Tab(t)) = tabs::bar(&self.strip_names()).get(i).cloned() {
             ChatPane::set_tab(self, t);
         }
@@ -635,10 +641,9 @@ impl Pane for ChatPane {
     }
 
     fn focus_tab(&self) -> Option<usize> {
-        match self.focus {
-            focus::Focus::Tab(i) => Some(i),
-            _ => None,
-        }
+        let focus::Focus::Tab(slot) = &self.focus else { return None };
+        let names = self.world.as_ref().map(|w| tabs::strip_names(&w.groups)).unwrap_or_default();
+        tabs::bar(&names).iter().position(|s| s == slot)
     }
 
     fn focus_tabs(&mut self) {
@@ -774,6 +779,7 @@ impl Pane for ChatPane {
     /// repeat on the tab shown opens its menu when
     /// `attend.chat.tabs.menu_on_repeat` says so.
     fn activate_tab(&mut self, i: usize, menu: bool) {
+        self.keep_tab();
         if let Some(target) = self.tab_target(i) {
             let how = if menu { activate::How::Menu } else { activate::How::Select { repeat: self.config.menu_on_repeat } };
             self.activate(target, how, None);
@@ -817,7 +823,7 @@ impl Pane for ChatPane {
     }
 
     fn quit_help(&self) -> Option<String> {
-        Some("quit; asks first over a draft; so does ≡ → Quit".into())
+        Some("quit; q asks first, ^C over a draft; so does ≡ → Quit".into())
     }
 
     fn take_open(&mut self) -> Option<Open> {
