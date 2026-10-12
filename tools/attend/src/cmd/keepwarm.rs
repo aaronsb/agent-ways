@@ -51,7 +51,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 eprintln!("keepwarm: could not write the arm file: {e}");
                 std::process::exit(1);
             }
-            println!("keepwarm is off");
+            println!("keepwarm is not armed");
         }
         KeepwarmCmd::Check => unreachable!("handled above"),
         KeepwarmCmd::Status => {
@@ -64,8 +64,46 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             for line in card(&reading, arm.as_ref(), ledger.as_ref(), now) {
                 println!("{line}");
             }
+            // In a session the attend mod hosts, the mod's own switch decides
+            // whether the check runs at all, whatever is armed here.
+            if attend_presence::enrollment::host(sid) == Some(attend_presence::enrollment::Host::Mod) {
+                println!("{}", mod_setting_line(mod_settings(&ident.origin_path).as_deref()));
+            }
         }
     }
+}
+
+/// The effective `attend_mod` section for `project`, as the attend mod reads
+/// it: `ways settings list attend_mod --json --effective`. `None` when ways
+/// cannot answer.
+fn mod_settings(project: &str) -> Option<String> {
+    let out = std::process::Command::new("ways")
+        .args(["settings", "list", "attend_mod", "--json", "--effective", "--project", project])
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The card's line for the attend mod's `attend_mod.keepwarm` setting, read
+/// from `ways settings list attend_mod --json --effective`: its value and
+/// the layer that set it. With `off` the mod never runs the check, so
+/// nothing arms or wakes in this session whatever the line above says.
+fn mod_setting_line(settings: Option<&str>) -> String {
+    let key = settings
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|doc| doc.get("keys").and_then(|k| k.get("attend_mod.keepwarm")).cloned());
+    let Some(key) = key else {
+        return "mod setting attend_mod.keepwarm unknown (ways settings could not be read)".to_string();
+    };
+    // The mod reads anything but `off` as on (plugins/attend/hooks/lib.ts).
+    let value = if key.get("value").and_then(|v| v.as_str()) == Some("off") { "off" } else { "on" };
+    let from = match (key.get("layer").and_then(|v| v.as_str()), key.get("file").and_then(|v| v.as_str())) {
+        (_, Some(file)) => format!(" (from {file})"),
+        (Some(layer), None) => format!(" ({layer})"),
+        (None, None) => String::new(),
+    };
+    let effect = if value == "off" { "; the mod never runs the keepwarm check in this session" } else { "" };
+    format!("mod setting attend_mod.keepwarm {value}{from}{effect}")
 }
 
 /// `attend keepwarm check`: the sensor's judgment, once. Prints the
@@ -91,5 +129,34 @@ fn check(ident: &attend_presence::session::SessionIdentity) {
     }
     if let Some(line) = check_once(sid, &keepwarm_dir(), &ident.origin_path, sensor_trait::epoch_secs()) {
         println!("{line}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mod_setting_line;
+
+    fn settings(value: &str, layer: &str, file: Option<&str>) -> String {
+        let file = file.map_or("null".to_string(), |f| format!("\"{f}\""));
+        format!(r#"{{"view":"effective","keys":{{"attend_mod.keepwarm":{{"value":"{value}","default":"on","layer":"{layer}","file":{file}}}}}}}"#)
+    }
+
+    /// The clean-slate test's finding 6: the card names the mod's setting
+    /// apart from whether keepwarm is armed.
+    #[test]
+    fn the_mod_setting_line_names_the_value_and_where_it_came_from() {
+        assert_eq!(mod_setting_line(Some(&settings("on", "default", None))), "mod setting attend_mod.keepwarm on (default)");
+        assert_eq!(
+            mod_setting_line(Some(&settings("off", "project", Some("/p/.claude/ways.yaml")))),
+            "mod setting attend_mod.keepwarm off (from /p/.claude/ways.yaml); the mod never runs the keepwarm check in this session"
+        );
+        assert_eq!(
+            mod_setting_line(None),
+            "mod setting attend_mod.keepwarm unknown (ways settings could not be read)"
+        );
+        assert_eq!(
+            mod_setting_line(Some("not json")),
+            "mod setting attend_mod.keepwarm unknown (ways settings could not be read)"
+        );
     }
 }

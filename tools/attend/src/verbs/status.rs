@@ -134,7 +134,9 @@ fn reparented(pid: u32) -> bool {
 }
 
 /// Keepwarm's state for session `me` in one line: armed with its time left,
-/// stopped with the sensor's reason, or off (ADR-182).
+/// stopped with the sensor's reason, or not armed (ADR-182). "Not armed",
+/// never "off": `off` is a value of the attend mod's `attend_mod.keepwarm`
+/// setting, which says whether the mod runs the check at all.
 #[cfg(not(feature = "sensor-keepwarm"))]
 fn keepwarm_line(_me: &Session) -> String {
     "not built".to_string()
@@ -149,10 +151,10 @@ fn keepwarm_line(me: &Session) -> String {
     let now = sensor_trait::epoch_secs();
     let dir = crate::util::keepwarm_dir();
     match read_arm(&dir, &me.session_id) {
-        Some(a) if a.deadline > now => format!("on, {} left", fmt_duration(a.deadline - now)),
+        Some(a) if a.deadline > now => format!("armed, {} left", fmt_duration(a.deadline - now)),
         _ => match read_ledger(&dir, &me.session_id).and_then(|l| l.stopped) {
             Some(why) => format!("stopped, {why}"),
-            None => "off".to_string(),
+            None => "not armed".to_string(),
         },
     }
 }

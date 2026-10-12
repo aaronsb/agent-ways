@@ -70,7 +70,7 @@ model       claude-opus-5
 state       warm, 38m left
 context     182400 tokens
 cold cost   $1.82 to re-write it (warm turn $0.09)
-keepwarm    on, 5h12m left · wake in 28m
+keepwarm    armed, 5h12m left · wake in 28m
 break-even  up to 20 wakes at the read rate cost one cold write, about 16h40m of idle at one wake per 50m
 session     1 cold write paid, $1.64
 ```
@@ -79,9 +79,12 @@ session     1 cold write paid, $1.64
 |---|---|
 | `state` | `warm` with the time left on the cache hour, `COLD` with the time since the last request, or no request yet |
 | `cold cost` | what rewriting the current context would cost, and what one warm turn costs |
-| `keepwarm` | `on` with the window left and the next wake; `stopped` with the reason; or `off` |
+| `keepwarm` | `armed` with the window left and the next wake; `stopped` with the reason; or `not armed` |
+| `mod setting` | only in a session the attend mod hosts: the effective `attend_mod.keepwarm` setting and the file that set it. With `off` the mod never runs the check, so nothing arms or wakes in that session |
 | `break-even` | how many wakes cost the same as one rewrite, and how much idle time that covers; left out for a model with no price |
 | `session` | the cold writes this session has paid and their total |
+
+The `keepwarm` line says `armed` and `not armed`, never `on` and `off`: those are the values of the mod's `attend_mod.keepwarm` setting, which says whether the check runs at all, not whether a window is armed now.
 
 `attend status` shows the `keepwarm` line on its own.
 
