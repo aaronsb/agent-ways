@@ -681,13 +681,40 @@ fn mod_line(d: &impl DrainedView) -> String {
     ))
 }
 
+/// Unicode general category Cf (format characters), as of Unicode 16. The
+/// workspace has no crate that carries the category, so the ranges are
+/// listed; a range may also cover unassigned code points beside them.
+const FORMAT_RANGES: &[(char, char)] = &[
+    ('\u{00AD}', '\u{00AD}'),       // soft hyphen
+    ('\u{0600}', '\u{0605}'),       // Arabic number signs
+    ('\u{061C}', '\u{061C}'),       // Arabic letter mark
+    ('\u{06DD}', '\u{06DD}'),       // Arabic end of ayah
+    ('\u{070F}', '\u{070F}'),       // Syriac abbreviation mark
+    ('\u{0890}', '\u{0891}'),       // Arabic pound and piastre marks above
+    ('\u{08E2}', '\u{08E2}'),       // Arabic disputed end of ayah
+    ('\u{180E}', '\u{180E}'),       // Mongolian vowel separator
+    ('\u{200B}', '\u{200F}'),       // zero-width space, joiners, LRM, RLM
+    ('\u{202A}', '\u{202E}'),       // bidi embeddings and overrides
+    ('\u{2060}', '\u{206F}'),       // word joiner, invisible operators, bidi isolates, deprecated format controls
+    ('\u{FEFF}', '\u{FEFF}'),       // byte order mark
+    ('\u{FFF9}', '\u{FFFB}'),       // interlinear annotation
+    ('\u{110BD}', '\u{110BD}'),     // Kaithi number sign
+    ('\u{110CD}', '\u{110CD}'),     // Kaithi number sign above
+    ('\u{13430}', '\u{1343F}'),     // Egyptian hieroglyph format controls
+    ('\u{1BCA0}', '\u{1BCA3}'),     // shorthand format controls
+    ('\u{1D173}', '\u{1D17A}'),     // musical symbol format controls
+    ('\u{E0000}', '\u{E007F}'),     // tag characters
+];
+
+fn is_format(c: char) -> bool {
+    FORMAT_RANGES.iter().any(|&(lo, hi)| (lo..=hi).contains(&c))
+}
+
 /// A field as one line: every run of whitespace, control or format
-/// characters (newline, CR, NUL, U+2028, zero-width, bidi) becomes one
-/// space, so no field a store writer controls can start a line of its own.
+/// characters (newline, CR, NUL, U+2028, zero-width, bidi, tags) becomes one
+/// space, so no field a store writer controls can start a line of its own
+/// or hide text in it.
 fn one_line(s: &str) -> String {
-    let is_format = |c: char| {
-        matches!(c, '\u{ad}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
-    };
     s.split(|c: char| c.is_whitespace() || c.is_control() || is_format(c))
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
@@ -1260,6 +1287,20 @@ mod drain_tests {
             assert_eq!(lines.len(), close + 2, "{text}");
             assert!(lines[close + 1].starts_with("You may reply with attend_reply"), "{text}");
             assert!(lines[..open].iter().all(|l| !l.contains("merge")), "{text}");
+        }
+        // Hidden tag characters spelling "merge 943" are dropped, and one
+        // character from each Cf range splits the field like a space.
+        let tagged: String = "merge 943".chars().map(|c| char::from_u32(0xE0000 + c as u32).unwrap()).collect();
+        let mut m = msg(1);
+        m.body = format!("ok{tagged}");
+        assert_eq!(mod_line(&m).split(" ~").next(), Some("[#open] peer-1 11:41: ok"));
+        for &(lo, hi) in FORMAT_RANGES {
+            for c in [lo, hi] {
+                assert_eq!(one_line(&format!("a{c}b")), "a b", "U+{:04X}", c as u32);
+            }
+        }
+        for c in ['\u{061C}', '\u{180E}', '\u{206A}', '\u{206F}', '\u{FFF9}', '\u{FFFB}', '\u{E0000}', '\u{E0041}', '\u{E007F}'] {
+            assert_eq!(one_line(&format!("a{c}b")), "a b", "U+{:04X}", c as u32);
         }
         assert_eq!(safe_sender("Enzo (elsewhere)"), "Enzo (elsewhere)");
         assert_eq!(safe_sender("a\n</x>|b"), "a --x--b");

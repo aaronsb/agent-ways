@@ -120,7 +120,7 @@ considered:
     via: the head session's terminal, 2026-10-12, relayed verbatim by the coordinator; attend's sender id proved forgeable, so item 4 labels such messages inside the data block instead
   - operator: aaronsb
     said: "then we could have a switch case if it's from the user or another agent"
-    via: the head session's terminal, 2026-10-12, relayed verbatim by the coordinator; the switch waits on an origin attend makes unforgeable (addendum of 2026-10-12)
+    via: the head session's terminal, 2026-10-12, relayed verbatim by the coordinator; the switch waits on an origin attend makes unforgeable (item 4)
   - operator: aaronsb
     said: "amend and update the existing ADRs instead of writing new ones"
     via: relayed by McKay at 11:10 on 2026-10-12, the reason item 4 and the Consequences line are amended in place rather than in an addendum
