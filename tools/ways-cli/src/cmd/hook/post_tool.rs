@@ -6,7 +6,6 @@
 //! (`show::way_scored`), so a reactive way does not fire during its refire
 //! window, and they share one context budget.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -94,10 +93,11 @@ fn requests_within(checks: &[Postcheck], payload: &str, session_id: &str, deadli
             // Written from its own thread: a payload larger than the pipe
             // buffer would otherwise block on a postcheck that never reads.
             // A postcheck that exits or is killed closes the pipe, and the
-            // write ends with an error, which is not one.
+            // write ends with an error, which is not one; under the default
+            // SIGPIPE a bare write would end `ways` instead.
             let payload = Arc::clone(&payload);
             std::thread::spawn(move || {
-                let _ = stdin.write_all(payload.as_bytes());
+                let _ = agent_fmt::write_to_child(&mut stdin, payload.as_bytes());
             });
         }
         running.push((i, child));
@@ -261,5 +261,35 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(3), "took {:?}", t.elapsed());
         assert_eq!(got, vec!["fast".to_string(), "deaf".to_string()]);
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// `ways` runs with the default SIGPIPE, which the test harness does not.
+    /// The test reruns itself in a child that sets it, and the child feeds a
+    /// payload larger than the pipe buffer to a postcheck that exits unread.
+    #[test]
+    fn a_postcheck_that_exits_unread_does_not_end_ways_under_the_default_sigpipe() {
+        const CHILD: &str = "WAYS_TEST_POSTCHECK_SIGPIPE";
+        let name = "cmd::hook::post_tool::tests::a_postcheck_that_exits_unread_does_not_end_ways_under_the_default_sigpipe";
+        if std::env::var_os(CHILD).is_some() {
+            agent_fmt::exit_quietly_on_closed_pipe();
+            let base = std::env::temp_dir().join(format!("ways-postcheck-sigpipe-{}", std::process::id()));
+            let checks = vec![Postcheck { way_id: "deaf".into(), script: script(&base, "deaf", "exit 0", 0o755), runs: true }];
+            let got = requests_within(&checks, &"x".repeat(1 << 20), "s", Duration::from_secs(5));
+            // The writer thread outlives the postcheck: give its write time
+            // to meet the closed pipe.
+            std::thread::sleep(Duration::from_millis(300));
+            std::fs::remove_dir_all(&base).ok();
+            assert_eq!(got, vec!["deaf".to_string()]);
+            return;
+        }
+        use std::os::unix::process::ExitStatusExt;
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads", "1"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.signal(), None, "the child ended by a signal: {:?}", out.status);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("1 passed"), "the child ran the test");
     }
 }

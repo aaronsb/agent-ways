@@ -21,3 +21,7 @@ clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 unicode-width = "0.2"
 vte = { version = "0.15", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+# SIGPIPE back to its default, so `tui-harness ls | head` ends quietly.
+libc = "0.2"

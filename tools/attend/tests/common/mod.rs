@@ -100,7 +100,7 @@ impl Fixture {
         self.cache().join("enrolled").join(sid)
     }
 
-    fn command(&self) -> Command {
+    pub fn command(&self) -> Command {
         self.command_from(Path::new(env!("CARGO_BIN_EXE_attend")))
     }
 

@@ -1869,6 +1869,7 @@ dependencies = [
  "anyhow",
  "clap",
  "image",
+ "libc",
  "unicode-width",
  "vte",
 ]

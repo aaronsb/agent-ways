@@ -121,6 +121,12 @@ fn events(tokens: &[String]) -> Vec<agent_tui::ratatui::crossterm::event::Event>
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Only the print-and-exit answers take the default SIGPIPE. The screen
+    // keeps Rust's: a failed write comes back as an error, so the terminal
+    // is put back before the process ends.
+    if args.iter().any(|a| matches!(a.as_str(), "--version" | "-V" | "--help" | "-h")) {
+        agent_fmt::exit_quietly_on_closed_pipe();
+    }
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("attend-chat {} ({})", env!("CARGO_PKG_VERSION"), env!("ATTEND_CHAT_COMMIT"));
         return;

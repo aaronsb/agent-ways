@@ -123,7 +123,14 @@ enum KeyAction {
 }
 
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    let cli = Cli::parse();
+    // The reports end quietly on a closed pipe. `serve` keeps Rust's
+    // default: a client that gives up at its deadline closes the socket
+    // before the reply, and that write must fail, not end the agent.
+    if !matches!(cli.command, Command::Serve { .. }) {
+        agent_fmt::exit_quietly_on_closed_pipe();
+    }
+    match run(cli) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("ways agent: {e:#}");
@@ -506,7 +513,9 @@ const CC_DISABLED: libc::cc_t = 0xff;
 #[cfg(unix)]
 fn read_hidden_line() -> Result<String> {
     use std::io::Write;
-    const SIGNALS: [libc::c_int; 3] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP];
+    // SIGPIPE too: the dots go to stderr, and a closed stderr must not end
+    // the prompt with the terminal raw.
+    const SIGNALS: [libc::c_int; 4] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGPIPE];
     // SAFETY: termios calls on stdin with a struct tcgetattr fills; the
     // original settings are restored on every path, including a signal
     // through the handler above. Echo is never left on: a failed switch reads

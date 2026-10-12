@@ -1137,14 +1137,8 @@ enum TargetCommand {
 }
 
 fn main() -> Result<()> {
-    // Rust ignores SIGPIPE, so `ways settings | head` panicked on the first
-    // print after `head` closed the pipe. The default disposition ends the
-    // process quietly, as every other Unix filter does.
-    #[cfg(unix)]
-    // SAFETY: setting a signal disposition before any thread starts.
-    unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-    }
+    // `ways settings | head` ends quietly once `head` closes the pipe.
+    agent_fmt::exit_quietly_on_closed_pipe();
     // Windows' default main-thread stack is 1 MB; Linux's is 8 MB. Some commands
     // (e.g. `corpus`, `scan`) use a large-enough startup frame to overflow 1 MB,
     // crashing the spawned release binary immediately with STATUS_STACK_OVERFLOW

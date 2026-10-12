@@ -107,6 +107,15 @@ enum Cmd {
 }
 
 fn main() {
+    // Rust ignores SIGPIPE, so `tui-harness ls | head` panicked on the first
+    // print after `head` closed the pipe. The default disposition ends the
+    // process quietly, as every other Unix filter does. The tool depends on
+    // none of the suite's crates, so it carries agent-fmt's two lines itself.
+    #[cfg(unix)]
+    // SAFETY: setting a signal disposition before any thread starts.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
     // The pane's process for every launch: `tui-harness __exec-env FILE --
     // CMD...`. Handled before clap so no argument of CMD is ever parsed.
     let args: Vec<OsString> = std::env::args_os().collect();
