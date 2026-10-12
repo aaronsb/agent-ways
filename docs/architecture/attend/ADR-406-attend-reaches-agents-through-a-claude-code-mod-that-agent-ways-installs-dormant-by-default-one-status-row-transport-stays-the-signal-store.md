@@ -124,6 +124,9 @@ considered:
   - operator: aaronsb
     said: "amend and update the existing ADRs instead of writing new ones"
     via: relayed by McKay at 11:10 on 2026-10-12, the reason item 4 and the Consequences line are amended in place rather than in an addendum
+  - operator: aaronsb
+    said: "let's fix the fence"
+    via: the head session's terminal, 2026-10-12
 status: accepted
 date: 2026-10-10
 deciders:
@@ -190,7 +193,7 @@ The operator set the constraints. Attend matters when several agents work on rel
 
    The full preamble carries tool usage only (the line format, `attend_reply` and its `re` handle, `attend_send`), between the closing tag and the last line. It goes with the first delivery of a session and the first delivery after a compaction or a `/clear`, and then with the first delivery once a configured number of turns has passed since it last showed (default 20), the way a way re-discloses after its refire span.
 
-   Without Claude Code's frame, the tags are the whole boundary between data and instruction, and every field a store writer controls lands inside them. The mod makes each field one line at the sink (whitespace, control and format characters become a space), so no sender name, sender id, scope, time or body can start a line of its own, and it replaces every `<` inside the block with `‹`, so no variant of the closing tag, whatever its spacing or case, ends the block early. The Stop-hook drain's mod format (item 9) sanitises its lines the same way and keeps the sender to a safe charset.
+   Without Claude Code's frame, the tags are the whole boundary between data and instruction, and every field a store writer controls lands inside them. The mod makes each field one line at the sink (whitespace, control and format characters become a space), so no sender name, sender id, scope, time or body can start a line of its own, and it replaces a `<` inside the block with `‹` when, after optional whitespace, a `/` or `attend` in any case follows it. No variant of the closing tag or of the opening tag, whatever its spacing or case, can then end the block early or open a second one, and every other `<` (`<cwd>`, `x < y`, `Vec<u8>`) arrives as written. The Stop-hook drain's mod format (item 9) sanitises its lines the same way and keeps the sender to a safe charset.
 
    A message whose sender id is `external:<user>[@terminal]` (attend-chat, or `attend send` from a plain terminal) carries `(from <user> via attend-chat or a terminal, as reported by attend)` on its line, inside the tags, the user restricted to `[A-Za-z0-9_.-]`. It is not presented as the operator's words, because attend does not make that id unforgeable: the sender id is written into a plain signal file by whichever process sends, `attend send` falls back to `external:$USER` whenever it cannot resolve a Claude session, `USER` is the sender's own environment, and any process that can write the store can write any id. Switching between the user and another agent, as the operator asked, needs an origin attend derives and a peer cannot produce: for example attend-chat signing its sends with a key only it holds, or a store write path only attend-chat's process can use, checked by the drain before it reports the sender as a person.
 
