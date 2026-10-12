@@ -1,39 +1,40 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
+|▸≡   ▽  1 #deploy   ♦  2 #infra    +   — rollout coordination   ◆  #open   ⋯all |
 |┌pick one: attend-chat──┐──────────────────────────────────────────────────────╮|
 |│   Theme ▸             │                                                      │|
-|│   Keybinding set ▸    │                                                      │|
-|│   Mouse off at start  │───────────────────────────────────────────────────── │|
-|│   Show column         │ging                                                  │|
+|│   Keybinding set ▸    │───────────────────────────────────────────────────── │|
+|│   Mouse off at start  │ging                                                  │|
+|│   Show column         │                                                      │|
 |│   Settings…           │                                                      │|
 |│   Quit                │                                                      │|
 |└───────────────────────┘                                                      │|
-|│ ──────────────────────────────────────────────────────────────────────────── │|
-|│ the shell this ran under: /bin/sh                                            │|
-|│  file: sh                                                                    │|
 |│                                                                              │|
-|│  13:59  Laszlo  alpha                                                        │|
-|│ ──────────────────────────────────────────────────────────────────────────── │|
-|│ a longer message, so the feed shows how a body wraps beside its chip when it │|
-|│ runs past the width of the row it is given                                   │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
+|│                                                                              │|
 |│                                                                              │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│ >                                                                            │|
-|│                                                                       #open  │|
+|│                                                                     #deploy  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
 | pick   ↑↓ choose · Enter or click sets · Esc closes                            |
 styles
-  0   0-2   White Blue -
-  0   5-14  Black Cyan BOLD
-  0  17-18  Blue - BOLD
-  0  19-27  White Blue -
-  0  30-31  Red - -
-  0  32-42  White Blue -
-  0  45-46  Cyan - -
-  0  47-56  White Blue -
-  0  59-61  White Blue -
+  0   0-2   White Blue BOLD|REVERSED
+  0   5-6   Red - -
+  0   7-17  Black Cyan BOLD
+  0  20-21  Cyan - -
+  0  22-31  White Blue -
+  0  34-36  White Blue -
+  0  37-60  - - DIM
+  0  64-65  Blue - BOLD
+  0  66-72  White Blue -
+  0  74-79  White DarkGray -
   1   0-0   LightBlue - -
   1   1-21  LightBlue - BOLD
   1  22-24  LightBlue - -
@@ -41,14 +42,14 @@ styles
   2   0-0   LightBlue - -
   2   1-23  - - BOLD|REVERSED
   2  24-24  LightBlue - -
+  2  25-77  White DarkGray DIM
   2  79-79  - - DIM
   3   0-0   LightBlue - -
   3  24-24  LightBlue - -
-  3  25-77  White DarkGray DIM
+  3  25-77  - - DIM
   3  79-79  - - DIM
   4   0-0   LightBlue - -
   4  24-24  LightBlue - -
-  4  25-77  - - DIM
   4  79-79  - - DIM
   5   0-0   LightBlue - -
   5  24-24  LightBlue - -
@@ -60,25 +61,18 @@ styles
   7  24-24  LightBlue - -
   7  79-79  - - DIM
   8   0-24  LightBlue - -
-  8  25-77  White DarkGray DIM
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9   2-77  - - DIM
   9  79-79  - - DIM
  10   0-0   - - DIM
  10  79-79  - - DIM
  11   0-0   - - DIM
- 11   2-11  White DarkGray -
  11  79-79  - - DIM
  12   0-0   - - DIM
  12  79-79  - - DIM
  13   0-0   - - DIM
- 13   2-8   White DarkGray -
- 13   9-16  Black Cyan -
- 13  17-77  White DarkGray DIM
  13  79-79  - - DIM
  14   0-0   - - DIM
- 14   2-77  - - DIM
  14  79-79  - - DIM
  15   0-0   - - DIM
  15  79-79  - - DIM
@@ -87,15 +81,14 @@ styles
  17   0-0   - - DIM
  17  79-79  - - DIM
  18   0-79  - - DIM
- 19   0-79  Cyan - -
- 20   0-0   Cyan - -
- 20   2-3   Cyan - -
- 20   4-4   - - REVERSED
- 20  79-79  Cyan - -
- 21   0-0   Cyan - -
- 21  71-77  White Blue -
- 21  79-79  Cyan - -
- 22   0-79  Cyan - -
+ 19   0-79  - - DIM
+ 20   0-0   - - DIM
+ 20   2-3   - - DIM
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
+ 21  69-77  White Blue -
+ 21  79-79  - - DIM
+ 22   0-79  - - DIM
  23   1-7   Cyan - BOLD
  23   9-14  LightCyan - -
  23  16-21  LightYellow - -

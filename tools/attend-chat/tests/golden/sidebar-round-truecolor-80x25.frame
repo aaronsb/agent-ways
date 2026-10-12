@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +       |
+| ≡   ▽  1 #deploy   ♦  2 #infra    +                ◆  #open   ⋯all |
 | Agents 2/4              │╭────────────────────────────────────────────────────╮|
 |  Laszlo  alpha    ● ││ production at 15:00                                │|
 |  Wells  beta      ● ││                                                    │|
@@ -23,29 +23,29 @@ agent-tui frame 80x25
 |                         ││ >                                                  │|
 |                         ││                                             #open  │|
 |                         │╰────────────────────────────────────────────────────╯|
-| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · F2 ↓ column     |
+| chat  mouse on (M-m) │ F1 keys · Shift+Tab or ↑ at the top leaves the box    |
 styles
   0   0-0   #bfa2c3 - -
   0   1-3   #2e3440 #bfa2c3 -
   0   4-4   #bfa2c3 - -
-  0   7-7   #c99fc1 - -
-  0   8-17  #2e3440 #c99fc1 BOLD
-  0  18-18  #c99fc1 - -
-  0  21-22  #ffb3a1 - BOLD
-  0  23-23  #bfa2c3 - -
-  0  24-32  #2e3440 #bfa2c3 -
-  0  33-33  #bfa2c3 - -
-  0  36-37  #e07b7b - -
-  0  38-38  #bfa2c3 - -
-  0  39-49  #2e3440 #bfa2c3 -
-  0  50-50  #bfa2c3 - -
-  0  53-54  #b0bec5 - -
-  0  55-55  #bfa2c3 - -
-  0  56-65  #2e3440 #bfa2c3 -
-  0  66-66  #bfa2c3 - -
-  0  69-69  #bfa2c3 - -
-  0  70-72  #2e3440 #bfa2c3 -
-  0  73-73  #bfa2c3 - -
+  0   7-8   #e07b7b - -
+  0   9-9   #bfa2c3 - -
+  0  10-20  #2e3440 #bfa2c3 -
+  0  21-21  #bfa2c3 - -
+  0  24-25  #b0bec5 - -
+  0  26-26  #bfa2c3 - -
+  0  27-36  #2e3440 #bfa2c3 -
+  0  37-37  #bfa2c3 - -
+  0  40-40  #bfa2c3 - -
+  0  41-43  #2e3440 #bfa2c3 -
+  0  44-44  #bfa2c3 - -
+  0  60-61  #ffb3a1 - BOLD
+  0  62-62  #bfa2c3 - -
+  0  63-69  #2e3440 #bfa2c3 -
+  0  70-70  #bfa2c3 - -
+  0  72-72  #434c5e - -
+  0  73-78  #d8dee9 #434c5e BOLD
+  0  79-79  #434c5e - -
   1   0-10  #7c8baa - BOLD
   1  25-79  #434c5e - -
   2   1-1   #c67eff - -
@@ -189,9 +189,5 @@ styles
  24  23-25  #434c5e - -
  24  26-28  #c99fc1 - -
  24  29-35  #7c8baa - ITALIC
- 24  36-41  #c99fc1 - -
- 24  42-48  #7c8baa - ITALIC
- 24  49-52  #c99fc1 - -
- 24  53-63  #7c8baa - ITALIC
- 24  64-68  #c99fc1 - -
- 24  69-74  #7c8baa - ITALIC
+ 24  36-45  #c99fc1 - -
+ 24  46-75  #7c8baa - ITALIC

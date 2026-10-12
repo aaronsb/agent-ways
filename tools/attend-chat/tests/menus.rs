@@ -289,20 +289,22 @@ fn settings_opens_the_listing_in_a_modal() {
 #[test]
 fn a_click_on_the_tab_of_a_menu_docked_at_its_row_only_closes_it() {
     let mut c = chat();
-    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
-    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
     let ((_, y), _) = menu(&mut c).expect("#deploy's menu");
     let (_, row) = row_of(&mut c, "#deploy");
     assert_eq!(y, row as usize + 1, "docked under the column's row");
-    let tab = at(&mut c, "3 #deploy");
+    let tab = at(&mut c, "1 #deploy");
     click(&mut c, tab);
     assert!(menu(&mut c).is_none(), "closed, and not opened again under the tab: {:#?}", rows(&mut c));
 
-    // The other way round: docked under the tab, closed by its row.
+    // The other way round: docked under the tab, closed by its row. The
+    // menu under the tab covers the column's rows, so the row is found
+    // before it opens.
+    let deploy = row_of(&mut c, "#deploy");
     click(&mut c, tab);
     let ((_, y), _) = menu(&mut c).expect("#deploy's menu");
     assert_eq!(y, 1, "docked under the tab");
-    let deploy = row_of(&mut c, "#deploy");
     click(&mut c, deploy);
     assert!(menu(&mut c).is_none(), "closed, and not opened again under the row: {:#?}", rows(&mut c));
 }
@@ -318,7 +320,7 @@ fn the_exit_guard_names_a_lent_box_for_what_it_holds() {
     }
     press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
     let shown = rows(&mut c).join("\n");
-    assert!(shown.contains("a new channel's name being typed"), "{shown}");
+    assert!(shown.contains("new channel name being typed"), "{shown}");
     assert!(!shown.contains("a draft in the compose box"), "{shown}");
 
     let mut c = chat();
@@ -330,7 +332,7 @@ fn the_exit_guard_names_a_lent_box_for_what_it_holds() {
     }
     press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
     let shown = rows(&mut c).join("\n");
-    assert!(shown.contains("a description of #deploy being typed"), "{shown}");
+    assert!(shown.contains("describe #deploy being typed"), "{shown}");
 
     // A draft is still a draft.
     let mut c = chat();

@@ -1,15 +1,15 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coord…|
-|╭─────────────────────────────┌pick one: #deploy───────────────────┐───────────╮|
-|│  ▽ 13:55  Wells  beta       │   Invite agent ▸                   │           │|
-|│ ────────────────────────────│   Add agent       needs ADR-404 D1 │────────── │|
-|│ rollout is green on staging │   Remove agent ▸                   │           │|
-|│ production at 15:00         │   Describe…                        │           │|
-|│                             │   Clear history                    │           │|
-|│                             │   Join                             │           │|
-|│                             │   Seal            needs ADR-404 D4 │           │|
-|│                             │   Delete channel                   │           │|
-|│                             └────────────────────────────────────┘           │|
+| ≡   ▽  1 #deploy   ♦  2 #infra    +   — rollout coordination   ◆  #open   ⋯all |
+|╭────┌pick one: #deploy───────────────────┐────────────────────────────────────╮|
+|│  ▽ │   Invite agent ▸                   │                                    │|
+|│ ───│   Add agent       needs ADR-404 D1 │─────────────────────────────────── │|
+|│ rol│   Remove agent ▸                   │                                    │|
+|│ pro│   Describe…                        │                                    │|
+|│    │   Clear history                    │                                    │|
+|│    │   Join                             │                                    │|
+|│    │   Seal            needs ADR-404 D4 │                                    │|
+|│    │   Delete channel                   │                                    │|
+|│    └────────────────────────────────────┘                                    │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -26,63 +26,61 @@ agent-tui frame 80x25
 | pick   ↑↓ choose · Enter or click sets · Esc closes                            |
 styles
   0   0-2   White Blue -
-  0   5-14  White Blue -
-  0  17-18  Blue - BOLD
-  0  19-27  White Blue -
-  0  30-31  Red - -
-  0  32-42  Black Cyan BOLD
-  0  45-46  Cyan - -
-  0  47-56  White Blue -
-  0  59-61  White Blue -
-  0  62-79  - - DIM
-  1   0-29  - - DIM
-  1  30-30  LightBlue - -
-  1  31-47  LightBlue - BOLD
-  1  48-67  LightBlue - -
-  1  68-79  - - DIM
+  0   5-6   Red - -
+  0   7-17  Black Cyan BOLD
+  0  20-21  Cyan - -
+  0  22-31  White Blue -
+  0  34-36  White Blue -
+  0  37-60  - - DIM
+  0  64-65  Blue - BOLD
+  0  66-72  White Blue -
+  0  74-79  White DarkGray -
+  1   0-4   - - DIM
+  1   5-5   LightBlue - -
+  1   6-22  LightBlue - BOLD
+  1  23-42  LightBlue - -
+  1  43-79  - - DIM
   2   0-0   - - DIM
-  2   2-10  White DarkGray -
-  2  11-17  Black LightCyan -
-  2  18-29  White DarkGray DIM
-  2  30-30  LightBlue - -
-  2  31-66  - - BOLD|REVERSED
-  2  67-67  LightBlue - -
-  2  68-77  White DarkGray DIM
+  2   2-4   White DarkGray -
+  2   5-5   LightBlue - -
+  2   6-41  - - BOLD|REVERSED
+  2  42-42  LightBlue - -
+  2  43-77  White DarkGray DIM
   2  79-79  - - DIM
   3   0-0   - - DIM
-  3   2-29  - - DIM
-  3  30-30  LightBlue - -
-  3  31-66  - - DIM
-  3  67-67  LightBlue - -
-  3  68-77  - - DIM
+  3   2-4   - - DIM
+  3   5-5   LightBlue - -
+  3   6-41  - - DIM
+  3  42-42  LightBlue - -
+  3  43-77  - - DIM
   3  79-79  - - DIM
   4   0-0   - - DIM
-  4  30-30  LightBlue - -
-  4  67-67  LightBlue - -
+  4   5-5   LightBlue - -
+  4  42-42  LightBlue - -
   4  79-79  - - DIM
   5   0-0   - - DIM
-  5  30-30  LightBlue - -
-  5  67-67  LightBlue - -
+  5   5-5   LightBlue - -
+  5  42-42  LightBlue - -
   5  79-79  - - DIM
   6   0-0   - - DIM
-  6  30-30  LightBlue - -
-  6  67-67  LightBlue - -
+  6   5-5   LightBlue - -
+  6  42-42  LightBlue - -
   6  79-79  - - DIM
   7   0-0   - - DIM
-  7  30-30  LightBlue - -
-  7  67-67  LightBlue - -
+  7   5-5   LightBlue - -
+  7  42-42  LightBlue - -
   7  79-79  - - DIM
   8   0-0   - - DIM
-  8  30-30  LightBlue - -
-  8  31-66  - - DIM
-  8  67-67  LightBlue - -
+  8   5-5   LightBlue - -
+  8   6-41  - - DIM
+  8  42-42  LightBlue - -
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9  30-30  LightBlue - -
-  9  67-67  LightBlue - -
+  9   5-5   LightBlue - -
+  9  42-42  LightBlue - -
   9  79-79  - - DIM
  10   0-0   - - DIM
- 10  30-67  LightBlue - -
+ 10   5-42  LightBlue - -
  10  79-79  - - DIM
  11   0-0   - - DIM
  11  79-79  - - DIM
@@ -99,15 +97,14 @@ styles
  17   0-0   - - DIM
  17  79-79  - - DIM
  18   0-79  - - DIM
- 19   0-79  Cyan - -
- 20   0-0   Cyan - -
- 20   2-3   Cyan - -
- 20   4-4   - - REVERSED
- 20  79-79  Cyan - -
- 21   0-0   Cyan - -
+ 19   0-79  - - DIM
+ 20   0-0   - - DIM
+ 20   2-3   - - DIM
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
  21  69-77  White Blue -
- 21  79-79  Cyan - -
- 22   0-79  Cyan - -
+ 21  79-79  - - DIM
+ 22   0-79  - - DIM
  23   1-7   Cyan - BOLD
  23   9-14  LightCyan - -
  23  16-21  LightYellow - -

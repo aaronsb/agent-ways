@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                                                           |
+| ≡   ▽  1 #deploy   ♦  2 #infra    +                                                                    ◆  #open   ⋯all |
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
 |│  13:50  Laszlo  alpha                                                                                                │|
 |│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │|
@@ -38,17 +38,17 @@ agent-tui frame 120x40
 |│                                                                                                               #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                                                                  |
-| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · Alt+1-9 tab (again: menu) · F2 tabs    |
+| chat  mouse on (M-m) │ F1 keys · Shift+Tab or ↑ at the top leaves the box · Enter send · Tab complete · Alt+0-9 tab    |
 styles
   0   0-2   White Blue -
-  0   5-14  Black Cyan BOLD
-  0  17-18  Blue - BOLD
-  0  19-27  White Blue -
-  0  30-31  Red - -
-  0  32-42  White Blue -
-  0  45-46  Cyan - -
-  0  47-56  White Blue -
-  0  59-61  White Blue -
+  0   5-6   Red - -
+  0   7-17  White Blue -
+  0  20-21  Cyan - -
+  0  22-31  White Blue -
+  0  34-36  White Blue -
+  0 104-105 Blue - BOLD
+  0 106-112 White Blue -
+  0 114-119 White DarkGray BOLD
   1   0-119 - - DIM
   2   0-0   - - DIM
   2   2-8   White DarkGray -
@@ -145,13 +145,11 @@ styles
  39  21-23  - - DIM
  39  24-26  Cyan - -
  39  27-33  - - DIM|ITALIC
- 39  34-39  Cyan - -
- 39  40-46  - - DIM|ITALIC
- 39  47-50  Cyan - -
- 39  51-61  - - DIM|ITALIC
- 39  62-71  Cyan - -
- 39  72-80  - - DIM|ITALIC
- 39  81-88  Cyan - -
- 39  89-108 - - DIM|ITALIC
- 39 109-111 Cyan - -
- 39 112-115 - - DIM|ITALIC
+ 39  34-43  Cyan - -
+ 39  44-76  - - DIM|ITALIC
+ 39  77-82  Cyan - -
+ 39  83-89  - - DIM|ITALIC
+ 39  90-93  Cyan - -
+ 39  94-104 - - DIM|ITALIC
+ 39 105-112 Cyan - -
+ 39 113-115 - - DIM|ITALIC

@@ -180,7 +180,7 @@ mod on_a_terminal {
             }
         });
         let pty = Pty { child, master: Some(std::fs::File::from(master)), seen, stop, reader: Some(handle), home };
-        pty.wait_for(b"merged");
+        pty.wait_for("⋯all".as_bytes());
         pty
     }
 

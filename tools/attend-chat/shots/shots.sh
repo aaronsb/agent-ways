@@ -59,35 +59,36 @@ click        | base  | wait:#infra click:#infra click:#infra wait:pick
 tab          | base  | wait:#deploy click:#deploy click:#deploy wait:pick
 side-show    | base  | wait:Agents side:#infra
 side-menu    | base  | wait:Agents side:#infra side:#infra wait:pick
-key-dock     | base  | wait:Agents M-2 M-2 wait:pick
-foot-keys    | many  | wait:Agents F2 Down End Up Enter Enter wait:pick
+key-dock     | base  | wait:Agents M-1 M-1 wait:pick
+foot-keys    | many  | wait:Agents F2 Down End Up Enter wait:pick
 foot-click   | many  | wait:Agents F2 Down End Escape side:#infra side:#infra wait:pick
-keys         | base  | wait:Agents F2 Down Down wait:↑↓_move
-menu-keys    | base  | wait:Agents F2 Down Down Enter Enter wait:pick
-focus-resize | base  | wait:Agents F2 Down Down wait:↑↓_move resize:70 gone:Agents
+keys         | base  | wait:Agents F2 Down Down wait:↑_↓_move
+menu-keys    | base  | wait:Agents F2 Down Down Enter wait:pick
+focus-resize | base  | wait:Agents F2 Down Down wait:↑_↓_move resize:70 gone:Agents
 agent-menu   | base  | wait:Agents side:○ wait:Address
 crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
 common       | base  | wait:Agents click:≡ wait:Hide_column
-clear-view   | base  | wait:merged click:merged wait:Clear_view Enter wait:clear_the_view?
+clear-view   | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:clear_the_view?
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
 own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
 quiet-send   | base  | wait:Agents side:○ wait:Address Enter text:are_you_there Enter wait:no_heartbeat
-paste-asked  | base  | wait:merged click:merged wait:Clear_view Enter wait:clear_the_view? paste:yes_please\\nsecond_line wait:kept
-ask          | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear
-ask-yes      | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear click:y_clear wait:cleared
-ask-no       | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear click:n_keep wait:kept
-ask-feed     | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear click:signing wait:kept
-ask-row      | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear side:#infra wait:kept
+paste-asked  | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:clear_the_view? paste:yes_please\\nsecond_line wait:kept
+ask          | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear
+ask-yes      | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:y_clear wait:cleared
+ask-no       | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:n_keep wait:kept
+ask-feed     | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:signing wait:kept
+ask-row      | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear side:#infra wait:kept
 ask-long     | base  | wait:#open click:#open click:#open wait:Clear_history Down Enter wait:y_clear
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
 menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
-prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc click:signing gone:new_channel
-lent-name    | base  | wait:Agents text:draft C-n wait:new_channel_name text:release
-lent-desc    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Describe wait:describe_#deploy text:rollouts
-lent-tab     | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc M-3 gone:new_channel_name
-lent-row     | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name Escape text:abc
+prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc click:Agents gone:new_channel
+entry-name   | base  | wait:Agents text:draft C-n wait:new_channel_name text:release
+entry-bad    | base  | wait:Agents text:draft C-n wait:new_channel_name text:no_spaces Enter wait:no_spaces
+entry-desc   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Describe wait:describe_#deploy text:_for_staging
+entry-tab    | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc click:1_#deploy gone:new_channel_name
+entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name Escape text:abc
 esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape gone:pick
 common-quit  | base  | wait:Agents click:≡ wait:Quit
 quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:discards
@@ -96,21 +97,41 @@ theme-sub    | base  | wait:Agents click:≡ wait:Theme click:Theme wait:theme_f
 keys-sub     | base  | wait:Agents click:≡ wait:Keybinding click:Keybinding wait:keybinding_set
 remove-sub   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Remove_agent wait:remove_from
 settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:sets_one
-tab-closes   | base  | wait:Agents M-3 M-3 wait:pick click:3_#deploy gone:pick
+tab-closes   | base  | wait:Agents M-1 M-1 wait:pick click:1_#deploy gone:pick
 guard-name   | base  | wait:Agents C-n wait:new_channel_name text:abc C-c wait:being_typed
 rclick-row   | base  | wait:Agents rside:#infra wait:pick_one:_#infra
 rclick-agent | base  | wait:Agents rside:● wait:Address
 rclick-name  | base  | wait:signing rfeed:gamma wait:Address
-flag-click   | base  | wait:Agents M-3 wait:rollout_is_green last:#deploy wait:pick_one:_#deploy
+flag-click   | base  | wait:Agents M-1 wait:rollout_is_green last:#deploy wait:pick_one:_#deploy
 flag-merged  | base  | wait:Agents last:#open wait:pick_one:_#open
 key-help     | base  | wait:Agents F1 wait:any_other_key
+key-help-nav | base  | wait:Agents BTab wait:Enter_sender F1 wait:any_other_key
 header       | base  | wait:signing_off
 header-long  | long  | wait:keeps_the_time
 header-human | own   | wait:watching_the
 header-pick  | base  | wait:signing_off click:signing_off
-header-chan  | base  | wait:Agents M-3 wait:rollout_is_green
-quit-lent    | base  | wait:Agents C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
+header-chan  | base  | wait:Agents M-1 wait:rollout_is_green
+quit-entry   | base  | wait:Agents text:half C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
 too-long     | base  | wait:Agents bigpaste:65537 wait:xxxxxxxxxx Enter wait:over_attend's_limit
+focus-compose | base  | wait:Agents wait:leaves_the_box
+focus-view   | base  | wait:Agents F2 wait:▸⋯all
+focus-open   | base  | wait:Agents F2 Left wait:▸#open
+focus-plus   | base  | wait:Agents F2 Left Left wait:▸+
+focus-tab    | base  | wait:Agents F2 Left Left Left Left wait:▸1_#deploy
+focus-common | base  | wait:Agents Down wait:▸≡
+focus-agent  | base  | wait:Agents F2 Down wait:_column_
+focus-row    | base  | wait:Agents F2 Down End Up wait:_column_
+focus-feed   | base  | wait:Agents BTab wait:_feed_
+focus-msg    | base  | wait:Agents BTab Up Up wait:select
+enter-view   | base  | wait:Agents F2 Enter wait:pick_one:_⋯all
+enter-row    | base  | wait:Agents F2 Down End Up Enter wait:pick_one:_#infra
+enter-agent  | base  | wait:Agents F2 Down Enter wait:Add_agent_to_chat
+enter-feed   | base  | wait:Agents BTab Enter wait:Add_agent_to_chat
+enter-plus   | base  | wait:Agents F2 Left Left Enter wait:new_channel_name
+add-menu     | base  | wait:Agents rside:● wait:Add_agent_to_chat
+add-pick     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel
+add-done     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel Enter wait:invite
+narrow-bar   | many  | wait:Agents resize:60 wait:⋯all
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy

@@ -139,7 +139,7 @@ fn a_right_click_on_a_senders_name_opens_the_agents_menu() {
 fn a_click_on_the_destination_flag_opens_the_menu_of_the_channel_it_names() {
     for b in [MouseButton::Left, MouseButton::Right] {
         let mut c = chat();
-        press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
+        press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
         assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
         let flag = cell(&mut c, "#deploy ", false);
         let flag = rows(&mut c).iter().enumerate().rev().find_map(|(y, r)| r.rfind("#deploy").map(|x| (r[..x].chars().count() as u16, y as u16))).unwrap_or(flag);
@@ -165,10 +165,10 @@ fn every_input_on_a_channel_reaches_the_same_state() {
     type Input = fn(&mut Chat);
     let inputs: [(&str, Input); 3] = [
         ("tab", |c| {
-            let t = at(c, "3 #deploy");
+            let t = at(c, "1 #deploy");
             click(c, t)
         }),
-        ("digit", |c| press(c, KeyCode::Char('3'), KeyModifiers::CONTROL)),
+        ("digit", |c| press(c, KeyCode::Char('1'), KeyModifiers::CONTROL)),
         ("row", |c| {
             let r = cell(c, "#deploy", true);
             click(c, r)
@@ -184,7 +184,7 @@ fn every_input_on_a_channel_reaches_the_same_state() {
     }
     for (how, at_) in [("tab", true), ("row", false)] {
         let mut c = chat();
-        let target = if at_ { at(&mut c, "3 #deploy") } else { cell(&mut c, "#deploy", true) };
+        let target = if at_ { at(&mut c, "1 #deploy") } else { cell(&mut c, "#deploy", true) };
         right(&mut c, target);
         let shown = menu(&mut c).map(|(t, _)| t);
         assert_eq!((c.foreground(), shown), (&Tab::Merged, Some("#deploy".into())), "{how}: a right click opens the menu, showing nothing");

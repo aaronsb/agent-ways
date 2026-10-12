@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
+| ≡   ▽  1 #deploy   ♦  2 #infra    +                            ◆  #open   ⋯all |
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│                                                                              │|
 |│  ▽ 13:55  Wells  beta                                                        │|
@@ -23,17 +23,17 @@ agent-tui frame 80x25
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
-| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
+| chat  mouse off (M-m) │ F1 keys · Shift+Tab or ↑ at the top leaves the box     |
 styles
   0   0-2   White Blue -
-  0   5-14  Black Cyan BOLD
-  0  17-18  Blue - BOLD
-  0  19-27  White Blue -
-  0  30-31  Red - -
-  0  32-42  White Blue -
-  0  45-46  Cyan - -
-  0  47-56  White Blue -
-  0  59-61  White Blue -
+  0   5-6   Red - -
+  0   7-17  White Blue -
+  0  20-21  Cyan - -
+  0  22-31  White Blue -
+  0  34-36  White Blue -
+  0  64-65  Blue - BOLD
+  0  66-72  White Blue -
+  0  74-79  White DarkGray BOLD
   1   0-79  - - DIM
   2   0-0   - - DIM
   2  79-79  - - DIM
@@ -96,9 +96,5 @@ styles
  24  22-24  - - DIM
  24  25-27  Cyan - -
  24  28-34  - - DIM|ITALIC
- 24  35-40  Cyan - -
- 24  41-47  - - DIM|ITALIC
- 24  48-51  Cyan - -
- 24  52-62  - - DIM|ITALIC
- 24  63-72  Cyan - -
- 24  73-78  - - DIM|ITALIC
+ 24  35-44  Cyan - -
+ 24  45-74  - - DIM|ITALIC

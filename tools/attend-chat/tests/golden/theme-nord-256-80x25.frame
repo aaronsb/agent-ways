@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
+| ≡   ▽  1 #deploy   ♦  2 #infra    +                            ◆  #open   ⋯all |
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│                                                                              │|
 |│  ▽ 13:55  Wells  beta                                                        │|
@@ -23,17 +23,17 @@ agent-tui frame 80x25
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
-| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll  |
+| chat  mouse on (M-m) │ F1 keys · Shift+Tab or ↑ at the top leaves the box      |
 styles
   0   0-2   i237 i249 -
-  0   5-14  i237 i181 BOLD
-  0  17-18  i217 - BOLD
-  0  19-27  i237 i249 -
-  0  30-31  i174 - -
-  0  32-42  i237 i249 -
-  0  45-46  i250 - -
-  0  47-56  i237 i249 -
-  0  59-61  i237 i249 -
+  0   5-6   i174 - -
+  0   7-17  i237 i249 -
+  0  20-21  i250 - -
+  0  22-31  i237 i249 -
+  0  34-36  i237 i249 -
+  0  64-65  i217 - BOLD
+  0  66-72  i237 i249 -
+  0  74-79  i253 i239 BOLD
   1   0-79  i239 - -
   2   0-0   i239 - -
   2  79-79  i239 - -
@@ -103,9 +103,5 @@ styles
  24  21-23  i239 - -
  24  24-26  i181 - -
  24  27-33  i103 - ITALIC
- 24  34-39  i181 - -
- 24  40-46  i103 - ITALIC
- 24  47-50  i181 - -
- 24  51-61  i103 - ITALIC
- 24  62-71  i181 - -
- 24  72-77  i103 - ITALIC
+ 24  34-43  i181 - -
+ 24  44-73  i103 - ITALIC

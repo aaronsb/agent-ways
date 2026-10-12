@@ -1,103 +1,104 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
+| ≡   ▽  1 #deploy   ♦  2 #infra    +                            ◆  #open   ⋯all |
 |┌keys · ↑↓ scroll · any other key closes───────────────────────────────────────┐|
-|│F1               keys                                                         │|
-|│Enter            send                                                         │|
-|│Tab              complete                                                     │|
-|│PgUp PgDn        scroll                                                       │|
-|│S-Enter M-Enter  new line                                                     │|
-|│← → Home End     move the cursor                                              │|
-|│Bksp Del         edit                                                         │|
-|│click a message  selects it; a chip completes; the compose box: the cursor    │|
-|│F3               show or hide the agents and channels column                  │|
-|│Alt+1-9          tab (again: menu)                                            │|
-|│F2               tabs                                                         │|
-|│Ctrl+T           the tab bar, as F2: ← → move, Enter its menu, Esc back       │|
-|│Ctrl+N           new channel, from the compose box or the tab bar             │|
-|│right-click      a tab, a row or a sender's name: its menu at once            │|
-|│M-m              mouse on or off (off lets the terminal select text)          │|
-|│Shift-drag       selects text while the mouse is on, in most terminals        │|
-|│middle-click     pastes only while the mouse is off                           │|
-|│^C               quit; asks first over a draft; so does ≡ → Quit              │|
-|│click            a channel shows it, again its menu; agent, flag: its menu    │|
-|│                                                                              │|
-|│help: chat                                                                    │|
+|│F1                 keys                                                       │|
+|│Shift+Tab          or ↑ at the top leaves the box                             │|
+|│Enter              send                                                       │|
+|│Tab                complete                                                   │|
+|│← →                move the cursor; outside the box, the element before or nex│|
+|│↑ ↓                between the box's lines; outside it, a column row or a feed│|
+|│Esc                clears the selection and the bar; outside the box, back to │|
+|│PgUp PgDn          scroll the feed                                            │|
+|│S-Enter M-Enter    new line                                                   │|
+|│Home End Bksp Del  edit in the box; Home and End jump in lists                │|
+|│click a message    selects it; a chip completes; the compose box: the cursor  │|
+|│F3                 show or hide the agents and channels column                │|
+|│Alt+0-9            tab (again: menu)                                          │|
+|│F2                 tabs                                                       │|
+|│Ctrl+T             the tab bar, as F2: ← → move, Enter its menu, Esc back     │|
+|│Ctrl+N             new channel, from the compose box or the tab bar           │|
+|│right-click        a tab, a row or a sender's name: its menu at once          │|
+|│M-m                mouse on or off (off lets the terminal select text)        │|
+|│Shift-drag         selects text while the mouse is on, in most terminals      │|
+|│middle-click       pastes only while the mouse is off                         │|
+|│^C                 quit; asks first over a draft; so does ≡ → Quit            │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
-| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll  |
+| chat  mouse on (M-m) │ F1 keys · Shift+Tab or ↑ at the top leaves the box      |
 styles
   0   0-2   White Blue -
-  0   5-14  Black Cyan BOLD
-  0  17-18  Blue - BOLD
-  0  19-27  White Blue -
-  0  30-31  Red - -
-  0  32-42  White Blue -
-  0  45-46  Cyan - -
-  0  47-56  White Blue -
-  0  59-61  White Blue -
+  0   5-6   Red - -
+  0   7-17  White Blue -
+  0  20-21  Cyan - -
+  0  22-31  White Blue -
+  0  34-36  White Blue -
+  0  64-65  Blue - BOLD
+  0  66-72  White Blue -
+  0  74-79  White DarkGray BOLD
   1   0-0   LightBlue - -
   1   1-39  LightBlue - BOLD
   1  40-79  LightBlue - -
   2   0-0   LightBlue - -
-  2   1-17  Cyan - -
+  2   1-19  Cyan - -
   2  79-79  LightBlue - -
   3   0-0   LightBlue - -
-  3   1-17  Cyan - -
+  3   1-19  Cyan - -
   3  79-79  LightBlue - -
   4   0-0   LightBlue - -
-  4   1-17  Cyan - -
+  4   1-19  Cyan - -
   4  79-79  LightBlue - -
   5   0-0   LightBlue - -
-  5   1-17  Cyan - -
+  5   1-19  Cyan - -
   5  79-79  LightBlue - -
   6   0-0   LightBlue - -
-  6   1-17  Cyan - -
+  6   1-19  Cyan - -
   6  79-79  LightBlue - -
   7   0-0   LightBlue - -
-  7   1-17  Cyan - -
+  7   1-19  Cyan - -
   7  79-79  LightBlue - -
   8   0-0   LightBlue - -
-  8   1-17  Cyan - -
+  8   1-19  Cyan - -
   8  79-79  LightBlue - -
   9   0-0   LightBlue - -
-  9   1-17  Cyan - -
+  9   1-19  Cyan - -
   9  79-79  LightBlue - -
  10   0-0   LightBlue - -
- 10   1-17  Cyan - -
+ 10   1-19  Cyan - -
  10  79-79  LightBlue - -
  11   0-0   LightBlue - -
- 11   1-17  Cyan - -
+ 11   1-19  Cyan - -
  11  79-79  LightBlue - -
  12   0-0   LightBlue - -
- 12   1-17  Cyan - -
+ 12   1-19  Cyan - -
  12  79-79  LightBlue - -
  13   0-0   LightBlue - -
- 13   1-17  Cyan - -
+ 13   1-19  Cyan - -
  13  79-79  LightBlue - -
  14   0-0   LightBlue - -
- 14   1-17  Cyan - -
+ 14   1-19  Cyan - -
  14  79-79  LightBlue - -
  15   0-0   LightBlue - -
- 15   1-17  Cyan - -
+ 15   1-19  Cyan - -
  15  79-79  LightBlue - -
  16   0-0   LightBlue - -
- 16   1-17  Cyan - -
+ 16   1-19  Cyan - -
  16  79-79  LightBlue - -
  17   0-0   LightBlue - -
- 17   1-17  Cyan - -
+ 17   1-19  Cyan - -
  17  79-79  LightBlue - -
  18   0-0   LightBlue - -
- 18   1-17  Cyan - -
+ 18   1-19  Cyan - -
  18  79-79  LightBlue - -
  19   0-0   LightBlue - -
- 19   1-17  Cyan - -
+ 19   1-19  Cyan - -
  19  79-79  LightBlue - -
  20   0-0   LightBlue - -
- 20   1-17  Cyan - -
+ 20   1-19  Cyan - -
  20  79-79  LightBlue - -
  21   0-0   LightBlue - -
+ 21   1-19  Cyan - -
  21  79-79  LightBlue - -
  22   0-0   LightBlue - -
- 22   1-10  - - BOLD
+ 22   1-19  Cyan - -
  22  79-79  LightBlue - -
  23   0-79  LightBlue - -
  24   0-5   Black Cyan BOLD
@@ -105,9 +106,5 @@ styles
  24  21-23  - - DIM
  24  24-26  Cyan - -
  24  27-33  - - DIM|ITALIC
- 24  34-39  Cyan - -
- 24  40-46  - - DIM|ITALIC
- 24  47-50  Cyan - -
- 24  51-61  - - DIM|ITALIC
- 24  62-71  Cyan - -
- 24  72-77  - - DIM|ITALIC
+ 24  34-43  Cyan - -
+ 24  44-73  - - DIM|ITALIC
