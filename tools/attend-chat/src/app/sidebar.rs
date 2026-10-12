@@ -17,7 +17,6 @@ use agent_tui::ratatui::style::Color;
 use agent_tui::theme::{self, Ground, Seg, Shape};
 use agent_tui::wrap::str_width;
 
-use super::activate::{How, Target};
 use super::ChatPane;
 use crate::chip::{color_for, Seen};
 use crate::groups::ChannelRow;
@@ -321,6 +320,13 @@ fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown
     Line::from(spans)
 }
 
+/// The column's rows of `world` in order, agents then channels.
+pub(super) fn side_items_of(world: &super::World) -> Vec<SideHit> {
+    let mut out: Vec<SideHit> = agent_order(&world.seen).into_iter().map(|s| SideHit::Agent(s.member.clone())).collect();
+    out.extend(world.rows.iter().map(|r| SideHit::Channel(r.known.group.name.clone())));
+    out
+}
+
 impl ChatPane {
     /// Whether the column is drawn in a pane `total` columns wide.
     pub(super) fn side_width(&self, total: u16) -> Option<u16> {
@@ -351,54 +357,18 @@ impl ChatPane {
         self.dirty = true;
     }
 
-    /// Put the focus on row `i` of `items`, and the list it is in where the
-    /// cursor shows.
+    /// Put the focus on row `i` of `items`, as the keyboard puts it there.
+    #[cfg(test)]
     fn focus_at(&mut self, items: &[SideHit], i: usize) {
-        self.focus = super::focus::Focus::Row(i);
-        self.side_focus_hit = items.get(i).cloned();
+        self.ix = super::ix::Ix { focus: super::focus::Focus::Row(i), row_hit: items.get(i).cloned(), ..self.ix.clone() };
         self.side_follow = true;
-    }
-
-    /// After the world is read again, the cursor follows its row to where
-    /// it is now; a row gone since leaves it at the same place, held within
-    /// a list that may have shrunk.
-    pub(super) fn refocus(&mut self) {
-        let (Some(i), Some(hit)) = (self.side_focus(), self.side_focus_hit.clone()) else { return };
-        let items = self.side_items();
-        match items.iter().position(|h| *h == hit) {
-            Some(at) => self.focus = super::focus::Focus::Row(at),
-            None if items.is_empty() => self.focus = super::focus::Focus::Compose,
-            None => self.focus_at(&items, i.min(items.len() - 1)),
-        }
     }
 
     /// Show or hide the column.
     pub(super) fn toggle_sidebar(&mut self) {
         self.sidebar = !self.sidebar;
-        if self.side_focus().is_some() {
-            self.focus = super::focus::Focus::Compose;
-        }
+        self.dispatch(super::ix::Ev::ColumnHidden);
         self.invalidate();
-    }
-
-    /// A click on a row of the column, or Enter on it: the one activation
-    /// path ([`ChatPane::activate`]), as a select. An agent's row opens its
-    /// menu. A channel's row opens the menu of the channel shown and shows
-    /// any other channel with a tab, as Ctrl+digit shows it. The menu opens
-    /// whatever `attend.chat.tabs.menu_on_repeat` says: that setting is
-    /// about keys. A channel with no tab cannot be shown, so its menu opens.
-    ///
-    /// A question waiting on the bar is the shell's: a click here answers
-    /// it no before it reaches the row. While the column has the keyboard,
-    /// its cursor moves to the row clicked.
-    pub(super) fn side_click(&mut self, hit: SideHit) {
-        if self.side_focus().is_some() {
-            let items = self.side_items();
-            if let Some(i) = items.iter().position(|h| *h == hit) {
-                self.focus_at(&items, i);
-            }
-        }
-        self.activate(Target::of(hit), How::Select { repeat: true }, None);
     }
 
     /// The column's row drawn for `hit` in the last frame, where a menu
@@ -409,12 +379,10 @@ impl ChatPane {
     }
 
     /// The column's rows in order, agents then channels, as the keyboard
-    /// walks them.
-    pub(super) fn side_items(&mut self) -> Vec<SideHit> {
-        let world = self.world();
-        let mut out: Vec<SideHit> = agent_order(&world.seen).into_iter().map(|s| SideHit::Agent(s.member.clone())).collect();
-        out.extend(world.rows.iter().map(|r| SideHit::Channel(r.known.group.name.clone())));
-        out
+    /// walks them, the world read first.
+    #[cfg(test)]
+    fn side_items(&mut self) -> Vec<SideHit> {
+        side_items_of(self.world())
     }
 
     /// Whether the last frame drew the column: shown, and room for it.
@@ -496,9 +464,9 @@ mod tests {
         let items = c.side_items();
         c.focus_at(&items, 1);
         with_agents(&mut c, &["New", "Ada", "Bo", "Cy"]);
-        assert_eq!((c.side_focus(), c.side_focus_hit.clone()), (Some(2), Some(SideHit::Agent("id-Bo".into()))), "on Bo, moved down a row");
+        assert_eq!((c.side_focus(), c.ix.row_hit.clone()), (Some(2), Some(SideHit::Agent("id-Bo".into()))), "on Bo, moved down a row");
         with_agents(&mut c, &["Ada"]);
-        assert_eq!((c.side_focus(), c.side_focus_hit.clone()), (Some(0), Some(SideHit::Agent("id-Ada".into()))), "Bo gone: held within the list");
+        assert_eq!((c.side_focus(), c.ix.row_hit.clone()), (Some(0), Some(SideHit::Agent("id-Ada".into()))), "Bo gone: held within the list");
         with_agents(&mut c, &[]);
         assert_eq!(c.side_focus(), None, "nothing left to be on");
     }

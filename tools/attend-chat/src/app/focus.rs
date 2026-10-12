@@ -3,7 +3,7 @@
 //! and that element alone is drawn focused.
 //!
 //! The ring is the one ordered list the key handler walks and the renderer
-//! marks ([`ChatPane::ring`]): the tab bar in the order drawn (`≡`, the
+//! marks: the tab bar in the order drawn (`≡`, the
 //! created channels, `+`, then the reserved `#open` and the operator view),
 //! the column's rows (every agent, then every channel), the feed, then the
 //! compose box, and round again.
@@ -17,13 +17,16 @@
 //!   the compose box. The shell's single keys work as the help names them
 //!   (`?`, `q`, `m`, the digits), since nothing is being typed; any other
 //!   character goes to the compose box and is typed there.
+//!
+//! These rules are [`ix::step`], a pure function over the one interaction
+//! state ([`ix::Ix`]); [`ChatPane::dispatch`] is where every input that can
+//! move the focus goes, and carries out what the step asks.
 
-use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use agent_tui::ratatui::layout::Rect;
 use agent_tui::{Anchor, Binding, Open};
 
 use super::activate::{How, Target};
-use super::sidebar::SideHit;
+use super::ix::{self, Effect, Ev, Laid, View};
 use super::ChatPane;
 use crate::tabs::{self, Slot, Tab};
 
@@ -32,7 +35,7 @@ use crate::tabs::{self, Slot, Tab};
 pub(super) enum Focus {
     /// A slot of the tab bar ([`tabs::bar`]), kept by what it is, so a
     /// channel created or dissolved under the focus leaves it on the same
-    /// slot ([`ChatPane::refocus_tab`]).
+    /// slot ([`ChatPane::refocus`]).
     Tab(Slot),
     /// The column's row `i`, agents then channels ([`ChatPane::side_items`]).
     Row(usize),
@@ -55,29 +58,15 @@ pub(super) enum Kind {
 }
 
 impl ChatPane {
-    /// The ring of focusable elements, in order: the tab bar's slots, the
-    /// column's rows while it is drawn, the feed, the compose box.
-    pub(super) fn ring(&mut self) -> Vec<Focus> {
-        let mut out: Vec<Focus> = tabs::bar(&self.strip_names()).into_iter().map(Focus::Tab).collect();
-        if self.side_drawn() {
-            out.extend((0..self.side_items().len()).map(Focus::Row));
-        }
-        out.extend([Focus::Feed, Focus::Compose]);
-        out
-    }
-
     /// The column's row under the focus, if it is there.
     pub(super) fn side_focus(&self) -> Option<usize> {
-        match self.focus {
-            Focus::Row(i) => Some(i),
-            _ => None,
-        }
+        self.ix.side_focus()
     }
 
     /// What the focused element is, from the world as last read.
     pub(super) fn focus_kind(&self) -> Kind {
         let world = self.world.as_ref();
-        match self.focus.clone() {
+        match self.ix.focus.clone() {
             Focus::Tab(slot) => match slot {
                 Slot::Common => Kind::Common,
                 Slot::New => Kind::New,
@@ -93,261 +82,83 @@ impl ChatPane {
         }
     }
 
-    /// Put the focus on `f`. Landing on a tab shows it, as moving along the
-    /// tab bar always has; a slot (`≡`, `+`) is only pointed at. What the
-    /// walk shows is a preview: leaving the bar for the column, the feed or
-    /// the box puts back the tab shown before, so the draft's destination does
-    /// not change on its way past; Esc from the bar cancels the same way.
-    /// Enter or a digit on the bar keeps the tab shown ([`ChatPane::keep_tab`]).
-    pub(super) fn focus_on(&mut self, f: Focus) {
-        let on_bar = matches!(self.focus, Focus::Tab(_));
-        match (&f, on_bar) {
-            (Focus::Tab(_), false) => self.bar_entry = Some(self.normal_tab()),
-            (Focus::Tab(_), true) => {}
-            (_, true) => {
-                if let Some(t) = self.bar_entry.take() {
-                    self.set_tab(t);
-                }
-            }
-            (_, false) => {}
-        }
-        match &f {
-            Focus::Tab(slot) => {
-                if let Slot::Tab(t) = slot.clone() {
-                    self.set_tab(t);
-                }
-            }
-            Focus::Row(i) => {
-                let items = self.side_items();
-                self.side_focus_hit = items.get(*i).cloned();
-                self.side_follow = true;
-            }
-            Focus::Feed | Focus::Compose => {}
-        }
-        self.focus = f;
-        self.dirty = true;
-    }
-
-    /// One step along the ring, forward or back, wrapping.
-    pub(super) fn step(&mut self, forward: bool) {
-        let ring = self.ring();
-        let n = ring.len();
-        let at = ring.iter().position(|f| *f == self.focus).unwrap_or(n - 1);
-        let to = if forward { (at + 1) % n } else { (at + n - 1) % n };
-        self.focus_on(ring[to].clone());
-    }
-
-    /// The tab bar's index of slot `slot`.
-    pub(super) fn slot_index(&mut self, slot: &Slot) -> Option<usize> {
-        tabs::bar(&self.strip_names()).iter().position(|s| s == slot)
-    }
-
     /// The tab bar's index of the slot showing `tab`.
     pub(super) fn slot_of(&mut self, tab: &Tab) -> Option<usize> {
-        self.slot_index(&Slot::Tab(tab.clone()))
+        let slot = Slot::Tab(tab.clone());
+        tabs::bar(&self.strip_names()).iter().position(|s| *s == slot)
     }
 
-    /// The tab shown stays shown: the walk along the bar was a choice.
-    pub(super) fn keep_tab(&mut self) {
-        self.bar_entry = None;
-    }
-
-    /// A tab chosen by its digit or a click while the focus is on the bar:
-    /// the focus goes to that tab, so Enter acts on the tab shown.
-    pub(super) fn follow_on_bar(&mut self, slot: &Slot) {
-        if matches!(self.focus, Focus::Tab(_)) {
-            self.focus = Focus::Tab(slot.clone());
-            self.dirty = true;
+    /// What the step reads of the screen: the tab bar and the column when
+    /// the world is read, never reading it ([`ix::NeedWorld`]).
+    fn ix_view(&self) -> View {
+        let world = self.world.as_ref().map(|w| {
+            let names = tabs::strip_names(&w.groups);
+            Laid { bar: tabs::bar(&names), rows: super::sidebar::side_items_of(w), shown: tabs::normalize(self.foreground.clone(), &names) }
+        });
+        let cursor = self.input.cursor();
+        View {
+            world,
+            side_drawn: self.side_drawn(),
+            draft_empty: self.input.is_empty(),
+            caret_start: cursor == 0,
+            caret_end: cursor == self.input.text().chars().count(),
+            feed_len: self.feed.len(),
+            feed_selected: self.feed.selected,
+            menu_on_repeat: self.config.menu_on_repeat,
         }
     }
 
-    /// After the world is read again, a focused tab whose channel is gone
-    /// moves to the tab shown, which falls back to `#open` the same way.
-    pub(super) fn refocus_tab(&mut self) {
-        let Focus::Tab(slot) = self.focus.clone() else { return };
-        let names = self.world.as_ref().map(|w| tabs::strip_names(&w.groups)).unwrap_or_default();
-        let bar = tabs::bar(&names);
-        if !bar.contains(&slot) {
-            let shown = tabs::normalize(self.foreground.clone(), &names);
-            self.focus = Focus::Tab(Slot::Tab(shown));
-            self.dirty = true;
+    /// Move the interaction state by `ev` ([`ix::step`]) and carry out what
+    /// the step asks, in order. A step that needs the world reads it, which
+    /// refocuses, then steps once more, with the world in the view.
+    pub(super) fn dispatch(&mut self, ev: Ev) {
+        let (ix, effects) = match ix::step(&self.ix, ev.clone(), &self.ix_view()) {
+            Ok(done) => done,
+            Err(ix::NeedWorld) => {
+                self.world();
+                ix::step(&self.ix, ev, &self.ix_view()).expect("the world was just read")
+            }
+        };
+        self.ix = ix;
+        for e in effects {
+            self.apply_effect(e);
         }
     }
 
-    /// F2 or Ctrl+T: the focus to the tab shown, or from the tab bar back to
-    /// the compose box.
-    pub(super) fn toggle_tabs(&mut self) {
-        if matches!(self.focus, Focus::Tab(_)) {
-            return self.focus_on(Focus::Compose);
-        }
-        let shown = self.normal_tab();
-        self.focus_on(Focus::Tab(Slot::Tab(shown)));
+    /// After the world is read again: the focus follows its row or its tab.
+    pub(super) fn refocus(&mut self) {
+        self.dispatch(Ev::WorldChanged);
     }
 
-    /// A key while the compose box has the focus: every key edits, but for
-    /// the ways out. Shift+Tab leaves backward. ↑ at the very top and ↓ at
-    /// the very end leave a box that holds text; in an empty box they do
-    /// nothing, so an arrow pressed from habit never turns the next keys
-    /// into commands, and Esc leaves an empty box instead (ADR-409).
-    pub(super) fn compose_key(&mut self, k: KeyEvent) {
-        let m = k.modifiers;
-        let width = self.hits.text_width;
-        match k.code {
-            KeyCode::Esc => {
-                self.clear();
-                if self.input.is_empty() {
-                    self.step(false);
-                }
-            }
-            KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.enter(),
-            KeyCode::Tab => self.tab_key(),
-            KeyCode::BackTab => self.step(false),
-            KeyCode::Up => {
-                if !self.input.up(width) && !self.input.is_empty() {
-                    self.step(false);
-                }
-            }
-            KeyCode::Down => {
-                if !self.input.down(width) && !self.input.is_empty() {
-                    self.step(true);
-                }
-            }
-            KeyCode::PageUp => self.page(true),
-            KeyCode::PageDown => self.page(false),
-            _ => {
+    fn apply_effect(&mut self, e: Effect) {
+        match e {
+            Effect::Type(k) => {
                 self.input.key(k);
             }
-        }
-    }
-
-    /// A key while the focus is outside the compose box.
-    pub(super) fn nav_key(&mut self, k: KeyEvent) {
-        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-        match k.code {
-            KeyCode::Tab | KeyCode::Right => self.step(true),
-            KeyCode::BackTab | KeyCode::Left => self.step(false),
-            KeyCode::Up => self.nav_vertical(false),
-            KeyCode::Down => self.nav_vertical(true),
-            KeyCode::Home | KeyCode::End => self.nav_end(k.code == KeyCode::End),
-            KeyCode::Enter => self.activate_focus(),
-            // Esc cancels: off the bar it puts back the tab shown before.
-            KeyCode::Esc => self.focus_on(Focus::Compose),
-            KeyCode::PageUp => self.page(true),
-            KeyCode::PageDown => self.page(false),
-            // A character is typing: it goes to the compose box. Backspace
-            // and Delete only go back to the box, the draft untouched.
-            KeyCode::Char(_) if plain => {
-                self.focus_on(Focus::Compose);
-                self.compose_key(k);
-            }
-            KeyCode::Backspace | KeyCode::Delete => self.focus_on(Focus::Compose),
-            _ => {}
-        }
-    }
-
-    /// ↑ or ↓ outside the compose box: along the column, through the feed's
-    /// messages, from the tab bar down into the column.
-    fn nav_vertical(&mut self, down: bool) {
-        match self.focus.clone() {
-            Focus::Tab(slot) if down => {
-                // Into the column: the row of the tab's channel, else the
-                // first row; past a hidden column, the feed.
-                let tab = match slot {
-                    Slot::Tab(Tab::Channel(c)) => Some(c),
-                    _ => None,
-                };
-                if !self.side_drawn() || self.side_items().is_empty() {
-                    return self.focus_on(Focus::Feed);
-                }
-                let items = self.side_items();
-                let row = tab.and_then(|c| items.iter().position(|h| *h == SideHit::Channel(c.clone()))).unwrap_or(0);
-                self.focus_on(Focus::Row(row));
-            }
-            Focus::Tab(_) => {}
-            Focus::Row(i) => {
-                let last = self.side_items().len().saturating_sub(1);
-                match (down, i) {
-                    (false, 0) => {
-                        let shown = self.normal_tab();
-                        self.focus_on(Focus::Tab(Slot::Tab(shown)));
-                    }
-                    (false, i) => self.focus_on(Focus::Row(i - 1)),
-                    (true, i) if i >= last => self.focus_on(Focus::Feed),
-                    (true, i) => self.focus_on(Focus::Row(i + 1)),
+            Effect::Caret { up } => {
+                let width = self.hits.text_width;
+                if up {
+                    self.input.up(width);
+                } else {
+                    self.input.down(width);
                 }
             }
-            Focus::Feed => self.feed_move(down),
-            Focus::Compose => {}
-        }
-    }
-
-    /// Home or End outside the compose box: the column's first or last row,
-    /// the feed's oldest or newest message.
-    fn nav_end(&mut self, end: bool) {
-        match self.focus {
-            Focus::Row(_) => {
-                let last = self.side_items().len().saturating_sub(1);
-                self.focus_on(Focus::Row(if end { last } else { 0 }));
-            }
-            Focus::Feed => {
-                let n = self.feed.len();
-                if n > 0 {
-                    self.feed.reveal(if end { n - 1 } else { 0 });
-                    self.dirty = true;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// ↑ or ↓ in the feed: the selection moves to the older or newer
-    /// message, starting from the newest. Past the newest, the compose box.
-    fn feed_move(&mut self, down: bool) {
-        let n = self.feed.len();
-        if n == 0 {
-            if down {
-                self.focus_on(Focus::Compose);
-            }
-            return;
-        }
-        let to = match (self.feed.selected, down) {
-            (None, false) => Some(n - 1),
-            (None, true) => None,
-            (Some(i), false) => Some(i.saturating_sub(1)),
-            (Some(i), true) if i + 1 < n => Some(i + 1),
-            (Some(_), true) => None,
-        };
-        match to {
-            Some(i) => self.feed.reveal(i),
-            None => {
-                self.feed.selected = None;
-                self.focus_on(Focus::Compose);
-            }
-        }
-        self.dirty = true;
-    }
-
-    /// Enter outside the compose box: the focused element's menu, the one a
-    /// click (or a right click) on it opens, through the one activation
-    /// path. A menu from the tab bar docks under its tab.
-    pub(super) fn activate_focus(&mut self) {
-        match self.focus.clone() {
-            Focus::Tab(slot) => {
-                self.keep_tab();
-                let Some(i) = self.slot_index(&slot) else { return };
-                let Some(target) = self.tab_target(i) else { return };
-                self.activate(target, How::Menu, None);
-                if let Some(Open::Pick { anchor, .. } | Open::Entry { anchor, .. }) = &mut self.open {
+            Effect::Send => self.enter(),
+            Effect::Complete => self.tab_key(),
+            Effect::Clear => self.clear(),
+            Effect::Page { up } => self.page(up),
+            Effect::ShowTab(t) | Effect::RestoreTab(t) => self.set_tab(t),
+            Effect::Follow => self.side_follow = true,
+            Effect::Activate { target, how, under_tab } => {
+                self.activate(target, how, None);
+                if let (Some(i), Some(Open::Pick { anchor, .. } | Open::Entry { anchor, .. })) = (under_tab, &mut self.open) {
                     *anchor = Anchor::Tab(i);
                 }
             }
-            Focus::Row(i) => {
-                if let Some(hit) = self.side_items().get(i).cloned() {
-                    self.activate(Target::of(hit), How::Menu, None);
-                }
-            }
-            Focus::Feed => self.feed_menu(),
-            Focus::Compose => {}
+            Effect::FeedMenu => self.feed_menu(),
+            Effect::Reveal(i) => self.feed.reveal(i),
+            Effect::Deselect => self.feed.selected = None,
+            Effect::Redraw => self.dirty = true,
         }
     }
 

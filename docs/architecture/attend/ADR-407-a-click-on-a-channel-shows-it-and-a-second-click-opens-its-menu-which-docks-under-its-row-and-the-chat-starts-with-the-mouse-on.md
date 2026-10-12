@@ -13,6 +13,14 @@ basis:
     level: directed
     said: "currently, left clicking on a channel in 'attend-chat' does not bring up the context dialog. also, I think it would be nice for that dialog to dock on the next line under the clicked channel. the ideal path is first click activates that channel (selects it to foregrond) and the second click (essentially, clicking on the active/foreground channel) brings up the context dialog. I can use ctrl+4 (for the fourth marked channel) to bring to foreground and use ctrl+4 a second time to bring up the context menu now on the keyboar"
     via: chat, relayed by the main session, 2026-10-11
+  - operator: aaronsb
+    level: directed
+    said: "Merge #953, then A→B→C (Recommended)"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
+    said: "since we're changing things a bit, let's avoid work with low value by adhering to golden states"
+    via: chat, relayed by the main session, 2026-10-12
   - evidence: "The operator's screenshot of the failing click showed `mouse off (M-m)` in the bottom bar, relayed by the main session, 2026-10-11. attend.chat.mouse defaulted to false, so a terminal never reported the click to the chat."
   - precedent: ADR-405
 agent:
@@ -99,3 +107,14 @@ Review of the change refined (a) and (c); the docking rule in (a) was the agent'
 ## Amendment (2026-10-12): Enter on a focused element opens its menu at once
 
 The operator asked that "we can use enter to raise the context menu for any element. (the same context menu that the mouse click affords)". Enter on a focused tab, column row or the feed now opens that element's menu at once, as a right click does, through the same activation path; it no longer shows a channel first. A menu opened from the tab bar docks under its tab. Moving the tab bar's focus onto a channel tab still shows it, so a channel is shown from the keyboard by walking to it. The digits number the created channels from 1; the reserved tabs carry none, and 0 is the bar's last tab (ADR-405, amendment of 2026-10-12).
+
+## Amendment (2026-10-12): one interaction state, moved by one pure step
+
+The operator chose the order of the work that follows the review of the chat's focus handling: "Merge #953, then A→B→C (Recommended)". This amendment records A, a refactor with no change in behaviour. B replaces the shell's overlay hooks with a contract in agent-tui. C changes what Esc does. The operator set the bar for A: "since we're changing things a bit, let's avoid work with low value by adhering to golden states". No golden frame under `tools/attend-chat/tests/golden` changes. A golden that would need blessing again is a defect in the refactor.
+
+- **One value.** The chat's interaction state is one value, `Ix` (`tools/attend-chat/src/app/ix.rs`). It holds where the keyboard is, the tab the walk along the tab bar is previewing over (`preview_from`), the column row under the focus, and the overlay the shell last reported. The flags `overlaid`, `bar_entry` and `side_focus_hit` are gone. `owns_text`, `overlaid` and the focused tab the shell reads are derived from `Ix`, and so are the renderer's focus marks and the footer.
+- **One step.** `step(ix, ev, view) -> (Ix, effects)` is a pure function. Every input that can move the focus reaches it: keys in and outside the compose box, a paste, F2 or Ctrl+T, a click in the pane or one the shell takes, a tab's digit, a tab activated, a world read again, the column hidden, and the overlay up or down. It returns the effects in order: type, move the caret, send, complete, clear, page, show a tab, put the previewed tab back, activate a target, the feed's menu, reveal or deselect a message, follow a row, redraw. The tab is put back before anything is typed or sent. The chat's dispatcher is the only writer of `Ix`, and the direct writes of the focus that bypassed the old `focus_on` are gone.
+- **The world is read when a step needs it.** The view carries the tab bar and the column only when the world has been read. A step that needs them and does not have them asks for the world. The dispatcher then reads it, which refocuses, and steps again. The chat reads the world at the same points as before, so a key that only types does not read it.
+- **The overlay has one kind for now.** `Pane::overlaid` reports only that an overlay is up, so `Ix` records one kind of overlay. B's contract reports which overlay is up and adds the kinds: a menu, an entry, a question, the help, the guard. B also decides whether `Ix.overlay` mirrors or owns the pane's own menus. Those menus are a second record of what is open, outside `Ix`: `ChatPane::open` is written in about 13 places in `menu.rs`, and the dispatcher patches a menu's anchor after `Activate`.
+- **Evidence.** Unit tests cover each cell of the interaction table and need no terminal. Property tests over seeded random sequences check three things: the preview is never held off the bar, the overlay is what the shell last reported, and a printable key lands only in the compose box, after the previewed tab is put back. A differential run drove the chat on main and on the refactor through 600 seeded sequences of 200 keys, clicks and pastes, through the shell's real handlers. Both recorded identical state and frames at every step. The run leaves the world unchanged after setup: it pushes no signals, makes no `stale()` call, and sends no wheel or resize. So it does not exercise refocus after a refresh. Two planted defects showed this: refocus landing on the old row index, and the follow effect dropped from a row move. The differential run missed both, and the unit tests caught both.
+
