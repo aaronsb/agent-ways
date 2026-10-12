@@ -121,7 +121,9 @@ impl Call {
             Call::MarketplaceRemove => format!("removed the {MARKETPLACE} marketplace"),
             Call::MarketplaceUpdate => format!("refreshed the {MARKETPLACE} marketplace"),
             Call::Install => format!("installed {PLUGIN_ID}"),
-            Call::Update => format!("updated {PLUGIN_ID}; running sessions keep their version until they restart"),
+            Call::Update => format!(
+                "updated {PLUGIN_ID}'s recorded version; sessions run the plugin from the {MARKETPLACE} folder, and a running one takes a change with /reload-plugins"
+            ),
             Call::Uninstall => format!("uninstalled {PLUGIN_ID}"),
         }
     }
@@ -335,20 +337,35 @@ pub fn withdraw(source_root: &Path, dest_root: &Path, default_root: &Path, dry_r
     }
 }
 
-/// For `ways status`: the installed and the shipped version in one target.
+/// For `ways status`: in one target, the version sessions run, the version
+/// Claude Code records as installed, and the shipped one.
+///
+/// A plugin from a folder marketplace runs from that folder, never from the
+/// copy `claude plugin install` makes in the plugin cache (ADR-406, addendum
+/// of 2026-10-12). So where the `agent-ways` marketplace is this app's
+/// `plugins/` folder, sessions run the shipped version whatever the record
+/// says; `runs` is `null` where that cannot be told.
 pub fn status(source_root: &Path, dest_root: &Path, default_root: &Path) -> serde_json::Value {
     let shipped = shipped_version(source_root);
     let installed = claude_bin()
         .ok_or_else(|| "`claude` is not on PATH".to_string())
         .and_then(|c| query(&c, config_dir(dest_root, default_root).0.as_deref()));
+    let dir = marketplace_dir(source_root).to_string_lossy().to_string();
     match installed {
         Ok(h) => serde_json::json!({
+            "runs": runs_version(&h, &dir, shipped.as_deref()),
             "installed": h.ours,
             "shipped": shipped,
             "foreign": h.foreign,
         }),
-        Err(e) => serde_json::json!({ "installed": null, "shipped": shipped, "error": e }),
+        Err(e) => serde_json::json!({ "runs": null, "installed": null, "shipped": shipped, "error": e }),
     }
+}
+
+/// The version sessions run: the shipped one when `attend@agent-ways` is
+/// installed from this app's folder `dir`, which sessions read in place.
+fn runs_version(have: &Installed, dir: &str, shipped: Option<&str>) -> Option<String> {
+    (have.ours.is_some() && have.marketplace.as_deref() == Some(dir)).then(|| shipped.map(str::to_string)).flatten()
 }
 
 /// `status` as one line.
@@ -358,12 +375,13 @@ pub fn status_line(v: &serde_json::Value) -> String {
         return format!("{PLUGIN_ID} unknown ({e}); shipped {shipped}");
     }
     let foreign: Vec<&str> = v["foreign"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
-    let installed = match v["installed"].as_str() {
-        Some(i) => format!("{PLUGIN_ID} {i} installed"),
-        None => format!("{PLUGIN_ID} not installed"),
-    };
     let foreign = if foreign.is_empty() { String::new() } else { format!("; {} from another marketplace", foreign.join(", ")) };
-    format!("{installed}, shipped {shipped}{foreign}")
+    match (v["runs"].as_str(), v["installed"].as_str()) {
+        (Some(runs), Some(i)) if runs == i => format!("{PLUGIN_ID} {runs} runs from the app's folder{foreign}"),
+        (Some(runs), Some(i)) => format!("{PLUGIN_ID} {runs} runs from the app's folder (Claude Code records {i}){foreign}"),
+        (_, Some(i)) => format!("{PLUGIN_ID} {i} installed, shipped {shipped}{foreign}"),
+        (_, None) => format!("{PLUGIN_ID} not installed, shipped {shipped}{foreign}"),
+    }
 }
 
 #[cfg(test)]
@@ -482,6 +500,20 @@ mod tests {
         let mut h = have(None, None);
         h.foreign.push("attend@mine".into());
         assert_eq!(plan_withdraw(&h, DIR, None, "CMD"), Plan::default(), "a foreign attend stays");
+    }
+
+    /// Installed from this app's folder, sessions run the folder's version
+    /// whatever Claude Code's record says (review of #927, finding 1).
+    #[test]
+    fn the_status_line_says_what_sessions_run() {
+        let ours = have(Some(DIR), Some("0.18.0"));
+        assert_eq!(runs_version(&ours, DIR, Some("0.19.0")).as_deref(), Some("0.19.0"));
+        assert_eq!(runs_version(&have(Some("/elsewhere"), Some("0.18.0")), DIR, Some("0.19.0")), None);
+        assert_eq!(runs_version(&have(Some(DIR), None), DIR, Some("0.19.0")), None);
+        let v = serde_json::json!({ "runs": "0.19.0", "installed": "0.18.0", "shipped": "0.19.0", "foreign": [] });
+        assert_eq!(status_line(&v), "attend@agent-ways 0.19.0 runs from the app's folder (Claude Code records 0.18.0)");
+        let v = serde_json::json!({ "runs": "0.19.0", "installed": "0.19.0", "shipped": "0.19.0", "foreign": [] });
+        assert_eq!(status_line(&v), "attend@agent-ways 0.19.0 runs from the app's folder");
     }
 
     #[test]
