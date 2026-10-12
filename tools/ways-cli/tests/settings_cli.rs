@@ -11,6 +11,10 @@ static SEQ: AtomicUsize = AtomicUsize::new(0);
 
 struct Fx {
     root: PathBuf,
+    /// The root as the filesystem resolves it: on macOS `/tmp` is a link to
+    /// `/private/tmp`, and the binary prints a `--project` it resolved in
+    /// this form. Elsewhere it is `root`.
+    real: PathBuf,
 }
 
 impl Fx {
@@ -38,7 +42,14 @@ impl Fx {
         // directory both find (`settings_root_of` in cmd/settings).
         std::fs::create_dir_all(root.join("proj/.claude")).unwrap();
         std::fs::write(root.join("proj/CLAUDE.md"), "").unwrap();
-        Fx { root }
+        // The root stays as written, the length above; the resolved form is
+        // kept beside it for `norm`. Windows resolves to a `\\?\` path the
+        // binary never prints, so there it is the root itself.
+        #[cfg(not(windows))]
+        let real = std::fs::canonicalize(&root).unwrap();
+        #[cfg(windows)]
+        let real = root.clone();
+        Fx { root, real }
     }
 
     fn user(&self) -> PathBuf {
@@ -95,14 +106,15 @@ impl Fx {
         (self.norm(&out.stdout), self.norm(&out.stderr), out.status.code().unwrap_or(-1))
     }
 
-    /// Output with the fixture root as `<ROOT>`. On Windows the path that
-    /// follows the root is written with `/`, so goldens and assertions read
-    /// the same on every platform; nothing but those paths is changed.
+    /// Output with the fixture root as `<ROOT>`, in its resolved form and as
+    /// written. On Windows the path that follows the root is written with
+    /// `/`, so goldens and assertions read the same on every platform;
+    /// nothing but those paths is changed.
     fn norm(&self, b: &[u8]) -> String {
         let text = String::from_utf8_lossy(b).to_string();
         let root = self.root.to_string_lossy().to_string();
         #[cfg(not(windows))]
-        return text.replace(&root, "<ROOT>");
+        return text.replace(&*self.real.to_string_lossy(), "<ROOT>").replace(&root, "<ROOT>");
         #[cfg(windows)]
         {
             // JSON escapes each backslash, so the root appears in three forms.
@@ -1119,12 +1131,9 @@ fn a_relative_project_path_resolves_against_the_working_directory() {
 /// its own is in no project. A temp directory inside a checkout (some CI and
 /// nix setups) encloses everything; tests that need no project skip there.
 fn outside_any_project(f: &Fx) -> bool {
-    let marked = |d: &Path| {
-        let c = d.join(".claude");
-        (c.is_dir() && (d.join("CLAUDE.md").exists() || ["settings.json", "settings.local.json", "ways.yaml", "attend.yaml"].iter().any(|m| c.join(m).exists())))
-            || d.join(".git").exists()
-    };
-    let clear = !f.root.ancestors().any(marked);
+    use ways_core::util::{is_project_root, SETTINGS_OVERLAYS};
+    let marked = |d: &Path| is_project_root(d, SETTINGS_OVERLAYS) || d.join(".git").exists();
+    let clear = !f.real.ancestors().any(marked);
     if !clear {
         eprintln!("skipped: a directory above {} is a project root", f.root.display());
     }

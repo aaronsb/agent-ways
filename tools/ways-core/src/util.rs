@@ -172,6 +172,11 @@ pub fn detect_project_dir() -> Option<String> {
 /// `CLAUDE.md` beside it does too ([`is_project_root`]).
 pub const CLAUDE_MARKERS: &[&str] = &["settings.json", "settings.local.json"];
 
+/// The `.claude/` overlays a settings write leaves. The settings resolver
+/// passes them to [`is_project_root`] as extra markers; the walk from the
+/// working directory does not.
+pub const SETTINGS_OVERLAYS: &[&str] = &["ways.yaml", "attend.yaml"];
+
 /// The root of the project enclosing `start`: the nearest directory at or
 /// above it that [`is_project_root`] with no extra markers. `None` when no
 /// ancestor is one. `start` is walked as given.

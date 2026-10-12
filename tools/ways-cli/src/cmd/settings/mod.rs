@@ -112,10 +112,6 @@ pub(super) fn implicit_project() -> Option<PathBuf> {
     settings_root_of(Path::new(&crate::util::project_dir()))
 }
 
-/// The `.claude/` overlays a settings write leaves, which mark a project
-/// root for the settings resolver beside [`ways_core::util::CLAUDE_MARKERS`].
-const OVERLAYS: &[&str] = &["ways.yaml", "attend.yaml"];
-
 /// The project root settings resolve `start` to: the nearest ancestor that
 /// is a project root with the overlays as markers too
 /// ([`ways_core::util::is_project_root`]), and only when none is, the nearest
@@ -126,14 +122,14 @@ pub(super) fn settings_root_of(start: &Path) -> Option<PathBuf> {
     let home = claude_sessions::home_dir();
     let candidates = || start.ancestors().filter(|d| !is_home(d, &home));
     candidates()
-        .find(|d| ways_core::util::is_project_root(d, OVERLAYS))
+        .find(|d| ways_core::util::is_project_root(d, ways_core::util::SETTINGS_OVERLAYS))
         .or_else(|| candidates().find(|d| d.join(".git").exists()))
         .map(Path::to_path_buf)
 }
 
 /// What marks a project root, for a message naming why none was found.
 fn markers() -> String {
-    let files: Vec<String> = ways_core::util::CLAUDE_MARKERS.iter().chain(OVERLAYS).map(|f| format!(".claude/{f}")).collect();
+    let files: Vec<String> = ways_core::util::CLAUDE_MARKERS.iter().chain(ways_core::util::SETTINGS_OVERLAYS).map(|f| format!(".claude/{f}")).collect();
     format!("a project root holds {}, or CLAUDE.md beside .claude/; failing those, a .git", files.join(", "))
 }
 
@@ -179,7 +175,7 @@ pub(super) fn is_home(dir: &Path, home: &Path) -> bool {
 
 /// The line a write puts on stderr naming the file it touched, so stdout
 /// keeps its contract: `project: <path>`, `user: <path>` or
-/// `target: <path>` (ADR-503 §9).
+/// `target: <path>` (ADR-510, amending ADR-503 §9).
 pub(super) fn touched(scope: LayerScope, path: &Path, dry_run: bool) {
     let layer = match scope {
         LayerScope::Project => "project",

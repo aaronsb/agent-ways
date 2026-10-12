@@ -65,8 +65,11 @@ impl Fx {
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
+        // The root as written and as resolved: macOS's temp directory sits
+        // behind a link, and the binary prints a `--project` it resolved.
         let root = self.root.to_string_lossy().to_string();
-        let s = |b: &[u8]| String::from_utf8_lossy(b).replace(&root, "<ROOT>");
+        let real = std::fs::canonicalize(&self.root).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| root.clone());
+        let s = |b: &[u8]| String::from_utf8_lossy(b).replace(&real, "<ROOT>").replace(&root, "<ROOT>");
         (s(&o.stdout), s(&o.stderr), o.status.code().unwrap_or(-1))
     }
 }

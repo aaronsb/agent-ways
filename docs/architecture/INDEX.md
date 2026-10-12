@@ -165,6 +165,7 @@ _Install, update, configuration, permissions, the CLI contract, testing_
 | [ADR-507](./platform/ADR-507-the-ways-commands-regroup-into-operator-commands-and-six-groups-names-another-process-calls-stay-fixed.md) | The ways commands regroup into operator commands and six groups; names another process calls stay fixed | accepted |
 | [ADR-508](./platform/ADR-508-the-live-fixture-runs-locally-its-github-workflow-runs-on-manual-dispatch-only.md) | The live fixture runs locally; its GitHub workflow runs on manual dispatch only | accepted |
 | [ADR-509](./platform/ADR-509-lifecycle-commands-sit-under-one-ways-manage-group-the-updater-s-reconcile-stays-a-hidden-fixed-name.md) | Lifecycle commands sit under one ways manage group; the updater's reconcile stays a hidden fixed name | accepted |
+| [ADR-510](./platform/ADR-510-settings-project-names-the-enclosing-project-and-a-write-names-its-file.md) | Settings --project names the enclosing project, and a write names its file | accepted |
 
 ## Practice
 _The ways method, way authoring, the development loop_
