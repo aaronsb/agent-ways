@@ -268,14 +268,14 @@ impl ChatPane {
             Some(r) => Anchor::Row(r),
             None => self.slot_of(&tab).map_or(Anchor::Center, Anchor::Tab),
         };
-        self.open = Some(Open::Pick { id, title, items: items(channel.as_deref(), joined), multi: false, anchor });
+        self.to_open = Some(Open::Pick { id, title, items: items(channel.as_deref(), joined), multi: false, anchor });
     }
 
     pub(super) fn common_menu(&mut self) {
         let mouse = if self.config.mouse { MOUSE_OFF } else { MOUSE_ON };
         let column = if self.sidebar { HIDE_COLUMN } else { SHOW_COLUMN };
         let items = [THEME, KEYS, mouse, column, SETTINGS, QUIT].into_iter().map(Item::from).collect();
-        self.open = Some(Open::Pick { id: "common".into(), title: "attend-chat".into(), items, multi: false, anchor: Anchor::Tab(0) });
+        self.to_open = Some(Open::Pick { id: "common".into(), title: "attend-chat".into(), items, multi: false, anchor: Anchor::Tab(0) });
     }
 
     /// The keybinding preset the chat's settings match, if any.
@@ -291,7 +291,7 @@ impl ChatPane {
                 let mut names = vec!["terminal".to_string()];
                 names.extend(set.list().map(|(t, _)| t.name.clone()));
                 let items = names.into_iter().map(|n| Item::new(n.clone()).current(n == self.theme)).collect();
-                self.open = Some(Open::Pick { id: "theme".into(), title: "theme for this session".into(), items, multi: false, anchor: Anchor::Parent });
+                self.to_open = Some(Open::Pick { id: "theme".into(), title: "theme for this session".into(), items, multi: false, anchor: Anchor::Parent });
             }
             KEYS => {
                 let current = self.preset();
@@ -303,7 +303,7 @@ impl ChatPane {
                     items.push(Item::disabled(CUSTOM_KEYS, format!("jump={}, focus={}", self.config.jump, self.config.focus_key)).current(true));
                 }
                 items.extend(PRESETS.iter().map(|(l, _, _)| Item::new(*l).current(current == Some(*l))));
-                self.open = Some(Open::Pick { id: "keys".into(), title: "keybinding set".into(), items, multi: false, anchor: Anchor::Parent });
+                self.to_open = Some(Open::Pick { id: "keys".into(), title: "keybinding set".into(), items, multi: false, anchor: Anchor::Parent });
             }
             MOUSE_ON | MOUSE_OFF => {
                 let on = item == MOUSE_ON;
@@ -316,11 +316,11 @@ impl ChatPane {
             SETTINGS => {
                 let text = crate::settings::listing_lines(&std::env::current_dir().unwrap_or_default()).join("\n");
                 let text = format!("{text}\n\n/config <key> <value> sets one");
-                self.open = Some(Open::Report { label: "settings".into(), command: "/config".into(), text });
+                self.to_open = Some(Open::Report { label: "settings".into(), command: "/config".into(), text });
             }
             // The shell's quit, as Ctrl-C: at once, or the exit guard over
             // a draft.
-            QUIT => self.open = Some(Open::Quit),
+            QUIT => self.to_open = Some(Open::Quit),
             _ => {}
         }
     }
@@ -433,7 +433,7 @@ impl ChatPane {
         let items = agent_items(&name, listed.as_ref().map(|(c, _)| c.as_str()), member == me, add);
         self.removable = removable(listed.map(|(_, m)| m).into_iter().collect(), &me);
         let anchor = at.or_else(|| self.side_row(&super::sidebar::SideHit::Agent(member.clone()))).map_or(Anchor::Center, Anchor::Row);
-        self.open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
+        self.to_open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
     }
 
     fn agent_item(&mut self, member: &str, item: &str) {
@@ -519,7 +519,7 @@ impl ChatPane {
         }
         let (id, title) = if add { (format!("invite:{channel}"), format!("add to #{channel}")) } else { (format!("remove:{channel}"), format!("remove from #{channel}")) };
         let items = options.into_iter().map(Item::from).collect();
-        self.open = Some(Open::Pick { id, title, items, multi: false, anchor: Anchor::Parent });
+        self.to_open = Some(Open::Pick { id, title, items, multi: false, anchor: Anchor::Parent });
     }
 
     /// Whether `s` can be added to a channel from its menu, and if not why.
@@ -550,7 +550,7 @@ impl ChatPane {
         // Under the agent's row, where its menu was; beside the closed menu
         // only when the row is not drawn.
         let anchor = self.side_row(&super::sidebar::SideHit::Agent(member.to_string())).map_or(Anchor::Parent, Anchor::Row);
-        self.open = Some(Open::Pick { id: format!("addto:{member}"), title: "add to channel".into(), items, multi: false, anchor });
+        self.to_open = Some(Open::Pick { id: format!("addto:{member}"), title: "add to channel".into(), items, multi: false, anchor });
     }
 
     /// The channel picked for an agent: it is invited there, by its session,
@@ -586,7 +586,7 @@ impl ChatPane {
     fn ask_name(&mut self, value: String, error: Option<String>) {
         self.dirty = true;
         let anchor = self.plus_anchor();
-        self.open = Some(Open::Entry { id: NEW_CHANNEL.into(), title: "new channel name".into(), value, error, anchor });
+        self.to_open = Some(Open::Entry { id: NEW_CHANNEL.into(), title: "new channel name".into(), value, error, anchor });
     }
 
     /// The name entered for a new channel: created and shown, or the dialog
@@ -610,7 +610,7 @@ impl ChatPane {
     /// opened on the line it has now.
     fn describe(&mut self, channel: &str) {
         let now = self.world().groups.iter().find(|k| k.group.name == channel).and_then(|k| k.membership.description.clone()).unwrap_or_default();
-        self.open = Some(Open::Entry { id: format!("{DESCRIBE_ID}{channel}"), title: format!("describe #{channel}"), value: now, error: None, anchor: Anchor::Parent });
+        self.to_open = Some(Open::Entry { id: format!("{DESCRIBE_ID}{channel}"), title: format!("describe #{channel}"), value: now, error: None, anchor: Anchor::Parent });
     }
 
     /// The line entered for `channel`: set, or cleared when empty.
@@ -637,7 +637,7 @@ impl ChatPane {
     pub(super) fn ask(&mut self, step: Step) {
         let (question, yes, no) = step.question();
         self.asked = Some(step);
-        self.open = Some(Open::Ask { id: ASK.into(), question, yes: yes.into(), no: no.into() });
+        self.to_open = Some(Open::Ask { id: ASK.into(), question, yes: yes.into(), no: no.into() });
     }
 
     /// The answer to the question asked: yes runs the step, no keeps things
@@ -763,7 +763,7 @@ mod tests {
         c.dry_run = true;
         for (item, ask) in [(CLEAR_VIEW, "clear the view?"), (CLEAR_HISTORY, "clear #deploy history?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
             c.item("deploy", item);
-            assert!(matches!(c.open.take(), Some(Open::Ask { question, .. }) if question.contains(ask)), "{item} asks the shell");
+            assert!(matches!(c.to_open.take(), Some(Open::Ask { question, .. }) if question.contains(ask)), "{item} asks the shell");
             assert_eq!(c.status, "", "{item} ran nothing yet");
             c.menu_picked(ASK, "n");
             assert_eq!(c.status, "kept");
@@ -793,7 +793,7 @@ mod tests {
     fn pane_with(seen: Vec<Seen>) -> ChatPane {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
-        c.world = Some(super::super::World { groups: Vec::new(), seen, rows: Vec::new(), live_members: Vec::new(), instances: attend_instances::SnapshotCache::new() });
+        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground));
         c
     }
 
@@ -828,13 +828,13 @@ mod tests {
     fn an_agent_row_is_found_by_its_id_when_two_share_a_name() {
         let mut c = pane_with(vec![seen("Ada", "s1", false, true), seen("Ada", "s2", false, true)]);
         c.agent_menu("s2".into(), None);
-        match c.open.take() {
+        match c.to_open.take() {
             Some(Open::Pick { id, title, .. }) => assert_eq!((id.as_str(), title.as_str()), ("agent:s2", "@Ada")),
             other => panic!("no menu: {other:?}"),
         }
         c.menu_picked("agent:s2", WHO);
         assert!(c.status.contains("session s2"), "who is the row picked, not the first of its name: {}", c.status);
         c.agent_menu("gone".into(), None);
-        assert!(c.open.is_none() && c.status_is_error, "a row gone since is said, not guessed");
+        assert!(c.to_open.is_none() && c.status_is_error, "a row gone since is said, not guessed");
     }
 }

@@ -26,7 +26,7 @@ use agent_tui::ratatui::layout::Rect;
 use agent_tui::{Anchor, Binding, Open};
 
 use super::activate::{How, Target};
-use super::ix::{self, Effect, Ev, Laid, View};
+use super::ix::{self, Effect, Ev, View};
 use super::ChatPane;
 use crate::tabs::{self, Slot, Tab};
 
@@ -66,7 +66,7 @@ impl ChatPane {
     /// What the focused element is, from the world as last read.
     pub(super) fn focus_kind(&self) -> Kind {
         let world = self.world.as_ref();
-        match self.ix.focus.clone() {
+        match self.ix.focus().clone() {
             Focus::Tab(slot) => match slot {
                 Slot::Common => Kind::Common,
                 Slot::New => Kind::New,
@@ -88,16 +88,13 @@ impl ChatPane {
         tabs::bar(&self.strip_names()).iter().position(|s| *s == slot)
     }
 
-    /// What the step reads of the screen: the tab bar and the column when
-    /// the world is read, never reading it ([`ix::NeedWorld`]).
+    /// What the step reads of the screen: the tab bar and the column as the
+    /// world laid them out when it was read, never reading it
+    /// ([`ix::NeedWorld`]).
     fn ix_view(&self) -> View {
-        let world = self.world.as_ref().map(|w| {
-            let names = tabs::strip_names(&w.groups);
-            Laid { bar: tabs::bar(&names), rows: super::sidebar::side_items_of(w), shown: tabs::normalize(self.foreground.clone(), &names) }
-        });
         let cursor = self.input.cursor();
         View {
-            world,
+            world: self.world.as_ref().map(|w| w.laid.clone()),
             side_drawn: self.side_drawn(),
             draft_empty: self.input.is_empty(),
             caret_start: cursor == 0,
@@ -108,18 +105,18 @@ impl ChatPane {
         }
     }
 
-    /// Move the interaction state by `ev` ([`ix::step`]) and carry out what
-    /// the step asks, in order. A step that needs the world reads it, which
-    /// refocuses, then steps once more, with the world in the view.
+    /// Move the interaction state by `ev` ([`ix::Machine::step`]) and carry
+    /// out what the step asks, in order. A step that needs the world reads
+    /// it, which refocuses, then steps once more, with the world in the
+    /// view. The only writer of the interaction state.
     pub(super) fn dispatch(&mut self, ev: Ev) {
-        let (ix, effects) = match ix::step(&self.ix, ev.clone(), &self.ix_view()) {
-            Ok(done) => done,
+        let effects = match self.ix.step(ev.clone(), &self.ix_view()) {
+            Ok(fx) => fx,
             Err(ix::NeedWorld) => {
                 self.world();
-                ix::step(&self.ix, ev, &self.ix_view()).expect("the world was just read")
+                self.ix.step(ev, &self.ix_view()).expect("the world was just read")
             }
         };
-        self.ix = ix;
         for e in effects {
             self.apply_effect(e);
         }
@@ -151,7 +148,7 @@ impl ChatPane {
             Effect::Follow => self.side_follow = true,
             Effect::Activate { target, how, under_tab } => {
                 self.activate(target, how, None);
-                if let (Some(i), Some(Open::Pick { anchor, .. } | Open::Entry { anchor, .. })) = (under_tab, &mut self.open) {
+                if let (Some(i), Some(Open::Pick { anchor, .. } | Open::Entry { anchor, .. })) = (under_tab, &mut self.to_open) {
                     *anchor = Anchor::Tab(i);
                 }
             }

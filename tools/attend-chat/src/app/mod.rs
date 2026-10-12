@@ -91,6 +91,10 @@ struct World {
     /// The instance registry, for each chip's `-<instance>` suffix
     /// (ADR-129). Built afresh with the world, never kept across it.
     instances: SnapshotCache,
+    /// The tab bar and the column as this world lays them out, for the
+    /// interaction state's steps: built with the world, the tab shown
+    /// kept against it ([`ChatPane::set_tab`]).
+    laid: ix::Laid,
 }
 
 /// A chip of the helper row, and what a click on it completes.
@@ -171,8 +175,10 @@ pub struct ChatPane {
     /// feed's times are relative to the day (`HH:MM` today, a date before).
     day_seen: Option<SystemTime>,
     hits: Hits,
-    /// What a tab's menu asked the shell to open over the pane.
-    open: Option<Open>,
+    /// What the chat asks the shell to open over the pane, until the shell
+    /// takes it ([`Pane::take_open`]). A request: what is open is the
+    /// interaction state's overlay stack, as the shell reports it.
+    to_open: Option<Open>,
     /// The theme this session shows: its name, or `terminal` for the
     /// terminal's own palette. Marked in the Theme menu.
     theme: String,
@@ -192,8 +198,8 @@ pub struct ChatPane {
     shape: Shape,
     /// The interaction state: where the keyboard is, the walk's preview,
     /// the column row under the focus, what the shell holds open ([`ix`]).
-    /// Only [`ChatPane::dispatch`] writes it.
-    ix: ix::Ix,
+    /// Only [`ChatPane::dispatch`] moves it, through the machine's step.
+    ix: ix::Machine,
     /// The first row shown of each of the column's lists, agents then
     /// channels: the wheel moves them, and the cursor keeps itself in view
     /// while `side_follow`, until the wheel moves the list away from it.
@@ -231,14 +237,14 @@ impl ChatPane {
             draws: 0,
             day_seen: None,
             hits: Hits::default(),
-            open: None,
+            to_open: None,
             theme: "terminal".into(),
             asked: None,
             enhanced: false,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
             sidebar: true,
             shape: Shape::PLAIN,
-            ix: ix::Ix::default(),
+            ix: ix::Machine::new(),
             side_scroll: [0, 0],
             side_follow: true,
             removable: Vec::new(),
@@ -314,7 +320,7 @@ impl ChatPane {
             let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
-            self.world = Some(World { groups: tab_channels(&rows), seen, rows, live_members, instances });
+            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground));
             self.refocus();
         }
         self.world.as_ref().expect("just built")
@@ -334,6 +340,9 @@ impl ChatPane {
 
     fn set_tab(&mut self, t: Tab) {
         if t != self.foreground {
+            if let Some(w) = &mut self.world {
+                w.laid.shown = tabs::normalize(t.clone(), &tabs::strip_names(&w.groups));
+            }
             self.foreground = t;
             self.feed = FeedState::default();
             self.invalidate();
@@ -618,29 +627,40 @@ impl Pane for ChatPane {
         self.scroll_by(up, WHEEL_ROWS);
     }
 
-    fn owns_focus(&self) -> bool {
-        true
+    /// The chat owns the focus, the tab bar's included, and Esc never quits
+    /// (ADR-409). The compose box types every plain key while it has the
+    /// focus; away from it the shell's single keys work as the key help
+    /// names them, and a plain digit shows a tab while the focus is on a
+    /// slot the bar draws ([`ix::Ix::ctx`]).
+    fn keymap_ctx(&self) -> agent_tui::Ctx {
+        match &self.world {
+            Some(w) => self.ix.ctx(&w.laid.bar),
+            None => self.ix.ctx(&tabs::bar(&[])),
+        }
     }
 
     /// An overlay holds the keyboard: the compose box draws no caret and
     /// its border is set back, so the focus shows in one place.
-    fn overlaid(&mut self, on: bool) {
-        self.dispatch(ix::Ev::Overlaid(on));
+    fn overlay_opened(&mut self, o: agent_tui::Overlay) {
+        self.dispatch(ix::Ev::OverlayOpened(o));
     }
 
+    fn overlay_closed(&mut self, o: agent_tui::Overlay) {
+        self.dispatch(ix::Ev::OverlayClosed(o));
+    }
+
+    /// The bar's index of the focused slot, against the bar as the world
+    /// laid it out; with the world unread, the bar of no channels.
     fn focus_tab(&self) -> Option<usize> {
-        let focus::Focus::Tab(slot) = &self.ix.focus else { return None };
-        let names = self.world.as_ref().map(|w| tabs::strip_names(&w.groups)).unwrap_or_default();
-        tabs::bar(&names).iter().position(|s| s == slot)
+        let focus::Focus::Tab(slot) = self.ix.focus() else { return None };
+        match &self.world {
+            Some(w) => w.laid.bar.iter().position(|s| s == slot),
+            None => tabs::bar(&[]).iter().position(|s| s == slot),
+        }
     }
 
     fn focus_tabs(&mut self) {
         self.dispatch(ix::Ev::ToggleBar);
-    }
-
-    /// Esc with nothing open over the chat: never quit (ADR-409).
-    fn esc_quits(&self) -> bool {
-        false
     }
 
     /// A paste goes into the compose box whole, at the cursor, and the focus
@@ -733,12 +753,6 @@ impl Pane for ChatPane {
         (!line.is_empty()).then_some((line, tone))
     }
 
-    /// The compose box types every plain key while it has the focus; away
-    /// from it the shell's single keys work as the key help names them.
-    fn owns_text(&self) -> bool {
-        self.ix.owns_text()
-    }
-
     /// `attend.chat.mouse`, on unless set off: the chat is worked by
     /// clicks (ADR-405), and Shift-drag still selects text in most
     /// terminals. Alt+m gives the terminal its mouse back, for selection
@@ -802,7 +816,7 @@ impl Pane for ChatPane {
     }
 
     fn take_open(&mut self) -> Option<Open> {
-        self.open.take()
+        self.to_open.take()
     }
 
     fn picked(&mut self, id: &str, values: Vec<String>) {
@@ -1042,6 +1056,14 @@ impl Screen for Chat {
 }
 
 impl World {
+    /// A world of these channels and identities, laid out for the tab
+    /// `shown` against its channels.
+    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab) -> World {
+        let names = tabs::strip_names(&groups);
+        let laid = ix::Laid { bar: tabs::bar(&names), rows: sidebar::side_items_of(&seen, &rows), shown: tabs::normalize(shown.clone(), &names) };
+        World { groups, seen, rows, live_members, instances, laid }
+    }
+
     /// What the frame shows of the world: the channels with their members
     /// and descriptions, and the identities with their instance names.
     fn fingerprint(&self) -> String {

@@ -2,13 +2,19 @@
 //! moves it (ADR-407 §Interaction state).
 //!
 //! [`Ix`] is where the keyboard is ([`Focus`]), the tab the walk along the
-//! tab bar is previewing over, the column row the focus is on, and what the
-//! shell holds open over the pane. Nothing else writes it: every input that
-//! can move the focus reaches [`step`] as an [`Ev`], with a [`View`] of what
-//! the screen lays out, and gets back the next `Ix` and the [`Effect`]s to
-//! carry out, in order. `step` is pure, so each cell of the interaction
-//! table is a unit test with no terminal ([`ChatPane::dispatch`] is the
-//! only caller that carries the effects out).
+//! tab bar is previewing over, the column row the focus is on, and the
+//! stack of overlays the shell holds open over the pane. Nothing else
+//! writes it: every input that can move it reaches [`step`] as an [`Ev`],
+//! with a [`View`] of what the screen lays out, and gets back the next `Ix`
+//! and the [`Effect`]s to carry out, in order. `step` is pure, so each cell
+//! of the interaction table is a unit test with no terminal.
+//!
+//! The chat holds its `Ix` in a [`Machine`], whose one writing method runs
+//! `step`; the fields of `Ix` are private to this module. So the single
+//! writer is the compiler's to keep: outside this module an `Ix` can be
+//! read, and cloned, but never put back ([`ChatPane::dispatch`] is the only
+//! caller of [`Machine::step`], and carries the effects out). The shell
+//! asks how to route a key ([`Ix::ctx`]) and reads nothing else of it.
 //!
 //! The rules are those of [`super::focus`]: in the compose box every key
 //! edits but for the ways out; outside it the keys walk the ring, a
@@ -23,6 +29,7 @@
 //! world, which refocuses ([`Ev::WorldChanged`]), and steps again.
 
 use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use agent_tui::{Ctx, Overlay};
 
 use super::activate::{How, Target};
 use super::focus::Focus;
@@ -33,28 +40,32 @@ use crate::tabs::{Slot, Tab};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Ix {
     /// Where the keyboard is.
-    pub(super) focus: Focus,
+    focus: Focus,
     /// The tab shown when the focus walked onto the tab bar, put back when
     /// it walks off without choosing. Never set while the focus is off the
     /// bar.
-    pub(super) preview_from: Option<Tab>,
+    preview_from: Option<Tab>,
     /// The column row the focus is on, while it is on one: a refresh that
     /// moves the row keeps the focus on it.
-    pub(super) row_hit: Option<SideHit>,
-    /// What holds the keyboard over the pane, as the shell last reported it.
-    pub(super) overlay: Option<Overlay>,
-}
-
-/// What the shell holds open over the pane. The shell reports only that an
-/// overlay is up (`Pane::overlaid`, at each frame), not which, so this has
-/// the one kind; the menu, entry, question, help and guard kinds come with
-/// the contract that reports them (ADR-407 §Interaction state, PR B).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Overlay {
-    Shell,
+    row_hit: Option<SideHit>,
+    /// What the shell holds open over the pane, bottom first, as it
+    /// reported each opening and closing: the pane's menus by their ids,
+    /// its entry dialog and its questions, the key help, the exit guard.
+    /// The one record of what is open.
+    overlays: Vec<Overlay>,
 }
 
 impl Ix {
+    pub(super) fn focus(&self) -> &Focus {
+        &self.focus
+    }
+
+    /// The column row under the focus, by what it stands for.
+    #[cfg(test)]
+    pub(super) fn row_hit(&self) -> Option<&SideHit> {
+        self.row_hit.as_ref()
+    }
+
     /// The compose box types every plain key while it has the focus.
     pub(super) fn owns_text(&self) -> bool {
         self.focus == Focus::Compose
@@ -62,7 +73,7 @@ impl Ix {
 
     /// An overlay of the shell's holds the keyboard over the pane.
     pub(super) fn overlaid(&self) -> bool {
-        self.overlay.is_some()
+        !self.overlays.is_empty()
     }
 
     pub(super) fn on_bar(&self) -> bool {
@@ -75,6 +86,46 @@ impl Ix {
             Focus::Row(i) => Some(i),
             _ => None,
         }
+    }
+
+    /// How the shell routes a key beside the chat, against `bar`, the tab
+    /// bar as the world laid it out: the compose box types while it has the
+    /// focus, a plain digit shows a tab while the focus is on a slot `bar`
+    /// draws, the chat owns the bar's focus, and Esc never quits (ADR-409).
+    pub(super) fn ctx(&self, bar: &[Slot]) -> Ctx {
+        let digits = matches!(&self.focus, Focus::Tab(slot) if bar.contains(slot));
+        Ctx { text: self.owns_text(), digits, owns_bar: true, esc_quits: false }
+    }
+}
+
+/// The chat's one [`Ix`], and the one way to move it. It has no `Default`,
+/// so `std::mem::take` cannot reset it outside this module; replacing the
+/// whole value with [`Machine::new`] is the one write the compiler allows
+/// outside `step`, and only [`ChatPane::new`] does it.
+#[derive(Debug)]
+pub(super) struct Machine(Ix);
+
+impl Machine {
+    /// The state a chat starts in: the keyboard in the compose box,
+    /// nothing open.
+    pub(super) fn new() -> Machine {
+        Machine(Ix::default())
+    }
+
+    /// Step by `ev` ([`step`]) and keep the result: the effects to carry
+    /// out, in order. On [`NeedWorld`] nothing moves.
+    pub(super) fn step(&mut self, ev: Ev, v: &View) -> Result<Vec<Effect>, NeedWorld> {
+        let (ix, fx) = step(&self.0, ev, v)?;
+        self.0 = ix;
+        Ok(fx)
+    }
+}
+
+impl std::ops::Deref for Machine {
+    type Target = Ix;
+
+    fn deref(&self) -> &Ix {
+        &self.0
     }
 }
 
@@ -98,8 +149,11 @@ pub(super) enum Ev {
     WorldChanged,
     /// The column is hidden, by its key or for want of width.
     ColumnHidden,
-    /// The shell's overlay is up, or down (`Pane::overlaid`).
-    Overlaid(bool),
+    /// The shell opened an overlay over the pane, on top of the rest
+    /// (`Pane::overlay_opened`).
+    OverlayOpened(Overlay),
+    /// The shell closed the overlay on top (`Pane::overlay_closed`).
+    OverlayClosed(Overlay),
 }
 
 /// A left click.
@@ -178,7 +232,7 @@ pub(super) struct Laid {
 pub(super) struct NeedWorld;
 
 /// The interaction state after `ev`, and what to do, in order.
-pub(super) fn step(ix: &Ix, ev: Ev, v: &View) -> Result<(Ix, Vec<Effect>), NeedWorld> {
+fn step(ix: &Ix, ev: Ev, v: &View) -> Result<(Ix, Vec<Effect>), NeedWorld> {
     let mut s = Step { ix: ix.clone(), fx: Vec::new(), v };
     s.ev(ev)?;
     Ok((s.ix, s.fx))
@@ -241,11 +295,19 @@ impl<'a> Step<'a> {
                 }
                 Ok(())
             }
-            Ev::Overlaid(on) => {
-                let overlay = on.then_some(Overlay::Shell);
-                if self.ix.overlay != overlay {
-                    self.ix.overlay = overlay;
+            Ev::OverlayOpened(o) => {
+                if !self.ix.overlaid() {
                     self.fx.push(Effect::Redraw);
+                }
+                self.ix.overlays.push(o);
+                Ok(())
+            }
+            Ev::OverlayClosed(o) => {
+                if let Some(i) = self.ix.overlays.iter().rposition(|x| *x == o) {
+                    self.ix.overlays.remove(i);
+                    if !self.ix.overlaid() {
+                        self.fx.push(Effect::Redraw);
+                    }
                 }
                 Ok(())
             }

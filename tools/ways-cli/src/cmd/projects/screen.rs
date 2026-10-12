@@ -15,7 +15,7 @@ use agent_tui::ratatui::widgets::{Cell, HighlightSpacing, Paragraph, Row, Table,
 use agent_tui::ratatui::Frame as Draw;
 use agent_tui::screen::Screen;
 use agent_tui::theme::{self, Ground, Palette, Seg, Shape};
-use agent_tui::{App, Binding, Keyed, Pane, PaneTab, Tone};
+use agent_tui::{App, Binding, Ctx, Keyed, Pane, PaneTab, Tone};
 use anyhow::Result;
 
 use super::{ellipsize_left, list_cells, scan_all, shallow_match, show_project, Env, Project};
@@ -297,8 +297,8 @@ impl Pane for ProjectsPane {
     }
 
     /// While the filter is typed, every plain key is a letter of it.
-    fn owns_text(&self) -> bool {
-        self.editing
+    fn keymap_ctx(&self) -> Ctx {
+        Ctx { text: self.editing, ..Ctx::default() }
     }
 }
 

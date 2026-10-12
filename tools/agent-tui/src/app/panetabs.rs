@@ -257,7 +257,7 @@ impl App {
     /// Give the tab bar the focus, its cursor on the tab shown. A pane that
     /// owns the focus moves it itself ([`crate::Pane::focus_tabs`]).
     pub(super) fn strip_focus(&mut self) {
-        if let Some(p) = self.pane.as_mut().filter(|p| p.owns_focus()) {
+        if let Some(p) = self.pane.as_mut().filter(|p| p.keymap_ctx().owns_bar) {
             p.focus_tabs();
             return;
         }
