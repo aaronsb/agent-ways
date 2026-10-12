@@ -143,11 +143,14 @@ pub(crate) fn claude_stdout(claude: &Path, config_dir: Option<&Path>, args: &[&s
     output_within(cmd, CLAUDE_TIMEOUT)
 }
 
-/// Run `cmd` with its output captured, killing it once `limit` has passed.
+/// Run `cmd` with its output captured, killing it once `limit` has passed:
+/// on Unix its whole process group, so what it started dies with it.
 /// Its stdout on success; its stderr, its exit code, or the timeout otherwise.
 pub(crate) fn output_within(mut cmd: Command, limit: Duration) -> Result<String, String> {
     use std::io::Read;
     use std::process::Stdio;
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
     // Read both pipes on threads, so a child that fills one never blocks.
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
@@ -166,6 +169,12 @@ pub(crate) fn output_within(mut cmd: Command, limit: Duration) -> Result<String,
         match child.try_wait().map_err(|e| e.to_string())? {
             Some(status) => break status,
             None if Instant::now() >= deadline => {
+                #[cfg(unix)]
+                let _ = Command::new("kill")
+                    .args(["-KILL", "--", &format!("-{}", child.id())])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("timed out after {}s", limit.as_secs()));
@@ -308,6 +317,28 @@ mod tests {
         let mut failing = Command::new("sh");
         failing.args(["-c", "echo why >&2; exit 3"]);
         assert_eq!(output_within(failing, Duration::from_secs(5)).unwrap_err(), "why");
+    }
+
+    /// What the timed-out call started dies with it: its process group is
+    /// killed, not only the direct child.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_timeout_kills_what_the_call_started() {
+        let pidfile = std::env::temp_dir().join(format!("ways-output-within-{}", std::process::id()));
+        let mut slow = Command::new("sh");
+        slow.args(["-c", &format!("sleep 30 & echo $! > {}; wait", pidfile.display())]);
+        assert!(output_within(slow, Duration::from_millis(300)).unwrap_err().contains("timed out"));
+        let pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_string();
+        std::fs::remove_file(&pidfile).ok();
+        // Reaped by init once killed; give the kernel a moment.
+        let alive = || std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| !s.contains(") Z "));
+        for _ in 0..50 {
+            if !alive() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!alive(), "the grandchild {pid} outlived the timeout");
     }
 
     #[test]
