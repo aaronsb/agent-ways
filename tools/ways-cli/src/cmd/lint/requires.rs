@@ -28,6 +28,7 @@ pub(super) fn scan_macro_requires(path: &Path) -> Vec<String> {
 
     let mut found: Vec<&str> = Vec::new();
     let mut heredoc_delim: Option<String> = None;
+    let mut quote_ctx = vec![Ctx::Code];
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -42,7 +43,7 @@ pub(super) fn scan_macro_requires(path: &Path) -> Vec<String> {
         // Quoted text is data: `echo "a && touch b"` runs no `touch`. The
         // masked line keeps byte positions, so the delimiter below is read
         // from the original.
-        let masked = mask_quoted(trimmed);
+        let masked = mask_line(trimmed, &mut quote_ctx);
 
         // Detect here-doc start: cat <<EOF, cat <<'EOF', cat <<"EOF".
         // A `<<<` here-string has no body and is not one.
@@ -95,27 +96,41 @@ pub(super) fn scan_macro_requires(path: &Path) -> Vec<String> {
     perms
 }
 
+/// Where [`mask_line`] stands at a byte: in code, inside a `$( )` or
+/// backtick substitution, or inside a quoted string.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Ctx {
+    Code,
+    Subst,
+    Backtick,
+    Single,
+    /// `$'...'`, where a backslash escapes the next byte.
+    AnsiC,
+    Double,
+}
+
+/// [`mask_line`] for one line on its own.
+#[cfg(test)]
+fn mask_quoted(line: &str) -> String {
+    mask_line(line, &mut vec![Ctx::Code])
+}
+
 /// `line` with the literal text inside quotes replaced by `x`, byte for byte:
 /// single-quoted text whole, double-quoted text except a `$( )` or backtick
-/// substitution inside it, whose commands do run. The quote marks stay, so a
-/// quoted string reads as one word that is never a command name. Quote state
-/// does not carry across lines.
-fn mask_quoted(line: &str) -> String {
-    #[derive(PartialEq)]
-    enum Ctx {
-        Code,
-        Subst,
-        Backtick,
-        Single,
-        Double,
-    }
+/// substitution inside it, whose commands do run, and a `#` comment's text.
+/// The quote marks stay, so a quoted string reads as one word that is never
+/// a command name. `stack` carries the context from the previous line, so a
+/// string opened there (a multi-line awk program) is still a string here.
+fn mask_line(line: &str, stack: &mut Vec<Ctx>) -> String {
     let bytes = line.as_bytes();
     let mut out = bytes.to_vec();
-    let mut stack = vec![Ctx::Code];
+    if stack.is_empty() {
+        stack.push(Ctx::Code);
+    }
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        let top = stack.last().unwrap_or(&Ctx::Code);
+        let top = *stack.last().unwrap_or(&Ctx::Code);
         match top {
             Ctx::Single => {
                 if b == b'\'' {
@@ -124,6 +139,19 @@ fn mask_quoted(line: &str) -> String {
                     out[i] = b'x';
                 }
             }
+            Ctx::AnsiC => match b {
+                b'\'' => {
+                    stack.pop();
+                }
+                b'\\' => {
+                    out[i] = b'x';
+                    if i + 1 < bytes.len() {
+                        out[i + 1] = b'x';
+                    }
+                    i += 1;
+                }
+                _ => out[i] = b'x',
+            },
             Ctx::Double => match b {
                 b'"' => {
                     stack.pop();
@@ -144,16 +172,27 @@ fn mask_quoted(line: &str) -> String {
             },
             Ctx::Code | Ctx::Subst | Ctx::Backtick => match b {
                 b'\\' => i += 1,
+                // A comment runs to the end of the line: `#` that starts a
+                // word, not the one in `$#` or `${#x}`.
+                b'#' if i == 0 || bytes[i - 1].is_ascii_whitespace() || bytes[i - 1] == b';' => {
+                    out[i + 1..].fill(b'x');
+                    break;
+                }
+                b'$' if bytes.get(i + 1) == Some(&b'\'') => {
+                    stack.push(Ctx::AnsiC);
+                    i += 1;
+                }
                 b'\'' => stack.push(Ctx::Single),
                 b'"' => stack.push(Ctx::Double),
-                b'$' if bytes.get(i + 1) == Some(&b'(') => {
+                // `$(` and the process substitutions `<(` and `>(`
+                b'$' | b'<' | b'>' if bytes.get(i + 1) == Some(&b'(') => {
                     stack.push(Ctx::Subst);
                     i += 1;
                 }
-                b')' if *top == Ctx::Subst => {
+                b')' if top == Ctx::Subst => {
                     stack.pop();
                 }
-                b'`' if *top == Ctx::Backtick => {
+                b'`' if top == Ctx::Backtick => {
                     stack.pop();
                 }
                 b'`' => stack.push(Ctx::Backtick),
@@ -161,6 +200,11 @@ fn mask_quoted(line: &str) -> String {
             },
         }
         i += 1;
+    }
+    // A substitution does not span lines in the macros this reads; a quote
+    // does. Drop any unclosed substitution so only quotes carry over.
+    while matches!(stack.last(), Some(Ctx::Subst | Ctx::Backtick)) {
+        stack.pop();
     }
     // Every byte of a multi-byte character shares one context, so each is
     // replaced or none is, and the result stays valid UTF-8.
@@ -193,26 +237,53 @@ fn line_uses_command(line: &str, cmd: &str) -> bool {
     false
 }
 
+/// Commands that run the next word as a command: `timeout 2 gh`, `env X=1
+/// jq`, `nice -n 5 make`, `nohup cmd`, `command cmd` (not `command -v cmd`,
+/// which only looks it up).
+const WRAPPERS: &[&str] = &["timeout", "env", "nice", "nohup", "command", "exec"];
+
 /// Simple shell tokenizer — extracts tokens in "command position".
 /// Command position: first word of line, after |, &&, ||, ;, `{`, `then`,
-/// `do`, `else`, or inside $().
+/// `do`, `else`, after a wrapper (see [`WRAPPERS`]), or inside $() or
+/// backticks.
 /// Also handles VAR=$(cmd ...) and trap 'cmd ...' patterns.
 fn shell_tokens(line: &str) -> Vec<&str> {
     let mut tokens = Vec::new();
     let mut expect_cmd = true; // first word is a command
+    // The wrapper whose command comes next. Its options, assignments and a
+    // duration or count come first.
+    let mut wrapper: Option<&str> = None;
 
     for word in line.split_whitespace() {
-        // Handle VAR=$(cmd — split on $( inside the word
-        let subshell_word = if let Some(pos) = word.find("$(") {
-            let after = &word[pos + 2..];
-            if !after.is_empty() {
-                Some(after)
-            } else {
-                None // trailing $( — next word is the command
+        if let Some(wr) = wrapper {
+            if wr == "command" && matches!(word, "-v" | "-V") {
+                // `command -v x` looks `x` up; nothing runs.
+                wrapper = None;
+                expect_cmd = false;
+                continue;
             }
-        } else {
-            None
-        };
+            let is_arg = word.starts_with('-')
+                || word.contains('=')
+                || word.trim_end_matches(['s', 'm', 'h', 'd']).parse::<f64>().is_ok();
+            if is_arg {
+                continue;
+            }
+            wrapper = None;
+        }
+
+        // Handle VAR=$(cmd or "text `cmd — a substitution that opens
+        // inside the word
+        let opens = [
+            word.find("$(").map(|p| p + 2),
+            word.find("<(").map(|p| p + 2),
+            word.find(">(").map(|p| p + 2),
+            word.char_indices().skip(1).find(|&(_, c)| c == '`').map(|(p, _)| p + 1),
+        ];
+        let subshell_word = opens.into_iter().flatten().min().and_then(|pos| {
+            let after = &word[pos..];
+            // A trailing $( or ` — the next word is the command
+            (!after.is_empty()).then_some(after)
+        });
 
         // If we extracted a command from inside $(), process it
         if let Some(sw) = subshell_word {
@@ -222,6 +293,11 @@ fn shell_tokens(line: &str) -> Vec<&str> {
                 .trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
             if !clean.is_empty() && !clean.starts_with('-') {
                 tokens.push(clean);
+                if WRAPPERS.contains(&clean) {
+                    wrapper = Some(clean);
+                    expect_cmd = true;
+                    continue;
+                }
             }
         }
 
@@ -244,6 +320,10 @@ fn shell_tokens(line: &str) -> Vec<&str> {
             let clean = w.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
             if !clean.is_empty() && !tokens.contains(&clean) {
                 tokens.push(clean);
+            }
+            if WRAPPERS.contains(&clean) {
+                wrapper = Some(clean);
+                continue;
             }
             expect_cmd = false;
         }
@@ -360,6 +440,35 @@ mod tests {
         assert_eq!(got, ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(wc:*)"]);
         assert_eq!(mask_quoted("a \"b c\" 'd' e"), "a \"xxx\" 'x' e");
         assert_eq!(mask_quoted("cat <<'EOF'").len(), "cat <<'EOF'".len());
+    }
+
+    #[test]
+    fn a_quote_opened_on_an_earlier_line_carries_over() {
+        // The makefile way's macro: an awk program spans lines, and the
+        // line that closes it pipes on to tr and sort.
+        let got = scan(
+            "multiline",
+            "TARGETS=$(awk '\n  /^[a-z]+:/ { print $1; then git }\n' \"$MAKEFILE\" 2>/dev/null | tr ' ' '\\n' | sort -u | tr '\\n' ' ')\n",
+        );
+        assert_eq!(got, ["Bash(awk:*)", "Bash(sort:*)", "Bash(tr:*)"]);
+        // A comment's apostrophe opens no quote.
+        let got = scan("comment", "# don't stop here\ngrep x f # and then git\nwc -l f\n");
+        assert_eq!(got, ["Bash(grep:*)", "Bash(wc:*)"]);
+    }
+
+    #[test]
+    fn a_backtick_inside_double_quotes_runs() {
+        let got = scan("backtick", "echo \"tick: `uname -r`\"\n");
+        assert_eq!(got, ["Bash(uname:*)"]);
+    }
+
+    #[test]
+    fn a_wrapper_runs_the_next_command() {
+        let got = scan(
+            "wrappers",
+            "timeout 2 gh api user &\nX=$(timeout 1.5 jq . f)\nenv A=1 B=2 git status\nnice -n 5 make\ncommand -v sed >/dev/null || exit 0\ndone < <(file -b x)\n",
+        );
+        assert_eq!(got, ["Read", "Bash(file:*)", "Bash(gh:*)", "Bash(git:*)", "Bash(jq:*)", "Bash(make:*)"]);
     }
 
     #[test]
