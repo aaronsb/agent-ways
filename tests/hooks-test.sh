@@ -448,4 +448,18 @@ check "attend macro: attend not installed" \
     "$(PATH="$SYSBIN" "$BASH_BIN" "$HOOKS/softwaredev/environment/attend/macro.sh" 2>&1)"
 check "attend macro: calls attend only with the argv it expects" "" "$(cat "$WORK/attend-unexpected" 2>/dev/null)"
 
+# The github macro fits under the 3 s macro deadline when GitHub hangs: a
+# stand-in `gh` sleeps, so each call runs to its own timeout.
+GH_SHIMS="$WORK/gh-shims"
+mkdir -p "$GH_SHIMS"
+printf '#!/bin/sh\n[ "$1" = repo ] && [ -n "$GH_VIEW_OK" ] && exit 0\nsleep 10\n' > "$GH_SHIMS/gh"
+chmod +x "$GH_SHIMS/gh"
+for view in "" 1; do
+    secs=$( { time ( cd "$WORK" && GH_VIEW_OK="$view" PATH="$GH_SHIMS:$PATH" \
+        bash "$HOOKS/softwaredev/delivery/github/macro.sh" > "$WORK/gh.out" 2>/dev/null ); } 2>&1 )
+    check "github macro under a hung gh (repo view ok: ${view:-no}) ends under 3 s (took ${secs} s)" "yes" "$(under "$secs" 3)"
+    check "github macro under a hung gh (repo view ok: ${view:-no}) says the API is unreachable" \
+        "**Note**: Could not reach GitHub API" "$(cat "$WORK/gh.out")"
+done
+
 exit $fail

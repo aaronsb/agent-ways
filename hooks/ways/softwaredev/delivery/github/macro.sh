@@ -4,11 +4,18 @@
 #   1. Project scope (solo vs team) and workflow recommendations
 #   2. Repository health — how well-configured is this repo?
 
-# Early exit if not a GitHub repo
-gh repo view &>/dev/null || {
-  echo "**Note**: Not a GitHub repository - GitHub commands won't work"
-  exit 0
-}
+# Time budget: ways kills a macro at 3 s and keeps none of its output, so
+# the network calls are bounded to fit under it: 1 s for the repo check,
+# then one parallel batch of 1.5 s.
+
+# Early exit if not a GitHub repo. A timeout (124) is an unreachable API,
+# not a missing repo.
+timeout 1 gh repo view --json name &>/dev/null
+case $? in
+  0) ;;
+  124) echo "**Note**: Could not reach GitHub API"; exit 0 ;;
+  *) echo "**Note**: Not a GitHub repository - GitHub commands won't work"; exit 0 ;;
+esac
 
 # --- Parallel API calls ---
 # We need: repo details, community profile, labels, branch protection
@@ -17,8 +24,14 @@ gh repo view &>/dev/null || {
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+# The default branch for the protection call, read locally so that call
+# can join the batch instead of waiting on the repo details.
+PROTECT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+PROTECT_BRANCH=${PROTECT_BRANCH#origin/}
+PROTECT_BRANCH=${PROTECT_BRANCH:-main}
+
 # Repo details (description, topics, permissions, default branch, full_name for badges)
-timeout 3 gh api repos/:owner/:repo \
+timeout 1.5 gh api repos/:owner/:repo \
   --jq '{
     description: .description,
     topics: .topics,
@@ -30,23 +43,27 @@ timeout 3 gh api repos/:owner/:repo \
   }' >"$WORK_DIR/repo.json" 2>/dev/null &
 
 # Community profile (README, license, CoC, contributing, templates, security)
-timeout 3 gh api repos/:owner/:repo/community/profile \
+timeout 1.5 gh api repos/:owner/:repo/community/profile \
   >"$WORK_DIR/community.json" 2>/dev/null &
 
 # Contributors (save full response for reuse in team path)
-timeout 3 gh api repos/:owner/:repo/contributors \
+timeout 1.5 gh api repos/:owner/:repo/contributors \
   >"$WORK_DIR/contributors.json" 2>/dev/null &
 
 # Labels — paginate returns per-page jq results, so pipe aggregate through jq
-timeout 3 gh api repos/:owner/:repo/labels --paginate \
+timeout 1.5 gh api repos/:owner/:repo/labels --paginate \
   >"$WORK_DIR/labels.json" 2>/dev/null &
 
-# Security policy (not in community profile, check both common locations)
-(timeout 3 gh api repos/:owner/:repo/contents/SECURITY.md --jq '.name' >"$WORK_DIR/security.txt" 2>/dev/null ||
- timeout 3 gh api repos/:owner/:repo/contents/.github/SECURITY.md --jq '.name' >"$WORK_DIR/security.txt" 2>/dev/null) &
+# Security policy (not in community profile): both common locations at once
+timeout 1.5 gh api repos/:owner/:repo/contents/SECURITY.md --jq '.name' >"$WORK_DIR/security-root.txt" 2>/dev/null &
+timeout 1.5 gh api repos/:owner/:repo/contents/.github/SECURITY.md --jq '.name' >"$WORK_DIR/security-github.txt" 2>/dev/null &
 
 # Current user
-timeout 3 gh api user --jq '.login' >"$WORK_DIR/user.txt" 2>/dev/null &
+timeout 1.5 gh api user --jq '.login' >"$WORK_DIR/user.txt" 2>/dev/null &
+
+# Branch protection: a success with a url means protected
+(timeout 1.5 gh api "repos/:owner/:repo/branches/$PROTECT_BRANCH/protection" \
+  --jq '.url' >"$WORK_DIR/protection.txt" 2>/dev/null && touch "$WORK_DIR/protection.ok") &
 
 wait
 
@@ -63,7 +80,6 @@ ACTIVE_CONTRIBUTORS=${ACTIVE_CONTRIBUTORS:-0}
 # Repo details
 DESCRIPTION=$(jq -r '.description // empty' "$WORK_DIR/repo.json" 2>/dev/null)
 TOPICS=$(jq -r '.topics | length' "$WORK_DIR/repo.json" 2>/dev/null)
-DEFAULT_BRANCH=$(jq -r '.default_branch // "main"' "$WORK_DIR/repo.json" 2>/dev/null)
 CAN_PUSH=$(jq -r '.permissions.push // false' "$WORK_DIR/repo.json" 2>/dev/null)
 CAN_ADMIN=$(jq -r '.permissions.admin // false' "$WORK_DIR/repo.json" 2>/dev/null)
 REPO_FULL_NAME=$(jq -r '.full_name // empty' "$WORK_DIR/repo.json" 2>/dev/null)
@@ -76,19 +92,15 @@ HAS_CONTRIBUTING=$(jq -r 'if .files.contributing then "yes" else "" end' "$WORK_
 HAS_ISSUE_TEMPLATE=$(jq -r 'if .files.issue_template then "yes" else "" end' "$WORK_DIR/community.json" 2>/dev/null)
 HAS_PR_TEMPLATE=$(jq -r 'if .files.pull_request_template then "yes" else "" end' "$WORK_DIR/community.json" 2>/dev/null)
 # Security policy — populated by parallel call above
-HAS_SECURITY_POLICY=$(cat "$WORK_DIR/security.txt" 2>/dev/null)
+HAS_SECURITY_POLICY=$(cat "$WORK_DIR/security-root.txt" "$WORK_DIR/security-github.txt" 2>/dev/null | head -1)
 
 # Labels — aggregate paginated JSON and count non-defaults
 CUSTOM_LABELS=$(jq -s '[.[][] | select(.default == false)] | length' "$WORK_DIR/labels.json" 2>/dev/null)
 
-# Branch protection (separate call - needs the default branch name)
+# Branch protection — from the parallel call above
 HAS_BRANCH_PROTECTION=""
-if [[ -n "$DEFAULT_BRANCH" ]]; then
-  timeout 3 gh api "repos/:owner/:repo/branches/$DEFAULT_BRANCH/protection" \
-    --jq '.url' >"$WORK_DIR/protection.txt" 2>/dev/null
-  if [[ $? -eq 0 ]] && [[ -s "$WORK_DIR/protection.txt" ]]; then
-    HAS_BRANCH_PROTECTION="yes"
-  fi
+if [[ -e "$WORK_DIR/protection.ok" ]] && [[ -s "$WORK_DIR/protection.txt" ]]; then
+  HAS_BRANCH_PROTECTION="yes"
 fi
 
 # README badges (shields.io)

@@ -6,7 +6,7 @@ commands: ^gh\ |^gh$
 refire: 0.15
 macro: prepend
 scope: agent, subagent
-requires: ["Read", "Bash(cat:*)", "Bash(gh:*)", "Bash(git:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(jq:*)", "Bash(rm:*)", "Bash(sed:*)", "Bash(sort:*)", "Bash(tr:*)", "Bash(wc:*)"]
+requires: ["Read", "Bash(cat:*)", "Bash(gh:*)", "Bash(git:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(jq:*)", "Bash(rm:*)", "Bash(sed:*)", "Bash(sort:*)", "Bash(touch:*)", "Bash(tr:*)", "Bash(wc:*)"]
 ---
 <!-- epistemic: convention -->
 # GitHub Way
