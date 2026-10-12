@@ -74,17 +74,25 @@ type World = {
   noHostFlag?: boolean
   /** Submits that fail before one enters. */
   submitFails?: number
+  /** The session id `$.session.id()` reads; `s1` when not given. */
+  sessionId?: string
+  /** What $.state holds at the start, as a reload hands it to a fresh module. */
+  status?: Record<string, unknown>
+  /** What the plugin's `$.store` holds at the start. */
+  store?: Record<string, unknown>
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
  *  every argv, registered tool and submitted prompt recorded. It holds the
  *  plugin's `status` in $.state as the session does, and `clearState`
- *  empties it as Claude Code 2.1.296 does at a /clear. */
+ *  empties it as Claude Code 2.1.296 does at a /clear or a /resume. It
+ *  holds the plugin's `$.store`, which outlives the process, and answers
+ *  `$.session.id()` from `world.sessionId`. */
 function host(on: On, world: World) {
   const argvs: string[][] = []
   const submitted: string[] = []
   const tools: string[] = []
-  const state: { value: unknown; version: number } = { value: undefined, version: 0 }
+  const state: { value: unknown; version: number } = world.status ? { value: world.status, version: 1 } : { value: undefined, version: 0 }
   on('state.get', { plugin: 'attend', key: 'status' }, () => ({ value: { value: state.value, version: state.version } }) as never)
   on('state.set', { plugin: 'attend', key: 'status' }, ($, e) => {
     if (e.ifVersion !== undefined && e.ifVersion !== state.version) return { value: { isSet: false, version: state.version } } as never
@@ -92,6 +100,13 @@ function host(on: On, world: World) {
     state.version += 1
     return { value: { isSet: true, version: state.version } } as never
   })
+  const store: Record<string, unknown> = { ...(world.store ?? {}) }
+  on('store.get', ($, e) => ({ value: store[e.key] }) as never)
+  on('store.set', ($, e) => {
+    store[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined } as never
+  })
+  on('session.id', () => ({ value: world.sessionId ?? 's1' }) as never)
   const clearState = () => {
     state.value = undefined
     state.version = 0
@@ -134,17 +149,23 @@ function host(on: On, world: World) {
   const count = (cmd: string) => argvs.filter(a => a.slice(1).join(' ').startsWith(cmd)).length
   const ran = (cmd: string) => count(cmd) > 0
   const mode = () => (state.value as { mode?: string } | undefined)?.mode
-  return { argvs, submitted, tools, count, ran, mode, clearState }
+  return { argvs, submitted, tools, count, ran, mode, clearState, store, world }
 }
 
-/** A /clear as Claude Code 2.1.296 runs it: `session.end` with reason
- *  `clear`, the plugin's $.state emptied, then the settings SessionStart
- *  (source `clear`) under the new session id. No `session.start` follows. */
-async function clear($: Engine, h: ReturnType<typeof host>) {
-  await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+/** A /clear or an in-session /resume as Claude Code 2.1.296 runs it:
+ *  `session.end` with that reason, the plugin's $.state emptied, then the
+ *  settings SessionStart under the session id that goes on (the new one, or
+ *  the resumed one). No `session.start` follows. */
+async function clear($: Engine, h: ReturnType<typeof host>, to = 's2', source: 'clear' | 'resume' = 'clear') {
+  await $.session.end({ reason: source, sessionId: h.world.sessionId ?? 's1' } as never)
   h.clearState()
-  await $.classic.SessionStart({ source: 'clear' } as never)
+  h.world.sessionId = to
+  await $.classic.SessionStart({ source, session_id: to } as never)
 }
+
+const ACTIVE_TOOLS = ['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers']
+/** The store key that names the sessions that listened. */
+const LISTENED = 'listened'
 
 /** The calls and tools a step added, to read what a reload did. */
 function since(h: ReturnType<typeof host>) {
@@ -573,6 +594,101 @@ describe('a reload', () => {
     expect(reload.tools()).toEqual(['attend_listen'])
     expect(reload.ran('listen off')).toBe(true)
     expect(reload.ran('listen on')).toBe(false)
+    expect(h.mode()).not.toBe('active')
+  })
+})
+
+// A reload's fresh module has only $.state to go on: here session.start
+// finds it seeded, never having seen attend_listen, and a /clear comes
+// before activation has run (it waits on the config read), then a second
+// reload.
+describe('a fresh module', () => {
+  test('restored from $.state, it stays active through an early /clear and another reload', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { status: { mode: 'active' } })
+    await $.session.start(INTERACTIVE)
+    await clear($, h)
+    const reload = since(h)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(reload.tools()).toEqual(ACTIVE_TOOLS)
+    expect(reload.ran('listen on')).toBe(true)
+    expect(reload.ran('listen off')).toBe(false)
+    expect(h.mode()).toBe('active')
+  })
+})
+
+// Activation is kept per session id in $.store, which outlives the process,
+// so `claude --resume` and an in-session /resume bring a session that
+// listened back listening (ADR-406, addendum of 2026-10-12).
+describe('a resume', () => {
+  test('claude --resume of a session that listened starts listening', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1', store: { [LISTENED]: ['s0', 's1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect([...new Set(h.tools)]).toEqual(ACTIVE_TOOLS)
+    expect(h.ran('listen on')).toBe(true)
+    expect(h.ran('listen off')).toBe(false)
+    expect(h.mode()).toBe('active')
+  })
+
+  test('a session id that never listened starts dormant', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s0', 's1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    expect(h.tools).toEqual(['attend_listen'])
+    expect(h.ran('listen off')).toBe(true)
+    expect(h.ran('listen on')).toBe(false)
+  })
+
+  test('attend_listen records the session id, and the record keeps the newest 50', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const old = Array.from({ length: 60 }, (_, i) => `old${i}`)
+    const h = host(on, { sessionId: 's1', store: { [LISTENED]: old } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    const ids = h.store[LISTENED] as string[]
+    expect(ids.length).toBe(50)
+    expect(ids[ids.length - 1]).toBe('s1')
+    expect(ids).not.toContain('old0')
+  })
+
+  test('a /clear carries the activation to the new session id', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's1' })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clear($, h, 's2')
+    expect(h.store[LISTENED]).toEqual(['s1', 's2'])
+  })
+
+  test('an in-session /resume to a session that listened turns a dormant session on', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    const resume = since(h)
+    await clear($, h, 's1', 'resume')
+    await clock.advance(1_000)
+    expect(resume.tools()).toEqual(ACTIVE_TOOLS.slice(1))
+    expect(resume.ran('listen on')).toBe(true)
+    expect(h.mode()).toBe('active')
+  })
+
+  test('an in-session /resume to a session that never listened leaves a dormant one dormant', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s1'] } })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    const resume = since(h)
+    await clear($, h, 's8', 'resume')
+    await clock.advance(1_000)
+    expect(resume.tools()).toEqual([])
+    expect(resume.ran('listen on')).toBe(false)
     expect(h.mode()).not.toBe('active')
   })
 })

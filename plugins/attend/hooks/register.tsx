@@ -68,6 +68,12 @@ const PEERS_EVERY_MS = 30_000
 const KEEPWARM_EVERY_MS = 60_000
 // Polls that retry a batch whose submit failed before it is let go.
 const SUBMIT_TRIES = 3
+// The $.store key naming the sessions that listened, newest last, so a
+// resume of one comes back listening (ADR-406, addendum of 2026-10-12).
+const LISTENED = 'listened'
+const LISTENED_KEPT = 50
+// A /clear or a /resume tells attend the id that goes on after this long.
+const RELISTEN_MS = 1_000
 
 // agent-ways theme (tools/agent-theme/themes/agent-ways.theme).
 const SUBTLE = '#3a3a3c'
@@ -75,7 +81,8 @@ const FG = '#d0d0d0'
 
 /** What the module keeps between dispatches. A reload starts it afresh, so
  *  the mode a reload reads is the one in $.state: session.start restores it
- *  from there, and a /clear, which empties $.state, has it put back. */
+ *  from there, and a /clear or a /resume, which empty $.state, has it put
+ *  back. Across processes the record in $.store answers instead. */
 type Mod = {
   config: ModConfig
   /** Whether this session may poll: interactive, or allowed by config. */
@@ -102,6 +109,12 @@ type Mod = {
   submitTries: number
   /** Channels joined through attend_join, shown until attend reports rooms. */
   joined: Set<string>
+  /** session.start has run; before it, at process start, the engine has not
+   *  bound the session and refuses a tool registration. */
+  isStarted: boolean
+  /** A /clear or a /resume moved the session to an id attend has not been
+   *  told is listening yet; the poll holds its drain until it has. */
+  isRelistening: boolean
 }
 
 async function readStatus($: $): Promise<AttendStatus> {
@@ -209,16 +222,31 @@ async function listenOn($: $): Promise<ProcessRunResult> {
   return r
 }
 
+/** The sessions that listened, newest last, as $.store holds them. */
+async function readListened($: $): Promise<string[]> {
+  const v = await $.store.get(LISTENED)
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+
+/** Records that session `id` listened, keeping the newest LISTENED_KEPT. */
+async function rememberListening($: $, id: string) {
+  const ids = (await readListened($)).filter(x => x !== id)
+  ids.push(id)
+  await $.store.set(LISTENED, ids.slice(-LISTENED_KEPT))
+}
+
 /** Makes the session active for the rest of the process: listening and the
  *  poll; the caller has registered the tools. Idempotent. Returns attend's
  *  answer to `listen on`. */
 async function activate($: $, mod: Mod): Promise<ProcessRunResult> {
+  mod.active = true
   mod.config = await readConfig($, mod.cwd)
   mod.canPoll = mod.canPoll || mod.config.headlessPoll
   mod.lastActivityMs = await $.clock.now()
-  mod.active = true
   await updateStatus($, s => ({ ...s, mode: 'active' as const }))
+  await rememberListening($, await $.session.id())
   const r = await listenOn($)
+  mod.isRelistening = false
   if (mod.canPoll) {
     startTicker($, mod)
     $.clock.after(0, () => void tick($, mod, true))
@@ -244,7 +272,7 @@ async function tick($: $, mod: Mod, force: boolean) {
     const interval = pollInterval(mod.config, now - mod.lastActivityMs, isTurnRunning)
     if (!force && now - mod.lastPollMs < interval) return
     mod.lastPollMs = now
-    if (!isTurnRunning) await poll($, mod)
+    if (!isTurnRunning && !mod.isRelistening) await poll($, mod)
     await refreshUnread($, mod)
     if (force || now - mod.lastPeersMs >= PEERS_EVERY_MS) await refreshPeers($, mod)
     if (mod.config.keepwarm === 'on' && mod.running.size === 0 && now - mod.lastKeepwarmMs >= KEEPWARM_EVERY_MS) {
@@ -381,6 +409,8 @@ export const register: Register = on => {
     pending: [],
     submitTries: 0,
     joined: new Set(),
+    isStarted: false,
+    isRelistening: false,
   }
 
   on('session.start', async ($, e, next) => {
@@ -390,9 +420,14 @@ export const register: Register = on => {
     if (!mod.config.install) return next(e)
     mod.canPoll = e.isInteractive || mod.config.headlessPoll
     await registerListen($)
-    const wasActive = isActive(await readStatus($))
+    mod.isStarted = true
+    // A reload finds the mode in $.state; a new process (`claude --resume`)
+    // finds the session id in the record of sessions that listened.
+    const wasActive = isActive(await readStatus($)) || (await readListened($)).includes(await $.session.id())
     if (wasActive || (mod.config.listening === 'active' && mod.canPoll)) {
       // Listed by turn one; listening and the first drain follow the hook.
+      // Active from here, so a /clear before activate runs keeps it.
+      mod.active = true
       await registerActiveTools($)
       $.clock.after(0, () => void activate($, mod))
     } else {
@@ -402,18 +437,30 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // A /clear goes on under a new session id with no session.start, and
-  // Claude Code empties this plugin's $.state with the old session. The
-  // settings SessionStart (source `clear`) fires in the new one: an active
-  // session puts its mode back there at once, so a reload after the /clear
-  // still finds it active, and tells attend the new id is listening. The
-  // /clear empties the model's context as a compaction does, so the next
-  // delivery carries the full preamble again.
+  // A /clear or an in-session /resume goes on under another session id with
+  // no session.start, and Claude Code empties this plugin's $.state. The
+  // settings SessionStart (source `clear` or `resume`, `session_id` the id
+  // that goes on) fires after that. An active session, or a /resume to a
+  // session that listened, puts the mode back at once, so a reload finds it
+  // active, records the id, and tells attend the id is listening. The poll
+  // holds its drain until then. The model's context changed as at a
+  // compaction, so the next delivery carries the full preamble. At process
+  // start this event comes before session.start, which handles that case.
   on('classic.SessionStart', async ($, e, next) => {
     const done = await next(e)
-    if (e.source === 'clear' && (await isOn($, mod))) {
-      await updateStatus($, s => ({ ...s, afterCompaction: true, turnsSinceFull: 0 }))
-      $.clock.after(1_000, () => void listenOn($))
+    if (!mod.isStarted || (e.source !== 'clear' && e.source !== 'resume')) return done
+    const id = e.session_id || (await $.session.id())
+    const goesOn = (await isOn($, mod)) || (e.source === 'resume' && (await readListened($)).includes(id))
+    if (!goesOn) return done
+    await updateStatus($, s => ({ ...s, mode: 'active' as const, afterCompaction: true, turnsSinceFull: 0 }))
+    await rememberListening($, id)
+    mod.isRelistening = true
+    if (mod.active) {
+      $.clock.after(RELISTEN_MS, () => void listenOn($).finally(() => (mod.isRelistening = false)))
+    } else {
+      mod.active = true
+      await registerActiveTools($)
+      $.clock.after(RELISTEN_MS, () => void activate($, mod))
     }
     return done
   })

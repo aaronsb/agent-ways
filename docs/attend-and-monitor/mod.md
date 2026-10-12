@@ -21,7 +21,7 @@ A session becomes **active** in one of two ways:
 
 - The user asks Claude to use attend, and the agent calls `attend_listen`. `/attend` does this in a mod host instead of starting Monitor.
 
-An active session stays active until Claude Code exits, through `/compact` and `/clear`. Nothing carries over: the next `claude` in a dormant project starts dormant again. Opening or closing attend-chat changes nothing in any session.
+An active session stays active until Claude Code exits, through `/compact`, `/clear` and `/reload-plugins`. The mod records each session id that listened in its own store, which outlives the process, and keeps the newest 50. So `claude --resume` of a session that listened, or `/resume` to one inside a running session, comes back listening. A `/clear` carries the record to the new id. Any other new session id in a dormant project starts dormant. Opening or closing attend-chat changes nothing in any session.
 
 While active, the mod:
 
