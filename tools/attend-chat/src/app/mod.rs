@@ -164,8 +164,9 @@ pub struct ChatPane {
     open: Option<Open>,
     /// The column's row the menu in `open` docks under.
     anchor: Option<Rect>,
-    /// A menu step, or a quit, waiting for `y`.
-    pending: Option<menu::Pending>,
+    /// The step the shell's question asks about, a menu step or a quit,
+    /// until it is answered ([`ChatPane::answered`]).
+    asked: Option<menu::Step>,
     /// The compose box lent to a channel's name or description, and the
     /// draft it held before.
     prompt: Option<(menu::Prompt, String)>,
@@ -222,7 +223,7 @@ impl ChatPane {
             hits: Hits::default(),
             open: None,
             anchor: None,
-            pending: None,
+            asked: None,
             prompt: None,
             enhanced: false,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
@@ -242,6 +243,12 @@ impl ChatPane {
         self.status_set_at = Some(Instant::now());
         self.status_is_error = error;
         self.dirty = true;
+    }
+
+    /// The compose box's text and its `> ` prompt, as last drawn.
+    fn compose_rect(&self) -> Rect {
+        let (text, _) = self.hits.compose;
+        Rect { x: text.x.saturating_sub(2), width: text.width + 2, ..text }
     }
 
     /// The feed's entries are out of date: rebuild them, and their layout,
@@ -318,8 +325,6 @@ impl ChatPane {
 
     fn set_tab(&mut self, t: Tab) {
         if t != self.foreground {
-            // A question asked on one tab is not answered on another.
-            self.drop_question();
             self.foreground = t;
             self.feed = FeedState::default();
             self.invalidate();
@@ -577,18 +582,6 @@ impl Pane for ChatPane {
     fn key(&mut self, k: KeyEvent) -> Keyed {
         self.dirty = true;
         let m = k.modifiers;
-        let plain = !m.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-        if self.pending.is_some() {
-            let yes = plain && matches!(k.code, KeyCode::Char('y' | 'Y'));
-            if self.answer(yes) {
-                return Keyed::Quit;
-            }
-            // Any other character keeps things as they are and is typing:
-            // it goes on into the draft. Other keys only answer.
-            if yes || !(plain && matches!(k.code, KeyCode::Char(_))) {
-                return Keyed::Done;
-            }
-        }
         if self.prompt.is_some() {
             match k.code {
                 KeyCode::Esc => self.prompt_cancel(),
@@ -610,7 +603,7 @@ impl Pane for ChatPane {
         match k.code {
             // Without the keyboard enhancement Ctrl+3 is this same Esc:
             // ask, so a tab key never closes the chat.
-            KeyCode::Esc if !self.enhanced && self.input.is_empty() => self.pending = Some(menu::Pending::Quit),
+            KeyCode::Esc if !self.enhanced && self.input.is_empty() => self.ask(menu::Step::Quit),
             KeyCode::Esc => return Keyed::Pass,
             KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.enter(),
             KeyCode::Tab => self.tab_key(),
@@ -630,12 +623,11 @@ impl Pane for ChatPane {
     /// A paste goes into the compose box whole, at the cursor: its lines
     /// stay one draft, and nothing is sent until Enter. A box lent to a
     /// one-line name or description takes the lines joined by spaces. A
-    /// waiting question is dropped, as a typed character drops it, so a
-    /// later `y` in the paste never answers it. Control characters other
+    /// waiting question the shell answers no first, as a typed character
+    /// answers it, so a `y` in the paste never does. Control characters other
     /// than newline and tab are left out: an escape sequence in the
     /// clipboard is not drawn into the box or sent.
     fn paste(&mut self, text: &str) {
-        self.drop_question();
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         let text = if self.prompt.is_some() { text.split('\n').collect::<Vec<_>>().join(" ") } else { text };
         self.side_focus = None;
@@ -658,10 +650,22 @@ impl Pane for ChatPane {
     /// A click on a message selects it and brings it whole into view; on
     /// the compose box's text it puts the cursor there; on a chip of the
     /// helper row it completes what is being typed to it.
+    ///
+    /// While the compose box is lent, a click outside it gives the box
+    /// back, as Esc does, and does nothing more, except on the column,
+    /// where it goes on, as a click that closes a menu does.
     fn click(&mut self, at: Position) {
         self.dirty = true;
         if !self.hits.side_area.contains(at) {
             self.side_focus = None;
+        }
+        let (text, start) = self.hits.compose;
+        let with_prompt = self.compose_rect();
+        if self.prompt.is_some() && !with_prompt.contains(at) {
+            self.prompt_cancel();
+            if !self.click_through(at) {
+                return;
+            }
         }
         if self.hits.feed.contains(at) {
             if let Some(i) = self.feed.entry_at(at.y - self.hits.feed.y) {
@@ -669,8 +673,6 @@ impl Pane for ChatPane {
             }
             return;
         }
-        let (text, start) = self.hits.compose;
-        let with_prompt = Rect { x: text.x.saturating_sub(2), width: text.width + 2, ..text };
         if with_prompt.contains(at) {
             let col = at.x.saturating_sub(text.x) as usize;
             self.input.click(self.hits.text_width, start + (at.y - text.y) as usize, col);
@@ -683,6 +685,21 @@ impl Pane for ChatPane {
         }
         if let Some((_, hit)) = self.hits.side.iter().find(|(r, _)| r.contains(at)).cloned() {
             self.side_click(hit);
+        }
+    }
+
+    /// The column passes a click that closes a menu or a question on to
+    /// its row, as the tab bar does.
+    fn click_through(&self, at: Position) -> bool {
+        self.side_drawn() && self.hits.side_area.contains(at)
+    }
+
+    /// A click on the tab bar or the bottom bar, or a right click outside
+    /// the compose box, gives a lent compose box back, as a left click
+    /// outside it does.
+    fn dismiss(&mut self, at: Option<Position>) {
+        if at.is_none_or(|at| !self.compose_rect().contains(at)) {
+            self.prompt_cancel();
         }
     }
 
@@ -776,10 +793,9 @@ impl Pane for ChatPane {
         self.new_channel();
     }
 
-    /// The shell took a key or a click: a waiting question is dropped,
-    /// and the column gives up the keyboard (F2, a tab, the bottom bar).
+    /// The shell took a key or a click: the column gives up the keyboard
+    /// (F2, a tab, the bottom bar).
     fn interrupted(&mut self) {
-        self.drop_question();
         if self.side_focus.take().is_some() {
             self.dirty = true;
         }
@@ -1097,14 +1113,11 @@ mod paste_tests {
     use super::*;
 
     #[test]
-    fn a_paste_drops_a_waiting_question_and_leaves_out_control_characters() {
+    fn a_paste_leaves_out_control_characters() {
         let mut c = ChatPane::new(None, Palette::default());
-        c.pending = Some(menu::Pending::Leave("deploy".into()));
         // An escape sequence as a clipboard can carry one: ESC, then `[31m`.
         let esc = char::from(0x1b);
         c.paste(&format!("yes{esc}[31m red\x07\tok\r\nnext"));
-        assert_eq!(c.pending, None, "the paste is typing, not an answer");
-        assert_eq!(c.status, "kept");
         assert_eq!(c.input.text(), "yes[31m red\tok\nnext", "escape and bell dropped; tab and newline kept");
     }
 }

@@ -877,15 +877,21 @@ fn clear_history_asks_first_and_y_runs_the_purge() {
     press(&mut c, key(KeyCode::Char('y')));
     assert_eq!(c.status(), "dry run: /purge not run");
     assert!(c.input().is_empty(), "the y answered; it typed nothing");
-    // Delete channel on a named channel: the last item. Another character
-    // keeps the channel and goes on into the draft.
+    // Delete channel on a named channel: the last item. `n` keeps the
+    // channel and types nothing; another character keeps it and goes on
+    // into the draft.
     press(&mut c, ctrl('3'));
     press(&mut c, ctrl('3'));
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Enter));
     assert!(bar(&mut c).contains("delete #deploy and its history?"), "{}", bar(&mut c));
     press(&mut c, key(KeyCode::Char('n')));
-    assert_eq!((c.status(), c.input().text()), ("kept", "n"));
+    assert_eq!((c.status(), c.input().text()), ("kept", ""));
+    press(&mut c, ctrl('3'));
+    press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Enter));
+    press(&mut c, key(KeyCode::Char('o')));
+    assert_eq!((c.status(), c.input().text()), ("kept", "o"));
     g.finish();
 }
 
@@ -964,7 +970,8 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
 // whatever the bar says after it: a later `y` never answers a question
 // that is no longer shown.
 
-/// Ctrl+digit opens the tab menu over the question; Esc closes it unchanged.
+/// Ctrl+digit opens the tab menu over the question; Esc closes it, saying
+/// nothing.
 #[test]
 fn ctrl_digit_drops_a_waiting_question() {
     let mut c = chat().enhanced(true).dry_run(true);
@@ -972,7 +979,7 @@ fn ctrl_digit_drops_a_waiting_question() {
     press(&mut c, ctrl('3'));
     assert_eq!(c.status(), "kept");
     press(&mut c, key(KeyCode::Esc));
-    assert!(bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
+    assert!(!bar(&mut c).contains("unchanged") && !bar(&mut c).contains("delete #deploy"), "{}", bar(&mut c));
     y_types(&mut c);
 }
 
@@ -1610,7 +1617,8 @@ fn an_agent_row_removes_it_from_the_shown_channel() {
     assert!(menu.contains("Remove from #deploy"), "{menu}");
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Enter));
-    assert!(bar(&mut c).contains("from #deploy? y removes"), "{}", bar(&mut c));
+    let shown = bar(&mut c);
+    assert!(shown.contains("remove @") && shown.contains("from #deploy?") && shown.contains(" y remove ") && shown.contains(" n keep "), "{shown}");
     press(&mut c, key(KeyCode::Char('y')));
     assert_eq!(c.status(), "dry run: /kick not run");
 }
@@ -1624,21 +1632,21 @@ fn the_destination_flag_marks_a_swept_channel() {
     assert!(text(&mut c, 80, 25).contains(" #archive (swept) "), "{}", text(&mut c, 80, 25));
 }
 
-/// A menu closed unchanged leaves "unchanged" in the bar; a question a
-/// later pick asks replaces it, so the `y` that answers it is never blind.
+/// A menu closed with Esc says nothing; a question a later pick asks is
+/// shown with its answers, so the `y` that answers it is never blind.
 /// By keys: #deploy's menu, Esc, its menu again, Delete channel.
 #[test]
 fn a_question_after_a_menu_closed_unchanged_is_shown_by_keys() {
     let mut c = chat().enhanced(true).dry_run(true);
     drawn(&mut c, &[ctrl('3'), ctrl('3'), key(KeyCode::Esc)], 80, 25);
-    assert!(bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
+    assert!(!bar(&mut c).contains("unchanged"), "closing says nothing: {}", bar(&mut c));
     // Ctrl+3 on the tab shown opens its menu; Join is item 6, Delete 7.
     let mut keys = vec![ctrl('3')];
     keys.extend(std::iter::repeat_n(key(KeyCode::Down), 6));
     keys.push(key(KeyCode::Enter));
     drawn(&mut c, &keys, 80, 25);
     let shown = bar(&mut c);
-    assert!(shown.contains("delete #deploy and its history? y deletes") && !shown.contains("unchanged"), "{shown}");
+    assert!(shown.contains("delete #deploy and its history?") && shown.contains(" y delete "), "{shown}");
 }
 
 /// The same by the mouse: a menu closed unchanged, then Remove from an
@@ -1647,7 +1655,7 @@ fn a_question_after_a_menu_closed_unchanged_is_shown_by_keys() {
 fn a_question_after_a_menu_closed_unchanged_is_shown_by_the_mouse() {
     let mut c = chat_side().enhanced(true).dry_run(true);
     drawn(&mut c, &[ctrl('3'), ctrl('3'), key(KeyCode::Esc)], 80, 25);
-    assert!(bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
+    assert!(!bar(&mut c).contains("unchanged"), "closing says nothing: {}", bar(&mut c));
     let buf = testkit::render_screen(&mut c, 80, 25);
     let row = testkit::find(&buf, "beta").expect("the member's row");
     left(&mut c, row);
@@ -1655,7 +1663,7 @@ fn a_question_after_a_menu_closed_unchanged_is_shown_by_the_mouse() {
     let item = testkit::find(&buf, "Remove from #deploy").expect("the menu's item");
     left(&mut c, item);
     let shown = bar(&mut c);
-    assert!(shown.contains("from #deploy? y removes") && !shown.contains("unchanged"), "{shown}");
+    assert!(shown.contains("from #deploy?") && shown.contains(" y remove "), "{shown}");
 }
 
 /// A paste with newlines is one draft in the compose box: nothing sent,

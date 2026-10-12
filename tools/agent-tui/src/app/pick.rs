@@ -117,10 +117,13 @@ impl App {
     }
 
     /// One key in the picker. Enter sets the value; on a list, Space marks
-    /// the option under the cursor. Esc closes it unchanged.
+    /// the option under the cursor. Esc closes it unchanged: a setting's
+    /// picker says so, and a pane's menu closes saying nothing, as every
+    /// overlay over a pane does.
     pub(super) fn pick_key(&mut self, mut p: Pick, k: KeyEvent) {
         let last = p.options.len() - 1;
         match k.code {
+            KeyCode::Esc | KeyCode::Char('q') if p.pane.is_some() => self.msg.clear(),
             KeyCode::Esc | KeyCode::Char('q') => self.msg = "unchanged".into(),
             KeyCode::Up | KeyCode::Char('k') => p.sel = p.sel.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('j') => p.sel = (p.sel + 1).min(last),

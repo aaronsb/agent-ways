@@ -83,6 +83,8 @@ pub(crate) enum Mode {
     ItemDelete { name: String, noun: &'static str },
     /// Esc in the editor with unsaved edits: save, discard, or back.
     ThemeUnsaved,
+    /// A pane's question waiting for `y` or `n` ([`pane::Open::Ask`]).
+    Ask(paneshell::Asked),
 }
 
 /// The click targets of review's bar and the quit prompt, and a flow's buttons.
@@ -274,6 +276,9 @@ pub struct App {
     /// The terminal reports Ctrl+digits as themselves (the kitty keyboard
     /// protocol is on).
     enhanced: bool,
+    /// The session ends: a quit asked for by a click, which, unlike a key,
+    /// has no return value to end it with ([`App::ended`]).
+    ending: bool,
 }
 
 impl App {
@@ -310,6 +315,7 @@ impl App {
             menu_anchor: None,
             menu_at_tab: false,
             enhanced: false,
+            ending: false,
         }
     }
 
@@ -397,6 +403,13 @@ impl App {
     /// The bottom bar's message.
     pub fn message(&self) -> &str {
         &self.msg
+    }
+
+    /// Whether the session has ended on something other than a key, such
+    /// as a click that quit ([`pane::Open::Quit`]). The terminal loop ends
+    /// on it after a click; [`App::key`] returns false on it.
+    pub fn ended(&self) -> bool {
+        self.ending
     }
 
     /// Whether the exit guard is asking.

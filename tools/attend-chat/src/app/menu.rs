@@ -1,6 +1,6 @@
 //! The tab menu: what a tab's menu offers and what each item does, the
-//! inline confirm a destructive item waits on, and the compose box lent
-//! to a name or a description. Every item runs the slash command that
+//! question a destructive item waits on, and the compose box lent to a
+//! name or a description. Every item runs the slash command that
 //! does the same thing ([`keys::run_slash`]); the commands stay.
 //!
 //! - `≡`, the common menu: Theme ▸ (this session's look), Keybinding set ▸
@@ -23,9 +23,12 @@
 //!   Remove agent picker.
 //!
 //! Every item that drops something asks first: Clear view, Clear history,
-//! Leave and Delete channel. `y` goes ahead, any other key keeps things as
-//! they are. A click opens a menu with the first item under the cursor, so
-//! an Enter just after the click must not drop anything.
+//! Leave, Delete channel and Remove. The question is the shell's
+//! ([`agent_tui::Open::Ask`]), on the bottom bar with its two answers as
+//! lozenges: `y` or a click on the first goes ahead; `n`, Esc, a click
+//! anywhere else or any other key keeps things as they are. A click opens
+//! a menu with the first item under the cursor, so an Enter just after the
+//! click must not drop anything: Enter only answers no.
 //!
 //! A menu docks on the line under the row it belongs to: a channel's or an
 //! agent's row in the left column, else its tab. Where the lines below
@@ -75,9 +78,12 @@ pub(super) const PRESETS: &[(&str, &str, &str)] = &[
     ("auto: Ctrl+1-9 where it arrives, else Alt+1-9", "auto", "both"),
 ];
 
-/// A step waiting for `y`.
+/// The id the chat's questions go to the shell under ([`agent_tui::Open::Ask`]).
+const ASK: &str = "ask";
+
+/// A step that asks first, waiting for its answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Pending {
+pub(super) enum Step {
     /// Empty the view (`/clear`); the bus keeps every message.
     ClearView,
     /// Leave the channel (`/leave`).
@@ -90,6 +96,20 @@ pub(super) enum Pending {
     Remove(String, Member),
     /// Quit: Esc where the terminal sends Ctrl+3 as Esc.
     Quit,
+}
+
+impl Step {
+    /// The question, then what yes and no do, as the answers name them.
+    fn question(&self) -> (String, &'static str, &'static str) {
+        match self {
+            Step::ClearView => ("clear the view? the bus keeps every message".into(), "clear", "keep"),
+            Step::Leave(c) => (format!("leave #{c}?"), "leave", "stay"),
+            Step::ClearHistory(c) => (format!("clear #{c} history? deletes what every live agent has read, older than 90 s"), "clear", "keep"),
+            Step::Delete(c) => (format!("delete #{c} and its history?"), "delete", "keep"),
+            Step::Remove(c, m) => (format!("remove @{} from #{c}?", m.label), "remove", "keep"),
+            Step::Quit => ("quit the chat? Ctrl-C quits at once".into(), "quit", "stay"),
+        }
+    }
 }
 
 /// A channel member a Remove can take out: its membership id, the name the
@@ -190,20 +210,8 @@ pub(super) fn who_line(s: &Seen, roster: &[Peer]) -> String {
 }
 
 impl ChatPane {
-    /// The bottom bar's line while a step waits or the compose box is lent.
+    /// The bottom bar's line while the compose box is lent.
     pub(super) fn menu_status(&self) -> Option<String> {
-        if let Some(p) = &self.pending {
-            return Some(match p {
-                Pending::ClearView => "clear the view? the bus keeps every message · y clears · any other key keeps it".into(),
-                Pending::Leave(c) => format!("leave #{c}? y leaves · any other key stays"),
-                Pending::ClearHistory(c) => {
-                    format!("clear #{c} history? deletes what every live agent has read, older than 90 s · y clears · any other key keeps it")
-                }
-                Pending::Delete(c) => format!("delete #{c} and its history? y deletes · any other key keeps it"),
-                Pending::Remove(c, m) => format!("remove @{} from #{c}? y removes · any other key keeps them", m.label),
-                Pending::Quit => "quit? y quits · any other key stays · Ctrl-C quits at once".into(),
-            });
-        }
         self.prompt.as_ref().map(|(p, _)| match p {
             Prompt::NewChannel => "new channel: type its name · Enter creates it · Esc cancels".into(),
             Prompt::Describe(c) => format!("describe #{c}: type a line · Enter sets it (empty clears) · Esc cancels"),
@@ -292,10 +300,12 @@ impl ChatPane {
         }
     }
 
-    /// A menu item, or a submenu's peer, was chosen.
+    /// A menu item, or a submenu's peer, was chosen; or a question was
+    /// answered.
     pub(super) fn menu_picked(&mut self, id: &str, value: &str) {
         self.dirty = true;
         match id {
+            ASK => return self.answered(value == "y"),
             "common" => return self.common_item(value),
             "theme" => return self.theme_picked(value),
             "keys" => {
@@ -335,7 +345,7 @@ impl ChatPane {
             }
         } else if let Some(c) = id.strip_prefix("remove:") {
             if let Some(m) = self.removable.iter().find(|m| m.option() == value).cloned() {
-                self.pending = Some(Pending::Remove(c.into(), m));
+                self.ask(Step::Remove(c.into(), m));
             }
         }
     }
@@ -374,10 +384,10 @@ impl ChatPane {
             self.whois(member);
         } else if let Some(c) = item.strip_prefix(REMOVE_FROM).map(|c| c.trim().trim_start_matches('#').to_string()) {
             if let Some(m) = self.removable.first().cloned() {
-                self.pending = Some(Pending::Remove(c, m));
+                self.ask(Step::Remove(c, m));
             }
         } else if let Some(c) = item.strip_prefix(LEAVE).map(|c| c.trim().trim_start_matches('#').to_string()) {
-            self.pending = Some(Pending::Leave(c));
+            self.ask(Step::Leave(c));
         }
     }
 
@@ -402,10 +412,18 @@ impl ChatPane {
     fn item(&mut self, channel: &str, item: &str) {
         let chan = || (!channel.is_empty()).then(|| channel.to_string());
         match item {
-            CLEAR_VIEW => self.pending = Some(Pending::ClearView),
-            CLEAR_HISTORY => self.pending = Some(Pending::ClearHistory(chan().unwrap_or(BASE_CHANNEL_NAME.into()))),
-            DELETE => self.pending = chan().map(Pending::Delete),
-            LEAVE => self.pending = chan().map(Pending::Leave),
+            CLEAR_VIEW => self.ask(Step::ClearView),
+            CLEAR_HISTORY => self.ask(Step::ClearHistory(chan().unwrap_or(BASE_CHANNEL_NAME.into()))),
+            DELETE => {
+                if let Some(c) = chan() {
+                    self.ask(Step::Delete(c));
+                }
+            }
+            LEAVE => {
+                if let Some(c) = chan() {
+                    self.ask(Step::Leave(c));
+                }
+            }
             JOIN => {
                 if let Some(c) = chan() {
                     self.run("join", SlashOutcome::Join(c));
@@ -441,13 +459,12 @@ impl ChatPane {
     }
 
     /// Ask for a new channel's name in the compose box: from the `+` slot
-    /// or Ctrl+N. A waiting question is dropped; the name already being
-    /// typed is left alone, so a repeat cannot take the name for the draft.
+    /// or Ctrl+N. The name already being typed is left alone, so a repeat
+    /// cannot take the name for the draft.
     /// A description being typed is never thrown away: the request waits
     /// until it is sent or cancelled.
     pub(super) fn new_channel(&mut self) {
         self.dirty = true;
-        self.pending = None;
         match self.prompt {
             Some((Prompt::NewChannel, _)) => {}
             Some(_) => self.say("finish the description, or Esc, first", false),
@@ -493,10 +510,14 @@ impl ChatPane {
         }
     }
 
-    /// Esc while the compose box is lent: give it back unchanged.
+    /// Esc, or a click outside the compose box, while it is lent: give it
+    /// back with its draft, saying nothing, as every overlay closes.
     pub(super) fn prompt_cancel(&mut self) {
-        self.end_prompt();
-        self.say("cancelled", false);
+        if self.prompt.is_some() {
+            self.end_prompt();
+            self.status.clear();
+            self.dirty = true;
+        }
     }
 
     /// What to add to a status line when the jump setting asks for Ctrl+digits
@@ -512,37 +533,38 @@ impl ChatPane {
         }
     }
 
-    /// The shell took a key or a click: a waiting question is dropped.
-    pub(super) fn drop_question(&mut self) {
-        if let Some(p) = self.pending.take() {
-            self.say(if p == Pending::Quit { "stayed" } else { "kept" }, false);
-        }
+    /// Ask before `step` runs: the shell shows the question and its answers
+    /// ([`agent_tui::Open::Ask`]), and the answer comes back through
+    /// [`ChatPane::answered`].
+    pub(super) fn ask(&mut self, step: Step) {
+        let (question, yes, no) = step.question();
+        self.asked = Some(step);
+        self.open = Some(Open::Ask { id: ASK.into(), question, yes: yes.into(), no: no.into() });
     }
 
-    /// A key while a step waits: `y` goes ahead, any other key keeps
-    /// things as they are. True when the screen should quit.
-    pub(super) fn answer(&mut self, yes: bool) -> bool {
-        let Some(p) = self.pending.take() else { return false };
+    /// The answer to the question asked: yes runs the step, no keeps things
+    /// as they are and says so.
+    pub(super) fn answered(&mut self, yes: bool) {
+        let Some(step) = self.asked.take() else { return };
         self.dirty = true;
         if !yes {
-            self.say(if p == Pending::Quit { "stayed" } else { "kept" }, false);
-            return false;
+            return self.say(if step == Step::Quit { "stayed" } else { "kept" }, false);
         }
-        match p {
-            Pending::Quit => return true,
-            Pending::ClearView => {
+        match step {
+            Step::Quit => self.open = Some(Open::Quit),
+            Step::ClearView => {
                 self.run("clear", SlashOutcome::ClearTranscript);
             }
-            Pending::Leave(c) => {
+            Step::Leave(c) => {
                 self.run("leave", SlashOutcome::Leave(Some(c)));
             }
-            Pending::ClearHistory(c) => {
+            Step::ClearHistory(c) => {
                 self.run("purge", SlashOutcome::Purge(Some(c)));
             }
-            Pending::Delete(c) => {
+            Step::Delete(c) => {
                 self.run("dissolve", SlashOutcome::Dissolve(Some(c)));
             }
-            Pending::Remove(c, m) => {
+            Step::Remove(c, m) => {
                 if self.dry_run {
                     self.say("dry run: /kick not run", false);
                 } else {
@@ -550,7 +572,6 @@ impl ChatPane {
                 }
             }
         }
-        false
     }
 
     /// Run a slash command for a menu item and show what it did, the
@@ -642,14 +663,14 @@ mod tests {
         c.dry_run = true;
         for (item, ask) in [(CLEAR_VIEW, "clear the view?"), (CLEAR_HISTORY, "clear #deploy history?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
             c.item("deploy", item);
-            assert!(c.menu_status().is_some_and(|s| s.contains(ask)), "{item}: {:?}", c.menu_status());
+            assert!(matches!(c.open.take(), Some(Open::Ask { question, .. }) if question.contains(ask)), "{item} asks the shell");
             assert_eq!(c.status, "", "{item} ran nothing yet");
-            c.answer(false);
+            c.menu_picked(ASK, "n");
             assert_eq!(c.status, "kept");
             c.status.clear();
         }
         c.item("deploy", LEAVE);
-        c.answer(true);
+        c.menu_picked(ASK, "y");
         assert_eq!(c.status, "dry run: /leave not run", "y goes ahead");
     }
 
@@ -664,7 +685,7 @@ mod tests {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
         c.menu_picked("agent:aaron", "Leave #deploy");
-        assert_eq!(c.pending, Some(Pending::Leave("deploy".into())), "Leave asks first, as the channel menu's does");
+        assert_eq!(c.asked, Some(Step::Leave("deploy".into())), "Leave asks first, as the channel menu's does");
     }
 
     /// A pane whose world is `seen`, shown on merged.

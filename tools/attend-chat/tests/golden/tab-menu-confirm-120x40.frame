@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                                                                                               #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                                                                  |
-| chat  clear #open history? deletes what every live agent has read, older than 90 s · y clears · any other key keeps it |
+| confirm  clear #open history? deletes what every live agent has read, older than 90 s   y clear   n keep               |
 styles
   0   0-2   White Blue -
   0   5-14  White Blue -
@@ -159,4 +159,6 @@ styles
  38   1-7   Cyan - BOLD
  38   9-14  LightCyan - -
  38  16-21  LightYellow - -
- 39   0-5   Black Cyan BOLD
+ 39   0-8   Black Yellow BOLD
+ 39  88-96  White Red BOLD
+ 39  98-105 Black Green BOLD

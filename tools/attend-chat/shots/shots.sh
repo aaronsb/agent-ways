@@ -70,6 +70,16 @@ plain        | plain | wait:Agents
 own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
 quiet-send   | base  | wait:Agents side:○ wait:Address Enter text:are_you_there Enter wait:no_heartbeat
 paste-asked  | base  | wait:merged click:merged wait:Clear_view Enter wait:clear_the_view? paste:yes_please\\nsecond_line wait:kept
+ask          | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear
+ask-yes      | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear click:y_clear wait:cleared
+ask-no       | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear click:n_keep wait:kept
+ask-feed     | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear click:signing wait:kept
+ask-row      | base  | wait:merged click:merged wait:Clear_view Enter wait:y_clear side:#infra wait:kept
+ask-long     | base  | wait:#open click:#open click:#open wait:Clear_history Down Enter wait:y_clear
+menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
+menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
+prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc click:signing gone:new_channel
+quit-ask     | base  | wait:Agents Escape wait:quit_the_chat
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
