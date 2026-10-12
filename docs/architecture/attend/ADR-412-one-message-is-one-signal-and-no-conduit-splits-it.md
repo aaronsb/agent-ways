@@ -25,6 +25,11 @@ agent:
   model: claude-opus-5-5
 amends:
   - ADR-406#Decision
+considered:
+  - operator: aaronsb
+    said: "Accept the cut (Recommended)"
+    via: "AskUserQuestion in the head session's terminal, 2026-10-12; question: whether it is acceptable that a Monitor reader sees only about the first 420 characters of a long message (Monitor truncates at 500), with attend inbox for the rest; option text written by the agent, chosen by the operator: Monitor is the fallback now that the mod's tools are the principal path. The line shows the sender and ~id before the body, so attend inbox or a reply still works. Simplest, and nothing splits."
+    covers: [monitor]
 status: accepted
 date: 2026-10-12
 deciders:
