@@ -217,8 +217,8 @@ pub trait Pane: Any {
     fn new_item(&mut self) {}
 
     /// The shell took a key or a click before the pane saw it: the tab bar
-    /// got the focus, a tab was clicked. A pane waiting on an answer (a
-    /// `y` to confirm) drops the question.
+    /// got the focus, a tab was clicked. A pane holding the keyboard in a
+    /// list of its own lets go of it.
     fn interrupted(&mut self) {}
 
     /// How the key help describes quitting, when the pane's differs from
@@ -277,10 +277,13 @@ pub trait Pane: Any {
         false
     }
 
-    /// A click landed outside the pane's area, on the tab bar or the
-    /// bottom bar: close what the pane holds open over its own content,
-    /// such as a text entry lent to a name, and say nothing.
-    fn clicked_outside(&mut self) {}
+    /// A left or right click that is not the pane's to act on: on the tab
+    /// bar or the bottom bar (`None`), or a right click inside the pane at
+    /// `at`. Close what the pane holds open over its own content, such as a
+    /// text entry lent to a name, when the click is outside it, and say
+    /// nothing. A left click inside the pane reaches [`Pane::click`], which
+    /// does the same.
+    fn dismiss(&mut self, _at: Option<Position>) {}
 
     /// Text the terminal pasted, whole, newlines and all. Nothing by
     /// default.

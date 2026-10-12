@@ -40,6 +40,12 @@ impl App {
             if matches!(self.mode, Mode::Flow(_)) {
                 return self.flow_event(FlowEvent::Cancel);
             }
+            // A question is answered no first, so the pane says so and
+            // holds nothing for an answer that will never come.
+            if let Mode::Ask(a) = &self.mode {
+                let a = a.clone();
+                self.answer(a, false);
+            }
             return self.quit();
         }
         match std::mem::replace(&mut self.mode, Mode::Browse) {
@@ -448,20 +454,25 @@ impl App {
                         self.key(press(k));
                     }
                 } else if closes && !in_menu {
+                    // A click on what the menu docks under only closes it:
+                    // going on would open the same menu again.
+                    let on_anchor = p.anchor.is_some_and(|r| r.contains(at));
                     self.key(press(KeyCode::Esc));
-                    self.click_through(m);
+                    if !on_anchor {
+                        self.click_through(m);
+                    }
                 }
             }
-            // A pane's question: a click on an answer gives it; a click of
-            // any button anywhere else answers no and, on the tab bar or
-            // the column, acts. The wheel scrolls what is under it, as
-            // with nothing asked.
+            // A pane's question: a left click on an answer gives it; any
+            // other press, of any button anywhere, answers no and, on the
+            // tab bar or the column, acts. The wheel scrolls what is under
+            // it, as with nothing asked.
             Mode::Ask(a) => {
                 if wheel.is_some() {
                     self.pane_mouse(m);
                 } else if matches!(m.kind, MouseEventKind::Down(_)) {
                     let a = a.clone();
-                    let answer = self.hits.answers.iter().find(|(r, _)| r.contains(at)).map(|&(_, yes)| yes);
+                    let answer = self.hits.answers.iter().find(|(r, _)| click && r.contains(at)).map(|&(_, yes)| yes);
                     self.answer(a, answer == Some(true));
                     if answer.is_none() {
                         self.click_through(m);

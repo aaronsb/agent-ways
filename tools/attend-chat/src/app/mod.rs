@@ -245,6 +245,12 @@ impl ChatPane {
         self.dirty = true;
     }
 
+    /// The compose box's text and its `> ` prompt, as last drawn.
+    fn compose_rect(&self) -> Rect {
+        let (text, _) = self.hits.compose;
+        Rect { x: text.x.saturating_sub(2), width: text.width + 2, ..text }
+    }
+
     /// The feed's entries are out of date: rebuild them, and their layout,
     /// on the next frame.
     fn invalidate(&mut self) {
@@ -654,7 +660,7 @@ impl Pane for ChatPane {
             self.side_focus = None;
         }
         let (text, start) = self.hits.compose;
-        let with_prompt = Rect { x: text.x.saturating_sub(2), width: text.width + 2, ..text };
+        let with_prompt = self.compose_rect();
         if self.prompt.is_some() && !with_prompt.contains(at) {
             self.prompt_cancel();
             if !self.click_through(at) {
@@ -688,9 +694,13 @@ impl Pane for ChatPane {
         self.side_drawn() && self.hits.side_area.contains(at)
     }
 
-    /// A click on the tab bar or the bottom bar gives a lent compose box back.
-    fn clicked_outside(&mut self) {
-        self.prompt_cancel();
+    /// A click on the tab bar or the bottom bar, or a right click outside
+    /// the compose box, gives a lent compose box back, as a left click
+    /// outside it does.
+    fn dismiss(&mut self, at: Option<Position>) {
+        if at.is_none_or(|at| !self.compose_rect().contains(at)) {
+            self.prompt_cancel();
+        }
     }
 
     fn bindings(&self) -> Vec<Binding> {

@@ -189,8 +189,8 @@ impl App {
         // While the tab bar has the focus the bar says so, over the pane's mode.
         let (mode, ground) = if focused { ("TABS".to_string(), theme::Ground::Accent) } else { (p.mode(), p.mode_ground()) };
         let lozenge = self.shape.lozenge(&[Seg::on(format!(" {mode} "), ground).bold()]);
-        // What the shell said last (the mouse toggled, a menu closed
-        // unchanged) until input next reaches the pane: a key, a click in
+        // What the shell said last (the mouse toggled, a middle click's
+        // paste hint) until input next reaches the pane: a key, a click in
         // it, or a pick from a menu it opened. Else the pane's own, so a
         // question the pane asks after a pick is always the one shown.
         let said = if self.msg.is_empty() { p.status() } else { Some((self.msg.clone(), Tone::Said)) };
@@ -307,10 +307,10 @@ impl App {
     /// pane passes on and quits, quits.
     ///
     /// A key the shell takes is one the pane never sees, so the pane is
-    /// told first ([`Pane::interrupted`]): a question it is waiting on is
-    /// dropped, never left for a later `y` to answer unseen. Every shell
-    /// key passes here, so a new one is covered by being added to
-    /// [`App::shell_key`].
+    /// told first ([`Pane::interrupted`]): a list holding the keyboard lets
+    /// go of it. Every shell key passes here, so a new one is covered by
+    /// being added to [`App::shell_key`]. A question the pane asked is the
+    /// shell's ([`Mode::Ask`]) and is answered before a key reaches here.
     pub(super) fn pane_key(&mut self, k: KeyEvent) -> bool {
         let taken = self.shell_key(k);
         if self.strip.is_some() && !matches!(taken, Some(ShellKey::Strip(_))) {
@@ -510,14 +510,18 @@ impl App {
     /// The mouse while a pane is shown: a click on a tab shows it, and on
     /// the tab shown opens its menu, as Ctrl+digit does and a right click
     /// does at once; the wheel and a click inside the pane are the pane's.
-    /// A click on the tab bar or the bottom bar first closes what the pane
-    /// holds open over its content ([`Pane::clicked_outside`]). A middle
-    /// click pastes nothing while the shell has the mouse, and the bar says so.
+    /// A click or a right click on the tab bar or the bottom bar, and a
+    /// right click in the pane, first closes what the pane holds open over
+    /// its content ([`Pane::dismiss`]), as a left click in the pane does.
+    /// A middle click pastes nothing while the shell has the mouse, and the
+    /// bar says so.
     pub(super) fn pane_mouse(&mut self, m: MouseEvent) {
         let at = Position::new(m.column, m.row);
-        if Self::is_press(&m) && !self.hits.pane.contains(at) {
+        let inside = self.hits.pane.contains(at);
+        let right = m.kind == MouseEventKind::Down(MouseButton::Right);
+        if Self::is_press(&m) && (!inside || right) {
             if let Some(p) = &mut self.pane {
-                p.clicked_outside();
+                p.dismiss(inside.then_some(at));
             }
         }
         match m.kind {

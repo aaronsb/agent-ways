@@ -100,16 +100,35 @@ fn feed(c: &mut Chat) -> (u16, u16) {
     (50, 10)
 }
 
-/// How each step that asks first is reached: the tab whose menu offers it
-/// (Ctrl+digit twice), the item, what its question says, and what yes runs.
-const STEPS: &[(char, &str, &str, &str)] = &[
-    ('1', "Clear view", "clear the view?", "dry run: /clear not run"),
-    ('2', "Clear history", "clear #open history?", "dry run: /purge not run"),
-    ('3', "Leave", "leave #deploy?", "dry run: /leave not run"),
-    ('3', "Delete channel", "delete #deploy and its history?", "dry run: /dissolve not run"),
+/// A step that asks first, and how it is reached: the tab whose menu offers
+/// it (Ctrl+digit twice, or two clicks on the tab), the item, what its
+/// question says, its answers, and what yes runs. An item that opens a
+/// picker (Remove agent) asks once its first entry is picked.
+struct Step {
+    key: char,
+    tab: &'static str,
+    item: &'static str,
+    question: &'static str,
+    yes: &'static str,
+    no: &'static str,
+    ran: &'static str,
+}
+
+const STEPS: &[Step] = &[
+    Step { key: '1', tab: "1 merged", item: "Clear view", question: "clear the view?", yes: " y clear ", no: " n keep ", ran: "dry run: /clear not run" },
+    Step { key: '2', tab: "2 #open", item: "Clear history", question: "clear #open history?", yes: " y clear ", no: " n keep ", ran: "dry run: /purge not run" },
+    Step { key: '3', tab: "3 #deploy", item: "Leave", question: "leave #deploy?", yes: " y leave ", no: " n stay ", ran: "dry run: /leave not run" },
+    Step { key: '3', tab: "3 #deploy", item: "Delete channel", question: "delete #deploy and its history?", yes: " y delete ", no: " n keep ", ran: "dry run: /dissolve not run" },
+    Step { key: '3', tab: "3 #deploy", item: "Remove agent", question: "from #deploy?", yes: " y remove ", no: " n keep ", ran: "dry run: /kick not run" },
 ];
 
-/// Open `tab`'s menu by Ctrl+digit and pick `item` by the keyboard.
+/// The row of the open menu's title, if a menu is open.
+fn menu_title(c: &mut Chat) -> Option<(usize, usize)> {
+    rows(c).iter().enumerate().find_map(|(y, r)| r.find("pick one").map(|x| (r[..x].chars().count(), y)))
+}
+
+/// Open `tab`'s menu by Ctrl+digit and pick `item` by the keyboard; a
+/// picker it opens gets Enter on its first entry.
 fn ask_by_keys(c: &mut Chat, tab: char, item: &str) {
     press(c, KeyCode::Char(tab), KeyModifiers::CONTROL);
     if !menu_open(c) {
@@ -124,9 +143,13 @@ fn ask_by_keys(c: &mut Chat, tab: char, item: &str) {
         key(c, KeyCode::Down);
     }
     key(c, KeyCode::Enter);
+    if menu_open(c) {
+        key(c, KeyCode::Enter);
+    }
 }
 
-/// Open `tab`'s menu by clicks on its tab and pick `item` by a click.
+/// Open `tab`'s menu by clicks on its tab and pick `item` by a click; a
+/// picker it opens gets a click on its first entry.
 fn ask_by_clicks(c: &mut Chat, tab: &str, item: &str) {
     let t = at(c, tab);
     click(c, t);
@@ -135,6 +158,9 @@ fn ask_by_clicks(c: &mut Chat, tab: &str, item: &str) {
     }
     let i = at(c, item);
     click(c, i);
+    if let Some((x, y)) = menu_title(c) {
+        click(c, (x as u16 + 2, y as u16 + 1));
+    }
 }
 
 #[test]
@@ -153,6 +179,20 @@ fn a_click_on_the_yes_answer_runs_the_step() {
     let yes = at(&mut c, " y clear ");
     click(&mut c, yes);
     assert_eq!(c.status(), "dry run: /clear not run", "the step ran, as far as a dry run runs one");
+}
+
+/// Only a left click gives an answer: a middle or a right click on the yes
+/// lozenge answers no, as a click of any button elsewhere does.
+#[test]
+fn a_middle_or_right_click_on_the_yes_answer_answers_no() {
+    for b in [MouseButton::Middle, MouseButton::Right] {
+        let mut c = chat();
+        ask_by_clicks(&mut c, "1 merged", "Clear view");
+        let yes = at(&mut c, " y clear ");
+        button(&mut c, yes, b);
+        assert_eq!(c.status(), "kept", "{b:?} on yes ran nothing");
+        assert!(!bar(&mut c).contains("clear the view?"), "{b:?}: nothing left asking");
+    }
 }
 
 #[test]
@@ -179,44 +219,89 @@ fn a_click_in_the_feed_answers_no() {
     assert!(!c.signals().is_empty());
 }
 
+/// Ctrl-C over a question with a draft open: the exit guard asks, and the
+/// question is answered no first, so going back from the guard finds it
+/// gone and said, and a `y` types.
+#[test]
+fn ctrl_c_over_a_question_answers_it_no_before_the_guard_asks() {
+    let mut c = chat();
+    for ch in "half".chars() {
+        key(&mut c, KeyCode::Char(ch));
+    }
+    ask_by_clicks(&mut c, "1 merged", "Clear view");
+    assert!(bar(&mut c).contains("clear the view?"));
+    assert!(press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL), "a draft keeps the chat open");
+    assert!(c.app().guarding());
+    key(&mut c, KeyCode::Esc);
+    assert!(!c.app().guarding());
+    assert_eq!(c.status(), "kept", "the question was answered, and said so");
+    key(&mut c, KeyCode::Char('y'));
+    assert_eq!(c.input().text(), "halfy", "a y types: nothing is asking");
+    assert!(!c.signals().is_empty());
+}
+
 /// Every step that asks, answered once by key and once by click, lands in
 /// the same state: the same status, the same draft, nothing left asking.
 #[test]
 fn keys_and_clicks_answer_every_question_alike() {
-    for &(tab, item, question, ran) in STEPS {
-        let tab_name = match tab {
-            '1' => "1 merged",
-            '2' => "2 #open",
-            _ => "3 #deploy",
-        };
+    for s in STEPS {
         for yes in [true, false] {
             let mut by_key = chat();
-            ask_by_keys(&mut by_key, tab, item);
-            assert!(bar(&mut by_key).contains(question), "{item} by keys asks: {}", bar(&mut by_key));
+            ask_by_keys(&mut by_key, s.key, s.item);
+            assert!(bar(&mut by_key).contains(s.question), "{} by keys asks: {}", s.item, bar(&mut by_key));
             key(&mut by_key, KeyCode::Char(if yes { 'y' } else { 'n' }));
 
             let mut by_click = chat();
-            ask_by_clicks(&mut by_click, tab_name, item);
-            assert!(bar(&mut by_click).contains(question), "{item} by clicks asks: {}", bar(&mut by_click));
-            let (yes_label, no_label) = if item == "Leave" { (" y leave ", " n stay ") } else { (item_yes(item), " n keep ") };
-            let answer = at(&mut by_click, if yes { yes_label } else { no_label });
+            ask_by_clicks(&mut by_click, s.tab, s.item);
+            assert!(bar(&mut by_click).contains(s.question), "{} by clicks asks: {}", s.item, bar(&mut by_click));
+            let answer = at(&mut by_click, if yes { s.yes } else { s.no });
             click(&mut by_click, answer);
 
-            let want = if yes { ran } else { "kept" };
-            assert_eq!(by_key.status(), want, "{item}, yes {yes}, by keys");
-            assert_eq!(by_click.status(), want, "{item}, yes {yes}, by clicks");
-            assert_eq!(by_key.input().text(), by_click.input().text(), "{item}: the draft");
-            assert_eq!(by_key.signals().len(), by_click.signals().len(), "{item}: the feed");
-            assert!(!bar(&mut by_key).contains(question) && !bar(&mut by_click).contains(question), "{item}: nothing left asking");
+            let want = if yes { s.ran } else { "kept" };
+            assert_eq!(by_key.status(), want, "{}, yes {yes}, by keys", s.item);
+            assert_eq!(by_click.status(), want, "{}, yes {yes}, by clicks", s.item);
+            assert_eq!(by_key.input().text(), by_click.input().text(), "{}: the draft", s.item);
+            assert_eq!(by_key.signals().len(), by_click.signals().len(), "{}: the feed", s.item);
+            assert!(!bar(&mut by_key).contains(s.question) && !bar(&mut by_click).contains(s.question), "{}: nothing left asking", s.item);
         }
     }
 }
 
-fn item_yes(item: &str) -> &'static str {
-    match item {
-        "Delete channel" => " y delete ",
-        _ => " y clear ",
+/// A click on what a menu docks under closes it and does not open it
+/// again: on a channel's row in the column, and on a tab.
+#[test]
+fn a_click_on_a_menus_own_anchor_only_closes_it() {
+    let mut c = chat();
+    let infra = row_of(&mut c, "#infra");
+    click(&mut c, infra);
+    click(&mut c, infra);
+    assert!(menu_open(&mut c), "the second click opens #infra's menu under its row");
+    click(&mut c, infra);
+    assert!(!menu_open(&mut c), "a click on the row closes the menu and opens it no more");
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+
+    let tab = at(&mut c, "3 #deploy");
+    click(&mut c, tab);
+    click(&mut c, tab);
+    assert!(menu_open(&mut c), "the second click opens #deploy's menu under its tab");
+    click(&mut c, tab);
+    assert!(!menu_open(&mut c), "a click on the tab closes the menu and opens it no more");
+}
+
+/// A right click outside a lent compose box gives it back, as a left one
+/// does.
+#[test]
+fn a_right_click_in_the_feed_gives_a_lent_compose_box_back() {
+    let mut c = chat();
+    for ch in "draft".chars() {
+        key(&mut c, KeyCode::Char(ch));
     }
+    press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
+    key(&mut c, KeyCode::Char('x'));
+    let f = feed(&mut c);
+    button(&mut c, f, MouseButton::Right);
+    assert!(!bar(&mut c).contains("new channel"), "the box is back: {}", bar(&mut c));
+    assert_eq!(c.input().text(), "draft");
 }
 
 /// Esc on a menu, or a click outside it, closes it and says nothing: the

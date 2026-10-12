@@ -405,7 +405,6 @@ impl App {
         &self.msg
     }
 
-    /// Whether the exit guard is asking.
     /// Whether the session has ended on something other than a key, such
     /// as a click that quit ([`pane::Open::Quit`]). The terminal loop ends
     /// on it after a click; [`App::key`] returns false on it.
@@ -413,6 +412,7 @@ impl App {
         self.ending
     }
 
+    /// Whether the exit guard is asking.
     pub fn guarding(&self) -> bool {
         matches!(self.mode, Mode::Guard { .. })
     }
