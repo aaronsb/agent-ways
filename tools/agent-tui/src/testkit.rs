@@ -27,6 +27,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Mutex;
@@ -395,7 +396,8 @@ impl Goldens {
                 Ok(e) if e == actual => return,
                 Ok(_) => "drifted",
             };
-            eprintln!("agent-tui: provisional frame {name} {state}; not asserted (PROVISIONAL)");
+            // Straight to stderr: libtest captures `eprintln!` from a passing test.
+            let _ = writeln!(std::io::stderr(), "agent-tui: provisional frame {name} {state}; not asserted (PROVISIONAL)");
             return;
         }
         if self.bless {
@@ -423,7 +425,7 @@ impl Goldens {
     pub fn finish(self) {
         for n in self.stale() {
             if WARNED.lock().unwrap_or_else(|e| e.into_inner()).insert(self.path(&n)) {
-                eprintln!("agent-tui: PROVISIONAL lists {n}, but {} does not exist and no check has reached it so far", self.path(&n).display());
+                let _ = writeln!(std::io::stderr(), "agent-tui: PROVISIONAL lists {n}, but {} does not exist and no check has reached it so far", self.path(&n).display());
             }
         }
         let mut out = String::new();
