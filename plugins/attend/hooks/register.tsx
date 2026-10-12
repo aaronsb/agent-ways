@@ -360,7 +360,7 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean
   const s = await readStatus($)
   const full = isFullPreamble(s.deliveries, s.afterCompaction, s.turnsSinceFull, mod.config.preambleEveryTurns)
   const entered = await $.prompt
-    .submit({ text: frameInbound(msgs.map(formatMessage), msgs.length, full) })
+    .submit({ text: frameInbound(msgs.map(formatMessage), msgs.length, full), asUser: true })
     .then(r => r.drop === undefined)
     .catch(() => false)
   if (!entered) return false
