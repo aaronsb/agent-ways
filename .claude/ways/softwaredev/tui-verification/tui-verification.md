@@ -22,3 +22,7 @@ After changing a TUI, drive it and look at it before the PR.
 4. List the shots you looked at in the PR description, with what each showed.
 
 A new screen state adds a scenario to the script's list in the same change. `cargo test -p ways --test tui_smoke` checks key states of the `ways` screens in CI; extend it when a state is load-bearing.
+
+## Provisional golden frames
+
+While a screen's layout is in a rapid iteration phase (code/testing/gates/assertions), list its unsettled frames in a committed `PROVISIONAL` file in the golden directory, one exact frame name per line, size suffix included. A listed frame is never asserted and never blessed, in any run, CI included. A drift or a missing golden prints one note. Settled frames are always asserted. A listed name with no `.frame` file that no check reaches prints a stale-entry warning. Once the operator accepts the layout, delete the frame's line, bless it, and review it. `tools/attend-chat/tests/golden/PROVISIONAL` is the current list (ADR-407).

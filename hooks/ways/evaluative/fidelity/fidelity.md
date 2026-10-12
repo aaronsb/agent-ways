@@ -20,6 +20,7 @@ Capture the current approved output exactly: generated tables, numbers written a
 - **Score image diffs, but never on pixels alone.** An auto-pass needs a pixel score above the threshold and identical numerics. A changed count or header value queues the case whatever its pixel score, because a tolerance on pixels can hide a numeric drift.
 - **The agent reads the queue only.** Cases that auto-passed stay unopened. Each queued case is read, explained, and either fixed or proposed as a delta.
 - **Deltas go to the operator.** A baseline moves only with the operator's approval, given against a report of what changed. Record each approved delta with its size ("moved 72 table values by at most 0.012 degrees") so the baseline's lineage can be audited.
+- **A baseline before its first approval is provisional.** While the output's shape is still being decided, keep a few anchor cases frozen and the rest provisional (code/testing/gates/assertions, rapid iteration phase). The answer key is never provisional. A provisional case becomes part of the frozen baseline when the operator accepts the output.
 
 ## Fidelity: argued against the reference, with numbers
 
@@ -38,5 +39,5 @@ Each gate prints one pass or fail line and writes its full log to disk. On failu
 ## See Also
 
 - evaluative(evaluative) — parent: author and judge, the shared core, choosing the loop
-- code/testing/gates/assertions(softwaredev) — golden baselines and the enumerated-delta rule
+- code/testing/gates/assertions(softwaredev) — golden baselines, the enumerated-delta rule, and the rapid iteration phase
 - freshness/groundtruth(softwaredev) — the golden master captured before a migration

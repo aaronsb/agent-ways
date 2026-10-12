@@ -21,6 +21,14 @@ basis:
     level: directed
     said: "since we're changing things a bit, let's avoid work with low value by adhering to golden states"
     via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
+    said: "I want to point out that we should, before compaction, try to add an escape valve for golden repro - until we're sure of the flow/layout etc we should be more sparse in recording/checking golden layouts. we could call that a rapid iteration phase"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
+    said: "otherwise we're making changes and then the repo recording path is essentially treating that as 'ok we've finally got it' when actually we haven't - as you can see by the number of polish suggestions I keep coming up wiht"
+    via: chat, relayed by the main session, 2026-10-12
   - evidence: "The operator's screenshot of the failing click showed `mouse off (M-m)` in the bottom bar, relayed by the main session, 2026-10-11. attend.chat.mouse defaulted to false, so a terminal never reported the click to the chat."
   - precedent: ADR-405
 agent:
@@ -30,6 +38,9 @@ considered:
   - operator: aaronsb
     said: "we can use enter to raise the context menu for any element. (the same context menu that the mouse click affords)"
     via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    said: "List is the switch (Recommended)"
+    via: "the review of PR #963 (option: Frames named in the committed PROVISIONAL file are never asserted or blessed, in CI too. The weakening stays visible as a reviewed file in the diff. Settled frames stay strict everywhere. Anchors for the chat: the default view at 80x25 and 120x35.), relayed by the main session, 2026-10-12"
 status: accepted
 date: 2026-10-11
 deciders:
@@ -118,3 +129,14 @@ The operator chose the order of the work that follows the review of the chat's f
 - **The overlay has one kind for now.** `Pane::overlaid` reports only that an overlay is up, so `Ix` records one kind of overlay. B's contract reports which overlay is up and adds the kinds: a menu, an entry, a question, the help, the guard. B also decides whether `Ix.overlay` mirrors or owns the pane's own menus. Those menus are a second record of what is open, outside `Ix`: `ChatPane::open` is written in about 13 places in `menu.rs`, and the dispatcher patches a menu's anchor after `Activate`.
 - **Evidence.** Unit tests cover each cell of the interaction table and need no terminal. Property tests over seeded random sequences check three things: the preview is never held off the bar, the overlay is what the shell last reported, and a printable key lands only in the compose box, after the previewed tab is put back. A differential run drove the chat on main and on the refactor through 600 seeded sequences of 200 keys, clicks and pastes, through the shell's real handlers. Both recorded identical state and frames at every step. The run leaves the world unchanged after setup: it pushes no signals, makes no `stale()` call, and sends no wheel or resize. So it does not exercise refocus after a refresh. Two planted defects showed this: refocus landing on the old row index, and the follow effect dropped from a row move. The differential run missed both, and the unit tests caught both.
 
+
+## Amendment (2026-10-12): the chat's goldens are in a rapid iteration phase
+
+The operator asked for "an escape valve for golden repro - until we're sure of the flow/layout etc we should be more sparse in recording/checking golden layouts. we could call that a rapid iteration phase". The reason, in the operator's words: "otherwise we're making changes and then the repo recording path is essentially treating that as 'ok we've finally got it' when actually we haven't". Recording a golden asserts that the layout is settled. The chat's layout is still taking polish feedback each round.
+
+- **The list is the switch.** The review of #963 offered two designs. The operator chose "List is the switch (Recommended)", which read: "Frames named in the committed PROVISIONAL file are never asserted or blessed, in CI too. The weakening stays visible as a reviewed file in the diff. Settled frames stay strict everywhere. Anchors for the chat: the default view at 80x25 and 120x35."
+- **Provisional frames.** A frame named in `tools/attend-chat/tests/golden/PROVISIONAL` is never asserted and never blessed by agent-tui's golden check, in any run, CI included. A drift or a missing golden prints one note. A listed name with no `.frame` file that no check reaches prints a stale-entry warning. Every other frame is settled and always asserted.
+- **The anchors.** The two settled frames are the default view: the chat with its left column shown, as it starts, at 80x25 (`sidebar-80x25`) and at the suite's reference size (`sidebar-120x40`). The suite has no 120x35 size. Its reference size is 120x40, so that frame stands for the operator's "120x35". Every other chat frame is listed.
+- **What carries behaviour.** The table and property tests of `step` (amendment above) carry the chat's interaction behaviour.
+- **Leaving the phase.** The phase ends when the operator accepts the layout. Each provisional frame is then removed from the list, blessed and reviewed.
+- **The refactor bar stands.** A change with no change in behaviour still leaves every settled golden byte-identical.

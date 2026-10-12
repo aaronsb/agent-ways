@@ -22,6 +22,10 @@ Script the key sequence that reaches each state under test and keep it beside th
 
 Read each changed golden image or text capture row by row and name what moved in each changed row. The assertions way decides whether each change is accepted. Confirm the capture shows the state its name claims.
 
+## While the layout is still being decided
+
+Keep a handful of anchor states as settled goldens and list the rest as provisional. Pin each state's behaviour with checks on the program's state and its transitions, which do not move with the layout. Promote the provisional goldens once the operator accepts the layout (code/testing/gates/assertions, rapid iteration phase).
+
 ## Stand in for external commands
 
 When a screen shows the output of an external command, run it against a stand-in runner that produces the edge case on purpose. A runner that prints 25 long lines and exits with status 3 exercises wrapping, scrolling, overflow, and the error path in one capture. Keep stand-ins in the test fixtures so each edge is reproducible.
@@ -29,5 +33,5 @@ When a screen shows the output of an external command, run it against a stand-in
 ## See Also
 
 - code/testing/evaluation(softwaredev) — parent: reproduce as reported, drive the real path, re-review, count what ran
-- code/testing/gates/assertions(softwaredev) — golden baselines, masked volatile leaves, and the enumerated-delta rule
+- code/testing/gates/assertions(softwaredev) — golden baselines, masked volatile leaves, the enumerated-delta rule, and the rapid iteration phase
 - code/testing/mocking(softwaredev) — test doubles for the commands a stand-in runner replaces
