@@ -66,9 +66,12 @@ pub enum EnterAction {
 /// Plain-Enter dispatch. Slash command first; otherwise parse the
 /// `@`/`#` address sigil and write to the right inbox. `foreground`
 /// is the active tab (#393): unaddressed sends target its channel,
-/// and channel commands with no argument scope to it. Returns an
-/// `EnterAction` describing how the screen should update its state.
-pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> EnterAction {
+/// and channel commands with no argument scope to it. `person` is the
+/// membership id of the person at the chat, who a send to a channel makes
+/// its member (ADR-404 D1); `None` for a chat that is no person, such as a
+/// test's. Returns an `EnterAction` describing how the screen should
+/// update its state.
+pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>) -> EnterAction {
     let msg = input_value.trim_end().to_string();
     if msg.is_empty() {
         return EnterAction::None;
@@ -80,7 +83,7 @@ pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> 
     if let Some((cmd, args)) = slash::parse(&msg) {
         return run_slash(slash::dispatch(cmd, args), foreground);
     }
-    send_message(&msg, signals, foreground)
+    send_message(&msg, signals, foreground, person)
 }
 
 /// Run a dispatched slash command: the one path both the typed command
@@ -129,7 +132,7 @@ fn run_config(key: Option<String>, value: Option<String>) -> EnterAction {
 
 /// Send `msg`: to the recipients its leading `@`/`#` run addresses, or
 /// to the foreground tab's channel.
-fn send_message(msg: &str, signals: &[Signal], foreground: &Tab) -> EnterAction {
+fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>) -> EnterAction {
     let msg = msg.to_string();
     let caps = ColorDepth::detect();
     let seeds = discover_sessions();
@@ -164,10 +167,10 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab) -> EnterAction 
             // explicit `#g` prefix — only the channel came from the
             // tab instead of the message text. The body is unchanged
             // (wire format carries no channel).
-            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet)
+            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet, person)
         }
     } else {
-        send_to_recipients(&msg, &recipients, &agents, &quiet)
+        send_to_recipients(&msg, &recipients, &agents, &quiet, person)
     }
 }
 
@@ -196,12 +199,21 @@ fn send_to_recipients(
     recipients: &[Addressed<'_>],
     agents: &[KnownIdentity],
     quiet: &[String],
+    person: Option<&str>,
 ) -> EnterAction {
     // A recipient that cannot read it refuses the send, in its own words.
     let dests = match resolve_recipients(recipients, agents, quiet) {
         Ok(dests) => dests,
         Err(refusal) => return EnterAction::StatusOnly(refusal),
     };
+    // Posting in a channel makes the person its member, before the
+    // message is written, so the membership precedes what an agent
+    // answers (ADR-404 D1).
+    for r in recipients {
+        if let (Addressed::Group(name), Some(member)) = (r, person) {
+            enter_channel(member, name);
+        }
+    }
     let sent = dests.iter().try_for_each(|dir| write_signal(dir, msg).map(|_| ())).map(|()| dests);
     match sent {
         Ok(dests) => {
@@ -235,6 +247,31 @@ fn run_join(name: &str) -> EnterAction {
     let member = crate::signal::human_member_id();
     let _ = attend_presence::heartbeat::touch(&member);
     join_group_in(&signals_base(), &member, name)
+}
+
+/// Make the person at the chat, `member`, a member of channel `name` when
+/// they post in it (ADR-404 D1), as `/join` makes them, so an agent alone in
+/// the channel with them can answer. Showing a channel joins nothing: the
+/// tab bar is walked, cycled and advanced past channels nobody chose, and a
+/// Leave must hold. The heartbeat is touched first, as `/join` does, so the
+/// membership is live at once.
+fn enter_channel(member: &str, name: &str) {
+    let _ = attend_presence::heartbeat::touch(member);
+    enter_channel_in(&signals_base(), member, name);
+}
+
+/// Filesystem-effect core of [`enter_channel`]. Only a channel that exists,
+/// with its entry and its directory, is entered: a swept or unknown channel
+/// is not brought back, as `/join` would. Returns whether it wrote a
+/// membership.
+fn enter_channel_in(base: &std::path::Path, member: &str, name: &str) -> bool {
+    let groups = attend_groups::Groups::new(base, member);
+    match groups.members(name) {
+        Some(members) if !members.iter().any(|m| m == member) && groups.group_dir(name).is_dir() => {
+            groups.join(name, false).is_ok()
+        }
+        _ => false,
+    }
 }
 
 /// Execute a `/leave` against the live signals base. A missing
@@ -935,7 +972,7 @@ mod tests {
 
     #[test]
     fn enter_empty_is_noop() {
-        match handle_enter("   ", &[], &Tab::Merged) {
+        match handle_enter("   ", &[], &Tab::Merged, None) {
             EnterAction::None => {}
             _ => panic!("empty input should produce EnterAction::None"),
         }
@@ -1023,6 +1060,22 @@ mod tests {
             .members("deploy")
             .unwrap();
         assert_eq!(members, vec!["aaron"]);
+    }
+
+    #[test]
+    fn entering_joins_only_a_channel_that_exists() {
+        let base = tempdir_like();
+        assert!(!enter_channel_in(&base, "aaron", "ghost"), "an unknown channel is not made");
+        assert!(!base.join("@ghost").exists());
+        let agent = attend_groups::Groups::new(&base, "agent");
+        agent.join("deploy", false).unwrap();
+        agent.join("swept", false).unwrap();
+        std::fs::remove_dir_all(base.join("@swept")).unwrap();
+        assert!(!enter_channel_in(&base, "aaron", "swept"), "a swept channel is not brought back");
+        assert!(!base.join("@swept").exists());
+        assert!(enter_channel_in(&base, "aaron", "deploy"));
+        assert!(!enter_channel_in(&base, "aaron", "deploy"), "a member is not written twice");
+        assert_eq!(agent.members("deploy").unwrap(), vec!["agent", "aaron"]);
     }
 
     #[test]

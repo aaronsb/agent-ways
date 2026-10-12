@@ -90,8 +90,8 @@ pub fn peers() -> Peers {
 /// without waiting for them to post (ADR-404 D7, the text view of
 /// membership): this session as `Name (you)`, a live agent session as
 /// `Name (project)`, the way `attend peers` lists it, a person in
-/// attend-chat by their username, and an agent session that is not live
-/// by the first eight characters of its id.
+/// attend-chat as `username (attend-chat)`, and an agent session that is
+/// not live by the first eight characters of its id.
 pub fn member_names(members: &[String], me: &Agent, peers: &[Agent]) -> Vec<String> {
     members
         .iter()
@@ -105,7 +105,7 @@ pub fn member_names(members: &[String], me: &Agent, peers: &[Agent]) -> Vec<Stri
             if attend_groups::is_agent_member(id) {
                 return format!("session {}", id.chars().take(8).collect::<String>());
             }
-            id.clone()
+            format!("{id} (attend-chat)")
         })
         .collect()
 }
@@ -162,7 +162,7 @@ mod tests {
         ];
         assert_eq!(
             member_names(&members, &me, &peers),
-            ["Chaucer-beta (you)", "McKay (attend-collaborator)", "aaron", "session 33333333"]
+            ["Chaucer-beta (you)", "McKay (attend-collaborator)", "aaron (attend-chat)", "session 33333333"]
         );
     }
 }
