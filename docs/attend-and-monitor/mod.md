@@ -80,6 +80,24 @@ claude --plugin-dir <checkout>/plugins/attend
 
 Where `attend@agent-ways` is installed too, the working copy takes its place for that session: Claude Code 2.1.296 logs `Plugin "attend" from --plugin-dir overrides installed version` and loads one `attend` hooks module, `attend@inline`, so there is nothing to disable first. Sessions started without the flag keep the installed one. An interactive session reloads the mod when a file in the folder changes, and lays Claude Code's API declarations in `plugins/attend/.claude-plugin/types/` for the editor and `tsc`.
 
+### Trying a branch in a running session
+
+To put a branch's mod and attend into a session that is already running, with no release and no restart:
+
+1. Push the branch, then run `ways manage update --ref <branch>` in a shell. It checks the app source out at the branch (`plugins/attend/` changes in place) and builds attend and the rest of the suite from source.
+2. In the running session, run `/reload-plugins`. It prints that `attend@agent-ways` was re-read from its folder; register and `session.start` run again, and the tools carry the new descriptions. Closing the `/plugin` menu after disabling and enabling attend runs the same reload.
+3. `ways manage update --ref main` returns to the release channel.
+
+Each part refreshes on its own terms (Claude Code 2.1.296, tested in a throwaway config laid out like a real install):
+
+| Part | What refreshes it |
+|---|---|
+| `attend` binary | Nothing to do: the mod runs `attend` from `PATH` at every call, so the rebuilt binary answers the next one |
+| Hooks module (`register.tsx`, `lib.ts`) | `/reload-plugins`, which re-reads the marketplace folder when a file in it changed |
+| Tool list and descriptions | The same reload |
+
+Three steps refresh nothing: doing nothing (an installed plugin's folder is not watched), `/mcp` → attend → Reconnect (it reconnects the tool server and keeps the old module), and `claude plugin marketplace update` with `claude plugin update`. With a version bump the last writes a new copy under the plugin cache and says to restart, but a session loads the plugin from the marketplace folder, not from that copy.
+
 `make test-plugins` checks the version lockstep with attend, runs `claude plugin validate` on the marketplace and the plugin, runs `claude plugin test plugins/attend`, and type-checks the mod when Claude Code's declarations are found (`CLAUDE_CODE_TYPES`, or the copy a session laid). CI runs the same target against Claude Code 2.1.296, the build the mod's early-access API was written against.
 
 The mod depends on attend's `listen`, `unread` and `keepwarm check` verbs and on attend splitting long bodies itself. Against an attend without them, the row shows `attend not listening` and the unread count stays at zero.

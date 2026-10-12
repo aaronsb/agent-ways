@@ -607,7 +607,8 @@ fn run_ref_upgrade(app: &Path, git_ref: &str, dry_run: bool, has_toolchain: bool
 
     println!("\nUpgraded to {git_ref} (built from source; the checkout is on a detached HEAD).");
     println!("Return to the release channel with:  ways manage update --ref main");
-    println!("Restart Claude Code to pick up the new version.");
+    println!("Restart Claude Code to pick up the new version. A running session takes the");
+    println!("attend mod's new code with /reload-plugins; the attend binary is read at each call.");
     judge_setup();
     Ok(())
 }
