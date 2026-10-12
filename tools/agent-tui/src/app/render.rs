@@ -677,6 +677,10 @@ impl App {
                 let a = a.clone();
                 spans.extend(self.ask_status(area, &a));
             }
+            Mode::Entry(_) => {
+                spans.extend(mode("entry", Ground::Accent));
+                spans.push(hint("  type a line · Enter sets · Esc cancels"));
+            }
             Mode::Browse | Mode::Help { .. } if self.pane.is_some() => spans.extend(self.pane_status(area)),
             Mode::Browse | Mode::Help { .. } if self.on_theme_tab() => {
                 spans.extend(self.theme_status(sh));

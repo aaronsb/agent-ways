@@ -53,6 +53,13 @@ pub struct PaneTab {
     /// An action at the end of the bar, such as `+` for a new channel: no
     /// number, never shown as a tab; choosing it opens its menu.
     pub action: bool,
+    /// Reserved: pinned to the bar's right end with the other reserved tabs,
+    /// never cut away for width, and carrying no number. The tabs left of
+    /// them give way first when the bar is short of room.
+    pub reserved: bool,
+    /// A view rather than a channel, such as the chat's operator view: drawn
+    /// on the shaded ground ([`crate::strip::view_seg`]), not the accent.
+    pub view: bool,
 }
 
 impl PaneTab {
@@ -73,6 +80,18 @@ impl PaneTab {
     /// An action slot rather than a tab ([`PaneTab::action`]).
     pub fn action(mut self) -> PaneTab {
         self.action = true;
+        self
+    }
+
+    /// Pinned to the right end of the bar ([`PaneTab::reserved`]).
+    pub fn reserved(mut self) -> PaneTab {
+        self.reserved = true;
+        self
+    }
+
+    /// Drawn as a view ([`PaneTab::view`]).
+    pub fn view(mut self) -> PaneTab {
+        self.view = true;
         self
     }
 }
@@ -207,6 +226,14 @@ pub enum Open {
     /// key the shell takes, then go on as typed. The answer comes back
     /// through [`Pane::picked`] under `id`, as `["y"]` or `["n"]`.
     Ask { id: String, question: String, yes: String, no: String },
+    /// A line typed in a small dialog docked at `anchor`, as a menu docks:
+    /// a name, a description. `value` is the text it opens with and `error`
+    /// what was wrong with the last one entered, said inside the dialog.
+    /// Enter gives the text back through [`Pane::picked`] under `id`, as
+    /// `[text]`; the pane checks it and, to refuse it, opens the entry
+    /// again with the text and the reason. Esc or a click outside closes it
+    /// with nothing. The pane's own text entry is never borrowed for it.
+    Entry { id: String, title: String, value: String, error: Option<String>, anchor: Anchor },
     /// Quit, as Ctrl-C does: asking first over unsaved work.
     Quit,
 }
@@ -333,6 +360,31 @@ pub trait Pane: Any {
     /// Whether the terminal took the keyboard enhancement the pane asked
     /// for: without it Ctrl+3 arrives as Esc and Ctrl+8 as Backspace.
     fn set_keyboard_enhanced(&mut self, _on: bool) {}
+
+    /// Whether the pane holds the keyboard focus itself, the tab bar's
+    /// included: one focus owner. The shell then keeps no focus of its own
+    /// on the tab bar. F2, Ctrl+T and [`Keyed::Tabs`] go to
+    /// [`Pane::focus_tabs`], the bar draws its cursor where
+    /// [`Pane::focus_tab`] says, and a key the shell takes leaves the focus
+    /// where it is. False by default.
+    fn owns_focus(&self) -> bool {
+        false
+    }
+
+    /// The tab the pane's focus is on, for a pane that owns the focus.
+    fn focus_tab(&self) -> Option<usize> {
+        None
+    }
+
+    /// F2 or Ctrl+T beside a pane that owns the focus: move it to the tab
+    /// bar, or back from it.
+    fn focus_tabs(&mut self) {}
+
+    /// Whether an overlay (a menu, a picker, the entry dialog, the key
+    /// help, a report, a question) is open over the pane, told before each
+    /// frame: the keyboard is the overlay's, so the pane draws no focus of
+    /// its own, such as a text entry's caret.
+    fn overlaid(&mut self, _on: bool) {}
 
     /// Text after the tabs, such as what the shown channel is for.
     fn trailer(&mut self) -> Vec<Span<'static>> {

@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                                                           |
+| ≡   ▽  1 #deploy   ♦  2 #infra    +                                                                    ◆  #open   ⋯all |
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
 |│  13:50  Laszlo  alpha                                                                                                │|
 |│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │|
@@ -38,17 +38,17 @@ agent-tui frame 120x40
 |│                                                                                                               #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                                                                  |
-| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · Alt+1-9 tab (again: menu) · F2 tabs    |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · S-Tab or ↑ leaves · Alt+0-9 tab (again: menu) · F2 tabs   |
 styles
   0   0-2   #2e3440 #bfa2c3 -
-  0   5-14  #2e3440 #c99fc1 BOLD
-  0  17-18  #ffb3a1 - BOLD
-  0  19-27  #2e3440 #bfa2c3 -
-  0  30-31  #e07b7b - -
-  0  32-42  #2e3440 #bfa2c3 -
-  0  45-46  #b0bec5 - -
-  0  47-56  #2e3440 #bfa2c3 -
-  0  59-61  #2e3440 #bfa2c3 -
+  0   5-6   #e07b7b - -
+  0   7-17  #2e3440 #bfa2c3 -
+  0  20-21  #b0bec5 - -
+  0  22-31  #2e3440 #bfa2c3 -
+  0  34-36  #2e3440 #bfa2c3 -
+  0 104-105 #ffb3a1 - BOLD
+  0 106-112 #2e3440 #bfa2c3 -
+  0 114-119 #d8dee9 #434c5e BOLD
   1   0-119 #434c5e - -
   2   0-0   #434c5e - -
   2   2-8   #c67eff #33005c -
@@ -157,9 +157,9 @@ styles
  39  40-46  #7c8baa - ITALIC
  39  47-50  #c99fc1 - -
  39  51-61  #7c8baa - ITALIC
- 39  62-71  #c99fc1 - -
- 39  72-80  #7c8baa - ITALIC
- 39  81-88  #c99fc1 - -
- 39  89-108 #7c8baa - ITALIC
- 39 109-111 #c99fc1 - -
- 39 112-115 #7c8baa - ITALIC
+ 39  62-67  #c99fc1 - -
+ 39  68-81  #7c8baa - ITALIC
+ 39  82-89  #c99fc1 - -
+ 39  90-109 #7c8baa - ITALIC
+ 39 110-112 #c99fc1 - -
+ 39 113-116 #7c8baa - ITALIC

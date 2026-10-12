@@ -6,6 +6,14 @@ capability: attend
 amends: [ADR-408#Decision, 'ADR-504#Note (2026-10-02): a screen that is not a tree is a pane inside `App`']
 basis:
   - operator: aaronsb
+    level: directed
+    said: "we should have the new channel name entry be consistent with the other context entry dialogs, not appearing in the chat box"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
+    said: "the chat box is reserved for chatting, not a general entry interface"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
     level: guided
     said: "we should go through the feature list of attend-chat and make sure it's consistent in application of ui/ux conventions (I see the nav bar for agents and channels). its kind of expected that the mouse click should work on elements"
     via: chat, relayed by the main session, 2026-10-11
@@ -23,6 +31,12 @@ considered:
     said: "Never quits (Recommended)"
     via: AskUserQuestion, session chat, 2026-10-11; option label written by the agent, chosen by the operator
     covers: [esc-never-quits]
+  - operator: aaronsb
+    said: "the chat box is reserved for chatting, not a general entry interface"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    said: "Guarded (Recommended): ↑/↓ leave only a box that has text, at its first or last line; an empty box is left with Shift+Tab or Esc. Outside the box, `q` asks before quitting, and digits switch channels only when the tab bar has focus. Help keys still work outside the box."
+    via: "AskUserQuestion relayed by the main session, 2026-10-12, on #953's review finding 1 (an arrow on an empty compose box turned the next keys into commands); option label and text written by the reviewer, chosen by the operator"
 status: accepted
 date: 2026-10-11
 deciders:
@@ -35,7 +49,7 @@ related:
   - ADR-504
 ---
 
-# ADR-409: Esc in the chat never quits, and the compose box lent to a name says what it is lent to
+# ADR-409: Esc in the chat never quits, and the compose box is for chatting: names and descriptions are typed in an entry dialog
 
 ## Summary
 
@@ -100,3 +114,22 @@ Review of the change refined (d) so that (b) and (d) hold together. The decision
 - **The `≡` menu opens over a lent box.** Its items give the box back when picked, except Quit, which leaves it lent. The shell's quit then counts a name typed there as unsaved and opens the exit guard, as Ctrl-C does, and Back returns to the lent box. Opening `≡` no longer gives the box back on its own.
 - **A click on an action slot does not dismiss.** A click on `≡` or `+` acts as the slot's key does: `≡` opens its menu over the lent box, and `+` lends the box or keeps it lent, as Ctrl+N does.
 - **Ctrl+digit on the shown tab** with `attend.chat.tabs.menu_on_repeat` off shows the tab again, so it gives the box back as a click on that tab does.
+
+## Amendment (2026-10-12): the chat box is for chatting; names and descriptions are typed in an entry dialog
+
+The operator said: "we should have the new channel name entry be consistent with the other context entry dialogs, not appearing in the chat box", and stated the principle: "the chat box is reserved for chatting, not a general entry interface".
+
+- The compose box is never lent. The lend mechanism (decision (b)'s `new channel name >` and `describe #deploy >` leads) is removed.
+- A line that is not a chat message is typed in one shared entry dialog, `agent_tui::Open::Entry`, docked where a menu docks: the new channel's name (from `+` or Ctrl+N) under the `+` slot, a channel's description (Describe…) beside its menu item, opened on the line the channel has now. Enter gives the text to the chat; a name it refuses opens the dialog again with the name and the reason inside it. Esc or a click outside closes it with nothing, and Esc never quits. While it is open it holds the keyboard; the compose box and its draft are untouched throughout.
+- A name typed in the dialog is unsaved work: Ctrl-C's exit guard names it ("new channel name being typed"), and going back opens the dialog again with the name.
+- Entry points moved: the new channel's name (`+`, Ctrl+N), and a channel's description (Describe…). Slash commands typed as chat stay in the compose box, since the operator typed them there. Confirmations were already the shell's question on the bottom bar (ADR-408).
+
+## Amendment (2026-10-12): arrows never turn typing into commands
+
+A review of the nav polish found that ↑ or ↓ on an empty compose box left it at once, after which `1` switched the channel and `q` quit: a reflexive arrow turned the next keys into commands. The question put to the operator: should ↑ and ↓ leave an empty box, and what may single keys do outside it? The operator chose "Guarded (Recommended)", which read: "↑/↓ leave only a box that has text, at its first or last line; an empty box is left with Shift+Tab or Esc. Outside the box, `q` asks before quitting, and digits switch channels only when the tab bar has focus. Help keys still work outside the box."
+
+- ↑ at the start of the first line and ↓ at the end of the last line leave only a box that holds text. In an empty box they do nothing.
+- Esc in an empty box leaves it backward, as Shift+Tab does. With text it clears the selection and the status line, and the draft stays. Esc still never quits.
+- Outside the box, `q` asks `quit?` on the bar, whatever is unsaved; yes goes on through the exit guard over a draft. Ctrl-C quits as before.
+- The digits switch tabs only while the tab bar has the focus. Elsewhere a digit is typed into the box, like any other character.
+- At the exit guard over the entry dialog, typing goes back into the dialog, never the compose draft.

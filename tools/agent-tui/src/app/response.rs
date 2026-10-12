@@ -317,6 +317,16 @@ impl App {
 
     /// A held modal, opened once the screen can take it.
     pub(super) fn open_held(&mut self) {
+        // Back from the exit guard: the entry dialog it closed, as it was.
+        if matches!(self.mode, Mode::Browse) {
+            if let Some(e) = self.entry_held.take() {
+                self.mode = Mode::Entry(e);
+                return;
+            }
+        }
+        if !matches!(self.mode, Mode::Guard { .. }) {
+            self.entry_held = None;
+        }
         if matches!(self.mode, Mode::Browse | Mode::Review { run: None, discard: false, .. }) {
             if let Some(s) = self.held.take() {
                 self.show_response(s);

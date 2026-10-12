@@ -125,17 +125,17 @@ fn deploy_menu(c: &mut Chat) {
     assert!(menu(c).is_some(), "the second click opens #deploy's menu");
 }
 
-/// Add agent and Seal wait on attend (ADR-404 D1 and D4): each is in the
-/// menu, says what it waits on, and is never the first highlighted item.
+/// Seal waits on attend (ADR-404 D4): it is in the menu, says what it
+/// waits on, and is never the first highlighted item. Add agent ▸ is
+/// enabled: it invites, as the agent menu's Add agent to chat does.
 #[test]
 fn items_that_wait_on_attend_name_what_they_wait_on() {
     let mut c = chat();
     deploy_menu(&mut c);
     let shown = items(&mut c);
-    assert!(shown.iter().any(|r| r.contains("Add agent") && r.contains("needs ADR-404 D1")), "{shown:#?}");
     assert!(shown.iter().any(|r| r.contains("Seal") && r.contains("needs ADR-404 D4")), "{shown:#?}");
-    assert!(!shown[0].contains("Add agent"), "never first: {shown:#?}");
-    assert!(!highlighted(&mut c).contains("Add agent"));
+    assert!(shown[0].contains("Add agent ▸") && !shown.iter().any(|r| r.contains("needs ADR-404 D1")), "Add agent invites: {shown:#?}");
+    assert!(!shown[0].contains("Seal"), "never first: {shown:#?}");
 }
 
 /// The highlight skips an item that waits, down and up, and Enter never
@@ -147,13 +147,13 @@ fn the_highlight_skips_items_that_wait() {
     for _ in 0..12 {
         key(&mut c, KeyCode::Down);
         let h = highlighted(&mut c);
-        assert!(!h.contains("Add agent") && !h.contains("Seal"), "Down landed on {h}");
+        assert!(!h.contains("Seal"), "Down landed on {h}");
     }
     assert!(highlighted(&mut c).contains("Delete channel"), "the last item");
     for _ in 0..12 {
         key(&mut c, KeyCode::Up);
         let h = highlighted(&mut c);
-        assert!(!h.contains("Add agent") && !h.contains("Seal"), "Up landed on {h}");
+        assert!(!h.contains("Seal"), "Up landed on {h}");
     }
     key(&mut c, KeyCode::End);
     key(&mut c, KeyCode::Up);
@@ -166,12 +166,10 @@ fn the_highlight_skips_items_that_wait() {
 fn a_click_on_an_item_that_waits_does_nothing() {
     let mut c = chat();
     deploy_menu(&mut c);
-    for item in ["Add agent", "Seal"] {
-        let i = at(&mut c, item);
-        click(&mut c, i);
-        assert!(menu(&mut c).is_some(), "{item}: the menu stays open");
-        assert_eq!(c.status(), "", "{item}: nothing said");
-    }
+    let i = at(&mut c, "Seal");
+    click(&mut c, i);
+    assert!(menu(&mut c).is_some(), "Seal: the menu stays open");
+    assert_eq!(c.status(), "", "Seal: nothing said");
 }
 
 /// Open `≡` and pick `item` by clicks; the submenu's rows.
@@ -252,7 +250,7 @@ fn a_submenu_docks_beside_its_row_and_marks_the_current_value() {
     }
 }
 
-/// Invite agent ▸ docks beside the channel menu's row too.
+/// Add agent ▸ docks beside the channel menu's row too.
 #[test]
 fn invite_agent_docks_beside_the_channel_menu() {
     let mut c = chat();
@@ -289,20 +287,22 @@ fn settings_opens_the_listing_in_a_modal() {
 #[test]
 fn a_click_on_the_tab_of_a_menu_docked_at_its_row_only_closes_it() {
     let mut c = chat();
-    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
-    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
     let ((_, y), _) = menu(&mut c).expect("#deploy's menu");
     let (_, row) = row_of(&mut c, "#deploy");
     assert_eq!(y, row as usize + 1, "docked under the column's row");
-    let tab = at(&mut c, "3 #deploy");
+    let tab = at(&mut c, "1 #deploy");
     click(&mut c, tab);
     assert!(menu(&mut c).is_none(), "closed, and not opened again under the tab: {:#?}", rows(&mut c));
 
-    // The other way round: docked under the tab, closed by its row.
+    // The other way round: docked under the tab, closed by its row. The
+    // menu under the tab covers the column's rows, so the row is found
+    // before it opens.
+    let deploy = row_of(&mut c, "#deploy");
     click(&mut c, tab);
     let ((_, y), _) = menu(&mut c).expect("#deploy's menu");
     assert_eq!(y, 1, "docked under the tab");
-    let deploy = row_of(&mut c, "#deploy");
     click(&mut c, deploy);
     assert!(menu(&mut c).is_none(), "closed, and not opened again under the row: {:#?}", rows(&mut c));
 }
@@ -318,7 +318,7 @@ fn the_exit_guard_names_a_lent_box_for_what_it_holds() {
     }
     press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
     let shown = rows(&mut c).join("\n");
-    assert!(shown.contains("a new channel's name being typed"), "{shown}");
+    assert!(shown.contains("new channel name being typed"), "{shown}");
     assert!(!shown.contains("a draft in the compose box"), "{shown}");
 
     let mut c = chat();
@@ -330,7 +330,7 @@ fn the_exit_guard_names_a_lent_box_for_what_it_holds() {
     }
     press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL);
     let shown = rows(&mut c).join("\n");
-    assert!(shown.contains("a description of #deploy being typed"), "{shown}");
+    assert!(shown.contains("describe #deploy being typed"), "{shown}");
 
     // A draft is still a draft.
     let mut c = chat();

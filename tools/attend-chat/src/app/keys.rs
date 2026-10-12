@@ -478,6 +478,23 @@ fn run_whois(name: &str) -> EnterAction {
 /// is preserved (ADR-173 / #393 consent asymmetry).
 fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAction {
     let g = tabs::command_scope(channel, foreground);
+    // The base channel's rule fires before any roster read.
+    if g == BASE_CHANNEL_NAME {
+        return invite_peer(&g, &crate::peers::Peer { session_id: String::new(), root: String::new(), display: member.into() });
+    }
+    let caps = ColorDepth::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    match crate::peers::resolve_peer(member, &roster) {
+        Ok(peer) => invite_peer(&g, peer),
+        Err(e) => EnterAction::StatusOnly(e),
+    }
+}
+
+/// Invite `peer` to channel `g`: the one invitation `/invite` and a menu's
+/// Add agent to chat both send. The peer joins itself, or stays silent.
+pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
+    let g = g.to_string();
     if g == BASE_CHANNEL_NAME {
         return EnterAction::StatusOnly(
             "#open is the base channel — everyone is already there".into(),
@@ -488,13 +505,6 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
     // typo than an intent. `/join` it first.
     let Some(dir) = resolve_group_dir(&g) else {
         return EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"));
-    };
-    let caps = ColorDepth::detect();
-    let instance_cache = attend_instances::SnapshotCache::new();
-    let roster = crate::peers::roster(caps, &instance_cache);
-    let peer = match crate::peers::resolve_peer(member, &roster) {
-        Ok(p) => p,
-        Err(e) => return EnterAction::StatusOnly(e),
     };
     let dest = cwd_dir(&peer.root);
     let body = invite_body(&g, &dir);

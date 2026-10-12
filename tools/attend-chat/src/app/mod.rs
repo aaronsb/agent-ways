@@ -14,6 +14,7 @@
 //! [`keys`] as free functions; the editing keys are the shared input's.
 
 mod activate;
+mod focus;
 mod keys;
 mod menu;
 mod sidebar;
@@ -25,7 +26,7 @@ use std::time::{Duration, Instant, SystemTime};
 use agent_tui::feed::{Entry, FeedState};
 use agent_tui::input::Input;
 use agent_tui::ratatui::buffer::Cell;
-use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use agent_tui::ratatui::crossterm::event::{KeyEvent, MouseEvent};
 use agent_tui::ratatui::layout::{Position, Rect};
 use agent_tui::ratatui::text::Span;
 use agent_tui::ratatui::Frame;
@@ -106,9 +107,10 @@ enum Chip {
 #[derive(Debug, Clone, Default)]
 struct Hits {
     feed: Rect,
+    /// The feed's box, border and all: where the wheel scrolls it.
+    feed_box: Rect,
     compose: (Rect, usize),
-    /// The width of what leads the compose box's first row: `> `, or what
-    /// the box is lent to.
+    /// The width of what leads the compose box's first row: `> `.
     lead: u16,
     text_width: u16,
     chips: Vec<(Rect, Chip)>,
@@ -176,9 +178,6 @@ pub struct ChatPane {
     /// The menu step the shell's question asks about, until it is answered
     /// ([`ChatPane::answered`]).
     asked: Option<menu::Step>,
-    /// The compose box lent to a channel's name or description, and the
-    /// draft it held before.
-    prompt: Option<(menu::Prompt, String)>,
     /// The terminal reports Ctrl+digits as themselves. Without it Ctrl+3
     /// arrives as Esc, which closes and clears and never quits (ADR-409),
     /// and a setting that asks for Ctrl+digits says they do not arrive.
@@ -190,10 +189,15 @@ pub struct ChatPane {
     sidebar: bool,
     /// The lozenge shape the left column's rows are drawn in, the shell's.
     shape: Shape,
-    /// The left column's row under the keyboard's cursor, while it has the
-    /// focus (F2, then Down), and the row it is: a refresh that moves the
-    /// row keeps the cursor on it ([`ChatPane::refocus`]).
-    side_focus: Option<usize>,
+    /// Where the keyboard is: one focus owner ([`focus`]).
+    focus: focus::Focus,
+    /// An overlay of the shell's holds the keyboard over the pane.
+    overlaid: bool,
+    /// The tab shown when the focus walked onto the tab bar, put back when
+    /// it walks off without choosing ([`ChatPane::focus_on`]).
+    bar_entry: Option<Tab>,
+    /// The column row the focus is on, while it is on one: a refresh that
+    /// moves the row keeps the focus on it ([`ChatPane::refocus`]).
     side_focus_hit: Option<sidebar::SideHit>,
     /// The first row shown of each of the column's lists, agents then
     /// channels: the wheel moves them, and the cursor keeps itself in view
@@ -235,12 +239,13 @@ impl ChatPane {
             open: None,
             theme: "terminal".into(),
             asked: None,
-            prompt: None,
             enhanced: false,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
             sidebar: true,
             shape: Shape::PLAIN,
-            side_focus: None,
+            focus: focus::Focus::Compose,
+            overlaid: false,
+            bar_entry: None,
             side_focus_hit: None,
             side_scroll: [0, 0],
             side_follow: true,
@@ -261,16 +266,6 @@ impl ChatPane {
         let (text, _) = self.hits.compose;
         let lead = self.hits.lead;
         Rect { x: text.x.saturating_sub(lead), width: text.width + lead, ..text }
-    }
-
-    /// What leads the compose box's first row in a box `width` wide: `> `,
-    /// or while the box is lent, what it is lent to (`new channel name > `),
-    /// cut to half the box so the text keeps room.
-    fn lead(&self, width: u16) -> String {
-        match &self.prompt {
-            Some((p, _)) => format!("{} > ", agent_tui::wrap::truncate(&p.label(), usize::from(width / 2).saturating_sub(3).max(1))),
-            None => "> ".into(),
-        }
     }
 
     /// The feed's entries are out of date: rebuild them, and their layout,
@@ -329,6 +324,7 @@ impl ChatPane {
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
             self.world = Some(World { groups: tab_channels(&rows), seen, rows, live_members, instances });
             self.refocus();
+            self.refocus_tab();
         }
         self.world.as_ref().expect("just built")
     }
@@ -556,24 +552,21 @@ impl Pane for ChatPane {
         view::tabs(self)
     }
 
-    /// The bar's index of the tab shown: 0 is the `≡` slot, 1 merged, then
-    /// the channels, then the `+` slot.
+    /// The bar's index of the tab shown, in [`tabs::bar`]'s order.
     fn tab(&mut self) -> usize {
-        match self.normal_tab() {
-            Tab::Merged => 1,
-            Tab::Channel(g) => self.strip_names().iter().position(|n| *n == g).map_or(1, |i| i + 2),
-        }
+        let shown = self.normal_tab();
+        self.slot_of(&shown).unwrap_or(0)
     }
 
-    /// Show the bar's tab `i`: merged, or a channel (tab number `i`, as
-    /// Alt+N and Ctrl+N count them). The slots and an index past the tabs
-    /// do nothing. Showing a tab gives a lent compose box back, by key as
-    /// by a click on the tab.
+    /// Show the bar's tab `i`: a channel or the operator view. The slots
+    /// and an index past the tabs do nothing.
     fn set_tab(&mut self, i: usize) {
-        self.prompt_cancel();
-        let names = self.strip_names();
-        if let Some(t) = i.checked_sub(1).and_then(|n| tabs::jump(n as u32 + 1, &names)) {
-            ChatPane::set_tab(self, t);
+        self.keep_tab();
+        if let Some(slot @ tabs::Slot::Tab(_)) = tabs::bar(&self.strip_names()).get(i).cloned() {
+            self.follow_on_bar(&slot);
+            if let tabs::Slot::Tab(t) = slot {
+                ChatPane::set_tab(self, t);
+            }
         }
     }
 
@@ -609,44 +602,26 @@ impl Pane for ChatPane {
         self.last_frame = Some((area, cells));
     }
 
-    /// The chat's keys. Alt+1..9 (a tab), Alt+m (the mouse), F1 (the keys)
-    /// and Ctrl-C (quit) are the shell's, and never reach here.
+    /// The chat's keys, by where the focus is ([`focus`]). Alt+1..9 (a
+    /// tab), Alt+m (the mouse), F1 (the keys), F2 (the tab bar) and Ctrl-C
+    /// (quit) are the shell's, and never reach here; outside the compose
+    /// box their single-key forms (`1`..`9`, `m`, `?`, `q`) are the shell's
+    /// too.
     ///
-    /// Esc never quits (ADR-409): it gives a lent compose box back, takes
-    /// the keyboard from the column, and with nothing else to close clears
-    /// the message selected and what the bar says. The draft stays. Where
-    /// Ctrl+3 arrives as Esc it is the same Esc, so a tab key can never
-    /// close the chat.
+    /// Esc never quits (ADR-409): in the compose box it clears the message
+    /// selected and what the bar says, the draft kept; elsewhere it brings
+    /// the focus back to the box. Where Ctrl+3 arrives as Esc it is the same
+    /// Esc, so a tab key can never close the chat.
     fn key(&mut self, k: KeyEvent) -> Keyed {
         self.dirty = true;
-        let m = k.modifiers;
-        if self.prompt.is_some() {
-            match k.code {
-                KeyCode::Esc => self.prompt_cancel(),
-                KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.prompt_enter(),
-                KeyCode::Tab | KeyCode::PageUp | KeyCode::PageDown => {}
-                _ => {
-                    self.input.key(k);
-                }
-            }
-            return Keyed::Done;
-        }
         if self.is_sidebar_key(&k) {
             self.toggle_sidebar();
             return Keyed::Done;
         }
-        if let Some(keyed) = self.side_key(k) {
-            return keyed;
-        }
-        match k.code {
-            KeyCode::Esc => self.clear(),
-            KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.enter(),
-            KeyCode::Tab => self.tab_key(),
-            KeyCode::PageUp => self.page(true),
-            KeyCode::PageDown => self.page(false),
-            _ => {
-                self.input.key(k);
-            }
+        if self.focus == focus::Focus::Compose {
+            self.compose_key(k);
+        } else {
+            self.nav_key(k);
         }
         Keyed::Done
     }
@@ -655,56 +630,75 @@ impl Pane for ChatPane {
         self.scroll_by(up, WHEEL_ROWS);
     }
 
+    fn owns_focus(&self) -> bool {
+        true
+    }
+
+    /// An overlay holds the keyboard: the compose box draws no caret and
+    /// its border is set back, so the focus shows in one place.
+    fn overlaid(&mut self, on: bool) {
+        if self.overlaid != on {
+            self.overlaid = on;
+            self.dirty = true;
+        }
+    }
+
+    fn focus_tab(&self) -> Option<usize> {
+        let focus::Focus::Tab(slot) = &self.focus else { return None };
+        let names = self.world.as_ref().map(|w| tabs::strip_names(&w.groups)).unwrap_or_default();
+        tabs::bar(&names).iter().position(|s| s == slot)
+    }
+
+    fn focus_tabs(&mut self) {
+        self.toggle_tabs();
+    }
+
     /// Esc with nothing open over the chat: never quit (ADR-409).
     fn esc_quits(&self) -> bool {
         false
     }
 
-    /// A paste goes into the compose box whole, at the cursor: its lines
-    /// stay one draft, and nothing is sent until Enter. A box lent to a
-    /// one-line name or description takes the lines joined by spaces. A
+    /// A paste goes into the compose box whole, at the cursor, and the focus
+    /// with it: its lines stay one draft, and nothing is sent until Enter. A
     /// waiting question the shell answers no first, as a typed character
     /// answers it, so a `y` in the paste never does. Control characters other
     /// than newline and tab are left out: an escape sequence in the
     /// clipboard is not drawn into the box or sent.
     fn paste(&mut self, text: &str) {
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
-        let text = if self.prompt.is_some() { text.split('\n').collect::<Vec<_>>().join(" ") } else { text };
-        self.side_focus = None;
+        self.focus_on(focus::Focus::Compose);
         let kept: String = text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();
         self.input.insert_str(&kept);
         self.tab_cycle = None;
         self.dirty = true;
     }
 
-    /// The wheel over one of the column's lists scrolls that list; anywhere
-    /// else, the feed.
+    /// The wheel scrolls what is under it: one of the column's lists, or
+    /// the feed. Over the compose box and the helper row it does nothing.
     fn wheel_at(&mut self, up: bool, at: Position) {
         match self.hits.side_lists.iter().position(|r| r.contains(at)) {
             Some(list) => self.side_wheel(list, up),
-            None => self.wheel(up),
+            None if self.hits.feed_box.contains(at) => self.wheel(up),
+            None => {}
         }
     }
 
     /// A click on a message selects it and brings it whole into view; on
     /// the compose box's text it puts the cursor there; on a chip of the
-    /// helper row it completes what is being typed to it.
-    ///
-    /// While the compose box is lent, a click outside it gives the box
-    /// back, as Esc does, and does nothing more, except on the column,
-    /// where it goes on, as a click that closes a menu does.
+    /// helper row it completes what is being typed to it. The keyboard goes
+    /// back to the compose box, but for a click on the column while it has
+    /// the focus, which moves it to the row clicked, and one on a message
+    /// while the feed has it.
     fn click(&mut self, at: Position) {
         self.dirty = true;
-        if !self.hits.side_area.contains(at) {
-            self.side_focus = None;
-        }
         let (text, start) = self.hits.compose;
-        let with_prompt = self.compose_rect();
-        if self.prompt.is_some() && !with_prompt.contains(at) {
-            self.prompt_cancel();
-            if !self.click_through(at) {
-                return;
-            }
+        let keeps = match self.focus {
+            focus::Focus::Row(_) => self.hits.side_area.contains(at),
+            focus::Focus::Feed => self.hits.feed.contains(at),
+            _ => false,
+        };
+        if !keeps {
+            self.focus = focus::Focus::Compose;
         }
         if self.hits.flag.contains(at) {
             return self.flag_menu();
@@ -715,7 +709,7 @@ impl Pane for ChatPane {
             }
             return;
         }
-        if with_prompt.contains(at) {
+        if self.compose_rect().contains(at) {
             let col = at.x.saturating_sub(text.x) as usize;
             self.input.click(self.hits.text_width, start + (at.y - text.y) as usize, col);
             self.tab_cycle = None;
@@ -736,50 +730,20 @@ impl Pane for ChatPane {
         self.side_drawn() && self.hits.side_area.contains(at)
     }
 
-    /// A click on the tab bar or the bottom bar, or a right click outside
-    /// the compose box, gives a lent compose box back, as a left click
-    /// outside it does.
-    fn dismiss(&mut self, at: Option<Position>) {
-        if at.is_none_or(|at| !self.compose_rect().contains(at)) {
-            self.prompt_cancel();
-        }
-    }
-
+    /// The keys of the element the focus is on, for the footer, then the
+    /// rest for the key help ([`ChatPane::focus_bindings`]).
     fn bindings(&self) -> Vec<Binding> {
-        let mut out = vec![Binding::new("Enter", "send"), Binding::new("Tab", "complete")];
-        // The column's way in, on the footer while the column is drawn and
-        // does not have the keyboard: at 80 columns it takes the place of
-        // the scroll keys, which the key help still lists.
-        if self.side_drawn() && self.side_focus.is_none() {
-            out.push(Binding::new("F2 ↓", "the column: ↑ ↓ move, Enter acts, ↑ at the top or Esc back").short("column"));
-        }
-        out.extend([
-            Binding::new("PgUp PgDn", "scroll"),
-            Binding::help("S-Enter M-Enter", "new line"),
-            Binding::help("← → Home End", "move the cursor"),
-            Binding::help("Bksp Del", "edit"),
-            Binding::help("click a message", "selects it; a chip completes; the compose box: the cursor"),
-        ]);
-        if let Some(key) = self.sidebar_key_label() {
-            out.push(Binding::help(key, "show or hide the agents and channels column"));
-        }
-        out
+        self.focus_bindings()
     }
 
     fn mode(&self) -> String {
-        "chat".into()
+        self.focus_mode()
     }
 
     /// The status slot (#398, #400): a fresh result asserts itself, an
     /// error in the error role; past [`STATUS_ASSERT`] the help of a
     /// command being typed, or the last result, set back.
     fn status(&mut self) -> Option<(String, Tone)> {
-        if let Some(s) = self.menu_status() {
-            return Some((s, Tone::Said));
-        }
-        if self.side_focus.is_some() {
-            return Some((sidebar::FOCUS_HINT.into(), Tone::Said));
-        }
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
         let (line, how) = status_slot(fresh, self.status_is_error, crate::slash::contextual_help(self.input.text()), &self.status);
         let tone = match how {
@@ -790,8 +754,10 @@ impl Pane for ChatPane {
         (!line.is_empty()).then_some((line, tone))
     }
 
+    /// The compose box types every plain key while it has the focus; away
+    /// from it the shell's single keys work as the key help names them.
     fn owns_text(&self) -> bool {
-        true
+        self.focus == focus::Focus::Compose
     }
 
     /// `attend.chat.mouse`, on unless set off: the chat is worked by
@@ -802,25 +768,9 @@ impl Pane for ChatPane {
         self.config.mouse
     }
 
-    /// What quitting would lose: a draft, or a name or description typed in
-    /// the lent box, named for what it is.
+    /// What quitting would lose: a draft.
     fn unsaved(&self) -> Option<String> {
-        let typed = !self.input.is_empty();
-        match &self.prompt {
-            None => typed.then(|| "a draft in the compose box".into()),
-            Some((p, draft)) => {
-                let lent = match p {
-                    menu::Prompt::NewChannel => "a new channel's name being typed".to_string(),
-                    menu::Prompt::Describe(c) => format!("a description of #{c} being typed"),
-                };
-                match (typed, draft.is_empty()) {
-                    (true, true) => Some(lent),
-                    (true, false) => Some(format!("{lent}, and a draft held")),
-                    (false, false) => Some("a draft in the compose box".into()),
-                    (false, true) => None,
-                }
-            }
-        }
+        (!self.input.is_empty()).then(|| "a draft in the compose box".into())
     }
 
     fn has_tab_menus(&self) -> bool {
@@ -832,6 +782,10 @@ impl Pane for ChatPane {
     /// repeat on the tab shown opens its menu when
     /// `attend.chat.tabs.menu_on_repeat` says so.
     fn activate_tab(&mut self, i: usize, menu: bool) {
+        self.keep_tab();
+        if let Some(slot) = tabs::bar(&self.strip_names()).get(i).cloned() {
+            self.follow_on_bar(&slot);
+        }
         if let Some(target) = self.tab_target(i) {
             let how = if menu { activate::How::Menu } else { activate::How::Select { repeat: self.config.menu_on_repeat } };
             self.activate(target, how, None);
@@ -845,20 +799,6 @@ impl Pane for ChatPane {
         self.context_at(at);
     }
 
-    fn below_strip(&self) -> Option<&'static str> {
-        self.side_drawn().then_some("the column")
-    }
-
-    /// The column taking the keyboard gives a lent compose box back: its
-    /// keys then act on its rows, never on the name being typed.
-    fn focus_below(&mut self) -> bool {
-        let focused = self.focus_side();
-        if focused {
-            self.prompt_cancel();
-        }
-        focused
-    }
-
     fn new_item_label(&self) -> Option<&'static str> {
         Some("new channel")
     }
@@ -867,10 +807,11 @@ impl Pane for ChatPane {
         self.new_channel();
     }
 
-    /// The shell took a key or a click: the column gives up the keyboard
-    /// (F2, a tab, the bottom bar).
+    /// The shell took a click (a tab, the bottom bar): the keyboard goes
+    /// back to the compose box, as a click in the pane sends it.
     fn interrupted(&mut self) {
-        if self.side_focus.take().is_some() {
+        if self.focus != focus::Focus::Compose {
+            self.focus = focus::Focus::Compose;
             self.dirty = true;
         }
     }
@@ -888,7 +829,7 @@ impl Pane for ChatPane {
     }
 
     fn quit_help(&self) -> Option<String> {
-        Some("quit; asks first over a draft; so does ≡ → Quit".into())
+        Some("quit; q asks first, ^C over a draft; so does ≡ → Quit".into())
     }
 
     fn take_open(&mut self) -> Option<Open> {
@@ -919,10 +860,12 @@ impl Pane for ChatPane {
 
     fn help(&self) -> Option<String> {
         Some(
-            "Enter sends to the shown channel; merged sends to #open. @name or #channel\n\
-             at the start addresses the message; Tab completes them, and on an empty\n\
-             line shows the next tab. /help lists the slash commands. `attend inbox`\n\
-             and `attend send` are the same bus outside the screen."
+            "Enter sends to the shown channel; ⋯all, every channel together, sends to\n\
+             #open. @name or #channel at the start addresses the message; Tab completes\n\
+             them, and on an empty line shows the next tab. /help lists the slash\n\
+             commands. Outside the compose box Tab and the arrows walk the tabs, the\n\
+             column, the feed and the box, and Enter opens a menu. `attend inbox` and\n\
+             `attend send` are the same bus outside the screen."
                 .into(),
         )
     }

@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
+| ≡   ▽  1 #deploy   ♦  2 #infra    +                            ◆  #open   ⋯all |
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│                                                                              │|
 |│  ▽ 13:55  Wells  beta                                                        │|
@@ -23,16 +23,16 @@ agent-tui frame 80x25
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
-| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll  |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · S-Tab or ↑ leaves |
 styles
   0   0-2   - - REVERSED
-  0   5-14  - - BOLD|REVERSED
-  0  17-18  - - BOLD
-  0  19-27  - - REVERSED
-  0  32-42  - - REVERSED
-  0  45-46  - - BOLD
-  0  47-56  - - REVERSED
-  0  59-61  - - REVERSED
+  0   7-17  - - REVERSED
+  0  20-21  - - BOLD
+  0  22-31  - - REVERSED
+  0  34-36  - - REVERSED
+  0  64-65  - - BOLD
+  0  66-72  - - REVERSED
+  0  74-79  - - BOLD|REVERSED
   1   0-79  - - DIM
   2   0-0   - - DIM
   2  79-79  - - DIM
@@ -84,4 +84,4 @@ styles
  24  27-33  - - DIM|ITALIC
  24  40-46  - - DIM|ITALIC
  24  51-61  - - DIM|ITALIC
- 24  72-77  - - DIM|ITALIC
+ 24  68-78  - - DIM|ITALIC

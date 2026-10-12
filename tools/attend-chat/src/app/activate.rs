@@ -12,14 +12,14 @@
 //!   flag) opens the menu at once and shows nothing. The flag acts on the
 //!   channel it names: `#open` on merged.
 //! - An agent has no shown state: either opens its menu (ADR-405).
-//! - `≡` opens the common menu over a lent compose box; `+` lends the box.
-//!   Every other activation gives a lent box back first (ADR-409 (d)).
+//! - `≡` opens the common menu; `+` asks a new channel's name in an entry
+//!   dialog docked under it. The compose box is never borrowed (ADR-409).
 
 use agent_tui::ratatui::layout::{Position, Rect};
 
 use super::sidebar::SideHit;
 use super::ChatPane;
-use crate::tabs::Tab;
+use crate::tabs::{self, Slot, Tab};
 
 /// What an input acts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,16 +53,15 @@ impl Target {
 }
 
 impl ChatPane {
-    /// The tab bar's slot `i`: 0 is `≡`, 1 merged, then the channels in
-    /// strip order, then `+`.
+    /// The tab bar's slot `i`, in [`tabs::bar`]'s order: `≡`, the created
+    /// channels, `+`, then `#open` and the operator view.
     pub(super) fn tab_target(&mut self, i: usize) -> Option<Target> {
-        let names = self.strip_names();
-        match i {
-            0 => Some(Target::Common),
-            1 => Some(Target::Merged),
-            i if i == names.len() + 2 => Some(Target::NewChannel),
-            i => names.get(i - 2).map(|n| Target::Channel(n.clone())),
-        }
+        Some(match tabs::bar(&self.strip_names()).get(i)? {
+            Slot::Common => Target::Common,
+            Slot::New => Target::NewChannel,
+            Slot::Tab(Tab::Merged) => Target::Merged,
+            Slot::Tab(Tab::Channel(c)) => Target::Channel(c.clone()),
+        })
     }
 
     /// Act on `target` as `how` says. A menu docks under `at` when given,
@@ -72,10 +71,7 @@ impl ChatPane {
         match target {
             Target::Common => self.common_menu(),
             Target::NewChannel => self.new_channel(),
-            Target::Agent(member) => {
-                self.prompt_cancel();
-                self.agent_menu(member, at);
-            }
+            Target::Agent(member) => self.agent_menu(member, at),
             Target::Merged | Target::Channel(_) => {
                 let channel = match target {
                     Target::Channel(c) => Some(c),
@@ -88,7 +84,6 @@ impl ChatPane {
                     How::Menu => true,
                     How::Select { repeat } => !has_tab || (shown && repeat),
                 };
-                self.prompt_cancel();
                 if menu {
                     self.channel_menu(channel, at);
                 } else {

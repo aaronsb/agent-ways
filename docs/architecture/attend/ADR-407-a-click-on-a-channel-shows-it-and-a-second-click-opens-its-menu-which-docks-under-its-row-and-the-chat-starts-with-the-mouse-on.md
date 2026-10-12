@@ -7,6 +7,10 @@ amends: [ADR-405#Decision, 'ADR-504#Note (2026-10-02): a screen that is not a tr
 basis:
   - operator: aaronsb
     level: directed
+    said: "new fix for attend-chat: the merged channel needs to be called something different like ('combined' or full stream or something) - because it's all the chats together. Next, I don't want the merged channel to be actually a channel - it's an operator view for attend-chat, and should be justified right side, maybe with some characters that indicate 'merged chat' (no more than 3-4). That tab should be a different color (lighter? shaded? not sure). The chat box itself needs to be one of the tabbable elements. the text entry box swallows normal keyboard commands (including shift and tab) because it's the entry panel. when the chat box is active regular tab is autocomplete. whenever the entry box is active, we have a little legend update that indicates that shift+tab or arrow can be used to leave the box. nav arrows (up down left right) work inside the box, but if the up arrow is used when the cursor is at the beginning of the first line of the entry box, it is the same as leaving focus for the entry box and allows navigation of elements. same goes for the last position of the last line, down arrow exits the pattern. we need to define the chain of elements that tab (or shift tab, or left and right arrows) do for navigating the elemnts outside of chat. we need every agent entry and channel to be in that loop. we also need the hints on the bottom to reflect the context of where the active cursor is at, and we can use enter to raise the context menu for any element. (the same context menu that the mouse click affords). when not in the text entry box, we should be able to use all the characters for contorl that the help (F1) claims. If we're not deliberately in chat, the lighter highlight around the entry box for text is not brighter as it is now, but instead the lower border color.. we could say that this is a nav polish pass"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
     said: "currently, left clicking on a channel in 'attend-chat' does not bring up the context dialog. also, I think it would be nice for that dialog to dock on the next line under the clicked channel. the ideal path is first click activates that channel (selects it to foregrond) and the second click (essentially, clicking on the active/foreground channel) brings up the context dialog. I can use ctrl+4 (for the fourth marked channel) to bring to foreground and use ctrl+4 a second time to bring up the context menu now on the keyboar"
     via: chat, relayed by the main session, 2026-10-11
   - evidence: "The operator's screenshot of the failing click showed `mouse off (M-m)` in the bottom bar, relayed by the main session, 2026-10-11. attend.chat.mouse defaulted to false, so a terminal never reported the click to the chat."
@@ -14,6 +18,10 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "we can use enter to raise the context menu for any element. (the same context menu that the mouse click affords)"
+    via: chat, relayed by the main session, 2026-10-12
 status: accepted
 date: 2026-10-11
 deciders:
@@ -87,3 +95,7 @@ Review of the change refined (a) and (c); the docking rule in (a) was the agent'
 - **Where a menu docks follows the input.** A click or right click on a tab docks the menu under the tab, even where the left column shows that channel's row. Enter on the focused tab bar does the same. A click on a column row docks under that row. Keyboard input from elsewhere (Ctrl+digit, Alt+digit, Enter on a column row) docks under the channel's column row when the column shows it, and under its tab otherwise. The placement rule in (c) is unchanged. A row that a resize has left outside the pane is clamped into it.
 - **`attend.chat.tabs.menu_on_repeat: false` governs keys only.** With it off, a second Ctrl+digit or Alt+digit, or a click on the tab already shown, only shows the tab. A click on the shown channel's column row, or Enter on that row, still opens its menu, since the row has no other action on the channel already shown.
 - **A click in the column moves its keyboard cursor.** While the column has the keyboard, a click on one of its rows puts the cursor on that row.
+
+## Amendment (2026-10-12): Enter on a focused element opens its menu at once
+
+The operator asked that "we can use enter to raise the context menu for any element. (the same context menu that the mouse click affords)". Enter on a focused tab, column row or the feed now opens that element's menu at once, as a right click does, through the same activation path; it no longer shows a channel first. A menu opened from the tab bar docks under its tab. Moving the tab bar's focus onto a channel tab still shows it, so a channel is shown from the keyboard by walking to it. The digits number the created channels from 1; the reserved tabs carry none, and 0 is the bar's last tab (ADR-405, amendment of 2026-10-12).

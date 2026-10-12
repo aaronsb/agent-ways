@@ -42,13 +42,13 @@ fn config_lists_sets_refuses_and_applies_at_once() {
         c.status(),
         "tabs.jump = auto (default) · tabs.menu_on_repeat = true (default) · tabs.focus_key = both (default) · mouse = true (default) · sidebar_key = f3 (default) · /config <key> <value> sets one"
     );
-    assert!(bar(&mut c).contains("Ctrl+1-9 tab (again: menu)"), "{}", bar(&mut c));
+    assert!(bar(&mut c).contains("Ctrl+0-9 tab (again: menu)"), "{}", bar(&mut c));
 
     enter(&mut c, "/config tabs.jump alt");
     assert_eq!(c.status(), "tabs.jump = alt");
     let file = std::fs::read_to_string(attend_config::user_path()).unwrap();
     assert!(file.contains("chat:\n  tabs:\n    jump: alt\n"), "{file}");
-    assert!(bar(&mut c).contains("Alt+1-9 tab (again: menu)"), "applied at once: {}", bar(&mut c));
+    assert!(bar(&mut c).contains("Alt+0-9 tab (again: menu)"), "applied at once: {}", bar(&mut c));
     enter(&mut c, "/config");
     assert!(c.status().starts_with("tabs.jump = alt (user)"), "{}", c.status());
 
@@ -75,15 +75,23 @@ fn config_lists_sets_refuses_and_applies_at_once() {
     enter(&mut c, "/config tabs.jump ctrl");
     assert_eq!(c.status(), "tabs.jump = ctrl · Ctrl+digits do not arrive in this terminal; F2 reaches the tabs");
     let b = bar(&mut c);
-    assert!(!b.contains("Ctrl+1-9") && b.contains("F2 tabs"), "{b}");
+    assert!(!b.contains("Ctrl+0-9") && b.contains("F2 tabs"), "{b}");
     enter(&mut c, "/config tabs.jump both");
     assert!(c.status().ends_with("Alt+1-9 and F2 do"), "{}", c.status());
-    assert!(bar(&mut c).contains("Alt+1-9 tab (again: menu)"));
+    assert!(bar(&mut c).contains("Alt+0-9 tab (again: menu)"));
 
     // The ≡ menu's keybinding set writes its keys in one go. jump=both
     // matches no preset, so the cursor starts on the custom row: Down to
     // ctrl, Down to alt.
-    for k in [KeyCode::F(2), KeyCode::Left, KeyCode::Enter, KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Down, KeyCode::Enter] {
+    // F2, then ← along the bar to ≡, its first slot.
+    testkit::drive(&mut c, &[key(KeyCode::F(2))]);
+    for _ in 0..8 {
+        if testkit::rows(&testkit::render_screen(&mut c, 120, 25))[0].contains("▸≡") {
+            break;
+        }
+        testkit::drive(&mut c, &[key(KeyCode::Left)]);
+    }
+    for k in [KeyCode::Enter, KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Down, KeyCode::Enter] {
         testkit::drive(&mut c, &[key(k)]);
     }
     assert!(c.status().starts_with("keybinding set: alt"), "{}", c.status());

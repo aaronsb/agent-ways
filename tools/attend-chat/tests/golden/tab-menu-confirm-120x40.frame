@@ -1,5 +1,5 @@
 agent-tui frame 120x40
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                                                           |
+| ≡   ▽  1 #deploy   ♦  2 #infra    +                                                                    ◆ ▸#open   ⋯all |
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
 |│  13:50  Laszlo  alpha                                                                                                │|
 |│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │|
@@ -41,14 +41,14 @@ agent-tui frame 120x40
 | confirm  clear #open history? deletes what every live agent has read, older than 90 s   y clear   n keep               |
 styles
   0   0-2   White Blue -
-  0   5-14  White Blue -
-  0  17-18  Blue - BOLD
-  0  19-27  Black Cyan BOLD
-  0  30-31  Red - -
-  0  32-42  White Blue -
-  0  45-46  Cyan - -
-  0  47-56  White Blue -
-  0  59-61  White Blue -
+  0   5-6   Red - -
+  0   7-17  White Blue -
+  0  20-21  Cyan - -
+  0  22-31  White Blue -
+  0  34-36  White Blue -
+  0 104-105 Blue - BOLD
+  0 106-112 Black Cyan BOLD|REVERSED
+  0 114-119 White DarkGray -
   1   0-119 - - DIM
   2   0-0   - - DIM
   2   2-8   White DarkGray -
@@ -124,15 +124,14 @@ styles
  32   0-0   - - DIM
  32 119-119 - - DIM
  33   0-119 - - DIM
- 34   0-119 Cyan - -
- 35   0-0   Cyan - -
- 35   2-3   Cyan - -
- 35   4-4   - - REVERSED
- 35 119-119 Cyan - -
- 36   0-0   Cyan - -
+ 34   0-119 - - DIM
+ 35   0-0   - - DIM
+ 35   2-3   - - DIM
+ 35 119-119 - - DIM
+ 36   0-0   - - DIM
  36 111-117 White Blue -
- 36 119-119 Cyan - -
- 37   0-119 Cyan - -
+ 36 119-119 - - DIM
+ 37   0-119 - - DIM
  38   1-7   Cyan - BOLD
  38   9-14  LightCyan - -
  38  16-21  LightYellow - -
