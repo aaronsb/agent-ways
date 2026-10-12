@@ -92,3 +92,11 @@ The audit put the Esc question to the operator: Esc on an empty compose box with
 - **Esc on an empty line always asks.** It keeps a one-key route to quitting, but a double Esc still lands on a question and the question needs an answer before anything else works.
 - **Esc clears the draft.** It would make Esc a full reset, but a stray or doubled Esc would lose typing, which is the cost this record removes.
 - **Keep the lent box until Enter or Esc, and only draw the label.** It would make the state visible but let a tab change carry a half-typed name onto another channel's view, and a key would still differ from a click on the tab.
+
+## Correction (2026-10-11): the `≡` menu, the action slots, and the shown tab
+
+Review of the change refined (d) so that (b) and (d) hold together. The decision text above stands as accepted.
+
+- **The `≡` menu opens over a lent box.** Its items give the box back when picked, except Quit, which leaves it lent. The shell's quit then counts a name typed there as unsaved and opens the exit guard, as Ctrl-C does, and Back returns to the lent box. Opening `≡` no longer gives the box back on its own.
+- **A click on an action slot does not dismiss.** A click on `≡` or `+` acts as the slot's key does: `≡` opens its menu over the lent box, and `+` lends the box or keeps it lent, as Ctrl+N does.
+- **Ctrl+digit on the shown tab** with `attend.chat.tabs.menu_on_repeat` off shows the tab again, so it gives the box back as a click on that tab does.
