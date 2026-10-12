@@ -230,7 +230,7 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
         chat.entries = Some(entries);
         chat.entry_members = members;
     }
-    let focused = chat.ix.focus == super::focus::Focus::Feed && !chat.ix.overlaid();
+    let focused = *chat.ix.focus() == super::focus::Focus::Feed && !chat.ix.overlaid();
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(border(focused)).padding(Padding::horizontal(1));
     let inner = block.inner(area);
     f.render_widget(block, area);

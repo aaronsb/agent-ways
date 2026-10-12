@@ -16,7 +16,7 @@
 //! of the pane that passes clicks through ([`Pane::click_through`]), then
 //! does what it would have done with nothing open.
 //!
-//! A pane that owns text ([`Pane::owns_text`]) types every plain key, so the
+//! A pane that owns text ([`Ctx::text`]) types every plain key, so the
 //! shell's own keys take their Alt form there: Alt+1-9 for a tab, Alt+m for
 //! the mouse. F1 opens the key help, and Esc and Ctrl-C quit, asking first
 //! when the pane holds unsaved work.
@@ -145,7 +145,7 @@ pub enum Keyed {
     /// The pane acted on it.
     Done,
     /// Not the pane's key: the shell's, such as Esc, which quits unless the
-    /// pane says otherwise ([`Pane::esc_quits`]).
+    /// pane says otherwise ([`Ctx::esc_quits`]).
     Pass,
     /// Quit, as Esc would: the pane confirmed it.
     Quit,
@@ -236,6 +236,56 @@ pub enum Open {
     Entry { id: String, title: String, value: String, error: Option<String>, anchor: Anchor },
     /// Quit, as Ctrl-C does: asking first over unsaved work.
     Quit,
+}
+
+/// How the shell routes a key beside a pane ([`Pane::keymap_ctx`]): which
+/// of its own keys it takes, and what Esc does. One answer, asked of the
+/// pane, in place of a question per key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ctx {
+    /// The pane types every plain key, as a text entry does: the shell's
+    /// single keys (`?`, `q`, `m`, the digits) take their Alt form, and F1
+    /// opens the key help.
+    pub text: bool,
+    /// Beside no text, a plain digit shows a tab. A pane that owns the bar
+    /// types digits as text off it.
+    pub digits: bool,
+    /// The pane holds the keyboard focus itself, the tab bar's included:
+    /// one focus owner. The shell then keeps no focus of its own on the
+    /// bar. F2, Ctrl+T and [`Keyed::Tabs`] go to [`Pane::focus_tabs`], the
+    /// bar draws its cursor where [`Pane::focus_tab`] says, a key the shell
+    /// takes leaves the focus where it is, and a plain `q` asks first.
+    pub owns_bar: bool,
+    /// Esc the pane passes on quits. Without it the pane keeps quitting on
+    /// Ctrl-C (and `q` beside no text), and the key help leaves Esc out of
+    /// the quit keys.
+    pub esc_quits: bool,
+}
+
+impl Default for Ctx {
+    /// No text, the digits the shell's, the focus the shell's, Esc quits.
+    fn default() -> Ctx {
+        Ctx { text: false, digits: true, owns_bar: false, esc_quits: true }
+    }
+}
+
+/// What the shell holds open over a pane ([`Pane::overlay_opened`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Overlay {
+    /// A menu or picker the pane opened ([`Open::Pick`]), by its id.
+    Menu { id: String },
+    /// The entry dialog the pane opened ([`Open::Entry`]), by its id.
+    Entry { id: String },
+    /// A question on the bottom bar, the pane's ([`Open::Ask`]) or the
+    /// shell's own before a plain `q` quits, by its id.
+    Ask { id: String },
+    /// The key help.
+    Help,
+    /// The exit guard over unsaved work.
+    Guard,
+    /// The response modal ([`Open::Report`], [`Open::Error`]), or another
+    /// of the shell's dialogs, which only a tree screen opens.
+    Report,
 }
 
 /// What an application supplies for a screen that is not a tree. `Any`
@@ -339,13 +389,6 @@ pub trait Pane: Any {
         None
     }
 
-    /// Whether Esc the pane passes on quits, as it does by default. A pane
-    /// that answers false keeps quitting on Ctrl-C (and `q` beside no
-    /// text), and the key help leaves Esc out of the quit keys.
-    fn esc_quits(&self) -> bool {
-        true
-    }
-
     /// How the tabs are reached from the keyboard, from the pane's settings.
     fn tab_keys(&self) -> super::panetabs::TabKeys {
         super::panetabs::TabKeys::default()
@@ -361,17 +404,14 @@ pub trait Pane: Any {
     /// for: without it Ctrl+3 arrives as Esc and Ctrl+8 as Backspace.
     fn set_keyboard_enhanced(&mut self, _on: bool) {}
 
-    /// Whether the pane holds the keyboard focus itself, the tab bar's
-    /// included: one focus owner. The shell then keeps no focus of its own
-    /// on the tab bar. F2, Ctrl+T and [`Keyed::Tabs`] go to
-    /// [`Pane::focus_tabs`], the bar draws its cursor where
-    /// [`Pane::focus_tab`] says, and a key the shell takes leaves the focus
-    /// where it is. False by default.
-    fn owns_focus(&self) -> bool {
-        false
+    /// How the shell routes a key beside the pane, asked before each key
+    /// and each frame ([`Ctx`]).
+    fn keymap_ctx(&self) -> Ctx {
+        Ctx::default()
     }
 
-    /// The tab the pane's focus is on, for a pane that owns the focus.
+    /// The tab the pane's focus is on, for a pane that owns the bar
+    /// ([`Ctx::owns_bar`]): where the bar draws its cursor.
     fn focus_tab(&self) -> Option<usize> {
         None
     }
@@ -380,11 +420,14 @@ pub trait Pane: Any {
     /// bar, or back from it.
     fn focus_tabs(&mut self) {}
 
-    /// Whether an overlay (a menu, a picker, the entry dialog, the key
-    /// help, a report, a question) is open over the pane, told before each
-    /// frame: the keyboard is the overlay's, so the pane draws no focus of
-    /// its own, such as a text entry's caret.
-    fn overlaid(&mut self, _on: bool) {}
+    /// An overlay opened over the pane, on top of those open already. The
+    /// shell tells the pane before each frame what opened and closed since
+    /// the last, closing first, top down: the keyboard is the overlay's, so
+    /// the pane draws no focus of its own, such as a text entry's caret.
+    fn overlay_opened(&mut self, _o: Overlay) {}
+
+    /// The overlay on top closed ([`Pane::overlay_opened`]).
+    fn overlay_closed(&mut self, _o: Overlay) {}
 
     /// Text after the tabs, such as what the shown channel is for.
     fn trailer(&mut self) -> Vec<Span<'static>> {
@@ -451,11 +494,6 @@ pub trait Pane: Any {
     /// The bottom bar's message and how it reads, asked each frame.
     fn status(&mut self) -> Option<(String, Tone)> {
         None
-    }
-
-    /// Whether the pane types every plain key, as a text entry does.
-    fn owns_text(&self) -> bool {
-        false
     }
 
     /// Whether the shell reports the mouse when the screen opens. With it

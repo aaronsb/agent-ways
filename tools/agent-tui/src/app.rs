@@ -277,6 +277,9 @@ pub struct App {
     entry_held: Option<Box<entry::Entry>>,
     /// The pane's tab bar, as last drawn, has a reserved tab.
     has_reserved: bool,
+    /// The overlays the pane was last told are open, bottom first
+    /// ([`pane::Pane::overlay_opened`]).
+    overlays_told: Vec<pane::Overlay>,
     /// The menu and its row a pick came from, for the menu the pick opens
     /// ([`pane::Anchor::Parent`]).
     menu_parent: Option<(Rect, Rect)>,
@@ -322,6 +325,7 @@ impl App {
             clicked_tab: None,
             entry_held: None,
             has_reserved: false,
+            overlays_told: Vec::new(),
             menu_parent: None,
             enhanced: false,
             ending: false,

@@ -383,17 +383,37 @@ fn a_refresh_keeps_the_focus_on_what_it_was_on() {
     ]);
 }
 
+fn menu(id: &str) -> Overlay {
+    Overlay::Menu { id: id.into() }
+}
+
 #[test]
-fn the_overlay_is_what_the_shell_last_reported() {
+fn the_overlays_are_what_the_shell_opened_and_has_not_closed() {
     use Effect::*;
-    let up = Ix { overlay: Some(Overlay::Shell), ..at(Focus::Compose) };
+    let with = |o: &[Overlay]| Ix { overlays: o.to_vec(), ..at(Focus::Compose) };
+    let guard = [Overlay::Entry { id: "new-channel".into() }, Overlay::Guard];
     check(vec![
-        cell("up", at(Focus::Compose), Ev::Overlaid(true), view(), up.clone(), vec![Redraw]),
-        cell("up again changes nothing", up.clone(), Ev::Overlaid(true), view(), up.clone(), vec![]),
-        cell("down", up.clone(), Ev::Overlaid(false), view(), at(Focus::Compose), vec![Redraw]),
-        cell("down again changes nothing", at(Focus::Compose), Ev::Overlaid(false), view(), at(Focus::Compose), vec![]),
+        cell("a menu opens", at(Focus::Compose), Ev::OverlayOpened(menu("common")), view(), with(&[menu("common")]), vec![Redraw]),
+        cell("another over it", with(&[menu("common")]), Ev::OverlayOpened(menu("theme")), view(), with(&[menu("common"), menu("theme")]), vec![]),
+        cell("the top closes", with(&[menu("common"), menu("theme")]), Ev::OverlayClosed(menu("theme")), view(), with(&[menu("common")]), vec![]),
+        cell("the last closes", with(&[menu("common")]), Ev::OverlayClosed(menu("common")), view(), at(Focus::Compose), vec![Redraw]),
+        cell("the guard over an entry", with(&guard[..1]), Ev::OverlayOpened(Overlay::Guard), view(), with(&guard), vec![]),
+        cell("a close of what is not open changes nothing", at(Focus::Compose), Ev::OverlayClosed(Overlay::Help), view(), at(Focus::Compose), vec![]),
+        cell("an overlay leaves the focus where it is", at(Focus::Feed), Ev::OverlayOpened(Overlay::Help), view(), Ix { overlays: vec![Overlay::Help], ..at(Focus::Feed) }, vec![Redraw]),
     ]);
-    assert!(up.overlaid() && !at(Focus::Compose).overlaid());
+    assert!(with(&[Overlay::Help]).overlaid() && !at(Focus::Compose).overlaid());
+}
+
+/// The shell's routing follows the focus: the box types, the bar takes the
+/// digits, and the chat keeps the bar's focus and Esc.
+#[test]
+fn the_keymap_context_follows_the_focus() {
+    let ctx = |f: Focus| at(f).ctx();
+    assert_eq!(ctx(Focus::Compose), Ctx { text: true, digits: false, owns_bar: true, esc_quits: false });
+    assert_eq!(ctx(Focus::Tab(Slot::Common)), Ctx { text: false, digits: true, owns_bar: true, esc_quits: false });
+    for f in [Focus::Row(0), Focus::Feed] {
+        assert_eq!(ctx(f), Ctx { text: false, digits: false, owns_bar: true, esc_quits: false });
+    }
 }
 
 #[test]
@@ -495,7 +515,8 @@ fn any_ev(r: &mut Rng, v: &View) -> Ev {
         16 => Ev::TabActivated { i: r.below(8), menu: r.coin() },
         17 => Ev::WorldChanged,
         18 => Ev::ColumnHidden,
-        _ => Ev::Overlaid(r.coin()),
+        19 if r.coin() => Ev::OverlayOpened([menu("common"), Overlay::Help, Overlay::Ask { id: "q".into() }, Overlay::Guard][r.below(4)].clone()),
+        _ => Ev::OverlayClosed([menu("common"), Overlay::Help, Overlay::Ask { id: "q".into() }, Overlay::Guard][r.below(4)].clone()),
     }
 }
 
@@ -530,14 +551,25 @@ fn the_preview_is_never_held_off_the_bar_nor_a_row_off_the_column() {
 }
 
 #[test]
-fn the_overlay_mirrors_what_the_shell_reported_last() {
+fn the_overlays_mirror_what_the_shell_reported() {
     for seed in 1..=300 {
-        let mut shell = false;
-        run(seed, 400, |_, ev, _, ix, _| {
-            if let Ev::Overlaid(on) = ev {
-                shell = *on;
+        let mut shell: Vec<Overlay> = Vec::new();
+        run(seed, 400, |before, ev, _, ix, fx| {
+            match ev {
+                Ev::OverlayOpened(o) => shell.push(o.clone()),
+                Ev::OverlayClosed(o) => {
+                    if let Some(i) = shell.iter().rposition(|x| x == o) {
+                        shell.remove(i);
+                    }
+                }
+                _ => {}
             }
-            assert_eq!(ix.overlaid(), shell, "seed {seed}: {ev:?}");
+            assert_eq!(ix.overlays, shell, "seed {seed}: {ev:?}");
+            if matches!(ev, Ev::OverlayOpened(_) | Ev::OverlayClosed(_)) {
+                let flipped = before.overlaid() != ix.overlaid();
+                assert_eq!(fx.contains(&Effect::Redraw), flipped, "seed {seed}: a redraw when, and only when, something comes or goes over the pane");
+                assert_eq!(ix.focus, before.focus, "seed {seed}: an overlay moves no focus");
+            }
         });
     }
 }

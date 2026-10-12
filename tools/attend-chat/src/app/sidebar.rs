@@ -321,9 +321,9 @@ fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown
 }
 
 /// The column's rows of `world` in order, agents then channels.
-pub(super) fn side_items_of(world: &super::World) -> Vec<SideHit> {
-    let mut out: Vec<SideHit> = agent_order(&world.seen).into_iter().map(|s| SideHit::Agent(s.member.clone())).collect();
-    out.extend(world.rows.iter().map(|r| SideHit::Channel(r.known.group.name.clone())));
+pub(super) fn side_items_of(seen: &[Seen], rows: &[ChannelRow]) -> Vec<SideHit> {
+    let mut out: Vec<SideHit> = agent_order(seen).into_iter().map(|s| SideHit::Agent(s.member.clone())).collect();
+    out.extend(rows.iter().map(|r| SideHit::Channel(r.known.group.name.clone())));
     out
 }
 
@@ -357,17 +357,20 @@ impl ChatPane {
         self.dirty = true;
     }
 
-    /// Put the focus on row `i` of `items`, as the keyboard puts it there.
+    /// Put the focus on row `i` of `items`, as a click on the row puts it
+    /// there, the agent's menu the click asks for left unopened.
     #[cfg(test)]
     fn focus_at(&mut self, items: &[SideHit], i: usize) {
-        self.ix = super::ix::Ix { focus: super::focus::Focus::Row(i), row_hit: items.get(i).cloned(), ..self.ix.clone() };
-        self.side_follow = true;
+        self.dispatch(super::ix::Ev::Click(super::ix::Click::Pane { column: true, feed: false, row: items.get(i).cloned() }));
+        self.to_open = None;
     }
 
-    /// Show or hide the column.
+    /// Show or hide the column. Hidden, it takes the focus off its rows.
     pub(super) fn toggle_sidebar(&mut self) {
         self.sidebar = !self.sidebar;
-        self.dispatch(super::ix::Ev::ColumnHidden);
+        if !self.sidebar {
+            self.dispatch(super::ix::Ev::ColumnHidden);
+        }
         self.invalidate();
     }
 
@@ -382,7 +385,7 @@ impl ChatPane {
     /// walks them, the world read first.
     #[cfg(test)]
     fn side_items(&mut self) -> Vec<SideHit> {
-        side_items_of(self.world())
+        self.world().laid.rows.clone()
     }
 
     /// Whether the last frame drew the column: shown, and room for it.
@@ -453,7 +456,7 @@ mod tests {
 
     fn with_agents(c: &mut ChatPane, names: &[&str]) {
         let seen = names.iter().map(|n| seen(n)).collect();
-        c.world = Some(super::super::World { groups: Vec::new(), seen, rows: Vec::new(), live_members: Vec::new(), instances: attend_instances::SnapshotCache::new() });
+        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground));
         c.refocus();
     }
 
@@ -464,9 +467,9 @@ mod tests {
         let items = c.side_items();
         c.focus_at(&items, 1);
         with_agents(&mut c, &["New", "Ada", "Bo", "Cy"]);
-        assert_eq!((c.side_focus(), c.ix.row_hit.clone()), (Some(2), Some(SideHit::Agent("id-Bo".into()))), "on Bo, moved down a row");
+        assert_eq!((c.side_focus(), c.ix.row_hit().cloned()), (Some(2), Some(SideHit::Agent("id-Bo".into()))), "on Bo, moved down a row");
         with_agents(&mut c, &["Ada"]);
-        assert_eq!((c.side_focus(), c.ix.row_hit.clone()), (Some(0), Some(SideHit::Agent("id-Ada".into()))), "Bo gone: held within the list");
+        assert_eq!((c.side_focus(), c.ix.row_hit().cloned()), (Some(0), Some(SideHit::Agent("id-Ada".into()))), "Bo gone: held within the list");
         with_agents(&mut c, &[]);
         assert_eq!(c.side_focus(), None, "nothing left to be on");
     }

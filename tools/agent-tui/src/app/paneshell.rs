@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
-use super::pane::{footer_spans, Binding, Keyed, Open, Tone};
+use super::pane::{footer_spans, Binding, Ctx, Keyed, Open, Overlay, Tone};
 use super::pick::Pick;
 use super::render::{modal_rect, pane as bordered};
 use super::response::Shown;
@@ -93,8 +93,14 @@ impl App {
         }
     }
 
+    /// How the pane says keys are routed beside it ([`Pane::keymap_ctx`]);
+    /// the shell's own default with no pane.
+    pub(super) fn ctx(&self) -> Ctx {
+        self.pane.as_ref().map_or_else(Ctx::default, |p| p.keymap_ctx())
+    }
+
     pub(super) fn owns_text(&self) -> bool {
-        self.pane.as_ref().is_some_and(|p| p.owns_text())
+        self.ctx().text
     }
 
     /// The shell's own keys around the pane, in the form they take there:
@@ -142,7 +148,7 @@ impl App {
             }
         }
         let quit = self.pane.as_ref().and_then(|p| p.quit_help()).unwrap_or_else(|| "quit; asks first over unsaved work".into());
-        let quit_keys = if self.pane.as_ref().is_none_or(|p| p.esc_quits()) { k("q Esc ^C", "Esc ^C") } else { k("q ^C", "^C") };
+        let quit_keys = if self.ctx().esc_quits { k("q Esc ^C", "Esc ^C") } else { k("q ^C", "^C") };
         out.extend([
             Binding::help(self.mouse_key(), "mouse on or off (off lets the terminal select text)"),
             Binding::help("Shift-drag", "selects text while the mouse is on, in most terminals"),
@@ -183,9 +189,8 @@ impl App {
         let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
         self.draw_pane_tabs(f, bar);
         self.hits.pane = main;
-        let overlaid = !matches!(self.mode, Mode::Browse);
+        self.tell_overlays();
         if let Some(p) = &mut self.pane {
-            p.overlaid(overlaid);
             p.draw(f, main);
         }
         match &self.mode {
@@ -206,6 +211,38 @@ impl App {
             _ => {}
         }
         self.draw_status(f, status);
+    }
+
+    /// What is open over the pane, bottom first: the entry dialog the exit
+    /// guard holds under it, then the mode's own overlay.
+    fn overlays(&self) -> Vec<Overlay> {
+        let top = match &self.mode {
+            Mode::Browse => None,
+            Mode::Help { .. } => Some(Overlay::Help),
+            Mode::Guard { .. } => Some(Overlay::Guard),
+            Mode::Pick(p) => Some(Overlay::Menu { id: p.pane.as_ref().map(|(id, _)| id.clone()).unwrap_or_default() }),
+            Mode::Entry(e) => Some(Overlay::Entry { id: e.id.clone() }),
+            Mode::Ask(a) => Some(Overlay::Ask { id: a.id.clone() }),
+            _ => Some(Overlay::Report),
+        };
+        let held = matches!(self.mode, Mode::Guard { .. }).then(|| self.entry_held.as_ref().map(|e| Overlay::Entry { id: e.id.clone() })).flatten();
+        held.into_iter().chain(top).collect()
+    }
+
+    /// Tell the pane what closed over it since the last frame, top down,
+    /// then what opened, bottom up.
+    fn tell_overlays(&mut self) {
+        let now = self.overlays();
+        let kept = self.overlays_told.iter().zip(&now).take_while(|(a, b)| a == b).count();
+        let closed: Vec<Overlay> = self.overlays_told.drain(kept..).rev().collect();
+        self.overlays_told = now.clone();
+        let Some(p) = &mut self.pane else { return };
+        for o in closed {
+            p.overlay_closed(o);
+        }
+        for o in now.into_iter().skip(kept) {
+            p.overlay_opened(o);
+        }
     }
 
     /// The bottom bar over a pane: its lozenge, the message, then the mouse
@@ -317,7 +354,8 @@ impl App {
         if let Some(s) = self.tab_bar_key(k) {
             return Some(s);
         }
-        let text = self.owns_text();
+        let ctx = self.ctx();
+        let text = ctx.text;
         let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         // The shell's letter and digit keys: plain, or the Alt chord, which
         // is the only form beside text.
@@ -325,9 +363,7 @@ impl App {
         // Alt+digit is Ctrl+digit where Ctrl+digits do not arrive, and the
         // footer says so: again on the tab shown, its menu.
         let alt_digit = k.modifiers == KeyModifiers::ALT && self.alt_jump();
-        // A pane that owns the focus takes plain digits as text, but on its
-        // tab bar; and 0 is a key only where a reserved tab gives it a place.
-        let on_bar = self.pane.as_ref().is_none_or(|p| !p.owns_focus() || p.focus_tab().is_some());
+        // 0 is a key only where a reserved tab gives it a place.
         let digit_ok = |c: char| c != '0' || self.has_reserved;
         match k.code {
             KeyCode::F(1) => Some(ShellKey::Help),
@@ -335,7 +371,7 @@ impl App {
             KeyCode::Char('q') if !text && plain => Some(ShellKey::Quit),
             KeyCode::Char('m') if shell => Some(ShellKey::Mouse),
             KeyCode::Char(c @ '0'..='9') if alt_digit && digit_ok(c) => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
-            KeyCode::Char(c @ '0'..='9') if !text && plain && on_bar && digit_ok(c) => Some(ShellKey::Tab(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '0'..='9') if !text && plain && ctx.digits && digit_ok(c) => Some(ShellKey::Tab(c as usize - '0' as usize)),
             _ => None,
         }
     }
@@ -357,7 +393,7 @@ impl App {
         }
         if let Some(s) = taken {
             // A pane that owns the focus keeps it across the shell's keys.
-            if !self.pane.as_ref().is_some_and(|p| p.owns_focus()) {
+            if !self.ctx().owns_bar {
                 self.interrupt_pane();
             }
             return self.shell_act(s, k);
@@ -368,7 +404,7 @@ impl App {
         self.take_pane_open();
         match keyed {
             Keyed::Done => true,
-            Keyed::Pass if k.code == KeyCode::Esc && self.pane.as_ref().is_some_and(|p| p.esc_quits()) => self.quit(),
+            Keyed::Pass if k.code == KeyCode::Esc && self.ctx().esc_quits => self.quit(),
             Keyed::Pass => true,
             Keyed::Quit => self.quit(),
             Keyed::Tabs => {
@@ -397,7 +433,7 @@ impl App {
             ShellKey::Help => self.mode = Mode::Help { scroll: 0 },
             // A plain `q` beside a pane that owns the focus asks first,
             // whatever is unsaved: it is one keystroke from typing.
-            ShellKey::Quit if k.code == KeyCode::Char('q') && self.pane.as_ref().is_some_and(|p| p.owns_focus()) => {
+            ShellKey::Quit if k.code == KeyCode::Char('q') && self.ctx().owns_bar => {
                 self.mode = Mode::Ask(Asked { id: QUIT_ASK.into(), question: "quit?".into(), yes: "quit".into(), no: "stay".into() });
             }
             ShellKey::Quit => return self.quit(),
@@ -520,7 +556,7 @@ impl App {
             KeyCode::Esc => self.answer(a, false),
             _ => {
                 // A pane that owns the focus types a character wherever its focus is.
-                let typed = plain && matches!(k.code, KeyCode::Char(_)) && (self.owns_text() || self.pane.as_ref().is_some_and(|p| p.owns_focus()));
+                let typed = plain && matches!(k.code, KeyCode::Char(_)) && (self.ctx().text || self.ctx().owns_bar);
                 let goes_on = typed || self.shell_key(k).is_some();
                 self.answer(a, false);
                 if goes_on && matches!(self.mode, Mode::Browse) {
@@ -830,8 +866,8 @@ mod tests {
         fn bindings(&self) -> Vec<Binding> {
             vec![Binding::new("x", "count")]
         }
-        fn owns_text(&self) -> bool {
-            self.text
+        fn keymap_ctx(&self) -> Ctx {
+            Ctx { text: self.text, ..Ctx::default() }
         }
         fn unsaved(&self) -> Option<String> {
             self.dirty.then(|| "a count".into())
@@ -1389,11 +1425,8 @@ mod tests {
         fn bindings(&self) -> Vec<Binding> {
             Vec::new()
         }
-        fn owns_text(&self) -> bool {
-            true
-        }
-        fn esc_quits(&self) -> bool {
-            false
+        fn keymap_ctx(&self) -> Ctx {
+            Ctx { text: true, esc_quits: false, ..Ctx::default() }
         }
     }
 
