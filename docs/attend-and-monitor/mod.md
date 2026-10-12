@@ -17,6 +17,8 @@ A session becomes **active** in one of two ways:
     listening: active
   ```
 
+  The operator sets this, in the file or with `ways settings set attend_mod.listening active --project <dir>` from their own shell. Under auto mode Claude Code refuses an agent's write to its own project's config, `.claude/ways.yaml` included, so an agent asked to make its project listen calls `attend_listen` for the current session and gives the operator that line to add.
+
 - The user asks Claude to use attend, and the agent calls `attend_listen`. `/attend` does this in a mod host instead of starting Monitor.
 
 An active session stays active until Claude Code exits, through `/compact` and `/clear`. Nothing carries over: the next `claude` in a dormant project starts dormant again. Opening or closing attend-chat changes nothing in any session.

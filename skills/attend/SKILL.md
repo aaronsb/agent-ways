@@ -35,6 +35,8 @@ If not found, tell the user to run `ways manage update` (or `make attend link` f
 
 **In a mod host, call `attend_listen` instead.** When the `attend_listen` tool is listed, the attend mod is loaded (ADR-406). Call it and skip Steps 2 and 3: it turns listening on for the rest of the session, draws one status row, delivers messages as turns, and adds `attend_send`, `attend_reply`, `attend_join` and `attend_peers`, which take the message as a typed parameter with no quoting. Do not also start Monitor; two pollers on one session are noisy. Monitor below is the fallback where the tool is absent.
 
+**Starting active is the operator's setting.** A project starts its sessions listening with `attend_mod.listening: active` in its `.claude/ways.yaml`. The operator sets it, in that file or with `ways settings set attend_mod.listening active --project <dir>` from their own shell: under auto mode Claude Code refuses an agent's write to its own project's config. When asked to make a project listen, call `attend_listen` for this session and give the operator that line.
+
 ## Step 2: Launch via Monitor
 
 **CRITICAL: You MUST use the Monitor tool, NOT Bash.** Running attend via Bash blocks the tool call and discards notifications. Monitor is the only correct way to launch the sensor loop.

@@ -211,6 +211,33 @@ mod tests {
         assert!(!body.is_empty());
     }
 
+    /// The three synchronized messaging sources say alike that the operator
+    /// sets `attend_mod.listening: active`, since auto mode refuses an
+    /// agent's write to its own project config (the clean-slate test's
+    /// finding 7).
+    #[test]
+    fn the_synced_sources_say_the_operator_sets_listening_active() {
+        const MARK: &str = "**Starting active is the operator's setting.**";
+        // Read at test time, not embedded: the two other sources are no
+        // part of attend's binary.
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let read = |rel: &str| std::fs::read_to_string(repo.join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        let skill = read("skills/attend/SKILL.md");
+        let way = read("hooks/ways/softwaredev/environment/attend/attend.md");
+        let sources = [("messaging.md", Component::Messaging.body()), ("SKILL.md", skill.as_str()), ("attend.md", way.as_str())];
+        let paragraphs: Vec<(&str, &str)> = sources
+            .iter()
+            .map(|(name, text)| {
+                let para = text.lines().find(|l| l.starts_with(MARK)).unwrap_or_else(|| panic!("{name} lacks the paragraph"));
+                (*name, para)
+            })
+            .collect();
+        for (name, para) in &paragraphs {
+            assert!(para.contains("attend_mod.listening: active") && para.contains("auto mode"), "{name}: {para}");
+            assert_eq!(*para, paragraphs[0].1, "{name} differs from messaging.md");
+        }
+    }
+
     #[test]
     fn format_observation_contains_tag_and_body() {
         let sensor = DisclosureSensor::new();
