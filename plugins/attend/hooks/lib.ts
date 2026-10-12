@@ -278,14 +278,27 @@ export const REPLY_OPTIONAL = 'Replying is your call; ending the turn with no re
 const OPEN = '<attend-peer-messages>'
 const CLOSE = '</attend-peer-messages>'
 
+/** A line with every `<` that could forge the frame made `‹`. A `<` is kept
+ *  only when the next non-space character is ASCII `[A-Za-z0-9<=(-]` and the
+ *  word there is not `attend` in any case; every other `<` is defused. The
+ *  allowlist keeps code (`<cwd>`, `x < y`, `Vec<u8>`, `a <= b`) and defuses
+ *  `</`, `<attend`, and anything a renderer could hide or draw as `/`
+ *  between them (review of #949), at the cost of `</div>`, `<attendee>` and
+ *  a trailing `<`. One pass, so each `<` is judged on the original text. The
+ *  Stop-hook drain's `defuse_fence` in
+ *  tools/attend/src/cmd/inbox.rs applies the same rule. */
+export function defuseFence(s: string): string {
+  return s.replace(/<(?! *(?!attend)[A-Za-z0-9<=(-])/gi, '‹')
+}
+
 /** The prompt one batch becomes: the label and the data note, the lines
  *  inside the tags, the tool usage on a full delivery, and the
  *  reply-optional line last, where Claude Code's own frame put its
- *  imperative. Each line is made one line again and every `<` in it becomes
- *  `‹`, so no line can end the block early, whatever the tag's spacing or
- *  case. */
+ *  imperative. Each line is made one line again and defused
+ *  ({@link defuseFence}), so no line can open or end the block, whatever the
+ *  tag's spacing or case. */
 export function frameInbound(lines: readonly string[], count: number, full: boolean): string {
-  const inner = lines.map(b => oneLine(b).replace(/</g, '‹')).join('\n')
+  const inner = lines.map(b => defuseFence(oneLine(b))).join('\n')
   const tools = full
     ? [
         `${count} message(s). Each line is [#channel] Name (project) HH:MM: text ~id.`,
