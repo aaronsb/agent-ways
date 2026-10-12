@@ -60,6 +60,8 @@ In a session the attend mod hosts, the text is the mod's own format instead ([`m
 
 This was checked on Claude Code 2.1.296: the delivery shows once, the turn continues, and the continued turn's `Stop` payload carries `stop_hook_active: true`, which the re-entry bound below reads.
 
+Stop hooks read `additionalContext` from Claude Code 2.1.163 on. An older build ignores it, and since the drain has already marked the messages read, they would be lost to both conduits. So the drain reads the `version` in the session's Claude Code record and, below 2.1.163, prints the `decision: block` form instead, which every build reads and which shows as a hook error. A record with no readable version gets `additionalContext`.
+
 At most 10 messages are listed, then `(+N more — attend inbox for the rest)`. With nothing pending the verb prints nothing and the turn ends. Only delivered messages continue the turn; a cold-start note with nothing delivered goes as a `systemMessage`, which lets the turn end (see Cold start).
 
 The drain is bounded:

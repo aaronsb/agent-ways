@@ -43,6 +43,28 @@ fn a_delivery_is_context_not_a_block() {
     assert!(!text.contains("attend_reply"), "{text}");
 }
 
+/// A Claude Code older than 2.1.163 ignores a Stop hook's additionalContext,
+/// and the drain has marked the messages read by then, so for such a
+/// session, by its record's `version`, the drain uses the block form.
+#[test]
+fn an_old_claude_code_gets_the_block_form() {
+    let f = Fixture::new("drain-host-old");
+    let pid = std::process::id();
+    let record = f.home.join(".claude").join("sessions").join(format!("{pid}.json"));
+    std::fs::write(
+        &record,
+        format!(r#"{{"pid":{pid},"sessionId":"{}","cwd":"{}","version":"2.1.100"}}"#, f.sid, f.origin),
+    )
+    .unwrap();
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    put_from_peer(&f, "_broadcast", "peer-sess-1-1", None, "to an old host");
+    let out = f.drain_hook_with("{}");
+    let doc: Value = serde_json::from_str(&out).unwrap_or_else(|e| panic!("{e}: {out}"));
+    assert_eq!(doc["decision"], "block", "{out}");
+    assert!(doc["reason"].as_str().unwrap().contains("to an old host"), "{out}");
+}
+
 /// Findings 2 and 3: in a mod host the drain names the mod's tools and
 /// speaks its format, and a `~id` it printed is one `attend reply` takes.
 #[cfg(feature = "sensor-peers")]
