@@ -21,7 +21,7 @@ agent:
   model: claude-opus-5-5
 amends:
   - ADR-406#Decision
-status: proposed
+status: accepted
 date: 2026-10-12
 deciders:
   - aaronsb

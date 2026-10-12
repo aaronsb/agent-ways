@@ -270,7 +270,6 @@ Consequences:
 - `ways status` reported the installed version from Claude Code's record, which can trail what runs. It now reports the version sessions run: the shipped version when `attend@agent-ways` is installed from this app's `plugins/` folder, with the recorded version beside it when the two differ, and the record alone where the marketplace is some other folder.
 - The plugin cache is no longer a cost of this route. A session that has not run `/reload-plugins` keeps the module it loaded, which is the remaining sense in which a running session keeps its version.
 
-
 ## Addendum, 2026-10-12: resume is decided in ADR-411
 
 Appended after acceptance; nothing above is changed. The operator's answers recorded as `considered` entries 7 and 8 reverse the `door` probe's "until Claude exits" for a resumed session id. ADR-411 records that change: it amends items 1 and 2 of the Decision, so that a session that listened comes back listening when its session id is resumed.
