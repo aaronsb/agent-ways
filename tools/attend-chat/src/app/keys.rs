@@ -486,9 +486,9 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
     // Inviting into a channel that doesn't exist would hand the peer
     // a join command that mints a brand-new group — more likely a
     // typo than an intent. `/join` it first.
-    if resolve_group_dir(&g).is_none() {
+    let Some(dir) = resolve_group_dir(&g) else {
         return EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"));
-    }
+    };
     let caps = ColorDepth::detect();
     let instance_cache = attend_instances::SnapshotCache::new();
     let roster = crate::peers::roster(caps, &instance_cache);
@@ -497,7 +497,7 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
         Err(e) => return EnterAction::StatusOnly(e),
     };
     let dest = cwd_dir(&peer.root);
-    let body = format!("you're invited to #{g} — join with: attend join {g} (its recent history is yours to read)");
+    let body = invite_body(&g, &dir);
     match write_signal(&dest, &body) {
         Ok(_) => {
             // The invitee's join answers this: it keeps the room's recent
@@ -517,6 +517,18 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
         }
         Err(e) => EnterAction::StatusOnly(format!("/invite failed: {e}")),
     }
+}
+
+/// The invitation's text: how to join, and that the channel's recent history
+/// is the invitee's to read only when the channel has any. A join that
+/// answers an invitation keeps that history to read (ADR-404); in an empty
+/// channel there is none, and saying so would send the invitee looking.
+fn invite_body(g: &str, dir: &std::path::Path) -> String {
+    let has_history = std::fs::read_dir(dir)
+        .map(|entries| entries.flatten().any(|e| e.path().extension().is_some_and(|x| x == "signal")))
+        .unwrap_or(false);
+    let history = if has_history { " (its recent history is yours to read)" } else { "" };
+    format!("you're invited to #{g} — join with: attend join {g}{history}")
 }
 
 /// `/kick @name [#channel]` — resolve the target, remove them, then
@@ -945,6 +957,23 @@ mod tests {
                 _ => panic!("scoped /kick on base channel must reject"),
             }
         }
+    }
+
+    /// The clean-slate test's finding 4: the invitation mentions history to
+    /// read only when the channel holds a message.
+    #[test]
+    fn an_invitation_mentions_history_only_when_the_channel_has_some() {
+        let dir = tempdir_like().join("@empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(invite_body("empty", &dir), "you're invited to #empty — join with: attend join empty");
+        std::fs::write(dir.join("notes.txt"), "not a message").unwrap();
+        assert!(!invite_body("empty", &dir).contains("history"), "only a signal is history");
+        std::fs::write(dir.join("peer-1-1.signal"), "claude:peer|x|/tmp/x|said\n").unwrap();
+        assert_eq!(
+            invite_body("empty", &dir),
+            "you're invited to #empty — join with: attend join empty (its recent history is yours to read)"
+        );
+        assert!(!invite_body("gone", &dir.join("missing")).contains("history"), "a channel with no directory yet has none");
     }
 
     #[test]
