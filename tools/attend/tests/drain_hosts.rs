@@ -80,6 +80,28 @@ fn a_mod_host_gets_the_mods_format_and_its_handles_reply() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("handle ~zzzzz"), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
+/// A handle for a message in a channel this session has since left still
+/// names it, so the reply is refused as answering a left channel, not as an
+/// unknown handle (review of #927).
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_handle_in_a_left_channel_says_the_channel_was_left() {
+    let f = Fixture::new("drain-host-left");
+    f.ok(&["listen", "on", "--host", "mod"]);
+    f.ok(&["join", "room"]);
+    attend_groups::Groups::new(&f.signals(), "aaron").join("room", true).unwrap();
+    f.drain("plain");
+    put_from_peer(&f, "@room", "peer-sess-1-1", None, "said in the room");
+    let text = delivered_text(&f.drain_hook_with("{}"));
+    let line = text.lines().find(|l| l.contains("said in the room")).unwrap_or_else(|| panic!("{text}"));
+    let handle = line.rsplit_once(" ~").map(|(_, h)| h).unwrap();
+    f.ok(&["leave", "room"]);
+    let out = f.attend(&["reply", "--re", handle, "--", "too late"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("which you have left"), "{err}");
+}
+
 /// A shell's `listen on` or a join later in a mod-hosted session keeps the
 /// mod as the host; `listen off` ends it with the enrollment.
 #[test]

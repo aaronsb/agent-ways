@@ -11,9 +11,11 @@
 //! - `optout`, when `attend scene private` or `attend listen off` ran while
 //!   an `attend run` held the session: the run's enrollment ends once no
 //!   run holds it;
-//! - `host <name>`, what hosts the session's delivery when it is not the
-//!   default (Monitor or a shell): `host mod` when the attend mod turned
-//!   listening on (ADR-406), so the drain speaks that host's tools;
+//! - `host <name> [<key>]`, what hosts the session's delivery when it is
+//!   not the default (Monitor or a shell): `host mod <key>` when the attend
+//!   mod turned listening on (ADR-406), so the drain speaks that host's
+//!   tools. `<key>` is the Claude Code process the mod ran in: the host
+//!   holds only for that process, since a resumed session may have no mod;
 //! - `claude <key>`, the Claude Code process the session ran in (pid and
 //!   start time), so a session whose id changes under the same process
 //!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it.
@@ -81,7 +83,14 @@ impl Host {
 struct Record {
     sources: Vec<Source>,
     optout: bool,
-    host: Option<Host>,
+    host: Option<HostRecord>,
+    claude: Option<String>,
+}
+
+/// A recorded host and the Claude Code process it was recorded in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HostRecord {
+    host: Host,
     claude: Option<String>,
 }
 
@@ -97,8 +106,12 @@ impl Record {
                 _ => {
                     if let Some(key) = line.strip_prefix("claude ") {
                         r.claude = Some(key.to_string());
-                    } else if let Some(host) = line.strip_prefix("host ") {
-                        r.host = Host::parse(host);
+                    } else if let Some(rest) = line.strip_prefix("host ") {
+                        let mut words = rest.split_whitespace();
+                        r.host = words
+                            .next()
+                            .and_then(Host::parse)
+                            .map(|host| HostRecord { host, claude: words.next().map(str::to_string) });
                     }
                 }
             }
@@ -111,8 +124,11 @@ impl Record {
         if self.optout {
             out.push_str("optout\n");
         }
-        if let Some(host) = self.host {
-            out.push_str(&format!("host {}\n", host.as_str()));
+        if let Some(h) = &self.host {
+            match &h.claude {
+                Some(key) => out.push_str(&format!("host {} {key}\n", h.host.as_str())),
+                None => out.push_str(&format!("host {}\n", h.host.as_str())),
+            }
         }
         if let Some(key) = &self.claude {
             out.push_str(&format!("claude {key}\n"));
@@ -193,9 +209,10 @@ pub fn sources(session_id: &str) -> Vec<Source> {
 
 /// Record that `session_id` enrolled by `source`. Idempotent. Enrolling
 /// again clears a pending opt-out, and records the Claude Code process.
-/// `host`, when given, records what hosts the session's delivery; `None`
-/// keeps whatever host the record holds, so a join or a shell's `listen on`
-/// in a mod-hosted session leaves it mod-hosted.
+/// `host`, when given, records what hosts the session's delivery, for this
+/// Claude Code process; `None` keeps whatever host the record holds, so a
+/// join or a shell's `listen on` in a mod-hosted session leaves it
+/// mod-hosted.
 pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Result<()> {
     let claude = own_claude_key();
     edit(session_id, |r| {
@@ -203,8 +220,8 @@ pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Resul
             r.sources.push(source);
         }
         r.optout = false;
-        if host.is_some() {
-            r.host = host;
+        if let Some(host) = host {
+            r.host = Some(HostRecord { host, claude: claude.clone() });
         }
         if claude.is_some() {
             r.claude = claude;
@@ -213,9 +230,13 @@ pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Resul
 }
 
 /// What hosts `session_id`'s delivery, when it is enrolled and not hosted
-/// by the default (Monitor or a shell).
+/// by the default (Monitor or a shell). A host recorded in another Claude
+/// Code process does not hold: enrollment outlives the process, and a
+/// session resumed in a new one may run without the mod, or with it
+/// dormant. The mod records itself again when it turns listening on.
 pub fn host(session_id: &str) -> Option<Host> {
-    read(session_id).filter(|r| !r.sources.is_empty()).and_then(|r| r.host)
+    let h = read(session_id).filter(|r| !r.sources.is_empty()).and_then(|r| r.host)?;
+    (h.claude == own_claude_key()).then_some(h.host)
 }
 
 /// Withdraw one way `session_id` enrolled. The session stays enrolled while
@@ -378,9 +399,25 @@ mod tests {
             enroll("s", Source::Listen, Some(Host::Mod)).unwrap();
             enroll("s", Source::Join, None).unwrap();
             assert_eq!(host("s"), Some(Host::Mod));
-            assert_eq!(Record::parse(&read("s").unwrap().render()).host, Some(Host::Mod));
+            assert_eq!(Record::parse(&read("s").unwrap().render()).host.map(|h| h.host), Some(Host::Mod));
             opt_out("s").unwrap();
             assert_eq!(host("s"), None);
+        });
+    }
+
+    /// The reviewer's finding on #927: enrollment outlives the Claude Code
+    /// process, so a session resumed in a new process (perhaps with no mod)
+    /// must not read as mod-hosted.
+    #[test]
+    fn a_host_recorded_in_another_process_does_not_hold() {
+        with_cache(|| {
+            enroll("s", Source::Listen, Some(Host::Mod)).unwrap();
+            assert_eq!(host("s"), Some(Host::Mod));
+            let other = Record { host: Some(HostRecord { host: Host::Mod, claude: Some("1-999".into()) }), ..read("s").unwrap() };
+            write("s", &other).unwrap();
+            assert_eq!(Record::parse(&read("s").unwrap().render()), other);
+            assert_eq!(host("s"), None, "recorded under another process");
+            assert!(is_enrolled("s"), "the enrollment itself still holds");
         });
     }
 }

@@ -75,13 +75,31 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
 
 /// The effective `attend_mod` section for `project`, as the attend mod reads
 /// it: `ways settings list attend_mod --json --effective`. `None` when ways
-/// cannot answer.
+/// cannot answer within five seconds.
 fn mod_settings(project: &str) -> Option<String> {
-    let out = std::process::Command::new("ways")
+    use std::io::Read;
+    let mut child = std::process::Command::new("ways")
         .args(["settings", "list", "attend_mod", "--json", "--effective", "--project", project])
-        .output()
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(20)),
+            _ => {
+                child.kill().ok();
+                child.wait().ok();
+                return None;
+            }
+        }
+    };
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    status.success().then_some(out)
 }
 
 /// The card's line for the attend mod's `attend_mod.keepwarm` setting, read

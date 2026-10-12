@@ -240,13 +240,29 @@ pub fn is_short_id(s: &str) -> bool {
     s.len() == 5 && s.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
 }
 
-/// The full id of the message in `me`'s receive set whose handle is
-/// `handle`, its own messages included (a reply's parent may be one). Where
-/// two share a handle, the newest wins.
+/// The full id of the message whose handle is `handle`: first in `me`'s
+/// receive set (its own messages there included), then in every channel's
+/// directory, so a handle for a message in a channel `me` has left still
+/// names it and the reply can say the channel was left. Where two share a
+/// handle, the newest wins.
 pub fn resolve_short_id(me: &Session, handle: &str) -> Option<String> {
+    let receive: Vec<std::path::PathBuf> = groups_for(me).receive_dirs(&me.origin_path).into_iter().map(|d| d.path).collect();
+    newest_with_handle(&receive, handle).or_else(|| {
+        let channels: Vec<std::path::PathBuf> = std::fs::read_dir(crate::util::signals_base())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir() && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('@')))
+            .collect();
+        newest_with_handle(&channels, handle)
+    })
+}
+
+fn newest_with_handle(dirs: &[std::path::PathBuf], handle: &str) -> Option<String> {
     let mut best: Option<(SystemTime, String)> = None;
-    for dir in &groups_for(me).receive_dirs(&me.origin_path) {
-        let Ok(entries) = std::fs::read_dir(&dir.path) else { continue };
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
         for entry in entries.flatten() {
             let name = entry.file_name();
             let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".signal")) else { continue };

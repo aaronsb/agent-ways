@@ -593,7 +593,7 @@ fn render_mod_delivery(delivered: &[impl DrainedView], note: Option<&str>, me: O
     out.push_str(MOD_CLOSE);
     out.push('\n');
     if delivered.len() > DRAIN_RENDER_MAX {
-        out.push_str(&format!("(+{} more — attend inbox for the rest)\n", delivered.len() - DRAIN_RENDER_MAX));
+        out.push_str(&format!("(+{} more, not shown here; they stay in attend's inbox)\n", delivered.len() - DRAIN_RENDER_MAX));
     }
     out.push_str(
         "You may reply with attend_reply (it threads to the newest message, or to the one whose ~id you pass as re), \
@@ -1092,6 +1092,16 @@ mod drain_tests {
         let cli = hook_output(&[msg(1)], None, None, None).unwrap();
         assert!(cli.contains("auto-threads to the newest"), "the default host keeps the shell hint: {cli}");
         assert!(!cli.contains("attend_reply"), "{cli}");
+    }
+
+    /// Past the render cap the mod format counts the rest without naming a
+    /// shell command (review of #927).
+    #[test]
+    fn a_mod_delivery_counts_the_rest_without_a_shell_command() {
+        let msgs: Vec<FakeMsg> = (0..12).map(msg).collect();
+        let text = render_mod_delivery(&msgs, None, None);
+        assert!(text.contains("(+2 more, not shown here; they stay in attend's inbox)"), "{text}");
+        assert!(!text.contains("attend inbox"), "{text}");
     }
 
     /// A body cannot close the mod's frame early.
