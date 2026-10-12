@@ -368,7 +368,7 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean
   const s = await readStatus($)
   const full = isFullPreamble(s.deliveries, s.afterCompaction, s.turnsSinceFull, mod.config.preambleEveryTurns)
   const entered = await $.prompt
-    .submit({ text: frameInbound(msgs.map(formatMessage), msgs.length, full), asUser: true })
+    .submit({ text: frameInbound(msgs.map(formatMessage), full), asUser: true })
     .then(r => r.drop === undefined)
     .catch(() => false)
   if (!entered) return false
@@ -405,7 +405,7 @@ async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: 
     if (m.re) mod.ids.set(shortId(m.re), m.re)
   }
   const note = d.note ? `attend: ${oneLine(d.note)}` : undefined
-  const block = msgs.length > 0 ? frameInbound(msgs.map(formatMessage), msgs.length, true) : undefined
+  const block = msgs.length > 0 ? frameInbound(msgs.map(formatMessage), true) : undefined
   const attached = [block, note].filter((x): x is string => x !== undefined)
   if (attached.length === 0) return next(e)
   const keep = () => {
@@ -534,7 +534,7 @@ export const register: Register = on => {
   // session that listened, puts the mode back at once, so a reload finds it
   // active, records the id, and tells attend the id is listening. The poll
   // holds its drain until then. The model's context changed as at a
-  // compaction, so the next delivery carries the full preamble. At process
+  // compaction, so the next delivery carries the preamble line. At process
   // start this event comes before session.start, which handles that case.
   on('classic.SessionStart', async ($, e, next) => {
     const done = await next(e)

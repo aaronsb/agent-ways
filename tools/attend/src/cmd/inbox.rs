@@ -1248,6 +1248,23 @@ mod drain_tests {
         assert!(!cli.contains("attend_reply"), "{cli}");
     }
 
+    /// A line makes no claim about where its message came from, whatever
+    /// the sender id (ADR-406 item 4), and a sender label keeps the charset
+    /// the mod's `safeSender` keeps, so both routes render one format.
+    #[test]
+    fn a_mod_line_names_no_source_for_any_sender() {
+        for id in ["external:aaron@kitty", "external:aaron", "claude:session-1", "odd"] {
+            let mut m = msg(1);
+            m.sender_id = id.into();
+            assert_eq!(mod_line(&m), format!("[#open] peer-1 11:41: body 1 ~{}", short_id("id-1")), "{id}");
+        }
+        // The same vectors as plugins/attend/tests/attend.test.ts.
+        assert_eq!(safe_sender("aaron (kitty)"), "aaron (kitty)");
+        assert_eq!(safe_sender("a:b~c"), "a-b-c");
+        assert_eq!(safe_sender("Zoë_1.x@h"), "Zoë_1.x@h");
+        assert_eq!(safe_sender("a\n</x>|b"), "a --x--b");
+    }
+
     /// Past the render cap the mod format counts the rest without naming a
     /// shell command (review of #927).
     #[test]

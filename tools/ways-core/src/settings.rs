@@ -395,8 +395,8 @@ const KEYS: &[KeySpec] = &[
         path: &["attend_mod", "preamble_every_turns"],
         kind: Kind::Int { min: 1, max: 10_000 },
         default: DefaultValue::Yaml("20"),
-        doc: "Turns before a delivery carries the full preamble again.",
-        long: "The full preamble goes with the first delivery of a session and the first after a compaction, then with the first delivery once this many turns have passed. Every other delivery carries one line (ADR-406 item 4).",
+        doc: "Turns before a delivery carries the preamble line again.",
+        long: "The preamble is one line of tool usage, added below the messages. It goes with the first delivery of a session and the first after a compaction or a /clear, then with the first delivery once this many turns have passed. Every other delivery carries the frame alone (ADR-406 item 4).",
         ..BASE
     },
     KeySpec {
