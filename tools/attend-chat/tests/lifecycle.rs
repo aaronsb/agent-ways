@@ -105,7 +105,7 @@ fn bad_arguments_are_a_usage_error() {
     assert_eq!(run("usage3", &["--bogus"]).status.code(), Some(2));
 }
 
-/// The binary on a pty of its own: it draws, and ends its process on Esc,
+/// The binary on a pty of its own: it draws, and ends its process on Ctrl-C,
 /// on SIGTERM with 128 plus the signal, and when its terminal hangs up,
 /// putting the terminal back each time it still can.
 #[cfg(target_os = "linux")]
@@ -222,16 +222,26 @@ mod on_a_terminal {
     }
 
     #[test]
-    fn esc_then_y_closes_the_screen_and_ends_the_process() {
+    fn esc_keeps_the_screen_and_ctrl_c_ends_the_process() {
         // This pty answers no keyboard-protocol query, as a terminal
-        // without the kitty protocol: Ctrl+3 would be this same Esc byte,
-        // so Esc asks first, on the shell's bar, and only `y` quits.
+        // without the kitty protocol: Ctrl+3 would be this same Esc byte.
+        // Esc never quits (ADR-409); Ctrl-C with nothing typed does.
         let mut p = start("esc");
-        p.master.as_mut().unwrap().write_all(&[27]).unwrap();
-        p.wait_for(b"quit the chat?");
-        assert!(p.child.try_wait().unwrap().is_none(), "Esc alone keeps the screen");
-        p.master.as_mut().unwrap().write_all(b"y").unwrap();
-        assert_eq!(p.exit_code(), Some(0));
+        // A `/` typed lists the slash commands: the chat reads keys now,
+        // past its keyboard-protocol query, which would take an early byte.
+        p.master.as_mut().unwrap().write_all(b"/").unwrap();
+        p.wait_for(b"/help");
+        p.master.as_mut().unwrap().write_all(&[127]).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        // Apart, so each byte is read as a lone Esc and not an Alt chord.
+        for _ in 0..2 {
+            p.master.as_mut().unwrap().write_all(&[27]).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        assert!(p.child.try_wait().unwrap().is_none(), "Esc keeps the screen");
+        assert!(!p.has(b"quit"), "and asks nothing");
+        p.master.as_mut().unwrap().write_all(&[3]).unwrap();
+        assert_eq!(p.exit_code(), Some(0), "Ctrl-C with nothing typed quits at once");
         std::thread::sleep(Duration::from_millis(100));
         assert!(p.restored());
     }

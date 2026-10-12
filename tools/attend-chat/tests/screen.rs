@@ -264,19 +264,15 @@ fn without_colour_no_cell_is_coloured() {
     assert!(buf.content().iter().all(|c| c.fg == Color::Reset && c.bg == Color::Reset));
 }
 
+/// Ctrl-C ends the chat; Esc never does, whether or not the terminal
+/// reports Ctrl+digits (where it does not, Ctrl+3 is this same Esc).
 #[test]
-fn esc_and_ctrl_c_end_the_chat() {
-    // Where the terminal reports Ctrl+digits, Esc is only Esc.
-    let mut c = chat().enhanced(true);
-    assert!(!press(&mut c, key(KeyCode::Esc)));
-    // Where it does not, Ctrl+3 is this same Esc: it asks, and y quits.
-    let mut c = chat();
-    assert!(press(&mut c, key(KeyCode::Esc)));
-    assert!(press(&mut c, key(KeyCode::Esc)), "a second Esc (or Ctrl+3) stays");
-    assert!(press(&mut c, key(KeyCode::Esc)));
-    assert!(!press(&mut c, key(KeyCode::Char('y'))));
-    let mut c = chat();
-    assert!(!press(&mut c, KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+fn ctrl_c_ends_the_chat_and_esc_never_does() {
+    for enhanced in [true, false] {
+        let mut c = chat().enhanced(enhanced);
+        assert!(press(&mut c, key(KeyCode::Esc)) && press(&mut c, key(KeyCode::Esc)), "enhanced {enhanced}");
+        assert!(!press(&mut c, KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), "enhanced {enhanced}");
+    }
 }
 
 #[test]
@@ -568,13 +564,13 @@ fn a_middle_click_says_how_to_paste() {
     assert!(bar.contains("middle-click pastes with the mouse off"), "{bar}");
 }
 
-/// Typing on past an accidental Esc reaches the draft as typed: the guard
-/// opens, and the keys that follow go into the draft instead of answering
-/// it. `text` is typed after "half a thought" and an Esc.
-fn typed_past_esc(text: &str) -> Chat {
+/// Typing on past an accidental Ctrl-C reaches the draft as typed: the
+/// guard opens, and the keys that follow go into the draft instead of
+/// answering it. `text` is typed after "half a thought" and a Ctrl-C.
+fn typed_past_ctrl_c(text: &str) -> Chat {
     let mut c = chat();
     drawn(&mut c, &chars("half a thought"), 80, 25);
-    assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25));
+    assert!(drawn(&mut c, &[ctrl('c')], 80, 25));
     assert!(c.app().guarding());
     assert!(drawn(&mut c, &chars(text), 80, 25), "the chat stays open");
     assert!(!c.app().guarding());
@@ -583,23 +579,23 @@ fn typed_past_esc(text: &str) -> Chat {
 
 /// D arms the quit; the i after it types the D, then itself.
 #[test]
-fn did_you_after_esc_keeps_every_character() {
-    assert_eq!(typed_past_esc("Did you").input().text(), "half a thoughtDid you");
-    assert_eq!(typed_past_esc(" Did you see the deploy?").input().text(), "half a thought Did you see the deploy?");
+fn did_you_after_ctrl_c_keeps_every_character() {
+    assert_eq!(typed_past_ctrl_c("Did you").input().text(), "half a thoughtDid you");
+    assert_eq!(typed_past_ctrl_c(" Did you see the deploy?").input().text(), "half a thought Did you see the deploy?");
 }
 
 /// D then y would have confirmed the quit; beside text no letter does.
 #[test]
-fn dylan_here_after_esc_keeps_the_draft_and_the_chat() {
-    assert_eq!(typed_past_esc("Dylan here").input().text(), "half a thoughtDylan here");
+fn dylan_here_after_ctrl_c_keeps_the_draft_and_the_chat() {
+    assert_eq!(typed_past_ctrl_c("Dylan here").input().text(), "half a thoughtDylan here");
 }
 
 /// An editing key closes the guard and edits the draft.
 #[test]
-fn backspace_after_esc_edits_the_draft() {
+fn backspace_after_ctrl_c_edits_the_draft() {
     let mut c = chat();
     drawn(&mut c, &chars("half a thought"), 80, 25);
-    assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25));
+    assert!(drawn(&mut c, &[ctrl('c')], 80, 25));
     assert!(drawn(&mut c, &[key(KeyCode::Backspace), key(KeyCode::Left)], 80, 25), "the chat stays open");
     assert!(!c.app().guarding());
     assert_eq!(c.input().text(), "half a though");
@@ -672,20 +668,20 @@ fn the_wheel_scrolls_the_feed_and_not_outside_it() {
     assert_eq!(c.scroll(), 0);
 }
 
-/// Esc over a draft asks first, as the settings shell does over pending
-/// edits; Esc goes back to it, D then y quits and drops it.
+/// Ctrl-C over a draft asks first, as the settings shell does over
+/// pending edits; Esc goes back to it, D then Enter quits and drops it.
 #[test]
-fn golden_esc_over_a_draft_asks_first() {
+fn golden_ctrl_c_over_a_draft_asks_first() {
     let mut g = goldens();
     let mut c = chat();
     drawn(&mut c, &chars("half a thought"), 80, 25);
-    assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25), "a draft keeps the chat open");
+    assert!(drawn(&mut c, &[ctrl('c')], 80, 25), "a draft keeps the chat open");
     assert!(c.app().guarding());
     g.check("guard-draft-80x25", &testkit::render_screen(&mut c, 80, 25));
     assert!(drawn(&mut c, &[key(KeyCode::Esc)], 80, 25));
     assert!(!c.app().guarding());
     assert_eq!(c.input().text(), "half a thought", "back to the draft as it was");
-    assert!(drawn(&mut c, &[KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)], 80, 25), "^C asks too");
+    assert!(drawn(&mut c, &[ctrl('c')], 80, 25), "^C asks again");
     assert!(c.app().guarding());
     assert!(drawn(&mut c, &[key(KeyCode::Char('D'))], 80, 25));
     g.check("guard-armed-80x25", &testkit::render_screen(&mut c, 80, 25));
@@ -1242,11 +1238,13 @@ fn the_common_menu_sits_before_merged_and_merged_keeps_number_one() {
     press(&mut c, key(KeyCode::Left));
     press(&mut c, key(KeyCode::Enter));
     let menu = text(&mut c, 80, 25);
-    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse off at start", "Settings…"] {
+    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse off at start", "Settings…", "Quit"] {
         assert!(menu.contains(item), "{item}: {menu}");
     }
     g.check("common-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
+    // Settings… is the item above Quit, the last.
     press(&mut c, key(KeyCode::End));
+    press(&mut c, key(KeyCode::Up));
     press(&mut c, key(KeyCode::Enter));
     assert_eq!(c.status(), "dry run: /config not run", "Settings… is /config");
     g.finish();

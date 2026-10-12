@@ -125,7 +125,8 @@ pub enum Tone {
 pub enum Keyed {
     /// The pane acted on it.
     Done,
-    /// Not the pane's key: the shell's, such as Esc, which quits.
+    /// Not the pane's key: the shell's, such as Esc, which quits unless the
+    /// pane says otherwise ([`Pane::esc_quits`]).
     Pass,
     /// Quit, as Esc would: the pane confirmed it.
     Quit,
@@ -225,6 +226,13 @@ pub trait Pane: Any {
     /// the shell's (asking first over unsaved work).
     fn quit_help(&self) -> Option<String> {
         None
+    }
+
+    /// Whether Esc the pane passes on quits, as it does by default. A pane
+    /// that answers false keeps quitting on Ctrl-C (and `q` beside no
+    /// text), and the key help leaves Esc out of the quit keys.
+    fn esc_quits(&self) -> bool {
+        true
     }
 
     /// How the tabs are reached from the keyboard, from the pane's settings.

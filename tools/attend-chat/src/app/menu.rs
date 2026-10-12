@@ -6,14 +6,17 @@
 //! - `≡`, the common menu: Theme ▸ (this session's look), Keybinding set ▸
 //!   (presets over `attend.chat.tabs.*`), the mouse at start, Hide column
 //!   or Show column (the left column, as `attend.chat.sidebar_key` toggles
-//!   it), Settings… .
+//!   it), Settings…, Quit (as Ctrl-C, asking first over a draft; Esc never
+//!   quits, ADR-409).
 //! - merged: Clear view.
 //! - `#open`: Clear history, Clear view.
 //! - a named channel: Add agent ▸, Invite agent ▸, Remove agent ▸,
 //!   Describe…, Clear history, Leave (Join for a channel the human is
 //!   not in), Delete channel.
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
-//!   channel, typed in the compose box.
+//!   channel, typed in the compose box, which says `new channel name >`
+//!   while it is lent. Showing a tab, opening any other menu, or the column
+//!   taking the keyboard gives the box back, with the draft it held.
 //! - an agent's row in the left column: Address @Name (puts `@Name ` in
 //!   the compose box), Who is this (what `/whois` says of the session
 //!   the row is, or what the chat knows of one the roster lacks), and
@@ -69,6 +72,7 @@ pub(super) const ADDRESS: &str = "Address";
 pub(super) const WHO: &str = "Who is this";
 pub(super) const REMOVE_FROM: &str = "Remove from";
 pub(super) const SHOW_COLUMN: &str = "Show column";
+pub(super) const QUIT: &str = "Quit";
 
 /// The keybinding presets: a label, then the `attend.chat.tabs.*` values.
 pub(super) const PRESETS: &[(&str, &str, &str)] = &[
@@ -94,8 +98,6 @@ pub(super) enum Step {
     Delete(String),
     /// Take a member out of the channel (`/kick`).
     Remove(String, Member),
-    /// Quit: Esc where the terminal sends Ctrl+3 as Esc.
-    Quit,
 }
 
 impl Step {
@@ -107,7 +109,6 @@ impl Step {
             Step::ClearHistory(c) => (format!("clear #{c} history? deletes what every live agent has read, older than 90 s"), "clear", "keep"),
             Step::Delete(c) => (format!("delete #{c} and its history?"), "delete", "keep"),
             Step::Remove(c, m) => (format!("remove @{} from #{c}?", m.label), "remove", "keep"),
-            Step::Quit => ("quit the chat? Ctrl-C quits at once".into(), "quit", "stay"),
         }
     }
 }
@@ -180,6 +181,16 @@ pub(super) enum Prompt {
     Describe(String),
 }
 
+impl Prompt {
+    /// What the box says it is lent to, in place of `>`.
+    pub fn label(&self) -> String {
+        match self {
+            Prompt::NewChannel => "new channel name".into(),
+            Prompt::Describe(c) => format!("describe #{c}"),
+        }
+    }
+}
+
 /// The items of a tab's menu, by the channel it shows (`None`: merged):
 /// a named channel offers Leave to a member and Join to anyone else.
 pub(super) fn items(channel: Option<&str>, joined: bool) -> Vec<String> {
@@ -219,15 +230,17 @@ impl ChatPane {
     }
 
     /// Open the menu of the bar's tab `i`: 0 is the `≡` slot, 1 merged,
-    /// then the channels in strip order, then the `+` slot.
+    /// then the channels in strip order, then the `+` slot. A menu gives a
+    /// lent compose box back first; the `+` slot lends it.
     pub(super) fn open_tab_menu(&mut self, i: usize) {
         self.dirty = true;
         let names = self.strip_names();
-        if i == 0 {
-            return self.common_menu();
-        }
         if i == names.len() + 2 {
             return self.new_channel();
+        }
+        self.prompt_cancel();
+        if i == 0 {
+            return self.common_menu();
         }
         let channel = match i {
             1 => None,
@@ -257,7 +270,7 @@ impl ChatPane {
         self.anchor = None;
         let mouse = if self.config.mouse { MOUSE_OFF } else { MOUSE_ON };
         let column = if self.sidebar { HIDE_COLUMN } else { SHOW_COLUMN };
-        let options = [THEME, KEYS, mouse, column, SETTINGS].iter().map(|s| s.to_string()).collect();
+        let options = [THEME, KEYS, mouse, column, SETTINGS, QUIT].iter().map(|s| s.to_string()).collect();
         self.open = Some(Open::Pick { id: "common".into(), title: "attend-chat".into(), options, multi: false, chosen: Vec::new() });
     }
 
@@ -281,6 +294,9 @@ impl ChatPane {
             SETTINGS => {
                 self.run("config", SlashOutcome::Config { key: None, value: None });
             }
+            // The shell's quit, as Ctrl-C: at once, or the exit guard over
+            // a draft.
+            QUIT => self.open = Some(Open::Quit),
             _ => {}
         }
     }
@@ -548,10 +564,9 @@ impl ChatPane {
         let Some(step) = self.asked.take() else { return };
         self.dirty = true;
         if !yes {
-            return self.say(if step == Step::Quit { "stayed" } else { "kept" }, false);
+            return self.say("kept", false);
         }
         match step {
-            Step::Quit => self.open = Some(Open::Quit),
             Step::ClearView => {
                 self.run("clear", SlashOutcome::ClearTranscript);
             }

@@ -56,21 +56,23 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let helper = side.is_none() || super::sidebar::helper_needed(&text);
     let helper_h = u16::from(helper || text.trim_start().starts_with('/'));
     let attachments = attach::existing_attachments(&text);
-    // The compose box: its rows at the box's inner width less the prompt,
-    // the attachment row when a dropped file is in the buffer, and the
-    // destination flag's row (#392).
-    let inner = area.width.saturating_sub(6);
+    // The compose box: its rows at the box's inner width less the prompt
+    // (`>`, or what the box is lent to), the attachment row when a dropped
+    // file is in the buffer, and the destination flag's row (#392).
+    let lead = chat.lead(area.width.saturating_sub(4));
+    let lead_w = str_width(&lead) as u16;
+    let inner = area.width.saturating_sub(4 + lead_w);
     let rows = chat.input.rows(inner, theme::body());
     let shown = rows.len().clamp(1, INPUT_ROWS);
     let input_h = shown as u16 + 3 + u16::from(!attachments.is_empty());
     let [feed, compose, helper_row] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(helper_h)]).areas(area);
 
-    chat.hits = Hits { text_width: inner, side_area: side.unwrap_or_default(), ..Hits::default() };
+    chat.hits = Hits { text_width: inner, lead: lead_w, side_area: side.unwrap_or_default(), ..Hits::default() };
     if let Some(side) = side {
         super::sidebar::draw(chat, f, side);
     }
     draw_feed(chat, f, feed, &fg);
-    draw_compose(chat, f, compose, rows, &attachments, &fg);
+    draw_compose(chat, f, compose, &lead, rows, &attachments, &fg);
     if helper {
         draw_helper(chat, f, helper_row, &text);
     }
@@ -203,11 +205,15 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
     f.render_stateful_widget(feed, inner, &mut chat.feed);
 }
 
-/// The compose box: `> ` then the buffer with its cursor, a row of
+/// The compose box: `lead` (`> `) then the buffer with its cursor, a row of
 /// attachment chips when the buffer names files, and on the last row the
 /// destination flag (#392), where Enter would send it, hidden while a
 /// slash command is composed.
-fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'static>>, files: &[String], fg: &Tab) {
+///
+/// While the box is lent to a new channel's name or a description, `lead`
+/// says so (`new channel name > `, `describe #deploy > `) in bold, and no
+/// flag is drawn: Enter sends no message (ADR-409).
+fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, lead: &str, rows: Vec<Line<'static>>, files: &[String], fg: &Tab) {
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(theme::accent()).padding(Padding::horizontal(1));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -220,11 +226,15 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'
     let cursor_row = rows.iter().position(|l| l.spans.iter().any(|s| s.style.add_modifier.contains(Modifier::REVERSED))).unwrap_or(0);
     let start = cursor_row.saturating_sub(room - 1);
     // The text's rows after the prompt, and the first of them shown.
-    chat.hits.compose = (Rect { x: inner.x + 2, y: inner.y, width: inner.width.saturating_sub(2), height: room.min(rows.len()) as u16 }, start);
+    let lead_w = str_width(lead) as u16;
+    chat.hits.compose = (Rect { x: inner.x + lead_w, y: inner.y, width: inner.width.saturating_sub(lead_w), height: room.min(rows.len()) as u16 }, start);
+    let lent = chat.prompt.is_some();
+    let lead_style = if lent { theme::accent().add_modifier(Modifier::BOLD) } else { theme::accent() };
+    let indent = " ".repeat(usize::from(lead_w));
     let mut lines: Vec<Line<'static>> = Vec::new();
     for (i, row) in rows.into_iter().enumerate().skip(start).take(room) {
-        let prompt = if i == 0 { "> " } else { "  " };
-        let mut spans = vec![Span::styled(prompt, theme::accent())];
+        let prompt = if i == 0 { lead.to_string() } else { indent.clone() };
+        let mut spans = vec![Span::styled(prompt, lead_style)];
         spans.extend(row.spans);
         lines.push(Line::from(spans));
     }
@@ -232,6 +242,9 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, rows: Vec<Line<'
         lines.push(attachment_line(chat, files));
     }
     f.render_widget(Paragraph::new(lines), Rect { height: text_h, ..inner });
+    if lent {
+        return;
+    }
     let scope = tabs::send_scope(fg);
     let quiet = super::keys::quiet_names(&chat.world().seen);
     let swept = super::keys::swept_names(&chat.world().rows);

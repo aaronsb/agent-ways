@@ -122,11 +122,12 @@ impl App {
             out.push(Binding::help("right-click a tab", what));
         }
         let quit = self.pane.as_ref().and_then(|p| p.quit_help()).unwrap_or_else(|| "quit; asks first over unsaved work".into());
+        let quit_keys = if self.pane.as_ref().is_none_or(|p| p.esc_quits()) { k("q Esc ^C", "Esc ^C") } else { k("q ^C", "^C") };
         out.extend([
             Binding::help(self.mouse_key(), "mouse on or off (off lets the terminal select text)"),
             Binding::help("Shift-drag", "selects text while the mouse is on, in most terminals"),
             Binding::help("middle-click", "pastes only while the mouse is off"),
-            Binding::help(k("q Esc ^C", "Esc ^C"), quit),
+            Binding::help(quit_keys, quit),
         ]);
         out.push(Binding::help("click", "a tab shows it; the wheel scrolls"));
         out
@@ -327,7 +328,7 @@ impl App {
         self.take_pane_open();
         match keyed {
             Keyed::Done => true,
-            Keyed::Pass if k.code == KeyCode::Esc => self.quit(),
+            Keyed::Pass if k.code == KeyCode::Esc && self.pane.as_ref().is_some_and(|p| p.esc_quits()) => self.quit(),
             Keyed::Pass => true,
             Keyed::Quit => self.quit(),
             Keyed::Tabs => {
@@ -1243,6 +1244,47 @@ mod tests {
         a.key(k(KeyCode::Char('?'), KeyModifiers::NONE));
         let help = testkit::text(&testkit::render(&mut a, 140, 30));
         assert!(!help.contains("right-click") && !help.contains("Ctrl+T"), "{help}");
+    }
+
+    /// A pane that owns text and passes every key on, but says Esc does
+    /// not quit, as the chat does (ADR-409).
+    struct KeepsEsc;
+    impl Pane for KeepsEsc {
+        fn palette(&self) -> theme::Palette {
+            theme::Palette::default()
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            vec![PaneTab::new("one")]
+        }
+        fn tab(&mut self) -> usize {
+            0
+        }
+        fn set_tab(&mut self, _: usize) {}
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, _: KeyEvent) -> Keyed {
+            Keyed::Pass
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+        fn owns_text(&self) -> bool {
+            true
+        }
+        fn esc_quits(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn a_pane_can_keep_esc_from_quitting_and_the_help_says_so() {
+        let mut a = App::with_pane("keeps", KeepsEsc);
+        assert!(a.key(k(KeyCode::Esc, KeyModifiers::NONE)), "Esc passed on quits nothing");
+        assert!(!a.guarding());
+        a.key(k(KeyCode::F(1), KeyModifiers::NONE));
+        let help = testkit::text(&testkit::render(&mut a, 140, 30));
+        assert!(help.contains("^C") && !help.contains("Esc ^C"), "{help}");
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(!a.key(ctrl('c')), "Ctrl-C still quits");
     }
 
     #[test]

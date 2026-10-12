@@ -106,6 +106,9 @@ enum Chip {
 struct Hits {
     feed: Rect,
     compose: (Rect, usize),
+    /// The width of what leads the compose box's first row: `> `, or what
+    /// the box is lent to.
+    lead: u16,
     text_width: u16,
     chips: Vec<(Rect, Chip)>,
     /// The left column's rows, the column's whole area, and the rows of
@@ -164,14 +167,15 @@ pub struct ChatPane {
     open: Option<Open>,
     /// The column's row the menu in `open` docks under.
     anchor: Option<Rect>,
-    /// The step the shell's question asks about, a menu step or a quit,
-    /// until it is answered ([`ChatPane::answered`]).
+    /// The menu step the shell's question asks about, until it is answered
+    /// ([`ChatPane::answered`]).
     asked: Option<menu::Step>,
     /// The compose box lent to a channel's name or description, and the
     /// draft it held before.
     prompt: Option<(menu::Prompt, String)>,
     /// The terminal reports Ctrl+digits as themselves. Without it Ctrl+3
-    /// arrives as Esc, so Esc on an empty line asks before quitting.
+    /// arrives as Esc, which closes and clears and never quits (ADR-409),
+    /// and a setting that asks for Ctrl+digits says they do not arrive.
     enhanced: bool,
     /// The chat's settings (`attend.chat.*`), read at start and again
     /// after a command, so `/config` applies at once.
@@ -245,10 +249,21 @@ impl ChatPane {
         self.dirty = true;
     }
 
-    /// The compose box's text and its `> ` prompt, as last drawn.
+    /// The compose box's text and its prompt, as last drawn.
     fn compose_rect(&self) -> Rect {
         let (text, _) = self.hits.compose;
-        Rect { x: text.x.saturating_sub(2), width: text.width + 2, ..text }
+        let lead = self.hits.lead;
+        Rect { x: text.x.saturating_sub(lead), width: text.width + lead, ..text }
+    }
+
+    /// What leads the compose box's first row in a box `width` wide: `> `,
+    /// or while the box is lent, what it is lent to (`new channel name > `),
+    /// cut to half the box so the text keeps room.
+    fn lead(&self, width: u16) -> String {
+        match &self.prompt {
+            Some((p, _)) => format!("{} > ", agent_tui::wrap::truncate(&p.label(), usize::from(width / 2).saturating_sub(3).max(1))),
+            None => "> ".into(),
+        }
     }
 
     /// The feed's entries are out of date: rebuild them, and their layout,
@@ -437,6 +452,15 @@ impl ChatPane {
         self.tab_cycle = r.new_cycle;
     }
 
+    /// Esc with nothing open: the message selected and what the bar says
+    /// are cleared; the draft stays.
+    fn clear(&mut self) {
+        self.feed.selected = None;
+        self.status.clear();
+        self.status_set_at = None;
+        self.status_is_error = false;
+    }
+
     fn page(&mut self, up: bool) {
         let step = (self.feed_rows as usize).saturating_sub(1).max(1);
         self.scroll_by(up, step);
@@ -536,8 +560,10 @@ impl Pane for ChatPane {
 
     /// Show the bar's tab `i`: merged, or a channel (tab number `i`, as
     /// Alt+N and Ctrl+N count them). The slots and an index past the tabs
-    /// do nothing.
+    /// do nothing. Showing a tab gives a lent compose box back, by key as
+    /// by a click on the tab.
     fn set_tab(&mut self, i: usize) {
+        self.prompt_cancel();
         let names = self.strip_names();
         if let Some(t) = i.checked_sub(1).and_then(|n| tabs::jump(n as u32 + 1, &names)) {
             ChatPane::set_tab(self, t);
@@ -576,9 +602,14 @@ impl Pane for ChatPane {
         self.last_frame = Some((area, cells));
     }
 
-    /// The chat's keys. Esc is the shell's: it quits, asking first over a
-    /// draft. Alt+1..9 (a tab), Alt+m (the mouse) and F1 (the keys) are
-    /// the shell's too, and never reach here.
+    /// The chat's keys. Alt+1..9 (a tab), Alt+m (the mouse), F1 (the keys)
+    /// and Ctrl-C (quit) are the shell's, and never reach here.
+    ///
+    /// Esc never quits (ADR-409): it gives a lent compose box back, takes
+    /// the keyboard from the column, and with nothing else to close clears
+    /// the message selected and what the bar says. The draft stays. Where
+    /// Ctrl+3 arrives as Esc it is the same Esc, so a tab key can never
+    /// close the chat.
     fn key(&mut self, k: KeyEvent) -> Keyed {
         self.dirty = true;
         let m = k.modifiers;
@@ -601,10 +632,7 @@ impl Pane for ChatPane {
             return keyed;
         }
         match k.code {
-            // Without the keyboard enhancement Ctrl+3 is this same Esc:
-            // ask, so a tab key never closes the chat.
-            KeyCode::Esc if !self.enhanced && self.input.is_empty() => self.ask(menu::Step::Quit),
-            KeyCode::Esc => return Keyed::Pass,
+            KeyCode::Esc => self.clear(),
             KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.enter(),
             KeyCode::Tab => self.tab_key(),
             KeyCode::PageUp => self.page(true),
@@ -618,6 +646,11 @@ impl Pane for ChatPane {
 
     fn wheel(&mut self, up: bool) {
         self.scroll_by(up, WHEEL_ROWS);
+    }
+
+    /// Esc with nothing open over the chat: never quit (ADR-409).
+    fn esc_quits(&self) -> bool {
+        false
     }
 
     /// A paste goes into the compose box whole, at the cursor: its lines
@@ -773,6 +806,8 @@ impl Pane for ChatPane {
         true
     }
 
+    /// A tab's menu gives a lent compose box back, as a click on the tab
+    /// does; the `+` slot's is the box lent again.
     fn tab_menu(&mut self, i: usize) {
         self.open_tab_menu(i);
     }
@@ -781,8 +816,14 @@ impl Pane for ChatPane {
         self.side_drawn().then_some("the column")
     }
 
+    /// The column taking the keyboard gives a lent compose box back: its
+    /// keys then act on its rows, never on the name being typed.
     fn focus_below(&mut self) -> bool {
-        self.focus_side()
+        let focused = self.focus_side();
+        if focused {
+            self.prompt_cancel();
+        }
+        focused
     }
 
     fn new_item_label(&self) -> Option<&'static str> {
@@ -802,11 +843,7 @@ impl Pane for ChatPane {
     }
 
     fn quit_help(&self) -> Option<String> {
-        Some(if self.enhanced {
-            "quit; asks first over a draft".into()
-        } else {
-            "quit; asks over a draft; else Esc asks and y quits".into()
-        })
+        Some("quit; asks first over a draft; so does ≡ → Quit".into())
     }
 
     fn take_open(&mut self) -> Option<Open> {
