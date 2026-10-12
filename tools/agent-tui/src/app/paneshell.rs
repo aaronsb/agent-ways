@@ -346,7 +346,7 @@ impl App {
             ShellKey::StripFocus => self.strip_focus(),
             ShellKey::TabOrMenu(n) => {
                 if let Some(i) = self.numbered(n) {
-                    self.pane_tab_or_menu(i, false);
+                    self.activate_tab(i, false, false);
                 }
             }
             ShellKey::Tab(n) => {
@@ -432,7 +432,6 @@ impl App {
                 self.mode = Mode::Ask(Asked { id, question, yes, no });
             }
             Open::Ask { .. } => {}
-            Open::Tab(i) => self.pane_tab_or_menu(i, false),
             Open::Quit => {
                 if !self.quit() {
                     self.ending = true;
@@ -532,7 +531,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
                     self.interrupt_pane();
-                    return self.pane_tab_or_menu(i, true);
+                    return self.activate_tab(i, false, true);
                 }
                 if self.hits.pane.contains(at) {
                     self.msg.clear();
@@ -548,7 +547,14 @@ impl App {
             MouseEventKind::Down(MouseButton::Right) => {
                 if let Some(&(_, i)) = self.hits.tabs.iter().find(|(r, _)| r.contains(at)) {
                     self.interrupt_pane();
-                    return self.open_tab_menu(i, true);
+                    return self.activate_tab(i, true, true);
+                }
+                // Inside the pane: the menu a left click there would reach.
+                if inside {
+                    self.msg.clear();
+                    if let Some(p) = &mut self.pane {
+                        p.context(at);
+                    }
                 }
             }
             MouseEventKind::Down(MouseButton::Middle) => {
@@ -682,6 +688,9 @@ mod tests {
     }
 
     impl Pane for Two {
+        fn context(&mut self, at: Position) {
+            self.picked.push(format!("context@{},{}", at.x, at.y));
+        }
         fn take_open(&mut self) -> Option<Open> {
             self.open.take()
         }
@@ -1149,18 +1158,16 @@ mod tests {
         assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1, 0]), "a right click opens a tab's menu without showing it");
     }
 
+    /// A right click inside the pane reaches [`Pane::context`] at its cell;
+    /// one on the tab bar opens the tab's menu, as before.
     #[test]
-    fn a_row_of_the_pane_standing_for_a_tab_shows_it_then_opens_its_menu() {
+    fn a_right_click_inside_the_pane_asks_it_for_a_menu() {
         let mut a = app(false);
         let buf = testkit::render(&mut a, 60, 8);
         let (_, y) = testkit::find(&buf, "2 two").expect("the tab");
-        let inside = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 5, row: y + 3, modifiers: KeyModifiers::NONE };
-        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Tab(1));
-        a.mouse(inside);
-        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![]), "the first click shows the tab, as Ctrl+2 does");
-        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Tab(1));
-        a.mouse(inside);
-        assert_eq!((two(&a).tab, two(&a).menus.clone()), (1, vec![1]), "a click on the row of the tab shown opens its menu");
+        a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), column: 5, row: y + 3, modifiers: KeyModifiers::NONE });
+        assert_eq!(two(&a).picked, [format!("context@5,{}", y + 3)]);
+        assert!(two(&a).menus.is_empty(), "no tab's menu");
     }
 
     #[test]

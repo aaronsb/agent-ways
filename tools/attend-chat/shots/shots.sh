@@ -37,6 +37,9 @@ mkdir -p "$WORK"
 #   text:CHARS     typed literally
 #   click:TEXT     a left click on the first cell showing TEXT
 #   side:TEXT      the same, on TEXT in the left column only
+#   feed:TEXT      the same, on TEXT right of the left column
+#   last:TEXT      the same, on the last cell showing TEXT
+#   rclick: rside: rfeed: rlast:  the same with the right button
 #   wait:TEXT      until TEXT is on the screen
 #   gone:TEXT      until TEXT is off the screen
 #   resize:COLS    the terminal narrowed (or widened) to COLS columns
@@ -93,6 +96,11 @@ remove-sub   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Rem
 settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:sets_one
 tab-closes   | base  | wait:Agents M-3 M-3 wait:pick click:3_#deploy gone:pick
 guard-name   | base  | wait:Agents C-n wait:new_channel_name text:abc C-c wait:being_typed
+rclick-row   | base  | wait:Agents rside:#infra wait:pick_one:_#infra
+rclick-agent | base  | wait:Agents rside:● wait:Address
+rclick-name  | base  | wait:signing rfeed:gamma wait:Address
+flag-click   | base  | wait:Agents M-3 wait:rollout_is_green last:#deploy wait:pick_one:_#deploy
+flag-merged  | base  | wait:Agents last:#open wait:pick_one:_merged
 quit-lent    | base  | wait:Agents C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
 "
 
@@ -189,16 +197,24 @@ steady() {
 settle() { PREV=; poll "$1" "the screen to settle" steady; }
 
 # The 1-based cell of the first TEXT on the screen; with `side`, the first
-# left of the column's rule, so a name in the column and not in the feed.
-cell() { # name text [side]
+# left of the column's rule, so a name in the column and not in the feed;
+# with `feed`, the first right of it; with `last`, the last on the screen.
+cell() { # name text [side|feed|last]
   $TH text "$1" | python3 -I -c '
 import sys
-want, side = sys.argv[1], sys.argv[2:] == ["side"]
-for row, line in enumerate(sys.stdin.read().split("\n"), 1):
-    col, rule = line.find(want), line.find("│")
-    if col >= 0 and not (side and not 0 <= col < rule):
-        print(col + 1, row)
-        break
+want, where = sys.argv[1], (sys.argv[2:] or ["any"])[0]
+lines = sys.stdin.read().split("\n")
+rows = list(enumerate(lines, 1))
+if where == "last":
+    rows.reverse()
+for row, line in rows:
+    rule = line.find("│")
+    start = rule + 1 if where == "feed" and rule >= 0 else 0
+    col = line.rfind(want) if where == "last" else line.find(want, start)
+    if col < 0 or (where == "side" and not 0 <= col < rule) or (where == "feed" and rule < 0):
+        continue
+    print(col + 1, row)
+    break
 else:
     sys.exit(1)
 ' "${@:2}"
@@ -217,9 +233,11 @@ step() { # name step
   arg=${arg//_/ }
   case $k in
     text:*) $TH send "$n" -l "$arg" ;;
-    click:* | side:*)
-      at=$(cell "$n" "$arg" "${k%%:*}") || { echo "$n: no '$arg' to click" >&2; return 1; }
-      $TH send "$n" -l $'\e[<0;'"${at% *};${at#* }M"$'\e[<0;'"${at% *};${at#* }m" ;;
+    click:* | side:* | feed:* | last:* | rclick:* | rside:* | rfeed:* | rlast:*)
+      local kind=${k%%:*} b=0
+      case $kind in r*) b=2; kind=${kind#r} ;; esac
+      at=$(cell "$n" "$arg" "$kind") || { echo "$n: no '$arg' to click" >&2; return 1; }
+      $TH send "$n" -l $'\e[<'"$b;${at% *};${at#* }M"$'\e[<'"$b;${at% *};${at#* }m" ;;
     wait:*) poll "$n" "'$arg'" has "$arg"; return ;;
     gone:*) poll "$n" "'$arg' to go" lacks "$arg"; return ;;
     resize:*) resize "$n" "$arg" ;;

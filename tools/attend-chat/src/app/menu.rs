@@ -49,6 +49,7 @@
 //! (ADR-404 D4). Neither is ever the first item.
 
 use agent_theme::ColorDepth;
+use agent_tui::ratatui::layout::Rect;
 use agent_tui::{Anchor, Item, Open};
 
 use crate::chip::Seen;
@@ -254,41 +255,18 @@ impl ChatPane {
         })
     }
 
-    /// Open the menu of the bar's tab `i`: 0 is the `≡` slot, 1 merged,
-    /// then the channels in strip order, then the `+` slot. A channel's
-    /// menu gives a lent compose box back first; the `+` slot lends it. The
-    /// `≡` menu opens over the lent box, and its item decides
-    /// ([`ChatPane::common_item`]).
-    pub(super) fn open_tab_menu(&mut self, i: usize) {
-        self.dirty = true;
-        let names = self.strip_names();
-        if i == names.len() + 2 {
-            return self.new_channel();
-        }
-        if i == 0 {
-            return self.common_menu();
-        }
-        self.prompt_cancel();
-        let channel = match i {
-            1 => None,
-            i => match names.get(i - 2) {
-                Some(n) => Some(n.clone()),
-                None => return,
-            },
-        };
-        self.channel_menu(channel);
-    }
-
     /// The menu of `channel`, or merged's for `None`: from its tab, or its
-    /// row in the left column, which lists channels that have no tab.
-    pub(super) fn channel_menu(&mut self, channel: Option<String>) {
+    /// row in the left column, which lists channels that have no tab. It
+    /// docks under `at` when given (the destination flag), else under the
+    /// channel's row in the column, else its tab.
+    pub(super) fn channel_menu(&mut self, channel: Option<String>, at: Option<Rect>) {
         self.dirty = true;
         let title = channel.as_ref().map_or("merged".to_string(), |c| format!("#{c}"));
         let id = format!("menu:{}", channel.as_deref().unwrap_or(""));
         let me = crate::signal::human_member_id();
         let joined = channel.as_deref().is_some_and(|c| self.world().rows.iter().any(|r| r.known.group.name == c && r.known.membership.members.contains(&me)));
         // Under the channel's row in the column, else under its tab.
-        let row = channel.clone().and_then(|c| self.side_row(&super::sidebar::SideHit::Channel(c)));
+        let row = at.or_else(|| channel.clone().and_then(|c| self.side_row(&super::sidebar::SideHit::Channel(c))));
         let anchor = match (row, &channel) {
             (Some(r), _) => Anchor::Row(r),
             (None, None) => Anchor::Tab(1),
@@ -297,7 +275,7 @@ impl ChatPane {
         self.open = Some(Open::Pick { id, title, items: items(channel.as_deref(), joined), multi: false, anchor });
     }
 
-    fn common_menu(&mut self) {
+    pub(super) fn common_menu(&mut self) {
         let mouse = if self.config.mouse { MOUSE_OFF } else { MOUSE_ON };
         let column = if self.sidebar { HIDE_COLUMN } else { SHOW_COLUMN };
         let items = [THEME, KEYS, mouse, column, SETTINGS, QUIT].into_iter().map(Item::from).collect();
@@ -438,8 +416,9 @@ impl ChatPane {
     }
 
     /// The menu of an agent's row in the left column, the agent named by
-    /// its membership id: two agents can share a name, never an id.
-    pub(super) fn agent_menu(&mut self, member: String) {
+    /// its membership id: two agents can share a name, never an id. It
+    /// docks under `at` when given (a sender's name), else under the row.
+    pub(super) fn agent_menu(&mut self, member: String, at: Option<Rect>) {
         self.dirty = true;
         let Some(s) = self.seen_member(&member) else {
             return self.say("that agent is not in the column any more", true);
@@ -452,7 +431,7 @@ impl ChatPane {
         };
         let options = agent_items(&name, listed.as_ref().map(|(c, _)| c.as_str()), member == me);
         self.removable = removable(listed.map(|(_, m)| m).into_iter().collect(), &me);
-        let anchor = self.side_row(&super::sidebar::SideHit::Agent(member.clone())).map_or(Anchor::Center, Anchor::Row);
+        let anchor = at.or_else(|| self.side_row(&super::sidebar::SideHit::Agent(member.clone()))).map_or(Anchor::Center, Anchor::Row);
         let items = options.into_iter().map(Item::from).collect();
         self.open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
     }
@@ -797,14 +776,14 @@ mod tests {
     #[test]
     fn an_agent_row_is_found_by_its_id_when_two_share_a_name() {
         let mut c = pane_with(vec![seen("Ada", "s1", false, true), seen("Ada", "s2", false, true)]);
-        c.agent_menu("s2".into());
+        c.agent_menu("s2".into(), None);
         match c.open.take() {
             Some(Open::Pick { id, title, .. }) => assert_eq!((id.as_str(), title.as_str()), ("agent:s2", "@Ada")),
             other => panic!("no menu: {other:?}"),
         }
         c.menu_picked("agent:s2", WHO);
         assert!(c.status.contains("session s2"), "who is the row picked, not the first of its name: {}", c.status);
-        c.agent_menu("gone".into());
+        c.agent_menu("gone".into(), None);
         assert!(c.open.is_none() && c.status_is_error, "a row gone since is said, not guessed");
     }
 }

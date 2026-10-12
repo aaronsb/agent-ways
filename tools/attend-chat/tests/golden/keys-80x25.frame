@@ -10,6 +10,8 @@ agent-tui frame 80x25
 |│Bksp Del           edit                                                       │|
 |│click a message    selects it; in the compose box it places the cursor; a chip│|
 |│click a side row   an agent: its menu (address, who, remove); a channel: shows│|
+|│right-click a row  a column row or a sender's name: its menu at once          │|
+|│click the flag     under the compose box: the shown channel's menu            │|
 |│F3                 show or hide the agents and channels column                │|
 |│Alt+1-9            tab (again: menu)                                          │|
 |│F2                 tabs                                                       │|
@@ -20,8 +22,6 @@ agent-tui frame 80x25
 |│Shift-drag         selects text while the mouse is on, in most terminals      │|
 |│middle-click       pastes only while the mouse is off                         │|
 |│^C                 quit; asks first over a draft; so does ≡ → Quit            │|
-|│click              a tab shows it; the wheel scrolls                          │|
-|│                                                                              │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll  |
 styles
@@ -98,6 +98,7 @@ styles
  21   1-19  Cyan - -
  21  79-79  LightBlue - -
  22   0-0   LightBlue - -
+ 22   1-19  Cyan - -
  22  79-79  LightBlue - -
  23   0-79  LightBlue - -
  24   0-5   Black Cyan BOLD

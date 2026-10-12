@@ -233,7 +233,7 @@ impl App {
             KeyCode::Right => self.strip_move(at, true),
             KeyCode::Enter => {
                 self.strip_blur();
-                self.open_tab_menu(at, true);
+                self.activate_tab(at, true, true);
             }
             KeyCode::Down => {
                 if self.pane.as_mut().is_some_and(|p| p.focus_below()) {
@@ -297,33 +297,15 @@ impl App {
         }
     }
 
-    /// Ctrl+digit, a click on tab `i` (`at_tab`), or a pane's row standing
-    /// for it ([`Open::Tab`]): show it, or open its menu when it is shown
-    /// already or is an action slot. Without a menu on repeat, the tab shown
-    /// is shown again, so the pane hears of the key as it hears of a click
-    /// on the tab (ADR-409 (d)).
-    pub(super) fn pane_tab_or_menu(&mut self, i: usize, at_tab: bool) {
+    /// Tab `i` activated ([`Pane::activate_tab`]): by Ctrl+digit or a left
+    /// click (`menu` false), by a right click or Enter on the focused bar
+    /// (`menu` true). A menu it opens docks where the input came from: under
+    /// the tab for a click on it or Enter on the tab bar (`at_tab`); for a
+    /// key, where the pane's [`crate::Anchor`] says, which for the chat is
+    /// the channel's row in its column, else the tab.
+    pub(super) fn activate_tab(&mut self, i: usize, menu: bool, at_tab: bool) {
         let Some(p) = &mut self.pane else { return };
-        let Some(t) = p.tabs().get(i).cloned() else { return };
-        let menus = p.has_tab_menus();
-        if menus && (t.action || (p.tab() == i && p.tab_keys().menu_on_repeat)) {
-            self.open_tab_menu(i, at_tab);
-        } else {
-            p.set_tab(i);
-        }
-    }
-
-    /// Open tab `i`'s menu, over the pane. It docks where the input came
-    /// from: under the tab for a click on it or Enter on the tab bar
-    /// (`at_tab`); for a key, where the pane's [`crate::Anchor`] says,
-    /// which for the chat is the channel's row in its column, else the tab.
-    pub(super) fn open_tab_menu(&mut self, i: usize, at_tab: bool) {
-        if let Some(p) = &mut self.pane {
-            if !p.has_tab_menus() {
-                return;
-            }
-            p.tab_menu(i);
-        }
+        p.activate_tab(i, menu);
         self.clicked_tab = self.hits.tabs.iter().find(|(_, t)| *t == i && at_tab).map(|(r, _)| *r);
         self.take_pane_open();
         self.clicked_tab = None;

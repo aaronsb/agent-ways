@@ -17,6 +17,7 @@ use agent_tui::ratatui::style::Color;
 use agent_tui::theme::{self, Ground, Seg, Shape};
 use agent_tui::wrap::str_width;
 
+use super::activate::{How, Target};
 use super::ChatPane;
 use agent_tui::Keyed;
 use crate::chip::{color_for, Seen};
@@ -360,12 +361,12 @@ impl ChatPane {
         self.invalidate();
     }
 
-    /// A click on a row of the column, or Enter on it. An agent's row opens
-    /// its menu. A channel's row opens the menu of the channel shown, and
-    /// shows any other channel with a tab, through the shell as Ctrl+digit
-    /// shows it ([`agent_tui::Open::Tab`]). The menu opens whatever
-    /// `attend.chat.tabs.menu_on_repeat` says: that setting is about keys.
-    /// A channel with no tab cannot be shown, so its menu opens.
+    /// A click on a row of the column, or Enter on it: the one activation
+    /// path ([`ChatPane::activate`]), as a select. An agent's row opens its
+    /// menu. A channel's row opens the menu of the channel shown and shows
+    /// any other channel with a tab, as Ctrl+digit shows it. The menu opens
+    /// whatever `attend.chat.tabs.menu_on_repeat` says: that setting is
+    /// about keys. A channel with no tab cannot be shown, so its menu opens.
     ///
     /// A question waiting on the bar is the shell's: a click here answers
     /// it no before it reaches the row. While the column has the keyboard,
@@ -377,18 +378,7 @@ impl ChatPane {
                 self.focus_at(&items, i);
             }
         }
-        match hit {
-            SideHit::Agent(member) => self.agent_menu(member),
-            SideHit::Channel(name) if self.normal_tab() == Tab::Channel(name.clone()) => self.channel_menu(Some(name)),
-            SideHit::Channel(name) => match self.strip_names().iter().position(|n| *n == name) {
-                // The bar's index: 0 is `≡`, 1 merged, then the channels.
-                Some(i) => {
-                    self.dirty = true;
-                    self.open = Some(agent_tui::Open::Tab(i + 2));
-                }
-                None => self.channel_menu(Some(name)),
-            },
-        }
+        self.activate(Target::of(hit), How::Select { repeat: true }, None);
     }
 
     /// The column's row drawn for `hit` in the last frame, where a menu
@@ -461,7 +451,7 @@ impl ChatPane {
                 }
                 // A channel shown keeps the cursor on its row, so a second
                 // Enter opens its menu; a menu takes the keyboard.
-                if !matches!(self.open, Some(agent_tui::Open::Tab(_))) {
+                if self.open.is_some() {
                     self.side_focus = None;
                 }
             }
