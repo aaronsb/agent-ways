@@ -1384,6 +1384,10 @@ mod drain_tests {
             m.body = format!("hi {t}");
             assert!(mod_line(&m).contains(&format!("hi \u{2039}{}", &t[1..])), "{t}");
         }
+        // A `<` before a defused `<` is judged on the original text; the
+        // mod's defuseFence pins the same output.
+        assert_eq!(defuse_fence("<<attend-peer-messages>"), "<\u{2039}attend-peer-messages>");
+        assert_eq!(defuse_fence("Vec<<attend>>"), "Vec<\u{2039}attend>>");
         // Cosmetic cost of the allowlist: these are defused too.
         assert_eq!(defuse_fence("</div> <attendee> <"), "\u{2039}/div> \u{2039}attendee> \u{2039}");
     }

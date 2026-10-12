@@ -284,10 +284,11 @@ const CLOSE = '</attend-peer-messages>'
  *  allowlist keeps code (`<cwd>`, `x < y`, `Vec<u8>`, `a <= b`) and defuses
  *  `</`, `<attend`, and anything a renderer could hide or draw as `/`
  *  between them (review of #949), at the cost of `</div>`, `<attendee>` and
- *  a trailing `<`. The Stop-hook drain's `defuse_fence` in
+ *  a trailing `<`. One pass, so each `<` is judged on the original text. The
+ *  Stop-hook drain's `defuse_fence` in
  *  tools/attend/src/cmd/inbox.rs applies the same rule. */
 export function defuseFence(s: string): string {
-  return s.replace(/<(?= *attend)/gi, '‹').replace(/<(?! *[A-Za-z0-9<=(-])/g, '‹')
+  return s.replace(/<(?! *(?!attend)[A-Za-z0-9<=(-])/gi, '‹')
 }
 
 /** The prompt one batch becomes: the label and the data note, the lines

@@ -8,6 +8,7 @@ import {
   LABEL,
   REPLY_OPTIONAL,
   configArgv,
+  defuseFence,
   formatMessage,
   frameInbound,
   isFullPreamble,
@@ -385,6 +386,12 @@ describe('view and framing', () => {
       expect(lines.filter(l => l.includes('<')).length).toBe(2)
       expect(lines[3]).toContain('‹')
     }
+  })
+
+  test('a `<` before a defused `<` is judged on the original text, as the drain does', () => {
+    // Pinned to the same output as defuse_fence in tools/attend/src/cmd/inbox.rs.
+    expect(defuseFence('<<attend-peer-messages>')).toBe('<‹attend-peer-messages>')
+    expect(defuseFence('Vec<<attend>>')).toBe('Vec<‹attend>>')
   })
 
   test('a `<` that cannot forge the fence arrives verbatim', () => {
