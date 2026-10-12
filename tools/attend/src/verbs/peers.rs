@@ -35,7 +35,7 @@ pub struct JoinedChannel {
 pub struct PeerChannel {
     pub name: String,
     pub pinned: bool,
-    /// Every member by name ([`member_names`]), this session included.
+    /// Every live member by name ([`member_names`]), this session included.
     pub members: Vec<String>,
 }
 
@@ -74,7 +74,11 @@ pub fn peers() -> Peers {
         .my_groups()
         .into_iter()
         .map(|(name, pinned)| {
-            let members = member_names(&r.members(&name).unwrap_or_default(), &me, &peers);
+            // Read-only, so no cleanup_stale: a member whose session is gone
+            // is left out here and pruned by the next `attend channels`.
+            let live: Vec<String> =
+                r.members(&name).unwrap_or_default().into_iter().filter(|m| attend_groups::member_alive(m)).collect();
+            let members = member_names(&live, &me, &peers);
             PeerChannel { name, pinned, members }
         })
         .collect();

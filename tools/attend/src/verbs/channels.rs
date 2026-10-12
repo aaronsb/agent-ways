@@ -98,7 +98,9 @@ pub fn leave(name: &str) -> Left {
 pub struct Channel {
     pub name: String,
     pub members: usize,
-    /// The members by name ([`crate::verbs::peers::member_names`]).
+    /// The members by name ([`crate::verbs::peers::member_names`]), for a
+    /// channel this session is in; empty for any other, which shows only
+    /// its count.
     pub member_names: Vec<String>,
     pub joined: bool,
     pub pinned: bool,
@@ -125,7 +127,11 @@ pub fn list() -> Vec<Channel> {
             Channel {
                 name: name.clone(),
                 members: entry.members.len(),
-                member_names: crate::verbs::peers::member_names(&entry.members, &roster.me, &roster.peers),
+                member_names: if joined.contains(name) {
+                    crate::verbs::peers::member_names(&entry.members, &roster.me, &roster.peers)
+                } else {
+                    Vec::new()
+                },
                 joined: joined.contains(name),
                 pinned: entry.pinned,
                 description: entry.description.clone(),
