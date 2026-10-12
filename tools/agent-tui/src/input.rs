@@ -154,6 +154,40 @@ impl Input {
         true
     }
 
+    /// Up in the text wrapped at `width`: the cursor goes to the row above,
+    /// at the same column or the row's end; on the first row, to the start
+    /// of the text. False when it was there already, at the start of the
+    /// first line, where Up has nowhere left to go in the text.
+    pub fn up(&mut self, width: u16) -> bool {
+        let (row, col) = self.drawn_at(width.max(1));
+        if row == 0 {
+            let moved = self.cursor != 0;
+            self.cursor = 0;
+            return moved;
+        }
+        self.click(width.max(1), row - 1, col);
+        true
+    }
+
+    /// Down in the text wrapped at `width`: the cursor goes to the row below,
+    /// at the same column or the row's end; on the last row, to the end of
+    /// the text. False when it was there already, at the end of the last
+    /// line.
+    pub fn down(&mut self, width: u16) -> bool {
+        let end = self.text.chars().count();
+        let (row, col) = self.drawn_at(width.max(1));
+        let mut probe = self.clone();
+        probe.cursor = end;
+        let (last, _) = probe.drawn_at(width.max(1));
+        if row >= last {
+            let moved = self.cursor != end;
+            self.cursor = end;
+            return moved;
+        }
+        self.click(width.max(1), row + 1, col);
+        true
+    }
+
     /// Where the cursor is drawn in [`Input::rows`] at `width`: its row,
     /// and its column in display cells.
     fn drawn_at(&self, width: u16) -> (usize, usize) {
@@ -242,6 +276,23 @@ mod tests {
 
     fn texts(rows: &[Line]) -> Vec<String> {
         rows.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect()
+    }
+
+    #[test]
+    fn up_and_down_move_between_rows_and_say_when_they_reach_an_end() {
+        let mut i = at("one\ntwo\nthree", 6);
+        assert!(i.up(20));
+        assert_eq!(i.cursor(), 2, "the row above, the same column");
+        assert!(i.up(20), "the first row: to the start");
+        assert_eq!(i.cursor(), 0);
+        assert!(!i.up(20), "at the start of the first line Up has nowhere to go");
+        assert!(i.down(20));
+        assert_eq!(i.cursor(), 4, "the row below, the same column");
+        assert!(i.down(20) && i.down(20), "the last row: to the end");
+        assert_eq!(i.cursor(), 13);
+        assert!(!i.down(20), "at the end of the last line Down has nowhere to go");
+        let mut empty = Input::new();
+        assert!(!empty.up(20) && !empty.down(20), "an empty box is at both ends");
     }
 
     #[test]

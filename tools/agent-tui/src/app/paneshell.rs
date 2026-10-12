@@ -60,9 +60,10 @@ pub(super) enum ShellKey {
     Strip(usize),
     /// F2 or Ctrl+T: the tab bar takes the focus.
     StripFocus,
-    /// Ctrl+digit: tab n (from 1), or its menu on the tab shown.
+    /// Ctrl+digit: tab n (from 1; 0 is the bar's last tab), or its menu on
+    /// the tab shown.
     TabOrMenu(usize),
-    /// Alt+digit, or a plain digit beside no text: tab n (from 1).
+    /// Alt+digit, or a plain digit beside no text: tab n (from 1; 0 the last).
     Tab(usize),
     /// F1, or `?` beside no text: the key help.
     Help,
@@ -74,8 +75,19 @@ pub(super) enum ShellKey {
 
 impl App {
     /// The pane's unsaved work, for the exit guard.
+    /// The pane's unsaved work, and a line typed in its entry dialog, for
+    /// the exit guard.
     pub(super) fn pane_unsaved(&self) -> Option<String> {
-        self.pane.as_ref()?.unsaved()
+        let typed = match &self.mode {
+            Mode::Entry(e) if !e.input.is_empty() => Some(format!("{} being typed", e.title)),
+            Mode::Guard { .. } => self.entry_held.as_ref().map(|e| format!("{} being typed", e.title)),
+            _ => None,
+        };
+        let own = self.pane.as_ref()?.unsaved();
+        match (typed, own) {
+            (Some(t), Some(o)) => Some(format!("{t}, and {o}")),
+            (t, o) => t.or(o),
+        }
     }
 
     pub(super) fn owns_text(&self) -> bool {
@@ -96,10 +108,12 @@ impl App {
         let menus = self.has_tab_menus();
         let again = if keys.menu_on_repeat && menus { "tab (again: menu)" } else { "tab" };
         let (ctrl, alt) = (self.ctrl_shown(), self.alt_jump());
+        // With reserved tabs, which carry no number, 0 is the bar's last tab.
+        let digits = if self.has_reserved_tab() { "0-9" } else { "1-9" };
         match (text, ctrl, alt) {
-            (false, _, _) => out.push(Binding::new("1-9", "tabs")),
-            (true, true, _) => out.push(Binding::new("Ctrl+1-9", again).short("tab")),
-            (true, false, true) => out.push(Binding::new("Alt+1-9", again).short("tab")),
+            (false, _, _) => out.push(Binding::new(digits, "tabs")),
+            (true, true, _) => out.push(Binding::new(format!("Ctrl+{digits}"), again).short("tab")),
+            (true, false, true) => out.push(Binding::new(format!("Alt+{digits}"), again).short("tab")),
             (true, false, false) => {}
         }
         if let Some(f) = keys.focus_label().filter(|_| menus) {
@@ -109,10 +123,10 @@ impl App {
             out.push(Binding::help("Ctrl+T", "the tab bar, as F2: ← → move, Enter its menu, Esc back"));
         }
         if !text && ctrl {
-            out.push(Binding::help("Ctrl+1-9", again));
+            out.push(Binding::help(format!("Ctrl+{digits}"), again));
         }
         if text && ctrl && alt {
-            out.push(Binding::help("Alt+1-9", "a tab, where the terminal passes Alt+digits on (Konsole keeps them)"));
+            out.push(Binding::help(format!("Alt+{digits}"), "a tab, where the terminal passes Alt+digits on (Konsole keeps them)"));
         }
         if let Some(n) = self.new_item_label() {
             out.push(Binding::help("Ctrl+N", format!("{n}, from the compose box or the tab bar")));
@@ -135,6 +149,12 @@ impl App {
         let click = self.pane.as_ref().and_then(|p| p.click_help()).unwrap_or_else(|| "a tab shows it; the wheel scrolls".into());
         out.push(Binding::help("click", click));
         out
+    }
+
+    /// Whether the pane's bar, as last drawn, has a reserved tab, which
+    /// only the 0 key reaches by number.
+    fn has_reserved_tab(&self) -> bool {
+        self.has_reserved
     }
 
     /// The key that turns the mouse on or off as the bar names it: `m`, or
@@ -160,7 +180,9 @@ impl App {
         let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
         self.draw_pane_tabs(f, bar);
         self.hits.pane = main;
+        let overlaid = !matches!(self.mode, Mode::Browse);
         if let Some(p) = &mut self.pane {
+            p.overlaid(overlaid);
             p.draw(f, main);
         }
         match &self.mode {
@@ -173,6 +195,10 @@ impl App {
             Mode::Pick(p) => {
                 let p = p.clone();
                 self.draw_pick(f, main, &p);
+            }
+            Mode::Entry(e) => {
+                let e = e.clone();
+                self.draw_entry(f, main, &e);
             }
             _ => {}
         }
@@ -301,8 +327,8 @@ impl App {
             KeyCode::Char('?') if !text && plain => Some(ShellKey::Help),
             KeyCode::Char('q') if !text && plain => Some(ShellKey::Quit),
             KeyCode::Char('m') if shell => Some(ShellKey::Mouse),
-            KeyCode::Char(c @ '1'..='9') if alt_digit => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
-            KeyCode::Char(c @ '1'..='9') if !text && plain => Some(ShellKey::Tab(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '0'..='9') if alt_digit => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '0'..='9') if !text && plain => Some(ShellKey::Tab(c as usize - '0' as usize)),
             _ => None,
         }
     }
@@ -323,7 +349,10 @@ impl App {
             self.strip_blur();
         }
         if let Some(s) = taken {
-            self.interrupt_pane();
+            // A pane that owns the focus keeps it across the shell's keys.
+            if !self.pane.as_ref().is_some_and(|p| p.owns_focus()) {
+                self.interrupt_pane();
+            }
             return self.shell_act(s, k);
         }
         self.msg.clear();
@@ -436,6 +465,14 @@ impl App {
                 self.mode = Mode::Ask(Asked { id, question, yes, no });
             }
             Open::Ask { .. } => {}
+            Open::Entry { id, title, value, error, anchor } if matches!(self.mode, Mode::Browse) => {
+                let mut input = crate::input::Input::new();
+                let n = value.chars().count();
+                input.set(value, n);
+                let dock = self.dock(anchor);
+                self.mode = Mode::Entry(Box::new(super::entry::Entry { id, title, input, error, dock }));
+            }
+            Open::Entry { .. } => {}
             Open::Quit => {
                 if !self.quit() {
                     self.ending = true;
@@ -456,7 +493,8 @@ impl App {
             KeyCode::Char('n' | 'N') if plain => self.answer(a, false),
             KeyCode::Esc => self.answer(a, false),
             _ => {
-                let typed = plain && matches!(k.code, KeyCode::Char(_)) && self.owns_text();
+                // A pane that owns the focus types a character wherever its focus is.
+                let typed = plain && matches!(k.code, KeyCode::Char(_)) && (self.owns_text() || self.pane.as_ref().is_some_and(|p| p.owns_focus()));
                 let goes_on = typed || self.shell_key(k).is_some();
                 self.answer(a, false);
                 if goes_on && matches!(self.mode, Mode::Browse) {
@@ -572,6 +610,17 @@ impl App {
         self.take_pane_open();
     }
 
+    /// The wheel outside an overlay over a pane: what is under it in the
+    /// pane scrolls, as with nothing open.
+    pub(super) fn pane_wheel(&mut self, m: MouseEvent) {
+        let at = Position::new(m.column, m.row);
+        if self.hits.pane.contains(at) {
+            if let Some(p) = &mut self.pane {
+                p.wheel_at(m.kind == MouseEventKind::ScrollUp, at);
+            }
+        }
+    }
+
     /// A click or a right click outside an overlay, which has closed: on the
     /// tab bar, or on a part of the pane that passes clicks through
     /// ([`Pane::click_through`]), it goes on and acts as it would with
@@ -602,6 +651,9 @@ impl App {
         if let Mode::Ask(a) = &self.mode {
             let a = a.clone();
             self.answer(a, false);
+        }
+        if matches!(self.mode, Mode::Entry(_)) {
+            return self.entry_paste(text);
         }
         if !matches!(self.mode, Mode::Browse) || self.strip.is_some() {
             return;
@@ -1397,9 +1449,9 @@ mod tests {
         a.pane_mut::<Described>().expect("the pane").0.tab = 4;
         let bar = testkit::rows(&testkit::render(&mut a, 20, 10))[0].clone();
         assert!(bar.contains(" 4 ") && bar.trim_end().ends_with('›'), "#infra, shown, stays; others go: {bar}");
+        assert!(bar.contains('+') && bar.contains('≡'), "an action slot never goes: {bar}");
         assert!(!bar.contains(" 3 "), "the last tab other than the one shown went: {bar}");
-        let (rect, i) = *a.hits.tabs.last().expect("a tab drawn");
-        assert_eq!(i, 4, "its click target is its own tab, not its place on the bar");
+        let &(rect, _) = a.hits.tabs.iter().find(|(_, i)| *i == 4).expect("its click target is its own tab, not its place on the bar");
         assert!(rect.right() <= 20);
     }
 

@@ -19,6 +19,18 @@ pub fn tab_seg(label: impl Into<String>, active: bool) -> Seg {
     }
 }
 
+/// A view's segment, such as the chat's operator view: a view is not a
+/// channel, so it is drawn on the shaded ground of the rule rather than the
+/// accent, bold when shown. Without colour it reads by its label alone.
+pub fn view_seg(label: impl Into<String>, active: bool) -> Seg {
+    let seg = Seg::on(label, Ground::Rule);
+    if active {
+        seg.bold()
+    } else {
+        seg
+    }
+}
+
 /// One tab as a lozenge in `shape`.
 pub fn tab(shape: Shape, label: impl Into<String>, active: bool) -> Vec<Span<'static>> {
     shape.lozenge(&[tab_seg(label, active)])

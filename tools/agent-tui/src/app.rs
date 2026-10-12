@@ -5,6 +5,7 @@
 //! does the writes and commands an apply asks for.
 
 mod apply;
+mod entry;
 pub mod flow;
 mod items;
 mod keys;
@@ -85,6 +86,8 @@ pub(crate) enum Mode {
     ThemeUnsaved,
     /// A pane's question waiting for `y` or `n` ([`pane::Open::Ask`]).
     Ask(paneshell::Asked),
+    /// A pane's entry dialog ([`pane::Open::Entry`]).
+    Entry(Box<entry::Entry>),
 }
 
 /// The click targets of review's bar and the quit prompt, and a flow's buttons.
@@ -269,6 +272,11 @@ pub struct App {
     /// The tab a pane's menu is opening from, by a click on it or Enter on
     /// the focused tab bar: the menu docks under it, whatever it names.
     clicked_tab: Option<Rect>,
+    /// The entry dialog open when quit was asked, with what was typed in
+    /// it: the exit guard names it, and going back opens it again as it was.
+    entry_held: Option<Box<entry::Entry>>,
+    /// The pane's tab bar, as last drawn, has a reserved tab.
+    has_reserved: bool,
     /// The menu and its row a pick came from, for the menu the pick opens
     /// ([`pane::Anchor::Parent`]).
     menu_parent: Option<(Rect, Rect)>,
@@ -312,6 +320,8 @@ impl App {
             pane: None,
             strip: None,
             clicked_tab: None,
+            entry_held: None,
+            has_reserved: false,
             menu_parent: None,
             enhanced: false,
             ending: false,
@@ -557,6 +567,10 @@ impl App {
     /// Quit, or ask first when anything is pending in any tab or the theme
     /// editor holds unsaved edits.
     fn quit(&mut self) -> bool {
+        self.entry_held = match &self.mode {
+            Mode::Entry(e) if !e.input.is_empty() => Some(e.clone()),
+            _ => None,
+        };
         if self.pending() == 0 && !self.theme_dirty() && self.pane_unsaved().is_none() {
             return false;
         }

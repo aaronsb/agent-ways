@@ -221,7 +221,7 @@ impl App {
         }
         match k.code {
             _ if toggle => Some(ShellKey::StripFocus),
-            KeyCode::Char(c @ '1'..='9') if ctrl && self.ctrl_jump() => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '0'..='9') if ctrl && self.ctrl_jump() => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
             _ => None,
         }
     }
@@ -254,8 +254,13 @@ impl App {
         self.take_pane_open();
     }
 
-    /// Give the tab bar the focus, its cursor on the tab shown.
+    /// Give the tab bar the focus, its cursor on the tab shown. A pane that
+    /// owns the focus moves it itself ([`crate::Pane::focus_tabs`]).
     pub(super) fn strip_focus(&mut self) {
+        if let Some(p) = self.pane.as_mut().filter(|p| p.owns_focus()) {
+            p.focus_tabs();
+            return;
+        }
         if let Some(p) = &mut self.pane {
             self.strip = Some(p.tab());
             self.msg = strip_hint(p.new_item_label(), p.below_strip());
@@ -283,10 +288,16 @@ impl App {
         self.strip = Some(to);
     }
 
-    /// The index of tab number `n` (from 1): action slots carry no number.
+    /// The index of tab number `n` (from 1): action slots and reserved tabs
+    /// carry no number. 0 is the last tab on the bar, as a browser's last
+    /// digit is its last tab.
     pub(super) fn numbered(&mut self, n: usize) -> Option<usize> {
         let p = self.pane.as_mut()?;
-        p.tabs().iter().enumerate().filter(|(_, t)| !t.action).nth(n.checked_sub(1)?).map(|(i, _)| i)
+        let tabs = p.tabs();
+        if n == 0 {
+            return tabs.iter().rposition(|t| !t.action);
+        }
+        tabs.iter().enumerate().filter(|(_, t)| !t.action && !t.reserved).nth(n - 1).map(|(i, _)| i)
     }
 
     /// Show the pane's tab `i`, when it has one and it is a tab.
@@ -313,20 +324,27 @@ impl App {
 
     /// The pane's tabs as the shell draws its own: numbered lozenges, the
     /// shown one on the accent, each after its lead, then the trailer. Each
-    /// tab, lead and all, is a click target. The tab under the bar's cursor
-    /// is drawn in reverse video behind a `▸`; an action slot carries no number.
+    /// tab, lead and all, is a click target. The tab under the focus (the
+    /// bar's own cursor, or the pane's when it owns the focus) is drawn in
+    /// reverse video behind a `▸`; an action slot carries no number.
     ///
-    /// The bar keeps to its width, as the tree's tab bar does. When the tabs
-    /// and the trailer overflow it, the trailer is cut first, ending in `…`;
-    /// then the gaps tighten; then the names are cut shorter, down to the
-    /// number alone, while each lead and action slot stays whole. Tabs that
-    /// still do not fit are left off behind a `›` marker, so none goes
-    /// missing unannounced; the tab shown is never one of them.
+    /// Reserved tabs ([`PaneTab::reserved`]) are pinned at the bar's right
+    /// end, whole and unnumbered; a view among them ([`PaneTab::view`]) is
+    /// drawn shaded. The rest of the bar is the tabs left of them.
+    ///
+    /// The bar keeps to its width, as the tree's tab bar does. When the left
+    /// tabs and the trailer overflow the room the reserved tabs leave, the
+    /// trailer is cut first, ending in `…`; then the gaps tighten; then the
+    /// names are cut shorter, down to the number alone, while each lead and
+    /// action slot stays whole. Tabs that still do not fit are left off
+    /// behind a `›` marker, so none goes missing unannounced; neither the tab
+    /// shown nor an action slot is ever one of them.
     pub(super) fn draw_pane_tabs(&mut self, f: &mut Frame, area: Rect) {
         self.hits.tabs.clear();
-        let cursor = self.strip;
         let shape = self.shape;
+        let strip = self.strip;
         let Some(p) = &mut self.pane else { return };
+        let cursor = strip.or_else(|| p.focus_tab());
         let tabs = p.tabs();
         let active = p.tab();
         let trailer = p.trailer();
@@ -334,14 +352,14 @@ impl App {
         let numbers: Vec<Option<usize>> = tabs
             .iter()
             .map(|t| {
-                (!t.action).then(|| {
+                (!t.action && !t.reserved).then(|| {
                     count += 1;
                     count
                 })
             })
             .collect();
         // Tab `i`'s lead and lozenge with its name cut to `cap` columns; a
-        // cap of 0 leaves the number alone.
+        // cap of 0 leaves the number alone. A reserved tab is always whole.
         let lozenge = |i: usize, cap: usize| -> Vec<Span<'static>> {
             let t = &tabs[i];
             let label = match numbers[i] {
@@ -353,7 +371,8 @@ impl App {
             // The marker takes the label's leading space, so the bar does
             // not shift when the focus moves.
             let label = if at_cursor { format!("▸{}", label.strip_prefix(' ').unwrap_or(&label)) } else { label };
-            let mut seg = crate::strip::tab_seg(label, i == active && !t.action);
+            let shown = i == active && !t.action;
+            let mut seg = if t.view { crate::strip::view_seg(label, shown) } else { crate::strip::tab_seg(label, shown) };
             seg.style = crate::strip::target(seg.style, t.target);
             if at_cursor {
                 seg.style = seg.style.add_modifier(Modifier::REVERSED | Modifier::BOLD);
@@ -363,26 +382,32 @@ impl App {
             out
         };
         let span = |lozs: &[(usize, Vec<Span>)], gap: u16| lozs.iter().map(|(_, l)| width(l)).sum::<u16>() + gap * lozs.len().saturating_sub(1) as u16;
-        let longest = tabs.iter().filter(|t| !t.action).map(|t| crate::wrap::str_width(&t.name)).max().unwrap_or(0);
+        // The reserved tabs first: they keep their room whatever the rest needs.
+        let right: Vec<(usize, Vec<Span<'static>>)> = (0..tabs.len()).filter(|i| tabs[*i].reserved).map(|i| (i, lozenge(i, usize::MAX))).collect();
+        self.has_reserved = !right.is_empty();
+        let right_w = span(&right, 1).min(area.width);
+        let room = area.width.saturating_sub(right_w + u16::from(!right.is_empty()));
+        let left_idx: Vec<usize> = (0..tabs.len()).filter(|i| !tabs[*i].reserved).collect();
+        let longest = left_idx.iter().filter(|i| !tabs[**i].action).map(|i| crate::wrap::str_width(&tabs[*i].name)).max().unwrap_or(0);
         // Whole names at the usual gap, then at one column, then names cut
         // shorter. A cap of 1 would leave a bare `…`, so below 2 the name goes.
         let mut plan = None;
         'fit: for cap in (0..=longest).rev().filter(|c| *c != 1) {
-            let lozs: Vec<_> = (0..tabs.len()).map(|i| (i, lozenge(i, cap))).collect();
+            let lozs: Vec<_> = left_idx.iter().map(|&i| (i, lozenge(i, cap))).collect();
             let gaps: &[u16] = if cap == longest { &[2, 1] } else { &[1] };
             for &gap in gaps {
-                if span(&lozs, gap) <= area.width {
+                if span(&lozs, gap) <= room {
                     plan = Some((lozs, gap, false));
                     break 'fit;
                 }
             }
         }
         // Even the numbers alone overflow: as many as fit, then the marker.
-        // The last tab other than the one shown goes first.
+        // The last tab that is neither the one shown nor an action goes first.
         let (lozs, gap, more) = plan.unwrap_or_else(|| {
-            let mut lozs: Vec<_> = (0..tabs.len()).map(|i| (i, lozenge(i, 0))).collect();
-            while !lozs.is_empty() && span(&lozs, 1) + 2 > area.width {
-                let last = lozs.iter().rposition(|(i, _)| *i != active).unwrap_or(lozs.len() - 1);
+            let mut lozs: Vec<_> = left_idx.iter().map(|&i| (i, lozenge(i, 0))).collect();
+            while span(&lozs, 1) + 2 > room {
+                let Some(last) = lozs.iter().rposition(|(i, _)| *i != active && !tabs[*i].action) else { break };
                 lozs.remove(last);
             }
             (lozs, 1, true)
@@ -400,9 +425,23 @@ impl App {
         if more {
             spans.push(Span::styled(" ›", theme::hint()));
         } else {
-            spans.extend(cut_trailer(trailer, area.width.saturating_sub(width(&spans)) as usize));
+            spans.extend(cut_trailer(trailer, room.saturating_sub(width(&spans)) as usize));
         }
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        f.render_widget(Paragraph::new(Line::from(spans)), Rect { width: room, ..area });
+        let left = area.right().saturating_sub(right_w);
+        let mut x = left;
+        let mut rspans: Vec<Span<'static>> = Vec::new();
+        for (k, (i, tab)) in right.into_iter().enumerate() {
+            if k > 0 {
+                rspans.push(Span::raw(" "));
+                x += 1;
+            }
+            let w = width(&tab);
+            self.hits.tabs.push((Rect { x, y: area.y, width: w, height: 1 }.intersection(area), i));
+            x += w;
+            rspans.extend(tab);
+        }
+        f.render_widget(Paragraph::new(Line::from(rspans)), Rect { x: left, width: right_w, ..area });
     }
 
     /// The key help's line on the keyboard: whether Ctrl+digits arrive.
