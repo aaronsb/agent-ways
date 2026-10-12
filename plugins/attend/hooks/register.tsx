@@ -268,7 +268,12 @@ async function poll($: $, mod: Mod) {
   try {
     if (mod.pending.length === 0) {
       const first = parseDrain((await run($, DRAIN_ARGV)).stdout)
-      if (!first || first.messages.length === 0) return
+      if (!first) return
+      // Listening turned off elsewhere (attend listen off, a private scene),
+      // or an identity attend cannot resolve: the row says so.
+      const listening = first.status === 'drained'
+      if ((await readStatus($)).listening !== listening) await updateStatus($, s => ({ ...s, listening }))
+      if (first.messages.length === 0) return
       const msgs = [...first.messages]
       await updateStatus($, s => ({ ...s, unread: Math.max(s.unread, msgs.length) }))
       await new Promise<void>(resolve => $.clock.after(BATCH_MS, resolve))

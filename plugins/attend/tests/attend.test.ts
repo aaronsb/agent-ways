@@ -24,6 +24,7 @@ import {
   DRAIN_EMPTY,
   DRAIN_NOT_LISTENING,
   DRAIN_ROOM_AND_REPLY,
+  DRAIN_UNRESOLVED,
   UNREAD_ROOM,
 } from './attend-output.ts'
 
@@ -206,6 +207,8 @@ describe('view and framing', () => {
   test("attend's drain documents: messages apart from the note and the name", () => {
     expect(parseDrain(DRAIN_COLD_EMPTY)).toEqual({ status: 'drained', messages: [], heldBack: 0, note: null, youAre: 'Chaucer-alpha' })
     expect(parseDrain(DRAIN_NOT_LISTENING)?.status).toBe('not_listening')
+    expect(parseDrain(DRAIN_UNRESOLVED)?.status).toBe('unresolved')
+    expect(parseDrain(JSON.stringify({ ...JSON.parse(DRAIN_EMPTY), schema: 2 }))).toBeUndefined()
     const cold = parseDrain(DRAIN_COLD_BACKLOG)!
     expect(cold.messages.map(m => m.message)).toEqual(['addressed while dormant', 'fresh open'])
     expect(cold.heldBack).toBe(1)
@@ -341,6 +344,31 @@ describe('activation and delivery against attend\'s real drain', () => {
     expect(h.submitted.length).toBe(1)
     expect(h.submitted[0]).toContain('m7')
     expect(full(h.submitted[0] ?? '')).toBe(true)
+  })
+})
+
+describe('the drain\'s status on the row', () => {
+  test('listening turned off elsewhere, or an unresolved session, shows on the row until a drain runs again', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(6_000)
+    const shows = async (text: RegExp) => {
+      const ui = await $.ui.mount(BAND as never)
+      const found = await ui.find({ text } as never)
+      await ui.unmount()
+      return found !== undefined
+    }
+    expect(await shows(/peers/)).toBe(true)
+    drains.push(DRAIN_NOT_LISTENING, DRAIN_NOT_LISTENING)
+    await clock.advance(6_000)
+    expect(await shows(/attend not listening/)).toBe(true)
+    await clock.advance(12_000)
+    expect(await shows(/peers/)).toBe(true)
+    drains.push(DRAIN_UNRESOLVED, DRAIN_UNRESOLVED, DRAIN_UNRESOLVED)
+    await clock.advance(6_000)
+    expect(await shows(/attend not listening/)).toBe(true)
   })
 })
 

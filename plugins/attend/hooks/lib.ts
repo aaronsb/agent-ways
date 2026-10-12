@@ -144,8 +144,10 @@ export type Listed = {
 /** What one drain said. `messages` is empty when nothing was delivered: the
  *  cold start's held-back note and the session's name are fields of their
  *  own, never messages. `status` is `drained`, or why nothing was:
- *  `not_listening`, `unresolved`, `deferred`. Undefined where the output is
- *  not that document (an attend without `--drain --json`). */
+ *  `not_listening` (listening was turned off, here or elsewhere) or
+ *  `unresolved` (attend cannot tell which session this is). Undefined where
+ *  the output is not a schema-1 document (an attend without `--drain
+ *  --json`, or one whose document changed shape). */
 export type Drain = {
   status: string
   messages: Listed[]
@@ -153,6 +155,9 @@ export type Drain = {
   note: string | null
   youAre: string | null
 }
+
+/** The `--drain --json` schema this mod reads. */
+export const DRAIN_SCHEMA = 1
 
 export function parseDrain(stdout: string): Drain | undefined {
   let doc: unknown
@@ -163,7 +168,7 @@ export function parseDrain(stdout: string): Drain | undefined {
   }
   if (typeof doc !== 'object' || doc === null) return undefined
   const d = doc as Record<string, unknown>
-  if (typeof d.status !== 'string' || !Array.isArray(d.messages)) return undefined
+  if (d.schema !== DRAIN_SCHEMA || typeof d.status !== 'string' || !Array.isArray(d.messages)) return undefined
   const str = (v: unknown) => (typeof v === 'string' ? v : '')
   const messages = d.messages.flatMap((m): Listed[] => {
     if (typeof m !== 'object' || m === null) return []
