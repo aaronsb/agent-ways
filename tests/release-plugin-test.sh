@@ -37,4 +37,14 @@ check "a mod change without a version bump" refused "$(run)"
 sed -i.bak 's/0.17.0/0.18.0/' "$manifest" && rm -f "$manifest.bak"; g add -A; g commit -qm "bump"
 check "the same change with the version moved" ok "$(run)"
 
+printf '{ "name": "attend", "version": "0.16.0" }\n' > "$manifest"; g add -A; g commit -qm "backwards"
+check "a version that moved backwards, read from a one-line manifest" refused "$(run)"
+printf '{ "name": "attend" }\n' > "$manifest"; g add -A; g commit -qm "no version"
+check "a manifest with no version" refused "$(run)"
+g tag -f ways-v1.0.1 >/dev/null
+printf '{ "name": "attend", "version": "0.19.0" }\n' > "$manifest"; g add -A; g commit -qm "readable again"
+check "a version unreadable at the last tag" refused "$(run)"
+printf '{"name":"attend","version":"0.19.1"}' > "$manifest"; g tag -f ways-v1.0.2 HEAD~0 >/dev/null; g add -A; g commit -qm "one line"
+check "a one-line manifest moving forward from a one-line one" ok "$(run)"
+
 exit $fail

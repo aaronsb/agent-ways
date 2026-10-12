@@ -57,20 +57,34 @@ lock_version() {
 PLUGIN_MANIFEST="plugins/attend/.claude-plugin/plugin.json"
 
 plugin_version_of() {
-  sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -n1
+  # The first "version" field, wherever it sits on its line, so a manifest
+  # written on one line reads the same.
+  grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed -E 's/.*"([^"]*)"$/\1/'
+}
+
+# True when version $1 sorts before $2 (numeric fields, as sort -V orders them).
+version_lt() {
+  [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]
 }
 
 # Refuse a release whose range changed plugins/attend/ without moving the
-# plugin's version: the range runs from this component's last tag to HEAD.
+# plugin's version forward: the range runs from this component's last tag to
+# HEAD. It fails closed: a version it cannot read on either side refuses,
+# and so does one that moved backwards.
 check_plugin_bump() {
   [[ -f "$PLUGIN_MANIFEST" ]] || return 0
   local prev old new
   prev="$(git describe --tags --abbrev=0 --match "${TAG_PREFIX}*" HEAD 2>/dev/null)" || return 0
   git diff --quiet "$prev" HEAD -- plugins/attend && return 0
-  old="$(git show "$prev:$PLUGIN_MANIFEST" 2>/dev/null | plugin_version_of)"
   new="$(plugin_version_of < "$PLUGIN_MANIFEST")"
-  [[ -n "$old" && "$old" == "$new" ]] || return 0
-  die "plugins/attend/ changed since $prev but $PLUGIN_MANIFEST is still $new; release attend first (make cut-release COMPONENT=attend), which moves the plugin's version with attend's"
+  [[ -n "$new" ]] || die "cannot read the plugin's version from $PLUGIN_MANIFEST"
+  # A plugin that did not exist at the last tag is new: any version moves.
+  git cat-file -e "$prev:$PLUGIN_MANIFEST" 2>/dev/null || return 0
+  old="$(git show "$prev:$PLUGIN_MANIFEST" | plugin_version_of)"
+  [[ -n "$old" ]] || die "cannot read the plugin's version from $PLUGIN_MANIFEST at $prev"
+  version_lt "$new" "$old" && die "$PLUGIN_MANIFEST moved backwards since $prev: $old to $new"
+  [[ "$old" != "$new" ]] || die "plugins/attend/ changed since $prev but $PLUGIN_MANIFEST is still $new; release attend first (make cut-release COMPONENT=attend), which moves the plugin's version with attend's"
+  return 0
 }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

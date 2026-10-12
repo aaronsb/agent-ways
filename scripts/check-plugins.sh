@@ -20,7 +20,7 @@ cd "$ROOT"
 fail() { echo "check-plugins: $*" >&2; exit 1; }
 
 plugin_version() {
-  sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$1" | head -n1
+  grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" | head -n1 | sed -E 's/.*"([^"]*)"$/\1/'
 }
 cargo_version() {
   grep -m1 -E '^version *= *"' "$1" | sed -E 's/.*"([^"]+)".*/\1/'
