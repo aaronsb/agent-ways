@@ -149,20 +149,39 @@ pub fn is_claude(pid: u32) -> bool {
     })
 }
 
-/// Whether `pid` runs the Claude Code program itself, not a process whose
-/// command line merely mentions it: the program (`argv[0]`) is `claude` or
-/// a path under a `claude/versions/` install, or a node, bun or deno whose
-/// script is Claude Code's. A shell sourcing a snapshot under `~/.claude/`,
-/// and a wrapper such as `timeout claude`, are not it.
+/// Whether `pid` runs the Claude Code program itself (see
+/// [`is_claude_argv`]).
 pub fn is_claude_program(pid: u32) -> bool {
-    let Some(args) = argv(pid) else { return false };
-    let program = args.first().map(String::as_str).unwrap_or_default();
-    let base = std::path::Path::new(program).file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-    let base = base.trim_end_matches(".exe");
-    if base == "claude" || program.replace('\\', "/").contains("/claude/versions/") {
+    argv(pid).is_some_and(|args| is_claude_argv(&args))
+}
+
+/// Whether a command line runs the Claude Code program itself, not one that
+/// merely mentions it. The program (`argv[0]`) is `claude` or a path under a
+/// `claude/versions/` install; or it is node, bun or deno and the script is
+/// Claude Code's entry point: an npm-global `claude` (`node /usr/bin/claude`),
+/// `@anthropic-ai/claude-code/`, or the Agent SDK's bundled
+/// `@anthropic-ai/claude-agent-sdk/cli.js`. A script that only lives under a
+/// `.claude/` folder (an operator's hook or statusline), a shell sourcing a
+/// snapshot under `~/.claude/`, and a wrapper such as `timeout claude` are not.
+pub fn is_claude_argv(args: &[String]) -> bool {
+    let unix = |s: &str| s.replace('\\', "/");
+    let base = |s: &str| {
+        let b = std::path::Path::new(&unix(s)).file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        b.trim_end_matches(".exe").trim_end_matches(".cmd").to_string()
+    };
+    let Some(program) = args.first() else { return false };
+    if base(program) == "claude" || unix(program).contains("/claude/versions/") {
         return true;
     }
-    matches!(base, "node" | "bun" | "deno") && args.get(1).is_some_and(|a| a.contains("claude-code") || a.contains("claude/"))
+    if !matches!(base(program).as_str(), "node" | "bun" | "deno") {
+        return false;
+    }
+    // The script is the first argument that is not an interpreter flag.
+    let Some(script) = args.iter().skip(1).find(|a| !a.starts_with('-')) else { return false };
+    let script = unix(script);
+    base(&script) == "claude"
+        || script.contains("@anthropic-ai/claude-code/")
+        || script.contains("@anthropic-ai/claude-agent-sdk/cli.js")
 }
 
 /// The nearest ancestor of `pid` that is the Claude Code program itself,

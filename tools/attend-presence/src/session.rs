@@ -328,6 +328,44 @@ mod tests {
         fs::remove_dir_all(&home).ok();
     }
 
+    /// A node or bun hook under a `.claude/hooks/` folder that runs attend is
+    /// not the Claude Code program: the walk climbs past it to the session.
+    #[cfg(unix)]
+    #[test]
+    fn a_node_hook_under_a_claude_folder_resolves_through_to_the_session() {
+        let home = tempdir_like();
+        let own = std::process::id();
+        let session = std::os::unix::process::parent_id();
+        write_session(&home, "sess-outer", session, "/work/proj");
+        for hook in [["node", "/home/u/.claude/hooks/hook.js"], ["bun", "/home/u/proj/.claude/statusline.ts"]] {
+            let argv: Vec<String> = hook.iter().map(|s| s.to_string()).collect();
+            // This process stands for the hook; its parent for the session.
+            let is_claude = |pid: u32| pid == own && crate::process::is_claude_argv(&argv);
+            assert_eq!(find_session_in_dirs(std::slice::from_ref(&home), own, is_claude), Some(("sess-outer".to_string(), session)), "{argv:?}");
+        }
+        fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn claude_code_is_told_from_what_mentions_it() {
+        let v = |args: &[&str]| crate::process::is_claude_argv(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        // Claude Code itself.
+        assert!(v(&["claude", "-p", "hi"]));
+        assert!(v(&["/home/u/.local/share/claude/versions/2.1.296"]));
+        assert!(v(&["node", "/usr/bin/claude"]), "npm-global");
+        assert!(v(&["node", "/home/u/.npm-global/bin/claude", "--resume"]), "npm-global under the home");
+        assert!(v(&["node", "--no-warnings", "/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js"]));
+        assert!(v(&["node", "/app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js"]), "the Agent SDK's CLI");
+        assert!(v(&["C:\\Users\\u\\AppData\\Roaming\\npm\\claude.exe"]));
+        // What only mentions it.
+        assert!(!v(&["node", "/home/u/.claude/hooks/hook.js"]));
+        assert!(!v(&["bun", "/home/u/proj/.claude/statusline.ts"]));
+        assert!(!v(&["node", "/app/node_modules/@anthropic-ai/claude-agent-sdk/index.js"]), "an SDK host, not its CLI");
+        assert!(!v(&["bash", "-c", "source /home/u/.claude/shell-snapshots/s.sh && attend"]));
+        assert!(!v(&["timeout", "240", "claude", "-p"]));
+        assert!(!v(&[]));
+    }
+
     fn write_session(dir: &Path, sid: &str, pid: u32, cwd: &str) {
         let body = format!(r#"{{"sessionId":"{sid}","cwd":"{cwd}","pid":{pid},"model":"x"}}"#);
         let mut f = fs::File::create(dir.join(format!("{sid}.json"))).unwrap();
