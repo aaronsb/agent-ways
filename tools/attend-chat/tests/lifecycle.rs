@@ -128,7 +128,16 @@ mod on_a_terminal {
     }
 
     fn start(tag: &str) -> Pty {
+        start_with(tag, None)
+    }
+
+    /// [`start`] with `config` as the user's attend config file.
+    fn start_with(tag: &str, config: Option<&str>) -> Pty {
         let home = super::home(tag);
+        if let Some(c) = config {
+            std::fs::create_dir_all(home.join("config/attend")).unwrap();
+            std::fs::write(home.join("config/attend/config.yaml"), c).unwrap();
+        }
         let (mut m, mut s) = (0, 0);
         let ws = libc::winsize { ws_row: 25, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0 };
         // SAFETY: openpty fills two descriptors we then own; the master is
@@ -245,5 +254,28 @@ mod on_a_terminal {
         p.reader.take().unwrap().join().unwrap();
         drop(p.master.take());
         assert_eq!(p.exit_code(), Some(128 + libc::SIGHUP));
+    }
+
+    /// The terminal is asked for clicks when the chat opens, with no
+    /// setting: a test that injects mouse bytes cannot see this, since the
+    /// bytes reach the chat whether or not a real terminal would send them.
+    #[test]
+    fn the_mouse_is_captured_at_start_by_default() {
+        let mut p = start("mouse");
+        p.wait_for(b"\x1b[?1000h");
+        assert!(p.has(b"\x1b[?1006h"), "clicks in the SGR encoding");
+        // SAFETY: a signal to our own child.
+        unsafe { libc::kill(p.child.id() as i32, libc::SIGTERM) };
+        assert_eq!(p.exit_code(), Some(128 + libc::SIGTERM));
+    }
+
+    #[test]
+    fn mouse_false_leaves_the_terminal_its_own_mouse() {
+        let mut p = start_with("nomouse", Some("chat:\n  mouse: false\n"));
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(!p.has(b"\x1b[?1000h"), "no capture asked for");
+        // SAFETY: a signal to our own child.
+        unsafe { libc::kill(p.child.id() as i32, libc::SIGTERM) };
+        assert_eq!(p.exit_code(), Some(128 + libc::SIGTERM));
     }
 }

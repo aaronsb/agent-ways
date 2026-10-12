@@ -140,6 +140,10 @@ pub enum Open {
     /// A picker over `options`, `chosen` marked; what is picked comes back
     /// through [`Pane::picked`] under `id`. Esc closes it with nothing.
     Pick { id: String, title: String, options: Vec<String>, multi: bool, chosen: Vec<String> },
+    /// Tab `i` as Ctrl+digit takes it: shown, or its menu opened when it
+    /// is shown already. For a row of the pane that stands for a tab, so a
+    /// click on the row and the key share one rule.
+    Tab(usize),
 }
 
 /// What an application supplies for a screen that is not a tree. `Any`
@@ -180,13 +184,6 @@ pub trait Pane: Any {
     /// Down on the focused tab bar: take the focus into the list
     /// [`Pane::below_strip`] names. False leaves the focus on the bar.
     fn focus_below(&mut self) -> bool {
-        false
-    }
-
-    /// Whether a left click on a tab shows it and opens its menu at once,
-    /// rather than opening the menu only on the tab already shown. Only a
-    /// pane with tab menus is asked. Keys keep their own rule.
-    fn menu_on_click(&self) -> bool {
         false
     }
 
@@ -296,6 +293,14 @@ pub trait Pane: Any {
     /// Something to open over the pane: the response modal or a picker.
     /// The shell asks after each key, click and tick that reaches the pane.
     fn take_open(&mut self) -> Option<Open> {
+        None
+    }
+
+    /// The row the menu just opened ([`Pane::take_open`]) docks under, in
+    /// screen cells: the row of the pane it was opened from. `None` docks
+    /// it under its tab, or centres it. Asked, and so cleared, with each
+    /// [`Pane::take_open`].
+    fn take_anchor(&mut self) -> Option<Rect> {
         None
     }
 

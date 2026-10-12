@@ -29,6 +29,8 @@ pub(crate) struct Pick {
     /// A pane's picker: the id its choice goes back under, and its title.
     /// `None` for a setting's.
     pub(crate) pane: Option<(String, String)>,
+    /// The row a pane's picker docks under; `None` centres it.
+    pub(crate) anchor: Option<Rect>,
 }
 
 impl Pick {
@@ -43,7 +45,7 @@ impl Pick {
         options.extend(unknown);
         let marked: Vec<bool> = options.iter().map(|o| held.contains(o)).collect();
         let sel = marked.iter().position(|m| *m).unwrap_or(0);
-        Pick { path, options, known, multi, sel, marked, was: value.to_string(), pane: None }
+        Pick { path, options, known, multi, sel, marked, was: value.to_string(), pane: None, anchor: None }
     }
 
     /// A picker a pane opened: `chosen` marked, the choice going back to
@@ -52,7 +54,7 @@ impl Pick {
         let marked: Vec<bool> = options.iter().map(|o| chosen.contains(o)).collect();
         let sel = marked.iter().position(|m| *m).unwrap_or(0);
         let known = options.len();
-        Pick { path: Vec::new(), options, known, multi, sel, marked, was: String::new(), pane: Some((id, title)) }
+        Pick { path: Vec::new(), options, known, multi, sel, marked, was: String::new(), pane: Some((id, title)), anchor: None }
     }
 
     /// The options picked: the one under the cursor, or the marked ones in
@@ -137,7 +139,11 @@ impl App {
     /// rejected value keeps the picker open, and the bottom bar says why.
     fn pick_set(&mut self, p: Pick) {
         if let Some((id, _)) = &p.pane {
-            return self.pane_picked(id, p.values());
+            // A menu the pick leads to (Invite agent ▸) docks where this one did.
+            self.menu_anchor = p.anchor;
+            self.pane_picked(id, p.values());
+            self.menu_anchor = None;
+            return;
         }
         let v = p.value();
         if v == p.was {
@@ -156,8 +162,43 @@ impl App {
             None => tree::label(&self.roots, &p.path),
         };
         let title = format!("{}: {what}", if p.multi { "pick any" } else { "pick one" });
-        self.draw_menu_items(f, area, title, p.items(), p.sel);
+        match p.anchor {
+            Some(row) => {
+                let items = p.items();
+                let r = docked(area, row, &title, &items);
+                self.draw_menu_items_in(f, r, title, items, p.sel);
+            }
+            None => self.draw_menu_items(f, area, title, p.items(), p.sel),
+        }
     }
+}
+
+/// Where a picker docked under `row` goes in `area`: on the line below the
+/// row, from the row's left edge, as wide as its title and items need.
+/// Where the lines below cannot hold it, it ends on the line above the row,
+/// so the row stays in sight; where neither side can, it sits at the foot
+/// of `area`. It is moved as far as it must to lie inside `area`, which a
+/// row left outside it by a resize needs, and it is never taller or wider
+/// than `area`.
+pub(super) fn docked(area: Rect, row: Rect, title: &str, items: &[(String, String)]) -> Rect {
+    use crate::wrap::str_width;
+    // Borders, the item's lead space, its mark and a space, and a column
+    // of padding: the rows `draw_menu_items_in` draws.
+    let widest = items.iter().map(|(l, t)| 1 + str_width(&format!("{l:<10}")) + str_width(t) + 1).max().unwrap_or(0);
+    let want = (widest.max(str_width(title) + 2) + 2).max(24);
+    let w = (want.min(usize::from(u16::MAX)) as u16).min(area.width);
+    let h = (items.len() as u16 + 2).min(area.height);
+    let below = row.y.saturating_add(row.height.max(1));
+    let y = if below + h <= area.bottom() {
+        below
+    } else if row.y >= area.y + h {
+        row.y - h
+    } else {
+        area.bottom() - h
+    };
+    let y = y.clamp(area.y, area.bottom() - h);
+    let x = row.x.clamp(area.x, area.right() - w);
+    Rect { x, y, width: w, height: h }
 }
 
 #[cfg(test)]
@@ -290,5 +331,26 @@ mod tests {
         app.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: at.x + 2, row: at.y, modifiers: KeyModifiers::NONE });
         assert!(matches!(app.mode, Mode::Browse), "{}", app.msg);
         assert_eq!(value(&app, 0), "openrouter");
+    }
+
+    #[test]
+    fn a_docked_menu_sits_under_its_row_else_above_it_else_at_the_foot() {
+        let area = Rect { x: 0, y: 1, width: 80, height: 23 };
+        let items: Vec<(String, String)> = (0..7).map(|i| (format!("  item {i}"), String::new())).collect();
+        let row = |y| Rect { x: 0, y, width: 26, height: 1 };
+        let r = docked(area, row(8), "pick one: #infra", &items);
+        assert_eq!((r.x, r.y, r.height), (0, 9, 9), "on the line under the row");
+        let r = docked(area, row(20), "pick one: #infra", &items);
+        assert_eq!((r.y, r.bottom()), (11, 20), "no room below: it ends on the line above the row");
+        let short = Rect { height: 10, ..area };
+        let r = docked(short, row(6), "pick one: #infra", &items);
+        assert_eq!((r.y, r.bottom()), (2, 11), "no room either side: at the foot, inside the area");
+        let r = docked(area, Rect { x: 70, y: 0, width: 8, height: 1 }, "pick one: #infra", &items);
+        assert_eq!(r.right(), 80, "moved left to end inside the area");
+        assert!(r.width >= 24 && r.width <= 80);
+        let r = docked(Rect { height: 23, ..area }, row(31), "pick one: #infra", &items);
+        assert_eq!((r.y, r.bottom()), (15, 24), "a row below the area after a resize: the menu ends at its foot");
+        let narrow = Rect { width: 20, ..area };
+        assert_eq!(docked(narrow, row(3), "a long title for a narrow screen", &items).width, 20, "never wider than the area");
     }
 }

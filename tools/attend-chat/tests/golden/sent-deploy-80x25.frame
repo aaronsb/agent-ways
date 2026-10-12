@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                     #deploy  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
-| chat  sent → #deploy │ mouse off (M-m) │ F1 keys · Enter send · Tab complete   |
+| chat  sent → #deploy │ mouse on (M-m) │ F1 keys · Enter send · Tab complete    |
 styles
   0   0-2   White Blue -
   0   5-14  White Blue -
@@ -95,11 +95,11 @@ styles
  23  16-21  LightYellow - -
  24   0-5   Black Cyan BOLD
  24  21-23  - - DIM
- 24  24-38  - - DIM|ITALIC
- 24  39-41  - - DIM
- 24  42-44  Cyan - -
- 24  45-51  - - DIM|ITALIC
- 24  52-57  Cyan - -
- 24  58-64  - - DIM|ITALIC
- 24  65-68  Cyan - -
- 24  69-76  - - DIM|ITALIC
+ 24  24-37  - - DIM|ITALIC
+ 24  38-40  - - DIM
+ 24  41-43  Cyan - -
+ 24  44-50  - - DIM|ITALIC
+ 24  51-56  Cyan - -
+ 24  57-63  - - DIM|ITALIC
+ 24  64-67  Cyan - -
+ 24  68-75  - - DIM|ITALIC

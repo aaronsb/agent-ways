@@ -523,6 +523,11 @@ impl App {
     /// recorded as a click target.
     pub(super) fn draw_menu_items(&mut self, f: &mut Frame, area: Rect, title: String, items: Vec<(String, String)>, sel: usize) {
         let r = modal_rect(area, 50, items.len() as u16 + 2);
+        self.draw_menu_items_in(f, r, title, items, sel);
+    }
+
+    /// The menu's items in the popup `r`, each row a click target.
+    pub(super) fn draw_menu_items_in(&mut self, f: &mut Frame, r: Rect, title: String, items: Vec<(String, String)>, sel: usize) {
         let w = r.width;
         let lines: Vec<Line> = items
             .iter()

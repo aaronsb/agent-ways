@@ -535,15 +535,17 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
 }
 
-/// The chat starts with the mouse off, so the terminal selects text and
-/// middle-click pastes. Alt+m is the shell's toggle beside a text entry,
-/// where m types; the bottom bar says which way it is, and how to select
-/// while it is on.
+/// The chat starts with the mouse on, so a click reaches the tabs and the
+/// column (`attend.chat.mouse`). Alt+m is the shell's toggle beside a text
+/// entry, where m types; the bottom bar says which way it is, and how to
+/// select while it is on.
 #[test]
-fn golden_alt_m_turns_the_mouse_on_and_m_types() {
+fn golden_alt_m_turns_the_mouse_off_and_on_and_m_types() {
     let mut g = goldens();
     let mut c = chat();
-    assert!(!c.app().mouse_on(), "a chat starts with the terminal's own mouse");
+    assert!(c.app().mouse_on(), "a chat starts with the mouse on");
+    drawn(&mut c, &[alt('m')], 80, 25);
+    assert!(!c.app().mouse_on(), "Alt+m gives the terminal its mouse");
     drawn(&mut c, &[alt('m')], 80, 25);
     assert!(c.app().mouse_on());
     assert!(c.input().is_empty(), "Alt+m types nothing");
@@ -605,18 +607,41 @@ fn backspace_after_esc_edits_the_draft() {
 }
 
 #[test]
-fn a_click_on_a_tab_shows_its_channel_and_opens_its_menu() {
+fn a_click_on_a_tab_shows_its_channel_and_a_second_opens_its_menu() {
     let mut c = chat();
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
-    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"), "one click opens the menu (ADR-405)");
+    assert!(!text(&mut c, 80, 25).contains("pick one"), "the first click only shows the channel, as Ctrl+3 does");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows[usize::from(y) + 1].contains("pick one: #deploy"), "a click on the tab shown opens its menu on the line under it: {rows:#?}");
     assert!(press(&mut c, key(KeyCode::Esc)), "Esc closes the menu");
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "1 merged").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert_eq!(c.foreground(), &Tab::Merged);
+}
+
+/// A menu docks where the input came from: a click on the tab docks it
+/// under the tab even while the column shows the channel's row; the key
+/// docks it under that row.
+#[test]
+fn a_tab_click_docks_the_menu_under_the_tab_and_the_key_under_the_row() {
+    let mut c = chat_side().enhanced(true);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
+    left(&mut c, (x, y));
+    left(&mut c, (x, y));
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    let title = rows.iter().position(|r| r.contains("pick one: #deploy")).expect("the menu is drawn");
+    assert_eq!(title, usize::from(y) + 1, "under the tab: {rows:#?}");
+    press(&mut c, key(KeyCode::Esc));
+    let row = testkit::rows(&testkit::render_screen(&mut c, 80, 25)).iter().position(|r| r.contains("#deploy") && !r.starts_with(" ≡")).expect("the column's row");
+    press(&mut c, ctrl('3'));
+    let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
+    assert!(rows[row + 1].starts_with("┌pick one: #deploy"), "Ctrl+3 docks under the column's row: {rows:#?}");
 }
 
 #[test]
@@ -628,6 +653,8 @@ fn golden_a_tab_clicked() {
     // The glyph before the lozenge is part of the target.
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x.saturating_sub(3), y));
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+    // Again, on the tab shown: its menu, docked under the tab.
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x.saturating_sub(3), y));
     g.check("clicked-infra-80x25", &testkit::render_screen(&mut c, 80, 25));
     g.finish();
 }
@@ -884,7 +911,7 @@ fn a_click_then_enter_on_merged_asks_before_clearing_the_view() {
     // The key help names what a click on a tab does.
     press(&mut c, key(KeyCode::F(1)));
     let help = text(&mut c, 100, 60);
-    assert!(help.contains("a tab shows it and opens its menu"), "{help}");
+    assert!(help.contains("so does a click on the tab shown"), "{help}");
 }
 
 /// #deploy's menu, then Delete channel: the question waits for its `y`.
@@ -953,7 +980,6 @@ fn ctrl_digit_drops_a_waiting_question() {
 #[test]
 fn alt_m_drops_a_waiting_question() {
     let mut c = chat().enhanced(true).dry_run(true);
-    press(&mut c, alt('m'));
     ask_delete(&mut c);
     press(&mut c, alt('m'));
     assert_eq!(c.status(), "kept");
@@ -1140,8 +1166,7 @@ fn a_right_click_opens_a_tabs_menu_without_showing_it() {
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "3 #deploy").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
-    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"));
-    press(&mut c, key(KeyCode::Esc));
+    assert!(!text(&mut c, 80, 25).contains("pick one"));
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "4 #infra").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Right), x, y));
@@ -1210,7 +1235,7 @@ fn the_common_menu_sits_before_merged_and_merged_keeps_number_one() {
     press(&mut c, key(KeyCode::Left));
     press(&mut c, key(KeyCode::Enter));
     let menu = text(&mut c, 80, 25);
-    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse on at start", "Settings…"] {
+    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse off at start", "Settings…"] {
         assert!(menu.contains(item), "{item}: {menu}");
     }
     g.check("common-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
@@ -1334,7 +1359,9 @@ fn a_click_on_an_agent_row_opens_its_menu_and_on_a_channel_row_the_channels() {
     let (x, y) = testkit::find(&buf, "#infra").expect("the channel row");
     left(&mut c, (x, y));
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
-    assert!(text(&mut c, 80, 25).contains("pick one: #infra"));
+    assert!(!text(&mut c, 80, 25).contains("pick one"), "the first click shows it");
+    left(&mut c, (x, y));
+    assert!(text(&mut c, 80, 25).contains("pick one: #infra"), "the second opens its menu");
     press(&mut c, key(KeyCode::Esc));
 
     let buf = testkit::render_screen(&mut c, 80, 25);
@@ -1403,7 +1430,11 @@ fn golden_the_keyboard_walks_the_column() {
     assert!(at.contains("#deploy"), "Down from #open is #deploy: {at}");
     press(&mut c, key(KeyCode::Enter));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
-    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"), "Enter opens the channel's menu");
+    assert!(!text(&mut c, 80, 25).contains("pick one"), "Enter shows the channel, as a click does");
+    assert!(cursor_row(&mut c, 80).is_some_and(|r| r.contains("#deploy")), "the cursor stays on its row");
+    press(&mut c, key(KeyCode::Enter));
+    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"), "Enter on the channel shown opens its menu");
+    press(&mut c, key(KeyCode::Esc));
     press(&mut c, key(KeyCode::Esc));
 
     // Up past the top goes back to the tab bar.
@@ -1669,6 +1700,7 @@ fn a_channel_menu_joins_a_channel_the_human_is_not_in() {
     let mut c = chat_side().enhanced(true).dry_run(true);
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "#deploy").expect("the row");
+    left(&mut c, (x, y));
     left(&mut c, (x, y));
     let shown = text(&mut c, 80, 25);
     assert!(shown.contains("Join") && !shown.contains("Leave"), "{shown}");

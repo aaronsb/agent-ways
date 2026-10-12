@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |                             ││ >                                                                                      │|
 |                             ││                                                                                 #open  │|
 |                             │╰────────────────────────────────────────────────────────────────────────────────────────╯|
-| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · F2 ↓ column · PgUp PgDn scroll · Alt+1-9 tab · F2 tabs   |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · F2 ↓ column · PgUp PgDn scroll · Alt+1-9 tab · F2 tabs    |
 styles
   0   0-2   White Blue -
   0   5-14  Black Cyan BOLD
@@ -207,19 +207,19 @@ styles
  38  29-29  - - DIM
  38  30-119 Cyan - -
  39   0-5   Black Cyan BOLD
- 39   7-21  - - DIM|ITALIC
- 39  22-24  - - DIM
- 39  25-27  Cyan - -
- 39  28-34  - - DIM|ITALIC
- 39  35-40  Cyan - -
- 39  41-47  - - DIM|ITALIC
- 39  48-51  Cyan - -
- 39  52-62  - - DIM|ITALIC
- 39  63-67  Cyan - -
- 39  68-76  - - DIM|ITALIC
- 39  77-86  Cyan - -
- 39  87-95  - - DIM|ITALIC
- 39  96-103 Cyan - -
- 39 104-109 - - DIM|ITALIC
- 39 110-112 Cyan - -
- 39 113-116 - - DIM|ITALIC
+ 39   7-20  - - DIM|ITALIC
+ 39  21-23  - - DIM
+ 39  24-26  Cyan - -
+ 39  27-33  - - DIM|ITALIC
+ 39  34-39  Cyan - -
+ 39  40-46  - - DIM|ITALIC
+ 39  47-50  Cyan - -
+ 39  51-61  - - DIM|ITALIC
+ 39  62-66  Cyan - -
+ 39  67-75  - - DIM|ITALIC
+ 39  76-85  Cyan - -
+ 39  86-94  - - DIM|ITALIC
+ 39  95-102 Cyan - -
+ 39 103-108 - - DIM|ITALIC
+ 39 109-111 Cyan - -
+ 39 112-115 - - DIM|ITALIC

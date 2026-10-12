@@ -38,7 +38,7 @@ agent-tui frame 120x40
 |│                                                                                                               #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                                                                  |
-| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · Alt+1-9 tab (again: menu) · F2 tabs   |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll · Alt+1-9 tab (again: menu) · F2 tabs    |
 styles
   0   0-2   #2e3440 #bfa2c3 -
   0   5-14  #2e3440 #c99fc1 BOLD
@@ -178,17 +178,17 @@ styles
  38   9-14  #c9e265 - -
  38  16-21  #e07b7b - -
  39   0-5   #2e3440 #c99fc1 BOLD
- 39   7-21  #7c8baa - ITALIC
- 39  22-24  #434c5e - -
- 39  25-27  #c99fc1 - -
- 39  28-34  #7c8baa - ITALIC
- 39  35-40  #c99fc1 - -
- 39  41-47  #7c8baa - ITALIC
- 39  48-51  #c99fc1 - -
- 39  52-62  #7c8baa - ITALIC
- 39  63-72  #c99fc1 - -
- 39  73-81  #7c8baa - ITALIC
- 39  82-89  #c99fc1 - -
- 39  90-109 #7c8baa - ITALIC
- 39 110-112 #c99fc1 - -
- 39 113-116 #7c8baa - ITALIC
+ 39   7-20  #7c8baa - ITALIC
+ 39  21-23  #434c5e - -
+ 39  24-26  #c99fc1 - -
+ 39  27-33  #7c8baa - ITALIC
+ 39  34-39  #c99fc1 - -
+ 39  40-46  #7c8baa - ITALIC
+ 39  47-50  #c99fc1 - -
+ 39  51-61  #7c8baa - ITALIC
+ 39  62-71  #c99fc1 - -
+ 39  72-80  #7c8baa - ITALIC
+ 39  81-88  #c99fc1 - -
+ 39  89-108 #7c8baa - ITALIC
+ 39 109-111 #c99fc1 - -
+ 39 112-115 #7c8baa - ITALIC

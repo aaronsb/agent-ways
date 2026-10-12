@@ -23,7 +23,7 @@ agent-tui frame 80x25
 |│                                                                       #open  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
-| chat  mouse off (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · PgUp PgDn scroll  |
 styles
   0   0-2   - - REVERSED
   0   5-14  - - BOLD|REVERSED
@@ -101,9 +101,9 @@ styles
  23   1-7   - - BOLD
  23   9-14  - - BOLD|ITALIC
  24   0-5   - - BOLD|REVERSED
- 24   7-21  - - DIM|ITALIC
- 24  22-24  - - DIM
- 24  28-34  - - DIM|ITALIC
- 24  41-47  - - DIM|ITALIC
- 24  52-62  - - DIM|ITALIC
- 24  73-78  - - DIM|ITALIC
+ 24   7-20  - - DIM|ITALIC
+ 24  21-23  - - DIM
+ 24  27-33  - - DIM|ITALIC
+ 24  40-46  - - DIM|ITALIC
+ 24  51-61  - - DIM|ITALIC
+ 24  72-77  - - DIM|ITALIC

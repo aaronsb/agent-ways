@@ -151,7 +151,7 @@ impl Config {
             jump: text("attend.chat.tabs.jump", "auto"),
             menu_on_repeat: get("attend.chat.tabs.menu_on_repeat", layers).and_then(|v| v.as_bool()).unwrap_or(true),
             focus_key: text("attend.chat.tabs.focus_key", "both"),
-            mouse: get("attend.chat.mouse", layers).and_then(|v| v.as_bool()).unwrap_or(false),
+            mouse: get("attend.chat.mouse", layers).and_then(|v| v.as_bool()).unwrap_or(true),
             sidebar_key: text("attend.chat.sidebar_key", "f3"),
         };
         Config { governor, engagement, cleanup, sensors, chat }

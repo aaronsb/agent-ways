@@ -233,7 +233,7 @@ impl App {
             KeyCode::Right => self.strip_move(at, true),
             KeyCode::Enter => {
                 self.strip_blur();
-                self.open_tab_menu(at);
+                self.open_tab_menu(at, true);
             }
             KeyCode::Down => {
                 if self.pane.as_mut().is_some_and(|p| p.focus_below()) {
@@ -297,43 +297,36 @@ impl App {
         }
     }
 
-    /// Ctrl+digit or a click on tab `i`: show it, or open its menu when it
-    /// is shown already or is an action slot.
-    pub(super) fn pane_tab_or_menu(&mut self, i: usize) {
+    /// Ctrl+digit, a click on tab `i` (`at_tab`), or a pane's row standing
+    /// for it ([`Open::Tab`]): show it, or open its menu when it is shown
+    /// already or is an action slot.
+    pub(super) fn pane_tab_or_menu(&mut self, i: usize, at_tab: bool) {
         let Some(p) = &mut self.pane else { return };
         let Some(t) = p.tabs().get(i).cloned() else { return };
         let menus = p.has_tab_menus();
         if menus && (t.action || (p.tab() == i && p.tab_keys().menu_on_repeat)) {
-            self.open_tab_menu(i);
+            self.open_tab_menu(i, at_tab);
         } else if p.tab() != i {
             p.set_tab(i);
         }
     }
 
-    /// A left click on tab `i`: where the pane asks for it
-    /// ([`Pane::menu_on_click`]), show the tab and open its menu at once;
-    /// otherwise as Ctrl+digit.
-    pub(super) fn pane_tab_click(&mut self, i: usize) {
-        let Some(p) = &mut self.pane else { return };
-        if !(p.has_tab_menus() && p.menu_on_click()) {
-            return self.pane_tab_or_menu(i);
-        }
-        let Some(t) = p.tabs().get(i).cloned() else { return };
-        if !t.action && p.tab() != i {
-            p.set_tab(i);
-        }
-        self.open_tab_menu(i);
-    }
-
-    /// Open tab `i`'s menu, over the pane.
-    pub(super) fn open_tab_menu(&mut self, i: usize) {
+    /// Open tab `i`'s menu, over the pane. It docks where the input came
+    /// from: under the tab for a click on it or Enter on the tab bar
+    /// (`at_tab`); for a key, under the pane's own row for the tab when it
+    /// names one ([`Pane::take_anchor`]), else under the tab.
+    pub(super) fn open_tab_menu(&mut self, i: usize, at_tab: bool) {
         if let Some(p) = &mut self.pane {
             if !p.has_tab_menus() {
                 return;
             }
             p.tab_menu(i);
         }
+        self.menu_anchor = self.hits.tabs.iter().find(|(_, t)| *t == i).map(|(r, _)| *r);
+        self.menu_at_tab = at_tab;
         self.take_pane_open();
+        self.menu_anchor = None;
+        self.menu_at_tab = false;
     }
 
     /// The pane's tabs as the shell draws its own: numbered lozenges, the

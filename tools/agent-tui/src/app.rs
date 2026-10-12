@@ -264,6 +264,13 @@ pub struct App {
     pane: Option<Box<dyn pane::Pane>>,
     /// The tab bar has the focus (F2): the tab under its cursor.
     strip: Option<usize>,
+    /// The row a pane's next menu docks under: the tab whose menu is
+    /// opening, or the menu a pick came from, for the menu it leads to.
+    menu_anchor: Option<Rect>,
+    /// The menu opening came from a click on its tab, or Enter on the
+    /// focused tab bar: it docks under the tab even where the pane has a
+    /// row of its own for it ([`Pane::take_anchor`]).
+    menu_at_tab: bool,
     /// The terminal reports Ctrl+digits as themselves (the kitty keyboard
     /// protocol is on).
     enhanced: bool,
@@ -300,6 +307,8 @@ impl App {
             drag: None,
             pane: None,
             strip: None,
+            menu_anchor: None,
+            menu_at_tab: false,
             enhanced: false,
         }
     }

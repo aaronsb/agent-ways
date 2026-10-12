@@ -278,10 +278,10 @@ const KEYS: &[KeySpec] = &[
         section: "attend.chat",
         path: &["chat", "mouse"],
         kind: Kind::Bool,
-        default: DefaultValue::Yaml("false"),
+        default: DefaultValue::Yaml("true"),
         scope: Scope::User,
         doc: "Whether attend-chat starts with the mouse on.",
-        long: "Off, the terminal selects text and middle-click pastes; Alt+m turns the mouse on for clicks on tabs, messages and chips.",
+        long: "On, a click reaches tabs, the left column, messages and chips, and Shift-drag selects text in most terminals. Off, the terminal selects text and middle-click pastes, and no click reaches the chat. Alt+m switches it while the chat runs.",
         ..BASE
     },
     KeySpec {

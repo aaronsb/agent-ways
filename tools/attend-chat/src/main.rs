@@ -38,11 +38,12 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
   Left / Right / Home / End move cursor
   Backspace / Delete        edit
   PgUp / PgDn               scroll the messages
-  Alt+m                     mouse on or off; off at the start, so the terminal
-                            selects text and middle-click pastes
+  Alt+m                     mouse on or off; on at the start (attend.chat.mouse);
+                            off, the terminal selects text and middle-click pastes
   F1                        the keys
-  mouse (on)                click a tab to show it, a message to select it, the
-                            compose box to place the cursor, a chip to complete it;
+  mouse (on)                click a tab or a channel in the column to show it,
+                            and again for its menu; a message to select it; the
+                            compose box to place the cursor; a chip to complete it;
                             the wheel scrolls the messages; Shift-drag selects
                             text in most terminals
 
