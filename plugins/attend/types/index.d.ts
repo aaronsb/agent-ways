@@ -17,6 +17,10 @@ export type AttendStatus = {
   afterCompaction: boolean
   /** Turns since the full preamble last showed. */
   turnsSinceFull: number
+  /** The config started this session listening and the operator has not
+   *  prompted yet: no turn is submitted, and what is pending rides the first
+   *  prompt. Kept here so a reloaded module keeps holding. */
+  awaitingOperator: boolean
 }
 
 declare module 'claude-code' {

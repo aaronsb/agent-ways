@@ -255,8 +255,8 @@ impl PeerSensor {
         // Cold start: the first scan of a session that restored no
         // checkpoint (no seen-set) applies `attend_state::cold_start`, the
         // rule the Stop-hook drain applies too. Addressed mail sent since the
-        // session began is delivered whatever its age; older addressed mail
-        // and old `#open` and channel backlog is marked seen
+        // session's process started, and `#open` and channel messages since
+        // it started listening, are delivered; older backlog is marked seen
         // without being shown and counted in one note, so a fresh enrollment
         // is neither flooded nor silently emptied. A warm restart skips this
         // (the checkpoint restored the seen-set), so down-gap messages still
@@ -327,7 +327,7 @@ impl PeerSensor {
 
         let plan = baselining.then(|| {
             let pending: Vec<_> = found.iter().map(|f| (&scan_dirs[f.room].room, f.age)).collect();
-            attend_state::cold_start::plan(&pending, attend_state::cold_start::session_age(&own_session_id))
+            attend_state::cold_start::plan(&pending, attend_state::cold_start::Window::for_session(&own_session_id))
         });
 
         for (i, f) in found.into_iter().enumerate() {

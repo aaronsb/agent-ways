@@ -85,6 +85,8 @@ type World = {
   store?: Record<string, unknown>
   /** A store whose writes fail, as on a full disk. */
   storeFails?: boolean
+  /** The operator's prompts are dropped beneath the plugin. */
+  dropPrompts?: boolean
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
@@ -120,6 +122,11 @@ function host(on: On, world: World) {
     logs.push(e.text)
     return { value: undefined } as never
   })
+  const toasts: string[] = []
+  on('ui.toast', ($, e) => {
+    toasts.push(e.text)
+    return { value: undefined } as never
+  })
   on('session.id', () => ({ value: world.sessionId ?? 's1' }) as never)
   const clearState = () => {
     state.value = undefined
@@ -152,11 +159,13 @@ function host(on: On, world: World) {
     if (cmd.startsWith('inbox --drain')) return ok(world.drains?.shift() ?? DRAIN_EMPTY)
     return ok('[attend] sent\n')
   }
-  // The operator's prompts, with the context the hooks attached.
+  // The operator's prompts, with the context the hooks attached; a hook
+  // beneath drops them while `world.dropPrompts` holds.
   const prompts: { text: string; context: readonly string[] }[] = []
   on('prompt.submit', ($, e) => {
     if (e.origin.kind !== 'plugin') {
       prompts.push({ text: e.text, context: e.context ?? [] })
+      if (world.dropPrompts) return { drop: 'blocked by a settings hook' }
       return { text: e.text, context: e.context }
     }
     if ((world.submitFails ?? 0) > 0) {
@@ -170,12 +179,12 @@ function host(on: On, world: World) {
   const count = (cmd: string) => argvs.filter(a => a.slice(1).join(' ').startsWith(cmd)).length
   const ran = (cmd: string) => count(cmd) > 0
   const mode = () => (state.value as { mode?: string } | undefined)?.mode
-  return { argvs, submitted, origins, prompts, tools, count, ran, mode, clearState, store, storeWrites, logs, world }
+  return { argvs, submitted, origins, prompts, tools, count, ran, mode, clearState, store, storeWrites, logs, toasts, world }
 }
 
 /** The operator types a prompt and presses Enter. */
-async function typed($: Engine, text = 'hello') {
-  await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
+async function typed($: Engine, text = 'hello', kind = 'composer') {
+  await $.prompt.submit({ text, wait: false, origin: { kind } } as never)
 }
 
 /** A /clear or an in-session /resume as Claude Code 2.1.296 runs it:
@@ -716,6 +725,85 @@ describe('before the operator\'s first prompt', () => {
     drains.push(one(5), DRAIN_EMPTY)
     await clock.advance(10_000)
     expect(h.submitted.length).toBe(1)
+  })
+
+  // #950 review, finding 1: the cold start's held-back note reaches the
+  // model with the messages, and a note alone still rides the prompt.
+  test('the held-back note rides the first prompt with the messages', async ($, on) => {
+    mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [DRAIN_COLD_BACKLOG] })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    const context = h.prompts[0]?.context ?? []
+    expect(context.length).toBe(1)
+    expect(context[0]).toContain('addressed while dormant')
+    expect(context[0]).toContain('attend: 1 older message held back; reading it is optional: attend inbox')
+    expect(context[0]).not.toContain('Chaucer-alpha')
+  })
+
+  test('a note with no message is attached on its own, and counts no delivery', async ($, on) => {
+    mock.clock(on, { now: T0 })
+    const noteOnly = JSON.stringify({ ...JSON.parse(DRAIN_EMPTY), held_back: 3, note: '3 older messages held back; reading them is optional: attend inbox' })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [noteOnly] })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    expect(h.prompts[0]?.context).toEqual(['attend: 3 older messages held back; reading them is optional: attend inbox'])
+    expect(h.toasts).toEqual([])
+  })
+
+  // #950 review, finding 2: a reload before the first prompt keeps holding.
+  test('a reload of a held session keeps holding until the operator prompts', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await $.session.start(INTERACTIVE)
+    drains.push(one(6), DRAIN_EMPTY)
+    await clock.advance(30_000)
+    expect(h.count('inbox --drain')).toBe(0)
+    expect(h.submitted).toEqual([])
+    await typed($)
+    expect(h.prompts[0]?.context.join('\n')).toContain('m6')
+  })
+
+  // #950 review, finding 3: a prompt that does not enter loses nothing.
+  test('a dropped first prompt leaves its messages for the poll to deliver', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const world: World = { config: { listening: 'active', keepwarm: 'off' }, drains: [one(8, 'project')], dropPrompts: true }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    expect(h.prompts[0]?.context.join('\n')).toContain('m8')
+    expect(h.toasts).toEqual([])
+    expect(h.submitted).toEqual([])
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m8')
+    // attend drained it once, at the prompt: the poll's later drains find
+    // nothing, so the turn carries the kept batch.
+    expect(h.submitted.filter(t => t.includes('m8')).length).toBe(1)
+  })
+
+  // #950 review, finding 4: the operator is told what went with the prompt.
+  test('messages that ride the prompt are announced to the operator', async ($, on) => {
+    mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [DRAIN_COLD_BACKLOG] })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    expect(h.toasts).toEqual(['attend: 2 peer message(s) went to Claude with your prompt'])
+  })
+
+  // #950 review, finding 5: the owner's ping from Slack is the operator's
+  // prompt; an unclassified one is not.
+  test('a Slack ping from the owner lifts the hold; an unclassified prompt does not', async ($, on) => {
+    mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [one(9), DRAIN_EMPTY] })
+    await $.session.start(INTERACTIVE)
+    await typed($, 'from a same-user socket', 'unclassified')
+    expect(h.count('inbox --drain')).toBe(0)
+    await typed($, 'from slack', 'slack-ping')
+    expect(h.prompts[1]?.context.join('\n')).toContain('m9')
   })
 })
 

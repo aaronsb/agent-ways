@@ -62,8 +62,9 @@ pub fn status() -> Listening {
 
 /// Turn listening on. When the session was not listening, the cold-start
 /// rule applies again at the next drain, as it does for a join or `attend
-/// run` ([`enroll_as`]): what was addressed to its project meanwhile is
-/// delivered, older `#open` and channel backlog is held back and counted.
+/// run` ([`enroll_as`]): what was addressed to its project since its Claude
+/// Code process started is delivered, and `#open` and channel messages from
+/// before now are held back and counted.
 /// Delivers nothing itself. `host` names what hosts delivery (the attend
 /// mod passes [`Host::Mod`]); `None` keeps the host already recorded.
 pub fn on(host: Option<Host>) -> Result<Listening, ListenError> {

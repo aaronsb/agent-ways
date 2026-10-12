@@ -95,8 +95,12 @@ To stop both conduits, run `attend scene private` and stop the Monitor running `
 
 A session is cold until a conduit has applied the cold-start rule for it, which it records as `baselined: true` in the state file. The peers sensor and the drain apply the same rule, `attend_state::cold_start`:
 
-- A message addressed to the project (`--to`) since the session began is delivered whatever its age, the newest 50 at most. `--to` addresses the sessions live in the project when it is sent (ADR-401), so a session reads its start from its Claude Code session record (`startedAt`), and mail from before then is backlog, whether or not the session it was for read it (ADR-404 D3b). A session record with no start time leaves addressed mail to the age rule below.
-- An `#open` or channel message younger than 120 seconds is live conversation and is delivered.
+A message is replayed to the sessions it was said to (ADR-404 D3b):
+
+- A message addressed to the project (`--to`) since the session began is delivered whatever its age, the newest 50 at most. `--to` addresses the sessions live in the project when it is sent (ADR-401). "Began" means the start of the current Claude Code process, the `startedAt` of its session record: a `claude --resume` writes a new record, so a resumed session that had never listened, or had turned listening off, gets only the mail sent since it was resumed. One that was listening kept its seen-set and is not cold. Mail from before then is backlog, whether or not the session it was for read it.
+- An `#open` or channel message posted since the session started listening is delivered, the newest 50 at most. Enrolling records that time in the enrollment record, and from then the session is a member of `#open` (a channel joined later has its older messages baselined at the join). So a first drain that comes late, such as the attend mod's at the operator's first prompt, still gets what was said while it waited.
+- Any message younger than 120 seconds is live conversation and is delivered.
+- A record with no time (a session record without `startedAt`, an enrollment record from an older attend) leaves that room to the 120-second rule.
 - Anything else is marked seen without being shown. The first delivery carries one line counting it, `N older messages held back; reading them is optional: attend inbox`. When there is nothing else to deliver, the drain sends that line alone as a `systemMessage`, so the turn still ends.
 
 A restarted `attend run` restores its seen-set from the checkpoint and delivers only what arrived while it was down.

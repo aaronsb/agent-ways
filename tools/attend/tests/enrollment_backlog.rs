@@ -134,6 +134,32 @@ fn mail_from_before_the_session_began_is_held_back_though_nobody_read_it() {
     assert_eq!(d["held_back"], 1, "{d}");
 }
 
+/// #950 review, finding 1: the attend mod holds a session's first drain
+/// until the operator's first prompt, minutes after it started listening. A
+/// question posted to `#open` during that wait is past the fresh window by
+/// then, and must still arrive: the session was a member of `#open` from
+/// the moment it listened. What `#open` carried before then stays held back.
+#[test]
+fn open_messages_since_listening_began_arrive_at_a_late_first_drain() {
+    let f = Fixture::new("backlog-late-drain");
+    f.put("_broadcast", "other-1-before", "posted before it listened", 30 * MINUTE);
+    f.ok(&["listen", "on"]);
+    // Ten minutes pass before the first drain: the record says it began
+    // listening then, and a peer asked a question two minutes in.
+    let marker = f.marker(&f.sid);
+    let record = std::fs::read_to_string(&marker).unwrap();
+    let back = std::time::SystemTime::now() - 10 * MINUTE;
+    let since = back.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let record: String =
+        record.lines().filter(|l| !l.starts_with("since ")).map(|l| format!("{l}\n")).collect::<String>() + &format!("since {since}\n");
+    std::fs::write(&marker, record).unwrap();
+    f.put("_broadcast", "other-1-during", "a question while it waited", 8 * MINUTE);
+
+    let d = drain_doc(&f.ok(&["inbox", "--drain", "--json"]));
+    assert_eq!(bodies(&d), vec!["a question while it waited".to_string()], "{d}");
+    assert_eq!(d["held_back"], 1, "{d}");
+}
+
 /// A session record with no start time (an older Claude Code) cannot say
 /// whom old project mail was for, so it is held back as old `#open`
 /// backlog is; a message younger than the fresh window still arrives.

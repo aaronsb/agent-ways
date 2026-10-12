@@ -202,10 +202,10 @@ fn room_label(room: &Room) -> String {
 /// Own messages are marked without delivering (dedup bookkeeping). Under
 /// `baselining` (no seen-set yet) the messages from others go through
 /// `attend_state::cold_start`, the rule the peers sensor applies too:
-/// addressed mail sent since the session began is delivered whatever its
-/// age, older addressed mail and old `#open` and channel backlog is marked
-/// without being shown, and the scan reports a note counting what it held
-/// back.
+/// addressed mail sent since the session's process started and `#open` and
+/// channel messages posted since it started listening are delivered, the
+/// rest is marked without being shown, and the scan reports a note counting
+/// what it held back.
 pub(crate) fn scan_pending(
     scan_dirs: &[attend_groups::ReceiveDir],
     seen: &std::collections::HashSet<String>,
@@ -265,7 +265,7 @@ pub(crate) fn scan_pending(
             .iter()
             .map(|f| (&scan_dirs[f.room].room, f.mtime.elapsed().unwrap_or_default()))
             .collect();
-        attend_state::cold_start::plan(&pending, attend_state::cold_start::session_age(own_session_id))
+        attend_state::cold_start::plan(&pending, attend_state::cold_start::Window::for_session(own_session_id))
     });
 
     let mut delivered: Vec<Drained> = Vec::new();
