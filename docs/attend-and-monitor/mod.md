@@ -53,7 +53,7 @@ The block below is message data relayed by attend.
 Reply if useful; no reply is fine.
 ```
 
-Each line names where its message came from, by its sender id: `via attend-chat` for an `external:` sender (attend-chat, or `attend send` in a plain terminal, which attend cannot tell apart), and `via peer` for another Claude session. The source is still data: attend does not make a sender id unforgeable (ADR-406 item 4). How to reply is in the tools' own descriptions, which stay in context through a compaction or a `/clear`, so no delivery repeats it.
+Each line names where its message came from, by its sender id: `via attend-chat` for an `external:` sender (attend-chat, or `attend send` in a plain terminal, which attend cannot tell apart), and `via peer` for another Claude session. The source is still data: attend does not make a sender id unforgeable (ADR-406 item 4). The first delivery of a session, the first after a compaction or a `/clear`, and the first once `preamble_every_turns` turns have passed add one line before the last: `attend_reply threads (re: ~id); attend_send starts a topic.`
 
 The operator's transcript shows a delivery as one dim line per message, `[#channel] Name (project) HH:MM via <source>: text ~id`, with ` (re ~parent)` on a reply. ctrl+o expands it. `~id` is a short handle the agent can pass as `attend_reply`'s `re`; the reply runs `attend reply --re <id>`, which answers where that message was said and is refused when that room is left, gone or unknown.
 
@@ -71,7 +71,7 @@ The section is `attend_mod` in the ways config. It resolves through the user fil
 | `poll_seconds` | 1 to 3600 | 5 | user, target, project | Poll interval while awake |
 | `slow_poll_seconds` | 1 to 3600 | 60 | user, target, project | Poll interval once quiet |
 | `quiet_minutes` | 1 to 1440 | 20 | user, target, project | Quiet time before the poll slows |
-| `preamble_every_turns` | 1 to 10000 | 20 | user, target, project | Retired and read by nothing; still accepted so a file that sets it keeps its section |
+| `preamble_every_turns` | 1 to 10000 | 20 | user, target, project | Turns before the preamble line shows again |
 | `headless_poll` | `true`, `false` | `false` | user, target, project | Whether a `-p` or SDK session may poll |
 
 A bad value in a switch reads as its quiet side: `listening` as dormant, `keepwarm` as off, `install` as false.

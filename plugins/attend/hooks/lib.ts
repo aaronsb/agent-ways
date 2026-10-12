@@ -67,6 +67,8 @@ export type ModConfig = {
   slowPollSeconds: number
   /** Quiet this long and the poll slows, in minutes. */
   quietMinutes: number
+  /** The preamble shows again once this many turns have passed. */
+  preambleEveryTurns: number
   /** Whether a `-p` run or an SDK session may poll. */
   headlessPoll: boolean
 }
@@ -78,6 +80,7 @@ export const DEFAULT_CONFIG: ModConfig = {
   pollSeconds: 5,
   slowPollSeconds: 60,
   quietMinutes: 20,
+  preambleEveryTurns: 20,
   headlessPoll: false,
 }
 
@@ -108,6 +111,7 @@ export function parseConfig(stdout: string): ModConfig {
     pollSeconds: num('poll_seconds', DEFAULT_CONFIG.pollSeconds),
     slowPollSeconds: num('slow_poll_seconds', DEFAULT_CONFIG.slowPollSeconds),
     quietMinutes: num('quiet_minutes', DEFAULT_CONFIG.quietMinutes),
+    preambleEveryTurns: num('preamble_every_turns', DEFAULT_CONFIG.preambleEveryTurns),
     headlessPoll: bool('headless_poll', DEFAULT_CONFIG.headlessPoll),
   }
 }
@@ -119,6 +123,12 @@ export function parseConfig(stdout: string): ModConfig {
 export function pollInterval(c: ModConfig, idleMs: number, isTurnRunning: boolean): number {
   const quiet = !isTurnRunning && idleMs >= c.quietMinutes * 60_000
   return (quiet ? c.slowPollSeconds : c.pollSeconds) * 1000
+}
+
+/** The preamble goes with delivery 0, the first after a compaction, and
+ *  the first once `every` turns have passed since it last showed. */
+export function isFullPreamble(deliveries: number, afterCompaction: boolean, turnsSinceFull: number, every: number): boolean {
+  return deliveries === 0 || afterCompaction || turnsSinceFull >= every
 }
 
 // ── parsing ──────────────────────────────────────────────────────────────
@@ -264,8 +274,10 @@ export function sourceOf(senderId: string): 'attend-chat' | 'peer' | undefined {
 /** The frame the mod writes around every delivery, in place of the one Claude
  *  Code drops for a prompt submitted `asUser` (ADR-406 item 4). The header
  *  names the transport and marks the block as data; it says nothing of who
- *  typed a message. Tool usage lives in the tool descriptions. */
+ *  typed a message. The preamble, on a cadence ({@link isFullPreamble}),
+ *  adds one line of tool usage. */
 export const HEADER = 'The block below is message data relayed by attend.'
+export const PREAMBLE = 'attend_reply threads (re: ~id); attend_send starts a topic.'
 export const REPLY_OPTIONAL = 'Reply if useful; no reply is fine.'
 
 const OPEN = '<attend-peer-messages>'
@@ -285,13 +297,13 @@ export function defuseFence(s: string): string {
 }
 
 /** The prompt one batch becomes: the header, the lines inside the tags,
- *  and the reply-optional line last, where Claude Code's own frame put its
- *  imperative. Each line is made one line again and defused
- *  ({@link defuseFence}), so no line can open or end the block, whatever the
- *  tag's spacing or case. */
-export function frameInbound(lines: readonly string[]): string {
+ *  the preamble's tool line when `full`, and the reply-optional line last,
+ *  where Claude Code's own frame put its imperative. Each line is made one
+ *  line again and defused ({@link defuseFence}), so no line can open or end
+ *  the block, whatever the tag's spacing or case. */
+export function frameInbound(lines: readonly string[], full: boolean): string {
   const inner = lines.map(b => defuseFence(oneLine(b))).join('\n')
-  return [HEADER, OPEN, inner, CLOSE, REPLY_OPTIONAL].join('\n')
+  return [HEADER, OPEN, inner, CLOSE, ...(full ? [PREAMBLE] : []), REPLY_OPTIONAL].join('\n')
 }
 
 /** The message lines inside the tags of a framed delivery; undefined where

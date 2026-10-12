@@ -395,8 +395,8 @@ const KEYS: &[KeySpec] = &[
         path: &["attend_mod", "preamble_every_turns"],
         kind: Kind::Int { min: 1, max: 10_000 },
         default: DefaultValue::Yaml("20"),
-        doc: "Retired: read by nothing; a delivery no longer carries a preamble.",
-        long: "Every delivery now carries the same short frame, and the tool descriptions carry the tool usage the preamble repeated (ADR-406 item 4). The key is still accepted, so a file that sets it keeps the rest of the attend_mod section; nothing reads its value.",
+        doc: "Turns before a delivery carries the full preamble again.",
+        long: "The full preamble goes with the first delivery of a session and the first after a compaction, then with the first delivery once this many turns have passed. Every other delivery carries one line (ADR-406 item 4).",
         ..BASE
     },
     KeySpec {

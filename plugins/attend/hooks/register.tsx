@@ -26,6 +26,7 @@ import {
   configArgv,
   formatMessage,
   frameInbound,
+  isFullPreamble,
   joinArgv,
   keepwarmLine,
   oneLine,
@@ -53,6 +54,9 @@ const DEFAULTS = {
   peers: 0,
   unread: 0,
   channels: [],
+  deliveries: 0,
+  afterCompaction: false,
+  turnsSinceFull: 0,
   awaitingOperator: false,
 } satisfies AttendStatus
 
@@ -353,17 +357,28 @@ async function poll($: $, mod: Mod) {
 }
 
 /** Submits one framed batch, which starts a turn in an idle session.
- *  Resolves whether the prompt entered. */
+ *  Resolves whether the prompt entered; the preamble counters move only
+ *  when it did. */
 async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean> {
   mod.lastActivityMs = await $.clock.now()
   for (const m of msgs) {
     mod.ids.set(shortId(m.id), m.id)
     if (m.re) mod.ids.set(shortId(m.re), m.re)
   }
-  return $.prompt
-    .submit({ text: frameInbound(msgs.map(formatMessage)), asUser: true })
+  const s = await readStatus($)
+  const full = isFullPreamble(s.deliveries, s.afterCompaction, s.turnsSinceFull, mod.config.preambleEveryTurns)
+  const entered = await $.prompt
+    .submit({ text: frameInbound(msgs.map(formatMessage), full), asUser: true })
     .then(r => r.drop === undefined)
     .catch(() => false)
+  if (!entered) return false
+  await updateStatus($, t => ({
+    ...t,
+    deliveries: t.deliveries + 1,
+    afterCompaction: false,
+    turnsSinceFull: full ? 0 : t.turnsSinceFull,
+  }))
+  return true
 }
 
 /** Holds, or stops holding, the session's turns until the operator's first
@@ -390,7 +405,7 @@ async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: 
     if (m.re) mod.ids.set(shortId(m.re), m.re)
   }
   const note = d.note ? `attend: ${oneLine(d.note)}` : undefined
-  const block = msgs.length > 0 ? frameInbound(msgs.map(formatMessage)) : undefined
+  const block = msgs.length > 0 ? frameInbound(msgs.map(formatMessage), true) : undefined
   const attached = [block, note].filter((x): x is string => x !== undefined)
   if (attached.length === 0) return next(e)
   const keep = () => {
@@ -408,6 +423,7 @@ async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: 
   if (r.drop !== undefined) {
     keep()
   } else if (msgs.length > 0) {
+    await updateStatus($, t => ({ ...t, deliveries: t.deliveries + 1, afterCompaction: false, turnsSinceFull: 0 }))
     $.ui.toast(`attend: ${msgs.length} peer message(s) went to Claude with your prompt`)
   }
   return r
@@ -517,8 +533,9 @@ export const register: Register = on => {
   // that goes on) fires after that. An active session, or a /resume to a
   // session that listened, puts the mode back at once, so a reload finds it
   // active, records the id, and tells attend the id is listening. The poll
-  // holds its drain until then. At process start this event comes before
-  // session.start, which handles that case.
+  // holds its drain until then. The model's context changed as at a
+  // compaction, so the next delivery carries the full preamble. At process
+  // start this event comes before session.start, which handles that case.
   on('classic.SessionStart', async ($, e, next) => {
     const done = await next(e)
     if (!mod.isStarted || (e.source !== 'clear' && e.source !== 'resume')) return done
@@ -528,6 +545,8 @@ export const register: Register = on => {
     await updateStatus($, s => ({
       ...s,
       mode: 'active' as const,
+      afterCompaction: true,
+      turnsSinceFull: 0,
       awaitingOperator: mod.isAwaitingOperator,
     }))
     await rememberListening($, mod, id)
@@ -538,6 +557,16 @@ export const register: Register = on => {
       mod.active = true
       await registerActiveTools($)
       $.clock.after(RELISTEN_MS, () => void activate($, mod, id))
+    }
+    return done
+  })
+
+  // A compaction drops the earlier preamble from the model's view, so the
+  // next delivery shows it in full. A precompute installs nothing.
+  on('session.compact', async ($, e, next) => {
+    const done = await next(e)
+    if (e.trigger !== 'precompute' && e.agentId === undefined && done.skip === undefined) {
+      await updateStatus($, s => ({ ...s, afterCompaction: true }))
     }
     return done
   })
@@ -555,6 +584,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     mod.running.add(e.turnId)
     mod.lastActivityMs = await $.clock.now()
+    if (await isOn($, mod)) await updateStatus($, s => ({ ...s, turnsSinceFull: s.turnsSinceFull + 1 }))
     return next(e)
   })
 
