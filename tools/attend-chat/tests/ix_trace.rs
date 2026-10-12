@@ -5,7 +5,11 @@
 //! its cursor, the status, and most steps the whole frame.
 //!
 //! A refactor that changes no behaviour leaves the trace byte-identical.
-//! Record it on the base and on the change and compare the two files:
+//! Each frame recorded carries a digest of its cells' styles, so the caret,
+//! a focused border and the focus marks count as well as the text. CI holds
+//! a digest of a small fixed run ([`PINNED`]); a change in behaviour changes
+//! it, and re-pinning is a reviewed change. To see what moved, record the
+//! full trace on the base and on the change and compare the two files:
 //!
 //! ```text
 //! IX_TRACE=/path/before.txt cargo test -p attend-chat --test ix_trace -- --ignored record
@@ -147,6 +151,22 @@ fn keys() -> Vec<KeyEvent> {
     ]
 }
 
+/// The digest of twenty seeds of 200 steps ([`pinned_run`]).
+const PINNED: &str = "a8e2e78039fd9124";
+
+/// FNV-1a over `bytes`, from `h`: a digest stable on every machine.
+fn fnv(h: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(h, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3))
+}
+
+const FNV_START: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// A digest of every cell's style in `buf`: colours and modifiers, the
+/// caret's reversed cell included.
+fn styles(buf: &agent_tui::ratatui::buffer::Buffer) -> u64 {
+    buf.content.iter().fold(FNV_START, |h, c| fnv(h, format!("{:?}", c.style()).as_bytes()))
+}
+
 /// The trace of `seeds` runs of `steps` steps each.
 fn trace(seeds: std::ops::RangeInclusive<u64>, steps: u64) -> String {
     let mut out = String::new();
@@ -198,7 +218,7 @@ fn trace(seeds: std::ops::RangeInclusive<u64>, steps: u64) -> String {
             if rng.below(4) != 0 {
                 let buf = testkit::render_screen(&mut c, w, h);
                 let text = testkit::rows(&buf).join("\n");
-                let _ = write!(line, "\n{text}");
+                let _ = write!(line, " styles={:016x}\n{text}", styles(&buf));
             }
             writeln!(out, "{line}").unwrap();
             if c.app().ended() {
@@ -210,14 +230,27 @@ fn trace(seeds: std::ops::RangeInclusive<u64>, steps: u64) -> String {
     out
 }
 
-/// The trace is a function of its seeds: two runs of the same seeds agree,
-/// so a difference between two revisions is theirs.
+/// The run CI pins: twenty seeds of 200 steps.
+fn pinned_run() -> String {
+    trace(1..=20, 200)
+}
+
+/// The chat's interaction is what it was when [`PINNED`] was recorded. A
+/// change that means to change behaviour re-pins it, and the review reads
+/// the trace's difference.
 #[test]
-fn the_trace_is_the_same_on_every_run() {
-    let a = trace(1..=4, 80);
-    let b = trace(1..=4, 80);
-    assert!(a == b, "two runs of the same seeds differ");
-    assert!(a.contains(" signal ") && a.contains(" wheel "), "the run reaches the watcher and the wheel");
+fn the_pinned_trace_is_unchanged() {
+    let run = pinned_run();
+    assert!(run.contains(" signal ") && run.contains(" wheel ") && run.contains(" styles="), "the run reaches the watcher and the wheel, and records styles");
+    let got = format!("{:016x}", fnv(FNV_START, run.as_bytes()));
+    assert!(
+        got == PINNED,
+        "the trace of the chat's interaction changed: {PINNED} pinned, {got} now.\n\
+         If the change in behaviour is intended, see what moved: record the full trace\n\
+         (`IX_TRACE=<file> cargo test -p attend-chat --test ix_trace -- --ignored record`)\n\
+         on the base and on this change and compare them. Then set PINNED in\n\
+         tools/attend-chat/tests/ix_trace.rs to {got}, and say why in the PR."
+    );
 }
 
 /// Record the trace to `IX_TRACE`, for comparing two revisions.
