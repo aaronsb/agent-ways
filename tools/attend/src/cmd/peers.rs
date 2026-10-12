@@ -57,6 +57,12 @@ pub(crate) fn cmd_peers(json: bool) {
 
     t.print();
 
+    // Who is in each of this session's channels, so a member sees who
+    // joined before anyone posts.
+    for c in &p.channels {
+        println!("  #{}: {}", c.name, c.members.join(", "));
+    }
+
     // The channel count is the explicit channels this session joined; the
     // "(self)" row is not one.
     println!(

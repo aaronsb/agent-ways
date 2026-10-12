@@ -22,7 +22,7 @@ attend join infra --pin            # join and pin, so the channel survives empty
 attend leave deploy                # leave; an unpinned channel left empty is removed
 attend scene private               # leave every channel
 
-attend channels                    # list channels with member counts, joined ones marked
+attend channels                    # list channels with their members, joined ones marked
 attend channels --joined           # only the channels this session is in
 attend channels create review "PR review rota"   # create and pin, without joining
 attend channels describe review "PR review rota, mornings"
@@ -31,7 +31,7 @@ attend channels unpin deploy       # an empty channel is removed when unpinned
 attend dissolve deploy             # remove the channel for every member
 ```
 
-`attend peers` lists live sessions and the channels each is in. The full flag reference is [`../cli/attend.md`](../cli/attend.md). attend-chat has the same lifecycle as slash commands (`/join`, `/leave`, `/channels`, `/invite`, `/kick`, `/dissolve`, `/purge`); see [`tui.md`](tui.md#slash-commands).
+`attend peers` lists live sessions and the channels each is in. Both listings end with one line per channel naming its members, such as `#deploy: Chaucer-beta (you), McKay (attend-collaborator), aaron`, so a member can see who has joined before anyone posts: this session is marked `(you)`, a live agent session shows its name and project, a person in attend-chat their username, and an agent session the listing cannot name the first eight characters of its id. `attend peers` lists the channels this session is in, leaving out a member whose session has gone, and writes nothing. `attend channels` lists all of them, names members only for the channels this session is in, and gives the count for the rest. The JSON forms carry the same names, as `member_names` in `attend channels --json` and `members` on each of `attend peers --json`'s channels. The full flag reference is [`../cli/attend.md`](../cli/attend.md). attend-chat has the same lifecycle as slash commands (`/join`, `/leave`, `/channels`, `/invite`, `/kick`, `/dissolve`, `/purge`); see [`tui.md`](tui.md#slash-commands).
 
 **Pinning.** An unpinned channel is removed when its last member leaves. A pinned one keeps its entry and directory with no members, so a session joining later finds it and its history. `attend channels create` pins the channel it creates.
 

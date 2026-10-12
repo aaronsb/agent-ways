@@ -30,11 +30,20 @@ pub struct JoinedChannel {
     pub pinned: bool,
 }
 
+/// A channel this session is in, with who else is in it.
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerChannel {
+    pub name: String,
+    pub pinned: bool,
+    /// Every live member by name ([`member_names`]), this session included.
+    pub members: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Peers {
     #[serde(rename = "self")]
     pub me: Agent,
-    pub channels: Vec<JoinedChannel>,
+    pub channels: Vec<PeerChannel>,
     pub peers: Vec<Agent>,
 }
 
@@ -51,13 +60,7 @@ pub fn peers() -> Peers {
     let self_instance = self_sid.as_deref().and_then(|sid| registry.lookup(&cwd, sid));
     let me = agent(self_sid, &cwd, self_instance, "working".to_string(), None, true);
 
-    let channels = groups_for(&session)
-        .my_groups()
-        .into_iter()
-        .map(|(name, pinned)| JoinedChannel { name, pinned })
-        .collect();
-
-    let peers = list_peers()
+    let peers: Vec<Agent> = list_peers()
         .into_iter()
         .map(|(sid, peer_cwd, _project, status, ctx)| {
             let instance = registry.lookup(&peer_cwd, &sid);
@@ -66,7 +69,49 @@ pub fn peers() -> Peers {
         })
         .collect();
 
+    let r = groups_for(&session);
+    let channels = r
+        .my_groups()
+        .into_iter()
+        .map(|(name, pinned)| {
+            // Read-only, so no cleanup_stale: a member whose session is gone
+            // is left out here and pruned by the next `attend channels`.
+            let live: Vec<String> =
+                r.members(&name).unwrap_or_default().into_iter().filter(|m| attend_groups::member_alive(m)).collect();
+            let members = member_names(&live, &me, &peers);
+            PeerChannel { name, pinned, members }
+        })
+        .collect();
+
     Peers { me, channels, peers }
+}
+
+/// A channel's members by name, so a member can see who else has joined
+/// without waiting for them to post (ADR-404 D7, the text view of
+/// membership): this session as `Name (you)`, a live agent session as
+/// `Name (project)`, the way `attend peers` lists it, a person in
+/// attend-chat by their username, and an agent session that is not live
+/// by the first eight characters of its id.
+pub fn member_names(members: &[String], me: &Agent, peers: &[Agent]) -> Vec<String> {
+    members
+        .iter()
+        .map(|id| {
+            if me.session_id.as_deref() == Some(id.as_str()) {
+                return format!("{} (you)", me.name);
+            }
+            if let Some(p) = peers.iter().find(|p| p.session_id.as_deref() == Some(id.as_str())) {
+                return format!("{} ({})", p.name, basename(&p.cwd));
+            }
+            if attend_groups::is_agent_member(id) {
+                return format!("session {}", id.chars().take(8).collect::<String>());
+            }
+            id.clone()
+        })
+        .collect()
+}
+
+fn basename(cwd: &str) -> &str {
+    cwd.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or(cwd)
 }
 
 fn agent(session_id: Option<String>, cwd: &str, instance: Option<String>, status: String, context_pct: Option<f64>, here: bool) -> Agent {
@@ -86,4 +131,38 @@ fn list_peers() -> Vec<(String, String, String, String, f64)> {
 #[cfg(not(feature = "sensor-peers"))]
 fn list_peers() -> Vec<(String, String, String, String, f64)> {
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn named(sid: &str, cwd: &str, name: &str) -> Agent {
+        Agent {
+            session_id: Some(sid.to_string()),
+            cwd: cwd.to_string(),
+            name: name.to_string(),
+            nickname: name.to_string(),
+            instance: None,
+            status: "waiting".to_string(),
+            context_pct: None,
+            here: false,
+        }
+    }
+
+    #[test]
+    fn members_are_named_as_peers_lists_them() {
+        let me = named("11111111-1111-1111-1111-111111111111", "/src/agent-ways", "Chaucer-beta");
+        let peers = [named("22222222-2222-2222-2222-222222222222", "/src/attend-collaborator", "McKay")];
+        let members = [
+            "11111111-1111-1111-1111-111111111111".to_string(),
+            "22222222-2222-2222-2222-222222222222".to_string(),
+            "aaron".to_string(),
+            "33333333-3333-3333-3333-333333333333".to_string(),
+        ];
+        assert_eq!(
+            member_names(&members, &me, &peers),
+            ["Chaucer-beta (you)", "McKay (attend-collaborator)", "aaron", "session 33333333"]
+        );
+    }
 }

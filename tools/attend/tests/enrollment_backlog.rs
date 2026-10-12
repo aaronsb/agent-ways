@@ -58,8 +58,8 @@ fn a_note_alone_does_not_block_the_stop() {
 }
 
 /// What the model receives on enrollment by join: the join's Bash output
-/// names the session, and the first blocking drain names it again in the
-/// reason, the only part of the hook output the model reads.
+/// names the session, and the first drain that delivers names it again in
+/// the delivered text, the only part of the hook output the model reads.
 #[test]
 fn join_and_first_delivery_name_the_session() {
     let f = with_backlog("backlog-named");
@@ -68,8 +68,8 @@ fn join_and_first_delivery_name_the_session() {
     assert!(!name.is_empty());
 
     let hook = f.drain_hook_with("{}");
-    assert!(hook.starts_with("{\"decision\": \"block\""), "addressed mail blocks: {hook}");
-    assert!(hook.contains(&format!("(you are {name})")), "the reason names the session: {hook}");
+    assert!(hook.starts_with("{\"hookSpecificOutput\": "), "addressed mail continues the turn: {hook}");
+    assert!(hook.contains(&format!("(you are {name})")), "the delivery names the session: {hook}");
 }
 
 // `attend run` has no sensor to scan the room without the peers sensor.

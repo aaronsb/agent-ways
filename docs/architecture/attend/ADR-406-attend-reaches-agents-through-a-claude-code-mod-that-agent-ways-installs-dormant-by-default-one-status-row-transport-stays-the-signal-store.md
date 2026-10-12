@@ -248,3 +248,17 @@ The operator set the constraints. Attend matters when several agents work on rel
 Appended after acceptance; nothing above is changed. It adds to the early-access risk in the Negative consequences and in item 8.
 
 On Claude Code 2.1.296 the debug log of a session with `attend@agent-ways` installed says `installed plugins' hooks modules held 1ms for the rollout flag (tengu_plugin_hooks_modules): the fetch settled with no payload`. An installed mod's hooks module therefore loads behind a server-side rollout flag, which a `--plugin-dir` load does not wait for. In that run the session was logged out, the flag fetch returned no payload, and the mod still loaded. Whether a flag that is fetched and set to off would stop an installed mod from loading is untested. If it would, the Monitor fallback of item 9 is the path for those sessions, as it is for any host that cannot run the mod.
+
+## Addendum, 2026-10-12: a folder-marketplace plugin runs from the folder, not the cache
+
+Appended after acceptance; nothing above is changed. It corrects item 8's account of updates and its cost, and says what `ways status` compares.
+
+Item 8 assumed that sessions run the copy `claude plugin install` makes in the plugin cache, so that reconcile's update step and a version bump were what carried a change to sessions ("Running sessions keep their version until they restart"; "the cost of the marketplace route is the cache"). That does not hold for this marketplace. Claude Code's plugin reference for 2.1.296 says that a plugin whose marketplace is a folder, with a relative-path entry, "is read from that folder itself, never from the copy `claude plugin install` made", and that `/reload-plugins` re-reads the folder when it changed. A test on Claude Code 2.1.296, in a throwaway config laid out like this install, matched it: with the cache copy at one version and the folder at the next, `/reload-plugins` ran the folder's; with the folder moved on again, a fresh session ran the folder's; `claude plugin update` after a bump wrote a new cache copy and said to restart, and no session ran that copy.
+
+Consequences:
+
+- A change to the app's `plugins/attend/` reaches every session that starts after it, as soon as the app source moves (`ways manage update`, or `--ref`), before reconcile runs. A running session takes it with `/reload-plugins`. The attend binary is read at each call, so it needs no step.
+- Reconcile's update step and the release rule that refuses a change under `plugins/attend/` without a version bump do not affect what loads. Both stay, as record-keeping: the bump labels what a release shipped, which `claude plugin list` and the release notes name, and the update step keeps Claude Code's record of the installed version in line with it. Neither is a delivery mechanism.
+- `ways status` reported the installed version from Claude Code's record, which can trail what runs. It now reports the version sessions run: the shipped version when `attend@agent-ways` is installed from this app's `plugins/` folder, with the recorded version beside it when the two differ, and the record alone where the marketplace is some other folder.
+- The plugin cache is no longer a cost of this route. A session that has not run `/reload-plugins` keeps the module it loaded, which is the remaining sense in which a running session keeps its version.
+

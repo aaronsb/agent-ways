@@ -54,7 +54,18 @@ impl Warm {
         std::fs::create_dir_all(&bin).unwrap();
         let reading = f.home.join("reading.json");
         let ways = bin.join("ways");
-        std::fs::write(&ways, format!("#!/bin/sh\ncat '{}'\n", reading.display())).unwrap();
+        // `ways settings ...` answers with settings.json beside the reading,
+        // when a test wrote one; anything else is `ways context --json`.
+        let settings = f.home.join("settings.json");
+        std::fs::write(
+            &ways,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = settings ]; then cat '{}'; else cat '{}'; fi\n",
+                settings.display(),
+                reading.display()
+            ),
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -174,11 +185,11 @@ fn a_paid_cold_write_arms_keepwarm() {
     let w = Warm::new("kw-coldwrite");
     w.reading(&[(30 * MIN, 200_000, 500)]);
     assert_eq!(w.check(), "");
-    assert!(w.status_line().contains("off"), "{}", w.status_line());
+    assert!(w.status_line().contains("not armed"), "{}", w.status_line());
     w.reading(&[(30 * MIN, 200_000, 500), (MIN, 0, 200_500)]);
     assert_eq!(w.check(), "");
     let status = w.status_line();
-    assert!(status.starts_with("keepwarm    on, 3h00m left") || status.starts_with("keepwarm    on, 2h59m left"), "{status}");
+    assert!(status.starts_with("keepwarm    armed, 3h00m left") || status.starts_with("keepwarm    armed, 2h59m left"), "{status}");
 }
 
 /// The sensor's own switch in attend's config turns the check off too.
@@ -237,7 +248,7 @@ fn a_cold_write_scored_late_arms_from_its_own_time() {
     w.reading(&[(5 * 60 * MIN, 200_000, 500), (4 * 60 * MIN, 0, 200_500)]);
     assert_eq!(w.check(), "");
     let status = w.status_line();
-    assert!(!status.contains(" on,"), "a window that ended an hour ago is not armed: {status}");
+    assert!(status.contains("not armed"), "a window that ended an hour ago is not armed: {status}");
 
     let w = Warm::new("kw-late-write-2");
     w.reading(&[(3 * 60 * MIN, 200_000, 500)]);
@@ -245,7 +256,7 @@ fn a_cold_write_scored_late_arms_from_its_own_time() {
     w.reading(&[(3 * 60 * MIN, 200_000, 500), (20 * MIN, 0, 200_500)]);
     assert_eq!(w.check(), "");
     let status = w.status_line();
-    assert!(status.starts_with("keepwarm    on, 2h40m left") || status.starts_with("keepwarm    on, 2h39m left"), "{status}");
+    assert!(status.starts_with("keepwarm    armed, 2h40m left") || status.starts_with("keepwarm    armed, 2h39m left"), "{status}");
 }
 
 /// With `attend_mod.keepwarm: off` the attend mod never runs `keepwarm
@@ -257,7 +268,7 @@ fn a_cold_write_scored_late_arms_from_its_own_time() {
 fn the_verbs_a_mod_with_keepwarm_off_runs_never_arm_after_a_cold_write() {
     let w = Warm::new("kw-mod-off");
     let mod_verbs: [&[&str]; 6] = [
-        &["listen", "on"],
+        &["listen", "on", "--host", "mod"],
         &["inbox", "--drain", "--json"],
         &["unread", "--json"],
         &["peers"],
@@ -272,12 +283,42 @@ fn the_verbs_a_mod_with_keepwarm_off_runs_never_arm_after_a_cold_write() {
     for v in mod_verbs {
         assert!(w.run(v).status.success(), "attend {v:?}");
     }
-    assert!(w.status_line().contains("off"), "nothing armed: {}", w.status_line());
+    assert!(w.status_line().contains("not armed"), "nothing armed: {}", w.status_line());
 
     w.reading(&[(30 * MIN, 200_000, 500)]);
     w.check();
     w.reading(&[(30 * MIN, 200_000, 500), (MIN, 0, 200_500)]);
     w.check();
-    assert!(w.status_line().contains(" on, "), "the check arms: {}", w.status_line());
+    assert!(w.status_line().contains("armed, "), "the check arms: {}", w.status_line());
+}
+
+/// The clean-slate test's finding 6: `status` says "armed" or "not armed",
+/// never the "on" and "off" of the mod's `attend_mod.keepwarm` setting, and
+/// in a mod host it shows that setting on a line of its own.
+#[test]
+fn status_says_armed_and_shows_the_mod_setting_in_a_mod_host() {
+    let w = Warm::new("kw-wording");
+    w.reading(&[(30 * MIN, 200_000, 500)]);
+    let card = |w: &Warm| {
+        let out = w.run(&["keepwarm", "status"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    assert_eq!(w.status_line(), "keepwarm    not armed (attend keepwarm on arms it for 6h00m)");
+    assert!(!card(&w).contains("mod setting"), "no mod host, no mod line");
+    let off = w.run(&["keepwarm", "off"]);
+    assert_eq!(String::from_utf8_lossy(&off.stdout), "keepwarm is not armed\n");
+    assert!(w.run(&["keepwarm", "on"]).status.success());
+    assert!(w.status_line().starts_with("keepwarm    armed, 6h00m left") || w.status_line().starts_with("keepwarm    armed, 5h59m left"), "{}", w.status_line());
+
+    assert!(w.run(&["listen", "on", "--host", "mod"]).status.success());
+    std::fs::write(
+        w.f.home.join("settings.json"),
+        r#"{"view":"effective","keys":{"attend_mod.keepwarm":{"value":"off","default":"on","layer":"project","file":"/p/.claude/ways.yaml"}}}"#,
+    )
+    .unwrap();
+    let text = card(&w);
+    let line = text.lines().find(|l| l.starts_with("mod setting")).unwrap_or_else(|| panic!("{text}"));
+    assert_eq!(line, "mod setting attend_mod.keepwarm off (from /p/.claude/ways.yaml); the mod never runs the keepwarm check in this session");
 }
 }

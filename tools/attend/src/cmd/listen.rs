@@ -1,7 +1,8 @@
 //! `attend listen` and `attend unread`: the verbs are `verbs::listen` and
 //! `verbs::unread`; this renders them.
 
-use crate::cli::ListenCmd;
+use crate::cli::{ListenCmd, ListenHost};
+use attend_presence::enrollment::Host;
 use crate::verbs::listen::{self, Listening};
 use crate::verbs::unread;
 
@@ -9,7 +10,7 @@ use crate::verbs::unread;
 /// or `not listening`; `--json` prints [`Listening`].
 pub(crate) fn cmd_listen(sub: ListenCmd, json: bool) {
     let result = match sub {
-        ListenCmd::On => listen::on(),
+        ListenCmd::On { host } => listen::on(host.map(|ListenHost::Mod| Host::Mod)),
         ListenCmd::Off => listen::off(),
         ListenCmd::Status => Ok(listen::status()),
     };

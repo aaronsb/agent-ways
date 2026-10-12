@@ -8,7 +8,7 @@
 //! read; the messages wait in the store.
 
 use crate::util::{adopt_previous_enrollment, current_session, enroll_as, Session};
-use attend_presence::enrollment::{self, Source};
+use attend_presence::enrollment::{self, Host, Source};
 use serde::Serialize;
 
 /// This session's listening state.
@@ -21,6 +21,10 @@ pub struct Listening {
     pub listening: bool,
     /// The ways it is listening: `listen`, `run`, `join`. Empty when not.
     pub via: Vec<&'static str>,
+    /// What hosts delivery when it is not Monitor or a shell: `mod` once the
+    /// attend mod turned listening on (ADR-406). The drain speaks that
+    /// host's tools and format.
+    pub host: Option<&'static str>,
     /// An `attend run` holds the session. It listens until that run exits,
     /// whatever `listen off` said.
     pub run_live: bool,
@@ -60,13 +64,14 @@ pub fn status() -> Listening {
 /// rule applies again at the next drain, as it does for a join or `attend
 /// run` ([`enroll_as`]): what was addressed to its project meanwhile is
 /// delivered, older `#open` and channel backlog is held back and counted.
-/// Delivers nothing itself.
-pub fn on() -> Result<Listening, ListenError> {
+/// Delivers nothing itself. `host` names what hosts delivery (the attend
+/// mod passes [`Host::Mod`]); `None` keeps the host already recorded.
+pub fn on(host: Option<Host>) -> Result<Listening, ListenError> {
     let me = current_session();
     if !me.resolved() {
         return Err(ListenError::Unresolved);
     }
-    enroll_as(&me, Source::Listen).map_err(|e| ListenError::Unwritable { error: e.to_string() })?;
+    enroll_as(&me, Source::Listen, host).map_err(|e| ListenError::Unwritable { error: e.to_string() })?;
     // A listening session looks alive to peers and to `/purge` from now,
     // not from its first drain.
     attend_presence::heartbeat::touch(&me.session_id).ok();
@@ -94,6 +99,7 @@ fn state(me: &Session, listening: bool) -> Listening {
         resolved,
         listening,
         via: if listening { enrollment::sources(&me.session_id).into_iter().map(Source::as_str).collect() } else { Vec::new() },
+        host: if listening { enrollment::host(&me.session_id).map(Host::as_str) } else { None },
         run_live: resolved && attend_presence::heartbeat::run_is_live(&me.session_id),
     }
 }

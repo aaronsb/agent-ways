@@ -131,6 +131,9 @@ pub enum SendError {
     NoLivePeers { name: String, only_self: bool, channels: Vec<ChannelCount> },
     /// `reply` found no peer message to thread under.
     NoInbound,
+    /// `re` is a short `~id` handle that names no message this session
+    /// receives.
+    UnknownHandle { handle: String },
     /// The parent was said in a channel this session has since left. A
     /// reply anywhere else would carry a channel's answer out of it.
     ParentChannelLeft { channel: String },
@@ -162,6 +165,10 @@ impl std::fmt::Display for SendError {
             }
             Self::NoLivePeers { name, .. } => write!(f, "no live peers in channel '{name}'"),
             Self::NoInbound => write!(f, "no prior inbound signal to thread against; to start a new topic, use attend send"),
+            Self::UnknownHandle { handle } => write!(
+                f,
+                "no message this session receives has the handle ~{handle}; drop re to answer the newest, or pass the full id (attend inbox lists them)"
+            ),
             Self::ParentChannelLeft { channel } => write!(
                 f,
                 "the message you are replying to was said in channel '{channel}', which you have left; rejoin it (attend join {channel}), pass --channel or --to, or use attend send"
@@ -413,7 +420,7 @@ pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     let me = current_session();
     let last = sensor_peers::last_inbound::read(&me.session_id);
     let (re, threading, said) = match &req.re {
-        Some(id) => (Some(id.clone()), Threading::Threaded, None),
+        Some(id) => (Some(resolve_re(&me, id)?), Threading::Threaded, None),
         None => {
             let said = last.as_ref().and_then(|l| l.said.as_ref());
             match classify_reply_target(last.as_ref().map(|l| l.id.clone())) {
@@ -435,6 +442,20 @@ pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     };
     let sent = send_as(&me, &SendRequest { message: req.message.clone(), to, channel, re })?;
     Ok(Replied { sent, threading })
+}
+
+/// The full id `re` names: a full signal id as given, or the short `~id`
+/// handle a delivery line shows (ADR-406 item 5), with or without its `~`,
+/// looked up in this session's receive set. The attend mod maps the handles
+/// of what it delivered itself; a handle the Stop-hook drain printed reaches
+/// attend as written and is resolved here.
+#[cfg(feature = "sensor-peers")]
+fn resolve_re(me: &Session, re: &str) -> Result<String, SendError> {
+    let re = re.strip_prefix('~').unwrap_or(re);
+    if !crate::verbs::inbox::is_short_id(re) {
+        return Ok(re.to_string());
+    }
+    crate::verbs::inbox::resolve_short_id(me, re).ok_or_else(|| SendError::UnknownHandle { handle: re.to_string() })
 }
 
 /// Where a reply goes when the caller names no destination.

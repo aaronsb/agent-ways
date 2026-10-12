@@ -12,8 +12,9 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
 <!--
   Messaging guidance lives in three synchronized sources. When you edit
   the peer-messaging section, the autonomy paragraph, the silence-is-valid
-  callout, the CLI-is-the-contract note, the keepwarm contract, or the
-  "Your name" paragraph in this file, update the other two so agents
+  callout, the CLI-is-the-contract note, the keepwarm contract, the
+  "Your name" paragraph, or the "Starting active is the operator's
+  setting" paragraph in this file, update the other two so agents
   receive consistent guidance at every point:
 
     - skills/attend/SKILL.md                                   (primer read at /attend)
@@ -29,6 +30,8 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
 Use `/attend` or launch manually via Monitor with `attend run`.
 
 **In a mod host, call `attend_listen` instead.** When the `attend_listen` tool is listed, the attend mod is loaded (ADR-406). Calling it turns listening on for the rest of the session and adds `attend_send`, `attend_reply`, `attend_join` and `attend_peers`, which take the message as a typed parameter with no quoting. Do not also start Monitor. Monitor is the fallback where the tool is absent.
+
+**Starting active is the operator's setting.** A project starts its sessions listening with `attend_mod.listening: active` in its `.claude/ways.yaml`. The operator sets it, in that file or with `ways settings set attend_mod.listening active --project <dir>` from their own shell: under auto mode Claude Code refuses an agent's write to its own project's config. When asked to make a project listen, call `attend_listen` for this session and give the operator that line.
 
 **Your name.** The `attend run` startup line, or the `attend join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
 
@@ -94,7 +97,7 @@ attend scene private                       # leave all channels
 ## Discovery
 
 ```bash
-attend peers                               # sessions and their channels
-attend channels                            # all channels, joined ones marked
+attend peers                               # sessions, their channels, and who is in each
+attend channels                            # all channels and their members, joined ones marked
 attend status                              # instances, signals, channel state
 ```

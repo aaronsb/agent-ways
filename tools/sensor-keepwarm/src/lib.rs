@@ -559,11 +559,11 @@ pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, n
             String::new()
         };
         let last = s.last_ping.as_ref().map(|p| format!(" · last wake read {} {}", fmt_tok(p.read), fmt_usd(p.usd))).unwrap_or_default();
-        format!("on, {} left{next}{last}", fmt_duration(s.deadline - now))
+        format!("armed, {} left{next}{last}", fmt_duration(s.deadline - now))
     } else if let Some(why) = &s.stopped {
         format!("stopped, {why}")
     } else {
-        format!("off (attend keepwarm on to arm it for {})", fmt_duration(DEFAULT_WINDOW_SECS))
+        format!("not armed (attend keepwarm on arms it for {})", fmt_duration(DEFAULT_WINDOW_SECS))
     };
     lines.push(format!("keepwarm    {keepwarm}"));
     if let Some(p) = price_of(&s.model) {
@@ -979,12 +979,12 @@ mod tests {
         assert_eq!(lines[1], "state       warm, 50m left");
         assert_eq!(lines[2], "context     200520 tokens");
         assert_eq!(lines[3], "cold cost   $4.01 to re-write it (warm turn $0.05)");
-        assert_eq!(lines[4], "keepwarm    on, 5h50m left · wake in 40m");
+        assert_eq!(lines[4], "keepwarm    armed, 5h50m left · wake in 40m");
         assert!(lines[5].starts_with("break-even  up to 80 wakes at the read rate cost one cold write, about 2d 18h of idle"));
         assert_eq!(lines[6], "session     0 cold writes paid, $0.00");
         let cold = card(&r, None, None, 1000 + TTL_SECS + 3600);
         assert_eq!(cold[1], "state       COLD, last request 2h00m ago");
-        assert!(cold[4].starts_with("keepwarm    off (attend keepwarm on"));
+        assert_eq!(cold[4], "keepwarm    not armed (attend keepwarm on arms it for 6h00m)");
     }
 
     #[test]

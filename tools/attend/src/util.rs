@@ -122,10 +122,15 @@ pub(crate) fn adopt_previous_enrollment(ident: &Session) -> bool {
 /// An enrollment this Claude Code process made under its id before
 /// `/clear` counts as listening, and moves here first. Returns whether the
 /// session was listening before. Only a resolved session enrolls: the
-/// drain never runs for any other.
-pub(crate) fn enroll_as(ident: &Session, source: attend_presence::enrollment::Source) -> std::io::Result<bool> {
+/// drain never runs for any other. `host` records what hosts delivery (the
+/// attend mod); `None` keeps the host already recorded.
+pub(crate) fn enroll_as(
+    ident: &Session,
+    source: attend_presence::enrollment::Source,
+    host: Option<attend_presence::enrollment::Host>,
+) -> std::io::Result<bool> {
     let was = adopt_previous_enrollment(ident);
-    attend_presence::enrollment::enroll(&ident.session_id, source)?;
+    attend_presence::enrollment::enroll(&ident.session_id, source, host)?;
     if !was {
         attend_state::StateStore::new(Some(ident.session_id.clone())).reopen_cold_start();
     }
@@ -135,7 +140,7 @@ pub(crate) fn enroll_as(ident: &Session, source: attend_presence::enrollment::So
 /// Record that this session enrolled by joining a channel (#720).
 pub(crate) fn enroll_by_join(ident: &Session) {
     if ident.resolved() {
-        enroll_as(ident, attend_presence::enrollment::Source::Join).ok();
+        enroll_as(ident, attend_presence::enrollment::Source::Join, None).ok();
     }
 }
 

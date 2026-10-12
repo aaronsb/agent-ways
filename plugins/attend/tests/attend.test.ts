@@ -70,6 +70,8 @@ type World = {
   keepwarm?: string
   /** An attend without the `listen` verb. */
   noListen?: boolean
+  /** An attend whose `listen on` has no `--host`. */
+  noHostFlag?: boolean
   /** Submits that fail before one enters. */
   submitFails?: number
 }
@@ -98,6 +100,7 @@ function host(on: On, world: World) {
     const cmd = argv.slice(1).join(' ')
     if (argv[0] === 'ways') return ok(configJson(world.config ?? {}))
     if (cmd.startsWith('listen') && world.noListen) return { ...ok(), exitCode: 2, stderr: "error: unrecognized subcommand 'listen'" }
+    if (cmd.includes('--host') && world.noHostFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--host' found" }
     if (cmd.startsWith('listen')) return ok(cmd === 'listen off' ? 'not listening\n' : 'listening\n')
     if (cmd === 'peers') return ok('...\n  3 agent(s), 0 channel(s)\n')
     if (cmd === 'unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
@@ -141,6 +144,14 @@ describe('argv', () => {
     expect(replyArgv('ok', 'id-1')).toEqual(['attend', 'reply', '--re', 'id-1', '--', 'ok'])
     const long = 'y'.repeat(900)
     expect(sendArgv(long)).toEqual(['attend', 'send', '--', long])
+  })
+
+  test('the handle matches attend\'s short_id, so a ~id the drain printed is one handle', () => {
+    // The same vectors as tools/attend/src/verbs/inbox.rs.
+    expect(shortId('peer-sess-1-1')).toBe('73nki')
+    expect(shortId('')).toBe('tntfp')
+    expect(shortId('é-x')).toBe('zer0p')
+    expect(shortId('a')).toBe('9wi7g')
   })
 
   test('the config is read through ways for the session directory', () => {
@@ -268,12 +279,27 @@ describe('dormant', () => {
     const r = await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
     expect(String((r as { result?: unknown }).result)).toContain('listening for the rest of this session')
     expect(h.tools).toEqual(['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers'])
-    expect(h.ran('listen on')).toBe(true)
+    // The mod names itself the host, so attend's Stop-hook drain speaks its
+    // format and tools in this session.
+    expect(h.argvs).toContainEqual(['attend', 'listen', 'on', '--host', 'mod'])
     await clock.advance(5_000)
     expect(h.submitted.length).toBe(1)
     expect(full(h.submitted[0] ?? '')).toBe(true)
     expect(h.submitted[0]).toContain(`[project] ${SENDER} 21:21: m0`)
     expect(await band($)).toBeDefined()
+  })
+
+  test('an attend older than --host still turns listening on, without naming the host', async ($, on) => {
+    mock.clock(on, { now: T0 })
+    const h = host(on, { noHostFlag: true })
+    await $.session.start(INTERACTIVE)
+    const r = (await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)) as { result?: unknown; isError?: boolean }
+    expect(r.isError).toBeUndefined()
+    expect(String(r.result)).toContain('listening for the rest of this session')
+    expect(h.argvs.filter(a => a[1] === 'listen' && a[2] === 'on')).toEqual([
+      ['attend', 'listen', 'on', '--host', 'mod'],
+      ['attend', 'listen', 'on'],
+    ])
   })
 
   test('attend_listen says so when attend cannot set the session listening', async ($, on) => {
@@ -447,6 +473,10 @@ describe('active', () => {
     expect(h.argvs.filter(a => a[1] === 'send').length).toBe(1)
     await $.tool.call({ tool: 'mcp__attend__attend_reply', message: '-- starts with dashes' } as never)
     expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--', '-- starts with dashes'])
+    // A handle the Stop-hook drain printed was never mapped here: it goes to
+    // attend as written, and attend resolves it.
+    await $.tool.call({ tool: 'mcp__attend__attend_reply', message: 'ok', re: '~73nki' } as never)
+    expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--re', '73nki', '--', 'ok'])
   })
 })
 

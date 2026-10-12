@@ -152,4 +152,9 @@ pub(crate) fn cmd_channels(json: bool) {
         ]);
     }
     t.print();
+    // Who is in each channel this session is in, one line each, so a member
+    // sees who joined before anyone posts. Other channels show their count.
+    for c in channels.iter().filter(|c| !c.member_names.is_empty()) {
+        println!("  #{}: {}", c.name, c.member_names.join(", "));
+    }
 }
