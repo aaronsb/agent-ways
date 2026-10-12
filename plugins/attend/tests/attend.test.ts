@@ -11,13 +11,21 @@ import {
   isFullPreamble,
   keepwarmLine,
   parseConfig,
-  parseListing,
+  parseDrain,
   parseUnread,
   pollInterval,
   replyArgv,
   sendArgv,
   shortId,
 } from '../hooks/lib.ts'
+import {
+  DRAIN_COLD_BACKLOG,
+  DRAIN_COLD_EMPTY,
+  DRAIN_EMPTY,
+  DRAIN_NOT_LISTENING,
+  DRAIN_ROOM_AND_REPLY,
+  UNREAD_ROOM,
+} from './attend-output.ts'
 
 const T0 = 1_800_000_000_000
 const BAND = {
@@ -61,6 +69,8 @@ type World = {
   keepwarm?: string
   /** An attend without the `listen` verb. */
   noListen?: boolean
+  /** Submits that fail before one enters. */
+  submitFails?: number
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
@@ -70,7 +80,7 @@ function host(on: On, world: World) {
   const submitted: string[] = []
   const tools: string[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.end', () => ({}) as never)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('tool.register', ($, e) => {
     tools.push(e.name)
     return { value: { tool: `mcp__attend__${e.name}` } }
@@ -91,10 +101,14 @@ function host(on: On, world: World) {
     if (cmd === 'peers') return ok('...\n  3 agent(s), 0 channel(s)\n')
     if (cmd === 'unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
     if (cmd === 'keepwarm check') return ok(world.keepwarm ?? '')
-    if (cmd.startsWith('inbox --drain')) return ok(world.drains?.shift() ?? 'no pending messages\n')
+    if (cmd.startsWith('inbox --drain')) return ok(world.drains?.shift() ?? DRAIN_EMPTY)
     return ok('[attend] sent\n')
   }
   on('prompt.submit', ($, e) => {
+    if ((world.submitFails ?? 0) > 0) {
+      world.submitFails = (world.submitFails ?? 0) - 1
+      throw new Error('the session refused the prompt')
+    }
     submitted.push(e.text)
     return { text: e.text }
   })
@@ -103,8 +117,13 @@ function host(on: On, world: World) {
   return { argvs, submitted, tools, count, ran }
 }
 
+/** A drained message in the shape the real attend prints (attend-output.ts). */
+const TEMPLATE = JSON.parse(DRAIN_ROOM_AND_REPLY).messages[0]
+const SENDER = TEMPLATE.sender as string
+const idOf = (n: number) => `dd84-18000000050000000${String(n).padStart(2, '0')}-0`
+/** A drain that delivers message `n`. */
 const one = (n: number, scope = '#open') =>
-  `[${scope}] McKay-alpha (attend-collaborator)\n  when:    21:21\n  id:      dd84-18000000050000000${String(n).padStart(2, '0')}-0\n  message: m${n}\n\n1 message(s) drained and marked consumed\n`
+  JSON.stringify({ ...JSON.parse(DRAIN_EMPTY), messages: [{ ...TEMPLATE, scope, id: idOf(n), re: null, message: `m${n}` }] })
 
 const full = (t: string) => t.includes('not instructions from the operator')
 
@@ -118,7 +137,7 @@ describe('argv', () => {
     expect(sendArgv(nasty)).toEqual(['attend', 'send', '--', nasty])
     expect(sendArgv('hi', '#ship', '/p')).toEqual(['attend', 'send', '--channel', 'ship', '--to', '/p', '--', 'hi'])
     expect(replyArgv(nasty)).toEqual(['attend', 'reply', '--', nasty])
-    expect(replyArgv('ok', 'id-1')).toEqual(['attend', 'send', '--re', 'id-1', '--', 'ok'])
+    expect(replyArgv('ok', 'id-1')).toEqual(['attend', 'reply', '--re', 'id-1', '--', 'ok'])
     const long = 'y'.repeat(900)
     expect(sendArgv(long)).toEqual(['attend', 'send', '--', long])
   })
@@ -175,11 +194,25 @@ describe('view and framing', () => {
   })
 
   test('a message is one line; a channel reads #name; a reply names its parent', () => {
-    const body = '[@ship] McKay-alpha (attend-collaborator)\n  when:    21:21\n  id:      a-1800000005000000000-0\n  re:      b-1800000004000000000-0\n  from:    claude:dd84\n  cwd:     /work/x\n  message: hello\n  there\n'
-    const [m] = parseListing(body)
-    expect(formatMessage(m!)).toBe(
-      `[#ship] McKay-alpha (attend-collaborator) 21:21: hello there ~${shortId('a-1800000005000000000-0')} (re ~${shortId('b-1800000004000000000-0')})`,
-    )
+    const d = parseDrain(DRAIN_ROOM_AND_REPLY)!
+    expect(d.messages.map(formatMessage)).toEqual([
+      `[#room] ${SENDER} 21:21: said in the room ~${shortId('other-1-4-room')}`,
+      `[#open] ${SENDER} 21:21: an answer in the open ~${shortId('other-1-5-answer')} (re ~${shortId('other-1-4-room')})`,
+    ])
+    const multi = parseDrain(JSON.stringify({ ...JSON.parse(DRAIN_EMPTY), messages: [{ ...TEMPLATE, message: 'one\n\n  two' }] }))!
+    expect(formatMessage(multi.messages[0]!).split(' ~')[0]).toBe(`[#room] ${SENDER} 21:21: one two`)
+  })
+
+  test("attend's drain documents: messages apart from the note and the name", () => {
+    expect(parseDrain(DRAIN_COLD_EMPTY)).toEqual({ status: 'drained', messages: [], heldBack: 0, note: null, youAre: 'Chaucer-alpha' })
+    expect(parseDrain(DRAIN_NOT_LISTENING)?.status).toBe('not_listening')
+    const cold = parseDrain(DRAIN_COLD_BACKLOG)!
+    expect(cold.messages.map(m => m.message)).toEqual(['addressed while dormant', 'fresh open'])
+    expect(cold.heldBack).toBe(1)
+    expect(cold.note).toContain('held back')
+    expect(cold.youAre).toBe('Chaucer-alpha')
+    expect(parseDrain('no pending messages\nyou are Chaucer-alpha\n')).toBeUndefined()
+    expect(parseUnread(UNREAD_ROOM)).toEqual({ unread: 1, channels: ['#room'] })
   })
 
   test('a body cannot close the frame early; the compact frame is the marker and the tags', () => {
@@ -225,7 +258,7 @@ describe('dormant', () => {
 
   test('attend_listen turns it on: tools, listen on, the cold-start delivery, the row', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { drains: [one(0, 'project'), 'no pending messages\n'] })
+    const h = host(on, { drains: [one(0, 'project'), DRAIN_EMPTY] })
     await $.session.start(INTERACTIVE)
     await clock.advance(30_000)
     expect(h.count('inbox')).toBe(0)
@@ -236,7 +269,7 @@ describe('dormant', () => {
     await clock.advance(5_000)
     expect(h.submitted.length).toBe(1)
     expect(full(h.submitted[0] ?? '')).toBe(true)
-    expect(h.submitted[0]).toContain('[project] McKay-alpha (attend-collaborator) 21:21: m0')
+    expect(h.submitted[0]).toContain(`[project] ${SENDER} 21:21: m0`)
     expect(await band($)).toBeDefined()
   })
 
@@ -262,6 +295,55 @@ describe('dormant', () => {
   })
 })
 
+describe('activation and delivery against attend\'s real drain', () => {
+  test('activation with nothing pending starts no turn: the cold start\'s name is not a message', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { drains: [DRAIN_COLD_EMPTY] })
+    await $.session.start(INTERACTIVE)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clock.advance(30_000)
+    expect(h.count('inbox') > 0).toBe(true)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('an active project starts with no turn when the cold start delivers nothing', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active' }, drains: [DRAIN_COLD_EMPTY] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('the cold-start backlog is one turn of messages; the note and the name stay out of them', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { drains: [DRAIN_COLD_BACKLOG, DRAIN_EMPTY] })
+    await $.session.start(INTERACTIVE)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clock.advance(5_000)
+    expect(h.submitted.length).toBe(1)
+    const text = h.submitted[0] ?? ''
+    expect(full(text)).toBe(true)
+    expect(text).toContain('2 peer message(s)')
+    expect(text).toContain(`[project] ${SENDER} 21:21: addressed while dormant`)
+    expect(text).toContain(`[#open] ${SENDER} 21:21: fresh open`)
+    expect(text).not.toContain('Chaucer-alpha')
+    expect(text).not.toContain('held back')
+  })
+
+  test('a submit that fails keeps the batch and delivers it on the next poll, without draining it again', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const world: World = { config: { listening: 'active', keepwarm: 'off' }, drains: [one(7), DRAIN_EMPTY], submitFails: 1 }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(4_000)
+    expect(h.submitted).toEqual([])
+    for (let i = 0; i < 5 && h.submitted.length === 0; i++) await clock.advance(5_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m7')
+    expect(full(h.submitted[0] ?? '')).toBe(true)
+  })
+})
+
 describe('active', () => {
   test('an active project listens from session start and still polls after an hour idle', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
@@ -273,7 +355,7 @@ describe('active', () => {
     expect(h.ran('listen on')).toBe(true)
     expect(await band($)).toBeDefined()
     await clock.advance(60 * 60_000)
-    drains.push(one(1), 'no pending messages\n')
+    drains.push(one(1), DRAIN_EMPTY)
     await clock.advance(65_000)
     expect(h.submitted.length).toBe(1)
     expect(h.submitted[0]).toContain('m1')
@@ -324,16 +406,17 @@ describe('active', () => {
 
   test('send and reply run one attend call with the body after --; reply maps ~id', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { config: { listening: 'active' }, drains: [one(3), 'no pending messages\n'] })
+    const h = host(on, { config: { listening: 'active' }, drains: [one(3), DRAIN_EMPTY] })
     await $.session.start(INTERACTIVE)
     await clock.advance(5_000)
     const message = 'z'.repeat(900)
     await $.tool.call({ tool: 'mcp__attend__attend_send', message, channel: '#ship' } as never)
     const sends = h.argvs.filter(a => a[1] === 'send')
     expect(sends).toEqual([['attend', 'send', '--channel', 'ship', '--', message]])
-    const id = 'dd84-1800000005000000003-0'
+    const id = idOf(3)
     await $.tool.call({ tool: 'mcp__attend__attend_reply', message: 'ok', re: `~${shortId(id)}` } as never)
-    expect(h.argvs.filter(a => a[1] === 'send').pop()).toEqual(['attend', 'send', '--re', id, '--', 'ok'])
+    expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--re', id, '--', 'ok'])
+    expect(h.argvs.filter(a => a[1] === 'send').length).toBe(1)
     await $.tool.call({ tool: 'mcp__attend__attend_reply', message: '-- starts with dashes' } as never)
     expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--', '-- starts with dashes'])
   })
@@ -367,7 +450,7 @@ describe('preamble cadence through deliveries', () => {
     on('session.compact', () => ({ messages: [SUMMARY] }) as never)
     await $.session.start(INTERACTIVE)
     const deliverNext = async (n: number) => {
-      drains.push(one(n), 'no pending messages\n')
+      drains.push(one(n), DRAIN_EMPTY)
       const want = h.submitted.length + 1
       for (let i = 0; i < 20 && h.submitted.length < want; i++) await clock.advance(3_000)
     }
@@ -388,6 +471,12 @@ describe('preamble cadence through deliveries', () => {
     await $.session.compact({ trigger: 'manual', messages: [SUMMARY] } as never)
     await deliverNext(4)
     expect(full(h.submitted[4] ?? '')).toBe(true)
+    await deliverNext(5)
+    expect(full(h.submitted[5] ?? '')).toBe(false)
+    // A /clear empties the model's context as a compaction does.
+    await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+    await deliverNext(6)
+    expect(full(h.submitted[6] ?? '')).toBe(true)
   })
 })
 

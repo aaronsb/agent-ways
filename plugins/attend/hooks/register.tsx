@@ -30,7 +30,6 @@ import {
   keepwarmLine,
   parseConfig,
   parseDrain,
-  parseListing,
   parsePeerCount,
   parseUnread,
   peerLines,
@@ -66,6 +65,8 @@ const BATCH_MS = 2_000
 // The peer count and the keepwarm check run at most this often.
 const PEERS_EVERY_MS = 30_000
 const KEEPWARM_EVERY_MS = 60_000
+// Polls that retry a batch whose submit failed before it is let go.
+const SUBMIT_TRIES = 3
 
 // agent-ways theme (tools/agent-theme/themes/agent-ways.theme).
 const SUBTLE = '#3a3a3c'
@@ -92,6 +93,12 @@ type Mod = {
   toolsRegistered: boolean
   /** Short `~id` handles of delivered messages, to their full ids. */
   ids: Map<string, string>
+  /** Set on activation; the mode in $.state is the copy a reload reads. */
+  active: boolean
+  /** A drained batch no submit has taken yet. */
+  pending: Listed[]
+  /** Submits of `pending` that failed. */
+  submitTries: number
   /** Channels joined through attend_join, shown until attend reports rooms. */
   joined: Set<string>
 }
@@ -205,6 +212,7 @@ async function activate($: $, mod: Mod): Promise<ProcessRunResult> {
   mod.config = await readConfig($, mod.cwd)
   mod.canPoll = mod.canPoll || mod.config.headlessPoll
   mod.lastActivityMs = await $.clock.now()
+  mod.active = true
   await updateStatus($, s => ({ ...s, mode: 'active' as const }))
   await registerActiveTools($, mod)
   const r = await listenOn($)
@@ -225,7 +233,7 @@ function startTicker($: $, mod: Mod) {
  *  check. `force` skips the interval (activation, a turn's end). */
 async function tick($: $, mod: Mod, force: boolean) {
   if (mod.isTicking) return
-  if ((await readStatus($)).mode !== 'active') return
+  if (!(await isOn($, mod))) return
   mod.isTicking = true
   try {
     const now = await $.clock.now()
@@ -246,37 +254,46 @@ async function tick($: $, mod: Mod, force: boolean) {
 }
 
 /** One drain; on messages, a second after BATCH_MS, then one prompt for the
- *  batch. */
+ *  batch. A turn is submitted only when the drain delivered at least one
+ *  message: the cold start's held-back note and the session's name are
+ *  fields of the drain's document, never a message.
+ *
+ *  The drain marks what it delivers read before the prompt is submitted, so
+ *  the batch waits in `mod.pending` until a submit takes it. A submit that
+ *  fails, or that a hook drops, leaves the batch there and the next poll
+ *  tries it again before draining more, up to SUBMIT_TRIES times. */
 async function poll($: $, mod: Mod) {
   if (mod.isPolling) return
   mod.isPolling = true
   try {
-    const first = parseDrain((await run($, DRAIN_ARGV)).stdout)
-    if (first.kind !== 'messages') return
-    const msgs = parsedOrRaw(first.body)
-    let count = first.count
-    await updateStatus($, s => ({ ...s, unread: Math.max(s.unread, count) }))
-    await new Promise<void>(resolve => $.clock.after(BATCH_MS, resolve))
-    const second = parseDrain((await run($, DRAIN_ARGV)).stdout)
-    if (second.kind === 'messages') {
-      msgs.push(...parsedOrRaw(second.body))
-      count += second.count
+    if (mod.pending.length === 0) {
+      const first = parseDrain((await run($, DRAIN_ARGV)).stdout)
+      if (!first || first.messages.length === 0) return
+      const msgs = [...first.messages]
+      await updateStatus($, s => ({ ...s, unread: Math.max(s.unread, msgs.length) }))
+      await new Promise<void>(resolve => $.clock.after(BATCH_MS, resolve))
+      const second = parseDrain((await run($, DRAIN_ARGV)).stdout)
+      if (second) msgs.push(...second.messages)
+      mod.pending = msgs
+      mod.submitTries = 0
     }
-    await deliver($, mod, msgs, count)
+    if (await deliver($, mod, mod.pending)) {
+      mod.pending = []
+    } else if (++mod.submitTries >= SUBMIT_TRIES) {
+      // Read by attend and refused by the session: they stay readable with
+      // attend inbox, and the poll goes on to new messages.
+      await $.ui.toast(`attend: ${mod.pending.length} message(s) could not be delivered; attend inbox lists them`)
+      mod.pending = []
+    }
   } finally {
     mod.isPolling = false
   }
 }
 
-/** A body the listing parser cannot read is kept as one line of its own. */
-function parsedOrRaw(body: string): Listed[] {
-  const parsed = parseListing(body)
-  return parsed.length > 0 ? parsed : [{ scope: 'attend', sender: 'unparsed', id: body, re: '', when: '', message: body }]
-}
-
-/** Submits one framed batch; resolves as its turn starts, waking an idle
- *  session. */
-async function deliver($: $, mod: Mod, msgs: readonly Listed[], count: number) {
+/** Submits one framed batch, which starts a turn in an idle session.
+ *  Resolves whether the prompt entered; the preamble counters move only
+ *  when it did. */
+async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean> {
   mod.lastActivityMs = await $.clock.now()
   for (const m of msgs) {
     mod.ids.set(shortId(m.id), m.id)
@@ -284,13 +301,18 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[], count: number) {
   }
   const s = await readStatus($)
   const full = isFullPreamble(s.deliveries, s.afterCompaction, s.turnsSinceFull, mod.config.preambleEveryTurns)
+  const entered = await $.prompt
+    .submit({ text: frameInbound(msgs.map(formatMessage), msgs.length, full) })
+    .then(r => r.drop === undefined)
+    .catch(() => false)
+  if (!entered) return false
   await updateStatus($, t => ({
     ...t,
     deliveries: t.deliveries + 1,
     afterCompaction: false,
     turnsSinceFull: full ? 0 : t.turnsSinceFull,
   }))
-  await $.prompt.submit({ text: frameInbound(msgs.map(formatMessage), count, full) })
+  return true
 }
 
 async function refreshUnread($: $, mod: Mod) {
@@ -316,6 +338,16 @@ async function keepwarm($: $) {
   if (line) await $.prompt.submit({ text: line })
 }
 
+/** Whether this session is active. The module's own flag answers too, and
+ *  puts the mode back in $.state, so an engine that clears the session's
+ *  state on /clear does not drop a session that is still listening. */
+async function isOn($: $, mod: Mod): Promise<boolean> {
+  if (isActive(await readStatus($))) return true
+  if (!mod.active) return false
+  await updateStatus($, s => ({ ...s, mode: 'active' as const }))
+  return true
+}
+
 function isActive(s: AttendStatus): boolean {
   return s.mode === 'active'
 }
@@ -339,6 +371,9 @@ export const register: Register = on => {
     lastActivityMs: 0,
     toolsRegistered: false,
     ids: new Map(),
+    active: false,
+    pending: [],
+    submitTries: 0,
     joined: new Set(),
   }
 
@@ -363,9 +398,12 @@ export const register: Register = on => {
 
   // A /clear goes on under a new session id with no session.start: an active
   // session tells attend again that the new id is listening.
+  // A /clear empties the model's context as a compaction does, so the next
+  // delivery carries the full preamble again.
   on('session.end', async ($, e, next) => {
     const done = await next(e)
-    if (e.reason === 'clear' && isActive(await readStatus($))) {
+    if (e.reason === 'clear' && (await isOn($, mod))) {
+      await updateStatus($, s => ({ ...s, afterCompaction: true, turnsSinceFull: 0 }))
       $.clock.after(1_000, () => void listenOn($))
     }
     return done
@@ -384,7 +422,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     mod.running.add(e.turnId)
     mod.lastActivityMs = await $.clock.now()
-    if (isActive(await readStatus($))) await updateStatus($, s => ({ ...s, turnsSinceFull: s.turnsSinceFull + 1 }))
+    if (await isOn($, mod)) await updateStatus($, s => ({ ...s, turnsSinceFull: s.turnsSinceFull + 1 }))
     return next(e)
   })
 
@@ -415,7 +453,7 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_send' }, async ($, e) => {
-    if (!isActive(await readStatus($))) return DORMANT_REFUSAL
+    if (!(await isOn($, mod))) return DORMANT_REFUSAL
     const a = input<{ message: unknown; channel: unknown; to: unknown }>(e)
     const message = typeof a.message === 'string' ? a.message : ''
     if (message.trim() === '') return { result: 'message is empty; nothing sent', isError: true }
@@ -426,7 +464,7 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_reply' }, async ($, e) => {
-    if (!isActive(await readStatus($))) return DORMANT_REFUSAL
+    if (!(await isOn($, mod))) return DORMANT_REFUSAL
     const a = input<{ message: unknown; re: unknown }>(e)
     const message = typeof a.message === 'string' ? a.message : ''
     if (message.trim() === '') return { result: 'message is empty; nothing sent', isError: true }
@@ -437,7 +475,7 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_join' }, async ($, e) => {
-    if (!isActive(await readStatus($))) return DORMANT_REFUSAL
+    if (!(await isOn($, mod))) return DORMANT_REFUSAL
     const a = input<{ channel: unknown }>(e)
     const channel = typeof a.channel === 'string' ? a.channel.trim() : ''
     if (channel === '') return { result: 'channel is empty; nothing joined', isError: true }
@@ -452,7 +490,7 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_peers' }, async $ => {
-    if (!isActive(await readStatus($))) return DORMANT_REFUSAL
+    if (!(await isOn($, mod))) return DORMANT_REFUSAL
     const r = await run($, PEERS_ARGV)
     if (r.exitCode === 0) await updateStatus($, s => ({ ...s, peers: parsePeerCount(r.stdout) }))
     return toolResult(r, 'attend peers')

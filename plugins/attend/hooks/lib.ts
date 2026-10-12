@@ -19,11 +19,11 @@ export function sendArgv(message: string, channel?: string, to?: string): string
   return argv
 }
 
-/** `attend reply -- <message>` threads to the last inbound; with `re`,
- *  `attend send --re <id> -- <message>` threads to that id. attend keeps the
- *  parent's channel either way. */
+/** `attend reply [--re <id>] -- <message>`: threads to the newest message
+ *  delivered, or to `re`, and goes where that message was said. attend
+ *  refuses a parent whose room this session left, or that it cannot find. */
 export function replyArgv(message: string, re?: string): string[] {
-  return re ? [ATTEND, 'send', '--re', re, '--', message] : [ATTEND, 'reply', '--', message]
+  return re ? [ATTEND, 'reply', '--re', re, '--', message] : [ATTEND, 'reply', '--', message]
 }
 
 export function joinArgv(channel: string): string[] {
@@ -36,7 +36,7 @@ function bareChannel(channel: string): string {
 
 export const LISTEN_ON_ARGV = [ATTEND, 'listen', 'on'] as const
 export const LISTEN_OFF_ARGV = [ATTEND, 'listen', 'off'] as const
-export const DRAIN_ARGV = [ATTEND, 'inbox', '--drain', '--format', 'plain'] as const
+export const DRAIN_ARGV = [ATTEND, 'inbox', '--drain', '--json'] as const
 export const UNREAD_ARGV = [ATTEND, 'unread', '--json'] as const
 export const PEERS_ARGV = [ATTEND, 'peers'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
@@ -128,55 +128,56 @@ export function isFullPreamble(deliveries: number, afterCompaction: boolean, tur
 
 // ── parsing ──────────────────────────────────────────────────────────────
 
-/** One message of a drain in the plain format. */
+/** One drained message, as `attend inbox --drain --json` gives it. */
 export type Listed = {
   /** The drain's scope label: `#open`, `project`, or `@name` for a channel. */
   scope: string
   sender: string
   id: string
-  /** The thread parent's id, where the message is a reply. */
+  /** The thread parent's id, where the message is a reply; empty otherwise. */
   re: string
-  /** The `when:` field, HH:MM; empty where absent. */
+  /** When it was sent, as attend shows it; empty where absent. */
   when: string
   message: string
 }
 
-export function parseListing(stdout: string): Listed[] {
-  const out: Listed[] = []
-  // A block ends at a blank line followed by the next `[scope]` header, so a
-  // message body with blank lines of its own stays whole.
-  for (const block of stdout.split(/\n\s*\n(?=\[[^\]\n]+\])/)) {
-    const head = /^\[([^\]]+)\]\s*(.*)$/m.exec(block)
-    const id = /^\s*id:\s*(\S+)/m.exec(block)
-    if (!head || !id) continue
-    const msg = /^\s*message:\s?([\s\S]*)$/m.exec(block)
-    out.push({
-      scope: head[1] ?? '',
-      sender: (head[2] ?? '').trim(),
-      id: id[1] ?? '',
-      re: /^\s*re:\s*(\S+)/m.exec(block)?.[1] ?? '',
-      when: /^\s*when:\s*(\S+)/m.exec(block)?.[1] ?? '',
-      message: (msg?.[1] ?? '').trim(),
-    })
-  }
-  return out
+/** What one drain said. `messages` is empty when nothing was delivered: the
+ *  cold start's held-back note and the session's name are fields of their
+ *  own, never messages. `status` is `drained`, or why nothing was:
+ *  `not_listening`, `unresolved`, `deferred`. Undefined where the output is
+ *  not that document (an attend without `--drain --json`). */
+export type Drain = {
+  status: string
+  messages: Listed[]
+  heldBack: number
+  note: string | null
+  youAre: string | null
 }
 
-/** What one plain drain said. `silent` is the drain's no-op: the session is
- *  not listening, or its identity is unresolved. */
-export type Drain =
-  | { kind: 'silent' }
-  | { kind: 'empty' }
-  | { kind: 'messages'; count: number; body: string }
-
-export function parseDrain(stdout: string): Drain {
-  const out = stdout.trim()
-  if (out === '') return { kind: 'silent' }
-  if (out === 'no pending messages') return { kind: 'empty' }
-  const m = /(\d+) message\(s\) drained and marked consumed\s*$/.exec(out)
-  const count = m ? Number(m[1]) : 1
-  const body = m ? out.slice(0, m.index).trimEnd() : out
-  return { kind: 'messages', count, body }
+export function parseDrain(stdout: string): Drain | undefined {
+  let doc: unknown
+  try {
+    doc = JSON.parse(stdout)
+  } catch {
+    return undefined
+  }
+  if (typeof doc !== 'object' || doc === null) return undefined
+  const d = doc as Record<string, unknown>
+  if (typeof d.status !== 'string' || !Array.isArray(d.messages)) return undefined
+  const str = (v: unknown) => (typeof v === 'string' ? v : '')
+  const messages = d.messages.flatMap((m): Listed[] => {
+    if (typeof m !== 'object' || m === null) return []
+    const x = m as Record<string, unknown>
+    if (typeof x.id !== 'string' || typeof x.message !== 'string') return []
+    return [{ scope: str(x.scope), sender: str(x.sender), id: x.id, re: str(x.re), when: str(x.when), message: x.message }]
+  })
+  return {
+    status: d.status,
+    messages,
+    heldBack: typeof d.held_back === 'number' ? d.held_back : 0,
+    note: typeof d.note === 'string' ? d.note : null,
+    youAre: typeof d.you_are === 'string' ? d.you_are : null,
+  }
 }
 
 /** The peer count from `attend peers`: its footer `N agent(s)` less this

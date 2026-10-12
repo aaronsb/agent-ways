@@ -68,6 +68,68 @@ fn a_session_not_listening_says_so() {
     assert!(!f.state_file(&f.sid).exists(), "and marks nothing read");
 }
 
+/// The attend mod's tests read the drain and unread documents this binary
+/// prints, from `plugins/attend/tests/attend-output.ts`. This test writes
+/// those documents from real runs and fails when the committed file no
+/// longer matches, so the mod is never tested against a shape attend does
+/// not print. `ATTEND_BLESS=1` rewrites the file.
+#[test]
+fn the_mod_fixtures_are_the_real_attend_output() {
+    fn norm(mut v: Value) -> Value {
+        if v["you_are"].is_string() {
+            v["you_are"] = Value::from("Chaucer-alpha");
+        }
+        if let Some(ms) = v["messages"].as_array_mut() {
+            for m in ms {
+                m["when"] = Value::from("21:21");
+            }
+        }
+        v
+    }
+    let mut out = vec![
+        "// Generated from the real attend binary by tools/attend/tests/drain_json.rs".to_string(),
+        "// (the_mod_fixtures_are_the_real_attend_output). Do not edit: rerun that test".to_string(),
+        "// with ATTEND_BLESS=1. `when` and the session's name are normalized.".to_string(),
+        String::new(),
+    ];
+    let mut put = |name: &str, v: Value| {
+        out.push(format!("export const {name} = {}", serde_json::to_string(&v.to_string()).unwrap()));
+    };
+
+    let f = Fixture::new("fixtures-cold");
+    put("DRAIN_NOT_LISTENING", norm(drain_json(&f)));
+    f.ok(&["listen", "on"]);
+    put("DRAIN_COLD_EMPTY", norm(drain_json(&f)));
+    put("DRAIN_EMPTY", norm(drain_json(&f)));
+
+    let f = Fixture::new("fixtures-backlog");
+    f.put(&f.project_tray(), "other-1-1-addressed", "addressed while dormant", 60 * MINUTE);
+    f.put("_broadcast", "other-1-2-old", "old open backlog", 10 * MINUTE);
+    f.put("_broadcast", "other-1-3-fresh", "fresh open", Duration::ZERO);
+    f.ok(&["listen", "on"]);
+    put("DRAIN_COLD_BACKLOG", norm(drain_json(&f)));
+
+    let f = Fixture::new("fixtures-channel");
+    f.ok(&["join", "room"]);
+    drain_json(&f);
+    f.put("@room", "other-1-4-room", "said in the room", Duration::ZERO);
+    let unread = f.ok(&["unread", "--json"]);
+    put("UNREAD_ROOM", serde_json::from_str(&unread).unwrap());
+    let dir = f.signals().join("_broadcast");
+    std::fs::create_dir_all(&dir).unwrap();
+    let line = agent_identity::signal::format_signal("claude:other-session", "elsewhere", "/tmp/elsewhere", Some("other-1-4-room"), "an answer in the open");
+    std::fs::write(dir.join("other-1-5-answer.signal"), line).unwrap();
+    put("DRAIN_ROOM_AND_REPLY", norm(drain_json(&f)));
+
+    let text = out.join("\n") + "\n";
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/attend/tests/attend-output.ts");
+    if std::env::var_os("ATTEND_BLESS").is_some() {
+        std::fs::write(&path, &text).unwrap();
+    }
+    let committed = std::fs::read_to_string(&path).unwrap_or_default();
+    assert_eq!(committed, text, "{} is stale; rerun with ATTEND_BLESS=1 and rerun the mod's tests", path.display());
+}
+
 #[test]
 fn a_threaded_message_carries_its_parent() {
     let f = Fixture::new("drain-json-re");
