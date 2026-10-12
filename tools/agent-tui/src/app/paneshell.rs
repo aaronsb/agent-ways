@@ -514,13 +514,17 @@ impl App {
     /// A click or a right click on the tab bar or the bottom bar, and a
     /// right click in the pane, first closes what the pane holds open over
     /// its content ([`Pane::dismiss`]), as a left click in the pane does.
+    /// An action slot (`≡`, `+`) is the exception: its own action decides,
+    /// as its key does, so a click and the key land in the same state.
     /// A middle click pastes nothing while the shell has the mouse, and the
     /// bar says so.
     pub(super) fn pane_mouse(&mut self, m: MouseEvent) {
         let at = Position::new(m.column, m.row);
         let inside = self.hits.pane.contains(at);
         let right = m.kind == MouseEventKind::Down(MouseButton::Right);
-        if Self::is_press(&m) && (!inside || right) {
+        let slot = self.hits.tabs.iter().find(|(r, _)| r.contains(at)).map(|&(_, i)| i);
+        let on_action = slot.is_some_and(|i| self.pane.as_mut().is_some_and(|p| p.tabs().get(i).is_some_and(|t| t.action)));
+        if Self::is_press(&m) && (!inside || right) && !on_action {
             if let Some(p) = &mut self.pane {
                 p.dismiss(inside.then_some(at));
             }

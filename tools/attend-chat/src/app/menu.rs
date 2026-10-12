@@ -15,8 +15,10 @@
 //!   not in), Delete channel.
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
 //!   channel, typed in the compose box, which says `new channel name >`
-//!   while it is lent. Showing a tab, opening any other menu, or the column
-//!   taking the keyboard gives the box back, with the draft it held.
+//!   while it is lent. Showing a tab, opening a channel's menu, an `≡` item
+//!   other than Quit, or the column taking the keyboard gives the box back,
+//!   with the draft it held. Quit leaves it lent, so the exit guard asks
+//!   over a name typed there.
 //! - an agent's row in the left column: Address @Name (puts `@Name ` in
 //!   the compose box), Who is this (what `/whois` says of the session
 //!   the row is, or what the chat knows of one the roster lacks), and
@@ -230,18 +232,20 @@ impl ChatPane {
     }
 
     /// Open the menu of the bar's tab `i`: 0 is the `≡` slot, 1 merged,
-    /// then the channels in strip order, then the `+` slot. A menu gives a
-    /// lent compose box back first; the `+` slot lends it.
+    /// then the channels in strip order, then the `+` slot. A channel's
+    /// menu gives a lent compose box back first; the `+` slot lends it. The
+    /// `≡` menu opens over the lent box, and its item decides
+    /// ([`ChatPane::common_item`]).
     pub(super) fn open_tab_menu(&mut self, i: usize) {
         self.dirty = true;
         let names = self.strip_names();
         if i == names.len() + 2 {
             return self.new_channel();
         }
-        self.prompt_cancel();
         if i == 0 {
             return self.common_menu();
         }
+        self.prompt_cancel();
         let channel = match i {
             1 => None,
             i => match names.get(i - 2) {
@@ -274,7 +278,13 @@ impl ChatPane {
         self.open = Some(Open::Pick { id: "common".into(), title: "attend-chat".into(), options, multi: false, chosen: Vec::new() });
     }
 
+    /// An item of the `≡` menu. Quit leaves a lent compose box as it is, so
+    /// the shell's quit counts a name typed there as unsaved and asks, as
+    /// Ctrl-C does; every other item gives the box back first.
     fn common_item(&mut self, item: &str) {
+        if item != QUIT {
+            self.prompt_cancel();
+        }
         match item {
             THEME => {
                 let set = agent_theme::ThemeSet::load(agent_theme::user_dir().as_deref());

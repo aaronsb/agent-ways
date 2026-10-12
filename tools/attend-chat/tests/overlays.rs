@@ -649,6 +649,57 @@ fn quit_on_the_common_menu_ends_the_chat() {
     assert!(c.app().guarding(), "and the exit guard asks, as Ctrl-C does");
 }
 
+/// With `menu_on_repeat` off, Ctrl+digit on the tab already shown gives a
+/// lent box back, as a click on that tab does.
+#[test]
+fn a_tab_key_on_the_shown_tab_gives_a_lent_box_back_with_repeat_off() {
+    for by_click in [false, true] {
+        let mut c = chat().menu_on_repeat(false);
+        typed(&mut c, "hello");
+        press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        typed(&mut c, "abc");
+        if by_click {
+            let merged = at(&mut c, "1 merged");
+            click(&mut c, merged);
+        } else {
+            press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+        }
+        assert_eq!(c.foreground(), &Tab::Merged);
+        assert!(!compose(&mut c)[0].contains("new channel name"), "click {by_click}: {:#?}", compose(&mut c));
+        assert_eq!(c.input().text(), "hello", "click {by_click}: the draft came back");
+    }
+}
+
+/// Open `≡` by a click on its slot and click Quit.
+fn quit_by_clicks(c: &mut Chat) {
+    let menu = at(c, "≡");
+    click(c, menu);
+    let quit = at(c, "Quit");
+    click(c, quit);
+}
+
+/// A name typed in the lent box is unsaved work to every quit: Ctrl-C,
+/// `≡` → Quit by clicks and by keys each open the exit guard, and going
+/// back finds the box still lent with the name.
+#[test]
+fn every_quit_asks_over_a_name_typed_in_the_lent_box() {
+    for how in ["ctrl-c", "keys", "clicks"] {
+        let mut c = chat();
+        press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
+        typed(&mut c, "abc");
+        match how {
+            "ctrl-c" => assert!(press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            "clicks" => quit_by_clicks(&mut c),
+            _ => assert!(quit_by_keys(&mut c)),
+        }
+        assert!(!c.app().ended(), "{how}: the chat stays open");
+        assert!(c.app().guarding(), "{how}: the exit guard asks");
+        key(&mut c, KeyCode::Esc);
+        assert!(!c.app().guarding());
+        assert!(compose(&mut c)[0].contains("new channel name > abc"), "{how}: back to the lent box: {:#?}", compose(&mut c));
+    }
+}
+
 /// Ctrl-C still quits, at once with nothing unsaved.
 #[test]
 fn ctrl_c_still_quits() {

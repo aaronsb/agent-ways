@@ -86,6 +86,7 @@ lent-row     | base  | wait:Agents click:+ wait:new_channel_name side:#infra gon
 esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape gone:pick
 common-quit  | base  | wait:Agents click:≡ wait:Quit
 quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:discards
+quit-lent    | base  | wait:Agents C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
