@@ -404,13 +404,15 @@ fn the_overlays_are_what_the_shell_opened_and_has_not_closed() {
     assert!(with(&[Overlay::Help]).overlaid() && !at(Focus::Compose).overlaid());
 }
 
-/// The shell's routing follows the focus: the box types, the bar takes the
-/// digits, and the chat keeps the bar's focus and Esc.
+/// The shell's routing follows the focus: the box types, a slot the bar
+/// draws takes the digits, and the chat keeps the bar's focus and Esc.
 #[test]
 fn the_keymap_context_follows_the_focus() {
-    let ctx = |f: Focus| at(f).ctx();
+    let bar = view().world.unwrap().bar;
+    let ctx = |f: Focus| at(f).ctx(&bar);
     assert_eq!(ctx(Focus::Compose), Ctx { text: true, digits: false, owns_bar: true, esc_quits: false });
     assert_eq!(ctx(Focus::Tab(Slot::Common)), Ctx { text: false, digits: true, owns_bar: true, esc_quits: false });
+    assert_eq!(ctx(Focus::Tab(Slot::Tab(chan("gone")))), Ctx { text: false, digits: false, owns_bar: true, esc_quits: false }, "a slot the bar no longer draws takes no digit");
     for f in [Focus::Row(0), Focus::Feed] {
         assert_eq!(ctx(f), Ctx { text: false, digits: false, owns_bar: true, esc_quits: false });
     }

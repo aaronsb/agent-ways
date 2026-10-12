@@ -244,7 +244,7 @@ impl ChatPane {
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
             sidebar: true,
             shape: Shape::PLAIN,
-            ix: ix::Machine::default(),
+            ix: ix::Machine::new(),
             side_scroll: [0, 0],
             side_follow: true,
             removable: Vec::new(),
@@ -633,7 +633,10 @@ impl Pane for ChatPane {
     /// names them, and a plain digit shows a tab while the focus is on a
     /// slot the bar draws ([`ix::Ix::ctx`]).
     fn keymap_ctx(&self) -> agent_tui::Ctx {
-        agent_tui::Ctx { digits: self.focus_tab().is_some(), ..self.ix.ctx() }
+        match &self.world {
+            Some(w) => self.ix.ctx(&w.laid.bar),
+            None => self.ix.ctx(&tabs::bar(&[])),
+        }
     }
 
     /// An overlay holds the keyboard: the compose box draws no caret and

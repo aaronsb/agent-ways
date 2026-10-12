@@ -88,20 +88,30 @@ impl Ix {
         }
     }
 
-    /// How the shell routes a key beside the chat: the compose box types
-    /// while it has the focus, a plain digit shows a tab while the focus is
-    /// on the bar, the chat owns the bar's focus, and Esc never quits
-    /// (ADR-409).
-    pub(super) fn ctx(&self) -> Ctx {
-        Ctx { text: self.owns_text(), digits: self.on_bar(), owns_bar: true, esc_quits: false }
+    /// How the shell routes a key beside the chat, against `bar`, the tab
+    /// bar as the world laid it out: the compose box types while it has the
+    /// focus, a plain digit shows a tab while the focus is on a slot `bar`
+    /// draws, the chat owns the bar's focus, and Esc never quits (ADR-409).
+    pub(super) fn ctx(&self, bar: &[Slot]) -> Ctx {
+        let digits = matches!(&self.focus, Focus::Tab(slot) if bar.contains(slot));
+        Ctx { text: self.owns_text(), digits, owns_bar: true, esc_quits: false }
     }
 }
 
-/// The chat's one [`Ix`], and the one way to move it.
-#[derive(Debug, Default)]
+/// The chat's one [`Ix`], and the one way to move it. It has no `Default`,
+/// so `std::mem::take` cannot reset it outside this module; replacing the
+/// whole value with [`Machine::new`] is the one write the compiler allows
+/// outside `step`, and only [`ChatPane::new`] does it.
+#[derive(Debug)]
 pub(super) struct Machine(Ix);
 
 impl Machine {
+    /// The state a chat starts in: the keyboard in the compose box,
+    /// nothing open.
+    pub(super) fn new() -> Machine {
+        Machine(Ix::default())
+    }
+
     /// Step by `ev` ([`step`]) and keep the result: the effects to carry
     /// out, in order. On [`NeedWorld`] nothing moves.
     pub(super) fn step(&mut self, ev: Ev, v: &View) -> Result<Vec<Effect>, NeedWorld> {
