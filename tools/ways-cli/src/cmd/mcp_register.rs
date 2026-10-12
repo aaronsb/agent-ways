@@ -146,6 +146,12 @@ pub(crate) fn claude_stdout(claude: &Path, config_dir: Option<&Path>, args: &[&s
 /// Run `cmd` with its output captured, killing it once `limit` has passed:
 /// on Unix its whole process group, so what it started dies with it.
 /// Its stdout on success; its stderr, its exit code, or the timeout otherwise.
+///
+/// The group is its own, so a Ctrl-C at the terminal stops `ways` and not
+/// the `claude` call in flight, which finishes on its own. That is the
+/// wanted side: each call is one short local edit of Claude Code's plugin
+/// or MCP config, which a signal mid-write could leave half done, and the
+/// next repair reads what it left and converges from there.
 pub(crate) fn output_within(mut cmd: Command, limit: Duration) -> Result<String, String> {
     use std::io::Read;
     use std::process::Stdio;
