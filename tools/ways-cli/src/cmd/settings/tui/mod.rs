@@ -40,6 +40,10 @@ use others::Other;
 #[derive(Debug, Clone)]
 pub struct Ctx {
     pub project: PathBuf,
+    /// Whether the screens were opened for a project (`--project`, or
+    /// `CLAUDE_PROJECT_DIR`), never the home directory. Without one, keys the
+    /// screens keep per project go to the user file.
+    pub for_project: bool,
     pub home: PathBuf,
     /// The core ways, one toggle each on the ways tab.
     pub corpus: PathBuf,
@@ -54,17 +58,30 @@ pub struct Ctx {
 }
 
 /// Whether the screens write `b` to the project's file: a project-scope key,
-/// or one the ways schema names for the screens to keep per project.
-pub(super) fn writes_project(b: &agent_settings::Bound) -> bool {
-    b.spec.scope == Scope::Project || ways_core::settings::SCREENS_WRITE_PROJECT.contains(&b.spec.name)
+/// or, when the screens were opened for a project, one the ways schema names
+/// for the screens to keep per project.
+pub(super) fn writes_project(b: &agent_settings::Bound, ctx: &Ctx) -> bool {
+    b.spec.scope == Scope::Project || (ctx.for_project && ways_core::settings::SCREENS_WRITE_PROJECT.contains(&b.spec.name))
+}
+
+/// Whether `given` (the `--project`, else `CLAUDE_PROJECT_DIR`) opens the
+/// screens for a project: one is named and it is not the home directory.
+pub(super) fn opened_for_project(given: Option<&Path>, home: &Path) -> bool {
+    given.is_some_and(|p| {
+        let canon = |q: &Path| std::fs::canonicalize(q).unwrap_or_else(|_| q.to_path_buf());
+        !p.as_os_str().is_empty() && canon(p) != canon(home)
+    })
 }
 
 impl Ctx {
     pub fn from_env(project: Option<&Path>) -> Ctx {
         let home = claude_sessions::home_dir();
         let xdg_config = ways_core::paths::xdg_dir("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
+        let env_project = std::env::var_os("CLAUDE_PROJECT_DIR").filter(|v| !v.is_empty()).map(PathBuf::from);
+        let for_project = opened_for_project(project.or(env_project.as_deref()), &home);
         Ctx {
             project: project_dir(project),
+            for_project,
             corpus: ways_core::paths::shipped_ways_root(),
             user_ways: ways_core::paths::user_ways_root(),
             themes: agent_theme::user_dir(),
@@ -232,7 +249,7 @@ impl Adapter for Ways {
         for w in values {
             let b = lookup(&self.reg, &w.store.key).map_err(|f| f.message)?;
             let v = b.spec.parse_cli(w.value, &layers, &b.bound).map_err(|m| format!("{}: {m}", w.store.key))?;
-            let at = |p: &Path| target_file(&b, writes_project(&b).then_some(p)).map(|t| t.0).map_err(|f| f.message);
+            let at = |p: &Path| target_file(&b, writes_project(&b, &self.ctx).then_some(p)).map(|t| t.0).map_err(|f| f.message);
             let mut path = at(&self.ctx.project)?;
             if path != file && b.spec.scope == Scope::Project {
                 match self.other_owning(file) {

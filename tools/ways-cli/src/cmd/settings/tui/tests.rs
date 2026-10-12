@@ -40,6 +40,7 @@ impl Adapter for Fixtured {
 fn roots(fx: &Fixture) -> Vec<Node> {
     let ctx = Ctx {
         project: fx.root.join("work/current"),
+        for_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -451,6 +452,7 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
     let project = agent_settings::Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, &file);
     let ctx = Ctx {
         project: fx.root.join("work/current"),
+        for_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -471,6 +473,7 @@ fn a_switch_for_a_way_no_root_holds_is_listed_as_not_found() {
 fn ctx_of(fx: &Fixture) -> Ctx {
     Ctx {
         project: fx.root.join("work/current"),
+        for_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -888,6 +891,7 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
     let project = agent_settings::Layer::read(&ways_core::settings::SCHEMA, "project", ways_core::settings::FILE, agent_settings::LayerScope::Project, &file);
     let ctx = Ctx {
         project: fx.root.join("work/current"),
+        for_project: true,
         home: fx.root.clone(),
         corpus: fx.root.join("corpus"),
         user_ways: fx.root.join(".config/agent-ways/ways"),
@@ -908,6 +912,28 @@ fn a_prefix_switch_shows_its_ways_off_and_is_not_listed_as_not_found() {
     let prefixes = section(project, "prefixes");
     assert_eq!(prefixes.children[0].children[0].setting.as_ref().unwrap().store.as_ref().unwrap().key, "ways.project.a/*");
     assert!(project.children.iter().all(|n| n.name != "not found"), "a prefix is not a missing way");
+}
+
+/// Opened without a project, the screens write listening and keepwarm to
+/// the user file, as `ways settings set` does; the home directory is never a
+/// project.
+#[test]
+fn the_mod_tab_opened_without_a_project_writes_the_user_file() {
+    let fx = Fixture::home();
+    let mut ctx = ctx_of(&fx);
+    ctx.for_project = false;
+    let ways = Ways::new(ctx);
+    let tabs = ways.build(&[]);
+    let tab = tabs.iter().find(|t| t.name == "mod").expect("the mod tab");
+    let project_file = fx.root.join("work/current/.claude/ways.yaml");
+    for key in ["listening", "keepwarm"] {
+        let store = leaf(tab, key).and_then(|n| n.setting.as_ref()).and_then(|s| s.store.clone()).unwrap();
+        assert_ne!(store.file, project_file, "{key} goes to the user file");
+        assert!(store.file.ends_with("agent-ways/config.yaml"), "{key}: {}", store.file.display());
+    }
+    assert!(!super::opened_for_project(None, &fx.root));
+    assert!(!super::opened_for_project(Some(&fx.root), &fx.root), "home is never a project");
+    assert!(super::opened_for_project(Some(&fx.root.join("work/current")), &fx.root));
 }
 
 fn leaf<'a>(node: &'a Node, name: &str) -> Option<&'a Node> {

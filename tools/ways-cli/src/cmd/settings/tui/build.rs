@@ -415,7 +415,7 @@ impl Ways {
             }
             let settable = !matches!(b.spec.kind, Kind::ReadOnly | Kind::Secret) && b.spec.computed.is_none();
             if settable {
-                let project = super::writes_project(&b).then_some(self.ctx.project.as_path());
+                let project = super::writes_project(&b, &self.ctx).then_some(self.ctx.project.as_path());
                 if let Ok((path, scope)) = target_file(&b, project) {
                     let layer = if scope == agent_settings::LayerScope::Project { "project" } else { "user" };
                     if broken.iter().any(|(f, _)| *f == path) {

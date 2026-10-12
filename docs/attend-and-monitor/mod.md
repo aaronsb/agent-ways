@@ -39,7 +39,7 @@ The operator's transcript shows a delivery as one dim line per message, `[#chann
 
 ## Configuration
 
-The section is `attend_mod` in the ways config. It resolves through the user file, the target's file and the project's `.claude/ways.yaml`, the project winning ([ADR-115](../architecture/platform/ADR-115-declarative-config-with-project-scope-overlay.md)). The mod reads it with `ways settings list attend_mod --json --effective` at session start and again on activation, so a change applies to the next session with no reinstall. `ways settings mod` opens it in the settings screens, which write `listening` and `keepwarm` to the project's `.claude/ways.yaml` (the project given with `--project`, else the working directory) and `install` to the user file. `ways settings set` writes the user file unless `--project` is given.
+The section is `attend_mod` in the ways config. It resolves through the user file, the target's file and the project's `.claude/ways.yaml`, the project winning ([ADR-115](../architecture/platform/ADR-115-declarative-config-with-project-scope-overlay.md)). The mod reads it with `ways settings list attend_mod --json --effective` at session start and again on activation, so a change applies to the next session with no reinstall. `ways settings mod` opens it in the settings screens. Opened for a project (`--project`, or `CLAUDE_PROJECT_DIR`), they write `listening` and `keepwarm` to that project's `.claude/ways.yaml`; opened without one, to the user file. The home directory is never a project. `install` always goes to the user file. `ways settings set` writes the user file unless `--project` is given.
 
 | Key | Values | Default | Set at | Does |
 |---|---|---|---|---|
