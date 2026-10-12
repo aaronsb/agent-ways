@@ -381,16 +381,16 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     delivered.sort_by_cached_key(|d| (d.mtime, agent_identity::signal_send_order(&d.id), d.id.clone()));
 
     // The cold start is this conduit's first contact with the session, so
-    // a delivery there names the session. Only a blocking reason reaches
-    // the model; the join itself already printed the name as Bash output.
+    // a delivery there names the session. Only delivered text reaches the
+    // model; the join itself already printed the name as Bash output.
     let me = baselining.then(|| crate::util::display_name(&ident));
 
     if delivered.is_empty() {
         // Nothing delivered: reset the re-entry counter (this boundary
         // chain is ending) and let the turn end. At most the cold start's
-        // held-back note goes out, and it goes non-blocking, so it never
-        // forces a turn — the termination property the re-entry design
-        // leans on.
+        // held-back note goes out, as a systemMessage that lets the turn
+        // end, so it never forces a turn — the termination property the
+        // re-entry design leans on.
         reset_drain_rounds(&session_id);
         // A cold start must still persist the (possibly empty) baseline,
         // or the next drain re-baselines and swallows what arrived in
@@ -580,6 +580,9 @@ fn render_mod_delivery(delivered: &[impl DrainedView], note: Option<&str>, me: O
         out.push_str(&format!("you are {me}\n"));
     }
     if let Some(note) = note {
+        // The cold start's note ends by naming the shell's `attend inbox`;
+        // a mod host's agent has no shell route to it.
+        let note = note.strip_suffix(": attend inbox").unwrap_or(note);
         out.push_str(&format!("({note})\n"));
     }
     out.push_str(MOD_OPEN);
@@ -1102,6 +1105,9 @@ mod drain_tests {
         let text = render_mod_delivery(&msgs, None, None);
         assert!(text.contains("(+2 more, not shown here; they stay in attend's inbox)"), "{text}");
         assert!(!text.contains("attend inbox"), "{text}");
+        let noted = render_mod_delivery(&[msg(1)], Some("2 older messages held back; reading them is optional: attend inbox"), None);
+        assert!(noted.contains("(2 older messages held back; reading them is optional)\n"), "{noted}");
+        assert!(!noted.contains("attend inbox"), "{noted}");
     }
 
     /// A body cannot close the mod's frame early.

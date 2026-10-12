@@ -12,8 +12,9 @@ requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(
 <!--
   Messaging guidance lives in three synchronized sources. When you edit
   the peer-messaging section, the autonomy paragraph, the silence-is-valid
-  callout, the CLI-is-the-contract note, the keepwarm contract, or the
-  "Your name" paragraph in this file, update the other two so agents
+  callout, the CLI-is-the-contract note, the keepwarm contract, the
+  "Your name" paragraph, or the "Starting active is the operator's
+  setting" paragraph in this file, update the other two so agents
   receive consistent guidance at every point:
 
     - skills/attend/SKILL.md                                   (primer read at /attend)

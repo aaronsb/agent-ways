@@ -9,8 +9,9 @@ allowed-tools: Bash, Monitor, Read
 <!--
 Messaging guidance lives in three synchronized sources. When you edit
 the peer-messaging section, the autonomy paragraph, the silence-is-valid
-callout, the CLI-is-the-contract note, the keepwarm contract, or the
-"Your name" paragraph, update all three:
+callout, the CLI-is-the-contract note, the keepwarm contract, the
+"Your name" paragraph, or the "Starting active is the operator's
+setting" paragraph, update all three:
 
   - skills/attend/SKILL.md                                   (this file — read at /attend invocation)
   - tools/attend/src/sensors/disclosures/messaging.md  (runtime reheat fired by the disclosure sensor)
