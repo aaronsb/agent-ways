@@ -113,7 +113,7 @@ header-pick  | base  | wait:signing_off click:signing_off
 header-chan  | base  | wait:Agents M-1 wait:rollout_is_green
 quit-entry   | base  | wait:Agents text:half C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
 too-long     | base  | wait:Agents bigpaste:65537 wait:xxxxxxxxxx Enter wait:over_attend's_limit
-focus-compose | base  | wait:Agents wait:leaves_the_box
+focus-compose | base  | wait:Agents wait:Enter_send
 focus-view   | base  | wait:Agents F2 wait:▸⋯all
 focus-open   | base  | wait:Agents F2 Left wait:▸#open
 focus-plus   | base  | wait:Agents F2 Left Left wait:▸+
