@@ -1,15 +1,15 @@
 agent-tui frame 80x25
 | ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +   — rollout coord…|
-|╭─────────────────────────────┌pick one: #deploy─────┐─────────────────────────╮|
-|│ ╭──────────────────╮        │   Add agent ▸        │                         │|
-|│ │ Wells            │ rollout│   Invite agent ▸     │                         │|
-|│ │ beta             │ product│   Remove agent ▸     │                         │|
-|│ │ ▽ 13:55          │        │   Describe…          │                         │|
-|│ ╰──────────────────╯        │   Clear history      │                         │|
-|│                             │   Join               │                         │|
-|│                             │   Delete channel     │                         │|
-|│                             └──────────────────────┘                         │|
-|│                                                                              │|
+|╭─────────────────────────────┌pick one: #deploy───────────────────┐───────────╮|
+|│ ╭──────────────────╮        │   Invite agent ▸                   │           │|
+|│ │ Wells            │ rollout│   Add agent       needs ADR-404 D1 │           │|
+|│ │ beta             │ product│   Remove agent ▸                   │           │|
+|│ │ ▽ 13:55          │        │   Describe…                        │           │|
+|│ ╰──────────────────╯        │   Clear history                    │           │|
+|│                             │   Join                             │           │|
+|│                             │   Seal            needs ADR-404 D4 │           │|
+|│                             │   Delete channel                   │           │|
+|│                             └────────────────────────────────────┘           │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -38,27 +38,28 @@ styles
   1   0-29  - - DIM
   1  30-30  LightBlue - -
   1  31-47  LightBlue - BOLD
-  1  48-53  LightBlue - -
-  1  54-79  - - DIM
+  1  48-67  LightBlue - -
+  1  68-79  - - DIM
   2   0-0   - - DIM
   2   2-21  - - DIM
   2  30-30  LightBlue - -
-  2  31-52  - - BOLD|REVERSED
-  2  53-53  LightBlue - -
+  2  31-66  - - BOLD|REVERSED
+  2  67-67  LightBlue - -
   2  79-79  - - DIM
   3   0-0   - - DIM
   3   2-2   - - DIM
   3   4-8   LightCyan - -
   3  21-21  - - DIM
   3  30-30  LightBlue - -
-  3  53-53  LightBlue - -
+  3  31-66  - - DIM
+  3  67-67  LightBlue - -
   3  79-79  - - DIM
   4   0-0   - - DIM
   4   2-2   - - DIM
   4   4-7   - - DIM
   4  21-21  - - DIM
   4  30-30  LightBlue - -
-  4  53-53  LightBlue - -
+  4  67-67  LightBlue - -
   4  79-79  - - DIM
   5   0-0   - - DIM
   5   2-2   - - DIM
@@ -66,25 +67,28 @@ styles
   5   6-10  - - DIM
   5  21-21  - - DIM
   5  30-30  LightBlue - -
-  5  53-53  LightBlue - -
+  5  67-67  LightBlue - -
   5  79-79  - - DIM
   6   0-0   - - DIM
   6   2-21  - - DIM
   6  30-30  LightBlue - -
-  6  53-53  LightBlue - -
+  6  67-67  LightBlue - -
   6  79-79  - - DIM
   7   0-0   - - DIM
   7  30-30  LightBlue - -
-  7  53-53  LightBlue - -
+  7  67-67  LightBlue - -
   7  79-79  - - DIM
   8   0-0   - - DIM
   8  30-30  LightBlue - -
-  8  53-53  LightBlue - -
+  8  31-66  - - DIM
+  8  67-67  LightBlue - -
   8  79-79  - - DIM
   9   0-0   - - DIM
-  9  30-53  LightBlue - -
+  9  30-30  LightBlue - -
+  9  67-67  LightBlue - -
   9  79-79  - - DIM
  10   0-0   - - DIM
+ 10  30-67  LightBlue - -
  10  79-79  - - DIM
  11   0-0   - - DIM
  11  79-79  - - DIM

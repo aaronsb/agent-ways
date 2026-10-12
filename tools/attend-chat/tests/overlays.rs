@@ -137,7 +137,10 @@ fn ask_by_keys(c: &mut Chat, tab: char, item: &str) {
     // The item's place in the menu: its row less the title's.
     let shown = rows(c);
     let title = shown.iter().position(|r| r.contains("pick one")).expect("the menu is open");
-    let row = shown.iter().skip(title + 1).position(|r| r.contains(item)).unwrap_or_else(|| panic!("no {item} in {shown:#?}"));
+    // The Downs from the top to it: the highlight passes over what waits.
+    let rows: Vec<&String> = shown.iter().skip(title + 1).collect();
+    let at = rows.iter().position(|r| r.contains(item)).unwrap_or_else(|| panic!("no {item} in {shown:#?}"));
+    let row = rows[..at].iter().filter(|r| !r.contains("needs ADR-404")).count();
     key(c, KeyCode::Home);
     for _ in 0..row {
         key(c, KeyCode::Down);

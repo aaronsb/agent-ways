@@ -165,8 +165,9 @@ pub struct ChatPane {
     hits: Hits,
     /// What a tab's menu asked the shell to open over the pane.
     open: Option<Open>,
-    /// The column's row the menu in `open` docks under.
-    anchor: Option<Rect>,
+    /// The theme this session shows: its name, or `terminal` for the
+    /// terminal's own palette. Marked in the Theme menu.
+    theme: String,
     /// The menu step the shell's question asks about, until it is answered
     /// ([`ChatPane::answered`]).
     asked: Option<menu::Step>,
@@ -226,7 +227,7 @@ impl ChatPane {
             day_seen: None,
             hits: Hits::default(),
             open: None,
-            anchor: None,
+            theme: "terminal".into(),
             asked: None,
             prompt: None,
             enhanced: false,
@@ -797,9 +798,25 @@ impl Pane for ChatPane {
         self.config.mouse
     }
 
+    /// What quitting would lose: a draft, or a name or description typed in
+    /// the lent box, named for what it is.
     fn unsaved(&self) -> Option<String> {
-        let held = self.prompt.as_ref().is_some_and(|(_, draft)| !draft.is_empty());
-        (!self.input.is_empty() || held).then(|| "a draft in the compose box".to_string())
+        let typed = !self.input.is_empty();
+        match &self.prompt {
+            None => typed.then(|| "a draft in the compose box".into()),
+            Some((p, draft)) => {
+                let lent = match p {
+                    menu::Prompt::NewChannel => "a new channel's name being typed".to_string(),
+                    menu::Prompt::Describe(c) => format!("a description of #{c} being typed"),
+                };
+                match (typed, draft.is_empty()) {
+                    (true, true) => Some(lent),
+                    (true, false) => Some(format!("{lent}, and a draft held")),
+                    (false, false) => Some("a draft in the compose box".into()),
+                    (false, true) => None,
+                }
+            }
+        }
     }
 
     fn has_tab_menus(&self) -> bool {
@@ -848,11 +865,6 @@ impl Pane for ChatPane {
 
     fn take_open(&mut self) -> Option<Open> {
         self.open.take()
-    }
-
-    /// A menu docks under its row in the left column.
-    fn take_anchor(&mut self) -> Option<Rect> {
-        self.anchor.take()
     }
 
     fn picked(&mut self, id: &str, values: Vec<String>) {
@@ -935,6 +947,13 @@ impl Chat {
     /// Show timestamps against a fixed `now` at a UTC `offset` in seconds.
     pub fn pinned(mut self, now: SystemTime, offset: i64) -> Chat {
         self.pane_mut().clock = Clock::Pinned { now, offset };
+        self
+    }
+
+    /// The theme the palette was drawn from, by name, or `None` for the
+    /// terminal's own palette: the Theme menu marks it.
+    pub fn theme(mut self, name: Option<&str>) -> Chat {
+        self.pane_mut().theme = name.unwrap_or("terminal").to_string();
         self
     }
 
