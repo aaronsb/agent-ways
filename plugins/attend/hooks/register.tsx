@@ -73,8 +73,9 @@ const SUBMIT_TRIES = 3
 const SUBTLE = '#3a3a3c'
 const FG = '#d0d0d0'
 
-/** What the module keeps between dispatches. A reload starts it afresh; the
- *  mode survives in $.state and session.start restores it. */
+/** What the module keeps between dispatches. A reload starts it afresh, so
+ *  the mode a reload reads is the one in $.state: session.start restores it
+ *  from there, and a /clear, which empties $.state, has it put back. */
 type Mod = {
   config: ModConfig
   /** Whether this session may poll: interactive, or allowed by config. */
@@ -91,7 +92,6 @@ type Mod = {
   lastKeepwarmMs: number
   /** The last delivery, send, reply, join or turn. */
   lastActivityMs: number
-  toolsRegistered: boolean
   /** Short `~id` handles of delivered messages, to their full ids. */
   ids: Map<string, string>
   /** Set on activation; the mode in $.state is the copy a reload reads. */
@@ -148,9 +148,10 @@ async function registerListen($: $) {
   })
 }
 
-async function registerActiveTools($: $, mod: Mod) {
-  if (mod.toolsRegistered) return
-  mod.toolsRegistered = true
+/** The tools of an active session. Registering one again with the same
+ *  spec changes nothing, so every path that finds the session active
+ *  registers them, a reloaded module's session.start included. */
+async function registerActiveTools($: $) {
   await $.tool.register({
     name: 'attend_send',
     description:
@@ -208,15 +209,15 @@ async function listenOn($: $): Promise<ProcessRunResult> {
   return r
 }
 
-/** Makes the session active for the rest of the process: tools, listening,
- *  the poll. Idempotent. Returns attend's answer to `listen on`. */
+/** Makes the session active for the rest of the process: listening and the
+ *  poll; the caller has registered the tools. Idempotent. Returns attend's
+ *  answer to `listen on`. */
 async function activate($: $, mod: Mod): Promise<ProcessRunResult> {
   mod.config = await readConfig($, mod.cwd)
   mod.canPoll = mod.canPoll || mod.config.headlessPoll
   mod.lastActivityMs = await $.clock.now()
   mod.active = true
   await updateStatus($, s => ({ ...s, mode: 'active' as const }))
-  await registerActiveTools($, mod)
   const r = await listenOn($)
   if (mod.canPoll) {
     startTicker($, mod)
@@ -346,8 +347,7 @@ async function keepwarm($: $) {
 }
 
 /** Whether this session is active. The module's own flag answers too, and
- *  puts the mode back in $.state, so an engine that clears the session's
- *  state on /clear does not drop a session that is still listening. */
+ *  puts the mode back in $.state should it be missing there. */
 async function isOn($: $, mod: Mod): Promise<boolean> {
   if (isActive(await readStatus($))) return true
   if (!mod.active) return false
@@ -376,7 +376,6 @@ export const register: Register = on => {
     lastPeersMs: 0,
     lastKeepwarmMs: 0,
     lastActivityMs: 0,
-    toolsRegistered: false,
     ids: new Map(),
     active: false,
     pending: [],
@@ -394,7 +393,7 @@ export const register: Register = on => {
     const wasActive = isActive(await readStatus($))
     if (wasActive || (mod.config.listening === 'active' && mod.canPoll)) {
       // Listed by turn one; listening and the first drain follow the hook.
-      await registerActiveTools($, mod)
+      await registerActiveTools($)
       $.clock.after(0, () => void activate($, mod))
     } else {
       // Dormant: attend's drain delivers nothing to this session either.
@@ -403,13 +402,16 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // A /clear goes on under a new session id with no session.start: an active
-  // session tells attend again that the new id is listening.
-  // A /clear empties the model's context as a compaction does, so the next
+  // A /clear goes on under a new session id with no session.start, and
+  // Claude Code empties this plugin's $.state with the old session. The
+  // settings SessionStart (source `clear`) fires in the new one: an active
+  // session puts its mode back there at once, so a reload after the /clear
+  // still finds it active, and tells attend the new id is listening. The
+  // /clear empties the model's context as a compaction does, so the next
   // delivery carries the full preamble again.
-  on('session.end', async ($, e, next) => {
+  on('classic.SessionStart', async ($, e, next) => {
     const done = await next(e)
-    if (e.reason === 'clear' && (await isOn($, mod))) {
+    if (e.source === 'clear' && (await isOn($, mod))) {
       await updateStatus($, s => ({ ...s, afterCompaction: true, turnsSinceFull: 0 }))
       $.clock.after(1_000, () => void listenOn($))
     }
@@ -444,6 +446,7 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'mcp__attend__attend_listen' }, async $ => {
     const was = isActive(await readStatus($))
+    await registerActiveTools($)
     const r = await activate($, mod)
     const tools = ' attend_send, attend_reply, attend_join and attend_peers are available.'
     if (r.exitCode !== 0) {

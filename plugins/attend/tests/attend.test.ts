@@ -77,13 +77,28 @@ type World = {
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
- *  every argv, registered tool and submitted prompt recorded. */
+ *  every argv, registered tool and submitted prompt recorded. It holds the
+ *  plugin's `status` in $.state as the session does, and `clearState`
+ *  empties it as Claude Code 2.1.296 does at a /clear. */
 function host(on: On, world: World) {
   const argvs: string[][] = []
   const submitted: string[] = []
   const tools: string[] = []
+  const state: { value: unknown; version: number } = { value: undefined, version: 0 }
+  on('state.get', { plugin: 'attend', key: 'status' }, () => ({ value: { value: state.value, version: state.version } }) as never)
+  on('state.set', { plugin: 'attend', key: 'status' }, ($, e) => {
+    if (e.ifVersion !== undefined && e.ifVersion !== state.version) return { value: { isSet: false, version: state.version } } as never
+    state.value = e.value
+    state.version += 1
+    return { value: { isSet: true, version: state.version } } as never
+  })
+  const clearState = () => {
+    state.value = undefined
+    state.version = 0
+  }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('classic.SessionStart', () => ({}))
   on('tool.register', ($, e) => {
     tools.push(e.name)
     return { value: { tool: `mcp__attend__${e.name}` } }
@@ -118,7 +133,25 @@ function host(on: On, world: World) {
   })
   const count = (cmd: string) => argvs.filter(a => a.slice(1).join(' ').startsWith(cmd)).length
   const ran = (cmd: string) => count(cmd) > 0
-  return { argvs, submitted, tools, count, ran }
+  const mode = () => (state.value as { mode?: string } | undefined)?.mode
+  return { argvs, submitted, tools, count, ran, mode, clearState }
+}
+
+/** A /clear as Claude Code 2.1.296 runs it: `session.end` with reason
+ *  `clear`, the plugin's $.state emptied, then the settings SessionStart
+ *  (source `clear`) under the new session id. No `session.start` follows. */
+async function clear($: Engine, h: ReturnType<typeof host>) {
+  await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+  h.clearState()
+  await $.classic.SessionStart({ source: 'clear' } as never)
+}
+
+/** The calls and tools a step added, to read what a reload did. */
+function since(h: ReturnType<typeof host>) {
+  const argvs = h.argvs.length
+  const tools = h.tools.length
+  const ran = (cmd: string) => h.argvs.slice(argvs).some(a => a.slice(1).join(' ').startsWith(cmd))
+  return { ran, tools: () => [...new Set(h.tools.slice(tools))] }
 }
 
 /** A drained message in the shape the real attend prints (attend-output.ts). */
@@ -480,6 +513,70 @@ describe('active', () => {
   })
 })
 
+// A reload of a changed module runs register and session.start again, and a
+// fresh module knows only what $.state holds. The kit loads the module once,
+// so these raise session.start again over $.state as the host left it.
+describe('a reload', () => {
+  test('an active session reloads active: all tools listed, listening on, never off', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    const reload = since(h)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(0)
+    expect(reload.tools()).toEqual(['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers'])
+    expect(reload.ran('listen on')).toBe(true)
+    expect(reload.ran('listen off')).toBe(false)
+  })
+
+  test('after a /clear, with no poll or turn since, a reload still finds the session active', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clear($, h)
+    expect(h.mode()).toBe('active')
+    const reload = since(h)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(0)
+    expect(reload.tools()).toEqual(['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers'])
+    expect(reload.ran('listen on')).toBe(true)
+    expect(reload.ran('listen off')).toBe(false)
+    expect(h.mode()).toBe('active')
+  })
+
+  test('a /clear tells attend the new session id is listening', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    const after = since(h)
+    await clear($, h)
+    await clock.advance(1_000)
+    expect(after.ran('listen on')).toBe(true)
+  })
+
+  test('a dormant session stays dormant through a /clear and a reload', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h)
+    await clock.advance(1_000)
+    const reload = since(h)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(0)
+    expect(reload.tools()).toEqual(['attend_listen'])
+    expect(reload.ran('listen off')).toBe(true)
+    expect(reload.ran('listen on')).toBe(false)
+    expect(h.mode()).not.toBe('active')
+  })
+})
+
 describe('keepwarm', () => {
   test('on: an active session runs the check and submits the wake line', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
@@ -532,7 +629,7 @@ describe('preamble cadence through deliveries', () => {
     await deliverNext(5)
     expect(full(h.submitted[5] ?? '')).toBe(false)
     // A /clear empties the model's context as a compaction does.
-    await $.session.end({ reason: 'clear', sessionId: 's1' } as never)
+    await clear($, h)
     await deliverNext(6)
     expect(full(h.submitted[6] ?? '')).toBe(true)
   })
