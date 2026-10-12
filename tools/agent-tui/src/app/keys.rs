@@ -447,19 +447,23 @@ impl App {
                     self.key(press(k));
                 } else if click && in_menu {
                     let Some((_, items)) = &self.hits.menu else { return };
-                    if let Some(i) = items.iter().position(|r| r.contains(at)) {
-                        // A click picks the row: on a list it marks it, as Space does.
+                    // A click picks the row: on a list it marks it, as Space
+                    // does. A row that cannot be picked yet takes no click.
+                    if let Some(i) = items.iter().position(|r| r.contains(at)).filter(|i| p.open(*i)) {
                         p.sel = i;
                         let k = if p.multi { KeyCode::Char(' ') } else { KeyCode::Enter };
                         self.key(press(k));
                     }
                 } else if closes && !in_menu {
-                    // A click on what the menu docks under only closes it:
-                    // going on would open the same menu again.
-                    let on_anchor = p.anchor.is_some_and(|r| r.contains(at));
+                    // A click on what would open this same menu (its tab, or
+                    // its row) only closes it, wherever it docked.
+                    let id = p.pane.as_ref().map(|(id, _)| id.clone());
                     self.key(press(KeyCode::Esc));
-                    if !on_anchor {
-                        self.click_through(m);
+                    self.click_through(m);
+                    if let Mode::Pick(q) = &self.mode {
+                        if id.is_some() && q.pane.as_ref().map(|(id, _)| id) == id.as_ref() {
+                            self.mode = Mode::Browse;
+                        }
                     }
                 }
             }

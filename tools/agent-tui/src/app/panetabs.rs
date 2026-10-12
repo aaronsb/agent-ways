@@ -315,8 +315,8 @@ impl App {
 
     /// Open tab `i`'s menu, over the pane. It docks where the input came
     /// from: under the tab for a click on it or Enter on the tab bar
-    /// (`at_tab`); for a key, under the pane's own row for the tab when it
-    /// names one ([`Pane::take_anchor`]), else under the tab.
+    /// (`at_tab`); for a key, where the pane's [`crate::Anchor`] says,
+    /// which for the chat is the channel's row in its column, else the tab.
     pub(super) fn open_tab_menu(&mut self, i: usize, at_tab: bool) {
         if let Some(p) = &mut self.pane {
             if !p.has_tab_menus() {
@@ -324,11 +324,9 @@ impl App {
             }
             p.tab_menu(i);
         }
-        self.menu_anchor = self.hits.tabs.iter().find(|(_, t)| *t == i).map(|(r, _)| *r);
-        self.menu_at_tab = at_tab;
+        self.clicked_tab = self.hits.tabs.iter().find(|(_, t)| *t == i && at_tab).map(|(r, _)| *r);
         self.take_pane_open();
-        self.menu_anchor = None;
-        self.menu_at_tab = false;
+        self.clicked_tab = None;
     }
 
     /// The pane's tabs as the shell draws its own: numbered lozenges, the

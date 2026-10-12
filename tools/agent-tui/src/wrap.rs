@@ -25,6 +25,12 @@ pub fn str_width(s: &str) -> usize {
     s.width()
 }
 
+/// `s` padded with spaces to `width` columns, as `{:<width$}` pads by
+/// characters; a wide character counts as the two cells it takes.
+pub fn pad_to(s: &str, width: usize) -> String {
+    format!("{s}{}", " ".repeat(width.saturating_sub(str_width(s))))
+}
+
 /// `s` cut to `max` columns, the last kept column a `…` when anything was cut.
 pub fn truncate(s: &str, max: usize) -> String {
     if str_width(s) <= max {

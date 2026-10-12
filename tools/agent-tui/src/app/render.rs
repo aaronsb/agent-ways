@@ -13,6 +13,7 @@ use super::theme::{self, Ground, Seg, Shape};
 use super::apply::Outcome;
 use super::{App, Btn, Mode};
 use crate::tree::{self, Arg, Kind, Row};
+use crate::wrap::pad_to;
 
 /// A bordered pane in the theme: rule-coloured border, accent title.
 pub(super) fn pane(title: impl Into<Line<'static>>) -> Block<'static> {
@@ -523,19 +524,24 @@ impl App {
     /// recorded as a click target.
     pub(super) fn draw_menu_items(&mut self, f: &mut Frame, area: Rect, title: String, items: Vec<(String, String)>, sel: usize) {
         let r = modal_rect(area, 50, items.len() as u16 + 2);
-        self.draw_menu_items_in(f, r, title, items, sel);
+        self.draw_menu_items_in(f, r, title, items, sel, &[]);
     }
 
-    /// The menu's items in the popup `r`, each row a click target.
-    pub(super) fn draw_menu_items_in(&mut self, f: &mut Frame, r: Rect, title: String, items: Vec<(String, String)>, sel: usize) {
+    /// The menu's items in the popup `r`, each row a click target. An item
+    /// `waits` marks, one that cannot be picked yet, is drawn set back.
+    pub(super) fn draw_menu_items_in(&mut self, f: &mut Frame, r: Rect, title: String, items: Vec<(String, String)>, sel: usize, waits: &[bool]) {
         let w = r.width;
         let lines: Vec<Line> = items
             .iter()
             .enumerate()
             .map(|(i, (label, tag))| {
-                let style = if i == sel { theme::picked() } else { Style::new() };
+                let style = match (i == sel, waits.get(i).copied().unwrap_or(false)) {
+                    (true, _) => theme::picked(),
+                    (false, true) => theme::muted(),
+                    (false, false) => Style::new(),
+                };
                 // Padded to the popup's inside, so the selection fills the row.
-                Line::styled(format!("{:<1$}", format!(" {label:<10}{tag}"), w.saturating_sub(2) as usize), style)
+                Line::styled(pad_to(&format!(" {}{tag}", pad_to(label, 10)), w.saturating_sub(2) as usize), style)
             })
             .collect();
         let inner = r.inner(ratatui::layout::Margin::new(1, 1));

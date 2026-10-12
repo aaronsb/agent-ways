@@ -2,13 +2,26 @@
 //! marked, for a fixed choice and a computed one alike. A list choice marks
 //! several. What it picks goes through the same check as typed text, and
 //! lands on the setting it was opened on.
+//!
+//! A pane's menu is the same picker over its [`Item`]s: an item that cannot
+//! be picked yet is drawn set back with why, the highlight passes over it,
+//! and a click on it does nothing. It docks at what opened it ([`Dock`]).
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
+use super::pane::{Anchor, Item};
 use super::{App, Mode};
 use crate::tree::{self, Kind};
+
+/// Where a pane's picker docks: on the line under a tab or a row, or beside
+/// the row of the menu it was picked from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Dock {
+    Under(Rect),
+    Beside { menu: Rect, row: Rect },
+}
 
 /// An open picker over the setting at `path`.
 #[derive(Debug, Clone)]
@@ -24,13 +37,15 @@ pub(crate) struct Pick {
     pub(crate) sel: usize,
     /// Per option: the current value (one), or marked to be in the list (multi).
     pub(crate) marked: Vec<bool>,
+    /// Per option: why it cannot be picked yet, or `None` when it can.
+    pub(crate) waits: Vec<Option<String>>,
     /// The value it was opened on.
     pub(crate) was: String,
     /// A pane's picker: the id its choice goes back under, and its title.
     /// `None` for a setting's.
     pub(crate) pane: Option<(String, String)>,
-    /// The row a pane's picker docks under; `None` centres it.
-    pub(crate) anchor: Option<Rect>,
+    /// Where a pane's picker docks; `None` centres it.
+    pub(crate) dock: Option<Dock>,
 }
 
 impl Pick {
@@ -45,16 +60,50 @@ impl Pick {
         options.extend(unknown);
         let marked: Vec<bool> = options.iter().map(|o| held.contains(o)).collect();
         let sel = marked.iter().position(|m| *m).unwrap_or(0);
-        Pick { path, options, known, multi, sel, marked, was: value.to_string(), pane: None, anchor: None }
+        let waits = vec![None; options.len()];
+        Pick { path, options, known, multi, sel, marked, waits, was: value.to_string(), pane: None, dock: None }
     }
 
-    /// A picker a pane opened: `chosen` marked, the choice going back to
-    /// the pane under `id`.
-    pub(crate) fn for_pane(id: String, title: String, options: Vec<String>, multi: bool, chosen: &[String]) -> Pick {
-        let marked: Vec<bool> = options.iter().map(|o| chosen.contains(o)).collect();
-        let sel = marked.iter().position(|m| *m).unwrap_or(0);
+    /// A picker a pane opened over `items`, the current ones marked, the
+    /// choice going back to the pane under `id`. The cursor starts on the
+    /// first current item, even one that cannot be picked, so an Enter at
+    /// once changes nothing; with none current, on the first that can be
+    /// picked.
+    pub(crate) fn for_pane(id: String, title: String, items: Vec<Item>, multi: bool) -> Pick {
+        let marked: Vec<bool> = items.iter().map(|i| i.current).collect();
+        let waits: Vec<Option<String>> = items.iter().map(|i| (!i.enabled).then(|| i.reason.clone().unwrap_or_default())).collect();
+        let options: Vec<String> = items.into_iter().map(|i| i.label).collect();
+        let open = |i: &usize| waits[*i].is_none();
+        let sel = (0..options.len()).find(|i| marked[*i]).or_else(|| (0..options.len()).find(open)).unwrap_or(0);
         let known = options.len();
-        Pick { path: Vec::new(), options, known, multi, sel, marked, was: String::new(), pane: Some((id, title)), anchor: None }
+        Pick { path: Vec::new(), options, known, multi, sel, marked, waits, was: String::new(), pane: Some((id, title)), dock: None }
+    }
+
+    /// Whether option `i` can be picked.
+    pub(crate) fn open(&self, i: usize) -> bool {
+        self.waits.get(i).is_some_and(Option::is_none)
+    }
+
+    /// The option `step` moves the cursor to from `from`: the next one that
+    /// can be picked that way, or `from` when there is none.
+    fn step(&self, from: usize, down: bool) -> usize {
+        let mut i = from;
+        loop {
+            i = match (down, i) {
+                (true, i) if i + 1 < self.options.len() => i + 1,
+                (false, i) if i > 0 => i - 1,
+                _ => return from,
+            };
+            if self.open(i) {
+                return i;
+            }
+        }
+    }
+
+    /// The first option that can be picked, from the top or the bottom.
+    fn end(&self, top: bool) -> usize {
+        let mut all: Box<dyn Iterator<Item = usize>> = if top { Box::new(0..self.options.len()) } else { Box::new((0..self.options.len()).rev()) };
+        all.find(|i| self.open(*i)).unwrap_or(self.sel)
     }
 
     /// The options picked: the one under the cursor, or the marked ones in
@@ -76,26 +125,33 @@ impl Pick {
         tree::list_value(&items)
     }
 
-    /// The (label, tag) rows the popup draws.
+    /// The (label, tag) rows the popup draws. An option that cannot be
+    /// picked yet carries why as its tag.
     fn items(&self) -> Vec<(String, String)> {
-        self.options
-            .iter()
+        use crate::wrap::str_width;
+        let mark = |m: bool| match (self.multi, m) {
+            (true, true) => "[x]",
+            (true, false) => "[ ]",
+            (false, true) => "●",
+            (false, false) => " ",
+        };
+        let labels: Vec<String> = self.options.iter().zip(&self.marked).map(|(o, m)| format!("{} {o}", mark(*m))).collect();
+        // Where an option says why it waits, the labels pad to the widest, in
+        // screen cells, so each reason starts in one column.
+        let pad = if self.waits.iter().any(Option::is_some) { labels.iter().map(|l| str_width(l)).max().unwrap_or(0) } else { 0 };
+        labels
+            .into_iter()
             .zip(&self.marked)
             .enumerate()
-            .map(|(i, (o, m))| {
+            .map(|(i, (label, m))| {
                 let tag = match (i >= self.known, !self.multi && *m) {
-                    (true, true) => "  current, not a choice",
-                    (true, false) => "  not a choice",
-                    (false, true) => "  current",
-                    (false, false) => "",
+                    _ if !self.open(i) => format!("  {}", self.waits[i].as_deref().unwrap_or_default()),
+                    (true, true) => "  current, not a choice".into(),
+                    (true, false) => "  not a choice".into(),
+                    (false, true) => "  current".into(),
+                    (false, false) => String::new(),
                 };
-                let mark = match (self.multi, m) {
-                    (true, true) => "[x]",
-                    (true, false) => "[ ]",
-                    (false, true) => "●",
-                    (false, false) => " ",
-                };
-                (format!("{mark} {o}"), tag.to_string())
+                (crate::wrap::pad_to(&label, pad), tag)
             })
             .collect()
     }
@@ -119,16 +175,20 @@ impl App {
     /// One key in the picker. Enter sets the value; on a list, Space marks
     /// the option under the cursor. Esc closes it unchanged: a setting's
     /// picker says so, and a pane's menu closes saying nothing, as every
-    /// overlay over a pane does.
+    /// overlay over a pane does. The cursor passes over an option that
+    /// cannot be picked, and Enter on one does nothing.
     pub(super) fn pick_key(&mut self, mut p: Pick, k: KeyEvent) {
-        let last = p.options.len() - 1;
         match k.code {
             KeyCode::Esc | KeyCode::Char('q') if p.pane.is_some() => self.msg.clear(),
             KeyCode::Esc | KeyCode::Char('q') => self.msg = "unchanged".into(),
-            KeyCode::Up | KeyCode::Char('k') => p.sel = p.sel.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => p.sel = (p.sel + 1).min(last),
-            KeyCode::Home | KeyCode::Char('g') => p.sel = 0,
-            KeyCode::End | KeyCode::Char('G') => p.sel = last,
+            KeyCode::Up | KeyCode::Char('k') => p.sel = p.step(p.sel, false),
+            KeyCode::Down | KeyCode::Char('j') => p.sel = p.step(p.sel, true),
+            KeyCode::Home | KeyCode::Char('g') => p.sel = p.end(true),
+            KeyCode::End | KeyCode::Char('G') => p.sel = p.end(false),
+            // A row that cannot change takes no Space. Enter on one picks
+            // nothing from one choice, and on a list sets the marks as they are.
+            KeyCode::Char(' ') if !p.open(p.sel) => {}
+            KeyCode::Enter if !p.multi && !p.open(p.sel) => {}
             KeyCode::Char(' ') if p.multi => p.marked[p.sel] = !p.marked[p.sel],
             KeyCode::Enter | KeyCode::Char(' ') => return self.pick_set(p),
             _ => {}
@@ -142,10 +202,11 @@ impl App {
     /// rejected value keeps the picker open, and the bottom bar says why.
     fn pick_set(&mut self, p: Pick) {
         if let Some((id, _)) = &p.pane {
-            // A menu the pick leads to (Invite agent ▸) docks where this one did.
-            self.menu_anchor = p.anchor;
+            // A menu the pick leads to (Invite agent ▸) docks beside the
+            // row picked, as the frame last drew it.
+            self.menu_parent = self.hits.menu.as_ref().and_then(|(menu, rows)| rows.get(p.sel).map(|row| (*menu, *row)));
             self.pane_picked(id, p.values());
-            self.menu_anchor = None;
+            self.menu_parent = None;
             return;
         }
         let v = p.value();
@@ -165,32 +226,65 @@ impl App {
             None => tree::label(&self.roots, &p.path),
         };
         let title = format!("{}: {what}", if p.multi { "pick any" } else { "pick one" });
-        match p.anchor {
-            Some(row) => {
+        let waits: Vec<bool> = (0..p.options.len()).map(|i| !p.open(i)).collect();
+        match p.dock {
+            Some(dock) => {
                 let items = p.items();
-                let r = docked(area, row, &title, &items);
-                self.draw_menu_items_in(f, r, title, items, p.sel);
+                let r = docked(area, dock, &title, &items);
+                self.draw_menu_items_in(f, r, title, items, p.sel, &waits);
             }
             None => self.draw_menu_items(f, area, title, p.items(), p.sel),
         }
     }
+
+    /// Where a pane's menu docks, from the anchor it names: under the tab a
+    /// click (or Enter on the focused bar) opened it from, whatever it
+    /// names; else under its tab or row, or beside the row of the menu it
+    /// was picked from; else in the middle.
+    pub(super) fn dock(&self, anchor: Anchor) -> Option<Dock> {
+        if let Some(tab) = self.clicked_tab {
+            return Some(Dock::Under(tab));
+        }
+        match anchor {
+            Anchor::Center => None,
+            Anchor::Tab(i) => self.hits.tabs.iter().find(|(_, t)| *t == i).map(|(r, _)| Dock::Under(*r)),
+            Anchor::Row(r) => Some(Dock::Under(r)),
+            Anchor::Parent => self.menu_parent.map(|(menu, row)| Dock::Beside { menu, row }),
+        }
+    }
 }
 
-/// Where a picker docked under `row` goes in `area`: on the line below the
-/// row, from the row's left edge, as wide as its title and items need.
-/// Where the lines below cannot hold it, it ends on the line above the row,
-/// so the row stays in sight; where neither side can, it sits at the foot
-/// of `area`. It is moved as far as it must to lie inside `area`, which a
-/// row left outside it by a resize needs, and it is never taller or wider
-/// than `area`.
-pub(super) fn docked(area: Rect, row: Rect, title: &str, items: &[(String, String)]) -> Rect {
+/// Where a docked picker goes in `area`, as wide as its title and items
+/// need. Under a row: on the line below the row, from its left edge; where
+/// the lines below cannot hold it, it ends on the line above the row, so
+/// the row stays in sight; where neither side can, it sits at the foot of
+/// `area`. Beside a menu's row: right of the menu, its first item level
+/// with the row, or left of the menu where the right has no room. It is
+/// moved as far as it must to lie inside `area`, which a row left outside
+/// it by a resize needs, and it is never taller or wider than `area`.
+pub(super) fn docked(area: Rect, dock: Dock, title: &str, items: &[(String, String)]) -> Rect {
     use crate::wrap::str_width;
     // Borders, the item's lead space, its mark and a space, and a column
     // of padding: the rows `draw_menu_items_in` draws.
-    let widest = items.iter().map(|(l, t)| 1 + str_width(&format!("{l:<10}")) + str_width(t) + 1).max().unwrap_or(0);
+    let widest = items.iter().map(|(l, t)| 1 + str_width(l).max(10) + str_width(t) + 1).max().unwrap_or(0);
     let want = (widest.max(str_width(title) + 2) + 2).max(24);
     let w = (want.min(usize::from(u16::MAX)) as u16).min(area.width);
     let h = (items.len() as u16 + 2).min(area.height);
+    let row = match dock {
+        Dock::Under(row) => row,
+        Dock::Beside { menu, row } => {
+            // Right of the menu; else left of it; else as far right as fits.
+            let x = if menu.right() + w <= area.right() {
+                menu.right()
+            } else if menu.x >= area.x + w {
+                menu.x - w
+            } else {
+                area.right() - w
+            };
+            let y = row.y.saturating_sub(1).clamp(area.y, area.bottom() - h);
+            return Rect { x: x.clamp(area.x, area.right() - w), y, width: w, height: h };
+        }
+    };
     let below = row.y.saturating_add(row.height.max(1));
     let y = if below + h <= area.bottom() {
         below
@@ -336,24 +430,45 @@ mod tests {
         assert_eq!(value(&app, 0), "openrouter");
     }
 
+    /// The reasons start in one screen column whatever the labels hold:
+    /// a wide character takes two cells, an emoji two.
+    #[test]
+    fn reasons_line_up_by_display_width() {
+        use crate::wrap::str_width;
+        let items = vec![Item::new("Join"), Item::disabled("数据 channel", "needs D1"), Item::disabled("🚀 launch", "needs D4"), Item::new("Delete channel")];
+        let p = Pick::for_pane("m".into(), "t".into(), items, false);
+        let widths: Vec<usize> = p.items().iter().map(|(label, _)| str_width(label)).collect();
+        assert!(widths.windows(2).all(|w| w[0] == w[1]), "every label pads to one width: {widths:?} {:#?}", p.items());
+    }
+
     #[test]
     fn a_docked_menu_sits_under_its_row_else_above_it_else_at_the_foot() {
         let area = Rect { x: 0, y: 1, width: 80, height: 23 };
         let items: Vec<(String, String)> = (0..7).map(|i| (format!("  item {i}"), String::new())).collect();
         let row = |y| Rect { x: 0, y, width: 26, height: 1 };
-        let r = docked(area, row(8), "pick one: #infra", &items);
+        let r = docked(area, Dock::Under(row(8)), "pick one: #infra", &items);
         assert_eq!((r.x, r.y, r.height), (0, 9, 9), "on the line under the row");
-        let r = docked(area, row(20), "pick one: #infra", &items);
+        let r = docked(area, Dock::Under(row(20)), "pick one: #infra", &items);
         assert_eq!((r.y, r.bottom()), (11, 20), "no room below: it ends on the line above the row");
         let short = Rect { height: 10, ..area };
-        let r = docked(short, row(6), "pick one: #infra", &items);
+        let r = docked(short, Dock::Under(row(6)), "pick one: #infra", &items);
         assert_eq!((r.y, r.bottom()), (2, 11), "no room either side: at the foot, inside the area");
-        let r = docked(area, Rect { x: 70, y: 0, width: 8, height: 1 }, "pick one: #infra", &items);
+        let r = docked(area, Dock::Under(Rect { x: 70, y: 0, width: 8, height: 1 }), "pick one: #infra", &items);
         assert_eq!(r.right(), 80, "moved left to end inside the area");
         assert!(r.width >= 24 && r.width <= 80);
-        let r = docked(Rect { height: 23, ..area }, row(31), "pick one: #infra", &items);
+        let r = docked(Rect { height: 23, ..area }, Dock::Under(row(31)), "pick one: #infra", &items);
         assert_eq!((r.y, r.bottom()), (15, 24), "a row below the area after a resize: the menu ends at its foot");
+        // Beside a menu's row: right of it, level with the row; else left of
+        // it; else as far right as it fits.
+        let parent = Rect { x: 0, y: 1, width: 24, height: 8 };
+        let r = docked(area, Dock::Beside { menu: parent, row: Rect { x: 1, y: 3, width: 22, height: 1 } }, "pick one: theme", &items);
+        assert_eq!((r.x, r.y), (24, 2), "right of the menu, its first item on the row's line");
+        let right = Rect { x: 56, ..parent };
+        assert_eq!(docked(area, Dock::Beside { menu: right, row: Rect { y: 3, ..right } }, "t", &items).right(), 56, "left of a menu at the right edge");
+        let wide: Vec<(String, String)> = vec![("  ".to_string() + &"x".repeat(60), String::new())];
+        let r = docked(area, Dock::Beside { menu: parent, row: Rect { y: 3, ..parent } }, "t", &wide);
+        assert_eq!(r.right(), 80, "neither side holds it: as far right as fits");
         let narrow = Rect { width: 20, ..area };
-        assert_eq!(docked(narrow, row(3), "a long title for a narrow screen", &items).width, 20, "never wider than the area");
+        assert_eq!(docked(narrow, Dock::Under(row(3)), "a long title for a narrow screen", &items).width, 20, "never wider than the area");
     }
 }

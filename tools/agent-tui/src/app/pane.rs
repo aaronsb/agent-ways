@@ -135,6 +135,58 @@ pub enum Keyed {
     Tabs,
 }
 
+/// One row of a pane's menu ([`Open::Pick`]): its label, which comes back
+/// through [`Pane::picked`] when it is picked; whether it can be picked, and
+/// if not why, which the row says set back; and whether it is the current
+/// value, which the row marks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Item {
+    pub label: String,
+    pub enabled: bool,
+    pub reason: Option<String>,
+    pub current: bool,
+}
+
+impl Item {
+    /// An item that can be picked.
+    pub fn new(label: impl Into<String>) -> Item {
+        Item { label: label.into(), enabled: true, reason: None, current: false }
+    }
+
+    /// An item that cannot be picked yet, and why: drawn set back with the
+    /// reason, skipped by the highlight, and deaf to a click.
+    pub fn disabled(label: impl Into<String>, reason: impl Into<String>) -> Item {
+        Item { label: label.into(), enabled: false, reason: Some(reason.into()), current: false }
+    }
+
+    /// Marked as the current value, or not.
+    pub fn current(self, on: bool) -> Item {
+        Item { current: on, ..self }
+    }
+}
+
+impl<S: Into<String>> From<S> for Item {
+    fn from(label: S) -> Item {
+        Item::new(label)
+    }
+}
+
+/// Where a pane's menu docks ([`Open::Pick`]). A menu opened by a click on
+/// its tab, or Enter on the focused tab bar, docks under that tab whatever
+/// it names, so it opens where the input came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Anchor {
+    /// In the middle of the pane.
+    #[default]
+    Center,
+    /// On the line under the pane's tab `i`.
+    Tab(usize),
+    /// On the line under a row of the pane's own, in screen cells.
+    Row(Rect),
+    /// Beside the row of the menu it was picked from: a submenu.
+    Parent,
+}
+
 /// What a pane asks the shell to open over it ([`Pane::take_open`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Open {
@@ -144,9 +196,10 @@ pub enum Open {
     Report { label: String, command: String, text: String },
     /// A failure, in the response modal as an error.
     Error { label: String, command: String, text: String },
-    /// A picker over `options`, `chosen` marked; what is picked comes back
-    /// through [`Pane::picked`] under `id`. Esc closes it with nothing.
-    Pick { id: String, title: String, options: Vec<String>, multi: bool, chosen: Vec<String> },
+    /// A menu or picker over `items`, docked at `anchor`; the label of what
+    /// is picked comes back through [`Pane::picked`] under `id`. Esc or a
+    /// click outside closes it with nothing.
+    Pick { id: String, title: String, items: Vec<Item>, multi: bool, anchor: Anchor },
     /// Tab `i` as Ctrl+digit takes it: shown, or its menu opened when it
     /// is shown already. For a row of the pane that stands for a tab, so a
     /// click on the row and the key share one rule.
@@ -332,14 +385,6 @@ pub trait Pane: Any {
     /// Something to open over the pane: the response modal or a picker.
     /// The shell asks after each key, click and tick that reaches the pane.
     fn take_open(&mut self) -> Option<Open> {
-        None
-    }
-
-    /// The row the menu just opened ([`Pane::take_open`]) docks under, in
-    /// screen cells: the row of the pane it was opened from. `None` docks
-    /// it under its tab, or centres it. Asked, and so cleared, with each
-    /// [`Pane::take_open`].
-    fn take_anchor(&mut self) -> Option<Rect> {
         None
     }
 

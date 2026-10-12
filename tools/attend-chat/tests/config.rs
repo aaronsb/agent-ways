@@ -80,8 +80,10 @@ fn config_lists_sets_refuses_and_applies_at_once() {
     assert!(c.status().ends_with("Alt+1-9 and F2 do"), "{}", c.status());
     assert!(bar(&mut c).contains("Alt+1-9 tab (again: menu)"));
 
-    // The ≡ menu's keybinding set writes its keys in one go.
-    for k in [KeyCode::F(2), KeyCode::Left, KeyCode::Enter, KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Enter] {
+    // The ≡ menu's keybinding set writes its keys in one go. jump=both
+    // matches no preset, so the cursor starts on the custom row: Down to
+    // ctrl, Down to alt.
+    for k in [KeyCode::F(2), KeyCode::Left, KeyCode::Enter, KeyCode::Down, KeyCode::Enter, KeyCode::Down, KeyCode::Down, KeyCode::Enter] {
         testkit::drive(&mut c, &[key(k)]);
     }
     assert!(c.status().starts_with("keybinding set: alt"), "{}", c.status());

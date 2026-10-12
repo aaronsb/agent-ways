@@ -86,6 +86,13 @@ lent-row     | base  | wait:Agents click:+ wait:new_channel_name side:#infra gon
 esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape gone:pick
 common-quit  | base  | wait:Agents click:≡ wait:Quit
 quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:discards
+menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_D1 Down
+theme-sub    | base  | wait:Agents click:≡ wait:Theme click:Theme wait:theme_for
+keys-sub     | base  | wait:Agents click:≡ wait:Keybinding click:Keybinding wait:keybinding_set
+remove-sub   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Remove_agent wait:remove_from
+settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:sets_one
+tab-closes   | base  | wait:Agents M-3 M-3 wait:pick click:3_#deploy gone:pick
+guard-name   | base  | wait:Agents C-n wait:new_channel_name text:abc C-c wait:being_typed
 quit-lent    | base  | wait:Agents C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
 "
 

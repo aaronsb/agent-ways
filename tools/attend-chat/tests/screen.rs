@@ -827,7 +827,7 @@ fn ctrl_digit_shows_a_tab_and_a_second_press_opens_its_menu() {
     assert!(!text(&mut c, 80, 25).contains("pick one"), "the first press only shows the tab");
     drawn(&mut c, &[ctrl('3')], 80, 25);
     let shown = text(&mut c, 80, 25);
-    for item in ["pick one: #deploy", "Add agent ▸", "Invite agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Join", "Delete channel"] {
+    for item in ["pick one: #deploy", "Invite agent ▸", "Add agent", "needs ADR-404 D1", "Remove agent ▸", "Describe…", "Clear history", "Join", "Seal", "needs ADR-404 D4", "Delete channel"] {
         assert!(shown.contains(item), "{item}: {shown}");
     }
     assert!(!shown.contains("Leave"), "the human is not in #deploy: Join, not Leave");
@@ -1091,7 +1091,8 @@ fn ctrl_n_never_throws_away_a_description_being_typed() {
     let mut c = chat().enhanced(true).dry_run(true);
     typed(&mut c, "a draft");
     drawn(&mut c, &[ctrl('3'), ctrl('3')], 80, 25);
-    for _ in 0..3 {
+    // Invite agent, then Remove agent and Describe…: Add agent waits.
+    for _ in 0..2 {
         press(&mut c, key(KeyCode::Down));
     }
     press(&mut c, key(KeyCode::Enter));
@@ -1246,7 +1247,8 @@ fn the_common_menu_sits_before_merged_and_merged_keeps_number_one() {
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Up));
     press(&mut c, key(KeyCode::Enter));
-    assert_eq!(c.status(), "dry run: /config not run", "Settings… is /config");
+    let shown = text(&mut c, 80, 25);
+    assert!(shown.contains("mouse = ") && shown.contains("/config <key> <value> sets one"), "Settings… shows /config's listing: {shown}");
     g.finish();
 }
 

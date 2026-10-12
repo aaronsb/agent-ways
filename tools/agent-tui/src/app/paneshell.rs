@@ -406,16 +406,10 @@ impl App {
     /// Open what the pane asked for: a report or an error in the response
     /// modal, or a picker whose choice goes back to the pane.
     ///
-    /// A picker docks under the row the pane names ([`Pane::take_anchor`]),
-    /// else under the tab or menu it was opened from, else in the middle;
-    /// a menu a click on its tab opened docks under the tab.
+    /// A picker docks where its [`crate::Anchor`] says ([`App::dock`]).
     pub(super) fn take_pane_open(&mut self) {
-        let from = self.menu_anchor.take();
-        let at_tab = std::mem::take(&mut self.menu_at_tab);
         let Some(p) = self.pane.as_mut() else { return };
-        let (open, row) = (p.take_open(), p.take_anchor());
-        let anchor = if at_tab { from.or(row) } else { row.or(from) };
-        let Some(open) = open else { return };
+        let Some(open) = p.take_open() else { return };
         match open {
             Open::Report { label, command, text } => {
                 let printed = Printed { code: Some(0), stdout: text, stderr: String::new() };
@@ -428,9 +422,9 @@ impl App {
                     self.show_response(s);
                 }
             }
-            Open::Pick { id, title, options, multi, chosen } if matches!(self.mode, Mode::Browse) && !options.is_empty() => {
-                let mut pick = Pick::for_pane(id, title, options, multi, &chosen);
-                pick.anchor = anchor;
+            Open::Pick { id, title, items, multi, anchor } if matches!(self.mode, Mode::Browse) && !items.is_empty() => {
+                let mut pick = Pick::for_pane(id, title, items, multi);
+                pick.dock = self.dock(anchor);
                 self.mode = Mode::Pick(pick);
             }
             Open::Pick { .. } => {}
@@ -664,7 +658,7 @@ impl crate::screen::Screen for App {
 
 #[cfg(test)]
 mod tests {
-    use super::super::pane::{Pane, PaneTab};
+    use super::super::pane::{Anchor, Item, Pane, PaneTab};
     use super::super::panetabs::{Jump, TabKeys};
     use super::*;
     use crate::testkit;
@@ -767,7 +761,7 @@ mod tests {
     #[test]
     fn a_pane_opens_a_picker_and_hears_the_choice() {
         let mut a = app(false);
-        let open = Open::Pick { id: "to".into(), title: "send to".into(), options: vec!["a".into(), "b".into()], multi: false, chosen: vec!["a".into()] };
+        let open = Open::Pick { id: "to".into(), title: "send to".into(), items: vec![Item::new("a").current(true), Item::new("b")], multi: false, anchor: Anchor::Center };
         a.pane_mut::<Two>().expect("the pane").open = Some(open);
         a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
         assert!(testkit::text(&testkit::render(&mut a, 80, 16)).contains("pick one: send to"));
@@ -775,6 +769,20 @@ mod tests {
         a.key(k(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(two(&a).picked, ["to=b"]);
         assert_eq!(two(&a).keys, 1, "the picker's keys are not the pane's");
+    }
+
+    /// A list whose first current item cannot be changed: the cursor starts
+    /// on it, Space there toggles nothing, and Enter sets the list at once,
+    /// the item that cannot change kept.
+    #[test]
+    fn enter_sets_a_list_from_a_row_that_cannot_change() {
+        let mut a = app(false);
+        let items = vec![Item::disabled("d", "fixed").current(true), Item::new("a"), Item::new("c").current(true)];
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Pick { id: "to".into(), title: "send to".into(), items, multi: true, anchor: Anchor::Center });
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        a.key(k(KeyCode::Char(' '), KeyModifiers::NONE));
+        a.key(k(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(two(&a).picked, ["to=d", "to=c"], "Space left d marked; Enter set the list");
     }
 
     /// One way to answer a question.
@@ -859,7 +867,7 @@ mod tests {
     #[test]
     fn a_panes_menu_closes_saying_nothing() {
         let mut a = app(false);
-        let open = Open::Pick { id: "to".into(), title: "send to".into(), options: vec!["a".into()], multi: false, chosen: Vec::new() };
+        let open = Open::Pick { id: "to".into(), title: "send to".into(), items: vec![Item::new("a")], multi: false, anchor: Anchor::Center };
         a.pane_mut::<Two>().expect("the pane").open = Some(open);
         a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
         a.key(k(KeyCode::Esc, KeyModifiers::NONE));
@@ -1161,7 +1169,7 @@ mod tests {
         let buf = testkit::render(&mut a, 60, 12);
         let (x2, y) = testkit::find(&buf, "2 two").expect("the tab");
         a.pane_mut::<Two>().expect("the pane").tab = 1;
-        let open = Open::Pick { id: "m".into(), title: "two".into(), options: vec!["a".into(), "b".into()], multi: false, chosen: Vec::new() };
+        let open = Open::Pick { id: "m".into(), title: "two".into(), items: vec![Item::new("a"), Item::new("b")], multi: false, anchor: Anchor::Center };
         a.pane_mut::<Two>().expect("the pane").open = Some(open);
         a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), column: x2, row: y, modifiers: KeyModifiers::NONE });
         let rows = testkit::rows(&testkit::render(&mut a, 60, 12));

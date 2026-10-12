@@ -44,6 +44,11 @@ pub fn tab_keys(c: &ChatConfig) -> TabKeys {
 
 /// One line on every chat key: its value and the layer it comes from.
 pub fn listing(dir: &Path) -> String {
+    format!("{} · /config <key> <value> sets one", listing_lines(dir).join(" · "))
+}
+
+/// Each chat key as `key = value (layer)`, a line each.
+pub fn listing_lines(dir: &Path) -> Vec<String> {
     let layers = layers(dir);
     let mut out = Vec::new();
     for k in KEYS {
@@ -54,7 +59,7 @@ pub fn listing(dir: &Path) -> String {
         let value = r.value.as_ref().map(plain).unwrap_or_default();
         out.push(format!("{k} = {value} ({from})"));
     }
-    format!("{} · /config <key> <value> sets one", out.join(" · "))
+    out
 }
 
 /// Set chat key `key` (its short name) to `raw` in the user file at
