@@ -109,15 +109,14 @@ impl ChatPane {
     }
 
     /// Move the interaction state by `ev` ([`ix::step`]) and carry out what
-    /// the step asks, in order. A step that needs the world reads it first,
-    /// which refocuses, then steps again.
+    /// the step asks, in order. A step that needs the world reads it, which
+    /// refocuses, then steps once more, with the world in the view.
     pub(super) fn dispatch(&mut self, ev: Ev) {
-        let (ix, effects) = loop {
-            match ix::step(&self.ix, ev.clone(), &self.ix_view()) {
-                Ok(done) => break done,
-                Err(ix::NeedWorld) => {
-                    self.world();
-                }
+        let (ix, effects) = match ix::step(&self.ix, ev.clone(), &self.ix_view()) {
+            Ok(done) => done,
+            Err(ix::NeedWorld) => {
+                self.world();
+                ix::step(&self.ix, ev, &self.ix_view()).expect("the world was just read")
             }
         };
         self.ix = ix;
