@@ -96,7 +96,7 @@ attend scene private                       # leave all channels
 ## Discovery
 
 ```bash
-attend peers                               # sessions and their channels
-attend channels                            # all channels, joined ones marked
+attend peers                               # sessions, their channels, and who is in each
+attend channels                            # all channels and their members, joined ones marked
 attend status                              # instances, signals, channel state
 ```

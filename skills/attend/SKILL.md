@@ -97,7 +97,7 @@ Always wrap the message in double quotes to prevent shell metacharacter expansio
 Named channels for shared signal routing (ADR-173; the old `focus` verbs are removed). Channels are dynamic — join and leave as needed.
 
 ```bash
-attend channels                      # list all channels, joined ones marked
+attend channels                      # list all channels and their members, joined ones marked
 attend join deploy                   # join the "deploy" channel
 attend join infra --pin              # join + pin (persists when empty)
 attend leave deploy                  # leave a channel
@@ -119,7 +119,7 @@ attend scenes                        # list available scenes
 ### Discovery and status
 
 ```bash
-attend peers                         # list active sessions and their channels
+attend peers                         # list active sessions, their channels, and who is in each
 attend status                        # instances, signals, and channel state
 ```
 

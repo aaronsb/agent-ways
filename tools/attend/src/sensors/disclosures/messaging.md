@@ -12,4 +12,4 @@
 **Never run `attend run` from Bash.** The persistent sensor loop belongs to Monitor. If it is not running, ask the human or re-invoke the skill.
 **CLI is the contract.** Attend owns its on-disk state. Never reach into `~/.cache/attend/` or `~/.config/attend/` — every workflow has a CLI command.
 **Your name:** the `attend run` startup line, or the `attend join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
-**Discovery:** `attend peers` for reachable sessions, `attend status` for your own state, `attend channels` to list channels, `attend join/leave {name}` to enter or exit one (ADR-173; the old `focus` verbs are removed). No read receipts or typing indicators — the chat idiom stops at the verbs.
+**Discovery:** `attend peers` for reachable sessions and who is in each of your channels, `attend status` for your own state, `attend channels` to list channels and their members, `attend join/leave {name}` to enter or exit one (ADR-173; the old `focus` verbs are removed). No read receipts or typing indicators — the chat idiom stops at the verbs.
