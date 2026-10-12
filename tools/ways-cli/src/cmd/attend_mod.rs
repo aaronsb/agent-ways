@@ -16,9 +16,11 @@
 //!
 //! The `agent-ways` marketplace is ours when its source is this app's
 //! `plugins/` folder; or the folder a repair recorded adding it from, which a
-//! moved app leaves behind; or, with no record, a folder that no longer holds
-//! a marketplace while `attend@agent-ways` is installed from it, since an app
-//! that is gone has no other owner. Any other `agent-ways` marketplace, and
+//! moved app leaves behind; or, with no record, a folder whose parent (the
+//! app or checkout that held `plugins/`) is gone while `attend@agent-ways` is
+//! installed from it, since an app that is gone has no other owner. A folder
+//! that is only missing its marketplace for now, in a checkout that is still
+//! there (a branch without `plugins/`), is reported, not claimed. Any other `agent-ways` marketplace, and
 //! an `attend` plugin from another marketplace, are the operator's own:
 //! reported, with the command that hands the marketplace to this app, and
 //! left alone. Removing a marketplace uninstalls its plugins, so a moved
@@ -147,7 +149,11 @@ enum Market {
 
 fn market(have: &Installed, dir: &str, recorded: Option<&str>) -> Market {
     let same = |a: &str, b: &str| super::reconcile::same_path(Path::new(a), Path::new(b));
-    let gone = |path: &str| !Path::new(path).join(".claude-plugin/marketplace.json").is_file();
+    // The whole app or checkout is gone, not just its marketplace for now.
+    let gone = |path: &str| {
+        let folder = Path::new(path);
+        !folder.join(".claude-plugin/marketplace.json").is_file() && !folder.parent().is_some_and(Path::exists)
+    };
     match have.marketplace.as_deref() {
         None => Market::Absent,
         Some("") => Market::Foreign("a source that is not a local folder".to_string()),
@@ -436,6 +442,15 @@ mod tests {
         assert_eq!(p.calls, vec![Call::MarketplaceRemove, Call::MarketplaceAdd(DIR.into()), Call::Install]);
         let w = plan_withdraw(&have(Some(gone), Some("0.17.0")), DIR, None, "CMD");
         assert_eq!(w.calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
+        // A checkout that is still there, only without plugins/ for now (a
+        // branch switch), is not claimed: reported, with the way out.
+        let dev = checkout("branch-switch");
+        std::fs::remove_dir_all(&dev).unwrap();
+        let p = plan_converge(&have(Some(&dev), Some("0.17.0")), DIR, None, "0.17.0", "CMD");
+        assert!(p.calls.is_empty(), "{p:?}");
+        assert!(p.notes[0].contains("run `CMD`"), "{p:?}");
+        let w = plan_withdraw(&have(Some(&dev), Some("0.17.0")), DIR, None, "CMD");
+        assert!(w.calls.is_empty(), "{w:?}");
         // With no attend plugin from it, a gone folder proves nothing.
         let p = plan_converge(&have(Some(gone), None), DIR, None, "0.17.0", "CMD");
         assert!(p.calls.is_empty() && p.notes.len() == 1, "{p:?}");

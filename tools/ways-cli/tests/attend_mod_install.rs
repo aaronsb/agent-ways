@@ -344,3 +344,21 @@ fn a_disabled_target_with_no_record_loses_a_mod_whose_folder_is_gone() {
         vec![format!("{dest}|plugin uninstall attend@agent-ways --scope user"), format!("{dest}|plugin marketplace remove agent-ways")]
     );
 }
+
+/// A dev checkout's marketplace whose plugins/ folder is missing for now (a
+/// branch without it), with attend installed from it and no record: the
+/// checkout is still there, so it is the operator's. The repair reports it
+/// with the way out and changes nothing.
+#[test]
+fn a_dev_marketplace_missing_for_now_is_reported_not_claimed() {
+    let fx = Fx::new("dev-missing");
+    let checkout = fx.root.join("dev");
+    std::fs::create_dir_all(&checkout).unwrap();
+    let plugins = checkout.join("plugins");
+    write(&fx.state().join("markets.json"), &format!(r#"[{{"name":"agent-ways","source":"directory","path":"{}"}}]"#, plugins.display()));
+    write(&fx.state().join("plugins.json"), r#"[{"id":"attend@agent-ways","version":"0.17.0"}]"#);
+    let out = fx.repair();
+    assert_eq!(fx.changes(), Vec::<String>::new());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&plugins.display().to_string()) && err.contains("ways manage repair"), "{err}");
+}
