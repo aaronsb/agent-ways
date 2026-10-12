@@ -13,7 +13,7 @@ use std::path::Path;
 const EXTERNAL_COMMANDS: &[&str] = &[
     "attend", "awk", "basename", "cargo", "cat", "chmod", "cp", "curl", "cut",
     "date", "df", "diff", "dirname", "du", "file", "find", "gh", "git", "grep",
-    "head", "id", "jq", "ln", "ls", "make", "mkdir", "mv", "node", "npm",
+    "head", "id", "jq", "ln", "ls", "make", "mkdir", "mv", "node", "npm", "paste",
     "pnpm", "ps", "python3", "realpath", "rg", "rm", "sed", "sha256sum",
     "sort", "stat", "tail", "tee", "touch", "tr", "tree", "uname", "uniq",
     "ways", "wc", "which", "xargs", "yarn",
@@ -39,8 +39,9 @@ pub(super) fn scan_macro_requires(path: &Path) -> Vec<String> {
             }
             continue;
         }
-        // Detect here-doc start: cat <<EOF, cat <<'EOF', cat <<"EOF"
-        if let Some(pos) = trimmed.find("<<") {
+        // Detect here-doc start: cat <<EOF, cat <<'EOF', cat <<"EOF".
+        // A `<<<` here-string has no body and is not one.
+        if let Some(pos) = heredoc_start(trimmed) {
             let after = trimmed[pos + 2..].trim_start_matches(&['-', '~'][..]);
             let delim = after
                 .trim_start_matches('\'').trim_start_matches('"')
@@ -89,6 +90,20 @@ pub(super) fn scan_macro_requires(path: &Path) -> Vec<String> {
     perms
 }
 
+/// Where the first here-doc operator `<<` in `line` starts, skipping each
+/// `<<<` here-string, which carries its text on the same line.
+fn heredoc_start(line: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(i) = line[from..].find("<<").map(|i| from + i) {
+        let run = line[i..].bytes().take_while(|&b| b == b'<').count();
+        if run == 2 {
+            return Some(i);
+        }
+        from = i + run;
+    }
+    None
+}
+
 /// Check if a shell line uses a specific command (not just as a substring).
 fn line_uses_command(line: &str, cmd: &str) -> bool {
     // Match command at line start, after pipe, after $(), after backtick,
@@ -102,7 +117,8 @@ fn line_uses_command(line: &str, cmd: &str) -> bool {
 }
 
 /// Simple shell tokenizer — extracts tokens in "command position".
-/// Command position: first word of line, after |, &&, ||, ;, or inside $().
+/// Command position: first word of line, after |, &&, ||, ;, `{`, `then`,
+/// `do`, `else`, or inside $().
 /// Also handles VAR=$(cmd ...) and trap 'cmd ...' patterns.
 fn shell_tokens(line: &str) -> Vec<&str> {
     let mut tokens = Vec::new();
@@ -158,6 +174,7 @@ fn shell_tokens(line: &str) -> Vec<&str> {
         // These signal the next word is a command
         if word.ends_with('|') || word == "&&" || word == "||" || word.ends_with(';')
             || word == "|" || word.ends_with("$(") || word.ends_with('`')
+            || matches!(word, "{" | "then" | "do" | "else")
         {
             expect_cmd = true;
         }
@@ -230,5 +247,38 @@ pub(super) fn is_valid_permission(perm: &str) -> bool {
         Some(Permission::Tool(ref t)) | Some(Permission::Scoped(ref t, _)) => {
             matches!(t.as_str(), "Read" | "Write" | "Edit" | "Bash")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scan(name: &str, src: &str) -> Vec<String> {
+        let dir = std::env::temp_dir().join(format!("ways-requires-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("macro.sh");
+        std::fs::write(&path, src).unwrap();
+        let got = scan_macro_requires(&path);
+        let _ = std::fs::remove_dir_all(&dir);
+        got
+    }
+
+    #[test]
+    fn a_here_string_is_not_a_heredoc() {
+        let got = scan("herestring", "f() { grep -o x <<<\"$1\" | head -1; }\nX=$(attend status)\necho \"$X\" | sed 1d\n");
+        assert_eq!(got, ["Read", "Bash(attend:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(sed:*)"]);
+    }
+
+    #[test]
+    fn a_heredoc_body_is_skipped() {
+        let got = scan("heredoc", "cat <<'EOF'\ngit status\nEOF\nwc -l x\n");
+        assert_eq!(got, ["Read", "Bash(cat:*)", "Bash(wc:*)"]);
+    }
+
+    #[test]
+    fn a_heredoc_after_a_here_string_on_one_line_is_found() {
+        assert_eq!(heredoc_start("x <<<y; cat <<EOF"), Some(12));
+        assert_eq!(heredoc_start("x <<<\"$1\""), None);
     }
 }
