@@ -15,10 +15,13 @@
 //! killed past [`super::mcp_register::CLAUDE_TIMEOUT`].
 //!
 //! The `agent-ways` marketplace is ours when its source is this app's
-//! `plugins/` folder, or the folder a repair recorded adding it from, which a
-//! moved app leaves behind. Any other `agent-ways` marketplace, and an
-//! `attend` plugin from another marketplace, are the operator's own: reported
-//! and left alone. Removing a marketplace uninstalls its plugins, so a moved
+//! `plugins/` folder; or the folder a repair recorded adding it from, which a
+//! moved app leaves behind; or, with no record, a folder that no longer holds
+//! a marketplace while `attend@agent-ways` is installed from it, since an app
+//! that is gone has no other owner. Any other `agent-ways` marketplace, and
+//! an `attend` plugin from another marketplace, are the operator's own:
+//! reported, with the command that hands the marketplace to this app, and
+//! left alone. Removing a marketplace uninstalls its plugins, so a moved
 //! app's marketplace is removed, added again and the plugin installed again in
 //! one pass. A missing `claude` binary or a failed call is reported and never
 //! fails a reconcile.
@@ -144,22 +147,37 @@ enum Market {
 
 fn market(have: &Installed, dir: &str, recorded: Option<&str>) -> Market {
     let same = |a: &str, b: &str| super::reconcile::same_path(Path::new(a), Path::new(b));
+    let gone = |path: &str| !Path::new(path).join(".claude-plugin/marketplace.json").is_file();
     match have.marketplace.as_deref() {
         None => Market::Absent,
         Some("") => Market::Foreign("a source that is not a local folder".to_string()),
         Some(path) if same(path, dir) => Market::Current,
         Some(path) if recorded.is_some_and(|r| same(path, r)) => Market::Moved,
+        Some(path) if have.ours.is_some() && gone(path) => Market::Moved,
         Some(path) => Market::Foreign(path.to_string()),
     }
 }
 
-fn foreign_note(from: &str) -> String {
-    format!("an {MARKETPLACE} marketplace from {from}, which this app did not add, is configured; it and its plugins are left as they are")
+/// The note for a marketplace this app will not touch. `recover` is the
+/// command that removes it from this target, after which a repair adds ours.
+fn foreign_note(from: &str, recover: &str) -> String {
+    format!(
+        "an {MARKETPLACE} marketplace from {from}, which this app did not add, is configured; it and its plugins are left as they are. \
+         To hand it to this app, run `{recover}` and then `ways manage repair`"
+    )
+}
+
+/// The exact command that removes the marketplace from one target.
+fn recover_command(cfg: Option<&Path>) -> String {
+    match cfg {
+        Some(d) => format!("CLAUDE_CONFIG_DIR={} claude plugin marketplace remove {MARKETPLACE}", d.display()),
+        None => format!("claude plugin marketplace remove {MARKETPLACE}"),
+    }
 }
 
 /// Install, or bring up to `shipped`, the mod from `dir`. `recorded` is the
 /// folder a repair last added the marketplace from.
-pub fn plan_converge(have: &Installed, dir: &str, recorded: Option<&str>, shipped: &str) -> Plan {
+pub fn plan_converge(have: &Installed, dir: &str, recorded: Option<&str>, shipped: &str, recover: &str) -> Plan {
     let mut plan = Plan::default();
     if !have.foreign.is_empty() {
         plan.notes.push(format!(
@@ -169,7 +187,7 @@ pub fn plan_converge(have: &Installed, dir: &str, recorded: Option<&str>, shippe
         return plan;
     }
     match market(have, dir, recorded) {
-        Market::Foreign(from) => plan.notes.push(foreign_note(&from)),
+        Market::Foreign(from) => plan.notes.push(foreign_note(&from, recover)),
         Market::Moved => {
             // Removing the marketplace uninstalls the plugin with it.
             plan.calls.extend([Call::MarketplaceRemove, Call::MarketplaceAdd(dir.to_string()), Call::Install]);
@@ -196,10 +214,10 @@ fn plugin_calls(have: &Installed, shipped: &str, refresh: bool) -> Vec<Call> {
 
 /// Remove the mod and the marketplace, where they are ours. Under a
 /// marketplace that is not ours, `attend@agent-ways` is the operator's too.
-pub fn plan_withdraw(have: &Installed, dir: &str, recorded: Option<&str>) -> Plan {
+pub fn plan_withdraw(have: &Installed, dir: &str, recorded: Option<&str>, recover: &str) -> Plan {
     let mut plan = Plan::default();
     match market(have, dir, recorded) {
-        Market::Foreign(from) => plan.notes.push(foreign_note(&from)),
+        Market::Foreign(from) => plan.notes.push(foreign_note(&from, recover)),
         Market::Current | Market::Moved => {
             if have.ours.is_some() {
                 plan.calls.push(Call::Uninstall);
@@ -283,10 +301,11 @@ pub fn converge(source_root: &Path, dest_root: &Path, default_root: &Path, insta
     };
     let dir = marketplace_dir(source_root).to_string_lossy().to_string();
     let recorded = read_record(dest_root);
+    let recover = recover_command(cfg.as_deref());
     let plan = if install {
-        plan_converge(&have, &dir, recorded.as_deref(), &shipped)
+        plan_converge(&have, &dir, recorded.as_deref(), &shipped, &recover)
     } else {
-        plan_withdraw(&have, &dir, recorded.as_deref())
+        plan_withdraw(&have, &dir, recorded.as_deref(), &recover)
     };
     execute(&claude, cfg.as_deref(), dest_root, &plan, dry_run)
 }
@@ -303,7 +322,7 @@ pub fn withdraw(source_root: &Path, dest_root: &Path, default_root: &Path, dry_r
     let dir = marketplace_dir(source_root).to_string_lossy().to_string();
     match query(&claude, cfg.as_deref()) {
         Ok(have) => {
-            let plan = plan_withdraw(&have, &dir, read_record(dest_root).as_deref());
+            let plan = plan_withdraw(&have, &dir, read_record(dest_root).as_deref(), &recover_command(cfg.as_deref()));
             execute(&claude, cfg.as_deref(), dest_root, &plan, dry_run)
         }
         Err(e) => vec![format!("attend mod: ⚠ could not read Claude Code's plugins: {e}")],
@@ -366,7 +385,7 @@ mod tests {
 
     #[test]
     fn a_fresh_target_gets_the_marketplace_then_the_plugin() {
-        let p = plan_converge(&have(None, None), DIR, None, "0.17.0");
+        let p = plan_converge(&have(None, None), DIR, None, "0.17.0", "CMD");
         assert_eq!(p.calls, vec![Call::MarketplaceAdd(DIR.into()), Call::Install]);
         assert_eq!(Call::MarketplaceAdd(DIR.into()).args(), ["plugin", "marketplace", "add", DIR, "--scope", "user"]);
         assert_eq!(Call::Install.args(), ["plugin", "install", "attend@agent-ways", "--scope", "user"]);
@@ -374,51 +393,80 @@ mod tests {
 
     #[test]
     fn current_is_nothing_older_is_an_update_newer_is_left() {
-        assert_eq!(plan_converge(&have(Some(DIR), Some("0.17.0")), DIR, None, "0.17.0"), Plan::default());
-        assert_eq!(plan_converge(&have(Some(DIR), Some("0.16.2")), DIR, None, "0.17.0").calls, vec![Call::MarketplaceUpdate, Call::Update]);
-        assert_eq!(plan_converge(&have(Some(DIR), Some("0.18.0")), DIR, None, "0.17.0"), Plan::default());
-        assert_eq!(plan_converge(&have(Some(DIR), None), DIR, None, "0.17.0").calls, vec![Call::Install]);
+        assert_eq!(plan_converge(&have(Some(DIR), Some("0.17.0")), DIR, None, "0.17.0", "CMD"), Plan::default());
+        assert_eq!(plan_converge(&have(Some(DIR), Some("0.16.2")), DIR, None, "0.17.0", "CMD").calls, vec![Call::MarketplaceUpdate, Call::Update]);
+        assert_eq!(plan_converge(&have(Some(DIR), Some("0.18.0")), DIR, None, "0.17.0", "CMD"), Plan::default());
+        assert_eq!(plan_converge(&have(Some(DIR), None), DIR, None, "0.17.0", "CMD").calls, vec![Call::Install]);
     }
 
     #[test]
     fn a_moved_app_re_adds_the_marketplace_and_reinstalls() {
         // Removing the marketplace uninstalls the plugin, whatever version.
         for v in [Some("0.17.0"), Some("0.16.0"), None] {
-            let p = plan_converge(&have(Some("/old/plugins"), v), DIR, Some("/old/plugins"), "0.17.0");
+            let p = plan_converge(&have(Some("/old/plugins"), v), DIR, Some("/old/plugins"), "0.17.0", "CMD");
             assert_eq!(p.calls, vec![Call::MarketplaceRemove, Call::MarketplaceAdd(DIR.into()), Call::Install], "{v:?}");
         }
     }
 
+    /// A folder that still holds a marketplace, which this app never used.
+    fn checkout(tag: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("ways-attend-mod-checkout-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+        std::fs::write(dir.join(".claude-plugin/marketplace.json"), "{}").unwrap();
+        dir.to_string_lossy().into_owned()
+    }
+
     #[test]
     fn a_marketplace_from_a_folder_this_app_never_used_is_foreign() {
-        let p = plan_converge(&have(Some("/dev/checkout/plugins"), Some("0.17.0")), DIR, Some("/old/plugins"), "0.18.0");
+        let dev = checkout("foreign");
+        let p = plan_converge(&have(Some(&dev), Some("0.17.0")), DIR, Some("/old/plugins"), "0.18.0", "CMD");
         assert!(p.calls.is_empty(), "{p:?}");
-        assert!(p.notes[0].contains("/dev/checkout/plugins"), "{p:?}");
-        let w = plan_withdraw(&have(Some("/dev/checkout/plugins"), Some("0.17.0")), DIR, None);
+        assert!(p.notes[0].contains(&dev), "{p:?}");
+        assert!(p.notes[0].contains("run `CMD` and then `ways manage repair`"), "the way out: {p:?}");
+        let w = plan_withdraw(&have(Some(&dev), Some("0.17.0")), DIR, None, "CMD");
         assert!(w.calls.is_empty(), "its plugin is the operator's too: {w:?}");
         assert_eq!(w.notes.len(), 1);
+        std::fs::remove_dir_all(&dev).ok();
+    }
+
+    #[test]
+    fn a_gone_folder_with_attend_installed_is_ours_moved_without_a_record() {
+        let gone = "/nowhere/agent-ways/plugins";
+        let p = plan_converge(&have(Some(gone), Some("0.17.0")), DIR, None, "0.17.0", "CMD");
+        assert_eq!(p.calls, vec![Call::MarketplaceRemove, Call::MarketplaceAdd(DIR.into()), Call::Install]);
+        let w = plan_withdraw(&have(Some(gone), Some("0.17.0")), DIR, None, "CMD");
+        assert_eq!(w.calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
+        // With no attend plugin from it, a gone folder proves nothing.
+        let p = plan_converge(&have(Some(gone), None), DIR, None, "0.17.0", "CMD");
+        assert!(p.calls.is_empty() && p.notes.len() == 1, "{p:?}");
+    }
+
+    #[test]
+    fn the_recovery_command_names_a_non_default_target() {
+        assert_eq!(recover_command(None), "claude plugin marketplace remove agent-ways");
+        assert_eq!(recover_command(Some(Path::new("/t/claude-b"))), "CLAUDE_CONFIG_DIR=/t/claude-b claude plugin marketplace remove agent-ways");
     }
 
     #[test]
     fn foreign_plugins_and_marketplaces_are_reported_and_left_alone() {
         let mut h = have(None, None);
         h.foreign.push("attend@mine".into());
-        let p = plan_converge(&h, DIR, None, "0.17.0");
+        let p = plan_converge(&h, DIR, None, "0.17.0", "CMD");
         assert!(p.calls.is_empty());
         assert!(p.notes[0].contains("attend@mine"), "{p:?}");
-        let p = plan_converge(&have(Some(""), None), DIR, None, "0.17.0");
+        let p = plan_converge(&have(Some(""), None), DIR, None, "0.17.0", "CMD");
         assert!(p.calls.is_empty());
         assert_eq!(p.notes.len(), 1);
     }
 
     #[test]
     fn withdrawal_uninstalls_then_removes_the_marketplace() {
-        assert_eq!(plan_withdraw(&have(Some(DIR), Some("0.17.0")), DIR, None).calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
-        assert_eq!(plan_withdraw(&have(Some("/old/plugins"), Some("0.17.0")), DIR, Some("/old/plugins")).calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
-        assert_eq!(plan_withdraw(&have(None, None), DIR, None), Plan::default());
+        assert_eq!(plan_withdraw(&have(Some(DIR), Some("0.17.0")), DIR, None, "CMD").calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
+        assert_eq!(plan_withdraw(&have(Some("/old/plugins"), Some("0.17.0")), DIR, Some("/old/plugins"), "CMD").calls, vec![Call::Uninstall, Call::MarketplaceRemove]);
+        assert_eq!(plan_withdraw(&have(None, None), DIR, None, "CMD"), Plan::default());
         let mut h = have(None, None);
         h.foreign.push("attend@mine".into());
-        assert_eq!(plan_withdraw(&h, DIR, None), Plan::default(), "a foreign attend stays");
+        assert_eq!(plan_withdraw(&h, DIR, None, "CMD"), Plan::default(), "a foreign attend stays");
     }
 
     #[test]

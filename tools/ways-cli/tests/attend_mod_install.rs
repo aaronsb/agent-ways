@@ -263,14 +263,84 @@ fn a_moved_app_reinstalls_the_mod_in_one_repair() {
 #[test]
 fn an_agent_ways_marketplace_this_app_never_added_is_left_alone() {
     let fx = Fx::new("foreign-market");
-    write(&fx.state().join("markets.json"), r#"[{"name":"agent-ways","source":"directory","path":"/dev/checkout/plugins"}]"#);
+    // A dev checkout's marketplace, added by hand: its folder still holds one.
+    let dev = fx.root.join("dev/plugins");
+    write(&dev.join(".claude-plugin/marketplace.json"), r#"{"name":"agent-ways","plugins":[]}"#);
+    write(&fx.state().join("markets.json"), &format!(r#"[{{"name":"agent-ways","source":"directory","path":"{}"}}]"#, dev.display()));
     write(&fx.state().join("plugins.json"), r#"[{"id":"attend@agent-ways","version":"0.1.0"}]"#);
     let out = fx.repair();
     assert_eq!(fx.changes(), Vec::<String>::new());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("/dev/checkout/plugins"));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&dev.display().to_string()), "{err}");
+    let recover = format!("run `CLAUDE_CONFIG_DIR={} claude plugin marketplace remove agent-ways` and then `ways manage repair`", fx.dest().display());
+    assert!(err.contains(&recover), "the note gives the way out: {err}");
     // Disabling the target leaves it alone too.
     write(&fx.user_config(), &format!("targets:\n  - path: {}\n    enabled: false\n", fx.dest().display()));
     let out = fx.ways(&fx.stub_path()).args(["manage", "repair", "--source"]).arg(fx.src()).output().unwrap();
     assert!(out.status.success());
     assert_eq!(fx.changes(), Vec::<String>::new());
+}
+
+/// The record of where the marketplace was added from is gone (the state
+/// root was cleared, or the install predates it) and the app moved: the old
+/// folder holds no marketplace any more and attend is installed from it, so
+/// it is this app's, and one repair moves it.
+fn lose_the_record_and_move(fx: &Fx) -> PathBuf {
+    for entry in walk(&fx.root.join("home")) {
+        if entry.file_name().is_some_and(|n| n == "attend-mod-marketplace") {
+            std::fs::remove_file(&entry).unwrap();
+        }
+    }
+    let moved = fx.root.join("moved");
+    std::fs::remove_dir_all(fx.src()).unwrap();
+    moved
+}
+
+fn walk(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
+#[test]
+fn a_moved_app_with_no_record_reinstalls_the_mod_in_one_repair() {
+    let fx = Fx::new("moved-no-record");
+    fx.repair();
+    fx.changes();
+    let moved = lose_the_record_and_move(&fx);
+    fx.repair_from(&moved);
+    let dest = fx.dest().display().to_string();
+    assert_eq!(
+        fx.changes(),
+        vec![
+            format!("{dest}|plugin marketplace remove agent-ways"),
+            format!("{dest}|plugin marketplace add {} --scope user", moved.join("plugins").display()),
+            format!("{dest}|plugin install attend@agent-ways --scope user"),
+        ]
+    );
+    fx.repair_from(&moved);
+    assert_eq!(fx.changes(), Vec::<String>::new());
+}
+
+#[test]
+fn a_disabled_target_with_no_record_loses_a_mod_whose_folder_is_gone() {
+    let fx = Fx::new("disable-no-record");
+    fx.repair();
+    fx.changes();
+    let moved = lose_the_record_and_move(&fx);
+    write(&fx.user_config(), &format!("targets:\n  - path: {}\n    enabled: false\n", fx.dest().display()));
+    let out = fx.ways(&fx.stub_path()).args(["manage", "repair", "--source"]).arg(&moved).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let dest = fx.dest().display().to_string();
+    assert_eq!(
+        fx.changes(),
+        vec![format!("{dest}|plugin uninstall attend@agent-ways --scope user"), format!("{dest}|plugin marketplace remove agent-ways")]
+    );
 }
