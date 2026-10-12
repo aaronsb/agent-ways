@@ -18,7 +18,11 @@
 //!   holds only for that process, since a resumed session may have no mod;
 //! - `claude <key>`, the Claude Code process the session ran in (pid and
 //!   start time), so a session whose id changes under the same process
-//!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it.
+//!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it;
+//! - `since <secs>`, when the session last went from not listening to
+//!   listening, in seconds since the epoch. From then it is a member of
+//!   `#open` (ADR-404 D3a), so its cold start replays what was posted there
+//!   since (D3b).
 //!
 //! The session is enrolled while the record holds a way. Every edit is a
 //! read-modify-write under one lock (`agent_settings::writer::Lock`), and
@@ -85,6 +89,7 @@ struct Record {
     optout: bool,
     host: Option<HostRecord>,
     claude: Option<String>,
+    since: Option<u64>,
 }
 
 /// A recorded host and the Claude Code process it was recorded in.
@@ -106,6 +111,8 @@ impl Record {
                 _ => {
                     if let Some(key) = line.strip_prefix("claude ") {
                         r.claude = Some(key.to_string());
+                    } else if let Some(secs) = line.strip_prefix("since ") {
+                        r.since = secs.trim().parse().ok();
                     } else if let Some(rest) = line.strip_prefix("host ") {
                         let mut words = rest.split_whitespace();
                         r.host = words
@@ -132,6 +139,9 @@ impl Record {
         }
         if let Some(key) = &self.claude {
             out.push_str(&format!("claude {key}\n"));
+        }
+        if let Some(secs) = self.since {
+            out.push_str(&format!("since {secs}\n"));
         }
         out
     }
@@ -212,10 +222,15 @@ pub fn sources(session_id: &str) -> Vec<Source> {
 /// `host`, when given, records what hosts the session's delivery, for this
 /// Claude Code process; `None` keeps whatever host the record holds, so a
 /// join or a shell's `listen on` in a mod-hosted session leaves it
-/// mod-hosted.
+/// mod-hosted. A session that was not enrolled starts listening now
+/// ([`listening_since`]).
 pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Result<()> {
     let claude = own_claude_key();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     edit(session_id, |r| {
+        if r.sources.is_empty() {
+            r.since = Some(now);
+        }
         if !r.sources.contains(&source) {
             r.sources.push(source);
         }
@@ -227,6 +242,13 @@ pub fn enroll(session_id: &str, source: Source, host: Option<Host>) -> io::Resul
             r.claude = claude;
         }
     })
+}
+
+/// When `session_id` last started listening, while it is enrolled; `None`
+/// for a record written before attend kept the time.
+pub fn listening_since(session_id: &str) -> Option<std::time::SystemTime> {
+    let r = read(session_id).filter(|r| !r.sources.is_empty())?;
+    r.since.map(|s| std::time::UNIX_EPOCH + std::time::Duration::from_secs(s))
 }
 
 /// What hosts `session_id`'s delivery, when it is enrolled and not hosted
@@ -277,6 +299,9 @@ pub fn carry(old: &str, new: &str) -> io::Result<()> {
         }
         if r.claude.is_none() {
             r.claude = from.claude.clone();
+        }
+        if r.since.is_none() {
+            r.since = from.since;
         }
     })?;
     edit(old, |r| *r = Record::default())
@@ -373,6 +398,28 @@ mod tests {
             assert_eq!(Record::parse(&read("s").unwrap().render()).sources, vec![Source::Listen, Source::Join]);
             opt_out("s").unwrap();
             assert!(!is_enrolled("s"), "no run holds it, so every way ends");
+        });
+    }
+
+    /// The time a session started listening holds while it listens, starts
+    /// over when it listens again after an opt-out, and moves with the id.
+    #[test]
+    fn listening_since_is_set_when_listening_starts() {
+        with_cache(|| {
+            let at = |s: u64| Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(s));
+            assert_eq!(listening_since("s"), None);
+            enroll("s", Source::Listen, None).unwrap();
+            assert!(listening_since("s").is_some(), "set on enrolling");
+            write("s", &Record { since: Some(1), ..read("s").unwrap() }).unwrap();
+            enroll("s", Source::Join, None).unwrap();
+            assert_eq!(listening_since("s"), at(1), "another way keeps it");
+            assert_eq!(Record::parse(&read("s").unwrap().render()).since, Some(1));
+            opt_out("s").unwrap();
+            assert_eq!(listening_since("s"), None, "not listening");
+            enroll("s", Source::Listen, None).unwrap();
+            assert!(listening_since("s") > at(1), "listening again starts it over");
+            carry("s", "t").unwrap();
+            assert!(listening_since("t") > at(1), "it moves with the id");
         });
     }
 

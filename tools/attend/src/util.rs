@@ -116,9 +116,12 @@ pub(crate) fn adopt_previous_enrollment(ident: &Session) -> bool {
 
 /// Enroll session `ident` by `source`: `attend listen on`, a channel join,
 /// or `attend run`. A session that was not listening before has its cold
-/// start reopened (`StateStore::reopen_cold_start`), so whichever way it
-/// listens again, the next conduit delivers what was addressed to its
-/// project meanwhile and holds back the older `#open` and channel backlog.
+/// start reopened (`StateStore::reopen_cold_start`), and its enrollment
+/// record notes when it started listening. Whichever way it listens again,
+/// the next conduit delivers what was addressed to its project since its
+/// Claude Code process started and what `#open` and its channels carried
+/// since it started listening, and holds back the older backlog
+/// (`attend_state::cold_start`).
 /// An enrollment this Claude Code process made under its id before
 /// `/clear` counts as listening, and moves here first. Returns whether the
 /// session was listening before. Only a resolved session enrolls: the
