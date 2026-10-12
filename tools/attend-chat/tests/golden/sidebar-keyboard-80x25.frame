@@ -1,22 +1,22 @@
 agent-tui frame 80x25
 | ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                   |
 | Agents 2/4              │╭────────────────────────────────────────────────────╮|
-|  Laszlo  alpha        ● ││ │ aaron            │ /bin/sh                       │|
-|  Wells  beta          ● ││ │ 13:58            │  file: sh                     │|
-|  Lyra  gamma          ○ ││ ╰──────────────────╯                               │|
-|  aaron  aaron         ○ ││                                                    │|
-| Channels 4              ││ ╭──────────────────╮                               │|
-|  ◆ #open              ● ││ │ Laszlo           │ a longer message, so the      │|
-|▸ ▽ #deploy  1👤        ● ││ │ alpha            │ feed shows how a body wraps   │|
-|  ♦ #infra  0👤         ○ ││ │ 13:59            │ beside its chip when it runs  │|
-|  ♦ #archive  1👤       ○ ││ ╰──────────────────╯ past the width of the row it  │|
-|                         ││                      is given                      │|
+|  Laszlo  alpha        ● ││ production at 15:00                                │|
+|  Wells  beta          ● ││                                                    │|
+|  Lyra  gamma          ○ ││  13:58  aaron  aaron                               │|
+|  aaron  aaron         ○ ││ ────────────────────────────────────────────────── │|
+| Channels 4              ││ the shell this ran under: /bin/sh                  │|
+|  ◆ #open              ● ││  file: sh                                          │|
+|▸ ▽ #deploy  1👤        ● ││                                                    │|
+|  ♦ #infra  0👤         ○ ││  13:59  Laszlo  alpha                              │|
+|  ♦ #archive  1👤       ○ ││ ────────────────────────────────────────────────── │|
+|                         ││ a longer message, so the feed shows how a body     │|
+|                         ││ wraps beside its chip when it runs past the width  │|
+|                         ││ of the row it is given                             │|
 |                         ││                                                    │|
-|                         ││ ╭──────────────────╮                               │|
-|                         ││ │ Lyra             │ signing off                   │|
-|                         ││ │ gamma            │                               │|
-|                         ││ │ 13:45            │                               │|
-|                         ││ ╰──────────────────╯                               │|
+|                         ││  13:45  Lyra  gamma                                │|
+|                         ││ ────────────────────────────────────────────────── │|
+|                         ││ signing off                                        │|
 |                         ││                                                    │|
 |                         │╰────────────────────────────────────────────────────╯|
 |                         │╭────────────────────────────────────────────────────╮|
@@ -40,37 +40,28 @@ styles
   2   9-21  White DarkGray DIM
   2  22-24  White DarkGray -
   2  25-26  - - DIM
-  2  28-28  - - DIM
-  2  30-34  - - DIM
-  2  47-47  - - DIM
   2  79-79  - - DIM
   3   1-7   Black LightCyan -
   3   8-21  White DarkGray DIM
   3  22-24  White DarkGray -
   3  25-26  - - DIM
-  3  28-28  - - DIM
-  3  30-34  - - DIM
-  3  47-47  - - DIM
-  3  49-58  White DarkGray -
   3  79-79  - - DIM
   4   1-24  White DarkGray DIM
   4  25-26  - - DIM
-  4  28-47  - - DIM
+  4  28-77  White DarkGray DIM
   4  79-79  - - DIM
   5   1-24  White DarkGray DIM
   5  25-26  - - DIM
+  5  28-77  - - DIM
   5  79-79  - - DIM
   6   0-10  - - BOLD|DIM
   6  25-26  - - DIM
-  6  28-47  - - DIM
   6  79-79  - - DIM
   7   1-9   Black Cyan -
   7  10-21  White Blue -
   7  22-24  White DarkGray -
   7  25-26  - - DIM
-  7  28-28  - - DIM
-  7  30-35  Cyan - BOLD
-  7  47-47  - - DIM
+  7  28-37  White DarkGray -
   7  79-79  - - DIM
   8   0-0   Cyan - BOLD
   8   1-11  Black Cyan -
@@ -78,46 +69,34 @@ styles
   8  16-21  White Blue -
   8  22-24  White DarkGray -
   8  25-26  - - DIM
-  8  28-28  - - DIM
-  8  30-34  - - DIM
-  8  47-47  - - DIM
   8  79-79  - - DIM
   9   1-13  White DarkGray DIM
   9  15-24  White DarkGray DIM
   9  25-26  - - DIM
-  9  28-28  - - DIM
-  9  30-34  - - DIM
-  9  47-47  - - DIM
+  9  28-34  White DarkGray -
+  9  35-42  Black Cyan -
+  9  43-77  White DarkGray DIM
   9  79-79  - - DIM
  10   1-15  White DarkGray DIM
  10  17-24  White DarkGray DIM
  10  25-26  - - DIM
- 10  28-47  - - DIM
+ 10  28-77  - - DIM
  10  79-79  - - DIM
  11  25-26  - - DIM
  11  79-79  - - DIM
  12  25-26  - - DIM
  12  79-79  - - DIM
  13  25-26  - - DIM
- 13  28-47  - - DIM
  13  79-79  - - DIM
  14  25-26  - - DIM
- 14  28-28  - - DIM
- 14  30-33  Magenta - -
- 14  47-47  - - DIM
  14  79-79  - - DIM
  15  25-26  - - DIM
- 15  28-28  - - DIM
- 15  30-34  - - DIM
- 15  47-47  - - DIM
+ 15  28-77  White DarkGray DIM
  15  79-79  - - DIM
  16  25-26  - - DIM
- 16  28-28  - - DIM
- 16  30-34  - - DIM
- 16  47-47  - - DIM
+ 16  28-77  - - DIM
  16  79-79  - - DIM
  17  25-26  - - DIM
- 17  28-47  - - DIM
  17  79-79  - - DIM
  18  25-26  - - DIM
  18  79-79  - - DIM

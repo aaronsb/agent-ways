@@ -19,7 +19,6 @@ use agent_tui::ratatui::layout::{Position, Rect};
 
 use super::sidebar::SideHit;
 use super::ChatPane;
-use crate::chip::CHIP_WIDTH;
 use crate::tabs::Tab;
 
 /// What an input acts on.
@@ -118,19 +117,22 @@ impl ChatPane {
             return self.flag_menu();
         }
         if let Some(member) = self.sender_at(at) {
-            let row = Rect { x: self.hits.feed.x, y: at.y, width: CHIP_WIDTH, height: 1 };
+            let row = Rect { x: self.hits.feed.x, y: at.y, width: self.hits.feed.width, height: 1 };
             self.activate(Target::Agent(member), How::Menu, Some(row));
         }
     }
 
-    /// The membership id of the sender whose name box is at `at` in the
-    /// feed: the label left of a message.
+    /// The membership id of the sender whose header band is at `at` in the
+    /// feed: the line over a message.
     fn sender_at(&self, at: Position) -> Option<String> {
         let feed = self.hits.feed;
-        if !feed.contains(at) || at.x >= feed.x + CHIP_WIDTH {
+        if !feed.contains(at) {
             return None;
         }
-        let i = self.feed.entry_at(at.y - feed.y)?;
+        let (i, row) = self.feed.entry_row(at.y - feed.y)?;
+        if row != 0 {
+            return None;
+        }
         self.entry_members.get(i).cloned().flatten()
     }
 }

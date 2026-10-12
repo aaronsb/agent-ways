@@ -284,6 +284,7 @@ pub const SELECTED_MARK: &str = "▌";
 
 /// One segment of a lozenge: its text and style. The style's background is
 /// the segment's ground, which the joins carry on.
+#[derive(Debug, Clone)]
 pub struct Seg {
     pub text: String,
     pub style: Style,

@@ -1,11 +1,11 @@
 agent-tui frame 80x25
 | ≡    1 merged   ◆  2 #open   ▽ ▸3 #deploy   ♦  4 #infra    +   — rollout coord…|
 |╭──────────────────────────────────────────────────────────────────────────────╮|
-|│ ╭──────────────────╮                                                         │|
-|│ │ Wells            │ rollout is green on staging                             │|
-|│ │ beta             │ production at 15:00                                     │|
-|│ │ ▽ 13:55          │                                                         │|
-|│ ╰──────────────────╯                                                         │|
+|│  ▽ 13:55  Wells  beta                                                        │|
+|│ ──────────────────────────────────────────────────────────────────────────── │|
+|│ rollout is green on staging                                                  │|
+|│ production at 15:00                                                          │|
+|│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
 |│                                                                              │|
@@ -37,26 +37,18 @@ styles
   0  62-79  - - DIM
   1   0-79  - - DIM
   2   0-0   - - DIM
-  2   2-21  - - DIM
+  2   2-10  White DarkGray -
+  2  11-17  Black LightCyan -
+  2  18-77  White DarkGray DIM
   2  79-79  - - DIM
   3   0-0   - - DIM
-  3   2-2   - - DIM
-  3   4-8   LightCyan - -
-  3  21-21  - - DIM
+  3   2-77  - - DIM
   3  79-79  - - DIM
   4   0-0   - - DIM
-  4   2-2   - - DIM
-  4   4-7   - - DIM
-  4  21-21  - - DIM
   4  79-79  - - DIM
   5   0-0   - - DIM
-  5   2-2   - - DIM
-  5   4-5   Red - -
-  5   6-10  - - DIM
-  5  21-21  - - DIM
   5  79-79  - - DIM
   6   0-0   - - DIM
-  6   2-21  - - DIM
   6  79-79  - - DIM
   7   0-0   - - DIM
   7  79-79  - - DIM

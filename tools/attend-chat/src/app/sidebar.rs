@@ -257,23 +257,30 @@ fn agent_line(chat: &ChatPane, s: &Seen, w: usize, mark: Style) -> Line<'static>
     let project = agent_identity::cwd_basename(&k.cwd);
     let dot = if s.live { "●" } else { "○" };
     let texts = sized(chat.shape, theme::colourless(), [&k.nickname, &project, dot], w);
-    let styles = if agent_identity::is_rich(depth) {
-        let st = IdentitySteps::of(Rgb(k.palette.rgb.0, k.palette.rgb.1, k.palette.rgb.2), s.live);
-        let cell = |x: agent_theme::Step| Style::new().fg(at(x.fg, depth)).bg(at(x.bg, depth));
-        let mut name = cell(st.name);
-        if s.live && k.style.bold {
-            name = name.add_modifier(Modifier::BOLD);
-        }
-        [name.patch(mark), cell(st.project), cell(st.mark)]
-    } else if s.live {
-        let name = Style::new().fg(Color::Black).bg(color_for(k.palette, depth));
-        [name.patch(mark), Seg::faded("").style, Seg::on("", Ground::Rule).style]
-    } else {
-        [Seg::faded("").style.patch(mark), Seg::faded("").style, Seg::faded("").style]
-    };
+    let [name, project, dot] = identity_styles(depth, k.palette, s.live, k.style.bold);
+    let styles = [name.patch(mark), project, dot];
     let mut spans = vec![Span::raw(" ")];
     spans.extend(chat.shape.lozenge(&segs(texts, styles)));
     Line::from(spans)
+}
+
+/// An identity's lozenge styles at `depth`: the name on the identity colour,
+/// the project on a darker step of it, the mark on the darkest; an
+/// inactive identity wears the desaturated steps. At 16 colours the name
+/// keeps its ANSI colour and the rest is set back. The left column's agent
+/// rows and the feed's message headers both wear these.
+pub(super) fn identity_styles(depth: agent_theme::ColorDepth, palette: agent_identity::PaletteEntry, live: bool, bold: bool) -> [Style; 3] {
+    if agent_identity::is_rich(depth) {
+        let st = IdentitySteps::of(Rgb(palette.rgb.0, palette.rgb.1, palette.rgb.2), live);
+        let cell = |x: agent_theme::Step| Style::new().fg(at(x.fg, depth)).bg(at(x.bg, depth));
+        let name = cell(st.name);
+        [if live && bold { name.add_modifier(Modifier::BOLD) } else { name }, cell(st.project), cell(st.mark)]
+    } else if live {
+        let name = Style::new().fg(Color::Black).bg(color_for(palette, depth));
+        [name, Seg::faded("").style, Seg::on("", Ground::Rule).style]
+    } else {
+        [Seg::faded("").style, Seg::faded("").style, Seg::faded("").style]
+    }
 }
 
 /// A channel's row, the same shape on the accent: its glyph and name, then

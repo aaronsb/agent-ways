@@ -47,7 +47,8 @@ mkdir -p "$WORK"
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
-# #deploy) or plain (no Nerd Font). An agent's name comes from the temp
+# #deploy), long (a fourth agent whose project name outruns any row) or
+# plain (no Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
 # the column's first `○`, its row being the agents' last.
 SCENARIOS="
@@ -102,6 +103,11 @@ rclick-name  | base  | wait:signing rfeed:gamma wait:Address
 flag-click   | base  | wait:Agents M-3 wait:rollout_is_green last:#deploy wait:pick_one:_#deploy
 flag-merged  | base  | wait:Agents last:#open wait:pick_one:_#open
 key-help     | base  | wait:Agents F1 wait:any_other_key
+header       | base  | wait:signing_off
+header-long  | long  | wait:keeps_the_time
+header-human | own   | wait:watching_the
+header-pick  | base  | wait:signing_off click:signing_off
+header-chan  | base  | wait:Agents M-3 wait:rollout_is_green
 quit-lent    | base  | wait:Agents C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
 "
 
@@ -128,6 +134,11 @@ fixture() { # kind
       mkdir -p "$F/work/crowd-$n"
       [ $((10#$n % 2)) -eq 1 ] && touch "$cache/heartbeat/dddddddd-0000-4000-8000-0000000000$n"
     done
+  fi
+  if [ "$1" = long ]; then
+    sessions+=("eeeeeeee-0000-4000-8000-000000000005:$F/work/the-delta-project-with-a-name-far-too-long-for-a-row")
+    mkdir -p "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row"
+    touch "$cache/heartbeat/eeeeeeee-0000-4000-8000-000000000005"
   fi
   if [ "$1" = many ]; then
     for n in $(seq -w 1 24); do mkdir -p "$sig/@ch$n"; done
@@ -163,6 +174,7 @@ YAML
   msg "$sig/_broadcast" s2 600 "claude:$A" "$F/work/alpha" "starting the theme port; the legend moves first"
   msg "$sig/@deploy" s3 300 "claude:$B" "$F/work/beta" "rollout is green on staging"
   [ "$1" = own ] && msg "$sig/@deploy" s4 120 "external:operator@kitty" "$F/work/alpha" "watching the rollout"
+  [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
 }
 

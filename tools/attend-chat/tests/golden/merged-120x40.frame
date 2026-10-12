@@ -1,29 +1,29 @@
 agent-tui frame 120x40
 | ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                                                           |
 |╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮|
-|│ ╭──────────────────╮                                                                                                 │|
-|│ │ Laszlo           │ starting the theme port; the legend moves first                                                 │|
-|│ │ alpha            │                                                                                                 │|
-|│ │ 13:50            │                                                                                                 │|
-|│ ╰──────────────────╯                                                                                                 │|
+|│  13:50  Laszlo  alpha                                                                                                │|
+|│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │|
+|│ starting the theme port; the legend moves first                                                                      │|
 |│                                                                                                                      │|
-|│ ╭──────────────────╮                                                                                                 │|
-|│ │ Wells            │ rollout is green on staging                                                                     │|
-|│ │ beta             │ production at 15:00                                                                             │|
-|│ │ ▽ 13:55          │                                                                                                 │|
-|│ ╰──────────────────╯                                                                                                 │|
+|│  ▽ 13:55  Wells  beta                                                                                                │|
+|│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │|
+|│ rollout is green on staging                                                                                          │|
+|│ production at 15:00                                                                                                  │|
 |│                                                                                                                      │|
-|│ ╭──────────────────╮                                                                                                 │|
-|│ │ aaron            │ the shell this ran under: /bin/sh                                                               │|
-|│ │ aaron            │  file: sh                                                                                       │|
-|│ │ 13:58            │                                                                                                 │|
-|│ ╰──────────────────╯                                                                                                 │|
+|│  13:58  aaron  aaron                                                                                                 │|
+|│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │|
+|│ the shell this ran under: /bin/sh                                                                                    │|
+|│  file: sh                                                                                                            │|
 |│                                                                                                                      │|
-|│ ╭──────────────────╮                                                                                                 │|
-|│ │ Laszlo           │ a longer message, so the feed shows how a body wraps beside its chip when it runs past the      │|
-|│ │ alpha            │ width of the row it is given                                                                    │|
-|│ │ 13:59            │                                                                                                 │|
-|│ ╰──────────────────╯                                                                                                 │|
+|│  13:59  Laszlo  alpha                                                                                                │|
+|│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │|
+|│ a longer message, so the feed shows how a body wraps beside its chip when it runs past the width of the row it is    │|
+|│ given                                                                                                                │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
+|│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -51,96 +51,65 @@ styles
   0  59-61  White Blue -
   1   0-119 - - DIM
   2   0-0   - - DIM
-  2   2-21  - - DIM
+  2   2-8   White DarkGray -
+  2   9-16  Black Cyan -
+  2  17-117 White DarkGray DIM
   2 119-119 - - DIM
   3   0-0   - - DIM
-  3   2-2   - - DIM
-  3   4-9   Cyan - BOLD
-  3  21-21  - - DIM
+  3   2-117 - - DIM
   3 119-119 - - DIM
   4   0-0   - - DIM
-  4   2-2   - - DIM
-  4   4-8   - - DIM
-  4  21-21  - - DIM
   4 119-119 - - DIM
   5   0-0   - - DIM
-  5   2-2   - - DIM
-  5   4-8   - - DIM
-  5  21-21  - - DIM
   5 119-119 - - DIM
   6   0-0   - - DIM
-  6   2-21  - - DIM
+  6   2-10  White DarkGray -
+  6  11-17  Black LightCyan -
+  6  18-117 White DarkGray DIM
   6 119-119 - - DIM
   7   0-0   - - DIM
+  7   2-117 - - DIM
   7 119-119 - - DIM
   8   0-0   - - DIM
-  8   2-21  - - DIM
   8 119-119 - - DIM
   9   0-0   - - DIM
-  9   2-2   - - DIM
-  9   4-8   LightCyan - -
-  9  21-21  - - DIM
   9 119-119 - - DIM
  10   0-0   - - DIM
- 10   2-2   - - DIM
- 10   4-7   - - DIM
- 10  21-21  - - DIM
  10 119-119 - - DIM
  11   0-0   - - DIM
- 11   2-2   - - DIM
- 11   4-5   Red - -
- 11   6-10  - - DIM
- 11  21-21  - - DIM
+ 11   2-117 White DarkGray DIM
  11 119-119 - - DIM
  12   0-0   - - DIM
- 12   2-21  - - DIM
+ 12   2-117 - - DIM
  12 119-119 - - DIM
  13   0-0   - - DIM
  13 119-119 - - DIM
  14   0-0   - - DIM
- 14   2-21  - - DIM
+ 14   2-11  White DarkGray -
  14 119-119 - - DIM
  15   0-0   - - DIM
- 15   2-2   - - DIM
- 15   4-8   LightYellow - -
- 15  21-21  - - DIM
  15 119-119 - - DIM
  16   0-0   - - DIM
- 16   2-2   - - DIM
- 16   4-8   - - DIM
- 16  21-21  - - DIM
- 16  23-32  White DarkGray -
+ 16   2-8   White DarkGray -
+ 16   9-16  Black Cyan -
+ 16  17-117 White DarkGray DIM
  16 119-119 - - DIM
  17   0-0   - - DIM
- 17   2-2   - - DIM
- 17   4-8   - - DIM
- 17  21-21  - - DIM
+ 17   2-117 - - DIM
  17 119-119 - - DIM
  18   0-0   - - DIM
- 18   2-21  - - DIM
  18 119-119 - - DIM
  19   0-0   - - DIM
  19 119-119 - - DIM
  20   0-0   - - DIM
- 20   2-21  - - DIM
  20 119-119 - - DIM
  21   0-0   - - DIM
- 21   2-2   - - DIM
- 21   4-9   Cyan - BOLD
- 21  21-21  - - DIM
  21 119-119 - - DIM
  22   0-0   - - DIM
- 22   2-2   - - DIM
- 22   4-8   - - DIM
- 22  21-21  - - DIM
  22 119-119 - - DIM
  23   0-0   - - DIM
- 23   2-2   - - DIM
- 23   4-8   - - DIM
- 23  21-21  - - DIM
  23 119-119 - - DIM
  24   0-0   - - DIM
- 24   2-21  - - DIM
  24 119-119 - - DIM
  25   0-0   - - DIM
  25 119-119 - - DIM
