@@ -150,19 +150,12 @@ fn warn_on_expansion(req: &SendRequest, message_parts: &[String]) {
 }
 
 /// The stderr lines for a message written: each tray that failed, then the
-/// signal's id, one line per part for a message sent in parts.
+/// signal's id.
 fn report(sent: &send::Sent) {
     for f in &sent.failed {
         eprintln!("[attend] error writing signal to {}: {}", f.dir.display(), f.error);
     }
-    let n = sent.parts.len();
-    if n == 1 {
-        eprintln!("[attend] signal written ({}, {} dirs): {}.signal", sent.scope, sent.dirs, sent.id);
-        return;
-    }
-    for (i, id) in sent.parts.iter().enumerate() {
-        eprintln!("[attend] signal written ({}, part {}/{n}): {id}.signal", sent.scope, i + 1);
-    }
+    eprintln!("[attend] signal written ({}, {} dirs): {}.signal", sent.scope, sent.dirs, sent.id);
 }
 
 const SEND_USAGE: &str = "usage: attend send <message>\n  (reaches every peer and Aaron — no routing flags needed)\n  tip: wrap message in double quotes to avoid shell expansion";
@@ -229,7 +222,7 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
         | SendError::ParentChannelLeft { .. }
         | SendError::ParentChannelGone { .. }
         | SendError::ParentRoomUnknown => eprintln!("attend reply: {e}"),
-        SendError::OwnProject { .. } | SendError::Incomplete { .. } => eprintln!("error: {e}"),
+        SendError::OwnProject { .. } | SendError::NotWritten { .. } | SendError::TooLong { .. } => eprintln!("error: {e}"),
     }
     std::process::exit(1);
 }

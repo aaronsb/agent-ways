@@ -28,7 +28,7 @@ from|project|cwd|re:signal-id|message
 
 The parser splits the leading fields on `|` and keeps the rest as the message, so a `|` inside the message survives.
 
-**Encoding and length.** UTF-8, with no length limit on disk. The Monitor line splits a long message into at most three parts (see [`delivery.md`](delivery.md#the-monitor-line)); `attend inbox <id>` prints the whole message.
+**Encoding and length.** UTF-8. `attend send` and `attend reply` refuse a body over 64 KiB with a `too_long` error, and readers skip, with a note, a signal file over 256 KiB, which no attend writes (ADR-412). The Monitor line carries the message on one line, and Monitor shows its first 500 characters (see [`delivery.md`](delivery.md#the-monitor-line)); `attend inbox <id>` prints the whole message.
 
 ## Storage layout
 

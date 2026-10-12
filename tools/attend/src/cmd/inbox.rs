@@ -178,6 +178,9 @@ pub(crate) struct Scan {
     pub(crate) note: Option<String>,
     /// How many the cold start marks without showing; `note` announces them.
     pub(crate) held_back: usize,
+    /// One note per signal file skipped for its size. Only the drain, which
+    /// commits `mark`, prints them, so each file is noted once.
+    pub(crate) skipped: Vec<String>,
 }
 
 /// The scope label a drained message carries for its room.
@@ -216,6 +219,7 @@ pub(crate) fn scan_pending(
         content: String,
     }
     let mut mark: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     let mut found: Vec<Found> = Vec::new();
     for (room, dir) in scan_dirs.iter().enumerate() {
         let Ok(entries) = std::fs::read_dir(&dir.path) else { continue };
@@ -230,7 +234,17 @@ pub(crate) fn scan_pending(
             if seen.contains(&key) {
                 continue;
             }
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let content = match agent_identity::signal::read_signal_file(&path) {
+                Ok(content) => content,
+                // A file no attend could have written: mark it so it is
+                // skipped once, with a note, not on every drain.
+                Err(e) if e.kind() == std::io::ErrorKind::FileTooLarge => {
+                    skipped.push(format!("[attend] skipped {filename}: {e}"));
+                    mark.push(key);
+                    continue;
+                }
+                Err(_) => continue,
+            };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
             // Own messages: mark (dedup bookkeeping) but never deliver.
             if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
@@ -270,7 +284,7 @@ pub(crate) fn scan_pending(
         delivered.push(Drained {
             when: agent_fmt::compact_time(f.mtime, std::time::SystemTime::now()),
             mtime: f.mtime,
-            sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
+            sender: render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), &instances),
             sender_id: sig.from.to_string(),
             scope: room_label(&scan_dirs[f.room].room),
             room: scan_dirs[f.room].room.clone(),
@@ -281,7 +295,7 @@ pub(crate) fn scan_pending(
         });
     }
     let held_back = plan.as_ref().map_or(0, |p| p.not_shown);
-    Scan { delivered, mark, note: plan.and_then(|p| p.note()), held_back }
+    Scan { delivered, mark, note: plan.and_then(|p| p.note()), held_back, skipped }
 }
 
 /// Drain pending authored messages for this session: deliver the unseen,
@@ -378,9 +392,12 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
-    let Scan { mut delivered, mark, note, held_back } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
-    // Oldest first; parts written within one timestamp tick go by id,
-    // which carries the send time.
+    let Scan { mut delivered, mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
+    for line in &skipped {
+        eprintln!("{line}");
+    }
+    // Oldest first; signals that share an mtime order by the send time in
+    // their ids, so legacy numbered parts still read in order.
     delivered.sort_by_cached_key(|d| (d.mtime, agent_identity::signal_send_order(&d.id), d.id.clone()));
 
     // The cold start is this conduit's first contact with the session, so
@@ -1108,7 +1125,7 @@ mod drain_tests {
         let _ = sensor.poll(&focus); // first poll: peer-presence baseline, emits nothing
         let observations = sensor.poll(&focus);
 
-        let expected = format!("message from {}: same name on both", drained.sender);
+        let expected = format!("message from {} ~{}: same name on both", drained.sender, short_id("peer-1"));
         assert!(
             observations.iter().any(|(_, line)| line == &expected),
             "Monitor conduit did not emit {expected:?}; got {:?}",

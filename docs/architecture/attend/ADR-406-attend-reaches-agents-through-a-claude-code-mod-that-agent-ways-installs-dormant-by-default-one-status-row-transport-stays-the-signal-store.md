@@ -300,3 +300,7 @@ Consequences:
 ## Addendum, 2026-10-12: resume is decided in ADR-411
 
 Appended after acceptance; nothing above is changed. The operator's answers recorded as `considered` entries 7 and 8 reverse the `door` probe's "until Claude exits" for a resumed session id. ADR-411 records that change: it amends items 1 and 2 of the Decision, so that a session that listened comes back listening when its session id is resumed.
+
+## Addendum, 2026-10-12: splitting is removed in ADR-412
+
+Appended after acceptance; nothing above is changed. Item 10 moved splitting a long body into `attend send`. ADR-412 amends the Decision so that one message is one signal whatever its length, and no conduit splits it on delivery.

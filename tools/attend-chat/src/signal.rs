@@ -5,7 +5,6 @@
 //! filename are shared through agent-identity; the paths and I/O around
 //! them are duplicated here.
 
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -71,7 +70,7 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
     if path.extension().and_then(|s| s.to_str()) != Some("signal") {
         return None;
     }
-    let raw = fs::read_to_string(path).ok()?;
+    let raw = agent_identity::signal::read_signal_file(path).ok()?;
     let parsed = agent_identity::parse_signal(agent_identity::wire_line(&raw))?;
 
     let id = path
@@ -129,6 +128,9 @@ pub fn write_broadcast(message: &str) -> io::Result<String> {
 /// broadcast and directed (`@Nickname`) paths both ride this — same
 /// wire format, same atomic tmp+rename, only the target differs.
 pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
+    // The same 64 KiB limit `attend send` keeps (ADR-412); the compose box
+    // shows the refusal and keeps the draft.
+    agent_identity::signal::check_message_len(message)?;
     let (sender_id, from, project, cwd) = sender_identity();
 
     // Build the filename stem (== signal id that `re:<id>` replies
@@ -232,6 +234,7 @@ pub fn human_member_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::io::Write;
 
     fn tmp_signal(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -369,5 +372,20 @@ mod tests {
 
     fn tempdir_like() -> std::path::PathBuf {
         crate::test_dir::unique("signal")
+    }
+
+    /// A body over the shared 64 KiB limit is refused and nothing is
+    /// written; one at the limit goes out (ADR-412).
+    #[test]
+    fn a_body_over_the_limit_is_refused_and_nothing_is_written() {
+        let dir = tempdir_like();
+        let max = agent_identity::signal::MAX_MESSAGE_BYTES;
+        let err = write_signal(&dir, &"x".repeat(max + 1)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("64 KiB"), "{err}");
+        assert!(!dir.exists() || fs::read_dir(&dir).unwrap().next().is_none(), "nothing written");
+        write_signal(&dir, &"x".repeat(max)).unwrap();
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = fs::remove_dir_all(&dir);
     }
 }
