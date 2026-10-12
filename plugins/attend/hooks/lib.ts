@@ -278,13 +278,16 @@ export const REPLY_OPTIONAL = 'Replying is your call; ending the turn with no re
 const OPEN = '<attend-peer-messages>'
 const CLOSE = '</attend-peer-messages>'
 
-/** A line with every `<` that could forge the frame made `‹`: one followed,
- *  after optional whitespace, by `/` (any closing tag) or by `attend` in any
- *  case (an opening tag of the frame). Every other `<` (`<cwd>`, `x < y`,
- *  `Vec<u8>`) passes through. The Stop-hook drain's `defuse_fence` in
+/** A line with every `<` that could forge the frame made `‹`. A `<` is kept
+ *  only when the next non-space character is ASCII `[A-Za-z0-9<=(-]` and the
+ *  word there is not `attend` in any case; every other `<` is defused. The
+ *  allowlist keeps code (`<cwd>`, `x < y`, `Vec<u8>`, `a <= b`) and defuses
+ *  `</`, `<attend`, and anything a renderer could hide or draw as `/`
+ *  between them (review of #949), at the cost of `</div>`, `<attendee>` and
+ *  a trailing `<`. The Stop-hook drain's `defuse_fence` in
  *  tools/attend/src/cmd/inbox.rs applies the same rule. */
 export function defuseFence(s: string): string {
-  return s.replace(/<(?=\s*(?:\/|attend))/gi, '‹')
+  return s.replace(/<(?= *attend)/gi, '‹').replace(/<(?! *[A-Za-z0-9<=(-])/g, '‹')
 }
 
 /** The prompt one batch becomes: the label and the data note, the lines
