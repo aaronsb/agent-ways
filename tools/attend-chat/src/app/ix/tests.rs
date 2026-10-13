@@ -21,6 +21,10 @@ fn agent(id: &str) -> SideHit {
     SideHit::Agent(id.into())
 }
 
+fn dm(id: &str) -> SideHit {
+    SideHit::Dm(id.into())
+}
+
 fn row(name: &str) -> SideHit {
     SideHit::Channel(name.into())
 }
@@ -476,7 +480,49 @@ fn mirror_views() -> Vec<(&'static str, View)> {
         ("#open shown", with(Laid { bar: reserved.clone(), shown: chan("open"), ..laid.clone() })),
         ("the operator view shown", with(Laid { bar: reserved.clone(), shown: Tab::Merged, ..laid.clone() })),
         ("a single channel", with(Laid { bar: reserved, rows: vec![row("open")], shown: Tab::Merged })),
+        ("a DM view shown, its row under its agent's", dm_view()),
     ]
+}
+
+/// a1's DM view shown: its tab on the bar's left, its row under a1's.
+fn dm_view() -> View {
+    let shown = Tab::Dm("a1".into());
+    let laid = Laid {
+        bar: vec![Slot::Common, Slot::Tab(shown.clone()), Slot::New, Slot::Tab(chan("open")), Slot::Tab(Tab::Merged)],
+        rows: vec![agent("a1"), dm("a1"), agent("a2"), row("open"), row("deploy"), row("infra")],
+        shown,
+    };
+    View { world: Some(laid), ..view() }
+}
+
+/// A DM view's row is a stop of the column like any other: the arrows move
+/// along it, ↓ from its tab lands on it, the column's numbers pass over
+/// it, Enter opens its menu and a click selects it.
+#[test]
+fn a_dm_row_is_a_stop_of_the_column() {
+    use Effect::*;
+    let v = dm_view();
+    let row_at = |i: usize| {
+        let hit = v.world.as_ref().unwrap().rows.get(i).cloned();
+        Ix { focus: Focus::Row(i), row_hit: hit.clone(), last_nav: Some((Focus::Row(i), hit)), ..Ix::default() }
+    };
+    let dm_tab = Slot::Tab(Tab::Dm("a1".into()));
+    check(vec![
+        cell("↓ from the agent's row lands on its DM row", row_at(0), Ev::Key(key(KeyCode::Down)), v.clone(), row_at(1), vec![Follow, Redraw]),
+        cell("↓ from the DM row goes on to the next agent", row_at(1), Ev::Key(key(KeyCode::Down)), v.clone(), row_at(2), vec![Follow, Redraw]),
+        cell("↓ from the DM view's tab lands on its row", tab(dm_tab), Ev::Key(key(KeyCode::Down)), v.clone(), row_at(1), vec![Follow, Redraw]),
+        cell("1 is still #open, past the DM row", at(Focus::Compose), Ev::Numbered { n: 1, menu: false }, v.clone(), at(Focus::Compose), vec![act(Target::Channel("open".into()), How::Select { repeat: false }, None), Redraw]),
+        cell("Enter on the DM row opens its menu", row_at(1), Ev::Key(key(KeyCode::Enter)), v.clone(), row_at(1), vec![act(Target::Dm("a1".into()), How::Menu, None)]),
+        cell(
+            "a click on the DM row puts the keyboard there and selects it",
+            at(Focus::Compose),
+            Ev::Click(Click::Pane { column: true, feed: false, row: Some(dm("a1")) }),
+            v.clone(),
+            row_at(1),
+            vec![Follow, act(Target::Dm("a1".into()), How::Select { repeat: true }, None)],
+        ),
+    ]);
+    assert!(!Ix { focus: Focus::Row(1), row_hit: Some(dm("a1")), ..Ix::default() }.ctx().digits, "a digit on a DM row is typed: it carries no number");
 }
 
 /// Tab and Shift+Tab are mirrors around the one ring: from every element,
@@ -664,11 +710,17 @@ fn any_key(r: &mut Rng) -> KeyEvent {
 }
 
 fn any_view(r: &mut Rng) -> View {
-    let mut rows: Vec<SideHit> = ["a1", "a2", "a3"].iter().take(r.below(4)).map(|a| agent(a)).collect();
+    let mut rows: Vec<SideHit> = Vec::new();
+    for a in ["a1", "a2", "a3"].iter().take(r.below(4)) {
+        rows.push(agent(a));
+        if r.below(3) == 0 {
+            rows.push(dm(a));
+        }
+    }
     rows.extend(["open", "deploy", "infra"].iter().take(r.below(4)).map(|c| row(c)));
-    let shown = [Tab::Merged, chan("open"), chan("deploy"), chan("infra")][r.below(4)].clone();
+    let shown = [Tab::Merged, chan("open"), chan("deploy"), chan("infra"), Tab::Dm("a1".into())][r.below(5)].clone();
     let mut bar = vec![Slot::Common];
-    if matches!(&shown, Tab::Channel(c) if c != "open") {
+    if matches!(&shown, Tab::Channel(c) if c != "open") || matches!(shown, Tab::Dm(_)) {
         bar.push(Slot::Tab(shown.clone()));
     }
     bar.extend([Slot::New, Slot::Tab(chan("open")), Slot::Tab(Tab::Merged)]);

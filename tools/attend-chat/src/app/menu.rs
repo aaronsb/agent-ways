@@ -20,8 +20,9 @@
 //!   line in the same dialog, docked beside its item. The compose box is
 //!   for chatting and is never borrowed (ADR-409): its draft stays as it
 //!   is. A name the dialog refuses is said inside it, the text kept.
-//! - an agent's row in the left column: Address @Name (puts `@Name ` in
-//!   the compose box), Who is this (what `/whois` says of the session
+//! - an agent's row in the left column: for a claude first Show DMs, or
+//!   Hide DMs while its DM view is listed ([`super::dm`]), then Address
+//!   @Name (puts `@Name ` in the compose box), Who is this (what `/whois` says of the session
 //!   the row is, or what the chat knows of one the roster lacks), Add
 //!   agent to chat ▸ (a picker, `add to channel`, of the channels the
 //!   agent is not in; the pick invites it, as Add agent ▸ does), and
@@ -29,9 +30,10 @@
 //!   quiet. The operator's own row offers Leave #channel there instead:
 //!   Remove never takes out the human at the keyboard, here or in the
 //!   Remove agent picker.
+//! - a DM view, by its row or its tab: Hide DMs.
 //! - a message in the feed, by Enter on it: Reply (its channel shown and
 //!   the keyboard in the compose box; a direct message is answered by
-//!   addressing its sender), Quote (its lines put in the box as `> `
+//!   addressing its sender, and one the chat sent by showing its DM view), Quote (its lines put in the box as `> `
 //!   lines), Address @Name (as the agent menu's), Copy (the message to the
 //!   terminal's clipboard by OSC 52).
 //!
@@ -63,6 +65,7 @@ use agent_tui::{Anchor, Item, Open};
 use crate::chip::Seen;
 use crate::peers::Peer;
 
+use super::dm::{HIDE_DMS, SHOW_DMS};
 use super::keys::{self, EnterAction};
 use super::ChatPane;
 use crate::groups::BASE_CHANNEL_NAME;
@@ -188,13 +191,15 @@ pub(super) fn removable(members: Vec<Member>, me: &str) -> Vec<Member> {
     members.into_iter().filter(|m| m.id != me).collect()
 }
 
-/// The items of an agent row's menu: address it, who it is, add it to a
-/// channel, then for the shown channel that lists it (`listed`), Remove, or
-/// Leave on the operator's own row. `add` is why the agent cannot be added
-/// to a channel, when it cannot: Add agent to chat is then set back with
-/// the reason.
-pub(super) fn agent_items(name: &str, listed: Option<&str>, operator: bool, add: Result<(), String>) -> Vec<Item> {
-    let mut out = vec![Item::new(format!("{ADDRESS} @{name}")), Item::new(WHO)];
+/// The items of an agent row's menu: its DM view shown or hidden, for an
+/// agent that has one (`dms`: whether the column lists it), address it, who
+/// it is, add it to a channel, then for the shown channel that lists it
+/// (`listed`), Remove, or Leave on the operator's own row. `add` is why the
+/// agent cannot be added to a channel, when it cannot: Add agent to chat is
+/// then set back with the reason.
+pub(super) fn agent_items(name: &str, dms: Option<bool>, listed: Option<&str>, operator: bool, add: Result<(), String>) -> Vec<Item> {
+    let mut out: Vec<Item> = dms.map(|on| Item::new(if on { HIDE_DMS } else { SHOW_DMS })).into_iter().collect();
+    out.extend([Item::new(format!("{ADDRESS} @{name}")), Item::new(WHO)]);
     out.push(match add {
         Ok(()) => Item::new(ADD_TO_CHAT),
         Err(why) => Item::disabled(ADD_TO_CHAT, why),
@@ -429,6 +434,9 @@ impl ChatPane {
         if let Some(member) = id.strip_prefix("agent:") {
             return self.agent_item(member, value);
         }
+        if let Some(member) = id.strip_prefix("dm:") {
+            return self.dm_item(member, value);
+        }
         if let Some(m) = id.strip_prefix("message:") {
             return self.message_item(m, value);
         }
@@ -474,10 +482,11 @@ impl ChatPane {
         let me = crate::signal::human_member_id();
         let listed = match self.normal_tab() {
             Tab::Channel(c) => self.channel_members(&c).into_iter().find(|m| m.id == member).map(|m| (c, m)),
-            Tab::Merged => None,
+            Tab::Merged | Tab::Dm(_) => None,
         };
         let add = self.can_add(&s);
-        let items = agent_items(&name, listed.as_ref().map(|(c, _)| c.as_str()), member == me, add);
+        let dms = self.has_dms(&member).then(|| self.dms.contains(&member));
+        let items = agent_items(&name, dms, listed.as_ref().map(|(c, _)| c.as_str()), member == me, add);
         self.removable = removable(listed.map(|(_, m)| m).into_iter().collect(), &me);
         let anchor = at.or_else(|| self.side_row(&super::sidebar::SideHit::Agent(member.clone()))).map_or(Anchor::Center, Anchor::Row);
         self.to_open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
@@ -489,7 +498,7 @@ impl ChatPane {
     /// an index would then name its neighbour.
     fn feed_message(&mut self, id: &str) -> Option<(crate::signal::Signal, Option<String>)> {
         let shown = self.normal_tab();
-        let (i, sig) = self.signals.iter().filter(|s| tabs::visible_in(&s.channel, &shown)).enumerate().find(|(_, s)| s.id == id)?;
+        let (i, sig) = self.signals.iter().filter(|s| tabs::shows(s, &shown)).enumerate().find(|(_, s)| s.id == id)?;
         let sig = sig.clone();
         let member = self.entry_members.get(i).cloned().flatten();
         let name = member.and_then(|m| self.seen_member(&m)).map(|s| s.identity.nickname);
@@ -505,7 +514,7 @@ impl ChatPane {
         };
         self.feed.reveal(i);
         let shown = self.normal_tab();
-        let Some(id) = self.signals.iter().filter(|s| tabs::visible_in(&s.channel, &shown)).nth(i).map(|s| s.id.clone()) else { return };
+        let Some(id) = self.signals.iter().filter(|s| tabs::shows(s, &shown)).nth(i).map(|s| s.id.clone()) else { return };
         let Some((sig, name)) = self.feed_message(&id) else { return };
         let feed = self.hits.feed;
         let anchor = self.feed.header_row(i).map_or(Anchor::Center, |r| Anchor::Row(Rect { x: feed.x, y: feed.y + r, width: feed.width, height: 1 }));
@@ -526,6 +535,10 @@ impl ChatPane {
                 (crate::signal::Channel::Group(g), _) => self.set_tab(Tab::Channel(g.clone())),
                 (crate::signal::Channel::Open, _) => self.set_tab(Tab::Channel(BASE_CHANNEL_NAME.into())),
                 (crate::signal::Channel::Direct | crate::signal::Channel::Person, Some(n)) => address(self, n),
+                (crate::signal::Channel::Sent(to), _) => match to.split(',').find(|m| self.has_dms(m)).map(str::to_string) {
+                    Some(m) => self.open_dm(m),
+                    None => return self.say("no DM view to reply in", true),
+                },
                 _ => return self.say("no channel to reply in", true),
             },
             QUOTE => {
@@ -550,7 +563,11 @@ impl ChatPane {
     }
 
     fn agent_item(&mut self, member: &str, item: &str) {
-        if item.starts_with(ADDRESS) {
+        if item == SHOW_DMS {
+            self.open_dm(member.to_string());
+        } else if item == HIDE_DMS {
+            self.hide_dm(member);
+        } else if item.starts_with(ADDRESS) {
             match self.seen_member(member) {
                 Some(s) => self.complete(super::Chip::Agent(s.identity.nickname)),
                 None => self.say("that agent is not in the column any more", true),
@@ -903,9 +920,9 @@ mod tests {
     #[test]
     fn remove_never_offers_the_operator_and_their_own_row_offers_leave() {
         let l = |items: Vec<Item>| items.into_iter().map(|i| i.label).collect::<Vec<_>>();
-        assert_eq!(l(agent_items("Wells", Some("deploy"), false, Ok(()))), ["Address @Wells", WHO, ADD_TO_CHAT, "Remove from #deploy"]);
-        assert_eq!(l(agent_items("aaron", Some("deploy"), true, Ok(()))), ["Address @aaron", WHO, ADD_TO_CHAT, "Leave #deploy"], "the operator leaves, never removes themself");
-        assert_eq!(l(agent_items("Lyra", None, false, Ok(()))), ["Address @Lyra", WHO, ADD_TO_CHAT], "not listed: nothing to remove");
+        assert_eq!(l(agent_items("Wells", Some(false), Some("deploy"), false, Ok(()))), [SHOW_DMS, "Address @Wells", WHO, ADD_TO_CHAT, "Remove from #deploy"]);
+        assert_eq!(l(agent_items("aaron", None, Some("deploy"), true, Ok(()))), ["Address @aaron", WHO, ADD_TO_CHAT, "Leave #deploy"], "the operator leaves, never removes themself; a human has no DM view");
+        assert_eq!(l(agent_items("Lyra", Some(true), None, false, Ok(()))), [HIDE_DMS, "Address @Lyra", WHO, ADD_TO_CHAT], "not listed: nothing to remove; its DMs listed: hide them");
         let m = |id: &str| Member { id: id.into(), label: id.into(), live: true, root: None };
         let left: Vec<String> = removable(vec![m("s1"), m("aaron"), m("s2")], "aaron").into_iter().map(|m| m.id).collect();
         assert_eq!(left, ["s1", "s2"], "the Remove agent picker leaves the operator out");
@@ -919,7 +936,7 @@ mod tests {
     fn pane_with(seen: Vec<Seen>) -> ChatPane {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
-        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground));
+        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground, &c.dms));
         c
     }
 
@@ -932,7 +949,7 @@ mod tests {
         assert_eq!(c.can_add(&human), Err("a human joins with /join".into()));
         assert_eq!(c.can_add(&quiet), Err("quiet: no live session to invite".into()));
         assert_eq!(c.can_add(&everywhere), Err("already in every channel".into()), "no channel it is not in");
-        let items = agent_items("Ada", None, false, c.can_add(&everywhere));
+        let items = agent_items("Ada", None, None, false, c.can_add(&everywhere));
         let add = items.iter().find(|i| i.label == ADD_TO_CHAT).expect("the item is listed");
         assert!(!add.enabled && add.reason.as_deref() == Some("already in every channel"), "{add:?}");
     }

@@ -3,10 +3,11 @@
 //! and that element alone is drawn focused.
 //!
 //! The ring is the one ordered list the key handler walks and the renderer
-//! marks: the tab bar in the order drawn (`≡`, the created channel shown,
-//! `+`, then the reserved `#open` and the operator view), the column's rows
-//! (every agent, then every channel), the feed, then the compose box, and
-//! round again. Tab walks it forward and Shift+Tab back, exact mirrors.
+//! marks: the tab bar in the order drawn (`≡`, the created channel or DM
+//! view shown, `+`, then the reserved `#open` and the operator view), the
+//! column's rows (every agent, each followed by its DM view's row while
+//! listed, then every channel), the feed, then the compose box, and round
+//! again. Tab walks it forward and Shift+Tab back, exact mirrors.
 //!
 //! - In the compose box every key edits: Enter sends, the arrows move the
 //!   cursor, and Tab completes a word that can be completed. Tab with no
@@ -35,6 +36,7 @@
 use agent_tui::{Anchor, Binding, Open};
 
 use super::ix::{self, Effect, Ev, View};
+use super::sidebar::SideHit;
 use super::ChatPane;
 use crate::tabs::{Slot, Tab};
 
@@ -60,6 +62,7 @@ pub(super) enum Kind {
     ChannelTab,
     View,
     AgentRow,
+    DmRow,
     ChannelRow,
     Feed,
     Compose,
@@ -78,11 +81,12 @@ impl ChatPane {
             Focus::Tab(slot) => match slot {
                 Slot::Common => Kind::Common,
                 Slot::New => Kind::New,
-                Slot::Tab(Tab::Merged) => Kind::View,
+                Slot::Tab(Tab::Merged | Tab::Dm(_)) => Kind::View,
                 Slot::Tab(_) => Kind::ChannelTab,
             },
-            Focus::Row(i) => match world {
-                Some(w) if i < w.seen.len() => Kind::AgentRow,
+            Focus::Row(i) => match world.and_then(|w| w.laid.rows.get(i)) {
+                Some(SideHit::Agent(_)) => Kind::AgentRow,
+                Some(SideHit::Dm(_)) => Kind::DmRow,
                 _ => Kind::ChannelRow,
             },
             Focus::Feed => Kind::Feed,
@@ -186,7 +190,7 @@ impl ChatPane {
     pub(super) fn focus_bindings(&self) -> Vec<Binding> {
         let kind = self.focus_kind();
         let on = |b: Binding, footer: bool| Binding { footer, ..b };
-        let list = matches!(kind, Kind::AgentRow | Kind::ChannelRow | Kind::Feed);
+        let list = matches!(kind, Kind::AgentRow | Kind::DmRow | Kind::ChannelRow | Kind::Feed);
         let mut out = Vec::new();
         if kind == Kind::Compose {
             out.extend([
@@ -231,7 +235,7 @@ impl ChatPane {
             Kind::Compose => "chat",
             Kind::Common | Kind::New | Kind::ChannelTab => "tabs",
             Kind::View => "view",
-            Kind::AgentRow | Kind::ChannelRow => "column",
+            Kind::AgentRow | Kind::DmRow | Kind::ChannelRow => "column",
             Kind::Feed => "feed",
         }
         .into()

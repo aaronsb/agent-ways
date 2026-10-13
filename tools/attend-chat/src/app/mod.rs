@@ -14,6 +14,7 @@
 //! [`keys`] as free functions; the editing keys are the shared input's.
 
 mod activate;
+mod dm;
 mod focus;
 mod ix;
 mod keys;
@@ -212,6 +213,10 @@ pub struct ChatPane {
     side_follow: bool,
     /// The members a Remove menu listed, for the one picked.
     removable: Vec<menu::Member>,
+    /// The agents whose DM view the column lists under their rows, by
+    /// membership id, in the order opened ([`dm`]). Hiding one takes it off
+    /// the list and leaves every message where it was.
+    dms: Vec<String>,
 }
 
 impl ChatPane {
@@ -255,6 +260,7 @@ impl ChatPane {
             side_scroll: [0, 0],
             side_follow: true,
             removable: Vec::new(),
+            dms: Vec::new(),
         }
     }
 
@@ -327,7 +333,7 @@ impl ChatPane {
             let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
-            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground));
+            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground, &self.dms));
             self.refocus();
         }
         self.world.as_ref().expect("just built")
@@ -445,11 +451,7 @@ impl ChatPane {
             Some((cmd, _)) => format!("dry run: /{cmd} not run"),
             None => {
                 let shown = self.normal_tab();
-                let scope = tabs::send_scope(&shown);
-                let quiet = keys::quiet_names(&self.world().seen);
-                let swept = keys::swept_names(&self.world().rows);
-                let in_channel = matches!(shown, Tab::Channel(_));
-                let to = destination_label(&text, &scope, in_channel, &quiet, &swept).unwrap_or(format!("#{scope}"));
+                let to = self.flag_label(&text, &shown).unwrap_or(format!("#{}", tabs::send_scope(&shown)));
                 format!("dry run: not sent to {to}")
             }
         };
@@ -823,9 +825,11 @@ impl Pane for ChatPane {
     }
 
     /// A click on a tab or a channel row shows it and again opens its menu;
-    /// an agent's row and the destination flag open theirs at once.
+    /// on a claude's row it shows the DMs with it, and again opens the
+    /// agent's menu. A human's row and the destination flag open theirs at
+    /// once.
     fn click_help(&self) -> Option<String> {
-        Some("a channel shows it, again its menu; agent, flag: its menu".into())
+        Some("shows a channel or agent's DMs, again its menu; flag: menu".into())
     }
 
     /// A right click opens the menu at once on a tab, a column row or a
@@ -1103,11 +1107,11 @@ impl Screen for Chat {
 
 impl World {
     /// A world of these channels and identities, laid out for the tab
-    /// `shown` against its channels.
-    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab) -> World {
+    /// `shown` against its channels, with the DM views `dms` lists.
+    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab, dms: &[String]) -> World {
         let names = tabs::strip_names(&groups);
         let shown = tabs::normalize(shown.clone(), &names);
-        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows), shown };
+        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows, dms), shown };
         World { groups, seen, rows, live_members, instances, laid }
     }
 

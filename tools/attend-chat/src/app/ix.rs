@@ -412,7 +412,7 @@ impl<'a> Step<'a> {
                 let w = self.world()?;
                 let mut channels = w.rows.iter().enumerate().filter_map(|(i, h)| match h {
                     SideHit::Channel(c) => Some((i, c.clone())),
-                    SideHit::Agent(_) => None,
+                    SideHit::Agent(_) | SideHit::Dm(_) => None,
                 });
                 let Some((i, name)) = channels.nth(n - 1) else { return Ok(()) };
                 if self.ix.side_focus().is_some() {
@@ -529,8 +529,8 @@ impl<'a> Step<'a> {
     fn vertical(&mut self, down: bool) -> R {
         match self.ix.focus.clone() {
             Focus::Tab(slot) if down => {
-                // Into the column: the row of the tab's channel, else the
-                // first row; past a hidden column, the feed.
+                // Into the column: the row of the tab's channel or DM view,
+                // else the first row; past a hidden column, the feed.
                 if !self.v.side_drawn {
                     return self.go(Focus::Feed);
                 }
@@ -540,6 +540,7 @@ impl<'a> Step<'a> {
                 }
                 let row = match slot {
                     Slot::Tab(Tab::Channel(c)) => rows.iter().position(|h| *h == SideHit::Channel(c.clone())),
+                    Slot::Tab(Tab::Dm(m)) => rows.iter().position(|h| *h == SideHit::Dm(m.clone())),
                     _ => None,
                 };
                 self.go(Focus::Row(row.unwrap_or(0)))
