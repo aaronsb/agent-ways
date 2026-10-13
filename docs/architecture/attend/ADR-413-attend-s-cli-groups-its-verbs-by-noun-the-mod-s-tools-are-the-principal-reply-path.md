@@ -30,6 +30,10 @@ considered:
   - operator: aaronsb
     said: "accepted the two prs. help me merge 940"
     via: "the operator's chat message to the head session, 2026-10-12, asking to merge PR #940"
+  - operator: aaronsb
+    said: "for the cli, that is correct"
+    via: the operator's chat message to the head session, answering ADR-413's scope probe
+    covers: [scope]
 observable:
   - '`attend --help` lists nine commands: run, listen, message, channel, peer, keepwarm, chat, sensor, config'
   - 'a bare `attend` prints the banner, those nine, and one line naming the attend_* tools as the principal path in a mod session'
