@@ -150,20 +150,16 @@ fn the_ring_walks_the_tab_bar_in_order_then_the_column_the_feed_and_the_box() {
     assert_eq!(focused(&mut c), "mode chat", "→ forward, round to the box");
 }
 
-/// Tab and Shift+Tab are exact mirrors around the one ring: from every
-/// element, N × Tab then N × Shift+Tab comes back, for every N round it.
-#[test]
-fn tab_and_shift_tab_are_mirrors_from_every_element() {
-    let mut c = chat();
-    show_deploy(&mut c);
+/// From every element of `fresh()`'s ring, N × Tab then N × Shift+Tab
+/// comes back, for every N round it. The ring is walked first from the box.
+fn assert_mirror(fresh: &dyn Fn() -> Chat, what: &str) -> usize {
+    let mut c = fresh();
     press(&mut c, KeyCode::Tab);
     let mut ring = vec![focused(&mut c)];
     ring.extend(walk(&mut c, KeyCode::Tab, "mode chat"));
-    assert!(ring.len() >= 12, "five slots, the column, the feed and the box: {ring:?}");
     for start in &ring {
         for n in 1..=ring.len() {
-            let mut c = chat();
-            show_deploy(&mut c);
+            let mut c = fresh();
             focus_to(&mut c, start);
             for _ in 0..n {
                 press(&mut c, KeyCode::Tab);
@@ -171,9 +167,67 @@ fn tab_and_shift_tab_are_mirrors_from_every_element() {
             for _ in 0..n {
                 press(&mut c, KeyCode::BackTab);
             }
-            assert_eq!(&focused(&mut c), start, "{n} × Tab, then {n} × Shift+Tab");
+            assert_eq!(&focused(&mut c), start, "{what}: {n} × Tab, then {n} × Shift+Tab: {ring:?}");
         }
     }
+    ring.len()
+}
+
+/// Tab and Shift+Tab are exact mirrors around the one ring, with #deploy's
+/// tab on the bar, with the column hidden, with #open shown, and with the
+/// operator view shown.
+#[test]
+fn tab_and_shift_tab_are_mirrors_from_every_element() {
+    let len = assert_mirror(
+        &|| {
+            let mut c = chat();
+            show_deploy(&mut c);
+            c
+        },
+        "#deploy shown",
+    );
+    assert!(len >= 12, "five slots, the column, the feed and the box: {len}");
+    let hidden = assert_mirror(
+        &|| {
+            let mut c = chat();
+            press(&mut c, KeyCode::F(3));
+            c
+        },
+        "the column hidden",
+    );
+    assert_eq!(hidden, 6, "four slots, the feed and the box");
+    assert_mirror(
+        &|| {
+            let mut c = chat();
+            key(&mut c, KeyEvent::new(KeyCode::Char('1'), KeyModifiers::CONTROL));
+            assert_eq!(c.foreground(), &Tab::Channel("open".into()));
+            c
+        },
+        "#open shown",
+    );
+    assert_mirror(&chat, "the operator view shown");
+}
+
+/// Tab in the box completes only where it changes the box; a word nothing
+/// completes, or completes no further, leaves it (the review of #972).
+#[test]
+fn tab_leaves_the_box_when_it_would_complete_nothing() {
+    for draft in ["hi @zzz", "/zzz", "hi there"] {
+        let mut c = chat();
+        typed(&mut c, draft);
+        press(&mut c, KeyCode::Tab);
+        assert_eq!((focused(&mut c), c.input().text()), ("tab ≡".to_string(), draft), "{draft:?}");
+    }
+    // #inf completes once, to the one channel it matches; the next Tab
+    // has nothing more to do and leaves.
+    let mut c = chat();
+    typed(&mut c, "#inf");
+    press(&mut c, KeyCode::Tab);
+    assert_eq!((focused(&mut c), c.input().text()), ("mode chat".to_string(), "#infra "));
+    press(&mut c, KeyCode::Tab);
+    assert_eq!((focused(&mut c), c.input().text()), ("tab ≡".to_string(), "#infra "), "a cycle of one: Tab leaves");
+    press(&mut c, KeyCode::BackTab);
+    assert_eq!(focused(&mut c), "mode chat", "and Shift+Tab comes back");
 }
 
 #[test]
@@ -926,4 +980,47 @@ fn the_feeds_message_menu_replies_quotes_addresses_and_copies() {
     open(&mut c, 1);
     pick(&mut c, "Reply");
     assert_eq!((focused(&mut c), c.foreground().clone()), ("mode chat".to_string(), Tab::Channel("open".into())));
+}
+
+/// Hide column, picked from the `≡` menu Esc opened, ends on the feed: the
+/// row the focus was on is no longer drawn (the review of #972).
+#[test]
+fn hide_column_from_the_esc_menu_ends_on_the_feed() {
+    let mut c = chat();
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::BackTab);
+    assert_eq!(focused(&mut c), "row #infra");
+    press(&mut c, KeyCode::Esc);
+    assert_eq!(menu(&mut c).as_deref(), Some("attend-chat"));
+    for _ in 0..3 {
+        press(&mut c, KeyCode::Down);
+    }
+    assert!(screen(&mut c).contains("Hide column"), "{}", screen(&mut c));
+    press(&mut c, KeyCode::Enter);
+    assert!(!c.sidebar_shown(), "the column is hidden");
+    assert_eq!(focused(&mut c), "mode feed", "the feed, as ADR-407 says");
+}
+
+/// The message menu names its message by its id: when the feed drops the
+/// oldest messages while the menu is open, a pick on a message gone acts on
+/// nothing, never on the message now at its place (the review of #972).
+#[test]
+fn the_message_menu_acts_on_its_message_or_on_nothing() {
+    let mut c = chat();
+    // 5,000 messages in all, the most the feed keeps: message 0 is the
+    // oldest, message 1 the next.
+    for i in 0..4998 {
+        c.push(Signal { id: format!("f-{i}"), from: format!("claude:{ALPHA_SID}"), project: "alpha".into(), cwd: "/work/alpha".into(), reply_to: None, message: format!("filler {i}"), ts: 1_790_949_100 + i, channel: Channel::Open });
+    }
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::Home);
+    press(&mut c, KeyCode::Enter);
+    assert!(menu(&mut c).is_some_and(|m| m.starts_with("message from @")), "{}", screen(&mut c));
+    // One more message: the feed drops message 0, the one the menu is for.
+    c.push(Signal { id: "f-last".into(), from: format!("claude:{BETA_SID}"), project: "beta".into(), cwd: "/work/beta".into(), reply_to: None, message: "the last".into(), ts: 1_790_960_000, channel: Channel::Open });
+    let buf = testkit::render_screen(&mut c, W, H);
+    let (x, y) = testkit::find(&buf, "Copy").expect("the menu's item");
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    assert_eq!(c.app().copied(), None, "message 1 is not copied in its place");
+    assert_eq!(c.status(), "that message is not in the feed any more");
 }
