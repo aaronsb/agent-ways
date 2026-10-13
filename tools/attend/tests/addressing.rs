@@ -417,3 +417,43 @@ fn the_monitor_poller_leaves_a_siblings_direct_message_unread() {
     run.wait_for("alpha's message", std::time::Duration::from_secs(30), |r| r.output().contains("FOR-ALPHA"));
     assert!(!run.output().contains("FOR-BETA"), "{}", run.output());
 }
+
+// ── channel posts addressed to someone (PR #974 review, O2) ──────────────
+
+/// A channel post whose `to` names alpha is read by every member, beta
+/// included: `to` marks attention in a shared room and restricts no one.
+/// It wakes the session it names and no other.
+#[test]
+fn a_channel_post_addressed_to_one_member_is_read_by_all_and_wakes_only_it() {
+    let f = Fixture::new("addr-channel-to");
+    f.ok(&["join", "room"]);
+    f.drain("plain");
+    signal(&f, "@room", "x-1-1", "claude:x|p|/tmp/p|to:alpha-sess|alpha, over to you");
+    let listed = f.ok(&["inbox", "--json"]);
+    assert!(listed.contains("alpha, over to you"), "beta reads it: {listed}");
+    let wake = |f: &Fixture| -> serde_json::Value { serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap() };
+    assert_eq!(wake(&f)["messages"], serde_json::json!([]), "a post addressed to alpha does not wake beta");
+    signal(&f, "@room", "x-1-2", &format!("claude:x|p|/tmp/p|to:{}|beta, your turn", f.sid));
+    let d = wake(&f);
+    let bodies: Vec<&str> = d["messages"].as_array().unwrap().iter().map(|m| m["message"].as_str().unwrap()).collect();
+    assert_eq!(bodies, ["alpha, over to you", "beta, your turn"], "addressed to beta, it wakes beta: {d}");
+}
+
+/// A send that names a channel and someone stays in the channel, addressed
+/// to them; `#open` likewise.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_send_with_channel_and_to_posts_in_the_channel_addressed() {
+    let f = Fixture::new("addr-channel-and-to");
+    let _env = enter(&f);
+    let peer = Peer::start(&f, "peer-sess", "peerproj");
+    attend::verbs::channels::join("room", false).expect("join");
+    attend_groups::Groups::new(&f.signals(), "peer-sess").join("room", false).unwrap();
+    attend_presence::heartbeat::touch("peer-sess").unwrap();
+    let sent = send(Some("peer-sess"), Some("#room"), "you, in the room").expect("sent");
+    assert_eq!((sent.scope, sent.to.as_str()), ("channel", "peer-sess"));
+    assert_eq!(read(&f.signals().join("@room"), &sent.id).0.as_deref(), Some("peer-sess"));
+    let sent = send(Some("peer-sess"), Some("open"), "you, in the open").expect("sent");
+    assert_eq!((sent.scope, sent.to.as_str()), ("#open", "peer-sess"));
+    assert!(files(&peer.tray(&f)).is_empty(), "nothing went to the tray");
+}

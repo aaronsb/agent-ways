@@ -227,7 +227,7 @@ Send a message: a direct message with --to, a channel post with --channel, else 
 ###### **Options:**
 
 * `--to <WHO>` — Send a direct message: to a session's name or id, a person's member id, or a project path for every live session there
-* `--channel <NAME>` — Post to a named channel; `open` or `#open` posts to #open
+* `--channel <NAME>` — Post to a named channel; `open` or `#open` posts to #open. With --to as well, the post stays in the channel, addressed to them
 * `--json` — Print the written signal as one JSON document
 
 

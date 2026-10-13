@@ -123,7 +123,8 @@ pub(crate) enum Commands {
         #[arg(long, value_name = "WHO")]
         to: Option<String>,
 
-        /// Post to a named channel; `open` or `#open` posts to #open
+        /// Post to a named channel; `open` or `#open` posts to #open. With
+        /// --to as well, the post stays in the channel, addressed to them
         #[arg(long, value_name = "NAME")]
         channel: Option<String>,
 

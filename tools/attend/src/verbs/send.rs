@@ -13,7 +13,8 @@ pub struct SendRequest {
     /// project path. It is a direct message (ADR-401, `to`).
     pub to: Option<String>,
     /// A channel name, with or without `#`: only its members receive it.
-    /// `open` is `#open`.
+    /// `open` is `#open`. With `to` as well, the post stays in the channel,
+    /// addressed to whom `to` names.
     pub channel: Option<String>,
     /// A signal id to thread under. `reply` fills it from the newest peer
     /// message when it is empty.
@@ -172,8 +173,9 @@ pub fn send(req: &SendRequest) -> Result<Sent, SendError> {
 /// Where a message goes, resolved, with the `to` it carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Dest {
-    /// `#open`, `to = *`.
-    Open,
+    /// `#open`. `to` is `*`, or the ids of those a post there is
+    /// addressed to.
+    Open { to: Option<String> },
     /// A channel. `to` is `#<name>`, or for a reply the parent's sender.
     Channel { name: String, to: Option<String> },
     /// A direct message to live sessions at one project: its tray, `to`
@@ -207,16 +209,32 @@ fn check(req: &SendRequest) -> Result<(), SendError> {
 /// (ADR-406 item 10).
 fn resolve(me: &Session, req: &SendRequest) -> Result<Dest, SendError> {
     if let Some(channel) = &req.channel {
+        // A post in a channel that also names someone stays in the channel,
+        // addressed to them, so it wakes them; every member still reads it
+        // (ADR-401, `to`).
+        let to = req.to.as_deref().map(|to| resolve_recipient(me, to).map(|d| d.addressee())).transpose()?;
         let name = channel.trim().trim_start_matches(['#', '@']);
         if name == attend_groups::BASE_CHANNEL {
-            return Ok(Dest::Open);
+            return Ok(Dest::Open { to });
         }
         check_channel(me, name)?;
-        return Ok(Dest::Channel { name: name.to_string(), to: None });
+        return Ok(Dest::Channel { name: name.to_string(), to });
     }
     match &req.to {
         Some(to) => resolve_recipient(me, to),
-        None => Ok(Dest::Open),
+        None => Ok(Dest::Open { to: None }),
+    }
+}
+
+impl Dest {
+    /// Who a direct destination is for, as `to` holds it: the session ids,
+    /// or the person's member id.
+    fn addressee(self) -> String {
+        match self {
+            Dest::Sessions { ids, .. } => ids.join(","),
+            Dest::Person(member) => member,
+            Dest::Open { to } | Dest::Channel { to, .. } => to.unwrap_or_default(),
+        }
     }
 }
 
@@ -298,6 +316,11 @@ fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
         return resolve_project(me, to);
     }
     let sessions = live_sessions();
+    // A session id is canonical: it names that session, whatever else
+    // answers to the same text.
+    if let Some(s) = sessions.iter().find(|s| s.id == to) {
+        return Ok(Dest::Sessions { cwd: s.cwd.clone(), ids: vec![s.id.clone()] });
+    }
     let matched: Vec<&LiveSession> = sessions
         .iter()
         .filter(|s| s.id == to || s.name.eq_ignore_ascii_case(to) || s.nickname.eq_ignore_ascii_case(to))
@@ -344,7 +367,7 @@ fn resolve_project(me: &Session, path: &str) -> Result<Dest, SendError> {
 fn write(me: &Session, dest: &Dest, req: &SendRequest) -> Result<Sent, SendError> {
     let base = signals_base();
     let (dir, scope, to) = match dest {
-        Dest::Open => (base.join(attend_groups::BROADCAST_DIR), "#open", "*".to_string()),
+        Dest::Open { to } => (base.join(attend_groups::BROADCAST_DIR), "#open", to.clone().unwrap_or_else(|| "*".to_string())),
         Dest::Channel { name, to } => (groups_for(me).group_dir(name), "channel", to.clone().unwrap_or_else(|| format!("#{name}"))),
         Dest::Sessions { cwd, ids } => (base.join(encode_project(cwd)), "directed", ids.join(",")),
         Dest::Person(member) => (attend_groups::person_dir(&base, member), "directed", member.clone()),
