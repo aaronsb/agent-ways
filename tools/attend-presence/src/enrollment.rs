@@ -334,8 +334,14 @@ pub fn listening_since(session_id: &str) -> Option<std::time::SystemTime> {
 /// dormant. The mod records itself again when it turns listening on.
 pub fn host(session_id: &str) -> Option<Host> {
     let h = read(session_id).filter(|r| !r.sources.is_empty()).and_then(|r| r.host)?;
-    let own = own_claude_key()?;
-    h.claude.as_deref().is_some_and(|k| same_process(k, &own)).then_some(h.host)
+    // Outside any Claude Code process (a shell, a CI runner) neither side
+    // has a key, and a host recorded there holds there.
+    let here = match (h.claude.as_deref(), own_claude_key()) {
+        (Some(recorded), Some(own)) => same_process(recorded, &own),
+        (None, None) => true,
+        _ => false,
+    };
+    here.then_some(h.host)
 }
 
 /// Withdraw one way `session_id` enrolled. The session stays enrolled while
