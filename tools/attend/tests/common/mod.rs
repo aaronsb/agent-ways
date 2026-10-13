@@ -272,3 +272,45 @@ impl Drop for Run {
 
 pub const MINUTE: Duration = Duration::from_secs(60);
 pub const DAY: Duration = Duration::from_secs(24 * 3600);
+
+/// A live Claude Code session `sid` at `<home>/<project>`: a process whose
+/// argv names claude, with a session record. Killed on drop. Only the peers
+/// sensor's process scan finds it.
+pub struct Peer {
+    child: Child,
+    pub cwd: String,
+}
+
+impl Peer {
+    /// Start it, and return once the process scan sees it: a freshly
+    /// spawned child's command line reads empty for a moment, and a scan in
+    /// that moment takes the session for exited.
+    pub fn start(f: &Fixture, sid: &str, project: &str) -> Peer {
+        let cwd = f.home.join(project);
+        std::fs::create_dir_all(&cwd).unwrap();
+        let cwd = cwd.to_string_lossy().into_owned();
+        let child = Command::new("sh").args(["-c", "sleep 60; :", "claude"]).stdout(Stdio::null()).spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !attend_presence::process::is_claude(child.id()) {
+            assert!(Instant::now() < deadline, "the peer process {} never showed its command line", child.id());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::fs::write(
+            f.home.join(".claude").join("sessions").join(format!("{}.json", child.id())),
+            format!(r#"{{"pid":{},"sessionId":"{sid}","cwd":"{cwd}"}}"#, child.id()),
+        )
+        .unwrap();
+        Peer { child, cwd }
+    }
+
+    pub fn tray(&self, f: &Fixture) -> PathBuf {
+        f.signals().join(claude_sessions::attend_key(&self.cwd))
+    }
+}
+
+impl Drop for Peer {
+    fn drop(&mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+    }
+}

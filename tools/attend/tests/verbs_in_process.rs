@@ -280,21 +280,12 @@ mod reply {
     fn a_reply_to_a_directed_parent_goes_to_the_live_sender() {
         let f = Fixture::new("route-directed");
         let _env = enter(&f);
-        let peer_cwd = f.home.join("peerproj");
-        std::fs::create_dir_all(&peer_cwd).unwrap();
-        let peer_cwd = peer_cwd.to_string_lossy().into_owned();
-        // A live process whose argv names claude, recorded as the peer session.
-        let mut peer = std::process::Command::new("sh").args(["-c", "sleep 30; :", "claude"]).spawn().unwrap();
-        std::fs::write(
-            f.home.join(".claude").join("sessions").join(format!("{}.json", peer.id())),
-            format!(r#"{{"pid":{},"sessionId":"peer-sess","cwd":"{peer_cwd}"}}"#, peer.id()),
-        )
-        .unwrap();
+        let peer = common::Peer::start(&f, "peer-sess", "peerproj");
+        let peer_cwd = peer.cwd.clone();
         signal(&f, &f.project_tray(), "peer-sess-1-1", &format!("claude:peer-sess|peerproj|{peer_cwd}|to your project"));
         record(&f.sid, "peer-sess-1-1", &Said::Project(Some(peer_cwd.clone())), "claude:peer-sess");
         let result = reply("answered in your project");
-        peer.kill().ok();
-        peer.wait().ok();
+        drop(peer);
         let sent = result.expect("a directed reply").sent;
         assert_eq!((sent.scope, sent.to.as_str()), ("directed", "peer-sess"));
         let tray = f.signals().join(claude_sessions::attend_key(&peer_cwd));
