@@ -167,6 +167,10 @@ considered:
   - operator: aaronsb
     said: "Yes, it inherits them — It's the same process and the same conversation slot, so nothing addressed to it is lost."
     via: "multiple-choice prompt in the head session, relayed by the coordinator, on the PR #974 review question O3"
+  - operator: aaronsb
+    said: "yes"
+    via: "the operator's answer in the head session, 2026-10-13, to: should a reply to a post in a named channel stay in that channel?"
+    covers: [channel-replies]
 status: accepted
 date: 2026-10-10
 deciders:
