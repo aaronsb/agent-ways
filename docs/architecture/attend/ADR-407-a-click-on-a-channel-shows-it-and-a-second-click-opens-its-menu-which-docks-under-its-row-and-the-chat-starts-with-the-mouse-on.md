@@ -43,6 +43,10 @@ basis:
     level: directed
     said: 1. digits only work on channel rows. 2. a. 3. agree with new behavior 4. keep 5. keep 6. keep the mark and add count on tab. 7. thats correct as built 8. agree- its a single char column and makes sense. 9. correct. 10. correct.
     via: 'the operator''s answers to the design questions in PR #972, given to the head session, 2026-10-13'
+  - operator: aaronsb
+    level: directed
+    said: "left click on agent - open its dms. a second click (when the dms are open) opens its menu"
+    via: "the operator's answer in the head session, 2026-10-13, to the #993 review's question on the agent-row left click"
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -182,7 +186,7 @@ This records C of the order the operator chose ("Merge #953, then A→B→C (Rec
 
 ADR-405's amendment of the same date adds a DM view per agent, listed on a row under the agent's. It changes (b) above and adds nav elements to the redesign's ring.
 
-- **(b) is replaced for claudes.** A click on a claude's row follows the rule in (a): the first click shows the agent's DM view, and a click on the agent whose view is shown opens its menu. A click on the DM row, or on the view's tab, shows the view, and on the view shown opens the view's menu. A human's row has no view and keeps (b): a click opens its menu at once. A right click opens the menu at once on every row, and Enter on a row opens its menu, as the amendment of 2026-10-12 says.
+- **(b) is replaced for claudes.** A click on a claude's row follows the rule in (a): the first click shows the agent's DM view, and a click on the agent whose view is shown opens its menu. The operator confirmed it: "left click on agent - open its dms. a second click (when the dms are open) opens its menu". A click on the DM row, or on the view's tab, shows the view, and on the view shown opens the view's menu. A human's row has no view and keeps (b): a click opens its menu at once. A right click opens the menu at once on every row, and Enter on a row opens its menu, as the amendment of 2026-10-12 says.
 - **The ring.** The DM row is a stop of the ring, directly after its agent's row; the view's tab is a stop on the bar, in the place the created channel shown takes. Tab and Shift+Tab stay exact mirrors with a view open. ↓ from the view's tab lands on its row. A digit on the DM row is typed in the compose box, since the row carries no number, and the column's numbers count channels only, past every agent and DM row.
 - **The Esc cycle.** The DM row and the view's tab are remembered like any row or tab: Esc from the DM row opens the `≡` menu, and the next Esc comes back to the row. When the view is hidden with the keyboard on its row, the keyboard goes to its agent's row.
 - **Evidence.** The interaction table gains cells for the DM row (the arrows, ↓ from its tab, the numbers passing over it, Enter, a click, a digit) and for a hidden DM row handing the keyboard to its agent; the mirror test runs with a view shown, and the random views include DM rows and tabs. `tools/attend-chat/tests/dm_view.rs` drives the same through the shell's real keys and mouse. The pinned trace digest moves for three reasons only: a left click on an agent's row now shows a view where it opened a menu, the agent's menu has Show DMs as its first item, one row taller, and the key help's click line reads `shows a channel or agent's DMs, again its menu; flag: menu`. The settled anchors `sidebar-80x25` and `sidebar-120x40` are unchanged.
