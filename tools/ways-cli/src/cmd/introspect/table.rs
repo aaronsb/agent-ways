@@ -153,10 +153,10 @@ fn pin(cluster: usize) -> Span<'static> {
     }
 }
 
-/// Where each way's next re-disclosure falls on a bar `bar` cells wide,
-/// and the distinct positions, which number the clusters.
-pub(super) fn clusters(ways: &[ActiveWay], window_k: u64, bar: usize) -> (Vec<Option<usize>>, Vec<usize>) {
-    let pos = render::compute_bar_positions_in(ways, window_k, bar);
+/// Where each way's next re-disclosure ([`due_k`]) falls on a bar `bar`
+/// cells wide, and the distinct positions, which number the clusters.
+pub(super) fn clusters(frame: &Frame, window_k: u64, bar: usize) -> (Vec<Option<usize>>, Vec<usize>) {
+    let pos: Vec<Option<usize>> = frame.ways.iter().map(|w| render::bar_position(due_k(frame, w), window_k, bar)).collect();
     let unique = render::unique_positions(&pos);
     (pos, unique)
 }
@@ -166,15 +166,17 @@ pub(super) fn clusters(ways: &[ActiveWay], window_k: u64, bar: usize) -> (Vec<Op
 /// against. The name takes its fate's mark and colour ([`look`]); a way
 /// fired or re-disclosed in this frame is bold.
 pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, bar: usize) -> Vec<Row<'static>> {
-    let (pos, unique) = clusters(&frame.ways, window_k, bar);
+    let (pos, unique) = clusters(frame, window_k, bar);
     let way_w = way_width(bar, agent_w);
     frame
         .ways
         .iter()
         .enumerate()
         .map(|(i, w)| {
-            let distance = frame.epoch.saturating_sub(w.epoch_fired);
-            let (next, next_style) = render::next_cell(w, frame.epoch, frame.token_position_k);
+            // Distance and re-disclosure count in the agent's own context.
+            let epoch = frame.epoch_of(&w.agent);
+            let distance = epoch.saturating_sub(w.epoch_fired);
+            let (next, next_style) = render::next_cell(w, epoch, frame.tokens_k_of(&w.agent));
             let pin = pos.get(i).copied().flatten().map_or(Span::raw(" "), |p| pin(render::cluster_of(p, &unique)));
             let mut way = vec![Line::from(way_name(w, way_w))];
             let mut agent = vec![agent_cell(agents, &w.agent, agent_w)];
@@ -188,7 +190,7 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
                 Cell::from(way),
                 Cell::from(agent),
                 Cell::from(Line::from(w.epoch_fired.to_string()).alignment(Alignment::Right)),
-                Cell::from(Line::styled(distance.to_string(), ink(render::distance_style(distance, frame.epoch))).alignment(Alignment::Right)),
+                Cell::from(Line::styled(distance.to_string(), ink(render::distance_style(distance, epoch))).alignment(Alignment::Right)),
                 Cell::from(render::format_trigger(&w.trigger)),
                 Cell::from(pin),
                 Cell::from(Span::styled(next, ink(next_style))),
@@ -197,6 +199,13 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
             .style(style)
         })
         .collect()
+}
+
+/// Where `w` next re-discloses on main's token axis: main's position plus
+/// how far the row is from re-disclosure in its own agent's context. For
+/// main's rows it is the fire position plus the threshold.
+pub(super) fn due_k(frame: &Frame, w: &ActiveWay) -> u64 {
+    (w.token_pos / 1000 + w.refire_threshold_k + frame.token_position_k).saturating_sub(frame.tokens_k_of(&w.agent))
 }
 
 /// A check's decay after `fires` fires.
@@ -218,12 +227,12 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
         let style = ink(render::traffic(pct < 50, pct < 75));
         out.push((0, Line::from(vec![Span::styled(format!("{}{}", "█".repeat(filled), "░".repeat(bar - filled)), style), Span::raw(label)])));
 
-        let (_, unique) = clusters(&frame.ways, window_k, bar);
+        let (_, unique) = clusters(frame, window_k, bar);
         let (mut now, mut soon, mut later) = (0, 0, 0);
         let mut future: Vec<(u64, usize)> = Vec::new();
         for w in &frame.ways {
             let threshold = w.refire_threshold_k;
-            let at = w.token_pos / 1000 + threshold;
+            let at = due_k(frame, w);
             if tokens_k >= at {
                 now += 1;
                 continue;

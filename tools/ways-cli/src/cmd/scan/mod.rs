@@ -1263,6 +1263,7 @@ fn log_near_miss(
     session::log_event(&[
         ("event", "way_nearmiss"),
         ("way", &way.id),
+        ("agent_id", &session::current_agent()),
         ("corpus_id", &way.corpus_id),
         ("domain", domain),
         ("prob_en", &fmt(nm.prob_en)),

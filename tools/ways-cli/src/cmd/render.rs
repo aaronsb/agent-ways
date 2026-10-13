@@ -169,11 +169,20 @@ pub fn compute_bar_positions_in<W: WayRow>(
                 return None;
             }
             let fire_pos_k = w.token_pos() / 1000;
-            let redisclose_at_k = fire_pos_k + w.refire_threshold_k();
-            let bar_pos = ((redisclose_at_k * bw as u64) / context_window_k) as usize;
-            Some(bar_pos.min(bw - 1))
+            bar_position(fire_pos_k + w.refire_threshold_k(), context_window_k, bw)
         })
         .collect()
+}
+
+/// The cell of a bar `bw` cells wide over `context_window_k` that a
+/// re-disclosure at `redisclose_at_k` falls in; `None` with no window.
+pub fn bar_position(redisclose_at_k: u64, context_window_k: u64, bw: usize) -> Option<usize> {
+    let bw = bw.max(1);
+    if context_window_k == 0 {
+        return None;
+    }
+    let bar_pos = ((redisclose_at_k * bw as u64) / context_window_k) as usize;
+    Some(bar_pos.min(bw - 1))
 }
 
 /// Deduplicated sorted positions for cluster assignment.

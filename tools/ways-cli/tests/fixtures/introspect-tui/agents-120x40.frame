@@ -1,15 +1,15 @@
 agent-tui frame 120x40
 | 1 timeline    2 fires    3 spend    4 stats    5 precision                                                             |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
-|epoch 2 · 200K ctx · 4 ways · window 1/1 · 2026-07-03 16:53                                                             |
+|main's epoch 2 · 200K ctx · 4 ways · window 1/1 · 2026-07-03 16:53                                                      |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 2/2|
-|┌ ways at epoch 2 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
+|┌ ways at main's epoch 2 ──────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│ Way                                                     Agent           Epoch   Dist  Trigger        ◎  Re-disclose  │|
 |│▌softwaredev/code/testing                                main                1      1  embed:en       ●  ● now        │|
 |│ softwaredev/docs/adr                                    main                2      0  file           ◆  ─            │|
-|│ softwaredev/docs/adr                                    code-reviewer       2      0  file           ◆  ─            │|
+|│ softwaredev/docs/adr                                    code-reviewer       1      0  file           ◆  ─            │|
 |│   ✓ ×1 decay 0.50                                       code-reviewer                                                │|
-|│ softwaredev/docs/adr                                    wf·audit:judge      2      0  keyword        ◆  ─            │|
+|│ softwaredev/docs/adr                                    wf·audit:judge      1      0  keyword        ◆  ─            │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
 |│                                                                                                                      │|
@@ -47,13 +47,13 @@ styles
   0  47-59  White Blue -
   1   0-7   - - BOLD
   1  44-59  - - DIM
-  2   0-58  - - DIM
+  2   0-65  - - DIM
   3   0-114 Cyan - -
   3 115-115 Cyan - BOLD
   3 116-119 - - BOLD
   4   0-0   - - DIM
-  4   1-17  LightBlue - BOLD|DIM
-  4  18-119 - - DIM
+  4   1-24  LightBlue - BOLD|DIM
+  4  25-119 - - DIM
   5   0-0   - - DIM
   5   1-118 - - BOLD
   5 119-119 - - DIM

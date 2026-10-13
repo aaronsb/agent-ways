@@ -87,6 +87,17 @@ struct DumpFrame {
     /// The suppressions in this frame (#786); left out when there are none.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     suppressed: Vec<Suppression>,
+    /// Each subagent's own epoch and token position at this frame (#815),
+    /// by agent id; `epoch` and `token_position_k` above are main's. Left
+    /// out when no subagent has fired yet.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    clocks: BTreeMap<String, DumpClock>,
+}
+
+#[derive(Serialize)]
+struct DumpClock {
+    epoch: u64,
+    token_position_k: u64,
 }
 
 #[derive(Serialize)]
@@ -94,6 +105,8 @@ struct DumpWay {
     id: String,
     trigger: String,
     epoch_fired: u64,
+    /// Epochs since it fired, in its own agent's count.
+    distance: u64,
     token_pos_k: u64,
     check_fires: u64,
     is_new: bool,
@@ -121,7 +134,12 @@ struct DumpWay {
 
 #[derive(Serialize)]
 struct NearMiss {
+    /// The epoch of the frame it fell in, in its agent's count.
     epoch: u64,
+    /// The subagent that scored it; left out for the main agent and for
+    /// a record written before near-misses named their agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_id: Option<String>,
     timestamp: String,
     way: String,
     prob_en: f64,
@@ -236,6 +254,7 @@ fn to_dump_frame(f: &Frame, agents: &Agents) -> DumpFrame {
             id: w.id.clone(),
             trigger: w.trigger.clone(),
             epoch_fired: w.epoch_fired,
+            distance: f.epoch_of(&w.agent).saturating_sub(w.epoch_fired),
             token_pos_k: w.token_pos / 1000,
             check_fires: w.check_fires,
             is_new: w.is_new,
@@ -256,6 +275,7 @@ fn to_dump_frame(f: &Frame, agents: &Agents) -> DumpFrame {
         active_ways,
         new_events: f.new_events.clone(),
         suppressed: f.suppressed.clone(),
+        clocks: f.clocks.iter().map(|(a, c)| (a.clone(), DumpClock { epoch: c.epoch, token_position_k: c.tokens_k })).collect(),
     }
 }
 
@@ -361,8 +381,10 @@ fn build_near_misses(content: &str, session_id: &str, frames: &[Frame]) -> Vec<N
         .filter(|v| v["event"].as_str() == Some("way_nearmiss"))
         .map(|v| {
             let ts = v["ts"].as_str().unwrap_or("").to_string();
+            let agent = v["agent_id"].as_str().filter(|a| !a.is_empty()).unwrap_or(frames::MAIN);
             NearMiss {
-                epoch: epoch_for_ts(frames, &ts),
+                epoch: epoch_for_ts(frames, &ts, agent),
+                agent_id: Some(agent.to_string()).filter(|a| a != frames::MAIN),
                 timestamp: ts,
                 way: v["way"].as_str().unwrap_or("").to_string(),
                 prob_en: field_f64(&v, "prob_en"),
@@ -449,13 +471,13 @@ pub(crate) fn most_recent_session(content: &str, scope: Option<&str>) -> Option<
     best.or(under).map(|(_, s)| s)
 }
 
-/// Map a near-miss timestamp to the epoch of the frame it falls within —
-/// the last frame whose timestamp is at or before it.
-fn epoch_for_ts(frames: &[Frame], ts: &str) -> u64 {
-    let mut epoch = frames.first().map(|f| f.epoch).unwrap_or(0);
+/// Map a near-miss timestamp to `agent`'s epoch at the frame it falls
+/// within — the last frame whose timestamp is at or before it.
+fn epoch_for_ts(frames: &[Frame], ts: &str, agent: &str) -> u64 {
+    let mut epoch = frames.first().map(|f| f.epoch_of(agent)).unwrap_or(0);
     for f in frames {
         if f.timestamp.as_str() <= ts {
-            epoch = f.epoch;
+            epoch = f.epoch_of(agent);
         } else {
             break;
         }
@@ -506,5 +528,28 @@ mod tests {
             rows(true),
             [row("d/a", "would_block", "0.100", ""), row("d/b", "blocked", "0.050", ""), row("d/b/c", "blocked", "0.050", "d/b")]
         );
+    }
+
+    /// Each row carries its distance in its own agent's epochs, and the
+    /// frame each subagent's epoch and token position.
+    #[test]
+    fn replay_json_gives_each_row_its_agents_distance() {
+        let log = concat!(
+            r#"{"event":"way_fired","session":"dump-agents","ts":"2026-01-01T00:00:00Z","way":"d/m","trigger":"keyword"}"#, "\n",
+            r#"{"event":"way_fired","session":"dump-agents","ts":"2026-01-01T00:00:10Z","way":"d/s","trigger":"keyword","agent_id":"a1"}"#, "\n",
+            r#"{"event":"way_fired","session":"dump-agents","ts":"2026-01-01T00:00:20Z","way":"d/t","trigger":"keyword","agent_id":"a1"}"#, "\n",
+        );
+        let dump = serde_json::to_value(build_dump(log, "dump-agents", false).unwrap()).unwrap();
+        let last = &dump["frames"][2];
+        assert_eq!(last["epoch"], 1, "main's epoch");
+        assert_eq!(last["clocks"]["a1"]["epoch"], 2);
+        assert_eq!(last["clocks"]["a1"]["token_position_k"], 0);
+        let rows: Vec<(String, u64)> = last["active_ways"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| (w["id"].as_str().unwrap().to_string(), w["distance"].as_u64().unwrap()))
+            .collect();
+        assert_eq!(rows, [("d/m".to_string(), 0), ("d/s".to_string(), 1), ("d/t".to_string(), 0)]);
     }
 }
