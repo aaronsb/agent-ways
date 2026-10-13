@@ -148,7 +148,7 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
     // The session behind a claude the chat knows: the id a direct message
     // to it is addressed to (ADR-401, `to`).
     let session_of = |k: &KnownIdentity| {
-        seen.iter().find(|s| s.identity.is_claude && s.identity.nickname == k.nickname && s.identity.cwd == k.cwd).map(|s| s.member.clone())
+        seen.iter().find(|s| s.live && s.identity.is_claude && s.identity.nickname == k.nickname && s.identity.cwd == k.cwd).map(|s| s.member.clone())
     };
     // A message can address several recipients at once
     // (`@Tamsin @Cleo …`). Parse the whole leading run; an empty run
@@ -856,9 +856,14 @@ fn resolve_recipients(
             Addressed::Agent(name) => {
                 // An exact quiet name is refused before a fuzzy match could
                 // carry it to a live agent with a name like it.
-                let exact_live = agents.iter().any(|k| k.is_claude && k.nickname.eq_ignore_ascii_case(name));
-                if let Some(q) = quiet.iter().find(|q| !exact_live && q.eq_ignore_ascii_case(name)) {
+                let exact_live = agents.iter().filter(|k| k.is_claude && k.nickname.eq_ignore_ascii_case(name)).count();
+                if let Some(q) = quiet.iter().find(|q| exact_live == 0 && q.eq_ignore_ascii_case(name)) {
                     return Err(format!("@{q} is quiet (no heartbeat) and would not read this"));
+                }
+                // Two live sessions answering to one name: refused, as
+                // `attend send --to` refuses an ambiguous name (ADR-401).
+                if exact_live > 1 {
+                    return Err(format!("@{name} names {exact_live} live sessions; nothing sent"));
                 }
                 let k = resolve_identity(name, agents).ok_or_else(|| format!("@{name}: unknown nickname"))?;
                 let sid = session_of(k).unwrap_or_default();
@@ -1552,6 +1557,12 @@ mod tests {
         assert_eq!(to(Addressed::Agent("Lark")), Err("@Lark is quiet (no heartbeat) and would not read this".into()), "not carried to Larks by the fuzzy match");
         assert!(to(Addressed::Agent("Larks")).is_ok(), "a live agent is sent to");
         assert_eq!(to(Addressed::Agent("Nobody")), Err("@Nobody: unknown nickname".into()));
+        let twins = [ident("Larks", "/w/larks"), ident("Larks", "/w/larks")];
+        assert_eq!(
+            resolve_recipients(&[Addressed::Agent("Larks")], &twins, &[], &|_| None),
+            Err("@Larks names 2 live sessions; nothing sent".into()),
+            "two live sessions of one name are refused"
+        );
         let seen = |name: &str, live: bool| Seen { identity: ident(name, &format!("/w/{name}")), live, member: name.into() };
         assert_eq!(quiet_names(&[seen("Lark", false), seen("Wells", true), seen("Wells", false)]), ["Lark"], "a name a live agent answers to is not quiet");
     }
