@@ -29,12 +29,8 @@ impl App {
                 }
                 return true;
             }
-            // Beside text, ^C again while the quit is armed confirms it.
-            if matches!(self.mode, Mode::Guard { confirm: true }) && self.owns_text() {
-                self.discard_all();
-                return false;
-            }
-            if matches!(self.mode, Mode::Guard { .. }) {
+            // ^C at the quit modal leaves it open: only D discards.
+            if matches!(self.mode, Mode::Guard) {
                 return true;
             }
             if matches!(self.mode, Mode::Flow(_)) {
@@ -172,38 +168,45 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {}
                 _ => self.mode = Mode::DiscardTab { tab },
             },
-            Mode::Guard { confirm } if self.owns_text() => return self.guard_beside_text(k, confirm),
-            Mode::Guard { confirm: false } => match k.code {
-                KeyCode::Char('r') => {
-                    self.clear_filter();
-                    match (0..self.roots.len()).find(|t| self.pending_in(*t) > 0) {
-                        Some(first) => {
-                            self.switch_tab(first);
-                            self.open_review(first);
-                        }
-                        // Only theme edits are unsaved: their review is the editor.
-                        None if self.theme_dirty() => self.switch_tab(self.theme_tab()),
-                        // A pane's work has no review: back to it.
-                        None => {}
-                    }
-                }
-                KeyCode::Char('D') => self.mode = Mode::Guard { confirm: true },
-                KeyCode::Esc | KeyCode::Char('b') | KeyCode::Enter => {}
-                _ => self.mode = Mode::Guard { confirm: false },
-            },
-            Mode::Guard { confirm: true } => match k.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    self.discard_all();
-                    return false;
-                }
-                // Any key but y disarms it: D has to be followed by y.
-                _ => self.mode = Mode::Guard { confirm: false },
-            },
+            Mode::Guard => return self.guard_key(k),
             Mode::Ask(a) => return self.ask_key(a, k),
             Mode::Entry(e) => return self.entry_key(*e, k),
             Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
             Mode::Browse => return self.browse(k),
+        }
+        true
+    }
+
+    /// The quit modal's keys, beside text as elsewhere: it owns them while
+    /// it is shown. D quits and discards at once, r opens the review where
+    /// there is one, and Esc, b and Enter (on the focused Back) go back.
+    /// Any other key leaves it open and reaches nothing under it.
+    fn guard_key(&mut self, k: KeyEvent) -> bool {
+        if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
+            self.mode = Mode::Guard;
+            return true;
+        }
+        match k.code {
+            KeyCode::Char('D') => {
+                self.discard_all();
+                return false;
+            }
+            KeyCode::Char('r') => {
+                self.clear_filter();
+                match (0..self.roots.len()).find(|t| self.pending_in(*t) > 0) {
+                    Some(first) => {
+                        self.switch_tab(first);
+                        self.open_review(first);
+                    }
+                    // Only theme edits are unsaved: their review is the editor.
+                    None if self.theme_dirty() => self.switch_tab(self.theme_tab()),
+                    // A pane's work has no review: the modal stays.
+                    None => self.mode = Mode::Guard,
+                }
+            }
+            KeyCode::Esc | KeyCode::Char('b') | KeyCode::Enter => {}
+            _ => self.mode = Mode::Guard,
         }
         true
     }
@@ -491,14 +494,9 @@ impl App {
                 }
             }
             Mode::Review { run: Some(_), .. } => {}
-            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ItemDelete { .. } | Mode::Guard { confirm: true } | Mode::Review { discard: true, .. } if click => {
+            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ItemDelete { .. } | Mode::Review { discard: true, .. } if click => {
                 if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
-                    let answer = match (self.owns_text() && matches!(self.mode, Mode::Guard { .. }), yes) {
-                        (true, true) => KeyCode::Enter,
-                        (true, false) => KeyCode::Esc,
-                        (false, yes) => KeyCode::Char(if yes { 'y' } else { 'n' }),
-                    };
-                    self.key(press(answer));
+                    self.key(press(KeyCode::Char(if yes { 'y' } else { 'n' })));
                 }
             }
             Mode::Review { discard: false, .. } => {
@@ -508,7 +506,7 @@ impl App {
                     self.click_review(at);
                 }
             }
-            Mode::Guard { confirm: false } | Mode::ThemeUnsaved if click => self.click_button(at),
+            Mode::Guard | Mode::ThemeUnsaved if click => self.click_button(at),
             // The entry dialog: a click outside closes it with nothing, and
             // on the tab bar or the column goes on; one inside keeps it.
             Mode::Entry(_) => {
@@ -562,9 +560,13 @@ impl App {
         }
     }
 
+    /// A click on a button presses its key. A button that quits, as the quit
+    /// modal's does, ends the session ([`App::ended`]).
     pub(super) fn click_button(&mut self, at: Position) {
         if let Some(&(_, b)) = self.hits.buttons.iter().find(|(r, _)| r.contains(at)) {
-            self.key(KeyEvent::new(b.key(), KeyModifiers::NONE));
+            if !self.key(KeyEvent::new(b.key(), KeyModifiers::NONE)) {
+                self.ending = true;
+            }
         }
     }
 

@@ -698,19 +698,22 @@ fn a_hidden_column_puts_the_channel_numbers_on_the_tabs() {
     assert!(!wide.contains("2 #deploy"), "room again: {wide}");
 }
 
-/// At the exit guard over the entry dialog, typing goes on into the
-/// dialog, never the compose draft.
+/// At the exit guard over the entry dialog, typing reaches neither the
+/// dialog nor the compose draft; Esc goes back to the dialog as it was.
 #[test]
-fn typing_at_the_guard_over_the_dialog_goes_back_to_the_dialog() {
+fn typing_at_the_guard_over_the_dialog_reaches_nothing() {
     let mut c = chat();
     key(&mut c, KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
     typed(&mut c, "rel");
     key(&mut c, KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     assert!(c.app().guarding());
     typed(&mut c, "ease");
+    assert!(c.app().guarding(), "the modal owns the keys");
+    key(&mut c, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(!c.app().guarding());
     assert_eq!(c.input().text(), "", "the draft is untouched");
-    assert!(screen(&mut c).contains("release"), "{}", screen(&mut c));
+    let shown = screen(&mut c);
+    assert!(shown.contains("rel") && !shown.contains("release"), "{shown}");
 }
 
 /// The compose footer keeps its verbs first at 80 and 60 columns.

@@ -93,7 +93,7 @@ entry-tab    | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc
 entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name text:abc
 esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape wait:pick_one:_attend-chat
 common-quit  | base  | wait:Agents click:≡ wait:Quit
-quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:discards
+quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:Quit_and_discard
 menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_D4 Down
 theme-sub    | base  | wait:Agents click:≡ wait:Theme click:Theme wait:theme_for
 keys-sub     | base  | wait:Agents click:≡ wait:Keybinding click:Keybinding wait:keybinding_set
@@ -101,6 +101,9 @@ remove-sub   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Rem
 settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:sets_one
 tab-closes   | base  | wait:Agents M-2 M-2 wait:pick click:rollout gone:pick
 guard-name   | base  | wait:Agents C-n wait:new_channel_name text:abc C-c wait:being_typed
+guard-draft  | base  | wait:Agents text:agg C-c wait:Quit_and_discard
+guard-typed  | base  | wait:Agents text:agg C-c wait:Quit_and_discard text:xyz C-c
+guard-back   | base  | wait:Agents text:agg C-c wait:Quit_and_discard Escape gone:Quit_and_discard wait:>_agg
 rclick-row   | base  | wait:Agents rside:#infra wait:pick_one:_#infra
 rclick-agent | base  | wait:Agents rside:● wait:Address
 rclick-name  | base  | wait:signing rfeed:gamma wait:Address
@@ -113,7 +116,7 @@ header-long  | long  | wait:keeps_the_time
 header-human | own   | wait:watching_the
 header-pick  | base  | wait:signing_off click:signing_off
 header-chan  | base  | wait:Agents M-2 wait:rollout_is_green
-quit-entry   | base  | wait:Agents text:half C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
+quit-entry   | base  | wait:Agents text:half C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:Quit_and_discard
 too-long     | base  | wait:Agents bigpaste:65537 wait:xxxxxxxxxx Enter wait:over_attend's_limit
 focus-compose | base  | wait:Agents wait:Enter_send
 focus-view   | base  | wait:Agents F2 wait:▸⋯all

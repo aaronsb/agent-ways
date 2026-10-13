@@ -841,7 +841,7 @@ fn a_failing_command_step_keeps_it_and_the_commands_after_it() {
 }
 
 #[test]
-fn quit_with_pending_in_any_tab_lists_each_and_discarding_needs_a_second_confirm() {
+fn quit_with_pending_in_any_tab_lists_each_and_d_discards_at_once() {
     let mut app = App::new("t", pending_tree());
     assert!(!app.key(press(KeyCode::Char('q'))), "nothing pending quits");
     let mut app = pending_app();
@@ -851,9 +851,18 @@ fn quit_with_pending_in_any_tab_lists_each_and_discarding_needs_a_second_confirm
     for t in ["6 unsaved in 2 tabs", "ways", "●5", "other", "●1", "Back (Esc)", "Review ways (r)", "Quit and discard all (D)"] {
         assert!(f.contains(t), "{t} missing:\n{f}");
     }
+    // Back is the go-back green, Quit the destructive answer's ground.
+    let mut term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    term.draw(|f| app.draw(f)).unwrap();
+    let ground = |text: &str| {
+        let (x, y) = crate::testkit::find(term.backend().buffer(), text).unwrap_or_else(|| panic!("{text} not drawn"));
+        term.backend().buffer()[(x, y)].bg
+    };
+    assert_eq!(ground("Back (Esc)"), theme::Ground::Ok.bg());
+    assert_eq!(ground("Quit and discard all (D)"), theme::Ground::Err.bg());
     keys(&mut app, &[KeyCode::Esc]);
     assert!(matches!(app.mode, Mode::Browse) && app.pending() == 6);
-    assert!(app.key(press(KeyCode::Esc)) && matches!(app.mode, Mode::Guard { .. }), "Esc asks too");
+    assert!(app.key(press(KeyCode::Esc)) && matches!(app.mode, Mode::Guard), "Esc asks too");
     let at = find(&mut app, "Back (Esc)");
     click(&mut app, at);
     assert!(matches!(app.mode, Mode::Browse));
@@ -868,15 +877,14 @@ fn quit_with_pending_in_any_tab_lists_each_and_discarding_needs_a_second_confirm
     click(&mut app, at);
     assert_eq!(review_tab(&app), Some(0), "a click on Review does the same");
 
+    // The modal's own buttons answer it: D quits and discards, and the bar
+    // asks no second confirm.
     let mut app = pending_app();
-    keys(&mut app, &[KeyCode::Char('q'), KeyCode::Char('D')]);
-    assert!(matches!(app.mode, Mode::Guard { confirm: true }) && app.pending() == 6, "one D discards nothing");
-    assert!(bottom(&mut app, 100, 24).contains("quit and discard all 6 pending?"));
-    keys(&mut app, &[KeyCode::Esc]);
-    assert!(matches!(app.mode, Mode::Guard { confirm: false }));
-    keys(&mut app, &[KeyCode::Char('D')]);
-    assert!(!app.key(press(KeyCode::Char('y'))), "the second confirm quits");
+    keys(&mut app, &[KeyCode::Char('q'), KeyCode::Char('x')]);
+    assert!(app.guarding() && app.pending() == 6, "a key that is no answer leaves the modal open");
+    assert!(!app.key(press(KeyCode::Char('D'))), "D quits");
     assert_eq!(app.pending(), 0);
+    assert!(!bottom(&mut app, 100, 24).contains("confirm"));
 }
 
 #[test]
@@ -886,14 +894,11 @@ fn ctrl_c_meets_the_guard_when_anything_is_pending() {
     assert!(!app.key(ctrl_c), "nothing pending quits");
     let mut app = pending_app();
     keys(&mut app, &[KeyCode::Char('2')]);
-    assert!(app.key(ctrl_c) && matches!(app.mode, Mode::Guard { confirm: false }));
-    assert!(app.key(ctrl_c), "a second ^C does not quit past the prompt");
+    assert!(app.key(ctrl_c) && app.guarding());
+    assert!(app.key(ctrl_c) && app.guarding(), "a second ^C does not quit past the prompt");
     let at = find(&mut app, "Quit and discard all (D)");
     click(&mut app, at);
-    let at = find(&mut app, "y quit");
-    assert_eq!(app.pending(), 6);
-    click(&mut app, at);
-    assert_eq!(app.pending(), 0);
+    assert!(app.ended() && app.pending() == 0, "a click on Quit quits and discards");
 
     let mut app = pending_app();
     keys(&mut app, &[KeyCode::Char('w'), KeyCode::Char('a')]);

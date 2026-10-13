@@ -38,6 +38,7 @@ settings   | ways settings --project $PS                    |
 matching   | ways settings matching --project $PS           | Down Down e C-u text:0.2 Enter
 picker     | ways settings gate --project $PS               | Down Down Down Right Down Right Down Down Enter
 mod        | ways settings mod --project $PS                |
+quit-guard | ways settings matching --project $PS           | Down Down e C-u text:0.2 Enter q
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null

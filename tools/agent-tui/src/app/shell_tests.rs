@@ -424,7 +424,7 @@ fn ctrl_c_during_a_check_with_nothing_pending_quits() {
     let (mut app, _) = checking();
     app.pick(vec![0], 0);
     assert!(!app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), "the session ends");
-    assert!(!matches!(app.mode, Mode::Guard { .. }), "nothing pending, so no guard");
+    assert!(!matches!(app.mode, Mode::Guard), "nothing pending, so no guard");
 }
 
 #[test]

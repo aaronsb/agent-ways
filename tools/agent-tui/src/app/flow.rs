@@ -689,6 +689,24 @@ mod tests {
         assert_eq!(f.picked_ids(), ["/a"], "back keeps the picks");
     }
 
+    /// The last step offers nothing destructive, so Back keeps the dim
+    /// accent beside Finish's green.
+    #[test]
+    fn the_last_step_keeps_back_on_the_dim_accent() {
+        let mut f = flow(true);
+        keys(&mut f, &[KeyCode::Enter, KeyCode::Enter]);
+        assert_eq!(f.step(), 2);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        term.draw(|fr| f.draw(fr, fr.area(), crate::theme::Shape::ROUND)).unwrap();
+        let buf = term.backend().buffer();
+        let ground = |text: &str| {
+            let (x, y) = crate::testkit::find(buf, text).unwrap_or_else(|| panic!("{text} not drawn"));
+            buf[(x, y)].bg
+        };
+        assert_eq!(ground("Back (Esc)"), crate::theme::Ground::AccentDim.bg());
+        assert_eq!(ground("Finish (Enter)"), crate::theme::Ground::Ok.bg());
+    }
+
     #[test]
     fn esc_on_the_first_step_cancels_and_q_cancels_anywhere() {
         assert_eq!(flow(true).key(press(KeyCode::Esc)), FlowEvent::Cancel);

@@ -89,6 +89,14 @@ basis:
   - evidence: 'non-Rust tools on these paths: tools/claude-projects (Python, linked onto PATH by scripts/install.sh:224) and the hook adapters hooks/ways/*.sh, of which check-post.sh:49-89 finds and runs postcheck.sh files and decides what to inject in bash; the spike reviewed frames through a Python/PIL script kept outside the repo; tools/scripts/fire-panel.py and probe-measure.py measure matching calibration and sit outside these paths'
   - upstream: 'Claude Code mods: TypeScript functions shipped in plugins, hot-reloaded, that run in-process before, after, instead of or around tool calls, permission requests and prompts, and can draw parts of the UI (https://claude.com/blog/claude-code-mods)'
   - evidence: ADR-505
+  - operator: aaronsb
+    level: directed
+    said: "there's an additional bottom row friction for exiting. I think that bottom row item is unnecessary - we can just stick with the dialog that says 'quit with unsaved changes'. these two screenshots are in sequence, you can see that when I pick 'Quit and discard all (D)' there is another confirmation at the bottom. Our spec should have already established we don't want to use bottom row interactions for these type of things. One thing we could inherit from the bottom row secondary view is colors (green for go back)."
+    via: "the operator's chat message to the head session, 2026-10-13, with two screenshots of attend-chat's quit flow"
+  - operator: aaronsb
+    level: directed
+    said: button colors green back in modals with destructive options
+    via: "the operator's answer in the head session, 2026-10-13, to the #994 review's question on button colours"
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -302,8 +310,19 @@ The shell's conventions are the tab bar, the bottom bar with a footer read from 
 
 The tree, the queue and the apply stay as they were, and a pane app has no theme tab. The pane's tick, the shell's tick during an apply or a reading, and the file watch each run on their own schedule.
 
-A pane that owns text, such as a compose box, types every plain key, so the shell's keys take their Alt form beside it: Alt+1-9 for a tab and Alt+m for the mouse. F1 opens the keys. Esc and Ctrl-C quit, asking first over unsaved work. The exit guard there takes no letter as an answer, since letters are typing. `D` arms the quit, and Enter, or Ctrl-C again, confirms it. Unarmed, Esc and Enter go back to the work, and a character or an editing key (Backspace, Delete, the arrows, Home, End) closes the guard and acts on the work. Armed, Esc disarms it, and a character or an editing key first types the arming `D` and then acts. So keys typed after an accidental Esc reach the draft as typed. The settings guard keeps `D` then `y`.
+A pane that owns text, such as a compose box, types every plain key, so the shell's keys take their Alt form beside it: Alt+1-9 for a tab and Alt+m for the mouse. F1 opens the keys. Esc and Ctrl-C quit, asking first over unsaved work. The exit guard there is the same modal as the settings guard, and it answers as the note on a modal's own buttons below says.
 
 A chat starts with the mouse off, so the terminal selects text and middle-click pastes. The shell captures clicks, the wheel and drags, but not bare moves.
 
 End state: screens that are not a tree move onto panes as they are touched. attend-chat is the first; `ways session` is next (#739), which gives it the mouse from the shell. Until the tree itself is a pane, `App` has two paths, one for the tree and one for a pane (#805). Bracketed paste for a pane's text entry is #806.
+
+## Note (2026-10-13): a modal's own buttons answer it
+
+A modal that offers its answers as buttons is answered by them, and only by them. The bottom bar never asks a second confirm for it and draws no answer of its own; it may name the modal's keys as a plain hint.
+
+- While a modal is shown it owns the keys. A key that is no answer leaves it open and reaches nothing under it, a compose box or an entry dialog included.
+- The exit guard is such a modal. `D` or a click on Quit quits and discards at once. Esc, Enter on the focused Back, `b` or a click on Back goes back to the work as it was. `r` or a click on Review opens the review where there is one. Ctrl-C leaves the guard open, so a reflexive second Ctrl-C discards nothing. This holds beside text and in the settings screens alike. It replaces the armed second step beside text (`D` then Enter, or Ctrl-C again) and the settings guard's `D` then `y`.
+- A click on a button that quits ends the session, as the key does.
+- Quit, Discard and Drop are drawn on the error ground the bar gives an answer that drops the work. On a button row that holds one of them, Back is drawn on the green the bar gives the answer that keeps it. On a row with nothing destructive, such as a guided flow's, Back keeps the dim accent, so it never shares green with Save or Finish for want of a contrast. The rule belongs to the button row and names no modal, so every dialog built on the row follows it.
+
+A confirm with no modal, such as a pane's question (ADR-408) or the settings shell's y/n before a tab's items are discarded, stays on the bottom bar with its two answers as lozenges.

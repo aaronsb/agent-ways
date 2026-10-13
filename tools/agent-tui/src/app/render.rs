@@ -26,13 +26,18 @@ fn width(spans: &[Span]) -> u16 {
 
 /// Buttons on one line, each recorded as a click target. `focus` marks the
 /// one Enter would press.
+///
+/// Back is green on a row that holds a destructive button, as the bar's
+/// keep answer is beside its drop answer; elsewhere it takes the dim accent.
 pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String)], hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
+    let destructive = buttons.iter().any(|(b, _)| matches!(b, Btn::Discard | Btn::Quit | Btn::Drop));
     let mut spans = vec![Span::raw(" ")];
     for (b, label) in buttons {
         let ground = match b {
             Btn::Apply | Btn::Finish | Btn::Save => Ground::Ok,
-            Btn::Discard | Btn::Quit | Btn::Drop => Ground::Err,
+            Btn::Back if destructive => Ground::Ok,
             Btn::Back => Ground::AccentDim,
+            Btn::Discard | Btn::Quit | Btn::Drop => Ground::Err,
             Btn::Review | Btn::Next => Ground::Accent,
             Btn::Cancel => Ground::Rule,
         };
@@ -143,7 +148,7 @@ impl App {
                     let scroll = *scroll;
                     self.draw_help(f, main, scroll);
                 }
-                Mode::Guard { .. } => self.draw_guard(f, main),
+                Mode::Guard => self.draw_guard(f, main),
                 Mode::ThemeMenu { sel } => {
                     let sel = *sel;
                     let items = self.theme_acts().iter().map(|a| (a.label().to_string(), self.theme_act_tag(*a))).collect();
@@ -188,7 +193,7 @@ impl App {
                 let scroll = *scroll;
                 self.draw_help(f, main, scroll);
             }
-            Mode::Guard { .. } => self.draw_guard(f, main),
+            Mode::Guard => self.draw_guard(f, main),
             Mode::Menu { path, sel } => {
                 let (path, sel) = (path.clone(), *sel);
                 self.draw_menu(f, main, &path, sel);
@@ -612,18 +617,6 @@ impl App {
                 spans.push(Span::raw(format!(" discard {} pending in {}?  ", self.pending_in(*t), self.roots[*t].name)));
                 answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y discard ", Ground::Err), (false, " n keep ", Ground::Ok)]);
             }
-            // Beside text, y and n would be typing: Enter quits, Esc goes back.
-            Mode::Guard { confirm: true } if self.owns_text() => {
-                spans.extend(mode("confirm", Ground::Warn));
-                let what = self.pane_unsaved().unwrap_or_else(|| "the unsaved work".into());
-                spans.push(Span::raw(format!(" quit and drop {what}?  ")));
-                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " Enter quit ", Ground::Err), (false, " Esc back ", Ground::Ok)]);
-            }
-            Mode::Guard { confirm: true } => {
-                spans.extend(mode("confirm", Ground::Warn));
-                spans.push(Span::raw(format!(" quit and discard all {} pending?  ", self.pending())));
-                answer_lozenges(sh, area, &mut spans, &mut self.hits.answers, [(true, " y quit ", Ground::Err), (false, " n back ", Ground::Ok)]);
-            }
             Mode::Review { run: Some(run), .. } => {
                 let (label, text) = match run.outcome {
                     Outcome::Stopped(_) => ("stopped", "  the failed step and the rest stay pending"),
@@ -690,16 +683,12 @@ impl App {
                 spans.extend(mode("flow", Ground::Accent));
                 spans.push(hint(flow.hint()));
             }
-            Mode::Guard { .. } => {
+            // The modal's buttons answer it; the bar only names their keys.
+            Mode::Guard => {
                 spans.extend(mode("quit", Ground::Warn));
                 // A pane's work alone has nothing to review.
                 let review = self.pending() > 0 || self.theme_dirty();
-                spans.push(hint(match (review, self.owns_text()) {
-                    (true, _) => "  Esc back · r review · D quit and discard all",
-                    // Beside text, letters keep typing; D arms and Enter confirms.
-                    (false, true) => "  Esc back · D then Enter quits and discards · typing goes on",
-                    (false, false) => "  Esc back · D quit and discard all",
-                }));
+                spans.push(hint(if review { "  Esc back · r review · D quit and discard all" } else { "  Esc back · D quit and discard all" }));
             }
             _ => {
                 spans.extend(mode(if self.filter.is_empty() { "browse" } else { "filter" }, Ground::Accent));
