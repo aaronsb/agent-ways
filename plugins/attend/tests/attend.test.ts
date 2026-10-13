@@ -24,6 +24,7 @@ import {
   shortId,
 } from '../hooks/lib.ts'
 import {
+  DRAIN_CACHE_LAPSED,
   DRAIN_COLD_BACKLOG,
   DRAIN_COLD_EMPTY,
   DRAIN_EMPTY,
@@ -318,7 +319,8 @@ describe('view and framing', () => {
   })
 
   test("attend's drain documents: messages apart from the note and the name", () => {
-    expect(parseDrain(DRAIN_COLD_EMPTY)).toEqual({ status: 'drained', messages: [], heldBack: 0, note: null, youAre: 'Chaucer-alpha' })
+    expect(parseDrain(DRAIN_COLD_EMPTY)).toEqual({ status: 'drained', messages: [], heldBack: 0, note: null, youAre: 'Chaucer-alpha', cacheLapsed: false })
+    expect(parseDrain(DRAIN_CACHE_LAPSED)?.cacheLapsed).toBe(true)
     expect(parseDrain(DRAIN_NOT_LISTENING)?.status).toBe('not_listening')
     expect(parseDrain(DRAIN_UNRESOLVED)?.status).toBe('unresolved')
     expect(parseDrain(JSON.stringify({ ...JSON.parse(DRAIN_EMPTY), schema: 2 }))).toBeUndefined()
@@ -750,6 +752,78 @@ describe('active', () => {
     // attend as written, and attend resolves it.
     await $.tool.call({ tool: 'mcp__attend__attend_reply', message: 'ok', re: '~73nki' } as never)
     expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--re', '73nki', '--', 'ok'])
+  })
+})
+
+// The operator: "It would be an expensive mistake to wake a cache expired
+// agent and reload all its context at expense." attend's wake drain holds an
+// addressed message while the cache has lapsed (ADR-406 item 1); the mod
+// starts no turn, the row says it waits, and it rides the operator's next
+// prompt.
+describe('a session whose cache has lapsed', () => {
+  const WAITING = '{"unread":1,"held_back":0,"listening":true,"rooms":[]}'
+  /** Wake drains that each hold the message, more than a test polls. */
+  const cold = Array<string>(20).fill(DRAIN_CACHE_LAPSED)
+
+  test('is not woken; the row shows the message waiting, cold', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains, unread: WAITING })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    drains.push(...cold)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+    const ui = await $.ui.mount(BAND as never)
+    expect(await ui.find({ text: /✉ 1 waiting · cold/ } as never)).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('what waits rides the operator\'s next prompt as context', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains, unread: WAITING })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    drains.push(...cold)
+    await clock.advance(10_000)
+    expect(h.submitted).toEqual([])
+    drains.splice(0, drains.length, one(7, 'project'))
+    await typed($, 'back again')
+    expect(h.submitted).toEqual([])
+    const context = h.prompts[1]?.context ?? []
+    expect(context.length).toBe(1)
+    expect(context[0]).toContain(`[project] ${SENDER} 21:21: m7`)
+    h.world.unread = '{"unread":0,"held_back":0,"listening":true,"rooms":[]}'
+    await clock.advance(10_000)
+    const ui = await $.ui.mount(BAND as never)
+    expect(await ui.find({ text: /✉ 0 unread/ } as never)).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a warm drain afterwards wakes the session again', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains, unread: WAITING })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    drains.push(...cold)
+    await clock.advance(10_000)
+    expect(h.submitted).toEqual([])
+    drains.splice(0, drains.length, one(8), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m8')
+  })
+
+  test('keepwarm still wakes on its own line', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const line = 'keepwarm: 50m idle, the prompt cache lapses in 10m on 200k tokens. Reply with one word and no tools.'
+    const h = host(on, { config: { listening: 'active', keepwarm: 'on' }, drains: [DRAIN_EMPTY, ...cold], keepwarm: line })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    await clock.advance(10_000)
+    expect(h.submitted).toEqual([line])
   })
 })
 

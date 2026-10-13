@@ -60,6 +60,7 @@ const DEFAULTS = {
   afterCompaction: false,
   turnsSinceFull: 0,
   awaitingOperator: false,
+  cacheLapsed: false,
 } satisfies AttendStatus
 
 const status = atom({ plugin: 'attend', key: 'status' } as const, DEFAULTS)
@@ -350,7 +351,10 @@ async function poll($: $, mod: Mod) {
       // Listening turned off elsewhere (attend listen off, a private scene),
       // or an identity attend cannot resolve: the row says so.
       const listening = first.status === 'drained'
-      if ((await readStatus($)).listening !== listening) await updateStatus($, s => ({ ...s, listening }))
+      const was = await readStatus($)
+      if (was.listening !== listening || was.cacheLapsed !== first.cacheLapsed) {
+        await updateStatus($, s => ({ ...s, listening, cacheLapsed: first.cacheLapsed }))
+      }
       if (first.messages.length === 0) return
       const msgs = [...first.messages]
       await updateStatus($, s => ({ ...s, unread: Math.max(s.unread, msgs.length) }))
@@ -589,12 +593,16 @@ export const register: Register = on => {
     return done
   })
 
-  // The operator's first prompt in a session the config started listening:
-  // what is pending enters beside it, read in the same turn, rather than as
-  // a turn the operator never asked for.
+  // The operator's first prompt in a session the config started listening,
+  // or their next prompt while a message waits on a lapsed cache: what is
+  // pending enters beside it, read in the same turn, rather than as a turn
+  // the operator never asked for.
   on('prompt.submit', async ($, e, next) => {
-    if (!mod.isAwaitingOperator || !OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    const isHeldCold = (await readStatus($)).cacheLapsed
+    if (!mod.isAwaitingOperator && !isHeldCold) return next(e)
     await setAwaiting($, mod, false)
+    if (isHeldCold) await updateStatus($, s => ({ ...s, cacheLapsed: false }))
     if (!(await isOn($, mod))) return next(e)
     return enterWithPending($, mod, e, next)
   })
@@ -680,14 +688,16 @@ export const register: Register = on => {
   })
 
   // One row while active, in the shape of the operator's statusline: peers,
-  // unread, channels. Name and project are the statusline's. Dormant draws
+  // unread (or waiting, while the cache is cold), channels. Name and project are the statusline's. Dormant draws
   // nothing.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const s = await readStatus($)
     if (!isActive(s)) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const state = s.listening === false ? '○ attend not listening' : `● ${s.peers} peers ✉ ${s.unread} unread`
+    // A message held on a lapsed cache waits for the operator's prompt.
+    const mail = s.cacheLapsed && s.unread > 0 ? `${s.unread} waiting · cold` : `${s.unread} unread`
+    const state = s.listening === false ? '○ attend not listening' : `● ${s.peers} peers ✉ ${mail}`
     const channels = s.channels.length > 0 ? ` ${s.channels.join(' ')}` : ''
     return (
       <Box flexDirection="row">
