@@ -18,8 +18,9 @@
 //!   holds only for that process, since a resumed session may have no mod;
 //! - `claude <key>`, the Claude Code process the session ran in (pid, start
 //!   time and host, `<pid>-<start>@<host>`), so a session whose id changes
-//!   under the same process
-//!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it;
+//!   under the same process (`/clear`) can find its enrollment again.
+//!   `by-claude/<pid>-<start>` indexes it, the host left out so a renamed
+//!   host still finds it;
 //! - `since <secs>`, when the session last went from not listening to
 //!   listening, in seconds since the epoch. From then it is a member of
 //!   `#open` (ADR-404 D3a), so its cold start replays what was posted there
@@ -185,7 +186,7 @@ fn write(session_id: &str, record: &Record) -> io::Result<()> {
     }
     agent_settings::writer::write_atomic(&p, record.render())?;
     if let Some(key) = &record.claude {
-        agent_settings::writer::write_atomic(&index_path(key), session_id)?;
+        agent_settings::writer::write_atomic(&index_path(process_part(key)), session_id)?;
     }
     Ok(())
 }
@@ -273,10 +274,18 @@ fn process_fact(key: &str) -> Fact {
     }
 }
 
-/// Whether `recorded`, a key in a record, names the process `own` does. A
-/// key recorded before keys carried a host matches `own` without its host.
+/// A key's `<pid>-<start>`, its host dropped: what names a process to
+/// itself. A host can be renamed while its processes run (a laptop moving
+/// networks), so only liveness judgments read the host.
+fn process_part(key: &str) -> &str {
+    key.rsplit_once('@').map_or(key, |(process, _)| process)
+}
+
+/// Whether `recorded`, a key in a record, names the process `own` does: the
+/// same pid and start time, whatever host name either was written under,
+/// and a key written before keys carried a host among them.
 fn same_process(recorded: &str, own: &str) -> bool {
-    recorded == own || own.rsplit_once('@').is_some_and(|(process, _)| recorded == process)
+    process_part(recorded) == process_part(own)
 }
 
 /// The ways `session_id` enrolled, empty when it is not enrolled.
@@ -419,11 +428,10 @@ pub fn any_indexed() -> bool {
 
 /// The enrolled session recorded for the Claude Code process `claude_key`,
 /// when it is not `current`: the id this process had before `/clear`.
-/// An index entry written before keys carried a host is found under the key
-/// without it.
+/// The index is kept under the key's process part, so a renamed host, or an
+/// entry written before keys carried a host, still finds it.
 pub fn previous_id(claude_key: &str, current: &str) -> Option<String> {
-    let legacy = claude_key.rsplit_once('@').map(|(process, _)| process);
-    let sid = [Some(claude_key), legacy].into_iter().flatten().find_map(|k| fs::read_to_string(index_path(k)).ok())?;
+    let sid = fs::read_to_string(index_path(process_part(claude_key))).ok()?;
     let sid = sid.trim();
     let same = |r: Record| r.claude.as_deref().is_some_and(|k| same_process(k, claude_key));
     (sid != current && read(sid).is_some_and(same)).then(|| sid.to_string())
@@ -527,6 +535,19 @@ mod tests {
             assert!(!crate::has_exited("there-gone"), "a pid this host does not hold says nothing of another host");
             enroll_in("legacy", &format!("{}-1", gone_pid()));
             assert!(!crate::has_exited("legacy"), "a key with no host is not judged either");
+        });
+    }
+
+    // Re-review of #998: a host can be renamed while its processes run (a
+    // laptop moving networks). The process is the same, so its own records
+    // are found again under the new name; only liveness reads the host.
+    #[test]
+    fn a_renamed_host_still_finds_its_own_process() {
+        with_cache(|| {
+            enroll_in("before", "123-456@host-a");
+            assert_eq!(previous_id("123-456@host-b", "after"), Some("before".to_string()), "a /clear after the rename still adopts");
+            assert!(same_process("123-456@host-a", "123-456@host-b"), "the own-process match ignores the host");
+            assert!(!same_process("123-457@host-a", "123-456@host-a"), "another process is still another");
         });
     }
 
