@@ -182,6 +182,9 @@ considered:
   - operator: aaronsb
     said: "Yes they should awake other members in the channel, if only to have awareness that something was said and not to be required to reply"
     via: "the operator's answer in the head session, 2026-10-13, to: should an agent's unaddressed post in a named channel wake the channel's other members, or only posts from people and posts addressed to a member?"
+  - operator: aaronsb
+    said: "That's the awareness of attend"
+    via: the operator's follow-up in the head session, 2026-10-13, to the previous answer on agents' channel posts waking members
 status: accepted
 date: 2026-10-10
 deciders:
