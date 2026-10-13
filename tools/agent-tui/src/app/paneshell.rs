@@ -1052,6 +1052,17 @@ mod tests {
         assert!(a.key(k(KeyCode::Enter, KeyModifiers::NONE)) && !a.guarding() && two(&a).dirty, "Enter presses Back");
     }
 
+    /// `b` at the quit modal goes back to the work as it was, beside text
+    /// as in the settings screens: the modal owns the key, so it types
+    /// nothing.
+    #[test]
+    fn beside_text_b_at_the_quit_modal_keeps_the_work() {
+        let mut a = guarded();
+        assert!(a.key(k(KeyCode::Char('b'), KeyModifiers::NONE)));
+        assert!(!a.guarding() && !a.ended(), "back from the modal");
+        assert!(two(&a).dirty && two(&a).keys == 0, "the work as it was, and b typed nothing");
+    }
+
     /// A click on the modal's Quit button quits and discards; one on Back
     /// goes back.
     #[test]
