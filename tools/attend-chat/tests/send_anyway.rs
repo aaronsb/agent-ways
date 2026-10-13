@@ -18,6 +18,10 @@ use std::time::{Duration, SystemTime};
 /// exited (it may run on another host, or not listen yet).
 const QUIET_SID: &str = "ffffffff-0000-4000-8000-000000000006";
 const QUIET_CWD: &str = "/work/zeta";
+/// A second quiet agent, for a send-now offer that must not follow the
+/// draft to it.
+const QUIET2_SID: &str = "dddddddd-0000-4000-8000-000000000007";
+const QUIET2_CWD: &str = "/work/delta";
 /// Gone: its enrollment names a Claude Code process that has exited.
 const GONE_SID: &str = "eeeeeeee-0000-4000-8000-000000000005";
 const GONE_CWD: &str = "/work/epsilon";
@@ -44,11 +48,13 @@ fn chat(enhanced: bool) -> Chat {
         std::fs::create_dir_all(&enrolled).unwrap();
         std::fs::write(enrolled.join(GONE_SID), format!("listen\nclaude {}-1\n", gone_pid())).unwrap();
         lapse(QUIET_SID);
+        lapse(QUIET2_SID);
         lapse(GONE_SID);
     });
     let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(enhanced);
     c.push(sig("s-1", QUIET_SID, QUIET_CWD));
     c.push(sig("s-2", GONE_SID, GONE_CWD));
+    c.push(sig("s-3", QUIET2_SID, QUIET2_CWD));
     c
 }
 
@@ -96,6 +102,13 @@ fn side_click(c: &mut Chat, text: &str) {
         })
         .unwrap_or_else(|| panic!("no {text} in the column: {rows:#?}"));
     c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+}
+
+/// A left click on the compose box's line that shows `text`.
+fn compose_click(c: &mut Chat, text: &str) {
+    let buf = testkit::render_screen(c, W, H);
+    let (x, y) = testkit::find(&buf, text).unwrap_or_else(|| panic!("no {text}: {}", testkit::rows(&buf).join("\n")));
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x + 2, row: y, modifiers: KeyModifiers::NONE });
 }
 
 fn in_tray(cwd: &str, body: &str) -> bool {
@@ -166,4 +179,21 @@ fn an_agent_whose_process_exited_is_refused_whatever_the_key() {
     key(&mut c, KeyCode::Enter, KeyModifiers::CONTROL);
     assert_eq!(c.status(), format!("@{gone} has exited and would not read this"));
     assert!(!in_tray(GONE_CWD, "hello"), "nothing was written");
+}
+
+// Review of #998, finding 1: the offer is for the draft and the place it
+// was refused, so another agent's DM view gets a fresh check.
+#[test]
+fn the_offer_does_not_follow_the_draft_to_another_dm_view() {
+    let mut c = chat(false);
+    side_click(&mut c, &nick(QUIET_CWD));
+    typed(&mut c, "hello for one agent");
+    press(&mut c, KeyCode::Enter);
+    assert!(c.status().starts_with("press Enter again to send: @"), "{}", c.status());
+    side_click(&mut c, &nick(QUIET2_CWD));
+    assert_eq!(c.input().text(), "hello for one agent", "the draft is kept across the switch");
+    compose_click(&mut c, "> hello for one agent");
+    press(&mut c, KeyCode::Enter);
+    assert!(!in_tray(QUIET2_CWD, "hello for one agent"), "the first Enter in the other view sends nothing: {}", c.status());
+    assert!(c.status().ends_with(&format!("@{} is quiet (no heartbeat)", nick(QUIET2_CWD))), "a fresh check refused it: {}", c.status());
 }

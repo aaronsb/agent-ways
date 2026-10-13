@@ -192,10 +192,11 @@ pub struct ChatPane {
     /// arrives as Esc, which closes and clears and never quits (ADR-409),
     /// and a setting that asks for Ctrl+digits says they do not arrive.
     enhanced: bool,
-    /// The draft a quiet refusal offered to send anyway: Enter again on it
-    /// unchanged sends it, as Ctrl+Enter does where it arrives. Any edit
-    /// withdraws the offer.
-    send_anyway: Option<String>,
+    /// The draft a quiet refusal offered to send anyway, and the tab it was
+    /// refused on: Enter again on it unchanged, on that tab, sends it, as
+    /// Ctrl+Enter does where it arrives. Any edit or a change of tab
+    /// withdraws the offer, so another destination gets a fresh check.
+    send_anyway: Option<(String, Tab)>,
     /// The chat's settings (`attend.chat.*`), read at start and again
     /// after a command, so `/config` applies at once.
     config: attend_config::ChatConfig,
@@ -367,6 +368,7 @@ impl ChatPane {
     /// tab shown ([`ChatPane::refocus`]).
     fn set_tab(&mut self, t: Tab) {
         if t != self.foreground {
+            self.send_anyway = None;
             if let Some(w) = &mut self.world {
                 let names = tabs::strip_names(&w.groups);
                 w.laid.shown = tabs::normalize(t.clone(), &names);
@@ -391,7 +393,8 @@ impl ChatPane {
     /// Enter in the compose box. On a draft a quiet refusal offered to
     /// send anyway, unchanged since, it sends anyway.
     fn enter(&mut self) {
-        let again = self.send_anyway.as_deref() == Some(self.input.text());
+        let here = (self.input.text().to_string(), self.normal_tab());
+        let again = self.send_anyway.as_ref() == Some(&here);
         self.send(again);
     }
 
@@ -429,7 +432,7 @@ impl ChatPane {
                 // key that arrives on this terminal is named (ADR-409).
                 let how = if self.enhanced { "Ctrl+Enter or Enter again to send now" } else { "press Enter again to send" };
                 self.say(format!("{how}: @{name} is quiet (no heartbeat)"), true);
-                self.send_anyway = Some(self.input.text().to_string());
+                self.send_anyway = Some((self.input.text().to_string(), self.normal_tab()));
             }
             EnterAction::ClearWithStatusAndFocus { status, focus } => {
                 self.say(status, false);
