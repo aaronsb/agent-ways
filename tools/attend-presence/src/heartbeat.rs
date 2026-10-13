@@ -6,10 +6,11 @@
 //! is no body, no parsing, no schema. Consumers read mtime and compare
 //! against a grace window:
 //!
-//! - `attend_groups::member_alive` gates channel membership
-//!   cleanup on heartbeat freshness.
-//! - `chip::known_identities` (attend-chat) filters signal-derived
-//!   chips so dead peers stop polluting the legend after reload.
+//! - [`crate::alive`] reads it beside a listening session's recorded Claude
+//!   Code process (ADR-129, addendum of 2026-10-13); its callers include
+//!   `attend_groups::member_alive`, which gates channel membership cleanup,
+//!   and `chip::known_identities` (attend-chat), which filters
+//!   signal-derived chips so dead peers stop polluting the legend.
 //!
 //! Why a sidecar file rather than a field on `_groups.yaml`: the only
 //! writer for a given session is that session itself, so per-session

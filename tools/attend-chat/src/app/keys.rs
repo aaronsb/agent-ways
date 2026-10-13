@@ -55,6 +55,10 @@ pub enum EnterAction {
     /// Failure path: set status, leave input + cursor intact so the
     /// user can edit and retry.
     StatusOnly(String),
+    /// A refusal because the agent named is quiet, though it may still
+    /// read the message: like [`EnterAction::StatusOnly`], and the screen
+    /// offers its send-now key for the draft as it stands.
+    Quiet(String),
     /// `/clear` — empty the transcript buffer, clear input + cursor,
     /// show status.
     ClearTranscript,
@@ -69,9 +73,10 @@ pub enum EnterAction {
 /// and channel commands with no argument scope to it. `person` is the
 /// membership id of the person at the chat, who a send to a channel makes
 /// its member (ADR-404 D1); `None` for a chat that is no person, such as a
-/// test's. Returns an `EnterAction` describing how the screen should
-/// update its state.
-pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>) -> EnterAction {
+/// test's. `anyway` sends to an agent that is quiet but has not exited,
+/// as the send-now key asks. Returns an `EnterAction` describing how the
+/// screen should update its state.
+pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>, anyway: bool) -> EnterAction {
     let msg = input_value.trim_end().to_string();
     if msg.is_empty() {
         return EnterAction::None;
@@ -83,7 +88,7 @@ pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab, per
     if let Some((cmd, args)) = slash::parse(&msg) {
         return run_slash(slash::dispatch(cmd, args), foreground);
     }
-    send_message(&msg, signals, foreground, person)
+    send_message(&msg, signals, foreground, person, anyway)
 }
 
 /// Run a dispatched slash command: the one path both the typed command
@@ -132,7 +137,7 @@ fn run_config(key: Option<String>, value: Option<String>) -> EnterAction {
 
 /// Send `msg`: to the recipients its leading `@`/`#` run addresses, or
 /// to the foreground tab's channel.
-fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>) -> EnterAction {
+fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>, anyway: bool) -> EnterAction {
     let msg = msg.to_string();
     let caps = ColorDepth::detect();
     let seeds = discover_sessions();
@@ -142,9 +147,13 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
     // against the current registry state.
     let instance_cache = attend_instances::SnapshotCache::new();
     let alive = |id: &str| attend_presence::alive(id, &Default::default());
-    let seen = seen_identities(signals, &seeds, caps, alive, |_| true, |_| false, &instance_cache);
+    let mut seen = seen_identities(signals, &seeds, caps, alive, |_| true, |_| false, &instance_cache);
+    if anyway {
+        wake_quiet(&mut seen);
+    }
     let agents = known_of(&seen);
     let quiet = quiet_names(&seen);
+    let gone = gone_names(&seen, &quiet);
     // The session behind a claude the chat knows: the id a direct message
     // to it is addressed to (ADR-401, `to`).
     let session_of = |k: &KnownIdentity| {
@@ -177,16 +186,16 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
             // explicit `#g` prefix — only the channel came from the
             // tab instead of the message text. The body is unchanged
             // (wire format carries no channel).
-            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet, &session_of, person, None)
+            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, (&quiet, &gone), &session_of, person, None)
         }
     } else if let (Tab::Channel(channel), true) = (foreground, recipients.iter().all(|r| matches!(r, Addressed::Agent(_)))) {
         // `@Name` while a channel is shown stays in that channel, addressed
         // to the agents it names; like any channel post it wakes the idle
         // members. Only the operator view makes it a direct message
         // (ADR-401, `to`).
-        let to = match resolve_recipients(&recipients, &agents, &quiet, &session_of) {
+        let to = match resolve_recipients(&recipients, &agents, (&quiet, &gone), &session_of) {
             Ok(dests) => dests.into_iter().map(|(_, to)| to).next().unwrap_or_default(),
-            Err(refusal) => return EnterAction::StatusOnly(refusal),
+            Err(refusal) => return refusal.action(),
         };
         // Only members read a named channel: a post addressed to an agent
         // outside it would reach no one, so it is refused and the draft
@@ -195,7 +204,7 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
             let members = attend_groups::load_groups(&signals_base()).get(channel.as_str()).map(|e| e.members.clone()).unwrap_or_default();
             for r in &recipients {
                 let Addressed::Agent(name) = r else { continue };
-                let sid = resolve_recipients(&[Addressed::Agent(name)], &agents, &quiet, &session_of).ok().and_then(|d| d.into_iter().next()).map(|(_, to)| to);
+                let sid = resolve_recipients(&[Addressed::Agent(name)], &agents, (&quiet, &gone), &session_of).ok().and_then(|d| d.into_iter().next()).map(|(_, to)| to);
                 if !sid.is_some_and(|sid| members.contains(&sid)) {
                     return EnterAction::StatusOnly(format!("@{name} is not in #{channel}; nothing sent"));
                 }
@@ -208,24 +217,25 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
                 Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
             }
         } else {
-            send_to_recipients(&msg, &[Addressed::Group(channel)], &agents, &quiet, &session_of, person, Some(&to))
+            send_to_recipients(&msg, &[Addressed::Group(channel)], &agents, (&quiet, &gone), &session_of, person, Some(&to))
         }
     } else {
-        send_to_recipients(&msg, &recipients, &agents, &quiet, &session_of, person, None)
+        send_to_recipients(&msg, &recipients, &agents, (&quiet, &gone), &session_of, person, None)
     }
 }
 
 /// A direct message to the claude whose session id is `member`, in its
 /// project's tray, addressed to that session alone (ADR-401, `to`): what
 /// Enter sends from its DM view. A quiet agent is refused, as an `@Name`
-/// send to it is.
+/// send to it is: one whose process has exited for good, one that may yet
+/// read it until the send-now key sends it anyway.
 fn send_dm(msg: &str, member: &str, seen: &[Seen]) -> EnterAction {
     let Some(s) = seen.iter().find(|s| s.member == member && s.identity.is_claude) else {
         return EnterAction::StatusOnly("that agent is not known to the chat any more; nothing sent".into());
     };
     let name = &s.identity.nickname;
     if !s.live {
-        return EnterAction::StatusOnly(format!("@{name} is quiet (no heartbeat) and would not read this"));
+        return if attend_presence::has_exited(member) { Refusal::exited(name) } else { Refusal::quiet(name) }.action();
     }
     let dir = cwd_dir(&s.identity.cwd);
     match write_signal(&dir, msg, member) {
@@ -250,6 +260,54 @@ pub(super) fn quiet_names(seen: &[Seen]) -> Vec<String> {
     seen.iter().filter(|s| s.identity.is_claude && !s.live && !live(&s.identity.nickname)).map(|s| s.identity.nickname.clone()).collect()
 }
 
+/// The quiet names in `quiet` whose every session has exited on this host
+/// ([`attend_presence::has_exited`]): a send to one is refused for good,
+/// whatever key sent it.
+fn gone_names(seen: &[Seen], quiet: &[String]) -> Vec<String> {
+    let exited = |n: &str| {
+        seen.iter().filter(|s| s.identity.is_claude && !s.live && s.identity.nickname.eq_ignore_ascii_case(n)).all(|s| attend_presence::has_exited(&s.member))
+    };
+    quiet.iter().filter(|n| exited(n)).cloned().collect()
+}
+
+/// For the send-now key: a quiet agent that has not exited counts as live,
+/// so the send reaches it as it would a live one. A name a live agent
+/// answers to stays with the live one.
+fn wake_quiet(seen: &mut [Seen]) {
+    let quiet = quiet_names(seen);
+    for s in seen.iter_mut() {
+        if s.identity.is_claude && !s.live && quiet.iter().any(|q| q.eq_ignore_ascii_case(&s.identity.nickname)) && !attend_presence::has_exited(&s.member) {
+            s.live = true;
+        }
+    }
+}
+
+/// Why a send was refused. `Quiet`: the agent named may still read it, and
+/// the send-now key sends to it anyway. `Final`: anything else, in its own
+/// words.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Refusal {
+    Quiet(String),
+    Final(String),
+}
+
+impl Refusal {
+    fn quiet(name: &str) -> Self {
+        Refusal::Quiet(name.to_string())
+    }
+
+    fn exited(name: &str) -> Self {
+        Refusal::Final(format!("@{name} has exited and would not read this"))
+    }
+
+    fn action(self) -> EnterAction {
+        match self {
+            Refusal::Quiet(s) => EnterAction::Quiet(s),
+            Refusal::Final(s) => EnterAction::StatusOnly(s),
+        }
+    }
+}
+
 /// The channels `_groups.yaml` still names whose directory was swept, by
 /// name. Tab completes them and the column lists them; a send to one is
 /// refused, and the destination flag marks it.
@@ -265,7 +323,7 @@ fn send_to_recipients(
     msg: &str,
     recipients: &[Addressed<'_>],
     agents: &[KnownIdentity],
-    quiet: &[String],
+    quiet: (&[String], &[String]),
     session_of: &dyn Fn(&KnownIdentity) -> Option<String>,
     person: Option<&str>,
     addressed: Option<&str>,
@@ -273,7 +331,7 @@ fn send_to_recipients(
     // A recipient that cannot read it refuses the send, in its own words.
     let dests = match resolve_recipients(recipients, agents, quiet, session_of) {
         Ok(dests) => dests,
-        Err(refusal) => return EnterAction::StatusOnly(refusal),
+        Err(refusal) => return refusal.action(),
     };
     // Posting in a channel makes the person its member, before the
     // message is written, so the membership precedes what an agent
@@ -914,14 +972,15 @@ fn recipient_labels(recipients: &[Addressed<'_>]) -> Vec<String> {
 ///
 /// Tab completes quiet agents and swept channels, as the column lists
 /// them, so a send to one says why it is refused: an agent named in
-/// `quiet` has no heartbeat, and a channel whose directory was swept has
-/// nobody live to read it until someone joins it again.
+/// `quiet` has no heartbeat, which the send-now key overrides unless it is
+/// also in `gone`, its process exited, and a channel whose directory was
+/// swept has nobody live to read it until someone joins it again.
 fn resolve_recipients(
     recipients: &[Addressed<'_>],
     agents: &[KnownIdentity],
-    quiet: &[String],
+    (quiet, gone): (&[String], &[String]),
     session_of: &dyn Fn(&KnownIdentity) -> Option<String>,
-) -> Result<Vec<(std::path::PathBuf, String)>, String> {
+) -> Result<Vec<(std::path::PathBuf, String)>, Refusal> {
     let mut dests: Vec<(std::path::PathBuf, String)> = Vec::with_capacity(recipients.len());
     // Every agent addressed: each direct message carries the full set, as
     // RFC 5322 `To` does (ADR-401, `to`).
@@ -938,14 +997,14 @@ fn resolve_recipients(
                 // carry it to a live agent with a name like it.
                 let exact_live = agents.iter().filter(|k| k.is_claude && k.nickname.eq_ignore_ascii_case(name)).count();
                 if let Some(q) = quiet.iter().find(|q| exact_live == 0 && q.eq_ignore_ascii_case(name)) {
-                    return Err(format!("@{q} is quiet (no heartbeat) and would not read this"));
+                    return Err(if gone.contains(q) { Refusal::exited(q) } else { Refusal::quiet(q) });
                 }
                 // Two live sessions answering to one name: refused, as
                 // `attend message send --to` refuses an ambiguous name (ADR-401).
                 if exact_live > 1 {
-                    return Err(format!("@{name} names {exact_live} live sessions; nothing sent"));
+                    return Err(Refusal::Final(format!("@{name} names {exact_live} live sessions; nothing sent")));
                 }
-                let k = resolve_identity(name, agents).ok_or_else(|| format!("@{name}: unknown nickname"))?;
+                let k = resolve_identity(name, agents).ok_or_else(|| Refusal::Final(format!("@{name}: unknown nickname")))?;
                 let sid = session_of(k).unwrap_or_default();
                 if !sid.is_empty() && !sessions.contains(&sid) {
                     sessions.push(sid);
@@ -955,17 +1014,17 @@ fn resolve_recipients(
             Addressed::Group(name) => match resolve_group_dir(name) {
                 Some(dir) if live_peer_count(name, &self_member) > 0 => (dir, Some(format!("#{name}"))),
                 Some(dir) if !dir.is_dir() => {
-                    return Err(format!(
+                    return Err(Refusal::Final(format!(
                         "#{name} was swept; /join #{name} and invite a live agent to bring it back, or send to #open"
-                    ))
+                    )))
                 }
                 Some(_) => {
-                    return Err(format!(
+                    return Err(Refusal::Final(format!(
                         "#{name}: no live peers — message would not be read. \
                          Try #open to broadcast."
-                    ))
+                    )))
                 }
-                None => return Err(format!("#{name}: unknown group")),
+                None => return Err(Refusal::Final(format!("#{name}: unknown group"))),
             },
         };
         if !dests.iter().any(|(d, _)| *d == dir) {
@@ -1129,7 +1188,7 @@ mod tests {
 
     #[test]
     fn enter_empty_is_noop() {
-        match handle_enter("   ", &[], &Tab::Merged, None) {
+        match handle_enter("   ", &[], &Tab::Merged, None, false) {
             EnterAction::None => {}
             _ => panic!("empty input should produce EnterAction::None"),
         }
@@ -1638,14 +1697,16 @@ mod tests {
     fn a_send_to_a_quiet_agent_or_a_swept_channel_is_refused_in_its_own_words() {
         let live = [ident("Larks", "/w/larks")];
         let quiet = ["Lark".to_string()];
-        let to = |r: Addressed<'_>| resolve_recipients(&[r], &live, &quiet, &|_| None);
-        assert_eq!(to(Addressed::Agent("Lark")), Err("@Lark is quiet (no heartbeat) and would not read this".into()), "not carried to Larks by the fuzzy match");
+        let to = |r: Addressed<'_>| resolve_recipients(&[r], &live, (&quiet, &[]), &|_| None);
+        assert_eq!(to(Addressed::Agent("Lark")), Err(Refusal::Quiet("Lark".into())), "not carried to Larks by the fuzzy match");
+        let exited = resolve_recipients(&[Addressed::Agent("Lark")], &live, (&quiet, &quiet), &|_| None);
+        assert_eq!(exited, Err(Refusal::Final("@Lark has exited and would not read this".into())), "an exited agent is refused for good");
         assert!(to(Addressed::Agent("Larks")).is_ok(), "a live agent is sent to");
-        assert_eq!(to(Addressed::Agent("Nobody")), Err("@Nobody: unknown nickname".into()));
+        assert_eq!(to(Addressed::Agent("Nobody")), Err(Refusal::Final("@Nobody: unknown nickname".into())));
         let twins = [ident("Larks", "/w/larks"), ident("Larks", "/w/larks")];
         assert_eq!(
-            resolve_recipients(&[Addressed::Agent("Larks")], &twins, &[], &|_| None),
-            Err("@Larks names 2 live sessions; nothing sent".into()),
+            resolve_recipients(&[Addressed::Agent("Larks")], &twins, (&[], &[]), &|_| None),
+            Err(Refusal::Final("@Larks names 2 live sessions; nothing sent".into())),
             "two live sessions of one name are refused"
         );
         let seen = |name: &str, live: bool| Seen { identity: ident(name, &format!("/w/{name}")), live, member: name.into() };

@@ -683,6 +683,45 @@ describe('active', () => {
     expect(h.count('message inbox') > before).toBe(true)
   })
 
+  // A session hosted here has no attend run: the drain, listen on and the
+  // beat are what touch its heartbeat, and attend-chat reads a heartbeat
+  // older than 90 s as a session that is gone (the mod-session liveness
+  // defect of 2026-10-13).
+  test('the heartbeat stays fresh through a turn longer than the grace and a slow poll longer than it', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', slow_poll_seconds: 300 } })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    await clock.advance(1_000)
+    const touches = () =>
+      h.argvs.filter(a => {
+        const cmd = a.slice(1).join(' ')
+        return cmd.startsWith('message inbox --drain') || cmd.startsWith('listen on') || cmd === 'listen beat'
+      }).length
+    let t = 0
+    let last = 0
+    let seen = touches()
+    const longestGap = async (ms: number) => {
+      let gap = 0
+      for (let i = 0; i < ms / 5_000; i++) {
+        await clock.advance(5_000)
+        t += 5_000
+        if (touches() > seen) {
+          seen = touches()
+          last = t
+        }
+        gap = Math.max(gap, t - last)
+      }
+      return gap
+    }
+    await $.turn.start({ text: 'work', turnId: 't1' } as never)
+    const inTurn = await longestGap(5 * 60_000)
+    expect(inTurn < 90_000 ? 'fresh' : `stale for ${inTurn} ms`).toBe('fresh')
+    await $.turn.complete(done('t1'))
+    const quiet = await longestGap(40 * 60_000)
+    expect(quiet < 90_000 ? 'fresh' : `stale for ${quiet} ms`).toBe('fresh')
+  })
+
   test('the row shows peers, unread and channels from attend', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     host(on, {

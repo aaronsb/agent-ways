@@ -16,6 +16,7 @@ import type { EngineInterface, ProcessRunResult, PromptSubmitInput, PromptSubmit
 import type { AttendStatus } from '../types/index.d.ts'
 import {
   DEFAULT_CONFIG,
+  BEAT_ARGV,
   DRAIN_ARGV,
   KEEPWARM_CHECK_ARGV,
   LISTEN_OFF_ARGV,
@@ -69,6 +70,9 @@ const BATCH_MS = 2_000
 // The peer count and the keepwarm check run at most this often.
 const PEERS_EVERY_MS = 30_000
 const KEEPWARM_EVERY_MS = 60_000
+// The heartbeat is touched this often, a third of attend's 90 s liveness
+// grace (ADR-129), during a turn and at the slow interval alike.
+const BEAT_EVERY_MS = 30_000
 // Polls that retry a batch whose submit failed before it is let go.
 const SUBMIT_TRIES = 3
 // The $.store key naming the sessions that listened where the project's
@@ -101,6 +105,7 @@ type Mod = {
   lastPollMs: number
   lastPeersMs: number
   lastKeepwarmMs: number
+  lastBeatMs: number
   /** The last delivery, send, reply, join or turn. */
   lastActivityMs: number
   /** Short `~id` handles of delivered messages, to their full ids. */
@@ -297,14 +302,21 @@ function startTicker($: $, mod: Mod) {
   mod.ticker = $.clock.every(every, () => void tick($, mod, false))
 }
 
-/** One beat of the poll: drain while idle, refresh the row, run the keepwarm
- *  check. `force` skips the interval (activation, a turn's end). */
+/** One beat of the poll: touch the heartbeat, drain while idle, refresh the
+ *  row, run the keepwarm check. `force` skips the poll's interval
+ *  (activation, a turn's end). The heartbeat keeps its own interval, so a
+ *  turn or a slow poll longer than attend's grace does not leave the session
+ *  looking gone. */
 async function tick($: $, mod: Mod, force: boolean) {
   if (mod.isTicking) return
   if (!(await isOn($, mod))) return
   mod.isTicking = true
   try {
     const now = await $.clock.now()
+    if (now - mod.lastBeatMs >= BEAT_EVERY_MS) {
+      mod.lastBeatMs = now
+      await run($, BEAT_ARGV)
+    }
     const isTurnRunning = mod.running.size > 0
     const interval = pollInterval(mod.config, now - mod.lastActivityMs, isTurnRunning)
     if (!force && now - mod.lastPollMs < interval) return
@@ -510,6 +522,7 @@ export const register: Register = on => {
     lastPollMs: 0,
     lastPeersMs: 0,
     lastKeepwarmMs: 0,
+    lastBeatMs: 0,
     lastActivityMs: 0,
     ids: new Map(),
     active: false,

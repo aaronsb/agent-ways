@@ -634,14 +634,16 @@ pub fn validate_group_name(name: &str) -> Result<(), String> {
 }
 
 /// Whether a member is still alive for cleanup: [`attend_presence::alive`]
-/// with no process scan, so only a fresh heartbeat counts (ADR-129). A
-/// claude session's attend touches its heartbeat on every tick, and an
-/// enrolled session's drain at every turn end; a human's attend-chat
-/// touches the username heartbeat on its refresh tick (ADR-170).
+/// with no process scan. A fresh heartbeat counts (ADR-129): a claude
+/// session's attend touches it on every tick, an enrolled session's drain
+/// at every turn end and the attend mod's `listen beat` every 30 seconds;
+/// a human's attend-chat touches the username heartbeat on its refresh tick
+/// (ADR-170). So does a listening session whose recorded Claude Code process
+/// still runs on this host (ADR-129, addendum of 2026-10-13), so a member
+/// through a long turn is not pruned.
 ///
-/// Running Claude processes are not consulted: a claude with no running
-/// attend cannot participate in the focus-group mesh, so for cleanup
-/// purposes it is functionally identical to a dead claude.
+/// A Claude process that never listened is not consulted: with nothing
+/// to deliver to it, for cleanup purposes it is as good as a dead claude.
 pub fn member_alive(member_id: &str) -> bool {
     attend_presence::alive(member_id, &std::collections::HashSet::new())
 }

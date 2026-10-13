@@ -63,12 +63,14 @@ impl SessionIdentity {
         self.session_resolved && self.origin_resolved
     }
 
-    /// The key of the Claude Code process this session runs in: its pid and
-    /// start time, which together outlive a session-id change (`/clear`)
-    /// and are never reused for another process.
+    /// The key of the Claude Code process this session runs in:
+    /// `<pid>-<start time>@<host>`. Pid and start time together outlive a
+    /// session-id change (`/clear`) and are never reused for another
+    /// process; the host scopes them, so a cache shared between hosts
+    /// never has one host judge another's pid.
     pub fn claude_key(&self) -> Option<String> {
         let pid = self.claude_pid?;
-        Some(format!("{pid}-{}", crate::process::start_time(pid)?))
+        Some(format!("{pid}-{}@{}", crate::process::start_time(pid)?, crate::process::host_name()))
     }
 }
 

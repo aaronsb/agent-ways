@@ -834,6 +834,11 @@ impl ChatPane {
                 self.say(s, true);
                 false
             }
+            // A menu's command sends nothing, so it makes no send-now offer.
+            EnterAction::Quiet(name) => {
+                self.say(format!("@{name} is quiet (no heartbeat)"), true);
+                false
+            }
             EnterAction::ClearWithStatusAndFocus { status, focus } => {
                 self.say(status, false);
                 self.set_tab(focus);

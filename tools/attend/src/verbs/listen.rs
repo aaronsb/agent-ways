@@ -93,6 +93,26 @@ pub fn off() -> Result<Listening, ListenError> {
     Ok(state(&me, listening))
 }
 
+/// Touch the heartbeat of a listening session, and deliver nothing. After
+/// a `/clear` it first moves the enrollment the session's earlier id made
+/// under this Claude Code process to the current id, as the drain does
+/// ([`adopt_previous_enrollment`]), so the beat lands on the id the session
+/// goes on under. The attend mod calls it on its own timer, since its poll
+/// and the Stop-hook drain, which also touch the heartbeat, run only between
+/// turns (ADR-129, addendum of 2026-10-13). A session that does not listen
+/// is written nothing, as the drain writes it nothing.
+pub fn beat() -> Result<Listening, ListenError> {
+    let me = current_session();
+    if !me.resolved() {
+        return Err(ListenError::Unresolved);
+    }
+    let listening = adopt_previous_enrollment(&me);
+    if listening {
+        attend_presence::heartbeat::touch(&me.session_id).map_err(|e| ListenError::Unwritable { error: e.to_string() })?;
+    }
+    Ok(state(&me, listening))
+}
+
 fn state(me: &Session, listening: bool) -> Listening {
     let resolved = me.resolved();
     Listening {

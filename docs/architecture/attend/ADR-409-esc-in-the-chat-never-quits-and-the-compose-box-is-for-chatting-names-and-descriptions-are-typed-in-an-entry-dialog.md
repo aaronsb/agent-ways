@@ -27,6 +27,11 @@ basis:
     level: directed
     said: 1. digits only work on channel rows. 2. a. 3. agree with new behavior 4. keep 5. keep 6. keep the mark and add count on tab. 7. thats correct as built 8. agree- its a single char column and makes sense. 9. correct. 10. correct.
     via: 'the operator''s answers to the design questions in PR #972, given to the head session, 2026-10-13'
+  - operator: aaronsb
+    level: directed
+    said: 'we could also add on "use ctrl+enter to send anyway" / or something like that / this is the exact same convention that claude code has to force message you (interrupting your turn) / terminals that don''t take ctrl+enter could be ''press enter again to send'' or something'
+    via: the operator's chat message to the head session, 2026-10-13
+  - upstream: "Claude Code keybindings reference (code.claude.com/docs/en/keybindings): `chat:sendNow`, default Ctrl+Enter and Ctrl+X Ctrl+S, sends the queued messages and the draft right away; terminals that don't report extended keys deliver Ctrl+Enter as plain Enter"
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -137,3 +142,12 @@ A review of the nav polish found that ↑ or ↓ on an empty compose box left it
 - Outside the box, `q` asks `quit?` on the bar, whatever is unsaved; yes goes on through the exit guard over a draft. Ctrl-C quits as before.
 - A plain digit picks a channel by the column's number only while the focus is on a channel's row (ADR-407's amendment C). Elsewhere, an agent's row and the tab bar included, a digit is typed into the box, like any other character.
 - At the exit guard over the entry dialog, typing reaches neither the dialog nor the compose draft, and Esc goes back to the dialog as it was (ADR-504, note of 2026-10-13: a modal's own buttons answer it).
+
+## Amendment (2026-10-13): a send refused because its agent is quiet can be sent now
+
+A send to an agent the chat reads as quiet was refused with no way past it, though a quiet agent can still read what is sent: one whose heartbeat lapsed through a long turn, one on another host, one that has not listened yet. The operator asked for Claude Code's own convention for sending at once, with a fallback where the key does not arrive.
+
+- A send refused because its agent is quiet offers the send-now key, key first so an 80-column status line keeps it: `press Enter again to send: @Name is quiet (no heartbeat)`, or `Ctrl+Enter or Enter again to send now: @Name is quiet (no heartbeat)` where the terminal reports Ctrl+Enter (the kitty keyboard protocol). The status line names only a key that arrives.
+- Enter pressed again on the unchanged draft sends it, and so does Ctrl+Enter, which mirrors Claude Code's `chat:sendNow`. Ctrl+Enter sends at once with no refusal first. Any edit to the draft, a completion and Esc withdraw the offer, and the next Enter refuses afresh.
+- An agent whose Claude Code process has exited on this host is refused whatever the key: `@Name has exited and would not read this`. attend-presence tells the two apart (ADR-129, addendum of 2026-10-13).
+- The same holds for an `@Name` send and for a send from an agent's DM view. Claude Code's chord fallback, Ctrl+X Ctrl+S, is not bound: Enter again is the fallback the operator named.

@@ -111,6 +111,99 @@ fn cwd_by_command(_pid: u32) -> Option<String> {
     None
 }
 
+/// This host's name, as a process key records it: the characters a file
+/// name takes everywhere (letters, digits, `.`, `-`, `_`), others made `_`.
+/// `unknown` where the name cannot be read.
+pub fn host_name() -> String {
+    use std::sync::OnceLock;
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| {
+        let raw = read_host_name().unwrap_or_default();
+        let name: String = raw.trim().chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' }).collect();
+        if name.is_empty() { "unknown".into() } else { name }
+    })
+    .clone()
+}
+
+#[cfg(unix)]
+fn read_host_name() -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: the buffer is writable for its whole length, and the name is
+    // read up to the first NUL inside it.
+    let ret = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+    if ret != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+    Some(String::from_utf8_lossy(&buf[..end]).into_owned())
+}
+
+#[cfg(not(unix))]
+fn read_host_name() -> Option<String> {
+    std::env::var("COMPUTERNAME").ok()
+}
+
+/// When `pid` started, as a time, or `None` when it cannot be read. Linux
+/// reads `/proc`; other Unix systems ask `ps` for the elapsed time, to the
+/// second; Windows answers `None`.
+pub fn started_at(pid: u32) -> Option<std::time::SystemTime> {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    #[cfg(target_os = "linux")]
+    if proc_mounted() {
+        let ticks: u64 = start_time(pid)?.parse().ok()?;
+        let stat = std::fs::read_to_string("/proc/stat").ok()?;
+        let boot: u64 = stat.lines().find_map(|l| l.strip_prefix("btime "))?.trim().parse().ok()?;
+        // SAFETY: sysconf reads a constant of the system.
+        let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+        let hz = u64::try_from(hz).ok().filter(|h| *h > 0)?;
+        return Some(UNIX_EPOCH + Duration::from_secs(boot) + Duration::from_millis(ticks * 1000 / hz));
+    }
+    #[cfg(unix)]
+    {
+        let out = Command::new("ps").args(["-p", &pid.to_string(), "-o", "etime="]).output().ok()?;
+        let elapsed = parse_etime(String::from_utf8_lossy(&out.stdout).trim())?;
+        SystemTime::now().checked_sub(Duration::from_secs(elapsed))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, SystemTime::now(), UNIX_EPOCH, Duration::ZERO);
+        None
+    }
+}
+
+/// `ps -o etime` as seconds: `[[dd-]hh:]mm:ss`.
+#[cfg(unix)]
+fn parse_etime(s: &str) -> Option<u64> {
+    let (days, rest) = match s.split_once('-') {
+        Some((d, r)) => (d.parse::<u64>().ok()?, r),
+        None => (0, s),
+    };
+    let parts: Vec<u64> = rest.split(':').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    let secs = match parts.as_slice() {
+        [m, s] => m * 60 + s,
+        [h, m, s] => h * 3600 + m * 60 + s,
+        _ => return None,
+    };
+    Some(days * 86_400 + secs)
+}
+
+/// Whether a process holds `pid`. A cheap test before [`start_time`]: on Unix
+/// a signal-0 `kill`, which asks `ps` nothing; elsewhere the start time is
+/// read.
+pub fn is_running(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
+        // SAFETY: signal 0 delivers nothing; the call only checks the pid.
+        let ret = unsafe { libc::kill(pid, 0) };
+        ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+    #[cfg(not(unix))]
+    {
+        start_time(pid).is_some()
+    }
+}
+
 /// When `pid` started, as an opaque string that differs between two
 /// processes that had the same pid. `None` when the process is gone.
 pub fn start_time(pid: u32) -> Option<String> {
@@ -222,6 +315,23 @@ pub fn has_ancestor(pid: u32, ancestor: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(unix)]
+    #[test]
+    fn ps_elapsed_times_read_as_seconds() {
+        assert_eq!(parse_etime("05:07"), Some(307));
+        assert_eq!(parse_etime("02:05:07"), Some(7507));
+        assert_eq!(parse_etime("3-02:05:07"), Some(3 * 86_400 + 7507));
+        assert_eq!(parse_etime("soon"), None);
+    }
+
+    #[test]
+    fn this_process_started_before_now_and_the_host_has_a_name() {
+        let began = started_at(std::process::id()).expect("this process's start");
+        assert!(began <= std::time::SystemTime::now());
+        assert!(std::time::SystemTime::now().duration_since(began).unwrap() < std::time::Duration::from_secs(3600));
+        assert!(!host_name().is_empty() && !host_name().contains('@'));
+    }
     use super::*;
 
     #[test]

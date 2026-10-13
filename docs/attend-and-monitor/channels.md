@@ -62,7 +62,7 @@ Membership is self-reported: a session adds and removes itself, and nothing veri
 
 ## Stale members
 
-A member is live while its heartbeat in attend's cache is fresh (90 seconds, ADR-129). `attend run` touches a session's heartbeat on every tick, the Stop-hook drain at every turn end, and attend-chat touches the human's while it is open. `attend channel` prunes members whose heartbeat is stale, and removes any unpinned channel that pruning empties. It also removes an `@<name>/` directory that `_groups.yaml` has no entry for, once the directory is older than a grace window.
+A member is live while its heartbeat in attend's cache is fresh (90 seconds, ADR-129), or while it listens and the Claude Code process it enrolled in runs on this host. `attend run` touches a session's heartbeat on every tick, the Stop-hook drain at every turn end, the attend mod every 30 seconds through `attend listen beat`, and attend-chat touches the human's while it is open. `attend channel` prunes members that are not live, and removes any unpinned channel that pruning empties. It also removes an `@<name>/` directory that `_groups.yaml` has no entry for, once the directory is older than a grace window.
 
 ## How joined channels are read
 

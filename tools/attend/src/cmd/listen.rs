@@ -6,13 +6,14 @@ use attend_presence::enrollment::Host;
 use crate::verbs::listen::{self, Listening};
 use crate::verbs::unread;
 
-/// `attend listen on|off|status`. Prints the state that results, `listening`
+/// `attend listen on|off|status|beat`. Prints the state that results, `listening`
 /// or `not listening`; `--json` prints [`Listening`].
 pub(crate) fn cmd_listen(sub: ListenCmd, json: bool) {
     let result = match sub {
         ListenCmd::On { host } => listen::on(host.map(|ListenHost::Mod| Host::Mod)),
         ListenCmd::Off => listen::off(),
         ListenCmd::Status => Ok(listen::status()),
+        ListenCmd::Beat => listen::beat(),
     };
     let state = match result {
         Ok(state) => state,

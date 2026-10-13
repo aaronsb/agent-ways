@@ -16,9 +16,11 @@
 //!   mod turned listening on (ADR-406), so the drain speaks that host's
 //!   tools. `<key>` is the Claude Code process the mod ran in: the host
 //!   holds only for that process, since a resumed session may have no mod;
-//! - `claude <key>`, the Claude Code process the session ran in (pid and
-//!   start time), so a session whose id changes under the same process
-//!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it;
+//! - `claude <key>`, the Claude Code process the session ran in (pid, start
+//!   time and host, `<pid>-<start>@<host>`), so a session whose id changes
+//!   under the same process (`/clear`) can find its enrollment again.
+//!   `by-claude/<pid>-<start>` indexes it, the host left out so a renamed
+//!   host still finds it;
 //! - `since <secs>`, when the session last went from not listening to
 //!   listening, in seconds since the epoch. From then it is a member of
 //!   `#open` (ADR-404 D3a), so its cold start replays what was posted there
@@ -184,7 +186,7 @@ fn write(session_id: &str, record: &Record) -> io::Result<()> {
     }
     agent_settings::writer::write_atomic(&p, record.render())?;
     if let Some(key) = &record.claude {
-        agent_settings::writer::write_atomic(&index_path(key), session_id)?;
+        agent_settings::writer::write_atomic(&index_path(process_part(key)), session_id)?;
     }
     Ok(())
 }
@@ -220,6 +222,70 @@ pub fn is_enrolled(session_id: &str) -> bool {
         return false;
     }
     !record.sources.is_empty()
+}
+
+/// Whether `session_id` listens and the Claude Code process it enrolled in
+/// still runs on this host: the pid of the record's `claude` key is held by
+/// the process that started when the key says. Reads only: a pending
+/// opt-out counts as not listening once no `attend run` holds the session,
+/// and the record is left for [`is_enrolled`] to apply it. A process on
+/// another host reads as not running, so a session there is judged by its
+/// heartbeat alone (ADR-406 item 12).
+pub fn process_is_live(session_id: &str) -> bool {
+    let Some(record) = read(session_id).filter(|r| !r.sources.is_empty()) else { return false };
+    if record.optout && !crate::heartbeat::run_is_live(session_id) {
+        return false;
+    }
+    record.claude.as_deref().map(process_fact) == Some(Fact::Running)
+}
+
+/// Whether `session_id`'s enrollment record names a Claude Code process
+/// of this host that is no longer running. False with no record, a record
+/// that names no process, or a key from another host or with no host:
+/// nothing here says the session has gone.
+pub fn process_has_exited(session_id: &str) -> bool {
+    read(session_id).and_then(|r| r.claude).map(|key| process_fact(&key)) == Some(Fact::Exited)
+}
+
+/// What this host can say of the process a key names.
+#[derive(Debug, PartialEq, Eq)]
+enum Fact {
+    /// The pid is held by the process that started at the key's time.
+    Running,
+    /// The pid is free, or held by a process that started later.
+    Exited,
+    /// The key is another host's, or names no host (a record from before
+    /// keys carried one): this host cannot judge its pid.
+    Unknown,
+}
+
+/// The fact for a `<pid>-<start time>@<host>` key.
+fn process_fact(key: &str) -> Fact {
+    let Some((process, host)) = key.rsplit_once('@') else { return Fact::Unknown };
+    if host != crate::process::host_name() {
+        return Fact::Unknown;
+    }
+    let Some((pid, started)) = process.split_once('-') else { return Fact::Unknown };
+    let Ok(pid) = pid.parse::<u32>() else { return Fact::Unknown };
+    if crate::process::is_running(pid) && crate::process::start_time(pid).as_deref() == Some(started) {
+        Fact::Running
+    } else {
+        Fact::Exited
+    }
+}
+
+/// A key's `<pid>-<start>`, its host dropped: what names a process to
+/// itself. A host can be renamed while its processes run (a laptop moving
+/// networks), so only liveness judgments read the host.
+fn process_part(key: &str) -> &str {
+    key.rsplit_once('@').map_or(key, |(process, _)| process)
+}
+
+/// Whether `recorded`, a key in a record, names the process `own` does: the
+/// same pid and start time, whatever host name either was written under,
+/// and a key written before keys carried a host among them.
+fn same_process(recorded: &str, own: &str) -> bool {
+    process_part(recorded) == process_part(own)
 }
 
 /// The ways `session_id` enrolled, empty when it is not enrolled.
@@ -268,7 +334,14 @@ pub fn listening_since(session_id: &str) -> Option<std::time::SystemTime> {
 /// dormant. The mod records itself again when it turns listening on.
 pub fn host(session_id: &str) -> Option<Host> {
     let h = read(session_id).filter(|r| !r.sources.is_empty()).and_then(|r| r.host)?;
-    (h.claude == own_claude_key()).then_some(h.host)
+    // Outside any Claude Code process (a shell, a CI runner) neither side
+    // has a key, and a host recorded there holds there.
+    let here = match (h.claude.as_deref(), own_claude_key()) {
+        (Some(recorded), Some(own)) => same_process(recorded, &own),
+        (None, None) => true,
+        _ => false,
+    };
+    here.then_some(h.host)
 }
 
 /// Withdraw one way `session_id` enrolled. The session stays enrolled while
@@ -361,10 +434,13 @@ pub fn any_indexed() -> bool {
 
 /// The enrolled session recorded for the Claude Code process `claude_key`,
 /// when it is not `current`: the id this process had before `/clear`.
+/// The index is kept under the key's process part, so a renamed host, or an
+/// entry written before keys carried a host, still finds it.
 pub fn previous_id(claude_key: &str, current: &str) -> Option<String> {
-    let sid = fs::read_to_string(index_path(claude_key)).ok()?;
+    let sid = fs::read_to_string(index_path(process_part(claude_key))).ok()?;
     let sid = sid.trim();
-    (sid != current && read(sid).is_some_and(|r| r.claude.as_deref() == Some(claude_key))).then(|| sid.to_string())
+    let same = |r: Record| r.claude.as_deref().is_some_and(|k| same_process(k, claude_key));
+    (sid != current && read(sid).is_some_and(same)).then(|| sid.to_string())
 }
 
 #[cfg(test)]
@@ -386,6 +462,99 @@ mod tests {
             None => std::env::remove_var("XDG_CACHE_HOME"),
         }
         fs::remove_dir_all(&root).ok();
+    }
+
+    /// A record enrolled under the Claude Code process `key`, as `enroll`
+    /// writes one from inside a session.
+    fn enroll_in(session_id: &str, key: &str) {
+        edit(session_id, |r| {
+            r.sources.push(Source::Listen);
+            r.claude = Some(key.to_string());
+        })
+        .unwrap();
+    }
+
+    /// This test process, keyed as a Claude Code process is.
+    fn own_key() -> String {
+        let pid = std::process::id();
+        format!("{pid}-{}@{}", crate::process::start_time(pid).unwrap(), crate::process::host_name())
+    }
+
+    /// A pid no process holds now: a child that has exited and been reaped.
+    fn gone_pid() -> u32 {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    }
+
+    // A session whose heartbeat lapsed during a long turn, while its Claude
+    // Code process ran on and it listened, is alive; one whose process has
+    // exited, or that no longer listens, is gone (the mod-session
+    // liveness defect of 2026-10-13).
+    #[test]
+    fn a_listening_session_whose_process_runs_is_alive_without_a_heartbeat() {
+        with_cache(|| {
+            let none = std::collections::HashSet::new();
+            enroll_in("running", &own_key());
+            assert!(!crate::heartbeat::heartbeat_path("running").exists());
+            assert!(crate::alive("running", &none), "its Claude Code process runs and it listens");
+
+            enroll_in("exited", &format!("{}-1@{}", gone_pid(), crate::process::host_name()));
+            assert!(!crate::alive("exited", &none), "its process has exited");
+
+            let pid = std::process::id();
+            enroll_in("reused", &format!("{pid}-not-when-it-started@{}", crate::process::host_name()));
+            assert!(!crate::alive("reused", &none), "the pid is another process's now");
+
+            enroll_in("left", &own_key());
+            opt_out("left").unwrap();
+            assert!(!crate::alive("left", &none), "it stopped listening");
+            assert!(!crate::alive("never", &none), "it never enrolled");
+        });
+    }
+
+    #[test]
+    fn a_session_has_exited_only_when_this_host_saw_its_process_go() {
+        with_cache(|| {
+            enroll_in("running", &own_key());
+            assert!(!crate::has_exited("running"));
+            enroll_in("exited", &format!("{}-1@{}", gone_pid(), crate::process::host_name()));
+            assert!(crate::has_exited("exited"));
+            assert!(!crate::has_exited("unknown"), "no record: perhaps another host, perhaps not listening");
+        });
+    }
+
+    // Review of #998, finding 2: with a cache shared between hosts, a key
+    // recorded on another host names a pid this host cannot judge. It is
+    // neither alive nor exited, so the session reads as quiet.
+    #[test]
+    fn a_process_key_from_another_host_is_neither_alive_nor_exited() {
+        with_cache(|| {
+            let none = std::collections::HashSet::new();
+            let pid = std::process::id();
+            let start = crate::process::start_time(pid).unwrap();
+            enroll_in("there", &format!("{pid}-{start}@another-host"));
+            assert!(!crate::alive("there", &none), "a pid on another host is not this process");
+            assert!(!crate::has_exited("there"), "nor is it known to have exited");
+            enroll_in("there-gone", &format!("{}-1@another-host", gone_pid()));
+            assert!(!crate::has_exited("there-gone"), "a pid this host does not hold says nothing of another host");
+            enroll_in("legacy", &format!("{}-1", gone_pid()));
+            assert!(!crate::has_exited("legacy"), "a key with no host is not judged either");
+        });
+    }
+
+    // Re-review of #998: a host can be renamed while its processes run (a
+    // laptop moving networks). The process is the same, so its own records
+    // are found again under the new name; only liveness reads the host.
+    #[test]
+    fn a_renamed_host_still_finds_its_own_process() {
+        with_cache(|| {
+            enroll_in("before", "123-456@host-a");
+            assert_eq!(previous_id("123-456@host-b", "after"), Some("before".to_string()), "a /clear after the rename still adopts");
+            assert!(same_process("123-456@host-a", "123-456@host-b"), "the own-process match ignores the host");
+            assert!(!same_process("123-457@host-a", "123-456@host-a"), "another process is still another");
+        });
     }
 
     #[test]
