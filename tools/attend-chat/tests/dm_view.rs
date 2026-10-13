@@ -230,6 +230,7 @@ fn hiding_the_view_keeps_its_messages_and_showing_it_again_lists_them() {
     assert!(items(&mut c).iter().any(|i| i == "Hide DMs"), "{:?}", items(&mut c));
     pick(&mut c, "Hide DMs");
     assert!(!column(&mut c).iter().any(|r| r.contains("DMs")), "the row is gone: {}", screen(&mut c));
+    assert!(column(&mut c).iter().any(|r| r.starts_with('▸') && r.contains("alpha")), "the keyboard on alpha's row: {}", screen(&mut c));
     assert_eq!(c.foreground(), &Tab::Merged, "the operator view, where the DMs also show");
     assert_eq!(c.signals().len(), before, "nothing deleted");
     assert!(feed(&mut c).contains("alpha to you"), "the operator view still lists the DM");

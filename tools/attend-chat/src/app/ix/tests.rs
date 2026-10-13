@@ -525,6 +525,17 @@ fn a_dm_row_is_a_stop_of_the_column() {
     assert!(!Ix { focus: Focus::Row(1), row_hit: Some(dm("a1")), ..Ix::default() }.ctx().digits, "a digit on a DM row is typed: it carries no number");
 }
 
+/// A DM view hidden while the keyboard is on its row: the keyboard goes to
+/// its agent's row, not to the row that took the index.
+#[test]
+fn a_hidden_dm_row_gives_the_keyboard_to_its_agent() {
+    use Effect::*;
+    let on_dm = Ix { focus: Focus::Row(2), row_hit: Some(dm("a2")), last_nav: Some((Focus::Row(2), Some(dm("a2")))), ..Ix::default() };
+    let hidden = view();
+    let want = Ix { focus: Focus::Row(1), row_hit: Some(agent("a2")), last_nav: Some((Focus::Row(1), Some(agent("a2")))), ..Ix::default() };
+    check_all(vec![cell("the DM row gone: its agent's row", on_dm, Ev::WorldChanged, hidden, want, vec![Follow])]);
+}
+
 /// Tab and Shift+Tab are mirrors around the one ring: from every element,
 /// N steps forward then N back come home, for every N round the ring, in
 /// every view.

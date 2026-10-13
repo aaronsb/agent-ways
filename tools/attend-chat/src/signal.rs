@@ -116,6 +116,14 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
+    // A direct message the person at this chat sent, in a cwd tray (its
+    // own, which the chat watches), is what it sent, to whom.
+    let mut channel = channel_for_path(path);
+    if let (Channel::Direct, Some("human"), Some(to)) = (&channel, parsed.from_kind, parsed.to) {
+        if parsed.from_id == Some(human_member_id().as_str()) {
+            channel = Channel::Sent(to.to_string());
+        }
+    }
     Some(Signal {
         id,
         from: parsed.from.to_string(),
@@ -124,7 +132,7 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
         reply_to: parsed.reply_to.map(str::to_string),
         message: parsed.message.to_string(),
         ts,
-        channel: channel_for_path(path),
+        channel,
     })
 }
 
@@ -347,6 +355,23 @@ mod tests {
         let pdir = d.join("_people").join("aaron");
         fs::create_dir_all(&pdir).unwrap();
         assert_eq!(parse_file(&tmp_signal(&pdir, "s", body)).unwrap().channel, Channel::Person);
+    }
+
+    /// A direct message the person at this chat sent, read back from a cwd
+    /// tray (the chat's own, which it watches), is what it sent, to whom:
+    /// the DM view of its recipient shows it. Anyone else's is direct.
+    #[test]
+    fn a_dm_the_person_sent_reads_back_as_sent() {
+        let d = tempdir_like();
+        let tray = d.join("-work-alpha");
+        fs::create_dir_all(&tray).unwrap();
+        let me = human_member_id();
+        let line = |id: &str| {
+            let env = agent_identity::Envelope { from_kind: Some("human"), from_id: Some(id), on_behalf_of: None, to: Some("s1") };
+            agent_identity::signal::format_tagged("external:x@pts", "alpha", "/work/alpha", &env, None, "hello")
+        };
+        assert_eq!(parse_file(&tmp_signal(&tray, "mine", &line(&me))).unwrap().channel, Channel::Sent("s1".into()));
+        assert_eq!(parse_file(&tmp_signal(&tray, "theirs", &line("someone-else"))).unwrap().channel, Channel::Direct);
     }
 
     #[test]
