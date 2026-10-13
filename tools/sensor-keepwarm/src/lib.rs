@@ -41,6 +41,14 @@ pub const DEFAULT_WINDOW_SECS: u64 = 6 * 60 * 60;
 pub const BIG_TOKENS: u64 = 50_000;
 /// A cold write is only scored against a prior context above this.
 pub const MISS_FLOOR_TOKENS: u64 = 20_000;
+/// The wake gate counts a cache lapsed this long before its tier's TTL: a
+/// transcript line is written up to tens of seconds after the request
+/// that refreshed the cache.
+pub const GATE_MARGIN_SECS: u64 = 120;
+/// The five-minute cache tier's TTL.
+pub const TTL_5M_SECS: u64 = 5 * 60;
+/// How long `ways context` may run before its reading counts as unknown.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 // ── Prices ─────────────────────────────────────────────────────
 
@@ -231,12 +239,25 @@ pub struct UsageEntry {
     pub cache_creation: u64,
     #[serde(default)]
     pub output: u64,
+    /// The cache tier this request wrote at, `1h` or `5m`.
+    #[serde(default)]
+    pub tier: String,
 }
 
 impl UsageEntry {
     /// The context the API saw on this request.
     pub fn context(&self) -> u64 {
         self.input + self.cache_read + self.cache_creation
+    }
+
+    /// How long the cache this request refreshed lives: five minutes on the
+    /// `5m` tier, else the main conversation's hour.
+    pub fn ttl_secs(&self) -> u64 {
+        if self.tier == "5m" {
+            TTL_5M_SECS
+        } else {
+            TTL_SECS
+        }
     }
 }
 
@@ -257,17 +278,62 @@ impl Reading {
     }
 }
 
-/// Run `ways context --json --session <id>` and parse it.
+/// Whether the prompt cache has lapsed at `now`, for the wake gate (ADR-406
+/// item 1). The clock is keepwarm's, the newest assistant turn in the
+/// transcript, against that turn's own tier, less [`GATE_MARGIN_SECS`]. A
+/// reading that cannot be had, or that holds no turn, counts as lapsed, so
+/// a session whose last activity is unknown is never woken.
+pub fn cache_lapsed(reading: Option<&Reading>, now: u64) -> bool {
+    match reading.and_then(|r| r.usage_tail.last()) {
+        Some(last) if last.at_epoch > 0 => now.saturating_sub(last.at_epoch) >= last.ttl_secs().saturating_sub(GATE_MARGIN_SECS),
+        _ => true,
+    }
+}
+
+/// [`cache_lapsed`] on the transcript of `session_id`, read now.
+pub fn session_cache_lapsed(session_id: &str, working_dir: &str, now: u64) -> bool {
+    cache_lapsed(read_context(session_id, working_dir).as_ref(), now)
+}
+
+/// Run `ways context --json --session <id>` and parse it. `None` when it
+/// fails, prints something else, or runs past [`READ_TIMEOUT`], in which
+/// case it is killed: a hung `ways` never stalls the caller, and never
+/// outlives it by more than the timeout.
 pub fn read_context(session_id: &str, working_dir: &str) -> Option<Reading> {
-    let output = Command::new("ways")
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = Command::new("ways")
         .args(["context", "--json", "--session", session_id])
         .current_dir(working_dir)
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .ok()?;
-    if !output.status.success() {
+    // Read on a thread, so a reading larger than the pipe's buffer cannot
+    // hold the child open past the deadline.
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        stdout.read_to_end(&mut out).ok().map(|_| out)
+    });
+    let deadline = std::time::Instant::now() + READ_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                child.kill().ok();
+                child.wait().ok();
+                return None;
+            }
+        }
+    };
+    let out = reader.join().ok()??;
+    if !status.success() {
         return None;
     }
-    serde_json::from_slice(&output.stdout).ok()
+    serde_json::from_slice(&out).ok()
 }
 
 // ── State and the decision ─────────────────────────────────────
@@ -700,7 +766,7 @@ mod tests {
     }
 
     fn entry(at: u64, read: u64, write: u64) -> UsageEntry {
-        UsageEntry { at_epoch: at, model: "claude-fable-5-1".into(), input: 20, cache_read: read, cache_creation: write, output: 5 }
+        UsageEntry { at_epoch: at, model: "claude-fable-5-1".into(), input: 20, cache_read: read, cache_creation: write, output: 5, tier: "1h".into() }
     }
 
     fn reading(entries: Vec<UsageEntry>) -> Reading {
@@ -720,6 +786,41 @@ mod tests {
         assert!(out.observations.is_empty());
         assert!(s.baselined);
         (s, r)
+    }
+
+    /// The wake gate's clock: the newest turn, its tier's TTL less the
+    /// margin back or more, is a lapsed cache; a missing reading or one with
+    /// no turn counts as lapsed.
+    #[test]
+    fn the_cache_lapses_a_margin_before_the_tier_ttl_and_unknown_is_lapsed() {
+        let r = reading(vec![entry(900, 200_000, 0), entry(1000, 200_000, 500)]);
+        assert!(!cache_lapsed(Some(&r), 1000 + PING_AFTER_SECS));
+        assert!(!cache_lapsed(Some(&r), 1000 + TTL_SECS - GATE_MARGIN_SECS - 1));
+        assert!(cache_lapsed(Some(&r), 1000 + TTL_SECS - GATE_MARGIN_SECS));
+        assert!(cache_lapsed(Some(&reading(Vec::new())), 1000));
+        assert!(cache_lapsed(None, 1000));
+    }
+
+    /// A turn on the five-minute tier lapses on its own clock; the newest
+    /// turn's tier decides.
+    #[test]
+    fn a_five_minute_tier_turn_lapses_on_its_own_clock() {
+        let mut short = entry(1000, 200_000, 500);
+        short.tier = "5m".into();
+        let r = reading(vec![entry(900, 200_000, 0), short.clone()]);
+        assert!(!cache_lapsed(Some(&r), 1000 + TTL_5M_SECS - GATE_MARGIN_SECS - 1));
+        assert!(cache_lapsed(Some(&r), 1000 + TTL_5M_SECS - GATE_MARGIN_SECS));
+        let mut long = entry(1100, 200_000, 500);
+        long.tier = "1h".into();
+        let r = reading(vec![short, long]);
+        assert!(!cache_lapsed(Some(&r), 1100 + 30 * 60));
+    }
+
+    /// The tier comes from `ways context --json`.
+    #[test]
+    fn the_tier_is_read_from_the_usage_entry() {
+        let r: Reading = serde_json::from_str(r#"{"usage_tail":[{"at_epoch":5,"tier":"5m"}]}"#).unwrap();
+        assert_eq!(r.usage_tail[0].ttl_secs(), TTL_5M_SECS);
     }
 
     /// A state resumed from the ledger steps as the one that wrote it would:

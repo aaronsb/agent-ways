@@ -68,7 +68,11 @@ pub(crate) enum Commands {
         /// would wake this session, one addressed to it, sent to its
         /// project, or a reply to a message it sent; then deliver all that
         /// is pending. `#open` and channel posts alone wait for the next
-        /// turn (ADR-406 item 1). The attend mod polls with it while idle.
+        /// turn (ADR-406 item 1). Once the session's prompt cache has
+        /// lapsed (its tier's TTL less two minutes after its last turn, or
+        /// no transcript readable in five seconds), nothing wakes it: the
+        /// drain delivers nothing and reports `cache_lapsed`. The attend
+        /// mod polls with it while idle.
         #[arg(long, requires = "drain")]
         wake: bool,
 

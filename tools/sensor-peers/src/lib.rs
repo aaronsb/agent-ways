@@ -13,6 +13,11 @@ use std::time::{Duration, Instant};
 /// the sensor loop.
 pub type ReceiveDirsFn = Arc<dyn Fn(&str) -> Vec<ReceiveDir> + Send + Sync>;
 
+/// Callback that answers whether this session's prompt cache has lapsed,
+/// given its working directory. Without one the sensor reads keepwarm's
+/// clock on the session's transcript (ADR-406 item 1).
+pub type CacheLapsedFn = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// Discovers peer Claude Code sessions by reading ~/.claude/sessions/*.json
 /// and their transcript files. Same discovery pattern as abtop.
 ///
@@ -42,6 +47,12 @@ pub struct PeerSensor {
     /// sensor reads the project tray and `#open`. Set via
     /// `set_receive_dirs_provider()`.
     receive_dirs_fn: Option<ReceiveDirsFn>,
+    /// Provider of the cache state the wake gate reads. Set via
+    /// `set_cache_lapsed_provider()`.
+    cache_lapsed_fn: Option<CacheLapsedFn>,
+    /// The last poll held an addressed message for a lapsed cache; the
+    /// hold is logged once, when it starts.
+    holding_cold: bool,
     /// Per-peer message timestamps for engagement-based magnitude boosting.
     /// Keyed by "from" field (e.g., "claude:<session_id>").
     /// When the same peer sends multiple messages in a window, their
@@ -141,6 +152,8 @@ impl PeerSensor {
             own_session_id,
             baseline_established: false,
             receive_dirs_fn: None,
+            cache_lapsed_fn: None,
+            holding_cold: false,
             peer_activity: HashMap::new(),
             peer_activity_window: Duration::from_secs(900),
             checkpoint_loaded: false,
@@ -195,6 +208,21 @@ impl PeerSensor {
     /// restarting the sensor loop.
     pub fn set_receive_dirs_provider(&mut self, f: ReceiveDirsFn) {
         self.receive_dirs_fn = Some(f);
+    }
+
+    /// Register the provider of the cache state the wake gate reads.
+    pub fn set_cache_lapsed_provider(&mut self, f: CacheLapsedFn) {
+        self.cache_lapsed_fn = Some(f);
+    }
+
+    /// Whether this session's prompt cache has lapsed. A session with no
+    /// resolved id has no transcript to read, which counts as lapsed.
+    fn cache_lapsed(&self, working_dir: &str) -> bool {
+        match (&self.cache_lapsed_fn, &self.own_session_id) {
+            (Some(f), _) => f(working_dir),
+            (None, Some(sid)) => sensor_keepwarm::session_cache_lapsed(sid, working_dir, sensor_trait::epoch_secs()),
+            (None, None) => true,
+        }
     }
 
     /// The directories to scan for `origin` this poll.
@@ -347,11 +375,20 @@ impl PeerSensor {
         // session, so this poll emits only when something pending is
         // addressed to it. Otherwise `#open` and channel posts stay unseen
         // and reach it with its next turn, through the Stop-hook drain.
-        let wakes = found.iter().enumerate().any(|(i, f)| {
+        let addressed = found.iter().enumerate().any(|(i, f)| {
             plan.as_ref().is_none_or(|p| p.deliver[i])
                 && agent_identity::parse_signal(agent_identity::wire_line(&f.content))
                     .is_some_and(|sig| sig.wakes(scan_dirs[f.room].room.is_tray(), &ids))
         });
+        // The cache gate: a session whose prompt cache has lapsed is never
+        // woken, since the wake would rewrite its whole context. What is
+        // addressed to it waits, unseen, for the operator's next turn.
+        let lapsed = addressed && self.cache_lapsed(&focus.working_dir);
+        if lapsed && !self.holding_cold {
+            eprintln!("[attend] a message is waiting; the prompt cache has lapsed, so it waits for the next turn");
+        }
+        self.holding_cold = lapsed;
+        let wakes = addressed && !lapsed;
 
         for (i, f) in found.into_iter().enumerate() {
             let shown = plan.as_ref().is_none_or(|p| p.deliver[i]);

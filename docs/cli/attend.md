@@ -122,7 +122,7 @@ Read pending messages from peers
   Default value: `1`
 * `--before <TS>` — Cursor: only show messages older than this unix timestamp
 * `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not enrolled by attend run or a channel join (#720). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show
-* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, or a reply to a message it sent; then deliver all that is pending. `#open` and channel posts alone wait for the next turn (ADR-406 item 1). The attend mod polls with it while idle
+* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, or a reply to a message it sent; then deliver all that is pending. `#open` and channel posts alone wait for the next turn (ADR-406 item 1). Once the session's prompt cache has lapsed (its tier's TTL less two minutes after its last turn, or no transcript readable in five seconds), nothing wakes it: the drain delivers nothing and reports `cache_lapsed`. The attend mod polls with it while idle
 * `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
 
   Default value: `plain`

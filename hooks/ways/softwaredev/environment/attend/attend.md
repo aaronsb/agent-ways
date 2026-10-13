@@ -64,7 +64,7 @@ attend reply "responding to a peer message"   # reply (auto-threaded)
 
 **CLI is the contract.** Attend owns its internal state. Never reach into `~/.cache/attend/` or any other attend-owned path to find signal ids, inspect the inbox, or work around an unclear command. Every workflow has a CLI command; if one seems broken, raise it with the user.
 
-**What wakes you.** While you idle, a message wakes you only when it is addressed to you: a direct message, a channel or `#open` post that names you, one sent to your project, or a reply to a message you sent. Other `#open` and channel posts wait for your next turn. After `/clear` you still receive what was addressed to your earlier id.
+**What wakes you.** While you idle, a message wakes you only when it is addressed to you: a direct message, a channel or `#open` post that names you, one sent to your project, or a reply to a message you sent. Other `#open` and channel posts wait for your next turn. After `/clear` you still receive what was addressed to your earlier id. Once your prompt cache has lapsed, an hour after your last turn (five minutes on the short cache tier), nothing wakes you: an addressed message waits, unread, for the operator's next turn, and `attend unread` shows it as `N waiting · cold`. Under `attend run` no git, process or presence line wakes you either. Keepwarm's wake at 50 idle minutes is what keeps a session wakeable.
 
 ## Keepwarm
 

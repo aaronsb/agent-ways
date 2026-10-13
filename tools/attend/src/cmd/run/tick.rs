@@ -50,6 +50,32 @@ pub(super) struct TickState<'a> {
     pub(super) focus: &'a Focus,
     pub(super) heartbeat_id: &'a str,
     pub(super) cfg: &'a config::Config,
+    pub(super) cache_gate: &'a mut CacheGate,
+}
+
+/// The cache gate on what this run prints (ADR-406 item 1). A line on
+/// stdout starts a turn in an idle session, and a session whose prompt
+/// cache has lapsed is woken by nothing but keepwarm. The answer is read
+/// at most every [`CacheGate::RECHECK`], and only while a line is waiting.
+#[derive(Default)]
+pub(super) struct CacheGate {
+    checked: Option<(Instant, bool)>,
+}
+
+impl CacheGate {
+    const RECHECK: Duration = Duration::from_secs(10);
+
+    /// Whether session `session_id`'s cache has lapsed, on keepwarm's clock.
+    fn lapsed(&mut self, session_id: &str, working_dir: &str) -> bool {
+        if let Some((at, lapsed)) = self.checked {
+            if at.elapsed() < Self::RECHECK {
+                return lapsed;
+            }
+        }
+        let lapsed = sensor_keepwarm::session_cache_lapsed(session_id, working_dir, sensor_trait::epoch_secs());
+        self.checked = Some((Instant::now(), lapsed));
+        lapsed
+    }
 }
 
 /// Build the engagement curve from config (ADR-123 action-potential
@@ -117,12 +143,20 @@ pub(super) fn initial_self_hash(self_exe: Option<&Path>) -> Option<u64> {
 /// point exec()ing into an identical binary — and the messaging reheat
 /// the reload triggers is pure noise — so we update the baseline mtime
 /// (to avoid rehashing every interval) and return without reloading.
+///
+/// On a lapsed cache (ADR-406 item 1) the reload prints nothing to stdout,
+/// which would wake the session. Held presence lines go to the log and the
+/// new process writes its banner there. A held line that is not presence
+/// can carry a message the peers sensor has already marked seen, so the
+/// reload waits until the cache is warm and the line has gone out.
 pub(super) fn maybe_self_reload(
     self_exe: Option<&Path>,
     baseline_mtime: &mut Option<SystemTime>,
     baseline_hash: Option<u64>,
     slots: &mut [SensorSlot],
     state_store: &state::StateStore,
+    session_id: &str,
+    working_dir: &str,
 ) {
     let Some(exe) = self_exe else {
         return;
@@ -149,8 +183,30 @@ pub(super) fn maybe_self_reload(
         *baseline_mtime = Some(current_mtime);
         return;
     }
-    emit::log("binary changed — checkpointing and reloading");
-    flush_message_lane(slots);
+    let lapsed = sensor_keepwarm::session_cache_lapsed(session_id, working_dir, sensor_trait::epoch_secs());
+    let held: Vec<&str> = slots
+        .iter()
+        .filter(|slot| rides_message_lane(slot.name()))
+        .flat_map(|slot| slot.accumulator.events.iter().map(String::as_str))
+        .collect();
+    let plan = reload_plan(lapsed, &held);
+    if plan == ReloadPlan::Wait {
+        emit::log("binary changed — a held line may carry a message; reloading once the prompt cache is warm");
+        return;
+    }
+    if plan == ReloadPlan::Quiet {
+        emit::log("binary changed — the prompt cache has lapsed, so the reload stays off stdout");
+        for slot in slots.iter_mut().filter(|slot| rides_message_lane(slot.name())) {
+            for line in slot.accumulator.drain_events() {
+                emit::log(&format!("{}: {line}", slot.name()));
+            }
+            slot.accumulator.reset();
+        }
+        std::env::set_var(RELOADED_COLD, "1");
+    } else {
+        emit::log("binary changed — checkpointing and reloading");
+        flush_message_lane(slots);
+    }
     let snapshot = collect_snapshot(slots);
     state_store.checkpoint(&snapshot);
 
@@ -166,6 +222,38 @@ pub(super) fn maybe_self_reload(
         env!("ATTEND_COMMIT")
     );
     reexec("ATTEND_RELOADED_FROM", &prev_version);
+}
+
+/// Set for the process a reload starts on a lapsed cache: its banner goes
+/// to the log, not to Monitor.
+pub(super) const RELOADED_COLD: &str = "ATTEND_RELOADED_COLD";
+
+/// How a binary change reloads `attend run`.
+#[derive(Debug, PartialEq)]
+enum ReloadPlan {
+    /// The cache is warm: held lines and the banner go to Monitor.
+    Loud,
+    /// The cache has lapsed and only presence is held: everything goes to
+    /// the log.
+    Quiet,
+    /// The cache has lapsed and a held line may carry a message the sensor
+    /// marked seen: wait for a warm cache to show it.
+    Wait,
+}
+
+fn reload_plan(lapsed: bool, held: &[&str]) -> ReloadPlan {
+    match (lapsed, held.iter().all(|line| is_presence(line))) {
+        (false, _) => ReloadPlan::Loud,
+        (true, true) => ReloadPlan::Quiet,
+        (true, false) => ReloadPlan::Wait,
+    }
+}
+
+/// Whether a peers-sensor line reports peer presence (a session started,
+/// exited, changed status or neared compaction), which describes a moment
+/// and carries no message.
+fn is_presence(line: &str) -> bool {
+    line.starts_with("peer ")
 }
 
 /// Re-execute this `attend run` with `var=value` set, so the new process
@@ -304,9 +392,25 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // only presence-noise control is relaxed. The clean fix is to split
     // message scanning into its own sensor so the lane is chosen per
     // observation (also the seam a future Slack event-sensor wants).
-    let (msg_ready, evt_ready): (Vec<usize>, Vec<usize>) = ready_indices
+    let (mut msg_ready, mut evt_ready): (Vec<usize>, Vec<usize>) = ready_indices
         .iter()
         .partition(|&&i| rides_message_lane(s.slots[i].name()));
+    // The cache gate: on a lapsed cache only keepwarm's line goes out. The
+    // event lane's observations are dropped, as its decay drops any it does
+    // not disclose; they describe a moment, and the next turn reads the
+    // repository afresh. The message lane is held: its accumulator keeps
+    // what the peers sensor surfaced, presence included, and it goes out
+    // once the cache is warm. Messages addressed to the session wait unseen
+    // in the sensor itself.
+    let gated = |i: &usize| s.slots[*i].name() != "keepwarm";
+    if (evt_ready.iter().any(gated) || msg_ready.iter().any(gated)) && s.cache_gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
+        for &i in &evt_ready {
+            emit::log(&format!("{}: dropped {} event(s), the prompt cache has lapsed", s.slots[i].name(), s.slots[i].accumulator.event_count));
+            s.slots[i].accumulator.reset();
+        }
+        evt_ready.clear();
+        msg_ready.retain(|i| s.slots[*i].name() == "keepwarm");
+    }
     try_disclose(s.slots, &evt_ready, s.governor, true);
     // Message lane: do not record engagement, so it never builds the
     // action-potential refractory that would later hold conversation.
@@ -500,6 +604,15 @@ mod tests {
             }
             _ => panic!("expected ActionPotential curve"),
         }
+    }
+
+    #[test]
+    fn a_cold_reload_logs_presence_and_waits_on_anything_else() {
+        assert_eq!(reload_plan(false, &["message from A ~x: hi"]), ReloadPlan::Loud);
+        assert_eq!(reload_plan(true, &[]), ReloadPlan::Quiet);
+        assert_eq!(reload_plan(true, &["peer session started: p [/p] (same project, idle, ctx 3%)"]), ReloadPlan::Quiet);
+        assert_eq!(reload_plan(true, &["peer session exited: p [/p]", "message from A ~x: hi"]), ReloadPlan::Wait);
+        assert_eq!(reload_plan(true, &["2 older messages held back; reading them is optional: attend inbox"]), ReloadPlan::Wait);
     }
 
     #[test]

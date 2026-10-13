@@ -153,6 +153,8 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     } // killed with SIGKILL: no hand-over
 
     f.set_session_id("sess-restart-new");
+    // The new id has had a turn, so its cache is warm (ADR-406 item 1).
+    f.last_turn_of("sess-restart-new", Some(Duration::ZERO));
     let run = f.run();
     run.wait_for("the adoption", Duration::from_secs(20), |_| {
         f.marker("sess-restart-new").exists()

@@ -43,6 +43,13 @@ pub(crate) fn own_session_id() -> Option<String> {
     attend_presence::session::find_own_session_id(std::process::id())
 }
 
+/// Whether session `ident`'s prompt cache has lapsed now, on keepwarm's
+/// clock (ADR-406 item 1). An unresolved identity has no transcript to
+/// read, which counts as lapsed.
+pub(crate) fn cache_lapsed(ident: &Session) -> bool {
+    !ident.resolved() || sensor_keepwarm::session_cache_lapsed(&ident.session_id, &ident.origin_path, sensor_trait::epoch_secs())
+}
+
 /// The ids session `ident` reads as: its own, then the ids it had before
 /// each `/clear` (`enrollment::previous_ids`). A message sent to an earlier
 /// id is still its to read, and a reply to one it sent under an earlier id

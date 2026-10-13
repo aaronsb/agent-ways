@@ -1539,6 +1539,7 @@ dependencies = [
  "attend-presence",
  "attend-state",
  "claude-sessions",
+ "sensor-keepwarm",
  "sensor-trait",
  "serde_json",
  "ways-core",

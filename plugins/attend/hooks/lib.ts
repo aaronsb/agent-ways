@@ -170,15 +170,18 @@ export type Listed = {
  *  cold start's held-back note and the session's name are fields of their
  *  own, never messages. `status` is `drained`, or why nothing was:
  *  `not_listening` (listening was turned off, here or elsewhere) or
- *  `unresolved` (attend cannot tell which session this is). Undefined where
- *  the output is not a schema-1 document (an attend without `--drain
- *  --json`, or one whose document changed shape). */
+ *  `unresolved` (attend cannot tell which session this is). `cacheLapsed`:
+ *  a wake drain held an addressed message because the session's prompt
+ *  cache has lapsed (ADR-406 item 1). Undefined where the output is not a
+ *  schema-1 document (an attend without `--drain --json`, or one whose
+ *  document changed shape). */
 export type Drain = {
   status: string
   messages: Listed[]
   heldBack: number
   note: string | null
   youAre: string | null
+  cacheLapsed: boolean
 }
 
 /** The `--drain --json` schema this mod reads. */
@@ -207,6 +210,7 @@ export function parseDrain(stdout: string): Drain | undefined {
     heldBack: typeof d.held_back === 'number' ? d.held_back : 0,
     note: typeof d.note === 'string' ? d.note : null,
     youAre: typeof d.you_are === 'string' ? d.you_are : null,
+    cacheLapsed: d.cache_lapsed === true,
   }
 }
 

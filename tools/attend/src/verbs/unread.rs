@@ -7,6 +7,10 @@
 //! Claude Code process made under its id before `/clear` moves to the
 //! current id, and an opt-out whose `attend run` has exited is applied.
 //!
+//! When a message addressed to the session waits, it also reports whether
+//! the session's prompt cache has lapsed, which holds that message for the
+//! operator's next turn.
+//!
 //! A session that is not listening, or that no conduit has baselined yet,
 //! is counted as its cold start would deliver when it listens: addressed
 //! mail and fresh messages, with the older backlog it would hold back
@@ -26,6 +30,10 @@ pub struct Unread {
     pub held_back: usize,
     /// Whether the drain delivers to this session (`attend listen`).
     pub listening: bool,
+    /// A message addressed to the session is waiting and its prompt cache
+    /// has lapsed, so nothing wakes it: what waits goes with the
+    /// operator's next turn (ADR-406 item 1).
+    pub cache_lapsed: bool,
     /// One entry per room the session receives, in the drain's order:
     /// its project tray, `#open`, then each joined channel.
     pub rooms: Vec<RoomCount>,
@@ -73,11 +81,25 @@ pub fn unread() -> Unread {
         let count = scan.delivered.iter().filter(|d| d.room == dir.room).count();
         rooms.push(RoomCount { label, kind, name, count });
     }
+    // Read only when something addressed waits: the clock costs a `ways`
+    // run, and with nothing to hold there is no hold to report.
+    let cache_lapsed = scan.delivered.iter().any(|d| d.wakes) && crate::util::cache_lapsed(&me);
     Unread {
         unread: scan.delivered.len(),
         held_back: scan.held_back,
         listening,
+        cache_lapsed,
         rooms,
+    }
+}
+
+/// The count in one phrase: `N unread`, or `N waiting · cold` while the
+/// prompt cache has lapsed under an addressed message.
+pub fn headline(u: &Unread) -> String {
+    if u.cache_lapsed {
+        format!("{} waiting · cold", u.unread)
+    } else {
+        format!("{} unread", u.unread)
     }
 }
 

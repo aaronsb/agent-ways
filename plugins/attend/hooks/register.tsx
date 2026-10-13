@@ -60,6 +60,7 @@ const DEFAULTS = {
   afterCompaction: false,
   turnsSinceFull: 0,
   awaitingOperator: false,
+  cacheLapsed: false,
 } satisfies AttendStatus
 
 const status = atom({ plugin: 'attend', key: 'status' } as const, DEFAULTS)
@@ -110,6 +111,10 @@ type Mod = {
   active: boolean
   /** A drained batch no submit has taken yet. */
   pending: Listed[]
+  /** `pending` was taken from a prompt the operator made while the cache
+   *  had lapsed, and that prompt did not enter. The poll leaves it for the
+   *  operator's next prompt instead of starting a turn on the cold cache. */
+  isPendingCold: boolean
   /** Submits of `pending` that failed. */
   submitTries: number
   /** attend refused `--wake` as an unknown argument: an attend older than
@@ -334,7 +339,7 @@ async function tick($: $, mod: Mod, force: boolean) {
  *  fails, or that a hook drops, leaves the batch there and the next poll
  *  tries it again before draining more, up to SUBMIT_TRIES times. */
 async function poll($: $, mod: Mod) {
-  if (mod.isPolling) return
+  if (mod.isPolling || mod.isPendingCold) return
   mod.isPolling = true
   try {
     if (mod.pending.length === 0) {
@@ -350,7 +355,10 @@ async function poll($: $, mod: Mod) {
       // Listening turned off elsewhere (attend listen off, a private scene),
       // or an identity attend cannot resolve: the row says so.
       const listening = first.status === 'drained'
-      if ((await readStatus($)).listening !== listening) await updateStatus($, s => ({ ...s, listening }))
+      const was = await readStatus($)
+      if (was.listening !== listening || was.cacheLapsed !== first.cacheLapsed) {
+        await updateStatus($, s => ({ ...s, listening, cacheLapsed: first.cacheLapsed }))
+      }
       if (first.messages.length === 0) return
       const msgs = [...first.messages]
       await updateStatus($, s => ({ ...s, unread: Math.max(s.unread, msgs.length) }))
@@ -411,34 +419,47 @@ async function setAwaiting($: $, mod: Mod, awaiting: boolean) {
  *  held-back note with it, rather than as a turn of its own. A prompt that
  *  does not enter leaves the messages in `mod.pending`, which the poll
  *  submits as it does a batch whose submit failed. */
-async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: PromptSubmitInput) => Promise<PromptSubmitResult>) {
+async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: PromptSubmitInput) => Promise<PromptSubmitResult>, isCold: boolean) {
+  // A batch an earlier cold prompt failed to carry goes first.
+  const carried = mod.isPendingCold ? mod.pending : []
   const d = parseDrain((await run($, DRAIN_ARGV)).stdout)
-  if (!d) return next(e)
-  const listening = d.status === 'drained'
-  if ((await readStatus($)).listening !== listening) await updateStatus($, s => ({ ...s, listening }))
-  const msgs = d.messages
+  if (!d && carried.length === 0) return next(e)
+  if (d) {
+    const listening = d.status === 'drained'
+    if ((await readStatus($)).listening !== listening) await updateStatus($, s => ({ ...s, listening }))
+  }
+  const msgs = [...carried, ...(d?.messages ?? [])]
+  if (carried.length > 0) {
+    mod.pending = []
+    mod.isPendingCold = false
+  }
   for (const m of msgs) {
     mod.ids.set(shortId(m.id), m.id)
     if (m.re) mod.ids.set(shortId(m.re), m.re)
   }
-  const note = d.note ? `attend: ${oneLine(d.note)}` : undefined
+  const note = d?.note ? `attend: ${oneLine(d.note)}` : undefined
   const block = msgs.length > 0 ? frameInbound(msgs.map(formatMessage), true) : undefined
   const attached = [block, note].filter((x): x is string => x !== undefined)
   if (attached.length === 0) return next(e)
-  const keep = () => {
+  // Read by attend and not entered: they wait in `mod.pending`. Taken on a
+  // lapsed cache, they wait for the operator's next prompt, with the row
+  // still saying so; otherwise the poll submits them.
+  const keep = async () => {
     if (msgs.length === 0) return
     mod.pending = [...msgs]
     mod.submitTries = 0
+    mod.isPendingCold = isCold
+    if (isCold) await updateStatus($, s => ({ ...s, cacheLapsed: true, unread: Math.max(s.unread, msgs.length) }))
   }
   let r: PromptSubmitResult
   try {
     r = await next({ ...e, context: [...(e.context ?? []), attached.join('\n')] })
   } catch (err) {
-    keep()
+    await keep()
     throw err
   }
   if (r.drop !== undefined) {
-    keep()
+    await keep()
   } else if (msgs.length > 0) {
     await updateStatus($, t => ({ ...t, deliveries: t.deliveries + 1, afterCompaction: false, turnsSinceFull: 0 }))
     $.ui.toast(`attend: ${msgs.length} peer message(s) went to Claude with your prompt`)
@@ -507,6 +528,7 @@ export const register: Register = on => {
     ids: new Map(),
     active: false,
     pending: [],
+    isPendingCold: false,
     submitTries: 0,
     noWakeDrain: false,
     joined: new Set(),
@@ -589,14 +611,18 @@ export const register: Register = on => {
     return done
   })
 
-  // The operator's first prompt in a session the config started listening:
-  // what is pending enters beside it, read in the same turn, rather than as
-  // a turn the operator never asked for.
+  // The operator's first prompt in a session the config started listening,
+  // or their next prompt while a message waits on a lapsed cache: what is
+  // pending enters beside it, read in the same turn, rather than as a turn
+  // the operator never asked for.
   on('prompt.submit', async ($, e, next) => {
-    if (!mod.isAwaitingOperator || !OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    const isHeldCold = (await readStatus($)).cacheLapsed || mod.isPendingCold
+    if (!mod.isAwaitingOperator && !isHeldCold) return next(e)
     await setAwaiting($, mod, false)
+    if (isHeldCold) await updateStatus($, s => ({ ...s, cacheLapsed: false }))
     if (!(await isOn($, mod))) return next(e)
-    return enterWithPending($, mod, e, next)
+    return enterWithPending($, mod, e, next, isHeldCold)
   })
 
   on('turn.start', async ($, e, next) => {
@@ -680,14 +706,16 @@ export const register: Register = on => {
   })
 
   // One row while active, in the shape of the operator's statusline: peers,
-  // unread, channels. Name and project are the statusline's. Dormant draws
+  // unread (or waiting, while the cache is cold), channels. Name and project are the statusline's. Dormant draws
   // nothing.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const s = await readStatus($)
     if (!isActive(s)) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const state = s.listening === false ? '○ attend not listening' : `● ${s.peers} peers ✉ ${s.unread} unread`
+    // A message held on a lapsed cache waits for the operator's prompt.
+    const mail = s.cacheLapsed && s.unread > 0 ? `${s.unread} waiting · cold` : `${s.unread} unread`
+    const state = s.listening === false ? '○ attend not listening' : `● ${s.peers} peers ✉ ${mail}`
     const channels = s.channels.length > 0 ? ` ${s.channels.join(' ')}` : ''
     return (
       <Box flexDirection="row">
