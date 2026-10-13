@@ -51,7 +51,7 @@ pub fn known_identities(
     caps: ColorDepth,
     instances: &SnapshotCache,
 ) -> Vec<KnownIdentity> {
-    // Production wrapper: gate on heartbeat freshness (ADR-129).
+    // Production wrapper: gate on attend's liveness (ADR-129).
     known_identities_with_liveness(signals, seeds, caps, claude_is_live, instances)
 }
 
@@ -184,7 +184,7 @@ where
     // already registered from a signal. Keys match the signal-
     // branch format so the same cwd doesn't double-register.
     // A session.json on disk is not sufficient evidence that attend is
-    // running for that session: liveness is the heartbeat's.
+    // running for that session: liveness is attend's (`claude_is_live`).
     for seed in seeds {
         let id = Identity::for_cwd(&seed.cwd, caps);
         let display = with_instance(id.nickname, &seed.cwd, &seed.session_id, instances);
@@ -217,7 +217,8 @@ fn claude_key(display: &str, cwd: &str, session_id: &str, live: bool) -> String 
     }
 }
 
-/// Heartbeat-based liveness check (ADR-129). Wrapped here so the
+/// Liveness check (ADR-129): a fresh heartbeat, or a listening session
+/// whose Claude Code process still runs. Wrapped here so the
 /// known_identities filter has a single name for the gate; the
 /// underlying `attend_presence::alive` is the source of truth.
 fn claude_is_live(session_id: &str) -> bool {
