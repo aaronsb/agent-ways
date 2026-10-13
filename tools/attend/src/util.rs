@@ -43,6 +43,25 @@ pub(crate) fn own_session_id() -> Option<String> {
     attend_presence::session::find_own_session_id(std::process::id())
 }
 
+/// The ids session `ident` reads as: its own, then the ids it had before
+/// each `/clear` (`enrollment::previous_ids`). A message sent to an earlier
+/// id is still its to read, and a reply to one it sent under an earlier id
+/// still wakes it (ADR-401, `to`). Before a verb that enrolls has moved the
+/// enrollment to the new id, the earlier id is found as
+/// [`adopt_previous_enrollment`] finds it, and nothing is moved.
+pub(crate) fn reading_ids(ident: &Session) -> Vec<String> {
+    use attend_presence::enrollment;
+    let mut ids = vec![ident.session_id.clone()];
+    ids.extend(enrollment::previous_ids(&ident.session_id));
+    if ids.len() == 1 && enrollment::any_indexed() {
+        if let Some(old) = ident.claude_key().and_then(|key| enrollment::previous_id(&key, &ident.session_id)) {
+            ids.extend(enrollment::previous_ids(&old));
+            ids.push(old);
+        }
+    }
+    ids
+}
+
 /// The identity of the session this process runs in, as one value.
 pub(crate) type Session = attend_presence::session::SessionIdentity;
 
@@ -179,7 +198,9 @@ pub(crate) fn brief_invited_room(ident: &Session, groups: &groups::Groups, name:
     let mut note = None;
     if !snapshot.as_ref().is_some_and(|s| s.baselined) {
         let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
-        let scan = crate::cmd::inbox::scan_pending(&groups.receive_dirs(&ident.origin_path), &seen, &ident.session_id, true);
+        let ids = reading_ids(ident);
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let scan = crate::cmd::inbox::scan_pending(&groups.receive_dirs(&ident.origin_path), &seen, &ids, true);
         let owed: std::collections::HashSet<String> = scan.delivered.iter().map(|d| attend_state::seen_key(&format!("{}.signal", d.id))).collect();
         store.baseline(scan.mark.into_iter().filter(|k| !owed.contains(k)));
         note = scan.note;

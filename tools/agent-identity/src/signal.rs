@@ -44,15 +44,6 @@ pub enum Kind {
     Agent,
 }
 
-/// Where a reader found a signal, as the read filter and the wake rule
-/// need to know it: a tray (a project's or a person's), or a shared room
-/// (`#open`, a channel).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Where {
-    Tray,
-    Shared,
-}
-
 impl ParsedSignal<'_> {
     /// The canonical sender id: the `from_id` tag, or for a record without
     /// it, derived from `from`: a `claude:` sender's session id, an
@@ -81,21 +72,23 @@ impl ParsedSignal<'_> {
         self.to.is_some_and(|to| to.split(',').any(|t| t == id))
     }
 
-    /// Whether the session or person `id` reads this signal from its tray:
-    /// when `to` names it, or when the signal carries no `to`, which an
-    /// older writer left and which is for every session at the project.
-    pub fn tray_reads(&self, id: &str) -> bool {
-        self.to.is_none() || self.addressed_to(id)
+    /// Whether the session or person reading as `ids` (its id, then the ids
+    /// it had before a `/clear`) reads this signal from its tray: when `to`
+    /// names one of them, or when the signal carries no `to`, which an older
+    /// writer left and which is for every session at the project.
+    pub fn tray_reads(&self, ids: &[&str]) -> bool {
+        self.to.is_none() || ids.iter().any(|id| self.addressed_to(id))
     }
 
-    /// Whether this signal, found `at`, starts a turn in the idle session
-    /// `id` (ADR-406 item 1): `to` names it, it sat in its tray with no
-    /// `to` (sent to its project by an older writer), or it replies to a
-    /// message `id` sent. Anything else waits for the session's next turn.
-    pub fn wakes(&self, at: Where, id: &str) -> bool {
-        self.addressed_to(id)
-            || (at == Where::Tray && self.to.is_none())
-            || self.reply_to.is_some_and(|re| sent_by(re, id))
+    /// Whether this signal starts a turn in the idle session reading as
+    /// `ids` (ADR-406 item 1): `to` names it, it sat in its tray (`in_tray`)
+    /// with no `to` (sent to its project by an older writer), or it replies
+    /// to a message the session sent. Anything else waits for the session's
+    /// next turn.
+    pub fn wakes(&self, in_tray: bool, ids: &[&str]) -> bool {
+        ids.iter().any(|id| self.addressed_to(id))
+            || (in_tray && self.to.is_none())
+            || self.reply_to.is_some_and(|re| ids.iter().any(|id| sent_by(re, id)))
     }
 }
 
@@ -537,9 +530,11 @@ mod tests {
         let mine = parse_signal("claude:x|p|/x|to:me,other|m").unwrap();
         let theirs = parse_signal("claude:x|p|/x|to:other|m").unwrap();
         let legacy = parse_signal("claude:x|p|/x|m").unwrap();
-        assert!(mine.addressed_to("me") && mine.tray_reads("me"));
-        assert!(!theirs.addressed_to("me") && !theirs.tray_reads("me"));
-        assert!(!legacy.addressed_to("me") && legacy.tray_reads("me"));
+        assert!(mine.addressed_to("me") && mine.tray_reads(&["me"]));
+        assert!(!theirs.addressed_to("me") && !theirs.tray_reads(&["me"]));
+        assert!(!legacy.addressed_to("me") && legacy.tray_reads(&["me"]));
+        // A session after `/clear` still reads what was sent to its old id.
+        assert!(theirs.tray_reads(&["me", "other"]));
     }
 
     /// The wake rule: addressed to the session, sent to its project (a tray
@@ -553,12 +548,15 @@ mod tests {
         let channel = parse_signal("claude:x|p|/x|to:#deploy|m").unwrap();
         let legacy = parse_signal("claude:x|p|/x|m").unwrap();
         let reply = parse_signal(&reply_line).unwrap();
-        assert!(dm.wakes(Where::Tray, me) && dm.wakes(Where::Shared, me));
-        assert!(legacy.wakes(Where::Tray, me), "sent to its project");
-        assert!(!legacy.wakes(Where::Shared, me), "an untagged #open post");
-        assert!(!open.wakes(Where::Shared, me));
-        assert!(!channel.wakes(Where::Shared, me));
-        assert!(reply.wakes(Where::Shared, me), "a reply to a message it sent");
+        assert!(dm.wakes(true, &[me]) && dm.wakes(false, &[me]));
+        assert!(legacy.wakes(true, &[me]), "sent to its project");
+        assert!(!legacy.wakes(false, &[me]), "an untagged #open post");
+        assert!(!open.wakes(false, &[me]));
+        assert!(!channel.wakes(false, &[me]));
+        assert!(reply.wakes(false, &[me]), "a reply to a message it sent");
+        // After `/clear`, the old id still counts: a DM to it, a reply to it.
+        assert!(dm.wakes(false, &["new-id", me]) && reply.wakes(false, &["new-id", me]));
+        assert!(!reply.wakes(false, &["new-id"]));
     }
 
     #[test]

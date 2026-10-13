@@ -10,7 +10,7 @@
 
 mod common;
 use common::Fixture;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -26,41 +26,7 @@ fn enter(f: &Fixture) -> MutexGuard<'static, ()> {
     guard
 }
 
-/// A live Claude Code session `sid` at `<home>/<project>`: a process whose
-/// argv names claude, with a session record. Killed on drop. Only the peers
-/// sensor's process scan finds it.
-#[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
-struct Peer {
-    child: std::process::Child,
-    cwd: String,
-}
-
-#[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
-impl Peer {
-    fn start(f: &Fixture, sid: &str, project: &str) -> Peer {
-        let cwd = f.home.join(project);
-        std::fs::create_dir_all(&cwd).unwrap();
-        let cwd = cwd.to_string_lossy().into_owned();
-        let child = std::process::Command::new("sh").args(["-c", "sleep 60; :", "claude"]).spawn().unwrap();
-        std::fs::write(
-            f.home.join(".claude").join("sessions").join(format!("{}.json", child.id())),
-            format!(r#"{{"pid":{},"sessionId":"{sid}","cwd":"{cwd}"}}"#, child.id()),
-        )
-        .unwrap();
-        Peer { child, cwd }
-    }
-
-    fn tray(&self, f: &Fixture) -> PathBuf {
-        f.signals().join(claude_sessions::attend_key(&self.cwd))
-    }
-}
-
-impl Drop for Peer {
-    fn drop(&mut self) {
-        self.child.kill().ok();
-        self.child.wait().ok();
-    }
-}
+use common::Peer;
 
 /// Write `line` as signal `id` into `tray`.
 fn signal(f: &Fixture, tray: &str, id: &str, line: &str) {
@@ -386,4 +352,67 @@ fn a_reply_without_re_follows_the_routing_and_never_falls_back_to_open() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("which has exited"), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(open_files(), 3, "nothing fell back to #open");
+}
+
+// ── after a /clear ───────────────────────────────────────────────────────
+
+/// `/clear` gives the session a new id. A direct message sent to the old id
+/// before the drain read it is still the session's: the drain delivers it,
+/// `inbox` lists it, and a reply to a message it sent under the old id
+/// still wakes it.
+#[test]
+fn a_direct_message_to_the_id_before_a_clear_is_still_read() {
+    let f = Fixture::new("addr-clear");
+    let old = f.sid.clone();
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    signal(&f, &f.project_tray(), "x-1-1", &format!("claude:x|p|/tmp/p|to:{old}|sent before the clear"));
+    f.set_session_id("sess-addr-clear-new");
+    let listed = f.ok(&["inbox", "--json"]);
+    assert!(listed.contains("sent before the clear"), "{listed}");
+    let d: serde_json::Value = serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap();
+    let bodies: Vec<&str> = d["messages"].as_array().unwrap().iter().map(|m| m["message"].as_str().unwrap()).collect();
+    assert_eq!(bodies, ["sent before the clear"], "{d}");
+
+    // A channel reply to a message the session sent under its old id.
+    signal(&f, "_broadcast", "x-1-2", &format!("claude:x|p|/tmp/p|to:*|re:{old}-1791000000000000001-0|answering you"));
+    let d: serde_json::Value = serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap();
+    let bodies: Vec<&str> = d["messages"].as_array().unwrap().iter().map(|m| m["message"].as_str().unwrap()).collect();
+    assert_eq!(bodies, ["answering you"], "a reply to the old id wakes the new one: {d}");
+}
+
+// ── siblings at one project ──────────────────────────────────────────────
+
+/// Alpha and beta work at one project. Alpha's reply to beta's direct
+/// message, with no `re`, threads to it and goes to beta.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_reply_to_a_siblings_direct_message_goes_to_the_sibling() {
+    let f = Fixture::new("addr-sibling");
+    let beta = Peer::start(&f, "beta-sess", "proj");
+    assert_eq!(beta.cwd, f.origin);
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    signal(&f, &f.project_tray(), "beta-sess-1-1", &format!("claude:beta-sess|proj|{}|to:{}|alpha, a question", f.origin, f.sid));
+    assert!(f.drain("plain").contains("alpha, a question"));
+    let out = f.attend(&["reply", "--json", "--", "an answer"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let sent: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!((sent["re"].as_str(), sent["to"].as_str()), (Some("beta-sess-1-1"), Some("beta-sess")));
+    assert!(f.signals().join(f.project_tray()).join(format!("{}.signal", sent["id"].as_str().unwrap())).is_file());
+}
+
+/// Under `attend run`, beta's direct message in the shared tray stays off
+/// alpha's Monitor line, even in the poll where alpha's own wakes it.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn the_monitor_poller_leaves_a_siblings_direct_message_unread() {
+    let f = Fixture::new("addr-monitor-filter");
+    let run = f.run();
+    run.wait_for("the startup line", std::time::Duration::from_secs(30), |r| r.output().contains("you are"));
+    let tray = f.project_tray();
+    signal(&f, &tray, "x-1-1", "claude:x|p|/tmp/p|to:beta-sess|FOR-BETA");
+    signal(&f, &tray, "x-1-2", &format!("claude:x|p|/tmp/p|to:{}|FOR-ALPHA", f.sid));
+    run.wait_for("alpha's message", std::time::Duration::from_secs(30), |r| r.output().contains("FOR-ALPHA"));
+    assert!(!run.output().contains("FOR-BETA"), "{}", run.output());
 }

@@ -15,20 +15,13 @@
 //!
 //! Path: `~/.cache/attend/state/<session_id>.last-inbound`
 //!
-//! # Invariants
+//! # What is recorded
 //!
-//! **One attend agent per canonicalized cwd.** The `record()` call site in
-//! `lib.rs::read_signals` filters incoming signals by comparing the
-//! parsed `source_cwd` against the observer's own `focus.working_dir`,
-//! and skips recording when they match. This prevents a previous
-//! incarnation of the same agent (new session uuid, same cwd) from
-//! polluting last_inbound and causing `attend reply` to auto-thread to
-//! the agent's own past self. The filter is correct as long as two
-//! simultaneous attend agents are not running in the same canonicalized
-//! working directory. Claude Code's one-agent-per-project norm satisfies
-//! this in practice; if that ever changes, this filter needs to grow a
-//! session-uuid-set check keyed off `~/.claude/sessions/*.json` metadata
-//! instead of a bare cwd comparison.
+//! The peers sensor and the drain record the newest message they surfaced
+//! from another sender. Messages the session sent itself, under its current
+//! id or an id it had before a `/clear`, are never surfaced, so they are
+//! never recorded. A sibling session at the same project (alpha and beta,
+//! ADR-129) is another sender: a reply to its direct message threads to it.
 
 use attend_groups::Room;
 use std::fs;

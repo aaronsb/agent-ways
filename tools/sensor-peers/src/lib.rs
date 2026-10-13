@@ -251,6 +251,13 @@ impl PeerSensor {
         let own_session_id: String = self.own_session_id
             .clone()
             .unwrap_or_else(|| "---none---".to_string());
+        // The ids this session reads as: its own, then the ones it had
+        // before each `/clear` (ADR-401, `to`).
+        let mut reading_ids = vec![own_session_id.clone()];
+        if let Some(sid) = &self.own_session_id {
+            reading_ids.extend(attend_presence::enrollment::previous_ids(sid));
+        }
+        let ids: Vec<&str> = reading_ids.iter().map(String::as_str).collect();
 
         // Cold start: the first scan of a session that restored no
         // checkpoint (no seen-set) applies `attend_state::cold_start`, the
@@ -307,13 +314,13 @@ impl PeerSensor {
                 };
                 // Skip our own signals — check the from field, not filename.
                 // from is "claude:session-id" or "external:user@terminal"
-                if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
+                if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
                     self.seen_signals.insert(key);
                     continue;
                 }
                 // A direct message to another session at this project shares
                 // the tray and is not this session's to read (ADR-401, `to`).
-                if dir.room == Room::Project && !sig.tray_reads(&own_session_id) {
+                if dir.room.is_tray() && !sig.tray_reads(&ids) {
                     self.seen_signals.insert(key);
                     continue;
                 }
@@ -343,7 +350,7 @@ impl PeerSensor {
         let wakes = found.iter().enumerate().any(|(i, f)| {
             plan.as_ref().is_none_or(|p| p.deliver[i])
                 && agent_identity::parse_signal(agent_identity::wire_line(&f.content))
-                    .is_some_and(|sig| sig.wakes(where_found(&scan_dirs[f.room].room), &own_session_id))
+                    .is_some_and(|sig| sig.wakes(scan_dirs[f.room].room.is_tray(), &ids))
         });
 
         for (i, f) in found.into_iter().enumerate() {
@@ -411,19 +418,12 @@ impl PeerSensor {
             // here (after deciding to emit an observation) so `attend
             // reply` targets what the operator actually saw, not what was
             // held back. The own-session-id keys the file so concurrent
-            // attend processes don't collide.
-            //
-            // Filter: skip signals originating from the same working
-            // directory as this observer. The own-session skip above only
-            // catches the *current* claude session id; a previous
-            // incarnation of the same agent (different session uuid, same
-            // cwd) would otherwise pollute last_inbound, causing `attend
-            // reply` to auto-thread to the agent's own past self.
+            // attend processes don't collide. Messages from this session,
+            // under its id or an earlier one, were skipped above, so a
+            // sibling session at this project is recorded like any sender.
             if let Some(ref sid) = self.own_session_id {
-                if source_cwd != focus.working_dir {
-                    let said = last_inbound::Said::of(&scan_dirs[f.room].room, &from, source_cwd);
-                    last_inbound::record(sid, &f.signal_id, &said, &from);
-                }
+                let said = last_inbound::Said::of(&scan_dirs[f.room].room, &from, source_cwd);
+                last_inbound::record(sid, &f.signal_id, &said, &from);
             }
         }
 
@@ -782,14 +782,6 @@ fn session_file(record: claude_sessions::SessionRecord) -> Option<SessionFile> {
 /// handle and the hint come before the body, so a line Monitor cuts at 500
 /// characters still names the message and still shows the hint the
 /// session sees once.
-/// Where a signal found in `room` sat, as the wake rule reads it.
-pub fn where_found(room: &Room) -> agent_identity::signal::Where {
-    match room {
-        Room::Project => agent_identity::signal::Where::Tray,
-        Room::Open | Room::Channel(_) => agent_identity::signal::Where::Shared,
-    }
-}
-
 fn monitor_line(sender: &str, signal_id: &str, body: &str, reply_hint: bool) -> String {
     let text = body.split_whitespace().collect::<Vec<_>>().join(" ");
     let hint = if reply_hint { REPLY_HINT } else { "" };

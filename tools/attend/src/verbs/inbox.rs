@@ -79,7 +79,8 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
     let me = current_session();
     // An unresolved session's id is a `pid-` placeholder no sender carries,
     // so nothing is skipped as its own.
-    let own_session_id = me.session_id.as_str();
+    let ids = crate::util::reading_ids(&me);
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let mut messages: Vec<Message> = Vec::new();
 
     for dir in &groups_for(&me).receive_dirs(&me.origin_path) {
@@ -100,12 +101,12 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
                 .unwrap_or(std::time::UNIX_EPOCH);
             let Ok(content) = agent_identity::signal::read_signal_file(&path) else { continue };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
-            // Skip own messages
-            if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
+            // Skip own messages, under this id or an earlier one.
+            if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
                 continue;
             }
             // Another session's direct message in a shared project tray.
-            if dir.room == Room::Project && !sig.tray_reads(own_session_id) {
+            if dir.room.is_tray() && !sig.tray_reads(&ids) {
                 continue;
             }
             messages.push(Message {
@@ -194,7 +195,9 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         let content = agent_identity::signal::read_signal_file(&path).map_err(|e| ReadError::Unreadable { error: e.to_string() })?;
         let sig = parse_signal(wire_line(&content)).ok_or(ReadError::Corrupt)?;
         // Another session's direct message is no message to this one.
-        if dir.room == Room::Project && !sig.tray_reads(&me.session_id) {
+        let ids = crate::util::reading_ids(&me);
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        if dir.room.is_tray() && !sig.tray_reads(&ids) {
             return Err(ReadError::NotFound);
         }
         let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()).unwrap_or(std::time::UNIX_EPOCH);

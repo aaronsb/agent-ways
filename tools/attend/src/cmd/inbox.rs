@@ -185,14 +185,6 @@ pub(crate) struct Scan {
     pub(crate) skipped: Vec<String>,
 }
 
-/// Where a signal found in `room` sat, as the wake rule reads it.
-fn where_found(room: &Room) -> agent_identity::signal::Where {
-    match room {
-        Room::Project => agent_identity::signal::Where::Tray,
-        Room::Open | Room::Channel(_) => agent_identity::signal::Where::Shared,
-    }
-}
-
 /// The scope label a drained message carries for its room.
 fn room_label(room: &Room) -> String {
     match room {
@@ -205,9 +197,11 @@ fn room_label(room: &Room) -> String {
 
 /// Scan core: walk the receive set and split unseen signals into
 /// deliverable messages and keys to mark. Pure with respect to identity
-/// and config: the caller supplies the seen-set, the session id and the
+/// and config: the caller supplies the seen-set, the session's ids and the
 /// baselining decision, so tests drive it with temp dirs (PR #385 review,
-/// finding 6).
+/// finding 6). `ids` is the session id, then the ids it had before a
+/// `/clear` ([`crate::util::reading_ids`]): a message to or from any of
+/// them is the session's own.
 ///
 /// Own messages are marked without delivering (dedup bookkeeping). Under
 /// `baselining` (no seen-set yet) the messages from others go through
@@ -219,9 +213,10 @@ fn room_label(room: &Room) -> String {
 pub(crate) fn scan_pending(
     scan_dirs: &[attend_groups::ReceiveDir],
     seen: &std::collections::HashSet<String>,
-    own_session_id: &str,
+    ids: &[&str],
     baselining: bool,
 ) -> Scan {
+    let own_session_id = ids.first().copied().unwrap_or_default();
     struct Found {
         room: usize,
         key: String,
@@ -258,13 +253,13 @@ pub(crate) fn scan_pending(
             };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
             // Own messages: mark (dedup bookkeeping) but never deliver.
-            if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
+            if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
                 mark.push(key);
                 continue;
             }
             // Another session's direct message in a shared project tray is
             // not this session's to read (ADR-401, `to`).
-            if dir.room == Room::Project && !sig.tray_reads(own_session_id) {
+            if dir.room.is_tray() && !sig.tray_reads(ids) {
                 mark.push(key);
                 continue;
             }
@@ -309,7 +304,7 @@ pub(crate) fn scan_pending(
             re: sig.reply_to.map(str::to_string),
             body: sig.message.to_string(),
             source_cwd: sig.cwd.to_string(),
-            wakes: sig.wakes(where_found(&scan_dirs[f.room].room), own_session_id),
+            wakes: sig.wakes(scan_dirs[f.room].room.is_tray(), ids),
         });
     }
     let held_back = plan.as_ref().map_or(0, |p| p.not_shown);
@@ -414,7 +409,9 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
-    let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
+    let ids = crate::util::reading_ids(&ident);
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &ids, baselining);
     // Nothing addressed to the session: what it found waits, unmarked, for
     // the next turn. The cold start's own marks still go through, so the
     // backlog it holds back stays held back.
@@ -512,14 +509,14 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
 
     // `attend reply` should target what the drain delivered, exactly as
     // it targets what the sensor surfaced, and stay in the room it was
-    // said in.
+    // said in. Nothing this session sent, under its id or an earlier one,
+    // is delivered, so the newest delivered is another sender's, a sibling
+    // session's at this project included.
     #[cfg(feature = "sensor-peers")]
-    if let Some(newest) = delivered.iter().rev().find(|d| d.source_cwd != cwd) {
+    if let Some(newest) = delivered.last() {
         let said = sensor_peers::last_inbound::Said::of(&newest.room, &newest.sender_id, &newest.source_cwd);
         sensor_peers::last_inbound::record(&session_id, &newest.id, &said, &newest.sender_id);
     }
-    #[cfg(not(feature = "sensor-peers"))]
-    let _ = cwd;
 }
 
 /// How a drain prints what it delivered.
@@ -1064,7 +1061,7 @@ mod drain_tests {
         let key = write_signal(&old, "m1", "claude:other-session", "once");
         let seen: std::collections::HashSet<String> = [key].into_iter().collect();
         std::fs::rename(old.join("m1.signal"), new.join("m1.signal")).unwrap();
-        let scan = scan_pending(&dirs(&new, Room::Project), &seen, "my-session", false);
+        let scan = scan_pending(&dirs(&new, Room::Project), &seen, &["my-session"], false);
         assert!(scan.delivered.is_empty());
         std::fs::remove_dir_all(&root).ok();
     }
@@ -1075,7 +1072,7 @@ mod drain_tests {
         let k1 = write_signal(&dir, "peer-1", "claude:other-session", "already seen");
         let k2 = write_signal(&dir, "peer-2", "claude:other-session", "new message");
         let seen: std::collections::HashSet<String> = [k1].into_iter().collect();
-        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &seen, "my-session", false);
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &seen, &["my-session"], false);
         assert_eq!(delivered.len(), 1);
         assert_eq!(delivered[0].body, "new message");
         assert_eq!(delivered[0].scope, "#open");
@@ -1088,7 +1085,7 @@ mod drain_tests {
     fn scan_marks_own_messages_without_delivering() {
         let dir = scan_fixture("own");
         let k = write_signal(&dir, "self-1", "claude:my-session", "my own send");
-        let Scan { delivered, mark, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
+        let Scan { delivered, mark, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true);
         assert!(delivered.is_empty(), "own message must not deliver");
         assert_eq!(mark, vec![k], "own message must still be marked (dedup bookkeeping)");
         std::fs::remove_dir_all(&dir).ok();
@@ -1101,7 +1098,7 @@ mod drain_tests {
     fn baseline_delivers_fresh_messages() {
         let dir = scan_fixture("baseline-fresh");
         let k = write_signal(&dir, "peer-1", "claude:other-session", "arrived just now");
-        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true);
         assert_eq!(delivered.len(), 1, "fresh message must survive the baseline");
         assert_eq!(mark, vec![k]);
         assert_eq!(note, None);
@@ -1116,7 +1113,7 @@ mod drain_tests {
         let k = write_signal(&dir, "peer-1", "claude:other-session", "durable backlog");
         age(&dir, "peer-1", std::time::Duration::from_secs(600));
 
-        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), "my-session", true);
+        let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true);
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
         assert_eq!(note.as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
@@ -1132,7 +1129,7 @@ mod drain_tests {
         write_signal(&dir, "peer-1", "claude:other-session", "sent with --to an hour ago");
         age(&dir, "peer-1", std::time::Duration::from_secs(3600));
 
-        let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), "my-session", true);
+        let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], true);
         assert!(scan.delivered.is_empty());
         assert_eq!(scan.note.as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
         std::fs::remove_dir_all(&dir).ok();
@@ -1151,7 +1148,7 @@ mod drain_tests {
         let dir = scan_fixture("conduits");
         write_signal(&dir, "peer-1", "claude:other-session", "same name on both");
         // Drain path.
-        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), "my-session", false);
+        let Scan { delivered, .. } = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], false);
         assert_eq!(delivered.len(), 1);
         let drained = &delivered[0];
 

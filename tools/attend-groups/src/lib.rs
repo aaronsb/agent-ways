@@ -86,6 +86,14 @@ pub enum Room {
     Channel(String),
 }
 
+impl Room {
+    /// Whether this is a tray, read by its owner alone, rather than a room
+    /// many share. The read filter and the wake rule ask it (ADR-401, `to`).
+    pub fn is_tray(&self) -> bool {
+        matches!(self, Room::Project)
+    }
+}
+
 /// One directory a member reads signals from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiveDir {
