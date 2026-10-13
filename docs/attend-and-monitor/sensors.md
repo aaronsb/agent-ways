@@ -148,7 +148,7 @@ The sensor does not capture output.
 
 ## `disclosure`
 
-Re-teaches the messaging contract when it has drifted out of the agent's recent context (ADR-122). Each poll reads the token count from `ways context --json`. The first poll of an `attend run` emits the contract (how to send, reply and scope messages, the drain, keepwarm, the CLI-is-the-contract rule), and it emits again each time the session has moved 25% of the context window since the last time. The magnitude is 5.0, so the line prints at high priority on a single poll.
+Re-teaches the messaging contract when it has drifted out of the agent's recent context (ADR-122). Each poll reads the token count from `ways context --json`. The first poll of an `attend run` emits the contract (how to send, reply and scope messages, the drain, keepwarm, the rule that attend's tools and CLI are the contract), and it emits again each time the session has moved 25% of the context window since the last time. The magnitude is 5.0, so the line prints at high priority on a single poll.
 
 The body is `tools/attend/src/sensors/disclosures/messaging.md`, compiled into the binary. It is kept in step with the attend skill and the attend way. The ledger is in memory only, so a restarted run teaches again on its first poll.
 

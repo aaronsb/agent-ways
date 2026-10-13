@@ -56,13 +56,13 @@ Sourcing defines the functions and prints nothing, from bash or zsh. The script 
 
 Every segment ends in a space or prints nothing, so they concatenate without separator logic. `sl_agent_name` prints the bare name for a layout of your own.
 
-Each external call runs under `SL_TIMEOUT` seconds (default 1) through `timeout`, or `gtimeout` on macOS with Homebrew coreutils. Without either it runs unbounded. A timed-out `attend` skips the table fallback, so a hung attend costs one `SL_TIMEOUT`. Set `SL_TIMEOUT` before sourcing to change it.
+Each external call runs under `SL_TIMEOUT` seconds (default 1) through `timeout`, or `gtimeout` on macOS with Homebrew coreutils. Without either it runs unbounded. A hung attend costs one `SL_TIMEOUT`. Set `SL_TIMEOUT` before sourcing to change it.
 
 ## The agent name
 
 The name comes from `attend peer whoami --display`. `whoami` derives it from the session record's origin path (ADR-171), so it stays the same when the shell's working directory changes during the session. The instance suffix (`Chaucer-2`) appears when several sessions share one origin.
 
-Read the name through the CLI and never from attend's state files. `attend peer whoami` is the supported surface. On attend builds before `--display`, the script parses the `display` row of the `whoami` table. Builds before `whoami` show no name.
+Read the name through the CLI and never from attend's state files. `attend peer whoami --display` is the supported surface. An attend without that command shows no name.
 
 The display name is presentation. A script that keys state on the session should read `attend peer whoami --machine`, which prints `session_id`, `origin_path` and `resolved`, and leaves the name out.
 
@@ -70,7 +70,7 @@ The display name is presentation. A script that keys state on the session should
 
 `make test-statusline` runs `tests/statusline-test.sh`. It checks:
 
-- the agent segment against stub attend builds: one with `--display`, one without, one that hangs, and none at all
+- the agent segment against stub attend builds: one with `peer whoami --display`, one without it, one that hangs, and none at all
 - a strict-mode caller surviving failed commands
 - sourcing under bash, zsh, and zsh with `nounset`, and a segment called from zsh
 - the branch, dirty and detached-HEAD forms of `sl_git` in a throwaway repo
