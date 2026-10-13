@@ -82,7 +82,7 @@ The drain delivers only to an enrolled session (#720). A session enrolls by runn
 
 Enrolling also tells the session its name, `you are <name>`, in output the model reads. `attend run` puts it on its startup line. `attend channel join`, and a scene that joins a channel, print it on a line of their own in the Bash output. A cold-start drain that delivers messages repeats it in the delivered text. A note-only drain carries no name, because its `systemMessage` is shown to the operator and never reaches the model.
 
-Enrollment is durable. A stale heartbeat does not end it, and neither does the pruning of a channel membership after a long turn. Only an explicit opt-out ends it:
+Enrollment is durable. A stale heartbeat does not end it, and neither does the pruning of a channel membership after the session's process has gone. Only an explicit opt-out ends it:
 
 - Leaving the last channel, or activating a scene that leaves none, withdraws the join. A session that also ran `attend run` stays enrolled.
 - `attend channel scene private` withdraws the join and the run. When an `attend run` holds the session at that moment, the record notes the opt-out, and the run's enrollment ends once no run holds the session. Enrolling again (`attend run`, `attend channel join`) clears the note.
