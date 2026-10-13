@@ -191,7 +191,7 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
             for r in &recipients {
                 let Addressed::Agent(name) = r else { continue };
                 let sid = resolve_recipients(&[Addressed::Agent(name)], &agents, &quiet, &session_of).ok().and_then(|d| d.into_iter().next()).map(|(_, to)| to);
-                if !sid.is_some_and(|sid| members.iter().any(|m| *m == sid)) {
+                if !sid.is_some_and(|sid| members.contains(&sid)) {
                     return EnterAction::StatusOnly(format!("@{name} is not in #{channel}; nothing sent"));
                 }
             }
