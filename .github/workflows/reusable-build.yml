@@ -141,10 +141,12 @@ jobs:
       - name: Run tests
         run: ${{ inputs.test }}
 
-  # Runs when the test job is skipped too (a component without tests).
+  # Runs when the test job is skipped too (a component without tests). A
+  # cancelled build leg is neither cancelled() nor failure() at the workflow
+  # level, so the gate reads each result: every platform must have built.
   collect:
     needs: [build, test]
-    if: ${{ !cancelled() && !failure() }}
+    if: ${{ needs.build.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -170,7 +172,7 @@ jobs:
 
   release:
     needs: collect
-    if: ${{ !cancelled() && !failure() && startsWith(github.ref, format('refs/tags/{0}-v', inputs.component)) }}
+    if: ${{ needs.collect.result == 'success' && startsWith(github.ref, format('refs/tags/{0}-v', inputs.component)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -187,6 +189,12 @@ jobs:
           NOTES: ${{ inputs.release-notes }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
+          # A rerun after a failed leg finds the release already made: replace
+          # its assets and keep its notes.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber binaries/*
+            exit 0
+          fi
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$COMPONENT ${TAG#"$COMPONENT"-}" \
