@@ -104,12 +104,15 @@ pub struct Seen {
 /// Every identity the chat has seen, live or not: the senders of the
 /// buffered signals, newest first, then the seeded sessions. A claude is
 /// live when `claude_live` holds for its session id; a human when
-/// `human_live` holds for its username. An entry seen twice is live when
-/// either sighting is. One seen under two session ids (a session
-/// restarted in the same cwd) keeps the id a channel lists, as
-/// `in_channel` says, so a menu acting on its membership finds it. The
-/// left column lists these (ADR-405); the legend and completion keep the
-/// live ones ([`known_identities_with_liveness`]).
+/// `human_live` holds for its username. Each live claude session is an
+/// entry of its own, whatever name it shares, so a direct message reaches
+/// the live session it names (ADR-401, `to`). Dead sightings of one name
+/// and cwd are one entry, which keeps the id a channel lists, as
+/// `in_channel` says, so a menu acting on its membership finds it; it is
+/// dropped when a live session answers to the same name and cwd and the
+/// channel lists no dead id. The left column lists these (ADR-405); the
+/// legend and completion keep the live ones
+/// ([`known_identities_with_liveness`]).
 pub fn seen_identities<F, H, M>(
     signals: &[Signal],
     seeds: &[DiscoveredSession],
@@ -169,7 +172,7 @@ where
         //   legend doesn't show `@aaron @aaron` when a user has
         //   attend-chat running in more than one cwd.
         let key = if is_claude {
-            format!("{}\x1f1\x1f{}", primary_label, sig.cwd)
+            claude_key(&primary_label, &sig.cwd, &member, live)
         } else {
             format!("{}\x1f0", primary_label)
         };
@@ -185,11 +188,33 @@ where
     for seed in seeds {
         let id = Identity::for_cwd(&seed.cwd, caps);
         let display = with_instance(id.nickname, &seed.cwd, &seed.session_id, instances);
-        let key = format!("{}\x1f1\x1f{}", display, seed.cwd);
+        let live = claude_live(&seed.session_id);
+        let key = claude_key(&display, &seed.cwd, &seed.session_id, live);
         let identity = KnownIdentity { nickname: display, cwd: seed.cwd.clone(), is_claude: true, palette: id.palette, style: id.style };
-        note(key, identity, claude_live(&seed.session_id), seed.session_id.clone(), &mut out);
+        note(key, identity, live, seed.session_id.clone(), &mut out);
     }
+    // A dead sighting gives way to a live session of the same name and cwd,
+    // unless a channel still lists its id.
+    let answered = |d: &Seen, out: &[Seen]| {
+        out.iter().any(|l| l.live && l.identity.is_claude && l.identity.nickname == d.identity.nickname && l.identity.cwd == d.identity.cwd)
+    };
+    let dropped: Vec<bool> = out.iter().map(|s| s.identity.is_claude && !s.live && !in_channel(&s.member) && answered(s, &out)).collect();
+    let mut i = 0;
+    out.retain(|_| {
+        i += 1;
+        !dropped[i - 1]
+    });
     out
+}
+
+/// The key a claude sighting merges under: a live one by its session id,
+/// so two live sessions never share an entry; dead ones by name and cwd.
+fn claude_key(display: &str, cwd: &str, session_id: &str, live: bool) -> String {
+    if live {
+        format!("{display}\x1f1\x1f{cwd}\x1f{session_id}")
+    } else {
+        format!("{display}\x1f1\x1f{cwd}")
+    }
 }
 
 /// Heartbeat-based liveness check (ADR-129). Wrapped here so the
@@ -257,18 +282,44 @@ mod tests {
 
     #[test]
     fn one_name_seen_under_two_sessions_keeps_the_id_a_channel_lists() {
-        // `old` is in a channel; `new` is the same cwd's later session.
-        // The buffer is newest last, and the walk goes in reverse, so
-        // `new` is met first.
+        // `old` is the same cwd's earlier session, now dead; `new` is live.
+        // The buffer is newest last, and the walk goes in reverse, so `new`
+        // is met first.
         let buf = vec![sig("claude:old", "/home/x"), sig("claude:new", "/home/x")];
-        let member = |in_channel: &dyn Fn(&str) -> bool| {
-            let seen = seen_identities(&buf, &[], ColorDepth::TrueColor, |_| true, |_| false, in_channel, &empty_cache());
-            assert_eq!(seen.len(), 1, "one name and cwd is one row");
-            seen[0].member.clone()
+        let rows = |in_channel: &dyn Fn(&str) -> bool| {
+            seen_identities(&buf, &[], ColorDepth::TrueColor, |sid| sid == "new", |_| false, in_channel, &empty_cache())
+                .into_iter()
+                .map(|s| (s.member, s.live))
+                .collect::<Vec<_>>()
         };
-        assert_eq!(member(&|id| id == "old"), "old", "the id the channel holds");
-        assert_eq!(member(&|id| id == "new"), "new");
-        assert_eq!(member(&|_| false), "new", "in no channel: the newest");
+        assert_eq!(rows(&|id| id == "old"), [("new".to_string(), true), ("old".to_string(), false)], "the id the channel holds stays listed");
+        assert_eq!(rows(&|_| false), [("new".to_string(), true)], "in no channel, the dead sighting gives way");
+    }
+
+    /// Review of #974, D2: a dead session's sighting and a live seed at one
+    /// cwd once merged into one live entry carrying the dead id, so an
+    /// `@Name` send was addressed to a session nobody reads as.
+    #[test]
+    fn a_live_seed_is_not_carried_by_a_dead_sighting_of_its_name() {
+        let dead = "aaaaaaaa-0000-4000-8000-000000000001";
+        let live = "bbbbbbbb-0000-4000-8000-000000000002";
+        let buf = vec![sig(&format!("claude:{dead}"), "/home/x")];
+        let seeds = vec![DiscoveredSession { cwd: "/home/x".into(), session_id: live.into() }];
+        let seen = seen_identities(&buf, &seeds, ColorDepth::TrueColor, |sid| sid == live, |_| false, |_| false, &empty_cache());
+        let rows: Vec<(&str, bool)> = seen.iter().map(|s| (s.member.as_str(), s.live)).collect();
+        assert_eq!(rows, [(live, true)]);
+    }
+
+    /// Two live sessions at one cwd with one name are two entries.
+    #[test]
+    fn two_live_sessions_of_one_name_are_two_entries() {
+        let seeds = vec![
+            DiscoveredSession { cwd: "/home/x".into(), session_id: "s1".into() },
+            DiscoveredSession { cwd: "/home/x".into(), session_id: "s2".into() },
+        ];
+        let seen = seen_identities(&[], &seeds, ColorDepth::TrueColor, |_| true, |_| false, |_| false, &empty_cache());
+        let members: Vec<&str> = seen.iter().map(|s| s.member.as_str()).collect();
+        assert_eq!(members, ["s1", "s2"]);
     }
 
     #[test]
@@ -352,7 +403,7 @@ mod tests {
         let buf = vec![sig("claude:a", "/home/x")];
         let seeds = vec![DiscoveredSession {
             cwd: "/home/x".to_string(),
-            session_id: "sx".into(),
+            session_id: "a".into(),
         }];
         let reg = known_identities_with_liveness(&buf, &seeds, ColorDepth::TrueColor, |_| true, &empty_cache());
         assert_eq!(reg.len(), 1);

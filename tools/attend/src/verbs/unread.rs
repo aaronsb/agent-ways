@@ -56,7 +56,9 @@ pub fn unread() -> Unread {
     // again, which reopens the cold start.
     let baselining = !listening || !snapshot.as_ref().is_some_and(|s| s.baselined);
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
-    let scan = crate::cmd::inbox::scan_pending(&dirs, &seen, &me.session_id, baselining);
+    let ids = crate::util::reading_ids(&me);
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let scan = crate::cmd::inbox::scan_pending(&dirs, &seen, &ids, baselining);
 
     let mut rooms: Vec<RoomCount> = Vec::new();
     for dir in &dirs {

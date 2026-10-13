@@ -60,8 +60,8 @@ Active awareness for Claude Code sessions
 * `whoami` — Print this session's canonical bus identity (issue #378)
 * `sensors` — List all sensors — built-in and config-defined script sensors
 * `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
-* `send` — Send a signal to peer sessions (defaults to #open base channel)
-* `reply` — Reply to the most recent peer message (auto-threaded)
+* `send` — Send a message: a direct message with --to, a channel post with --channel, else to #open
+* `reply` — Reply to the most recent peer message: a direct message to its sender, or in its named channel
 * `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
 * `unread` — Count this session's unread messages by room, marking none of them read
 * `chat` — Launch the interactive chat TUI (ADR-120)
@@ -122,6 +122,7 @@ Read pending messages from peers
   Default value: `1`
 * `--before <TS>` — Cursor: only show messages older than this unix timestamp
 * `--drain` — Atomically deliver pending messages and record their consumption (ADR-172). The Stop-hook fast path: a silent no-op under an unresolved identity or for a session not enrolled by attend run or a channel join (#720). On a cold start (no seen-set) it delivers addressed mail and fresh messages and counts the older backlog it does not show
+* `--wake` — With --drain: deliver and mark nothing unless a pending message would wake this session, one addressed to it, sent to its project, or a reply to a message it sent; then deliver all that is pending. `#open` and channel posts alone wait for the next turn (ADR-406 item 1). The attend mod polls with it while idle
 * `--format <FMT>` — Output format for --drain: `plain` (human/agent readable), `hook` (Claude Code Stop-hook JSON; reads the hook's stdin payload for `stop_hook_active`) or `json` (the same as --json)
 
   Default value: `plain`
@@ -215,7 +216,7 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 
 ## `attend send`
 
-Send a signal to peer sessions (defaults to #open base channel)
+Send a message: a direct message with --to, a channel post with --channel, else to #open
 
 **Usage:** `attend send [OPTIONS] [MESSAGE]...`
 
@@ -225,15 +226,15 @@ Send a signal to peer sessions (defaults to #open base channel)
 
 ###### **Options:**
 
-* `--to <PATH>` — Scope send to a specific project path
-* `--channel <NAME>` — Scope send to a named channel
+* `--to <WHO>` — Send a direct message: to a session's name or id, a person's member id, or a project path for every live session there
+* `--channel <NAME>` — Post to a named channel; `open` or `#open` posts to #open. With --to as well, the post stays in the channel, addressed to them
 * `--json` — Print the written signal as one JSON document
 
 
 
 ## `attend reply`
 
-Reply to the most recent peer message (auto-threaded)
+Reply to the most recent peer message: a direct message to its sender, or in its named channel
 
 **Usage:** `attend reply [OPTIONS] [MESSAGE]...`
 
@@ -243,9 +244,9 @@ Reply to the most recent peer message (auto-threaded)
 
 ###### **Options:**
 
-* `--re <ID>` — Reply to this message id instead of the newest one delivered. The reply goes where that message was said, and is refused when that room is left, gone or unknown, as without --re
-* `--to <PATH>` — Scope send to a specific project path
-* `--channel <NAME>` — Scope send to a named channel
+* `--re <ID>` — Reply to this message id instead of the newest one delivered. The reply goes to its sender, or into its named channel, as without --re
+* `--to <WHO>` — Send the reply as a direct message to this session, person or project path instead of to the parent's sender
+* `--channel <NAME>` — Post the reply to this channel instead; `open` posts to #open
 * `--json` — Print the written signal as one JSON document
 
 

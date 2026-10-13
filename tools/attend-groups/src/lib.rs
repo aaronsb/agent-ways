@@ -59,6 +59,22 @@ pub const BUSY: &str = "channels are busy; try again";
 /// channel every enrolled member receives (ADR-124).
 pub const BROADCAST_DIR: &str = "_broadcast";
 
+/// The display name of the base channel, `#open` (ADR-124). A send to a
+/// channel by this name goes to [`BROADCAST_DIR`].
+pub const BASE_CHANNEL: &str = "open";
+
+/// The directory under the signals base that holds the person trays:
+/// `_people/<member-id>/`, one per person a message was addressed to
+/// (ADR-401, `to`). attend-chat reads the tray of the person at its
+/// keyboard. A person tray is never reaped; a signal in it is, when its
+/// sender's project is gone.
+pub const PEOPLE_DIR: &str = "_people";
+
+/// The tray of the person with member id `member` (ADR-170) under `base`.
+pub fn person_dir(base: &Path, member: &str) -> PathBuf {
+    base.join(PEOPLE_DIR).join(member)
+}
+
 /// Which room a receive directory is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Room {
@@ -68,6 +84,14 @@ pub enum Room {
     Open,
     /// A joined channel, by name.
     Channel(String),
+}
+
+impl Room {
+    /// Whether this is a tray, read by its owner alone, rather than a room
+    /// many share. The read filter and the wake rule ask it (ADR-401, `to`).
+    pub fn is_tray(&self) -> bool {
+        matches!(self, Room::Project)
+    }
 }
 
 /// One directory a member reads signals from.

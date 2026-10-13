@@ -64,6 +64,14 @@ pub(crate) enum Commands {
         #[arg(long)]
         drain: bool,
 
+        /// With --drain: deliver and mark nothing unless a pending message
+        /// would wake this session, one addressed to it, sent to its
+        /// project, or a reply to a message it sent; then deliver all that
+        /// is pending. `#open` and channel posts alone wait for the next
+        /// turn (ADR-406 item 1). The attend mod polls with it while idle.
+        #[arg(long, requires = "drain")]
+        wake: bool,
+
         /// Output format for --drain: `plain` (human/agent readable),
         /// `hook` (Claude Code Stop-hook JSON; reads the hook's stdin
         /// payload for `stop_hook_active`) or `json` (the same as --json)
@@ -110,11 +118,13 @@ pub(crate) enum Commands {
 
     #[command(about = describe::SEND)]
     Send {
-        /// Scope send to a specific project path
-        #[arg(long, value_name = "PATH")]
+        /// Send a direct message: to a session's name or id, a person's
+        /// member id, or a project path for every live session there
+        #[arg(long, value_name = "WHO")]
         to: Option<String>,
 
-        /// Scope send to a named channel
+        /// Post to a named channel; `open` or `#open` posts to #open. With
+        /// --to as well, the post stays in the channel, addressed to them
         #[arg(long, value_name = "NAME")]
         channel: Option<String>,
 
@@ -134,16 +144,17 @@ pub(crate) enum Commands {
     #[command(about = describe::REPLY)]
     Reply {
         /// Reply to this message id instead of the newest one delivered.
-        /// The reply goes where that message was said, and is refused when
-        /// that room is left, gone or unknown, as without --re
+        /// The reply goes to its sender, or into its named channel, as
+        /// without --re
         #[arg(long, value_name = "ID")]
         re: Option<String>,
 
-        /// Scope send to a specific project path
-        #[arg(long, value_name = "PATH")]
+        /// Send the reply as a direct message to this session, person or
+        /// project path instead of to the parent's sender
+        #[arg(long, value_name = "WHO")]
         to: Option<String>,
 
-        /// Scope send to a named channel
+        /// Post the reply to this channel instead; `open` posts to #open
         #[arg(long, value_name = "NAME")]
         channel: Option<String>,
 

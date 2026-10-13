@@ -23,6 +23,7 @@ import {
   LISTEN_ON_PLAIN_ARGV,
   PEERS_ARGV,
   UNREAD_ARGV,
+  WAKE_DRAIN_ARGV,
   configArgv,
   formatMessage,
   frameInbound,
@@ -38,6 +39,7 @@ import {
   pollInterval,
   replyArgv,
   sendArgv,
+  isUnknownWake,
   shortId,
 } from './lib.ts'
 import type { Listed, ModConfig } from './lib.ts'
@@ -110,6 +112,9 @@ type Mod = {
   pending: Listed[]
   /** Submits of `pending` that failed. */
   submitTries: number
+  /** attend refused `--wake` as an unknown argument: an attend older than
+   *  the wake drain, which the poll then drains without it. */
+  noWakeDrain: boolean
   /** Channels joined through attend_join, shown until attend reports rooms. */
   joined: Set<string>
   /** session.start has run; before it, at process start, the engine has not
@@ -163,7 +168,7 @@ async function registerListen($: $) {
   await $.tool.register({
     name: 'attend_listen',
     description:
-      'Turn on attend (peer messaging between Claude sessions and people in attend-chat) for the rest of this session. Call it only when the user asks to use attend. It delivers messages addressed to this project, shows one status row, and adds attend_send, attend_reply, attend_join and attend_peers. It stays on until Claude Code exits.',
+      'Turn on attend (peer messaging between Claude sessions and people in attend-chat) for the rest of this session. Call it only when the user asks to use attend. It delivers messages addressed to this session, shows one status row, and adds attend_send, attend_reply, attend_join and attend_peers. It stays on until Claude Code exits.',
     inputSchema: { type: 'object', properties: {} },
     isDeferred: false,
   })
@@ -176,13 +181,16 @@ async function registerActiveTools($: $) {
   await $.tool.register({
     name: 'attend_send',
     description:
-      'Start a new topic with peer sessions over attend. Defaults to the #open base channel; `channel` scopes it to a named channel, `to` to one project path. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and a long one goes out as one message.',
+      'Start a new topic over attend. Name someone in `to` to send them a direct message. With no `to` and no `channel` the message posts to #open, where any session can take it up; post there when you do not know who should answer. `channel` posts to a named channel; with `to` as well, the post stays in the channel addressed to them, which wakes them. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and a long one goes out as one message.',
     inputSchema: {
       type: 'object',
       properties: {
         message: { type: 'string', description: 'The message body.' },
-        channel: { type: 'string', description: 'A named channel, with or without #.' },
-        to: { type: 'string', description: 'A project path to address the message to.' },
+        channel: { type: 'string', description: 'A channel name, with or without #. open or #open posts to #open.' },
+        to: {
+          type: 'string',
+          description: "Who the direct message is for: a session's name (such as Chaucer-beta), a person's member id (such as aaron), or a project path for every session there.",
+        },
       },
       required: ['message'],
     },
@@ -191,7 +199,7 @@ async function registerActiveTools($: $) {
   await $.tool.register({
     name: 'attend_reply',
     description:
-      "Reply to a peer message that arrived over attend. Threads to the newest inbound message, or to the one given as `re` (the `~id` at the end of its line, or a full id), in that message's channel. Silence is a valid reply.",
+      "Reply to a message that arrived over attend. The reply is a direct message to its sender, an answer to an #open post included; a reply to a post in a named channel stays in that channel. It threads to the newest inbound message, or to the one given as `re` (the `~id` at the end of its line, or a full id). Silence is a valid reply.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -314,10 +322,12 @@ async function tick($: $, mod: Mod, force: boolean) {
   }
 }
 
-/** One drain; on messages, a second after BATCH_MS, then one prompt for the
- *  batch. A turn is submitted only when the drain delivered at least one
- *  message: the cold start's held-back note and the session's name are
- *  fields of the drain's document, never a message.
+/** One wake drain; on messages, a plain drain after BATCH_MS, then one
+ *  prompt for the batch. The wake drain delivers only once something pending
+ *  is addressed to the session, and then delivers all that is pending. A
+ *  turn is submitted only when the drain delivered at least one message: the
+ *  cold start's held-back note and the session's name are fields of the
+ *  drain's document, never a message.
  *
  *  The drain marks what it delivers read before the prompt is submitted, so
  *  the batch waits in `mod.pending` until a submit takes it. A submit that
@@ -328,7 +338,14 @@ async function poll($: $, mod: Mod) {
   mod.isPolling = true
   try {
     if (mod.pending.length === 0) {
-      const first = parseDrain((await run($, DRAIN_ARGV)).stdout)
+      // Only what is addressed to the session starts a turn; #open and
+      // channel posts wait for its next one (ADR-406 item 1).
+      let r = await run($, mod.noWakeDrain ? DRAIN_ARGV : WAKE_DRAIN_ARGV)
+      if (!mod.noWakeDrain && isUnknownWake(r)) {
+        mod.noWakeDrain = true
+        r = await run($, DRAIN_ARGV)
+      }
+      const first = parseDrain(r.stdout)
       if (!first) return
       // Listening turned off elsewhere (attend listen off, a private scene),
       // or an identity attend cannot resolve: the row says so.
@@ -491,6 +508,7 @@ export const register: Register = on => {
     active: false,
     pending: [],
     submitTries: 0,
+    noWakeDrain: false,
     joined: new Set(),
     isStarted: false,
     isRelistening: false,
@@ -610,7 +628,7 @@ export const register: Register = on => {
     }
     const lead = was ? 'attend was already listening in this session.' : 'attend is listening for the rest of this session.'
     const poll = mod.canPoll
-      ? ' Messages addressed to this project arrive as peer-data turns.'
+      ? ' Messages addressed to this session arrive as peer-data turns; #open and channel posts arrive with your next turn.'
       : ' This session does not poll (a -p or SDK run); messages arrive at the end of a turn.'
     return { result: `${lead}${poll}${tools}` }
   })

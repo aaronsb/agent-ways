@@ -173,6 +173,9 @@ pub struct ChatPane {
     /// The time the last tick saw, to notice the local day changing: the
     /// feed's times are relative to the day (`HH:MM` today, a date before).
     day_seen: Option<SystemTime>,
+    /// This program's file and its modification time at start, to notice
+    /// an update installed while the chat is open; `None` once noticed.
+    binary: Option<(std::path::PathBuf, SystemTime)>,
     hits: Hits,
     /// What the chat asks the shell to open over the pane, until the shell
     /// takes it ([`Pane::take_open`]). A request: what is open is the
@@ -235,6 +238,7 @@ impl ChatPane {
             dry_run: false,
             draws: 0,
             day_seen: None,
+            binary: running_binary(),
             hits: Hits::default(),
             to_open: None,
             theme: "terminal".into(),
@@ -436,10 +440,12 @@ impl ChatPane {
         let what = match crate::slash::parse(&text) {
             Some((cmd, _)) => format!("dry run: /{cmd} not run"),
             None => {
-                let scope = tabs::send_scope(&self.normal_tab());
+                let shown = self.normal_tab();
+                let scope = tabs::send_scope(&shown);
                 let quiet = keys::quiet_names(&self.world().seen);
                 let swept = keys::swept_names(&self.world().rows);
-                let to = destination_label(&text, &scope, &quiet, &swept).unwrap_or(format!("#{scope}"));
+                let in_channel = matches!(shown, Tab::Channel(_));
+                let to = destination_label(&text, &scope, in_channel, &quiet, &swept).unwrap_or(format!("#{scope}"));
                 format!("dry run: not sent to {to}")
             }
         };
@@ -879,8 +885,30 @@ impl Pane for ChatPane {
             }
             self.refresh();
             self.refreshed = Some(Instant::now());
+            if self.binary.as_ref().is_some_and(|(path, at)| updated_on_disk(path, *at)) {
+                self.binary = None;
+                self.say(UPDATED_ON_DISK, false);
+            }
         }
     }
+}
+
+/// What the status line says once the chat's program changed on disk.
+pub const UPDATED_ON_DISK: &str =
+    "attend-chat was updated on disk: restart it to read new messages and direct replies correctly";
+
+/// This program's file and its modification time now.
+fn running_binary() -> Option<(std::path::PathBuf, SystemTime)> {
+    let path = std::env::current_exe().ok()?;
+    let at = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+    Some((path, at))
+}
+
+/// Whether the file at `path` is no longer the one modified at `at`: an
+/// update replaced or rewrote it. A file that is gone reads as unchanged,
+/// since the program may be moved aside while it is replaced.
+pub fn updated_on_disk(path: &std::path::Path, at: SystemTime) -> bool {
+    std::fs::metadata(path).and_then(|m| m.modified()).is_ok_and(|now| now != at)
 }
 
 /// The chat on the shell: [`ChatPane`] inside `agent_tui::App`. The

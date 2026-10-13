@@ -90,7 +90,12 @@ struct Record {
     host: Option<HostRecord>,
     claude: Option<String>,
     since: Option<u64>,
+    /// The ids this session had before each `/clear`, oldest first.
+    previous: Vec<String>,
 }
+
+/// How many earlier ids a record keeps.
+const PREVIOUS_KEPT: usize = 8;
 
 /// A recorded host and the Claude Code process it was recorded in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +116,8 @@ impl Record {
                 _ => {
                     if let Some(key) = line.strip_prefix("claude ") {
                         r.claude = Some(key.to_string());
+                    } else if let Some(sid) = line.strip_prefix("previous ") {
+                        r.previous.push(sid.trim().to_string());
                     } else if let Some(secs) = line.strip_prefix("since ") {
                         r.since = secs.trim().parse().ok();
                     } else if let Some(rest) = line.strip_prefix("host ") {
@@ -142,6 +149,9 @@ impl Record {
         }
         if let Some(secs) = self.since {
             out.push_str(&format!("since {secs}\n"));
+        }
+        for sid in &self.previous {
+            out.push_str(&format!("previous {sid}\n"));
         }
         out
     }
@@ -284,10 +294,18 @@ pub fn opt_out(session_id: &str) -> io::Result<()> {
 }
 
 /// Move `old`'s enrollment to `new`, for a session whose id changed under
-/// the same process (`/clear`). Keeps any way `new` already had.
+/// the same process (`/clear`). Keeps any way `new` already had, and records
+/// `old` and the ids before it as `new`'s earlier ids ([`previous_ids`]).
 pub fn carry(old: &str, new: &str) -> io::Result<()> {
     let Some(from) = read(old) else { return Ok(()) };
     edit(new, |r| {
+        for sid in from.previous.iter().map(String::as_str).chain([old]) {
+            if sid != new && !r.previous.iter().any(|p| p == sid) {
+                r.previous.push(sid.to_string());
+            }
+        }
+        let extra = r.previous.len().saturating_sub(PREVIOUS_KEPT);
+        r.previous.drain(..extra);
         for s in &from.sources {
             if !r.sources.contains(s) {
                 r.sources.push(*s);
@@ -305,6 +323,14 @@ pub fn carry(old: &str, new: &str) -> io::Result<()> {
         }
     })?;
     edit(old, |r| *r = Record::default())
+}
+
+/// The ids `session_id` had before each `/clear` that carried its
+/// enrollment, oldest first. A message sent to one of them is still the
+/// session's to read, and a reply to one it sent still wakes it (ADR-401,
+/// `to`).
+pub fn previous_ids(session_id: &str) -> Vec<String> {
+    read(session_id).map(|r| r.previous).unwrap_or_default()
 }
 
 /// Whether any enrollment was ever recorded under a Claude Code process
@@ -340,6 +366,17 @@ mod tests {
             None => std::env::remove_var("XDG_CACHE_HOME"),
         }
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_carry_records_the_earlier_ids() {
+        with_cache(|| {
+            enroll("a", Source::Listen, None).unwrap();
+            carry("a", "b").unwrap();
+            carry("b", "c").unwrap();
+            assert_eq!(previous_ids("c"), ["a", "b"]);
+            assert!(previous_ids("a").is_empty() && previous_ids("nobody").is_empty());
+        });
     }
 
     #[test]

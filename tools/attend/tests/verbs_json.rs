@@ -4,8 +4,6 @@
 mod common;
 use common::Fixture;
 use serde_json::Value;
-#[cfg(feature = "sensor-peers")]
-use std::time::Duration;
 
 fn json(out: &std::process::Output) -> Value {
     serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
@@ -82,7 +80,11 @@ fn a_reply_threads_under_the_message_the_drain_delivered() {
     // message it delivered as the one a reply threads under.
     f.ok(&["join", "room"]);
     f.drain("plain");
-    f.put("_broadcast", "other-session-1-1", "a question", Duration::from_secs(1));
+    // From a person, whose answer is always written: to a session that has
+    // exited, a reply is refused.
+    let open = f.signals().join("_broadcast");
+    std::fs::create_dir_all(&open).unwrap();
+    std::fs::write(open.join("other-session-1-1.signal"), "external:peer@kitty|peer|/home/peer|a question\n").unwrap();
     assert!(f.drain("plain").contains("a question"));
 
     let sent = ok_json(&f, &["reply", "--json", "an answer"]);

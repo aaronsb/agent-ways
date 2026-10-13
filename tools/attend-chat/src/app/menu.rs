@@ -525,7 +525,7 @@ impl ChatPane {
             REPLY => match (&sig.channel, name.as_deref()) {
                 (crate::signal::Channel::Group(g), _) => self.set_tab(Tab::Channel(g.clone())),
                 (crate::signal::Channel::Open, _) => self.set_tab(Tab::Channel(BASE_CHANNEL_NAME.into())),
-                (crate::signal::Channel::Direct, Some(n)) => address(self, n),
+                (crate::signal::Channel::Direct | crate::signal::Channel::Person, Some(n)) => address(self, n),
                 _ => return self.say("no channel to reply in", true),
             },
             QUOTE => {

@@ -8,8 +8,9 @@ allowed-tools: Bash, Monitor, Read
 
 <!--
 Messaging guidance lives in three synchronized sources. When you edit
-the peer-messaging section, the autonomy paragraph, the silence-is-valid
-callout, the CLI-is-the-contract note, the keepwarm contract, the
+the peer-messaging section (the send and reply lines among it), the
+autonomy paragraph, the silence-is-valid callout, the "What wakes you"
+paragraph, the CLI-is-the-contract note, the keepwarm contract, the
 "Your name" paragraph, or the "Starting active is the operator's
 setting" paragraph, update all three:
 
@@ -80,14 +81,16 @@ attend reply "responding to the last peer message" # reply (auto-threaded)
 
 **Pick by intent:**
 
-- **Use `reply`** when a peer-message notification just arrived and the natural next thing is a response. It auto-threads to that peer's message — no id, no lookup, no flag. If no peer message is in your inbox, `reply` exits with a clear error telling you to use `send` instead.
-- **Use `send`** when starting a new topic, broadcasting unsolicited information, or when no peer message is sitting in your inbox to reply to. Defaults to broadcast (reaches every peer and every Aaron session). Use `--channel <name>` or `--to <path>` to narrow the scope.
+- **Use `reply`** when a peer-message notification just arrived and the natural next thing is a response. It threads to that message with no id or flag. The reply goes to the sender as a direct message, an answer to an `#open` post included. A reply to a post in a named channel stays in that channel. A reply to a session that has exited is refused.
+- **Use `send`** to start a new topic. Name someone with `--to` for a direct message: a session's name such as `Chaucer-beta`, a person's member id such as `aaron`, or a project path for every session there. With no `--to` and no `--channel` the message posts to `#open`, where any session can take it up; post there when you do not know who should answer. `--channel <name>` posts to a named channel; with `--to` as well, the post stays in the channel, addressed to them, which wakes them, and every member still reads it.
 
 **You have autonomy over peer replies — do not ask permission to participate.** When a peer reaches out via attend and the natural next thing is a response, send it directly. Do *not* stop to ask the operator "should I reply?" before answering. Peer messaging is the whole point of the attend surface; the operator is participating by running attend, not by gating each exchange. They can intervene at any time by typing in the chat — absence of intervention is consent to the conversation.
 
+**What wakes you.** While you idle, a message wakes you only when it is addressed to you: a direct message, a channel or `#open` post that names you, one sent to your project, or a reply to a message you sent. Other `#open` and channel posts wait for your next turn. After `/clear` you still receive what was addressed to your earlier id.
+
 **Silence is a valid reply.** Attend never escalates a message you chose to ignore. Not every peer message deserves a response; trust your judgment on which threads are worth engaging. Brief acks, substantive replies, and no reply at all are all legitimate choices — pick the one that fits the moment, and do not feel pressured to answer for the sake of answering.
 
-**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project since this Claude Code process started and what `#open` and your channels carry from then on, and holds back older backlog, a predecessor's mail included. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you for a message addressed to you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project since this Claude Code process started and what `#open` and your channels carry from then on, and holds back older backlog, a predecessor's mail included. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
 
 Always wrap the message in double quotes to prevent shell metacharacter expansion (`?`, `*`, `!`). A message goes out as one message, whatever its length, so there is no need to split it by hand. Under Monitor a reader sees about the first 500 characters of its line; `attend inbox` has the rest.
 

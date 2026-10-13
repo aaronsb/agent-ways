@@ -35,6 +35,10 @@ pub enum Channel {
     Group(String),
     /// A cwd inbox (directed send) or a local self-echo.
     Direct,
+    /// The person tray of the person at this chat, `_people/<member-id>/`:
+    /// a reply or a direct message to them (ADR-401, `to`). Shown in every
+    /// view.
+    Person,
     /// Local-only status blocks (`/peers` output) — never on the bus,
     /// rendered in every tab so command feedback can't hide.
     Info,
@@ -107,7 +111,10 @@ fn channel_for_path(path: &Path) -> Channel {
         .and_then(|d| d.file_name())
         .and_then(|n| n.to_str())
         .unwrap_or("");
-    if dir == attend_groups::BROADCAST_DIR {
+    let tray_parent = path.parent().and_then(Path::parent).and_then(|d| d.file_name()).and_then(|n| n.to_str());
+    if tray_parent == Some(attend_groups::PEOPLE_DIR) {
+        Channel::Person
+    } else if dir == attend_groups::BROADCAST_DIR {
         Channel::Open
     } else if let Some(g) = dir.strip_prefix('@') {
         Channel::Group(g.to_string())
@@ -116,18 +123,21 @@ fn channel_for_path(path: &Path) -> Channel {
     }
 }
 
-/// Write a broadcast signal to `_broadcast/`. The line, the sender
-/// identity and the atomic write are `agent_identity::signal`'s, shared
-/// with `attend send`. Threaded replies (`re:<id>`) are produced by
+/// Write a broadcast signal to `_broadcast/`, `to = *`. The line, the
+/// sender identity and the atomic write are `agent_identity::signal`'s,
+/// shared with `attend send`. Threaded replies (`re:<id>`) are produced by
 /// `attend send` only; the TUI does not originate threaded sends yet.
 pub fn write_broadcast(message: &str) -> io::Result<String> {
-    write_signal(&broadcast_dir(), message)
+    write_signal(&broadcast_dir(), message, "*")
 }
 
-/// Write a signal into an arbitrary destination directory. The
-/// broadcast and directed (`@Nickname`) paths both ride this — same
-/// wire format, same atomic tmp+rename, only the target differs.
-pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
+/// Write a signal into an arbitrary destination directory, addressed to
+/// `to` (ADR-401): `*` for `#open`, `#<name>` for a channel, the session
+/// ids of a direct message. The broadcast and directed (`@Nickname`)
+/// paths both ride this — same wire format, same atomic tmp+rename, only
+/// the target differs. attend-chat writes as the person at its keyboard,
+/// `from_kind = human`.
+pub fn write_signal(dest: &Path, message: &str, to: &str) -> io::Result<String> {
     // The same 64 KiB limit `attend send` keeps (ADR-412); the compose box
     // shows the refusal and keeps the draft.
     agent_identity::signal::check_message_len(message)?;
@@ -140,7 +150,9 @@ pub fn write_signal(dest: &Path, message: &str) -> io::Result<String> {
     // (issue #368) — and makes the name collision-proof. `from` keeps the
     // raw id.
     let filename = agent_identity::signal_filename(&sender_id);
-    let content = agent_identity::signal::format_signal(&from, &project, &cwd, None, message);
+    let member = human_member_id();
+    let envelope = agent_identity::Envelope { from_kind: Some("human"), from_id: Some(&member), on_behalf_of: None, to: Some(to) };
+    let content = agent_identity::signal::format_tagged(&from, &project, &cwd, &envelope, None, message);
     agent_identity::signal::write_signal_file(dest, &filename, &content)?;
     Ok(filename)
 }
@@ -303,6 +315,9 @@ mod tests {
             Channel::Group("deploy".into())
         );
         assert_eq!(parse_file(&tmp_signal(&cdir, "s", body)).unwrap().channel, Channel::Direct);
+        let pdir = d.join("_people").join("aaron");
+        fs::create_dir_all(&pdir).unwrap();
+        assert_eq!(parse_file(&tmp_signal(&pdir, "s", body)).unwrap().channel, Channel::Person);
     }
 
     #[test]
@@ -311,6 +326,7 @@ mod tests {
         // instead of the real cache, then assert the writer's output
         // is accepted by our own parser. Guards against silent wire-
         // format drift between the TUI's send path and its watcher.
+        let _env = crate::test_dir::env_lock();
         let home = tempdir_like();
         // `set_var` is !Send on some platforms but this test is
         // single-threaded; Cargo isolates by default.
@@ -326,6 +342,9 @@ mod tests {
         let sig = parse_file(&path).expect("written signal must parse");
         assert_eq!(sig.message, "round-trip body");
         assert!(sig.from.starts_with("external:"));
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let wire = agent_identity::parse_signal(agent_identity::wire_line(&raw)).unwrap();
+        assert_eq!((wire.to, wire.from_kind), (Some("*"), Some("human")), "{raw}");
         assert!(sig.reply_to.is_none());
     }
 
@@ -356,6 +375,7 @@ mod tests {
     #[test]
     fn cwd_dir_is_under_signals_base() {
         // Point $HOME at a temp dir so signals_base resolves there.
+        let _env = crate::test_dir::env_lock();
         let home = tempdir_like();
         std::env::set_var("HOME", &home);
         let d = cwd_dir("/home/aaron/proj");
@@ -380,11 +400,11 @@ mod tests {
     fn a_body_over_the_limit_is_refused_and_nothing_is_written() {
         let dir = tempdir_like();
         let max = agent_identity::signal::MAX_MESSAGE_BYTES;
-        let err = write_signal(&dir, &"x".repeat(max + 1)).unwrap_err();
+        let err = write_signal(&dir, &"x".repeat(max + 1), "*").unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
         assert!(err.to_string().contains("64 KiB"), "{err}");
         assert!(!dir.exists() || fs::read_dir(&dir).unwrap().next().is_none(), "nothing written");
-        write_signal(&dir, &"x".repeat(max)).unwrap();
+        write_signal(&dir, &"x".repeat(max), "*").unwrap();
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
         let _ = fs::remove_dir_all(&dir);
     }

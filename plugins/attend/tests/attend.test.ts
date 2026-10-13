@@ -19,6 +19,7 @@ import {
   pollInterval,
   replyArgv,
   safeSender,
+  isUnknownWake,
   sendArgv,
   shortId,
 } from '../hooks/lib.ts'
@@ -76,6 +77,8 @@ type World = {
   noListen?: boolean
   /** An attend whose `listen on` has no `--host`. */
   noHostFlag?: boolean
+  /** An attend whose drain has no `--wake`. */
+  noWakeFlag?: boolean
   /** Submits that fail before one enters. */
   submitFails?: number
   /** The session id `$.session.id()` reads; `s1` when not given. */
@@ -136,8 +139,10 @@ function host(on: On, world: World) {
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', () => ({}))
+  const specs: Record<string, { description: string; inputSchema: { properties: Record<string, { description?: string }> } }> = {}
   on('tool.register', ($, e) => {
     tools.push(e.name)
+    specs[e.name] = e as never
     return { value: { tool: `mcp__attend__${e.name}` } }
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -153,6 +158,7 @@ function host(on: On, world: World) {
     if (argv[0] === 'ways') return ok(configJson(world.config ?? {}))
     if (cmd.startsWith('listen') && world.noListen) return { ...ok(), exitCode: 2, stderr: "error: unrecognized subcommand 'listen'" }
     if (cmd.includes('--host') && world.noHostFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--host' found" }
+    if (cmd.includes('--wake') && world.noWakeFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--wake' found" }
     if (cmd.startsWith('listen')) return ok(cmd === 'listen off' ? 'not listening\n' : 'listening\n')
     if (cmd === 'peers') return ok('...\n  3 agent(s), 0 channel(s)\n')
     if (cmd === 'unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
@@ -180,7 +186,7 @@ function host(on: On, world: World) {
   const count = (cmd: string) => argvs.filter(a => a.slice(1).join(' ').startsWith(cmd)).length
   const ran = (cmd: string) => count(cmd) > 0
   const mode = () => (state.value as { mode?: string } | undefined)?.mode
-  return { argvs, submitted, origins, prompts, tools, count, ran, mode, clearState, store, storeWrites, logs, toasts, world }
+  return { argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world }
 }
 
 /** The operator types a prompt and presses Enter. */
@@ -494,6 +500,60 @@ describe('dormant', () => {
     // Submitted as the person's words, so Claude Code adds no frame of its own.
     expect(h.origins[0]).toEqual({ kind: 'plugin', name: 'attend', asUser: true })
     expect(await band($)).toBeDefined()
+  })
+
+  test('an idle poll drains with --wake, so only what is addressed to the session starts a turn', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { drains: [one(0, 'project'), DRAIN_EMPTY] })
+    await $.session.start(INTERACTIVE)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clock.advance(5_000)
+    const drains = h.argvs.filter(a => a[1] === 'inbox')
+    expect(drains[0]).toEqual(['attend', 'inbox', '--drain', '--json', '--wake'])
+    // The batch's second drain takes everything: a turn starts anyway.
+    expect(drains[1]).toEqual(['attend', 'inbox', '--drain', '--json'])
+    expect(h.submitted.length).toBe(1)
+  })
+
+  test('an attend older than --wake is drained without it, and asked once', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { noWakeFlag: true, drains: [one(0, 'project'), DRAIN_EMPTY] })
+    await $.session.start(INTERACTIVE)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    await clock.advance(5_000)
+    const drains = h.argvs.filter(a => a[1] === 'inbox')
+    expect(drains.slice(0, 2)).toEqual([
+      ['attend', 'inbox', '--drain', '--json', '--wake'],
+      ['attend', 'inbox', '--drain', '--json'],
+    ])
+    expect(h.submitted.length).toBe(1)
+    // Later polls remember: one drain each, without the flag.
+    const before = h.argvs.length
+    await clock.advance(60_000)
+    const later = h.argvs.slice(before).filter(a => a[1] === 'inbox')
+    expect(later.length).toBeGreaterThan(0)
+    expect(later.every(a => !a.includes('--wake'))).toBe(true)
+  })
+
+  test('only an unknown --wake is taken for an old attend', () => {
+    expect(isUnknownWake({ exitCode: 2, stderr: "error: unexpected argument '--wake' found" })).toBe(true)
+    expect(isUnknownWake({ exitCode: 2, stderr: 'error: something else' })).toBe(false)
+    expect(isUnknownWake({ exitCode: 1, stderr: '--wake' })).toBe(false)
+  })
+
+  test('the send and reply descriptions say where a message goes', async ($, on) => {
+    mock.clock(on, { now: T0 })
+    const h = host(on, {})
+    await $.session.start(INTERACTIVE)
+    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
+    const send = h.specs.attend_send!
+    expect(send.description).toContain('#open')
+    expect(send.description).toContain('direct message')
+    expect(send.inputSchema.properties.to?.description).toContain('member id')
+    expect(send.inputSchema.properties.channel?.description).toContain('#open')
+    const reply = h.specs.attend_reply!
+    expect(reply.description).toContain('direct message to its sender')
+    expect(reply.description).toContain('named channel')
   })
 
   test('an attend older than --host still turns listening on, without naming the host', async ($, on) => {

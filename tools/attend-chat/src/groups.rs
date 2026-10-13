@@ -434,6 +434,7 @@ mod tests {
         // `#open` writes land in `_broadcast/` — ADR-124 §2.
         // Point $HOME at a temp dir so the resolver doesn't touch
         // the real cache.
+        let _env = crate::test_dir::env_lock();
         let home = tempdir_like();
         std::env::set_var("HOME", &home);
         let dir = resolve_group_dir("open").expect("open must resolve");

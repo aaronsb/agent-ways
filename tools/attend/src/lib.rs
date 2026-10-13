@@ -81,12 +81,12 @@ pub fn cli_main() {
     match command {
         Commands::Run { catchup } => cmd::run::cmd_run_with_catchup(catchup),
         Commands::Peers { json } => cmd::peers::cmd_peers(json),
-        Commands::Inbox { msg_id, limit, page, before, drain, format, json } => match (drain, msg_id) {
+        Commands::Inbox { msg_id, limit, page, before, drain, wake, format, json } => match (drain, msg_id) {
             (true, Some(_)) => {
                 let why = "--drain drains everything pending; it cannot be combined with a message id";
                 cmd::refuse_usage(why, why, json);
             }
-            (true, None) => cmd::inbox::cmd_inbox_drain(if json { "json" } else { &format }),
+            (true, None) => cmd::inbox::cmd_inbox_drain(if json { "json" } else { &format }, wake),
             (false, Some(id)) => cmd::inbox::cmd_inbox_read(&id, json),
             (false, None) => cmd::inbox::cmd_inbox(limit, page, before, json),
         },

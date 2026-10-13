@@ -92,7 +92,8 @@ fn a_mod_host_gets_the_mods_format_and_its_handles_reply() {
     assert!(!text.contains("peer-sess-1-1"), "full ids stay out of the mod's format: {text}");
 
     // The handle the drain printed is one attend_reply can pass straight on.
-    let out = f.attend(&["reply", "--re", &format!("~{handle}"), "--json", "--", "answering the question"]);
+    // The poster here is no live session, so the reply names a person to go to.
+    let out = f.attend(&["reply", "--re", &format!("~{handle}"), "--to", "fixture-human", "--json", "--", "answering the question"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let sent: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(sent["re"], "peer-sess-1-1");

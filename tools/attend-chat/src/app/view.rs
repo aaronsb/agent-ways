@@ -179,11 +179,15 @@ fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGrou
     let [name, project, mark] = super::sidebar::identity_styles(depth, chip.palette, live, chip.style.bold);
     let name = if chip.style.italic { name.add_modifier(Modifier::ITALIC) } else { name };
     let glyphs: String = key.as_deref().and_then(|k| memberships.get(k)).into_iter().flatten().map(|g| format!("{} ", g.group.glyph)).collect();
-    let header = vec![
+    let mut header = vec![
         Seg::styled(format!(" {glyphs}{} ", when(chat.clock, s.ts)), mark),
         Seg::styled(format!(" {} ", chip.primary), name),
         Seg::styled(format!(" {} ", chip.secondary), project),
     ];
+    // A reply or a direct message to the person at the chat (ADR-401, `to`).
+    if s.channel == crate::signal::Channel::Person {
+        header.push(Seg::styled(" → you ".to_string(), mark));
+    }
     let mut body: Vec<Line<'static>> = s.message.split('\n').map(|l| Line::styled(l.to_string(), theme::body())).collect();
     let files = attach::existing_attachments(&s.message);
     if !files.is_empty() {
@@ -276,7 +280,8 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, lead: &str, rows
     let scope = tabs::send_scope(fg);
     let quiet = super::keys::quiet_names(&chat.world().seen);
     let swept = super::keys::swept_names(&chat.world().rows);
-    if let Some(label) = super::destination_label(chat.input.text(), &scope, &quiet, &swept) {
+    let in_channel = matches!(fg, Tab::Channel(_));
+    if let Some(label) = super::destination_label(chat.input.text(), &scope, in_channel, &quiet, &swept) {
         let flag = format!(" {label} ");
         let w = (str_width(&flag) as u16).min(inner.width);
         let at = Rect { x: inner.x + inner.width - w, y: inner.y + text_h, width: w, height: flag_h };
