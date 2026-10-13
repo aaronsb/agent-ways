@@ -10,7 +10,9 @@ export const WAYS = 'ways'
 // `--`, so no quoting rule applies to it and a body that starts with a dash
 // stays a body. attend sends a long body as one message.
 
-/** `attend send [--channel C] [--to P] -- <message>`. */
+/** `attend send [--channel C] [--to T] -- <message>`: `to` is a session's
+ *  name, a person's member id or a project path, and makes it a direct
+ *  message; with neither it posts to #open, as `channel` open does. */
 export function sendArgv(message: string, channel?: string, to?: string): string[] {
   const argv = [ATTEND, 'send']
   if (channel) argv.push('--channel', bareChannel(channel))
@@ -20,8 +22,10 @@ export function sendArgv(message: string, channel?: string, to?: string): string
 }
 
 /** `attend reply [--re <id>] -- <message>`: threads to the newest message
- *  delivered, or to `re`, and goes where that message was said. attend
- *  refuses a parent whose room this session left, or that it cannot find. */
+ *  delivered, or to `re`, and goes to that message's sender as a direct
+ *  message, or into its channel when it was said in a named channel. attend
+ *  refuses a parent whose channel this session left, whose sender session
+ *  has exited, or that it cannot find. */
 export function replyArgv(message: string, re?: string): string[] {
   return re ? [ATTEND, 'reply', '--re', re, '--', message] : [ATTEND, 'reply', '--', message]
 }
@@ -42,6 +46,11 @@ export const LISTEN_ON_ARGV = [ATTEND, 'listen', 'on', '--host', 'mod'] as const
 export const LISTEN_ON_PLAIN_ARGV = [ATTEND, 'listen', 'on'] as const
 export const LISTEN_OFF_ARGV = [ATTEND, 'listen', 'off'] as const
 export const DRAIN_ARGV = [ATTEND, 'inbox', '--drain', '--json'] as const
+/** The idle poll's drain: it takes nothing unless something pending is
+ *  addressed to this session, sent to its project, or a reply to a message
+ *  it sent (ADR-406 item 1). An attend older than `--wake` refuses the flag
+ *  as a usage error (exit 2); the mod then drains without it. */
+export const WAKE_DRAIN_ARGV = [ATTEND, 'inbox', '--drain', '--json', '--wake'] as const
 export const UNREAD_ARGV = [ATTEND, 'unread', '--json'] as const
 export const PEERS_ARGV = [ATTEND, 'peers'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
