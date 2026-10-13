@@ -1,4 +1,4 @@
-//! `attend whoami` and `attend status` name the cache root they use.
+//! `attend peer whoami` and `attend peer status` name the cache root they use.
 //!
 //! Two processes with different `XDG_CACHE_HOME` read different trees and
 //! see neither each other nor an error, so the root has to be visible.
@@ -27,9 +27,9 @@ fn whoami_and_status_print_the_cache_root() {
     let cache = home.join(format!("elsewhere-cache-{}", "deep".repeat(30)));
     let root = cache.join("attend").to_string_lossy().into_owned();
 
-    let whoami = stdout_of(&["whoami"], &cache, &home);
+    let whoami = stdout_of(&["peer", "whoami"], &cache, &home);
     assert!(whoami.contains(&root), "whoami does not name {root}: {whoami}");
-    let status = stdout_of(&["status"], &cache, &home);
+    let status = stdout_of(&["peer", "status"], &cache, &home);
     assert!(status.contains(&root), "status does not name {root}: {status}");
     std::fs::remove_dir_all(&home).ok();
 }

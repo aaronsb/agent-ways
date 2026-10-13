@@ -1,7 +1,7 @@
 //! Per-session "last inbound signal" tracking.
 //!
 //! Sensor-peers and the drain write the most-recently-surfaced peer signal
-//! here so that `attend reply` can auto-thread a response without the
+//! here so that `attend message reply` can auto-thread a response without the
 //! calling agent having to discover the id. The state is scoped to the
 //! running attend process's own Claude session id, so multiple concurrent
 //! sessions don't step on each other's reply targets.

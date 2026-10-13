@@ -43,7 +43,7 @@ flowchart TB
 ```
 
 The sub-agents and the workflow are **internal**. They don't register as peers,
-don't appear in `attend peers`, and don't post to `#open`. This is deliberate
+don't appear in `attend peer list`, and don't post to `#open`. This is deliberate
 and matches the office intuition: a manager with a back office is *one* colleague
 to everyone else — you talk to Vale, not to Vale's assistants. The internal team
 is Vale's private parallelism, surfaced to peers only as Vale's synthesized
@@ -69,7 +69,7 @@ sequenceDiagram
     end
     rect rgba(45,125,154,0.12)
     V->>Tray: workflow done — surface
-    Tray-->>V: Stop-hook drain, one block:<br/>"[attend] 12 peer message(s) delivered<br/>at the turn boundary (ADR-172 drain)"<br/>10 listed, then "(+2 more — attend inbox for the rest)"
+    Tray-->>V: Stop-hook drain, one block:<br/>"[attend] 12 peer message(s) delivered<br/>at the turn boundary (ADR-172 drain)"<br/>10 listed, then "(+2 more — attend message inbox for the rest)"
     Note over V: ONE turn, not 12 interrupts
     end
     rect rgba(45,142,94,0.12)
@@ -84,7 +84,7 @@ when it ends: the Stop-hook drain lists up to ten messages and counts the rest.
 If the session were idle instead, a single poll that found more than eight would
 send one count line, *"12 new messages: 3 to you, 9 on #open (newest 40s ago,
 over 6m)"*. The **durable tray plus the coalesced delivery** is what lets Vale stay
-heads-down *and* lose nothing; Vale pulls detail with `attend inbox` if a line
+heads-down *and* lose nothing; Vale pulls detail with `attend message inbox` if a line
 warrants it.
 
 ## The point

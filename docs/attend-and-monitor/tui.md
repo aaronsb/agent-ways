@@ -1,6 +1,6 @@
 # `attend chat` — the human on the bus
 
-`attend chat` opens attend-chat, a terminal screen that puts a human on the same message bus the Claude sessions use. The human reads every channel the bus carries, addresses agents by name, and runs channel commands, all through the signal files `attend send` and `attend inbox` use. The decision is ADR-120. ADR-173 gave it the chat idiom (tabs, `@` and `#` addressing, slash commands), and ADR-504 moved it onto the shared `agent-tui` shell and theme.
+`attend chat` opens attend-chat, a terminal screen that puts a human on the same message bus the Claude sessions use. The human reads every channel the bus carries, addresses agents by name, and runs channel commands, all through the signal files `attend message send` and `attend message inbox` use. The decision is ADR-120. ADR-173 gave it the chat idiom (tabs, `@` and `#` addressing, slash commands), and ADR-504 moved it onto the shared `agent-tui` shell and theme.
 
 ![attend-chat on the operator view at 80x25, the compose box focused](../images/attend/attend-chat-operator-view.png)
 
@@ -11,7 +11,7 @@ attend chat          # runs the attend-chat binary
 attend-chat          # the same, directly
 ```
 
-`attend chat` passes its arguments through to `attend-chat`. The screen needs a terminal on stdin and stdout. Started anywhere else (a Monitor, a pipe) it exits and points at `attend inbox` and `attend send`.
+`attend chat` passes its arguments through to `attend-chat`. The screen needs a terminal on stdin and stdout. Started anywhere else (a Monitor, a pipe) it exits and points at `attend message inbox` and `attend message send`.
 
 While the screen is open it touches the human's heartbeat (`heartbeat/<username>` in attend's cache), so the human counts as a live channel member and agents can send to a channel that only the human is in.
 
@@ -110,7 +110,7 @@ Esc moves along one cycle: the compose box, the feed, the `≡` menu, the tab or
 
 **Tab menus.** `≡`, first on the bar and unnumbered, is the common menu: Theme (this session's look; `ways settings set theme.active` keeps one), Keybinding set (presets over the tab keys), Mouse on or off at start, Hide column or Show column (the left column, with no key needed), Settings (every chat setting with its value and layer, a line each, in a window that Esc closes; `/config <key> <value>` sets one), Quit. Theme and Keybinding set open beside their row and mark the current value with `●`. The operator view: Clear view only, for it is not a channel. `#open`: Clear view, Clear history. A named channel: Add agent (invites a live peer; it joins itself, as an agent's own Add agent to chat does), Remove agent (every member, quiet ones too; asks for `y`), Describe, Clear history, Leave (or Join, for a channel the human is not in), Seal, Delete channel. Seal waits on attend work, ADR-404 D4: it is drawn set back with what it needs, the highlight passes over it, and a click on it does nothing. Add agent and Remove agent open their pickers beside their row. A click on the tab or the row that opened a menu closes it, wherever it docked. The `+` slot asks a new channel's name in the entry dialog. Clear view, Clear history, Leave and Delete channel ask first, since a click opens a menu with the first item under the cursor: `y` goes ahead; Esc, a tab change or a click keeps it, and any other character keeps it and goes on into the draft. Clear history runs `/purge`, which keeps messages younger than 90 seconds and any message a live agent has not read yet. Each item runs the slash command that does the same thing.
 
-**Joining after an invitation.** An agent that joins a channel late is not handed the channel's history: messages older than two minutes are marked read, and the join says how many. A join that answers an invitation (`/invite`, or Add agent) is the exception: the invitee's `attend join` keeps the channel's newest 50 messages to read, as a briefing, and says how many older ones it held back. The invitation is spent by that join.
+**Joining after an invitation.** An agent that joins a channel late is not handed the channel's history: messages older than two minutes are marked read, and the join says how many. A join that answers an invitation (`/invite`, or Add agent) is the exception: the invitee's `attend channel join` keeps the channel's newest 50 messages to read, as a briefing, and says how many older ones it held back. The invitation is spent by that join.
 
 **Settings.** `attend.chat.tabs.jump` (auto, ctrl, alt, both, none), `attend.chat.tabs.menu_on_repeat`, `attend.chat.tabs.focus_key` (both, f2, ctrl-t, none), `attend.chat.mouse` and `attend.chat.sidebar_key` (f3, ctrl-b, none; Ctrl+B is tmux's prefix, and none keeps the column shown) live in attend's user file. `/config` lists them with the layer each comes from, and `/config <key> <value>` sets one; `ways settings` reads and sets the same keys.
 
@@ -136,7 +136,7 @@ attend-chat --snap 80x25 --keys "alt-3 text:@Elio hello"
 
 ## What it does not do
 
-It does not replace the agents' terminals. Editing code and reading long output happen there. It does not start or stop agents, fetch issues, or thread replies; `attend reply` threads on the wire, and attend-chat shows replies as ordinary messages.
+It does not replace the agents' terminals. Editing code and reading long output happen there. It does not start or stop agents, fetch issues, or thread replies; `attend message reply` threads on the wire, and attend-chat shows replies as ordinary messages.
 
 ## Related
 

@@ -71,7 +71,7 @@ const SECTIONS: &[SectionSpec] = &[
         entry: None,
         repair: None,
         columns: None,
-        doc: "The action potential model: how a sensor quiets after a burst (ADR-123). `attend tune --apply` writes it.",
+        doc: "The action potential model: how a sensor quiets after a burst (ADR-123). `attend config tune --apply` writes it.",
     },
     SectionSpec {
         name: "attend.cleanup",
@@ -187,7 +187,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Int { min: 0, max: 86_400 },
         default: DefaultValue::Yaml("60"),
         doc: "Seconds of complete silence after a burst.",
-        long: "No event fires in this window, whatever its magnitude. `attend tune` sets it to the median think time.",
+        long: "No event fires in this window, whatever its magnitude. `attend config tune` sets it to the median think time.",
         ..BASE
     },
     KeySpec {
@@ -218,7 +218,7 @@ const KEYS: &[KeySpec] = &[
         // so a bad value never starts a sweep that deletes files.
         fail_closed: Some(closed_off),
         doc: "Whether `attend run` sweeps away the signals of projects that are gone.",
-        long: "Off, signals stay until `attend cleanup` is run by hand.",
+        long: "Off, signals stay until `attend message cleanup` is run by hand.",
         ..BASE
     },
     KeySpec {
@@ -332,7 +332,7 @@ const KEYS: &[KeySpec] = &[
             Some(Value::Sequence(sensor_defaults(name(b)).requires.iter().map(|s| Value::String(s.to_string())).collect()))
         }),
         doc: "The tool permissions the sensor needs (ADR-116).",
-        long: "`attend permissions audit` checks each against settings.json.",
+        long: "`attend sensor permissions` checks each against settings.json.",
         ..SENSOR
     },
     KeySpec {
@@ -359,9 +359,9 @@ const KEYS: &[KeySpec] = &[
 /// One line on the sensor `name`, for the settings screens.
 pub fn sensor_doc(name: &str) -> String {
     if BUILTINS.contains(&name) {
-        format!("The built-in {name} sensor. `attend sensors` shows what it watches and whether it runs.")
+        format!("The built-in {name} sensor. `attend sensor list` shows what it watches and whether it runs.")
     } else {
-        format!("{name}, a sensor of your own: it runs its script. `attend sensors` shows whether the script resolves.")
+        format!("{name}, a sensor of your own: it runs its script. `attend sensor list` shows whether the script resolves.")
     }
 }
 

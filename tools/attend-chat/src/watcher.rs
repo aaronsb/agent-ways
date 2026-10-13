@@ -17,7 +17,7 @@
 //! sibling directories under the base. A non-recursive watcher would
 //! miss both — and would also miss *new* groups created after the
 //! TUI started, which is the common case (another agent runs
-//! `attend join deploy` during the session).
+//! `attend channel join deploy` during the session).
 //!
 //! `notify`'s callback runs on its own thread and sends into an
 //! unbounded [`std::sync::mpsc`] channel, which the screen drains

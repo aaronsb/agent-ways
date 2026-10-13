@@ -372,8 +372,8 @@ async function poll($: $, mod: Mod) {
       mod.pending = []
     } else if (++mod.submitTries >= SUBMIT_TRIES) {
       // Read by attend and refused by the session: they stay readable with
-      // attend inbox, and the poll goes on to new messages.
-      await $.ui.toast(`attend: ${mod.pending.length} message(s) could not be delivered; attend inbox lists them`)
+      // attend message inbox, and the poll goes on to new messages.
+      await $.ui.toast(`attend: ${mod.pending.length} message(s) could not be delivered; attend message inbox lists them`)
       mod.pending = []
     }
   } finally {
@@ -667,7 +667,7 @@ export const register: Register = on => {
     const channel = typeof a.channel === 'string' && a.channel.trim() !== '' ? a.channel : undefined
     const to = typeof a.to === 'string' && a.to.trim() !== '' ? a.to : undefined
     mod.lastActivityMs = await $.clock.now()
-    return toolResult(await run($, sendArgv(message, channel, to)), 'attend send')
+    return toolResult(await run($, sendArgv(message, channel, to)), 'attend message send')
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_reply' }, async ($, e) => {
@@ -680,7 +680,7 @@ export const register: Register = on => {
     const raw = typeof a.re === 'string' ? a.re.trim().replace(/^~/, '') : ''
     const re = raw === '' ? undefined : mod.ids.get(raw) ?? raw
     mod.lastActivityMs = await $.clock.now()
-    return toolResult(await run($, replyArgv(message, re)), 'attend reply')
+    return toolResult(await run($, replyArgv(message, re)), 'attend message reply')
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_join' }, async ($, e) => {
@@ -695,14 +695,14 @@ export const register: Register = on => {
       mod.joined.add(label)
       await updateStatus($, s => ({ ...s, channels: [...new Set([...s.channels, label])] }))
     }
-    return toolResult(r, 'attend join')
+    return toolResult(r, 'attend channel join')
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_peers' }, async $ => {
     if (!(await isOn($, mod))) return DORMANT_REFUSAL
     const r = await run($, PEERS_ARGV)
     if (r.exitCode === 0) await updateStatus($, s => ({ ...s, peers: parsePeerCount(r.stdout) }))
-    return toolResult(r, 'attend peers')
+    return toolResult(r, 'attend peer list')
   })
 
   // One row while active, in the shape of the operator's statusline: peers,

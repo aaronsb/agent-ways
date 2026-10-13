@@ -233,7 +233,7 @@ impl Fixture {
     }
 
     pub fn drain(&self, format: &str) -> String {
-        self.ok(&["inbox", "--drain", "--format", format])
+        self.ok(&["message", "inbox", "--drain", "--format", format])
     }
 
     /// Write a signal from another session into `tray`, `age` old.
@@ -250,7 +250,7 @@ impl Fixture {
         use std::io::Write;
         let mut child = self
             .command()
-            .args(["inbox", "--drain", "--format", "hook"])
+            .args(["message", "inbox", "--drain", "--format", "hook"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()

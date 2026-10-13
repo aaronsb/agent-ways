@@ -1,4 +1,4 @@
-//! `attend sensors` — list every sensor known to this build.
+//! `attend sensor list` — list every sensor known to this build.
 //!
 //! Reports built-in (compiled-in crate) sensors and any script sensors
 //! defined in config, with their state (active / off / not compiled /
@@ -68,5 +68,5 @@ fn print_legend(entries: &[SensorEntry]) {
     if has_missing {
         println!("  missing      script: path does not resolve to a file");
     }
-    println!("  see `attend sensors --help` for the full state vocabulary");
+    println!("  see `attend sensor list --help` for the full state vocabulary");
 }

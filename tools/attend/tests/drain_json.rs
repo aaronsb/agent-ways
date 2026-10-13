@@ -1,4 +1,4 @@
-//! `attend inbox --drain --json`: the drain for a program such as the attend
+//! `attend message inbox --drain --json`: the drain for a program such as the attend
 //! mod (ADR-406). The messages, the cold start's held-back count and note,
 //! and the session's name come in fields of their own, so a reader never
 //! mistakes the note or the name for a message.
@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 fn drain_json(f: &Fixture) -> Value {
-    let out = f.attend(&["inbox", "--drain", "--json"]);
+    let out = f.attend(&["message", "inbox", "--drain", "--json"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)))
 }
@@ -64,7 +64,7 @@ fn an_unresolved_session_says_so() {
     let f = Fixture::new("drain-json-unresolved");
     f.ok(&["listen", "on"]);
     f.put("_broadcast", "other-1-1-fresh", "fresh open", Duration::ZERO);
-    let out = f.without_session(|| f.attend(&["inbox", "--drain", "--json"]));
+    let out = f.without_session(|| f.attend(&["message", "inbox", "--drain", "--json"]));
     assert!(out.status.success());
     let d: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!((d["schema"].as_u64(), d["status"].as_str()), (Some(1), Some("unresolved")), "{d}");
@@ -110,7 +110,7 @@ fn the_mod_fixtures_are_the_real_attend_output() {
     };
 
     let f = Fixture::new("fixtures-cold");
-    let unresolved = f.without_session(|| f.attend(&["inbox", "--drain", "--json"]));
+    let unresolved = f.without_session(|| f.attend(&["message", "inbox", "--drain", "--json"]));
     assert!(unresolved.status.success());
     put("DRAIN_UNRESOLVED", norm(serde_json::from_slice(&unresolved.stdout).unwrap()));
     put("DRAIN_NOT_LISTENING", norm(drain_json(&f)));
@@ -131,13 +131,13 @@ fn the_mod_fixtures_are_the_real_attend_output() {
     drain_json(&f);
     f.last_turn(Some(61 * MINUTE));
     f.put(&f.project_tray(), "other-1-6-addressed", "addressed while cold", Duration::ZERO);
-    put("DRAIN_CACHE_LAPSED", norm(serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap()));
+    put("DRAIN_CACHE_LAPSED", norm(serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json", "--wake"])).unwrap()));
 
     let f = Fixture::new("fixtures-channel");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     drain_json(&f);
     f.put("@room", "other-1-4-room", "said in the room", Duration::ZERO);
-    let unread = f.ok(&["unread", "--json"]);
+    let unread = f.ok(&["message", "unread", "--json"]);
     put("UNREAD_ROOM", serde_json::from_str(&unread).unwrap());
     let dir = f.signals().join("_broadcast");
     std::fs::create_dir_all(&dir).unwrap();

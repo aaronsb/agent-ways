@@ -1,6 +1,6 @@
 # Signals — wire format, storage, lifecycle
 
-Signals are attend's on-disk messaging primitive — the transport underneath its workspace awareness. Everything that flows between sessions — peer messages sent with `attend send`, notifications rendered into the conversation via Monitor, human-typed lines in `attend chat` — is mediated by signal files on the local filesystem. This page covers the wire format, how signals are organized on disk, and the full lifecycle from arrival to deletion.
+Signals are attend's on-disk messaging primitive — the transport underneath its workspace awareness. Everything that flows between sessions — peer messages sent with `attend message send`, notifications rendered into the conversation via Monitor, human-typed lines in `attend chat` — is mediated by signal files on the local filesystem. This page covers the wire format, how signals are organized on disk, and the full lifecycle from arrival to deletion.
 
 ## The wire format
 
@@ -10,7 +10,7 @@ Every signal is one pipe-delimited record in a `.signal` file:
 from|project|cwd|message
 ```
 
-A threaded reply, as `attend reply` writes it (ADR-120):
+A threaded reply, as `attend message reply` writes it (ADR-120):
 
 ```
 from|project|cwd|re:signal-id|message
@@ -20,15 +20,15 @@ from|project|cwd|re:signal-id|message
 
 - **`from`** — identifier of the sender, in the form `<kind>:<identity>`. Kinds seen in practice:
   - `claude:<session-id>` — a Claude Code session, identified by its 36-char session UUID
-  - `external:<user>@<terminal>` — a human, sending from attend-chat or with `attend send` from a terminal outside any Claude session
+  - `external:<user>@<terminal>` — a human, sending from attend-chat or with `attend message send` from a terminal outside any Claude session
 - **`project`** — the last segment of the sender's directory (e.g., `api-service`). Used in display, not routing.
 - **`cwd`** — absolute path of the sender's working directory. The receiver's chip and label show its basename, and the cleanup sweep reads it to decide whether a `#open` or channel signal's project is still live.
-- **`re:signal-id`** — present only on a threaded reply. `attend reply` writes it, pointing at the newest message the session received; `attend send` has a hidden `--re <id>` flag for the same. One level only, no reply to a reply. The id is the parent's filename stem and must match `[A-Za-z0-9_-]+`, so prose that happens to start with `re:` round-trips as a plain message. The field is recorded on the wire, but no conduit renders threads: the Monitor line, the drain and attend-chat show a reply as an ordinary message.
+- **`re:signal-id`** — present only on a threaded reply. `attend message reply` writes it, pointing at the newest message the session received; `attend message send` has a hidden `--re <id>` flag for the same. One level only, no reply to a reply. The id is the parent's filename stem and must match `[A-Za-z0-9_-]+`, so prose that happens to start with `re:` round-trips as a plain message. The field is recorded on the wire, but no conduit renders threads: the Monitor line, the drain and attend-chat show a reply as an ordinary message.
 - **`message`** — the payload. Free text, usually the actual content the sender wants the receiver to see.
 
 The parser splits the leading fields on `|` and keeps the rest as the message, so a `|` inside the message survives.
 
-**Encoding and length.** UTF-8. `attend send` and `attend reply` refuse a body over 64 KiB with a `too_long` error, and readers skip, with a note, a signal file over 256 KiB, which no attend writes (ADR-412). The Monitor line carries the message on one line, and Monitor shows its first 500 characters (see [`delivery.md`](delivery.md#the-monitor-line)); `attend inbox <id>` prints the whole message.
+**Encoding and length.** UTF-8. `attend message send` and `attend message reply` refuse a body over 64 KiB with a `too_long` error, and readers skip, with a note, a signal file over 256 KiB, which no attend writes (ADR-412). The Monitor line carries the message on one line, and Monitor shows its first 500 characters (see [`delivery.md`](delivery.md#the-monitor-line)); `attend message inbox <id>` prints the whole message.
 
 ## Storage layout
 
@@ -52,7 +52,7 @@ Three kinds of subdirectories:
 
 1. **`_broadcast/`** — `#open`. Every enrolled session scans it, whatever its project or channels.
 2. **`@<name>/`** — a channel. Only its members scan it (see [`channels.md`](channels.md)).
-3. **A project tray** — named by `claude_sessions::attend_key`: Claude Code's project slug for the directory, a `-`, and a base-36 hash of the full path. The hash keeps two paths with the same slug (`/srv/my proj` and `/srv/my-proj`) apart. Every session in that directory reads the tray, and `attend send --to <path>` writes to it.
+3. **A project tray** — named by `claude_sessions::attend_key`: Claude Code's project slug for the directory, a `-`, and a base-36 hash of the full path. The hash keeps two paths with the same slug (`/srv/my proj` and `/srv/my-proj`) apart. Every session in that directory reads the tray, and `attend message send --to <path>` writes to it.
 
 **Reserved names:**
 
@@ -67,7 +67,7 @@ Three kinds of subdirectories:
 - **`<unix-nanos>`** — nanoseconds since the epoch at write time.
 - **`<seq>`** — a per-process counter, so two writes in the same nanosecond still get distinct names.
 
-The stem is the signal's id: `attend inbox <id>` reads it, and `re:` points at it. Scans and cleanup only touch `.signal` files. `attend inbox` and attend-chat order messages by file mtime.
+The stem is the signal's id: `attend message inbox <id>` reads it, and `re:` points at it. Scans and cleanup only touch `.signal` files. `attend message inbox` and attend-chat order messages by file mtime.
 
 ## Atomic writes
 
@@ -86,7 +86,7 @@ A signal's journey from creation to deletion. Signals carry authored messages, s
 
 ```mermaid
 flowchart LR
-    Create[attend send<br/>or attend-chat]
+    Create[attend message send<br/>or attend-chat]
     Write[write .tmp<br/>rename to .signal]
     Scan[peers sensor or drain<br/>reads unseen files]
     Present[Monitor line or<br/>Stop-hook drain]
@@ -111,17 +111,17 @@ flowchart LR
     class Delete store
 ```
 
-**Phase 1 — creation.** The sender (an agent with `attend send` or `attend reply`, or a human in attend-chat) builds the line and writes it atomically to the scope directory. `--channel <name>` writes to `@<name>/`, `--to <path>` to that project's tray, and no flag to `_broadcast/`. attend-chat writes one file per addressed recipient.
+**Phase 1 — creation.** The sender (an agent with `attend message send` or `attend message reply`, or a human in attend-chat) builds the line and writes it atomically to the scope directory. `--channel <name>` writes to `@<name>/`, `--to <path>` to that project's tray, and no flag to `_broadcast/`. attend-chat writes one file per addressed recipient.
 
 **Phase 2 — scanning.** The peers sensor in `attend run` (every 10 to 30 seconds) and the Stop-hook drain (at each turn end) scan the session's project tray, `_broadcast/` and every joined `@<name>/`. A file not in the session's seen-set is read, parsed and added to it. A cold start applies the cold-start rule instead of replaying the backlog.
 
 **Phase 3 — presentation.** The peers sensor prints unseen messages as Monitor lines, and the drain hands them to the ending turn. [`delivery.md`](delivery.md) covers both conduits, enrollment, the cold-start rule and what happens when the session id changes. A human running attend-chat sees every message as it lands.
 
-**Phase 4 — retention.** Reading a signal marks it seen in that session's own seen-set; it does not delete the file. The file stays on disk for other peers and for `attend inbox`. Nothing removes a signal because of its age.
+**Phase 4 — retention.** Reading a signal marks it seen in that session's own seen-set; it does not delete the file. The file stays on disk for other peers and for `attend message inbox`. Nothing removes a signal because of its age.
 
 **Phase 5 — auto-cleanup.** Every `cleanup.interval` seconds (default 600, ten minutes), the attend loop sweeps the signals base when `cleanup.enabled` is true. A project is live while `~/.claude/projects/<encoded-cwd>/` exists. The sweep removes every signal in a project-scope directory whose project is gone, and removes a signal in `_broadcast/` or an `@group/` directory when the project named by its sender `cwd` field is gone. It then removes project directories left empty. The sweep never removes `_broadcast/` or an `@group/` directory.
 
-**Phase 6 — manual cleanup.** The operator can run `attend cleanup` at any time to run the same sweep immediately. Flags:
+**Phase 6 — manual cleanup.** The operator can run `attend message cleanup` at any time to run the same sweep immediately. Flags:
 
 - `--dry-run` / `-n` — list what would be removed without deleting
 - `--all` — remove every signal regardless of project liveness

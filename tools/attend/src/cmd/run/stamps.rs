@@ -2,7 +2,7 @@
 //! the startup sweep that removes stamps of sessions long gone.
 //!
 //! `state/<key>.banner` holds the startup banner fingerprint and
-//! `state/<key>.last-inbound` the message `attend reply` threads to. Both
+//! `state/<key>.last-inbound` the message `attend message reply` threads to. Both
 //! are written per session and nothing else removes them, so a machine
 //! that runs many sessions collects one pair per session for ever.
 

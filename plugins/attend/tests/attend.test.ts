@@ -161,10 +161,10 @@ function host(on: On, world: World) {
     if (cmd.includes('--host') && world.noHostFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--host' found" }
     if (cmd.includes('--wake') && world.noWakeFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--wake' found" }
     if (cmd.startsWith('listen')) return ok(cmd === 'listen off' ? 'not listening\n' : 'listening\n')
-    if (cmd === 'peers') return ok('...\n  3 agent(s), 0 channel(s)\n')
-    if (cmd === 'unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
+    if (cmd === 'peer list') return ok('...\n  3 agent(s), 0 channel(s)\n')
+    if (cmd === 'message unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
     if (cmd === 'keepwarm check') return ok(world.keepwarm ?? '')
-    if (cmd.startsWith('inbox --drain')) return ok(world.drains?.shift() ?? DRAIN_EMPTY)
+    if (cmd.startsWith('message inbox --drain')) return ok(world.drains?.shift() ?? DRAIN_EMPTY)
     return ok('[attend] sent\n')
   }
   // The operator's prompts, with the context the hooks attached; a hook
@@ -241,12 +241,12 @@ const done = (turnId: string) =>
 describe('argv', () => {
   test('a body is one argv element after --, whatever it holds, and is never split', () => {
     const nasty = `--channel x "quoted" 'single' $(rm -rf ~) \`id\` ; | & \n line2`
-    expect(sendArgv(nasty)).toEqual(['attend', 'send', '--', nasty])
-    expect(sendArgv('hi', '#ship', '/p')).toEqual(['attend', 'send', '--channel', 'ship', '--to', '/p', '--', 'hi'])
-    expect(replyArgv(nasty)).toEqual(['attend', 'reply', '--', nasty])
-    expect(replyArgv('ok', 'id-1')).toEqual(['attend', 'reply', '--re', 'id-1', '--', 'ok'])
+    expect(sendArgv(nasty)).toEqual(['attend', 'message', 'send', '--', nasty])
+    expect(sendArgv('hi', '#ship', '/p')).toEqual(['attend', 'message', 'send', '--channel', 'ship', '--to', '/p', '--', 'hi'])
+    expect(replyArgv(nasty)).toEqual(['attend', 'message', 'reply', '--', nasty])
+    expect(replyArgv('ok', 'id-1')).toEqual(['attend', 'message', 'reply', '--re', 'id-1', '--', 'ok'])
     const long = 'y'.repeat(900)
-    expect(sendArgv(long)).toEqual(['attend', 'send', '--', long])
+    expect(sendArgv(long)).toEqual(['attend', 'message', 'send', '--', long])
   })
 
   test('the handle matches attend\'s short_id, so a ~id the drain printed is one handle', () => {
@@ -466,9 +466,9 @@ describe('dormant', () => {
     expect(h.tools).toEqual(['attend_listen'])
     expect(h.ran('listen off')).toBe(true)
     expect(h.ran('listen on')).toBe(false)
-    expect(h.count('inbox')).toBe(0)
-    expect(h.count('unread')).toBe(0)
-    expect(h.count('peers')).toBe(0)
+    expect(h.count('message inbox')).toBe(0)
+    expect(h.count('message unread')).toBe(0)
+    expect(h.count('peer list')).toBe(0)
     expect(h.count('keepwarm')).toBe(0)
     expect(h.submitted).toEqual([])
     expect(await band($)).toBeUndefined()
@@ -488,7 +488,7 @@ describe('dormant', () => {
     const h = host(on, { drains: [one(0, 'project'), DRAIN_EMPTY] })
     await $.session.start(INTERACTIVE)
     await clock.advance(30_000)
-    expect(h.count('inbox')).toBe(0)
+    expect(h.count('message inbox')).toBe(0)
     const r = await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
     expect(String((r as { result?: unknown }).result)).toContain('listening for the rest of this session')
     expect(h.tools).toEqual(['attend_listen', 'attend_send', 'attend_reply', 'attend_join', 'attend_peers'])
@@ -510,10 +510,10 @@ describe('dormant', () => {
     await $.session.start(INTERACTIVE)
     await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
     await clock.advance(5_000)
-    const drains = h.argvs.filter(a => a[1] === 'inbox')
-    expect(drains[0]).toEqual(['attend', 'inbox', '--drain', '--json', '--wake'])
+    const drains = h.argvs.filter(a => a[1] === 'message' && a[2] === 'inbox')
+    expect(drains[0]).toEqual(['attend', 'message', 'inbox', '--drain', '--json', '--wake'])
     // The batch's second drain takes everything: a turn starts anyway.
-    expect(drains[1]).toEqual(['attend', 'inbox', '--drain', '--json'])
+    expect(drains[1]).toEqual(['attend', 'message', 'inbox', '--drain', '--json'])
     expect(h.submitted.length).toBe(1)
   })
 
@@ -523,16 +523,16 @@ describe('dormant', () => {
     await $.session.start(INTERACTIVE)
     await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
     await clock.advance(5_000)
-    const drains = h.argvs.filter(a => a[1] === 'inbox')
+    const drains = h.argvs.filter(a => a[1] === 'message' && a[2] === 'inbox')
     expect(drains.slice(0, 2)).toEqual([
-      ['attend', 'inbox', '--drain', '--json', '--wake'],
-      ['attend', 'inbox', '--drain', '--json'],
+      ['attend', 'message', 'inbox', '--drain', '--json', '--wake'],
+      ['attend', 'message', 'inbox', '--drain', '--json'],
     ])
     expect(h.submitted.length).toBe(1)
     // Later polls remember: one drain each, without the flag.
     const before = h.argvs.length
     await clock.advance(60_000)
-    const later = h.argvs.slice(before).filter(a => a[1] === 'inbox')
+    const later = h.argvs.slice(before).filter(a => a[1] === 'message' && a[2] === 'inbox')
     expect(later.length).toBeGreaterThan(0)
     expect(later.every(a => !a.includes('--wake'))).toBe(true)
   })
@@ -589,7 +589,7 @@ describe('dormant', () => {
     await $.session.start(HEADLESS)
     await clock.advance(60_000)
     expect(h.tools).toEqual(['attend_listen'])
-    expect(h.count('inbox')).toBe(0)
+    expect(h.count('message inbox')).toBe(0)
   })
 })
 
@@ -600,7 +600,7 @@ describe('activation and delivery against attend\'s real drain', () => {
     await $.session.start(INTERACTIVE)
     await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
     await clock.advance(30_000)
-    expect(h.count('inbox') > 0).toBe(true)
+    expect(h.count('message inbox') > 0).toBe(true)
     expect(h.submitted).toEqual([])
   })
 
@@ -693,12 +693,12 @@ describe('active', () => {
     await $.session.start(INTERACTIVE)
     await typed($)
     await clock.advance(60_000)
-    const awake = h.count('inbox')
+    const awake = h.count('message inbox')
     expect(awake >= 10).toBe(true)
     await clock.advance(20 * 60_000)
-    const before = h.count('inbox')
+    const before = h.count('message inbox')
     await clock.advance(10 * 60_000)
-    const slow = h.count('inbox') - before
+    const slow = h.count('message inbox') - before
     expect(slow >= 9 && slow <= 11).toBe(true)
   })
 
@@ -709,12 +709,12 @@ describe('active', () => {
     await typed($)
     await clock.advance(1_000)
     await $.turn.start({ text: 'work', turnId: 't1' } as never)
-    const before = h.count('inbox')
+    const before = h.count('message inbox')
     await clock.advance(30_000)
-    expect(h.count('inbox')).toBe(before)
+    expect(h.count('message inbox')).toBe(before)
     await $.turn.complete(done('t1'))
     await clock.advance(1_000)
-    expect(h.count('inbox') > before).toBe(true)
+    expect(h.count('message inbox') > before).toBe(true)
   })
 
   test('the row shows peers, unread and channels from attend', async ($, on) => {
@@ -740,18 +740,18 @@ describe('active', () => {
     await clock.advance(5_000)
     const message = 'z'.repeat(900)
     await $.tool.call({ tool: 'mcp__attend__attend_send', message, channel: '#ship' } as never)
-    const sends = h.argvs.filter(a => a[1] === 'send')
-    expect(sends).toEqual([['attend', 'send', '--channel', 'ship', '--', message]])
+    const sends = h.argvs.filter(a => a[1] === 'message' && a[2] === 'send')
+    expect(sends).toEqual([['attend', 'message', 'send', '--channel', 'ship', '--', message]])
     const id = idOf(3)
     await $.tool.call({ tool: 'mcp__attend__attend_reply', message: 'ok', re: `~${shortId(id)}` } as never)
-    expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--re', id, '--', 'ok'])
-    expect(h.argvs.filter(a => a[1] === 'send').length).toBe(1)
+    expect(h.argvs.filter(a => a[1] === 'message' && a[2] === 'reply').pop()).toEqual(['attend', 'message', 'reply', '--re', id, '--', 'ok'])
+    expect(h.argvs.filter(a => a[1] === 'message' && a[2] === 'send').length).toBe(1)
     await $.tool.call({ tool: 'mcp__attend__attend_reply', message: '-- starts with dashes' } as never)
-    expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--', '-- starts with dashes'])
+    expect(h.argvs.filter(a => a[1] === 'message' && a[2] === 'reply').pop()).toEqual(['attend', 'message', 'reply', '--', '-- starts with dashes'])
     // A handle the Stop-hook drain printed was never mapped here: it goes to
     // attend as written, and attend resolves it.
     await $.tool.call({ tool: 'mcp__attend__attend_reply', message: 'ok', re: '~73nki' } as never)
-    expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--re', '73nki', '--', 'ok'])
+    expect(h.argvs.filter(a => a[1] === 'message' && a[2] === 'reply').pop()).toEqual(['attend', 'message', 'reply', '--re', '73nki', '--', 'ok'])
   })
 })
 
@@ -867,7 +867,7 @@ describe('before the operator\'s first prompt', () => {
     await $.session.start(INTERACTIVE)
     await clock.advance(10 * 60_000)
     expect(h.ran('listen on')).toBe(true)
-    expect(h.count('inbox --drain')).toBe(0)
+    expect(h.count('message inbox --drain')).toBe(0)
     expect(h.submitted).toEqual([])
     const ui = await $.ui.mount(BAND as never)
     expect(await ui.find({ text: /1 unread/ } as never)).toBeDefined()
@@ -884,7 +884,7 @@ describe('before the operator\'s first prompt', () => {
     expect(full(context[0] ?? '')).toBe(true)
     // A handle delivered there maps for attend_reply as one submitted would.
     await $.tool.call({ tool: 'mcp__attend__attend_reply', message: 'ok', re: `~${shortId(idOf(1))}` } as never)
-    expect(h.argvs.filter(a => a[1] === 'reply').pop()).toEqual(['attend', 'reply', '--re', idOf(1), '--', 'ok'])
+    expect(h.argvs.filter(a => a[1] === 'message' && a[2] === 'reply').pop()).toEqual(['attend', 'message', 'reply', '--re', idOf(1), '--', 'ok'])
   })
 
   test('after the first prompt, what arrives while idle is a turn again', async ($, on) => {
@@ -906,7 +906,7 @@ describe('before the operator\'s first prompt', () => {
     await $.session.start(INTERACTIVE)
     await $.prompt.submit({ text: 'done', wait: false, origin: { kind: 'task-notification' } } as never)
     await clock.advance(30_000)
-    expect(h.count('inbox --drain')).toBe(0)
+    expect(h.count('message inbox --drain')).toBe(0)
     expect(h.submitted).toEqual([])
   })
 
@@ -932,17 +932,17 @@ describe('before the operator\'s first prompt', () => {
     const context = h.prompts[0]?.context ?? []
     expect(context.length).toBe(1)
     expect(context[0]).toContain('addressed while dormant')
-    expect(context[0]).toContain('attend: 1 older message held back; reading it is optional: attend inbox')
+    expect(context[0]).toContain('attend: 1 older message held back; reading it is optional: attend message inbox')
     expect(context[0]).not.toContain('Chaucer-alpha')
   })
 
   test('a note with no message is attached on its own, and counts no delivery', async ($, on) => {
     mock.clock(on, { now: T0 })
-    const noteOnly = JSON.stringify({ ...JSON.parse(DRAIN_EMPTY), held_back: 3, note: '3 older messages held back; reading them is optional: attend inbox' })
+    const noteOnly = JSON.stringify({ ...JSON.parse(DRAIN_EMPTY), held_back: 3, note: '3 older messages held back; reading them is optional: attend message inbox' })
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [noteOnly] })
     await $.session.start(INTERACTIVE)
     await typed($)
-    expect(h.prompts[0]?.context).toEqual(['attend: 3 older messages held back; reading them is optional: attend inbox'])
+    expect(h.prompts[0]?.context).toEqual(['attend: 3 older messages held back; reading them is optional: attend message inbox'])
     expect(h.toasts).toEqual([])
   })
 
@@ -956,7 +956,7 @@ describe('before the operator\'s first prompt', () => {
     await $.session.start(INTERACTIVE)
     drains.push(one(6), DRAIN_EMPTY)
     await clock.advance(30_000)
-    expect(h.count('inbox --drain')).toBe(0)
+    expect(h.count('message inbox --drain')).toBe(0)
     expect(h.submitted).toEqual([])
     await typed($)
     expect(h.prompts[0]?.context.join('\n')).toContain('m6')
@@ -996,7 +996,7 @@ describe('before the operator\'s first prompt', () => {
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains: [one(9), DRAIN_EMPTY] })
     await $.session.start(INTERACTIVE)
     await typed($, 'from a same-user socket', 'unclassified')
-    expect(h.count('inbox --drain')).toBe(0)
+    expect(h.count('message inbox --drain')).toBe(0)
     await typed($, 'from slack', 'slack-ping')
     expect(h.prompts[1]?.context.join('\n')).toContain('m9')
   })
@@ -1160,7 +1160,7 @@ describe('a resume', () => {
     await clock.advance(1_000)
     const after = since(h)
     await clock.advance(10_000)
-    expect(after.ran('inbox --drain')).toBe(true)
+    expect(after.ran('message inbox --drain')).toBe(true)
   })
 
   test('a store that fails on an in-session /resume still turns the session on and drains', async ($, on) => {
@@ -1174,7 +1174,7 @@ describe('a resume', () => {
     expect(h.ran('listen on')).toBe(true)
     const after = since(h)
     await clock.advance(10_000)
-    expect(after.ran('inbox --drain')).toBe(true)
+    expect(after.ran('message inbox --drain')).toBe(true)
   })
 
   test('the record is written only for what config would not reproduce', async ($, on) => {

@@ -75,7 +75,7 @@ impl SessionIdentity {
 /// Resolve the identity of the current process. Memoized for the
 /// process lifetime — the tuple is stable by definition (a process
 /// cannot change its owning session), and one-shot commands like
-/// `attend send` would otherwise repeat the sessions-dir walk and
+/// `attend message send` would otherwise repeat the sessions-dir walk and
 /// `ps` ancestry climb several times per invocation.
 pub fn identity() -> SessionIdentity {
     use std::sync::OnceLock;
@@ -91,14 +91,14 @@ pub fn identity_for_pid(pid: u32) -> SessionIdentity {
 }
 
 /// The identity of `pid` when a Claude Code session record owns it, or
-/// `None` without reading anything more. `attend status` names each run by
+/// `None` without reading anything more. `attend peer status` names each run by
 /// this, and a run with no record costs no working-directory lookup.
 pub fn session_identity_for_pid(pid: u32) -> Option<SessionIdentity> {
     session_identity_in_dirs(&sessions_dirs(), pid, crate::process::is_claude_program)
 }
 
 /// The working directory of `pid`, the fallback origin. It is `pid`'s
-/// own, never the caller's: `attend status` resolves other processes, and
+/// own, never the caller's: `attend peer status` resolves other processes, and
 /// its own cwd says nothing about theirs. Empty when it cannot be read.
 fn process_cwd(pid: u32) -> String {
     if pid == std::process::id() {

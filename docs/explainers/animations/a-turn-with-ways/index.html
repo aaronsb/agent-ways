@@ -302,7 +302,7 @@ box(drainBox, 664, 290, 592, 200, { fill: '#10161d', r: 8 });
 txt(drainBox, 684, 324, 'Stop hooks', { size: 17, font: MONO, fill: C.muted });
 txt(drainBox, 684, 362, 'check-response.sh', { size: 18, font: MONO, fill: C.em });
 txt(drainBox, 684, 390, 'records the reply for the next prompt’s embed', { size: 16, fill: C.muted });
-txt(drainBox, 684, 430, 'attend inbox --drain --format hook', { size: 18, font: MONO, fill: C.amber });
+txt(drainBox, 684, 430, 'attend message inbox --drain --format hook', { size: 18, font: MONO, fill: C.amber });
 txt(drainBox, 684, 458, 'nothing pending → the turn ends', { size: 16, fill: C.muted });
 
 const refireBox = g(TV);
@@ -557,7 +557,7 @@ function render(t) {
   const bCont = t >= 96.5 && t < 99.5;
   sB.state.textContent = bBusy ? 'turn running · editing the form' : bCont ? 'turn continues with A’s message' : (t >= 103.2 && t < 106.5 ? 'woken by its Monitor line' : 'idle');
   set(sB.state, { fill: bBusy || bCont ? C.em : (t >= 103.2 && t < 106.5 ? C.amber : C.muted) });
-  sA.line1.textContent = t >= 90.5 ? '$ attend send "api auth change is pushed"' : '';
+  sA.line1.textContent = t >= 90.5 ? '$ attend message send "api auth change is pushed"' : '';
   sA.line3.textContent = t >= 106.8 ? 'peers: B (web): on it, rebasing now' : '';
   set(sA.line3, { fill: C.amber });
   sB.line1.textContent = t >= 93.5 && t < 96.5 ? 'queued: B is mid-turn' : (t >= 96.5 ? '[attend] 1 peer message at the turn boundary' : '');
@@ -565,7 +565,7 @@ function render(t) {
   // The wake: the peers sensor's Monitor line, then B's reply.
   sB.line3.textContent = t >= 103.2 ? 'peers: message from you: rebase on A’s change' : '';
   set(sB.line3, { fill: C.amber });
-  sB.line4.textContent = t >= 104 ? '$ attend reply "on it, rebasing now"' : '';
+  sB.line4.textContent = t >= 104 ? '$ attend message reply "on it, rebasing now"' : '';
   set(sB.line4, { 'font-family': MONO, fill: C.em, 'font-size': 16 });
   const chatSeq = [
     [94, 'A (api) → #open: api auth change is pushed', C.text],

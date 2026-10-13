@@ -44,7 +44,7 @@ flowchart TD
     class ET ephemeral
 ```
 
-- **Authored communication** — `attend send`, `attend reply`, attend-chat's
+- **Authored communication** — `attend message send`, `attend message reply`, attend-chat's
   `@Name` / `#group` / `#open`. A colleague chose to say this. It must be
   **delivered, once, and survive a brief absence.**
 - **Environmental events** — git churned, a peer appeared, a process started.
@@ -82,7 +82,7 @@ Both lanes timestamp everything; they *use* time oppositely:
 - The **message lane** uses time to **stamp and digest** — a message is never
   dropped for its age. A burst too big for one notification is summarized as
   *"12 new messages: 3 to you, 9 on #open (newest 40s ago, over 21m)"*, and
-  `attend inbox` is the durable, chronological ledger behind it.
+  `attend message inbox` is the durable, chronological ledger behind it.
 
 ## Two doors into a session
 
@@ -92,12 +92,12 @@ session never sees it twice:
 - **The Monitor line.** `attend run` polls the trays and wakes an *idle*
   session with a notification.
 - **The turn-boundary drain.** When a *busy* session ends a turn, a Stop hook
-  runs `attend inbox --drain`, and the turn continues with whatever arrived
+  runs `attend message inbox --drain`, and the turn continues with whatever arrived
   while it worked.
 
 Both conduits mark what they delivered in one seen-set (ADR-172). A session
 only receives through the drain once it has enrolled — by running attend or
-joining a channel — and `attend scene private` opts it out.
+joining a channel — and `attend channel scene private` opts it out.
 
 ## The scenarios
 

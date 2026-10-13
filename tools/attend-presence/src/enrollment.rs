@@ -8,7 +8,7 @@
 //!
 //! The record is `<cache>/enrolled/<session-id>`, one line each for:
 //! - every way the session enrolled (`run`, `join`, `listen`);
-//! - `optout`, when `attend scene private` or `attend listen off` ran while
+//! - `optout`, when `attend channel scene private` or `attend listen off` ran while
 //!   an `attend run` held the session: the run's enrollment ends once no
 //!   run holds it;
 //! - `host <name> [<key>]`, what hosts the session's delivery when it is
@@ -37,7 +37,7 @@ use std::path::PathBuf;
 pub enum Source {
     /// `attend run`.
     Run,
-    /// `attend join`, or a scene that joins a channel.
+    /// `attend channel join`, or a scene that joins a channel.
     Join,
     /// `attend listen on`: listening without joining a channel.
     Listen,
@@ -277,7 +277,7 @@ pub fn withdraw(session_id: &str, source: Source) -> io::Result<()> {
     edit(session_id, |r| r.sources.retain(|s| *s != source))
 }
 
-/// `attend scene private` and `attend listen off`: the explicit opt-out.
+/// `attend channel scene private` and `attend listen off`: the explicit opt-out.
 /// Withdraws the join and the listen, and the run too unless an `attend
 /// run` holds the session; then the run's enrollment ends once it no longer
 /// does ([`is_enrolled`] applies it).

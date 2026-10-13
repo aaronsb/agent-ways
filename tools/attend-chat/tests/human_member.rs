@@ -2,7 +2,7 @@
 //! one they `/join`, so an agent alone in the channel with them can answer
 //! them (ADR-404 D1). This is the reproduction of the bug observed on
 //! attend 0.21.0: the operator posted in a channel from attend-chat, was
-//! never written as a member, and the agent's `attend reply` was refused
+//! never written as a member, and the agent's `attend message reply` was refused
 //! as "you are the only listener". Showing a channel joins nothing: the tab
 //! bar is walked and cycled past channels nobody chose, and a Leave holds.
 //! In its own file, so its own fixture.

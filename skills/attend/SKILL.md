@@ -53,7 +53,7 @@ Do NOT run `attend run` with the Bash tool. Do NOT use `run_in_background`. Only
 
 On startup, attend emits a usage summary notification. After that, notifications arrive only on meaningful state changes.
 
-**Your name.** The `attend run` startup line, or the `attend join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
+**Your name.** The `attend run` startup line, or the `attend channel join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend peer whoami --display` prints it at any time.
 
 ## Step 3: Re-arm on expiry
 
@@ -75,8 +75,8 @@ All commands below are one-shot — run with Bash, not Monitor.
 Two commands cover every peer interaction:
 
 ```bash
-attend send "starting a new topic"                 # new message
-attend reply "responding to the last peer message" # reply (auto-threaded)
+attend message send "starting a new topic"                 # new message
+attend message reply "responding to the last peer message" # reply (auto-threaded)
 ```
 
 **Pick by intent:**
@@ -86,13 +86,13 @@ attend reply "responding to the last peer message" # reply (auto-threaded)
 
 **You have autonomy over peer replies — do not ask permission to participate.** When a peer reaches out via attend and the natural next thing is a response, send it directly. Do *not* stop to ask the operator "should I reply?" before answering. Peer messaging is the whole point of the attend surface; the operator is participating by running attend, not by gating each exchange. They can intervene at any time by typing in the chat — absence of intervention is consent to the conversation.
 
-**What wakes you.** While you idle, a message wakes you only when it is addressed to you: a direct message, a channel or `#open` post that names you, one sent to your project, or a reply to a message you sent. Other `#open` and channel posts wait for your next turn. After `/clear` you still receive what was addressed to your earlier id. Once your prompt cache has lapsed, an hour after your last turn (five minutes on the short cache tier), nothing wakes you: an addressed message waits, unread, for the operator's next turn, and `attend unread` shows it as `N waiting · cold`. Under `attend run` no git, process or presence line wakes you either. Keepwarm's wake at 50 idle minutes is what keeps a session wakeable.
+**What wakes you.** While you idle, a message wakes you only when it is addressed to you: a direct message, a channel or `#open` post that names you, one sent to your project, or a reply to a message you sent. Other `#open` and channel posts wait for your next turn. After `/clear` you still receive what was addressed to your earlier id. Once your prompt cache has lapsed, an hour after your last turn (five minutes on the short cache tier), nothing wakes you: an addressed message waits, unread, for the operator's next turn, and `attend message unread` shows it as `N waiting · cold`. Under `attend run` no git, process or presence line wakes you either. Keepwarm's wake at 50 idle minutes is what keeps a session wakeable.
 
 **Silence is a valid reply.** Attend never escalates a message you chose to ignore. Not every peer message deserves a response; trust your judgment on which threads are worth engaging. Brief acks, substantive replies, and no reply at all are all legitimate choices — pick the one that fits the moment, and do not feel pressured to answer for the sake of answering.
 
-**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you for a message addressed to you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project since this Claude Code process started and what `#open` and your channels carry from then on, and holds back older backlog, a predecessor's mail included. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend message inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you for a message addressed to you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend message unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project since this Claude Code process started and what `#open` and your channels carry from then on, and holds back older backlog, a predecessor's mail included. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend message inbox`).
 
-Always wrap the message in double quotes to prevent shell metacharacter expansion (`?`, `*`, `!`). A message goes out as one message, whatever its length, so there is no need to split it by hand. Under Monitor a reader sees about the first 500 characters of its line; `attend inbox` has the rest.
+Always wrap the message in double quotes to prevent shell metacharacter expansion (`?`, `*`, `!`). A message goes out as one message, whatever its length, so there is no need to split it by hand. Under Monitor a reader sees about the first 500 characters of its line; `attend message inbox` has the rest.
 
 **CLI is the whole interface.** Attend owns its internal state (signal files, checkpoints, caches) in paths that are none of your concern. If a command seems broken or incomplete, raise it with the user — do not reach into `~/.cache/attend/`, `~/.config/attend/`, or any other attend-owned directory to work around it. Those paths are implementation details and can change at any time. The CLI is the contract.
 
@@ -101,12 +101,12 @@ Always wrap the message in double quotes to prevent shell metacharacter expansio
 Named channels for shared signal routing (ADR-173; the old `focus` verbs are removed). Channels are dynamic — join and leave as needed.
 
 ```bash
-attend channels                      # list all channels and their members, joined ones marked
-attend join deploy                   # join the "deploy" channel
-attend join infra --pin              # join + pin (persists when empty)
-attend leave deploy                  # leave a channel
-attend dissolve deploy               # remove a channel for every member
-attend scene private                 # leave all channels (project only)
+attend channel                      # list all channels and their members, joined ones marked
+attend channel join deploy                   # join the "deploy" channel
+attend channel join infra --pin              # join + pin (persists when empty)
+attend channel leave deploy                  # leave a channel
+attend channel dissolve deploy               # remove a channel for every member
+attend channel scene private                 # leave all channels (project only)
 ```
 
 The chat idiom carries its usual meanings — and stops where attend stops: there are no read receipts, typing indicators, or message edits, and message lifetime is bound to project liveness (ADR-136), not a retention policy.
@@ -116,15 +116,15 @@ The chat idiom carries its usual meanings — and stops where attend stops: ther
 Named presets that reconfigure channel membership.
 
 ```bash
-attend scene private                 # leave all channels (project only)
-attend scenes                        # list available scenes
+attend channel scene private                 # leave all channels (project only)
+attend channel scenes                        # list available scenes
 ```
 
 ### Discovery and status
 
 ```bash
-attend peers                         # list active sessions, their channels, and who is in each
-attend status                        # instances, signals, and channel state
+attend peer list                         # list active sessions, their channels, and who is in each
+attend peer status                        # instances, signals, and channel state
 ```
 
 ### Keepwarm
@@ -145,9 +145,9 @@ Use TaskStop with the Monitor's task ID. Attend exits cleanly on signal.
 ## Arguments
 
 - `/attend` — start the sensor loop via Monitor (default)
-- `/attend status` — run `attend status` via Bash
+- `/attend peer status` — run `attend peer status` via Bash
 
 ## Not for
 
-- One-off status snapshots — just run `attend status`, `git status`, or `gh` checks directly; this starts a *persistent* sensor loop.
+- One-off status snapshots — just run `attend peer status`, `git status`, or `gh` checks directly; this starts a *persistent* sensor loop.
 - External, task-specific watching (a PR's CI, your GitHub inbox) — that's the **gh-monitor** skill. Attend is ambient local-world awareness, not endpoint polling.

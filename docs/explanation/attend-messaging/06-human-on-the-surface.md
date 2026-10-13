@@ -62,7 +62,7 @@ told it to"* — is now wrong, and they may not find out until the work doesn't
 happen. The human surface is the least forgiving consumer of the message lane:
 it is where "best-effort, may drop" fails most visibly, and where the durable
 tray and the *"N new messages … over Y"* re-entry digest matter most. The human
-types `attend inbox` and sees the whole ledger, in order, nothing aged out.
+types `attend message inbox` and sees the whole ledger, in order, nothing aged out.
 
 ## The point
 

@@ -17,7 +17,7 @@ const MIN: Duration = Duration::from_secs(60);
 fn addressed(tag: &str, ago: Option<Duration>) -> Fixture {
     let f = Fixture::new(tag);
     f.ok(&["listen", "on"]);
-    f.ok(&["inbox", "--drain", "--json"]);
+    f.ok(&["message", "inbox", "--drain", "--json"]);
     f.last_turn(ago);
     let dir = f.signals().join(f.project_tray());
     std::fs::create_dir_all(&dir).unwrap();
@@ -26,7 +26,7 @@ fn addressed(tag: &str, ago: Option<Duration>) -> Fixture {
 }
 
 fn wake_drain(f: &Fixture) -> serde_json::Value {
-    serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap()
+    serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json", "--wake"])).unwrap()
 }
 
 fn bodies(d: &serde_json::Value) -> Vec<String> {
@@ -34,7 +34,7 @@ fn bodies(d: &serde_json::Value) -> Vec<String> {
 }
 
 fn unread(f: &Fixture) -> u64 {
-    let u: serde_json::Value = serde_json::from_str(&f.ok(&["unread", "--json"])).unwrap();
+    let u: serde_json::Value = serde_json::from_str(&f.ok(&["message", "unread", "--json"])).unwrap();
     u["unread"].as_u64().unwrap()
 }
 
@@ -90,7 +90,7 @@ fn a_cold_idle_session_is_not_woken() {
 fn the_operators_next_turn_delivers_what_waited() {
     let f = addressed("cold-turn", Some(61 * MIN));
     assert_eq!(bodies(&wake_drain(&f)), Vec::<String>::new());
-    let d: serde_json::Value = serde_json::from_str(&f.ok(&["inbox", "--drain", "--json"])).unwrap();
+    let d: serde_json::Value = serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json"])).unwrap();
     assert_eq!(bodies(&d), ["for you"], "{d}");
     assert_eq!(unread(&f), 0);
 }
@@ -121,7 +121,7 @@ fn unknown_activity_counts_as_cold() {
 fn an_open_post_alone_reports_no_lapse() {
     let f = Fixture::new("cold-open");
     f.ok(&["listen", "on"]);
-    f.ok(&["inbox", "--drain", "--json"]);
+    f.ok(&["message", "inbox", "--drain", "--json"]);
     f.last_turn(Some(61 * MIN));
     let dir = f.signals().join("_broadcast");
     std::fs::create_dir_all(&dir).unwrap();
@@ -170,17 +170,17 @@ fn the_monitor_poller_does_not_wake_a_cold_session() {
     run.wait_for("the message once warm", Duration::from_secs(30), |r| r.output().contains("for you"));
 }
 
-/// `attend unread` and `attend status` say what waits on a lapsed cache.
+/// `attend message unread` and `attend peer status` say what waits on a lapsed cache.
 #[test]
 fn unread_and_status_say_the_message_waits_cold() {
     let f = addressed("cold-unread", Some(61 * MIN));
-    assert_eq!(f.ok(&["unread"]).lines().next(), Some("1 waiting · cold"));
-    let u: serde_json::Value = serde_json::from_str(&f.ok(&["unread", "--json"])).unwrap();
+    assert_eq!(f.ok(&["message", "unread"]).lines().next(), Some("1 waiting · cold"));
+    let u: serde_json::Value = serde_json::from_str(&f.ok(&["message", "unread", "--json"])).unwrap();
     assert_eq!(u["cache_lapsed"], true, "{u}");
-    assert!(f.ok(&["status"]).contains("1 waiting · cold"));
+    assert!(f.ok(&["peer", "status"]).contains("1 waiting · cold"));
     f.last_turn(Some(Duration::ZERO));
-    assert_eq!(f.ok(&["unread"]).lines().next(), Some("1 unread"));
-    assert!(f.ok(&["status"]).contains("1 unread"));
+    assert_eq!(f.ok(&["message", "unread"]).lines().next(), Some("1 unread"));
+    assert!(f.ok(&["peer", "status"]).contains("1 unread"));
 }
 
 /// After `/clear`, a running `attend run` hands over to a process under the

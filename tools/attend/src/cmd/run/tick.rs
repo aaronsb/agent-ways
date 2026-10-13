@@ -612,7 +612,7 @@ mod tests {
         assert_eq!(reload_plan(true, &[]), ReloadPlan::Quiet);
         assert_eq!(reload_plan(true, &["peer session started: p [/p] (same project, idle, ctx 3%)"]), ReloadPlan::Quiet);
         assert_eq!(reload_plan(true, &["peer session exited: p [/p]", "message from A ~x: hi"]), ReloadPlan::Wait);
-        assert_eq!(reload_plan(true, &["2 older messages held back; reading them is optional: attend inbox"]), ReloadPlan::Wait);
+        assert_eq!(reload_plan(true, &["2 older messages held back; reading them is optional: attend message inbox"]), ReloadPlan::Wait);
     }
 
     #[test]

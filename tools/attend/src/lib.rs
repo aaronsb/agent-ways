@@ -200,12 +200,12 @@ fn moved(old: &str, new: &str) {
 }
 
 fn send(a: SendArgs) {
-    cmd::send::reject_flag_like("send", cmd::send::SEND_FLAGS, &a.message, a.json);
+    cmd::send::reject_flag_like("message send", cmd::send::SEND_FLAGS, &a.message, a.json);
     cmd::send::cmd_send(a.to, a.channel, a.re, a.message, a.json);
 }
 
 fn reply(a: ReplyArgs) {
-    cmd::send::reject_flag_like("reply", cmd::send::REPLY_FLAGS, &a.message, a.json);
+    cmd::send::reject_flag_like("message reply", cmd::send::REPLY_FLAGS, &a.message, a.json);
     cmd::send::cmd_reply(a.re, a.to, a.channel, a.message, a.json);
 }
 
@@ -269,7 +269,7 @@ fn print_banner() {
 fn exec_chat(passthrough: Vec<String>) -> ! {
     // `attend chat` is a thin shim that execs the standalone `attend-chat`
     // binary. Keeping the chat's terminal UI out of the attend crate means
-    // `attend status`, `attend send`, and the sensor loop stay cheap to
+    // `attend peer status`, `attend message send`, and the sensor loop stay cheap to
     // cold-start from hooks. See ADR-120 and ADR-504 §1.
     #[cfg(unix)]
     {

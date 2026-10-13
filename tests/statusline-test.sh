@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# statusline.sh: the agent segment reads `attend whoami --display`, falls
-# back to the whoami table on older attend builds, and drops out without
-# attend. The git segments parse remotes and mark a dirty tree. Sourcing
+# statusline.sh: the agent segment reads `attend peer whoami --display`, and
+# drops out without attend or with one that lacks the command. The git segments parse remotes and mark a dirty tree. Sourcing
 # prints nothing, and segments survive a strict-mode caller. Stub `attend`
 # binaries stand in for a live session.
 
@@ -29,13 +28,10 @@ stub() {  # dir body
 }
 
 # Current attend: --display prints the name alone.
-stub current '[[ "$*" == "whoami --display" ]] && { echo "Chaucer-2"; exit 0; }; exit 1'
+stub current '[[ "$*" == "peer whoami --display" ]] && { echo "Chaucer-2"; exit 0; }; exit 1'
 
-# attend before --display: clap rejects the flag; the table carries the name
-# between ANSI styling.
-stub table 'if [[ "$*" == "whoami" ]]; then
-printf "  \033[1mValue\033[0m\n  session   abc\n  display   Chaucer\n"; exit 0; fi
-echo "error: unexpected argument" >&2; exit 2'
+# attend before the grouped CLI: clap rejects `peer` as a usage error.
+stub old 'echo "error: unrecognized subcommand" >&2; exit 2'
 
 # attend that hangs past SL_TIMEOUT.
 stub hang 'sleep 5'
@@ -49,7 +45,7 @@ name_with() {  # PATH
 }
 
 check "current attend uses --display" "Chaucer-2" "$(name_with "$WORK/current:$BARE")"
-check "older attend falls back to the table" "Chaucer" "$(name_with "$WORK/table:$BARE")"
+check "attend without peer whoami gives no name" "" "$(name_with "$WORK/old:$BARE")"
 check "no attend gives no name" "" "$(name_with "$BARE")"
 check "no attend drops the agent segment" "" \
     "$(PATH="$BARE" bash -c "source '$SCRIPT'; sl_agent")"
@@ -58,7 +54,7 @@ check "agent segment carries a trailing space" "🤖 Chaucer-2 " \
 check "sourcing prints nothing" "" "$(bash -c "source '$SCRIPT'")"
 
 check "a strict-mode caller survives a failing attend" "survived" \
-    "$(cd "$WORK" && PATH="$WORK/table:$BARE" bash -c "set -euo pipefail; source '$SCRIPT'; sl_agent_name >/dev/null; sl_git; sl_remote; echo survived" 2>/dev/null)"
+    "$(cd "$WORK" && PATH="$WORK/old:$BARE" bash -c "set -euo pipefail; source '$SCRIPT'; sl_agent_name >/dev/null; sl_git; sl_remote; echo survived" 2>/dev/null)"
 
 if command -v timeout > /dev/null 2>&1 || command -v gtimeout > /dev/null 2>&1; then
     start=$(date +%s%N)

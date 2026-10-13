@@ -1,4 +1,4 @@
-//! `attend join` / `leave` / `channels` / `dissolve` — channel
+//! `attend channel join` / `leave` / `list` / `dissolve` — channel
 //! membership, the chat-idiom verbs (ADR-173).
 //!
 //! Storage is untouched by the vocabulary: channels are still `@name/`

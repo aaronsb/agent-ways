@@ -6,9 +6,9 @@ A channel is a named message scope that sessions join and leave while they run. 
 
 | Scope | Directory under the signals base | Who receives it | How to send |
 |---|---|---|---|
-| `#open` | `_broadcast/` | every enrolled session | `attend send "…"` |
-| a channel | `@<name>/` | the channel's members | `attend send --channel <name> "…"` |
-| a project | the project's tray | the sessions in that project | `attend send --to <path> "…"` |
+| `#open` | `_broadcast/` | every enrolled session | `attend message send "…"` |
+| a channel | `@<name>/` | the channel's members | `attend message send --channel <name> "…"` |
+| a project | the project's tray | the sessions in that project | `attend message send --to <path> "…"` |
 
 `#open` is the base channel. Every session with attend running is in it, and it cannot be joined, left or dissolved. A send with no flag goes there. In attend-chat the same scopes are `#name`, `@Name` and the foreground tab (see [`tui.md`](tui.md#addressing)).
 
@@ -17,25 +17,25 @@ A send to a channel with no live member other than the sender fails with `error:
 ## Commands
 
 ```bash
-attend join deploy                 # join, creating the channel if it does not exist
-attend join infra --pin            # join and pin, so the channel survives empty
-attend leave deploy                # leave; an unpinned channel left empty is removed
-attend scene private               # leave every channel
+attend channel join deploy                 # join, creating the channel if it does not exist
+attend channel join infra --pin            # join and pin, so the channel survives empty
+attend channel leave deploy                # leave; an unpinned channel left empty is removed
+attend channel scene private               # leave every channel
 
-attend channels                    # list channels with their members, joined ones marked
-attend channels --joined           # only the channels this session is in
-attend channels create review "PR review rota"   # create and pin, without joining
-attend channels describe review "PR review rota, mornings"
-attend channels pin deploy
-attend channels unpin deploy       # an empty channel is removed when unpinned
-attend dissolve deploy             # remove the channel for every member
+attend channel                    # list channels with their members, joined ones marked
+attend channel --joined           # only the channels this session is in
+attend channel create review "PR review rota"   # create and pin, without joining
+attend channel describe review "PR review rota, mornings"
+attend channel pin deploy
+attend channel unpin deploy       # an empty channel is removed when unpinned
+attend channel dissolve deploy             # remove the channel for every member
 ```
 
-`attend peers` lists live sessions and the channels each is in. Both listings end with one line per channel naming its members, such as `#deploy: Chaucer-beta (you), McKay (attend-collaborator), aaron`, so a member can see who has joined before anyone posts: this session is marked `(you)`, a live agent session shows its name and project, a person in attend-chat their username, and an agent session the listing cannot name the first eight characters of its id. `attend peers` lists the channels this session is in, leaving out a member whose session has gone, and writes nothing. `attend channels` lists all of them, names members only for the channels this session is in, and gives the count for the rest. The JSON forms carry the same names, as `member_names` in `attend channels --json` and `members` on each of `attend peers --json`'s channels. The full flag reference is [`../cli/attend.md`](../cli/attend.md). attend-chat has the same lifecycle as slash commands (`/join`, `/leave`, `/channels`, `/invite`, `/kick`, `/dissolve`, `/purge`); see [`tui.md`](tui.md#slash-commands).
+`attend peer list` lists live sessions and the channels each is in. Both listings end with one line per channel naming its members, such as `#deploy: Chaucer-beta (you), McKay (attend-collaborator), aaron`, so a member can see who has joined before anyone posts: this session is marked `(you)`, a live agent session shows its name and project, a person in attend-chat their username, and an agent session the listing cannot name the first eight characters of its id. `attend peer list` lists the channels this session is in, leaving out a member whose session has gone, and writes nothing. `attend channel` lists all of them, names members only for the channels this session is in, and gives the count for the rest. The JSON forms carry the same names, as `member_names` in `attend channel --json` and `members` on each of `attend peer list --json`'s channels. The full flag reference is [`../cli/attend.md`](../cli/attend.md). attend-chat has the same lifecycle as slash commands (`/join`, `/leave`, `/channels`, `/invite`, `/kick`, `/dissolve`, `/purge`); see [`tui.md`](tui.md#slash-commands).
 
-**Pinning.** An unpinned channel is removed when its last member leaves. A pinned one keeps its entry and directory with no members, so a session joining later finds it and its history. `attend channels create` pins the channel it creates.
+**Pinning.** An unpinned channel is removed when its last member leaves. A pinned one keeps its entry and directory with no members, so a session joining later finds it and its history. `attend channel create` pins the channel it creates.
 
-**Dissolving** removes the channel's entry and its `@<name>/` directory, history included, and prints how many members it released. No message is sent to the members; their next scan simply has no such directory. attend-chat's `/dissolve` refuses while any member is live; `attend dissolve` does not check.
+**Dissolving** removes the channel's entry and its `@<name>/` directory, history included, and prints how many members it released. No message is sent to the members; their next scan simply has no such directory. attend-chat's `/dissolve` refuses while any member is live; `attend channel dissolve` does not check.
 
 **Names** are what `validate_group_name` accepts: not empty, not starting with `_` or `@`, and with no `/`, space, `#` or `:`. `broadcast` and `open` are reserved. The `@` on disk and the `#` in chat are added by attend.
 
@@ -62,7 +62,7 @@ Membership is self-reported: a session adds and removes itself, and nothing veri
 
 ## Stale members
 
-A member is live while its heartbeat in attend's cache is fresh (90 seconds, ADR-129). `attend run` touches a session's heartbeat on every tick, the Stop-hook drain at every turn end, and attend-chat touches the human's while it is open. `attend channels` prunes members whose heartbeat is stale, and removes any unpinned channel that pruning empties. It also removes an `@<name>/` directory that `_groups.yaml` has no entry for, once the directory is older than a grace window.
+A member is live while its heartbeat in attend's cache is fresh (90 seconds, ADR-129). `attend run` touches a session's heartbeat on every tick, the Stop-hook drain at every turn end, and attend-chat touches the human's while it is open. `attend channel` prunes members whose heartbeat is stale, and removes any unpinned channel that pruning empties. It also removes an `@<name>/` directory that `_groups.yaml` has no entry for, once the directory is older than a grace window.
 
 ## How joined channels are read
 

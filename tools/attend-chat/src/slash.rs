@@ -393,7 +393,7 @@ pub enum SlashOutcome {
     /// `/invite @name [#channel]` — send a DIRECTED invitation to the
     /// peer's project tray. Never a force-add: entry changes what
     /// reaches a session, so it requires the invitee's own
-    /// `attend join`; silence declines (consent asymmetry, ADR-173 /
+    /// `attend channel join`; silence declines (consent asymmetry, ADR-173 /
     /// issue #393).
     Invite {
         member: String,

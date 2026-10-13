@@ -1,4 +1,4 @@
-//! `attend status` — show every running `attend run` with the session it
+//! `attend peer status` — show every running `attend run` with the session it
 //! serves, signal counts, and focus.
 //! The state is `verbs::status`; this renders it.
 

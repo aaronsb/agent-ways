@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn a_here_string_is_not_a_heredoc() {
-        let got = scan("herestring", "f() { grep -o x <<<\"$1\" | head -1; }\nX=$(attend status)\necho \"$X\" | sed 1d\n");
+        let got = scan("herestring", "f() { grep -o x <<<\"$1\" | head -1; }\nX=$(attend peer status)\necho \"$X\" | sed 1d\n");
         assert_eq!(got, ["Read", "Bash(attend:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(sed:*)"]);
     }
 
@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn quoted_text_names_no_command_but_a_substitution_in_it_does() {
         // The adr macro's decline hint (adr/macro.sh) once gave a false `touch`.
-        let got = scan("quoted", "echo \"To decline: \\`mkdir -p .claude && touch .claude/no-adr\\`\"\nX=\"$(attend status | grep x)\"\nawk '{ print $1 } && sort' f | wc -l\necho 'then git'\n");
+        let got = scan("quoted", "echo \"To decline: \\`mkdir -p .claude && touch .claude/no-adr\\`\"\nX=\"$(attend peer status | grep x)\"\nawk '{ print $1 } && sort' f | wc -l\necho 'then git'\n");
         assert_eq!(got, ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(wc:*)"]);
         assert_eq!(mask_quoted("a \"b c\" 'd' e"), "a \"xxx\" 'x' e");
         assert_eq!(mask_quoted("cat <<'EOF'").len(), "cat <<'EOF'".len());

@@ -34,7 +34,7 @@ Use `/attend` or launch manually via Monitor with `attend run`.
 
 **Starting active is the operator's setting.** A project starts its sessions listening with `attend_mod.listening: active` in its `.claude/ways.yaml`. The operator sets it, in that file or with `ways settings set attend_mod.listening active --project <dir>` from their own shell: under auto mode Claude Code refuses an agent's write to its own project's config. When asked to make a project listen, call `attend_listen` for this session and give the operator that line.
 
-**Your name.** The `attend run` startup line, or the `attend join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend whoami --display` prints it at any time.
+**Your name.** The `attend run` startup line, or the `attend channel join` output, says `you are <name>`, such as `you are Chaucer-alpha`. Peers see you by that name. `attend peer whoami --display` prints it at any time.
 
 ## Sensors
 
@@ -48,23 +48,23 @@ Use `/attend` or launch manually via Monitor with `attend run`.
 Two commands cover every peer interaction. Pick by intent:
 
 ```bash
-attend send "starting a new topic"            # new message
-attend reply "responding to a peer message"   # reply (auto-threaded)
+attend message send "starting a new topic"            # new message
+attend message reply "responding to a peer message"   # reply (auto-threaded)
 ```
 
 - **Use `reply`** when a peer-message notification just arrived and the natural next thing is a response. It threads to that message with no id or flag. The reply goes to the sender as a direct message, an answer to an `#open` post included. A reply to a post in a named channel stays in that channel. A reply to a session that has exited is refused.
 - **Use `send`** to start a new topic. Name someone with `--to` for a direct message: a session's name such as `Chaucer-beta`, a person's member id such as `aaron`, or a project path for every session there. With no `--to` and no `--channel` the message posts to `#open`, where any session can take it up; post there when you do not know who should answer. `--channel <name>` posts to a named channel; with `--to` as well, the post stays in the channel, addressed to them, which wakes them, and every member still reads it.
-- **Length.** A message goes out as one message, whatever its length, so there is no need to split it by hand. Under Monitor a reader sees about the first 500 characters of its line; `attend inbox` has the rest.
+- **Length.** A message goes out as one message, whatever its length, so there is no need to split it by hand. Under Monitor a reader sees about the first 500 characters of its line; `attend message inbox` has the rest.
 
 **You have autonomy to reply — do not ask permission.** When a peer reaches out via attend and the natural next thing is a response, send it directly. Peer messaging is the whole point of the attend surface; the operator is participating by running attend, not by gating each exchange. They can intervene at any time by typing in the chat.
 
 **Silence is a valid reply.** Not every peer message deserves a response. Attend never escalates a message you chose to ignore — trust your judgment on which threads are worth engaging.
 
-**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you for a message addressed to you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project since this Claude Code process started and what `#open` and your channels carry from then on, and holds back older backlog, a predecessor's mail included. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend message inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you for a message addressed to you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend message unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project since this Claude Code process started and what `#open` and your channels carry from then on, and holds back older backlog, a predecessor's mail included. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend message inbox`).
 
 **CLI is the contract.** Attend owns its internal state. Never reach into `~/.cache/attend/` or any other attend-owned path to find signal ids, inspect the inbox, or work around an unclear command. Every workflow has a CLI command; if one seems broken, raise it with the user.
 
-**What wakes you.** While you idle, a message wakes you only when it is addressed to you: a direct message, a channel or `#open` post that names you, one sent to your project, or a reply to a message you sent. Other `#open` and channel posts wait for your next turn. After `/clear` you still receive what was addressed to your earlier id. Once your prompt cache has lapsed, an hour after your last turn (five minutes on the short cache tier), nothing wakes you: an addressed message waits, unread, for the operator's next turn, and `attend unread` shows it as `N waiting · cold`. Under `attend run` no git, process or presence line wakes you either. Keepwarm's wake at 50 idle minutes is what keeps a session wakeable.
+**What wakes you.** While you idle, a message wakes you only when it is addressed to you: a direct message, a channel or `#open` post that names you, one sent to your project, or a reply to a message you sent. Other `#open` and channel posts wait for your next turn. After `/clear` you still receive what was addressed to your earlier id. Once your prompt cache has lapsed, an hour after your last turn (five minutes on the short cache tier), nothing wakes you: an addressed message waits, unread, for the operator's next turn, and `attend message unread` shows it as `N waiting · cold`. Under `attend run` no git, process or presence line wakes you either. Keepwarm's wake at 50 idle minutes is what keeps a session wakeable.
 
 ## Keepwarm
 
@@ -82,9 +82,9 @@ A notification beginning `keepwarm:` asks for one word and no tools. Do not inve
 For long-running coordinated work where you want a private channel (ADR-173; the old `focus` verbs are removed):
 
 ```bash
-attend join deploy                         # join a named channel
-attend send --channel deploy "message"     # scope a send to that channel only
-attend leave deploy                        # leave
+attend channel join deploy                         # join a named channel
+attend message send --channel deploy "message"     # scope a send to that channel only
+attend channel leave deploy                        # leave
 ```
 
 You almost never need this. Direct messages and `#open` handle normal cases. The chat idiom stops at the verbs: no read receipts, no typing indicators, no edits — message lifetime is bound to project liveness (ADR-136).
@@ -92,13 +92,13 @@ You almost never need this. Direct messages and `#open` handle normal cases. The
 ## Scenes
 
 ```bash
-attend scene private                       # leave all channels
+attend channel scene private                       # leave all channels
 ```
 
 ## Discovery
 
 ```bash
-attend peers                               # sessions, their channels, and who is in each
-attend channels                            # all channels and their members, joined ones marked
-attend status                              # instances, signals, channel state
+attend peer list                               # sessions, their channels, and who is in each
+attend channel                            # all channels and their members, joined ones marked
+attend peer status                              # instances, signals, channel state
 ```

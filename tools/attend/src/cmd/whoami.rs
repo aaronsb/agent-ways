@@ -1,4 +1,4 @@
-//! `attend whoami` — print this session's canonical bus identity.
+//! `attend peer whoami` — print this session's canonical bus identity.
 //!
 //! The CLI accessor for the `(sessionId ∩ origin_path)` derivation
 //! (issue #378), so external consumers — hooks, scripts, the planned

@@ -938,10 +938,10 @@ mod tests {
     fn a_pane_opens_a_report_in_the_response_modal() {
         let mut a = app(false);
         a.pane_mut::<Two>().expect("the pane").open =
-            Some(Open::Report { label: "peers".into(), command: "attend peers".into(), text: "@one\n@two".into() });
+            Some(Open::Report { label: "peers".into(), command: "attend peer list".into(), text: "@one\n@two".into() });
         a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
         let text = testkit::text(&testkit::render(&mut a, 80, 16));
-        assert!(text.contains("attend peers") && text.contains("@two"), "{text}");
+        assert!(text.contains("attend peer list") && text.contains("@two"), "{text}");
         a.key(k(KeyCode::Esc, KeyModifiers::NONE));
         assert!(!testkit::text(&testkit::render(&mut a, 80, 16)).contains("@two"), "Esc closes it, not the screen");
     }

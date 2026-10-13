@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn component_registry_has_messaging_body() {
         let body = Component::Messaging.body();
-        assert!(body.contains("attend send"));
+        assert!(body.contains("attend message send"));
         // Post-ADR-124: default scope is `#open` (the base channel),
         // previously labelled `broadcast`. The assertion follows the
         // display-layer rename so any future regression in the
@@ -243,7 +243,7 @@ mod tests {
         let sensor = DisclosureSensor::new();
         let obs = sensor.format_observation(Component::Messaging);
         assert!(obs.starts_with("reheat: attend affordances — messaging"));
-        assert!(obs.contains("attend send"));
+        assert!(obs.contains("attend message send"));
     }
 
     // ── Ledger transition tests (exercise check_and_stamp directly

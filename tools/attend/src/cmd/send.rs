@@ -1,4 +1,4 @@
-//! `attend send` and `attend reply`: argv in, `verbs::send` called, its
+//! `attend message send` and `attend message reply`: argv in, `verbs::send` called, its
 //! result rendered. The verb bodies live in the library (ADR-501 item 2);
 //! what stays here is what only a shell caller needs: the flag-shaped
 //! message fence, the glob-expansion warning, and the CLI's wording.
@@ -8,17 +8,17 @@ use crate::verbs::send::Threading;
 use crate::verbs::send::{self, SendError, SendRequest};
 
 
-/// The flags `attend send` takes, as a caller might write them after the
+/// The flags `attend message send` takes, as a caller might write them after the
 /// message by mistake.
 pub(crate) const SEND_FLAGS: &[&str] = &["--to", "--channel", "--re", "--json"];
-/// The flags `attend reply` takes.
+/// The flags `attend message reply` takes.
 pub(crate) const REPLY_FLAGS: &[&str] = &["--re", "--to", "--channel", "--json"];
 
 /// The message is a trailing, hyphen-tolerant argument, so clap hands any
 /// unknown flag (a removed `--broadcast` or `--focus`, or a typo such as
 /// `--chanel`) over as message text, and the send would go out with the flag
 /// in its body. So does any of the verb's own flags (`own_flags`) written
-/// after the message: `attend send hi --json` would send "hi --json". A
+/// after the message: `attend message send hi --json` would send "hi --json". A
 /// leading token shaped like a long flag, or one of the verb's own flags
 /// anywhere in the message, is refused unless a `--` sits immediately before
 /// the message in the raw arguments (the escape hatch for a message that
@@ -67,7 +67,7 @@ pub(crate) fn reject_flag_like(verb: &str, own_flags: &[&str], message: &[String
 }
 
 
-/// `attend send`: the verb is `verbs::send::send`; this renders it.
+/// `attend message send`: the verb is `verbs::send::send`; this renders it.
 pub(crate) fn cmd_send(
     target_dir: Option<String>,
     target_channel: Option<String>,
@@ -88,7 +88,7 @@ pub(crate) fn cmd_send(
     }
 }
 
-/// `attend reply`: the verb is `verbs::send::reply`; this renders it.
+/// `attend message reply`: the verb is `verbs::send::reply`; this renders it.
 #[cfg(feature = "sensor-peers")]
 pub(crate) fn cmd_reply(
     re: Option<String>,
@@ -130,7 +130,7 @@ pub(crate) fn cmd_reply(
     json: bool,
 ) {
     let why = "sensor-peers feature is not compiled in this build";
-    crate::cmd::refuse_usage(&format!("attend reply: {why}"), why, json);
+    crate::cmd::refuse_usage(&format!("attend message reply: {why}"), why, json);
 }
 
 /// Fence: detect probable shell glob expansion. If any message part is an
@@ -144,7 +144,7 @@ fn warn_on_expansion(req: &SendRequest, message_parts: &[String]) {
     let suspect_expansion = message_parts.iter().any(|part| std::path::Path::new(part).exists() && !part.contains(' '));
     if suspect_expansion {
         eprintln!("[attend] warning: message contains existing file paths — shell may have expanded metacharacters");
-        eprintln!("[attend] did you mean: attend send \"{}\"", req.message);
+        eprintln!("[attend] did you mean: attend message send \"{}\"", req.message);
         eprintln!("[attend] sending anyway, but wrap in quotes next time");
     }
 }
@@ -158,10 +158,10 @@ fn report(sent: &send::Sent) {
     eprintln!("[attend] signal written ({}, {} dirs): {}.signal", sent.scope, sent.dirs, sent.id);
 }
 
-const SEND_USAGE: &str = "usage: attend send [--to <name|member|path>] [--channel <name>] <message>\n  (no --to and no --channel posts in #open; --to makes it a direct message)\n  tip: wrap message in double quotes to avoid shell expansion";
+const SEND_USAGE: &str = "usage: attend message send [--to <name|member|path>] [--channel <name>] <message>\n  (no --to and no --channel posts in #open; --to makes it a direct message)\n  tip: wrap message in double quotes to avoid shell expansion";
 
 #[cfg(feature = "sensor-peers")]
-const REPLY_USAGE: &str = "usage: attend reply [--re <id>] <message>\n  (answers the newest peer message delivered to this session, or the one --re names: a direct message to its sender, or in its channel)\n  tip: wrap message in double quotes to avoid shell expansion";
+const REPLY_USAGE: &str = "usage: attend message reply [--re <id>] <message>\n  (answers the newest peer message delivered to this session, or the one --re names: a direct message to its sender, or in its channel)\n  tip: wrap message in double quotes to avoid shell expansion";
 
 /// Print why the send wrote nothing, as the CLI always has, and exit 1. An
 /// empty message is a malformed command line: exit 2 with the verb's
@@ -175,7 +175,7 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
     }
     match e {
         SendError::InvalidReId => {
-            eprintln!("attend send: --re signal id must be non-empty and match [A-Za-z0-9_-]+");
+            eprintln!("attend message send: --re signal id must be non-empty and match [A-Za-z0-9_-]+");
         }
         SendError::EmptyMessage => unreachable!("an empty message is refused as usage above"),
         SendError::NoPeerAt { path, peers, suggestion } => {
@@ -211,19 +211,19 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
                 }
             }
             eprintln!("\ndrop --channel to post in #open (reaches every peer):");
-            eprintln!("  attend send <message>");
+            eprintln!("  attend message send <message>");
         }
         SendError::NoInbound => {
-            eprintln!("attend reply: no prior inbound signal to thread against.");
+            eprintln!("attend message reply: no prior inbound signal to thread against.");
             eprintln!("  (reply is for responding to a peer message your sensor surfaced.)");
-            eprintln!("  if you are starting a new topic, use `attend send` instead.");
+            eprintln!("  if you are starting a new topic, use `attend message send` instead.");
         }
         SendError::NoRecipient { .. } | SendError::AmbiguousRecipient { .. } | SendError::NotInChannel { .. } => eprintln!("error: {e}"),
         SendError::SenderExited { .. }
         | SendError::UnknownHandle { .. }
         | SendError::ParentChannelLeft { .. }
         | SendError::ParentChannelGone { .. }
-        | SendError::ParentRoomUnknown => eprintln!("attend reply: {e}"),
+        | SendError::ParentRoomUnknown => eprintln!("attend message reply: {e}"),
         SendError::OwnProject { .. } | SendError::NotWritten { .. } | SendError::TooLong { .. } => eprintln!("error: {e}"),
     }
     std::process::exit(1);

@@ -86,7 +86,7 @@ session     1 cold write paid, $1.64
 
 The `keepwarm` line says `armed` and `not armed`, never `on` and `off`: those are the values of the mod's `attend_mod.keepwarm` setting, which says whether the check runs at all, not whether a window is armed now.
 
-`attend status` shows the `keepwarm` line on its own.
+`attend peer status` shows the `keepwarm` line on its own.
 
 ## The cost model
 

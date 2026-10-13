@@ -1,4 +1,4 @@
-//! A drained reply names the message it answers, and `attend reply` to a
+//! A drained reply names the message it answers, and `attend message reply` to a
 //! message delivered from a channel stays in that channel (#900, ADR-406
 //! item 10). Both through the CLI, as the mod and the Stop hook run it.
 
@@ -25,7 +25,7 @@ fn peer_in(f: &Fixture, room: &str) {
 #[test]
 fn a_drained_reply_carries_its_parent_in_both_formats() {
     let f = Fixture::new("drain-threads-re");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     f.drain("plain");
     put_from_peer(&f, "_broadcast", "peer-sess-1-1", Some("me-1-0"), "an answer");
     put_from_peer(&f, "_broadcast", "peer-sess-1-2", None, "a new topic");
@@ -45,13 +45,13 @@ fn a_drained_reply_carries_its_parent_in_both_formats() {
 #[test]
 fn a_reply_to_a_drained_channel_message_stays_in_the_channel() {
     let f = Fixture::new("drain-threads-channel");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     f.drain("plain");
     peer_in(&f, "room");
     f.put("@room", "peer-sess-1-1", "said in the room", std::time::Duration::ZERO);
     assert!(f.drain("plain").contains("said in the room"));
 
-    let out = f.attend(&["reply", "--json", "answered in the room"]);
+    let out = f.attend(&["message", "reply", "--json", "answered in the room"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let sent: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(sent["scope"], "channel");
@@ -61,14 +61,14 @@ fn a_reply_to_a_drained_channel_message_stays_in_the_channel() {
     assert!(!f.signals().join("_broadcast").join(format!("{id}.signal")).exists(), "not to #open");
 }
 
-/// `attend reply --re` names an older parent than the newest delivered, as
+/// `attend message reply --re` names an older parent than the newest delivered, as
 /// the attend mod does with a `~id`; the reply still goes where that parent
 /// was said, not to `#open` and not where the newest message was said.
 #[cfg(feature = "sensor-peers")]
 #[test]
 fn a_reply_with_re_stays_in_its_parents_channel() {
     let f = Fixture::new("reply-re-channel");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     f.drain("plain");
     peer_in(&f, "room");
     f.put("@room", "peer-sess-1-1", "said in the room", std::time::Duration::ZERO);
@@ -76,7 +76,7 @@ fn a_reply_with_re_stays_in_its_parents_channel() {
     let drained = f.drain("plain");
     assert!(drained.contains("said in the room") && drained.contains("said in the open"), "{drained}");
 
-    let out = f.attend(&["reply", "--re", "peer-sess-1-1", "--json", "--", "answered in the room"]);
+    let out = f.attend(&["message", "reply", "--re", "peer-sess-1-1", "--json", "--", "answered in the room"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let sent: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(sent["re"], "peer-sess-1-1");
@@ -91,9 +91,9 @@ fn a_reply_with_re_stays_in_its_parents_channel() {
 #[test]
 fn a_reply_with_re_to_an_unknown_parent_is_refused() {
     let f = Fixture::new("reply-re-unknown");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     f.drain("plain");
-    let out = f.attend(&["reply", "--re", "nobody-1-1", "--json", "--", "into the void"]);
+    let out = f.attend(&["message", "reply", "--re", "nobody-1-1", "--json", "--", "into the void"]);
     assert!(!out.status.success());
     let err: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(err["error"]["kind"], "parent_room_unknown", "{err}");
@@ -107,13 +107,13 @@ fn a_reply_with_re_to_an_unknown_parent_is_refused() {
 #[test]
 fn a_reply_with_re_into_a_left_channel_is_refused() {
     let f = Fixture::new("reply-re-left");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     f.drain("plain");
     peer_in(&f, "room");
     f.put("@room", "peer-sess-1-1", "said in the room", std::time::Duration::ZERO);
     f.drain("plain");
-    f.ok(&["leave", "room"]);
-    let out = f.attend(&["reply", "--re", "peer-sess-1-1", "--json", "--", "after leaving"]);
+    f.ok(&["channel", "leave", "room"]);
+    let out = f.attend(&["message", "reply", "--re", "peer-sess-1-1", "--json", "--", "after leaving"]);
     assert!(!out.status.success());
     let err: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(err["error"]["kind"], "parent_channel_left", "{err}");

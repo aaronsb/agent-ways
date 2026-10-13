@@ -4,7 +4,7 @@
 //! project (`--to`) since the session began is delivered on enrollment
 //! whatever its age, while older addressed mail and an old `#open` message
 //! are baselined and announced, never consumed silently.
-//! Each enrollment path is covered: `attend join` (the drain runs first) and
+//! Each enrollment path is covered: `attend channel join` (the drain runs first) and
 //! `/attend` (the peers sensor under `attend run` runs first).
 
 mod common;
@@ -14,7 +14,7 @@ use std::time::Duration;
 
 const ADDRESSED: &str = "addressed ten minutes ago";
 const OLD_OPEN: &str = "open ten minutes ago";
-const NOTE: &str = "1 older message held back; reading it is optional: attend inbox";
+const NOTE: &str = "1 older message held back; reading it is optional: attend message inbox";
 
 fn with_backlog(tag: &str) -> Fixture {
     let f = Fixture::new(tag);
@@ -26,7 +26,7 @@ fn with_backlog(tag: &str) -> Fixture {
 #[test]
 fn join_then_drain_delivers_addressed_and_announces_the_rest() {
     let f = with_backlog("backlog-join");
-    f.ok(&["join", "side"]);
+    f.ok(&["channel", "join", "side"]);
 
     let first = f.drain("plain");
     assert!(first.contains(ADDRESSED), "addressed mail must reach the session: {first}");
@@ -36,7 +36,7 @@ fn join_then_drain_delivers_addressed_and_announces_the_rest() {
     let hook_again = f.drain("hook");
     assert_eq!(hook_again, "", "nothing is delivered twice");
     // The backlog is still there to read on demand.
-    assert!(f.ok(&["inbox"]).contains(OLD_OPEN));
+    assert!(f.ok(&["message", "inbox"]).contains(OLD_OPEN));
 }
 
 /// A cold start with only backlog to report delivers nothing, so it must
@@ -47,7 +47,7 @@ fn join_then_drain_delivers_addressed_and_announces_the_rest() {
 fn a_note_alone_does_not_block_the_stop() {
     let f = Fixture::new("backlog-note-only");
     f.put("_broadcast", "other-1-open", OLD_OPEN, 10 * MINUTE);
-    let joined = f.ok(&["join", "side"]);
+    let joined = f.ok(&["channel", "join", "side"]);
     assert!(joined.lines().any(|l| l.starts_with("you are ")), "the join names the session: {joined}");
 
     let hook = f.drain_hook_with("{}");
@@ -64,7 +64,7 @@ fn a_note_alone_does_not_block_the_stop() {
 #[test]
 fn join_and_first_delivery_name_the_session() {
     let f = with_backlog("backlog-named");
-    let joined = f.ok(&["join", "side"]);
+    let joined = f.ok(&["channel", "join", "side"]);
     let name = joined.lines().find_map(|l| l.strip_prefix("you are ")).unwrap_or_else(|| panic!("no name line: {joined}")).to_string();
     assert!(!name.is_empty());
 
@@ -97,14 +97,14 @@ fn a_new_session_is_not_replayed_its_predecessors_project_mail() {
     }
     // Session A, live for a day, listens and reads them, as the mod does.
     f.ok(&["listen", "on"]);
-    let a = drain_doc(&f.ok(&["inbox", "--drain", "--json"]));
+    let a = drain_doc(&f.ok(&["message", "inbox", "--drain", "--json"]));
     assert_eq!(bodies(&a).len(), 7, "A was live when they were sent, so they are A's: {a}");
 
     // Session B: a new Claude Code process in the same project, started
     // a minute ago, turns listening on and drains, as the mod does at start.
     let b_sid = "sess-backlog-successor-b";
     f.attend_in_process(b_sid, Some(MINUTE), &["listen", "on"]);
-    let b = drain_doc(&f.attend_in_process(b_sid, Some(MINUTE), &["inbox", "--drain", "--json"]));
+    let b = drain_doc(&f.attend_in_process(b_sid, Some(MINUTE), &["message", "inbox", "--drain", "--json"]));
     assert_eq!(b["status"], "drained", "{b}");
     assert!(bodies(&b).is_empty(), "B is replayed none of A's mail: {b}");
     assert_eq!(b["held_back"], 7, "{b}");
@@ -112,7 +112,7 @@ fn a_new_session_is_not_replayed_its_predecessors_project_mail() {
 
     // What is addressed to the project from here on is B's too.
     f.put(&tray, "other-1-to-new", "for whoever is here now", std::time::Duration::ZERO);
-    let next = drain_doc(&f.attend_in_process(b_sid, Some(MINUTE), &["inbox", "--drain", "--json"]));
+    let next = drain_doc(&f.attend_in_process(b_sid, Some(MINUTE), &["message", "inbox", "--drain", "--json"]));
     assert_eq!(bodies(&next), vec!["for whoever is here now".to_string()], "{next}");
 }
 
@@ -129,7 +129,7 @@ fn mail_from_before_the_session_began_is_held_back_though_nobody_read_it() {
     f.put(&tray, "other-1-meanwhile", "sent while it was dormant", 5 * MINUTE);
     let sid = "sess-backlog-nobody-b";
     f.attend_in_process(sid, Some(10 * MINUTE), &["listen", "on"]);
-    let d = drain_doc(&f.attend_in_process(sid, Some(10 * MINUTE), &["inbox", "--drain", "--json"]));
+    let d = drain_doc(&f.attend_in_process(sid, Some(10 * MINUTE), &["message", "inbox", "--drain", "--json"]));
     assert_eq!(bodies(&d), vec!["sent while it was dormant".to_string()], "{d}");
     assert_eq!(d["held_back"], 1, "{d}");
 }
@@ -155,7 +155,7 @@ fn open_messages_since_listening_began_arrive_at_a_late_first_drain() {
     std::fs::write(&marker, record).unwrap();
     f.put("_broadcast", "other-1-during", "a question while it waited", 8 * MINUTE);
 
-    let d = drain_doc(&f.ok(&["inbox", "--drain", "--json"]));
+    let d = drain_doc(&f.ok(&["message", "inbox", "--drain", "--json"]));
     assert_eq!(bodies(&d), vec!["a question while it waited".to_string()], "{d}");
     assert_eq!(d["held_back"], 1, "{d}");
 }
@@ -171,7 +171,7 @@ fn without_a_start_time_old_project_mail_is_held_back() {
     f.put(&tray, "other-1-live", "live project mail", std::time::Duration::ZERO);
     let sid = "sess-backlog-unknown-start-b";
     f.attend_in_process(sid, None, &["listen", "on"]);
-    let d = drain_doc(&f.attend_in_process(sid, None, &["inbox", "--drain", "--json"]));
+    let d = drain_doc(&f.attend_in_process(sid, None, &["message", "inbox", "--drain", "--json"]));
     assert_eq!(bodies(&d), vec!["live project mail".to_string()], "{d}");
     assert_eq!(d["held_back"], 1, "{d}");
 }
@@ -219,6 +219,6 @@ fn a_drain_before_the_sensor_scans_applies_the_rule() {
     run.wait_for("the sensor's first checkpoint", Duration::from_secs(10), |_| f.state_file(&f.sid).exists());
     let hook = f.drain_hook_with("{}");
     assert!(hook.contains("50 peer message(s)"), "the 50 cap: {hook}");
-    assert!(hook.contains("8 older messages held back; reading them is optional: attend inbox"), "the note: {hook}");
+    assert!(hook.contains("8 older messages held back; reading them is optional: attend message inbox"), "the note: {hook}");
     assert!(!hook.contains("old open"), "old #open is held back: {hook}");
 }

@@ -1,4 +1,4 @@
-//! `attend permissions audit` — cross-check sensor `requires:` against
+//! `attend sensor permissions` — cross-check sensor `requires:` against
 //! the grants declared in `~/.claude/settings.json`.
 
 use crate::config;

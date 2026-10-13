@@ -162,7 +162,7 @@ The **awareness layer** ([ADR-113](architecture/attend/ADR-113-attend-active-awa
 
 Claude invokes `Monitor` with `attend` as the command at session start. `attend` runs for the session's lifetime, writing observations to stdout as they become worth emitting. Each line becomes a notification Claude reads asynchronously between turns. When the session ends, `Monitor` terminates `attend`, which flushes state to disk so the next session can restore it.
 
-Peer messages have a second path. While Claude is working, a Stop hook drains pending messages at the end of each turn (`attend inbox --drain`, [ADR-172](architecture/attend/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md)). While Claude is idle, the `Monitor` poller wakes it. Both record what was delivered in one shared set, so a message arrives once.
+Peer messages have a second path. While Claude is working, a Stop hook drains pending messages at the end of each turn (`attend message inbox --drain`, [ADR-172](architecture/attend/ADR-172-turn-boundary-inbound-delivery-via-a-cli-owned-drain-checkpoint.md)). While Claude is idle, the `Monitor` poller wakes it. Both record what was delivered in one shared set, so a message arrives once.
 
 The awareness layer honors substrate separation rigorously:
 

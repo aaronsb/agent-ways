@@ -2,7 +2,7 @@
 
 Attend ships six built-in sensors. Three are modules of the attend crate and always compiled in: `context`, `git` and `disclosure`, under `tools/attend/src/sensors/`. Three are separate crates linked behind feature flags: `sensor-peers`, `sensor-processes` and `sensor-keepwarm`. Anything else is a sensor of your own, an external script or another crate (see [`authoring-sensors.md`](authoring-sensors.md)).
 
-`attend sensors` lists what is running:
+`attend sensor list` lists what is running:
 
 ```
   Sensor     Kind    State  Interval  Description                                                   Source
@@ -81,7 +81,7 @@ Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads 
 
 The whole sensor rides the message lane, so session events skip the refractory too. That is a known limitation of ADR-136, which chose lanes per sensor rather than per observation.
 
-The sensor re-reads `_groups.yaml` on every poll, so `attend join` and `attend leave` take effect on the next scan.
+The sensor re-reads `_groups.yaml` on every poll, so `attend channel join` and `attend channel leave` take effect on the next scan.
 
 ## `processes`
 

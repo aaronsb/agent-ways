@@ -43,7 +43,7 @@ pub type TickDelta = u64;
 macro_rules! sensor_metadata {
     () => {
         /// Sourced from this crate's `Cargo.toml` `description` field — edit
-        /// there to change what `attend sensors` prints.
+        /// there to change what `attend sensor list` prints.
         fn description(&self) -> &str {
             env!("CARGO_PKG_DESCRIPTION")
         }
@@ -73,7 +73,7 @@ pub trait Sensor: Send {
     fn name(&self) -> &str;
 
     /// One-line description of what this sensor observes. Surfaced by
-    /// `attend sensors` for discovery. Default empty so the trait stays
+    /// `attend sensor list` for discovery. Default empty so the trait stays
     /// backward compatible; concrete sensors should override.
     fn description(&self) -> &str {
         ""
@@ -81,7 +81,7 @@ pub trait Sensor: Send {
 
     /// Sensor source identifier — typically `crate@version` for built-in
     /// crate sensors, or a script path for `ScriptSensor`. Surfaced by
-    /// `attend sensors`. Default empty; concrete sensors should override.
+    /// `attend sensor list`. Default empty; concrete sensors should override.
     fn source(&self) -> String {
         String::new()
     }

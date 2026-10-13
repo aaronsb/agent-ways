@@ -60,11 +60,11 @@ Each external call runs under `SL_TIMEOUT` seconds (default 1) through `timeout`
 
 ## The agent name
 
-The name comes from `attend whoami --display`. `whoami` derives it from the session record's origin path (ADR-171), so it stays the same when the shell's working directory changes during the session. The instance suffix (`Chaucer-2`) appears when several sessions share one origin.
+The name comes from `attend peer whoami --display`. `whoami` derives it from the session record's origin path (ADR-171), so it stays the same when the shell's working directory changes during the session. The instance suffix (`Chaucer-2`) appears when several sessions share one origin.
 
-Read the name through the CLI and never from attend's state files. `attend whoami` is the supported surface. On attend builds before `--display`, the script parses the `display` row of the `whoami` table. Builds before `whoami` show no name.
+Read the name through the CLI and never from attend's state files. `attend peer whoami` is the supported surface. On attend builds before `--display`, the script parses the `display` row of the `whoami` table. Builds before `whoami` show no name.
 
-The display name is presentation. A script that keys state on the session should read `attend whoami --machine`, which prints `session_id`, `origin_path` and `resolved`, and leaves the name out.
+The display name is presentation. A script that keys state on the session should read `attend peer whoami --machine`, which prints `session_id`, `origin_path` and `resolved`, and leaves the name out.
 
 ## Tests
 

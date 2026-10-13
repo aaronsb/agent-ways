@@ -150,7 +150,7 @@ fn main() {
     // Monitor, a pipe) it says so and exits, before it takes a terminal or
     // installs a signal handler.
     if args.snap.is_none() && !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
-        usage("needs a terminal; `attend inbox` prints messages, `attend send` sends one");
+        usage("needs a terminal; `attend message inbox` prints messages, `attend message send` sends one");
     }
 
     let (tx, rx) = std::sync::mpsc::channel::<signal::Signal>();

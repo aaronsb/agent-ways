@@ -75,7 +75,7 @@ pub fn peers() -> Peers {
         .into_iter()
         .map(|(name, pinned)| {
             // Read-only, so no cleanup_stale: a member whose session is gone
-            // is left out here and pruned by the next `attend channels`.
+            // is left out here and pruned by the next `attend channel`.
             let live: Vec<String> =
                 r.members(&name).unwrap_or_default().into_iter().filter(|m| attend_groups::member_alive(m)).collect();
             let members = member_names(&live, &me, &peers);
@@ -89,7 +89,7 @@ pub fn peers() -> Peers {
 /// A channel's members by name, so a member can see who else has joined
 /// without waiting for them to post (ADR-404 D7, the text view of
 /// membership): this session as `Name (you)`, a live agent session as
-/// `Name (project)`, the way `attend peers` lists it, a person in
+/// `Name (project)`, the way `attend peer list` lists it, a person in
 /// attend-chat as `username (attend-chat)`, and an agent session that is
 /// not live by the first eight characters of its id.
 pub fn member_names(members: &[String], me: &Agent, peers: &[Agent]) -> Vec<String> {

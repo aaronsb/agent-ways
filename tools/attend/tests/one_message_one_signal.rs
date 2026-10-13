@@ -1,4 +1,4 @@
-//! One message is one signal, whatever its length (ADR-412). `attend send`
+//! One message is one signal, whatever its length (ADR-412). `attend message send`
 //! writes it whole, and every conduit delivers it whole under its one id:
 //! the Stop-hook drain, the attend mod's format, and the Monitor line of
 //! `attend run`. Signals an older peer sent as numbered `(i/n)` parts still
@@ -17,7 +17,7 @@ fn json(out: &std::process::Output) -> Value {
 
 /// The messages in `#open`, oldest first, as `inbox --json` lists them.
 fn open_messages(f: &Fixture) -> Vec<Value> {
-    let out = f.attend(&["inbox", "--json", "--limit", "50"]);
+    let out = f.attend(&["message", "inbox", "--json", "--limit", "50"]);
     assert!(out.status.success());
     json(&out)["messages"].as_array().unwrap().clone()
 }
@@ -56,7 +56,7 @@ fn a_long_message_goes_out_as_one_signal() {
     let f = Fixture::new("one-signal-send");
     let body = long_body();
 
-    let out = f.without_session(|| f.attend(&["send", "--json", "--", &body]));
+    let out = f.without_session(|| f.attend(&["message", "send", "--json", "--", &body]));
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let sent = json(&out);
     let id = sent["id"].as_str().unwrap().to_string();
@@ -74,7 +74,7 @@ fn a_long_message_goes_out_as_one_signal() {
 #[test]
 fn a_short_message_goes_out_as_one_signal() {
     let f = Fixture::new("one-signal-short");
-    let out = f.without_session(|| f.attend(&["send", "--json", "hello"]));
+    let out = f.without_session(|| f.attend(&["message", "send", "--json", "hello"]));
     assert!(out.status.success());
     assert_eq!(open_messages(&f)[0]["message"], "hello");
 }
@@ -88,7 +88,7 @@ fn a_send_that_could_not_be_written_says_so() {
     std::fs::write(f.signals().join("_broadcast"), "not a directory").unwrap();
     let body = long_body();
 
-    let out = f.without_session(|| f.attend(&["send", "--json", "--", &body]));
+    let out = f.without_session(|| f.attend(&["message", "send", "--json", "--", &body]));
     assert_eq!(out.status.code(), Some(1));
     let doc = json(&out);
     assert_eq!(doc["error"]["kind"], "not_written");
@@ -108,13 +108,13 @@ fn the_drain_delivers_a_long_message_whole_under_one_handle() {
     f.ok(&["listen", "on"]);
     f.drain("plain");
     put_from_peer(&f, "_broadcast", "peer-sess-1791000000000000001-0", &body);
-    let unread = json(&f.attend(&["unread", "--json"]));
+    let unread = json(&f.attend(&["message", "unread", "--json"]));
     assert_eq!(unread["unread"], 1, "{unread}");
     let drained = f.drain("plain");
     assert!(drained.contains(&body), "whole: {drained}");
     assert_eq!(drained.matches("END-OF-MESSAGE").count(), 1, "once: {drained}");
     assert!(drained.contains("1 message(s) drained"), "{drained}");
-    assert_eq!(json(&f.attend(&["unread", "--json"]))["unread"], 0);
+    assert_eq!(json(&f.attend(&["message", "unread", "--json"]))["unread"], 0);
     assert!(!f.drain("plain").contains("END-OF-MESSAGE"), "delivered once");
 
     let m = Fixture::new("one-signal-drain-mod");
@@ -190,7 +190,7 @@ fn legacy_numbered_parts_still_read_in_order() {
 #[test]
 fn a_send_to_the_own_project_names_the_problem() {
     let f = Fixture::new("send-own-project");
-    let out = f.attend(&["send", "--json", "--to", &f.origin, "note to self"]);
+    let out = f.attend(&["message", "send", "--json", "--to", &f.origin, "note to self"]);
     assert_eq!(out.status.code(), Some(1));
     let doc = json(&out);
     assert_eq!(doc["error"]["kind"], "own_project");
@@ -225,7 +225,7 @@ fn a_body_over_the_cap_is_refused_and_one_at_the_cap_goes_out() {
     let max = agent_identity::signal::MAX_MESSAGE_BYTES;
     let f = Fixture::new("one-signal-cap");
     let over = "x".repeat(max + 1);
-    let out = f.without_session(|| f.attend(&["send", "--json", "--", &over]));
+    let out = f.without_session(|| f.attend(&["message", "send", "--json", "--", &over]));
     assert_eq!(out.status.code(), Some(1));
     let doc = json(&out);
     assert_eq!(doc["error"]["kind"], "too_long");
@@ -235,7 +235,7 @@ fn a_body_over_the_cap_is_refused_and_one_at_the_cap_goes_out() {
     assert!(!f.signals().join("_broadcast").exists() || open_tray_files(&f).is_empty(), "nothing written");
 
     let at = "x".repeat(max);
-    let out = f.without_session(|| f.attend(&["send", "--json", "--", &at]));
+    let out = f.without_session(|| f.attend(&["message", "send", "--json", "--", &at]));
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(open_tray_files(&f).len(), 1);
 }
@@ -251,14 +251,14 @@ fn an_oversize_signal_file_is_skipped_with_a_note() {
     let huge = "y".repeat(agent_identity::signal::MAX_SIGNAL_FILE_BYTES as usize + 10);
     put_from_peer(&f, "_broadcast", "peer-sess-1791000000000000001-0", &huge);
     put_from_peer(&f, "_broadcast", "peer-sess-1791000000000000002-0", "a normal one");
-    let out = f.attend(&["inbox", "--drain", "--format", "plain"]);
+    let out = f.attend(&["message", "inbox", "--drain", "--format", "plain"]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stdout.contains("a normal one"), "{stdout}");
     assert!(!stdout.contains("yyyy"), "not delivered");
     assert!(stderr.contains("skipped peer-sess-1791000000000000001-0.signal") && stderr.contains("read limit"), "{stderr}");
-    let again = f.attend(&["inbox", "--drain", "--format", "plain"]);
+    let again = f.attend(&["message", "inbox", "--drain", "--format", "plain"]);
     assert!(!String::from_utf8_lossy(&again.stderr).contains("skipped"), "noted once");
 }
 

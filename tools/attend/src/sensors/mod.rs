@@ -171,9 +171,9 @@ pub fn register_sensors(
     (slots, enabled_names)
 }
 
-// ── Sensor enumeration (for `attend sensors`) ───────────────────
+// ── Sensor enumeration (for `attend sensor list`) ───────────────────
 
-/// Lightweight metadata for one sensor — used by `attend sensors` to
+/// Lightweight metadata for one sensor — used by `attend sensor list` to
 /// report what's compiled, configured, and active.
 pub struct SensorEntry {
     pub name: String,
@@ -377,7 +377,7 @@ mod tests {
     /// and a `crate@version`-shaped source string. Insurance for future
     /// sensor authors who forget to invoke `sensor_trait::sensor_metadata!()`
     /// in their `impl Sensor` block — without this test, a missing override
-    /// just renders as a blank cell in `attend sensors` rather than failing
+    /// just renders as a blank cell in `attend sensor list` rather than failing
     /// the build.
     #[test]
     fn builtin_sensors_expose_metadata() {

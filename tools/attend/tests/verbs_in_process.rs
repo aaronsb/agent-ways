@@ -114,7 +114,7 @@ mod reply {
         match result {
             Err(e @ attend::verbs::SendError::ParentRoomUnknown) => {
                 let why = e.to_string();
-                assert!(why.contains("--channel") && why.contains("--to") && why.contains("attend send"), "{why}");
+                assert!(why.contains("--channel") && why.contains("--to") && why.contains("attend message send"), "{why}");
             }
             other => panic!("expected parent_room_unknown: {other:?}"),
         }
@@ -177,7 +177,7 @@ mod reply {
             Err(e @ attend::verbs::SendError::ParentChannelLeft { .. }) => {
                 assert!(matches!(&e, attend::verbs::SendError::ParentChannelLeft { channel } if channel == "mod-trial"));
                 let why = e.to_string();
-                assert!(why.contains("attend join mod-trial") && why.contains("--channel") && why.contains("send"), "{why}");
+                assert!(why.contains("attend channel join mod-trial") && why.contains("--channel") && why.contains("send"), "{why}");
             }
             other => panic!("expected parent_channel_left: {other:?}"),
         }

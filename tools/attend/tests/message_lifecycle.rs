@@ -69,17 +69,17 @@ fn send_deliver_once_seen_then_purgeable() {
 
     // Send. No session record yet, so the sender is the human at a terminal
     // and the message is someone else's when the session drains.
-    ok(&attend(&home, &["send", "lifecycle hello"]));
+    ok(&attend(&home, &["message", "send", "lifecycle hello"]));
     let files = signal_files(&broadcast);
     assert_eq!(files.len(), 1, "one signal on #open: {files:?}");
     let key = files[0].clone();
 
     // The receiving session enrols by joining a channel.
     become_session(&home);
-    ok(&attend(&home, &["join", "lifecycle"]));
+    ok(&attend(&home, &["channel", "join", "lifecycle"]));
 
     // Deliver: the drain shows it once and records it.
-    let first = attend(&home, &["inbox", "--drain", "--format", "plain"]);
+    let first = attend(&home, &["message", "inbox", "--drain", "--format", "plain"]);
     ok(&first);
     let out = stdout(&first);
     assert!(out.contains("lifecycle hello"), "first drain must deliver: {out}");
@@ -91,7 +91,7 @@ fn send_deliver_once_seen_then_purgeable() {
     assert!(state.contains(&format!("seen_signal: {key}")), "seen-set: {state}");
 
     // Once: the next drain has nothing for it.
-    let second = attend(&home, &["inbox", "--drain", "--format", "plain"]);
+    let second = attend(&home, &["message", "inbox", "--drain", "--format", "plain"]);
     ok(&second);
     let out = stdout(&second);
     assert!(!out.contains("lifecycle hello"), "second drain must not redeliver: {out}");

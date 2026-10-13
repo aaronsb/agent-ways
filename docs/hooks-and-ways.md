@@ -69,7 +69,7 @@ All lanes respect the `scope:` field and the `when:` preconditions.
 ### Other hooks in the block
 
 - **`strip-session-link-pre.sh`** - Denies a `git commit` or `gh pr|issue` command that would publish a Claude Code session link as a trailer or footer line (ADR-167).
-- **`attend-drain-stop.sh`** - Runs `attend inbox --drain --format hook` at the end of each turn, delivering pending peer messages (ADR-172). Does nothing when `attend` is not installed.
+- **`attend-drain-stop.sh`** - Runs `attend message inbox --drain --format hook` at the end of each turn, delivering pending peer messages (ADR-172). Does nothing when `attend` is not installed.
 - **`issues-pull.sh`** / **`issues-task-created.sh`** - Mirror GitHub issues into the session's task list and reject unprefixed duplicates of mirrored issues (ADR-180).
 
 ## Session Lifecycle

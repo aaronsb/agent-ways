@@ -22,7 +22,7 @@ use serde_yaml::Value;
 use std::path::{Path, PathBuf};
 
 /// The first line of an attend file a write creates, from `ways settings`
-/// or `attend tune --apply` alike.
+/// or `attend config tune --apply` alike.
 pub const HEADER: &str = "# attend settings; `ways settings help attend` describes each key\n";
 
 /// `$XDG_CONFIG_HOME/attend/config.yaml`, or `~/.config/attend/config.yaml`.
@@ -103,7 +103,7 @@ governor:
   rate_window: 120
 
 # Action potential engagement model (ADR-123).
-# Run `attend tune` to derive these from real session history.
+# Run `attend config tune` to derive these from real session history.
 engagement:
   burst_threshold: 3         # disclosures before refractory kicks in
   step_multiplier: 1.25      # per-burst threshold elevation
@@ -112,7 +112,7 @@ engagement:
   peer_activity_window: 900  # per-peer engagement window
 
 # Background signal-file cleanup inside `attend run`. Reaping is by project
-# liveness (ADR-136), not by age. `attend cleanup` runs it by hand.
+# liveness (ADR-136), not by age. `attend message cleanup` runs it by hand.
 cleanup:
   enabled: true
   interval: 600              # seconds between sweeps (10 min)

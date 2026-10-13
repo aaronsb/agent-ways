@@ -203,7 +203,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     }
 
     // The name peers see this session by. Printed on every startup line so
-    // a session never has to guess its own name or run `attend peers`.
+    // a session never has to guess its own name or run `attend peer list`.
     let me = crate::util::display_name(&ident);
     match &moved_from {
         Some(old) => println!(
@@ -437,7 +437,7 @@ fn banner_line(banner: &Banner, me: &str, sensor_list: &str, focus_desc: &str) -
         ),
         Banner::Unchanged => format!("[attend] restarted (unchanged) — you are {me}"),
         Banner::Started => format!(
-            "[attend] started v{version} ({commit}) — you are {me} | sensors: {sensor_list} | focus: {focus_desc} | send: attend send <msg> (#open)"
+            "[attend] started v{version} ({commit}) — you are {me} | sensors: {sensor_list} | focus: {focus_desc} | send: attend message send <msg> (#open)"
         ),
     }
 }
