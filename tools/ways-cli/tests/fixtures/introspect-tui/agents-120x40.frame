@@ -3,10 +3,10 @@ agent-tui frame 120x40
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                                                            |
 |epoch 2 · 200K ctx · 4 ways · window 1/1 · 2026-07-03 16:53                                                             |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 2/2|
-|┌ ways at epoch 2 ─────────────────────────────────────────────────────────────────────────────────────────────────────┐|
+|┌ ways at main's epoch 2 ──────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│ Way                                                     Agent           Epoch   Dist  Trigger        ◎  Re-disclose  │|
 |│▌softwaredev/code/testing                                main                1      1  embed:en       ●  ● now        │|
-|│ softwaredev/docs/adr                                    main                2      0  file           ■  ─            │|
+|│ softwaredev/docs/adr                                    main                2      0  file           ◆  ─            │|
 |│ softwaredev/docs/adr                                    code-reviewer       1      0  file           ◆  ─            │|
 |│   ✓ ×1 decay 0.50                                       code-reviewer                                                │|
 |│ softwaredev/docs/adr                                    wf·audit:judge      1      0  keyword        ◆  ─            │|
@@ -35,7 +35,7 @@ agent-tui frame 120x40
 |┌ context ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐|
 |│████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 32% (64K / 200K)│|
 |│● 1 re-disclose now  ○ 3 distant  │ 40–80K intervals                                                                  │|
-|│················◆································································■················ forecast 64K → 160K│|
+|│·································································································◆ forecast 64K → 144K│|
 |│+ softwaredev/docs/adr (file), ✓ check softwaredev/docs/adr                                                           │|
 |└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘|
 | replay  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space play · +- 1.0s · f matched · 1-9 tabs             |
@@ -52,8 +52,8 @@ styles
   3 115-115 Cyan - BOLD
   3 116-119 - - BOLD
   4   0-0   - - DIM
-  4   1-17  LightBlue - BOLD|DIM
-  4  18-119 - - DIM
+  4   1-24  LightBlue - BOLD|DIM
+  4  25-119 - - DIM
   5   0-0   - - DIM
   5   1-118 - - BOLD
   5 119-119 - - DIM
@@ -78,7 +78,7 @@ styles
   7  72-80  - - BOLD
   7  81-85  Green - BOLD
   7  86-102 - - BOLD
-  7 103-103 #ff6b6b - BOLD
+  7 103-103 #7dd87d - BOLD
   7 104-105 - - BOLD
   7 106-106 - - BOLD|DIM
   7 107-118 - - BOLD
@@ -169,11 +169,9 @@ styles
  35   1-19  Green - -
  35  22-52  - - DIM
  35 119-119 - - DIM
- 36   0-16  - - DIM
- 36  17-17  #7dd87d - -
- 36  18-81  - - DIM
- 36  82-82  #ff6b6b - -
- 36  83-119 - - DIM
+ 36   0-97  - - DIM
+ 36  98-98  #7dd87d - -
+ 36  99-119 - - DIM
  37   0-0   - - DIM
  37   1-59  Green - BOLD
  37 119-119 - - DIM

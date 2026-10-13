@@ -3,10 +3,10 @@ agent-tui frame 80x25
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                    |
 |epoch 2 · 200K ctx · 4 ways · window 1/1 · 2026-07-03 16:53                     |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 2/2|
-|┌ ways at epoch 2 ─────────────────────────────────────────────────────────────┐|
+|┌ ways at main's epoch 2 ──────────────────────────────────────────────────────┐|
 |│ Way                 Agent       Epoch   Dist  Trigger        ◎  Re-disclose  │|
 |│▌…/code/testing      main            1      1  embed:en       ●  ● now        │|
-|│ …/docs/adr          main            2      0  file           ■  ─            │|
+|│ …/docs/adr          main            2      0  file           ◆  ─            │|
 |│ …/docs/adr          code-revi…      1      0  file           ◆  ─            │|
 |│   ✓ ×1 decay 0.50   code-revi…                                               │|
 |│ …/docs/adr          wf·…:judge      1      0  keyword        ◆  ─            │|
@@ -20,7 +20,7 @@ agent-tui frame 80x25
 |┌ context ─────────────────────────────────────────────────────────────────────┐|
 |│███████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 32% (64K / 200K)│|
 |│● 1 re-disclose now  ○ 3 distant  │ 40–80K intervals                          │|
-|│·········◆······································■········· forecast 64K → 160K│|
+|│·························································◆ forecast 64K → 144K│|
 |│+ softwaredev/docs/adr (file), ✓ check softwaredev/docs/adr                   │|
 |└──────────────────────────────────────────────────────────────────────────────┘|
 | replay  mouse on (m) │ ? keys · ↑↓ select · ⏎ why · ←→ frame · space play      |
@@ -37,8 +37,8 @@ styles
   3  75-75  Cyan - BOLD
   3  76-79  - - BOLD
   4   0-0   - - DIM
-  4   1-17  LightBlue - BOLD|DIM
-  4  18-79  - - DIM
+  4   1-24  LightBlue - BOLD|DIM
+  4  25-79  - - DIM
   5   0-0   - - DIM
   5   1-78  - - BOLD
   5  79-79  - - DIM
@@ -63,7 +63,7 @@ styles
   7  32-40  - - BOLD
   7  41-45  Green - BOLD
   7  46-62  - - BOLD
-  7  63-63  #ff6b6b - BOLD
+  7  63-63  #7dd87d - BOLD
   7  64-65  - - BOLD
   7  66-66  - - BOLD|DIM
   7  67-78  - - BOLD
@@ -124,11 +124,9 @@ styles
  20   1-19  Green - -
  20  22-52  - - DIM
  20  79-79  - - DIM
- 21   0-9   - - DIM
- 21  10-10  #7dd87d - -
- 21  11-48  - - DIM
- 21  49-49  #ff6b6b - -
- 21  50-79  - - DIM
+ 21   0-57  - - DIM
+ 21  58-58  #7dd87d - -
+ 21  59-79  - - DIM
  22   0-0   - - DIM
  22   1-59  Green - BOLD
  22  79-79  - - DIM

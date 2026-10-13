@@ -85,8 +85,8 @@ The output is one JSON object with four parts:
 |-------|----------|
 | top-level | `session`, `project`, `context_window_k` |
 | `summary` | epoch count, duration, distinct ways, total fires, re-disclosures, checks, near-misses, the trigger breakdown, the top ways by fire count, `gate` (the relevance gate's work: judged, passed, blocked, would-block, unjudged, fallbacks by reason, gate latency, and the blocked ways) and `suppressed` (ways withheld from subagents, by switch) |
-| `frames` | the turn-by-turn timeline — each frame has its epoch, timestamp, token position, the cumulative set of active ways (with per-way trigger, fire epoch, check count, and new / re-disclosed flags), and a `new_events` list of what changed that turn. With `--matched`, the ways the judge blocked appear here too. |
-| `near_misses` | every way that scored close but didn't fire — with its English and multilingual relevance probabilities (`prob_en` / `prob_multi`), the semantic threshold `τ_s` it fell short of, the margin, and the epoch it occurred in |
+| `frames` | the turn-by-turn timeline — each frame has main's epoch and token position, its timestamp, the cumulative set of active ways (with per-way trigger, fire epoch, `distance`, check count, and new / re-disclosed flags), and a `new_events` list of what changed that turn. Each agent counts its own epochs and tokens: a subagent row's fire epoch and `distance` are in its agent's count, and the frame's `clocks` give each subagent's epoch and token position by agent id. With `--matched`, the ways the judge blocked appear here too. |
+| `near_misses` | every way that scored close but didn't fire — with its English and multilingual relevance probabilities (`prob_en` / `prob_multi`), the semantic threshold `τ_s` it fell short of, the margin, and the epoch it occurred in, in its agent's count (`agent_id` names a subagent) |
 
 The `summary` is the at-a-glance shape of the session — the five numbers that open
 [[01.018.E]] come straight from it. The `frames` are the replay. The `near_misses`
