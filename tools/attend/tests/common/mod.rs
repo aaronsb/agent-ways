@@ -52,7 +52,45 @@ impl Fixture {
         std::fs::create_dir_all(&origin).unwrap();
         let f = Fixture { origin: origin.to_string_lossy().into_owned(), sid: format!("sess-{tag}"), home };
         f.set_session_id(&f.sid.clone());
+        f.stand_in_ways();
+        f.last_turn(Some(Duration::ZERO));
         f
+    }
+
+    /// A `ways` first on attend's PATH that answers `ways context` with the
+    /// transcript reading [`Fixture::last_turn`] wrote, and fails otherwise,
+    /// as a missing `ways` would. The wake gate reads the cache clock there.
+    fn stand_in_ways(&self) {
+        let bin = self.home.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let ways = bin.join("ways");
+        let reading = self.home.join("reading.json");
+        std::fs::write(&ways, format!("#!/bin/sh\n[ \"$1\" = context ] && [ -f '{0}' ] && exec cat '{0}'\nexit 1\n", reading.display()))
+            .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&ways, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    /// Set the session's cache clock: its newest assistant turn was `ago`
+    /// back, on a large context; `None` leaves no transcript to read. A new
+    /// fixture's last turn is now, so its cache is warm.
+    pub fn last_turn(&self, ago: Option<Duration>) {
+        let reading = self.home.join("reading.json");
+        let Some(ago) = ago else {
+            std::fs::remove_file(&reading).ok();
+            return;
+        };
+        let at = (SystemTime::now() - ago).duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        std::fs::write(
+            &reading,
+            format!(
+                r#"{{"tokens_used":200520,"model":"claude-fable-5-1","usage_tail":[{{"at_epoch":{at},"model":"claude-fable-5-1","input":20,"cache_read":200000,"cache_creation":500,"output":5}}]}}"#
+            ),
+        )
+        .unwrap();
     }
 
     /// Rewrite the session record, as Claude Code does on `/clear`. The
@@ -135,8 +173,12 @@ impl Fixture {
     }
 
     fn command_from(&self, bin: &Path) -> Command {
+        let mut path = std::ffi::OsString::from(self.home.join("bin"));
+        path.push(":");
+        path.push(std::env::var_os("PATH").unwrap_or_default());
         let mut c = Command::new(bin);
         c.env("HOME", &self.home)
+            .env("PATH", path)
             .env("XDG_CACHE_HOME", self.home.join(".cache"))
             .env("XDG_CONFIG_HOME", self.home.join("config"))
             .env("XDG_DATA_HOME", self.home.join("data"))

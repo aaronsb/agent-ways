@@ -257,6 +257,26 @@ impl Reading {
     }
 }
 
+/// Whether the prompt cache has lapsed at `now`, read on the keepwarm idle
+/// clock: the newest assistant turn in the transcript, an hour or more ago.
+/// A reading that cannot be had, or that holds no turn, counts as lapsed, so
+/// a session whose last activity is unknown is never woken (ADR-406 item 1).
+pub fn cache_lapsed(reading: Option<&Reading>, now: u64) -> bool {
+    match reading.map(Reading::last_at) {
+        Some(at) if at > 0 => lapsed_since(at, now),
+        _ => true,
+    }
+}
+
+/// [`cache_lapsed`] on the transcript of `session_id`, read now.
+pub fn session_cache_lapsed(session_id: &str, working_dir: &str, now: u64) -> bool {
+    cache_lapsed(read_context(session_id, working_dir).as_ref(), now)
+}
+
+fn lapsed_since(at: u64, now: u64) -> bool {
+    now.saturating_sub(at) >= TTL_SECS
+}
+
 /// Run `ways context --json --session <id>` and parse it.
 pub fn read_context(session_id: &str, working_dir: &str) -> Option<Reading> {
     let output = Command::new("ways")
@@ -326,7 +346,7 @@ impl State {
     }
 
     pub fn is_cold(&self, now: u64) -> bool {
-        self.last_seen_at > 0 && now.saturating_sub(self.last_seen_at) >= TTL_SECS
+        self.last_seen_at > 0 && lapsed_since(self.last_seen_at, now)
     }
 
     pub fn cold_usd(&self) -> Option<f64> {
@@ -720,6 +740,18 @@ mod tests {
         assert!(out.observations.is_empty());
         assert!(s.baselined);
         (s, r)
+    }
+
+    /// The wake gate's clock: the newest turn, an hour back or more, is a
+    /// lapsed cache; a missing reading or one with no turn counts as lapsed.
+    #[test]
+    fn the_cache_lapses_an_hour_after_the_last_turn_and_unknown_is_lapsed() {
+        let r = reading(vec![entry(900, 200_000, 0), entry(1000, 200_000, 500)]);
+        assert!(!cache_lapsed(Some(&r), 1000 + PING_AFTER_SECS));
+        assert!(!cache_lapsed(Some(&r), 1000 + TTL_SECS - 1));
+        assert!(cache_lapsed(Some(&r), 1000 + TTL_SECS));
+        assert!(cache_lapsed(Some(&reading(Vec::new())), 1000));
+        assert!(cache_lapsed(None, 1000));
     }
 
     /// A state resumed from the ledger steps as the one that wrote it would:

@@ -125,6 +125,14 @@ fn the_mod_fixtures_are_the_real_attend_output() {
     f.ok(&["listen", "on"]);
     put("DRAIN_COLD_BACKLOG", norm(drain_json(&f)));
 
+    // An addressed message held by the wake drain for a lapsed cache.
+    let f = Fixture::new("fixtures-lapsed");
+    f.ok(&["listen", "on"]);
+    drain_json(&f);
+    f.last_turn(Some(61 * MINUTE));
+    f.put(&f.project_tray(), "other-1-6-addressed", "addressed while cold", Duration::ZERO);
+    put("DRAIN_CACHE_LAPSED", norm(serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap()));
+
     let f = Fixture::new("fixtures-channel");
     f.ok(&["join", "room"]);
     drain_json(&f);

@@ -322,7 +322,9 @@ pub(crate) fn scan_pending(
 ///
 /// With `wake`, the drain delivers and marks nothing unless a pending
 /// message would wake the session (ADR-406 item 1); then it delivers all
-/// that is pending. The attend mod polls this way while the session idles.
+/// that is pending. A session whose prompt cache has lapsed is never woken:
+/// the drain holds what is pending for the operator's next turn and reports
+/// `cache_lapsed`. The attend mod polls this way while the session idles.
 pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let mode = match format {
         "hook" => DrainMode::Hook,
@@ -344,7 +346,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
             eprintln!("(identity unresolved — drain is a no-op; the Monitor poller still delivers)");
         }
         if mode == DrainMode::Json {
-            print_drain_json("unresolved", &[], 0, None, None);
+            print_drain_json("unresolved", &[], 0, None, None, false);
         }
         return;
     }
@@ -356,7 +358,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // process made under its id before `/clear` counts, and moves here.
     if !crate::util::adopt_previous_enrollment(&ident) {
         if mode == DrainMode::Json {
-            print_drain_json("not_listening", &[], 0, None, None);
+            print_drain_json("not_listening", &[], 0, None, None, false);
         }
         return;
     }
@@ -412,10 +414,17 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let ids = crate::util::reading_ids(&ident);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &ids, baselining);
-    // Nothing addressed to the session: what it found waits, unmarked, for
-    // the next turn. The cold start's own marks still go through, so the
-    // backlog it holds back stays held back.
-    if wake && !delivered.iter().any(|d| d.wakes) {
+    // The cache gate (ADR-406 item 1): waking a session whose prompt cache
+    // has lapsed would rewrite its whole context at the cache-write price,
+    // so an addressed message waits for the operator's next turn like any
+    // other. The clock is keepwarm's: the newest turn in the transcript,
+    // and a transcript that cannot be read counts as lapsed.
+    let addressed = wake && delivered.iter().any(|d| d.wakes);
+    let lapsed = addressed && sensor_keepwarm::session_cache_lapsed(&session_id, &cwd, sensor_trait::epoch_secs());
+    // Nothing addressed to the session, or a lapsed cache: what it found
+    // waits, unmarked, for the next turn. The cold start's own marks still
+    // go through, so the backlog it holds back stays held back.
+    if wake && (!addressed || lapsed) {
         let waiting: std::collections::HashSet<String> =
             delivered.drain(..).map(|d| attend_state::seen_key(&format!("{}.signal", d.id))).collect();
         mark.retain(|k| !waiting.contains(k));
@@ -448,7 +457,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
             store.mark_seen(mark);
         }
         if mode == DrainMode::Json {
-            print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref());
+            print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref(), lapsed);
         } else if hook_mode {
             if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), host, form) {
                 println!("{out}");
@@ -456,6 +465,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
         } else {
             match &note {
                 Some(note) => println!("{note}"),
+                None if lapsed => println!("a message is waiting; the prompt cache has lapsed, so it waits for the next turn"),
                 None => println!("no pending messages"),
             }
             if let Some(me) = &me {
@@ -471,7 +481,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // consumed with no conduit having shown them: loss on BOTH conduits,
     // since the sensor imports drain marks (PR #385 review, finding 2).
     if mode == DrainMode::Json {
-        print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref());
+        print_drain_json("drained", &delivered, held_back, note.as_deref(), me.as_deref(), lapsed);
     } else if hook_mode {
         if let Some(out) = hook_output(&delivered, note.as_deref(), me.as_deref(), host, form) {
             println!("{out}");
@@ -553,7 +563,9 @@ struct DrainedJson<'a> {
 /// `unresolved` identity, or `not_listening`. (The re-entry ceiling defers
 /// only a hook drain, which carries the Stop hook's `stop_hook_active`.)
 /// `you_are` is set on the cold start, the drain's first contact.
-fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Option<&str>, me: Option<&str>) {
+/// `cache_lapsed` is true when a wake drain held an addressed message
+/// because the session's prompt cache has lapsed (ADR-406 item 1).
+fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Option<&str>, me: Option<&str>, cache_lapsed: bool) {
     let messages: Vec<DrainedJson> = delivered
         .iter()
         .map(|d| DrainedJson {
@@ -574,6 +586,7 @@ fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note:
         "held_back": held_back,
         "note": note,
         "you_are": me,
+        "cache_lapsed": cache_lapsed,
     }));
 }
 
@@ -1162,6 +1175,8 @@ mod drain_tests {
             vec![attend_groups::ReceiveDir { path: fixture.clone(), room: attend_groups::Room::Project }]
         }));
         sensor.import_state(&[("reply_hint_shown".to_string(), "true".to_string())]);
+        // A warm cache, so the wake gate lets the message out.
+        sensor.set_cache_lapsed_provider(std::sync::Arc::new(|_: &str| false));
         // The fixture's cwd doubles as the focus so the sensor's
         // `attend reply` bookkeeping (keyed on the host session) sees
         // an own-project message and records nothing.
