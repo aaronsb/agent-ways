@@ -9,11 +9,12 @@
 //! `~/.claude/projects/<encoded-cwd>/` exists. When a project is gone:
 //!   - its directed tray (`signals/<encoded-cwd>/`) is reaped wholesale —
 //!     the recipient no longer exists, so its mail is moot;
-//!   - in the shared rooms (`_broadcast`, `@group`), the individual
-//!     signals *authored by* that dead project are reaped, keyed by the
-//!     sender cwd in the wire format. A live recipient that has not yet
-//!     read a shared signal is safe: a project leaves `~/.claude/projects`
-//!     only when the user deletes it, long after delivery latency.
+//!   - in the shared rooms (`_broadcast`, `@group`) and the person trays
+//!     (`_people/<member-id>/`), the individual signals *authored by* that
+//!     dead project are reaped, keyed by the sender cwd in the wire format.
+//!     A live recipient that has not yet read one is safe: a project leaves
+//!     `~/.claude/projects` only when the user deletes it, long after
+//!     delivery latency. A person tray itself is never reaped.
 //!
 //! A tray is named by `claude_sessions::attend_key`: the project slug, `-`,
 //! and a hash of the path. The slug part is what liveness checks.
@@ -82,16 +83,16 @@ pub(crate) fn run_cleanup_in(
         Err(_) => return stats,
     };
 
-    // Pass 1: reap signals.
-    for sub in entries.flatten() {
-        let subpath = sub.path();
-        if !subpath.is_dir() {
+    // Pass 1: reap signals. The person trays sit one level down, under
+    // `_people/`, and each is swept as a shared room.
+    let mut rooms: Vec<(std::path::PathBuf, String)> =
+        entries.flatten().filter_map(|e| Some((e.path(), e.file_name().to_str()?.to_string()))).collect();
+    let people = base.join(attend_groups::PEOPLE_DIR);
+    rooms.extend(std::fs::read_dir(&people).into_iter().flatten().flatten().map(|e| (e.path(), attend_groups::PEOPLE_DIR.to_string())));
+    for (subpath, dir_name) in rooms {
+        if !subpath.is_dir() || subpath == people {
             continue;
         }
-        let dir_name = match subpath.file_name().and_then(|s| s.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
         // Shared rooms (`_broadcast`, `@group`) are decided per-signal by
         // sender; everything else is a project tray decided by its owner.
         let shared = dir_name.starts_with('_') || dir_name.starts_with('@');
@@ -258,6 +259,26 @@ mod tests {
         assert!(open.join("live.signal").exists());
         assert!(!open.join("dead.signal").exists());
         assert!(open.join("torn.signal").exists(), "a record that does not parse is left alone");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A signal in a person tray goes when its sender's project is gone, as
+    /// in a shared room; the tray itself stays, empty or not (ADR-401, `to`).
+    #[test]
+    fn a_person_tray_signal_is_reaped_by_its_senders_project_and_the_tray_kept() {
+        let (root, base, projects) = fixture("people");
+        std::fs::create_dir_all(projects.join("-srv-live")).unwrap();
+        let tray = attend_groups::person_dir(&base, "aaron");
+        std::fs::create_dir_all(&tray).unwrap();
+        std::fs::write(tray.join("live.signal"), "claude:a|live|/srv/live|to:aaron|hi\n").unwrap();
+        std::fs::write(tray.join("dead.signal"), "claude:b|dead|/srv/dead|to:aaron|hi\n").unwrap();
+        let empty = attend_groups::person_dir(&base, "nobody");
+        std::fs::create_dir_all(&empty).unwrap();
+        let stats = run_cleanup_in(&base, &projects, false, false);
+        assert_eq!(stats.removed, 1);
+        assert!(tray.join("live.signal").exists());
+        assert!(!tray.join("dead.signal").exists());
+        assert!(empty.is_dir(), "a person tray is never reaped");
         std::fs::remove_dir_all(&root).ok();
     }
 
