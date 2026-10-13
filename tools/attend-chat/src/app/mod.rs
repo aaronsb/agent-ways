@@ -196,6 +196,9 @@ pub struct ChatPane {
     config: attend_config::ChatConfig,
     /// Whether the left column is shown (`attend.chat.sidebar_key`).
     sidebar: bool,
+    /// The pane's width in the frame being drawn ([`Pane::layout`]), told
+    /// before the tab bar is drawn: whether the column has room this frame.
+    width: Option<u16>,
     /// The lozenge shape the left column's rows are drawn in, the shell's.
     shape: Shape,
     /// The interaction state: where the keyboard is, the walk's preview,
@@ -246,6 +249,7 @@ impl ChatPane {
             enhanced: false,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
             sidebar: true,
+            width: None,
             shape: Shape::PLAIN,
             ix: ix::Machine::new(),
             side_scroll: [0, 0],
@@ -562,6 +566,10 @@ impl Pane for ChatPane {
         self.palette
     }
 
+    fn layout(&mut self, area: Rect) {
+        self.width = Some(area.width);
+    }
+
     fn tabs(&mut self) -> Vec<PaneTab> {
         view::tabs(self)
     }
@@ -640,7 +648,9 @@ impl Pane for ChatPane {
     }
 
     /// The column numbers its channels, from 1, for Ctrl+digit, Alt+digit
-    /// and a plain digit on a column row; the tab bar carries no numbers.
+    /// and a plain digit on a channel's row; the shell's tab bar carries no
+    /// numbers of its own, and the chat's tabs carry the column's while it
+    /// is hidden ([`view::tabs`]).
     fn own_numbers(&self) -> Option<&'static str> {
         Some("channel")
     }

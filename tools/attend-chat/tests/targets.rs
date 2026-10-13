@@ -170,7 +170,7 @@ fn every_input_on_a_channel_reaches_the_same_state() {
         click(c, r)
     };
     let tab: Input = |c| {
-        let t = at(c, "#deploy — rollout");
+        let t = at(c, "#deploy 2👤");
         click(c, t)
     };
     for (how, first, second) in [("digit", digit, digit), ("row", row, row), ("digit, then the tab", digit, tab), ("row, then the tab", row, tab)] {
@@ -179,7 +179,7 @@ fn every_input_on_a_channel_reaches_the_same_state() {
         first(&mut c);
         let shown = menu(&mut c).map(|(t, _)| t);
         assert_eq!((c.foreground(), shown), (&Tab::Channel("deploy".into()), None), "{how}: the first shows it");
-        assert!(rows(&mut c)[0].contains("#deploy — rollout"), "{how}: and its tab: {}", rows(&mut c)[0]);
+        assert!(rows(&mut c)[0].contains("#deploy 2👤"), "{how}: and its tab: {}", rows(&mut c)[0]);
         second(&mut c);
         assert_eq!(menu(&mut c).map(|(t, _)| t), Some("#deploy".into()), "{how}: the second opens its menu");
     }

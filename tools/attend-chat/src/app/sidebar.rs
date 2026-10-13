@@ -311,9 +311,7 @@ pub(super) fn identity_styles(depth: agent_theme::ColorDepth, palette: agent_ide
 fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown: bool, w: usize, mark: Style, focused: bool, number: usize) -> Line<'static> {
     let g = &row.known.group;
     let active = row.on_disk && (row.known.is_base || live > 0);
-    // A Nerd Font's person glyph beside the lozenge glyphs it already
-    // needs; the emoji where the shape is plain.
-    let person = if chat.shape.join.is_empty() { "👤" } else { "\u{f007}" };
+    let person = chat.person_glyph();
     let figures = if row.known.is_base { age.to_string() } else { format!("{}{person} {age}", row.known.membership.members.len()).trim_end().to_string() };
     let num = if number <= 9 { format!("{number} ") } else { "  ".to_string() };
     let name = format!("{num}{} #{}", g.glyph, g.name);
@@ -398,6 +396,23 @@ impl ChatPane {
     #[cfg(test)]
     fn side_items(&mut self) -> Vec<SideHit> {
         self.world().laid.rows.clone()
+    }
+
+    /// Whether the column is drawn in the frame being drawn: shown, and with
+    /// room at the pane's width ([`agent_tui::Pane::layout`]); before any
+    /// frame, as shown.
+    pub(super) fn column_this_frame(&self) -> bool {
+        self.sidebar && self.width.is_none_or(|w| width(w).is_some())
+    }
+
+    /// The person glyph a member count carries: a Nerd Font's beside the
+    /// lozenge glyphs it already needs, the emoji where the shape is plain.
+    pub(super) fn person_glyph(&self) -> &'static str {
+        if self.shape.join.is_empty() {
+            "👤"
+        } else {
+            "\u{f007}"
+        }
     }
 
     /// Whether the column is drawn: the last frame had room for it, and it

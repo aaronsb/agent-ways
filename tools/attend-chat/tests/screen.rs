@@ -857,6 +857,12 @@ fn open_menu(c: &mut Chat) {
     drawn(c, &[key(KeyCode::Enter)], 80, 25);
 }
 
+/// Whether the tab bar `row` has its focus on the slot labelled `label`,
+/// numbered or not: without the column a channel's tab carries its number.
+fn on_tab(row: &str, label: &str) -> bool {
+    row.contains(&format!("▸{label}")) || (1..=9).any(|n| row.contains(&format!("▸{n} {label}")))
+}
+
 /// The tab bar's focus on the slot labelled `label`: F2 when the focus is
 /// off the bar, then ← along the bar until the `▸` is on it.
 fn to_tab(c: &mut Chat, label: &str) {
@@ -864,7 +870,7 @@ fn to_tab(c: &mut Chat, label: &str) {
         drawn(c, &[key(KeyCode::F(2))], 80, 25);
     }
     for _ in 0..8 {
-        if text(c, 80, 25).lines().next().is_some_and(|r| r.contains(&format!("▸{label}"))) {
+        if text(c, 80, 25).lines().next().is_some_and(|r| on_tab(r, label)) {
             return;
         }
         drawn(c, &[key(KeyCode::Left)], 80, 25);
@@ -1171,7 +1177,7 @@ fn golden_the_tab_bar_focus_is_marked_on_every_kind_of_tab() {
     drawn(&mut c, &[key(KeyCode::F(2))], 80, 25);
     assert!(text(&mut c, 80, 25).contains("▸⋯all"), "F2 focuses the tab shown");
     drawn(&mut c, &[key(KeyCode::F(2)), alt('2'), key(KeyCode::F(2))], 80, 25);
-    assert!(text(&mut c, 80, 25).contains("▸#deploy"), "F2 focuses the tab shown, #deploy");
+    assert!(on_tab(text(&mut c, 80, 25).lines().next().unwrap(), "#deploy"), "F2 focuses the tab shown, #deploy");
     g.check("tab-bar-focused-80x25", &testkit::render_screen(&mut c, 80, 25));
     drawn(&mut c, &[key(KeyCode::Left)], 80, 25);
     assert!(text(&mut c, 80, 25).contains("▸≡"));

@@ -292,7 +292,7 @@ fn a_click_on_the_tab_of_a_menu_docked_at_its_row_only_closes_it() {
     let ((_, y), _) = menu(&mut c).expect("#deploy's menu");
     let (_, row) = row_of(&mut c, "#deploy");
     assert_eq!(y, row as usize + 1, "docked under the column's row");
-    let tab = at(&mut c, "#deploy — rollout");
+    let tab = at(&mut c, "#deploy 2👤");
     click(&mut c, tab);
     assert!(menu(&mut c).is_none(), "closed, and not opened again under the tab: {:#?}", rows(&mut c));
 

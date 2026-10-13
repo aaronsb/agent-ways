@@ -193,6 +193,9 @@ impl App {
         // First, so what the pane does as an overlay closes (the chat's Esc
         // cycle moves its focus) shows on the tab bar in this frame.
         self.tell_overlays();
+        if let Some(p) = &mut self.pane {
+            p.layout(main);
+        }
         self.draw_pane_tabs(f, bar);
         self.hits.pane = main;
         if let Some(p) = &mut self.pane {
