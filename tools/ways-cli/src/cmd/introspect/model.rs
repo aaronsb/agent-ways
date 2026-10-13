@@ -1,6 +1,8 @@
 //! Replay data: the events read from the log, the ways active at a frame,
 //! and the frames.
 
+use std::collections::HashMap;
+
 use crate::cmd::render::WayRow;
 
 /// A way event from events.jsonl.
@@ -138,7 +140,11 @@ impl Fate {
 pub(crate) struct ActiveWay {
     pub(crate) id: String,
     pub(crate) trigger: String,
+    /// The epoch it fired at, in its agent's own count.
     pub(crate) epoch_fired: u64,
+    /// The frame it fired at, counted across every agent within its
+    /// compaction window; rows are in this order.
+    pub(crate) seq: u64,
     pub(crate) token_pos: u64,
     pub(crate) check_fires: u64,
     pub(crate) is_new: bool,
@@ -176,7 +182,7 @@ pub(crate) struct Frame {
     pub(crate) timestamp: String,
     pub(crate) elapsed_secs: u64,
     pub(crate) token_position_k: u64,
-    /// The injected ways in (epoch fired, id, agent) order, then the
+    /// The injected ways in (frame fired, id, agent) order, then the
     /// candidates the judge blocked or the refire window or context cap held
     /// back in this frame, by id. [`Frame::shown`] filters them.
     pub(crate) ways: Vec<ActiveWay>,
@@ -188,9 +194,31 @@ pub(crate) struct Frame {
     /// and the accumulated ways reset, so the latest window mirrors `ways session ways`. The
     /// boundary itself surfaces as a `⎯ compaction ⎯` entry in `new_events`.
     pub(crate) window: u64,
+    /// Each subagent's epoch and token position at this frame, by agent id.
+    /// `epoch` and `token_position_k` are the main agent's.
+    pub(crate) clocks: HashMap<String, Clock>,
+}
+
+/// An agent's own epoch and token position (#815): the clusters with its
+/// events advance its epoch, and its transcript gives its tokens.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Clock {
+    pub(crate) epoch: u64,
+    pub(crate) tokens_k: u64,
 }
 
 impl Frame {
+    /// The epoch of `agent` at this frame; main's for main and for a row
+    /// that names no agent.
+    pub(crate) fn epoch_of(&self, agent: &str) -> u64 {
+        self.clocks.get(agent).map_or(self.epoch, |c| c.epoch)
+    }
+
+    /// The token position (K) of `agent` at this frame, as [`Frame::epoch_of`].
+    pub(crate) fn tokens_k_of(&self, agent: &str) -> u64 {
+        self.clocks.get(agent).map_or(self.token_position_k, |c| c.tokens_k)
+    }
+
     /// This frame as one view shows it: the injected ways (a shadow
     /// would-block was injected, so it stays), or with `matched` every
     /// matched candidate, the ones the judge, the refire window or the

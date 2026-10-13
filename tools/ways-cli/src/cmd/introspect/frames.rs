@@ -7,7 +7,7 @@ use crate::cmd::render;
 use crate::session;
 use agent_fmt::when::parse_utc_iso;
 
-use super::model::{ActiveWay, Frame, Outcome, Suppression, WayEvent};
+use super::model::{ActiveWay, Clock, Frame, Outcome, Suppression, WayEvent};
 
 // ── Frame construction ────────────────────────────────────────
 
@@ -45,7 +45,18 @@ pub(crate) fn reconstruct_all(
     context_window: u64,
 ) -> Vec<Frame> {
     let context_window_k = context_window / 1000;
-    let token_timeline = build_token_timeline(project_name, session_id);
+    let claude = ways_core::paths::claude_dir();
+    let mut agents: Vec<String> = events.iter().map(fired_by).collect();
+    agents.sort();
+    agents.dedup();
+    let timelines: HashMap<String, Vec<(String, u64)>> = agents
+        .into_iter()
+        .map(|agent| {
+            let transcript = session::transcript_in(&claude, None, project_name, session_id, &agent);
+            let timeline = transcript.map(|t| build_token_timeline(&t)).unwrap_or_default();
+            (agent, timeline)
+        })
+        .collect();
     let fallback_refire_k = context_window_k * 25 / 100;
     let mut refire_cache: HashMap<String, u64> = HashMap::new();
     for ev in events {
@@ -56,12 +67,26 @@ pub(crate) fn reconstruct_all(
             .unwrap_or(fallback_refire_k);
         refire_cache.insert(ev.way.clone(), threshold_k);
     }
-    build_frames(events, &token_timeline, &refire_cache, fallback_refire_k)
+    build_frames_by_agent(events, &timelines, &refire_cache, fallback_refire_k)
 }
 
+/// [`build_frames_by_agent`] with main's token timeline only.
+#[cfg(test)]
 pub(super) fn build_frames(
     events: &[WayEvent],
     token_timeline: &[(String, u64)],
+    refire_cache: &HashMap<String, u64>,
+    fallback_refire_k: u64,
+) -> Vec<Frame> {
+    let timelines = HashMap::from([(MAIN.to_string(), token_timeline.to_vec())]);
+    build_frames_by_agent(events, &timelines, refire_cache, fallback_refire_k)
+}
+
+/// The frames of `events`, each agent's token position read from its own
+/// timeline in `timelines`, keyed by agent id; an agent with none is at 0.
+pub(super) fn build_frames_by_agent(
+    events: &[WayEvent],
+    timelines: &HashMap<String, Vec<(String, u64)>>,
     refire_cache: &HashMap<String, u64>,
     fallback_refire_k: u64,
 ) -> Vec<Frame> {
@@ -76,7 +101,11 @@ pub(super) fn build_frames(
     // The agent that last fired each way: a check event that does not name
     // its agent counts against it.
     let mut last_agent: HashMap<String, String> = HashMap::new();
-    let mut epoch: u64 = 0;
+    // Each agent's epoch (#815): the clusters holding its events advance
+    // it, as the hooks bump an agent's own counter. `seq` counts every
+    // cluster and orders the rows by when they fired.
+    let mut epochs: HashMap<String, u64> = HashMap::new();
+    let mut seq: u64 = 0;
     let mut window: u64 = 1;
 
     // An event whose stamp is not UTC is skipped: read as 0 it would open an
@@ -112,15 +141,28 @@ pub(super) fn build_frames(
             check_fires.clear();
             last_agent.clear();
             window += 1;
-            epoch = 0;
+            epochs.clear();
+            seq = 0;
         }
 
-        epoch += 1;
+        seq += 1;
+        for agent in cluster_agents(cluster, &last_agent) {
+            *epochs.entry(agent).or_insert(0) += 1;
+        }
         let cluster_ts = cluster[0].ts.clone();
         let cluster_secs = parse_utc_iso(&cluster_ts).unwrap_or(start_secs);
         let elapsed = cluster_secs.saturating_sub(start_secs);
 
-        let token_k = find_token_position(token_timeline, &cluster_ts);
+        let clocks: HashMap<String, Clock> = epochs
+            .iter()
+            .map(|(agent, &epoch)| {
+                let tokens_k = timelines.get(agent).map_or(0, |t| find_token_position(t, &cluster_ts));
+                (agent.clone(), Clock { epoch, tokens_k })
+            })
+            .collect();
+        // A row that names no agent counts in main's context.
+        let main = clocks.get(MAIN).copied().unwrap_or_default();
+        let clock = |agent: &str| clocks.get(agent).copied().unwrap_or(main);
 
         let mut new_events: Vec<String> = Vec::new();
         if boundary {
@@ -157,11 +199,13 @@ pub(super) fn build_frames(
                             ));
                         }
                         let is_new = !active_ways.contains_key(&key);
+                        let at = clock(&key.1);
                         active_ways.insert(key.clone(), ActiveWay {
                             id: ev.way.clone(),
                             trigger: ev.trigger.clone(),
-                            epoch_fired: epoch,
-                            token_pos: token_k * 1000,
+                            epoch_fired: at.epoch,
+                            seq,
+                            token_pos: at.tokens_k * 1000,
                             check_fires: check_fires.get(&key).copied().unwrap_or(0),
                             is_new,
                             is_redisclosed: false,
@@ -196,6 +240,7 @@ pub(super) fn build_frames(
                     fired_now.push((&ev.way, key.1.clone()));
                     last_agent.insert(ev.way.clone(), key.1.clone());
                     let checks = check_fires.get(&key).copied().unwrap_or(0);
+                    let at = clock(&key.1);
                     // A redisclosure means the way is active (re-injected). Update it
                     // if present; otherwise ADD it — after a compaction-window reset a
                     // still-active way first reappears via redisclosure, not a fresh
@@ -203,8 +248,9 @@ pub(super) fn build_frames(
                     active_ways
                         .entry(key.clone())
                         .and_modify(|w| {
-                            w.epoch_fired = epoch;
-                            w.token_pos = token_k * 1000;
+                            w.epoch_fired = at.epoch;
+                            w.seq = seq;
+                            w.token_pos = at.tokens_k * 1000;
                             w.is_redisclosed = true;
                             w.by_redisclosure = true;
                             w.is_new = false;
@@ -216,8 +262,9 @@ pub(super) fn build_frames(
                         .or_insert_with(|| ActiveWay {
                             id: ev.way.clone(),
                             trigger: ev.trigger.clone(),
-                            epoch_fired: epoch,
-                            token_pos: token_k * 1000,
+                            epoch_fired: at.epoch,
+                            seq,
+                            token_pos: at.tokens_k * 1000,
                             check_fires: checks,
                             is_new: false,
                             is_redisclosed: true,
@@ -271,12 +318,14 @@ pub(super) fn build_frames(
                     new_events.push(format!("◌ {} (gate {}, shadow)", ev.way, ev.p_yes));
                 }
             } else if !blocked.iter().any(|b| b.id == ev.way && b.agent == ev.agent_id) {
+                let at = clock(&ev.agent_id);
                 blocked.push(ActiveWay {
                     id: ev.way.clone(),
                     // The channel the why index files a judge-blocked way under.
                     trigger: "judge".into(),
-                    epoch_fired: epoch,
-                    token_pos: token_k * 1000,
+                    epoch_fired: at.epoch,
+                    seq,
+                    token_pos: at.tokens_k * 1000,
                     check_fires: 0,
                     is_new: false,
                     is_redisclosed: false,
@@ -297,11 +346,13 @@ pub(super) fn build_frames(
             if blocked.iter().any(|b| b.id == ev.way && b.agent == agent && b.outcome == outcome) {
                 continue;
             }
+            let at = clock(&agent);
             blocked.push(ActiveWay {
                 id: ev.way.clone(),
                 trigger: ev.trigger.clone(),
-                epoch_fired: epoch,
-                token_pos: token_k * 1000,
+                epoch_fired: at.epoch,
+                seq,
+                token_pos: at.tokens_k * 1000,
                 check_fires: 0,
                 is_new: false,
                 is_redisclosed: false,
@@ -316,18 +367,19 @@ pub(super) fn build_frames(
         blocked.sort_by(|a, b| row_order(a).cmp(&row_order(b)));
 
         let mut ways: Vec<ActiveWay> = active_ways.values().cloned().collect();
-        ways.sort_by(|a, b| (a.epoch_fired, row_order(a)).cmp(&(b.epoch_fired, row_order(b))));
+        ways.sort_by(|a, b| (a.seq, row_order(a)).cmp(&(b.seq, row_order(b))));
         ways.extend(blocked);
 
         frames.push(Frame {
-            epoch,
+            epoch: main.epoch,
             timestamp: cluster_ts,
             elapsed_secs: elapsed,
-            token_position_k: token_k,
+            token_position_k: main.tokens_k,
             ways,
             new_events,
             suppressed,
             window,
+            clocks: clocks.into_iter().filter(|(a, _)| a != MAIN).collect(),
         });
     }
 
@@ -343,6 +395,29 @@ fn fired_by(ev: &WayEvent) -> String {
     if ev.agent_id.is_empty() { MAIN.to_string() } else { ev.agent_id.clone() }
 }
 
+/// The agents with an event in `cluster`. A check that names no agent is
+/// the last agent's to fire its way, as [`build_frames_by_agent`] counts it.
+fn cluster_agents(cluster: &[&WayEvent], last_agent: &HashMap<String, String>) -> Vec<String> {
+    let mut agents: Vec<String> = Vec::new();
+    for ev in cluster {
+        let agent = if ev.event == "check_fired" && ev.agent_id.is_empty() {
+            cluster
+                .iter()
+                .rev()
+                .find(|e| matches!(e.event.as_str(), "way_fired" | "way_redisclosed") && e.way == ev.check)
+                .map(|e| fired_by(e))
+                .or_else(|| last_agent.get(&ev.check).cloned())
+                .unwrap_or_else(|| MAIN.to_string())
+        } else {
+            fired_by(ev)
+        };
+        if !agents.contains(&agent) {
+            agents.push(agent);
+        }
+    }
+    agents
+}
+
 /// Rows of one epoch in id order, and a way's rows with main's first.
 fn row_order(w: &ActiveWay) -> (&str, bool, &str) {
     (&w.id, w.agent != MAIN, &w.agent)
@@ -353,11 +428,11 @@ pub(crate) fn has_verdicts(events: &[WayEvent]) -> bool {
     events.iter().any(|e| e.event == "way_judged")
 }
 
-fn build_token_timeline(project: &str, session_id: &str) -> Vec<(String, u64)> {
-    let transcript = ways_core::paths::claude_dir().find_transcript(Some(project), session_id);
-    let content = match transcript.map(std::fs::read_to_string) {
-        Some(Ok(c)) => c,
-        _ => return Vec::new(),
+/// The token position at each assistant turn of `transcript`, main's or a
+/// subagent's.
+fn build_token_timeline(transcript: &std::path::Path) -> Vec<(String, u64)> {
+    let Ok(content) = std::fs::read_to_string(transcript) else {
+        return Vec::new();
     };
 
     let mut timeline: Vec<(String, u64)> = Vec::new();
@@ -715,5 +790,54 @@ mod tests {
             last.ways.iter().any(|w| w.id == "d/a"),
             "a redisclosure must repopulate the reset window"
         );
+    }
+
+    /// Each agent keeps its own epoch and token position (#815): a
+    /// subagent's clusters leave main's epoch alone, and a subagent's row
+    /// re-discloses against its own transcript.
+    #[test]
+    fn each_agent_counts_epochs_and_tokens_in_its_own_context() {
+        let fire = |ts: &str, way: &str, agent: &str| WayEvent {
+            ts: ts.into(),
+            event: "way_fired".into(),
+            way: way.into(),
+            trigger: "keyword".into(),
+            agent_id: agent.into(),
+            ..Default::default()
+        };
+        let events = vec![
+            fire("2026-01-01T00:00:00Z", "d/main-a", ""),
+            fire("2026-01-01T00:00:10Z", "d/sub-a", "a1"),
+            fire("2026-01-01T00:00:20Z", "d/sub-b", "a1"),
+            fire("2026-01-01T00:00:30Z", "d/main-b", "main"),
+        ];
+        let line = |pts: &[(&str, u64)]| pts.iter().map(|(t, k)| (t.to_string(), *k)).collect::<Vec<_>>();
+        let timelines = HashMap::from([
+            (MAIN.to_string(), line(&[("2026-01-01T00:00:00Z", 10), ("2026-01-01T00:00:30Z", 20)])),
+            ("a1".to_string(), line(&[("2026-01-01T00:00:10Z", 5), ("2026-01-01T00:00:20Z", 50)])),
+        ]);
+        let refire = HashMap::from([("d/sub-a".to_string(), 40)]);
+        let frames = build_frames_by_agent(&events, &timelines, &refire, 50);
+        let last = frames.last().unwrap();
+        let row = |id: &str| last.ways.iter().find(|w| w.id == id).unwrap();
+
+        // Main saw two clusters; the subagent's two leave its epoch at 2.
+        assert_eq!(last.epoch, 2, "main's epoch");
+        assert_eq!(last.epoch_of(MAIN), 2);
+        assert_eq!(row("d/main-a").epoch_fired, 1);
+        assert_eq!(row("d/main-b").epoch_fired, 2);
+        assert_eq!(last.epoch_of(MAIN) - row("d/main-a").epoch_fired, 1, "main's distance");
+
+        // The subagent's own epoch: its first fire at 1, now at 2.
+        assert_eq!(row("d/sub-a").epoch_fired, 1);
+        assert_eq!(last.epoch_of("a1"), 2, "the subagent's epoch");
+
+        // Its token position is its transcript's, 5K at the fire, 50K now:
+        // 45K past a 40K threshold re-discloses now.
+        assert_eq!(row("d/sub-a").token_pos, 5_000);
+        assert_eq!(last.tokens_k_of("a1"), 50);
+        assert_eq!(last.tokens_k_of(MAIN), 20);
+        let (cell, _) = render::next_cell(row("d/sub-a"), last.epoch_of("a1"), last.tokens_k_of("a1"));
+        assert_eq!(cell, "● now");
     }
 }

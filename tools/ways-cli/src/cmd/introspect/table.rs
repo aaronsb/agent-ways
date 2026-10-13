@@ -173,8 +173,10 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
         .iter()
         .enumerate()
         .map(|(i, w)| {
-            let distance = frame.epoch.saturating_sub(w.epoch_fired);
-            let (next, next_style) = render::next_cell(w, frame.epoch, frame.token_position_k);
+            // Distance and re-disclosure count in the agent's own context.
+            let epoch = frame.epoch_of(&w.agent);
+            let distance = epoch.saturating_sub(w.epoch_fired);
+            let (next, next_style) = render::next_cell(w, epoch, frame.tokens_k_of(&w.agent));
             let pin = pos.get(i).copied().flatten().map_or(Span::raw(" "), |p| pin(render::cluster_of(p, &unique)));
             let mut way = vec![Line::from(way_name(w, way_w))];
             let mut agent = vec![agent_cell(agents, &w.agent, agent_w)];
@@ -188,7 +190,7 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
                 Cell::from(way),
                 Cell::from(agent),
                 Cell::from(Line::from(w.epoch_fired.to_string()).alignment(Alignment::Right)),
-                Cell::from(Line::styled(distance.to_string(), ink(render::distance_style(distance, frame.epoch))).alignment(Alignment::Right)),
+                Cell::from(Line::styled(distance.to_string(), ink(render::distance_style(distance, epoch))).alignment(Alignment::Right)),
                 Cell::from(render::format_trigger(&w.trigger)),
                 Cell::from(pin),
                 Cell::from(Span::styled(next, ink(next_style))),
@@ -224,6 +226,7 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
         for w in &frame.ways {
             let threshold = w.refire_threshold_k;
             let at = w.token_pos / 1000 + threshold;
+            let tokens_k = frame.tokens_k_of(&w.agent);
             if tokens_k >= at {
                 now += 1;
                 continue;

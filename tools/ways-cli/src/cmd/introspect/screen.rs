@@ -1080,7 +1080,7 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
         let withheld = || shown.ways.iter().filter(|w| !w.outcome.injected());
         // A way whose check fired takes a second line.
         let heights: Vec<u16> = fr.ways.iter().map(|w| 1 + u16::from(w.check_fires > 0)).chain(withheld().map(|_| 1)).collect();
-        rows.extend(withheld().map(|w| withheld_row(w, &r.agents, agent_w, way_w, shown.epoch)));
+        rows.extend(withheld().map(|w| withheld_row(w, &r.agents, agent_w, way_w, shown.epoch_of(&w.agent))));
         let t = Table::new(rows, table::widths(agent_w))
             .header(table::header())
             .column_spacing(2)
