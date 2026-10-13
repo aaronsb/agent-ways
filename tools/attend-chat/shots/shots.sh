@@ -150,6 +150,9 @@ esc-feed-back | base | wait:Agents Escape Escape wait:pick_one:_attend-chat Esca
 msg-menu     | base  | wait:Agents BTab Up wait:select Enter wait:message_from
 msg-quote    | base  | wait:Agents BTab Up wait:select Enter wait:message_from click:Quote wait:>_>
 msg-copy     | base  | wait:Agents BTab Up wait:select Enter wait:message_from click:Copy wait:clipboard
+tab-nomatch  | base  | wait:Agents text:hi_@zzz Tab wait:▸≡
+tab-once     | base  | wait:Agents text:#arch Tab wait:#archive Tab wait:▸≡
+esc-hide     | base  | wait:Agents BTab BTab Escape wait:Hide_column Down Down Down Enter gone:pick wait:_feed_
 add-chan     | base  | wait:Agents side:#infra side:#infra wait:pick click:Add_agent wait:add_to_#infra
 "
 
