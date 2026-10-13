@@ -217,6 +217,10 @@ pub struct ChatPane {
     /// membership id, in the order opened ([`dm`]). Hiding one takes it off
     /// the list and leaves every message where it was.
     dms: Vec<String>,
+    /// The last name the column showed for each agent whose DM view was
+    /// listed, by membership id: the view keeps it when the agent leaves
+    /// the column ([`dm`]).
+    dm_names: std::collections::HashMap<String, String>,
 }
 
 impl ChatPane {
@@ -261,6 +265,7 @@ impl ChatPane {
             side_follow: true,
             removable: Vec::new(),
             dms: Vec::new(),
+            dm_names: Default::default(),
         }
     }
 
@@ -334,6 +339,7 @@ impl ChatPane {
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
             self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground, &self.dms));
+            self.remember_dm_names();
             self.refocus();
         }
         self.world.as_ref().expect("just built")

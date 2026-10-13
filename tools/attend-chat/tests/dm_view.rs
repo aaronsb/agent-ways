@@ -322,3 +322,33 @@ fn tab_and_shift_tab_stay_mirrors_and_the_esc_cycle_comes_back_to_the_dm_row() {
         assert_eq!((menu(&mut c), focused(&mut c)), (None, "row DMs".to_string()), "back to the DM row");
     }
 }
+
+/// A DM the operator sent is labelled with whom it went to, as one the
+/// operator received is labelled `→ you`: on its header, not its body.
+#[test]
+fn a_sent_dm_is_labelled_with_its_recipient() {
+    let mut c = chat();
+    side_click(&mut c, "alpha");
+    let want = format!("→ @{}", nick(ALPHA_CWD));
+    let rows = rows(&mut c);
+    let header = rows.iter().find(|r| r.contains(&want)).unwrap_or_else(|| panic!("no {want}: {rows:#?}"));
+    assert!(!header.contains("you to alpha"), "the label is on the header: {header}");
+    assert!(rows.iter().any(|r| r.contains("→ you")), "the received one keeps its label");
+}
+
+/// The shown view keeps its agent's name when the agent leaves the column:
+/// the tab and the flag never fall back to the session id.
+#[test]
+fn a_dm_view_keeps_its_agents_name_when_the_agent_leaves_the_column() {
+    let mut c = chat_with(true);
+    side_click(&mut c, "alpha");
+    let name = format!("@{}", nick(ALPHA_CWD));
+    typed(&mut c, "/clear");
+    press(&mut c, KeyCode::Enter);
+    assert!(c.signals().is_empty(), "{}", c.status());
+    assert!(!column(&mut c).iter().any(|r| r.contains("alpha")), "alpha has left the column: {}", screen(&mut c));
+    let rows = rows(&mut c);
+    assert!(rows[0].contains(&format!("{name} DMs")), "the tab keeps the name: {}", rows[0]);
+    assert!(!rows[0].contains(ALPHA_SID), "{}", rows[0]);
+    assert!(rows.iter().any(|r| r.contains(&format!(" {name} "))), "so does the flag: {rows:#?}");
+}

@@ -29,6 +29,7 @@ impl ChatPane {
     pub(super) fn open_dm(&mut self, member: String) {
         if !self.dms.contains(&member) {
             self.dms.push(member.clone());
+            self.remember_dm_names();
             self.relay();
         }
         self.set_tab(Tab::Dm(member));
@@ -42,6 +43,24 @@ impl ChatPane {
             self.set_tab(Tab::Merged);
         }
         self.relay();
+    }
+
+    /// Keep the name the column shows for each agent whose DM view is
+    /// listed, for when the agent leaves the column.
+    pub(super) fn remember_dm_names(&mut self) {
+        let Some(w) = &self.world else { return };
+        for m in &self.dms {
+            if let Some(s) = w.seen.iter().find(|s| s.member == *m) {
+                self.dm_names.insert(m.clone(), s.identity.nickname.clone());
+            }
+        }
+    }
+
+    /// The name of the agent `member`: as the column shows it, else as it
+    /// showed it last, else the first part of its id.
+    pub(super) fn dm_name(&self, member: &str) -> String {
+        let seen = self.world.as_ref().and_then(|w| w.seen.iter().find(|s| s.member == member)).map(|s| s.identity.nickname.clone());
+        seen.or_else(|| self.dm_names.get(member).cloned()).unwrap_or_else(|| member.split('-').next().unwrap_or(member).to_string())
     }
 
     /// Lay the column's rows out again for the DM views listed, keeping
@@ -60,7 +79,8 @@ impl ChatPane {
     /// in the column, else its tab.
     pub(super) fn dm_menu(&mut self, member: String, at: Option<Rect>) {
         self.dirty = true;
-        let name = self.world().seen.iter().find(|s| s.member == member).map_or(member.clone(), |s| s.identity.nickname.clone());
+        self.world();
+        let name = self.dm_name(&member);
         let anchor = match at.or_else(|| self.side_row(&SideHit::Dm(member.clone()))) {
             Some(r) => Anchor::Row(r),
             None => self.slot_of(&Tab::Dm(member.clone())).map_or(Anchor::Center, Anchor::Tab),

@@ -100,7 +100,8 @@ pub(super) const VIEW_LABEL: &str = "⋯all";
 
 /// The tab bar the shell draws, in the order [`tabs::bar`] gives: the common
 /// menu's `≡` slot, the created channel shown with what it is for or the
-/// DM view shown (`@Name DMs`, shaded as a view), the `+` slot, then the reserved tabs pinned right, `#open` and the operator view
+/// DM view shown (`@Name DMs`, shaded as a view), the `+` slot, then the
+/// reserved tabs pinned right, `#open` and the operator view
 /// ([`VIEW_LABEL`]), shaded as a view. The left column numbers the
 /// channels for Ctrl+digit, and 0 is the operator view ([`ChatPane::jump`]);
 /// while the column is hidden, by its key or for want of width, each
@@ -122,10 +123,7 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
             Slot::Common => PaneTab::new("≡").action(),
             Slot::New => PaneTab::new("+").action(),
             Slot::Tab(Tab::Merged) => PaneTab::new(VIEW_LABEL).reserved().view(),
-            Slot::Tab(Tab::Dm(member)) => {
-                let name = chat.world().seen.iter().find(|s| s.member == member).map_or(member.clone(), |s| s.identity.nickname.clone());
-                PaneTab::new(format!("@{name} DMs")).view()
-            }
+            Slot::Tab(Tab::Dm(member)) => PaneTab::new(format!("@{} DMs", chat.dm_name(&member))).view(),
             Slot::Tab(Tab::Channel(name)) => {
                 let k = groups.iter().find(|k| k.group.name == name);
                 let mut glyph = Style::new();
@@ -199,9 +197,17 @@ fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGrou
         Seg::styled(format!(" {} ", chip.primary), name),
         Seg::styled(format!(" {} ", chip.secondary), project),
     ];
-    // A reply or a direct message to the person at the chat (ADR-401, `to`).
-    if s.channel == crate::signal::Channel::Person {
-        header.push(Seg::styled(" → you ".to_string(), mark));
+    // A reply or a direct message to the person at the chat (ADR-401, `to`),
+    // or one the chat sent, with whom it went to.
+    match &s.channel {
+        crate::signal::Channel::Person => header.push(Seg::styled(" → you ".to_string(), mark)),
+        crate::signal::Channel::Sent(to) => {
+            let names: Vec<String> = to.split(',').filter(|m| !m.is_empty()).map(|m| format!("@{}", chat.dm_name(m))).collect();
+            if !names.is_empty() {
+                header.push(Seg::styled(format!(" → {} ", names.join(" ")), mark));
+            }
+        }
+        _ => {}
     }
     let mut body: Vec<Line<'static>> = s.message.split('\n').map(|l| Line::styled(l.to_string(), theme::body())).collect();
     let files = attach::existing_attachments(&s.message);
@@ -312,9 +318,8 @@ impl ChatPane {
         let quiet = super::keys::quiet_names(&world.seen);
         let swept = super::keys::swept_names(&world.rows);
         if let Tab::Dm(member) = fg {
-            let agent = world.seen.iter().find(|s| s.member == *member);
-            let name = agent.map_or(member.clone(), |s| s.identity.nickname.clone());
-            return super::keys::dm_destination_label(text, &name, agent.is_some_and(|s| !s.live), &quiet, &swept);
+            let quiet_agent = world.seen.iter().find(|s| s.member == *member).is_some_and(|s| !s.live);
+            return super::keys::dm_destination_label(text, &self.dm_name(member), quiet_agent, &quiet, &swept);
         }
         let in_channel = matches!(fg, Tab::Channel(_));
         super::destination_label(text, &tabs::send_scope(fg), in_channel, &quiet, &swept)

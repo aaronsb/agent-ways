@@ -22,10 +22,11 @@
 //!   is. A name the dialog refuses is said inside it, the text kept.
 //! - an agent's row in the left column: for a claude first Show DMs, or
 //!   Hide DMs while its DM view is listed ([`super::dm`]), then Address
-//!   @Name (puts `@Name ` in the compose box), Who is this (what `/whois` says of the session
-//!   the row is, or what the chat knows of one the roster lacks), Add
-//!   agent to chat ▸ (a picker, `add to channel`, of the channels the
-//!   agent is not in; the pick invites it, as Add agent ▸ does), and
+//!   @Name (puts `@Name ` in the compose box), Who is this (what `/whois`
+//!   says of the session the row is, or what the chat knows of one the
+//!   roster lacks), Add agent to chat ▸ (a picker, `add to channel`, of
+//!   the channels the agent is not in; the pick invites it, as Add agent ▸
+//!   does), and
 //!   Remove from #channel when the shown channel lists the agent, live or
 //!   quiet. The operator's own row offers Leave #channel there instead:
 //!   Remove never takes out the human at the keyboard, here or in the
@@ -33,9 +34,10 @@
 //! - a DM view, by its row or its tab: Hide DMs.
 //! - a message in the feed, by Enter on it: Reply (its channel shown and
 //!   the keyboard in the compose box; a direct message is answered by
-//!   addressing its sender, and one the chat sent by showing its DM view), Quote (its lines put in the box as `> `
-//!   lines), Address @Name (as the agent menu's), Copy (the message to the
-//!   terminal's clipboard by OSC 52).
+//!   addressing its sender, and one the chat sent by showing its DM view),
+//!   Quote (its lines put in the box as `> ` lines), Address @Name (as
+//!   the agent menu's), Copy (the message to the terminal's clipboard by
+//!   OSC 52).
 //!
 //! Every item that drops something asks first: Clear view, Clear history,
 //! Leave, Delete channel and Remove. The question is the shell's
