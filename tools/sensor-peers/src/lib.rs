@@ -279,11 +279,19 @@ impl PeerSensor {
         let own_session_id: String = self.own_session_id
             .clone()
             .unwrap_or_else(|| "---none---".to_string());
-        // The ids this session reads as: its own, then the ones it had
-        // before each `/clear` (ADR-401, `to`).
-        let mut reading_ids = vec![own_session_id.clone()];
-        if let Some(sid) = &self.own_session_id {
-            reading_ids.extend(attend_presence::enrollment::previous_ids(sid));
+        // The ids this session reads as, resolved now as the drain resolves
+        // them: its current id, then the ones it had before each `/clear`
+        // (ADR-401, `to`). The id this poller started under stays among
+        // them, so a `/clear` the run has not yet followed still leaves the
+        // session's own posts, under either id, its own.
+        let now = attend_presence::session::identity_for_pid(self.own_pid);
+        let mut reading_ids =
+            if now.resolved() { attend_presence::enrollment::reading_ids(&now) } else { Vec::new() };
+        if !reading_ids.contains(&own_session_id) {
+            reading_ids.insert(0, own_session_id.clone());
+            if let Some(sid) = &self.own_session_id {
+                reading_ids.extend(attend_presence::enrollment::previous_ids(sid));
+            }
         }
         let ids: Vec<&str> = reading_ids.iter().map(String::as_str).collect();
 

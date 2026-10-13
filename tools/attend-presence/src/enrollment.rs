@@ -333,6 +333,26 @@ pub fn previous_ids(session_id: &str) -> Vec<String> {
     read(session_id).map(|r| r.previous).unwrap_or_default()
 }
 
+/// The ids session `ident` reads as: its own, then the ids it had before
+/// each `/clear` ([`previous_ids`]). A message sent to an earlier id is
+/// still its to read, a reply to one it sent under an earlier id still
+/// wakes it, and a post it wrote under one is its own (ADR-401, `to`).
+/// Before a verb that enrolls has moved the enrollment to the new id, the
+/// earlier id is found through this Claude Code process's index entry
+/// ([`previous_id`]), and nothing is moved. Every reader resolves `ident`
+/// when it reads, so the drain and the Monitor poller hold one id set.
+pub fn reading_ids(ident: &crate::session::SessionIdentity) -> Vec<String> {
+    let mut ids = vec![ident.session_id.clone()];
+    ids.extend(previous_ids(&ident.session_id));
+    if ids.len() == 1 && any_indexed() {
+        if let Some(old) = ident.claude_key().and_then(|key| previous_id(&key, &ident.session_id)) {
+            ids.extend(previous_ids(&old));
+            ids.push(old);
+        }
+    }
+    ids
+}
+
 /// Whether any enrollment was ever recorded under a Claude Code process
 /// key. A cheap test before computing this process's key.
 pub fn any_indexed() -> bool {

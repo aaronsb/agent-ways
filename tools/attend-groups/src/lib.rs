@@ -94,7 +94,7 @@ impl Room {
     }
 
     /// Whether this is a named channel, every post in which wakes its idle
-    /// members (ADR-406 item 1).
+    /// members (ADR-406 item 2).
     pub fn is_channel(&self) -> bool {
         matches!(self, Room::Channel(_))
     }

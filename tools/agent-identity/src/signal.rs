@@ -81,7 +81,7 @@ impl ParsedSignal<'_> {
     }
 
     /// Whether this signal starts a turn in the idle session reading as
-    /// `ids` (ADR-406 item 1): it was posted in a named channel the session
+    /// `ids` (ADR-406 item 2): it was posted in a named channel the session
     /// is a member of (`in_channel`), `to` names it, it sat in its tray
     /// (`in_tray`) with no `to` (sent to its project by an older writer), or
     /// it replies to a message the session sent. Anything else, an `#open`

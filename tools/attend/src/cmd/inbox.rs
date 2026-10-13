@@ -200,8 +200,8 @@ fn room_label(room: &Room) -> String {
 /// and config: the caller supplies the seen-set, the session's ids and the
 /// baselining decision, so tests drive it with temp dirs (PR #385 review,
 /// finding 6). `ids` is the session id, then the ids it had before a
-/// `/clear` ([`crate::util::reading_ids`]): a message to or from any of
-/// them is the session's own.
+/// `/clear` ([`attend_presence::enrollment::reading_ids`]): a message to
+/// or from any of them is the session's own.
 ///
 /// Own messages are marked without delivering (dedup bookkeeping). Under
 /// `baselining` (no seen-set yet) the messages from others go through
@@ -414,7 +414,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
-    let ids = crate::util::reading_ids(&ident);
+    let ids = attend_presence::enrollment::reading_ids(&ident);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &ids, baselining);
     // The cache gate (ADR-406 item 1): waking a session whose prompt cache
