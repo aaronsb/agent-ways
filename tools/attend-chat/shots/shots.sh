@@ -48,8 +48,8 @@ mkdir -p "$WORK"
 #   bigpaste:N     a bracketed paste of N x characters
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
-# #deploy), long (a fourth agent whose project name outruns any row) or
-# plain (no Nerd Font). An agent's name comes from the temp
+# #deploy), long (a fourth agent whose project name outruns any row),
+# dm (a direct message from alpha to the operator) or plain (no Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
 # the column's first `○`, its row being the agents' last.
 SCENARIOS="
@@ -67,7 +67,7 @@ foot-click   | many  | wait:Agents F2 Down End side:#infra side:#infra wait:pick
 keys         | base  | wait:Agents F2 Down Down wait:↑_↓_move
 menu-keys    | base  | wait:Agents F2 Down Down Enter wait:pick
 focus-resize | base  | wait:Agents F2 Down Down wait:↑_↓_move resize:70 gone:Agents
-agent-menu   | base  | wait:Agents side:○ wait:Address
+agent-menu   | base  | wait:Agents side:○ wait:DMs side:○ wait:Address
 crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
 common       | base  | wait:Agents click:≡ wait:Hide_column
 clear-view   | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:clear_the_view?
@@ -75,7 +75,7 @@ paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_th
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
 own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
-quiet-send   | base  | wait:Agents side:○ wait:Address Enter text:are_you_there Enter wait:no_heartbeat
+quiet-send   | base  | wait:Agents rside:○ wait:Address Down Enter text:are_you_there Enter wait:no_heartbeat
 paste-asked  | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:clear_the_view? paste:yes_please\\nsecond_line wait:kept
 ask          | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear
 ask-yes      | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:y_clear wait:cleared
@@ -158,6 +158,11 @@ tab-nomatch  | base  | wait:Agents text:hi_@zzz Tab wait:▸≡
 tab-once     | base  | wait:Agents text:#arch Tab wait:#archive Tab wait:▸≡
 esc-hide     | base  | wait:Agents BTab BTab Escape wait:Hide_column Down Down Down Enter gone:pick wait:_feed_
 add-chan     | base  | wait:Agents side:#infra side:#infra wait:pick click:Add_agent wait:add_to_#infra
+dm-open      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs
+dm-compose   | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs text:looks_good,_push_it Enter wait:sent_→
+dm-menu      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rfeed:→_you wait:Hide_DMs
+dm-hide      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs side:DMs wait:Hide_DMs click:Hide_DMs gone:pick_one
+dm-quiet     | base  | wait:Agents side:○ wait:DMs text:are_you_there Enter wait:no_heartbeat
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
@@ -165,7 +170,7 @@ add-chan     | base  | wait:Agents side:#infra side:#infra wait:pick click:Add_a
 # names after its directory was swept. The human is `operator`. `crowd`
 # adds fifteen agents, every other one live; `own` puts the operator in
 # #deploy, with a message there; `many` adds #ch01 to #ch24; `plain` the
-# plain shape. No attend config is written: the mouse is on by default.
+# plain shape; `dm` a direct message from alpha to the operator. No attend config is written: the mouse is on by default.
 fixture() { # kind
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
@@ -223,6 +228,10 @@ YAML
   msg "$sig/_broadcast" s2 600 "claude:$A" "$F/work/alpha" "starting the theme port; the legend moves first"
   msg "$sig/@deploy" s3 300 "claude:$B" "$F/work/beta" "rollout is green on staging"
   [ "$1" = own ] && msg "$sig/@deploy" s4 120 "external:operator@kitty" "$F/work/alpha" "watching the rollout"
+  if [ "$1" = dm ]; then
+    mkdir -p "$sig/_people/operator"
+    msg "$sig/_people/operator" s6 450 "claude:$A" "$F/work/alpha" "the legend moved; want a look before I push?"
+  fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
 }
@@ -327,8 +336,9 @@ while IFS='|' read -r name kind steps; do
   name=$(trim "$name")
   [ -n "$name" ] || continue
   want "$name" "$@" || continue
-  fixture "$(trim "$kind")"
   for size in $SIZES; do
+    # Each size from the same state: a scenario that sends writes the cache.
+    fixture "$(trim "$kind")"
     c=${size%x*} r=${size#*x}
     out=$WORK/$size
     mkdir -p "$out"

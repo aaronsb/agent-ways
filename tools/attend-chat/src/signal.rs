@@ -26,6 +26,29 @@ pub struct Signal {
     pub channel: Channel,
 }
 
+impl Signal {
+    /// The sender's membership id (ADR-170): a claude's session id, a
+    /// human's sanitized username. `None` for a local notice.
+    pub fn sender_member(&self) -> Option<String> {
+        if let Some(sid) = self.from.strip_prefix("claude:") {
+            return Some(sid.to_string());
+        }
+        let rest = self.from.strip_prefix("external:")?;
+        Some(agent_identity::sanitize_id_component(rest.split('@').next().unwrap_or(rest)))
+    }
+
+    /// Whether this is a direct message between the person at the chat and
+    /// `member`, either way: one `member` sent to the person's tray, or one
+    /// this chat sent with `member` among its recipients.
+    pub fn is_dm_with(&self, member: &str) -> bool {
+        match &self.channel {
+            Channel::Person => self.sender_member().as_deref() == Some(member),
+            Channel::Sent(to) => to.split(',').any(|t| t == member),
+            _ => false,
+        }
+    }
+}
+
 /// Provenance of a signal, at inbox-dir granularity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Channel {
@@ -33,8 +56,11 @@ pub enum Channel {
     Open,
     /// `@<name>/` — a named channel.
     Group(String),
-    /// A cwd inbox (directed send) or a local self-echo.
+    /// A cwd inbox (directed send).
     Direct,
+    /// A direct message this chat sent, echoed locally: its `to`, the
+    /// comma-separated session ids it went to (ADR-401, `to`).
+    Sent(String),
     /// The person tray of the person at this chat, `_people/<member-id>/`:
     /// a reply or a direct message to them (ADR-401, `to`). Shown in every
     /// view.
@@ -90,6 +116,14 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
+    // A direct message the person at this chat sent, in a cwd tray (its
+    // own, which the chat watches), is what it sent, to whom.
+    let mut channel = channel_for_path(path);
+    if let (Channel::Direct, Some("human"), Some(to)) = (&channel, parsed.from_kind, parsed.to) {
+        if parsed.from_id == Some(human_member_id().as_str()) {
+            channel = Channel::Sent(to.to_string());
+        }
+    }
     Some(Signal {
         id,
         from: parsed.from.to_string(),
@@ -98,7 +132,7 @@ pub fn parse_file(path: &Path) -> Option<Signal> {
         reply_to: parsed.reply_to.map(str::to_string),
         message: parsed.message.to_string(),
         ts,
-        channel: channel_for_path(path),
+        channel,
     })
 }
 
@@ -169,7 +203,10 @@ pub fn write_signal(dest: &Path, message: &str, to: &str) -> io::Result<String> 
 /// `project`, `cwd`) so the echoed row renders with the sender's chip,
 /// identical to how their own broadcast already appears. It writes
 /// nothing — echo is a display concern, not a bus event.
-pub fn compose_self_echo(message: &str) -> Signal {
+///
+/// `to` is the session ids the message went to, comma-separated, as its
+/// envelope carries them: the DM view of each shows the echo.
+pub fn compose_self_echo(message: &str, to: &str) -> Signal {
     let (_sender_id, from, project, cwd) = sender_identity();
     let ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -186,8 +223,8 @@ pub fn compose_self_echo(message: &str) -> Signal {
         message: message.to_string(),
         ts,
         // Echoes exist only for directed sends the watcher can't
-        // round-trip, so Direct is definitionally right.
-        channel: Channel::Direct,
+        // round-trip: a direct message, to `to`.
+        channel: Channel::Sent(to.to_string()),
     }
 }
 
@@ -320,6 +357,23 @@ mod tests {
         assert_eq!(parse_file(&tmp_signal(&pdir, "s", body)).unwrap().channel, Channel::Person);
     }
 
+    /// A direct message the person at this chat sent, read back from a cwd
+    /// tray (the chat's own, which it watches), is what it sent, to whom:
+    /// the DM view of its recipient shows it. Anyone else's is direct.
+    #[test]
+    fn a_dm_the_person_sent_reads_back_as_sent() {
+        let d = tempdir_like();
+        let tray = d.join("-work-alpha");
+        fs::create_dir_all(&tray).unwrap();
+        let me = human_member_id();
+        let line = |id: &str| {
+            let env = agent_identity::Envelope { from_kind: Some("human"), from_id: Some(id), on_behalf_of: None, to: Some("s1") };
+            agent_identity::signal::format_tagged("external:x@pts", "alpha", "/work/alpha", &env, None, "hello")
+        };
+        assert_eq!(parse_file(&tmp_signal(&tray, "mine", &line(&me))).unwrap().channel, Channel::Sent("s1".into()));
+        assert_eq!(parse_file(&tmp_signal(&tray, "theirs", &line("someone-else"))).unwrap().channel, Channel::Direct);
+    }
+
     #[test]
     fn write_then_parse_roundtrip() {
         // Point $HOME at a temp dir so broadcast_dir() resolves there
@@ -353,7 +407,7 @@ mod tests {
         // The echo must render as coming from THIS session (so it shows
         // the sender's own chip) and carry the message verbatim. It is a
         // display object, never written to disk.
-        let echo = compose_self_echo("hello @peer");
+        let echo = compose_self_echo("hello @peer", "s1,s2");
         assert_eq!(echo.message, "hello @peer");
         assert!(
             echo.from.starts_with("claude:") || echo.from.starts_with("external:"),
@@ -362,6 +416,7 @@ mod tests {
         );
         assert!(echo.reply_to.is_none());
         assert!(echo.id.starts_with("local-echo-"), "echo id marks it non-bus");
+        assert!(echo.is_dm_with("s1") && echo.is_dm_with("s2") && !echo.is_dm_with("s3"), "a DM with each recipient");
     }
 
     #[test]

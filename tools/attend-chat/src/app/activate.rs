@@ -11,7 +11,11 @@
 //! - Menu (a right click, Enter on the focused tab bar, the destination
 //!   flag) opens the menu at once and shows nothing. The flag acts on the
 //!   channel it names: `#open` on merged.
-//! - An agent has no shown state: either opens its menu (ADR-405).
+//! - A claude's row selects its DM view (ADR-405, amendment of
+//!   2026-10-13): the view is listed under the row and shown; on the view
+//!   shown, the agent's menu opens. The view's own row and tab select the
+//!   same way, and their menu is the view's. A human has no DM view: either
+//!   input opens its menu.
 //! - `≡` opens the common menu; `+` asks a new channel's name in an entry
 //!   dialog docked under it. The compose box is never borrowed (ADR-409).
 
@@ -32,6 +36,8 @@ pub(super) enum Target {
     Channel(String),
     /// An agent, by its membership id.
     Agent(String),
+    /// An agent's DM view, by the agent's membership id.
+    Dm(String),
 }
 
 /// How it acts: select, which on the target shown opens its menu when
@@ -47,6 +53,7 @@ impl Target {
     pub(super) fn of(hit: SideHit) -> Target {
         match hit {
             SideHit::Agent(member) => Target::Agent(member),
+            SideHit::Dm(member) => Target::Dm(member),
             SideHit::Channel(name) => Target::Channel(name),
         }
     }
@@ -57,6 +64,7 @@ impl Target {
             Slot::Common => Target::Common,
             Slot::New => Target::NewChannel,
             Slot::Tab(Tab::Merged) => Target::Merged,
+            Slot::Tab(Tab::Dm(member)) => Target::Dm(member.clone()),
             Slot::Tab(Tab::Channel(c)) => Target::Channel(c.clone()),
         }
     }
@@ -70,7 +78,20 @@ impl ChatPane {
         match target {
             Target::Common => self.common_menu(),
             Target::NewChannel => self.new_channel(),
-            Target::Agent(member) => self.agent_menu(member, at),
+            Target::Agent(member) => {
+                let shown = self.normal_tab() == Tab::Dm(member.clone());
+                match how {
+                    How::Select { .. } if !shown && self.has_dms(&member) => self.open_dm(member),
+                    _ => self.agent_menu(member, at),
+                }
+            }
+            Target::Dm(member) => {
+                let shown = self.normal_tab() == Tab::Dm(member.clone());
+                match how {
+                    How::Select { repeat } if !(shown && repeat) => self.open_dm(member),
+                    _ => self.dm_menu(member, at),
+                }
+            }
             Target::Merged | Target::Channel(_) => {
                 let channel = match target {
                     Target::Channel(c) => Some(c),
@@ -92,13 +113,16 @@ impl ChatPane {
         }
     }
 
-    /// The destination flag clicked: the menu of the channel it names, the
-    /// shown tab's send scope (`#open` on merged), docked at the flag. A
-    /// clicked element acts on what it shows.
+    /// The destination flag clicked: the menu of what it names, the shown
+    /// tab's send scope (`#open` on merged), or in a DM view its agent,
+    /// docked at the flag. A clicked element acts on what it shows.
     pub(super) fn flag_menu(&mut self) {
-        let scope = crate::tabs::send_scope(&self.normal_tab());
         let flag = self.hits.flag;
-        self.activate(Target::Channel(scope), How::Menu, Some(flag));
+        let target = match self.normal_tab() {
+            Tab::Dm(member) => Target::Agent(member),
+            tab => Target::Channel(crate::tabs::send_scope(&tab)),
+        };
+        self.activate(target, How::Menu, Some(flag));
     }
 
     /// A right click at `at`: the menu of what is under it, at once. A

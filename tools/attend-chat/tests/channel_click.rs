@@ -156,12 +156,15 @@ fn near_the_foot_the_menu_ends_on_the_line_above_the_row_and_stays_on_screen() {
 }
 
 #[test]
-fn a_click_on_an_agent_row_opens_its_menu_under_the_row_at_once() {
+fn a_click_on_an_agent_row_shows_its_dms_and_a_second_opens_its_menu_under_the_row() {
     let mut c = chat();
     let at = row_of(&mut c, "alpha");
     click(&mut c, at);
+    assert_eq!(c.foreground(), &Tab::Dm(ALPHA_SID.into()), "the first click shows its DMs");
+    assert!(!menu_open(&mut c));
+    click(&mut c, at);
     let rows = rows(&mut c);
-    assert!(rows[usize::from(at.1) + 1].starts_with("┌pick one: @"), "an agent has no foreground: its menu, docked: {rows:#?}");
+    assert!(rows[usize::from(at.1) + 1].starts_with("┌pick one: @"), "the second, on the agent shown, its menu, docked: {rows:#?}");
 }
 
 #[test]
