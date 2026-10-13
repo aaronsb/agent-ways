@@ -385,6 +385,22 @@ fn esc_moves_along_one_cycle() {
             vec![Redraw, Follow, Redraw],
         ),
         cell(
+            "back to the feed when the remembered channel has gone",
+            on_menu(row3.clone()),
+            Ev::OverlayClosed(esc_menu(true)),
+            with_rows(vec![agent("a1"), agent("a2"), row("open"), row("infra")]),
+            Ix { focus: Focus::Feed, last_nav: row3.clone(), ..Ix::default() },
+            vec![Redraw, Redraw],
+        ),
+        cell(
+            "back to the feed when the remembered agent has gone, not to the row now at its place",
+            on_menu(on_row(1).last_nav),
+            Ev::OverlayClosed(esc_menu(true)),
+            with_rows(vec![agent("a1"), row("open"), row("deploy"), row("infra")]),
+            Ix { focus: Focus::Feed, last_nav: on_row(1).last_nav, ..Ix::default() },
+            vec![Redraw, Redraw],
+        ),
+        cell(
             "back to the feed when the column is hidden",
             on_menu(row3.clone()),
             Ev::OverlayClosed(esc_menu(true)),
@@ -429,29 +445,69 @@ fn esc_moves_along_one_cycle() {
     ]);
 }
 
+/// The views the mirror runs over: the usual one; the column hidden; no
+/// agents; `#open` shown and the operator view shown, so the bar holds no
+/// channel tab; and a single channel, `#open`.
+fn mirror_views() -> Vec<(&'static str, View)> {
+    let base = view();
+    let laid = base.world.clone().unwrap();
+    let reserved = vec![Slot::Common, Slot::New, Slot::Tab(chan("open")), Slot::Tab(Tab::Merged)];
+    let with = |laid: Laid| View { world: Some(laid), ..view() };
+    vec![
+        ("the usual view", base.clone()),
+        ("the column hidden", View { side_drawn: false, ..view() }),
+        ("no agents", with(Laid { rows: vec![row("open"), row("deploy"), row("infra")], ..laid.clone() })),
+        ("#open shown", with(Laid { bar: reserved.clone(), shown: chan("open"), ..laid.clone() })),
+        ("the operator view shown", with(Laid { bar: reserved.clone(), shown: Tab::Merged, ..laid.clone() })),
+        ("a single channel", with(Laid { bar: reserved, rows: vec![row("open")], shown: Tab::Merged })),
+    ]
+}
+
 /// Tab and Shift+Tab are mirrors around the one ring: from every element,
-/// N steps forward then N back come home, for every N round the ring.
+/// N steps forward then N back come home, for every N round the ring, in
+/// every view.
 #[test]
 fn tab_and_shift_tab_are_mirrors_from_every_element() {
-    let v = view();
-    let w = v.world.clone().unwrap();
-    let mut starts: Vec<Ix> = w.bar.iter().cloned().map(tab).collect();
-    starts.extend((0..w.rows.len()).map(on_row));
-    starts.extend([at(Focus::Feed), at(Focus::Compose)]);
-    let len = starts.len();
-    for start in &starts {
-        for n in 1..=len {
-            let mut ix = start.clone();
-            let mut path = vec![ix.focus.clone()];
-            for code in std::iter::repeat_n(KeyCode::Tab, n).chain(std::iter::repeat_n(KeyCode::BackTab, n)) {
-                ix = step(&ix, Ev::Key(key(code)), &v).expect("the world is read").0;
-                path.push(ix.focus.clone());
+    for (name, v) in mirror_views() {
+        let w = v.world.clone().unwrap();
+        let mut starts: Vec<Ix> = w.bar.iter().cloned().map(tab).collect();
+        if v.side_drawn {
+            starts.extend((0..w.rows.len()).map(|i| Ix { focus: Focus::Row(i), row_hit: w.rows.get(i).cloned(), ..Ix::default() }));
+        }
+        starts.extend([at(Focus::Feed), at(Focus::Compose)]);
+        let len = starts.len();
+        for start in &starts {
+            for n in 1..=len {
+                let mut ix = start.clone();
+                let mut path = vec![ix.focus.clone()];
+                for code in std::iter::repeat_n(KeyCode::Tab, n).chain(std::iter::repeat_n(KeyCode::BackTab, n)) {
+                    ix = step(&ix, Ev::Key(key(code)), &v).expect("the world is read").0;
+                    path.push(ix.focus.clone());
+                }
+                assert_eq!(ix.focus, start.focus, "{name}: {n} × Tab, then {n} × Shift+Tab from {:?}: {path:?}", start.focus);
+                assert_eq!(path[n..].iter().rev().collect::<Vec<_>>(), path[..=n].iter().collect::<Vec<_>>(), "{name}: the way back retraces the way out");
             }
-            assert_eq!(ix.focus, start.focus, "{n} × Tab, then {n} × Shift+Tab from {:?}: {path:?}", start.focus);
-            assert_eq!(path[n..].iter().rev().collect::<Vec<_>>(), path[..=n].iter().collect::<Vec<_>>(), "the way back retraces the way out");
+        }
+        if name == "the usual view" {
+            assert_eq!(len, 12, "five slots, five rows, the feed and the box");
         }
     }
-    assert_eq!(len, 12, "five slots, five rows, the feed and the box");
+}
+
+/// With a word to complete in the box, Tab there completes and the focus
+/// stays: the mirror holds round the ring, not through a box whose Tab is
+/// completing. Once Tab has nothing more to complete it leaves, and the
+/// mirror holds from there.
+#[test]
+fn tab_in_the_box_completes_before_it_walks() {
+    let completing = View { completable: true, ..drafted() };
+    let (ix, fx) = step(&at(Focus::Compose), Ev::Key(key(KeyCode::Tab)), &completing).unwrap();
+    assert_eq!((ix.focus, fx), (Focus::Compose, vec![Effect::Complete]));
+    let done = drafted();
+    let (ix, _) = step(&at(Focus::Compose), Ev::Key(key(KeyCode::Tab)), &done).unwrap();
+    assert_eq!(ix.focus, Focus::Tab(Slot::Common), "nothing more to complete: Tab leaves");
+    let (back, _) = step(&ix, Ev::Key(key(KeyCode::BackTab)), &done).unwrap();
+    assert_eq!(back.focus, Focus::Compose, "and Shift+Tab comes back");
 }
 
 #[test]

@@ -400,9 +400,11 @@ impl ChatPane {
         self.world().laid.rows.clone()
     }
 
-    /// Whether the last frame drew the column: shown, and room for it.
+    /// Whether the column is drawn: the last frame had room for it, and it
+    /// has not been hidden since, so a hide takes effect before the next
+    /// frame shows it.
     pub(super) fn side_drawn(&self) -> bool {
-        !self.hits.side_area.is_empty()
+        self.sidebar && !self.hits.side_area.is_empty()
     }
 
     /// The key that toggles the column, as the help names it.

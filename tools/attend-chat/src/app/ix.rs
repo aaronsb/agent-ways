@@ -382,16 +382,18 @@ impl<'a> Step<'a> {
     }
 
     /// The `≡` menu Esc opened closed: the focus goes back to the tab or
-    /// column row it was last on, while that is still drawn, else to the
-    /// feed.
+    /// column row it was last on, found by what it is, while that is still
+    /// drawn; else to the feed. A row whose agent or channel has gone, or a
+    /// column hidden, is no longer drawn.
     fn esc_back(&mut self) -> R {
         let w = self.world()?;
         let back = match self.ix.last_nav.clone() {
             Some((Focus::Tab(slot), _)) if w.bar.contains(&slot) => Some(Focus::Tab(slot)),
-            Some((Focus::Row(i), hit)) if self.v.side_drawn => {
-                let at = hit.and_then(|h| w.rows.iter().position(|r| *r == h));
-                at.or((i < w.rows.len()).then_some(i)).map(Focus::Row)
+            Some((Focus::Row(i), hit)) if self.v.side_drawn => match hit {
+                Some(h) => w.rows.iter().position(|r| *r == h),
+                None => (i < w.rows.len()).then_some(i),
             }
+            .map(Focus::Row),
             _ => None,
         };
         self.go(back.unwrap_or(Focus::Feed))

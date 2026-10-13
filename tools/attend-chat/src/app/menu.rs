@@ -251,6 +251,20 @@ pub(super) fn message_items(name: Option<&str>, notice: bool) -> Vec<Item> {
     ]
 }
 
+/// The most bytes Copy sends: base64 makes it about 100 kB on the wire,
+/// past which many terminals drop an OSC 52 copy whole.
+pub(super) const COPY_MAX: usize = 74 * 1024;
+
+/// What Copy sends of `message`: all of it, or its first [`COPY_MAX`] bytes
+/// cut at a character's edge, and whether it was cut.
+pub(super) fn copy_text(message: &str) -> (String, bool) {
+    if message.len() <= COPY_MAX {
+        return (message.to_string(), false);
+    }
+    let end = (0..=COPY_MAX).rev().find(|i| message.is_char_boundary(*i)).unwrap_or(0);
+    (message[..end].to_string(), true)
+}
+
 /// A message's lines as a quote in the compose box: each led by `> `,
 /// then a line to write on.
 pub(super) fn quoted(message: &str) -> String {
@@ -415,8 +429,8 @@ impl ChatPane {
         if let Some(member) = id.strip_prefix("agent:") {
             return self.agent_item(member, value);
         }
-        if let Some(i) = id.strip_prefix("message:").and_then(|i| i.parse().ok()) {
-            return self.message_item(i, value);
+        if let Some(m) = id.strip_prefix("message:") {
+            return self.message_item(m, value);
         }
         if id == NEW_CHANNEL {
             return self.new_channel_named(value);
@@ -469,11 +483,14 @@ impl ChatPane {
         self.to_open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
     }
 
-    /// The feed's message `i` and the nickname of its sender, as the column
-    /// knows it.
-    fn feed_message(&mut self, i: usize) -> Option<(crate::signal::Signal, Option<String>)> {
+    /// The feed's message with the id `id`, while the feed holds it, and the
+    /// nickname of its sender, as the column knows it. A message is found by
+    /// what it is: the feed drops its oldest past [`super::MAX_SIGNALS`], and
+    /// an index would then name its neighbour.
+    fn feed_message(&mut self, id: &str) -> Option<(crate::signal::Signal, Option<String>)> {
         let shown = self.normal_tab();
-        let sig = self.signals.iter().filter(|s| tabs::visible_in(&s.channel, &shown)).nth(i).cloned()?;
+        let (i, sig) = self.signals.iter().filter(|s| tabs::visible_in(&s.channel, &shown)).enumerate().find(|(_, s)| s.id == id)?;
+        let sig = sig.clone();
         let member = self.entry_members.get(i).cloned().flatten();
         let name = member.and_then(|m| self.seen_member(&m)).map(|s| s.identity.nickname);
         Some((sig, name))
@@ -487,17 +504,20 @@ impl ChatPane {
             return self.say("no message to act on", false);
         };
         self.feed.reveal(i);
-        let Some((sig, name)) = self.feed_message(i) else { return };
+        let shown = self.normal_tab();
+        let Some(id) = self.signals.iter().filter(|s| tabs::visible_in(&s.channel, &shown)).nth(i).map(|s| s.id.clone()) else { return };
+        let Some((sig, name)) = self.feed_message(&id) else { return };
         let feed = self.hits.feed;
         let anchor = self.feed.header_row(i).map_or(Anchor::Center, |r| Anchor::Row(Rect { x: feed.x, y: feed.y + r, width: feed.width, height: 1 }));
         let title = name.as_ref().map_or("message".to_string(), |n| format!("message from @{n}"));
         let items = message_items(name.as_deref(), sig.channel == crate::signal::Channel::Info);
-        self.to_open = Some(Open::Pick { id: format!("message:{i}"), title, items, multi: false, anchor });
+        self.to_open = Some(Open::Pick { id: format!("message:{}", sig.id), title, items, multi: false, anchor });
     }
 
-    /// An item of message `i`'s menu.
-    fn message_item(&mut self, i: usize, item: &str) {
-        let Some((sig, name)) = self.feed_message(i) else {
+    /// An item of the menu of the message with the id `id`. A message the
+    /// feed has dropped since the menu opened is acted on no more.
+    fn message_item(&mut self, id: &str, item: &str) {
+        let Some((sig, name)) = self.feed_message(id) else {
             return self.say("that message is not in the feed any more", true);
         };
         let address = |c: &mut ChatPane, n: &str| c.complete(super::Chip::Agent(n.to_string()));
@@ -513,8 +533,10 @@ impl ChatPane {
                 self.tab_cycle = None;
             }
             COPY => {
-                self.to_open = Some(Open::Copy { text: sig.message.clone() });
-                return self.say("copied to the clipboard, where the terminal allows OSC 52", false);
+                let (text, cut) = copy_text(&sig.message);
+                self.to_open = Some(Open::Copy { text });
+                let said = if cut { format!("copied the first {} kB of {} kB to the clipboard, where the terminal allows OSC 52", COPY_MAX / 1024, sig.message.len().div_ceil(1024)) } else { "copied to the clipboard, where the terminal allows OSC 52".to_string() };
+                return self.say(said, false);
             }
             _ if item.starts_with(ADDRESS) => match name {
                 Some(n) => address(self, &n),
@@ -813,6 +835,19 @@ impl ChatPane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Copy sends at most COPY_MAX bytes, cut where a character ends, and
+    /// says when it cut.
+    #[test]
+    fn copy_is_capped_at_a_characters_edge() {
+        assert_eq!(copy_text("short"), ("short".to_string(), false));
+        let long = "é".repeat(COPY_MAX);
+        let (text, cut) = copy_text(&long);
+        assert!(cut && text.len() <= COPY_MAX && text.len() > COPY_MAX - 2, "{}", text.len());
+        assert!(text.chars().all(|c| c == 'é'), "no character split");
+        let exact = "x".repeat(COPY_MAX);
+        assert_eq!(copy_text(&exact), (exact.clone(), false), "exactly the cap is whole");
+    }
 
     #[test]
     fn each_tab_offers_what_its_channel_allows() {

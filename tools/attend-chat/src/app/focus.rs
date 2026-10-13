@@ -98,6 +98,13 @@ impl ChatPane {
         self.bar().iter().position(|s| *s == slot)
     }
 
+    /// Whether Tab would change the compose box ([`super::keys::completable`]),
+    /// over the names the column lists; with the world unread, none.
+    fn completable(&self) -> bool {
+        let (agents, channels) = self.world.as_ref().map(|w| super::sidebar::completion_pool(&w.seen, &w.rows)).unwrap_or_default();
+        super::keys::completable(self.input.text(), self.input.cursor(), self.tab_cycle.as_ref(), &agents, &channels)
+    }
+
     /// What the step reads of the screen: the tab bar and the column as the
     /// world laid them out when it was read, never reading it
     /// ([`ix::NeedWorld`]).
@@ -107,7 +114,7 @@ impl ChatPane {
             world: self.world.as_ref().map(|w| w.laid.clone()),
             side_drawn: self.side_drawn(),
             draft_empty: self.input.is_empty(),
-            completable: super::keys::completable(self.input.text(), cursor, self.tab_cycle.as_ref()),
+            completable: self.completable(),
             caret_start: cursor == 0,
             caret_end: cursor == self.input.text().chars().count(),
             feed_len: self.feed.len(),
