@@ -39,10 +39,32 @@ pub fn alive(member_id: &str, running: &std::collections::HashSet<String>) -> bo
         || enrollment::process_is_live(member_id)
 }
 
+/// How much later than its record's `startedAt` a session's process may
+/// have started and still be the record's: Claude Code writes the record
+/// once it is up, and a `/clear` rewrites it later still, so only a
+/// process that started well after the record is a later one.
+const RECORD_SLACK: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Whether the process a session record names still runs: a process holds
+/// its pid and, where the record and this host both give a start time,
+/// started no later than the record's `startedAt` and [`RECORD_SLACK`]. A
+/// process that started later was given the pid after the record's exited.
+fn record_process_runs(pid: u32, started_at_ms: Option<u64>) -> bool {
+    if !process::is_running(pid) {
+        return false;
+    }
+    let recorded = started_at_ms.map(|ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms));
+    match (recorded, process::started_at(pid)) {
+        (Some(recorded), Some(began)) => began <= recorded + RECORD_SLACK,
+        _ => true,
+    }
+}
+
 /// Whether `member_id` is a Claude Code session whose process this host saw
 /// exit: it is not [`alive`], and either the session records naming it all
-/// name pids no process holds, or, with no such record, its enrollment
-/// names a process that has exited. A session this host knows nothing of
+/// name processes that no longer run ([`record_process_runs`]), or, with no
+/// such record, its enrollment names a process of this host that has
+/// exited. A session this host knows nothing of
 /// (one on another host, or one that never listened) has not exited. A
 /// quiet session that has not exited may still read what is sent to it
 /// later; one that has exited never will.
@@ -50,14 +72,61 @@ pub fn has_exited(member_id: &str) -> bool {
     if alive(member_id, &std::collections::HashSet::new()) {
         return false;
     }
-    let records: Vec<u32> = session::sessions_dirs()
+    let records: Vec<(u32, Option<u64>)> = session::sessions_dirs()
         .iter()
         .flat_map(|d| claude_sessions::read_session_records(d))
         .filter(|r| r.session_id == member_id)
-        .map(|r| r.pid)
+        .map(|r| (r.pid, r.started_at_ms))
         .collect();
     if !records.is_empty() {
-        return !records.iter().any(|pid| process::is_running(*pid));
+        return !records.iter().any(|(pid, started)| record_process_runs(*pid, *started));
     }
     enrollment::process_has_exited(member_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    /// `HOME` and `XDG_CACHE_HOME` in a fresh directory, and no
+    /// `CLAUDE_CONFIG_DIR`, for `f`.
+    fn with_home(f: impl FnOnce(&Path)) {
+        let _g = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("attend-presence-lib-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(root.join(".claude/sessions")).unwrap();
+        let saved: Vec<_> = ["HOME", "XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR"].iter().map(|k| (*k, std::env::var_os(k))).collect();
+        std::env::set_var("HOME", &root);
+        std::env::set_var("XDG_CACHE_HOME", root.join("cache"));
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+        f(&root);
+        for (k, v) in saved {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    fn record(home: &Path, name: &str, pid: u32, session: &str, started: Option<SystemTime>) {
+        let started = started.map(|t| format!(r#","startedAt":{}"#, t.duration_since(UNIX_EPOCH).unwrap().as_millis())).unwrap_or_default();
+        std::fs::write(home.join(".claude/sessions").join(format!("{name}.json")), format!(r#"{{"pid":{pid},"sessionId":"{session}","cwd":"/w"{started}}}"#)).unwrap();
+    }
+
+    // Review of #998, finding 3: a session record's pid is judged with the
+    // record's start time, so a pid given to a later process does not keep
+    // an exited session alive.
+    #[test]
+    fn a_session_record_is_judged_by_its_pid_and_start_time() {
+        with_home(|home| {
+            let pid = std::process::id();
+            record(home, "a", pid, "current", Some(SystemTime::now()));
+            assert!(!crate::has_exited("current"), "this process started before its record");
+            record(home, "b", pid, "reused", Some(SystemTime::now() - Duration::from_secs(24 * 3600)));
+            assert!(crate::has_exited("reused"), "the record's process started a day ago; this pid's process is later");
+            record(home, "c", pid, "undated", None);
+            assert!(!crate::has_exited("undated"), "a record with no start time is judged by its pid");
+        });
+    }
 }

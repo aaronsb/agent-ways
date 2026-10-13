@@ -22,6 +22,10 @@ const QUIET_CWD: &str = "/work/zeta";
 /// draft to it.
 const QUIET2_SID: &str = "dddddddd-0000-4000-8000-000000000007";
 const QUIET2_CWD: &str = "/work/delta";
+/// On another host: its enrollment names a process key of another host,
+/// which this host cannot judge, so it reads as quiet.
+const ABROAD_SID: &str = "aaaaaaaa-0000-4000-8000-000000000008";
+const ABROAD_CWD: &str = "/work/theta";
 /// Gone: its enrollment names a Claude Code process that has exited.
 const GONE_SID: &str = "eeeeeeee-0000-4000-8000-000000000005";
 const GONE_CWD: &str = "/work/epsilon";
@@ -46,15 +50,18 @@ fn chat(enhanced: bool) -> Chat {
         std::env::remove_var("CLAUDE_CONFIG_DIR");
         let enrolled = attend_presence::cache::dir().join("enrolled");
         std::fs::create_dir_all(&enrolled).unwrap();
-        std::fs::write(enrolled.join(GONE_SID), format!("listen\nclaude {}-1\n", gone_pid())).unwrap();
+        std::fs::write(enrolled.join(GONE_SID), format!("listen\nclaude {}-1@{}\n", gone_pid(), attend_presence::process::host_name())).unwrap();
         lapse(QUIET_SID);
         lapse(QUIET2_SID);
+        std::fs::write(enrolled.join(ABROAD_SID), format!("listen\nclaude {}-1@another-host\n", gone_pid())).unwrap();
+        lapse(ABROAD_SID);
         lapse(GONE_SID);
     });
     let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(enhanced);
     c.push(sig("s-1", QUIET_SID, QUIET_CWD));
     c.push(sig("s-2", GONE_SID, GONE_CWD));
     c.push(sig("s-3", QUIET2_SID, QUIET2_CWD));
+    c.push(sig("s-4", ABROAD_SID, ABROAD_CWD));
     c
 }
 
@@ -196,4 +203,18 @@ fn the_offer_does_not_follow_the_draft_to_another_dm_view() {
     press(&mut c, KeyCode::Enter);
     assert!(!in_tray(QUIET2_CWD, "hello for one agent"), "the first Enter in the other view sends nothing: {}", c.status());
     assert!(c.status().ends_with(&format!("@{} is quiet (no heartbeat)", nick(QUIET2_CWD))), "a fresh check refused it: {}", c.status());
+}
+
+// Review of #998, finding 2: a cache shared with another host holds that
+// host's process keys; one whose pid is free here is no sign the session
+// exited, so it is quiet and the offer stands.
+#[test]
+fn an_agent_enrolled_on_another_host_is_quiet_not_exited() {
+    let mut c = chat(false);
+    let abroad = nick(ABROAD_CWD);
+    typed(&mut c, &format!("@{abroad} across hosts"));
+    press(&mut c, KeyCode::Enter);
+    assert_eq!(c.status(), format!("press Enter again to send: @{abroad} is quiet (no heartbeat)"));
+    press(&mut c, KeyCode::Enter);
+    assert!(in_tray(ABROAD_CWD, "across hosts"), "{}", c.status());
 }

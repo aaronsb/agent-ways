@@ -59,7 +59,7 @@ fn chat() -> Chat {
         session_record(&home, gone, GONE_SID, GONE_CWD);
         let enrolled = attend_presence::cache::dir().join("enrolled");
         std::fs::create_dir_all(&enrolled).unwrap();
-        std::fs::write(enrolled.join(GONE_SID), format!("listen\nclaude {gone}-1\n")).unwrap();
+        std::fs::write(enrolled.join(GONE_SID), format!("listen\nclaude {gone}-1@{}\n", attend_presence::process::host_name())).unwrap();
         lapse(WORKING_SID);
         lapse(GONE_SID);
     });
