@@ -279,7 +279,7 @@ impl Reading {
 }
 
 /// Whether the prompt cache has lapsed at `now`, for the wake gate (ADR-406
-/// item 1). The clock is keepwarm's, the newest assistant turn in the
+/// item 2). The clock is keepwarm's, the newest assistant turn in the
 /// transcript, against that turn's own tier, less [`GATE_MARGIN_SECS`]. A
 /// reading that cannot be had, or that holds no turn, counts as lapsed, so
 /// a session whose last activity is unknown is never woken.

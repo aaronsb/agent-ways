@@ -32,7 +32,7 @@ pub struct Unread {
     pub listening: bool,
     /// A message that would wake the session is waiting and its prompt
     /// cache has lapsed, so nothing wakes it: what waits goes with the
-    /// operator's next turn (ADR-406 item 1).
+    /// operator's next turn (ADR-406 item 2).
     pub cache_lapsed: bool,
     /// One entry per room the session receives, in the drain's order:
     /// its project tray, `#open`, then each joined channel.

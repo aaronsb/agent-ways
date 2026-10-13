@@ -15,7 +15,7 @@ pub type ReceiveDirsFn = Arc<dyn Fn(&str) -> Vec<ReceiveDir> + Send + Sync>;
 
 /// Callback that answers whether this session's prompt cache has lapsed,
 /// given its working directory. Without one the sensor reads keepwarm's
-/// clock on the session's transcript (ADR-406 item 1).
+/// clock on the session's transcript (ADR-406 item 2).
 pub type CacheLapsedFn = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
 /// Discovers peer Claude Code sessions by reading ~/.claude/sessions/*.json
@@ -379,7 +379,7 @@ impl PeerSensor {
             attend_state::cold_start::plan(&pending, attend_state::cold_start::Window::for_session(&own_session_id))
         });
 
-        // The wake rule (ADR-406 item 1): a line on stdout wakes an idle
+        // The wake rule (ADR-406 item 2): a line on stdout wakes an idle
         // session, so this poll emits only when something pending would
         // wake it: a post in one of its named channels, or a message
         // addressed to it. Otherwise `#open` posts stay unseen and reach it

@@ -410,7 +410,7 @@ fn print_startup_banner(me: &str, enabled_names: &[String], focus_desc: &str, st
             std::fs::write(p, &banner_fingerprint).ok();
         }
     };
-    // A reload on a lapsed cache must not wake the session (ADR-406 item 1).
+    // A reload on a lapsed cache must not wake the session (ADR-406 item 2).
     let quiet = std::env::var_os(tick::RELOADED_COLD).is_some();
     std::env::remove_var(tick::RELOADED_COLD);
     let banner = choose_banner(&banner_fingerprint, prev.as_deref(), reloaded_from);

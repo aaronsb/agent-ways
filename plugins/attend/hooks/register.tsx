@@ -340,7 +340,7 @@ async function poll($: $, mod: Mod) {
     if (mod.pending.length === 0) {
       // Only what is addressed to the session, or posted in one of its
       // named channels, starts a turn; other #open posts wait for its next
-      // one (ADR-406 item 1).
+      // one (ADR-406 item 2).
       const first = parseDrain((await run($, WAKE_DRAIN_ARGV)).stdout)
       if (!first) return
       // Listening turned off elsewhere (attend listen off, a private scene),

@@ -141,7 +141,7 @@ fn the_monitor_line_carries_a_long_message_whole_with_its_handle() {
     let body = long_body();
     let id = "peer-sess-1791000000000000001-0";
     // Fresh when the first scan finds it, so the cold start delivers it, and
-    // in the project tray, so it wakes the session (ADR-406 item 1).
+    // in the project tray, so it wakes the session (ADR-406 item 2).
     put_from_peer(&f, &f.project_tray(), id, &body);
     let run = f.run();
     run.wait_for("the message", Duration::from_secs(30), |r| r.output().contains("END-OF-MESSAGE"));
@@ -268,7 +268,7 @@ fn an_oversize_signal_file_is_skipped_with_a_note() {
 #[test]
 fn legacy_numbered_parts_come_out_in_order_on_the_monitor_line() {
     let f = Fixture::new("one-signal-legacy-run");
-    // In the project tray, so the parts wake the session (ADR-406 item 1).
+    // In the project tray, so the parts wake the session (ADR-406 item 2).
     let dir = f.signals().join(f.project_tray());
     std::fs::create_dir_all(&dir).unwrap();
     let mtime = std::time::SystemTime::now() - Duration::from_secs(2);

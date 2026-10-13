@@ -44,7 +44,7 @@ pub(crate) fn own_session_id() -> Option<String> {
 }
 
 /// Whether session `ident`'s prompt cache has lapsed now, on keepwarm's
-/// clock (ADR-406 item 1). An unresolved identity has no transcript to
+/// clock (ADR-406 item 2). An unresolved identity has no transcript to
 /// read, which counts as lapsed.
 pub(crate) fn cache_lapsed(ident: &Session) -> bool {
     !ident.resolved() || sensor_keepwarm::session_cache_lapsed(&ident.session_id, &ident.origin_path, sensor_trait::epoch_secs())

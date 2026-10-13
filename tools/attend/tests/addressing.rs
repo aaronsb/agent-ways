@@ -1,4 +1,4 @@
-//! Who a message is for, and where it lands (ADR-401 `to`, ADR-406 items 1,
+//! Who a message is for, and where it lands (ADR-401 `to`, ADR-406 items 2,
 //! 7 and 10). A reply goes to its parent's sender as a direct message, a send
 //! that names someone is direct, and a send that names no one goes to
 //! `#open`. A session reads a tray signal only when its `to` names it or it
@@ -371,7 +371,7 @@ fn a_direct_message_to_the_id_before_a_clear_is_still_read() {
     f.drain("plain");
     signal(&f, &f.project_tray(), "x-1-1", &format!("claude:x|p|/tmp/p|to:{old}|sent before the clear"));
     f.set_session_id("sess-addr-clear-new");
-    // The new id has had a turn, so its cache is warm (ADR-406 item 1).
+    // The new id has had a turn, so its cache is warm (ADR-406 item 2).
     f.last_turn_of("sess-addr-clear-new", Some(Duration::ZERO));
     let listed = f.ok(&["message", "inbox", "--json"]);
     assert!(listed.contains("sent before the clear"), "{listed}");

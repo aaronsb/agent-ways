@@ -67,8 +67,8 @@ fn a_late_join_under_attend_run_holds_back_the_history_too() {
         f.put("@testing", &format!("other-old-{i:02}"), &format!("{OLD} {i}"), 24 * 60 * MINUTE);
     }
     f.ok(&["channel", "join", "testing"]);
-    // Addressed to the session, so it wakes it: a channel post alone waits
-    // for the next turn (ADR-406 item 1).
+    // A post in the session's channel, addressed to it as well, so it
+    // wakes it (ADR-406 item 2).
     let dir = f.signals().join("@testing");
     std::fs::write(dir.join("other-live.signal"), format!("claude:other-session|elsewhere|/tmp/elsewhere|to:{}|{LIVE}\n", f.sid)).unwrap();
     // The live message is the positive control: the sensor scanned the room.

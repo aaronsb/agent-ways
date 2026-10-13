@@ -159,7 +159,7 @@ pub(crate) struct Drained {
     re: Option<String>,
     body: String,
     source_cwd: String,
-    /// Whether it would start a turn in the idle session (ADR-406 item 1).
+    /// Whether it would start a turn in the idle session (ADR-406 item 2).
     pub(crate) wakes: bool,
 }
 impl DrainedView for Drained {
@@ -324,7 +324,7 @@ pub(crate) fn scan_pending(
 /// happens exactly once.
 ///
 /// With `wake`, the drain delivers and marks nothing unless a pending
-/// message would wake the session (ADR-406 item 1); then it delivers all
+/// message would wake the session (ADR-406 item 2); then it delivers all
 /// that is pending. A session whose prompt cache has lapsed is never woken:
 /// the drain holds what is pending for the operator's next turn and reports
 /// `cache_lapsed`. The attend mod polls this way while the session idles.
@@ -417,7 +417,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let ids = attend_presence::enrollment::reading_ids(&ident);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &ids, baselining);
-    // The cache gate (ADR-406 item 1): waking a session whose prompt cache
+    // The cache gate (ADR-406 item 2): waking a session whose prompt cache
     // has lapsed would rewrite its whole context at the cache-write price,
     // so a message that would wake it waits for the operator's next turn
     // like any other. The clock is keepwarm's: the newest turn in the
@@ -567,7 +567,7 @@ struct DrainedJson<'a> {
 /// only a hook drain, which carries the Stop hook's `stop_hook_active`.)
 /// `you_are` is set on the cold start, the drain's first contact.
 /// `cache_lapsed` is true when a wake drain held a message that would wake
-/// the session because its prompt cache has lapsed (ADR-406 item 1).
+/// the session because its prompt cache has lapsed (ADR-406 item 2).
 fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Option<&str>, me: Option<&str>, cache_lapsed: bool) {
     let messages: Vec<DrainedJson> = delivered
         .iter()

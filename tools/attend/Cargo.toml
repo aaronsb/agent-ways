@@ -40,7 +40,7 @@ clap-markdown = "0.1"
 sensor-peers = { path = "../sensor-peers", optional = true }
 sensor-processes = { path = "../sensor-processes", optional = true }
 # Always linked: the wake gate reads the cache clock from it in every
-# build (ADR-406 item 1). The feature gates only the sensor and its verbs.
+# build (ADR-406 item 2). The feature gates only the sensor and its verbs.
 sensor-keepwarm = { path = "../sensor-keepwarm" }
 
 [dev-dependencies]

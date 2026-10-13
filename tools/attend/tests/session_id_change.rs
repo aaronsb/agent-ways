@@ -27,7 +27,7 @@ fn attend_run_follows_a_session_id_change() {
     });
 
     // A message the old id sees: in the project tray, so it wakes the
-    // session and the sensor marks it (ADR-406 item 1).
+    // session and the sensor marks it (ADR-406 item 2).
     f.put(&f.project_tray(), "other-1-before", "seen before the clear", Duration::ZERO);
     run.wait_for("the old id's checkpoint", Duration::from_secs(20), |_| {
         std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-before"))
@@ -65,7 +65,7 @@ fn a_message_held_in_the_cooldown_survives_an_id_change() {
     let f = Fixture::new("idcooldown");
     let old = f.sid.clone();
     let run = f.run();
-    // In the project tray, so each wakes the session (ADR-406 item 1).
+    // In the project tray, so each wakes the session (ADR-406 item 2).
     f.put(&f.project_tray(), "other-1-a", "first message", Duration::ZERO);
     run.wait_for("the first message", Duration::from_secs(20), |r| r.output().contains("first message"));
     // The message cooldown is 3 s from that disclosure.
@@ -144,7 +144,7 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     f.ok(&["channel", "join", "side"]);
     {
         let run = f.run();
-        // In the project tray, so it wakes the session (ADR-406 item 1).
+        // In the project tray, so it wakes the session (ADR-406 item 2).
         f.put(&f.project_tray(), "other-1-early", "EARLY-OPEN", Duration::ZERO);
         run.wait_for("the early message", Duration::from_secs(20), |r| r.output().contains("EARLY-OPEN"));
         run.wait_for("its checkpoint", Duration::from_secs(10), |_| {
@@ -153,7 +153,7 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     } // killed with SIGKILL: no hand-over
 
     f.set_session_id("sess-restart-new");
-    // The new id has had a turn, so its cache is warm (ADR-406 item 1).
+    // The new id has had a turn, so its cache is warm (ADR-406 item 2).
     f.last_turn_of("sess-restart-new", Some(Duration::ZERO));
     let run = f.run();
     run.wait_for("the adoption", Duration::from_secs(20), |_| {

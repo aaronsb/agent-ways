@@ -23,7 +23,7 @@ export type AttendStatus = {
   awaitingOperator: boolean
   /** A message that would wake the session waits because the prompt cache
    *  has lapsed: the session is not woken, and what waits rides the
-   *  operator's next prompt (ADR-406 item 1). */
+   *  operator's next prompt (ADR-406 item 2). */
   cacheLapsed: boolean
 }
 

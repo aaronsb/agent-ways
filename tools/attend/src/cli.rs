@@ -380,7 +380,7 @@ pub(crate) struct InboxFlags {
     /// would wake this session, one addressed to it, sent to its
     /// project, a reply to a message it sent, or any post in one of its
     /// named channels; then deliver all that is pending. Other `#open`
-    /// posts alone wait for the next turn (ADR-406 item 1). Once the session's prompt cache has
+    /// posts alone wait for the next turn (ADR-406 item 2). Once the session's prompt cache has
     /// lapsed (its tier's TTL less two minutes after its last turn, or
     /// no transcript readable in five seconds), nothing wakes it: the
     /// drain delivers nothing and reports `cache_lapsed`. The attend
