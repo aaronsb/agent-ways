@@ -48,6 +48,10 @@ export const DRAIN_ARGV = [ATTEND, 'message', 'inbox', '--drain', '--json'] as c
  *  sent, or a post in one of its named channels (ADR-406 item 2). */
 export const WAKE_DRAIN_ARGV = [ATTEND, 'message', 'inbox', '--drain', '--json', '--wake'] as const
 export const UNREAD_ARGV = [ATTEND, 'message', 'unread', '--json'] as const
+/** Touches the session's heartbeat while it listens, and nothing else. The
+ *  drain touches it too, but runs only between turns and at the poll's
+ *  interval, which can be longer than attend's 90 s liveness grace. */
+export const BEAT_ARGV = [ATTEND, 'listen', 'beat'] as const
 export const PEERS_ARGV = [ATTEND, 'peer', 'list'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
 
