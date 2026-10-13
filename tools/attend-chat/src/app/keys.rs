@@ -13,7 +13,7 @@ use crate::legend::{
 };
 use crate::sessions::discover as discover_sessions;
 use crate::signal::{
-    compose_self_echo, compose_status_block, cwd_dir, encode_cwd, signals_base, write_broadcast,
+    broadcast_dir, compose_self_echo, compose_status_block, cwd_dir, encode_cwd, signals_base, write_broadcast,
     write_signal, Signal,
 };
 use crate::tabs::{self, Tab};
@@ -172,10 +172,28 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
             // explicit `#g` prefix — only the channel came from the
             // tab instead of the message text. The body is unchanged
             // (wire format carries no channel).
-            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet, &session_of, person)
+            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet, &session_of, person, None)
+        }
+    } else if let (Tab::Channel(channel), true) = (foreground, recipients.iter().all(|r| matches!(r, Addressed::Agent(_)))) {
+        // `@Name` while a channel is shown stays in that channel, addressed
+        // to the agents it names, which wakes them; the other members read
+        // it at their next turn. Only the operator view makes it a direct
+        // message (ADR-401, `to`).
+        let to = match resolve_recipients(&recipients, &agents, &quiet, &session_of) {
+            Ok(dests) => dests.into_iter().map(|(_, to)| to).next().unwrap_or_default(),
+            Err(refusal) => return EnterAction::StatusOnly(refusal),
+        };
+        let names = recipient_labels(&recipients).join(" ");
+        if channel == BASE_CHANNEL_NAME {
+            match write_signal(&broadcast_dir(), &msg, &to) {
+                Ok(_) => EnterAction::ClearWithStatus(format!("sent → #{BASE_CHANNEL_NAME} {names}")),
+                Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
+            }
+        } else {
+            send_to_recipients(&msg, &[Addressed::Group(channel)], &agents, &quiet, &session_of, person, Some(&to))
         }
     } else {
-        send_to_recipients(&msg, &recipients, &agents, &quiet, &session_of, person)
+        send_to_recipients(&msg, &recipients, &agents, &quiet, &session_of, person, None)
     }
 }
 
@@ -206,6 +224,7 @@ fn send_to_recipients(
     quiet: &[String],
     session_of: &dyn Fn(&KnownIdentity) -> Option<String>,
     person: Option<&str>,
+    addressed: Option<&str>,
 ) -> EnterAction {
     // A recipient that cannot read it refuses the send, in its own words.
     let dests = match resolve_recipients(recipients, agents, quiet, session_of) {
@@ -224,7 +243,8 @@ fn send_to_recipients(
             }
         }
     }
-    let sent = dests.iter().try_for_each(|(dir, to)| write_signal(dir, msg, to).map(|_| ())).map(|()| dests);
+    // A channel post that names agents carries their ids in `to`.
+    let sent = dests.iter().try_for_each(|(dir, to)| write_signal(dir, msg, addressed.unwrap_or(to)).map(|_| ())).map(|()| dests);
     match sent {
         Ok(dests) => {
             let mut status = format!("sent → {}", recipient_labels(recipients).join(" "));
@@ -771,7 +791,7 @@ fn purge_channel_in(
 /// `scope` is the channel an unaddressed message targets. An agent named
 /// in `quiet` ([`quiet_names`]) and a channel named in `swept`
 /// ([`swept_names`]) are marked: the send would be refused.
-pub fn destination_label(input: &str, scope: &str, quiet: &[String], swept: &[String]) -> Option<String> {
+pub fn destination_label(input: &str, scope: &str, in_channel: bool, quiet: &[String], swept: &[String]) -> Option<String> {
     if slash::parse(input).is_some() || slash::find_slash_partial(input).is_some() {
         return None;
     }
@@ -788,6 +808,10 @@ pub fn destination_label(input: &str, scope: &str, quiet: &[String], swept: &[St
             _ => label,
         })
         .collect();
+    // `@Name` while a channel is shown is a post in that channel.
+    if in_channel && recipients.iter().all(|r| matches!(r, Addressed::Agent(_))) {
+        return Some(format!("#{scope} {}", labels.join(" ")));
+    }
     Some(labels.join(" "))
 }
 
@@ -1513,7 +1537,7 @@ mod tests {
     #[test]
     fn destination_label_tracks_routing_live() {
         // Unaddressed → the scope channel.
-        let destination_label = |i: &str, s: &str| destination_label(i, s, &[], &[]);
+        let destination_label = |i: &str, s: &str| destination_label(i, s, false, &[], &[]);
         assert_eq!(destination_label("", "open"), Some("#open".into()));
         assert_eq!(destination_label("hello", "open"), Some("#open".into()));
         assert_eq!(destination_label("hello", "deploy"), Some("#deploy".into()));
@@ -1526,22 +1550,25 @@ mod tests {
         );
         // A mid-message mention doesn't address — scope still shown.
         assert_eq!(destination_label("hi @Tamsin", "open"), Some("#open".into()));
+        // `@Name` while a channel is shown posts in that channel, to them.
+        assert_eq!(super::destination_label("@Tamsin hi", "deploy", true, &[], &[]), Some("#deploy @Tamsin".into()));
+        assert_eq!(super::destination_label("@Tamsin hi", "open", true, &[], &[]), Some("#open @Tamsin".into()));
     }
 
     #[test]
     fn the_destination_flag_marks_a_quiet_agent() {
         let quiet = ["Lark".to_string()];
-        assert_eq!(destination_label("@lark hi", "open", &quiet, &[]), Some("@lark (quiet)".into()));
-        assert_eq!(destination_label("@Tamsin @Lark hi", "open", &quiet, &[]), Some("@Tamsin @Lark (quiet)".into()));
-        assert_eq!(destination_label("hi", "open", &quiet, &[]), Some("#open".into()));
+        assert_eq!(destination_label("@lark hi", "open", false, &quiet, &[]), Some("@lark (quiet)".into()));
+        assert_eq!(destination_label("@Tamsin @Lark hi", "open", false, &quiet, &[]), Some("@Tamsin @Lark (quiet)".into()));
+        assert_eq!(destination_label("hi", "open", false, &quiet, &[]), Some("#open".into()));
     }
 
     #[test]
     fn the_destination_flag_marks_a_swept_channel() {
         let swept = ["ghost".to_string()];
-        assert_eq!(destination_label("#ghost hi", "open", &[], &swept), Some("#ghost (swept)".into()));
-        assert_eq!(destination_label("#infra #ghost hi", "open", &[], &swept), Some("#infra #ghost (swept)".into()));
-        assert_eq!(destination_label("#ghostly hi", "open", &[], &swept), Some("#ghostly".into()), "the name, not a prefix of it");
+        assert_eq!(destination_label("#ghost hi", "open", false, &[], &swept), Some("#ghost (swept)".into()));
+        assert_eq!(destination_label("#infra #ghost hi", "open", false, &[], &swept), Some("#infra #ghost (swept)".into()));
+        assert_eq!(destination_label("#ghostly hi", "open", false, &[], &swept), Some("#ghostly".into()), "the name, not a prefix of it");
     }
 
     fn ident(name: &str, cwd: &str) -> KnownIdentity {
@@ -1569,7 +1596,7 @@ mod tests {
 
     #[test]
     fn destination_label_hides_while_composing_slash() {
-        let destination_label = |i: &str, s: &str| destination_label(i, s, &[], &[]);
+        let destination_label = |i: &str, s: &str| destination_label(i, s, false, &[], &[]);
         assert_eq!(destination_label("/", "open"), None);
         assert_eq!(destination_label("/jo", "open"), None);
         assert_eq!(destination_label("/join #deploy", "open"), None);

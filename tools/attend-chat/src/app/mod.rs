@@ -440,10 +440,12 @@ impl ChatPane {
         let what = match crate::slash::parse(&text) {
             Some((cmd, _)) => format!("dry run: /{cmd} not run"),
             None => {
-                let scope = tabs::send_scope(&self.normal_tab());
+                let shown = self.normal_tab();
+                let scope = tabs::send_scope(&shown);
                 let quiet = keys::quiet_names(&self.world().seen);
                 let swept = keys::swept_names(&self.world().rows);
-                let to = destination_label(&text, &scope, &quiet, &swept).unwrap_or(format!("#{scope}"));
+                let in_channel = matches!(shown, Tab::Channel(_));
+                let to = destination_label(&text, &scope, in_channel, &quiet, &swept).unwrap_or(format!("#{scope}"));
                 format!("dry run: not sent to {to}")
             }
         };

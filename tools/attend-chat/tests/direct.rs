@@ -60,7 +60,10 @@ fn the_person_tray_streams_into_the_chat() {
     }
     std::thread::sleep(Duration::from_millis(300));
     got.extend(rx.try_iter());
-    let bodies: Vec<(&str, &Channel)> = got.iter().map(|s| (s.message.as_str(), &s.channel)).collect();
+    // Other tests in this binary post to #open and the project tray at the
+    // same time; only person-tray signals are this test's.
+    let bodies: Vec<(&str, &Channel)> =
+        got.iter().filter(|s| s.message.contains("for you") || s.message.contains("not yours")).map(|s| (s.message.as_str(), &s.channel)).collect();
     assert_eq!(bodies, [("a reply for you", &Channel::Person)]);
 }
 
@@ -124,4 +127,34 @@ fn a_replaced_program_file_is_noticed() {
     assert!(attend_chat::app::updated_on_disk(&path, at));
     assert!(!attend_chat::app::updated_on_disk(&dir.join("gone"), at), "a missing file is no update");
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// `@Name` while a channel is shown posts in that channel, addressed to
+/// the session (PR #974 review, O2): `#open` here, which every member reads.
+/// The session's tray gets nothing.
+#[test]
+fn an_at_name_send_in_a_channel_view_stays_in_the_channel() {
+    base();
+    let nick = agent_identity::Identity::for_cwd(PEER_CWD, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    let tray = signal::cwd_dir(PEER_CWD);
+    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).heartbeat(false);
+    testkit::render_screen(&mut c, 80, 25);
+    testkit::drive(&mut c, &[KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT)]);
+    assert_eq!(c.foreground(), &Tab::Channel("open".into()));
+    let body = format!("@{nick} over to you");
+    let keys: Vec<KeyEvent> = body.chars().map(|ch| KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)).collect();
+    testkit::drive(&mut c, &keys);
+    testkit::render_screen(&mut c, 80, 25);
+    testkit::drive(&mut c, &[KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)]);
+    let open = signal::broadcast_dir();
+    let mine = std::fs::read_dir(&open)
+        .unwrap()
+        .flatten()
+        .map(|e| std::fs::read_to_string(e.path()).unwrap())
+        .find(|raw| raw.contains("over to you"))
+        .expect("the post is in #open");
+    let sig = agent_identity::parse_signal(agent_identity::wire_line(&mine)).unwrap();
+    assert_eq!(sig.to, Some(PEER_SID));
+    let in_tray = std::fs::read_dir(&tray).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|r| r.contains("over to you")));
+    assert!(!in_tray, "nothing went to the session's tray");
 }
