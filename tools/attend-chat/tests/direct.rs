@@ -106,3 +106,22 @@ fn an_at_name_send_is_a_direct_message_to_the_session() {
     assert_eq!((sig.to, sig.from_kind, sig.from_id), (Some(PEER_SID), Some("human"), Some("aaron")));
     assert_eq!(sig.message, format!("@{nick} are you there"));
 }
+
+/// An attend-chat left open across an update reads the new wire wrongly
+/// until it restarts, so it notices its own file changing.
+#[test]
+fn a_replaced_program_file_is_noticed() {
+    let dir = std::env::temp_dir().join(format!("attend-chat-binary-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("attend-chat");
+    std::fs::write(&path, "v1").unwrap();
+    let at = std::fs::metadata(&path).unwrap().modified().unwrap();
+    assert!(!attend_chat::app::updated_on_disk(&path, at));
+    std::fs::write(dir.join("next"), "v2").unwrap();
+    let f = std::fs::File::options().write(true).open(dir.join("next")).unwrap();
+    f.set_modified(at + Duration::from_secs(5)).unwrap();
+    std::fs::rename(dir.join("next"), &path).unwrap();
+    assert!(attend_chat::app::updated_on_disk(&path, at));
+    assert!(!attend_chat::app::updated_on_disk(&dir.join("gone"), at), "a missing file is no update");
+    std::fs::remove_dir_all(&dir).ok();
+}
