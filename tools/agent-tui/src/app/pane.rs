@@ -236,6 +236,9 @@ pub enum Open {
     Entry { id: String, title: String, value: String, error: Option<String>, anchor: Anchor },
     /// Quit, as Ctrl-C does: asking first over unsaved work.
     Quit,
+    /// Put `text` on the terminal's clipboard, by OSC 52. A terminal that
+    /// does not allow it ignores the sequence; nothing opens.
+    Copy { text: String },
 }
 
 /// How the shell routes a key beside a pane ([`Pane::keymap_ctx`]): which
@@ -247,8 +250,9 @@ pub struct Ctx {
     /// single keys (`?`, `q`, `m`, the digits) take their Alt form, and F1
     /// opens the key help.
     pub text: bool,
-    /// Beside no text, a plain digit shows a tab. A pane that owns the bar
-    /// types digits as text off it.
+    /// Beside no text, a plain digit is the shell's: it shows a tab, or
+    /// goes to [`Pane::jump`] for a pane that numbers its own list. A pane
+    /// that owns the bar types digits as text where it says no.
     pub digits: bool,
     /// The pane holds the keyboard focus itself, the tab bar's included:
     /// one focus owner. The shell then keeps no focus of its own on the
@@ -273,7 +277,9 @@ impl Default for Ctx {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Overlay {
     /// A menu or picker the pane opened ([`Open::Pick`]), by its id.
-    Menu { id: String },
+    /// `by_esc`: the pane opened it in answer to Esc, so a pane that cycles
+    /// on Esc knows that closing it moves the cycle on.
+    Menu { id: String, by_esc: bool },
     /// The entry dialog the pane opened ([`Open::Entry`]), by its id.
     Entry { id: String },
     /// A question on the bottom bar, the pane's ([`Open::Ask`]) or the
@@ -304,6 +310,20 @@ pub trait Pane: Any {
     /// Show tab `i`, from a click or Alt+digit. An index past the tabs
     /// does nothing.
     fn set_tab(&mut self, i: usize);
+
+    /// What the pane numbers in place of its tabs, in a word ("channel"),
+    /// for a pane whose own list carries the numbers: the tab bar then
+    /// draws none, and Ctrl+digit, Alt+digit and a plain digit the shell
+    /// takes ([`Ctx::digits`]) go to [`Pane::jump`]. `None`, the default,
+    /// numbers the tabs.
+    fn own_numbers(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Item `n` of the pane's own numbering ([`Pane::own_numbers`]): by
+    /// Ctrl or Alt with a digit (`menu`, which on the item already shown
+    /// may open its menu), or a plain digit. Nothing by default.
+    fn jump(&mut self, _n: usize, _menu: bool) {}
 
     /// Whether the pane's tabs have menus ([`Pane::tab_menu`]). Without
     /// them the shell offers no tab-bar focus (F2, Ctrl+T), no menu on a

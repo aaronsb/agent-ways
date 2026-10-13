@@ -46,6 +46,8 @@ pub(crate) struct Pick {
     pub(crate) pane: Option<(String, String)>,
     /// Where a pane's picker docks; `None` centres it.
     pub(crate) dock: Option<Dock>,
+    /// The pane opened it in answer to Esc ([`crate::Overlay::Menu`]).
+    pub(crate) by_esc: bool,
 }
 
 impl Pick {
@@ -61,7 +63,7 @@ impl Pick {
         let marked: Vec<bool> = options.iter().map(|o| held.contains(o)).collect();
         let sel = marked.iter().position(|m| *m).unwrap_or(0);
         let waits = vec![None; options.len()];
-        Pick { path, options, known, multi, sel, marked, waits, was: value.to_string(), pane: None, dock: None }
+        Pick { path, options, known, multi, sel, marked, waits, was: value.to_string(), pane: None, dock: None, by_esc: false }
     }
 
     /// A picker a pane opened over `items`, the current ones marked, the
@@ -76,7 +78,7 @@ impl Pick {
         let open = |i: &usize| waits[*i].is_none();
         let sel = (0..options.len()).find(|i| marked[*i]).or_else(|| (0..options.len()).find(open)).unwrap_or(0);
         let known = options.len();
-        Pick { path: Vec::new(), options, known, multi, sel, marked, waits, was: String::new(), pane: Some((id, title)), dock: None }
+        Pick { path: Vec::new(), options, known, multi, sel, marked, waits, was: String::new(), pane: Some((id, title)), dock: None, by_esc: false }
     }
 
     /// Whether option `i` can be picked.
