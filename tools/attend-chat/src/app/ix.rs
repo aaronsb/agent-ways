@@ -1,9 +1,9 @@
 //! The chat's interaction state as one value, and the one function that
 //! moves it (ADR-407 §Interaction state).
 //!
-//! [`Ix`] is where the keyboard is ([`Focus`]), the tab the walk along the
-//! tab bar is previewing over, the column row the focus is on, and the
-//! stack of overlays the shell holds open over the pane. Nothing else
+//! [`Ix`] is where the keyboard is ([`Focus`]), the column row the focus is
+//! on, the last tab or row the focus was on, and the stack of overlays the
+//! shell holds open over the pane. Nothing else
 //! writes it: every input that can move it reaches [`step`] as an [`Ev`],
 //! with a [`View`] of what the screen lays out, and gets back the next `Ix`
 //! and the [`Effect`]s to carry out, in order. `step` is pure, so each cell
@@ -18,10 +18,11 @@
 //!
 //! The rules are those of [`super::focus`]: in the compose box every key
 //! edits but for the ways out; outside it the keys walk the ring, a
-//! character goes back to the box and is typed there, and Esc goes back to
-//! the box. The walk along the tab bar shows each tab it lands on as a
-//! preview: leaving the bar puts back the tab shown before
-//! ([`Ix::preview_from`]), unless Enter, a digit or a click chose one.
+//! character goes back to the box and is typed there, and Esc moves along
+//! the Esc cycle: the box, the feed, the `≡` menu, the last tab or column
+//! row the focus was on, the `≡` menu again. Walking the tab bar shows
+//! nothing: Enter opens the focused tab's menu, and the column's numbers
+//! show a channel.
 //!
 //! The world (the channels, the agents) is read lazily, as the chat always
 //! has: a `View` carries it only when it is already read. A step that needs
@@ -41,13 +42,12 @@ use crate::tabs::{Slot, Tab};
 pub(super) struct Ix {
     /// Where the keyboard is.
     focus: Focus,
-    /// The tab shown when the focus walked onto the tab bar, put back when
-    /// it walks off without choosing. Never set while the focus is off the
-    /// bar.
-    preview_from: Option<Tab>,
     /// The column row the focus is on, while it is on one: a refresh that
     /// moves the row keeps the focus on it.
     row_hit: Option<SideHit>,
+    /// The last tab or column row the focus was on, and the row's hit: where
+    /// the Esc cycle comes back to when the `≡` menu Esc opened closes.
+    last_nav: Option<(Focus, Option<SideHit>)>,
     /// What the shell holds open over the pane, bottom first, as it
     /// reported each opening and closing: the pane's menus by their ids,
     /// its entry dialog and its questions, the key help, the exit guard.
@@ -71,6 +71,12 @@ impl Ix {
         self.focus == Focus::Compose
     }
 
+    /// The chat is the compose box and the feed: there every plain key is
+    /// text, and the feed hands it to the box.
+    pub(super) fn in_chat(&self) -> bool {
+        matches!(self.focus, Focus::Compose | Focus::Feed)
+    }
+
     /// An overlay of the shell's holds the keyboard over the pane.
     pub(super) fn overlaid(&self) -> bool {
         !self.overlays.is_empty()
@@ -88,13 +94,14 @@ impl Ix {
         }
     }
 
-    /// How the shell routes a key beside the chat, against `bar`, the tab
-    /// bar as the world laid it out: the compose box types while it has the
-    /// focus, a plain digit shows a tab while the focus is on a slot `bar`
-    /// draws, the chat owns the bar's focus, and Esc never quits (ADR-409).
-    pub(super) fn ctx(&self, bar: &[Slot]) -> Ctx {
-        let digits = matches!(&self.focus, Focus::Tab(slot) if bar.contains(slot));
-        Ctx { text: self.owns_text(), digits, owns_bar: true, esc_quits: false }
+    /// How the shell routes a key beside the chat: the compose box and the
+    /// feed take every plain key as text, so `q`, `m`, `?` and the digits
+    /// are the shell's only on the tab bar and the column; a plain digit is
+    /// the column's number only while the focus is on a column row; the
+    /// chat owns the bar's focus, and Esc never quits (ADR-409).
+    pub(super) fn ctx(&self) -> Ctx {
+        let digits = matches!(self.focus, Focus::Row(_));
+        Ctx { text: self.in_chat(), digits, owns_bar: true, esc_quits: false }
     }
 }
 
@@ -137,10 +144,17 @@ pub(super) enum Ev {
     Click(Click),
     /// A paste: the text goes into the compose box, and the focus with it.
     Paste,
+    /// A menu item put text in the compose box, or pointed a reply there:
+    /// the focus goes to the box.
+    Compose,
     /// F2 or Ctrl+T: the focus to the tab shown, or from the bar to the box.
     ToggleBar,
-    /// A tab's digit: the bar's slot `i` is shown (`Pane::set_tab`).
+    /// The bar's slot `i` is shown (`Pane::set_tab`).
     Jump(usize),
+    /// The column's channel `n`, counted from 1, or with 0 the operator
+    /// view: Ctrl+digit or Alt+digit (`menu`), or a plain digit on a column
+    /// row (`Pane::jump`).
+    Numbered { n: usize, menu: bool },
     /// The bar's slot `i` activated: Ctrl+digit, a click on it, a right click
     /// (`menu`) (`Pane::activate_tab`).
     TabActivated { i: usize, menu: bool },
@@ -175,20 +189,18 @@ pub(super) enum Effect {
     Caret { up: bool },
     /// Enter in the box: send, or run the command.
     Send,
-    /// Tab in the box: complete, or on an empty line show the next tab.
+    /// Tab in the box on a word to complete: complete it.
     Complete,
     /// Esc in the box: the message selected and the status cleared.
     Clear,
     Page { up: bool },
     /// Show this tab.
     ShowTab(Tab),
-    /// Put back the tab shown before the walk along the bar.
-    RestoreTab(Tab),
     /// The column's list keeps its cursor in view again.
     Follow,
     /// The one activation path; a menu docks under the bar's slot when given.
     Activate { target: Target, how: How, under_tab: Option<usize> },
-    /// Enter on the feed: the selected message's sender's menu.
+    /// Enter on the feed: the selected message's menu.
     FeedMenu,
     /// Select the feed's message `i` and bring it into view.
     Reveal(usize),
@@ -206,6 +218,9 @@ pub(super) struct View {
     /// Whether the last frame drew the column.
     pub(super) side_drawn: bool,
     pub(super) draft_empty: bool,
+    /// The caret ends a word Tab completes: a command, a subcommand, an
+    /// `@agent` or a `#channel`, or the completion Tab last made.
+    pub(super) completable: bool,
     /// The caret at the start, or the end, of the draft: ↑ or ↓ has nowhere
     /// left to go in the text.
     pub(super) caret_start: bool,
@@ -219,7 +234,7 @@ pub(super) struct View {
 /// The tab bar and the column as the world lays them out.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct Laid {
-    /// The bar's slots in order ([`crate::tabs::bar`]).
+    /// The bar's slots in order ([`crate::tabs::bar`]), for the tab shown.
     pub(super) bar: Vec<Slot>,
     /// The column's rows, agents then channels, drawn or not.
     pub(super) rows: Vec<SideHit>,
@@ -263,14 +278,13 @@ impl<'a> Step<'a> {
                 }
                 Ok(())
             }
-            Ev::Paste => self.go(Focus::Compose),
+            Ev::Paste | Ev::Compose => self.go(Focus::Compose),
             Ev::ToggleBar if self.ix.on_bar() => self.go(Focus::Compose),
             Ev::ToggleBar => {
                 let shown = self.world()?.shown.clone();
                 self.go(Focus::Tab(Slot::Tab(shown)))
             }
             Ev::Jump(i) => {
-                self.ix.preview_from = None;
                 if let Some(slot @ Slot::Tab(_)) = self.world()?.bar.get(i).cloned() {
                     self.follow_on_bar(&slot);
                     if let Slot::Tab(t) = slot {
@@ -279,8 +293,8 @@ impl<'a> Step<'a> {
                 }
                 Ok(())
             }
+            Ev::Numbered { n, menu } => self.numbered(n, menu),
             Ev::TabActivated { i, menu } => {
-                self.ix.preview_from = None;
                 if let Some(slot) = self.world()?.bar.get(i).cloned() {
                     self.follow_on_bar(&slot);
                     let how = if menu { How::Menu } else { How::Select { repeat: self.v.menu_on_repeat } };
@@ -309,43 +323,32 @@ impl<'a> Step<'a> {
                         self.fx.push(Effect::Redraw);
                     }
                 }
+                // The `≡` menu Esc opened closed with the focus still on
+                // `≡`: the cycle moves on, to where the focus was.
+                if matches!(o, Overlay::Menu { by_esc: true, .. }) && self.ix.focus == Focus::Tab(Slot::Common) {
+                    return self.esc_back();
+                }
                 Ok(())
             }
         }
     }
 
     /// The focus is `f`, and nothing else is done: what is no longer true
-    /// of the state goes with the old focus.
+    /// of the state goes with the old focus. A tab is remembered for the
+    /// Esc cycle.
     fn set(&mut self, f: Focus) {
-        if !matches!(f, Focus::Tab(_)) {
-            self.ix.preview_from = None;
-        }
         if !matches!(f, Focus::Row(_)) {
             self.ix.row_hit = None;
+        }
+        if matches!(f, Focus::Tab(_)) {
+            self.ix.last_nav = Some((f.clone(), None));
         }
         self.ix.focus = f;
     }
 
-    /// Put the focus on `f`. Landing on a tab shows it, as moving along the
-    /// tab bar always has; a slot (`≡`, `+`) is only pointed at. What the
-    /// walk shows is a preview: leaving the bar for the column, the feed or
-    /// the box puts back the tab shown before, so the draft's destination
-    /// does not change on its way past.
+    /// Put the focus on `f`. Walking onto a tab shows nothing: the tab bar
+    /// holds the tab shown, and Enter opens a tab's menu.
     fn go(&mut self, f: Focus) -> R {
-        let on_bar = self.ix.on_bar();
-        match (&f, on_bar) {
-            (Focus::Tab(_), false) => self.ix.preview_from = Some(self.world()?.shown.clone()),
-            (Focus::Tab(_), true) => {}
-            (_, true) => {
-                if let Some(t) = self.ix.preview_from.take() {
-                    self.fx.push(Effect::RestoreTab(t));
-                }
-            }
-            (_, false) => {}
-        }
-        if let Focus::Tab(Slot::Tab(t)) = &f {
-            self.fx.push(Effect::ShowTab(t.clone()));
-        }
         match f {
             Focus::Row(i) => self.focus_at(i)?,
             f => self.set(f),
@@ -355,11 +358,68 @@ impl<'a> Step<'a> {
     }
 
     /// The focus on row `i`, and the list it is in where the cursor shows.
+    /// The row is remembered for the Esc cycle.
     fn focus_at(&mut self, i: usize) -> R {
         let hit = self.world()?.rows.get(i).cloned();
         self.set(Focus::Row(i));
+        self.ix.last_nav = Some((Focus::Row(i), hit.clone()));
         self.ix.row_hit = hit;
         self.fx.push(Effect::Follow);
+        Ok(())
+    }
+
+    /// Esc outside the compose box: the `≡` menu opens, docked under `≡`,
+    /// and the focus is on `≡` while it is open. The tab or row the focus
+    /// was on stays remembered, so the next Esc comes back to it
+    /// ([`Step::esc_back`]).
+    fn esc_menu(&mut self) -> R {
+        let at = self.world()?.bar.iter().position(|s| *s == Slot::Common);
+        self.ix.row_hit = None;
+        self.ix.focus = Focus::Tab(Slot::Common);
+        self.fx.push(Effect::Activate { target: Target::Common, how: How::Menu, under_tab: at });
+        self.fx.push(Effect::Redraw);
+        Ok(())
+    }
+
+    /// The `≡` menu Esc opened closed: the focus goes back to the tab or
+    /// column row it was last on, while that is still drawn, else to the
+    /// feed.
+    fn esc_back(&mut self) -> R {
+        let w = self.world()?;
+        let back = match self.ix.last_nav.clone() {
+            Some((Focus::Tab(slot), _)) if w.bar.contains(&slot) => Some(Focus::Tab(slot)),
+            Some((Focus::Row(i), hit)) if self.v.side_drawn => {
+                let at = hit.and_then(|h| w.rows.iter().position(|r| *r == h));
+                at.or((i < w.rows.len()).then_some(i)).map(Focus::Row)
+            }
+            _ => None,
+        };
+        self.go(back.unwrap_or(Focus::Feed))
+    }
+
+    /// The column's channel `n`, or with 0 the operator view, chosen as a
+    /// click on its row chooses: shown, and with `menu` (Ctrl or Alt) on the
+    /// one already shown its menu, as `attend.chat.tabs.menu_on_repeat`
+    /// allows. With the focus on a column row it moves to the row chosen.
+    fn numbered(&mut self, n: usize, menu: bool) -> R {
+        let target = match n {
+            0 => Target::Merged,
+            n => {
+                let w = self.world()?;
+                let mut channels = w.rows.iter().enumerate().filter_map(|(i, h)| match h {
+                    SideHit::Channel(c) => Some((i, c.clone())),
+                    SideHit::Agent(_) => None,
+                });
+                let Some((i, name)) = channels.nth(n - 1) else { return Ok(()) };
+                if self.ix.side_focus().is_some() {
+                    self.focus_at(i)?;
+                }
+                Target::Channel(name)
+            }
+        };
+        let how = How::Select { repeat: menu && self.v.menu_on_repeat };
+        self.fx.push(Effect::Activate { target, how, under_tab: None });
+        self.fx.push(Effect::Redraw);
         Ok(())
     }
 
@@ -394,20 +454,21 @@ impl<'a> Step<'a> {
     }
 
     /// A key while the compose box has the focus: every key edits, but for
-    /// the ways out. Shift+Tab leaves backward. ↑ at the very top and ↓ at
-    /// the very end leave a box that holds text; in an empty box they do
-    /// nothing, and Esc leaves an empty box instead (ADR-409).
+    /// the ways out. Tab completes a word that can be completed and
+    /// otherwise leaves forward, as Shift+Tab leaves backward. ↑ at the very
+    /// top and ↓ at the very end leave a box that holds text; in an empty
+    /// box they do nothing (ADR-409). Esc goes to the feed, the draft kept:
+    /// the first step of the Esc cycle.
     fn compose_key(&mut self, k: KeyEvent) -> R {
         let v = self.v;
         match k.code {
             KeyCode::Esc => {
                 self.fx.push(Effect::Clear);
-                if v.draft_empty {
-                    return self.walk(false);
-                }
+                return self.go(Focus::Feed);
             }
             KeyCode::Enter if !k.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.fx.push(Effect::Send),
-            KeyCode::Tab => self.fx.push(Effect::Complete),
+            KeyCode::Tab if v.completable => self.fx.push(Effect::Complete),
+            KeyCode::Tab => return self.walk(true),
             KeyCode::BackTab => return self.walk(false),
             KeyCode::Up if !v.caret_start => self.fx.push(Effect::Caret { up: true }),
             KeyCode::Up if !v.draft_empty => return self.walk(false),
@@ -431,8 +492,7 @@ impl<'a> Step<'a> {
             KeyCode::Down => self.vertical(true),
             KeyCode::Home | KeyCode::End => self.end(k.code == KeyCode::End),
             KeyCode::Enter => self.activate(),
-            // Esc cancels: off the bar it puts back the tab shown before.
-            KeyCode::Esc => self.go(Focus::Compose),
+            KeyCode::Esc => self.esc_menu(),
             KeyCode::PageUp => {
                 self.fx.push(Effect::Page { up: true });
                 Ok(())
@@ -536,13 +596,11 @@ impl<'a> Step<'a> {
     }
 
     /// Enter outside the compose box: the focused element's menu, the one a
-    /// click (or a right click) on it opens, through the one activation
-    /// path. Enter on the bar keeps the tab shown, and its menu docks under
-    /// its slot.
+    /// right click on it opens, through the one activation path; on the
+    /// feed, the selected message's menu. A tab's menu docks under its slot.
     fn activate(&mut self) -> R {
         match self.ix.focus.clone() {
             Focus::Tab(slot) => {
-                self.ix.preview_from = None;
                 if let Some(i) = self.world()?.bar.iter().position(|s| *s == slot) {
                     self.fx.push(Effect::Activate { target: Target::of_slot(&slot), how: How::Menu, under_tab: Some(i) });
                 }
@@ -559,7 +617,7 @@ impl<'a> Step<'a> {
     }
 
     /// A left click in the pane. The keyboard goes back to the compose box,
-    /// the walk's preview kept as chosen, but for a click on the column
+    /// but for a click on the column
     /// while it has the focus and one on the feed while the feed has it. A
     /// click on a column row puts the keyboard on that row, from wherever it
     /// was, so ↑, ↓ and Enter go on from the row clicked, and selects it

@@ -29,6 +29,11 @@
 //!   quiet. The operator's own row offers Leave #channel there instead:
 //!   Remove never takes out the human at the keyboard, here or in the
 //!   Remove agent picker.
+//! - a message in the feed, by Enter on it: Reply (its channel shown and
+//!   the keyboard in the compose box; a direct message is answered by
+//!   addressing its sender), Quote (its lines put in the box as `> `
+//!   lines), Address @Name (as the agent menu's), Copy (the message to the
+//!   terminal's clipboard by OSC 52).
 //!
 //! Every item that drops something asks first: Clear view, Clear history,
 //! Leave, Delete channel and Remove. The question is the shell's
@@ -85,6 +90,9 @@ pub(super) const REMOVE_FROM: &str = "Remove from";
 pub(super) const SHOW_COLUMN: &str = "Show column";
 pub(super) const QUIT: &str = "Quit";
 pub(super) const ADD_TO_CHAT: &str = "Add agent to chat ▸";
+pub(super) const REPLY: &str = "Reply";
+pub(super) const QUOTE: &str = "Quote";
+pub(super) const COPY: &str = "Copy";
 
 /// The entry dialogs' ids: a new channel's name, and a channel's line.
 const NEW_CHANNEL: &str = "new-channel";
@@ -225,6 +233,28 @@ pub(super) fn items(channel: Option<&str>, joined: bool) -> Vec<Item> {
             DELETE.into(),
         ],
     }
+}
+
+/// The items of a message's menu: reply where it was said, quote it,
+/// address its sender `name`, copy it. A local notice has no channel to
+/// reply in, and a message with no sender the column knows has no one to
+/// address.
+pub(super) fn message_items(name: Option<&str>, notice: bool) -> Vec<Item> {
+    vec![
+        if notice { Item::disabled(REPLY, "a notice of the chat's") } else { Item::new(REPLY) },
+        Item::new(QUOTE),
+        match name {
+            Some(n) => Item::new(format!("{ADDRESS} @{n}")),
+            None => Item::disabled(ADDRESS, "no sender to address"),
+        },
+        Item::new(COPY),
+    ]
+}
+
+/// A message's lines as a quote in the compose box: each led by `> `,
+/// then a line to write on.
+pub(super) fn quoted(message: &str) -> String {
+    message.lines().map(|l| format!("> {l}\n")).collect()
 }
 
 /// The labels of `items`, in order.
@@ -385,6 +415,9 @@ impl ChatPane {
         if let Some(member) = id.strip_prefix("agent:") {
             return self.agent_item(member, value);
         }
+        if let Some(i) = id.strip_prefix("message:").and_then(|i| i.parse().ok()) {
+            return self.message_item(i, value);
+        }
         if id == NEW_CHANNEL {
             return self.new_channel_named(value);
         }
@@ -434,6 +467,64 @@ impl ChatPane {
         self.removable = removable(listed.map(|(_, m)| m).into_iter().collect(), &me);
         let anchor = at.or_else(|| self.side_row(&super::sidebar::SideHit::Agent(member.clone()))).map_or(Anchor::Center, Anchor::Row);
         self.to_open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
+    }
+
+    /// The feed's message `i` and the nickname of its sender, as the column
+    /// knows it.
+    fn feed_message(&mut self, i: usize) -> Option<(crate::signal::Signal, Option<String>)> {
+        let shown = self.normal_tab();
+        let sig = self.signals.iter().filter(|s| tabs::visible_in(&s.channel, &shown)).nth(i).cloned()?;
+        let member = self.entry_members.get(i).cloned().flatten();
+        let name = member.and_then(|m| self.seen_member(&m)).map(|s| s.identity.nickname);
+        Some((sig, name))
+    }
+
+    /// Enter on the feed: the selected message's menu, docked under its
+    /// header. With no message selected, the newest is selected first.
+    pub(super) fn message_menu(&mut self) {
+        let n = self.feed.len();
+        let Some(i) = self.feed.selected.or(n.checked_sub(1)) else {
+            return self.say("no message to act on", false);
+        };
+        self.feed.reveal(i);
+        let Some((sig, name)) = self.feed_message(i) else { return };
+        let feed = self.hits.feed;
+        let anchor = self.feed.header_row(i).map_or(Anchor::Center, |r| Anchor::Row(Rect { x: feed.x, y: feed.y + r, width: feed.width, height: 1 }));
+        let title = name.as_ref().map_or("message".to_string(), |n| format!("message from @{n}"));
+        let items = message_items(name.as_deref(), sig.channel == crate::signal::Channel::Info);
+        self.to_open = Some(Open::Pick { id: format!("message:{i}"), title, items, multi: false, anchor });
+    }
+
+    /// An item of message `i`'s menu.
+    fn message_item(&mut self, i: usize, item: &str) {
+        let Some((sig, name)) = self.feed_message(i) else {
+            return self.say("that message is not in the feed any more", true);
+        };
+        let address = |c: &mut ChatPane, n: &str| c.complete(super::Chip::Agent(n.to_string()));
+        match item {
+            REPLY => match (&sig.channel, name.as_deref()) {
+                (crate::signal::Channel::Group(g), _) => self.set_tab(Tab::Channel(g.clone())),
+                (crate::signal::Channel::Open, _) => self.set_tab(Tab::Channel(BASE_CHANNEL_NAME.into())),
+                (crate::signal::Channel::Direct, Some(n)) => address(self, n),
+                _ => return self.say("no channel to reply in", true),
+            },
+            QUOTE => {
+                self.input.insert_str(&quoted(&sig.message));
+                self.tab_cycle = None;
+            }
+            COPY => {
+                self.to_open = Some(Open::Copy { text: sig.message.clone() });
+                return self.say("copied to the clipboard, where the terminal allows OSC 52", false);
+            }
+            _ if item.starts_with(ADDRESS) => match name {
+                Some(n) => address(self, &n),
+                None => return,
+            },
+            _ => return,
+        }
+        // What the item put in the box, or where it points the reply, is
+        // written next: the keyboard goes to the box.
+        self.dispatch(super::ix::Ev::Compose);
     }
 
     fn agent_item(&mut self, member: &str, item: &str) {
@@ -572,7 +663,7 @@ impl ChatPane {
 
     /// Where the new channel's dialog docks: under the `+` slot.
     fn plus_anchor(&mut self) -> Anchor {
-        tabs::bar(&self.strip_names()).iter().position(|s| *s == Slot::New).map_or(Anchor::Center, Anchor::Tab)
+        self.bar().iter().position(|s| *s == Slot::New).map_or(Anchor::Center, Anchor::Tab)
     }
 
     /// Ask for a new channel's name, from the `+` slot or Ctrl+N, in an

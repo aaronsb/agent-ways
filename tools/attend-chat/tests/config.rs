@@ -42,13 +42,13 @@ fn config_lists_sets_refuses_and_applies_at_once() {
         c.status(),
         "tabs.jump = auto (default) · tabs.menu_on_repeat = true (default) · tabs.focus_key = both (default) · mouse = true (default) · sidebar_key = f3 (default) · /config <key> <value> sets one"
     );
-    assert!(bar(&mut c).contains("Ctrl+0-9 tab (again: menu)"), "{}", bar(&mut c));
+    assert!(bar(&mut c).contains("Ctrl+0-9 channel (again: menu)"), "{}", bar(&mut c));
 
     enter(&mut c, "/config tabs.jump alt");
     assert_eq!(c.status(), "tabs.jump = alt");
     let file = std::fs::read_to_string(attend_config::user_path()).unwrap();
     assert!(file.contains("chat:\n  tabs:\n    jump: alt\n"), "{file}");
-    assert!(bar(&mut c).contains("Alt+0-9 tab (again: menu)"), "applied at once: {}", bar(&mut c));
+    assert!(bar(&mut c).contains("Alt+0-9 channel (again: menu)"), "applied at once: {}", bar(&mut c));
     enter(&mut c, "/config");
     assert!(c.status().starts_with("tabs.jump = alt (user)"), "{}", c.status());
 
@@ -78,7 +78,7 @@ fn config_lists_sets_refuses_and_applies_at_once() {
     assert!(!b.contains("Ctrl+0-9") && b.contains("F2 tabs"), "{b}");
     enter(&mut c, "/config tabs.jump both");
     assert!(c.status().ends_with("Alt+1-9 and F2 do"), "{}", c.status());
-    assert!(bar(&mut c).contains("Alt+0-9 tab (again: menu)"));
+    assert!(bar(&mut c).contains("Alt+0-9 channel (again: menu)"));
 
     // The ≡ menu's keybinding set writes its keys in one go. jump=both
     // matches no preset, so the cursor starts on the custom row: Down to

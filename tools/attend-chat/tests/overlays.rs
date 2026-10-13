@@ -100,10 +100,11 @@ fn feed(c: &mut Chat) -> (u16, u16) {
     (50, 10)
 }
 
-/// A step that asks first, and how it is reached: the tab whose menu offers
-/// it (Ctrl+digit twice, or two clicks on the tab), the item, what its
-/// question says, its answers, and what yes runs. An item that opens a
-/// picker (Remove agent) asks once its first entry is picked.
+/// A step that asks first, and how it is reached: the channel whose menu
+/// offers it (the column's number with Ctrl twice, or a click that shows it
+/// and one on its tab), the item, what its question says, its answers, and
+/// what yes runs. An item that opens a picker (Remove agent) asks once its
+/// first entry is picked.
 struct Step {
     key: char,
     tab: &'static str,
@@ -117,9 +118,9 @@ struct Step {
 const STEPS: &[Step] = &[
     Step { key: '0', tab: "⋯all", item: "Clear view", question: "clear the view?", yes: " y clear ", no: " n keep ", ran: "dry run: /clear not run" },
     Step { key: '-', tab: "#open", item: "Clear history", question: "clear #open history?", yes: " y clear ", no: " n keep ", ran: "dry run: /purge not run" },
-    Step { key: '1', tab: "1 #deploy", item: "Leave", question: "leave #deploy?", yes: " y leave ", no: " n stay ", ran: "dry run: /leave not run" },
-    Step { key: '1', tab: "1 #deploy", item: "Delete channel", question: "delete #deploy and its history?", yes: " y delete ", no: " n keep ", ran: "dry run: /dissolve not run" },
-    Step { key: '1', tab: "1 #deploy", item: "Remove agent", question: "from #deploy?", yes: " y remove ", no: " n keep ", ran: "dry run: /kick not run" },
+    Step { key: '2', tab: "#deploy", item: "Leave", question: "leave #deploy?", yes: " y leave ", no: " n stay ", ran: "dry run: /leave not run" },
+    Step { key: '2', tab: "#deploy", item: "Delete channel", question: "delete #deploy and its history?", yes: " y delete ", no: " n keep ", ran: "dry run: /dissolve not run" },
+    Step { key: '2', tab: "#deploy", item: "Remove agent", question: "from #deploy?", yes: " y remove ", no: " n keep ", ran: "dry run: /kick not run" },
 ];
 
 /// The row of the open menu's title, if a menu is open.
@@ -128,11 +129,10 @@ fn menu_title(c: &mut Chat) -> Option<(usize, usize)> {
 }
 
 /// Open `tab`'s menu by Ctrl+digit and pick `item` by the keyboard; a
-/// picker it opens gets Enter on its first entry. `#open` has no digit
-/// (`-`): F2, ← along the bar to it, and Enter.
+/// picker it opens gets Enter on its first entry. For `#open` (`-`): F2,
+/// ← along the bar to its tab, and Enter.
 fn ask_by_keys(c: &mut Chat, tab: char, item: &str) {
     if tab == '-' {
-        key(c, KeyCode::Esc);
         key(c, KeyCode::F(2));
         for _ in 0..8 {
             if rows(c)[0].contains("▸#open") {
@@ -164,9 +164,14 @@ fn ask_by_keys(c: &mut Chat, tab: char, item: &str) {
     }
 }
 
-/// Open `tab`'s menu by clicks on its tab and pick `item` by a click; a
-/// picker it opens gets a click on its first entry.
+/// Open `tab`'s menu by clicks and pick `item` by a click; a picker it
+/// opens gets a click on its first entry. A channel with no tab on the bar
+/// is shown first by a click on its row in the column.
 fn ask_by_clicks(c: &mut Chat, tab: &str, item: &str) {
+    if !rows(c)[0].contains(tab) {
+        let r = row_of(c, tab);
+        click(c, r);
+    }
     let t = at(c, tab);
     click(c, t);
     if !menu_open(c) {
@@ -296,10 +301,11 @@ fn a_click_on_a_menus_own_anchor_only_closes_it() {
     assert!(!menu_open(&mut c), "a click on the row closes the menu and opens it no more");
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
 
-    let tab = at(&mut c, "1 #deploy");
+    // #infra is shown: a click on its tab opens its menu under the tab.
+    let tab = at(&mut c, "#infra");
+    assert_eq!(tab.1, 0, "the tab, on the bar");
     click(&mut c, tab);
-    click(&mut c, tab);
-    assert!(menu_open(&mut c), "the second click opens #deploy's menu under its tab");
+    assert!(menu_open(&mut c), "a click on the tab shown opens #infra's menu under its tab");
     click(&mut c, tab);
     assert!(!menu_open(&mut c), "a click on the tab closes the menu and opens it no more");
 }
@@ -325,14 +331,14 @@ fn a_right_click_in_the_feed_gives_a_lent_compose_box_back() {
 #[test]
 fn a_menu_closed_by_esc_or_a_click_outside_says_nothing() {
     let mut c = chat();
-    ask_by_keys(&mut c, '1', "Leave");
+    ask_by_keys(&mut c, '2', "Leave");
     key(&mut c, KeyCode::Esc);
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     assert!(menu_open(&mut c));
     key(&mut c, KeyCode::Esc);
     assert!(!menu_open(&mut c));
     assert!(!bar(&mut c).contains("unchanged"), "{}", bar(&mut c));
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     let f = feed(&mut c);
     click(&mut c, f);
     assert!(!menu_open(&mut c));
@@ -376,9 +382,9 @@ fn with_a_menu_open_a_right_click_on_a_tab_opens_that_tabs_menu() {
     let infra = row_of(&mut c, "#infra");
     click(&mut c, infra);
     click(&mut c, infra);
-    let tab = at(&mut c, "1 #deploy");
+    let tab = at(&mut c, "#open");
     button(&mut c, tab, MouseButton::Right);
-    assert!(rows(&mut c).iter().any(|r| r.contains("pick one: #deploy")), "{:#?}", rows(&mut c));
+    assert!(rows(&mut c).iter().any(|r| r.contains("pick one: #open")), "{:#?}", rows(&mut c));
 }
 
 /// Elsewhere, a click outside a menu only closes it.
@@ -414,10 +420,10 @@ fn with_the_key_help_open_a_click_on_a_tab_closes_it_and_acts() {
     let mut c = chat();
     key(&mut c, KeyCode::F(1));
     assert!(rows(&mut c).iter().any(|r| r.contains("any other key closes")));
-    let tab = at(&mut c, "1 #deploy");
+    let tab = at(&mut c, "#open");
     click(&mut c, tab);
     assert!(!rows(&mut c).iter().any(|r| r.contains("any other key closes")));
-    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    assert_eq!(c.foreground(), &Tab::Channel("open".into()));
 }
 
 /// The new channel's dialog closes on a click outside it, saying nothing;
@@ -452,10 +458,10 @@ fn a_click_on_a_tab_closes_the_entry_dialog_and_shows_the_tab() {
     let mut c = chat();
     press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
     key(&mut c, KeyCode::Char('x'));
-    let tab = at(&mut c, "1 #deploy");
+    let tab = at(&mut c, "#open");
     click(&mut c, tab);
     assert!(!dialog(&mut c), "{:#?}", rows(&mut c));
-    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    assert_eq!(c.foreground(), &Tab::Channel("open".into()));
     assert_eq!(c.input().text(), "", "nothing reached the compose box");
 }
 
@@ -540,8 +546,9 @@ fn the_description_dialog_names_its_channel() {
 }
 
 /// Finding 3 of the audit: click `+`, click the #infra row, Esc, type
-/// `abc`, Enter. The row's click gives the box back, Esc quits nothing,
-/// and `abc` goes to #infra; no channel #abc is made.
+/// `abc`, Enter. The row's click closes the dialog and takes the keyboard,
+/// Esc opens the `≡` menu and Esc again closes it (the Esc cycle), nothing
+/// quits, and `abc` goes to #infra; no channel #abc is made.
 #[test]
 fn a_click_on_a_row_then_esc_never_makes_a_channel_of_a_message() {
     let mut c = chat();
@@ -550,23 +557,26 @@ fn a_click_on_a_row_then_esc_never_makes_a_channel_of_a_message() {
     let infra = row_of(&mut c, "#infra");
     click(&mut c, infra);
     assert!(key(&mut c, KeyCode::Esc), "Esc does not end the chat");
+    assert!(rows(&mut c).iter().any(|r| r.contains("pick one: attend-chat")), "the ≡ menu: {:#?}", rows(&mut c));
+    assert!(key(&mut c, KeyCode::Esc));
+    assert!(!menu_open(&mut c));
     typed(&mut c, "abc");
     assert!(compose(&mut c)[0].contains("> abc") && !compose(&mut c)[0].contains("new channel"), "{:#?}", compose(&mut c));
     key(&mut c, KeyCode::Enter);
     assert_eq!(c.status(), "dry run: not sent to #infra", "a message, not a channel");
 }
 
-/// The dialog holds the keyboard while it is open: Ctrl+1 types nothing
-/// and opens nothing in it. After Esc, the tab key acts and `abc` then
-/// Enter is a message to #deploy, never a channel.
+/// The dialog holds the keyboard while it is open: Ctrl+2 types nothing
+/// and opens nothing in it. After Esc, the channel's key acts and `abc`
+/// then Enter is a message to #deploy, never a channel.
 #[test]
 fn the_entry_dialog_holds_the_keys_until_it_closes() {
     let mut c = chat();
     press(&mut c, KeyCode::Char('n'), KeyModifiers::CONTROL);
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     assert!(dialog(&mut c) && !menu_open(&mut c), "{:#?}", rows(&mut c));
     key(&mut c, KeyCode::Esc);
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
     typed(&mut c, "abc");
     key(&mut c, KeyCode::Enter);
@@ -612,8 +622,10 @@ fn esc_never_quits() {
     }
 }
 
-/// A double Esc after a menu, a common habit to be sure it closed, leaves
-/// the chat as it was.
+/// A double Esc after a menu, a common habit to be sure it closed, is
+/// safe: the first closes the menu, the second is the Esc cycle's next
+/// stop, the `≡` menu, and a third comes back to the row. Nothing quits or
+/// asks.
 #[test]
 fn a_double_esc_after_a_menu_is_safe() {
     for enhanced in [true, false] {
@@ -623,8 +635,12 @@ fn a_double_esc_after_a_menu_is_safe() {
         click(&mut c, infra);
         assert!(menu_open(&mut c));
         assert!(key(&mut c, KeyCode::Esc) && key(&mut c, KeyCode::Esc), "enhanced {enhanced}");
-        assert!(!menu_open(&mut c) && !c.app().ended() && !c.app().guarding());
+        assert!(rows(&mut c).iter().any(|r| r.contains("pick one: attend-chat")), "enhanced {enhanced}: the ≡ menu: {:#?}", rows(&mut c));
+        assert!(!c.app().ended() && !c.app().guarding());
         assert!(!bar(&mut c).contains("quit"), "{}", bar(&mut c));
+        assert!(key(&mut c, KeyCode::Esc));
+        assert!(!menu_open(&mut c), "enhanced {enhanced}: back to the row");
+        assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
     }
 }
 

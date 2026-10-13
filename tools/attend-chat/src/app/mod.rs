@@ -29,7 +29,6 @@ use agent_tui::input::Input;
 use agent_tui::ratatui::buffer::Cell;
 use agent_tui::ratatui::crossterm::event::{KeyEvent, MouseEvent};
 use agent_tui::ratatui::layout::{Position, Rect};
-use agent_tui::ratatui::text::Span;
 use agent_tui::ratatui::Frame;
 use agent_tui::screen::Screen;
 use agent_tui::theme::{Palette, Shape};
@@ -338,14 +337,22 @@ impl ChatPane {
         tabs::normalize(self.foreground.clone(), &names)
     }
 
+    /// Show `t`. The tab bar holds the channel shown, so it is laid out
+    /// again, and a focus on a tab the bar no longer draws follows to the
+    /// tab shown ([`ChatPane::refocus`]).
     fn set_tab(&mut self, t: Tab) {
         if t != self.foreground {
             if let Some(w) = &mut self.world {
-                w.laid.shown = tabs::normalize(t.clone(), &tabs::strip_names(&w.groups));
+                let names = tabs::strip_names(&w.groups);
+                w.laid.shown = tabs::normalize(t.clone(), &names);
+                w.laid.bar = tabs::bar(&names, &w.laid.shown);
             }
             self.foreground = t;
             self.feed = FeedState::default();
             self.invalidate();
+            if self.world.is_some() {
+                self.refocus();
+            }
         }
     }
 
@@ -446,15 +453,9 @@ impl ChatPane {
         self.feed.scroll = 0;
     }
 
+    /// Tab on a word to complete ([`keys::completable`]): complete it, or
+    /// the next candidate.
     fn tab_key(&mut self) {
-        if self.input.is_empty() {
-            // Empty compose line: Tab cycles the foreground tab (#393).
-            // With content it stays completion.
-            let names = self.strip_names();
-            let cur = tabs::normalize(self.foreground.clone(), &names);
-            self.set_tab(tabs::cycle_next(&cur, &names));
-            return;
-        }
         let world = self.world();
         let (agents, channels) = sidebar::completion_pool(&world.seen, &world.rows);
         let r = handle_tab(self.input.text(), self.input.cursor(), self.tab_cycle.take(), &agents, &channels);
@@ -571,10 +572,6 @@ impl Pane for ChatPane {
         self.dispatch(ix::Ev::Jump(i));
     }
 
-    fn trailer(&mut self) -> Vec<Span<'static>> {
-        view::trailer(self)
-    }
-
     fn draw(&mut self, f: &mut Frame, area: Rect) {
         if !self.dirty {
             if let Some((at, cells)) = &self.last_frame {
@@ -628,15 +625,25 @@ impl Pane for ChatPane {
     }
 
     /// The chat owns the focus, the tab bar's included, and Esc never quits
-    /// (ADR-409). The compose box types every plain key while it has the
-    /// focus; away from it the shell's single keys work as the key help
-    /// names them, and a plain digit shows a tab while the focus is on a
-    /// slot the bar draws ([`ix::Ix::ctx`]).
+    /// (ADR-409). The compose box and the feed take every plain key as
+    /// text; on the tab bar and the column the shell's single keys work as
+    /// the key help names them, and on a column row a plain digit picks a
+    /// channel by its number ([`ix::Ix::ctx`]).
     fn keymap_ctx(&self) -> agent_tui::Ctx {
-        match &self.world {
-            Some(w) => self.ix.ctx(&w.laid.bar),
-            None => self.ix.ctx(&tabs::bar(&[])),
-        }
+        self.ix.ctx()
+    }
+
+    /// The column numbers its channels, from 1, for Ctrl+digit, Alt+digit
+    /// and a plain digit on a column row; the tab bar carries no numbers.
+    fn own_numbers(&self) -> Option<&'static str> {
+        Some("channel")
+    }
+
+    /// Channel `n` of the column, or with 0 the operator view, chosen as a
+    /// click on its row chooses ([`ix::Ev::Numbered`]).
+    fn jump(&mut self, n: usize, menu: bool) {
+        self.dirty = true;
+        self.dispatch(ix::Ev::Numbered { n, menu });
     }
 
     /// An overlay holds the keyboard: the compose box draws no caret and
@@ -655,7 +662,7 @@ impl Pane for ChatPane {
         let focus::Focus::Tab(slot) = self.ix.focus() else { return None };
         match &self.world {
             Some(w) => w.laid.bar.iter().position(|s| s == slot),
-            None => tabs::bar(&[]).iter().position(|s| s == slot),
+            None => tabs::bar(&[], &self.foreground).iter().position(|s| s == slot),
         }
     }
 
@@ -845,10 +852,11 @@ impl Pane for ChatPane {
         Some(
             "Enter sends to the shown channel; ⋯all, every channel together, sends to\n\
              #open. @name or #channel at the start addresses the message; Tab completes\n\
-             them, and on an empty line shows the next tab. /help lists the slash\n\
-             commands. Outside the compose box Tab and the arrows walk the tabs, the\n\
-             column, the feed and the box, and Enter opens a menu. `attend inbox` and\n\
-             `attend send` are the same bus outside the screen."
+             them, and with nothing to complete moves on. /help lists the slash commands.\n\
+             The column numbers the channels: Ctrl+digit shows one, 0 the operator view.\n\
+             Tab and Shift+Tab walk the tabs, the column, the feed and the box, and Enter\n\
+             opens a menu. Esc goes to the feed, then the ≡ menu, then back to where you\n\
+             were. `attend inbox` and `attend send` are the same bus outside the screen."
                 .into(),
         )
     }
@@ -1060,7 +1068,8 @@ impl World {
     /// `shown` against its channels.
     fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab) -> World {
         let names = tabs::strip_names(&groups);
-        let laid = ix::Laid { bar: tabs::bar(&names), rows: sidebar::side_items_of(&seen, &rows), shown: tabs::normalize(shown.clone(), &names) };
+        let shown = tabs::normalize(shown.clone(), &names);
+        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows), shown };
         World { groups, seen, rows, live_members, instances, laid }
     }
 

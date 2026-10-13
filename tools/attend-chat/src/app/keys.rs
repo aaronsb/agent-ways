@@ -887,6 +887,24 @@ pub struct TabResult {
     pub new_cycle: Option<TabCycle>,
 }
 
+/// Whether Tab in the compose box has a word to complete: the caret at the
+/// end, after a command or subcommand being typed, an `@agent` or a
+/// `#channel` in progress, or the completion `cycle` last made. Otherwise
+/// Tab leaves the box ([`super::ix`]).
+pub fn completable(buf: &str, cursor: usize, cycle: Option<&TabCycle>) -> bool {
+    if cursor != buf.chars().count() {
+        return false;
+    }
+    let cycling = cycle.is_some_and(|c| {
+        let sigil = match c.sigil {
+            Sigil::Agent => '@',
+            Sigil::Group => '#',
+        };
+        c.candidates.get(c.index).is_some_and(|n| buf.ends_with(&format!("{sigil}{n} ")))
+    });
+    cycling || slash::find_slash_partial(buf).is_some() || slash::complete_subcommand(buf).is_some() || find_trailing_mention(buf).is_some()
+}
+
 /// Tab-completion + cycle advance. No-op when the caret is mid-buffer
 /// (avoids surprising mid-sentence edits) or when no completion
 /// applies. Slash completions short-circuit before `@`/`#` parsing.
@@ -991,6 +1009,20 @@ pub fn handle_tab(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_has_a_word_to_complete_only_after_a_command_a_mention_or_its_own_completion() {
+        assert!(completable("/he", 3, None), "a command being typed");
+        assert!(completable("hi @al", 6, None), "an @agent in progress");
+        assert!(completable("#dep", 4, None), "a #channel in progress");
+        let cycle = TabCycle { sigil: Sigil::Agent, candidates: vec!["alpha".into(), "alto".into()], index: 0 };
+        assert!(completable("hi @alpha ", 10, Some(&cycle)), "the completion Tab made: the next candidate");
+        assert!(!completable("", 0, None), "an empty box");
+        assert!(!completable("hello there", 11, None), "plain text");
+        assert!(!completable("hi @alpha ", 10, None), "a finished mention");
+        assert!(!completable("hi @al", 3, None), "the caret mid-buffer");
+        assert!(!completable("mail a@b", 8, None), "an address, not a mention");
+    }
 
     #[test]
     fn enter_empty_is_noop() {

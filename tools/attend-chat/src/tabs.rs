@@ -1,14 +1,16 @@
 //! Tab model for the channel strip (#393, ADR-173 Decision 6).
 //!
-//! Channels are tabs: `[≡] [#g] … [+]` on the left and the reserved
-//! `[#open] [⋯all]` pinned at the right end ([`reserved`]). Per-channel tabs show a filtered transcript (the
-//! strict IRC prior); merged keeps today's full cross-channel stream
-//! (ambient awareness). Slash commands with no channel argument scope
-//! to the foreground tab — the `/part`-in-the-current-window
+//! The tab bar holds `[≡]`, the one created channel shown, `[+]` on the
+//! left, and the reserved `[#open] [⋯all]` pinned at the right end
+//! ([`reserved`]). The left column lists every channel, numbered for
+//! Ctrl+digit; the bar has no tab per channel. A channel tab shows a
+//! filtered transcript (the strict IRC prior); merged keeps the full
+//! cross-channel stream (ambient awareness). Slash commands with no channel
+//! argument scope to the foreground tab — the `/part`-in-the-current-window
 //! convention — while explicit arguments work from anywhere.
 //!
 //! Everything here is a pure function of the tab + the ordered
-//! channel-name list, so cycling, dissolve-advance, and scope
+//! channel-name list, so the bar, dissolve-advance, and scope
 //! resolution are testable without a terminal. The strip is drawn in
 //! `crate::view`.
 
@@ -70,11 +72,17 @@ pub enum Slot {
 }
 
 /// The tab bar in the order it is drawn and walked: `≡`, the created
-/// channels in strip order, `+`, then the [`reserved`] tabs at the right
-/// end. `#open` is there while the strip lists it, as it always does live.
-pub fn bar(names: &[String]) -> Vec<Slot> {
+/// channel `shown`, if it is one the strip lists, `+`, then the
+/// [`reserved`] tabs at the right end. While `#open` or the operator view
+/// is shown the left holds no channel tab. `#open` is there while the strip
+/// lists it, as it always does live.
+pub fn bar(names: &[String], shown: &Tab) -> Vec<Slot> {
     let mut out = vec![Slot::Common];
-    out.extend(names.iter().map(|n| Tab::Channel(n.clone())).filter(|t| !is_reserved(t)).map(Slot::Tab));
+    if let Tab::Channel(c) = shown {
+        if !is_reserved(shown) && names.contains(c) {
+            out.push(Slot::Tab(shown.clone()));
+        }
+    }
     out.push(Slot::New);
     out.extend(
         reserved()
@@ -86,23 +94,6 @@ pub fn bar(names: &[String]) -> Vec<Slot> {
             .map(Slot::Tab),
     );
     out
-}
-
-/// Tab on an empty compose line: the next tab in the bar's order, the
-/// created channels, then `#open`, then the operator view, wrapping. A tab
-/// no longer on the bar starts the walk again at the first.
-pub fn cycle_next(current: &Tab, names: &[String]) -> Tab {
-    let tabs: Vec<Tab> = bar(names)
-        .into_iter()
-        .filter_map(|s| match s {
-            Slot::Tab(t) => Some(t),
-            _ => None,
-        })
-        .collect();
-    match tabs.iter().position(|t| t == current) {
-        Some(i) => tabs[(i + 1) % tabs.len()].clone(),
-        None => tabs.first().cloned().unwrap_or_default(),
-    }
 }
 
 /// The channel an unaddressed send targets from `tab`. Merged targets
@@ -172,35 +163,15 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_puts_created_channels_and_plus_left_and_the_reserved_right() {
+    fn the_bar_holds_the_channel_shown_and_plus_left_and_the_reserved_right() {
         let n = names(&["open", "deploy", "infra"]);
         let t = |g: &str| Slot::Tab(chan(g));
-        assert_eq!(bar(&n), [Slot::Common, t("deploy"), t("infra"), Slot::New, t("open"), Slot::Tab(Tab::Merged)]);
+        let right = [t("open"), Slot::Tab(Tab::Merged)];
+        assert_eq!(bar(&n, &chan("infra")), [Slot::Common, t("infra"), Slot::New, right[0].clone(), right[1].clone()], "one tab: the created channel shown");
+        assert_eq!(bar(&n, &Tab::Merged), [Slot::Common, Slot::New, right[0].clone(), right[1].clone()], "none while the operator view is shown");
+        assert_eq!(bar(&n, &chan("open")), [Slot::Common, Slot::New, right[0].clone(), right[1].clone()], "none while #open is shown");
+        assert_eq!(bar(&n, &chan("ghost")), [Slot::Common, Slot::New, right[0].clone(), right[1].clone()], "none for a channel the strip lacks");
         assert!(is_reserved(&chan("open")) && is_reserved(&Tab::Merged) && !is_reserved(&chan("deploy")));
-    }
-
-    #[test]
-    fn cycle_walks_the_bar_order_and_wraps() {
-        let n = names(&["open", "deploy", "infra"]);
-        assert_eq!(cycle_next(&chan("deploy"), &n), chan("infra"));
-        assert_eq!(cycle_next(&chan("infra"), &n), chan("open"));
-        assert_eq!(cycle_next(&chan("open"), &n), Tab::Merged);
-        assert_eq!(cycle_next(&Tab::Merged, &n), chan("deploy"));
-    }
-
-    #[test]
-    fn cycle_with_no_channels_stays_on_merged() {
-        // Can't happen live (`#open` is always in the strip) but the
-        // function must not panic on an empty list.
-        assert_eq!(cycle_next(&Tab::Merged, &[]), Tab::Merged);
-    }
-
-    #[test]
-    fn cycle_from_vanished_channel_starts_again() {
-        // Foreground channel dissolved between renders: position()
-        // misses, so the cycle starts again rather than panicking.
-        let n = names(&["open", "deploy"]);
-        assert_eq!(cycle_next(&chan("ghost"), &n), chan("deploy"));
     }
 
     #[test]

@@ -1,10 +1,12 @@
 //! One focus owner and the keyboard's ring (ADR-405, #931 increments 5 and
-//! 6), through the shell's real key and mouse handlers: the ring's order,
-//! every way out of the compose box, Enter opening each element's menu, the
-//! single keys the key help names working outside the box, the footer's
-//! keys per focus, the operator view and the reserved tabs at the bar's
-//! right end, the entry dialog that replaced the lent compose box, and Add
-//! agent to chat. In its own file, so its own fixture: alpha and beta live,
+//! 6; ADR-407's redesign), through the shell's real key and mouse handlers:
+//! the ring's order, Tab and Shift+Tab as mirrors, every way out of the
+//! compose box, the Esc cycle, Enter opening each element's menu and the
+//! feed's message menu, the single keys the key help names working on the
+//! tab bar and the column and typed in the chat, the column's numbers, the
+//! footer's keys per focus, the operator view and the reserved tabs at the
+//! bar's right end, the entry dialog that replaced the lent compose box,
+//! and Add agent to chat. In its own file, so its own fixture: alpha and beta live,
 //! alpha and the operator in #deploy, an empty #infra.
 
 mod support;
@@ -119,21 +121,21 @@ fn walk(c: &mut Chat, code: KeyCode, stop: &str) -> Vec<String> {
 fn the_ring_walks_the_tab_bar_in_order_then_the_column_the_feed_and_the_box() {
     let mut c = chat();
     assert_eq!(focused(&mut c), "mode chat", "the chat opens typing");
-    // ↓ at the end of a box with text leaves it forward, round to the bar.
-    press(&mut c, KeyCode::Char('x'));
-    press(&mut c, KeyCode::Down);
+    // #deploy shown, the column's second channel, so the bar holds its tab.
+    show_deploy(&mut c);
+    // Tab in an empty box has nothing to complete: it leaves forward.
+    press(&mut c, KeyCode::Tab);
     let ring = {
         let mut r = vec![focused(&mut c)];
         r.extend(walk(&mut c, KeyCode::Tab, "mode chat"));
         r
     };
     let tabs: Vec<&str> = ring.iter().filter(|f| f.starts_with("tab ")).map(String::as_str).collect();
-    assert_eq!(tabs, ["tab ≡", "tab #deploy", "tab #infra", "tab +", "tab #open", "tab ⋯all"], "{ring:?}");
+    assert_eq!(tabs, ["tab ≡", "tab #deploy", "tab +", "tab #open", "tab ⋯all"], "{ring:?}");
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "walking the bar shows nothing");
     let rows: Vec<&str> = ring.iter().filter(|f| f.starts_with("row ")).map(String::as_str).collect();
     let channels: Vec<&str> = rows.iter().copied().filter(|r| r.starts_with("row #")).collect();
-    let mut sorted = channels.clone();
-    sorted.sort();
-    assert_eq!(sorted, ["row #deploy", "row #infra", "row #open"], "every channel: {ring:?}");
+    assert_eq!(channels, ["row #open", "row #deploy", "row #infra"], "every channel, in the column's numbered order: {ring:?}");
     let first_channel = rows.iter().position(|r| r.starts_with("row #")).unwrap();
     assert!(rows[..first_channel].len() >= 2 && rows[first_channel..].iter().all(|r| r.starts_with("row #")), "every agent, then every channel: {ring:?}");
     let tail: Vec<&str> = ring.iter().rev().take(2).rev().map(String::as_str).collect();
@@ -146,6 +148,32 @@ fn the_ring_walks_the_tab_bar_in_order_then_the_column_the_feed_and_the_box() {
     press(&mut c, KeyCode::Right);
     press(&mut c, KeyCode::Right);
     assert_eq!(focused(&mut c), "mode chat", "→ forward, round to the box");
+}
+
+/// Tab and Shift+Tab are exact mirrors around the one ring: from every
+/// element, N × Tab then N × Shift+Tab comes back, for every N round it.
+#[test]
+fn tab_and_shift_tab_are_mirrors_from_every_element() {
+    let mut c = chat();
+    show_deploy(&mut c);
+    press(&mut c, KeyCode::Tab);
+    let mut ring = vec![focused(&mut c)];
+    ring.extend(walk(&mut c, KeyCode::Tab, "mode chat"));
+    assert!(ring.len() >= 12, "five slots, the column, the feed and the box: {ring:?}");
+    for start in &ring {
+        for n in 1..=ring.len() {
+            let mut c = chat();
+            show_deploy(&mut c);
+            focus_to(&mut c, start);
+            for _ in 0..n {
+                press(&mut c, KeyCode::Tab);
+            }
+            for _ in 0..n {
+                press(&mut c, KeyCode::BackTab);
+            }
+            assert_eq!(&focused(&mut c), start, "{n} × Tab, then {n} × Shift+Tab");
+        }
+    }
 }
 
 #[test]
@@ -176,7 +204,7 @@ fn every_way_out_of_the_compose_box() {
     assert_eq!(focused(&mut c), "mode chat", "↓ on the last line goes to its end first");
     press(&mut c, KeyCode::Down);
     assert_eq!(focused(&mut c), "tab ≡", "↓ at the end of the last line leaves forward");
-    // ← and → move the cursor; Tab completes.
+    // ← and → move the cursor; Tab completes a word to complete.
     let mut c = chat();
     typed(&mut c, "#dep");
     press(&mut c, KeyCode::Left);
@@ -184,6 +212,19 @@ fn every_way_out_of_the_compose_box() {
     assert_eq!(focused(&mut c), "mode chat");
     press(&mut c, KeyCode::Tab);
     assert_eq!((focused(&mut c), c.input().text()), ("mode chat".to_string(), "#deploy "), "Tab completes in the box");
+    let mut c = chat();
+    typed(&mut c, "#");
+    press(&mut c, KeyCode::Tab);
+    assert_eq!(c.input().text(), "#open ");
+    press(&mut c, KeyCode::Tab);
+    assert_eq!((focused(&mut c), c.input().text()), ("mode chat".to_string(), "#deploy "), "again: the next candidate");
+    // With nothing to complete, Tab leaves forward and the draft stays.
+    for draft in ["", "hello", "hello #infra "] {
+        let mut c = chat();
+        typed(&mut c, draft);
+        press(&mut c, KeyCode::Tab);
+        assert_eq!((focused(&mut c), c.input().text()), ("tab ≡".to_string(), draft), "Tab after {draft:?} leaves");
+    }
     // Typing keys the shell takes outside the box are text inside it.
     let mut c = chat();
     typed(&mut c, "q m ? 1 0");
@@ -198,36 +239,42 @@ fn menu(c: &mut Chat) -> Option<String> {
     })
 }
 
-/// Walk forward from the box's ↓ exit until `want` has the focus.
+/// Walk the ring forward with Tab until `want` has the focus.
 fn focus_to(c: &mut Chat, want: &str) {
-    // The tab bar backward from the tab shown, then the ring forward from it.
-    for code in [KeyCode::BackTab, KeyCode::Tab] {
-        if focused(c) != "mode chat" {
-            press(c, KeyCode::Esc);
+    for _ in 0..40 {
+        if focused(c) == want {
+            return;
         }
-        press(c, KeyCode::F(2));
-        for _ in 0..40 {
-            if focused(c) == want {
-                return;
-            }
-            if focused(c) == "mode chat" {
-                break;
-            }
-            press(c, code);
-        }
+        press(c, KeyCode::Tab);
     }
-    panic!("never reached {want}");
+    panic!("never reached {want}: {}", screen(c));
+}
+
+/// #deploy shown, so the tab bar holds its tab: Ctrl+2, the column's
+/// second channel.
+fn show_deploy(c: &mut Chat) {
+    key(c, KeyEvent::new(KeyCode::Char('2'), KeyModifiers::CONTROL));
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
 }
 
 #[test]
 fn enter_opens_the_menu_a_click_opens_for_every_kind_of_element() {
-    for (element, title) in [("tab ≡", "attend-chat"), ("tab #deploy", "#deploy"), ("tab #open", "#open"), ("tab ⋯all", "⋯all"), ("row #infra", "#infra"), ("mode feed", "@")] {
+    for (element, title) in [("tab ≡", "attend-chat"), ("tab #deploy", "#deploy"), ("tab #open", "#open"), ("tab ⋯all", "⋯all"), ("row #infra", "#infra"), ("mode feed", "message from @")] {
         let mut c = chat();
+        if element == "tab #deploy" {
+            show_deploy(&mut c);
+        }
         focus_to(&mut c, element);
         press(&mut c, KeyCode::Enter);
         let m = menu(&mut c).unwrap_or_else(|| panic!("{element}: no menu: {}", screen(&mut c)));
         assert!(m.starts_with(title), "{element}: {m}");
     }
+    // Enter on #open's tab opens its menu and shows nothing.
+    let mut c = chat();
+    show_deploy(&mut c);
+    focus_to(&mut c, "tab #open");
+    press(&mut c, KeyCode::Enter);
+    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "the menu, not a switch");
     // An agent's row: its menu.
     let mut c = chat();
     focus_to(&mut c, "mode feed");
@@ -251,9 +298,17 @@ fn the_operator_view_is_no_channel_and_the_reserved_tabs_sit_right() {
     let top = rows(&mut c)[0].clone();
     assert!(top.trim_end().ends_with("#open   ⋯all") || top.trim_end().ends_with("#open  ⋯all") || top.trim_end().ends_with("#open ⋯all"), "#open then ⋯all at the right end: {top:?}");
     assert!(!top.contains("merged") && !top.contains("#⋯all") && !top.contains("#all"), "{top}");
+    assert!(!top.contains("#deploy") && !top.contains("#infra"), "no tab per channel: {top}");
     let open = top.find("#open").unwrap();
-    assert!(top.find('+').unwrap() < open && top.find("#deploy").unwrap() < top.find('+').unwrap(), "created channels, then +, left of the reserved: {top}");
+    assert!(top.find('≡').unwrap() < top.find('+').unwrap() && top.find('+').unwrap() < open, "≡ and + left of the reserved: {top}");
     assert!(open > top.chars().count() / 2, "pinned right: {top}");
+    // A created channel shown takes the place between ≡ and +, with what
+    // it is for, unnumbered: the column numbers the channels.
+    show_deploy(&mut c);
+    let top = rows(&mut c)[0].clone();
+    let deploy = top.find("#deploy — rollout").unwrap_or_else(|| panic!("the channel shown and its line: {top}"));
+    assert!(top.find('≡').unwrap() < deploy && deploy < top.find('+').unwrap(), "{top}");
+    assert!(!top.contains("1 #deploy") && !top.contains("2 #deploy"), "no number on the bar: {top}");
     focus_to(&mut c, "tab ⋯all");
     press(&mut c, KeyCode::Enter);
     let s = screen(&mut c);
@@ -261,31 +316,42 @@ fn the_operator_view_is_no_channel_and_the_reserved_tabs_sit_right() {
     for item in ["Leave", "Seal", "Delete", "Describe", "Invite", "Clear history", "Join"] {
         assert!(!s.contains(item), "the operator view offers no channel's {item}: {s}");
     }
-    // At a width that cannot hold every name, the reserved tabs and `+`
-    // stay whole and the created channels give way.
+    // At a width that cannot hold the channel's line, the reserved tabs and
+    // `+` stay whole and the channel's tab gives way.
     let buf = testkit::render_screen(&mut c, 44, 20);
     let top = testkit::rows(&buf)[0].clone();
-    assert!(top.contains("#open") && top.contains("⋯all") && top.contains('+') && top.contains('≡'), "{top:?}");
+    assert!(top.contains("#open") && top.contains("⋯all") && top.contains('+') && top.contains('≡') && top.contains("#d"), "{top:?}");
+    assert!(!top.contains("rollout"), "the line is cut first: {top:?}");
 }
 
+/// On the tab bar and the column the shell's single keys work as the key
+/// help names them; in the compose box and the feed, the chat, they are
+/// typed.
 #[test]
-fn outside_the_box_every_single_key_the_help_names_works() {
+fn outside_the_chat_every_single_key_the_help_names_works() {
+    // The column's last row: Shift+Tab twice from the box.
+    let to_column = |c: &mut Chat| {
+        press(c, KeyCode::BackTab);
+        press(c, KeyCode::BackTab);
+        assert!(focused(c).starts_with("row "), "{}", focused(c));
+    };
     // `?` opens the key help.
     let mut c = chat();
-    press(&mut c, KeyCode::BackTab);
+    to_column(&mut c);
     press(&mut c, KeyCode::Char('?'));
     assert!(screen(&mut c).contains("keys · ↑↓ scroll"), "{}", screen(&mut c));
     // `m` turns the mouse off.
     let mut c = chat();
-    press(&mut c, KeyCode::BackTab);
+    to_column(&mut c);
     press(&mut c, KeyCode::Char('m'));
     assert!(bar(&mut c).contains("mouse off"), "{}", bar(&mut c));
-    // On the tab bar a digit shows that created channel; 0 the bar's last
-    // tab, the operator view.
+    // On a column row a digit shows the channel by its number, 0 the
+    // operator view.
     let mut c = chat();
-    press(&mut c, KeyCode::F(2));
-    press(&mut c, KeyCode::Char('1'));
+    to_column(&mut c);
+    press(&mut c, KeyCode::Char('2'));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    assert_eq!(focused(&mut c), "row #deploy", "the cursor moves to the row picked");
     press(&mut c, KeyCode::Char('0'));
     assert_eq!(c.foreground(), &Tab::Merged);
     assert!(c.input().is_empty(), "nothing was typed");
@@ -294,35 +360,47 @@ fn outside_the_box_every_single_key_the_help_names_works() {
     for i in 0..30 {
         c.push(Signal { id: format!("x-{i}"), from: format!("claude:{ALPHA_SID}"), project: "alpha".into(), cwd: "/work/alpha".into(), reply_to: None, message: format!("filler {i}"), ts: 1_790_949_100 + i, channel: Channel::Open });
     }
-    press(&mut c, KeyCode::BackTab);
+    to_column(&mut c);
     press(&mut c, KeyCode::PageUp);
     assert!(c.scroll() > 0, "PgUp pages back");
     // F3 hides the column.
     let mut c = chat();
-    press(&mut c, KeyCode::BackTab);
+    to_column(&mut c);
     press(&mut c, KeyCode::F(3));
     assert!(!c.sidebar_shown(), "F3 hides the column");
     // Ctrl+N asks a new channel's name.
     let mut c = chat();
-    press(&mut c, KeyCode::BackTab);
+    to_column(&mut c);
     key(&mut c, KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
     assert!(screen(&mut c).contains("new channel name"));
-    // Esc goes back to the box, and any other character is typed there.
+    // Any other character is typed in the box.
     let mut c = chat();
-    press(&mut c, KeyCode::BackTab);
-    press(&mut c, KeyCode::Esc);
-    assert_eq!(focused(&mut c), "mode chat");
-    press(&mut c, KeyCode::BackTab);
+    to_column(&mut c);
     press(&mut c, KeyCode::Char('h'));
     assert_eq!((focused(&mut c), c.input().text()), ("mode chat".to_string(), "h"));
     // `q` asks first, even with nothing unsaved: `n` stays, `y` quits.
     let mut c = chat();
-    press(&mut c, KeyCode::BackTab);
+    to_column(&mut c);
     assert!(press(&mut c, KeyCode::Char('q')), "q asks before it quits");
     assert!(bar(&mut c).contains("quit?") && bar(&mut c).contains(" y quit "), "{}", bar(&mut c));
     assert!(press(&mut c, KeyCode::Char('n')) && !c.app().ended(), "n stays");
     press(&mut c, KeyCode::Char('q'));
     assert!(!press(&mut c, KeyCode::Char('y')), "y quits");
+}
+
+/// The feed is the chat: a printable key there goes to the compose box,
+/// typed, and `q`, `m`, `?` and the digits are text, never commands.
+#[test]
+fn a_key_typed_in_the_feed_goes_to_the_box() {
+    for (k, want) in [('h', "h"), ('q', "q"), ('m', "m"), ('?', "?"), ('2', "2")] {
+        let mut c = chat();
+        press(&mut c, KeyCode::BackTab);
+        assert_eq!(focused(&mut c), "mode feed");
+        press(&mut c, KeyCode::Char(k));
+        let f = focused(&mut c);
+        assert_eq!((f, c.input().text(), c.foreground().clone()), ("mode chat".to_string(), want, Tab::Merged), "{k:?} in the feed");
+        assert!(!bar(&mut c).contains("quit?") && c.app().mouse_on() && !screen(&mut c).contains("keys · ↑↓ scroll"), "{k:?} is no command there");
+    }
 }
 
 /// The reviewer's reproduction: ↑ on an empty box, then `1` and `x`. The
@@ -363,6 +441,7 @@ fn q_outside_the_box_goes_through_the_exit_guard_over_a_draft() {
     let mut c = chat();
     typed(&mut c, "draft");
     press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::BackTab);
     press(&mut c, KeyCode::Char('q'));
     assert!(bar(&mut c).contains("quit?"), "{}", bar(&mut c));
     assert!(press(&mut c, KeyCode::Char('y')), "the draft keeps the chat open");
@@ -372,16 +451,68 @@ fn q_outside_the_box_goes_through_the_exit_guard_over_a_draft() {
     assert_eq!(c.input().text(), "draft");
 }
 
-/// Esc leaves an empty box, backward, as Shift+Tab does.
+/// The Esc cycle, through the real keys: the box, the feed, the `≡` menu,
+/// the tab or column row last focused (the feed when there is none), the
+/// `≡` menu again. The draft stays through it all.
 #[test]
-fn esc_leaves_an_empty_box() {
+fn esc_moves_along_one_cycle() {
+    let common = |c: &mut Chat| menu(c).is_some_and(|m| m.starts_with("attend-chat"));
+    for draft in ["", "x"] {
+        let mut c = chat();
+        typed(&mut c, draft);
+        press(&mut c, KeyCode::Esc);
+        assert_eq!(focused(&mut c), "mode feed", "{draft:?}: the box, then the feed");
+        press(&mut c, KeyCode::Esc);
+        assert!(common(&mut c), "{draft:?}: then the ≡ menu: {}", screen(&mut c));
+        assert_eq!(focused(&mut c), "tab ≡", "the focus on ≡ while it is open");
+        press(&mut c, KeyCode::Esc);
+        assert!(menu(&mut c).is_none());
+        assert_eq!(focused(&mut c), "mode feed", "{draft:?}: no tab or row was focused: back to the feed");
+        press(&mut c, KeyCode::Esc);
+        assert!(common(&mut c), "{draft:?}: the ≡ menu again");
+        press(&mut c, KeyCode::Esc);
+        assert_eq!(c.input().text(), draft, "the draft stays");
+    }
+    // From a column row: the menu, then back to the row, and round.
     let mut c = chat();
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::BackTab);
+    assert_eq!(focused(&mut c), "row #infra");
+    for _ in 0..2 {
+        press(&mut c, KeyCode::Esc);
+        assert!(common(&mut c), "{}", screen(&mut c));
+        press(&mut c, KeyCode::Esc);
+        assert_eq!((menu(&mut c), focused(&mut c)), (None, "row #infra".to_string()), "back to the row last focused");
+    }
+    // From a tab: back to it.
+    let mut c = chat();
+    focus_to(&mut c, "tab #open");
     press(&mut c, KeyCode::Esc);
+    assert!(common(&mut c));
+    press(&mut c, KeyCode::Esc);
+    assert_eq!(focused(&mut c), "tab #open");
+    // The feed remembers the row it was reached from.
+    let mut c = chat();
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::Tab);
     assert_eq!(focused(&mut c), "mode feed");
-    let mut c = chat();
-    typed(&mut c, "x");
     press(&mut c, KeyCode::Esc);
-    assert_eq!(focused(&mut c), "mode chat", "with text, Esc only clears the bar");
+    press(&mut c, KeyCode::Esc);
+    assert_eq!(focused(&mut c), "row #infra", "≡, then the last row focused");
+    // An overlay that is open takes the first Esc.
+    let mut c = chat();
+    typed(&mut c, "draft");
+    press(&mut c, KeyCode::F(1));
+    press(&mut c, KeyCode::Esc);
+    assert_eq!(focused(&mut c), "mode chat", "the key help closed, the box keeps the focus");
+    let mut c = chat();
+    focus_to(&mut c, "tab ≡");
+    press(&mut c, KeyCode::Enter);
+    assert!(common(&mut c));
+    press(&mut c, KeyCode::Esc);
+    assert_eq!((menu(&mut c), focused(&mut c)), (None, "tab ≡".to_string()), "a menu Enter opened closes where it was");
+    assert!(press(&mut c, KeyCode::Esc), "and Esc never quits");
 }
 
 /// Backspace and Delete outside the box go back to it and leave the draft.
@@ -397,57 +528,50 @@ fn backspace_outside_the_box_does_not_edit_the_draft() {
     }
 }
 
-/// Walking the bar previews each tab; walking off it without choosing puts
-/// back the tab shown before, so the draft's destination stays. Esc on a
-/// tab keeps it.
+/// Walking the tab bar shows nothing: the tab shown stays, and the draft's
+/// destination with it. Enter on a tab opens its menu.
 #[test]
-fn walking_off_the_bar_puts_back_the_tab_shown() {
+fn walking_the_bar_shows_nothing() {
     let mut c = chat();
     typed(&mut c, "x");
     press(&mut c, KeyCode::Down);
     assert_eq!(focused(&mut c), "tab ≡");
-    press(&mut c, KeyCode::Tab);
-    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "the walk previews #deploy");
-    for _ in 0..6 {
+    for want in ["tab +", "tab #open", "tab ⋯all"] {
         press(&mut c, KeyCode::Tab);
-    }
-    assert!(focused(&mut c).starts_with("row "), "{}", focused(&mut c));
-    assert_eq!(c.foreground(), &Tab::Merged, "off the bar: the tab shown before");
-    // Esc cancels the preview, as F2 back to the box does.
-    for back in [KeyCode::Esc, KeyCode::F(2)] {
-        let mut c = chat();
-        press(&mut c, KeyCode::F(2));
-        press(&mut c, KeyCode::Left);
-        assert_eq!(c.foreground(), &Tab::Channel("open".into()));
-        press(&mut c, back);
         let f = focused(&mut c);
-        assert_eq!((c.foreground().clone(), f), (Tab::Merged, "mode chat".to_string()), "{back:?}");
+        assert_eq!((f, c.foreground().clone()), (want.to_string(), Tab::Merged));
     }
-    // Enter keeps it: the menu opens, then Esc closes the menu and leaves
-    // the tab chosen.
-    let mut c = chat();
     press(&mut c, KeyCode::F(2));
+    assert_eq!(focused(&mut c), "mode chat");
+    press(&mut c, KeyCode::F(2));
+    assert_eq!(focused(&mut c), "tab ⋯all", "F2: the tab shown");
     press(&mut c, KeyCode::Left);
+    assert_eq!((focused(&mut c), c.foreground().clone()), ("tab #open".to_string(), Tab::Merged));
     press(&mut c, KeyCode::Enter);
-    press(&mut c, KeyCode::Esc);
-    press(&mut c, KeyCode::Esc);
-    assert_eq!(c.foreground(), &Tab::Channel("open".into()), "Enter committed it");
+    assert_eq!(menu(&mut c).as_deref(), Some("#open"), "Enter: its menu");
+    assert_eq!(c.foreground(), &Tab::Merged, "and nothing shown");
 }
 
-/// A digit on the bar shows its tab and takes the focus there, so Enter
-/// opens the menu of the tab shown.
+/// A plain digit is the column's number only on a column row; on the tab
+/// bar it is typed, as anywhere else.
 #[test]
-fn a_digit_on_the_bar_moves_the_focus_to_its_tab() {
+fn a_digit_picks_a_channel_on_a_column_row_and_is_typed_elsewhere() {
     let mut c = chat();
     press(&mut c, KeyCode::F(2));
     press(&mut c, KeyCode::Char('2'));
-    assert_eq!((c.foreground().clone(), focused(&mut c)), (Tab::Channel("infra".into()), "tab #infra".to_string()));
+    assert_eq!((c.foreground().clone(), focused(&mut c), c.input().text()), (Tab::Merged, "mode chat".to_string(), "2"), "typed from the bar");
+    let mut c = chat();
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::Char('3'));
+    assert_eq!((c.foreground().clone(), focused(&mut c)), (Tab::Channel("infra".into()), "row #infra".to_string()));
+    press(&mut c, KeyCode::Char('3'));
+    assert!(menu(&mut c).is_none(), "a plain digit on the channel shown opens no menu");
     press(&mut c, KeyCode::Enter);
-    assert!(screen(&mut c).contains("pick one: #infra"), "{}", screen(&mut c));
-    // And the digit keeps it when the focus leaves the bar.
+    assert_eq!(menu(&mut c).as_deref(), Some("#infra"), "Enter does");
     press(&mut c, KeyCode::Esc);
-    press(&mut c, KeyCode::Esc);
-    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+    press(&mut c, KeyCode::Char('9'));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()), "a number past the channels does nothing");
 }
 
 /// At the exit guard over the entry dialog, typing goes on into the
@@ -478,18 +602,19 @@ fn the_compose_footer_keeps_enter_and_tab_first() {
 }
 
 #[test]
-fn the_help_names_the_single_keys_outside_the_box_and_the_chords_inside() {
+fn the_help_names_the_single_keys_outside_the_chat_and_the_chords_inside() {
     let mut c = chat();
     press(&mut c, KeyCode::F(1));
     let inside = screen(&mut c);
-    assert!(inside.contains("Alt+0-9") || inside.contains("Ctrl+0-9"), "{inside}");
+    assert!(inside.contains("Ctrl+0-9"), "{inside}");
     assert!(inside.contains("S-Tab") && inside.contains("leaves the box"), "{inside}");
     press(&mut c, KeyCode::Esc);
     press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::BackTab);
     press(&mut c, KeyCode::F(1));
     let outside = screen(&mut c);
-    for k in ["? ", "0-9", "q ^C", "m "] {
-        assert!(outside.contains(k), "{k:?} in the help outside the box: {outside}");
+    for k in ["? ", "0-9 channels", "q ^C", "m "] {
+        assert!(outside.contains(k), "{k:?} in the help on a column row: {outside}");
     }
 }
 
@@ -497,11 +622,14 @@ fn the_help_names_the_single_keys_outside_the_box_and_the_chords_inside() {
 fn the_footer_says_what_the_focused_element_takes() {
     let mut c = chat();
     assert!(bar(&mut c).contains("S-Tab or ↑") && bar(&mut c).contains("leaves"), "{}", bar(&mut c));
-    for (element, want) in [("tab #deploy", "Enter its menu"), ("tab ⋯all", "Enter its menu"), ("tab ≡", "Enter the menu"), ("tab +", "Enter new channel"), ("row #infra", "↑ ↓ move"), ("mode feed", "Enter sender's menu")] {
+    for (element, want) in [("tab #deploy", "Enter its menu"), ("tab ⋯all", "Enter its menu"), ("tab ≡", "Enter the menu"), ("tab +", "Enter new channel"), ("row #infra", "↑ ↓ move"), ("mode feed", "Enter message menu")] {
         let mut c = chat();
+        if element == "tab #deploy" {
+            show_deploy(&mut c);
+        }
         focus_to(&mut c, element);
         let b = bar(&mut c);
-        assert!(b.contains(want) && b.contains("Tab next") && b.contains("S-Tab back"), "{element}: {b}");
+        assert!(b.contains(want) && b.contains("Tab next") && b.contains("S-Tab back") && b.contains("Esc ≡ menu"), "{element}: {b}");
         assert!(!b.contains("leaves the box"), "{element}: {b}");
     }
     let mut c = chat();
@@ -590,6 +718,7 @@ fn a_new_channel_is_named_in_its_dialog_and_the_draft_is_untouched() {
 #[test]
 fn describe_asks_its_line_in_the_same_dialog() {
     let mut c = chat();
+    show_deploy(&mut c);
     focus_to(&mut c, "tab #deploy");
     press(&mut c, KeyCode::Enter);
     for _ in 0..3 {
@@ -751,4 +880,50 @@ fn enter_on_a_row_or_on_the_common_slot_opens_the_menu_a_click_opens_where_it_op
         press(&mut keyed, KeyCode::Enter);
         assert_eq!(menu_box(&mut keyed), Some(want.clone()), "draft {draft:?}: Enter on ≡ opens the menu a click opens");
     }
+}
+
+/// Enter on the feed opens the selected message's menu, docked under its
+/// header: Reply, Quote, Address, Copy. ↑ and ↓ choose the message.
+#[test]
+fn the_feeds_message_menu_replies_quotes_addresses_and_copies() {
+    let pick = |c: &mut Chat, item: &str| {
+        let buf = testkit::render_screen(c, W, H);
+        let (x, y) = testkit::find(&buf, item).unwrap_or_else(|| panic!("no {item}: {}", testkit::rows(&buf).join("\n")));
+        c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+    };
+    let open = |c: &mut Chat, ups: usize| {
+        press(c, KeyCode::BackTab);
+        for _ in 0..ups {
+            press(c, KeyCode::Up);
+        }
+        press(c, KeyCode::Enter);
+    };
+    let mut c = chat();
+    open(&mut c, 1);
+    let title = menu(&mut c).unwrap_or_else(|| panic!("{}", screen(&mut c)));
+    assert!(title.starts_with("message from @"), "{title}");
+    let items = picker(&mut c, &title);
+    let labels: Vec<String> = items.iter().map(|r| r.trim().to_string()).collect();
+    assert_eq!(labels.len(), 4, "{labels:?}");
+    assert!(labels[0] == "Reply" && labels[1] == "Quote" && labels[2].starts_with("Address @") && labels[3] == "Copy", "{labels:?}");
+    // Quote: the newest message's lines as `> ` lines, the keyboard in the box.
+    pick(&mut c, "Quote");
+    assert_eq!((focused(&mut c), c.input().text()), ("mode chat".to_string(), "> message 1 in the feed\n"));
+    // Copy: the older message, chosen with ↑ twice, to the clipboard.
+    let mut c = chat();
+    open(&mut c, 2);
+    pick(&mut c, "Copy");
+    assert_eq!(c.app().copied(), Some("message 0 in the feed"));
+    assert!(c.status().contains("clipboard"), "{}", c.status());
+    // Address: the sender's name in the box.
+    let mut c = chat();
+    open(&mut c, 1);
+    let name = labels[2].trim_start_matches("Address ").to_string();
+    pick(&mut c, "Address @");
+    assert_eq!((focused(&mut c), c.input().text().to_string()), ("mode chat".to_string(), format!("{name} ")));
+    // Reply: the message's channel shown, the keyboard in the box.
+    let mut c = chat();
+    open(&mut c, 1);
+    pick(&mut c, "Reply");
+    assert_eq!((focused(&mut c), c.foreground().clone()), ("mode chat".to_string(), Tab::Channel("open".into())));
 }

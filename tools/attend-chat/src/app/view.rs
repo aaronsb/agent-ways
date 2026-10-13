@@ -99,20 +99,19 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
 pub(super) const VIEW_LABEL: &str = "⋯all";
 
 /// The tab bar the shell draws, in the order [`tabs::bar`] gives: the common
-/// menu's `≡` slot, the created channels, the `+` slot, then the reserved
-/// tabs pinned right, `#open` and the operator view ([`VIEW_LABEL`]),
-/// shaded as a view. The created channels are numbered from 1 for Ctrl+N
-/// and Alt+N; the slots and the reserved tabs carry no number, and 0 is the
-/// bar's last tab, the operator view. Each channel tab (#393) is led by the
-/// channel's glyph in its identity colour, so the bar doubles as the
-/// channel legend. A `#partial` being typed marks the tabs it completes to.
+/// menu's `≡` slot, the created channel shown with what it is for, the `+`
+/// slot, then the reserved tabs pinned right, `#open` and the operator view
+/// ([`VIEW_LABEL`]), shaded as a view. No tab carries a number: the left
+/// column numbers the channels for Ctrl+digit, and 0 is the operator view
+/// ([`ChatPane::jump`]). A channel tab (#393) is led by the channel's glyph
+/// in its identity colour. A `#partial` being typed marks the tabs it
+/// completes to.
 pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
     let depth = chat.palette.depth();
     let text = chat.input.text().to_string();
     let partial = find_trailing_mention(&text).filter(|m| m.sigil == Sigil::Group).map(|m| m.partial.to_string());
-    let names = chat.strip_names();
     let groups = chat.world().groups.clone();
-    tabs::bar(&names)
+    chat.bar()
         .into_iter()
         .map(|slot| match slot {
             Slot::Common => PaneTab::new("≡").action(),
@@ -128,7 +127,11 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
                     }
                 }
                 let lead = k.map(|k| vec![Span::styled(format!("{} ", k.group.glyph), glyph)]).unwrap_or_default();
-                let tab = PaneTab::new(format!("#{name}")).lead(lead).target(prefix_match(&name, partial.as_deref()));
+                // The created channel shown says what it is for (#404); the
+                // bar cuts the line to fit.
+                let desc = k.filter(|k| !k.is_base).and_then(|k| k.membership.description.clone()).filter(|d| !d.is_empty());
+                let label = desc.map_or(format!("#{name}"), |d| format!("#{name} — {d}"));
+                let tab = PaneTab::new(label).lead(lead).target(prefix_match(&name, partial.as_deref()));
                 if tabs::is_reserved(&Tab::Channel(name)) {
                     tab.reserved()
                 } else {
@@ -137,16 +140,6 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
             }
         })
         .collect()
-}
-
-/// What the shown channel is for, set back after the tabs (#404).
-pub(super) fn trailer(chat: &mut ChatPane) -> Vec<Span<'static>> {
-    let Tab::Channel(g) = chat.normal_tab() else { return Vec::new() };
-    let groups = &chat.world().groups;
-    match groups.iter().find(|k| k.group.name == g).and_then(|k| k.membership.description.as_deref()) {
-        Some(desc) => vec![Span::styled(format!("  — {desc}"), theme::muted())],
-        None => Vec::new(),
-    }
 }
 
 /// The time a cell shows: one format across every attend surface

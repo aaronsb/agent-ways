@@ -1,6 +1,7 @@
 //! A click on a channel in the left column, through the shell's real mouse
 //! handler: the first click shows the channel, a click on the channel
-//! shown opens its menu, as the first and second Ctrl+digit do. The menu
+//! shown opens its menu, as the first and second Ctrl+digit do. The column
+//! numbers the channels from 1, `#open` first, so `#ch01` is Ctrl+2. The menu
 //! docks on the line under its row, or ends on the line above it where the
 //! rows below cannot hold it. In its own file, so its own fixture: 28
 //! channels fill the column at 80x25, and at 120x35 put #infra's row below
@@ -116,23 +117,23 @@ fn a_click_on_the_channel_shown_opens_its_menu_on_the_line_under_its_row() {
 fn ctrl_digit_twice_docks_the_menu_under_the_channels_row_too() {
     let mut c = chat();
     let (_, y) = row_of(&mut c, "#ch01");
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     assert!(!menu_open(&mut c));
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     let rows = rows(&mut c);
     assert!(rows[usize::from(y) + 1].starts_with("┌pick one: #ch01"), "the keyboard's menu docks where the click's does: {rows:#?}");
 }
 
 /// Where Ctrl+digits do not arrive, Alt+digit stands in for them, again
-/// on the tab shown for its menu, as the footer says.
+/// on the channel shown for its menu, as the footer says.
 #[test]
 fn alt_digit_again_opens_the_menu_where_ctrl_digits_do_not_arrive() {
     let mut c = chat().enhanced(false);
     let (_, y) = row_of(&mut c, "#ch01");
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::ALT);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::ALT);
     assert_eq!(c.foreground(), &Tab::Channel("ch01".into()));
     assert!(!menu_open(&mut c));
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::ALT);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::ALT);
     let rows = rows(&mut c);
     assert!(rows[usize::from(y) + 1].starts_with("┌pick one: #ch01"), "{rows:#?}");
 }
@@ -184,8 +185,8 @@ fn esc_and_a_click_elsewhere_close_the_menu() {
 #[test]
 fn a_click_on_the_channel_shown_drops_a_waiting_question() {
     let mut c = chat();
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     press(&mut c, KeyCode::End, KeyModifiers::NONE);
     press(&mut c, KeyCode::Enter, KeyModifiers::NONE);
     assert!(rows(&mut c).last().is_some_and(|r| r.contains("delete #ch01")), "the question waits");
@@ -210,8 +211,8 @@ fn the_channel_shown_opens_its_menu_from_the_column_with_repeat_off() {
     let rows = rows(&mut c);
     assert!(rows[usize::from(at.1) + 1].starts_with("┌pick one: #ch02"), "a click opens it: {rows:#?}");
     press(&mut c, KeyCode::Esc, KeyModifiers::NONE);
-    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
-    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
     assert!(!menu_open(&mut c), "the key follows the setting");
     // F2, Down: the column's cursor on #ch02, the channel shown; Enter
     // opens its menu, as Enter on any element does.

@@ -3,32 +3,37 @@
 //! and that element alone is drawn focused.
 //!
 //! The ring is the one ordered list the key handler walks and the renderer
-//! marks: the tab bar in the order drawn (`≡`, the
-//! created channels, `+`, then the reserved `#open` and the operator view),
-//! the column's rows (every agent, then every channel), the feed, then the
-//! compose box, and round again.
+//! marks: the tab bar in the order drawn (`≡`, the created channel shown,
+//! `+`, then the reserved `#open` and the operator view), the column's rows
+//! (every agent, then every channel), the feed, then the compose box, and
+//! round again. Tab walks it forward and Shift+Tab back, exact mirrors.
 //!
-//! - In the compose box every key edits: Tab completes, Enter sends, the
-//!   arrows move the cursor. Shift+Tab leaves backward, as does ↑ at the
-//!   start of the first line; ↓ at the end of the last line leaves forward.
-//! - Outside it, Tab or → moves forward and Shift+Tab or ← back; ↑ and ↓
-//!   move within the column and the feed; Enter opens the focused element's
-//!   menu, the one a click opens ([`ChatPane::activate`]); Esc goes back to
-//!   the compose box. The shell's single keys work as the help names them
-//!   (`?`, `q`, `m`, the digits), since nothing is being typed; any other
-//!   character goes to the compose box and is typed there.
+//! - In the compose box every key edits: Enter sends, the arrows move the
+//!   cursor, and Tab completes a word that can be completed. Tab with no
+//!   such word leaves forward and Shift+Tab backward; ↑ at the start of the
+//!   first line and ↓ at the end of the last leave a box that holds text.
+//! - The feed is the chat too: a character typed there goes to the compose
+//!   box, and `q`, `m`, `?` and the digits are typed, never the shell's.
+//! - Outside the chat, on the tab bar and the column, Tab or → moves forward
+//!   and Shift+Tab or ← back; ↑ and ↓ move within the column and the feed;
+//!   Enter opens the focused element's menu, the one a right click opens
+//!   ([`ChatPane::activate`]), and on the feed the selected message's menu.
+//!   The shell's single keys work there as the help names them (`?`, `q`,
+//!   `m`), and on a column row the digits pick a channel by its number; any
+//!   other character goes to the compose box and is typed there.
+//! - Esc moves along one cycle: the box, the feed, the `≡` menu, the tab or
+//!   column row the focus was last on (the feed when there is none), the
+//!   `≡` menu again. An overlay that is open takes the first Esc.
 //!
 //! These rules are [`ix::step`], a pure function over the one interaction
 //! state ([`ix::Ix`]); [`ChatPane::dispatch`] is where every input that can
 //! move the focus goes, and carries out what the step asks.
 
-use agent_tui::ratatui::layout::Rect;
 use agent_tui::{Anchor, Binding, Open};
 
-use super::activate::{How, Target};
 use super::ix::{self, Effect, Ev, View};
 use super::ChatPane;
-use crate::tabs::{self, Slot, Tab};
+use crate::tabs::{Slot, Tab};
 
 /// Where the keyboard is.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -82,10 +87,15 @@ impl ChatPane {
         }
     }
 
+    /// The tab bar as the world lays it out, for the tab shown.
+    pub(super) fn bar(&mut self) -> Vec<Slot> {
+        self.world().laid.bar.clone()
+    }
+
     /// The tab bar's index of the slot showing `tab`.
     pub(super) fn slot_of(&mut self, tab: &Tab) -> Option<usize> {
         let slot = Slot::Tab(tab.clone());
-        tabs::bar(&self.strip_names()).iter().position(|s| *s == slot)
+        self.bar().iter().position(|s| *s == slot)
     }
 
     /// What the step reads of the screen: the tab bar and the column as the
@@ -97,6 +107,7 @@ impl ChatPane {
             world: self.world.as_ref().map(|w| w.laid.clone()),
             side_drawn: self.side_drawn(),
             draft_empty: self.input.is_empty(),
+            completable: super::keys::completable(self.input.text(), cursor, self.tab_cycle.as_ref()),
             caret_start: cursor == 0,
             caret_end: cursor == self.input.text().chars().count(),
             feed_len: self.feed.len(),
@@ -144,7 +155,7 @@ impl ChatPane {
             Effect::Complete => self.tab_key(),
             Effect::Clear => self.clear(),
             Effect::Page { up } => self.page(up),
-            Effect::ShowTab(t) | Effect::RestoreTab(t) => self.set_tab(t),
+            Effect::ShowTab(t) => self.set_tab(t),
             Effect::Follow => self.side_follow = true,
             Effect::Activate { target, how, under_tab } => {
                 self.activate(target, how, None);
@@ -152,28 +163,11 @@ impl ChatPane {
                     *anchor = Anchor::Tab(i);
                 }
             }
-            Effect::FeedMenu => self.feed_menu(),
+            Effect::FeedMenu => self.message_menu(),
             Effect::Reveal(i) => self.feed.reveal(i),
             Effect::Deselect => self.feed.selected = None,
             Effect::Redraw => self.dirty = true,
         }
-    }
-
-    /// Enter on the feed: the menu of the selected message's sender, docked
-    /// under its header, as a right click on the sender's name opens it.
-    /// With no message selected, the newest is selected first.
-    fn feed_menu(&mut self) {
-        let n = self.feed.len();
-        let Some(i) = self.feed.selected.or(n.checked_sub(1)) else {
-            return self.say("no message to act on", false);
-        };
-        self.feed.reveal(i);
-        let Some(member) = self.entry_members.get(i).cloned().flatten() else {
-            return self.say("that message has no sender to act on", false);
-        };
-        let feed = self.hits.feed;
-        let at = self.feed.header_row(i).map(|r| Rect { x: feed.x, y: feed.y + r, width: feed.width, height: 1 });
-        self.activate(Target::Agent(member), How::Menu, at);
     }
 
     /// The chat's keys, the same keys wherever the focus is: those the
@@ -187,17 +181,17 @@ impl ChatPane {
         if kind == Kind::Compose {
             out.extend([
                 Binding::new("Enter", "send"),
-                Binding::new("Tab", "complete"),
+                Binding::new("Tab", "complete, else next").short("complete"),
                 Binding::new("S-Tab", "or ↑ at the top leaves the box").short("or ↑ leaves"),
+                Binding::new("Esc", "the feed"),
                 Binding::help("← →", "move the cursor; outside the box, the element before or next"),
                 Binding::help("↑ ↓", "between the box's lines; outside it, a column row or a feed message"),
-                Binding::help("Esc", "clears the selection and the bar; outside the box, back to it"),
             ]);
         } else {
             let enter = match kind {
                 Kind::Common => "the menu",
                 Kind::New => "new channel",
-                Kind::Feed => "sender's menu",
+                Kind::Feed => "message menu",
                 _ => "its menu",
             };
             out.extend([
@@ -205,7 +199,7 @@ impl ChatPane {
                 on(Binding::new("↑ ↓", if kind == Kind::Feed { "select" } else { "move" }), list),
                 Binding::new("Tab", "next"),
                 Binding::new("S-Tab", "back"),
-                Binding::new("Esc", "the box"),
+                Binding::new("Esc", "≡ menu"),
                 Binding::help("← →", "the element before or next; in the box, the cursor"),
             ]);
         }

@@ -43,9 +43,9 @@ fn base() -> std::path::PathBuf {
     attend_chat::signal::signals_base()
 }
 
-/// A channel created under the focus leaves it on the same tab, and a
-/// channel dissolved under it moves it to the tab shown. One test: both
-/// change the shared fixture.
+/// A channel created under the focus leaves it on the same tab, and the
+/// channel shown dissolved under it moves it to the tab shown in its place.
+/// One test: both change the shared fixture.
 #[test]
 fn the_focused_tab_is_kept_by_what_it_is() {
     let mut c = chat(true);
@@ -55,16 +55,19 @@ fn the_focused_tab_is_kept_by_what_it_is() {
     attend_groups::Groups::new(&base(), "").create("aaa-new", None).unwrap();
     c.refresh();
     let top = rows(&mut c)[0].clone();
-    assert!(top.contains("aaa-new") && top.contains("▸#open"), "the focus stays on #open: {top}");
-    // The focus on #infra, which then dissolves: the focus goes to the tab
-    // shown, #open's fallback.
+    assert!(!top.contains("aaa-new") && top.contains("▸#open"), "the focus stays on #open, and the bar gains no tab: {top}");
+    // #infra shown (the column's fourth channel, after #open, #aaa-new and
+    // #deploy), the focus on its tab, then #infra dissolves: the focus goes
+    // to the tab shown, #open's fallback.
+    testkit::render_screen(&mut c, W, H);
+    testkit::drive(&mut c, &[KeyEvent::new(KeyCode::Char('4'), KeyModifiers::CONTROL)]);
     for _ in 0..8 {
-        if rows(&mut c)[0].contains("▸3 #infra") {
+        if rows(&mut c)[0].contains("▸#infra") {
             break;
         }
         press(&mut c, KeyCode::Left);
     }
-    assert!(rows(&mut c)[0].contains("▸3 #infra"), "{}", rows(&mut c)[0]);
+    assert!(rows(&mut c)[0].contains("▸#infra"), "{}", rows(&mut c)[0]);
     attend_groups::Groups::new(&base(), "").dissolve("infra").unwrap();
     let _ = std::fs::remove_dir_all(base().join("@infra"));
     c.refresh();
