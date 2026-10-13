@@ -16,8 +16,9 @@
 //!   mod turned listening on (ADR-406), so the drain speaks that host's
 //!   tools. `<key>` is the Claude Code process the mod ran in: the host
 //!   holds only for that process, since a resumed session may have no mod;
-//! - `claude <key>`, the Claude Code process the session ran in (pid and
-//!   start time), so a session whose id changes under the same process
+//! - `claude <key>`, the Claude Code process the session ran in (pid, start
+//!   time and host, `<pid>-<start>@<host>`), so a session whose id changes
+//!   under the same process
 //!   (`/clear`) can find its enrollment again. `by-claude/<key>` indexes it;
 //! - `since <secs>`, when the session last went from not listening to
 //!   listening, in seconds since the epoch. From then it is a member of

@@ -93,7 +93,7 @@ Turn listening on or off for this session without joining a channel, or show it 
 * `on` — Listen: the Stop-hook drain delivers to this session. Messages addressed to its project while it was not listening are delivered by the next drain; older #open and channel backlog is held back
 * `off` — Stop listening: the drain delivers nothing and marks nothing read. Channel memberships are kept; a later join, `attend run` or `listen on` listens again
 * `status` — Print `listening` or `not listening` (default)
-* `beat` — Mark a listening session alive: touch its heartbeat, deliver nothing. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
+* `beat` — Mark a listening session alive: touch its heartbeat, deliver nothing. After a /clear it first takes over the enrollment the session's earlier id made, as the drain does. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
 
 ###### **Options:**
 
@@ -136,7 +136,7 @@ Print `listening` or `not listening` (default)
 
 ## `attend listen beat`
 
-Mark a listening session alive: touch its heartbeat, deliver nothing. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
+Mark a listening session alive: touch its heartbeat, deliver nothing. After a /clear it first takes over the enrollment the session's earlier id made, as the drain does. The attend mod runs it on a timer, through turns too, so the session stays within the liveness grace while it lives. A session that does not listen is written nothing
 
 **Usage:** `attend listen beat`
 

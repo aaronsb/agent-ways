@@ -93,8 +93,11 @@ pub fn off() -> Result<Listening, ListenError> {
     Ok(state(&me, listening))
 }
 
-/// Touch the heartbeat of a listening session, and nothing else: no drain,
-/// no enrollment. The attend mod calls it on its own timer, since its poll
+/// Touch the heartbeat of a listening session, and deliver nothing. After
+/// a `/clear` it first moves the enrollment the session's earlier id made
+/// under this Claude Code process to the current id, as the drain does
+/// ([`adopt_previous_enrollment`]), so the beat lands on the id the session
+/// goes on under. The attend mod calls it on its own timer, since its poll
 /// and the Stop-hook drain, which also touch the heartbeat, run only between
 /// turns (ADR-129, addendum of 2026-10-13). A session that does not listen
 /// is written nothing, as the drain writes it nothing.
