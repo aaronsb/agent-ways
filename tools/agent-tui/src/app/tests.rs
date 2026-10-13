@@ -851,6 +851,15 @@ fn quit_with_pending_in_any_tab_lists_each_and_d_discards_at_once() {
     for t in ["6 unsaved in 2 tabs", "ways", "●5", "other", "●1", "Back (Esc)", "Review ways (r)", "Quit and discard all (D)"] {
         assert!(f.contains(t), "{t} missing:\n{f}");
     }
+    // Back is the go-back green, Quit the destructive answer's ground.
+    let mut term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    term.draw(|f| app.draw(f)).unwrap();
+    let ground = |text: &str| {
+        let (x, y) = crate::testkit::find(term.backend().buffer(), text).unwrap_or_else(|| panic!("{text} not drawn"));
+        term.backend().buffer()[(x, y)].bg
+    };
+    assert_eq!(ground("Back (Esc)"), theme::Ground::Ok.bg());
+    assert_eq!(ground("Quit and discard all (D)"), theme::Ground::Err.bg());
     keys(&mut app, &[KeyCode::Esc]);
     assert!(matches!(app.mode, Mode::Browse) && app.pending() == 6);
     assert!(app.key(press(KeyCode::Esc)) && matches!(app.mode, Mode::Guard), "Esc asks too");

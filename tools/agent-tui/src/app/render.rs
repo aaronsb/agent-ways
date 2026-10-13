@@ -29,10 +29,10 @@ fn width(spans: &[Span]) -> u16 {
 pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String)], hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
     for (b, label) in buttons {
+        // Back is green, as the bar's keep answers are: it loses nothing.
         let ground = match b {
-            Btn::Apply | Btn::Finish | Btn::Save => Ground::Ok,
+            Btn::Apply | Btn::Finish | Btn::Save | Btn::Back => Ground::Ok,
             Btn::Discard | Btn::Quit | Btn::Drop => Ground::Err,
-            Btn::Back => Ground::AccentDim,
             Btn::Review | Btn::Next => Ground::Accent,
             Btn::Cancel => Ground::Rule,
         };
