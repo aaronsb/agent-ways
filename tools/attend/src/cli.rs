@@ -118,11 +118,12 @@ pub(crate) enum Commands {
 
     #[command(about = describe::SEND)]
     Send {
-        /// Scope send to a specific project path
-        #[arg(long, value_name = "PATH")]
+        /// Send a direct message: to a session's name or id, a person's
+        /// member id, or a project path for every live session there
+        #[arg(long, value_name = "WHO")]
         to: Option<String>,
 
-        /// Scope send to a named channel
+        /// Post to a named channel; `open` or `#open` posts to #open
         #[arg(long, value_name = "NAME")]
         channel: Option<String>,
 
@@ -142,16 +143,17 @@ pub(crate) enum Commands {
     #[command(about = describe::REPLY)]
     Reply {
         /// Reply to this message id instead of the newest one delivered.
-        /// The reply goes where that message was said, and is refused when
-        /// that room is left, gone or unknown, as without --re
+        /// The reply goes to its sender, or into its named channel, as
+        /// without --re
         #[arg(long, value_name = "ID")]
         re: Option<String>,
 
-        /// Scope send to a specific project path
-        #[arg(long, value_name = "PATH")]
+        /// Send the reply as a direct message to this session, person or
+        /// project path instead of to the parent's sender
+        #[arg(long, value_name = "WHO")]
         to: Option<String>,
 
-        /// Scope send to a named channel
+        /// Post the reply to this channel instead; `open` posts to #open
         #[arg(long, value_name = "NAME")]
         channel: Option<String>,
 

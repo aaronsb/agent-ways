@@ -5,8 +5,8 @@
 //! guidance of its own, such as a tool description, starts from the same
 //! string.
 
-pub const SEND: &str = "Send a signal to peer sessions (defaults to #open base channel)";
-pub const REPLY: &str = "Reply to the most recent peer message (auto-threaded)";
+pub const SEND: &str = "Send a message: a direct message with --to, a channel post with --channel, else to #open";
+pub const REPLY: &str = "Reply to the most recent peer message: a direct message to its sender, or in its named channel";
 pub const INBOX: &str = "Read pending messages from peers";
 pub const PEERS: &str = "List active Claude Code sessions and their channels";
 pub const STATUS: &str = "Show every running `attend run` with the session it serves, signals, and channel state";
