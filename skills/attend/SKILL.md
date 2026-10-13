@@ -150,7 +150,7 @@ Use TaskStop with the Monitor's task ID. Attend exits cleanly on signal.
 ## Arguments
 
 - `/attend` — start the sensor loop via Monitor (default)
-- `/attend` with `status` — run `attend peer status` via Bash
+- `/attend status` — run `attend peer status` via Bash
 
 ## Not for
 

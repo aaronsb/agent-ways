@@ -482,7 +482,7 @@ pub enum ListenHost {
     Mod,
 }
 
-/// Subcommands of the `attend permissions` alias, which defaulted to `audit`.
+/// Subcommands of the hidden `permissions` alias, which defaulted to `audit`.
 #[derive(Subcommand)]
 pub(crate) enum PermissionsCmd {
     /// Compare each sensor's `requires:` against settings.json

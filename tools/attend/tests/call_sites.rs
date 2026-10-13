@@ -1,10 +1,13 @@
 //! No caller or text names a flat attend verb that ADR-413 moved under a
 //! group (item 6.4). The scan covers plugins/, hooks/, skills/, statusline.sh,
-//! tools/attend-chat/src and docs/. Records under docs/architecture/ are
-//! history and keep the names current when they were written, except a
-//! decision still proposed, whose commands someone will type. Changelogs are
-//! append-only. The alias tests and tests/legacy_removed.rs, which name the
-//! old verbs on purpose, sit outside the scanned roots.
+//! README.md, docs/, tests/, attend's own crate and every crate attend names
+//! by path in its Cargo.toml. Records under docs/architecture/ are history
+//! and keep the names current when they were written, except a decision
+//! still proposed, whose commands someone will type. Changelogs are
+//! append-only, and the record fixtures under tests/fixtures/ are frozen
+//! copies of records. The alias tests and tests/legacy_removed.rs name the
+//! old verbs on purpose. A skill invocation such as `/attend status` is the
+//! skill's argument, not the CLI.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,9 +33,29 @@ fn tracked_files(root: &Path) -> Vec<String> {
     String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
 }
 
-fn in_scope(path: &str) -> bool {
-    let roots = ["plugins/", "hooks/", "skills/", "tools/attend-chat/src/", "docs/"];
-    (path == "statusline.sh" || roots.iter().any(|r| path.starts_with(r))) && !path.contains("CHANGELOG")
+/// attend's crate and the crates it names by path in its Cargo.toml.
+fn attend_crates(root: &Path) -> Vec<String> {
+    let manifest = std::fs::read_to_string(root.join("tools/attend/Cargo.toml")).expect("attend's Cargo.toml");
+    let mut crates = vec!["tools/attend/".to_string()];
+    for (at, _) in manifest.match_indices("path = \"../") {
+        let rest = &manifest[at + "path = \"../".len()..];
+        crates.push(format!("tools/{}/", &rest[..rest.find('"').unwrap()]));
+    }
+    crates
+}
+
+fn in_scope(path: &str, crates: &[String]) -> bool {
+    const EXEMPT: &[&str] = &[
+        "tools/attend/tests/aliases.rs",
+        "tools/attend/tests/legacy_removed.rs",
+        "tests/fixtures/adr/",
+        "tests/fixtures/docker/scenarios/adr-migrate/",
+    ];
+    let roots = ["plugins/", "hooks/", "skills/", "docs/", "tests/"];
+    let scanned = matches!(path, "statusline.sh" | "README.md")
+        || roots.iter().any(|r| path.starts_with(r))
+        || crates.iter().any(|c| path.starts_with(c.as_str()));
+    scanned && !path.contains("CHANGELOG") && !EXEMPT.iter().any(|e| path.starts_with(e))
 }
 
 /// A record under docs/architecture/ is scanned only while it is a proposed
@@ -44,13 +67,18 @@ fn live_record(text: &str) -> bool {
 }
 
 /// Each flat verb a line names as `attend <verb>`, with word boundaries on
-/// both sides, as `\battend (verb)\b` matches.
+/// both sides, as `\battend (verb)\b` matches. A `/` right before `attend`
+/// at the start of a word is a skill invocation and is passed over; one
+/// inside a path (`~/.cargo/bin/attend`) is the binary.
 fn flat_verbs(line: &str) -> Vec<&'static str> {
     let word = |c: char| c.is_alphanumeric() || c == '_';
     let mut found = Vec::new();
     for (at, _) in line.match_indices("attend ") {
-        if line[..at].chars().next_back().is_some_and(word) {
-            continue;
+        let mut before = line[..at].chars().rev();
+        match before.next() {
+            Some(c) if word(c) => continue,
+            Some('/') if !before.next().is_some_and(|c| word(c) || matches!(c, '.' | '-' | '~' | '/')) => continue,
+            _ => {}
         }
         let rest = &line[at + "attend ".len()..];
         let end = rest.find(|c: char| !word(c)).unwrap_or(rest.len());
@@ -61,21 +89,26 @@ fn flat_verbs(line: &str) -> Vec<&'static str> {
     found
 }
 
+// The samples are built with concat! so this file's own text holds no flat
+// verb for the scan to find.
 #[test]
 fn the_matcher_finds_flat_verbs_and_passes_grouped_paths() {
-    assert_eq!(flat_verbs("run `attend send \"hi\"` then attend peers"), ["send", "peers"]);
-    assert_eq!(flat_verbs("exec attend inbox --drain"), ["inbox"]);
-    assert_eq!(flat_verbs("/attend status"), ["status"]);
+    assert_eq!(flat_verbs(concat!("run `attend ", "send \"hi\"` then attend ", "peers")), ["send", "peers"]);
+    assert_eq!(flat_verbs(concat!("exec attend ", "inbox --drain")), ["inbox"]);
+    assert_eq!(flat_verbs(concat!("~/.cargo/bin/attend ", "status")), ["status"]);
+    assert!(flat_verbs(concat!("- `/attend ", "status` runs it via Bash")).is_empty());
     assert!(flat_verbs("attend message send, attend channel join x, attend peer list").is_empty());
-    assert!(flat_verbs("attend sending, reattend send, attend-send, attend run").is_empty());
+    assert!(flat_verbs(concat!("attend sending, reattend ", "send, attend-send, attend run")).is_empty());
 }
 
 #[test]
 fn no_caller_names_a_flat_attend_verb() {
     let root = repo_root();
+    let crates = attend_crates(&root);
+    assert!(crates.len() > 5, "attend names its crates by path: {crates:?}");
     let mut scanned = 0;
     let mut hits = Vec::new();
-    for path in tracked_files(&root).into_iter().filter(|p| in_scope(p)) {
+    for path in tracked_files(&root).into_iter().filter(|p| in_scope(p, &crates)) {
         let Ok(text) = std::fs::read_to_string(root.join(&path)) else { continue };
         if path.starts_with("docs/architecture/") && !live_record(&text) {
             continue;
