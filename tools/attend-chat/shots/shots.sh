@@ -99,7 +99,7 @@ theme-sub    | base  | wait:Agents click:≡ wait:Theme click:Theme wait:theme_f
 keys-sub     | base  | wait:Agents click:≡ wait:Keybinding click:Keybinding wait:keybinding_set
 remove-sub   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Remove_agent wait:remove_from
 settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:sets_one
-tab-closes   | base  | wait:Agents M-2 M-2 wait:pick click:#deploy_— gone:pick
+tab-closes   | base  | wait:Agents M-2 M-2 wait:pick click:rollout gone:pick
 guard-name   | base  | wait:Agents C-n wait:new_channel_name text:abc C-c wait:being_typed
 rclick-row   | base  | wait:Agents rside:#infra wait:pick_one:_#infra
 rclick-agent | base  | wait:Agents rside:● wait:Address
@@ -137,9 +137,14 @@ narrow-bar   | many  | wait:Agents resize:60 wait:⋯all
 arrow-empty  | base  | wait:Agents Up text:1x wait:>_1x
 q-asks       | base  | wait:Agents BTab BTab q wait:quit?
 walk-back    | base  | wait:Agents text:x Down Tab Tab Tab Tab wait:_column_
-bar-active   | base  | wait:Agents M-2 wait:#deploy_—
-bar-narrow   | base  | wait:Agents M-2 wait:#deploy_— resize:60 wait:⋯all
-digit-row    | base  | wait:Agents F2 Down End 2 wait:#deploy_—
+bar-active   | base  | wait:Agents M-2 wait:rollout
+tab-count    | base  | wait:Agents M-2 wait:rollout
+tab-numbers  | base  | wait:Agents M-2 wait:rollout F3 gone:Agents wait:1_#open
+tab-narrow   | base  | wait:Agents M-2 wait:rollout resize:70 gone:Agents wait:1_#open
+digit-agent  | base  | wait:Agents F2 Down wait:_column_ text:2 wait:>_2
+esc-tab-out  | base  | wait:Agents BTab BTab wait:_column_ text:hello Tab wait:▸≡ Escape wait:pick_one:_attend-chat Escape gone:pick_one wait:_column_
+bar-narrow   | base  | wait:Agents M-2 wait:rollout resize:60 wait:⋯all
+digit-row    | base  | wait:Agents F2 Down End 2 wait:rollout
 digit-typed  | base  | wait:Agents F2 2 wait:>_2
 tab-leaves   | base  | wait:Agents text:hello Tab wait:▸≡
 feed-type    | base  | wait:Agents BTab wait:_feed_ q wait:>_q
