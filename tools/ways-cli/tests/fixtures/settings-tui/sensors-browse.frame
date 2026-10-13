@@ -4,8 +4,8 @@ agent-tui frame 100x30
 |│ ▸ context · setting           value                 ││sensors.processes                          │|
 |│ ▸ git · setting               value                 ││                                           │|
 |│ ▸ peers · setting             value                 ││The built-in processes sensor. `attend     │|
-|│▌▾ processes · setting         value                 ││sensors` shows what it watches and whether │|
-|│     enabled                   true                  ││it runs.                                   │|
+|│▌▾ processes · setting         value                 ││sensor list` shows what it watches and     │|
+|│     enabled                   true                  ││whether it runs.                           │|
 |│     interval                  30                    ││                                           │|
 |│     min_interval              5                     ││7 entries, 0 changed                       │|
 |│     threshold                 2.0                   ││                                           │|

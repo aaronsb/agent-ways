@@ -4,8 +4,8 @@ agent-tui frame 100x30
 |│▌  ▾ processes             ●1                        ││sensors.processes                          │|
 |│       enabled             true → false              ││                                           │|
 |│                                                     ││The built-in processes sensor. `attend     │|
-|│                                                     ││sensors` shows what it watches and whether │|
-|│                                                     ││it runs.                                   │|
+|│                                                     ││sensor list` shows what it watches and     │|
+|│                                                     ││whether it runs.                           │|
 |│                                                     ││                                           │|
 |│                                                     ││1 change under this group                  │|
 |│                                                     ││                                           │|
