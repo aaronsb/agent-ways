@@ -14,28 +14,32 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
   Ctrl-C                    exit; with a draft in the compose box, asks first.
                             ≡ → Quit does the same
   Esc                       closes a menu, a question, the help or the entry
-                            dialog; outside the compose box, back to it; in it,
-                            clears the selection and the status line. It never
-                            exits, so Ctrl+3 arriving as Esc cannot close the chat
-  Enter                     send to the foreground channel
-  Ctrl+1..9, Ctrl+0         show created channel N, or with 0 the bar's last tab,
-                            the operator view ⋯all; again on the shown tab, its
-                            menu. Needs a terminal that speaks the kitty keyboard
-                            protocol; F1 says whether yours does
+                            dialog; with nothing open, the Esc cycle: the compose
+                            box, the feed, the ≡ menu, the tab or column row last
+                            focused, the ≡ menu again. It never exits, so Ctrl+3
+                            arriving as Esc cannot close the chat
+  Enter                     send to the foreground channel; outside the compose
+                            box, the focused element's menu (in the feed, the
+                            message's: Reply, Quote, Address, Copy)
+  Ctrl+1..9, Ctrl+0         show the column's channel N (#open is 1), or with 0
+                            the operator view ⋯all; again on the channel shown,
+                            its menu. Needs a terminal that speaks the kitty
+                            keyboard protocol; F1 says whether yours does
   Alt+0..9                  the same where Ctrl+digits do not arrive (Konsole and
                             GNOME Terminal keep Alt+digits for their own tabs)
   F2 / Ctrl+T               the focus to the tab shown (reversed behind a ▸), and
                             again back to the compose box
-  Shift+Tab, ↑ ↓, Esc       leave the compose box: Shift+Tab; with text, ↑ at
+  Shift+Tab, ↑ ↓            leave the compose box: Shift+Tab; with text, ↑ at
                             the start of its first line or ↓ at the end of its
-                            last; Esc when it is empty. Outside it Tab, →,
-                            Shift+Tab and ← walk the tabs, the column, the feed and
-                            the box, Enter opens the focused element's menu, ? and
-                            m work, q asks before quitting, and the digits switch
-                            tabs on the tab bar
+                            last. Outside it Tab, →, Shift+Tab and ← walk the
+                            tabs, the column, the feed and the box. In the feed a
+                            character is typed in the box; on the tab bar and the
+                            column ? and m work, q asks before quitting, and on a
+                            column row a digit picks a channel by its number
   Ctrl+N                    ask for a new channel's name in a dialog under +; the
                             compose box and its draft are never borrowed
-  Tab                       next tab (empty input) / complete @name #channel /command
+  Tab                       complete @name #channel /command; with nothing to
+                            complete, leave the compose box
   tab menus                 ≡ (first, no number): Theme, Keybinding set, Mouse at
                             start, Settings, Quit. ⋯all (the operator view, every
                             channel together, pinned right): Clear view.
@@ -46,8 +50,8 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             on attend (ADR-404 D4) and is set back.
                             The + slot (or Ctrl+N) asks for a new channel's name
                             with no menu. Clear history and Delete
-                            ask first: y goes ahead. Channel tabs are ordered
-                            by their newest message, #open first
+                            ask first: y goes ahead. The bar holds one channel
+                            tab, the created channel shown
   Shift-Enter / Alt-Enter   insert newline
   Left / Right / Home / End move cursor
   Backspace / Delete        edit

@@ -287,12 +287,12 @@ fn settings_opens_the_listing_in_a_modal() {
 #[test]
 fn a_click_on_the_tab_of_a_menu_docked_at_its_row_only_closes_it() {
     let mut c = chat();
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
-    press(&mut c, KeyCode::Char('1'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     let ((_, y), _) = menu(&mut c).expect("#deploy's menu");
     let (_, row) = row_of(&mut c, "#deploy");
     assert_eq!(y, row as usize + 1, "docked under the column's row");
-    let tab = at(&mut c, "1 #deploy");
+    let tab = at(&mut c, "#deploy — rollout");
     click(&mut c, tab);
     assert!(menu(&mut c).is_none(), "closed, and not opened again under the tab: {:#?}", rows(&mut c));
 

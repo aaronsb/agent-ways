@@ -162,8 +162,9 @@ fn golden_merged_feed_tabs_and_compose() {
 fn golden_channel_tab_filters_the_feed_and_shows_its_description() {
     let mut g = goldens();
     let mut c = chat();
-    // Tab on an empty line: the operator view → #deploy, the bar's first tab
-    press(&mut c, key(KeyCode::Tab));
+    // Alt+2: the column's second channel, #deploy. Ctrl+digits do not
+    // arrive here, so Alt+digits stand in.
+    press(&mut c, alt('2'));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
     shoot(&mut g, "channel-deploy", &mut c);
     g.finish();
@@ -274,22 +275,24 @@ fn ctrl_c_ends_the_chat_and_esc_never_does() {
     }
 }
 
+/// Tab on an empty line has nothing to complete: it leaves the box and
+/// shows nothing. Alt+digit picks a channel by the column's number, the
+/// column hidden or not; 0 is the operator view.
 #[test]
-fn tab_on_an_empty_input_cycles_the_tabs_and_alt_digits_jump() {
+fn tab_on_an_empty_input_leaves_the_box_and_alt_digits_pick_a_channel() {
     let mut c = chat();
-    let order: Vec<Tab> = (0..4)
-        .map(|_| {
-            press(&mut c, key(KeyCode::Tab));
-            c.foreground().clone()
-        })
-        .collect();
-    assert_eq!(order, [Tab::Channel("deploy".into()), Tab::Channel("infra".into()), Tab::Channel("open".into()), Tab::Merged], "the bar's order");
-    press(&mut c, KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT));
+    press(&mut c, key(KeyCode::Tab));
+    assert_eq!(c.foreground(), &Tab::Merged, "Tab shows nothing");
+    assert!(text(&mut c, 80, 25).lines().next().is_some_and(|r| r.contains("▸≡")), "it leaves the box, forward to ≡");
+    press(&mut c, key(KeyCode::BackTab));
+    press(&mut c, alt('2'));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
-    press(&mut c, KeyEvent::new(KeyCode::Char('9'), KeyModifiers::ALT));
-    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "an empty slot does nothing");
-    drawn(&mut c, &[KeyEvent::new(KeyCode::Char('0'), KeyModifiers::ALT)], 80, 25);
-    assert_eq!(c.foreground(), &Tab::Merged, "0 is the bar's last tab, the operator view");
+    press(&mut c, alt('3'));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
+    press(&mut c, alt('9'));
+    assert_eq!(c.foreground(), &Tab::Channel("infra".into()), "a number past the channels does nothing");
+    drawn(&mut c, &[alt('0')], 80, 25);
+    assert_eq!(c.foreground(), &Tab::Merged, "0 is the operator view");
     assert!(c.input().is_empty(), "Alt+digit types nothing");
 }
 
@@ -490,8 +493,9 @@ fn chars(s: &str) -> Vec<KeyEvent> {
 fn golden_compose_and_send_to_the_foreground_channel() {
     let mut g = goldens();
     let mut c = chat();
-    // Alt+1 is #deploy, where beta is a live member.
-    drawn(&mut c, &[KeyEvent::new(KeyCode::Char('1'), KeyModifiers::ALT)], 80, 25);
+    // Alt+2 is #deploy, the column's second channel, where beta is a live
+    // member.
+    drawn(&mut c, &[alt('2')], 80, 25);
     drawn(&mut c, &chars("ship it at 15:00"), 80, 25);
     g.check("compose-deploy-80x25", &testkit::render_screen(&mut c, 80, 25));
     drawn(&mut c, &[key(KeyCode::Enter)], 80, 25);
@@ -505,7 +509,7 @@ fn golden_compose_and_send_to_the_foreground_channel() {
 fn golden_channel_switch_by_alt_digit() {
     let mut g = goldens();
     let mut c = chat();
-    drawn(&mut c, &[KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT)], 80, 25);
+    drawn(&mut c, &[alt('3')], 80, 25);
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
     g.check("channel-infra-80x25", &testkit::render_screen(&mut c, 80, 25));
     g.finish();
@@ -605,51 +609,60 @@ fn backspace_after_ctrl_c_edits_the_draft() {
 fn a_click_on_a_tab_shows_its_channel_and_a_second_opens_its_menu() {
     let mut c = chat();
     let buf = testkit::render_screen(&mut c, 80, 25);
-    let (x, y) = testkit::find(&buf, "1 #deploy").expect("the tab is drawn");
+    let (x, y) = testkit::find(&buf, "#open").expect("the tab is drawn");
+    assert_eq!(y, 0, "the tab, on the bar");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
-    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
-    assert!(!text(&mut c, 80, 25).contains("pick one"), "the first click only shows the channel, as Ctrl+3 does");
+    assert_eq!(c.foreground(), &Tab::Channel("open".into()));
+    assert!(!text(&mut c, 80, 25).contains("pick one"), "the first click only shows the channel, as Ctrl+1 does");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
-    assert!(rows[usize::from(y) + 1].contains("pick one: #deploy"), "a click on the tab shown opens its menu on the line under it: {rows:#?}");
+    assert!(rows[usize::from(y) + 1].contains("pick one: #open"), "a click on the tab shown opens its menu on the line under it: {rows:#?}");
     assert!(press(&mut c, key(KeyCode::Esc)), "Esc closes the menu");
+    // A created channel's tab is there while it is shown, and goes with it.
+    press(&mut c, alt('2'));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#deploy").expect("the tab of the channel shown");
+    assert_eq!(y, 0);
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"), "one click on it: its menu");
+    press(&mut c, key(KeyCode::Esc));
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "⋯all").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert_eq!(c.foreground(), &Tab::Merged);
+    assert!(!testkit::rows(&testkit::render_screen(&mut c, 80, 25))[0].contains("#deploy"), "the channel's tab went with it");
 }
 
-/// A menu docks where the input came from: a click on the tab docks it
-/// under the tab even while the column shows the channel's row; the key
-/// docks it under that row.
 #[test]
 fn a_tab_click_docks_the_menu_under_the_tab_and_the_key_under_the_row() {
     let mut c = chat_side().enhanced(true);
+    press(&mut c, ctrl('2'));
     let buf = testkit::render_screen(&mut c, 80, 25);
-    let (x, y) = testkit::find(&buf, "1 #deploy").expect("the tab is drawn");
-    left(&mut c, (x, y));
+    let (x, y) = testkit::find(&buf, "#deploy").expect("the tab is drawn");
+    assert_eq!(y, 0, "the tab, on the bar");
     left(&mut c, (x, y));
     let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
     let title = rows.iter().position(|r| r.contains("pick one: #deploy")).expect("the menu is drawn");
     assert_eq!(title, usize::from(y) + 1, "under the tab: {rows:#?}");
     press(&mut c, key(KeyCode::Esc));
     let row = testkit::rows(&testkit::render_screen(&mut c, 80, 25)).iter().position(|r| r.contains("#deploy") && !r.starts_with(" ≡")).expect("the column's row");
-    press(&mut c, ctrl('1'));
+    press(&mut c, ctrl('2'));
     let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
-    assert!(rows[row + 1].starts_with("┌pick one: #deploy"), "Ctrl+1 docks under the column's row: {rows:#?}");
+    assert!(rows[row + 1].starts_with("┌pick one: #deploy"), "Ctrl+2 docks under the column's row: {rows:#?}");
 }
 
 #[test]
 fn golden_a_tab_clicked() {
     let mut g = goldens();
     let mut c = chat();
-    let buf = testkit::render_screen(&mut c, 80, 25);
-    let (x, y) = testkit::find(&buf, "2 #infra").expect("the tab is drawn");
-    // The glyph before the lozenge is part of the target.
-    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x.saturating_sub(3), y));
+    press(&mut c, alt('3'));
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
-    // Again, on the tab shown: its menu, docked under the tab.
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let (x, y) = testkit::find(&buf, "#infra").expect("the tab is drawn");
+    // The glyph before the lozenge is part of the target. A click on the
+    // tab shown: its menu, docked under the tab.
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x.saturating_sub(3), y));
+    assert!(text(&mut c, 80, 25).contains("pick one: #infra"));
     g.check("clicked-infra-80x25", &testkit::render_screen(&mut c, 80, 25));
     g.finish();
 }
@@ -821,10 +834,10 @@ fn bar(c: &mut Chat) -> String {
 fn ctrl_digit_shows_a_tab_and_a_second_press_opens_its_menu() {
     let mut g = goldens();
     let mut c = chat().enhanced(true);
-    drawn(&mut c, &[ctrl('1')], 80, 25);
+    drawn(&mut c, &[ctrl('2')], 80, 25);
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
     assert!(!text(&mut c, 80, 25).contains("pick one"), "the first press only shows the tab");
-    drawn(&mut c, &[ctrl('1')], 80, 25);
+    drawn(&mut c, &[ctrl('2')], 80, 25);
     let shown = text(&mut c, 80, 25);
     for item in ["pick one: #deploy", "Add agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Join", "Seal", "needs ADR-404 D4", "Delete channel"] {
         assert!(shown.contains(item), "{item}: {shown}");
@@ -837,17 +850,19 @@ fn ctrl_digit_shows_a_tab_and_a_second_press_opens_its_menu() {
     g.finish();
 }
 
-/// `#open` has no number: the tab bar's focus reaches it, left of the
+/// `#open`'s menu from the tab bar: its focus reaches it, left of the
 /// operator view, and Enter opens its menu.
 fn open_menu(c: &mut Chat) {
     to_tab(c, "#open");
     drawn(c, &[key(KeyCode::Enter)], 80, 25);
 }
 
-/// The tab bar's focus on the slot labelled `label`, from the compose box:
-/// F2, then ← along the bar until the `▸` is on it.
+/// The tab bar's focus on the slot labelled `label`: F2 when the focus is
+/// off the bar, then ← along the bar until the `▸` is on it.
 fn to_tab(c: &mut Chat, label: &str) {
-    drawn(c, &[key(KeyCode::Esc), key(KeyCode::Esc), key(KeyCode::F(2))], 80, 25);
+    if !text(c, 80, 25).lines().next().is_some_and(|r| r.contains('▸')) {
+        drawn(c, &[key(KeyCode::F(2))], 80, 25);
+    }
     for _ in 0..8 {
         if text(c, 80, 25).lines().next().is_some_and(|r| r.contains(&format!("▸{label}"))) {
             return;
@@ -891,14 +906,14 @@ fn clear_history_asks_first_and_y_runs_the_purge() {
     // Delete channel on a named channel: the last item. `n` keeps the
     // channel and types nothing; another character keeps it and goes on
     // into the draft.
-    press(&mut c, ctrl('1'));
-    press(&mut c, ctrl('1'));
+    press(&mut c, ctrl('2'));
+    press(&mut c, ctrl('2'));
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Enter));
     assert!(bar(&mut c).contains("delete #deploy and its history?"), "{}", bar(&mut c));
     press(&mut c, key(KeyCode::Char('n')));
     assert_eq!((c.status(), c.input().text()), ("kept", ""));
-    press(&mut c, ctrl('1'));
+    press(&mut c, ctrl('2'));
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Enter));
     press(&mut c, key(KeyCode::Char('o')));
@@ -933,8 +948,8 @@ fn a_click_then_enter_on_merged_asks_before_clearing_the_view() {
 
 /// #deploy's menu, then Delete channel: the question waits for its `y`.
 fn ask_delete(c: &mut Chat) {
-    press(c, ctrl('1'));
-    press(c, ctrl('1'));
+    press(c, ctrl('2'));
+    press(c, ctrl('2'));
     press(c, key(KeyCode::End));
     press(c, key(KeyCode::Enter));
     assert!(bar(c).contains("delete #deploy"), "{}", bar(c));
@@ -952,7 +967,7 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
     // A tab change.
     let mut c = chat().enhanced(true).dry_run(true);
     ask_delete(&mut c);
-    press(&mut c, ctrl('2'));
+    press(&mut c, ctrl('3'));
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()));
     assert!(!bar(&mut c).contains("delete #deploy"));
     press(&mut c, key(KeyCode::Char('y')));
@@ -962,7 +977,7 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
     ask_delete(&mut c);
     press(&mut c, key(KeyCode::F(2)));
     assert_eq!(c.status(), "kept");
-    press(&mut c, key(KeyCode::Esc));
+    press(&mut c, key(KeyCode::F(2)));
     press(&mut c, key(KeyCode::Char('y')));
     assert_eq!(c.input().text(), "y");
     // A click on a tab.
@@ -987,7 +1002,7 @@ fn a_tab_change_the_tab_bar_or_a_click_drops_a_waiting_question() {
 fn ctrl_digit_drops_a_waiting_question() {
     let mut c = chat().enhanced(true).dry_run(true);
     ask_delete(&mut c);
-    press(&mut c, ctrl('1'));
+    press(&mut c, ctrl('2'));
     assert_eq!(c.status(), "kept");
     press(&mut c, key(KeyCode::Esc));
     assert!(!bar(&mut c).contains("unchanged") && !bar(&mut c).contains("delete #deploy"), "{}", bar(&mut c));
@@ -1066,10 +1081,11 @@ fn golden_enter_on_the_plus_slot_asks_the_name_at_once() {
     g.check("new-channel-prompt-80x25", &testkit::render_screen(&mut c, 80, 25));
     // A click on the slot does the same.
     press(&mut c, key(KeyCode::Esc));
-    press(&mut c, key(KeyCode::Esc));
     let buf = testkit::render_screen(&mut c, 80, 25);
-    let (x, y) = testkit::find(&buf, " + ").expect("the slot is drawn");
-    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x + 1, y));
+    // The focus is on the slot, drawn `▸+`.
+    let (x, y) = testkit::find(&buf, "+").expect("the slot is drawn");
+    assert_eq!(y, 0, "on the bar");
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
     assert!(text(&mut c, 80, 25).contains("new channel name"), "{}", text(&mut c, 80, 25));
     assert!(!text(&mut c, 80, 25).contains("pick one"));
     g.finish();
@@ -1112,7 +1128,7 @@ fn golden_ctrl_n_asks_a_new_channels_name_and_leaves_the_draft() {
 fn ctrl_n_never_throws_away_a_description_being_typed() {
     let mut c = chat().enhanced(true).dry_run(true);
     typed(&mut c, "a draft");
-    drawn(&mut c, &[ctrl('1'), ctrl('1')], 80, 25);
+    drawn(&mut c, &[ctrl('2'), ctrl('2')], 80, 25);
     // Add agent, then Remove agent, then Describe….
     for _ in 0..2 {
         press(&mut c, key(KeyCode::Down));
@@ -1154,17 +1170,17 @@ fn golden_the_tab_bar_focus_is_marked_on_every_kind_of_tab() {
     let mut c = chat().dry_run(true);
     drawn(&mut c, &[key(KeyCode::F(2))], 80, 25);
     assert!(text(&mut c, 80, 25).contains("▸⋯all"), "F2 focuses the tab shown");
-    drawn(&mut c, &[key(KeyCode::Left); 4], 80, 25);
-    assert!(text(&mut c, 80, 25).contains("▸1 #deploy"), "← walks back along the bar: #open, +, #infra, #deploy");
+    drawn(&mut c, &[key(KeyCode::F(2)), alt('2'), key(KeyCode::F(2))], 80, 25);
+    assert!(text(&mut c, 80, 25).contains("▸#deploy"), "F2 focuses the tab shown, #deploy");
     g.check("tab-bar-focused-80x25", &testkit::render_screen(&mut c, 80, 25));
     drawn(&mut c, &[key(KeyCode::Left)], 80, 25);
     assert!(text(&mut c, 80, 25).contains("▸≡"));
     g.check("tab-bar-focused-common-80x25", &testkit::render_screen(&mut c, 80, 25));
-    drawn(&mut c, &[key(KeyCode::Right), key(KeyCode::Right), key(KeyCode::Right)], 80, 25);
+    drawn(&mut c, &[key(KeyCode::Right), key(KeyCode::Right)], 80, 25);
     assert!(text(&mut c, 80, 25).contains("▸+"), "+ ends the tabs left of the reserved ones");
     g.check("tab-bar-focused-plus-80x25", &testkit::render_screen(&mut c, 80, 25));
-    drawn(&mut c, &[key(KeyCode::Esc)], 80, 25);
-    assert!(!text(&mut c, 80, 25).contains('▸'));
+    drawn(&mut c, &[key(KeyCode::F(2))], 80, 25);
+    assert!(!text(&mut c, 80, 25).contains('▸'), "F2 again: the box");
     g.finish();
 }
 
@@ -1174,15 +1190,14 @@ fn f2_moves_along_the_tab_bar_and_enter_opens_the_menu() {
     let mut c = chat();
     drawn(&mut c, &[key(KeyCode::F(2))], 80, 25);
     assert!(bar(&mut c).contains(" view ") && bar(&mut c).contains("Enter its menu"), "{}", bar(&mut c));
-    drawn(&mut c, &[key(KeyCode::Left); 4], 80, 25);
-    assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
+    drawn(&mut c, &[key(KeyCode::Left)], 80, 25);
+    assert_eq!(c.foreground(), &Tab::Merged, "the walk shows nothing");
     press(&mut c, key(KeyCode::Enter));
-    assert!(text(&mut c, 80, 25).contains("pick one: #deploy"));
+    assert!(text(&mut c, 80, 25).contains("pick one: #open"));
     press(&mut c, key(KeyCode::Esc));
     // To the + slot: it is pointed at, never shown, and Enter asks a name.
-    press(&mut c, key(KeyCode::Right));
-    press(&mut c, key(KeyCode::Right));
-    assert_eq!(c.foreground(), &Tab::Channel("infra".into()), "the + slot is not a tab");
+    press(&mut c, key(KeyCode::Left));
+    assert_eq!(c.foreground(), &Tab::Merged, "the + slot is not a tab");
     press(&mut c, key(KeyCode::Enter));
     assert!(text(&mut c, 80, 25).contains("new channel name"), "{}", text(&mut c, 80, 25));
     // Ctrl+T takes the focus to the bar and back, as F2 does.
@@ -1196,14 +1211,11 @@ fn f2_moves_along_the_tab_bar_and_enter_opens_the_menu() {
 #[test]
 fn a_right_click_opens_a_tabs_menu_without_showing_it() {
     let mut c = chat();
+    press(&mut c, alt('2'));
     let buf = testkit::render_screen(&mut c, 80, 25);
-    let (x, y) = testkit::find(&buf, "1 #deploy").expect("the tab is drawn");
-    c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
-    assert!(!text(&mut c, 80, 25).contains("pick one"));
-    let buf = testkit::render_screen(&mut c, 80, 25);
-    let (x, y) = testkit::find(&buf, "2 #infra").expect("the tab is drawn");
+    let (x, y) = testkit::find(&buf, "#open").expect("the tab is drawn");
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Right), x, y));
-    assert!(text(&mut c, 80, 25).contains("pick one: #infra"));
+    assert!(text(&mut c, 80, 25).contains("pick one: #open"));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "a right click opens the menu without showing the tab");
 }
 
@@ -1259,12 +1271,13 @@ fn the_common_menu_leads_the_bar_and_the_operator_view_is_zero() {
     let mut g = goldens();
     let mut c = chat().enhanced(true).dry_run(true);
     let shown = text(&mut c, 80, 25);
-    assert!(shown.starts_with(" ≡ ") && shown.contains("1 #deploy"), "{shown}");
-    press(&mut c, ctrl('1'));
+    assert!(shown.starts_with(" ≡ ") && !shown.lines().next().unwrap().contains("#deploy"), "{shown}");
+    press(&mut c, ctrl('2'));
     drawn(&mut c, &[ctrl('0')], 80, 25);
-    assert_eq!(c.foreground(), &Tab::Merged, "Ctrl+0 is the bar's last tab, the operator view");
-    // ≡ is the first slot: ← from the operator view walks the bar back to it.
-    drawn(&mut c, &[key(KeyCode::F(2)), key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Left)], 80, 25);
+    assert_eq!(c.foreground(), &Tab::Merged, "Ctrl+0 is the operator view");
+    // ≡ is the first slot: ← from the operator view walks the bar back to it,
+    // past #open and +.
+    drawn(&mut c, &[key(KeyCode::F(2)), key(KeyCode::Left), key(KeyCode::Left), key(KeyCode::Left)], 80, 25);
     assert!(text(&mut c, 80, 25).contains("▸≡"), "{}", text(&mut c, 80, 25));
     press(&mut c, key(KeyCode::Enter));
     let menu = text(&mut c, 80, 25);
@@ -1469,7 +1482,9 @@ fn golden_the_keyboard_walks_the_column() {
     press(&mut c, key(KeyCode::Esc));
     assert!(cursor_row(&mut c, 80).is_some(), "the cursor stays on its row");
     press(&mut c, key(KeyCode::Esc));
-    assert!(cursor_row(&mut c, 80).is_none() && bar(&mut c).contains(" chat "), "Esc goes back to the box");
+    assert!(text(&mut c, 80, 25).contains("pick one: attend-chat"), "Esc again: the ≡ menu, the Esc cycle's next stop");
+    press(&mut c, key(KeyCode::Esc));
+    assert!(cursor_row(&mut c, 80).is_some(), "and back to the row");
 
     // Up past the top goes back to the tab bar.
     press(&mut c, key(KeyCode::F(2)));
@@ -1489,6 +1504,26 @@ fn golden_the_keyboard_walks_the_column() {
     assert!(text(&mut c, 80, 25).contains("pick one: @Laszlo"), "Enter on an agent opens its menu");
     press(&mut c, key(KeyCode::Enter));
     assert!(c.input().text().starts_with("@Laszlo"), "{:?}", c.input().text());
+    g.finish();
+}
+
+/// The Esc cycle's `≡` menu, opened from the feed, and the feed's message
+/// menu (ADR-407, the redesign): frames of states the redesign adds.
+#[test]
+fn golden_the_esc_cycle_and_the_message_menu() {
+    let mut g = goldens();
+    let mut c = chat_side().enhanced(true).dry_run(true);
+    drawn(&mut c, &[key(KeyCode::Esc), key(KeyCode::Esc)], 80, 25);
+    assert!(text(&mut c, 80, 25).contains("pick one: attend-chat"), "the box, the feed, then the ≡ menu: {}", text(&mut c, 80, 25));
+    g.check("esc-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
+    drawn(&mut c, &[key(KeyCode::Esc)], 80, 25);
+    assert!(bar(&mut c).trim_start().starts_with("feed"), "back to the feed: {}", bar(&mut c));
+    drawn(&mut c, &[key(KeyCode::Up), key(KeyCode::Enter)], 80, 25);
+    let shown = text(&mut c, 80, 25);
+    for item in ["pick one: message from @", "Reply", "Quote", "Address @", "Copy"] {
+        assert!(shown.contains(item), "{item}: {shown}");
+    }
+    g.check("message-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
     g.finish();
 }
 
@@ -1645,7 +1680,7 @@ fn in_column(buf: &agent_tui::ratatui::buffer::Buffer, text: &str) -> (u16, u16)
 #[test]
 fn an_agent_row_removes_it_from_the_shown_channel() {
     let mut c = chat_side().enhanced(true).dry_run(true);
-    press(&mut c, ctrl('1'));
+    press(&mut c, ctrl('2'));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = in_column(&buf, "beta");
@@ -1675,10 +1710,10 @@ fn the_destination_flag_marks_a_swept_channel() {
 #[test]
 fn a_question_after_a_menu_closed_unchanged_is_shown_by_keys() {
     let mut c = chat().enhanced(true).dry_run(true);
-    drawn(&mut c, &[ctrl('1'), ctrl('1'), key(KeyCode::Esc)], 80, 25);
+    drawn(&mut c, &[ctrl('2'), ctrl('2'), key(KeyCode::Esc)], 80, 25);
     assert!(!bar(&mut c).contains("unchanged"), "closing says nothing: {}", bar(&mut c));
-    // Ctrl+1 on the tab shown opens its menu; Join is item 6, Delete 7.
-    let mut keys = vec![ctrl('1')];
+    // Ctrl+2 on the channel shown opens its menu; Join is item 6, Delete 7.
+    let mut keys = vec![ctrl('2')];
     keys.extend(std::iter::repeat_n(key(KeyCode::Down), 6));
     keys.push(key(KeyCode::Enter));
     drawn(&mut c, &keys, 80, 25);
@@ -1691,7 +1726,7 @@ fn a_question_after_a_menu_closed_unchanged_is_shown_by_keys() {
 #[test]
 fn a_question_after_a_menu_closed_unchanged_is_shown_by_the_mouse() {
     let mut c = chat_side().enhanced(true).dry_run(true);
-    drawn(&mut c, &[ctrl('1'), ctrl('1'), key(KeyCode::Esc)], 80, 25);
+    drawn(&mut c, &[ctrl('2'), ctrl('2'), key(KeyCode::Esc)], 80, 25);
     assert!(!bar(&mut c).contains("unchanged"), "closing says nothing: {}", bar(&mut c));
     let buf = testkit::render_screen(&mut c, 80, 25);
     let row = in_column(&buf, "beta");

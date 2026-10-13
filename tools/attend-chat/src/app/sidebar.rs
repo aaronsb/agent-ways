@@ -1,10 +1,12 @@
 //! The left column (ADR-405): Agents, every identity the chat has seen,
-//! live ones first and the rest set back; then Channels, every channel,
-//! including empty ones and ones only `_groups.yaml` still names. A click
-//! on an agent opens its menu (address, who, remove); a click on a channel
+//! live ones first and the rest set back, those in the channel shown
+//! marked; then Channels, every channel, including empty ones and ones only
+//! `_groups.yaml` still names, numbered from 1 for Ctrl+digit. A click on
+//! an agent opens its menu (address, who, remove); a click on a channel
 //! shows it, and a click on the channel shown opens its menu, as Ctrl+digit
-//! does. A menu docks on the line under its row. `attend.chat.sidebar_key` shows or hides
-//! it, and a terminal too narrow for it beside the feed hides it.
+//! does. A menu docks on the line under its row. `attend.chat.sidebar_key`
+//! shows or hides it, and a terminal too narrow for it beside the feed
+//! hides it.
 
 use agent_tui::ratatui::layout::{Constraint, Layout, Rect};
 use agent_tui::ratatui::style::{Modifier, Style};
@@ -107,6 +109,12 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let focus = chat.side_focus();
     let world = chat.world();
     let seen: Vec<Seen> = agent_order(&world.seen).into_iter().cloned().collect();
+    // Who is in the channel shown: a created channel's members, the
+    // operator among them. `#open` and the operator view hold everyone.
+    let members: Vec<String> = match &fg {
+        Tab::Channel(c) => world.rows.iter().find(|r| r.known.group.name == *c && !r.known.is_base).map(|r| r.known.membership.members.clone()).unwrap_or_default(),
+        Tab::Merged => Vec::new(),
+    };
     let rows: Vec<(ChannelRow, usize)> = world.rows.iter().cloned().zip(world.live_members.iter().copied()).collect();
     let [inner, rule] = Layout::horizontal([Constraint::Min(1), Constraint::Length(1)]).areas(area);
     for y in rule.top()..rule.bottom() {
@@ -136,6 +144,8 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         let mut line = agent_line(chat, s, w, mark, focused);
         if focused {
             line.spans[0] = cursor();
+        } else if members.contains(&s.member) {
+            line.spans[0] = Span::styled(theme::SELECTED_MARK, theme::accent());
         }
         f.render_widget(Paragraph::new(line), r);
         hits.push((r, SideHit::Agent(s.member.clone())));
@@ -148,7 +158,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         let mark = target(Style::new(), prefix_match(&row.known.group.name, channel_partial.as_deref()));
         let age = row.last.and_then(|t| now.duration_since(t).ok()).map(age_label).unwrap_or_default();
         let focused = focus == Some(n_a + i);
-        let mut line = channel_line(chat, row, *live, &age, shown, w, mark, focused);
+        let mut line = channel_line(chat, row, *live, &age, shown, w, mark, focused, i + 1);
         if focused {
             line.spans[0] = cursor();
         }
@@ -291,20 +301,22 @@ pub(super) fn identity_styles(depth: agent_theme::ColorDepth, palette: agent_ide
     }
 }
 
-/// A channel's row, the same shape on the accent: its glyph and name, then
-/// its member count and the time since its last message, then `●` when a
-/// member is live (where D5's seal marker will go). The shown channel is
-/// marked at the left. A channel with no live member, or none on disk, is
-/// set back.
+/// A channel's row, the same shape on the accent: its number, glyph and
+/// name, then its member count and the time since its last message, then
+/// `●` when a member is live (where D5's seal marker will go). The shown
+/// channel is marked at the left. A channel with no live member, or none on
+/// disk, is set back. `number` counts the channels from 1, for Ctrl+digit;
+/// past the ninth a row has none.
 #[allow(clippy::too_many_arguments)]
-fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown: bool, w: usize, mark: Style, focused: bool) -> Line<'static> {
+fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown: bool, w: usize, mark: Style, focused: bool, number: usize) -> Line<'static> {
     let g = &row.known.group;
     let active = row.on_disk && (row.known.is_base || live > 0);
     // A Nerd Font's person glyph beside the lozenge glyphs it already
     // needs; the emoji where the shape is plain.
     let person = if chat.shape.join.is_empty() { "👤" } else { "\u{f007}" };
     let figures = if row.known.is_base { age.to_string() } else { format!("{}{person} {age}", row.known.membership.members.len()).trim_end().to_string() };
-    let name = format!("{} #{}", g.glyph, g.name);
+    let num = if number <= 9 { format!("{number} ") } else { "  ".to_string() };
+    let name = format!("{num}{} #{}", g.glyph, g.name);
     let dot = if active { "●" } else { "○" };
     let texts = sized(chat.shape, theme::colourless(), [&name, &figures, dot], w);
     let styles = if active {
@@ -388,9 +400,11 @@ impl ChatPane {
         self.world().laid.rows.clone()
     }
 
-    /// Whether the last frame drew the column: shown, and room for it.
+    /// Whether the column is drawn: the last frame had room for it, and it
+    /// has not been hidden since, so a hide takes effect before the next
+    /// frame shows it.
     pub(super) fn side_drawn(&self) -> bool {
-        !self.hits.side_area.is_empty()
+        self.sidebar && !self.hits.side_area.is_empty()
     }
 
     /// The key that toggles the column, as the help names it.

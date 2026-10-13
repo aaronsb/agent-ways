@@ -3,6 +3,7 @@
 //! every way out: a quit, an error, a panic, or a signal (SIGTERM, SIGHUP,
 //! SIGINT), which the loop sees between polls.
 
+use std::io::Write;
 use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -425,6 +426,11 @@ impl App {
                     execute!(io::stdout(), DisableMouseCapture)?;
                 }
                 captured = self.mouse;
+            }
+            // Text a pane copied goes to the terminal's clipboard by OSC 52.
+            if let Some(osc) = self.take_osc52() {
+                let mut out = io::stdout();
+                let _ = out.write_all(osc.as_bytes()).and_then(|_| out.flush());
             }
             let wait = schedule.wait(self.pane_tick_every(), self.applying(), Instant::now());
             // A terminal that can no longer be drawn on or read from has hung

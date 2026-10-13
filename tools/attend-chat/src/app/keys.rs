@@ -887,6 +887,15 @@ pub struct TabResult {
     pub new_cycle: Option<TabCycle>,
 }
 
+/// Whether Tab in the compose box has a word to complete: Tab would change
+/// the box's text, completing a command, a subcommand, an `@agent` or a
+/// `#channel` over `agents` and `channels`, or moving the completion `cycle`
+/// last made to its next candidate. A word nothing matches, or a cycle of
+/// one, completes nothing, and Tab leaves the box instead ([`super::ix`]).
+pub fn completable(buf: &str, cursor: usize, cycle: Option<&TabCycle>, agents: &[String], channels: &[String]) -> bool {
+    handle_tab(buf, cursor, cycle.cloned(), agents, channels).new_buf != buf
+}
+
 /// Tab-completion + cycle advance. No-op when the caret is mid-buffer
 /// (avoids surprising mid-sentence edits) or when no completion
 /// applies. Slash completions short-circuit before `@`/`#` parsing.
@@ -991,6 +1000,31 @@ pub fn handle_tab(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tab has a word to complete only where it would change the box: the
+    /// review of #972 found Tab dead on a cycle of one, an `@` or a `/` that
+    /// matches nothing.
+    #[test]
+    fn tab_has_a_word_to_complete_only_where_it_changes_the_box() {
+        let agents = ["alpha".to_string(), "alto".to_string()];
+        let channels = ["open".to_string(), "deploy".to_string(), "archive".to_string()];
+        let can = |buf: &str, cursor: usize, cycle: Option<&TabCycle>| completable(buf, cursor, cycle, &agents, &channels);
+        assert!(can("/he", 3, None), "a command being typed");
+        assert!(can("hi @al", 6, None), "an @agent in progress");
+        assert!(can("#dep", 4, None), "a #channel in progress");
+        let two = TabCycle { sigil: Sigil::Agent, candidates: vec!["alpha".into(), "alto".into()], index: 0 };
+        assert!(can("hi @alpha ", 10, Some(&two)), "the completion Tab made: the next candidate");
+        let one = TabCycle { sigil: Sigil::Group, candidates: vec!["archive".into()], index: 0 };
+        assert!(can("#arch", 5, None), "#arch completes once");
+        assert!(!can("#archive ", 9, Some(&one)), "a cycle of one: Tab would put back the same name");
+        assert!(!can("hi @zzz", 7, None), "an @ nothing matches");
+        assert!(!can("/zzz", 4, None), "a / nothing matches");
+        assert!(!can("hi there", 8, None), "plain text");
+        assert!(!can("", 0, None), "an empty box");
+        assert!(!can("hi @alpha ", 10, None), "a finished mention");
+        assert!(!can("hi @al", 3, None), "the caret mid-buffer");
+        assert!(!can("mail a@b", 8, None), "an address, not a mention");
+    }
 
     #[test]
     fn enter_empty_is_noop() {

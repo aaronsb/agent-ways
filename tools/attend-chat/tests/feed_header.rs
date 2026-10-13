@@ -164,7 +164,7 @@ fn a_channel_shows_its_own_headers_only() {
     let mut c = chat();
     let merged = testkit::rows(&frame(&mut c, (120, 35))).join("\n");
     assert!(merged.contains("a message in the feed") && merged.contains("rollout is green"));
-    testkit::drive(&mut c, &[agent_tui::ratatui::crossterm::event::KeyEvent::new(agent_tui::ratatui::crossterm::event::KeyCode::Char('1'), KeyModifiers::CONTROL)]);
+    testkit::drive(&mut c, &[agent_tui::ratatui::crossterm::event::KeyEvent::new(agent_tui::ratatui::crossterm::event::KeyCode::Char('2'), KeyModifiers::CONTROL)]);
     let deploy = testkit::rows(&frame(&mut c, (120, 35)));
     assert!(deploy.iter().any(|r| r.contains("rollout is green")) && !deploy.iter().any(|r| r.contains("a message in the feed")), "{deploy:#?}");
     let (_, y) = find(&frame(&mut c, (120, 35)), "rollout is green");

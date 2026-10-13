@@ -18,6 +18,10 @@
 //!
 //! Alt+1-9 still shows a tab where the terminal passes Alt+digits on;
 //! Konsole and GNOME Terminal keep them for their own tabs.
+//!
+//! A pane that numbers a list of its own ([`crate::Pane::own_numbers`])
+//! takes the digits instead, through [`crate::Pane::jump`], and its tabs
+//! carry no numbers.
 
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
@@ -335,10 +339,11 @@ impl App {
     /// The bar keeps to its width, as the tree's tab bar does. When the left
     /// tabs and the trailer overflow the room the reserved tabs leave, the
     /// trailer is cut first, ending in `…`; then the gaps tighten; then the
-    /// names are cut shorter, down to the number alone, while each lead and
-    /// action slot stays whole. Tabs that still do not fit are left off
-    /// behind a `›` marker, so none goes missing unannounced; neither the tab
-    /// shown nor an action slot is ever one of them.
+    /// names are cut shorter, down to the number alone (an unnumbered name
+    /// to two columns), while each lead and action slot stays whole. Tabs
+    /// that still do not fit are left off behind a `›` marker, so none goes
+    /// missing unannounced; neither the tab shown nor an action slot is ever
+    /// one of them.
     pub(super) fn draw_pane_tabs(&mut self, f: &mut Frame, area: Rect) {
         self.hits.tabs.clear();
         let shape = self.shape;
@@ -348,22 +353,26 @@ impl App {
         let tabs = p.tabs();
         let active = p.tab();
         let trailer = p.trailer();
+        // A pane that numbers its own list leaves the tabs unnumbered.
+        let numbered = p.own_numbers().is_none();
         let mut count = 0;
         let numbers: Vec<Option<usize>> = tabs
             .iter()
             .map(|t| {
-                (!t.action && !t.reserved).then(|| {
+                (numbered && !t.action && !t.reserved).then(|| {
                     count += 1;
                     count
                 })
             })
             .collect();
         // Tab `i`'s lead and lozenge with its name cut to `cap` columns; a
-        // cap of 0 leaves the number alone. A reserved tab is always whole.
+        // cap of 0 leaves the number alone, or an unnumbered name cut to two
+        // columns. An action slot and a reserved tab are always whole.
         let lozenge = |i: usize, cap: usize| -> Vec<Span<'static>> {
             let t = &tabs[i];
             let label = match numbers[i] {
-                None => format!(" {} ", t.name),
+                None if t.action || t.reserved => format!(" {} ", t.name),
+                None => format!(" {} ", crate::wrap::truncate(&t.name, cap.max(2))),
                 Some(n) if cap == 0 => format!(" {n} "),
                 Some(n) => format!(" {n} {} ", crate::wrap::truncate(&t.name, cap)),
             };

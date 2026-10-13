@@ -289,6 +289,9 @@ pub struct App {
     /// The session ends: a quit asked for by a click, which, unlike a key,
     /// has no return value to end it with ([`App::ended`]).
     ending: bool,
+    /// Text the pane asked to copy ([`pane::Open::Copy`]): the last, and
+    /// whether the terminal has yet to be sent it.
+    copied: Option<(String, bool)>,
 }
 
 impl App {
@@ -329,6 +332,7 @@ impl App {
             menu_parent: None,
             enhanced: false,
             ending: false,
+            copied: None,
         }
     }
 
