@@ -76,7 +76,7 @@ A name that matches more than one session, or both a session and a person, is re
 
 **Who reads a tray message.** A session reads a signal in its project tray when the signal's `to` holds its session id, or when the signal carries no `to` tag. A signal without the tag was written before the tag shipped, or by an older writer, and is addressed to every session at the project. Two sessions at one origin (alpha and beta, ADR-129) share a tray and do not read each other's direct messages. A session that ran `/clear` reads as its earlier ids too: a message whose `to` holds an id it had before the `/clear` is its to read, and a reply to a message it sent under that id is addressed to it. A person reads their person tray, which attend-chat watches for the human at the keyboard.
 
-**Who reads a channel or `#open` post.** Every member reads it, whatever its `to` holds. In a shared room `to` marks whose attention the post asks for and restricts no reader: the post wakes the sessions it names, and the other members read it at their next turn. Only tray signals, a project's and a person's, are filtered by `to`.
+**Who reads a channel or `#open` post.** Every member reads it, whatever its `to` holds. In a shared room `to` marks whose attention the post asks for and restricts no reader. An `#open` post wakes the sessions it names, and the others read it at their next turn. A post in a named channel wakes every idle member but its sender, named or not (ADR-406 item 2). Only tray signals, a project's and a person's, are filtered by `to`.
 
 **Writers.**
 
