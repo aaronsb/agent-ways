@@ -641,7 +641,7 @@ impl Pane for ChatPane {
     /// The chat owns the focus, the tab bar's included, and Esc never quits
     /// (ADR-409). The compose box and the feed take every plain key as
     /// text; on the tab bar and the column the shell's single keys work as
-    /// the key help names them, and on a column row a plain digit picks a
+    /// the key help names them, and on a channel's row a plain digit picks a
     /// channel by its number ([`ix::Ix::ctx`]).
     fn keymap_ctx(&self) -> agent_tui::Ctx {
         self.ix.ctx()

@@ -321,7 +321,7 @@ fn the_shells_tab_inputs_choose_a_tab() {
 
 /// The column numbers its channels from 1 (agents carry none), and 0 is the
 /// operator view: Ctrl or Alt with a digit from anywhere, a plain digit on a
-/// column row. A number picks as a click on the row picks.
+/// channel's row. A number picks as a click on the row picks.
 #[test]
 fn the_columns_numbers_pick_a_channel() {
     use Effect::*;
@@ -579,7 +579,7 @@ fn the_overlays_are_what_the_shell_opened_and_has_not_closed() {
 }
 
 /// The shell's routing follows the focus: the box and the feed take every
-/// plain key as text, a column row takes the digits as the column's
+/// plain key as text, a channel's row takes the digits as the column's
 /// numbers, and the chat keeps the bar's focus and Esc.
 #[test]
 fn the_keymap_context_follows_the_focus() {
