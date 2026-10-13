@@ -2,6 +2,9 @@
 //! timeline, and read a session's events from the (unioned) event log.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 use crate::cmd::render;
 use crate::session;
@@ -53,7 +56,7 @@ pub(crate) fn reconstruct_all(
         .into_iter()
         .map(|agent| {
             let transcript = session::transcript_in(&claude, None, project_name, session_id, &agent);
-            let timeline = transcript.map(|t| build_token_timeline(&t)).unwrap_or_default();
+            let timeline = transcript.map(|t| cached_token_timeline(&t)).unwrap_or_default();
             (agent, timeline)
         })
         .collect();
@@ -396,20 +399,20 @@ fn fired_by(ev: &WayEvent) -> String {
 }
 
 /// The agents with an event in `cluster`. A check that names no agent is
-/// the last agent's to fire its way, as [`build_frames_by_agent`] counts it.
+/// the last agent to fire its way before the check, the rule the event
+/// loop in [`build_frames_by_agent`] counts it by.
 fn cluster_agents(cluster: &[&WayEvent], last_agent: &HashMap<String, String>) -> Vec<String> {
+    let mut last = last_agent.clone();
     let mut agents: Vec<String> = Vec::new();
     for ev in cluster {
-        let agent = if ev.event == "check_fired" && ev.agent_id.is_empty() {
-            cluster
-                .iter()
-                .rev()
-                .find(|e| matches!(e.event.as_str(), "way_fired" | "way_redisclosed") && e.way == ev.check)
-                .map(|e| fired_by(e))
-                .or_else(|| last_agent.get(&ev.check).cloned())
-                .unwrap_or_else(|| MAIN.to_string())
-        } else {
-            fired_by(ev)
+        let agent = match ev.event.as_str() {
+            "check_fired" if ev.agent_id.is_empty() => last.get(&ev.check).cloned().unwrap_or_else(|| MAIN.to_string()),
+            "way_fired" | "way_redisclosed" if !ev.way.is_empty() => {
+                let agent = fired_by(ev);
+                last.insert(ev.way.clone(), agent.clone());
+                agent
+            }
+            _ => fired_by(ev),
         };
         if !agents.contains(&agent) {
             agents.push(agent);
@@ -428,9 +431,36 @@ pub(crate) fn has_verdicts(events: &[WayEvent]) -> bool {
     events.iter().any(|e| e.event == "way_judged")
 }
 
+/// Each transcript's token timeline, keyed by its path and kept while its
+/// length and modification time hold. A live replay rebuilds its frames on
+/// every write to the event log; an agent whose transcript has not changed
+/// costs a stat, not a read.
+type TimelineCache = HashMap<PathBuf, (u64, Option<SystemTime>, Vec<(String, u64)>)>;
+static TIMELINES: OnceLock<Mutex<TimelineCache>> = OnceLock::new();
+
+/// [`build_token_timeline`] of `transcript`, read again only when its length
+/// or modification time changed since the last read.
+fn cached_token_timeline(transcript: &Path) -> Vec<(String, u64)> {
+    let Ok(meta) = std::fs::metadata(transcript) else {
+        return Vec::new();
+    };
+    let key = (meta.len(), meta.modified().ok());
+    let cache = TIMELINES.get_or_init(Mutex::default);
+    if let Some((len, mtime, timeline)) = cache.lock().ok().as_ref().and_then(|c| c.get(transcript).cloned()) {
+        if (len, mtime) == key {
+            return timeline;
+        }
+    }
+    let timeline = build_token_timeline(transcript);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(transcript.to_path_buf(), (key.0, key.1, timeline.clone()));
+    }
+    timeline
+}
+
 /// The token position at each assistant turn of `transcript`, main's or a
 /// subagent's.
-fn build_token_timeline(transcript: &std::path::Path) -> Vec<(String, u64)> {
+fn build_token_timeline(transcript: &Path) -> Vec<(String, u64)> {
     let Ok(content) = std::fs::read_to_string(transcript) else {
         return Vec::new();
     };
@@ -839,5 +869,128 @@ mod tests {
         assert_eq!(last.tokens_k_of(MAIN), 20);
         let (cell, _) = render::next_cell(row("d/sub-a"), last.epoch_of("a1"), last.tokens_k_of("a1"));
         assert_eq!(cell, "● now");
+    }
+
+    fn by(ts: &str, event: &str, way: &str, agent: &str) -> WayEvent {
+        let check = event == "check_fired";
+        WayEvent {
+            ts: ts.into(),
+            event: event.into(),
+            way: if check { String::new() } else { way.into() },
+            check: if check { way.into() } else { String::new() },
+            trigger: "keyword".into(),
+            agent_id: agent.into(),
+            ..Default::default()
+        }
+    }
+
+    /// The forecast strip and the bar's clusters place each row by how far
+    /// it is from re-disclosure in its own context, from main's position.
+    #[test]
+    fn the_forecast_places_a_subagent_row_by_its_own_distance() {
+        let events = vec![
+            by("2026-01-01T00:00:00Z", "way_fired", "d/main", ""),
+            by("2026-01-01T00:00:10Z", "way_fired", "d/sub", "a1"),
+        ];
+        let line = |pts: &[(&str, u64)]| pts.iter().map(|(t, k)| (t.to_string(), *k)).collect::<Vec<_>>();
+        let timelines = HashMap::from([
+            (MAIN.to_string(), line(&[("2026-01-01T00:00:00Z", 64)])),
+            ("a1".to_string(), line(&[("2026-01-01T00:00:10Z", 10)])),
+        ]);
+        let refire = HashMap::from([("d/main".to_string(), 40), ("d/sub".to_string(), 40)]);
+        let frames = build_frames_by_agent(&events, &timelines, &refire, 50);
+        let last = frames.last().unwrap();
+        // Both rows are 40K from re-disclosure in their own context: main's
+        // at 64K + 40K, the subagent's at 10K + 40K. From main's 64K both
+        // plot at 104K, one cluster.
+        let (pos, unique) = super::super::table::clusters(last, 200, 50);
+        assert_eq!(pos[0], pos[1], "one bar position for both rows");
+        assert_eq!(unique.len(), 1);
+        let text: Vec<String> = super::super::table::context(last, 200, 80)
+            .into_iter()
+            .map(|(_, l)| l.spans.iter().map(|s| s.content.to_string()).collect())
+            .collect();
+        let strip = text.iter().find(|l| l.contains("forecast")).expect("a forecast strip");
+        assert!(strip.ends_with(" forecast 64K → 104K"), "{strip}");
+        let first = strip.chars().next().unwrap();
+        assert_eq!(first, '·', "no row plots as due now: {strip}");
+    }
+
+    /// The cursor falls back by the frame a row fired at, across agents:
+    /// a subagent row low in its own count but late in the frame order is
+    /// not taken for an earlier one.
+    #[test]
+    fn the_cursor_falls_back_by_frame_order_across_agents() {
+        let events = vec![
+            by("2026-01-01T00:00:00Z", "way_fired", "d/m1", ""),
+            by("2026-01-01T00:00:10Z", "way_fired", "d/m2", ""),
+            by("2026-01-01T00:00:20Z", "way_fired", "d/m3", ""),
+            by("2026-01-01T00:00:30Z", "way_fired", "d/s1", "a1"),
+        ];
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        let last = frames.last().unwrap();
+        let ids: Vec<(&str, u64, u64)> = last.ways.iter().map(|w| (w.id.as_str(), w.epoch_fired, w.seq)).collect();
+        assert_eq!(ids, [("d/m1", 1, 1), ("d/m2", 2, 2), ("d/m3", 3, 3), ("d/s1", 1, 4)]);
+        // A main way anchored at frame 3 that is gone: the last row fired at
+        // or before frame 3 is d/m3, not the subagent's epoch-1 row.
+        assert_eq!(super::super::screen::reselect_by_anchor(last, "gone", MAIN, 3), 2);
+        assert_eq!(super::super::screen::reselect_by_anchor(last, "d/s1", "a1", 4), 3, "the same row by frame");
+    }
+
+    /// A check that names no agent is the last agent's to fire its way
+    /// before the check, in the epoch count as in the check count.
+    #[test]
+    fn an_agentless_check_counts_for_the_agent_that_fired_its_way_before_it() {
+        let events = vec![
+            by("2026-01-01T00:00:00Z", "way_fired", "d/x", ""),
+            by("2026-01-01T00:00:10Z", "check_fired", "d/x", ""),
+            by("2026-01-01T00:00:11Z", "way_fired", "d/x", "a1"),
+        ];
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        let last = frames.last().unwrap();
+        let main_row = last.ways.iter().find(|w| w.agent == MAIN).unwrap();
+        assert_eq!(main_row.check_fires, 1, "the check counted against main");
+        assert_eq!(last.epoch, 2, "so the cluster advanced main's epoch");
+        assert_eq!(last.epoch_of("a1"), 1);
+    }
+
+    /// Main's compaction clears the session directory, subagents' state
+    /// under `agents/` included, so every agent's epoch restarts there.
+    #[test]
+    fn main_compaction_restarts_every_agents_epoch() {
+        let events = vec![
+            by("2026-01-01T00:00:00Z", "session_start", "", ""),
+            by("2026-01-01T00:00:10Z", "way_fired", "d/s1", "a1"),
+            by("2026-01-01T00:00:20Z", "way_fired", "d/s2", "a1"),
+            by("2026-01-01T01:00:00Z", "session_start", "", ""),
+            by("2026-01-01T01:00:10Z", "way_fired", "d/s3", "a1"),
+        ];
+        let frames = build_frames(&events, &[], &HashMap::new(), 50);
+        let last = frames.last().unwrap();
+        assert_eq!(last.window, 2);
+        assert_eq!(last.epoch_of("a1"), 1, "the subagent's count restarted");
+        assert_eq!(last.ways.iter().map(|w| (w.id.as_str(), w.epoch_fired)).collect::<Vec<_>>(), [("d/s3", 1)]);
+    }
+
+    /// A transcript is read again once it grows, and its cached timeline
+    /// is served while it does not.
+    #[test]
+    fn a_token_timeline_is_read_again_only_when_its_transcript_changes() {
+        let dir = std::env::temp_dir().join(format!("ways-timeline-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let turn = |ts: &str, k: u64| {
+            format!(
+                r#"{{"type":"assistant","timestamp":"{ts}","message":{{"usage":{{"input_tokens":{},"cache_read_input_tokens":0}}}}}}"#,
+                k * 1000
+            ) + "\n"
+        };
+        std::fs::write(&path, turn("2026-01-01T00:00:00Z", 5)).unwrap();
+        assert_eq!(cached_token_timeline(&path), [("2026-01-01T00:00:00Z".to_string(), 5)]);
+        let mut grown = turn("2026-01-01T00:00:00Z", 5);
+        grown.push_str(&turn("2026-01-01T00:00:10Z", 9));
+        std::fs::write(&path, grown).unwrap();
+        assert_eq!(cached_token_timeline(&path).len(), 2, "the grown file is read again");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

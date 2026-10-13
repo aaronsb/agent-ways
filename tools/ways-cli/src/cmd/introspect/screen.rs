@@ -206,6 +206,12 @@ impl Replay {
         &self.frames[self.play.pos()]
     }
 
+    /// Whether a subagent fired in this session, so an epoch on screen
+    /// names whose count it is.
+    fn has_subagents(&self) -> bool {
+        self.frames.iter().any(|f| !f.clocks.is_empty())
+    }
+
     /// The frame shown, its ways filtered by the view.
     fn shown(&self) -> Frame {
         self.frame().shown(self.matched)
@@ -216,7 +222,7 @@ impl Replay {
     fn toggle_matched(&mut self) {
         let anchor = self.anchor();
         self.matched = !self.matched;
-        self.sel = anchor.map_or(0, |(id, agent, epoch)| reselect_by_anchor(&self.shown(), &id, &agent, epoch));
+        self.sel = anchor.map_or(0, |(id, agent, seq)| reselect_by_anchor(&self.shown(), &id, &agent, seq));
         self.scroll = 0;
     }
 
@@ -240,10 +246,11 @@ impl Replay {
         self.shown().ways.len()
     }
 
-    /// The selected way's id, agent and the epoch it fired at, carried
-    /// across a frame change so the cursor stays on the same row.
+    /// The selected way's id, agent and the frame it fired at
+    /// ([`ActiveWay::seq`]), carried across a frame change so the cursor
+    /// stays on the same row.
     fn anchor(&self) -> Option<(String, String, u64)> {
-        self.shown().ways.get(self.sel.min(self.ways_len().saturating_sub(1))).map(|w| (w.id.clone(), w.agent.clone(), w.epoch_fired))
+        self.shown().ways.get(self.sel.min(self.ways_len().saturating_sub(1))).map(|w| (w.id.clone(), w.agent.clone(), w.seq))
     }
 
     /// Move along the timeline with `go`, keeping the selection on the
@@ -253,7 +260,7 @@ impl Replay {
         let anchor = self.anchor();
         go(&mut self.play);
         self.sel = match anchor {
-            Some((id, agent, epoch)) => reselect_by_anchor(&self.shown(), &id, &agent, epoch),
+            Some((id, agent, seq)) => reselect_by_anchor(&self.shown(), &id, &agent, seq),
             None => 0,
         };
         self.follow_newest();
@@ -521,7 +528,7 @@ impl Replay {
         let anchor = self.anchor();
         self.frames = frames;
         self.play.resize(self.frames.len());
-        self.sel = anchor.map_or(0, |(id, agent, epoch)| reselect_by_anchor(&self.shown(), &id, &agent, epoch));
+        self.sel = anchor.map_or(0, |(id, agent, seq)| reselect_by_anchor(&self.shown(), &id, &agent, seq));
         self.follow_newest();
         // The why index is read again in place: the reader keeps its scroll.
         // Out of the view it is dropped and read when the view opens.
@@ -543,25 +550,26 @@ pub(super) fn session_spend(content: &str, session: &str) -> Option<Group> {
 }
 
 /// The row in `frame` that best keeps an anchor across a frame change: the
-/// same row, by id, agent and epoch, which tells a way's blocked row from
-/// its active one; else the same way and agent; else the same way; else the nearest active way that fired
-/// at or before the anchor's epoch (the ways are in epoch order, so the
-/// last such row), else the first row. Epochs restart at each compaction
-/// window, so across one the id match does the work and the fallback only
-/// places the cursor.
-pub(super) fn reselect_by_anchor(frame: &Frame, anchor_id: &str, anchor_agent: &str, anchor_epoch: u64) -> usize {
+/// same row, by id, agent and the frame it fired at ([`ActiveWay::seq`]),
+/// which tells a way's blocked row from its active one; else the same way
+/// and agent; else the same way; else the nearest way that fired at or
+/// before the anchor's frame (the ways are in `seq` order across agents,
+/// so the last such row), else the first row. `seq` restarts at each
+/// compaction window, so across one the id match does the work and the
+/// fallback only places the cursor.
+pub(super) fn reselect_by_anchor(frame: &Frame, anchor_id: &str, anchor_agent: &str, anchor_seq: u64) -> usize {
     let same = |w: &&ActiveWay| w.id == anchor_id;
     let mine = |w: &&ActiveWay| same(w) && w.agent == anchor_agent;
     if let Some(i) = frame
         .ways
         .iter()
-        .position(|w| mine(&w) && w.epoch_fired == anchor_epoch)
+        .position(|w| mine(&w) && w.seq == anchor_seq)
         .or_else(|| frame.ways.iter().position(|w| mine(&w)))
         .or_else(|| frame.ways.iter().position(|w| same(&w)))
     {
         return i;
     }
-    frame.ways.iter().rposition(|w| w.epoch_fired <= anchor_epoch).unwrap_or(0)
+    frame.ways.iter().rposition(|w| w.seq <= anchor_seq).unwrap_or(0)
 }
 
 /// Opens a session the picker chose; following it when the flag says it
@@ -1066,7 +1074,7 @@ fn draw_timeline(f: &mut Draw, r: &mut Replay, area: Rect) {
     }
     let ctx_h = if ctx.is_empty() { 0 } else { ctx.len() as u16 + 2 };
     let [ways, context] = Layout::vertical([Constraint::Min(3), Constraint::Length(ctx_h)]).areas(area);
-    let title = format!(" ways at epoch {} ", fr.epoch);
+    let title = if r.has_subagents() { format!(" ways at main's epoch {} ", fr.epoch) } else { format!(" ways at epoch {} ", fr.epoch) };
     let shown = all.shown(r.matched);
     if shown.ways.is_empty() {
         f.render_widget(Paragraph::new(Line::styled("no ways fired yet", theme::muted())).block(pane(title)), ways);
@@ -1137,6 +1145,8 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
     let left_w = (area.width / 3).clamp(16, 40).min(area.width.saturating_sub(14));
     let [left, right] = Layout::horizontal([Constraint::Length(left_w), Constraint::Min(10)]).areas(area);
     let fr = &r.frames[r.play.pos()].shown(r.matched);
+    // Each entry's epoch is in its own agent's count, the agent named
+    // after a subagent's entry.
     let ew = fr.ways.iter().map(|w| w.epoch_fired).max().unwrap_or(0).to_string().len();
     let facet = |id: &str, trigger: &str| r.why.as_ref().and_then(|ix| ix.get(&(id.to_string(), trigger.to_string())));
     let items: Vec<ListItem> = fr
@@ -1160,7 +1170,7 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
         })
         .collect();
     let list = List::new(items)
-        .block(pane(" ways · epoch "))
+        .block(pane(if r.has_subagents() { " ways · epoch per agent " } else { " ways · epoch " }))
         .highlight_style(theme::selected())
         .highlight_symbol(Line::styled(theme::SELECTED_MARK, theme::accent()))
         .highlight_spacing(HighlightSpacing::Always);

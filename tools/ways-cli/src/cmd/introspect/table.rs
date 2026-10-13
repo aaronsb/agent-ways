@@ -153,10 +153,10 @@ fn pin(cluster: usize) -> Span<'static> {
     }
 }
 
-/// Where each way's next re-disclosure falls on a bar `bar` cells wide,
-/// and the distinct positions, which number the clusters.
-pub(super) fn clusters(ways: &[ActiveWay], window_k: u64, bar: usize) -> (Vec<Option<usize>>, Vec<usize>) {
-    let pos = render::compute_bar_positions_in(ways, window_k, bar);
+/// Where each way's next re-disclosure ([`due_k`]) falls on a bar `bar`
+/// cells wide, and the distinct positions, which number the clusters.
+pub(super) fn clusters(frame: &Frame, window_k: u64, bar: usize) -> (Vec<Option<usize>>, Vec<usize>) {
+    let pos: Vec<Option<usize>> = frame.ways.iter().map(|w| render::bar_position(due_k(frame, w), window_k, bar)).collect();
     let unique = render::unique_positions(&pos);
     (pos, unique)
 }
@@ -166,7 +166,7 @@ pub(super) fn clusters(ways: &[ActiveWay], window_k: u64, bar: usize) -> (Vec<Op
 /// against. The name takes its fate's mark and colour ([`look`]); a way
 /// fired or re-disclosed in this frame is bold.
 pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, bar: usize) -> Vec<Row<'static>> {
-    let (pos, unique) = clusters(&frame.ways, window_k, bar);
+    let (pos, unique) = clusters(frame, window_k, bar);
     let way_w = way_width(bar, agent_w);
     frame
         .ways
@@ -201,6 +201,13 @@ pub(super) fn rows(frame: &Frame, agents: &Agents, agent_w: u16, window_k: u64, 
         .collect()
 }
 
+/// Where `w` next re-discloses on main's token axis: main's position plus
+/// how far the row is from re-disclosure in its own agent's context. For
+/// main's rows it is the fire position plus the threshold.
+pub(super) fn due_k(frame: &Frame, w: &ActiveWay) -> u64 {
+    (w.token_pos / 1000 + w.refire_threshold_k + frame.token_position_k).saturating_sub(frame.tokens_k_of(&w.agent))
+}
+
 /// A check's decay after `fires` fires.
 pub(super) fn decay(fires: u64) -> f64 {
     1.0 / (fires as f64 + 1.0)
@@ -220,13 +227,12 @@ pub(super) fn context(frame: &Frame, window_k: u64, width: usize) -> Vec<(u8, Li
         let style = ink(render::traffic(pct < 50, pct < 75));
         out.push((0, Line::from(vec![Span::styled(format!("{}{}", "█".repeat(filled), "░".repeat(bar - filled)), style), Span::raw(label)])));
 
-        let (_, unique) = clusters(&frame.ways, window_k, bar);
+        let (_, unique) = clusters(frame, window_k, bar);
         let (mut now, mut soon, mut later) = (0, 0, 0);
         let mut future: Vec<(u64, usize)> = Vec::new();
         for w in &frame.ways {
             let threshold = w.refire_threshold_k;
-            let at = w.token_pos / 1000 + threshold;
-            let tokens_k = frame.tokens_k_of(&w.agent);
+            let at = due_k(frame, w);
             if tokens_k >= at {
                 now += 1;
                 continue;
