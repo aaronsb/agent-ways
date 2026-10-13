@@ -144,16 +144,21 @@ jobs:
   # Runs when the test job is skipped too (a component without tests). A
   # cancelled build leg is neither cancelled() nor failure() at the workflow
   # level, so the gate reads each result: every platform must have built.
+  # The leading !cancelled() replaces the implicit success(), which is false
+  # when test was skipped and would skip collect for a component with no tests.
   collect:
     needs: [build, test]
-    if: ${{ needs.build.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
+      # Platform binaries only: a rerun of all jobs would otherwise merge an
+      # earlier attempt's -all-platforms artifact over this attempt's builds.
       - uses: actions/download-artifact@v5
         with:
           path: binaries
+          pattern: ${{ inputs.component }}-{linux,darwin}-*
           merge-multiple: true
 
       - name: Generate checksums
@@ -172,7 +177,7 @@ jobs:
 
   release:
     needs: collect
-    if: ${{ needs.collect.result == 'success' && startsWith(github.ref, format('refs/tags/{0}-v', inputs.component)) }}
+    if: ${{ !cancelled() && needs.collect.result == 'success' && startsWith(github.ref, format('refs/tags/{0}-v', inputs.component)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
