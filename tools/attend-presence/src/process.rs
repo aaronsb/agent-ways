@@ -315,6 +315,23 @@ pub fn has_ancestor(pid: u32, ancestor: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(unix)]
+    #[test]
+    fn ps_elapsed_times_read_as_seconds() {
+        assert_eq!(parse_etime("05:07"), Some(307));
+        assert_eq!(parse_etime("02:05:07"), Some(7507));
+        assert_eq!(parse_etime("3-02:05:07"), Some(3 * 86_400 + 7507));
+        assert_eq!(parse_etime("soon"), None);
+    }
+
+    #[test]
+    fn this_process_started_before_now_and_the_host_has_a_name() {
+        let began = started_at(std::process::id()).expect("this process's start");
+        assert!(began <= std::time::SystemTime::now());
+        assert!(std::time::SystemTime::now().duration_since(began).unwrap() < std::time::Duration::from_secs(3600));
+        assert!(!host_name().is_empty() && !host_name().contains('@'));
+    }
     use super::*;
 
     #[test]
