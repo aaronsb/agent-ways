@@ -7,7 +7,7 @@ mod common;
 use common::Fixture;
 
 fn machine(f: &Fixture, config_dir: &std::path::Path) -> String {
-    let out = f.attend_with(&["whoami", "--machine"], &[("CLAUDE_CONFIG_DIR", config_dir.as_os_str())]);
+    let out = f.attend_with(&["peer", "whoami", "--machine"], &[("CLAUDE_CONFIG_DIR", config_dir.as_os_str())]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).into_owned()
 }

@@ -4,7 +4,7 @@
 //!
 //! On the local-first bus (ADR-136) both ends share a filesystem, so
 //! the path IS the attachment: no blob transport, and the wire body
-//! carries the path as plain text — old clients and `attend inbox`
+//! carries the path as plain text — old clients and `attend message inbox`
 //! degrade to showing the path. Terminals deliver drag-drop as pasted
 //! text (typically a shell-quoted absolute path), which is why the
 //! tokenizer speaks shell-paste: quoted runs and backslash-escaped

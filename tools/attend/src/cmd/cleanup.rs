@@ -1,4 +1,4 @@
-//! `attend cleanup` — reap signal files whose owning project is gone, and
+//! `attend message cleanup` — reap signal files whose owning project is gone, and
 //! prune the empty project dirs left behind. The core `run_cleanup` is
 //! also used by the in-loop auto-sweep in `cmd::run`, so it and
 //! `CleanupStats` are `pub(crate)`.
@@ -51,7 +51,7 @@ fn tray_live(projects: &Path, tray: &str) -> bool {
     })
 }
 
-/// Core cleanup routine, shared by `attend cleanup` and the in-loop sweep.
+/// Core cleanup routine, shared by `attend message cleanup` and the in-loop sweep.
 ///
 /// Pass 1 reaps signals by project liveness (or every signal, if
 /// `nuke_all`):

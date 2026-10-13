@@ -63,7 +63,7 @@ fn signals_written(home: &std::path::Path) -> usize {
 
 #[test]
 fn send_broadcast_is_rejected_and_sends_nothing() {
-    let (out, home) = attend("bcast", &["send", "--broadcast", "hello"]);
+    let (out, home) = attend("bcast", &["message", "send", "--broadcast", "hello"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "stderr: {err}");
     assert!(err.contains("--broadcast"), "stderr: {err}");
@@ -72,18 +72,18 @@ fn send_broadcast_is_rejected_and_sends_nothing() {
 
 #[test]
 fn send_focus_is_rejected_and_sends_nothing() {
-    let (out, home) = attend("focus", &["send", "--focus", "deploy", "hello"]);
+    let (out, home) = attend("focus", &["message", "send", "--focus", "deploy", "hello"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "stderr: {err}");
     assert!(err.contains("--focus"), "stderr: {err}");
     assert_eq!(signals_written(&home), 0, "nothing may be written");
 }
 
-// `attend reply` is compiled out without the peers sensor.
+// `attend message reply` is compiled out without the peers sensor.
 #[cfg(feature = "sensor-peers")]
 #[test]
 fn reply_broadcast_is_rejected_by_the_guard_and_writes_nothing() {
-    let (out, home) = attend("rbcast", &["reply", "--broadcast", "hello"]);
+    let (out, home) = attend("rbcast", &["message", "reply", "--broadcast", "hello"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2), "stderr: {err}");
     assert!(err.contains("`--broadcast` is not a flag"), "stderr: {err}");
@@ -96,7 +96,7 @@ fn reply_broadcast_is_rejected_by_the_guard_and_writes_nothing() {
     std::fs::create_dir_all(&state).unwrap();
     std::fs::write(state.join("test-session-rbcast.last-inbound"), "peer-1-1\n#open\nfrom external:peer@kitty\n").unwrap();
     let ok = Command::new(env!("CARGO_BIN_EXE_attend"))
-        .args(["reply", "hello"])
+        .args(["message", "reply", "hello"])
         .env("HOME", &home)
         .env("XDG_CACHE_HOME", home.join("cache"))
         .env("XDG_CONFIG_HOME", home.join("config"))
@@ -107,7 +107,7 @@ fn reply_broadcast_is_rejected_by_the_guard_and_writes_nothing() {
 
     // Control: with no flag a fresh fixture fails for a different reason
     // (no inbound to thread against), so the guard text above is the guard's.
-    let (ctl, _h) = attend("rctl", &["reply", "hello"]);
+    let (ctl, _h) = attend("rctl", &["message", "reply", "hello"]);
     let ctl_err = String::from_utf8_lossy(&ctl.stderr);
     assert!(ctl_err.contains("no prior inbound"), "stderr: {ctl_err}");
     assert!(!ctl_err.contains("is not a flag"), "stderr: {ctl_err}");
@@ -115,14 +115,14 @@ fn reply_broadcast_is_rejected_by_the_guard_and_writes_nothing() {
 
 #[test]
 fn positive_control_a_plain_send_writes_one_signal_inside_the_fixture() {
-    let (out, home) = attend("plain", &["send", "hello"]);
+    let (out, home) = attend("plain", &["message", "send", "hello"]);
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(signals_written(&home), 1, "the fixture must see exactly one signal");
 }
 
 #[test]
 fn a_typo_d_flag_is_refused_not_broadcast() {
-    let (out, home) = attend("typo", &["send", "--chanel", "deploy", "hi"]);
+    let (out, home) = attend("typo", &["message", "send", "--chanel", "deploy", "hi"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2), "stderr: {err}");
     assert!(err.contains("`--chanel` is not a flag"), "stderr: {err}");
@@ -131,7 +131,7 @@ fn a_typo_d_flag_is_refused_not_broadcast() {
 
 #[test]
 fn double_dash_sends_a_flag_shaped_message_as_text() {
-    let (out, home) = attend("dashdash", &["send", "--", "--broadcast", "was", "removed"]);
+    let (out, home) = attend("dashdash", &["message", "send", "--", "--broadcast", "was", "removed"]);
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(signals_written(&home), 1);
 }
@@ -147,7 +147,7 @@ fn joined_view_is_read_only() {
     std::fs::write(&groups, "ghost:\n  pinned: false\n  members:\n    - dead-member\n").unwrap();
     let before = std::fs::read_to_string(&groups).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_attend"))
-        .args(["channels", "--joined"])
+        .args(["channel", "--joined"])
         .env("HOME", &home)
         .env("XDG_CACHE_HOME", home.join("cache"))
         .env("XDG_CONFIG_HOME", home.join("config"))
@@ -159,7 +159,7 @@ fn joined_view_is_read_only() {
 
     // Control: the full listing does clean up, so the file is a fair probe.
     let full = Command::new(env!("CARGO_BIN_EXE_attend"))
-        .args(["channels"])
+        .args(["channel"])
         .env("HOME", &home)
         .env("XDG_CACHE_HOME", home.join("cache"))
         .env("XDG_CONFIG_HOME", home.join("config"))
@@ -169,7 +169,7 @@ fn joined_view_is_read_only() {
     assert_ne!(
         std::fs::read_to_string(&groups).unwrap_or_default(),
         before,
-        "`attend channels` should have pruned the stale member"
+        "`attend channel` should have pruned the stale member"
     );
 }
 
@@ -189,18 +189,18 @@ fn rooms_scene_is_an_error_and_leaves_membership_alone() {
             .output()
             .expect("run attend")
     };
-    assert!(run(&["join", "keepme"]).status.success());
-    let before = String::from_utf8_lossy(&run(&["channels", "--joined"]).stdout).to_string();
+    assert!(run(&["channel", "join", "keepme"]).status.success());
+    let before = String::from_utf8_lossy(&run(&["channel", "--joined"]).stdout).to_string();
     assert!(before.contains("#keepme"), "{before}");
 
-    let out = run(&["scene", "workroom"]);
+    let out = run(&["channel", "scene", "workroom"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "stderr: {err}");
     assert!(err.contains("`rooms:` was renamed `channels:`"), "stderr: {err}");
-    let after = String::from_utf8_lossy(&run(&["channels", "--joined"]).stdout).to_string();
+    let after = String::from_utf8_lossy(&run(&["channel", "--joined"]).stdout).to_string();
     assert_eq!(before, after, "membership must be unchanged");
 
-    let listed = run(&["scenes"]);
+    let listed = run(&["channel", "scenes"]);
     assert!(!listed.status.success());
 }
 
@@ -216,12 +216,12 @@ fn channels_pin_and_unpin_round_trip() {
             .output()
             .expect("run attend")
     };
-    assert!(run(&["join", "ops"]).status.success());
-    assert!(run(&["channels", "pin", "ops"]).status.success());
-    let pinned = String::from_utf8_lossy(&run(&["channels", "--joined"]).stdout).to_string();
+    assert!(run(&["channel", "join", "ops"]).status.success());
+    assert!(run(&["channel", "pin", "ops"]).status.success());
+    let pinned = String::from_utf8_lossy(&run(&["channel", "--joined"]).stdout).to_string();
     assert!(pinned.contains("#ops") && pinned.contains("yes"), "{pinned}");
-    assert!(run(&["channels", "unpin", "ops"]).status.success());
-    let unpinned = String::from_utf8_lossy(&run(&["channels", "--joined"]).stdout).to_string();
+    assert!(run(&["channel", "unpin", "ops"]).status.success());
+    let unpinned = String::from_utf8_lossy(&run(&["channel", "--joined"]).stdout).to_string();
     assert!(unpinned.contains("#ops") && unpinned.contains("no"), "{unpinned}");
 }
 

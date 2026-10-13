@@ -257,7 +257,7 @@ impl PeerSensor {
     /// Return the set of live Claude session IDs currently visible to
     /// the peer sensor. Callers cross-reference this against
     /// `_groups.yaml` member lists when they need a liveness-checked
-    /// view (channel routing in `attend send --channel`, etc.) — the
+    /// view (channel routing in `attend message send --channel`, etc.) — the
     /// yaml count alone trusts membership records that outlive their session.
     pub fn live_session_ids(&self) -> std::collections::HashSet<String> {
         self.discover_peers().into_keys().collect()
@@ -271,7 +271,7 @@ impl PeerSensor {
         // individually (the common, timely case) or coalesced into one
         // digest when a single poll surfaces more than DIGEST_THRESHOLD —
         // a warm rejoin after a down-gap, or a burst from a hyperactive
-        // peer. Nothing is dropped; detail is always in `attend inbox`.
+        // peer. Nothing is dropped; detail is always in `attend message inbox`.
         let mut pending: Vec<PendingMsg> = Vec::new();
         // Directories to scan: own project + `#open` + joined channels.
         let scan_dirs = self.receive_dirs(&focus.working_dir);
@@ -295,7 +295,7 @@ impl PeerSensor {
         // without being shown and counted in one note, so a fresh enrollment
         // is neither flooded nor silently emptied. A warm restart skips this
         // (the checkpoint restored the seen-set), so down-gap messages still
-        // surface as unseen. Detail is always available via `attend inbox`.
+        // surface as unseen. Detail is always available via `attend message inbox`.
         let baselining = !self.message_baseline_done && !self.checkpoint_loaded;
         self.message_baseline_done = true;
 
@@ -451,7 +451,7 @@ impl PeerSensor {
                 age_secs: f.age.as_secs(),
             });
 
-            // Track most-recent inbound for `attend reply`. We record
+            // Track most-recent inbound for `attend message reply`. We record
             // here (after deciding to emit an observation) so `attend
             // reply` targets what the operator actually saw, not what was
             // held back. The own-session-id keys the file so concurrent
@@ -827,8 +827,8 @@ fn monitor_line(sender: &str, signal_id: &str, body: &str, reply_hint: bool) -> 
 
 /// Appended to the first peer message a session sees. It names `attend
 /// reply`, which threads to that message on its own, because that is the
-/// verb for answering it; `attend send` starts a new topic.
-const REPLY_HINT: &str = " (reply: attend reply \"...\")";
+/// verb for answering it; `attend message send` starts a new topic.
+const REPLY_HINT: &str = " (reply: attend message reply \"...\")";
 
 /// A single poll surfacing more than this many messages is a flood — a
 /// warm rejoin after a down-gap, or a hyperactive peer. Above it, the poll
@@ -867,7 +867,7 @@ fn build_digest(pending: &[PendingMsg]) -> (f64, String) {
         parts.push(format!("{group} in groups"));
     }
     let body = format!(
-        "{} new messages: {} (newest {} ago, over {}) — attend inbox for detail",
+        "{} new messages: {} (newest {} ago, over {}) — attend message inbox for detail",
         pending.len(),
         parts.join(", "),
         fmt_ago(newest),
@@ -905,8 +905,8 @@ mod tests {
     /// The hint names the threading verb.
     #[test]
     fn reply_hint_names_attend_reply() {
-        assert!(REPLY_HINT.contains("attend reply \""), "{REPLY_HINT}");
-        assert!(!REPLY_HINT.contains("attend send"), "{REPLY_HINT}");
+        assert!(REPLY_HINT.contains("attend message reply \""), "{REPLY_HINT}");
+        assert!(!REPLY_HINT.contains("attend message send"), "{REPLY_HINT}");
     }
 
     #[test]
@@ -1025,7 +1025,7 @@ mod tests {
         // Newest is 120s (2m); span back to the oldest is 1260s (21m).
         assert!(body.contains("newest 2m ago"), "{body}");
         assert!(body.contains("over 21m"), "{body}");
-        assert!(body.contains("attend inbox"), "{body}");
+        assert!(body.contains("attend message inbox"), "{body}");
     }
 
     #[test]

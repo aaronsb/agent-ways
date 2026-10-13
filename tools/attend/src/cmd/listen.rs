@@ -1,4 +1,4 @@
-//! `attend listen` and `attend unread`: the verbs are `verbs::listen` and
+//! `attend listen` and `attend message unread`: the verbs are `verbs::listen` and
 //! `verbs::unread`; this renders them.
 
 use crate::cli::{ListenCmd, ListenHost};
@@ -45,7 +45,7 @@ fn word(state: &Listening) -> &'static str {
     }
 }
 
-/// `attend unread`: `N unread`, or `N waiting · cold` when the prompt cache
+/// `attend message unread`: `N unread`, or `N waiting · cold` when the prompt cache
 /// has lapsed under an addressed message, then one line per room with
 /// unread messages; `--json` prints [`unread::Unread`].
 pub(crate) fn cmd_unread(json: bool) {

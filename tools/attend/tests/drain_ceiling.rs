@@ -14,7 +14,7 @@ use common::{Fixture, MINUTE};
 fn an_unwritable_state_dir_cannot_loop_the_stop_hook() {
     use std::os::unix::fs::PermissionsExt;
     let f = Fixture::new("ceiling");
-    f.ok(&["join", "side"]);
+    f.ok(&["channel", "join", "side"]);
     f.put("_broadcast", "other-1-old", "old backlog", 30 * MINUTE);
     let state = f.cache().join("state");
     std::fs::create_dir_all(&state).unwrap();

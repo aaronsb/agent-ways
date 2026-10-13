@@ -254,7 +254,7 @@ fn the_drain_skips_another_sessions_direct_message() {
     let tray = f.project_tray();
     signal(&f, &tray, "x-1-1", &format!("claude:x|p|/tmp/p|to:{}|for me", f.sid));
     signal(&f, &tray, "x-1-2", "claude:x|p|/tmp/p|to:beta-sess|for beta");
-    let d: serde_json::Value = serde_json::from_str(&f.ok(&["inbox", "--drain", "--json"])).unwrap();
+    let d: serde_json::Value = serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json"])).unwrap();
     let bodies: Vec<&str> = d["messages"].as_array().unwrap().iter().map(|m| m["message"].as_str().unwrap()).collect();
     assert_eq!(bodies, ["for me"]);
 }
@@ -267,9 +267,9 @@ fn the_wake_drain_waits_for_an_addressed_message() {
     let f = Fixture::new("addr-wake");
     f.ok(&["listen", "on"]);
     // The cold start is behind us before anything arrives.
-    f.ok(&["inbox", "--drain", "--json"]);
+    f.ok(&["message", "inbox", "--drain", "--json"]);
     signal(&f, "_broadcast", "x-1-1", "claude:x|p|/tmp/p|to:*|on open");
-    let wake = |f: &Fixture| -> serde_json::Value { serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap() };
+    let wake = |f: &Fixture| -> serde_json::Value { serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json", "--wake"])).unwrap() };
     assert_eq!(wake(&f)["messages"], serde_json::json!([]), "an #open post wakes no one");
     assert_eq!(wake(&f)["messages"], serde_json::json!([]), "and is still pending");
     signal(&f, &f.project_tray(), "x-1-2", &format!("claude:x|p|/tmp/p|to:{}|for me", f.sid));
@@ -278,7 +278,7 @@ fn the_wake_drain_waits_for_an_addressed_message() {
     assert_eq!(bodies, ["on open", "for me"]);
 }
 
-/// `attend unread` counts what the session would read, and no more.
+/// `attend message unread` counts what the session would read, and no more.
 #[test]
 fn unread_counts_only_what_the_session_reads() {
     let f = Fixture::new("addr-unread");
@@ -286,7 +286,7 @@ fn unread_counts_only_what_the_session_reads() {
     let tray = f.project_tray();
     signal(&f, &tray, "x-1-1", &format!("claude:x|p|/tmp/p|to:{}|for me", f.sid));
     signal(&f, &tray, "x-1-2", "claude:x|p|/tmp/p|to:beta-sess|for beta");
-    let u: serde_json::Value = serde_json::from_str(&f.ok(&["unread", "--json"])).unwrap();
+    let u: serde_json::Value = serde_json::from_str(&f.ok(&["message", "unread", "--json"])).unwrap();
     assert_eq!(u["unread"], 1, "{u}");
 }
 
@@ -304,14 +304,14 @@ fn the_monitor_poller_wakes_only_for_an_addressed_message() {
     // Three polls at the fixture's one-second interval.
     std::thread::sleep(std::time::Duration::from_secs(3));
     assert!(!run.output().contains("chatter on open"), "an #open post wakes no one: {}", run.output());
-    let u: serde_json::Value = serde_json::from_str(&f.ok(&["unread", "--json"])).unwrap();
+    let u: serde_json::Value = serde_json::from_str(&f.ok(&["message", "unread", "--json"])).unwrap();
     assert_eq!(u["unread"], 1, "and stays unread: {u}");
     signal(&f, &f.project_tray(), "x-1-2", &format!("claude:x|p|/tmp/p|to:{}|for you", f.sid));
     run.wait_for("the direct message", std::time::Duration::from_secs(30), |r| r.output().contains("for you"));
     assert!(run.output().contains("chatter on open"), "what was pending goes with it: {}", run.output());
 }
 
-/// `attend reply` with no `re`, as `attend_reply` sends it when the agent
+/// `attend message reply` with no `re`, as `attend_reply` sends it when the agent
 /// gives no handle, answers the newest message the drain delivered by the
 /// same rule: a person gets a direct message, a live session gets one in
 /// its tray, an exited session is refused by name, and nothing reaches
@@ -323,7 +323,7 @@ fn a_reply_without_re_follows_the_routing_and_never_falls_back_to_open() {
     f.ok(&["listen", "on"]);
     f.drain("plain");
     let open = f.signals().join("_broadcast");
-    let reply = |text: &str| f.attend(&["reply", "--json", "--", text]);
+    let reply = |text: &str| f.attend(&["message", "reply", "--json", "--", text]);
     let open_files = || files(&open).len();
 
     // An #open post from a person.
@@ -372,15 +372,15 @@ fn a_direct_message_to_the_id_before_a_clear_is_still_read() {
     f.set_session_id("sess-addr-clear-new");
     // The new id has had a turn, so its cache is warm (ADR-406 item 1).
     f.last_turn_of("sess-addr-clear-new", Some(Duration::ZERO));
-    let listed = f.ok(&["inbox", "--json"]);
+    let listed = f.ok(&["message", "inbox", "--json"]);
     assert!(listed.contains("sent before the clear"), "{listed}");
-    let d: serde_json::Value = serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap();
+    let d: serde_json::Value = serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json", "--wake"])).unwrap();
     let bodies: Vec<&str> = d["messages"].as_array().unwrap().iter().map(|m| m["message"].as_str().unwrap()).collect();
     assert_eq!(bodies, ["sent before the clear"], "{d}");
 
     // A channel reply to a message the session sent under its old id.
     signal(&f, "_broadcast", "x-1-2", &format!("claude:x|p|/tmp/p|to:*|re:{old}-1791000000000000001-0|answering you"));
-    let d: serde_json::Value = serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap();
+    let d: serde_json::Value = serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json", "--wake"])).unwrap();
     let bodies: Vec<&str> = d["messages"].as_array().unwrap().iter().map(|m| m["message"].as_str().unwrap()).collect();
     assert_eq!(bodies, ["answering you"], "a reply to the old id wakes the new one: {d}");
 }
@@ -399,7 +399,7 @@ fn a_reply_to_a_siblings_direct_message_goes_to_the_sibling() {
     f.drain("plain");
     signal(&f, &f.project_tray(), "beta-sess-1-1", &format!("claude:beta-sess|proj|{}|to:{}|alpha, a question", f.origin, f.sid));
     assert!(f.drain("plain").contains("alpha, a question"));
-    let out = f.attend(&["reply", "--json", "--", "an answer"]);
+    let out = f.attend(&["message", "reply", "--json", "--", "an answer"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let sent: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!((sent["re"].as_str(), sent["to"].as_str()), (Some("beta-sess-1-1"), Some("beta-sess")));
@@ -429,12 +429,12 @@ fn the_monitor_poller_leaves_a_siblings_direct_message_unread() {
 #[test]
 fn a_channel_post_addressed_to_one_member_is_read_by_all_and_wakes_only_it() {
     let f = Fixture::new("addr-channel-to");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     f.drain("plain");
     signal(&f, "@room", "x-1-1", "claude:x|p|/tmp/p|to:alpha-sess|alpha, over to you");
-    let listed = f.ok(&["inbox", "--json"]);
+    let listed = f.ok(&["message", "inbox", "--json"]);
     assert!(listed.contains("alpha, over to you"), "beta reads it: {listed}");
-    let wake = |f: &Fixture| -> serde_json::Value { serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap() };
+    let wake = |f: &Fixture| -> serde_json::Value { serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json", "--wake"])).unwrap() };
     assert_eq!(wake(&f)["messages"], serde_json::json!([]), "a post addressed to alpha does not wake beta");
     signal(&f, "@room", "x-1-2", &format!("claude:x|p|/tmp/p|to:{}|beta, your turn", f.sid));
     let d = wake(&f);
@@ -471,21 +471,21 @@ fn a_channel_post_to_a_non_member_is_refused() {
     let f = Fixture::new("addr-channel-nonmember");
     let _member = Peer::start(&f, "peer-sess", "peerproj");
     let _outsider = Peer::start(&f, "other-sess", "otherproj");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     attend_groups::Groups::new(&f.signals(), "peer-sess").join("room", false).unwrap();
     std::fs::create_dir_all(f.cache().join("heartbeat")).unwrap();
     std::fs::write(f.heartbeat("peer-sess"), "").unwrap();
     let room = f.signals().join("@room");
     for (to, who) in [("other-sess", "a session"), ("fixture-human", "a person")] {
-        let out = f.attend(&["send", "--channel", "room", "--to", to, "--", "are you there?"]);
+        let out = f.attend(&["message", "send", "--channel", "room", "--to", to, "--", "are you there?"]);
         assert_eq!(out.status.code(), Some(1), "{who}: {}", String::from_utf8_lossy(&out.stderr));
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(err.contains(&format!("@{to} is not in #room; nothing sent")), "{who}: {err}");
         assert!(files(&room).is_empty(), "{who}: nothing written");
     }
-    let out = f.attend(&["send", "--channel", "room", "--to", "peer-sess", "--json", "--", "you, in the room"]);
+    let out = f.attend(&["message", "send", "--channel", "room", "--to", "peer-sess", "--json", "--", "you, in the room"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(files(&room).len(), 1, "a member addressee posts");
-    let out = f.attend(&["send", "--channel", "open", "--to", "other-sess", "--", "you, in the open"]);
+    let out = f.attend(&["message", "send", "--channel", "open", "--to", "other-sess", "--", "you, in the open"]);
     assert!(out.status.success(), "#open has no membership: {}", String::from_utf8_lossy(&out.stderr));
 }

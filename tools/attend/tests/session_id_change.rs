@@ -86,7 +86,7 @@ fn a_message_held_in_the_cooldown_survives_an_id_change() {
 #[test]
 fn a_join_only_session_follows_an_id_change() {
     let f = Fixture::new("idjoin");
-    f.ok(&["join", "side"]);
+    f.ok(&["channel", "join", "side"]);
     f.put("_broadcast", "other-1-before", "before the clear", Duration::ZERO);
     assert!(f.drain("plain").contains("before the clear"));
 
@@ -101,7 +101,7 @@ fn a_join_only_session_follows_an_id_change() {
     assert!(!out.contains("before the clear"), "nothing seen before is delivered again: {out}");
     assert!(f.marker("sess-join-new").exists());
     assert!(!f.marker("sess-idjoin").exists());
-    assert!(f.ok(&["channels", "--joined"]).contains("#side"));
+    assert!(f.ok(&["channel", "--joined"]).contains("#side"));
 }
 
 /// #725 re-review, finding 9: the moves happen in the re-executed run, so
@@ -141,7 +141,7 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     let f = Fixture::new("idrestart");
     let old = f.sid.clone();
     let registry = f.cache().join("instances").join(format!("{}.yaml", f.project_tray()));
-    f.ok(&["join", "side"]);
+    f.ok(&["channel", "join", "side"]);
     {
         let run = f.run();
         // In the project tray, so it wakes the session (ADR-406 item 1).
@@ -166,7 +166,7 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     assert!(reg.contains("instance: alpha"), "the slot name carries over: {reg}");
     // The marker moves before the channel membership does, so wait for it.
     run.wait_for("the channel membership", Duration::from_secs(20), |_| {
-        f.ok(&["channels", "--joined"]).contains("#side")
+        f.ok(&["channel", "--joined"]).contains("#side")
     });
     // Addressed to the session, so the channel post wakes it.
     std::fs::write(f.signals().join("@side").join("other-1-side.signal"), "claude:other-session|elsewhere|/tmp/elsewhere|to:sess-restart-new|SIDE-AFTER\n").unwrap();

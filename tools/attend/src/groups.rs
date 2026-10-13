@@ -5,7 +5,7 @@
 //! tracked in `_groups.yaml`.
 //!
 //! Every agent is always in its implicit project group (from cwd).
-//! Named groups are explicit and opt-in via `attend join <name>`.
+//! Named groups are explicit and opt-in via `attend channel join <name>`.
 //!
 //! The state manager and `_groups.yaml` I/O live in the shared
 //! `attend-groups` crate (ADR-170) — attend-chat's `/join` write path

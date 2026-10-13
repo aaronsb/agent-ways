@@ -3,7 +3,7 @@
 //!
 //! Listening is enrollment (ADR-172, addendum of 2026-10-01). A session
 //! listens once it runs `attend listen on`, runs `attend run`, or joins a
-//! channel, and stops at `attend listen off` or `attend scene private`.
+//! channel, and stops at `attend listen off` or `attend channel scene private`.
 //! While it is not listening the drain delivers nothing and marks nothing
 //! read; the messages wait in the store.
 

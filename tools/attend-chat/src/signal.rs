@@ -125,8 +125,8 @@ fn channel_for_path(path: &Path) -> Channel {
 
 /// Write a broadcast signal to `_broadcast/`, `to = *`. The line, the
 /// sender identity and the atomic write are `agent_identity::signal`'s,
-/// shared with `attend send`. Threaded replies (`re:<id>`) are produced by
-/// `attend send` only; the TUI does not originate threaded sends yet.
+/// shared with `attend message send`. Threaded replies (`re:<id>`) are produced by
+/// `attend message send` only; the TUI does not originate threaded sends yet.
 pub fn write_broadcast(message: &str) -> io::Result<String> {
     write_signal(&broadcast_dir(), message, "*")
 }
@@ -138,7 +138,7 @@ pub fn write_broadcast(message: &str) -> io::Result<String> {
 /// the target differs. attend-chat writes as the person at its keyboard,
 /// `from_kind = human`.
 pub fn write_signal(dest: &Path, message: &str, to: &str) -> io::Result<String> {
-    // The same 64 KiB limit `attend send` keeps (ADR-412); the compose box
+    // The same 64 KiB limit `attend message send` keeps (ADR-412); the compose box
     // shows the refusal and keeps the draft.
     agent_identity::signal::check_message_len(message)?;
     let (sender_id, from, project, cwd) = sender_identity();
@@ -146,7 +146,7 @@ pub fn write_signal(dest: &Path, message: &str, to: &str) -> io::Result<String> 
     // Build the filename stem (== signal id that `re:<id>` replies
     // reference). `signal_filename` normalizes the sender id — the TUI's
     // sender is `$USER@<terminal>`, whose raw `@`/`.` would fail
-    // `is_valid_signal_id` and break `attend reply` auto-threading
+    // `is_valid_signal_id` and break `attend message reply` auto-threading
     // (issue #368) — and makes the name collision-proof. `from` keeps the
     // raw id.
     let filename = agent_identity::signal_filename(&sender_id);

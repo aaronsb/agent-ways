@@ -182,7 +182,7 @@ mod tests {
         assert!(!is_attend_run("/bin/zsh -c eval 'attend run'"));
         assert!(!is_attend_run("nvim notes-about-attend run"));
         assert!(!is_attend_run("attend-chat run"));
-        assert!(!is_attend_run("attend status"));
+        assert!(!is_attend_run("attend peer status"));
         assert!(!is_attend_run(""));
     }
 

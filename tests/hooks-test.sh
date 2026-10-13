@@ -361,8 +361,8 @@ cat > "$ATTEND_SHIMS/attend" <<'SHIM'
 #!/bin/sh
 case "$*" in
     "listen status --json") f=listen ;;
-    "channels --joined --json") f=channels ;;
-    "unread --json") f=unread ;;
+    "channel --joined --json") f=channels ;;
+    "message unread --json") f=unread ;;
     *) echo "$*" >> "$FIX/../attend-unexpected"; exit 2 ;;
 esac
 [ -e "$FIX/$f" ] || exit 1
@@ -540,5 +540,24 @@ check "a macro past the deadline adds nothing to its way" "# Slow way body" "$(c
 check "a macro past the deadline is logged by its way" "slowdom/slow" \
     "$(jq -r 'select(.event=="macro_timeout") | .way' "$XDG_STATE_HOME/agent-ways/events.jsonl" 2>/dev/null)"
 rm -rf "$CORE/slowdom"
+
+# attend-drain-stop.sh passes the drain's stdout and stdin through, and ends
+# the turn normally (exit 0) on any failure from attend: Claude Code reads a
+# Stop hook's exit 2 as a block, and clap exits 2 on a usage error (ADR-413).
+drain_with() {  # stub-body -> "exit:stdout"
+    local dir="$WORK/drain-bin"
+    rm -rf "$dir"; mkdir -p "$dir"
+    printf '#!/bin/bash\n%s\n' "$1" > "$dir/attend"; chmod +x "$dir/attend"
+    local out rc=0
+    out=$(echo '{"stop_hook_active":false}' | PATH="$dir:/usr/bin:/bin" bash "$HOOKS/attend-drain-stop.sh" 2>/dev/null) || rc=$?
+    echo "$rc:$out"
+}
+check "the drain hook passes the drain's output and stdin through" '0:{"decision":"block","stdin":{"stop_hook_active":false}}' \
+    "$(drain_with '[[ "$*" == "message inbox --drain --format hook" ]] || exit 9; echo "{\"decision\":\"block\",\"stdin\":$(cat)}"')"
+check "a usage error from attend ends the turn normally" "0:" \
+    "$(drain_with 'echo "error: unrecognized subcommand" >&2; exit 2')"
+check "any other failure from attend ends the turn normally" "0:" "$(drain_with 'echo partial; exit 1')"
+check "no attend on PATH ends the turn normally" "0:" \
+    "$(rc=0; out=$(PATH="$WORK/empty-bin" /bin/bash "$HOOKS/attend-drain-stop.sh" </dev/null) || rc=$?; echo "$rc:$out")"
 
 exit $fail

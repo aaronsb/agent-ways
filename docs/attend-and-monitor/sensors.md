@@ -2,7 +2,7 @@
 
 Attend ships six built-in sensors. Three are modules of the attend crate and always compiled in: `context`, `git` and `disclosure`, under `tools/attend/src/sensors/`. Three are separate crates linked behind feature flags: `sensor-peers`, `sensor-processes` and `sensor-keepwarm`. Anything else is a sensor of your own, an external script or another crate (see [`authoring-sensors.md`](authoring-sensors.md)).
 
-`attend sensors` lists what is running:
+`attend sensor list` lists what is running:
 
 ```
   Sensor     Kind    State  Interval  Description                                                   Source
@@ -81,7 +81,7 @@ Discovers other Claude Code sessions from `~/.claude/sessions/*.json` and reads 
 
 The whole sensor rides the message lane, so session events skip the refractory too. That is a known limitation of ADR-136, which chose lanes per sensor rather than per observation.
 
-The sensor re-reads `_groups.yaml` on every poll, so `attend join` and `attend leave` take effect on the next scan.
+The sensor re-reads `_groups.yaml` on every poll, so `attend channel join` and `attend channel leave` take effect on the next scan.
 
 ## `processes`
 
@@ -148,7 +148,7 @@ The sensor does not capture output.
 
 ## `disclosure`
 
-Re-teaches the messaging contract when it has drifted out of the agent's recent context (ADR-122). Each poll reads the token count from `ways context --json`. The first poll of an `attend run` emits the contract (how to send, reply and scope messages, the drain, keepwarm, the CLI-is-the-contract rule), and it emits again each time the session has moved 25% of the context window since the last time. The magnitude is 5.0, so the line prints at high priority on a single poll.
+Re-teaches the messaging contract when it has drifted out of the agent's recent context (ADR-122). Each poll reads the token count from `ways context --json`. The first poll of an `attend run` emits the contract (how to send, reply and scope messages, the drain, keepwarm, the rule that attend's tools and CLI are the contract), and it emits again each time the session has moved 25% of the context window since the last time. The magnitude is 5.0, so the line prints at high priority on a single poll.
 
 The body is `tools/attend/src/sensors/disclosures/messaging.md`, compiled into the binary. It is kept in step with the attend skill and the attend way. The ledger is in memory only, so a restarted run teaches again on its first poll.
 

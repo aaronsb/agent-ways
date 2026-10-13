@@ -12,24 +12,23 @@ pub const PEERS: &str = "List active Claude Code sessions and their channels";
 pub const STATUS: &str = "Show every running `attend run` with the session it serves, signals, and channel state";
 pub const JOIN: &str = "Join a channel (creates it if absent)";
 pub const LEAVE: &str = "Leave a channel";
-/// What the verb does with no subcommand, which is all a tool offers. The
-/// CLI's lifecycle subcommands (create, describe, pin, unpin) list
-/// themselves under it in `--help`.
+/// What `channel list` does, which is all a tool offers. The CLI's other
+/// channel verbs list themselves beside it in `attend channel --help`.
 pub const CHANNELS: &str = "List every channel, marking the ones this session is in";
 
 pub const LISTEN: &str = "Turn listening on or off for this session without joining a channel, or show it (default: status)";
 pub const UNREAD: &str = "Count this session's unread messages by room, marking none of them read";
 
-/// Every message verb with its description, by the CLI name.
+/// Every message verb with its description, by its CLI path (ADR-413).
 pub const VERBS: &[(&str, &str)] = &[
-    ("send", SEND),
-    ("reply", REPLY),
-    ("inbox", INBOX),
-    ("peers", PEERS),
-    ("status", STATUS),
-    ("join", JOIN),
-    ("leave", LEAVE),
-    ("channels", CHANNELS),
+    ("message send", SEND),
+    ("message reply", REPLY),
+    ("message inbox", INBOX),
+    ("message unread", UNREAD),
+    ("peer list", PEERS),
+    ("peer status", STATUS),
+    ("channel join", JOIN),
+    ("channel leave", LEAVE),
+    ("channel list", CHANNELS),
     ("listen", LISTEN),
-    ("unread", UNREAD),
 ];

@@ -72,7 +72,7 @@ fn attend(home: &Path, args: &[&str]) -> Output {
 }
 
 fn drain(home: &Path, format: &str) -> String {
-    let out = attend(home, &["inbox", "--drain", "--format", format]);
+    let out = attend(home, &["message", "inbox", "--drain", "--format", format]);
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
@@ -104,7 +104,7 @@ fn an_unenrolled_session_drains_nothing_and_writes_no_heartbeat() {
 #[test]
 fn a_session_in_a_channel_drains_every_tray_as_before() {
     let home = fixture("joined");
-    assert!(attend(&home, &["join", "side"]).status.success());
+    assert!(attend(&home, &["channel", "join", "side"]).status.success());
 
     let plain = drain(&home, "plain");
     for body in ["open-msg", "project-msg", "channel-msg"] {

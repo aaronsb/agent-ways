@@ -152,7 +152,7 @@ fn keys() -> Vec<KeyEvent> {
 }
 
 /// The digest of twenty seeds of 200 steps ([`pinned_run`]).
-const PINNED: &str = "a76839c709b57522";
+const PINNED: &str = "a6ff74afc40cc1e4";
 
 /// FNV-1a over `bytes`, from `h`: a digest stable on every machine.
 fn fnv(h: u64, bytes: &[u8]) -> u64 {

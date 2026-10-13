@@ -152,15 +152,15 @@ The `record_fire(tick, magnitude)` call replaces the pre-ADR-123 `record_disclos
 
 `sensor-peers` multiplies a message's magnitude by how often the same peer has written within `peer_activity_window` (default 900 s): ×1.0 for the first message, ×1.75 for the second, ×2.5 from the third. Since peer messages ride the message lane, the boost only raises the line's priority. It does not decide whether a message is shown: every message is shown once. The sensor counts per peer in its own sliding window rather than through the curve engine, because the boost is per peer, not per sensor.
 
-## Tuning with `attend tune`
+## Tuning with `attend config tune`
 
-The default engagement parameters are sized for a typical Claude session, but they're derivable from real data. `attend tune` surveys recent sessions under `~/.claude/projects/` (the 10 most-recent active projects, 5 most-recent sessions each by default), computes percentiles on turn cycle durations (assistant → user, user → user), and proposes engagement parameters grounded in actual usage:
+The default engagement parameters are sized for a typical Claude session, but they're derivable from real data. `attend config tune` surveys recent sessions under `~/.claude/projects/` (the 10 most-recent active projects, 5 most-recent sessions each by default), computes percentiles on turn cycle durations (assistant → user, user → user), and proposes engagement parameters grounded in actual usage:
 
 ```
-$ attend tune
+$ attend config tune
 [tune] surveying 34 sessions across 10 projects
 
-=== attend tune — session survey ===
+=== attend config tune — session survey ===
   projects surveyed:  10
   sessions parsed:    34
   turn samples:       661
@@ -205,7 +205,7 @@ The governor protects against *global flood* — too many sensors all trying to 
 
 When should you tune these parameters vs leave defaults?
 
-- **Leave defaults unless you've run `attend tune`.** The defaults are reasonable for a typical dev workflow. Random tweaking is unlikely to improve things.
+- **Leave defaults unless you've run `attend config tune`.** The defaults are reasonable for a typical dev workflow. Random tweaking is unlikely to improve things.
 - **Lower `burst_threshold` if you're getting spammed.** If a particular sensor is firing too often, lower the threshold to 2 so refractory kicks in faster.
 - **Higher `step_multiplier` if refractory isn't strong enough.** If elevated threshold still lets chatty events through, raise from 1.25 to 1.5 (which becomes `peak_multiplier = 2.5` at runtime).
 - **Longer `absolute_refractory` if you need more silence.** 60 seconds is one Claude turn. If you want a full pause between bursts, raise it to 120–180.

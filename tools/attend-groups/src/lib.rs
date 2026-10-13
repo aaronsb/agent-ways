@@ -162,7 +162,7 @@ impl Groups {
     /// Every directory this member receives from, in a fixed order: the
     /// project tray of `origin` (named by `claude_sessions::attend_key`),
     /// `#open`, then each joined channel. The one receive set the drain,
-    /// `attend inbox`, `attend status` and the peers sensor all read.
+    /// `attend message inbox`, `attend peer status` and the peers sensor all read.
     pub fn receive_dirs(&self, origin: &str) -> Vec<ReceiveDir> {
         let mut dirs = vec![
             ReceiveDir { path: self.base.join(claude_sessions::attend_key(origin)), room: Room::Project },
@@ -298,7 +298,7 @@ impl Groups {
     }
 
     /// Record that `member` was invited to `name`. The invitee's own
-    /// `attend join` answers it ([`Groups::take_invite`]).
+    /// `attend channel join` answers it ([`Groups::take_invite`]).
     pub fn invite(&self, name: &str, member: &str) -> Result<(), String> {
         validate_group_name(name)?;
         if member.is_empty() || member.contains('/') {

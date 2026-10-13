@@ -34,7 +34,7 @@ attend config path      # the file paths attend loads from
 attend config lint      # the findings in attend's two files; exit 3 with any
 ```
 
-Every write goes through the one settings writer: it takes a lock beside the file, changes only the keys it sets, keeps every comment and the order of the rest, and renames a temporary file into place. `attend tune --apply` and `ways settings set` leave the same bytes.
+Every write goes through the one settings writer: it takes a lock beside the file, changes only the keys it sets, keeps every comment and the order of the rest, and renames a temporary file into place. `attend config tune --apply` and `ways settings set` leave the same bytes.
 
 A value of the wrong type or out of range is a finding, never clamped. A section with a finding is ignored in that file, so its keys resolve from the layers beneath, ending at the defaults; each sensor falls back alone. A switch fails closed: a sensor or `cleanup` whose `enabled` holds anything but `true` in an entry with a finding reads as off. A sensor name the schema refuses (such as the retired `-processes:`) closes that file's `sensors:`: every built-in and every sensor the file names reads off until the name is edited by hand, and `ways settings fix` will not guess at it. A file that does not parse sets nothing; `cleanup` and every built-in sensor are off in its scope until its syntax is fixed by hand. Each finding is one line on stderr of `attend run` and `attend config show`, naming the file, line and section.
 
@@ -50,7 +50,7 @@ governor:
   rate_window: 120           # seconds of the rolling rate window
 
 # Action potential engagement model (ADR-123)
-# Run `attend tune` to auto-derive these from real session history
+# Run `attend config tune` to auto-derive these from real session history
 engagement:
   burst_threshold: 3         # disclosures before refractory kicks in
   step_multiplier: 1.25      # per-disclosure threshold elevation past burst_threshold
@@ -144,7 +144,7 @@ The action potential model parameters. Governs per-sensor refractory behavior. S
 | `absolute_refractory` | `absolute_refractory` (seconds)                    |
 | `decay_per_minute`    | `multiplier_half_life = ln(0.5)/ln(1-rate) × 60`   |
 
-**Auto-tuning.** Run `attend tune` to derive these from real session history. See [`engagement.md`](engagement.md#tuning-with-attend-tune) for how tuning works and how the linear-derived `decay_per_minute` relates to the engine's exponential half-life.
+**Auto-tuning.** Run `attend config tune` to derive these from real session history. See [`engagement.md`](engagement.md#tuning-with-attend-tune) for how tuning works and how the linear-derived `decay_per_minute` relates to the engine's exponential half-life.
 
 ### `cleanup`
 
@@ -152,17 +152,17 @@ Background signal-file cleanup. Prevents the signals base from accumulating inde
 
 Reaping is by **project liveness** (ADR-136), not by age: a signal is removed when the project that owns it is gone, mirroring Claude Code's notion of a live project. A project-tray signal belongs to the recipient's project; a `#open` or channel signal belongs to the sender's. There is no age cutoff and no `retention` dial. See [`signals.md`](signals.md#the-full-lifecycle).
 
-- **`enabled`** (bool, default true): master switch. If false, auto-cleanup is skipped and you must run `attend cleanup` manually to reclaim space.
+- **`enabled`** (bool, default true): master switch. If false, auto-cleanup is skipped and you must run `attend message cleanup` manually to reclaim space.
 - **`interval`** (seconds, default 600): how often the auto-sweep runs inside `attend run`. At this interval the loop scans the signals base and reaps signals whose owning project is no longer live.
 
 The sweep also removes empty encoded-cwd project subdirectories left as shells after their signals are reaped. Reserved names (`_broadcast`, `@groups`, anything starting with `_` or `@`) are never removed.
 
-`attend cleanup` can be run manually:
+`attend message cleanup` can be run manually:
 
 ```bash
-attend cleanup                        # reap signals of dead projects
-attend cleanup --dry-run              # list what would be removed
-attend cleanup --all                  # nuke everything (ignore liveness)
+attend message cleanup                        # reap signals of dead projects
+attend message cleanup --dry-run              # list what would be removed
+attend message cleanup --all                  # nuke everything (ignore liveness)
 ```
 
 ### `sensors`
@@ -266,10 +266,10 @@ Merged result in that project:
 
 ## Permissions (ADR-116)
 
-The `requires:` list on each sensor block declares the harness permissions that sensor needs. Running `attend permissions audit` walks your config and checks each declared requirement against `settings.json`:
+The `requires:` list on each sensor block declares the harness permissions that sensor needs. Running `attend sensor permissions` walks your config and checks each declared requirement against `settings.json`:
 
 ```bash
-$ attend permissions audit
+$ attend sensor permissions
 
   Attend Permissions Audit (ADR-116)
 

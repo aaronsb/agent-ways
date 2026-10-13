@@ -40,8 +40,8 @@ The pattern is **convene-then-split**:
 
 1. Someone calls it on `#open` — the commons, where everyone is. *"Big refactor;
    let's split by area."*
-2. Sessions **join channels** (`attend join backend`) and scope their
-   chatter to that channel (`attend send --channel backend "…"`). The `#backend`
+2. Sessions **join channels** (`attend channel join backend`) and scope their
+   chatter to that channel (`attend message send --channel backend "…"`). The `#backend`
    traffic no longer wakes the frontend session.
 3. Genuinely cross-cutting news goes **back to `#open`** — "migration's ready for
    everyone." Convening on the commons and working in channels is the same move
@@ -60,7 +60,7 @@ is still *authored*, so it rides the durable message lane. The channel only chan
 - **Drowning the returnee.** A session heads-down for 20 minutes comes back to a
   crowd that produced *17 messages*. Replaying 17 turns would bury it; the
   **re-entry digest** collapses them — *"17 new messages: 5 to you, 12 on #open
-  (newest 2m ago, over 21m)"* — into one turn, detail on demand via `attend inbox`.
+  (newest 2m ago, over 21m)"* — into one turn, detail on demand via `attend message inbox`.
   Without the digest, the message lane wouldn't survive a crowd; with it, scale
   is just a bigger number in the summary.
 

@@ -38,7 +38,7 @@ The release-asset downloads go through `gh`, so the wrapper exports `GH_TOKEN` f
 3. The target is recorded in the user config. `ways manage target list --json` and `ways status --json` report one enabled target, active, with the embedding engine up.
 4. `ways manage repair --dry-run` twice prints identical output and reports up to date. A bare reconcile changes nothing.
 5. The second config directory hashes the same as its seed.
-6. `attend status` and `claude --version` exit 0. The version is the pinned one unless `latest` was requested.
+6. `attend peer status` and `claude --version` exit 0. The version is the pinned one unless `latest` was requested.
 7. Hooks run the way Claude Code runs them. The runner reads each event's commands out of the merged `settings.json`, keeps the entries whose matcher matches the source or tool name, expands `${HOME}`, and pipes the payload to stdin. It asserts the ways table and core guidance on `SessionStart`, the ADR way on an ADR prompt, the gitconfig way on `git config --global`, the validate way on an edit to `README.md`, the user's own hooks still running, and a zero exit from every hook.
 
 The payloads name `/home/tester/project` as the working directory. The runner creates it as a git repository before any hook runs.

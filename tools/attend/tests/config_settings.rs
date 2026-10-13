@@ -89,7 +89,7 @@ fn tune_apply_changes_only_the_derived_keys_and_keeps_comments() {
     let fx = Fx::new();
     fx.sessions();
     fx.write(&fx.user(), HAND);
-    let out = fx.run(&["tune", "--apply"]);
+    let out = fx.run(&["config", "tune", "--apply"]);
     assert!(out.status.success(), "{}{}", text(&out.stdout), text(&out.stderr));
     let after = std::fs::read_to_string(fx.user()).unwrap();
     // Only the three derived values may differ, each on its own line.
@@ -116,7 +116,7 @@ fn tune_apply_replaces_the_file_atomically_and_leaves_nothing_beside_it() {
     fx.sessions();
     fx.write(&fx.user(), HAND);
     let before = std::fs::metadata(fx.user()).unwrap().ino();
-    assert!(fx.run(&["tune", "--apply"]).status.success());
+    assert!(fx.run(&["config", "tune", "--apply"]).status.success());
     assert_ne!(std::fs::metadata(fx.user()).unwrap().ino(), before, "written in place, not renamed into place");
     let names: Vec<String> = std::fs::read_dir(fx.user().parent().unwrap()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     assert_eq!(names, vec!["config.yaml".to_string()], "a lock or temporary file was left");
@@ -128,7 +128,7 @@ fn tune_apply_waits_for_the_settings_lock() {
     fx.sessions();
     fx.write(&fx.user(), HAND);
     let held = agent_settings::writer::Lock::acquire(&fx.user()).unwrap();
-    let mut child = fx.cmd(&["tune", "--apply"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    let mut child = fx.cmd(&["config", "tune", "--apply"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(800) {
         assert!(child.try_wait().unwrap().is_none(), "tune wrote while another writer held the lock");
@@ -146,7 +146,7 @@ fn tune_apply_derives_from_the_file_as_it_is_under_the_lock() {
     fx.sessions();
     fx.write(&fx.user(), "engagement:\n  burst_threshold: 3\n");
     let held = agent_settings::writer::Lock::acquire(&fx.user()).unwrap();
-    let mut child = fx.cmd(&["tune", "--apply"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    let mut child = fx.cmd(&["config", "tune", "--apply"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
     std::thread::sleep(Duration::from_millis(400));
     // An edit lands while tune waits for the lock; tune must use it.
     fx.write(&fx.user(), "engagement:\n  burst_threshold: 5\n");
@@ -161,7 +161,7 @@ fn tune_apply_clamps_a_derived_decay_to_its_range() {
     let fx = Fx::new();
     fx.sessions();
     fx.write(&fx.user(), "engagement:\n  burst_threshold: 1\n  step_multiplier: 100\n");
-    let out = fx.run(&["tune", "--apply"]);
+    let out = fx.run(&["config", "tune", "--apply"]);
     assert!(out.status.success(), "{}", text(&out.stderr));
     assert!(std::fs::read_to_string(fx.user()).unwrap().contains("decay_per_minute: 1.0"));
 }
@@ -194,7 +194,7 @@ fn max_per_window_zero_mutes() {
 fn tune_apply_on_no_file_writes_only_the_derived_values() {
     let fx = Fx::new();
     fx.sessions();
-    assert!(fx.run(&["tune", "--apply"]).status.success());
+    assert!(fx.run(&["config", "tune", "--apply"]).status.success());
     let body = std::fs::read_to_string(fx.user()).unwrap();
     assert_eq!(
         body,

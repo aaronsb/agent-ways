@@ -1,4 +1,4 @@
-//! `attend tune` — survey session history and derive engagement config.
+//! `attend config tune` — survey session history and derive engagement config.
 
 use crate::config;
 
@@ -163,7 +163,7 @@ pub(crate) fn cmd_tune(apply: bool) {
     let d = derive(&current.engagement, a2u_median, u2u_p90);
 
     println!();
-    println!("=== attend tune — session survey ===");
+    println!("=== attend config tune — session survey ===");
     println!("  projects surveyed:  {}", proj_dirs.len());
     println!("  sessions parsed:    {}", sessions.len());
     println!("  turn samples:       {}", u2u_gaps.len());

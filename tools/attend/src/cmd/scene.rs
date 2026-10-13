@@ -1,4 +1,4 @@
-//! `attend scene` / `attend scenes` — named channel presets.
+//! `attend channel scene` / `attend channel scenes` — named channel presets.
 
 use crate::scenes;
 use crate::util::{current_session, groups_for, Session};
@@ -7,7 +7,7 @@ pub(crate) fn cmd_scene(name: &str) {
     let me = current_session();
     let r = groups_for(&me);
     let all = scenes::load_scenes();
-    // A scene's channels are joined as `attend join` joins one: their old
+    // A scene's channels are joined as `attend channel join` joins one: their old
     // messages are marked seen first, once the scene is known to activate.
     let held = match scenes::checked(&all, name) {
         Ok(scene) => scene.channels.iter().map(|c| crate::util::baseline_joined_room(&me, &r, c)).sum(),
@@ -18,7 +18,7 @@ pub(crate) fn cmd_scene(name: &str) {
             settle_scene_enrollment(&me, name, &r);
             println!("[attend] scene '{name}': {result}{}", crate::util::backlog_note(held));
             // A scene that leaves the session in a channel enrolls it, so
-            // it names the session as `attend join` does.
+            // it names the session as `attend channel join` does.
             if !r.my_groups().is_empty() {
                 if let Some(line) = crate::util::you_are_line(&me) {
                     println!("{line}");

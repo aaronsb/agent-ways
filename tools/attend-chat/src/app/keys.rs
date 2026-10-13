@@ -411,7 +411,7 @@ fn run_dissolve(channel: Option<String>, foreground: &Tab) -> EnterAction {
 /// real heartbeat sidecar.
 ///
 /// The live-member guard is chat-side policy the CLI's
-/// `attend dissolve` doesn't have: from the TUI this is a
+/// `attend channel dissolve` doesn't have: from the TUI this is a
 /// channel-hygiene action, and yanking a group out from under peers
 /// actively working in it shouldn't be one Enter away. A group whose
 /// members are all heartbeat-stale — or an orphan `@dir` the yaml
@@ -526,7 +526,7 @@ fn channels_status_in<F: Fn(&str) -> bool>(
 
 /// `/peers` — the live-session roster as a transcript status block
 /// (ADR-173 Decision 5: operator discovery parity with agent-side
-/// `attend peers`). A block, not a status line: the roster carries a
+/// `attend peer list`). A block, not a status line: the roster carries a
 /// root path per row and the status row truncates on overflow.
 /// Roster enumeration is keyed by session id (issue #394), so one
 /// session record renders exactly one row whatever its cwd history.
@@ -572,7 +572,7 @@ fn run_whois(name: &str) -> EnterAction {
 /// `/invite @name [#channel]` — invitation, never force-add. The
 /// invitation is an ordinary directed signal to the peer's project
 /// tray telling them how to join; entry happens only through their
-/// own `attend join`, so the invitee's autonomy to decline (silence)
+/// own `attend channel join`, so the invitee's autonomy to decline (silence)
 /// is preserved (ADR-173 / #393 consent asymmetry).
 fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAction {
     let g = tabs::command_scope(channel, foreground);
@@ -636,7 +636,7 @@ fn invite_body(g: &str, dir: &std::path::Path) -> String {
         .map(|entries| entries.flatten().any(|e| e.path().extension().is_some_and(|x| x == "signal")))
         .unwrap_or(false);
     let history = if has_history { " (its recent history is yours to read)" } else { "" };
-    format!("you're invited to #{g} — join with: attend join {g}{history}")
+    format!("you're invited to #{g} — join with attend_join, or: attend channel join {g}{history}")
 }
 
 /// `/kick @name [#channel]` — resolve the target, remove them, then
@@ -672,7 +672,7 @@ pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterA
     let action = kick_member_in(&signals_base(), g, id, label);
     if let (EnterAction::ClearWithStatus(_), Some(root)) = (&action, root) {
         let notice = format!(
-            "you were removed from #{g} by the operator — rejoin with: attend join {g}"
+            "you were removed from #{g} by the operator — rejoin with attend_join, or: attend channel join {g}"
         );
         let _ = write_signal(&cwd_dir(root), &notice, id);
     }
@@ -864,7 +864,7 @@ fn recipient_labels(recipients: &[Addressed<'_>]) -> Vec<String> {
 /// the same dir are deduped so a message is delivered once per inbox.
 ///
 /// The empty-group rejection (ADR-129 follow-up) mirrors
-/// `attend send --channel` discipline: a `#groupname` send to a group
+/// `attend message send --channel` discipline: a `#groupname` send to a group
 /// with zero live members would land in `@<name>/` and sit unread while
 /// the chat reports "sent". The base channel (`#open`) bypasses the
 /// check — it rides `_broadcast/`, scanned regardless of membership.
@@ -898,7 +898,7 @@ fn resolve_recipients(
                     return Err(format!("@{q} is quiet (no heartbeat) and would not read this"));
                 }
                 // Two live sessions answering to one name: refused, as
-                // `attend send --to` refuses an ambiguous name (ADR-401).
+                // `attend message send --to` refuses an ambiguous name (ADR-401).
                 if exact_live > 1 {
                     return Err(format!("@{name} names {exact_live} live sessions; nothing sent"));
                 }
@@ -1126,13 +1126,13 @@ mod tests {
     fn an_invitation_mentions_history_only_when_the_channel_has_some() {
         let dir = tempdir_like().join("@empty");
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(invite_body("empty", &dir), "you're invited to #empty — join with: attend join empty");
+        assert_eq!(invite_body("empty", &dir), "you're invited to #empty — join with attend_join, or: attend channel join empty");
         std::fs::write(dir.join("notes.txt"), "not a message").unwrap();
         assert!(!invite_body("empty", &dir).contains("history"), "only a signal is history");
         std::fs::write(dir.join("peer-1-1.signal"), "claude:peer|x|/tmp/x|said\n").unwrap();
         assert_eq!(
             invite_body("empty", &dir),
-            "you're invited to #empty — join with: attend join empty (its recent history is yours to read)"
+            "you're invited to #empty — join with attend_join, or: attend channel join empty (its recent history is yours to read)"
         );
         assert!(!invite_body("gone", &dir.join("missing")).contains("history"), "a channel with no directory yet has none");
     }

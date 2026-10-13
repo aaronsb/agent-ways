@@ -872,7 +872,7 @@ impl Pane for ChatPane {
              The column numbers the channels: Ctrl+digit shows one, 0 the operator view.\n\
              Tab and Shift+Tab walk the tabs, the column, the feed and the box, and Enter\n\
              opens a menu. Esc goes to the feed, then the ≡ menu, then back to where you\n\
-             were. `attend inbox` and `attend send` are the same bus outside the screen."
+             were. `attend message` reads and sends on the same bus outside the screen."
                 .into(),
         )
     }

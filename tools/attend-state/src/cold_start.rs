@@ -8,7 +8,7 @@
 //! A message is replayed to a session that was among those it was said to
 //! (ADR-404 D3b), judged by the [`Window`] the session's own records give:
 //!
-//! - **Addressed messages** (the project tray: `attend send --to`) are
+//! - **Addressed messages** (the project tray: `attend message send --to`) are
 //!   addressed to the sessions live in the project when they were sent
 //!   (ADR-401). One sent since this session's Claude Code process started
 //!   is delivered whatever its age, the newest [`ADDRESSED_MAX`]. One sent
@@ -25,7 +25,7 @@
 //!
 //! Anything else is backlog: marked seen without being shown, and counted.
 //! The count goes out once, as [`Plan::note`], with the first delivery, so
-//! nothing is consumed silently; `attend inbox` still lists every message.
+//! nothing is consumed silently; `attend message inbox` still lists every message.
 //!
 //! A room joined later is cold for that room alone: [`room_backlog`] names
 //! its old messages, which the join marks seen before the membership is
@@ -108,8 +108,8 @@ impl Plan {
 pub fn held_back_note(n: usize) -> Option<String> {
     match n {
         0 => None,
-        1 => Some("1 older message held back; reading it is optional: attend inbox".to_string()),
-        n => Some(format!("{n} older messages held back; reading them is optional: attend inbox")),
+        1 => Some("1 older message held back; reading it is optional: attend message inbox".to_string()),
+        n => Some(format!("{n} older messages held back; reading them is optional: attend message inbox")),
     }
 }
 
@@ -221,7 +221,7 @@ mod tests {
         let w = window(Some(11 * HOUR), Some(MINUTE));
         let p = plan(&[(&Room::Project, 10 * HOUR), (&Room::Open, 10 * HOUR), (&Room::Open, Duration::ZERO)], w);
         assert_eq!(p.deliver, vec![true, false, true]);
-        assert_eq!(p.note().as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
+        assert_eq!(p.note().as_deref(), Some("1 older message held back; reading it is optional: attend message inbox"));
     }
 
     /// The observation behind the rule: a new session in a project was
@@ -267,7 +267,7 @@ mod tests {
             // Input runs oldest first, so the three oldest are the ones held back.
             assert_eq!(p.deliver[..3], [false, false, false]);
             assert!(p.deliver[3..].iter().all(|d| *d));
-            assert_eq!(p.note().as_deref(), Some("3 older messages held back; reading them is optional: attend inbox"));
+            assert_eq!(p.note().as_deref(), Some("3 older messages held back; reading them is optional: attend message inbox"));
         }
     }
 

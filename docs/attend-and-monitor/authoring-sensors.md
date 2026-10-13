@@ -4,7 +4,7 @@ Sensor authorship is a first-class design surface in attend. A sensor is not a l
 
 This page is for people building sensors, in either of attend's two implementations.
 
-> **New to attend sensors?** [`first-sensor.md`](first-sensor.md) is a walkthrough-style companion that builds a sensor from zero in one sitting. It covers the same ground as this reference but in narrative form, so you end up with a working sensor before you have to memorize the protocol. Read the tutorial first if you've never written one; come back here for the full schema and the subprocess contract when you want the details.
+> **New to writing sensors?** [`first-sensor.md`](first-sensor.md) is a walkthrough-style companion that builds a sensor from zero in one sitting. It covers the same ground as this reference but in narrative form, so you end up with a working sensor before you have to memorize the protocol. Read the tutorial first if you've never written one; come back here for the full schema and the subprocess contract when you want the details.
 
 ## The sensor-layer contract
 
@@ -72,7 +72,7 @@ pub trait Sensor: Send {
 The contract:
 
 - **`name()`** — stable identifier used in logs, config, and state keys.
-- **`description()`** and **`source()`** — what `attend sensors` prints. Put `sensor_trait::sensor_metadata!();` inside the `impl` to fill both from the crate's `Cargo.toml` (the `description` field, and `name@version`).
+- **`description()`** and **`source()`** — what `attend sensor list` prints. Put `sensor_trait::sensor_metadata!();` inside the `impl` to fill both from the crate's `Cargo.toml` (the `description` field, and `name@version`).
 - **`poll(focus)`** — called whenever the sensor's turn comes up in the priority queue. Returns a list of `(magnitude, description)` pairs. Empty vec means "nothing changed this tick." The `Focus` argument carries the working directory, a human-readable description of current work, and any keywords attend knows about — use it to scope observations or skip irrelevant ones.
 - **`emission_threshold()`** — the accumulator floor this sensor must cross before it's a disclosure candidate. Typical values 1.5–2.5.
 - **`base_interval()`** — the slowest polling interval, used when the sensor has been quiet for a while. Typical 30–60 seconds.

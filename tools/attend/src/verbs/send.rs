@@ -141,21 +141,21 @@ impl std::fmt::Display for SendError {
                 write!(f, "no live peers in channel '{name}' (you are the only listener)")
             }
             Self::NoLivePeers { name, .. } => write!(f, "no live peers in channel '{name}'"),
-            Self::NoInbound => write!(f, "no prior inbound signal to thread against; to start a new topic, use attend send"),
+            Self::NoInbound => write!(f, "no prior inbound signal to thread against; to start a new topic, use attend message send"),
             Self::UnknownHandle { handle } => write!(
                 f,
-                "no message this session receives has the handle ~{handle}; drop re to answer the newest, or pass the full id (attend inbox lists them)"
+                "no message this session receives has the handle ~{handle}; drop re to answer the newest, or pass the full id (attend message inbox lists them)"
             ),
             Self::ParentChannelLeft { channel } => write!(
                 f,
-                "the message you are replying to was said in channel '{channel}', which you have left; rejoin it (attend join {channel}), pass --channel or --to, or use attend send"
+                "the message you are replying to was said in channel '{channel}', which you have left; rejoin it (attend channel join {channel}), pass --channel or --to, or use attend message send"
             ),
             Self::ParentChannelGone { channel } => write!(
                 f,
-                "the message you are replying to was said in channel '{channel}', which no longer exists; pass --channel or --to, or use attend send"
+                "the message you are replying to was said in channel '{channel}', which no longer exists; pass --channel or --to, or use attend message send"
             ),
             Self::ParentRoomUnknown => {
-                write!(f, "can't tell where the parent was said; pass --channel or --to, or use attend send")
+                write!(f, "can't tell where the parent was said; pass --channel or --to, or use attend message send")
             }
             Self::NotWritten { error } => write!(f, "the message could not be written: {error}"),
         }
@@ -405,7 +405,7 @@ fn write(me: &Session, dest: &Dest, req: &SendRequest) -> Result<Sent, SendError
     // filename stem doubles as the signal id `re:<id>` replies reference.
     // `signal_filename` normalizes the sender id (external senders are
     // `$USER@<terminal>`; the raw `@`/`.` would fail `is_valid_signal_id`
-    // and break `attend reply` auto-threading, issue #368) and makes the
+    // and break `attend message reply` auto-threading, issue #368) and makes the
     // name collision-proof. The `from` field above keeps the un-normalized
     // identity.
     let filename = agent_identity::signal_filename(&sender_id);

@@ -248,7 +248,7 @@ assert_eq "~/.claude-work untouched" "$SEED_WORK_HASH" "$(tree_hash "$WORK")"
 
 section "attend and claude"
 assert "attend on PATH" command -v attend
-assert "attend status exits 0" attend status
+assert "attend peer status exits 0" attend peer status
 CLAUDE_OUT=$(claude --version 2>&1); CLAUDE_RC=$?
 assert_eq "claude --version exits 0" "0" "$CLAUDE_RC"
 if [[ "$CLAUDE_VERSION" != "latest" ]]; then

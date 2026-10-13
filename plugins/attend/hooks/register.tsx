@@ -20,7 +20,6 @@ import {
   KEEPWARM_CHECK_ARGV,
   LISTEN_OFF_ARGV,
   LISTEN_ON_ARGV,
-  LISTEN_ON_PLAIN_ARGV,
   PEERS_ARGV,
   UNREAD_ARGV,
   WAKE_DRAIN_ARGV,
@@ -39,7 +38,6 @@ import {
   pollInterval,
   replyArgv,
   sendArgv,
-  isUnknownWake,
   shortId,
 } from './lib.ts'
 import type { Listed, ModConfig } from './lib.ts'
@@ -117,9 +115,6 @@ type Mod = {
   isPendingCold: boolean
   /** Submits of `pending` that failed. */
   submitTries: number
-  /** attend refused `--wake` as an unknown argument: an attend older than
-   *  the wake drain, which the poll then drains without it. */
-  noWakeDrain: boolean
   /** Channels joined through attend_join, shown until attend reports rooms. */
   joined: Set<string>
   /** session.start has run; before it, at process start, the engine has not
@@ -238,8 +233,7 @@ async function registerActiveTools($: $) {
  *  since this Claude Code process started arrives, and what `#open` and the
  *  channels carry from now on. */
 async function listenOn($: $): Promise<ProcessRunResult> {
-  let r = await run($, LISTEN_ON_ARGV)
-  if (r.exitCode === 2) r = await run($, LISTEN_ON_PLAIN_ARGV)
+  const r = await run($, LISTEN_ON_ARGV)
   await updateStatus($, s => ({ ...s, listening: r.exitCode === 0 }))
   return r
 }
@@ -345,12 +339,7 @@ async function poll($: $, mod: Mod) {
     if (mod.pending.length === 0) {
       // Only what is addressed to the session starts a turn; #open and
       // channel posts wait for its next one (ADR-406 item 1).
-      let r = await run($, mod.noWakeDrain ? DRAIN_ARGV : WAKE_DRAIN_ARGV)
-      if (!mod.noWakeDrain && isUnknownWake(r)) {
-        mod.noWakeDrain = true
-        r = await run($, DRAIN_ARGV)
-      }
-      const first = parseDrain(r.stdout)
+      const first = parseDrain((await run($, WAKE_DRAIN_ARGV)).stdout)
       if (!first) return
       // Listening turned off elsewhere (attend listen off, a private scene),
       // or an identity attend cannot resolve: the row says so.
@@ -372,8 +361,8 @@ async function poll($: $, mod: Mod) {
       mod.pending = []
     } else if (++mod.submitTries >= SUBMIT_TRIES) {
       // Read by attend and refused by the session: they stay readable with
-      // attend inbox, and the poll goes on to new messages.
-      await $.ui.toast(`attend: ${mod.pending.length} message(s) could not be delivered; attend inbox lists them`)
+      // attend message inbox, and the poll goes on to new messages.
+      await $.ui.toast(`attend: ${mod.pending.length} message(s) could not be delivered; attend message inbox lists them`)
       mod.pending = []
     }
   } finally {
@@ -474,13 +463,8 @@ const OPERATOR_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'slack-ping'])
 
 async function refreshUnread($: $, mod: Mod) {
   const u = parseUnread((await run($, UNREAD_ARGV)).stdout)
-  const joined = [...mod.joined]
-  if (u) {
-    await updateStatus($, s => ({ ...s, unread: u.unread, channels: [...new Set([...u.channels, ...joined])] }))
-  } else {
-    // An attend without `unread`: the row counts nothing it cannot see.
-    await updateStatus($, s => ({ ...s, unread: 0, channels: joined }))
-  }
+  if (!u) return
+  await updateStatus($, s => ({ ...s, unread: u.unread, channels: [...new Set([...u.channels, ...mod.joined])] }))
 }
 
 async function refreshPeers($: $, mod: Mod) {
@@ -530,7 +514,6 @@ export const register: Register = on => {
     pending: [],
     isPendingCold: false,
     submitTries: 0,
-    noWakeDrain: false,
     joined: new Set(),
     isStarted: false,
     isRelistening: false,
@@ -667,7 +650,7 @@ export const register: Register = on => {
     const channel = typeof a.channel === 'string' && a.channel.trim() !== '' ? a.channel : undefined
     const to = typeof a.to === 'string' && a.to.trim() !== '' ? a.to : undefined
     mod.lastActivityMs = await $.clock.now()
-    return toolResult(await run($, sendArgv(message, channel, to)), 'attend send')
+    return toolResult(await run($, sendArgv(message, channel, to)), 'attend message send')
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_reply' }, async ($, e) => {
@@ -680,7 +663,7 @@ export const register: Register = on => {
     const raw = typeof a.re === 'string' ? a.re.trim().replace(/^~/, '') : ''
     const re = raw === '' ? undefined : mod.ids.get(raw) ?? raw
     mod.lastActivityMs = await $.clock.now()
-    return toolResult(await run($, replyArgv(message, re)), 'attend reply')
+    return toolResult(await run($, replyArgv(message, re)), 'attend message reply')
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_join' }, async ($, e) => {
@@ -695,14 +678,14 @@ export const register: Register = on => {
       mod.joined.add(label)
       await updateStatus($, s => ({ ...s, channels: [...new Set([...s.channels, label])] }))
     }
-    return toolResult(r, 'attend join')
+    return toolResult(r, 'attend channel join')
   })
 
   on('tool.call', { tool: 'mcp__attend__attend_peers' }, async $ => {
     if (!(await isOn($, mod))) return DORMANT_REFUSAL
     const r = await run($, PEERS_ARGV)
     if (r.exitCode === 0) await updateStatus($, s => ({ ...s, peers: parsePeerCount(r.stdout) }))
-    return toolResult(r, 'attend peers')
+    return toolResult(r, 'attend peer list')
   })
 
   // One row while active, in the shape of the operator's statusline: peers,

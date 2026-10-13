@@ -3,7 +3,7 @@
 //! Without this, the TUI only knows about agents who have emitted a
 //! signal that's still in its buffer — so a fresh launch shows an
 //! empty `@` legend and `@Nickname` routing fails even for claudes
-//! that are visibly alive in `attend peers`. Walking the sessions
+//! that are visibly alive in `attend peer list`. Walking the sessions
 //! directory gives us every claude cwd Claude Code has checked in
 //! for recently, which is the ground truth for "who exists".
 //!

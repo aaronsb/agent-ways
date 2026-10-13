@@ -6,7 +6,7 @@ export type AttendStatus = {
    *  failed, null before it ran. */
   listening: boolean | null
   peers: number
-  /** Messages waiting for this session (`attend unread`), or drained and not
+  /** Messages waiting for this session (`attend message unread`), or drained and not
    *  yet delivered where attend has no unread count. */
   unread: number
   /** The channels this session receives or joined, as `#name`. */

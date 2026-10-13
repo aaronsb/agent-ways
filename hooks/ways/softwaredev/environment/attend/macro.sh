@@ -61,7 +61,7 @@ fi
 
 # Joined channels (read-only: no state cleanup on a way fire). A listening
 # session also hears its project and #open.
-JOINED=$(attend channels --joined --json 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | sed 's/^/#/' | paste -sd, - | sed 's/,/, /g')
+JOINED=$(attend channel --joined --json 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | sed 's/^/#/' | paste -sd, - | sed 's/,/, /g')
 if [[ $LISTENING == true ]]; then
   echo "**Channels**: $WHO hears project, #open${JOINED:+, $JOINED}"
 elif [[ -n $JOINED ]]; then
@@ -70,7 +70,7 @@ fi
 
 # Messages that wait while the session does not listen.
 if [[ $LISTENING != true ]]; then
-  UNREAD=$(field "$(attend unread --json 2>/dev/null)" unread)
+  UNREAD=$(field "$(attend message unread --json 2>/dev/null)" unread)
   [[ $UNREAD =~ ^[1-9][0-9]*$ ]] && echo "**Unread**: $UNREAD for $WHO"
 fi
 exit 0

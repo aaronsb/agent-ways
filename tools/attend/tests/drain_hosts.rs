@@ -5,8 +5,8 @@
 //! which Claude Code shows once as `Stop hook feedback`; a `decision:
 //! block` showed each delivery a second time as a hook error. A session the
 //! attend mod turned on (`attend listen on --host mod`) gets the mod's own
-//! format and tools, with short `~id` handles that `attend reply --re`
-//! takes; any other host keeps the CLI's format and its `attend reply` hint.
+//! format and tools, with short `~id` handles that `attend message reply --re`
+//! takes; any other host keeps the CLI's format and its `attend message reply` hint.
 
 mod common;
 use common::Fixture;
@@ -39,7 +39,7 @@ fn a_delivery_is_context_not_a_block() {
     assert!(text.contains("hello from a peer"), "{text}");
     // The default host keeps the CLI's format and hint (finding 2 leaves it).
     assert!(text.contains("id peer-sess-1-1"), "{text}");
-    assert!(text.contains("attend reply \"...\" auto-threads"), "{text}");
+    assert!(text.contains("attend message reply \"...\" auto-threads"), "{text}");
     assert!(!text.contains("attend_reply"), "{text}");
 }
 
@@ -66,7 +66,7 @@ fn an_old_claude_code_gets_the_block_form() {
 }
 
 /// Findings 2 and 3: in a mod host the drain names the mod's tools and
-/// speaks its format, and a `~id` it printed is one `attend reply` takes.
+/// speaks its format, and a `~id` it printed is one `attend message reply` takes.
 #[cfg(feature = "sensor-peers")]
 #[test]
 fn a_mod_host_gets_the_mods_format_and_its_handles_reply() {
@@ -88,17 +88,17 @@ fn a_mod_host_gets_the_mods_format_and_its_handles_reply() {
     let follow = lines.iter().find(|l| l.contains("and a follow-up over two lines")).unwrap_or_else(|| panic!("{text}"));
     assert!(follow.ends_with(&format!("(re ~{handle})")), "the parent is shown by its handle: {follow}");
     assert!(text.contains("attend_reply") && text.contains("attend_send"), "{text}");
-    assert!(!text.contains("attend reply \""), "no shell hint in a mod host: {text}");
+    assert!(!text.contains("attend message reply \""), "no shell hint in a mod host: {text}");
     assert!(!text.contains("peer-sess-1-1"), "full ids stay out of the mod's format: {text}");
 
     // The handle the drain printed is one attend_reply can pass straight on.
     // The poster here is no live session, so the reply names a person to go to.
-    let out = f.attend(&["reply", "--re", &format!("~{handle}"), "--to", "fixture-human", "--json", "--", "answering the question"]);
+    let out = f.attend(&["message", "reply", "--re", &format!("~{handle}"), "--to", "fixture-human", "--json", "--", "answering the question"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let sent: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(sent["re"], "peer-sess-1-1");
 
-    let out = f.attend(&["reply", "--re", "zzzzz", "--", "to nothing"]);
+    let out = f.attend(&["message", "reply", "--re", "zzzzz", "--", "to nothing"]);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("handle ~zzzzz"), "{}", String::from_utf8_lossy(&out.stderr));
 }
@@ -111,15 +111,15 @@ fn a_mod_host_gets_the_mods_format_and_its_handles_reply() {
 fn a_handle_in_a_left_channel_says_the_channel_was_left() {
     let f = Fixture::new("drain-host-left");
     f.ok(&["listen", "on", "--host", "mod"]);
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     attend_groups::Groups::new(&f.signals(), "aaron").join("room", true).unwrap();
     f.drain("plain");
     put_from_peer(&f, "@room", "peer-sess-1-1", None, "said in the room");
     let text = delivered_text(&f.drain_hook_with("{}"));
     let line = text.lines().find(|l| l.contains("said in the room")).unwrap_or_else(|| panic!("{text}"));
     let handle = line.rsplit_once(" ~").map(|(_, h)| h).unwrap();
-    f.ok(&["leave", "room"]);
-    let out = f.attend(&["reply", "--re", handle, "--", "too late"]);
+    f.ok(&["channel", "leave", "room"]);
+    let out = f.attend(&["message", "reply", "--re", handle, "--", "too late"]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("which you have left"), "{err}");
@@ -132,7 +132,7 @@ fn the_mod_host_lasts_until_listening_ends() {
     let f = Fixture::new("drain-host-keep");
     f.ok(&["listen", "on", "--host", "mod"]);
     f.ok(&["listen", "on"]);
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     let state: Value = serde_json::from_str(&f.ok(&["listen", "status", "--json"])).unwrap();
     assert_eq!(state["host"], "mod");
     f.ok(&["listen", "off"]);

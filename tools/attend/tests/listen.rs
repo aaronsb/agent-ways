@@ -1,8 +1,8 @@
-//! `attend listen` and `attend unread` through the CLI (ADR-406 item 10).
+//! `attend listen` and `attend message unread` through the CLI (ADR-406 item 10).
 //!
 //! Listening is what the Stop-hook drain delivers to. A session listens
 //! without joining a channel through `attend listen on`; while it does not
-//! listen the drain delivers nothing and marks nothing read. `attend unread`
+//! listen the drain delivers nothing and marks nothing read. `attend message unread`
 //! counts what the drain would deliver, and reads only.
 
 mod common;
@@ -78,18 +78,18 @@ fn listen_off_stops_delivery_and_listen_on_applies_the_cold_start_again() {
 #[test]
 fn a_joined_session_listens_and_listen_off_keeps_its_channels() {
     let f = Fixture::new("listen-join");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     let state = doc(&f, &["listen", "--json"]);
     assert_eq!(state["listening"], true);
     assert_eq!(state["via"], json!(["join"]));
 
     assert_eq!(f.ok(&["listen", "off"]), "not listening\n");
-    assert!(f.ok(&["channels", "--joined"]).contains("room"), "membership kept");
+    assert!(f.ok(&["channel", "--joined"]).contains("room"), "membership kept");
     f.put("@room", "other-1-room", "in the room", Duration::ZERO);
     assert_eq!(f.drain("plain"), "");
 
     // A later join listens again.
-    f.ok(&["join", "other"]);
+    f.ok(&["channel", "join", "other"]);
     assert_eq!(f.ok(&["listen"]), "listening\n");
 }
 
@@ -108,14 +108,14 @@ fn listen_needs_a_session() {
 #[test]
 fn unread_counts_by_room_and_marks_nothing() {
     let f = Fixture::new("unread");
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     f.drain("plain");
     f.put("_broadcast", "other-1-u1", "one", Duration::ZERO);
     f.put("_broadcast", "other-1-u2", "two", Duration::ZERO);
     f.put(&f.project_tray(), "other-1-u3", "three", Duration::ZERO);
     f.put("@room", "other-1-u4", "four", Duration::ZERO);
 
-    let counts = doc(&f, &["unread", "--json"]);
+    let counts = doc(&f, &["message", "unread", "--json"]);
     assert_eq!(counts["unread"], 4);
     assert_eq!(counts["held_back"], 0);
     assert_eq!(counts["listening"], true);
@@ -127,12 +127,12 @@ fn unread_counts_by_room_and_marks_nothing() {
             {"label": "@room", "kind": "channel", "name": "room", "count": 1},
         ])
     );
-    let text = f.ok(&["unread"]);
+    let text = f.ok(&["message", "unread"]);
     assert!(text.starts_with("4 unread\n") && text.contains("  #open 2\n") && text.contains("  @room 1\n"), "{text}");
 
-    assert_eq!(doc(&f, &["unread", "--json"])["unread"], 4, "counting marked nothing");
+    assert_eq!(doc(&f, &["message", "unread", "--json"])["unread"], 4, "counting marked nothing");
     assert!(f.drain("plain").contains("4 message(s) drained"));
-    assert_eq!(doc(&f, &["unread", "--json"])["unread"], 0);
+    assert_eq!(doc(&f, &["message", "unread", "--json"])["unread"], 0);
 }
 
 /// A session no conduit has baselined is counted as its cold start would
@@ -141,7 +141,7 @@ fn unread_counts_by_room_and_marks_nothing() {
 fn unread_on_a_cold_session_counts_what_the_cold_start_delivers() {
     let f = Fixture::new("unread-cold");
     backlog(&f, "c");
-    let counts = doc(&f, &["unread", "--json"]);
+    let counts = doc(&f, &["message", "unread", "--json"]);
     assert_eq!(counts["unread"], 2);
     assert_eq!(counts["held_back"], 1);
     assert_eq!(counts["listening"], false);
@@ -156,16 +156,16 @@ fn unread_on_a_cold_session_counts_what_the_cold_start_delivers() {
 fn unread_after_clear_counts_as_the_session_did_before() {
     let f = Fixture::new("unread-clear");
     f.ok(&["listen", "on"]);
-    f.ok(&["join", "room"]);
+    f.ok(&["channel", "join", "room"]);
     f.put("_broadcast", "other-1-c1", "delivered open", Duration::ZERO);
     f.put(&f.project_tray(), "other-1-c2", "delivered addressed", Duration::ZERO);
     assert!(f.drain("plain").contains("2 message(s) drained"));
     f.put("@room", "other-1-c3", "unread in room", Duration::ZERO);
-    let before = doc(&f, &["unread", "--json"]);
+    let before = doc(&f, &["message", "unread", "--json"]);
     assert_eq!(before["unread"], 1);
 
     f.set_session_id("sess-unread-clear-after");
-    let after = doc(&f, &["unread", "--json"]);
+    let after = doc(&f, &["message", "unread", "--json"]);
     assert_eq!(after["listening"], true, "{after}");
     assert_eq!(after["unread"], 1, "{after}");
     assert_eq!(after["rooms"], before["rooms"], "{after}");
@@ -183,7 +183,7 @@ fn a_join_after_listen_off_holds_back_the_backlog() {
     f.ok(&["listen", "off"]);
     f.put("_broadcast", "other-1-j1", "old open while off", 30 * MINUTE);
     f.put(&f.project_tray(), "other-1-j2", "addressed while off", 30 * MINUTE);
-    f.ok(&["join", "newroom"]);
+    f.ok(&["channel", "join", "newroom"]);
     let plain = f.drain("plain");
     assert!(plain.contains("addressed while off"), "{plain}");
     assert!(!plain.contains("old open while off"), "{plain}");
@@ -199,7 +199,7 @@ fn unread_after_listen_off_counts_what_listen_on_delivers() {
     f.drain("plain");
     f.ok(&["listen", "off"]);
     backlog(&f, "d");
-    let counts = doc(&f, &["unread", "--json"]);
+    let counts = doc(&f, &["message", "unread", "--json"]);
     assert_eq!(counts["listening"], false);
     assert_eq!(counts["unread"], 2, "{counts}");
     assert_eq!(counts["held_back"], 1, "{counts}");

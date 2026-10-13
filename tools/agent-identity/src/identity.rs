@@ -92,7 +92,7 @@ pub fn cwd_basename(path: &str) -> String {
 /// `re:<id>` threaded replies reference. External sender identities are
 /// `$USER@<terminal>` (e.g. `aaron@kitty`, `aaron@iterm.app`), so the raw
 /// id carries `@`/`.` — characters that fail the `is_valid_signal_id`
-/// fence in `attend`/`sensor-peers` and break `attend reply`'s auto-
+/// fence in `attend`/`sensor-peers` and break `attend message reply`'s auto-
 /// threading. Sanitizing here, at every write site, keeps ids valid
 /// regardless of sender.
 ///
@@ -112,7 +112,7 @@ static SIGNAL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 
 /// Build a collision-resistant signal filename for `sender_id`. The stem
 /// (name without `.signal`) doubles as the signal id that `re:<id>`
-/// threaded replies and `attend reply`'s last-inbound record reference,
+/// threaded replies and `attend message reply`'s last-inbound record reference,
 /// so it is always `[A-Za-z0-9_-]+`.
 ///
 /// Shape: `<sanitized-sender>-<unix-nanos>-<seq>.signal`. Uniqueness has
@@ -127,7 +127,7 @@ static SIGNAL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 /// external identities (`iterm.app` vs `iterm-app`) to the same sender
 /// stem, and a second-granularity name let same-second writes silently
 /// overwrite each other on rename. Centralized here so both write sites
-/// (`attend send`, the attend-chat TUI) stay byte-identical — see the
+/// (`attend message send`, the attend-chat TUI) stay byte-identical — see the
 /// wire-format-mirror note in `attend::cmd::send`.
 pub fn signal_filename(sender_id: &str) -> String {
     let nanos = std::time::SystemTime::now()
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn sanitize_id_component_normalizes_external_ids() {
-        // The exact shape that broke `attend reply`: `$USER@<terminal>`.
+        // The exact shape that broke `attend message reply`: `$USER@<terminal>`.
         assert_eq!(sanitize_id_component("aaron@kitty"), "aaron-kitty");
         assert_eq!(sanitize_id_component("aaron@iterm.app"), "aaron-iterm-app");
         // Valid chars pass through untouched.

@@ -9,7 +9,7 @@
 //! Lives beside [`crate::signal_filename`], which mints the ids a reply
 //! references, so every reader (the attend CLI, the attend-chat TUI, the
 //! peers sensor) applies one rule for what counts as threaded, and both
-//! writers (`attend send`, attend-chat) produce the same line, the same
+//! writers (`attend message send`, attend-chat) produce the same line, the same
 //! sender identity and the same atomic file.
 
 use std::io::{self, Read};
@@ -133,7 +133,7 @@ const TAGS: [&str; 5] = ["from_kind", "from_id", "on_behalf_of", "to", "re"];
 /// Signal ids are filename stems in the form `<sender-id>-<timestamp>`,
 /// which is always `[A-Za-z0-9_-]+`. This char class is the discriminator
 /// fence that keeps legacy prose starting with "re:" from being misparsed as
-/// threaded: `attend send "re: the thing we discussed|still open"` stays a
+/// threaded: `attend message send "re: the thing we discussed|still open"` stays a
 /// legacy message because `the thing we discussed` has a space.
 pub fn is_valid_signal_id(id: &str) -> bool {
     !id.is_empty()
@@ -280,7 +280,7 @@ pub fn project_label(cwd: &str) -> String {
     cwd.rsplit('/').find(|seg| !seg.is_empty()).unwrap_or("?").to_string()
 }
 
-/// The longest message body `attend send` and `attend reply` take, in
+/// The longest message body `attend message send` and `attend message reply` take, in
 /// bytes: 64 KiB. Linux caps one argv element at 128 KiB (`MAX_ARG_STRLEN`),
 /// and both the CLI and the attend mod pass the body as one argument, so a
 /// body past that fails at exec before attend runs. Half of it leaves room
@@ -322,7 +322,7 @@ impl From<TooLong> for io::Error {
 }
 
 /// Refuse a body over [`MAX_MESSAGE_BYTES`]. Every writer calls this
-/// before it formats a signal: `attend send` and `reply`, and attend-chat.
+/// before it formats a signal: `attend message send` and `reply`, and attend-chat.
 pub fn check_message_len(message: &str) -> Result<(), TooLong> {
     if message.len() > MAX_MESSAGE_BYTES {
         return Err(TooLong { bytes: message.len(), max: MAX_MESSAGE_BYTES });

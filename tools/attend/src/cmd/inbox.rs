@@ -1,7 +1,7 @@
-//! `attend inbox` — read messages from peers.
+//! `attend message inbox` — read messages from peers.
 //!
 //! The listing and the single read are `verbs::inbox`; this renders them.
-//! The drain, `attend inbox --drain`, is CLI machinery the Stop hook runs
+//! The drain, `attend message inbox --drain`, is CLI machinery the Stop hook runs
 //! and stays here whole (ADR-172).
 
 use attend_groups::Room;
@@ -118,16 +118,16 @@ fn print_inbox_footer(page: usize, total: usize, shown: usize, older: usize, cur
     println!("page {page} · showing {shown} of {total} message(s)");
     if older > 0 {
         println!(
-            "  ↑ {older} older — attend inbox --page {} (or --before {cursor_ts})",
+            "  ↑ {older} older — attend message inbox --page {} (or --before {cursor_ts})",
             page + 1
         );
     }
 }
 
 // ---------------------------------------------------------------------------
-// `attend inbox --drain` — the ADR-172 turn-boundary consumption path.
+// `attend message inbox --drain` — the ADR-172 turn-boundary consumption path.
 // ---------------------------------------------------------------------------
-// `attend inbox --drain` — the ADR-172 turn-boundary consumption path.
+// `attend message inbox --drain` — the ADR-172 turn-boundary consumption path.
 // ---------------------------------------------------------------------------
 
 /// Consecutive drain-fired continuations allowed before the drain defers
@@ -138,7 +138,7 @@ fn print_inbox_footer(page: usize, total: usize, shown: usize, older: usize, cur
 const MAX_DRAIN_ROUNDS: u32 = 5;
 
 /// Cap on messages rendered in full in one drain; the remainder is
-/// counted and pointed at `attend inbox`. Keeps a rejoin-after-gap
+/// counted and pointed at `attend message inbox`. Keeps a rejoin-after-gap
 /// burst from flooding a single turn injection.
 const DRAIN_RENDER_MAX: usize = 10;
 
@@ -517,7 +517,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
         store.mark_seen(mark);
     }
 
-    // `attend reply` should target what the drain delivered, exactly as
+    // `attend message reply` should target what the drain delivered, exactly as
     // it targets what the sensor surfaced, and stay in the room it was
     // said in. Nothing this session sent, under its id or an earlier one,
     // is delivered, so the newest delivered is another sender's, a sibling
@@ -693,9 +693,9 @@ fn render_mod_delivery(delivered: &[impl DrainedView], note: Option<&str>, me: O
         out.push_str(&format!("you are {me}\n"));
     }
     if let Some(note) = note {
-        // The cold start's note ends by naming the shell's `attend inbox`;
+        // The cold start's note ends by naming the shell's `attend message inbox`;
         // a mod host's agent has no shell route to it.
-        let note = note.strip_suffix(": attend inbox").unwrap_or(note);
+        let note = note.strip_suffix(": attend message inbox").unwrap_or(note);
         out.push_str(&format!("({note})\n"));
     }
     out.push_str(MOD_OPEN);
@@ -849,13 +849,13 @@ fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>, me: O
     }
     if delivered.len() > DRAIN_RENDER_MAX {
         out.push_str(&format!(
-            "\n(+{} more — attend inbox for the rest)\n",
+            "\n(+{} more — attend message inbox for the rest)\n",
             delivered.len() - DRAIN_RENDER_MAX
         ));
     }
     out.push_str(
-        "\nYou may reply (attend reply \"...\" auto-threads to the newest), \
-         start a new thread (attend send), or continue your work — \
+        "\nYou may reply (attend message reply \"...\" auto-threads to the newest), \
+         start a new thread (attend message send), or continue your work — \
          silence is a valid reply.",
     );
     out
@@ -1129,7 +1129,7 @@ mod drain_tests {
         let Scan { delivered, mark, note, .. } = scan_pending(&dirs(&dir, Room::Open), &Default::default(), &["my-session"], true);
         assert!(delivered.is_empty(), "stale backlog must not flood a cold start");
         assert_eq!(mark, vec![k], "stale backlog must be marked so it baselines once");
-        assert_eq!(note.as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
+        assert_eq!(note.as_deref(), Some("1 older message held back; reading it is optional: attend message inbox"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1144,7 +1144,7 @@ mod drain_tests {
 
         let scan = scan_pending(&dirs(&dir, Room::Project), &Default::default(), &["my-session"], true);
         assert!(scan.delivered.is_empty());
-        assert_eq!(scan.note.as_deref(), Some("1 older message held back; reading it is optional: attend inbox"));
+        assert_eq!(scan.note.as_deref(), Some("1 older message held back; reading it is optional: attend message inbox"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1178,7 +1178,7 @@ mod drain_tests {
         // A warm cache, so the wake gate lets the message out.
         sensor.set_cache_lapsed_provider(std::sync::Arc::new(|_: &str| false));
         // The fixture's cwd doubles as the focus so the sensor's
-        // `attend reply` bookkeeping (keyed on the host session) sees
+        // `attend message reply` bookkeeping (keyed on the host session) sees
         // an own-project message and records nothing.
         let focus = Focus {
             description: String::new(),
@@ -1232,8 +1232,8 @@ mod drain_tests {
     /// "0 peer message(s) delivered" header.
     #[test]
     fn note_only_reason_is_the_note() {
-        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend inbox"), None);
-        assert!(reason.starts_with("[attend] 3 older messages held back; reading them is optional: attend inbox"), "{reason}");
+        let reason = render_drain_reason(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), None);
+        assert!(reason.starts_with("[attend] 3 older messages held back; reading them is optional: attend message inbox"), "{reason}");
         assert!(!reason.contains("0 peer message"), "{reason}");
     }
 
@@ -1241,7 +1241,7 @@ mod drain_tests {
     /// goes as a systemMessage, so the turn ends.
     #[test]
     fn note_only_hook_output_does_not_block() {
-        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend inbox"), None, None, StopForm::Context).unwrap();
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), None, None, StopForm::Context).unwrap();
         assert!(out.starts_with("{\"systemMessage\": \"[attend] 3 older messages held back"), "{out}");
         assert!(!out.contains("decision"), "{out}");
     }
@@ -1252,7 +1252,7 @@ mod drain_tests {
     #[test]
     fn delivered_messages_continue_the_turn_as_context_and_an_empty_drain_prints_nothing() {
         let msgs: Vec<FakeMsg> = (0..1).map(msg).collect();
-        let out = hook_output(&msgs, Some("1 older message held back; reading it is optional: attend inbox"), None, None, StopForm::Context).unwrap();
+        let out = hook_output(&msgs, Some("1 older message held back; reading it is optional: attend message inbox"), None, None, StopForm::Context).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&out).expect(&out);
         assert_eq!(doc["hookSpecificOutput"]["hookEventName"], "Stop", "{out}");
         let ctx = doc["hookSpecificOutput"]["additionalContext"].as_str().expect(&out);
@@ -1281,7 +1281,7 @@ mod drain_tests {
         assert_eq!(lines[4], format!("[#open] peer-2 11:42: body 2 ~{}", short_id("id-2")));
         assert_eq!(lines[5], "</attend-peer-messages>");
         assert!(lines[6].contains("attend_reply") && lines[6].contains("attend_send"), "{text}");
-        assert!(!text.contains("attend reply"), "no shell hint in a mod host: {text}");
+        assert!(!text.contains("attend message reply"), "no shell hint in a mod host: {text}");
         let out = hook_output(&[msg(1)], None, None, Some(Host::Mod), StopForm::Context).unwrap();
         assert!(out.contains("peer data over attend"), "{out}");
         let cli = hook_output(&[msg(1)], None, None, None, StopForm::Context).unwrap();
@@ -1313,10 +1313,10 @@ mod drain_tests {
         let msgs: Vec<FakeMsg> = (0..12).map(msg).collect();
         let text = render_mod_delivery(&msgs, None, None);
         assert!(text.contains("(+2 more, not shown here; they stay in attend's inbox)"), "{text}");
-        assert!(!text.contains("attend inbox"), "{text}");
-        let noted = render_mod_delivery(&[msg(1)], Some("2 older messages held back; reading them is optional: attend inbox"), None);
+        assert!(!text.contains("attend message inbox"), "{text}");
+        let noted = render_mod_delivery(&[msg(1)], Some("2 older messages held back; reading them is optional: attend message inbox"), None);
         assert!(noted.contains("(2 older messages held back; reading them is optional)\n"), "{noted}");
-        assert!(!noted.contains("attend inbox"), "{noted}");
+        assert!(!noted.contains("attend message inbox"), "{noted}");
     }
 
     /// Below Claude Code 2.1.163 a Stop hook's additionalContext is ignored,
@@ -1482,14 +1482,14 @@ mod drain_tests {
         assert!(reason.contains("14 peer message(s)"));
         assert!(reason.contains("body 9"));
         assert!(!reason.contains("body 10"));
-        assert!(reason.contains("(+4 more — attend inbox for the rest)"));
+        assert!(reason.contains("(+4 more — attend message inbox for the rest)"));
     }
 
     /// The name is for the model, and a systemMessage reaches only the
     /// operator, so a note-only drain carries no name.
     #[test]
     fn a_note_only_drain_does_not_name_the_session() {
-        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend inbox"), Some("Chaucer-alpha"), None, StopForm::Context).unwrap();
+        let out = hook_output(&[] as &[FakeMsg], Some("3 older messages held back; reading them is optional: attend message inbox"), Some("Chaucer-alpha"), None, StopForm::Context).unwrap();
         assert!(!out.contains("you are"), "{out}");
     }
 

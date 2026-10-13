@@ -10,28 +10,28 @@ export const WAYS = 'ways'
 // `--`, so no quoting rule applies to it and a body that starts with a dash
 // stays a body. attend sends a long body as one message.
 
-/** `attend send [--channel C] [--to T] -- <message>`: `to` is a session's
+/** `attend message send [--channel C] [--to T] -- <message>`: `to` is a session's
  *  name, a person's member id or a project path, and makes it a direct
  *  message; with neither it posts to #open, as `channel` open does. */
 export function sendArgv(message: string, channel?: string, to?: string): string[] {
-  const argv = [ATTEND, 'send']
+  const argv = [ATTEND, 'message', 'send']
   if (channel) argv.push('--channel', bareChannel(channel))
   if (to) argv.push('--to', to)
   argv.push('--', message)
   return argv
 }
 
-/** `attend reply [--re <id>] -- <message>`: threads to the newest message
+/** `attend message reply [--re <id>] -- <message>`: threads to the newest message
  *  delivered, or to `re`, and goes to that message's sender as a direct
  *  message, or into its channel when it was said in a named channel. attend
  *  refuses a parent whose channel this session left, whose sender session
  *  has exited, or that it cannot find. */
 export function replyArgv(message: string, re?: string): string[] {
-  return re ? [ATTEND, 'reply', '--re', re, '--', message] : [ATTEND, 'reply', '--', message]
+  return re ? [ATTEND, 'message', 'reply', '--re', re, '--', message] : [ATTEND, 'message', 'reply', '--', message]
 }
 
 export function joinArgv(channel: string): string[] {
-  return [ATTEND, 'join', bareChannel(channel)]
+  return [ATTEND, 'channel', 'join', bareChannel(channel)]
 }
 
 function bareChannel(channel: string): string {
@@ -39,28 +39,16 @@ function bareChannel(channel: string): string {
 }
 
 /** `listen on` names the mod as the host, so attend's Stop-hook drain speaks
- *  the mod's format and tools in this session. An attend older than
- *  `--host` refuses the flag as a usage error (exit 2); the mod then turns
- *  listening on without it. */
+ *  the mod's format and tools in this session. */
 export const LISTEN_ON_ARGV = [ATTEND, 'listen', 'on', '--host', 'mod'] as const
-export const LISTEN_ON_PLAIN_ARGV = [ATTEND, 'listen', 'on'] as const
 export const LISTEN_OFF_ARGV = [ATTEND, 'listen', 'off'] as const
-export const DRAIN_ARGV = [ATTEND, 'inbox', '--drain', '--json'] as const
+export const DRAIN_ARGV = [ATTEND, 'message', 'inbox', '--drain', '--json'] as const
 /** The idle poll's drain: it takes nothing unless something pending is
  *  addressed to this session, sent to its project, or a reply to a message
- *  it sent (ADR-406 item 1). An attend older than `--wake` refuses the flag
- *  as a usage error ([`isUnknownWake`]); the mod then drains without it for
- *  the rest of the session. */
-export const WAKE_DRAIN_ARGV = [ATTEND, 'inbox', '--drain', '--json', '--wake'] as const
-
-/** Whether attend refused the wake drain's `--wake` as an argument it does
- *  not know, the usage error (exit 2) of an attend older than the flag.
- *  Any other failure is not taken for an old attend. */
-export function isUnknownWake(r: { exitCode: number; stderr: string }): boolean {
-  return r.exitCode === 2 && r.stderr.includes('--wake')
-}
-export const UNREAD_ARGV = [ATTEND, 'unread', '--json'] as const
-export const PEERS_ARGV = [ATTEND, 'peers'] as const
+ *  it sent (ADR-406 item 1). */
+export const WAKE_DRAIN_ARGV = [ATTEND, 'message', 'inbox', '--drain', '--json', '--wake'] as const
+export const UNREAD_ARGV = [ATTEND, 'message', 'unread', '--json'] as const
+export const PEERS_ARGV = [ATTEND, 'peer', 'list'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
 
 /** The resolved `attend_mod` section, through the ways config layers: the
@@ -150,7 +138,7 @@ export function isFullPreamble(deliveries: number, afterCompaction: boolean, tur
 
 // ── parsing ──────────────────────────────────────────────────────────────
 
-/** One drained message, as `attend inbox --drain --json` gives it. */
+/** One drained message, as `attend message inbox --drain --json` gives it. */
 export type Listed = {
   /** The drain's scope label: `#open`, `project`, or `@name` for a channel. */
   scope: string
@@ -214,14 +202,14 @@ export function parseDrain(stdout: string): Drain | undefined {
   }
 }
 
-/** The peer count from `attend peers`: its footer `N agent(s)` less this
+/** The peer count from `attend peer list`: its footer `N agent(s)` less this
  *  session's own row. */
 export function parsePeerCount(stdout: string): number {
   const m = /(\d+) agent\(s\)/.exec(stdout)
   return m ? Math.max(0, Number(m[1]) - 1) : 0
 }
 
-/** `attend unread --json`: the count and the channels this session receives.
+/** `attend message unread --json`: the count and the channels this session receives.
  *  Undefined where the output is not that shape (an attend without the verb). */
 export function parseUnread(stdout: string): { unread: number; channels: string[] } | undefined {
   try {
@@ -247,7 +235,7 @@ export function keepwarmLine(stdout: string): string | undefined {
 /** Short stable handle for a message id; `attend_reply`'s `re` takes it.
  *  attend computes the same handle (`short_id` in tools/attend/src/verbs/
  *  inbox.rs) for the lines its Stop-hook drain prints in a mod host, and
- *  `attend reply --re` resolves one this module never mapped. */
+ *  `attend message reply --re` resolves one this module never mapped. */
 export function shortId(id: string): string {
   let h = 0x811c9dc5
   for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) >>> 0

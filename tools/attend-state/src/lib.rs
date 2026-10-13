@@ -1,7 +1,7 @@
 //! Shared per-session sensor state — checkpoint/restore for attend's
 //! sensors and the consumption record the ADR-172 drain writes.
 //!
-//! Extracted from `attend::state` when `attend inbox --drain` became a
+//! Extracted from `attend::state` when `attend message inbox --drain` became a
 //! second writer to the seen-set (ADR-172): the drain (a one-shot
 //! process at the turn boundary), the long-running sensor loop, and
 //! `/purge`'s read-only consult in attend-chat all speak this format,

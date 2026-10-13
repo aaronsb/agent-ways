@@ -1,4 +1,4 @@
-//! `attend peers` — list active Claude Code sessions and their channels.
+//! `attend peer list` — list active Claude Code sessions and their channels.
 //! The listing is `verbs::peers`; this renders it.
 
 use crate::verbs::peers::{self, Agent};
@@ -18,8 +18,8 @@ pub(crate) fn cmd_peers(json: bool) {
     t.max_width(1, 28);
 
     // Self-row Focus cell: "(self)" identifies which row IS the runner of
-    // `attend peers`, without using the literal string "project" — that
-    // priming caused agents to reach for `attend send --channel project`
+    // `attend peer list`, without using the literal string "project" — that
+    // priming caused agents to reach for `attend message send --channel project`
     // and silently land signals in an empty `@project/` room.
     t.add_owned(vec![
         "(self)".to_string(),
@@ -41,7 +41,7 @@ pub(crate) fn cmd_peers(json: bool) {
         for peer in &p.peers {
             // Same-cwd peers previously rendered "(project)" in the
             // Focus column — a string that primed agents into running
-            // `attend send --channel project`, a group nobody had
+            // `attend message send --channel project`, a group nobody had
             // joined. "(here)" pairs with the self row's "(self)"
             // marker, preserves the same-cwd visual scan, and uses
             // parentheses to make clear it is not a focus group name.

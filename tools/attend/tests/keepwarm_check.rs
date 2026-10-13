@@ -269,9 +269,9 @@ fn the_verbs_a_mod_with_keepwarm_off_runs_never_arm_after_a_cold_write() {
     let w = Warm::new("kw-mod-off");
     let mod_verbs: [&[&str]; 6] = [
         &["listen", "on", "--host", "mod"],
-        &["inbox", "--drain", "--json"],
-        &["unread", "--json"],
-        &["peers"],
+        &["message", "inbox", "--drain", "--json"],
+        &["message", "unread", "--json"],
+        &["peer", "list"],
         &["keepwarm", "status"],
         &["listen", "status", "--json"],
     ];

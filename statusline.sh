@@ -29,24 +29,14 @@ sl__run() {
 }
 
 # This session's attend display name, or nothing when attend is absent.
-# CLI is the contract: read sanctioned attend surfaces, never attend-owned
-# state. `attend whoami` derives the name from the session record's origin
-# path (ADR-171), so it stays stable when the shell's cwd wanders.
-# `--display` prints the name alone; attend builds before it get the name
-# parsed from the whoami table. Builds before `whoami` show no name. A
-# timeout (124) skips the fallback, so a hung attend costs one SL_TIMEOUT.
+# attend's surfaces are the contract: read them, never attend-owned state.
+# `attend peer whoami --display` derives the name from the session record's
+# origin path (ADR-171), so it stays stable when the shell's cwd wanders. An
+# attend without that command shows no name, and a hung one costs one
+# SL_TIMEOUT.
 sl_agent_name() {
     command -v attend > /dev/null 2>&1 || return 0
-    local name rc=0
-    name=$(sl__run attend whoami --display 2>/dev/null) || rc=$?
-    if [[ -z "$name" && $rc -ne 124 ]]; then
-        local esc
-        esc=$(printf '\033')
-        name=$(sl__run attend whoami 2>/dev/null \
-            | sed "s/${esc}\[[0-9;]*m//g" \
-            | awk '/^ *display/{print $2; exit}') || name=""
-    fi
-    printf '%s' "$name"
+    sl__run attend peer whoami --display 2>/dev/null || true
 }
 
 sl_agent() {

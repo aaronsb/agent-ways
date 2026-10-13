@@ -497,7 +497,7 @@ $XDG_DATA_HOME/agent-ways/hooks/ways/      # shipped ways, projected as ~/.claud
 │
 ├── check-setup.sh              # SessionStart:startup → notice when the ways binary is missing
 ├── strip-session-link-pre.sh   # PreToolUse:Bash → deny publishing a session link (ADR-167)
-├── attend-drain-stop.sh        # Stop → attend inbox --drain (ADR-172)
+├── attend-drain-stop.sh        # Stop → attend message inbox --drain (ADR-172)
 ├── issues-pull.sh              # SessionStart, UserPromptSubmit, PostToolUse:Bash → gh-tasks pull (ADR-180)
 ├── issues-task-created.sh      # TaskCreated → reject unprefixed duplicates of mirrored issues (ADR-180)
 ├── check-bash-bound.py         # Bash guard (ADR-181), shipped but not wired
@@ -537,7 +537,7 @@ flowchart LR
     SHOW --> MAC["macro.sh · postcheck.sh"]:::util
 
     IP["issues-pull.sh · issues-task-created.sh"]:::other --> GT["gh-tasks"]:::other
-    AS["attend-drain-stop.sh"]:::other --> AT["attend inbox"]:::other
+    AS["attend-drain-stop.sh"]:::other --> AT["attend message inbox"]:::other
     SL["strip-session-link-pre.sh"]:::other --> DENY["PreToolUse deny"]:::other
 ```
 

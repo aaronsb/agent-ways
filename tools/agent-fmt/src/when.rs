@@ -1,7 +1,7 @@
 //! Date and duration maths for every agent-ways tool: the civil-date
 //! conversion, the UTC ISO-8601 stamp the event log and findings carry and
 //! its parser, and the compact message timestamps every attend surface
-//! shares (issue #389): attend-chat cells, `attend inbox` listings, and the
+//! shares (issue #389): attend-chat cells, `attend message inbox` listings, and the
 //! ADR-172 drain injection. One implementation so the surfaces cannot drift.
 //!
 //! Dependency-free by conviction (this workspace carries no date

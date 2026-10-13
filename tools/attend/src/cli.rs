@@ -7,7 +7,10 @@
 //! tree through the library's `cli_command()`.
 
 use crate::describe;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
+
+/// The closing line of a bare `attend` and of `attend --help` (ADR-413 item 4).
+const AFTER_HELP: &str = "In a session with the attend mod, the attend_* tools send, reply, join and list peers. This CLI is for hosts without the mod and for scripts.";
 
 #[derive(Parser)]
 #[command(
@@ -15,6 +18,7 @@ use clap::{Parser, Subcommand};
     version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("ATTEND_COMMIT"), ")"),
     about = "Active awareness for Claude Code sessions",
     long_about = None,
+    after_help = AFTER_HELP,
     disable_help_subcommand = true,
 )]
 pub(crate) struct Cli {
@@ -22,6 +26,8 @@ pub(crate) struct Cli {
     pub(crate) command: Option<Commands>,
 }
 
+/// The nine top-level commands (ADR-413 item 1), then the one-release
+/// aliases of the flat verbs they replace.
 #[derive(Subcommand)]
 pub(crate) enum Commands {
     /// Start the sensor loop (use with Monitor for async delivery)
@@ -29,146 +35,6 @@ pub(crate) enum Commands {
         /// Replay backlog signals on startup before normal cadence
         #[arg(long)]
         catchup: bool,
-    },
-
-    #[command(about = describe::PEERS)]
-    Peers {
-        /// Print the result as one JSON document
-        #[arg(long)]
-        json: bool,
-    },
-
-    #[command(about = describe::INBOX)]
-    Inbox {
-        /// Specific message id to read in detail (omit to list inbox)
-        msg_id: Option<String>,
-
-        /// Max messages per page, newest first
-        #[arg(long, default_value_t = crate::verbs::inbox::DEFAULT_LIMIT)]
-        limit: usize,
-
-        /// Page number; 1 = newest. Higher numbers walk back into history.
-        #[arg(long, default_value_t = 1)]
-        page: usize,
-
-        /// Cursor: only show messages older than this unix timestamp
-        #[arg(long, value_name = "TS")]
-        before: Option<u64>,
-
-        /// Atomically deliver pending messages and record their
-        /// consumption (ADR-172). The Stop-hook fast path: a silent no-op
-        /// under an unresolved identity or for a session not enrolled by
-        /// attend run or a channel join (#720). On a cold start (no
-        /// seen-set) it delivers addressed mail and fresh messages and
-        /// counts the older backlog it does not show.
-        #[arg(long)]
-        drain: bool,
-
-        /// With --drain: deliver and mark nothing unless a pending message
-        /// would wake this session, one addressed to it, sent to its
-        /// project, or a reply to a message it sent; then deliver all that
-        /// is pending. `#open` and channel posts alone wait for the next
-        /// turn (ADR-406 item 1). Once the session's prompt cache has
-        /// lapsed (its tier's TTL less two minutes after its last turn, or
-        /// no transcript readable in five seconds), nothing wakes it: the
-        /// drain delivers nothing and reports `cache_lapsed`. The attend
-        /// mod polls with it while idle.
-        #[arg(long, requires = "drain")]
-        wake: bool,
-
-        /// Output format for --drain: `plain` (human/agent readable),
-        /// `hook` (Claude Code Stop-hook JSON; reads the hook's stdin
-        /// payload for `stop_hook_active`) or `json` (the same as --json)
-        #[arg(long, default_value = "plain", value_name = "FMT")]
-        format: String,
-
-        /// Print the listing, the message, or with --drain the drained
-        /// messages, held-back count, note and name, as one JSON document
-        #[arg(long, conflicts_with = "format")]
-        json: bool,
-    },
-
-    #[command(about = describe::STATUS)]
-    Status {
-        /// Print the result as one JSON document
-        #[arg(long)]
-        json: bool,
-    },
-
-    /// Print this session's canonical bus identity (issue #378)
-    Whoami {
-        /// Emit the stable key as `key=value` lines for scripts/hooks
-        /// (session_id, origin_path, resolved) instead of the
-        /// human-readable table. Downstream state must key on these
-        /// fields — the display name is presentation, never a key.
-        #[arg(long, conflicts_with = "display")]
-        machine: bool,
-        /// Print only the display name, for status lines and prompts.
-        /// Presentation only: it can change between sessions, so never
-        /// key state on it. An unresolved identity prints the name of
-        /// the process cwd, with no notice.
-        #[arg(long)]
-        display: bool,
-    },
-
-    /// List all sensors — built-in and config-defined script sensors
-    Sensors,
-
-    /// Keep the prompt cache warm across idle stretches (ADR-182; default: status)
-    Keepwarm {
-        #[command(subcommand)]
-        sub: Option<KeepwarmCmd>,
-    },
-
-    #[command(about = describe::SEND)]
-    Send {
-        /// Send a direct message: to a session's name or id, a person's
-        /// member id, or a project path for every live session there
-        #[arg(long, value_name = "WHO")]
-        to: Option<String>,
-
-        /// Post to a named channel; `open` or `#open` posts to #open. With
-        /// --to as well, the post stays in the channel, addressed to them
-        #[arg(long, value_name = "NAME")]
-        channel: Option<String>,
-
-        /// Thread reply to a specific signal id (use `attend reply` instead — it auto-threads)
-        #[arg(long, value_name = "ID", hide = true)]
-        re: Option<String>,
-
-        /// Print the written signal as one JSON document
-        #[arg(long)]
-        json: bool,
-
-        /// Message body (must follow all flags)
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        message: Vec<String>,
-    },
-
-    #[command(about = describe::REPLY)]
-    Reply {
-        /// Reply to this message id instead of the newest one delivered.
-        /// The reply goes to its sender, or into its named channel, as
-        /// without --re
-        #[arg(long, value_name = "ID")]
-        re: Option<String>,
-
-        /// Send the reply as a direct message to this session, person or
-        /// project path instead of to the parent's sender
-        #[arg(long, value_name = "WHO")]
-        to: Option<String>,
-
-        /// Post the reply to this channel instead; `open` posts to #open
-        #[arg(long, value_name = "NAME")]
-        channel: Option<String>,
-
-        /// Print the written signal as one JSON document
-        #[arg(long)]
-        json: bool,
-
-        /// Message body (must follow all flags)
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        message: Vec<String>,
     },
 
     #[command(about = describe::LISTEN)]
@@ -181,11 +47,33 @@ pub(crate) enum Commands {
         json: bool,
     },
 
-    #[command(about = describe::UNREAD)]
-    Unread {
-        /// Print the counts as one JSON document
-        #[arg(long)]
-        json: bool,
+    /// Send, reply to, read and count messages (default: inbox)
+    #[command(args_conflicts_with_subcommands = true)]
+    Message {
+        #[command(flatten)]
+        inbox: InboxFlags,
+
+        #[command(subcommand)]
+        sub: Option<MessageCmd>,
+    },
+
+    /// Join, leave, list and manage channels and scenes (default: list)
+    Channel(ChannelGroup),
+
+    /// List sessions, show this session's identity and the running loops (default: list)
+    #[command(args_conflicts_with_subcommands = true)]
+    Peer {
+        #[command(flatten)]
+        list: JsonArgs,
+
+        #[command(subcommand)]
+        sub: Option<PeerCmd>,
+    },
+
+    /// Keep the prompt cache warm across idle stretches (ADR-182; default: status)
+    Keepwarm {
+        #[command(subcommand)]
+        sub: Option<KeepwarmCmd>,
     },
 
     /// Launch the interactive chat TUI (ADR-120)
@@ -195,81 +83,10 @@ pub(crate) enum Commands {
         passthrough: Vec<String>,
     },
 
-    #[command(about = describe::JOIN)]
-    Join {
-        /// Channel name (with or without the # prefix)
-        name: String,
-        /// Pin so the channel persists across scene changes
-        #[arg(long)]
-        pin: bool,
-        /// Print the result as one JSON document
-        #[arg(long)]
-        json: bool,
-    },
-
-    #[command(about = describe::LEAVE)]
-    Leave {
-        /// Channel name (with or without the # prefix)
-        name: String,
-        /// Print the result as one JSON document
-        #[arg(long)]
-        json: bool,
-    },
-
-    #[command(about = describe::CHANNELS)]
-    Channels {
-        /// List only the channels this session has joined (read-only: no cleanup)
-        #[arg(long)]
-        joined: bool,
-
-        /// Print the listing as one JSON document
-        #[arg(long)]
-        json: bool,
-
+    /// List sensors and audit their permissions (default: list)
+    Sensor {
         #[command(subcommand)]
-        sub: Option<ChannelsCmd>,
-    },
-
-    /// Dissolve a channel (removes it for every member)
-    Dissolve {
-        /// Channel name (with or without the # prefix)
-        name: String,
-    },
-
-    /// Activate a named scene (reconfigure channel membership; `scene private` leaves all channels)
-    Scene {
-        /// Scene name (try `attend scenes` to list)
-        name: String,
-    },
-
-    /// List available scenes
-    Scenes,
-
-    /// Survey session history and derive engagement config
-    Tune {
-        /// Write the derived absolute_refractory, decay_per_minute and
-        /// peer_activity_window to the user config, changing nothing else
-        #[arg(long)]
-        apply: bool,
-    },
-
-    /// Audit sensor permissions against settings.json (default: audit)
-    Permissions {
-        #[command(subcommand)]
-        sub: Option<PermissionsCmd>,
-    },
-
-    /// Reap signal files whose owning project is gone, and prune empty
-    /// project dirs. Messages are never removed by age — lifetime is bound
-    /// to project liveness (ADR-136).
-    Cleanup {
-        /// List what would be removed without deleting
-        #[arg(long, short = 'n')]
-        dry_run: bool,
-
-        /// Remove every signal file regardless of project liveness
-        #[arg(long)]
-        all: bool,
+        sub: Option<SensorCmd>,
     },
 
     /// Manage configuration (default: show)
@@ -277,6 +94,345 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         sub: Option<ConfigCmd>,
     },
+
+    // The one-release aliases of ADR-413 item 5: each old flat verb parses
+    // what it parsed, prints the new form on stderr, then runs the new verb
+    // with the same stdout and exit code. Issue #982 removes them in the
+    // release after the one that ships the groups, and adds each name to
+    // tests/legacy_removed.rs.
+    #[command(hide = true)]
+    Send(SendArgs),
+    #[command(hide = true)]
+    Reply(ReplyArgs),
+    #[command(hide = true)]
+    Inbox(InboxArgs),
+    #[command(hide = true)]
+    Unread(JsonArgs),
+    #[command(hide = true)]
+    Cleanup(CleanupArgs),
+    #[command(hide = true)]
+    Join(JoinArgs),
+    #[command(hide = true)]
+    Leave(LeaveArgs),
+    #[command(hide = true)]
+    Channels(ChannelGroup),
+    #[command(hide = true)]
+    Dissolve(NameArg),
+    #[command(hide = true)]
+    Scene(SceneArgs),
+    #[command(hide = true)]
+    Scenes,
+    #[command(hide = true)]
+    Peers(JsonArgs),
+    #[command(hide = true)]
+    Whoami(WhoamiArgs),
+    #[command(hide = true)]
+    Status(JsonArgs),
+    #[command(hide = true)]
+    Sensors,
+    #[command(hide = true)]
+    Permissions {
+        #[command(subcommand)]
+        sub: Option<PermissionsCmd>,
+    },
+    #[command(hide = true)]
+    Tune(TuneArgs),
+}
+
+/// Subcommands for `attend message`. With no subcommand, defaults to `inbox`.
+#[derive(Subcommand)]
+pub(crate) enum MessageCmd {
+    #[command(about = describe::SEND)]
+    Send(SendArgs),
+
+    #[command(about = describe::REPLY)]
+    Reply(ReplyArgs),
+
+    #[command(about = describe::INBOX)]
+    Inbox(InboxArgs),
+
+    #[command(about = describe::UNREAD)]
+    Unread(JsonArgs),
+
+    /// Reap signal files whose owning project is gone, and prune empty
+    /// project dirs. Messages are never removed by age — lifetime is bound
+    /// to project liveness (ADR-136).
+    Cleanup(CleanupArgs),
+}
+
+/// Subcommands for `attend channel`. With no subcommand, defaults to `list`.
+#[derive(Subcommand)]
+pub(crate) enum ChannelCmd {
+    #[command(about = describe::CHANNELS)]
+    List(ChannelListArgs),
+
+    #[command(about = describe::JOIN)]
+    Join(JoinArgs),
+
+    #[command(about = describe::LEAVE)]
+    Leave(LeaveArgs),
+
+    /// Create a channel without joining it (pinned so it persists empty)
+    Create {
+        /// Channel name (with or without the # prefix)
+        name: String,
+        /// Optional single-line description (all trailing words)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        description: Vec<String>,
+    },
+
+    /// Set or replace a channel's single-line description
+    Describe {
+        /// Channel name (with or without the # prefix)
+        name: String,
+        /// The description text (all trailing words; empty clears)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        description: Vec<String>,
+    },
+
+    /// Pin a channel so it persists when empty
+    Pin(NameArg),
+
+    /// Unpin a channel; it is removed if empty
+    Unpin(NameArg),
+
+    /// Dissolve a channel (removes it for every member)
+    Dissolve(NameArg),
+
+    /// Activate a named scene (reconfigure channel membership; `scene private` leaves all channels)
+    Scene(SceneArgs),
+
+    /// List available scenes
+    Scenes,
+}
+
+/// Subcommands for `attend peer`. With no subcommand, defaults to `list`.
+#[derive(Subcommand)]
+pub(crate) enum PeerCmd {
+    #[command(about = describe::PEERS)]
+    List(JsonArgs),
+
+    /// Print this session's canonical bus identity (issue #378)
+    Whoami(WhoamiArgs),
+
+    #[command(about = describe::STATUS)]
+    Status(JsonArgs),
+}
+
+/// Subcommands for `attend sensor`. With no subcommand, defaults to `list`.
+#[derive(Subcommand)]
+pub(crate) enum SensorCmd {
+    /// List all sensors — built-in and config-defined script sensors
+    List,
+
+    /// Compare each sensor's `requires:` against settings.json
+    Permissions,
+}
+
+/// `attend channel`: the listing's flags, which also work with no
+/// subcommand, and the channel verbs.
+#[derive(Args)]
+pub(crate) struct ChannelGroup {
+    #[command(flatten)]
+    pub(crate) list: ChannelListArgs,
+
+    #[command(subcommand)]
+    pub(crate) sub: Option<ChannelCmd>,
+}
+
+#[derive(Args, Default)]
+pub(crate) struct ChannelListArgs {
+    /// List only the channels this session has joined (read-only: no cleanup)
+    #[arg(long)]
+    pub(crate) joined: bool,
+
+    /// Print the listing as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+/// A verb whose one flag is `--json`.
+#[derive(Args)]
+pub(crate) struct JsonArgs {
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct NameArg {
+    /// Channel name (with or without the # prefix)
+    pub(crate) name: String,
+}
+
+#[derive(Args)]
+pub(crate) struct SceneArgs {
+    /// Scene name (try `attend channel scenes` to list)
+    pub(crate) name: String,
+}
+
+#[derive(Args)]
+pub(crate) struct JoinArgs {
+    /// Channel name (with or without the # prefix)
+    pub(crate) name: String,
+    /// Pin so the channel persists across scene changes
+    #[arg(long)]
+    pub(crate) pin: bool,
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct LeaveArgs {
+    /// Channel name (with or without the # prefix)
+    pub(crate) name: String,
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct SendArgs {
+    /// Send a direct message: to a session's name or id, a person's
+    /// member id, or a project path for every live session there
+    #[arg(long, value_name = "WHO")]
+    pub(crate) to: Option<String>,
+
+    /// Post to a named channel; `open` or `#open` posts to #open. With
+    /// --to as well, the post stays in the channel, addressed to them
+    #[arg(long, value_name = "NAME")]
+    pub(crate) channel: Option<String>,
+
+    /// Thread reply to a specific signal id (use `attend message reply` instead — it auto-threads)
+    #[arg(long, value_name = "ID", hide = true)]
+    pub(crate) re: Option<String>,
+
+    /// Print the written signal as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+
+    /// Message body (must follow all flags)
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub(crate) message: Vec<String>,
+}
+
+#[derive(Args)]
+pub(crate) struct ReplyArgs {
+    /// Reply to this message id instead of the newest one delivered.
+    /// The reply goes to its sender, or into its named channel, as
+    /// without --re
+    #[arg(long, value_name = "ID")]
+    pub(crate) re: Option<String>,
+
+    /// Send the reply as a direct message to this session, person or
+    /// project path instead of to the parent's sender
+    #[arg(long, value_name = "WHO")]
+    pub(crate) to: Option<String>,
+
+    /// Post the reply to this channel instead; `open` posts to #open
+    #[arg(long, value_name = "NAME")]
+    pub(crate) channel: Option<String>,
+
+    /// Print the written signal as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+
+    /// Message body (must follow all flags)
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub(crate) message: Vec<String>,
+}
+
+#[derive(Args)]
+pub(crate) struct InboxArgs {
+    /// Specific message id to read in detail (omit to list inbox)
+    pub(crate) msg_id: Option<String>,
+
+    #[command(flatten)]
+    pub(crate) flags: InboxFlags,
+}
+
+/// The inbox's flags, which also work on a bare `attend message`.
+#[derive(Args)]
+pub(crate) struct InboxFlags {
+    /// Max messages per page, newest first
+    #[arg(long, default_value_t = crate::verbs::inbox::DEFAULT_LIMIT)]
+    pub(crate) limit: usize,
+
+    /// Page number; 1 = newest. Higher numbers walk back into history.
+    #[arg(long, default_value_t = 1)]
+    pub(crate) page: usize,
+
+    /// Cursor: only show messages older than this unix timestamp
+    #[arg(long, value_name = "TS")]
+    pub(crate) before: Option<u64>,
+
+    /// Atomically deliver pending messages and record their
+    /// consumption (ADR-172). The Stop-hook fast path: a silent no-op
+    /// under an unresolved identity or for a session not enrolled by
+    /// attend run or a channel join (#720). On a cold start (no
+    /// seen-set) it delivers addressed mail and fresh messages and
+    /// counts the older backlog it does not show.
+    #[arg(long)]
+    pub(crate) drain: bool,
+
+    /// With --drain: deliver and mark nothing unless a pending message
+    /// would wake this session, one addressed to it, sent to its
+    /// project, or a reply to a message it sent; then deliver all that
+    /// is pending. `#open` and channel posts alone wait for the next
+    /// turn (ADR-406 item 1). Once the session's prompt cache has
+    /// lapsed (its tier's TTL less two minutes after its last turn, or
+    /// no transcript readable in five seconds), nothing wakes it: the
+    /// drain delivers nothing and reports `cache_lapsed`. The attend
+    /// mod polls with it while idle.
+    #[arg(long, requires = "drain")]
+    pub(crate) wake: bool,
+
+    /// Output format for --drain: `plain` (human/agent readable),
+    /// `hook` (Claude Code Stop-hook JSON; reads the hook's stdin
+    /// payload for `stop_hook_active`) or `json` (the same as --json)
+    #[arg(long, default_value = "plain", value_name = "FMT")]
+    pub(crate) format: String,
+
+    /// Print the listing, the message, or with --drain the drained
+    /// messages, held-back count, note and name, as one JSON document
+    #[arg(long, conflicts_with = "format")]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct WhoamiArgs {
+    /// Emit the stable key as `key=value` lines for scripts/hooks
+    /// (session_id, origin_path, resolved) instead of the
+    /// human-readable table. Downstream state must key on these
+    /// fields — the display name is presentation, never a key.
+    #[arg(long, conflicts_with = "display")]
+    pub(crate) machine: bool,
+    /// Print only the display name, for status lines and prompts.
+    /// Presentation only: it can change between sessions, so never
+    /// key state on it. An unresolved identity prints the name of
+    /// the process cwd, with no notice.
+    #[arg(long)]
+    pub(crate) display: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct CleanupArgs {
+    /// List what would be removed without deleting
+    #[arg(long, short = 'n')]
+    pub(crate) dry_run: bool,
+
+    /// Remove every signal file regardless of project liveness
+    #[arg(long)]
+    pub(crate) all: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct TuneArgs {
+    /// Write the derived absolute_refractory, decay_per_minute and
+    /// peer_activity_window to the user config, changing nothing else
+    #[arg(long)]
+    pub(crate) apply: bool,
 }
 
 /// Subcommands for `attend keepwarm`. With no subcommand, defaults to `status`.
@@ -326,45 +482,7 @@ pub enum ListenHost {
     Mod,
 }
 
-/// Subcommands for `attend channels`. With no subcommand, defaults to
-/// `list` — the plain listing agents already know.
-#[derive(Subcommand)]
-pub(crate) enum ChannelsCmd {
-    /// List all channels with joined marks (default)
-    List,
-
-    /// Pin a channel so it persists when empty
-    Pin {
-        /// Channel name (with or without the # prefix)
-        name: String,
-    },
-
-    /// Unpin a channel; it is removed if empty
-    Unpin {
-        /// Channel name (with or without the # prefix)
-        name: String,
-    },
-
-    /// Create a channel without joining it (pinned so it persists empty)
-    Create {
-        /// Channel name (with or without the # prefix)
-        name: String,
-        /// Optional single-line description (all trailing words)
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        description: Vec<String>,
-    },
-
-    /// Set or replace a channel's single-line description
-    Describe {
-        /// Channel name (with or without the # prefix)
-        name: String,
-        /// The description text (all trailing words; empty clears)
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        description: Vec<String>,
-    },
-}
-
-/// Subcommands for `attend permissions`. With no subcommand, defaults to `audit`.
+/// Subcommands of the hidden `permissions` alias, which defaulted to `audit`.
 #[derive(Subcommand)]
 pub(crate) enum PermissionsCmd {
     /// Compare each sensor's `requires:` against settings.json
@@ -387,6 +505,9 @@ pub(crate) enum ConfigCmd {
 
     /// Check the config files against the schema; exit 3 with findings
     Lint,
+
+    /// Survey session history and derive engagement config
+    Tune(TuneArgs),
 }
 
 #[cfg(test)]
@@ -394,15 +515,22 @@ mod tests {
     use super::*;
     use clap::CommandFactory;
 
+    /// The subcommand at a space-separated path such as `message send`.
+    fn at(cli: &clap::Command, path: &str) -> clap::Command {
+        path.split(' ').fold(cli.clone(), |cmd, name| {
+            cmd.find_subcommand(name).unwrap_or_else(|| panic!("no `{path}` subcommand")).clone()
+        })
+    }
+
     /// Each message verb's help says exactly its `describe` string, the one
     /// description every frontend reads (ADR-501 item 4).
     #[test]
     fn message_verb_help_is_the_shared_description() {
         let cli = Cli::command();
-        for (verb, text) in describe::VERBS {
-            let sub = cli.find_subcommand(verb).unwrap_or_else(|| panic!("no `{verb}` subcommand"));
-            assert_eq!(sub.get_about().map(|s| s.to_string()).as_deref(), Some(*text), "{verb}");
-            assert!(sub.get_long_about().is_none(), "{verb} has no second description");
+        for (path, text) in describe::VERBS {
+            let sub = at(&cli, path);
+            assert_eq!(sub.get_about().map(|s| s.to_string()).as_deref(), Some(*text), "{path}");
+            assert!(sub.get_long_about().is_none(), "{path} has no second description");
         }
     }
 
@@ -410,9 +538,23 @@ mod tests {
     #[test]
     fn message_verbs_take_json() {
         let cli = Cli::command();
-        for (verb, _) in describe::VERBS {
-            let sub = cli.find_subcommand(verb).unwrap();
-            assert!(sub.get_arguments().any(|a| a.get_long() == Some("json")), "{verb} lacks --json");
+        for (path, _) in describe::VERBS {
+            let sub = at(&cli, path);
+            assert!(sub.get_arguments().any(|a| a.get_long() == Some("json")), "{path} lacks --json");
         }
+    }
+
+    /// `attend --help` lists the nine groups and none of the aliases
+    /// (ADR-413 items 1 and 5).
+    #[test]
+    fn help_lists_the_nine_commands() {
+        let cli = Cli::command();
+        let shown: Vec<&str> = cli.get_subcommands().filter(|c| !c.is_hide_set()).map(|c| c.get_name()).collect();
+        assert_eq!(shown, ["run", "listen", "message", "channel", "peer", "keepwarm", "chat", "sensor", "config"]);
+    }
+
+    #[test]
+    fn clap_tree_is_valid() {
+        Cli::command().debug_assert();
     }
 }

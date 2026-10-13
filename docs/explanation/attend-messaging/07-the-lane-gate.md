@@ -123,7 +123,7 @@ Both lanes timestamp everything — they just *use* time in opposite directions:
 | **Uses time to** | stamp & **digest** | decay & **drop** |
 | **On a burst** | coalesce into *"12 new messages: 3 to you, 9 on #open"* | suppress the noise, surface the one that moved |
 | **On absence** | hold durably until you return | age out — you didn't miss much |
-| **Pull surface** | `attend inbox` — the full chronological ledger | none needed; it was noise |
+| **Pull surface** | `attend message inbox` — the full chronological ledger | none needed; it was noise |
 | **Failure that matters** | a dropped message = work that never happens | a dropped event = a wake-up you didn't need |
 
 The office analogy from [[04.001.E]]: workers talking is the message lane —
