@@ -473,6 +473,11 @@ pub enum ListenCmd {
     Off,
     /// Print `listening` or `not listening` (default)
     Status,
+    /// Mark a listening session alive: touch its heartbeat, deliver
+    /// nothing. The attend mod runs it on a timer, through turns too, so
+    /// the session stays within the liveness grace while it lives. A
+    /// session that does not listen is written nothing
+    Beat,
 }
 
 /// A host `attend listen on --host` records.

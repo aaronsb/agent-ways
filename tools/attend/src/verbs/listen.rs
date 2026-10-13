@@ -93,6 +93,23 @@ pub fn off() -> Result<Listening, ListenError> {
     Ok(state(&me, listening))
 }
 
+/// Touch the heartbeat of a listening session, and nothing else: no drain,
+/// no enrollment. The attend mod calls it on its own timer, since its poll
+/// and the Stop-hook drain, which also touch the heartbeat, run only between
+/// turns (ADR-129, addendum of 2026-10-13). A session that does not listen
+/// is written nothing, as the drain writes it nothing.
+pub fn beat() -> Result<Listening, ListenError> {
+    let me = current_session();
+    if !me.resolved() {
+        return Err(ListenError::Unresolved);
+    }
+    let listening = adopt_previous_enrollment(&me);
+    if listening {
+        attend_presence::heartbeat::touch(&me.session_id).map_err(|e| ListenError::Unwritable { error: e.to_string() })?;
+    }
+    Ok(state(&me, listening))
+}
+
 fn state(me: &Session, listening: bool) -> Listening {
     let resolved = me.resolved();
     Listening {

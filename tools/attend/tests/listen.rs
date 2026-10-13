@@ -225,3 +225,28 @@ fn listen_off_under_a_live_run_keeps_listening() {
     drop(run);
     assert_eq!(f.ok(&["listen"]), "not listening\n", "the opt-out applies once the run is gone");
 }
+
+/// `listen beat`: the attend mod's timer keeps a listening session's
+/// heartbeat inside the grace through a turn longer than it, which no drain
+/// touches (the mod-session liveness defect of 2026-10-13). A session that
+/// does not listen is written nothing.
+#[test]
+fn listen_beat_touches_a_listening_session_only() {
+    let f = Fixture::new("listen-beat");
+    assert_eq!(f.ok(&["listen", "beat"]), "not listening\n");
+    assert!(!f.heartbeat(&f.sid).exists(), "a session that does not listen looks no more alive");
+    f.ok(&["listen", "on", "--host", "mod"]);
+    common::age_file(&f.heartbeat(&f.sid), Duration::from_secs(120));
+    let stale = std::fs::metadata(f.heartbeat(&f.sid)).unwrap().modified().unwrap();
+    assert_eq!(f.ok(&["listen", "beat"]), "listening\n");
+    let beat = std::fs::metadata(f.heartbeat(&f.sid)).unwrap().modified().unwrap();
+    assert!(beat.duration_since(stale).unwrap() >= Duration::from_secs(110), "the beat freshened the heartbeat");
+    assert!(!f.state_file(&f.sid).exists(), "and delivered nothing: no drain ran");
+    f.ok(&["listen", "off"]);
+    common::age_file(&f.heartbeat(&f.sid), Duration::from_secs(120));
+    f.ok(&["listen", "beat"]);
+    let after = std::fs::metadata(f.heartbeat(&f.sid)).unwrap().modified().unwrap();
+    assert!(std::time::SystemTime::now().duration_since(after).unwrap() >= Duration::from_secs(110), "after listen off it touches nothing");
+    let out = f.without_session(|| f.attend(&["listen", "beat"]));
+    assert_eq!(out.status.code(), Some(1), "no session, no beat");
+}
