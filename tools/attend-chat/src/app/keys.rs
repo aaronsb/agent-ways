@@ -157,6 +157,11 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
     // otherwise, with the destination flag (#392) showing the
     // resolution before Enter is pressed.
     let recipients = parse_addressed(&msg);
+    // In an agent's DM view an unaddressed message is a direct message to
+    // that agent; an addressed one goes as it would from the operator view.
+    if let (Tab::Dm(member), true) = (foreground, recipients.is_empty()) {
+        return send_dm(&msg, member, &seen);
+    }
     if recipients.is_empty() {
         let scope = tabs::send_scope(foreground);
         if scope == BASE_CHANNEL_NAME {
@@ -207,6 +212,32 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
         }
     } else {
         send_to_recipients(&msg, &recipients, &agents, &quiet, &session_of, person, None)
+    }
+}
+
+/// A direct message to the claude whose session id is `member`, in its
+/// project's tray, addressed to that session alone (ADR-401, `to`): what
+/// Enter sends from its DM view. A quiet agent is refused, as an `@Name`
+/// send to it is.
+fn send_dm(msg: &str, member: &str, seen: &[Seen]) -> EnterAction {
+    let Some(s) = seen.iter().find(|s| s.member == member && s.identity.is_claude) else {
+        return EnterAction::StatusOnly("that agent is not known to the chat any more; nothing sent".into());
+    };
+    let name = &s.identity.nickname;
+    if !s.live {
+        return EnterAction::StatusOnly(format!("@{name} is quiet (no heartbeat) and would not read this"));
+    }
+    let dir = cwd_dir(&s.identity.cwd);
+    match write_signal(&dir, msg, member) {
+        Ok(_) => {
+            let status = format!("sent → @{name}");
+            if sender_watches(&dir) {
+                EnterAction::ClearWithStatus(status)
+            } else {
+                EnterAction::ClearWithStatusAndEcho { status, echo: compose_self_echo(msg, member) }
+            }
+        }
+        Err(e) => EnterAction::StatusOnly(format!("send failed: {e}")),
     }
 }
 
@@ -276,9 +307,11 @@ fn send_to_recipients(
             if dests.iter().any(|(d, _)| sender_watches(d)) {
                 EnterAction::ClearWithStatus(status)
             } else {
+                // Every tray here took the same `to`: the sessions addressed.
+                let to = dests.first().map_or("", |(_, to)| to.as_str());
                 EnterAction::ClearWithStatusAndEcho {
                     status,
-                    echo: compose_self_echo(msg),
+                    echo: compose_self_echo(msg, to),
                 }
             }
         }
@@ -619,7 +652,7 @@ pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
             } else {
                 EnterAction::ClearWithStatusAndEcho {
                     status,
-                    echo: compose_self_echo(&body),
+                    echo: compose_self_echo(&body, &peer.session_id),
                 }
             }
         }
@@ -826,6 +859,16 @@ pub fn destination_label(input: &str, scope: &str, in_channel: bool, quiet: &[St
         return Some(format!("#{scope} {}", labels.join(" ")));
     }
     Some(labels.join(" "))
+}
+
+/// The destination flag in the DM view of the agent `name`: the agent, for
+/// an unaddressed message, marked when it is `quiet`; an addressed one as
+/// the operator view flags it ([`destination_label`]).
+pub fn dm_destination_label(input: &str, name: &str, quiet: bool, quiet_names: &[String], swept: &[String]) -> Option<String> {
+    if parse_addressed(input).is_empty() && slash::parse(input).is_none() && slash::find_slash_partial(input).is_none() {
+        return Some(if quiet { format!("@{name} (quiet)") } else { format!("@{name}") });
+    }
+    destination_label(input, BASE_CHANNEL_NAME, false, quiet_names, swept)
 }
 
 /// Does the sender's own chat watcher already surface signals written to

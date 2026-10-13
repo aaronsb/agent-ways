@@ -99,8 +99,9 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
 pub(super) const VIEW_LABEL: &str = "⋯all";
 
 /// The tab bar the shell draws, in the order [`tabs::bar`] gives: the common
-/// menu's `≡` slot, the created channel shown with what it is for, the `+`
-/// slot, then the reserved tabs pinned right, `#open` and the operator view
+/// menu's `≡` slot, the created channel shown with what it is for or the
+/// DM view shown (`@Name DMs`, shaded as a view), the `+` slot, then the
+/// reserved tabs pinned right, `#open` and the operator view
 /// ([`VIEW_LABEL`]), shaded as a view. The left column numbers the
 /// channels for Ctrl+digit, and 0 is the operator view ([`ChatPane::jump`]);
 /// while the column is hidden, by its key or for want of width, each
@@ -122,6 +123,7 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
             Slot::Common => PaneTab::new("≡").action(),
             Slot::New => PaneTab::new("+").action(),
             Slot::Tab(Tab::Merged) => PaneTab::new(VIEW_LABEL).reserved().view(),
+            Slot::Tab(Tab::Dm(member)) => PaneTab::new(format!("@{} DMs", chat.dm_name(&member))).view(),
             Slot::Tab(Tab::Channel(name)) => {
                 let k = groups.iter().find(|k| k.group.name == name);
                 let mut glyph = Style::new();
@@ -184,11 +186,7 @@ fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGrou
     let chip = chip_for(&s.from, &s.project, &s.cwd, depth, &world.instances);
     // Claudes are members by session id; humans by their sanitized
     // username (ADR-170), the id `/join` writes.
-    let key: Option<String> = chip.session_id.clone().or_else(|| {
-        s.from
-            .strip_prefix("external:")
-            .map(|rest| agent_identity::sanitize_id_component(rest.split('@').next().unwrap_or(rest)))
-    });
+    let key = s.sender_member();
     // Live as the column has it: a sender the column sets back is set back here.
     let live = key.as_deref().and_then(|k| world.seen.iter().find(|x| x.member == k)).is_none_or(|x| x.live);
     let [name, project, mark] = super::sidebar::identity_styles(depth, chip.palette, live, chip.style.bold);
@@ -199,9 +197,17 @@ fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGrou
         Seg::styled(format!(" {} ", chip.primary), name),
         Seg::styled(format!(" {} ", chip.secondary), project),
     ];
-    // A reply or a direct message to the person at the chat (ADR-401, `to`).
-    if s.channel == crate::signal::Channel::Person {
-        header.push(Seg::styled(" → you ".to_string(), mark));
+    // A reply or a direct message to the person at the chat (ADR-401, `to`),
+    // or one the chat sent, with whom it went to.
+    match &s.channel {
+        crate::signal::Channel::Person => header.push(Seg::styled(" → you ".to_string(), mark)),
+        crate::signal::Channel::Sent(to) => {
+            let names: Vec<String> = to.split(',').filter(|m| !m.is_empty()).map(|m| format!("@{}", chat.dm_name(m))).collect();
+            if !names.is_empty() {
+                header.push(Seg::styled(format!(" → {} ", names.join(" ")), mark));
+            }
+        }
+        _ => {}
     }
     let mut body: Vec<Line<'static>> = s.message.split('\n').map(|l| Line::styled(l.to_string(), theme::body())).collect();
     let files = attach::existing_attachments(&s.message);
@@ -238,7 +244,7 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
             }
         }
         let (entries, members): (Vec<Entry>, Vec<Option<String>>) =
-            chat.signals.iter().filter(|s| tabs::visible_in(&s.channel, fg)).map(|s| entry(chat, s, &memberships)).unzip();
+            chat.signals.iter().filter(|s| tabs::shows(s, fg)).map(|s| entry(chat, s, &memberships)).unzip();
         chat.entries = Some(entries);
         chat.entry_members = members;
     }
@@ -292,17 +298,31 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, lead: &str, rows
         lines.push(attachment_line(chat, files));
     }
     f.render_widget(Paragraph::new(lines), Rect { height: text_h, ..inner });
-    let scope = tabs::send_scope(fg);
-    let quiet = super::keys::quiet_names(&chat.world().seen);
-    let swept = super::keys::swept_names(&chat.world().rows);
-    let in_channel = matches!(fg, Tab::Channel(_));
-    if let Some(label) = super::destination_label(chat.input.text(), &scope, in_channel, &quiet, &swept) {
+    let draft = chat.input.text().to_owned();
+    if let Some(label) = chat.flag_label(&draft, fg) {
         let flag = format!(" {label} ");
         let w = (str_width(&flag) as u16).min(inner.width);
         let at = Rect { x: inner.x + inner.width - w, y: inner.y + text_h, width: w, height: flag_h };
         f.render_widget(Paragraph::new(Span::styled(flag, theme::badge(Ground::Info))), at);
         // A click on it opens the menu of the channel it names.
         chat.hits.flag = at;
+    }
+}
+
+impl ChatPane {
+    /// The destination flag for `text` in `fg`: where Enter would send it,
+    /// or `None` while a slash command is composed. In a DM view an
+    /// unaddressed message goes to its agent.
+    pub(super) fn flag_label(&mut self, text: &str, fg: &Tab) -> Option<String> {
+        let world = self.world();
+        let quiet = super::keys::quiet_names(&world.seen);
+        let swept = super::keys::swept_names(&world.rows);
+        if let Tab::Dm(member) = fg {
+            let quiet_agent = world.seen.iter().find(|s| s.member == *member).is_some_and(|s| !s.live);
+            return super::keys::dm_destination_label(text, &self.dm_name(member), quiet_agent, &quiet, &swept);
+        }
+        let in_channel = matches!(fg, Tab::Channel(_));
+        super::destination_label(text, &tabs::send_scope(fg), in_channel, &quiet, &swept)
     }
 }
 

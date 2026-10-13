@@ -725,6 +725,12 @@ fn left(c: &mut Chat, (x, y): (u16, u16)) {
     c.mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
 }
 
+/// A right click: the menu of what is under it, at once.
+fn right(c: &mut Chat, (x, y): (u16, u16)) {
+    testkit::render_screen(c, 80, 25);
+    c.mouse(mouse(MouseEventKind::Down(MouseButton::Right), x, y));
+}
+
 /// A click on a message cut off at the top of the feed selects it and
 /// scrolls it whole into view; the rule under its header turns heavy.
 #[test]
@@ -928,7 +934,7 @@ fn a_click_then_enter_on_merged_asks_before_clearing_the_view() {
     // The key help names what a click on a tab does.
     press(&mut c, key(KeyCode::F(1)));
     let help = text(&mut c, 100, 60);
-    assert!(help.contains("a channel shows it, again its menu"), "{help}");
+    assert!(help.contains("shows a channel or agent's DMs, again its menu"), "{help}");
 }
 
 /// #deploy's menu, then Delete channel: the question waits for its `y`.
@@ -1376,14 +1382,20 @@ fn a_click_on_an_agent_row_opens_its_menu_and_on_a_channel_row_the_channels() {
     let mut c = chat_side().enhanced(true);
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "gamma").expect("the agent row");
+    // The first click shows the agent's DMs; the second, on the agent
+    // shown, opens its menu.
+    left(&mut c, (x, y));
+    assert!(!text(&mut c, 80, 25).contains("pick one"), "the first click shows its DMs");
     left(&mut c, (x, y));
     let menu = text(&mut c, 80, 25);
-    assert!(menu.contains("pick one: @Lyra") && menu.contains("Address @Lyra") && menu.contains("Who is this"), "{menu}");
-    assert!(!menu.contains("Remove from"), "merged shows no channel to remove from: {menu}");
+    assert!(menu.contains("pick one: @Lyra") && menu.contains("Hide DMs") && menu.contains("Address @Lyra") && menu.contains("Who is this"), "{menu}");
+    assert!(!menu.contains("Remove from"), "a DM view shows no channel to remove from: {menu}");
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
-    assert_eq!(c.input().text(), "@Lyra ", "the first item addresses it");
+    assert_eq!(c.input().text(), "@Lyra ", "the item after Hide DMs addresses it");
     // Who is this, for a quiet claude /whois cannot resolve.
     left(&mut c, (x, y));
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
     assert!(c.status().contains("session cccccccc") && c.status().contains("quiet"), "{}", c.status());
@@ -1487,8 +1499,9 @@ fn golden_the_keyboard_walks_the_column() {
     press(&mut c, key(KeyCode::Home));
     press(&mut c, key(KeyCode::Enter));
     assert!(text(&mut c, 80, 25).contains("pick one: @Laszlo"), "Enter on an agent opens its menu");
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
-    assert!(c.input().text().starts_with("@Laszlo"), "{:?}", c.input().text());
+    assert!(c.input().text().starts_with("@Laszlo"), "the item after Show DMs addresses it: {:?}", c.input().text());
     g.finish();
 }
 
@@ -1668,8 +1681,9 @@ fn an_agent_row_removes_it_from_the_shown_channel() {
     press(&mut c, ctrl('2'));
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
     let buf = testkit::render_screen(&mut c, 80, 25);
+    // A right click: the agent's menu, #deploy still shown.
     let (x, y) = in_column(&buf, "beta");
-    left(&mut c, (x, y));
+    right(&mut c, (x, y));
     let menu = text(&mut c, 80, 25);
     assert!(menu.contains("Remove from #deploy"), "{menu}");
     press(&mut c, key(KeyCode::End));
@@ -1715,7 +1729,7 @@ fn a_question_after_a_menu_closed_unchanged_is_shown_by_the_mouse() {
     assert!(!bar(&mut c).contains("unchanged"), "closing says nothing: {}", bar(&mut c));
     let buf = testkit::render_screen(&mut c, 80, 25);
     let row = in_column(&buf, "beta");
-    left(&mut c, row);
+    right(&mut c, row);
     let buf = testkit::render_screen(&mut c, 80, 25);
     let item = testkit::find(&buf, "Remove from #deploy").expect("the menu's item");
     left(&mut c, item);

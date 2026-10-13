@@ -89,6 +89,8 @@ fn add_agent_to_chat_invites_the_agent_for_real() {
         testkit::render_screen(c, W, H);
         c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
     };
+    // The first click shows beta's DMs, the second opens its menu.
+    click(&mut c, x, y as u16);
     click(&mut c, x, y as u16);
     let buf = testkit::render_screen(&mut c, W, H);
     let (x, y) = testkit::find(&buf, "Add agent to chat").expect("the item");

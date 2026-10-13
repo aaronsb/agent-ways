@@ -82,8 +82,8 @@ fn a_direct_message_shows_in_every_view_labelled() {
         ts: 1_790_949_000,
         channel: Channel::Person,
     });
-    for tab in [Tab::Merged, Tab::Channel("open".into())] {
-        assert!(attend_chat::tabs::visible_in(&Channel::Person, &tab), "{tab:?}");
+    for tab in [Tab::Merged, Tab::Channel("open".into()), Tab::Dm(PEER_SID.into())] {
+        assert!(attend_chat::tabs::shows(&c.signals()[0], &tab), "{tab:?}");
     }
     let rows = testkit::rows(&testkit::render_screen(&mut c, 80, 25));
     let header = rows.iter().find(|r| r.contains("→ you")).unwrap_or_else(|| panic!("{rows:#?}"));

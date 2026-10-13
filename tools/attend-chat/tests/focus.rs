@@ -874,13 +874,14 @@ fn picker(c: &mut Chat, title: &str) -> Vec<String> {
     rows[y + 1..].iter().take_while(|r| r.chars().nth(left) == Some('│')).map(|r| r.chars().skip(left + 1).take(right - left - 1).collect()).collect()
 }
 
-/// The menu of the agent row named `name`, by a click on it.
+/// The menu of the agent row named `name`, by a right click on it: at
+/// once, the channel shown kept.
 fn agent_menu(c: &mut Chat, name: &str) {
     let rows = rows(c);
     let (y, r) = rows.iter().enumerate().find(|(_, r)| r.split('│').next().is_some_and(|l| l.contains(name))).unwrap_or_else(|| panic!("no {name} row: {rows:#?}"));
     let x = r.find(name).unwrap();
     let x = r[..x].chars().count() as u16;
-    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y as u16, modifiers: KeyModifiers::NONE });
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), column: x, row: y as u16, modifiers: KeyModifiers::NONE });
 }
 
 #[test]
@@ -976,11 +977,14 @@ fn enter_on_a_row_or_on_the_common_slot_opens_the_menu_a_click_opens_where_it_op
     let want = menu_box(&mut clicked).expect("the click opens #infra's menu");
     assert!(want.2[0].contains("#infra"), "{want:?}");
     assert_eq!(menu_box(&mut keyed), Some(want), "Enter: the same menu, docked in the same place");
-    // An agent's row: one click opens its menu. Esc closes it, the row
-    // keeping the keyboard, and Enter opens it again where it was.
+    // An agent's row: the first click shows its DMs, the second, on the
+    // agent shown, opens its menu. Esc closes it, the row keeping the
+    // keyboard, and Enter opens it again where it was.
     let mut c = chat();
     side_click(&mut c, "beta");
-    let want = menu_box(&mut c).expect("the click opens the agent's menu");
+    assert_eq!(menu_box(&mut c), None, "the first click shows the agent's DMs");
+    side_click(&mut c, "beta");
+    let want = menu_box(&mut c).expect("the second opens the agent's menu");
     assert!(want.2[0].contains('@'), "{want:?}");
     press(&mut c, KeyCode::Esc);
     assert_eq!(menu_box(&mut c), None);

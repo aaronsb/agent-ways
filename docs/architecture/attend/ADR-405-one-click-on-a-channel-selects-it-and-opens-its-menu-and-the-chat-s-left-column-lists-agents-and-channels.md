@@ -51,6 +51,26 @@ basis:
     level: directed
     said: 1. digits only work on channel rows. 2. a. 3. agree with new behavior 4. keep 5. keep 6. keep the mark and add count on tab. 7. thats correct as built 8. agree- its a single char column and makes sense. 9. correct. 10. correct.
     via: 'the operator''s answers to the design questions in PR #972, given to the head session, 2026-10-13'
+  - operator: aaronsb
+    level: directed
+    said: "I'm not so sure, it would get complicated - my intuition tells me we could pick any agent out of the list, and have a special conversation view under that agent on the left nav bar that can reveal the conversation flow from that agent's perspective. so if I pick 'agent froboz' from the left nav bar and pick a new option called 'review DMs' then it's DM perspective appears under my DM flow link, labeled agent froboz DMs (with a different color maybe to be distinctive). This 'agent view' is dismissable I think, in order to declutter (it's just show/hide) (and also, it makes me think we can show/hide our dms to that agent too). So we have two DM views for all agents on the left nav bar, that are hide-able: the obvious one, the dms between the attend-chat operator and the agent, and then a second view which is that agent's DM view. (which would include it's conversations to the attend-chat operator). it's just a different query of the same messages."
+    via: "the operator's chat message to the head session, 2026-10-13, describing the per-agent DM views"
+  - operator: aaronsb
+    level: directed
+    said: "the ui for attend-chat does not seem to open a dm channel under your agent on the left side nav bar"
+    via: "the operator's follow-up to the head session, 2026-10-13, reporting that no DM view opened under an agent"
+  - operator: aaronsb
+    level: directed
+    said: "I think the open behavior is great as it is - if I @ message you on open, you get notified which is fine."
+    via: "the operator's follow-up to the head session, 2026-10-13, confirming that @Name in #open stays an addressed #open post"
+  - operator: aaronsb
+    level: directed
+    said: "the agent's dms are read only from attend-chat's perspective"
+    via: "the operator's chat message to the head session, 2026-10-13"
+  - operator: aaronsb
+    level: directed
+    said: "by 'read only' it's only basically we don't have a function in attend-chat to write to that"
+    via: "the operator's chat message to the head session, 2026-10-13, saying what the line above means"
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -139,3 +159,15 @@ ADR-407's amendment of the same date, "C, the operator's navigation redesign", c
 - **The tab bar.** It holds `≡`, the created channel shown, `+`, then the reserved tabs. The created channels are numbered in the left column, `#open` first, and no longer on the bar; while the column is hidden each channel's tab carries its number. Ctrl+n or Alt+n picks the column's channel n, and 0 is the operator view.
 - **Keys.** In the compose box Esc goes to the feed, and Tab leaves the box when the caret ends no word to complete. The feed is the chat: a printable key there is typed into the box, and `q`, `m` and `?` are text. On the tab bar and the column the single keys work as before, and a plain digit picks a channel by its number only on a channel's row; agents carry no number. Outside the box Esc opens the `≡` menu, and Esc on that menu goes back to the tab or column row the focus was last on; Tab out of the box onto `≡` is not remembered. Walking the bar shows nothing; Enter on a tab opens its menu.
 - **The column.** It marks the agents in the created channel shown, and that channel's tab carries its member count.
+
+## Amendment (2026-10-13): two DM views per agent, the first delivered
+
+The operator described the column's DM views (`basis`, the entry of 2026-10-13): "we could pick any agent out of the list, and have a special conversation view under that agent on the left nav bar", and "So we have two DM views for all agents on the left nav bar, that are hide-able: the obvious one, the dms between the attend-chat operator and the agent, and then a second view which is that agent's DM view". They noted that "it's just a different query of the same messages", and later reported that "the ui for attend-chat does not seem to open a dm channel under your agent on the left side nav bar".
+
+- **Two views per agent, each a row under the agent's.** The first holds the direct messages between the operator and the agent, both ways. The second, the agent's own DM perspective, holds every direct message the agent sent or received, its DMs with the operator among them; the agent's menu opens it with Review DMs, and its row is labelled with the agent's name and drawn in a colour of its own. Each view is shown or hidden, and hiding one deletes nothing. Both are views over the messages the chat already holds, filtered by sender and recipient. This amendment delivers the first view. The second is the next increment, and the column's row kinds leave room for it.
+- **The second view offers nothing to send.** The operator called the agent's DMs "read only from attend-chat's perspective", and said what that means: "we don't have a function in attend-chat to write to that". attend-chat has no send as another agent or into its conversations, so the view shows no compose box. A view that sends nothing is a kind the nav model allows; the first view's compose box comes with its view, not with every view.
+- **Opening the first view.** A click on a claude's row lists its DM view on the row under the agent's and shows it, as a click on a channel's row shows the channel (ADR-407 (a)). A click on the agent whose view is shown opens the agent's menu. Enter on an agent's row opens its menu, as Enter on any row does, and the menu's first item is Show DMs, or Hide DMs while the view is listed. A right click opens the menu at once and keeps the channel shown, which is how the channel shown's Remove item is reached by mouse. A human's row has no DM view, since `@name` routes to a session's tray and a human has none: a click on it opens its menu at once.
+- **What the view shows.** The feed shows the direct messages the agent sent the operator's person tray and those the chat sent with the agent among the recipients, plus the chat's own notices. The chat records each direct message it sends with its recipients. A direct message to an agent in the chat's own project lands in the tray the chat watches, and reads back as sent by the operator to its recipients. Direct messages the operator sent to another project's tray in an earlier session are not on disk where the chat reads, so the view lists them only from the session that sent them. Issue #995 carries that as the follow-up.
+- **Sending from the view.** The compose box sends an unaddressed message to the agent as a direct message, `to` set to its session, never to `#open`. The destination flag reads `@Name`, marked `(quiet)` when the agent has no heartbeat, and a send to a quiet agent is refused with the draft kept. A message that starts with `@Name` or `#channel` goes as it would from the operator view (ADR-406 item 7). `@Name` in `#open` stays an addressed `#open` post, which wakes the agent; the operator confirmed it: "I think the open behavior is great as it is - if I @ message you on open, you get notified which is fine." Slash commands scope as they do in the operator view.
+- **In the nav.** The DM row is indented under its agent's row and drawn on the info ground the destination flag wears, with the count of messages it holds; the shown view is marked as the channel shown is. The shown view's tab, `@Name DMs`, holds the left of the tab bar where the created channel shown would, on the shaded ground of a view. Hide DMs, on the agent's menu or on the DM row's own menu, takes the row off the column; when the hidden view was shown, the operator view takes its place, and the same DMs show there among everything else. A click on the agent's row lists the view again with its messages.
+

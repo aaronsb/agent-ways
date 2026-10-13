@@ -412,7 +412,7 @@ impl<'a> Step<'a> {
                 let w = self.world()?;
                 let mut channels = w.rows.iter().enumerate().filter_map(|(i, h)| match h {
                     SideHit::Channel(c) => Some((i, c.clone())),
-                    SideHit::Agent(_) => None,
+                    SideHit::Agent(_) | SideHit::Dm(_) => None,
                 });
                 let Some((i, name)) = channels.nth(n - 1) else { return Ok(()) };
                 if self.ix.side_focus().is_some() {
@@ -529,8 +529,8 @@ impl<'a> Step<'a> {
     fn vertical(&mut self, down: bool) -> R {
         match self.ix.focus.clone() {
             Focus::Tab(slot) if down => {
-                // Into the column: the row of the tab's channel, else the
-                // first row; past a hidden column, the feed.
+                // Into the column: the row of the tab's channel or DM view,
+                // else the first row; past a hidden column, the feed.
                 if !self.v.side_drawn {
                     return self.go(Focus::Feed);
                 }
@@ -540,6 +540,7 @@ impl<'a> Step<'a> {
                 }
                 let row = match slot {
                     Slot::Tab(Tab::Channel(c)) => rows.iter().position(|h| *h == SideHit::Channel(c.clone())),
+                    Slot::Tab(Tab::Dm(m)) => rows.iter().position(|h| *h == SideHit::Dm(m.clone())),
                     _ => None,
                 };
                 self.go(Focus::Row(row.unwrap_or(0)))
@@ -655,17 +656,22 @@ impl<'a> Step<'a> {
     }
 
     /// After the world is read again, the column's cursor follows its row to
-    /// where it is now; a row gone since leaves it at the same place, held
-    /// within a list that may have shrunk. A focused tab whose channel is
-    /// gone moves to the tab shown, which falls back to `#open` the same way.
+    /// where it is now; a DM view's row gone since leaves it on its agent's
+    /// row, and any other row gone leaves it at the same place, held within
+    /// a list that may have shrunk. A focused tab whose channel is gone moves
+    /// to the tab shown, which falls back to `#open` the same way.
     fn refocus(&mut self) -> R {
         if let (Some(i), Some(hit)) = (self.ix.side_focus(), self.ix.row_hit.clone()) {
             let rows = &self.world()?.rows;
+            let owner = match &hit {
+                SideHit::Dm(m) => rows.iter().position(|h| *h == SideHit::Agent(m.clone())),
+                _ => None,
+            };
             match rows.iter().position(|h| *h == hit) {
                 Some(at) => self.ix.focus = Focus::Row(at),
                 None if rows.is_empty() => self.set(Focus::Compose),
                 None => {
-                    let at = i.min(rows.len() - 1);
+                    let at = owner.unwrap_or(i.min(rows.len() - 1));
                     self.focus_at(at)?;
                 }
             }
