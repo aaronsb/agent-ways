@@ -1144,6 +1144,8 @@ mod tests {
         // own watcher surfaces. `sender_watches` must agree with
         // `accept_path` about which destination dirs those are.
         use crate::signal::{broadcast_dir, cwd_dir, signals_base};
+        // Every path below derives from the environment other tests set.
+        let _env = crate::test_dir::env_lock();
 
         // `#open` → _broadcast/ : watched (would round-trip, so NO echo).
         assert!(sender_watches(&broadcast_dir()));

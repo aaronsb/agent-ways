@@ -326,6 +326,7 @@ mod tests {
         // instead of the real cache, then assert the writer's output
         // is accepted by our own parser. Guards against silent wire-
         // format drift between the TUI's send path and its watcher.
+        let _env = crate::test_dir::env_lock();
         let home = tempdir_like();
         // `set_var` is !Send on some platforms but this test is
         // single-threaded; Cargo isolates by default.
@@ -374,6 +375,7 @@ mod tests {
     #[test]
     fn cwd_dir_is_under_signals_base() {
         // Point $HOME at a temp dir so signals_base resolves there.
+        let _env = crate::test_dir::env_lock();
         let home = tempdir_like();
         std::env::set_var("HOME", &home);
         let d = cwd_dir("/home/aaron/proj");
