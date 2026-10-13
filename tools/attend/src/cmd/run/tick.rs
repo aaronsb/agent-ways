@@ -53,7 +53,7 @@ pub(super) struct TickState<'a> {
     pub(super) cache_gate: &'a mut CacheGate,
 }
 
-/// The cache gate on what this run prints (ADR-406 item 1). A line on
+/// The cache gate on what this run prints (ADR-406 item 2). A line on
 /// stdout starts a turn in an idle session, and a session whose prompt
 /// cache has lapsed is woken by nothing but keepwarm. The answer is read
 /// at most every [`CacheGate::RECHECK`], and only while a line is waiting.
@@ -144,7 +144,7 @@ pub(super) fn initial_self_hash(self_exe: Option<&Path>) -> Option<u64> {
 /// the reload triggers is pure noise — so we update the baseline mtime
 /// (to avoid rehashing every interval) and return without reloading.
 ///
-/// On a lapsed cache (ADR-406 item 1) the reload prints nothing to stdout,
+/// On a lapsed cache (ADR-406 item 2) the reload prints nothing to stdout,
 /// which would wake the session. Held presence lines go to the log and the
 /// new process writes its banner there. A held line that is not presence
 /// can carry a message the peers sensor has already marked seen, so the
@@ -400,8 +400,8 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // not disclose; they describe a moment, and the next turn reads the
     // repository afresh. The message lane is held: its accumulator keeps
     // what the peers sensor surfaced, presence included, and it goes out
-    // once the cache is warm. Messages addressed to the session wait unseen
-    // in the sensor itself.
+    // once the cache is warm. Messages that would wake the session wait
+    // unseen in the sensor itself.
     let gated = |i: &usize| s.slots[*i].name() != "keepwarm";
     if (evt_ready.iter().any(gated) || msg_ready.iter().any(gated)) && s.cache_gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
         for &i in &evt_ready {

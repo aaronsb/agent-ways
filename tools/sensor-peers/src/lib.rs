@@ -15,7 +15,7 @@ pub type ReceiveDirsFn = Arc<dyn Fn(&str) -> Vec<ReceiveDir> + Send + Sync>;
 
 /// Callback that answers whether this session's prompt cache has lapsed,
 /// given its working directory. Without one the sensor reads keepwarm's
-/// clock on the session's transcript (ADR-406 item 1).
+/// clock on the session's transcript (ADR-406 item 2).
 pub type CacheLapsedFn = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
 /// Discovers peer Claude Code sessions by reading ~/.claude/sessions/*.json
@@ -279,11 +279,19 @@ impl PeerSensor {
         let own_session_id: String = self.own_session_id
             .clone()
             .unwrap_or_else(|| "---none---".to_string());
-        // The ids this session reads as: its own, then the ones it had
-        // before each `/clear` (ADR-401, `to`).
-        let mut reading_ids = vec![own_session_id.clone()];
-        if let Some(sid) = &self.own_session_id {
-            reading_ids.extend(attend_presence::enrollment::previous_ids(sid));
+        // The ids this session reads as, resolved now as the drain resolves
+        // them: its current id, then the ones it had before each `/clear`
+        // (ADR-401, `to`). The id this poller started under stays among
+        // them, so a `/clear` the run has not yet followed still leaves the
+        // session's own posts, under either id, its own.
+        let now = attend_presence::session::identity_for_pid(self.own_pid);
+        let mut reading_ids =
+            if now.resolved() { attend_presence::enrollment::reading_ids(&now) } else { Vec::new() };
+        if !reading_ids.contains(&own_session_id) {
+            reading_ids.insert(0, own_session_id.clone());
+            if let Some(sid) = &self.own_session_id {
+                reading_ids.extend(attend_presence::enrollment::previous_ids(sid));
+            }
         }
         let ids: Vec<&str> = reading_ids.iter().map(String::as_str).collect();
 
@@ -371,24 +379,26 @@ impl PeerSensor {
             attend_state::cold_start::plan(&pending, attend_state::cold_start::Window::for_session(&own_session_id))
         });
 
-        // The wake rule (ADR-406 item 1): a line on stdout wakes an idle
-        // session, so this poll emits only when something pending is
-        // addressed to it. Otherwise `#open` and channel posts stay unseen
-        // and reach it with its next turn, through the Stop-hook drain.
-        let addressed = found.iter().enumerate().any(|(i, f)| {
+        // The wake rule (ADR-406 item 2): a line on stdout wakes an idle
+        // session, so this poll emits only when something pending would
+        // wake it: a post in one of its named channels, or a message
+        // addressed to it. Otherwise `#open` posts stay unseen and reach it
+        // with its next turn, through the Stop-hook drain.
+        let due = found.iter().enumerate().any(|(i, f)| {
+            let room = &scan_dirs[f.room].room;
             plan.as_ref().is_none_or(|p| p.deliver[i])
                 && agent_identity::parse_signal(agent_identity::wire_line(&f.content))
-                    .is_some_and(|sig| sig.wakes(scan_dirs[f.room].room.is_tray(), &ids))
+                    .is_some_and(|sig| sig.wakes(room.is_tray(), room.is_channel(), &ids))
         });
         // The cache gate: a session whose prompt cache has lapsed is never
-        // woken, since the wake would rewrite its whole context. What is
-        // addressed to it waits, unseen, for the operator's next turn.
-        let lapsed = addressed && self.cache_lapsed(&focus.working_dir);
+        // woken, since the wake would rewrite its whole context. What would
+        // wake it waits, unseen, for the operator's next turn.
+        let lapsed = due && self.cache_lapsed(&focus.working_dir);
         if lapsed && !self.holding_cold {
             eprintln!("[attend] a message is waiting; the prompt cache has lapsed, so it waits for the next turn");
         }
         self.holding_cold = lapsed;
-        let wakes = addressed && !lapsed;
+        let wakes = due && !lapsed;
 
         for (i, f) in found.into_iter().enumerate() {
             let shown = plan.as_ref().is_none_or(|p| p.deliver[i]);

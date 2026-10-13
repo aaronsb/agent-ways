@@ -181,7 +181,7 @@ async function registerActiveTools($: $) {
   await $.tool.register({
     name: 'attend_send',
     description:
-      'Start a new topic over attend. Name someone in `to` to send them a direct message. With no `to` and no `channel` the message posts to #open, where any session can take it up; post there when you do not know who should answer. `channel` posts to a named channel; with `to` as well, the post stays in the channel addressed to them, which wakes them. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and a long one goes out as one message.',
+      'Start a new topic over attend. Name someone in `to` to send them a direct message. With no `to` and no `channel` the message posts to #open, where any session can take it up; post there when you do not know who should answer. `channel` posts to a named channel, which wakes its idle members; with `to` as well, the post stays in the channel addressed to them. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and a long one goes out as one message.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -323,7 +323,8 @@ async function tick($: $, mod: Mod, force: boolean) {
 
 /** One wake drain; on messages, a plain drain after BATCH_MS, then one
  *  prompt for the batch. The wake drain delivers only once something pending
- *  is addressed to the session, and then delivers all that is pending. A
+ *  would wake the session (a message addressed to it, or a post in one of
+ *  its named channels), and then delivers all that is pending. A
  *  turn is submitted only when the drain delivered at least one message: the
  *  cold start's held-back note and the session's name are fields of the
  *  drain's document, never a message.
@@ -337,8 +338,9 @@ async function poll($: $, mod: Mod) {
   mod.isPolling = true
   try {
     if (mod.pending.length === 0) {
-      // Only what is addressed to the session starts a turn; #open and
-      // channel posts wait for its next one (ADR-406 item 1).
+      // Only what is addressed to the session, or posted in one of its
+      // named channels, starts a turn; other #open posts wait for its next
+      // one (ADR-406 item 2).
       const first = parseDrain((await run($, WAKE_DRAIN_ARGV)).stdout)
       if (!first) return
       // Listening turned off elsewhere (attend listen off, a private scene),
@@ -637,7 +639,7 @@ export const register: Register = on => {
     }
     const lead = was ? 'attend was already listening in this session.' : 'attend is listening for the rest of this session.'
     const poll = mod.canPoll
-      ? ' Messages addressed to this session arrive as peer-data turns; #open and channel posts arrive with your next turn.'
+      ? ' Messages addressed to this session and posts in its channels arrive as peer-data turns; other #open posts arrive with your next turn.'
       : ' This session does not poll (a -p or SDK run); messages arrive at the end of a turn.'
     return { result: `${lead}${poll}${tools}` }
   })

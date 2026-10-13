@@ -81,12 +81,15 @@ impl ParsedSignal<'_> {
     }
 
     /// Whether this signal starts a turn in the idle session reading as
-    /// `ids` (ADR-406 item 1): `to` names it, it sat in its tray (`in_tray`)
-    /// with no `to` (sent to its project by an older writer), or it replies
-    /// to a message the session sent. Anything else waits for the session's
-    /// next turn.
-    pub fn wakes(&self, in_tray: bool, ids: &[&str]) -> bool {
-        ids.iter().any(|id| self.addressed_to(id))
+    /// `ids` (ADR-406 item 2): it was posted in a named channel the session
+    /// is a member of (`in_channel`), `to` names it, it sat in its tray
+    /// (`in_tray`) with no `to` (sent to its project by an older writer), or
+    /// it replies to a message the session sent. Anything else, an `#open`
+    /// post that names someone else among it, waits for the session's next
+    /// turn. The caller has already set aside the session's own signals.
+    pub fn wakes(&self, in_tray: bool, in_channel: bool, ids: &[&str]) -> bool {
+        in_channel
+            || ids.iter().any(|id| self.addressed_to(id))
             || (in_tray && self.to.is_none())
             || self.reply_to.is_some_and(|re| ids.iter().any(|id| sent_by(re, id)))
     }
@@ -537,8 +540,9 @@ mod tests {
         assert!(theirs.tray_reads(&["me", "other"]));
     }
 
-    /// The wake rule: addressed to the session, sent to its project (a tray
-    /// signal without `to`), or a reply to a message it sent.
+    /// The wake rule: a post in one of the session's named channels,
+    /// addressed to the session, sent to its project (a tray signal without
+    /// `to`), or a reply to a message it sent.
     #[test]
     fn the_wake_rule() {
         let me = "11111111-2222-3333-4444-555555555555";
@@ -548,15 +552,18 @@ mod tests {
         let channel = parse_signal("claude:x|p|/x|to:#deploy|m").unwrap();
         let legacy = parse_signal("claude:x|p|/x|m").unwrap();
         let reply = parse_signal(&reply_line).unwrap();
-        assert!(dm.wakes(true, &[me]) && dm.wakes(false, &[me]));
-        assert!(legacy.wakes(true, &[me]), "sent to its project");
-        assert!(!legacy.wakes(false, &[me]), "an untagged #open post");
-        assert!(!open.wakes(false, &[me]));
-        assert!(!channel.wakes(false, &[me]));
-        assert!(reply.wakes(false, &[me]), "a reply to a message it sent");
+        let to_other = parse_signal("claude:x|p|/x|to:other-sess|m").unwrap();
+        assert!(dm.wakes(true, false, &[me]) && dm.wakes(false, false, &[me]));
+        assert!(legacy.wakes(true, false, &[me]), "sent to its project");
+        assert!(!legacy.wakes(false, false, &[me]), "an untagged #open post");
+        assert!(!open.wakes(false, false, &[me]));
+        assert!(!to_other.wakes(false, false, &[me]), "an #open post naming someone else");
+        assert!(channel.wakes(false, true, &[me]), "a post in its channel");
+        assert!(to_other.wakes(false, true, &[me]), "a channel post naming someone else");
+        assert!(reply.wakes(false, false, &[me]), "a reply to a message it sent");
         // After `/clear`, the old id still counts: a DM to it, a reply to it.
-        assert!(dm.wakes(false, &["new-id", me]) && reply.wakes(false, &["new-id", me]));
-        assert!(!reply.wakes(false, &["new-id"]));
+        assert!(dm.wakes(false, false, &["new-id", me]) && reply.wakes(false, false, &["new-id", me]));
+        assert!(!reply.wakes(false, false, &["new-id"]));
     }
 
     #[test]

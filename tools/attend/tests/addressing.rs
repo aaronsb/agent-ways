@@ -1,8 +1,9 @@
-//! Who a message is for, and where it lands (ADR-401 `to`, ADR-406 items 1,
+//! Who a message is for, and where it lands (ADR-401 `to`, ADR-406 items 2,
 //! 7 and 10). A reply goes to its parent's sender as a direct message, a send
 //! that names someone is direct, and a send that names no one goes to
 //! `#open`. A session reads a tray signal only when its `to` names it or it
-//! has no `to`, and an idle session wakes only for what is addressed to it.
+//! has no `to`, and an idle session wakes for what is addressed to it and
+//! for any post in one of its named channels.
 //!
 //! The verbs read HOME and the XDG roots from the environment, which is
 //! process-wide, so each in-process test holds [`LOCK`] while it points them
@@ -260,8 +261,8 @@ fn the_drain_skips_another_sessions_direct_message() {
 }
 
 /// The wake drain (`--wake`) delivers nothing and marks nothing while only
-/// `#open` and channel posts are pending; once something addressed to the
-/// session arrives, it delivers everything pending.
+/// `#open` posts are pending; once something addressed to the session
+/// arrives, it delivers everything pending.
 #[test]
 fn the_wake_drain_waits_for_an_addressed_message() {
     let f = Fixture::new("addr-wake");
@@ -370,7 +371,7 @@ fn a_direct_message_to_the_id_before_a_clear_is_still_read() {
     f.drain("plain");
     signal(&f, &f.project_tray(), "x-1-1", &format!("claude:x|p|/tmp/p|to:{old}|sent before the clear"));
     f.set_session_id("sess-addr-clear-new");
-    // The new id has had a turn, so its cache is warm (ADR-406 item 1).
+    // The new id has had a turn, so its cache is warm (ADR-406 item 2).
     f.last_turn_of("sess-addr-clear-new", Some(Duration::ZERO));
     let listed = f.ok(&["message", "inbox", "--json"]);
     assert!(listed.contains("sent before the clear"), "{listed}");
@@ -425,9 +426,9 @@ fn the_monitor_poller_leaves_a_siblings_direct_message_unread() {
 
 /// A channel post whose `to` names alpha is read by every member, beta
 /// included: `to` marks attention in a shared room and restricts no one.
-/// It wakes the session it names and no other.
+/// Like any post in a named channel, it wakes every idle member.
 #[test]
-fn a_channel_post_addressed_to_one_member_is_read_by_all_and_wakes_only_it() {
+fn a_channel_post_addressed_to_one_member_is_read_by_all_and_wakes_all() {
     let f = Fixture::new("addr-channel-to");
     f.ok(&["channel", "join", "room"]);
     f.drain("plain");
@@ -435,11 +436,9 @@ fn a_channel_post_addressed_to_one_member_is_read_by_all_and_wakes_only_it() {
     let listed = f.ok(&["message", "inbox", "--json"]);
     assert!(listed.contains("alpha, over to you"), "beta reads it: {listed}");
     let wake = |f: &Fixture| -> serde_json::Value { serde_json::from_str(&f.ok(&["message", "inbox", "--drain", "--json", "--wake"])).unwrap() };
-    assert_eq!(wake(&f)["messages"], serde_json::json!([]), "a post addressed to alpha does not wake beta");
-    signal(&f, "@room", "x-1-2", &format!("claude:x|p|/tmp/p|to:{}|beta, your turn", f.sid));
     let d = wake(&f);
     let bodies: Vec<&str> = d["messages"].as_array().unwrap().iter().map(|m| m["message"].as_str().unwrap()).collect();
-    assert_eq!(bodies, ["alpha, over to you", "beta, your turn"], "addressed to beta, it wakes beta: {d}");
+    assert_eq!(bodies, ["alpha, over to you"], "a post addressed to alpha wakes beta too: {d}");
 }
 
 /// A send that names a channel and someone stays in the channel, addressed

@@ -1,6 +1,6 @@
 # Delivery — how a message reaches a session
 
-A message written to the bus reaches a Claude session through one of two conduits. The Monitor line wakes an idle session. The Stop-hook drain delivers at the end of a turn, so a busy session sees its messages without waiting for a poll. Both read the same directories and record what they delivered in one seen-set, so each message is shown once (ADR-172). This page covers both conduits, which sessions they serve, and how a session opts out.
+A message written to the bus reaches a Claude session through one of two conduits. The Monitor line wakes an idle session, for a message addressed to it or any post in one of its named channels. Other `#open` posts wait for the next turn, and nothing wakes a session whose prompt cache has lapsed (ADR-406). The Stop-hook drain delivers at the end of a turn, so a busy session sees its messages without waiting for a poll. Both read the same directories and record what they delivered in one seen-set, so each message is shown once (ADR-172). This page covers both conduits, which sessions they serve, and how a session opts out.
 
 ```mermaid
 flowchart TD

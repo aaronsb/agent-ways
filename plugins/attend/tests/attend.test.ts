@@ -500,7 +500,7 @@ describe('dormant', () => {
     expect(await band($)).toBeDefined()
   })
 
-  test('an idle poll drains with --wake, so only what is addressed to the session starts a turn', async ($, on) => {
+  test('an idle poll drains with --wake, so only what would wake the session starts a turn', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { drains: [one(0, 'project'), DRAIN_EMPTY] })
     await $.session.start(INTERACTIVE)
@@ -723,7 +723,7 @@ describe('active', () => {
 
 // The operator: "It would be an expensive mistake to wake a cache expired
 // agent and reload all its context at expense." attend's wake drain holds an
-// addressed message while the cache has lapsed (ADR-406 item 1); the mod
+// addressed message while the cache has lapsed (ADR-406 item 2); the mod
 // starts no turn, the row says it waits, and it rides the operator's next
 // prompt.
 describe('a session whose cache has lapsed', () => {

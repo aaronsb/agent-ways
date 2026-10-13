@@ -1,4 +1,4 @@
-//! The cache gate on the wake rule (ADR-406 items 1 and 13): an idle
+//! The cache gate on the wake rule (ADR-406 items 2 and 13): an idle
 //! session whose prompt cache has lapsed is never woken. A message stays
 //! unread and reaches the session with the operator's next turn. The clock
 //! is keepwarm's, the newest turn in the transcript at its own cache tier,

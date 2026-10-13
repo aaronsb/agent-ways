@@ -30,9 +30,9 @@ pub struct Unread {
     pub held_back: usize,
     /// Whether the drain delivers to this session (`attend listen`).
     pub listening: bool,
-    /// A message addressed to the session is waiting and its prompt cache
-    /// has lapsed, so nothing wakes it: what waits goes with the
-    /// operator's next turn (ADR-406 item 1).
+    /// A message that would wake the session is waiting and its prompt
+    /// cache has lapsed, so nothing wakes it: what waits goes with the
+    /// operator's next turn (ADR-406 item 2).
     pub cache_lapsed: bool,
     /// One entry per room the session receives, in the drain's order:
     /// its project tray, `#open`, then each joined channel.
@@ -64,7 +64,7 @@ pub fn unread() -> Unread {
     // again, which reopens the cold start.
     let baselining = !listening || !snapshot.as_ref().is_some_and(|s| s.baselined);
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
-    let ids = crate::util::reading_ids(&me);
+    let ids = attend_presence::enrollment::reading_ids(&me);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let scan = crate::cmd::inbox::scan_pending(&dirs, &seen, &ids, baselining);
 

@@ -79,7 +79,7 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
     let me = current_session();
     // An unresolved session's id is a `pid-` placeholder no sender carries,
     // so nothing is skipped as its own.
-    let ids = crate::util::reading_ids(&me);
+    let ids = attend_presence::enrollment::reading_ids(&me);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let mut messages: Vec<Message> = Vec::new();
 
@@ -195,7 +195,7 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         let content = agent_identity::signal::read_signal_file(&path).map_err(|e| ReadError::Unreadable { error: e.to_string() })?;
         let sig = parse_signal(wire_line(&content)).ok_or(ReadError::Corrupt)?;
         // Another session's direct message is no message to this one.
-        let ids = crate::util::reading_ids(&me);
+        let ids = attend_presence::enrollment::reading_ids(&me);
         let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
         if dir.room.is_tray() && !sig.tray_reads(&ids) {
             return Err(ReadError::NotFound);
