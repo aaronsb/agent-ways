@@ -110,5 +110,9 @@ check "dev-restore leaves a real file" "mine" "$(cat "$DEVC/attend")"
 check "dev-restore adds no link that was absent" "no" "$([[ -e $DEVC/ways-audit || -L $DEVC/ways-audit ]] && echo yes || echo no)"
 make -s -C "$ROOT" dev-restore APP_DIR="$WORK/no-app" XDG_BIN="$DEVB" CLAUDE_BIN="$DEVC" >/dev/null 2>&1
 check "dev-restore refuses a missing app" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
+mkdir -p "$WORK/empty-xdg" "$WORK/empty-claude"
+none=$(make -s -C "$ROOT" dev-restore APP_DIR="$APP" XDG_BIN="$WORK/empty-xdg" CLAUDE_BIN="$WORK/empty-claude" 2>&1)
+check "dev-restore fails when it repoints nothing" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
+check "and says so" "yes" "$(has "$none" "no link repointed")"
 
 exit $fail

@@ -19,7 +19,7 @@ The build passes on the laptop, the report says "tests pass", and CI goes red an
 
 ## Order the passes by cost
 
-Iterate on the authoring host, where a build takes minutes, until the behaviour holds there. Then exercise each target and fix what breaks on each one. A target run started before the behaviour holds locally spends a slow round trip on a defect the fast host would have shown.
+Iterate on the authoring host, where the loop is shortest, until the behaviour holds there. Then exercise each target and fix what breaks on each one. A target run started before the behaviour holds locally spends a slow round trip on a defect the fast host would have shown.
 
 ## What differs between hosts
 

@@ -82,7 +82,7 @@ For multi-platform binaries, build per-platform and attach all of them to a sing
 
 ## Release Evaluated Batches
 
-A release is the slow outward step: a version bump, the full pipeline, a build for every platform, a published artifact. Try a fix with a local build for the authoring host, installed over the local copy, and evaluate it there. environment/hostparity orders the local and target passes. A change that holds locally and passes CI on every target waits for the next release. Cut the release when a batch of evaluated changes is ready. Keep one command that puts the released build back after a local evaluation.
+A release is the slow outward step: a version bump, the full pipeline, a build for every platform, a published artifact. Try a fix with a local build for the authoring host, installed over the local copy, and evaluate it there. environment/hostparity orders the local and target passes. A change that holds locally and passes CI on every target waits for the next release. Cut the release when a batch of evaluated changes is ready. Keep one command that puts the released build back after a local evaluation. Local evaluation is evidence about the change. The released artifact still passes its own gates.
 
 ## Two-Step Release Under Branch Protection
 

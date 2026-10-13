@@ -6,7 +6,7 @@
 #   ways manage update | ways manage repair | ways manage uninstall | make cut-release
 
 .DEFAULT_GOAL := help
-.PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries dev-install dev-restore clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-plugins test-lang test-locales test-multilingual test-live purge-attend-state
+.PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries dev-install dev-restore _unix_only clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-plugins test-lang test-locales test-multilingual test-live purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -188,26 +188,34 @@ update-binaries: $(SUITE_BINS:%=%-rebuild) way-embed-rebuild
 # at it: $(XDG_BIN)/<bin>, and $(CLAUDE_BIN)/<bin> where the projection holds a
 # link there. dev-restore points the same links back at the installed app.
 # Neither writes to the app's bin/, and a real file in place of a link is left
-# alone. way-embed is not rebuilt.
+# alone. Binaries only: hooks, ways, skills and the attend mod still come from
+# the app. way-embed is not rebuilt. Unix only: the links are symlinks.
 APP_DIR = $(or $(filter /%,$(XDG_DATA_HOME)),$(HOME)/.local/share)/agent-ways
 
-# $(1): the directory whose bin/ the links point at.
+# $(1): the directory whose bin/ the links point at. Prints each link it
+# repointed, and fails when it repointed none.
 define point_bins
-	@for b in $(SUITE_BINS); do \
+	@n=0; for b in $(SUITE_BINS); do \
 		src="$(1)/bin/$$b"; \
 		[ -e "$$src" ] || { echo "  ⚠ $$src missing; $$b left as it was"; continue; }; \
 		for dst in "$(XDG_BIN)/$$b" "$(CLAUDE_BIN)/$$b"; do \
-			if [ -L "$$dst" ]; then ln -sfn "$$src" "$$dst"; echo "  $$dst -> $$src"; \
+			if [ -L "$$dst" ]; then ln -sfn "$$src" "$$dst"; echo "  $$dst -> $$src"; n=$$((n+1)); \
 			elif [ -e "$$dst" ]; then echo "  ⚠ $$dst is a real file; not replacing it"; fi; \
 		done; \
-	done
+	done; \
+	if [ $$n -eq 0 ]; then echo "  ⚠ no link repointed: no suite binary is linked in $(XDG_BIN) or $(CLAUDE_BIN)"; exit 1; fi; \
+	echo "  repointed $$n links"
 endef
+
+dev-install dev-restore: _unix_only
+_unix_only:
+	@[ "$(OS)" != Windows_NT ] || { echo "error: dev-install and dev-restore are Unix only"; exit 1; }
 
 dev-install:
 	@bash scripts/check-rust.sh
 	cargo build --release --manifest-path tools/Cargo.toml $(SUITE_BINS:%=-p %)
 	@mkdir -p bin
-	@for b in $(SUITE_BINS); do $(LINK) "$(CURDIR)/tools/target/release/$$b$(EXE)" bin/$$b; done
+	@for b in $(SUITE_BINS); do ln -sf "$(CURDIR)/tools/target/release/$$b" bin/$$b; done
 	$(call point_bins,$(CURDIR))
 	@echo "Running processes keep the old binary: start a new session, and run 'ways-agent unload'."
 
