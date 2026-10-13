@@ -342,3 +342,48 @@ fn the_monitor_poller_wakes_only_for_an_addressed_message() {
     run.wait_for("the direct message", std::time::Duration::from_secs(30), |r| r.output().contains("for you"));
     assert!(run.output().contains("chatter on open"), "what was pending goes with it: {}", run.output());
 }
+
+/// `attend reply` with no `re`, as `attend_reply` sends it when the agent
+/// gives no handle, answers the newest message the drain delivered by the
+/// same rule: a person gets a direct message, a live session gets one in
+/// its tray, an exited session is refused by name, and nothing reaches
+/// `#open`.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_reply_without_re_follows_the_routing_and_never_falls_back_to_open() {
+    let f = Fixture::new("addr-reply-no-re");
+    f.ok(&["listen", "on"]);
+    f.drain("plain");
+    let open = f.signals().join("_broadcast");
+    let reply = |text: &str| f.attend(&["reply", "--json", "--", text]);
+    let open_files = || files(&open).len();
+
+    // An #open post from a person.
+    signal(&f, "_broadcast", "aaron-kitty-1-1", "external:aaron@kitty|aaron|/home/aaron|to:*|who is free?");
+    assert!(f.drain("plain").contains("who is free?"));
+    let out = reply("me");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let sent: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!((sent["to"].as_str(), sent["re"].as_str()), (Some("aaron"), Some("aaron-kitty-1-1")));
+    assert_eq!(read(&attend_groups::person_dir(&f.signals(), "aaron"), sent["id"].as_str().unwrap()).1, "me");
+    assert_eq!(open_files(), 1, "only the post itself is in #open");
+
+    // An #open post from a live session.
+    let peer = Peer::start(&f, "peer-sess", "peerproj");
+    signal(&f, "_broadcast", "peer-sess-1-2", &format!("claude:peer-sess|peerproj|{}|to:*|any ideas?", peer.cwd));
+    assert!(f.drain("plain").contains("any ideas?"));
+    let out = reply("one idea");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let sent: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(sent["to"].as_str(), Some("peer-sess"));
+    assert!(peer.tray(&f).join(format!("{}.signal", sent["id"].as_str().unwrap())).is_file());
+    assert_eq!(open_files(), 2);
+
+    // An #open post from a session that has exited.
+    signal(&f, "_broadcast", "gone-sess-1-3", "claude:gone-sess|goneproj|/tmp/goneproj|to:*|still there?");
+    assert!(f.drain("plain").contains("still there?"));
+    let out = reply("too late");
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("which has exited"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(open_files(), 3, "nothing fell back to #open");
+}
