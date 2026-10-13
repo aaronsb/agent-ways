@@ -19,9 +19,16 @@ fn read(rel: &str) -> String {
     std::fs::read_to_string(repo_root().join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
 }
 
-/// The single-quoted strings in `s`, in order.
+/// The single- or double-quoted strings in `s`, in order.
 fn quoted(s: &str) -> Vec<String> {
-    s.split('\'').skip(1).step_by(2).map(str::to_string).collect()
+    let mut out = Vec::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\'' || c == '"' {
+            out.push(chars.by_ref().take_while(|&d| d != c).collect());
+        }
+    }
+    out
 }
 
 /// One call: the command path and the flags it passes.
@@ -98,6 +105,7 @@ fn every_argv_the_mod_builds_parses() {
     let calls = mod_calls();
     assert!(calls.len() >= 10, "found only {} [ATTEND, ...] literals in lib.ts: {calls:?}", calls.len());
     for call in &calls {
+        assert!(!call.path.is_empty(), "{}: a call with no verb", call.origin);
         let (code, text) = help(&call.path);
         assert_eq!(code, Some(0), "{}: `attend {}` does not parse:\n{text}", call.origin, call.path.join(" "));
         assert_listed(&call.origin, &call.path);
