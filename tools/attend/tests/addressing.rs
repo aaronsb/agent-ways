@@ -27,12 +27,15 @@ fn enter(f: &Fixture) -> MutexGuard<'static, ()> {
 }
 
 /// A live Claude Code session `sid` at `<home>/<project>`: a process whose
-/// argv names claude, with a session record. Killed on drop.
+/// argv names claude, with a session record. Killed on drop. Only the peers
+/// sensor's process scan finds it.
+#[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
 struct Peer {
     child: std::process::Child,
     cwd: String,
 }
 
+#[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
 impl Peer {
     fn start(f: &Fixture, sid: &str, project: &str) -> Peer {
         let cwd = f.home.join(project);
@@ -73,6 +76,7 @@ fn read(dir: &Path, id: &str) -> (Option<String>, String) {
     (sig.to.map(str::to_string), sig.message.to_string())
 }
 
+#[cfg_attr(not(feature = "sensor-peers"), allow(dead_code))]
 fn files(dir: &Path) -> Vec<String> {
     std::fs::read_dir(dir).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default()
 }
@@ -113,6 +117,8 @@ fn open_is_a_channel_name_for_open() {
 
 /// A send naming a session, by its name or its id, is a direct message in
 /// its project's tray with `to` = its session id.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_send_naming_a_session_is_direct() {
     let f = Fixture::new("addr-session");
@@ -139,6 +145,8 @@ fn a_send_naming_a_person_lands_in_the_person_tray() {
 }
 
 /// A send to a project path is for every live session there.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn a_send_naming_a_project_is_for_every_live_session_there() {
     let f = Fixture::new("addr-project");
@@ -153,6 +161,8 @@ fn a_send_naming_a_project_is_for_every_live_session_there() {
 }
 
 /// A name two live sessions answer to is refused, with both listed.
+// Live sessions are found by the peers sensor's process scan.
+#[cfg(feature = "sensor-peers")]
 #[test]
 fn an_ambiguous_name_is_refused() {
     let f = Fixture::new("addr-ambiguous");

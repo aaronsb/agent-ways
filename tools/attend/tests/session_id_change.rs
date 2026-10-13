@@ -26,8 +26,9 @@ fn attend_run_follows_a_session_id_change() {
         std::fs::read_to_string(&registry).is_ok_and(|r| r.contains(&old))
     });
 
-    // A message the old id sees.
-    f.put("_broadcast", "other-1-before", "seen before the clear", Duration::ZERO);
+    // A message the old id sees: in the project tray, so it wakes the
+    // session and the sensor marks it (ADR-406 item 1).
+    f.put(&f.project_tray(), "other-1-before", "seen before the clear", Duration::ZERO);
     run.wait_for("the old id's checkpoint", Duration::from_secs(20), |_| {
         std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-before"))
     });
@@ -64,10 +65,11 @@ fn a_message_held_in_the_cooldown_survives_an_id_change() {
     let f = Fixture::new("idcooldown");
     let old = f.sid.clone();
     let run = f.run();
-    f.put("_broadcast", "other-1-a", "first message", Duration::ZERO);
+    // In the project tray, so each wakes the session (ADR-406 item 1).
+    f.put(&f.project_tray(), "other-1-a", "first message", Duration::ZERO);
     run.wait_for("the first message", Duration::from_secs(20), |r| r.output().contains("first message"));
     // The message cooldown is 3 s from that disclosure.
-    f.put("_broadcast", "other-1-b", "held in the cooldown", Duration::ZERO);
+    f.put(&f.project_tray(), "other-1-b", "held in the cooldown", Duration::ZERO);
     run.wait_for("the sensor to scan the second", Duration::from_secs(5), |_| {
         std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-b"))
     });
@@ -142,7 +144,8 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     f.ok(&["join", "side"]);
     {
         let run = f.run();
-        f.put("_broadcast", "other-1-early", "EARLY-OPEN", Duration::ZERO);
+        // In the project tray, so it wakes the session (ADR-406 item 1).
+        f.put(&f.project_tray(), "other-1-early", "EARLY-OPEN", Duration::ZERO);
         run.wait_for("the early message", Duration::from_secs(20), |r| r.output().contains("EARLY-OPEN"));
         run.wait_for("its checkpoint", Duration::from_secs(10), |_| {
             std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-early"))
@@ -163,7 +166,8 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     run.wait_for("the channel membership", Duration::from_secs(20), |_| {
         f.ok(&["channels", "--joined"]).contains("#side")
     });
-    f.put("@side", "other-1-side", "SIDE-AFTER", Duration::ZERO);
+    // Addressed to the session, so the channel post wakes it.
+    std::fs::write(f.signals().join("@side").join("other-1-side.signal"), "claude:other-session|elsewhere|/tmp/elsewhere|to:sess-restart-new|SIDE-AFTER\n").unwrap();
     run.wait_for("the channel message", Duration::from_secs(20), |r| r.output().contains("SIDE-AFTER"));
     assert!(!run.output().contains("EARLY-OPEN"), "nothing seen is shown again: {}", run.output());
 }

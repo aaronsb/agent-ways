@@ -186,8 +186,7 @@ pub fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
     // The tags: `key:value|` segments while the key is a known one not yet
     // seen and the value is in its class. `re:` is last; it ends the run,
     // and an empty one, `re:|`, marks an unthreaded message.
-    loop {
-        let Some((seg, rest)) = sig.message.split_once('|') else { break };
+    while let Some((seg, rest)) = sig.message.split_once('|') {
         let Some((key, value)) = seg.split_once(':') else { break };
         let slot = match key {
             "re" if value.is_empty() || is_valid_signal_id(value) => {
