@@ -19,11 +19,14 @@
 //!   Enter opens the focused element's menu, the one a right click opens
 //!   ([`ChatPane::activate`]), and on the feed the selected message's menu.
 //!   The shell's single keys work there as the help names them (`?`, `q`,
-//!   `m`), and on a column row the digits pick a channel by its number; any
-//!   other character goes to the compose box and is typed there.
+//!   `m`), and on a channel's row the digits pick a channel by its number;
+//!   any other character, a digit on an agent's row among them, goes to the
+//!   compose box and is typed there.
 //! - Esc moves along one cycle: the box, the feed, the `≡` menu, the tab or
 //!   column row the focus was last on (the feed when there is none), the
-//!   `≡` menu again. An overlay that is open takes the first Esc.
+//!   `≡` menu again. Tab out of the box onto `≡` is not remembered, so the
+//!   cycle comes back to the tab or row focused before. An overlay that is
+//!   open takes the first Esc.
 //!
 //! These rules are [`ix::step`], a pure function over the one interaction
 //! state ([`ix::Ix`]); [`ChatPane::dispatch`] is where every input that can

@@ -628,6 +628,44 @@ fn a_digit_picks_a_channel_on_a_column_row_and_is_typed_elsewhere() {
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()), "a number past the channels does nothing");
 }
 
+/// Agents carry no number: on an agent's row a plain digit is typed in the
+/// box, as any other character outside the chat is.
+#[test]
+fn a_digit_on_an_agent_row_is_typed_in_the_box() {
+    let mut c = chat();
+    press(&mut c, KeyCode::F(2));
+    press(&mut c, KeyCode::Down);
+    let row = focused(&mut c);
+    assert!(row.starts_with("row ") && !row.starts_with("row #"), "an agent's row: {row}");
+    assert!(!bar(&mut c).contains("1-9"), "the footer names no digits there: {}", bar(&mut c));
+    press(&mut c, KeyCode::Char('2'));
+    assert_eq!((c.foreground().clone(), focused(&mut c), c.input().text()), (Tab::Merged, "mode chat".to_string(), "2"));
+}
+
+/// Tab out of the box onto `≡` is no visit: the Esc cycle comes back to
+/// the row or tab focused before, or to the feed when there was none.
+#[test]
+fn tab_out_of_the_box_leaves_the_esc_cycle_where_it_was() {
+    let mut c = chat();
+    typed(&mut c, "hello");
+    press(&mut c, KeyCode::Tab);
+    assert_eq!(focused(&mut c), "tab ≡");
+    press(&mut c, KeyCode::Esc);
+    assert!(menu(&mut c).is_some_and(|m| m.starts_with("attend-chat")), "{}", screen(&mut c));
+    press(&mut c, KeyCode::Esc);
+    assert_eq!((menu(&mut c), focused(&mut c)), (None, "mode feed".to_string()), "nothing focused before: the feed");
+    let mut c = chat();
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::BackTab);
+    assert_eq!(focused(&mut c), "row #infra");
+    typed(&mut c, "hello");
+    assert_eq!(focused(&mut c), "mode chat");
+    press(&mut c, KeyCode::Tab);
+    press(&mut c, KeyCode::Esc);
+    press(&mut c, KeyCode::Esc);
+    assert_eq!((menu(&mut c), focused(&mut c)), (None, "row #infra".to_string()), "the row focused before");
+}
+
 /// At the exit guard over the entry dialog, typing goes on into the
 /// dialog, never the compose draft.
 #[test]

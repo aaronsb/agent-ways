@@ -332,7 +332,7 @@ fn the_columns_numbers_pick_a_channel() {
         cell("1 is the first channel, #open", compose.clone(), Ev::Numbered { n: 1, menu: true }, view(), compose.clone(), vec![pick("open", false), Redraw]),
         cell("3 is the third channel, past the agents", compose.clone(), Ev::Numbered { n: 3, menu: false }, view(), compose.clone(), vec![pick("infra", false), Redraw]),
         cell("Ctrl+digit asks for the menu on a repeat where menu_on_repeat allows", compose.clone(), Ev::Numbered { n: 2, menu: true }, repeat.clone(), compose.clone(), vec![pick("deploy", true), Redraw]),
-        cell("a plain digit never asks for the menu", on_row(0), Ev::Numbered { n: 2, menu: false }, repeat.clone(), on_row(3), vec![Follow, pick("deploy", false), Redraw]),
+        cell("a plain digit never asks for the menu", on_row(2), Ev::Numbered { n: 2, menu: false }, repeat.clone(), on_row(3), vec![Follow, pick("deploy", false), Redraw]),
         cell("0 is the operator view", compose.clone(), Ev::Numbered { n: 0, menu: false }, view(), compose.clone(), vec![act(Target::Merged, How::Select { repeat: false }, None), Redraw]),
         cell("a number past the channels does nothing", compose.clone(), Ev::Numbered { n: 4, menu: true }, view(), compose.clone(), vec![]),
         cell("on a column row the focus moves to the row picked", on_row(1), Ev::Numbered { n: 3, menu: false }, view(), on_row(4), vec![Follow, pick("infra", false), Redraw]),
@@ -426,6 +426,22 @@ fn esc_moves_along_one_cycle() {
             vec![Redraw, Redraw],
         ),
         cell("≡ itself: Esc opens its menu", tab(Slot::Common), Ev::Key(key(KeyCode::Esc)), view(), tab(Slot::Common), menu_fx()),
+        cell(
+            "Tab out of the box onto ≡: the row stays remembered",
+            Ix { focus: Focus::Compose, last_nav: row3.clone(), ..Ix::default() },
+            Ev::Key(key(KeyCode::Tab)),
+            drafted(),
+            Ix { focus: Focus::Tab(Slot::Common), last_nav: row3.clone(), ..Ix::default() },
+            vec![Redraw],
+        ),
+        cell(
+            "↓ out of the box onto ≡: nothing remembered stays so",
+            at(Focus::Compose),
+            Ev::Key(key(KeyCode::Down)),
+            View { caret_end: true, ..drafted() },
+            at(Focus::Tab(Slot::Common)),
+            vec![Redraw],
+        ),
         cell(
             "a menu Enter opened closes: the focus stays on ≡",
             Ix { overlays: vec![esc_menu(false)], ..tab(Slot::Common) },
@@ -574,7 +590,9 @@ fn the_keymap_context_follows_the_focus() {
     for slot in [Slot::Common, Slot::New, Slot::Tab(chan("deploy")), Slot::Tab(Tab::Merged)] {
         assert_eq!(ctx(Focus::Tab(slot)), Ctx { text: false, digits: false, owns_bar: true, esc_quits: false }, "a digit on the bar is typed");
     }
-    assert_eq!(ctx(Focus::Row(0)), Ctx { text: false, digits: true, owns_bar: true, esc_quits: false });
+    let row = Ctx { text: false, digits: true, owns_bar: true, esc_quits: false };
+    assert_eq!(on_row(2).ctx(), row, "a channel row takes the digits as the column's numbers");
+    assert_eq!(on_row(0).ctx(), Ctx { digits: false, ..row }, "an agent row carries no number: a digit is typed in the box");
 }
 
 #[test]
