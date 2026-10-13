@@ -21,9 +21,9 @@ export type AttendStatus = {
    *  prompted yet: no turn is submitted, and what is pending rides the first
    *  prompt. Kept here so a reloaded module keeps holding. */
   awaitingOperator: boolean
-  /** An addressed message waits because the prompt cache has lapsed: the
-   *  session is not woken, and what waits rides the operator's next prompt
-   *  (ADR-406 item 1). */
+  /** A message that would wake the session waits because the prompt cache
+   *  has lapsed: the session is not woken, and what waits rides the
+   *  operator's next prompt (ADR-406 item 1). */
   cacheLapsed: boolean
 }
 

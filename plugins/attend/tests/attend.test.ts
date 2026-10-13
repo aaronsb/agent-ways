@@ -500,7 +500,7 @@ describe('dormant', () => {
     expect(await band($)).toBeDefined()
   })
 
-  test('an idle poll drains with --wake, so only what is addressed to the session starts a turn', async ($, on) => {
+  test('an idle poll drains with --wake, so only what would wake the session starts a turn', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { drains: [one(0, 'project'), DRAIN_EMPTY] })
     await $.session.start(INTERACTIVE)

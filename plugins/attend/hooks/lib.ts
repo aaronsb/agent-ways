@@ -44,8 +44,8 @@ export const LISTEN_ON_ARGV = [ATTEND, 'listen', 'on', '--host', 'mod'] as const
 export const LISTEN_OFF_ARGV = [ATTEND, 'listen', 'off'] as const
 export const DRAIN_ARGV = [ATTEND, 'message', 'inbox', '--drain', '--json'] as const
 /** The idle poll's drain: it takes nothing unless something pending is
- *  addressed to this session, sent to its project, or a reply to a message
- *  it sent (ADR-406 item 1). */
+ *  addressed to this session, sent to its project, a reply to a message it
+ *  sent, or a post in one of its named channels (ADR-406 item 1). */
 export const WAKE_DRAIN_ARGV = [ATTEND, 'message', 'inbox', '--drain', '--json', '--wake'] as const
 export const UNREAD_ARGV = [ATTEND, 'message', 'unread', '--json'] as const
 export const PEERS_ARGV = [ATTEND, 'peer', 'list'] as const
@@ -159,8 +159,8 @@ export type Listed = {
  *  own, never messages. `status` is `drained`, or why nothing was:
  *  `not_listening` (listening was turned off, here or elsewhere) or
  *  `unresolved` (attend cannot tell which session this is). `cacheLapsed`:
- *  a wake drain held an addressed message because the session's prompt
- *  cache has lapsed (ADR-406 item 1). Undefined where the output is not a
+ *  a wake drain held a message that would wake the session because its
+ *  prompt cache has lapsed (ADR-406 item 1). Undefined where the output is not a
  *  schema-1 document (an attend without `--drain --json`, or one whose
  *  document changed shape). */
 export type Drain = {

@@ -176,9 +176,9 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
         }
     } else if let (Tab::Channel(channel), true) = (foreground, recipients.iter().all(|r| matches!(r, Addressed::Agent(_)))) {
         // `@Name` while a channel is shown stays in that channel, addressed
-        // to the agents it names, which wakes them; the other members read
-        // it at their next turn. Only the operator view makes it a direct
-        // message (ADR-401, `to`).
+        // to the agents it names; like any channel post it wakes the idle
+        // members. Only the operator view makes it a direct message
+        // (ADR-401, `to`).
         let to = match resolve_recipients(&recipients, &agents, &quiet, &session_of) {
             Ok(dests) => dests.into_iter().map(|(_, to)| to).next().unwrap_or_default(),
             Err(refusal) => return EnterAction::StatusOnly(refusal),
