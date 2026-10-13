@@ -61,9 +61,9 @@ side-show    | base  | wait:Agents side:#infra
 side-arrows  | base  | wait:Agents side:#open Down Down Up wait:_column_
 side-enter   | base  | wait:Agents side:#infra Enter wait:pick_one:_#infra
 side-menu    | base  | wait:Agents side:#infra side:#infra wait:pick
-key-dock     | base  | wait:Agents M-1 M-1 wait:pick
+key-dock     | base  | wait:Agents M-2 M-2 wait:pick
 foot-keys    | many  | wait:Agents F2 Down End Up Enter wait:pick
-foot-click   | many  | wait:Agents F2 Down End Escape side:#infra side:#infra wait:pick
+foot-click   | many  | wait:Agents F2 Down End side:#infra side:#infra wait:pick
 keys         | base  | wait:Agents F2 Down Down wait:↑_↓_move
 menu-keys    | base  | wait:Agents F2 Down Down Enter wait:pick
 focus-resize | base  | wait:Agents F2 Down Down wait:↑_↓_move resize:70 gone:Agents
@@ -89,9 +89,9 @@ prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc clic
 entry-name   | base  | wait:Agents text:draft C-n wait:new_channel_name text:release
 entry-bad    | base  | wait:Agents text:draft C-n wait:new_channel_name text:no_spaces Enter wait:no_spaces
 entry-desc   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Describe wait:describe_#deploy text:_for_staging
-entry-tab    | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc click:1_#deploy gone:new_channel_name
-entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name Escape text:abc
-esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape gone:pick
+entry-tab    | base  | wait:Agents text:draft C-n wait:new_channel_name text:abc click:#open gone:new_channel_name
+entry-row    | base  | wait:Agents click:+ wait:new_channel_name side:#infra gone:new_channel_name text:abc
+esc-twice    | base  | wait:Agents side:#infra side:#infra wait:pick Escape Escape wait:pick_one:_attend-chat
 common-quit  | base  | wait:Agents click:≡ wait:Quit
 quit-click   | base  | wait:Agents text:half click:≡ wait:Quit click:Quit wait:discards
 menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_D4 Down
@@ -99,27 +99,27 @@ theme-sub    | base  | wait:Agents click:≡ wait:Theme click:Theme wait:theme_f
 keys-sub     | base  | wait:Agents click:≡ wait:Keybinding click:Keybinding wait:keybinding_set
 remove-sub   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Remove_agent wait:remove_from
 settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:sets_one
-tab-closes   | base  | wait:Agents M-1 M-1 wait:pick click:1_#deploy gone:pick
+tab-closes   | base  | wait:Agents M-2 M-2 wait:pick click:#deploy_— gone:pick
 guard-name   | base  | wait:Agents C-n wait:new_channel_name text:abc C-c wait:being_typed
 rclick-row   | base  | wait:Agents rside:#infra wait:pick_one:_#infra
 rclick-agent | base  | wait:Agents rside:● wait:Address
 rclick-name  | base  | wait:signing rfeed:gamma wait:Address
-flag-click   | base  | wait:Agents M-1 wait:rollout_is_green last:#deploy wait:pick_one:_#deploy
+flag-click   | base  | wait:Agents M-2 wait:rollout_is_green last:#deploy wait:pick_one:_#deploy
 flag-merged  | base  | wait:Agents last:#open wait:pick_one:_#open
 key-help     | base  | wait:Agents F1 wait:any_other_key
-key-help-nav | base  | wait:Agents BTab wait:Enter_sender F1 wait:any_other_key
+key-help-nav | base  | wait:Agents BTab BTab wait:↑_↓_move F1 wait:any_other_key
 header       | base  | wait:signing_off
 header-long  | long  | wait:keeps_the_time
 header-human | own   | wait:watching_the
 header-pick  | base  | wait:signing_off click:signing_off
-header-chan  | base  | wait:Agents M-1 wait:rollout_is_green
+header-chan  | base  | wait:Agents M-2 wait:rollout_is_green
 quit-entry   | base  | wait:Agents text:half C-n wait:new_channel_name text:abc click:≡ wait:Quit click:Quit wait:discards
 too-long     | base  | wait:Agents bigpaste:65537 wait:xxxxxxxxxx Enter wait:over_attend's_limit
 focus-compose | base  | wait:Agents wait:Enter_send
 focus-view   | base  | wait:Agents F2 wait:▸⋯all
 focus-open   | base  | wait:Agents F2 Left wait:▸#open
 focus-plus   | base  | wait:Agents F2 Left Left wait:▸+
-focus-tab    | base  | wait:Agents F2 Left Left Left Left wait:▸1_#deploy
+focus-tab    | base  | wait:Agents M-2 F2 wait:▸#deploy
 focus-common | base  | wait:Agents text:x Down wait:▸≡
 focus-agent  | base  | wait:Agents F2 Down wait:_column_
 focus-row    | base  | wait:Agents F2 Down End Up wait:_column_
@@ -128,15 +128,28 @@ focus-msg    | base  | wait:Agents BTab Up Up wait:select
 enter-view   | base  | wait:Agents F2 Enter wait:pick_one:_⋯all
 enter-row    | base  | wait:Agents F2 Down End Up Enter wait:pick_one:_#infra
 enter-agent  | base  | wait:Agents F2 Down Enter wait:Add_agent_to_chat
-enter-feed   | base  | wait:Agents BTab Enter wait:Add_agent_to_chat
+enter-feed   | base  | wait:Agents BTab Enter wait:message_from
 enter-plus   | base  | wait:Agents F2 Left Left Enter wait:new_channel_name
 add-menu     | base  | wait:Agents rside:● wait:Add_agent_to_chat
 add-pick     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel
 add-done     | base  | wait:Agents rside:● wait:Add_agent_to_chat click:Add_agent_to_chat wait:add_to_channel Enter wait:invite
 narrow-bar   | many  | wait:Agents resize:60 wait:⋯all
 arrow-empty  | base  | wait:Agents Up text:1x wait:>_1x
-q-asks       | base  | wait:Agents BTab q wait:quit?
-walk-back    | base  | wait:Agents text:x Down Tab wait:rollout_is_green Tab Tab Tab Tab Tab Tab wait:_column_
+q-asks       | base  | wait:Agents BTab BTab q wait:quit?
+walk-back    | base  | wait:Agents text:x Down Tab Tab Tab Tab wait:_column_
+bar-active   | base  | wait:Agents M-2 wait:#deploy_—
+bar-narrow   | base  | wait:Agents M-2 wait:#deploy_— resize:60 wait:⋯all
+digit-row    | base  | wait:Agents F2 Down End 2 wait:#deploy_—
+digit-typed  | base  | wait:Agents F2 2 wait:>_2
+tab-leaves   | base  | wait:Agents text:hello Tab wait:▸≡
+feed-type    | base  | wait:Agents BTab wait:_feed_ q wait:>_q
+esc-feed     | base  | wait:Agents text:draft Escape wait:_feed_
+esc-menu     | base  | wait:Agents Escape wait:_feed_ Escape wait:pick_one:_attend-chat
+esc-back     | base  | wait:Agents BTab BTab Escape wait:pick_one:_attend-chat Escape gone:pick wait:_column_
+esc-feed-back | base | wait:Agents Escape Escape wait:pick_one:_attend-chat Escape gone:pick wait:_feed_
+msg-menu     | base  | wait:Agents BTab Up wait:select Enter wait:message_from
+msg-quote    | base  | wait:Agents BTab Up wait:select Enter wait:message_from click:Quote wait:>_>
+msg-copy     | base  | wait:Agents BTab Up wait:select Enter wait:message_from click:Copy wait:clipboard
 add-chan     | base  | wait:Agents side:#infra side:#infra wait:pick click:Add_agent wait:add_to_#infra
 "
 
