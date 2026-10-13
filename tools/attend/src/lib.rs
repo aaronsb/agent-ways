@@ -41,8 +41,10 @@ use attend_state as state;
 use attend_config as config;
 
 use clap::Parser;
-use cli::{Cli, Commands, ConfigCmd, ListenCmd, PermissionsCmd};
-use cli::KeepwarmCmd;
+use cli::{
+    ChannelCmd, ChannelGroup, ChannelListArgs, Cli, Commands, ConfigCmd, InboxArgs, JsonArgs, KeepwarmCmd, ListenCmd,
+    MessageCmd, PeerCmd, PermissionsCmd, ReplyArgs, SendArgs, SensorCmd,
+};
 use sensors::Focus;
 
 /// The clap command tree the binary parses, for renderings outside it
@@ -80,19 +82,24 @@ pub fn cli_main() {
 
     match command {
         Commands::Run { catchup } => cmd::run::cmd_run_with_catchup(catchup),
-        Commands::Peers { json } => cmd::peers::cmd_peers(json),
-        Commands::Inbox { msg_id, limit, page, before, drain, wake, format, json } => match (drain, msg_id) {
-            (true, Some(_)) => {
-                let why = "--drain drains everything pending; it cannot be combined with a message id";
-                cmd::refuse_usage(why, why, json);
-            }
-            (true, None) => cmd::inbox::cmd_inbox_drain(if json { "json" } else { &format }, wake),
-            (false, Some(id)) => cmd::inbox::cmd_inbox_read(&id, json),
-            (false, None) => cmd::inbox::cmd_inbox(limit, page, before, json),
+        Commands::Listen { sub, json } => cmd::listen::cmd_listen(sub.unwrap_or(ListenCmd::Status), json),
+        Commands::Message { inbox: flags, sub } => match sub {
+            None => inbox(InboxArgs { msg_id: None, flags }),
+            Some(MessageCmd::Send(a)) => send(a),
+            Some(MessageCmd::Reply(a)) => reply(a),
+            Some(MessageCmd::Inbox(a)) => inbox(a),
+            Some(MessageCmd::Unread(a)) => cmd::listen::cmd_unread(a.json),
+            Some(MessageCmd::Cleanup(a)) => cmd::cleanup::cmd_cleanup(a.dry_run, a.all),
         },
-        Commands::Status { json } => cmd::status::cmd_status(json),
-        Commands::Whoami { machine, display } => cmd::whoami::cmd_whoami(machine, display),
-        Commands::Sensors => cmd::sensors::cmd_sensors(),
+        Commands::Channel(g) => channel(g),
+        Commands::Peer { list, sub } => match sub {
+            None | Some(PeerCmd::List(_)) => {
+                let json = list.json || matches!(sub, Some(PeerCmd::List(JsonArgs { json: true })));
+                cmd::peers::cmd_peers(json)
+            }
+            Some(PeerCmd::Whoami(a)) => cmd::whoami::cmd_whoami(a.machine, a.display),
+            Some(PeerCmd::Status(a)) => cmd::status::cmd_status(a.json),
+        },
         #[cfg(feature = "sensor-keepwarm")]
         Commands::Keepwarm { sub } => cmd::keepwarm::cmd_keepwarm(sub.unwrap_or(KeepwarmCmd::Status)),
         // A build without the sensor cannot judge. `check` is polled by a
@@ -105,51 +112,148 @@ pub fn cli_main() {
                 std::process::exit(1);
             }
         }
-        Commands::Send { to, channel, re, json, message } => {
-            cmd::send::reject_flag_like("send", cmd::send::SEND_FLAGS, &message, json);
-            cmd::send::cmd_send(to, channel, re, message, json);
-        }
-        Commands::Reply { re, to, channel, json, message } => {
-            cmd::send::reject_flag_like("reply", cmd::send::REPLY_FLAGS, &message, json);
-            cmd::send::cmd_reply(re, to, channel, message, json);
-        }
-        Commands::Listen { sub, json } => cmd::listen::cmd_listen(sub.unwrap_or(ListenCmd::Status), json),
-        Commands::Unread { json } => cmd::listen::cmd_unread(json),
         Commands::Chat { passthrough } => exec_chat(passthrough),
-        // Chat-idiom primary verbs (ADR-173). The `#` prefix is
-        // tolerated so `attend join "#deploy"` works; bare names stay
-        // primary because an unquoted `#` starts a shell comment.
-        Commands::Join { name, pin, json } => cmd::channels::cmd_join(&name, pin, json),
-        Commands::Leave { name, json } => cmd::channels::cmd_leave(&name, json),
-        Commands::Channels { joined: true, json, sub: None } => cmd::channels::cmd_joined(json),
-        Commands::Channels { json: true, sub: Some(sub), .. } if !matches!(sub, cli::ChannelsCmd::List) => {
-            let why = "--json applies to the channel listing, not to its lifecycle subcommands";
+        Commands::Sensor { sub } => match sub.unwrap_or(SensorCmd::List) {
+            SensorCmd::List => cmd::sensors::cmd_sensors(),
+            SensorCmd::Permissions => cmd::permissions::cmd_permissions_audit(),
+        },
+        Commands::Config { sub } => dispatch_config(sub.unwrap_or(ConfigCmd::Show)),
+
+        // The one-release aliases (ADR-413 item 5), removed by issue #982.
+        Commands::Send(a) => {
+            moved("send", "message send");
+            send(a)
+        }
+        Commands::Reply(a) => {
+            moved("reply", "message reply");
+            reply(a)
+        }
+        Commands::Inbox(a) => {
+            moved("inbox", "message inbox");
+            inbox(a)
+        }
+        Commands::Unread(a) => {
+            moved("unread", "message unread");
+            cmd::listen::cmd_unread(a.json)
+        }
+        Commands::Cleanup(a) => {
+            moved("cleanup", "message cleanup");
+            cmd::cleanup::cmd_cleanup(a.dry_run, a.all)
+        }
+        Commands::Join(a) => {
+            moved("join", "channel join");
+            cmd::channels::cmd_join(&a.name, a.pin, a.json)
+        }
+        Commands::Leave(a) => {
+            moved("leave", "channel leave");
+            cmd::channels::cmd_leave(&a.name, a.json)
+        }
+        Commands::Channels(g) => {
+            moved("channels", "channel");
+            channel(g)
+        }
+        Commands::Dissolve(a) => {
+            moved("dissolve", "channel dissolve");
+            cmd::channels::cmd_dissolve(a.name.trim_start_matches('#'))
+        }
+        Commands::Scene(a) => {
+            moved("scene", "channel scene");
+            cmd::scene::cmd_scene(&a.name)
+        }
+        Commands::Scenes => {
+            moved("scenes", "channel scenes");
+            cmd::scene::cmd_scenes()
+        }
+        Commands::Peers(a) => {
+            moved("peers", "peer list");
+            cmd::peers::cmd_peers(a.json)
+        }
+        Commands::Whoami(a) => {
+            moved("whoami", "peer whoami");
+            cmd::whoami::cmd_whoami(a.machine, a.display)
+        }
+        Commands::Status(a) => {
+            moved("status", "peer status");
+            cmd::status::cmd_status(a.json)
+        }
+        Commands::Sensors => {
+            moved("sensors", "sensor list");
+            cmd::sensors::cmd_sensors()
+        }
+        Commands::Permissions { sub } => {
+            moved("permissions", "sensor permissions");
+            match sub.unwrap_or(PermissionsCmd::Audit) {
+                PermissionsCmd::Audit => cmd::permissions::cmd_permissions_audit(),
+            }
+        }
+        Commands::Tune(a) => {
+            moved("tune", "config tune");
+            cmd::tune::cmd_tune(a.apply)
+        }
+    }
+}
+
+/// The one-release alias notice (ADR-413 item 5): the old flat verb, then
+/// the grouped form that replaces it. Removed with the aliases by issue #982.
+fn moved(old: &str, new: &str) {
+    eprintln!("note: `attend {old}` is now `attend {new}`");
+}
+
+fn send(a: SendArgs) {
+    cmd::send::reject_flag_like("send", cmd::send::SEND_FLAGS, &a.message, a.json);
+    cmd::send::cmd_send(a.to, a.channel, a.re, a.message, a.json);
+}
+
+fn reply(a: ReplyArgs) {
+    cmd::send::reject_flag_like("reply", cmd::send::REPLY_FLAGS, &a.message, a.json);
+    cmd::send::cmd_reply(a.re, a.to, a.channel, a.message, a.json);
+}
+
+fn inbox(InboxArgs { msg_id, flags: f }: InboxArgs) {
+    match (f.drain, msg_id) {
+        (true, Some(_)) => {
+            let why = "--drain drains everything pending; it cannot be combined with a message id";
+            cmd::refuse_usage(why, why, f.json);
+        }
+        (true, None) => cmd::inbox::cmd_inbox_drain(if f.json { "json" } else { &f.format }, f.wake),
+        (false, Some(id)) => cmd::inbox::cmd_inbox_read(&id, f.json),
+        (false, None) => cmd::inbox::cmd_inbox(f.limit, f.page, f.before, f.json),
+    }
+}
+
+/// `attend channel`. The listing's flags apply with no subcommand or with
+/// `list`. Chat-idiom verbs (ADR-173): the `#` prefix is tolerated so
+/// `attend channel join "#deploy"` works; bare names stay primary because an
+/// unquoted `#` starts a shell comment.
+fn channel(ChannelGroup { list, sub }: ChannelGroup) {
+    match sub {
+        None => list_channels(list),
+        Some(ChannelCmd::List(own)) => list_channels(ChannelListArgs { joined: list.joined || own.joined, json: list.json || own.json }),
+        Some(_) if list.json => {
+            let why = "--json applies to the channel listing, not to the other channel verbs";
             cmd::refuse_usage(why, why, true);
         }
-        Commands::Channels { sub, json, .. } => match sub {
-            None | Some(cli::ChannelsCmd::List) => cmd::channels::cmd_channels(json),
-            Some(cli::ChannelsCmd::Pin { name }) => cmd::channels::cmd_pin(&name),
-            Some(cli::ChannelsCmd::Unpin { name }) => cmd::channels::cmd_unpin(&name),
-            Some(cli::ChannelsCmd::Create { name, description }) => {
-                cmd::channels::cmd_create(name.trim_start_matches('#'), &description.join(" "));
-            }
-            Some(cli::ChannelsCmd::Describe { name, description }) => {
-                cmd::channels::cmd_describe(name.trim_start_matches('#'), &description.join(" "));
-            }
-        },
-        Commands::Dissolve { name } => {
-            cmd::channels::cmd_dissolve(name.trim_start_matches('#'));
+        Some(ChannelCmd::Join(a)) => cmd::channels::cmd_join(&a.name, a.pin, a.json),
+        Some(ChannelCmd::Leave(a)) => cmd::channels::cmd_leave(&a.name, a.json),
+        Some(ChannelCmd::Create { name, description }) => {
+            cmd::channels::cmd_create(name.trim_start_matches('#'), &description.join(" "));
         }
-        Commands::Scene { name } => cmd::scene::cmd_scene(&name),
-        Commands::Scenes => cmd::scene::cmd_scenes(),
-        Commands::Tune { apply } => cmd::tune::cmd_tune(apply),
-        Commands::Permissions { sub } => match sub.unwrap_or(PermissionsCmd::Audit) {
-            PermissionsCmd::Audit => cmd::permissions::cmd_permissions_audit(),
-        },
-        Commands::Cleanup { dry_run, all } => {
-            cmd::cleanup::cmd_cleanup(dry_run, all);
+        Some(ChannelCmd::Describe { name, description }) => {
+            cmd::channels::cmd_describe(name.trim_start_matches('#'), &description.join(" "));
         }
-        Commands::Config { sub } => dispatch_config(sub.unwrap_or(ConfigCmd::Show)),
+        Some(ChannelCmd::Pin(a)) => cmd::channels::cmd_pin(&a.name),
+        Some(ChannelCmd::Unpin(a)) => cmd::channels::cmd_unpin(&a.name),
+        Some(ChannelCmd::Dissolve(a)) => cmd::channels::cmd_dissolve(a.name.trim_start_matches('#')),
+        Some(ChannelCmd::Scene(a)) => cmd::scene::cmd_scene(&a.name),
+        Some(ChannelCmd::Scenes) => cmd::scene::cmd_scenes(),
+    }
+}
+
+fn list_channels(a: ChannelListArgs) {
+    if a.joined {
+        cmd::channels::cmd_joined(a.json)
+    } else {
+        cmd::channels::cmd_channels(a.json)
     }
 }
 
@@ -217,5 +321,6 @@ fn dispatch_config(sub: ConfigCmd) {
                 std::process::exit(code);
             }
         }
+        ConfigCmd::Tune(a) => cmd::tune::cmd_tune(a.apply),
     }
 }
