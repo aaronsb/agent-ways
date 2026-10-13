@@ -311,6 +311,12 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 }
+                // A direct message to another session at this project shares
+                // the tray and is not this session's to read (ADR-401, `to`).
+                if dir.room == Room::Project && !sig.tray_reads(&own_session_id) {
+                    self.seen_signals.insert(key);
+                    continue;
+                }
                 let mtime = fs::metadata(&path)
                     .and_then(|m| m.modified())
                     .unwrap_or(std::time::UNIX_EPOCH);
@@ -330,7 +336,21 @@ impl PeerSensor {
             attend_state::cold_start::plan(&pending, attend_state::cold_start::Window::for_session(&own_session_id))
         });
 
+        // The wake rule (ADR-406 item 1): a line on stdout wakes an idle
+        // session, so this poll emits only when something pending is
+        // addressed to it. Otherwise `#open` and channel posts stay unseen
+        // and reach it with its next turn, through the Stop-hook drain.
+        let wakes = found.iter().enumerate().any(|(i, f)| {
+            plan.as_ref().is_none_or(|p| p.deliver[i])
+                && agent_identity::parse_signal(agent_identity::wire_line(&f.content))
+                    .is_some_and(|sig| sig.wakes(where_found(&scan_dirs[f.room].room), &own_session_id))
+        });
+
         for (i, f) in found.into_iter().enumerate() {
+            let shown = plan.as_ref().is_none_or(|p| p.deliver[i]);
+            if shown && !wakes {
+                continue;
+            }
             // Authored messages are durable: reading one marks it seen
             // (dedup), but the file is NEVER deleted here. Destroying a
             // signal that another peer — or this same session after a
@@ -340,7 +360,7 @@ impl PeerSensor {
             // sweep (a tray dies when its project is gone), not by a
             // per-read wall-clock timer.
             self.seen_signals.insert(f.key);
-            if plan.as_ref().is_some_and(|p| !p.deliver[i]) {
+            if !shown {
                 continue;
             }
             let Some(agent_identity::ParsedSignal { from, cwd: source_cwd, message, .. }) =
@@ -402,7 +422,7 @@ impl PeerSensor {
             if let Some(ref sid) = self.own_session_id {
                 if source_cwd != focus.working_dir {
                     let said = last_inbound::Said::of(&scan_dirs[f.room].room, &from, source_cwd);
-                    last_inbound::record(sid, &f.signal_id, &said);
+                    last_inbound::record(sid, &f.signal_id, &said, &from);
                 }
             }
         }
@@ -762,6 +782,14 @@ fn session_file(record: claude_sessions::SessionRecord) -> Option<SessionFile> {
 /// handle and the hint come before the body, so a line Monitor cuts at 500
 /// characters still names the message and still shows the hint the
 /// session sees once.
+/// Where a signal found in `room` sat, as the wake rule reads it.
+pub fn where_found(room: &Room) -> agent_identity::signal::Where {
+    match room {
+        Room::Project => agent_identity::signal::Where::Tray,
+        Room::Open | Room::Channel(_) => agent_identity::signal::Where::Shared,
+    }
+}
+
 fn monitor_line(sender: &str, signal_id: &str, body: &str, reply_hint: bool) -> String {
     let text = body.split_whitespace().collect::<Vec<_>>().join(" ");
     let hint = if reply_hint { REPLY_HINT } else { "" };

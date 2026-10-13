@@ -7,10 +7,11 @@
 //! sessions don't step on each other's reply targets.
 //!
 //! Wire format is plain text: the signal id (filename stem, the same shape
-//! `re:<id>` references) on the first line, and where it was said on the
-//! second (see [`Said`]). The second line lets a reply stay in the parent's
-//! room after the parent's file is gone. A file with only the id, as written
-//! before the room was recorded, still reads, with no room.
+//! `re:<id>` references) on the first line, where it was said on the second
+//! (see [`Said`]), and its wire `from` on the third, after `from `. The room
+//! and the sender let a reply reach the parent's channel or sender after the
+//! parent's file is gone. A file written before either was recorded still
+//! reads, without them.
 //!
 //! Path: `~/.cache/attend/state/<session_id>.last-inbound`
 //!
@@ -97,6 +98,9 @@ pub struct LastInbound {
     /// Where it was said; `None` for a record written before the room was
     /// kept, or one whose room line does not parse.
     pub said: Option<Said>,
+    /// Its wire `from`; `None` for a record written before the sender was
+    /// kept.
+    pub from: Option<String>,
 }
 
 /// Build the path that stores the last-inbound signal id for the given
@@ -105,8 +109,8 @@ pub fn path(session_id: &str) -> PathBuf {
     attend_presence::cache::state_dir().join(format!("{session_id}.last-inbound"))
 }
 
-/// Record `signal_id`, said in `said`, as the most-recent inbound signal
-/// for `session_id`. Creates the parent directory if needed. A project room
+/// Record `signal_id`, said in `said` by `from`, as the most-recent inbound
+/// signal for `session_id`. Creates the parent directory if needed. A project room
 /// whose cwd is not [`Said::routable_cwd`] is not recorded: the record keeps
 /// the id alone, and a reply to it is refused rather than guessed.
 ///
@@ -118,14 +122,15 @@ pub fn path(session_id: &str) -> PathBuf {
 /// Errors are ignored: the callers (the peers sensor, the drain) cannot
 /// usefully recover from a failed write here, and a missing file on the
 /// reply side degrades to "no threaded reply," not a crash.
-pub fn record(session_id: &str, signal_id: &str, said: &Said) {
+pub fn record(session_id: &str, signal_id: &str, said: &Said, from: &str) {
     let p = path(session_id);
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent).ok();
     }
     let content = match said {
         Said::Project(Some(cwd)) if !Said::routable_cwd(cwd) => format!("{signal_id}\n"),
-        _ => format!("{signal_id}\n{}\n", said.encode()),
+        _ if from.is_empty() || from.contains(['\n', '\r']) => format!("{signal_id}\n{}\n", said.encode()),
+        _ => format!("{signal_id}\n{}\nfrom {from}\n", said.encode()),
     };
     let tmp = p.with_extension(format!("last-inbound.{}.tmp", std::process::id()));
     if fs::write(&tmp, content).and_then(|()| fs::rename(&tmp, &p)).is_err() {
@@ -141,7 +146,8 @@ pub fn read(session_id: &str) -> Option<LastInbound> {
     let mut lines = raw.lines();
     let id = lines.next().map(str::trim).filter(|id| !id.is_empty())?.to_string();
     let said = lines.next().and_then(Said::decode);
-    Some(LastInbound { id, said })
+    let from = lines.next().and_then(|l| l.strip_prefix("from ")).filter(|f| !f.is_empty()).map(str::to_string);
+    Some(LastInbound { id, said, from })
 }
 
 #[cfg(test)]
@@ -165,8 +171,11 @@ mod tests {
             Said::Project(None),
             Said::Project(Some("/home/a/proj x".to_string())),
         ] {
-            record(&sid, "parent-abc-1234", &said);
-            assert_eq!(read(&sid), Some(LastInbound { id: "parent-abc-1234".to_string(), said: Some(said) }));
+            record(&sid, "parent-abc-1234", &said, "claude:peer");
+            assert_eq!(
+                read(&sid),
+                Some(LastInbound { id: "parent-abc-1234".to_string(), said: Some(said), from: Some("claude:peer".to_string()) })
+            );
         }
         // Clean up.
         fs::remove_file(path(&sid)).ok();
@@ -178,7 +187,7 @@ mod tests {
         fs::create_dir_all(path(&sid).parent().unwrap()).unwrap();
         for old in ["parent-abc-1234", "parent-abc-1234\n", "parent-abc-1234\nsomething else\n"] {
             fs::write(path(&sid), old).unwrap();
-            assert_eq!(read(&sid), Some(LastInbound { id: "parent-abc-1234".to_string(), said: None }), "{old:?}");
+            assert_eq!(read(&sid), Some(LastInbound { id: "parent-abc-1234".to_string(), said: None, from: None }), "{old:?}");
         }
         fs::remove_file(path(&sid)).ok();
     }
@@ -189,9 +198,9 @@ mod tests {
     #[test]
     fn a_project_room_without_a_one_line_cwd_reads_as_no_room() {
         let sid = format!("test-ri-cwd-{}", std::process::id());
-        let no_room = Some(LastInbound { id: "parent-abc-1234".to_string(), said: None });
+        let no_room = Some(LastInbound { id: "parent-abc-1234".to_string(), said: None, from: None });
         for cwd in ["", "/a\nb", "/a\r", "/a\rb"] {
-            record(&sid, "parent-abc-1234", &Said::Project(Some(cwd.to_string())));
+            record(&sid, "parent-abc-1234", &Said::Project(Some(cwd.to_string())), "claude:peer");
             assert_eq!(read(&sid), no_room, "{cwd:?}");
         }
         for on_disk in ["parent-abc-1234\nproject \n", "parent-abc-1234\nproject \r\n"] {
@@ -199,7 +208,7 @@ mod tests {
             assert_eq!(read(&sid), no_room, "{on_disk:?}");
         }
         // Spaces in a cwd are its own; only the line terminator goes.
-        record(&sid, "parent-abc-1234", &Said::Project(Some("/a b ".to_string())));
+        record(&sid, "parent-abc-1234", &Said::Project(Some("/a b ".to_string())), "claude:peer");
         assert_eq!(read(&sid).and_then(|l| l.said), Some(Said::Project(Some("/a b ".to_string()))));
         fs::remove_file(path(&sid)).ok();
     }
@@ -209,9 +218,9 @@ mod tests {
     #[test]
     fn record_replaces_the_file_and_leaves_no_temporary() {
         let sid = format!("test-ri-tmp-{}", std::process::id());
-        record(&sid, "parent-abc-1234", &Said::Open);
-        record(&sid, "parent-abc-5678", &Said::Channel("deploy".to_string()));
-        assert_eq!(fs::read_to_string(path(&sid)).unwrap(), "parent-abc-5678\n@deploy\n");
+        record(&sid, "parent-abc-1234", &Said::Open, "claude:peer");
+        record(&sid, "parent-abc-5678", &Said::Channel("deploy".to_string()), "external:aaron@kitty");
+        assert_eq!(fs::read_to_string(path(&sid)).unwrap(), "parent-abc-5678\n@deploy\nfrom external:aaron@kitty\n");
         let stray: Vec<String> = fs::read_dir(path(&sid).parent().unwrap())
             .unwrap()
             .flatten()

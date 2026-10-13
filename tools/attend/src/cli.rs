@@ -64,6 +64,14 @@ pub(crate) enum Commands {
         #[arg(long)]
         drain: bool,
 
+        /// With --drain: deliver and mark nothing unless a pending message
+        /// would wake this session, one addressed to it, sent to its
+        /// project, or a reply to a message it sent; then deliver all that
+        /// is pending. `#open` and channel posts alone wait for the next
+        /// turn (ADR-406 item 1). The attend mod polls with it while idle.
+        #[arg(long, requires = "drain")]
+        wake: bool,
+
         /// Output format for --drain: `plain` (human/agent readable),
         /// `hook` (Claude Code Stop-hook JSON; reads the hook's stdin
         /// payload for `stop_hook_active`) or `json` (the same as --json)

@@ -115,12 +115,19 @@ fn basename(cwd: &str) -> &str {
 }
 
 fn agent(session_id: Option<String>, cwd: &str, instance: Option<String>, status: String, context_pct: Option<f64>, here: bool) -> Agent {
+    let (nickname, name) = names(cwd, instance.as_deref());
+    Agent { session_id, cwd: cwd.to_string(), name, nickname, instance, status, context_pct, here }
+}
+
+/// A session's `(nickname, name)` at `cwd`: the persona, and the persona
+/// with its instance suffix (ADR-129), as peers see it.
+pub(crate) fn names(cwd: &str, instance: Option<&str>) -> (String, String) {
     let nickname = agent_identity::Identity::for_cwd(cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
-    let name = match &instance {
+    let name = match instance {
         Some(inst) => format!("{nickname}-{inst}"),
         None => nickname.clone(),
     };
-    Agent { session_id, cwd: cwd.to_string(), name, nickname, instance, status, context_pct, here }
+    (nickname, name)
 }
 
 #[cfg(feature = "sensor-peers")]

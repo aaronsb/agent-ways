@@ -159,6 +159,8 @@ pub(crate) struct Drained {
     re: Option<String>,
     body: String,
     source_cwd: String,
+    /// Whether it would start a turn in the idle session (ADR-406 item 1).
+    pub(crate) wakes: bool,
 }
 impl DrainedView for Drained {
     fn when(&self) -> &str { &self.when }
@@ -181,6 +183,14 @@ pub(crate) struct Scan {
     /// One note per signal file skipped for its size. Only the drain, which
     /// commits `mark`, prints them, so each file is noted once.
     pub(crate) skipped: Vec<String>,
+}
+
+/// Where a signal found in `room` sat, as the wake rule reads it.
+fn where_found(room: &Room) -> agent_identity::signal::Where {
+    match room {
+        Room::Project => agent_identity::signal::Where::Tray,
+        Room::Open | Room::Channel(_) => agent_identity::signal::Where::Shared,
+    }
 }
 
 /// The scope label a drained message carries for its room.
@@ -252,6 +262,12 @@ pub(crate) fn scan_pending(
                 mark.push(key);
                 continue;
             }
+            // Another session's direct message in a shared project tray is
+            // not this session's to read (ADR-401, `to`).
+            if dir.room == Room::Project && !sig.tray_reads(own_session_id) {
+                mark.push(key);
+                continue;
+            }
             let mtime = std::fs::metadata(&path)
                 .ok()
                 .and_then(|m| m.modified().ok())
@@ -293,6 +309,7 @@ pub(crate) fn scan_pending(
             re: sig.reply_to.map(str::to_string),
             body: sig.message.to_string(),
             source_cwd: sig.cwd.to_string(),
+            wakes: sig.wakes(where_found(&scan_dirs[f.room].room), own_session_id),
         });
     }
     let held_back = plan.as_ref().map_or(0, |p| p.not_shown);
@@ -307,7 +324,11 @@ pub(crate) fn scan_pending(
 /// Monitor conduit; a cold start applies `attend_state::cold_start`,
 /// announces what it held back, and always persists the state file so it
 /// happens exactly once.
-pub(crate) fn cmd_inbox_drain(format: &str) {
+///
+/// With `wake`, the drain delivers and marks nothing unless a pending
+/// message would wake the session (ADR-406 item 1); then it delivers all
+/// that is pending. The attend mod polls this way while the session idles.
+pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let mode = match format {
         "hook" => DrainMode::Hook,
         "plain" => DrainMode::Plain,
@@ -393,7 +414,15 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
 
     let cwd = ident.origin_path.clone();
-    let Scan { mut delivered, mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
+    let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &session_id, baselining);
+    // Nothing addressed to the session: what it found waits, unmarked, for
+    // the next turn. The cold start's own marks still go through, so the
+    // backlog it holds back stays held back.
+    if wake && !delivered.iter().any(|d| d.wakes) {
+        let waiting: std::collections::HashSet<String> =
+            delivered.drain(..).map(|d| attend_state::seen_key(&format!("{}.signal", d.id))).collect();
+        mark.retain(|k| !waiting.contains(k));
+    }
     for line in &skipped {
         eprintln!("{line}");
     }
@@ -487,7 +516,7 @@ pub(crate) fn cmd_inbox_drain(format: &str) {
     #[cfg(feature = "sensor-peers")]
     if let Some(newest) = delivered.iter().rev().find(|d| d.source_cwd != cwd) {
         let said = sensor_peers::last_inbound::Said::of(&newest.room, &newest.sender_id, &newest.source_cwd);
-        sensor_peers::last_inbound::record(&session_id, &newest.id, &said);
+        sensor_peers::last_inbound::record(&session_id, &newest.id, &said, &newest.sender_id);
     }
     #[cfg(not(feature = "sensor-peers"))]
     let _ = cwd;

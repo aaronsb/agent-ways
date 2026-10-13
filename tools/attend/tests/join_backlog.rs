@@ -67,7 +67,10 @@ fn a_late_join_under_attend_run_holds_back_the_history_too() {
         f.put("@testing", &format!("other-old-{i:02}"), &format!("{OLD} {i}"), 24 * 60 * MINUTE);
     }
     f.ok(&["join", "testing"]);
-    f.put("@testing", "other-live", LIVE, Duration::ZERO);
+    // Addressed to the session, so it wakes it: a channel post alone waits
+    // for the next turn (ADR-406 item 1).
+    let dir = f.signals().join("@testing");
+    std::fs::write(dir.join("other-live.signal"), format!("claude:other-session|elsewhere|/tmp/elsewhere|to:{}|{LIVE}\n", f.sid)).unwrap();
     // The live message is the positive control: the sensor scanned the room.
     run.wait_for("the live message", Duration::from_secs(30), |r| r.output().contains(LIVE));
     assert!(!run.output().contains(OLD), "the room's history is not delivered: {}", run.output());

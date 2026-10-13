@@ -66,22 +66,22 @@ mod reply {
 
         assert!(matches!(reply("too early"), Err(attend::verbs::SendError::NoInbound)));
 
-        record(&f.sid, "other-session-1-1", &Said::Open);
+        record(&f.sid, "other-session-1-1", &Said::Open, "external:someone@kitty");
         let threaded = reply("an answer").expect("a threaded reply");
         assert_eq!(threaded.threading, attend::verbs::Threading::Threaded);
         assert_eq!(threaded.sent.re.as_deref(), Some("other-session-1-1"));
 
         // An id from an external sender is not a signal id: the reply still
         // goes out, without a thread, and says so.
-        record(&f.sid, "someone@kitty-1", &Said::Open);
+        record(&f.sid, "someone@kitty-1", &Said::Open, "external:someone@kitty");
         let unthreaded = reply("still delivered").expect("an unthreaded reply");
         assert_eq!(unthreaded.threading, attend::verbs::Threading::Unthreaded);
         assert_eq!(unthreaded.sent.re, None);
         assert_eq!(unthreaded.sent.failed.len(), 0);
     }
 
-    // Where a reply goes when the caller names no destination: where its parent
-    // was said. One test per route.
+    // Where a reply goes when the caller names no destination: to its parent's
+    // sender, or in its parent's channel. One test per route.
 
     fn channel(name: &str) -> Said {
         Said::Channel(name.to_string())
@@ -128,27 +128,22 @@ mod reply {
         attend_presence::heartbeat::touch("peer-sess").unwrap();
     }
 
+    /// The operator's case of 2026-10-12: a message from attend-chat sent to
+    /// this project, answered with attend_reply, went to `#open`. A reply to a
+    /// person is a direct message in their person tray, `to` their member id.
     #[test]
-    fn a_reply_to_an_open_parent_goes_to_open() {
-        let f = Fixture::new("route-open");
-        let _env = enter(&f);
-        f.put("_broadcast", "peer-sess-1-1", "said to everyone", std::time::Duration::ZERO);
-        record(&f.sid, "peer-sess-1-1", &Said::Open);
-        let sent = reply("answered to everyone").expect("a reply in #open").sent;
-        assert_eq!(sent.scope, "#open");
-        assert!(open_tray(&f).contains(&format!("{}.signal", sent.id)));
-    }
-
-    /// A directed message from outside Claude Code came from a shell no session
-    /// listens at, so its answer goes where people read: `#open`.
-    #[test]
-    fn a_reply_to_an_external_directed_parent_goes_to_open() {
+    fn a_reply_to_an_external_directed_parent_goes_to_the_person() {
         let f = Fixture::new("route-external");
         let _env = enter(&f);
-        signal(&f, &f.project_tray(), "me-kitty-1-1", "external:me@kitty|me|/home/me|to your project");
-        record(&f.sid, "me-kitty-1-1", &Said::Project(None));
-        let sent = reply("answered").expect("a reply in #open").sent;
-        assert_eq!(sent.scope, "#open");
+        signal(&f, &f.project_tray(), "aaron-kitty-1-1", "external:aaron@kitty|aaron|/home/aaron|@Chaucer-beta can you look?");
+        record(&f.sid, "aaron-kitty-1-1", &Said::Project(None), "external:aaron@kitty");
+        let sent = reply("looking now").expect("a direct reply").sent;
+        assert_eq!((sent.scope, sent.to.as_str()), ("directed", "aaron"));
+        let raw = std::fs::read_to_string(attend_groups::person_dir(&f.signals(), "aaron").join(format!("{}.signal", sent.id)))
+            .expect("the reply is in the person tray");
+        let sig = agent_identity::parse_signal(agent_identity::wire_line(&raw)).unwrap();
+        assert_eq!((sig.to, sig.reply_to, sig.message), (Some("aaron"), Some("aaron-kitty-1-1"), "looking now"));
+        assert!(open_tray(&f).is_empty(), "nothing reached #open");
     }
 
     /// A reply to a message said in a channel goes to that channel, not to
@@ -159,7 +154,7 @@ mod reply {
         let _env = enter(&f);
         shared_channel(&f);
         f.put("@mod-trial", "peer-sess-1-1", "in the channel", std::time::Duration::ZERO);
-        record(&f.sid, "peer-sess-1-1", &channel("mod-trial"));
+        record(&f.sid, "peer-sess-1-1", &channel("mod-trial"), "claude:peer-sess");
         let sent = reply("answered in the channel").expect("a reply into the channel").sent;
         assert_eq!(sent.scope, "channel");
         assert!(f.signals().join("@mod-trial").join(format!("{}.signal", sent.id)).is_file());
@@ -197,7 +192,7 @@ mod reply {
         let _env = enter(&f);
         shared_channel(&f);
         f.put("@mod-trial", "peer-sess-1-1", "in the channel", std::time::Duration::ZERO);
-        record(&f.sid, "peer-sess-1-1", &channel("mod-trial"));
+        record(&f.sid, "peer-sess-1-1", &channel("mod-trial"), "claude:peer-sess");
         attend_groups::Groups::new(&f.signals(), "peer-sess").dissolve("mod-trial").unwrap();
         match reply("a private answer") {
             Err(attend::verbs::SendError::ParentChannelGone { channel }) => assert_eq!(channel, "mod-trial"),
@@ -214,12 +209,12 @@ mod reply {
         let f = Fixture::new("route-reaped");
         let _env = enter(&f);
         shared_channel(&f);
-        record(&f.sid, "peer-sess-1-9", &channel("mod-trial"));
+        record(&f.sid, "peer-sess-1-9", &channel("mod-trial"), "claude:peer-sess");
         let sent = reply("answered in the channel").expect("a reply into the channel").sent;
         assert_eq!(sent.scope, "channel");
         assert_eq!(sent.re.as_deref(), Some("peer-sess-1-9"));
 
-        record(&f.sid, "someone@kitty-1", &channel("mod-trial"));
+        record(&f.sid, "someone@kitty-1", &channel("mod-trial"), "external:someone@kitty");
         let unthreaded = reply("still in the channel").expect("an unthreaded reply");
         assert_eq!(unthreaded.threading, attend::verbs::Threading::Unthreaded);
         assert_eq!(unthreaded.sent.scope, "channel");
@@ -262,20 +257,25 @@ mod reply {
     /// A Claude sender with an empty cwd names no project to answer in. Its
     /// room is not recorded, so once the parent is reaped the reply is refused;
     /// it is never mistaken for an external sender's and sent to `#open`. While
-    /// the parent's file stands, the same holds.
+    /// the parent's file stands, its sender is known and has exited, and the
+    /// reply is refused naming it.
     #[test]
     fn a_reply_to_a_directed_parent_with_an_empty_sender_cwd_is_refused() {
         let f = Fixture::new("route-unknown-emptycwd");
         let _env = enter(&f);
-        record(&f.sid, "peer-sess-1-1", &Said::Project(Some(String::new())));
+        record(&f.sid, "peer-sess-1-1", &Said::Project(Some(String::new())), "claude:peer-sess");
         assert_room_unknown(&f, reply("an answer"));
 
         signal(&f, &f.project_tray(), "peer-sess-1-1", "claude:peer-sess|peerproj||to your project");
-        assert_room_unknown(&f, reply("an answer"));
+        match reply("an answer") {
+            Err(attend::verbs::SendError::SenderExited { session, .. }) => assert_eq!(session, "peer-sess"),
+            other => panic!("expected sender_exited: {other:?}"),
+        }
+        assert!(open_tray(&f).is_empty(), "nothing reached #open");
     }
 
     /// A message another Claude session sent this project with `--to` is
-    /// answered in that session's project, while it is live.
+    /// answered with a direct message to that session, while it is live.
     #[test]
     fn a_reply_to_a_directed_parent_goes_to_the_live_sender() {
         let f = Fixture::new("route-directed");
@@ -291,12 +291,12 @@ mod reply {
         )
         .unwrap();
         signal(&f, &f.project_tray(), "peer-sess-1-1", &format!("claude:peer-sess|peerproj|{peer_cwd}|to your project"));
-        record(&f.sid, "peer-sess-1-1", &Said::Project(Some(peer_cwd.clone())));
+        record(&f.sid, "peer-sess-1-1", &Said::Project(Some(peer_cwd.clone())), "claude:peer-sess");
         let result = reply("answered in your project");
         peer.kill().ok();
         peer.wait().ok();
         let sent = result.expect("a directed reply").sent;
-        assert_eq!(sent.scope, "directed");
+        assert_eq!((sent.scope, sent.to.as_str()), ("directed", "peer-sess"));
         let tray = f.signals().join(claude_sessions::attend_key(&peer_cwd));
         assert!(tray.join(format!("{}.signal", sent.id)).is_file());
         assert!(open_tray(&f).is_empty());
@@ -309,7 +309,7 @@ mod reply {
         let _env = enter(&f);
         shared_channel(&f);
         f.put("@mod-trial", "peer-sess-1-1", "in the channel", std::time::Duration::ZERO);
-        record(&f.sid, "peer-sess-1-1", &channel("mod-trial"));
+        record(&f.sid, "peer-sess-1-1", &channel("mod-trial"), "claude:peer-sess");
         let req = attend::verbs::SendRequest {
             message: "elsewhere".to_string(),
             to: Some("/nowhere/live".to_string()),

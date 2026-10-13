@@ -5,13 +5,15 @@ use agent_identity::is_valid_signal_id;
 use serde::Serialize;
 use std::path::PathBuf;
 
-/// A message to send. With no routing field it reaches every peer.
+/// A message to send. With no routing field it goes to `#open`.
 #[derive(Debug, Clone, Default)]
 pub struct SendRequest {
     pub message: String,
-    /// A project path: only the live peers working there receive it.
+    /// Who it is for: a session's name or id, a person's member id, or a
+    /// project path. It is a direct message (ADR-401, `to`).
     pub to: Option<String>,
-    /// A channel name: only its members receive it.
+    /// A channel name, with or without `#`: only its members receive it.
+    /// `open` is `#open`.
     pub channel: Option<String>,
     /// A signal id to thread under. `reply` fills it from the newest peer
     /// message when it is empty.
@@ -23,8 +25,11 @@ pub struct SendRequest {
 pub struct Sent {
     /// The signal's id, which a reply to it threads under.
     pub id: String,
-    /// `#open` for a broadcast, `channel` or `directed`.
+    /// `#open` for a broadcast, `channel`, or `directed` for a direct
+    /// message.
     pub scope: &'static str,
+    /// The signal's `to`: `*`, `#<channel>`, or the recipients' ids.
+    pub to: String,
     /// The id this one threads under, if any.
     pub re: Option<String>,
     /// How many trays it was addressed to.
@@ -67,6 +72,13 @@ pub enum SendError {
     TooLong { bytes: usize, max: usize },
     /// No live peer works at the `to` path.
     NoPeerAt { path: String, peers: Vec<PeerAt>, suggestion: Option<String> },
+    /// The `to` name is no live session and no person attend knows.
+    NoRecipient { name: String, sessions: Vec<String> },
+    /// The `to` name matches more than one session, or a session and a
+    /// person.
+    AmbiguousRecipient { name: String, candidates: Vec<String> },
+    /// The message being answered came from a session that has exited.
+    SenderExited { session: String, name: String },
     /// The `to` path is this session's own project, and no other session
     /// works there, so nobody would receive the message.
     OwnProject { path: String },
@@ -100,6 +112,21 @@ impl std::fmt::Display for SendError {
             Self::EmptyMessage => write!(f, "the message is empty"),
             Self::TooLong { bytes, max } => agent_identity::signal::TooLong { bytes: *bytes, max: *max }.fmt(f),
             Self::NoPeerAt { path, .. } => write!(f, "no active peer at {path}"),
+            Self::NoRecipient { name, sessions } if sessions.is_empty() => {
+                write!(f, "no live session or person is named '{name}'; drop --to to post in #open")
+            }
+            Self::NoRecipient { name, sessions } => write!(
+                f,
+                "no live session or person is named '{name}'; live sessions: {}; drop --to to post in #open",
+                sessions.join(", ")
+            ),
+            Self::AmbiguousRecipient { name, candidates } => {
+                write!(f, "'{name}' names more than one recipient: {}; name one of them", candidates.join(", "))
+            }
+            Self::SenderExited { session, name } => write!(
+                f,
+                "the message you are replying to came from {name} (session {session}), which has exited; nothing was sent"
+            ),
             Self::OwnProject { path } => write!(
                 f,
                 "{path} is this session's own project and no other session works there, so nobody would receive it; drop --to to reach every peer, or name another project"
@@ -136,11 +163,30 @@ impl std::error::Error for SendError {}
 /// Code session found by process ancestry, else the external `$USER@<terminal>`
 /// identity a plain terminal has.
 pub fn send(req: &SendRequest) -> Result<Sent, SendError> {
-    send_as(&current_session(), req)
+    let me = current_session();
+    check(req)?;
+    let dest = resolve(&me, req)?;
+    write(&me, &dest, req)
 }
 
-/// [`send`] as session `me`, resolved once by the calling verb.
-fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
+/// Where a message goes, resolved, with the `to` it carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Dest {
+    /// `#open`, `to = *`.
+    Open,
+    /// A channel. `to` is `#<name>`, or for a reply the parent's sender.
+    Channel { name: String, to: Option<String> },
+    /// A direct message to live sessions at one project: its tray, `to`
+    /// their session ids.
+    Sessions { cwd: String, ids: Vec<String> },
+    /// A direct message to a person: their person tray, `to` their member
+    /// id.
+    Person(String),
+}
+
+/// Refuse what no route can carry: a malformed `re`, an empty or
+/// oversized body.
+fn check(req: &SendRequest) -> Result<(), SendError> {
     // A signal id must match the same character class the parser uses to
     // disambiguate threaded records from legacy messages that happen to
     // start with "re:". Signal filename stems are
@@ -154,92 +200,171 @@ fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
     if req.message.is_empty() {
         return Err(SendError::EmptyMessage);
     }
-    agent_identity::signal::check_message_len(&req.message)
-        .map_err(|t| SendError::TooLong { bytes: t.bytes, max: t.max })?;
-    // A message that itself starts `re:` needs nothing here: the wire
-    // marks an unthreaded one with an empty thread field
-    // (`agent_identity::format_signal`), so it reads back as written.
+    agent_identity::signal::check_message_len(&req.message).map_err(|t| SendError::TooLong { bytes: t.bytes, max: t.max })
+}
 
+/// The destination `req` names: its channel, else its `to`, else `#open`
+/// (ADR-406 item 10).
+fn resolve(me: &Session, req: &SendRequest) -> Result<Dest, SendError> {
+    if let Some(channel) = &req.channel {
+        let name = channel.trim().trim_start_matches(['#', '@']);
+        if name == attend_groups::BASE_CHANNEL {
+            return Ok(Dest::Open);
+        }
+        check_channel(me, name)?;
+        return Ok(Dest::Channel { name: name.to_string(), to: None });
+    }
+    match &req.to {
+        Some(to) => resolve_recipient(me, to),
+        None => Ok(Dest::Open),
+    }
+}
+
+/// Refuse a channel no live peer would read. A signal written to a group
+/// nobody is *currently* listening on sits unread in `@<name>/` until
+/// cleanup sweeps it, while the sender sees "signal written" and assumes
+/// delivery. `_groups.yaml` membership is intersected with
+/// `PeerSensor::live_session_ids` so a peer that joined and died does not
+/// let the validation pass on a phantom member.
+fn check_channel(me: &Session, name: &str) -> Result<(), SendError> {
+    let r = groups_for(me);
+    let self_id = me.session_resolved.then(|| me.session_id.clone());
+    let members = r.members(name);
+    let live_ids = live_session_ids();
+    // A member is live if it's a running claude session OR its heartbeat is
+    // fresh. The heartbeat arm covers human members (ADR-170): attend-chat
+    // heartbeats the username while open, and a human never appears in the
+    // claude-process scan — so without it, a human-only group would reject
+    // agent sends with a phantom "no live peers".
+    let live_peer_count = members.as_ref().map_or(0, |ids| {
+        ids.iter()
+            .filter(|sid| attend_presence::alive(sid, &live_ids) && self_id.as_ref().map(|s| s != *sid).unwrap_or(true))
+            .count()
+    });
+    if live_peer_count > 0 {
+        return Ok(());
+    }
+    let channels = r.all_groups().into_iter().map(|(name, members, pinned)| ChannelCount { name, members, pinned }).collect();
+    Err(match members {
+        None => SendError::NoChannel { name: name.to_string(), channels },
+        Some(ids) => SendError::NoLivePeers {
+            name: name.to_string(),
+            only_self: self_id.as_ref().is_some_and(|sid| ids.iter().any(|m| m == sid)),
+            channels,
+        },
+    })
+}
+
+/// A live session other than this one, as `to` can name it.
+struct LiveSession {
+    id: String,
+    cwd: String,
+    nickname: String,
+    name: String,
+}
+
+fn live_sessions() -> Vec<LiveSession> {
+    let registry = attend_instances::Registry::new();
+    list_peers()
+        .into_iter()
+        .map(|(id, cwd, _, _, _)| {
+            let (nickname, name) = crate::verbs::peers::names(&cwd, registry.lookup(&cwd, &id).as_deref());
+            LiveSession { id, cwd, nickname, name }
+        })
+        .collect()
+}
+
+/// The people attend knows by member id (ADR-170): the person at this
+/// machine, anyone with a person tray, and every person in a channel.
+fn known_people() -> Vec<String> {
     let base = signals_base();
+    let mut people = vec![agent_identity::sanitize_id_component(&agent_identity::signal::user_name())];
+    let trays = std::fs::read_dir(base.join(attend_groups::PEOPLE_DIR)).into_iter().flatten().flatten();
+    people.extend(trays.filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()));
+    for entry in attend_groups::load_groups(&base).into_values() {
+        people.extend(entry.members.into_iter().filter(|m| !attend_groups::is_agent_member(m)));
+    }
+    people.sort();
+    people.dedup();
+    people
+}
+
+/// Resolve `to`: a project path to every live session there, else a
+/// session's name or id, or a person's member id. A name that matches more
+/// than one, or none, is refused.
+fn resolve_recipient(me: &Session, to: &str) -> Result<Dest, SendError> {
+    let to = to.trim();
+    if to.contains(['/', '\\']) || to.starts_with(['.', '~']) {
+        return resolve_project(me, to);
+    }
+    let sessions = live_sessions();
+    let matched: Vec<&LiveSession> = sessions
+        .iter()
+        .filter(|s| s.id == to || s.name.eq_ignore_ascii_case(to) || s.nickname.eq_ignore_ascii_case(to))
+        .collect();
+    let person = known_people().into_iter().find(|p| p.eq_ignore_ascii_case(to));
+    match (matched.as_slice(), person) {
+        ([one], None) => Ok(Dest::Sessions { cwd: one.cwd.clone(), ids: vec![one.id.clone()] }),
+        ([], Some(person)) => Ok(Dest::Person(person)),
+        ([], None) => Err(SendError::NoRecipient { name: to.to_string(), sessions: sessions.iter().map(|s| s.name.clone()).collect() }),
+        (many, person) => {
+            let mut candidates: Vec<String> = many.iter().map(|s| format!("{} (session {})", s.name, s.id)).collect();
+            candidates.extend(person.map(|p| format!("{p} (person)")));
+            Err(SendError::AmbiguousRecipient { name: to.to_string(), candidates })
+        }
+    }
+}
+
+/// A project path: every live session working there. A path no live peer
+/// works at is refused, with the live ones listed.
+fn resolve_project(me: &Session, path: &str) -> Result<Dest, SendError> {
+    let resolved = std::fs::canonicalize(path).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_string());
+    let peers = list_peers();
+    let ids: Vec<String> = peers.iter().filter(|(_, cwd, ..)| *cwd == resolved).map(|(id, ..)| id.clone()).collect();
+    if !ids.is_empty() {
+        return Ok(Dest::Sessions { cwd: resolved, ids });
+    }
+    // The peer list leaves this session out, so its own project reads as
+    // empty when no other session works there. Say that, rather than "no
+    // active peer" at a path the sender is using.
+    let cwd = &me.origin_path;
+    let own = std::fs::canonicalize(cwd).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| cwd.clone());
+    if resolved == own || resolved == *cwd {
+        return Err(SendError::OwnProject { path: resolved });
+    }
+    let peer_paths: Vec<&str> = peers.iter().map(|(_, cwd, ..)| cwd.as_str()).collect();
+    Err(SendError::NoPeerAt {
+        suggestion: find_closest_peer(&resolved, &peer_paths).map(str::to_string),
+        peers: peers.iter().map(|(_, cwd, project, _, _)| PeerAt { cwd: cwd.clone(), project: project.clone() }).collect(),
+        path: resolved,
+    })
+}
+
+/// Write `req.message` to `dest` as session `me`, threaded under `req.re`.
+fn write(me: &Session, dest: &Dest, req: &SendRequest) -> Result<Sent, SendError> {
+    let base = signals_base();
+    let (dir, scope, to) = match dest {
+        Dest::Open => (base.join(attend_groups::BROADCAST_DIR), "#open", "*".to_string()),
+        Dest::Channel { name, to } => (groups_for(me).group_dir(name), "channel", to.clone().unwrap_or_else(|| format!("#{name}"))),
+        Dest::Sessions { cwd, ids } => (base.join(encode_project(cwd)), "directed", ids.join(",")),
+        Dest::Person(member) => (attend_groups::person_dir(&base, member), "directed", member.clone()),
+    };
     // Wire identity rides this cwd (issue #378): the session record's
     // origin path, so a stray shell `cd` can't relabel our sends.
     let cwd = &me.origin_path;
     let self_id = me.session_resolved.then(|| me.session_id.clone());
-
-    // Validate `to` against active peers.
-    let resolved_to = req.to.as_ref().map(|path| {
-        std::fs::canonicalize(path).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| path.clone())
-    });
-    if let Some(resolved) = &resolved_to {
-        let peers = list_peers();
-        let peer_paths: Vec<&str> = peers.iter().map(|(_, cwd, _, _, _)| cwd.as_str()).collect();
-        if !peer_paths.contains(&resolved.as_str()) {
-            // The peer list leaves this session out, so its own project
-            // reads as empty when no other session works there. Say that,
-            // rather than "no active peer" at a path the sender is using.
-            let own = std::fs::canonicalize(cwd).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| cwd.clone());
-            if *resolved == own || resolved == cwd {
-                return Err(SendError::OwnProject { path: resolved.clone() });
-            }
-            return Err(SendError::NoPeerAt {
-                path: resolved.clone(),
-                suggestion: find_closest_peer(resolved, &peer_paths).map(str::to_string),
-                peers: peers.iter().map(|(_, cwd, project, _, _)| PeerAt { cwd: cwd.clone(), project: project.clone() }).collect(),
-            });
-        }
-    }
-
-    let r = groups_for(me);
-
-    // Validate `channel` against live `_groups.yaml` membership. A signal
-    // written to a group nobody is *currently* listening on sits unread in
-    // `@<name>/` until cleanup sweeps it; the sender only sees "signal
-    // written" and assumes delivery. Mirror `to`'s liveness discipline:
-    // `_groups.yaml` membership is intersected with
-    // `PeerSensor::live_session_ids` so a peer that joined-and-died does not
-    // let the validation pass on a phantom member.
-    if let Some(name) = &req.channel {
-        let members = r.members(name);
-        let live_ids = live_session_ids();
-        // A member is live if it's a running claude session OR its
-        // heartbeat is fresh. The heartbeat arm covers human members
-        // (ADR-170): attend-chat heartbeats the username while open,
-        // and a human never appears in the claude-process scan — so
-        // without it, a human-only group would reject agent sends
-        // with a phantom "no live peers".
-        let live_peer_count = members.as_ref().map_or(0, |ids| {
-            ids.iter()
-                .filter(|sid| attend_presence::alive(sid, &live_ids) && self_id.as_ref().map(|s| s != *sid).unwrap_or(true))
-                .count()
-        });
-        if live_peer_count == 0 {
-            let channels = r
-                .all_groups()
-                .into_iter()
-                .map(|(name, members, pinned)| ChannelCount { name, members, pinned })
-                .collect();
-            return Err(match members {
-                None => SendError::NoChannel { name: name.clone(), channels },
-                Some(ids) => SendError::NoLivePeers {
-                    name: name.clone(),
-                    only_self: self_id.as_ref().is_some_and(|sid| ids.iter().any(|m| m == sid)),
-                    channels,
-                },
-            });
-        }
-    }
-
-    // Default is broadcast — simplest possible routing: every send reaches
-    // every peer. A channel or a project path narrows it.
-    let (dest_dirs, scope) = match (&req.channel, &resolved_to) {
-        (Some(channel), _) => (vec![r.group_dir(channel)], "channel"),
-        (None, Some(resolved)) => (vec![base.join(encode_project(resolved))], "directed"),
-        (None, None) => (vec![base.join(attend_groups::BROADCAST_DIR)], "#open"),
-    };
-
-    let (sender_id, source_kind) = agent_identity::signal::identify_sender(self_id);
+    let (sender_id, source_kind) = agent_identity::signal::identify_sender(self_id.clone());
     let from = format!("{}:{}", source_kind, sender_id);
     let project = agent_identity::signal::project_label(cwd);
+    // The envelope (ADR-401): the sender's kind and canonical id, resolved
+    // here, never supplied by the caller, and who the message is for.
+    let from_id = self_id.unwrap_or_else(|| agent_identity::sanitize_id_component(&agent_identity::signal::user_name()));
+    let envelope = agent_identity::Envelope {
+        from_kind: Some(if me.session_resolved { "agent" } else { "human" }),
+        from_id: Some(&from_id),
+        on_behalf_of: None,
+        to: Some(&to),
+    };
 
     // One message is one signal, whatever its length (ADR-412). The
     // filename stem doubles as the signal id `re:<id>` replies reference.
@@ -249,25 +374,13 @@ fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
     // name collision-proof. The `from` field above keeps the un-normalized
     // identity.
     let filename = agent_identity::signal_filename(&sender_id);
-    // Wire format (ADR-120): `from|project|cwd|message`, or with `re:<id>`
-    // before the message when threading. attend-chat writes through the
-    // same `agent_identity::signal` functions.
-    let content = agent_identity::signal::format_signal(&from, &project, cwd, req.re.as_deref(), &req.message);
-    let failed: Vec<WriteFailure> = dest_dirs
-        .iter()
-        .filter_map(|dir| {
-            agent_identity::signal::write_signal_file(dir, &filename, &content)
-                .err()
-                .map(|e| WriteFailure { dir: dir.clone(), error: e.to_string() })
-        })
-        .collect();
-    if failed.len() == dest_dirs.len() {
-        let error = failed.iter().map(|f| format!("{}: {}", f.dir.display(), f.error)).collect::<Vec<_>>().join("; ");
-        return Err(SendError::NotWritten { error });
-    }
+    // Wire format (ADR-120, ADR-401): `from|project|cwd|<tags>|message`.
+    // attend-chat writes through the same `agent_identity::signal` functions.
+    let content = agent_identity::signal::format_tagged(&from, &project, cwd, &envelope, req.re.as_deref(), &req.message);
+    agent_identity::signal::write_signal_file(&dir, &filename, &content)
+        .map_err(|e| SendError::NotWritten { error: format!("{}: {e}", dir.display()) })?;
     let id = filename.trim_end_matches(".signal").to_string();
-
-    Ok(Sent { id, scope, re: req.re.clone(), dirs: dest_dirs.len(), failed })
+    Ok(Sent { id, scope, to, re: req.re.clone(), dirs: 1, failed: Vec::new() })
 }
 
 /// How a reply was threaded.
@@ -321,14 +434,14 @@ fn classify_reply_target(last_inbound: Option<String>) -> ReplyTarget {
 /// sensor or the drain) surfaced to this session, and fails with
 /// [`SendError::NoInbound`] when none has.
 ///
-/// A reply stays where its parent was said: in the parent's channel, or,
-/// for a parent another Claude session sent to this project with `--to`,
-/// back to that session's project. A `to` or `channel` in `req` overrides
-/// this. A parent known to have been said in `#open`, or one sent to this
-/// project from outside Claude Code, is answered in `#open`. A parent said
-/// in a channel is never answered outside it: when this session has left
-/// the channel, or the channel is gone, the reply is refused. A parent whose
-/// room cannot be told is refused too, never guessed to be `#open`.
+/// A reply goes to its parent's sender as a direct message, a reply to an
+/// `#open` post included (ADR-401, `to`; ADR-406 item 10). A parent said in
+/// a named channel is answered in that channel, addressed to its sender, and
+/// never outside it: when this session has left the channel, or the channel
+/// is gone, the reply is refused. A sender session that has exited is
+/// refused by name; a person is always written to. A parent whose room or
+/// sender cannot be told is refused, never guessed to be `#open`. A `to` or
+/// `channel` in `req` overrides all of this.
 #[cfg(feature = "sensor-peers")]
 pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     // An empty message is refused before anything is looked up, as `send`
@@ -338,28 +451,22 @@ pub fn reply(req: &SendRequest) -> Result<Replied, SendError> {
     }
     let me = current_session();
     let last = sensor_peers::last_inbound::read(&me.session_id);
-    let (re, threading, said) = match &req.re {
+    let (re, threading, recorded) = match &req.re {
         Some(id) => (Some(resolve_re(&me, id)?), Threading::Threaded, None),
-        None => {
-            let said = last.as_ref().and_then(|l| l.said.as_ref());
-            match classify_reply_target(last.as_ref().map(|l| l.id.clone())) {
-                ReplyTarget::NoInbound => return Err(SendError::NoInbound),
-                ReplyTarget::Unthreaded => (None, Threading::Unthreaded, said),
-                ReplyTarget::Threaded(id) => (Some(id), Threading::Threaded, said),
-            }
-        }
+        None => match classify_reply_target(last.as_ref().map(|l| l.id.clone())) {
+            ReplyTarget::NoInbound => return Err(SendError::NoInbound),
+            ReplyTarget::Unthreaded => (None, Threading::Unthreaded, last.as_ref()),
+            ReplyTarget::Threaded(id) => (Some(id), Threading::Threaded, last.as_ref()),
+        },
     };
-    let route = if req.to.is_some() || req.channel.is_some() {
-        Route::Caller
+    let req = SendRequest { re, ..req.clone() };
+    check(&req)?;
+    let dest = if req.to.is_some() || req.channel.is_some() {
+        resolve(&me, &req)?
     } else {
-        parent_route(&me, re.as_deref(), said)?
+        parent_dest(&me, req.re.as_deref(), recorded)?
     };
-    let (to, channel) = match route {
-        Route::Caller => (req.to.clone(), req.channel.clone()),
-        Route::Channel(name) => (None, Some(name)),
-        Route::Project(path) => (Some(path), None),
-    };
-    let sent = send_as(&me, &SendRequest { message: req.message.clone(), to, channel, re })?;
+    let sent = write(&me, &dest, &req)?;
     Ok(Replied { sent, threading })
 }
 
@@ -377,70 +484,122 @@ fn resolve_re(me: &Session, re: &str) -> Result<String, SendError> {
     crate::verbs::inbox::resolve_short_id(me, re).ok_or_else(|| SendError::UnknownHandle { handle: re.to_string() })
 }
 
-/// Where a reply goes when the caller names no destination.
+/// Who sent a parent message: its canonical id, its kind, and where it
+/// worked when it is known.
 #[cfg(feature = "sensor-peers")]
-#[derive(Debug, PartialEq, Eq)]
-enum Route {
-    /// The caller's `to` and `channel`, which may both be empty: `#open`.
-    Caller,
-    Channel(String),
-    Project(String),
+struct Sender {
+    id: String,
+    kind: Option<agent_identity::signal::Kind>,
+    cwd: Option<String>,
 }
 
-/// Where the parent message `id` was said. The tray this session received
-/// it in answers first. A parent not in those trays but in another channel's
-/// directory was said in a channel this session left. A parent whose file
-/// is gone, or whose id cannot be looked up, goes by `recorded`, the room
-/// the conduit noted when it surfaced the message.
-///
-/// The reply goes to `#open` only when the parent is known to have been said
-/// there, or is a message sent to this project from outside Claude Code.
-/// When no room can be told, or a directed parent names no project to answer
-/// in, the reply is refused with [`SendError::ParentRoomUnknown`].
 #[cfg(feature = "sensor-peers")]
-fn parent_route(
+impl Sender {
+    fn of(sig: &agent_identity::ParsedSignal) -> Self {
+        Sender { id: sig.sender_id(), kind: sig.sender_kind(), cwd: Some(sig.cwd.to_string()).filter(|c| !c.is_empty()) }
+    }
+
+    /// From a wire `from` alone, as the last-inbound record keeps it.
+    fn of_from(from: &str) -> Self {
+        let kind = if from.starts_with("claude:") {
+            Some(agent_identity::signal::Kind::Agent)
+        } else if from.starts_with("external:") {
+            Some(agent_identity::signal::Kind::Human)
+        } else {
+            None
+        };
+        Sender { id: agent_identity::signal::derived_sender_id(from), kind, cwd: None }
+    }
+}
+
+/// Where the reply to parent `id` goes. The parent's file in this session's
+/// receive set answers first; a parent not there but in another channel's
+/// directory was said in a channel this session left. A parent whose file
+/// is gone, or whose id cannot be looked up, goes by `recorded`: the room and
+/// sender the conduit noted when it surfaced the message.
+#[cfg(feature = "sensor-peers")]
+fn parent_dest(
     me: &Session,
     id: Option<&str>,
-    recorded: Option<&sensor_peers::last_inbound::Said>,
-) -> Result<Route, SendError> {
+    recorded: Option<&sensor_peers::last_inbound::LastInbound>,
+) -> Result<Dest, SendError> {
     use sensor_peers::last_inbound::Said;
     let r = groups_for(me);
-    let channel_route = |channel: &str| {
+    let channel_dest = |channel: &str, sender: Option<&Sender>| {
         if r.members(channel).is_none() {
             Err(SendError::ParentChannelGone { channel: channel.to_string() })
         } else if !r.joined_group_names().iter().any(|n| n == channel) {
             Err(SendError::ParentChannelLeft { channel: channel.to_string() })
         } else {
-            Ok(Route::Channel(channel.to_string()))
+            check_channel(me, channel)?;
+            Ok(Dest::Channel { name: channel.to_string(), to: sender.map(|s| s.id.clone()) })
         }
     };
-    let said = match id.map(|id| format!("{id}.signal")) {
-        Some(file) => match r.receive_dirs(&me.origin_path).into_iter().find(|d| d.path.join(&file).is_file()) {
-            Some(dir) => {
-                let sig = agent_identity::signal::read_signal_file(&dir.path.join(&file)).ok();
-                let sig = sig.as_deref().and_then(|c| agent_identity::parse_signal(agent_identity::wire_line(c)));
-                // A record that does not parse still names a shared room.
-                // In this project's tray it names no sender, and so no
-                // place to answer.
-                match (sig, &dir.room) {
-                    (Some(sig), room) => Some(Said::of(room, &sig.from, sig.cwd)),
-                    (None, attend_groups::Room::Project) => None,
-                    (None, room) => Some(Said::of(room, "", "")),
-                }
+    let file = id.map(|id| format!("{id}.signal"));
+    let in_receive_set = file.as_ref().and_then(|file| {
+        r.receive_dirs(&me.origin_path).into_iter().find(|d| d.path.join(file).is_file()).map(|d| (d, file))
+    });
+    // The room the parent was said in, and its sender when it can be told.
+    let (room, sender): (Option<Said>, Option<Sender>) = match in_receive_set {
+        Some((dir, file)) => {
+            let raw = agent_identity::signal::read_signal_file(&dir.path.join(file)).ok();
+            let sig = raw.as_deref().and_then(|c| agent_identity::parse_signal(agent_identity::wire_line(c)));
+            let room = match &dir.room {
+                attend_groups::Room::Channel(name) => Said::Channel(name.clone()),
+                attend_groups::Room::Open => Said::Open,
+                attend_groups::Room::Project => Said::Project(None),
+            };
+            (Some(room), sig.as_ref().map(Sender::of))
+        }
+        None => {
+            if let Some(channel) = file.as_ref().and_then(|f| r.channel_holding(f)) {
+                let sender = recorded.and_then(|l| l.from.as_deref()).map(Sender::of_from);
+                return channel_dest(&channel, sender.as_ref());
             }
-            None => match r.channel_holding(&file) {
-                Some(channel) => return channel_route(&channel),
-                None => recorded.cloned(),
-            },
-        },
-        None => recorded.cloned(),
+            let Some(rec) = recorded else { return Err(SendError::ParentRoomUnknown) };
+            // A record written before the sender was kept names a Claude
+            // sender only by its project: answer there, as attend did then.
+            if let (None, Some(Said::Project(Some(cwd)))) = (&rec.from, &rec.said) {
+                return resolve_project(me, cwd);
+            }
+            (rec.said.clone(), rec.from.as_deref().map(Sender::of_from))
+        }
     };
-    match said {
-        Some(Said::Open) | Some(Said::Project(None)) => Ok(Route::Caller),
-        Some(Said::Project(Some(cwd))) if Said::routable_cwd(&cwd) => Ok(Route::Project(cwd)),
-        None | Some(Said::Project(Some(_))) => Err(SendError::ParentRoomUnknown),
-        Some(Said::Channel(channel)) => channel_route(&channel),
+    match (room, sender) {
+        (Some(Said::Channel(channel)), sender) => channel_dest(&channel, sender.as_ref()),
+        (Some(_), Some(sender)) => sender_dest(sender),
+        _ => Err(SendError::ParentRoomUnknown),
     }
+}
+
+/// A direct message to `sender`: a person's tray, always; a session's
+/// project tray while it is live, else refused by its name.
+#[cfg(feature = "sensor-peers")]
+fn sender_dest(sender: Sender) -> Result<Dest, SendError> {
+    use agent_identity::signal::Kind;
+    match sender.kind {
+        Some(Kind::Human) if is_member_id(&sender.id) => Ok(Dest::Person(sender.id)),
+        Some(Kind::Agent) => match live_sessions().into_iter().find(|s| s.id == sender.id) {
+            Some(live) => Ok(Dest::Sessions { cwd: live.cwd, ids: vec![live.id] }),
+            None => {
+                let name = match &sender.cwd {
+                    Some(cwd) => {
+                        let instance = attend_instances::Registry::new().lookup(cwd, &sender.id);
+                        crate::verbs::peers::names(cwd, instance.as_deref()).1
+                    }
+                    None => format!("session {}", sender.id.chars().take(8).collect::<String>()),
+                };
+                Err(SendError::SenderExited { session: sender.id, name })
+            }
+        },
+        _ => Err(SendError::ParentRoomUnknown),
+    }
+}
+
+/// Whether `id` can name a person tray: a non-empty sanitized member id.
+#[cfg(feature = "sensor-peers")]
+fn is_member_id(id: &str) -> bool {
+    !id.is_empty() && id.trim_matches('-').len() == id.len() && agent_identity::sanitize_id_component(id) == id
 }
 
 #[cfg(feature = "sensor-peers")]

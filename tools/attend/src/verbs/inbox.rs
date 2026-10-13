@@ -104,6 +104,10 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
             if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
                 continue;
             }
+            // Another session's direct message in a shared project tray.
+            if dir.room == Room::Project && !sig.tray_reads(own_session_id) {
+                continue;
+            }
             messages.push(Message {
                 id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
                 scope,
@@ -189,6 +193,10 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         // from ordinary races.
         let content = agent_identity::signal::read_signal_file(&path).map_err(|e| ReadError::Unreadable { error: e.to_string() })?;
         let sig = parse_signal(wire_line(&content)).ok_or(ReadError::Corrupt)?;
+        // Another session's direct message is no message to this one.
+        if dir.room == Room::Project && !sig.tray_reads(&me.session_id) {
+            return Err(ReadError::NotFound);
+        }
         let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()).unwrap_or(std::time::UNIX_EPOCH);
         let scope = match dir.room {
             Room::Open => "#open",

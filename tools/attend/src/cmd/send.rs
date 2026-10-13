@@ -158,10 +158,10 @@ fn report(sent: &send::Sent) {
     eprintln!("[attend] signal written ({}, {} dirs): {}.signal", sent.scope, sent.dirs, sent.id);
 }
 
-const SEND_USAGE: &str = "usage: attend send <message>\n  (reaches every peer and Aaron — no routing flags needed)\n  tip: wrap message in double quotes to avoid shell expansion";
+const SEND_USAGE: &str = "usage: attend send [--to <name|member|path>] [--channel <name>] <message>\n  (no --to and no --channel posts in #open; --to makes it a direct message)\n  tip: wrap message in double quotes to avoid shell expansion";
 
 #[cfg(feature = "sensor-peers")]
-const REPLY_USAGE: &str = "usage: attend reply [--re <id>] <message>\n  (answers the newest peer message delivered to this session, or the one --re names, where it was said)\n  tip: wrap message in double quotes to avoid shell expansion";
+const REPLY_USAGE: &str = "usage: attend reply [--re <id>] <message>\n  (answers the newest peer message delivered to this session, or the one --re names: a direct message to its sender, or in its channel)\n  tip: wrap message in double quotes to avoid shell expansion";
 
 /// Print why the send wrote nothing, as the CLI always has, and exit 1. An
 /// empty message is a malformed command line: exit 2 with the verb's
@@ -210,7 +210,7 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
                     eprintln!("  {} — {} member{}{}", c.name, c.members, suffix, pin);
                 }
             }
-            eprintln!("\ndrop --channel to broadcast (reaches every peer):");
+            eprintln!("\ndrop --channel to post in #open (reaches every peer):");
             eprintln!("  attend send <message>");
         }
         SendError::NoInbound => {
@@ -218,7 +218,9 @@ fn fail(e: &SendError, json: bool, usage: &str) -> ! {
             eprintln!("  (reply is for responding to a peer message your sensor surfaced.)");
             eprintln!("  if you are starting a new topic, use `attend send` instead.");
         }
-        SendError::UnknownHandle { .. }
+        SendError::NoRecipient { .. } | SendError::AmbiguousRecipient { .. } => eprintln!("error: {e}"),
+        SendError::SenderExited { .. }
+        | SendError::UnknownHandle { .. }
         | SendError::ParentChannelLeft { .. }
         | SendError::ParentChannelGone { .. }
         | SendError::ParentRoomUnknown => eprintln!("attend reply: {e}"),

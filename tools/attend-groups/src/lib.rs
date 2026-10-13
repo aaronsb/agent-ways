@@ -59,6 +59,10 @@ pub const BUSY: &str = "channels are busy; try again";
 /// channel every enrolled member receives (ADR-124).
 pub const BROADCAST_DIR: &str = "_broadcast";
 
+/// The display name of the base channel, `#open` (ADR-124). A send to a
+/// channel by this name goes to [`BROADCAST_DIR`].
+pub const BASE_CHANNEL: &str = "open";
+
 /// The directory under the signals base that holds the person trays:
 /// `_people/<member-id>/`, one per person a message was addressed to
 /// (ADR-401, `to`). attend-chat reads the tray of the person at its
