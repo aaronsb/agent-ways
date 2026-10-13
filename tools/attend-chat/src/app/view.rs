@@ -101,16 +101,21 @@ pub(super) const VIEW_LABEL: &str = "⋯all";
 /// The tab bar the shell draws, in the order [`tabs::bar`] gives: the common
 /// menu's `≡` slot, the created channel shown with what it is for, the `+`
 /// slot, then the reserved tabs pinned right, `#open` and the operator view
-/// ([`VIEW_LABEL`]), shaded as a view. No tab carries a number: the left
-/// column numbers the channels for Ctrl+digit, and 0 is the operator view
-/// ([`ChatPane::jump`]). A channel tab (#393) is led by the channel's glyph
-/// in its identity colour. A `#partial` being typed marks the tabs it
-/// completes to.
+/// ([`VIEW_LABEL`]), shaded as a view. The left column numbers the
+/// channels for Ctrl+digit, and 0 is the operator view ([`ChatPane::jump`]);
+/// while the column is hidden, by its key or for want of width, each
+/// channel's tab carries the column's number in its place. A channel tab
+/// (#393) is led by the channel's glyph in its identity colour, and the
+/// created channel shown carries its member count. A `#partial` being typed
+/// marks the tabs it completes to.
 pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
     let depth = chat.palette.depth();
     let text = chat.input.text().to_string();
     let partial = find_trailing_mention(&text).filter(|m| m.sigil == Sigil::Group).map(|m| m.partial.to_string());
     let groups = chat.world().groups.clone();
+    let numbers = !chat.column_this_frame();
+    let order: Vec<String> = chat.world().rows.iter().map(|r| r.known.group.name.clone()).collect();
+    let person = chat.person_glyph();
     chat.bar()
         .into_iter()
         .map(|slot| match slot {
@@ -129,8 +134,18 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
                 let lead = k.map(|k| vec![Span::styled(format!("{} ", k.group.glyph), glyph)]).unwrap_or_default();
                 // The created channel shown says what it is for (#404); the
                 // bar cuts the line to fit.
-                let desc = k.filter(|k| !k.is_base).and_then(|k| k.membership.description.clone()).filter(|d| !d.is_empty());
-                let label = desc.map_or(format!("#{name}"), |d| format!("#{name} — {d}"));
+                let created = k.filter(|k| !k.is_base);
+                let desc = created.and_then(|k| k.membership.description.clone()).filter(|d| !d.is_empty());
+                let mut label = format!("#{name}");
+                if let Some(k) = created {
+                    label = format!("{label} {}{person}", k.membership.members.len());
+                }
+                if let Some(d) = desc {
+                    label = format!("{label} — {d}");
+                }
+                if let Some(n) = order.iter().position(|o| *o == name).map(|i| i + 1).filter(|n| numbers && *n <= 9) {
+                    label = format!("{n} {label}");
+                }
                 let tab = PaneTab::new(label).lead(lead).target(prefix_match(&name, partial.as_deref()));
                 if tabs::is_reserved(&Tab::Channel(name)) {
                     tab.reserved()

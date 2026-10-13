@@ -301,6 +301,11 @@ pub trait Pane: Any {
     /// The palette the screen draws in.
     fn palette(&self) -> Palette;
 
+    /// The area the pane is drawn in this frame, told before the tab bar
+    /// asks for [`Pane::tabs`], so the tabs can follow what the pane lays
+    /// out at that size. Nothing by default.
+    fn layout(&mut self, _area: Rect) {}
+
     /// The tabs, in order.
     fn tabs(&mut self) -> Vec<PaneTab>;
 

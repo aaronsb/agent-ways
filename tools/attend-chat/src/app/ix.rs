@@ -20,7 +20,8 @@
 //! edits but for the ways out; outside it the keys walk the ring, a
 //! character goes back to the box and is typed there, and Esc moves along
 //! the Esc cycle: the box, the feed, the `≡` menu, the last tab or column
-//! row the focus was on, the `≡` menu again. Walking the tab bar shows
+//! row the focus was on, the `≡` menu again; Tab out of the box onto `≡`
+//! is not remembered. Walking the tab bar shows
 //! nothing: Enter opens the focused tab's menu, and the column's numbers
 //! show a channel.
 //!
@@ -97,10 +98,11 @@ impl Ix {
     /// How the shell routes a key beside the chat: the compose box and the
     /// feed take every plain key as text, so `q`, `m`, `?` and the digits
     /// are the shell's only on the tab bar and the column; a plain digit is
-    /// the column's number only while the focus is on a column row; the
-    /// chat owns the bar's focus, and Esc never quits (ADR-409).
+    /// the column's number only while the focus is on a channel's row, since
+    /// agents carry no number; the chat owns the bar's focus, and Esc never
+    /// quits (ADR-409).
     pub(super) fn ctx(&self) -> Ctx {
-        let digits = matches!(self.focus, Focus::Row(_));
+        let digits = matches!(self.focus, Focus::Row(_)) && matches!(self.row_hit, Some(SideHit::Channel(_)));
         Ctx { text: self.in_chat(), digits, owns_bar: true, esc_quits: false }
     }
 }
@@ -446,13 +448,20 @@ impl<'a> Step<'a> {
         Ok(out)
     }
 
-    /// One step along the ring, forward or back, wrapping.
+    /// One step along the ring, forward or back, wrapping. Leaving the
+    /// compose box onto `≡` is no visit: the Esc cycle keeps the tab or row
+    /// remembered before.
     fn walk(&mut self, forward: bool) -> R {
         let ring = self.ring()?;
         let n = ring.len();
         let at = ring.iter().position(|f| *f == self.ix.focus).unwrap_or(n - 1);
         let to = if forward { (at + 1) % n } else { (at + n - 1) % n };
-        self.go(ring[to].clone())
+        let kept = (self.ix.focus == Focus::Compose).then(|| self.ix.last_nav.clone());
+        self.go(ring[to].clone())?;
+        if let Some(last) = kept {
+            self.ix.last_nav = last;
+        }
+        Ok(())
     }
 
     /// A key while the compose box has the focus: every key edits, but for
