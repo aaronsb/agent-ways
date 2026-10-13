@@ -69,9 +69,9 @@ pub(crate) enum Mode {
     Review { tab: usize, run: Option<Run>, discard: bool },
     /// y/n before one tab's pending items are dropped.
     DiscardTab { tab: usize },
-    /// Quit was asked with items pending in any tab: go back, review, or
-    /// quit and discard them all, which `confirm` asks a second time.
-    Guard { confirm: bool },
+    /// Quit was asked over unsaved work: the modal's buttons go back,
+    /// review, or quit and discard it all, and nothing else answers.
+    Guard,
     /// A guided flow; finishing it queues its commands on the tab that launched it.
     Flow(Box<Flow>),
     /// The theme tab's action menu.
@@ -431,7 +431,7 @@ impl App {
 
     /// Whether the exit guard is asking.
     pub fn guarding(&self) -> bool {
-        matches!(self.mode, Mode::Guard { .. })
+        matches!(self.mode, Mode::Guard)
     }
 
     /// The tab shown, the theme tab being the last.
@@ -582,7 +582,7 @@ impl App {
         if self.pending() == 0 && !self.theme_dirty() && self.pane_unsaved().is_none() {
             return false;
         }
-        self.mode = Mode::Guard { confirm: false };
+        self.mode = Mode::Guard;
         true
     }
 

@@ -537,8 +537,7 @@ fn the_exit_guard_lists_unsaved_theme_edits_and_review_opens_the_editor() {
     keys(&mut app, &[KeyCode::Char('1'), KeyCode::Enter, KeyCode::Char('q')]);
     let f = text(&draw(&mut app, 100, 30));
     assert!(f.contains("2 unsaved in 2 tabs") && f.contains("ways") && f.contains("edits to ed"), "{f}");
-    keys(&mut app, &[KeyCode::Char('D')]);
-    assert!(!app.key(press(KeyCode::Char('y'))));
+    assert!(!app.key(press(KeyCode::Char('D'))), "D quits");
     assert!(app.themes.editor.is_none());
 }
 

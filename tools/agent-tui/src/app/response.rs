@@ -324,7 +324,7 @@ impl App {
                 return;
             }
         }
-        if !matches!(self.mode, Mode::Guard { .. }) {
+        if !matches!(self.mode, Mode::Guard) {
             self.entry_held = None;
         }
         if matches!(self.mode, Mode::Browse | Mode::Review { run: None, discard: false, .. }) {

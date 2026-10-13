@@ -83,7 +83,7 @@ impl App {
     pub(super) fn pane_unsaved(&self) -> Option<String> {
         let typed = match &self.mode {
             Mode::Entry(e) if !e.input.is_empty() => Some(format!("{} being typed", e.title)),
-            Mode::Guard { .. } => self.entry_held.as_ref().map(|e| format!("{} being typed", e.title)),
+            Mode::Guard => self.entry_held.as_ref().map(|e| format!("{} being typed", e.title)),
             _ => None,
         };
         let own = self.pane.as_ref()?.unsaved();
@@ -206,7 +206,7 @@ impl App {
                 let scroll = *scroll;
                 self.draw_pane_help(f, main, scroll);
             }
-            Mode::Guard { .. } => self.draw_guard(f, main),
+            Mode::Guard => self.draw_guard(f, main),
             Mode::Response(_) => self.draw_response(f, main),
             Mode::Pick(p) => {
                 let p = p.clone();
@@ -227,13 +227,13 @@ impl App {
         let top = match &self.mode {
             Mode::Browse => None,
             Mode::Help { .. } => Some(Overlay::Help),
-            Mode::Guard { .. } => Some(Overlay::Guard),
+            Mode::Guard => Some(Overlay::Guard),
             Mode::Pick(p) => Some(Overlay::Menu { id: p.pane.as_ref().map(|(id, _)| id.clone()).unwrap_or_default(), by_esc: p.by_esc }),
             Mode::Entry(e) => Some(Overlay::Entry { id: e.id.clone() }),
             Mode::Ask(a) => Some(Overlay::Ask { id: a.id.clone() }),
             _ => Some(Overlay::Report),
         };
-        let held = matches!(self.mode, Mode::Guard { .. }).then(|| self.entry_held.as_ref().map(|e| Overlay::Entry { id: e.id.clone() })).flatten();
+        let held = matches!(self.mode, Mode::Guard).then(|| self.entry_held.as_ref().map(|e| Overlay::Entry { id: e.id.clone() })).flatten();
         held.into_iter().chain(top).collect()
     }
 
@@ -456,54 +456,6 @@ impl App {
                     self.msg = "the terminal selects text".into();
                 }
             }
-        }
-        true
-    }
-
-    /// The exit guard beside a pane that owns text, where keystrokes are in
-    /// flight when it opens. `D` arms the quit and Enter (or ^C again)
-    /// confirms it; no letter does, since letters are typing. Unarmed, Esc
-    /// and Enter go back to the work, and a character or an editing key
-    /// closes the guard and acts on the work. Armed, Esc disarms it, and a
-    /// character or an editing key types the arming `D` first, then acts:
-    /// typing on past an Esc reaches the draft as typed.
-    pub(super) fn guard_beside_text(&mut self, k: KeyEvent, confirm: bool) -> bool {
-        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-        let edits = plain
-            && matches!(
-                k.code,
-                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete | KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End
-            );
-        match (confirm, k.code) {
-            (true, KeyCode::Enter) => {
-                self.discard_all();
-                return false;
-            }
-            (true, KeyCode::Esc) => self.mode = Mode::Guard { confirm: false },
-            // Over an entry dialog the guard closed, typing goes back to it.
-            (confirm, _) if edits && self.entry_held.is_some() => {
-                let e = self.entry_held.take().expect("checked");
-                self.mode = Mode::Entry(e);
-                if confirm {
-                    if let Mode::Entry(e) = std::mem::replace(&mut self.mode, Mode::Browse) {
-                        self.entry_key(*e, KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
-                    }
-                }
-                if let Mode::Entry(e) = std::mem::replace(&mut self.mode, Mode::Browse) {
-                    return self.entry_key(*e, k);
-                }
-                return true;
-            }
-            (true, _) if edits => {
-                // Back to typing: the D that armed the quit was typing too.
-                self.pane_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
-                return self.pane_key(k);
-            }
-            (true, _) => self.mode = Mode::Guard { confirm: true },
-            (false, KeyCode::Char('D')) if plain => self.mode = Mode::Guard { confirm: true },
-            (false, KeyCode::Esc | KeyCode::Enter) => {}
-            (false, _) if edits => return self.pane_key(k),
-            (false, _) => self.mode = Mode::Guard { confirm: false },
         }
         true
     }
@@ -1066,58 +1018,64 @@ mod tests {
         assert!(two(&a).picked.is_empty());
     }
 
-    /// Armed, any key but y disarms the quit: D has to be followed by y.
-    #[test]
-    fn the_armed_quit_takes_only_y() {
-        let mut a = app(false);
-        a.pane_mut::<Two>().expect("the pane").dirty = true;
-        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
-        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
-        assert!(a.key(k(KeyCode::Char('i'), KeyModifiers::NONE)));
-        assert!(a.guarding() && a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)), "y alone does not quit");
-        assert!(two(&a).dirty);
-    }
-
-    /// Beside text, the guard answers only its own keys; the rest is typed.
-    #[test]
-    fn beside_text_the_guard_lets_typing_through() {
+    /// The quit modal beside text, open over unsaved work.
+    fn guarded() -> App {
         let mut a = app(true);
         a.pane_mut::<Two>().expect("the pane").dirty = true;
         a.key(k(KeyCode::Esc, KeyModifiers::NONE));
         assert!(a.guarding());
-        for c in "Did you".chars() {
-            assert!(a.key(k(KeyCode::Char(c), KeyModifiers::NONE)), "{c} keeps the screen open");
-        }
-        assert!(!a.guarding());
-        assert_eq!(two(&a).keys, 7, "the arming D reached the pane too, before the i");
-        assert!(two(&a).dirty);
-        // No letter confirms beside text: D then y types "Dy".
-        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
-        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
-        assert!(a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)));
-        assert_eq!(two(&a).keys, 9);
-        // Esc disarms, typing nothing; D then Enter quits, as does ^C armed.
-        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
-        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
-        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(a.guarding() && two(&a).keys == 9);
-        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
-        assert!(!a.key(k(KeyCode::Char('c'), KeyModifiers::CONTROL)), "^C again while armed quits");
-        assert!(!two(&a).dirty);
+        a
     }
 
-    /// Unarmed, an editing key closes the guard and acts on the work.
+    /// Beside text the quit modal owns the keys: D quits and discards at
+    /// once, and the bar asks nothing of its own.
     #[test]
-    fn beside_text_an_editing_key_closes_the_guard() {
+    fn beside_text_d_at_the_quit_modal_quits_at_once() {
+        let mut a = guarded();
+        assert!(!a.key(k(KeyCode::Char('D'), KeyModifiers::NONE)), "D quits");
+        assert!(!two(&a).dirty, "and discards");
+        let bar = testkit::rows(&testkit::render(&mut a, 80, 16)).pop().expect("a bar");
+        assert!(!bar.contains("confirm") && !bar.contains("Enter quit"), "no confirm on the bar: {bar}");
+    }
+
+    /// Esc goes back to the work as it was; a character is the modal's and
+    /// types nothing.
+    #[test]
+    fn beside_text_esc_at_the_quit_modal_keeps_the_work() {
+        let mut a = guarded();
+        assert!(a.key(k(KeyCode::Char('x'), KeyModifiers::NONE)));
+        assert!(a.guarding() && two(&a).keys == 0, "the modal owns the keys");
+        assert!(a.key(k(KeyCode::Esc, KeyModifiers::NONE)));
+        assert!(!a.guarding() && two(&a).dirty && two(&a).keys == 0, "back to the work as it was");
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(a.key(k(KeyCode::Char('c'), KeyModifiers::CONTROL)) && a.guarding(), "^C leaves the modal open");
+        assert!(a.key(k(KeyCode::Enter, KeyModifiers::NONE)) && !a.guarding() && two(&a).dirty, "Enter presses Back");
+    }
+
+    /// A click on the modal's Quit button quits and discards; one on Back
+    /// goes back.
+    #[test]
+    fn beside_text_a_click_on_quit_quits() {
+        let click = |a: &mut App, text: &str| {
+            let buf = testkit::render(a, 80, 16);
+            let (x, y) = testkit::find(&buf, text).expect("the button is drawn");
+            a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+        };
+        let mut a = guarded();
+        click(&mut a, "Back (Esc)");
+        assert!(!a.guarding() && !a.ended() && two(&a).dirty);
+        let mut a = guarded();
+        click(&mut a, "Quit and discard all (D)");
+        assert!(a.ended() && !two(&a).dirty, "the click quit and discarded");
+    }
+
+    /// With no modal open, D is typing.
+    #[test]
+    fn beside_text_d_with_no_modal_types() {
         let mut a = app(true);
         a.pane_mut::<Two>().expect("the pane").dirty = true;
-        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(a.key(k(KeyCode::Backspace, KeyModifiers::NONE)));
-        assert!(!a.guarding());
-        assert_eq!(two(&a).keys, 1);
-        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
-        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
-        assert!(!a.key(k(KeyCode::Enter, KeyModifiers::NONE)), "D then Enter quits");
+        assert!(a.key(k(KeyCode::Char('D'), KeyModifiers::NONE)));
+        assert!(!a.guarding() && two(&a).keys == 1 && two(&a).dirty);
     }
 
     #[test]
@@ -1564,10 +1522,10 @@ mod tests {
         let text = testkit::text(&testkit::render(&mut a, 80, 16));
         assert!(text.contains("1 unsaved") && text.contains("a count") && !text.contains("Review"), "{text}");
         a.key(k(KeyCode::Char('r'), KeyModifiers::NONE));
-        assert!(!a.guarding(), "r has nothing to review: back to the pane");
+        assert!(a.guarding(), "r has nothing to review: the modal stays");
         a.key(k(KeyCode::Char('c'), KeyModifiers::CONTROL));
-        a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
-        assert!(!a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)));
+        assert!(a.guarding(), "^C leaves it open");
+        assert!(!a.key(k(KeyCode::Char('D'), KeyModifiers::NONE)), "D quits");
         assert!(!two(&a).dirty, "the work was dropped");
     }
 
