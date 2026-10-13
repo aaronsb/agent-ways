@@ -57,7 +57,7 @@ fn a_send_to_a_quiet_agent_says_it_may_not_be_read() {
     let quiet = agent_identity::Identity::for_cwd(QUIET_CWD, agent_theme::ColorDepth::Ansi16).nickname;
     let screen = send(&mut c, &format!("@{quiet} are you there"));
     assert!(screen.contains(&format!("@{quiet} (quiet)")), "the destination flag marks it: {screen}");
-    assert_eq!(c.status(), format!("@{quiet} is quiet (no heartbeat) and may not read this; press Enter again to send"));
+    assert_eq!(c.status(), format!("press Enter again to send: @{quiet} is quiet (no heartbeat)"));
     assert_eq!(c.input().text(), format!("@{quiet} are you there"), "the draft is kept to send elsewhere");
 }
 

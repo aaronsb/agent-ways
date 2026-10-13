@@ -55,9 +55,9 @@ pub enum EnterAction {
     /// Failure path: set status, leave input + cursor intact so the
     /// user can edit and retry.
     StatusOnly(String),
-    /// A refusal because an agent is quiet, though it may still read the
-    /// message: like [`EnterAction::StatusOnly`], and the screen offers
-    /// its send-now key for the draft as it stands.
+    /// A refusal because the agent named is quiet, though it may still
+    /// read the message: like [`EnterAction::StatusOnly`], and the screen
+    /// offers its send-now key for the draft as it stands.
     Quiet(String),
     /// `/clear` — empty the transcript buffer, clear input + cursor,
     /// show status.
@@ -282,8 +282,9 @@ fn wake_quiet(seen: &mut [Seen]) {
     }
 }
 
-/// Why a send was refused. `Quiet`: an agent that may still read it, which
-/// the send-now key sends to anyway. `Final`: anything else.
+/// Why a send was refused. `Quiet`: the agent named may still read it, and
+/// the send-now key sends to it anyway. `Final`: anything else, in its own
+/// words.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Refusal {
     Quiet(String),
@@ -292,7 +293,7 @@ pub(super) enum Refusal {
 
 impl Refusal {
     fn quiet(name: &str) -> Self {
-        Refusal::Quiet(format!("@{name} is quiet (no heartbeat) and may not read this"))
+        Refusal::Quiet(name.to_string())
     }
 
     fn exited(name: &str) -> Self {
@@ -1697,7 +1698,7 @@ mod tests {
         let live = [ident("Larks", "/w/larks")];
         let quiet = ["Lark".to_string()];
         let to = |r: Addressed<'_>| resolve_recipients(&[r], &live, (&quiet, &[]), &|_| None);
-        assert_eq!(to(Addressed::Agent("Lark")), Err(Refusal::Quiet("@Lark is quiet (no heartbeat) and may not read this".into())), "not carried to Larks by the fuzzy match");
+        assert_eq!(to(Addressed::Agent("Lark")), Err(Refusal::Quiet("Lark".into())), "not carried to Larks by the fuzzy match");
         let exited = resolve_recipients(&[Addressed::Agent("Lark")], &live, (&quiet, &quiet), &|_| None);
         assert_eq!(exited, Err(Refusal::Final("@Lark has exited and would not read this".into())), "an exited agent is refused for good");
         assert!(to(Addressed::Agent("Larks")).is_ok(), "a live agent is sent to");

@@ -424,10 +424,11 @@ impl ChatPane {
                 self.push(echo);
             }
             EnterAction::StatusOnly(s) => self.say(s, true),
-            EnterAction::Quiet(s) => {
-                // Name the key that arrives on this terminal (ADR-409).
+            EnterAction::Quiet(name) => {
+                // The key first, so a narrow status line keeps it; only a
+                // key that arrives on this terminal is named (ADR-409).
                 let how = if self.enhanced { "Ctrl+Enter or Enter again to send now" } else { "press Enter again to send" };
-                self.say(format!("{s}; {how}"), true);
+                self.say(format!("{how}: @{name} is quiet (no heartbeat)"), true);
                 self.send_anyway = Some(self.input.text().to_string());
             }
             EnterAction::ClearWithStatusAndFocus { status, focus } => {

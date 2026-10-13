@@ -92,7 +92,7 @@ Where the terminal does not speak the kitty keyboard protocol, Ctrl-3 arrives as
 | Key | Action |
 |---|---|
 | Enter | send, or run the slash command |
-| Ctrl-Enter | send now, to a quiet agent too, as Claude Code's `chat:sendNow` does (ADR-409, amendment of 2026-10-13). A send refused because its agent is quiet says `press Enter again to send`, and Enter again on the unchanged draft sends it on any terminal; any edit withdraws the offer. An agent whose process has exited is refused whatever the key. Ctrl-Enter needs a terminal that speaks the kitty keyboard protocol; elsewhere it arrives as Enter |
+| Ctrl-Enter | send now, to a quiet agent too, as Claude Code's `chat:sendNow` does (ADR-409, amendment of 2026-10-13). A send refused because its agent is quiet says `press Enter again to send: @Name is quiet (no heartbeat)`, and Enter again on the unchanged draft sends it on any terminal; any edit withdraws the offer. An agent whose process has exited is refused whatever the key. Ctrl-Enter needs a terminal that speaks the kitty keyboard protocol; elsewhere it arrives as Enter |
 | Shift-Enter, Alt-Enter | new line |
 | Tab | complete the `@name`, `#channel` or `/command` being typed, over the agents (claudes, live or quiet) and channels (swept ones too) the left column lists; with nothing to complete, leave the compose box forward |
 | Ctrl-1 … Ctrl-9, Ctrl-0 | show the column's channel by its number (`#open` is 1), or with 0 the operator view; on the channel already shown, open its menu. Needs a terminal that speaks the kitty keyboard protocol; the F1 view says whether yours does |

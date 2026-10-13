@@ -108,7 +108,7 @@ fn enter_again_sends_a_refused_message_to_a_quiet_agent() {
     let quiet = nick(QUIET_CWD);
     typed(&mut c, &format!("@{quiet} first try"));
     press(&mut c, KeyCode::Enter);
-    assert_eq!(c.status(), format!("@{quiet} is quiet (no heartbeat) and may not read this; press Enter again to send"));
+    assert_eq!(c.status(), format!("press Enter again to send: @{quiet} is quiet (no heartbeat)"));
     assert!(!in_tray(QUIET_CWD, "first try"), "the first Enter sends nothing");
     press(&mut c, KeyCode::Enter);
     assert!(c.input().is_empty(), "sent: {}", c.status());
@@ -124,7 +124,7 @@ fn an_edit_to_the_draft_cancels_the_offer() {
     typed(&mut c, "x");
     press(&mut c, KeyCode::Backspace);
     press(&mut c, KeyCode::Enter);
-    assert!(c.status().starts_with(&format!("@{quiet} is quiet")), "refused again: {}", c.status());
+    assert!(c.status().ends_with(&format!("@{quiet} is quiet (no heartbeat)")), "refused again: {}", c.status());
     assert!(!in_tray(QUIET_CWD, "edited"), "an edit between the Enters cancels the send");
     press(&mut c, KeyCode::Enter);
     assert!(in_tray(QUIET_CWD, "edited"), "the offer stands again after the new refusal: {}", c.status());
@@ -136,7 +136,7 @@ fn ctrl_enter_sends_now_where_the_terminal_reports_it() {
     let quiet = nick(QUIET_CWD);
     typed(&mut c, &format!("@{quiet} refused once"));
     press(&mut c, KeyCode::Enter);
-    assert_eq!(c.status(), format!("@{quiet} is quiet (no heartbeat) and may not read this; Ctrl+Enter or Enter again to send now"));
+    assert_eq!(c.status(), format!("Ctrl+Enter or Enter again to send now: @{quiet} is quiet (no heartbeat)"));
     key(&mut c, KeyCode::Enter, KeyModifiers::CONTROL);
     assert!(in_tray(QUIET_CWD, "refused once"), "Ctrl+Enter sent it: {}", c.status());
     typed(&mut c, &format!("@{quiet} straight away"));
@@ -150,7 +150,7 @@ fn enter_again_sends_a_refused_dm() {
     side_click(&mut c, &nick(QUIET_CWD));
     typed(&mut c, "dm to a quiet agent");
     press(&mut c, KeyCode::Enter);
-    assert!(c.status().ends_with("press Enter again to send"), "{}", c.status());
+    assert!(c.status().starts_with("press Enter again to send: @"), "{}", c.status());
     press(&mut c, KeyCode::Enter);
     assert!(in_tray(QUIET_CWD, "dm to a quiet agent"), "{}", c.status());
 }
