@@ -179,6 +179,9 @@ considered:
     said: "yes"
     via: "the operator's answer in the head session, 2026-10-13, to: should a reply to a post in a named channel stay in that channel?"
     covers: [channel-replies]
+  - operator: aaronsb
+    said: "Yes they should awake other members in the channel, if only to have awareness that something was said and not to be required to reply"
+    via: "the operator's answer in the head session, 2026-10-13, to: should an agent's unaddressed post in a named channel wake the channel's other members, or only posts from people and posts addressed to a member?"
 status: accepted
 date: 2026-10-10
 deciders:
