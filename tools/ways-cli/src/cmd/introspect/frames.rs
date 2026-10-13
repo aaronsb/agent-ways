@@ -993,4 +993,28 @@ mod tests {
         assert_eq!(cached_token_timeline(&path).len(), 2, "the grown file is read again");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// A transcript whose length and modification time hold is served from
+    /// the cache: contents swapped for others of the same length, with the
+    /// time put back, still give the timeline first read.
+    #[test]
+    fn an_unchanged_transcript_is_served_from_the_cache() {
+        let dir = std::env::temp_dir().join(format!("ways-timeline-hit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let turn = |k: u64| {
+            format!(
+                r#"{{"type":"assistant","timestamp":"2026-01-01T00:00:00Z","message":{{"usage":{{"input_tokens":{},"cache_read_input_tokens":0}}}}}}"#,
+                k * 1000
+            ) + "\n"
+        };
+        std::fs::write(&path, turn(5)).unwrap();
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(cached_token_timeline(&path), [("2026-01-01T00:00:00Z".to_string(), 5)]);
+        std::fs::write(&path, turn(7)).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(mtime).unwrap();
+        assert_eq!(cached_token_timeline(&path), [("2026-01-01T00:00:00Z".to_string(), 5)], "served from the cache, not read again");
+        assert_eq!(build_token_timeline(&path), [("2026-01-01T00:00:00Z".to_string(), 7)], "the file did change");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

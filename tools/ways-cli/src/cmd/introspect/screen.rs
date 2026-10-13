@@ -985,7 +985,15 @@ fn header(r: &Replay, width: u16) -> Vec<Line<'static>> {
         (
             0,
             Span::styled(
-                format!("epoch {} · {}K ctx · {} ways · window {}/{}", fr.epoch, r.window_k, fr.shown(r.matched).ways.len(), fr.window, windows),
+                format!(
+                    "{}epoch {} · {}K ctx · {} ways · window {}/{}",
+                    if r.has_subagents() { "main's " } else { "" },
+                    fr.epoch,
+                    r.window_k,
+                    fr.shown(r.matched).ways.len(),
+                    fr.window,
+                    windows
+                ),
                 theme::muted(),
             ),
         ),
@@ -1141,6 +1149,10 @@ fn withheld_row(w: &ActiveWay, agents: &Agents, agent_w: u16, way_w: usize, epoc
     ])
 }
 
+/// Widest a subagent's name runs before a why entry's way name: the Agent
+/// column's width at 80 columns.
+const AGENT_MARK_W: u16 = 10;
+
 fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
     let left_w = (area.width / 3).clamp(16, 40).min(area.width.saturating_sub(14));
     let [left, right] = Layout::horizontal([Constraint::Length(left_w), Constraint::Min(10)]).areas(area);
@@ -1156,16 +1168,20 @@ fn draw_why(f: &mut Draw, r: &mut Replay, area: Rect) {
             // A filled bullet marks a way the model has a record of on this
             // channel; a judge-blocked way's channel is `judge`.
             let bullet = if facet(&w.id, &w.trigger).is_some() { "•" } else { "·" };
+            // A way several agents fired is a row each: a subagent's entry
+            // names its agent before the way, cut as the Agent column cuts
+            // it, so the epoch's owner stays in view in a narrow pane.
+            let agent = if w.agent.is_empty() || w.agent == super::frames::MAIN {
+                Span::raw("")
+            } else {
+                let name: String = table::agent_cell(&r.agents, &w.agent, AGENT_MARK_W).spans.iter().map(|s| s.content.as_ref()).collect();
+                Span::styled(format!("{name} "), r.agents.style(&w.agent))
+            };
             ListItem::new(Line::from(vec![
                 Span::raw(format!("{bullet} ")),
                 Span::styled(format!("e{:>ew$} ", w.epoch_fired), theme::muted()),
+                agent,
                 table::way_name(w, usize::MAX),
-                // A way several agents fired is a row each: name whose.
-                if w.agent.is_empty() || w.agent == super::frames::MAIN {
-                    Span::raw("")
-                } else {
-                    Span::styled(format!(" · {}", r.agents.label(&w.agent)), r.agents.style(&w.agent))
-                },
             ]))
         })
         .collect();

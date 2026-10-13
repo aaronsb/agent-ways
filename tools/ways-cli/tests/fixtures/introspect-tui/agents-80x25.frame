@@ -1,7 +1,7 @@
 agent-tui frame 80x25
 | 1 timeline    2 fires    3 spend    4 stats    5 precision                     |
 |Session 8f3a2c1d-5e6f-4a7b-9c8d-0e1f2a3b4c5d  /home/dev/proj                    |
-|epoch 2 · 200K ctx · 4 ways · window 1/1 · 2026-07-03 16:53                     |
+|main's epoch 2 · 200K ctx · 4 ways · window 1/1 · 2026-07-03 16:53              |
 |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━● 2/2|
 |┌ ways at main's epoch 2 ──────────────────────────────────────────────────────┐|
 |│ Way                 Agent       Epoch   Dist  Trigger        ◎  Re-disclose  │|
@@ -32,7 +32,7 @@ styles
   0  47-59  White Blue -
   1   0-7   - - BOLD
   1  44-59  - - DIM
-  2   0-58  - - DIM
+  2   0-65  - - DIM
   3   0-74  Cyan - -
   3  75-75  Cyan - BOLD
   3  76-79  - - BOLD
