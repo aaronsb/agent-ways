@@ -637,7 +637,7 @@ fn a_digit_on_an_agent_row_is_typed_in_the_box() {
     press(&mut c, KeyCode::Down);
     let row = focused(&mut c);
     assert!(row.starts_with("row ") && !row.starts_with("row #"), "an agent's row: {row}");
-    assert!(!bar(&mut c).contains("1-9"), "the footer names no digits there: {}", bar(&mut c));
+    assert!(!bar(&mut c).contains("0-9 channels"), "the footer names no digits there: {}", bar(&mut c));
     press(&mut c, KeyCode::Char('2'));
     assert_eq!((c.foreground().clone(), focused(&mut c), c.input().text()), (Tab::Merged, "mode chat".to_string(), "2"));
 }

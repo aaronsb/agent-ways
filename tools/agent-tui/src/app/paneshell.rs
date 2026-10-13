@@ -1460,6 +1460,52 @@ mod tests {
         assert!(!help.contains("right-click") && !help.contains("Ctrl+T"), "{help}");
     }
 
+    /// A pane that records, in order, the area each frame tells it and the
+    /// area it held when the tab bar asked for its tabs.
+    #[derive(Default)]
+    struct Lays {
+        area: Option<Rect>,
+        log: Vec<String>,
+    }
+    impl Pane for Lays {
+        fn palette(&self) -> theme::Palette {
+            theme::Palette::default()
+        }
+        fn layout(&mut self, area: Rect) {
+            self.area = Some(area);
+            self.log.push(format!("layout {}x{}", area.width, area.height));
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            self.log.push(format!("tabs at {:?}", self.area.map(|a| a.width)));
+            vec![PaneTab::new("one")]
+        }
+        fn tab(&mut self) -> usize {
+            0
+        }
+        fn set_tab(&mut self, _: usize) {}
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, _: KeyEvent) -> Keyed {
+            Keyed::Done
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+    }
+
+    /// The pane learns this frame's area before the tab bar asks for its
+    /// tabs, so a resize shows on the bar in the frame it happens.
+    #[test]
+    fn the_pane_is_told_its_area_before_the_tab_bar_asks_for_its_tabs() {
+        let mut a = App::with_pane("lays", Lays::default());
+        testkit::render(&mut a, 80, 10);
+        testkit::render(&mut a, 60, 10);
+        let p: &Lays = a.pane_ref().expect("the pane");
+        let tabs: Vec<&String> = p.log.iter().filter(|l| l.starts_with("tabs")).collect();
+        assert_eq!(tabs.last().map(|l| l.as_str()), Some("tabs at Some(60)"), "the bar reads the width of the frame it is in: {:?}", p.log);
+        let first_tabs = p.log.iter().position(|l| l.starts_with("tabs")).expect("the bar asked for tabs");
+        assert!(p.log[..first_tabs].iter().any(|l| l.starts_with("layout 80x")), "layout before the first tabs: {:?}", p.log);
+    }
+
     /// A pane that owns text and passes every key on, but says Esc does
     /// not quit, as the chat does (ADR-409).
     struct KeepsEsc;

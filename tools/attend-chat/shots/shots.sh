@@ -138,7 +138,6 @@ arrow-empty  | base  | wait:Agents Up text:1x wait:>_1x
 q-asks       | base  | wait:Agents BTab BTab q wait:quit?
 walk-back    | base  | wait:Agents text:x Down Tab Tab Tab Tab wait:_column_
 bar-active   | base  | wait:Agents M-2 wait:rollout
-tab-count    | base  | wait:Agents M-2 wait:rollout
 tab-numbers  | base  | wait:Agents M-2 wait:rollout F3 gone:Agents wait:1_#open
 tab-narrow   | base  | wait:Agents M-2 wait:rollout resize:70 gone:Agents wait:1_#open
 digit-agent  | base  | wait:Agents F2 Down wait:_column_ text:2 wait:>_2

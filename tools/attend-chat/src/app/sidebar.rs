@@ -398,11 +398,11 @@ impl ChatPane {
         self.world().laid.rows.clone()
     }
 
-    /// Whether the column is drawn in the frame being drawn: shown, and with
-    /// room at the pane's width ([`agent_tui::Pane::layout`]); before any
-    /// frame, as shown.
+    /// Whether the column is drawn in the frame now being drawn, at the
+    /// width [`agent_tui::Pane::layout`] told before the tab bar; before any
+    /// frame, whether it is shown.
     pub(super) fn column_this_frame(&self) -> bool {
-        self.sidebar && self.width.is_none_or(|w| width(w).is_some())
+        self.width.map_or(self.sidebar, |w| self.side_width(w).is_some())
     }
 
     /// The person glyph a member count carries: a Nerd Font's beside the
@@ -415,9 +415,9 @@ impl ChatPane {
         }
     }
 
-    /// Whether the column is drawn: the last frame had room for it, and it
-    /// has not been hidden since, so a hide takes effect before the next
-    /// frame shows it.
+    /// Whether the column was drawn in the last frame drawn: it had room
+    /// then, and it has not been hidden since, so a hide takes effect before
+    /// the next frame shows it.
     pub(super) fn side_drawn(&self) -> bool {
         self.sidebar && !self.hits.side_area.is_empty()
     }

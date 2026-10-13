@@ -85,7 +85,7 @@ The compose box and the feed are the chat: in the feed a character goes to the b
 
 Esc moves along one cycle: the compose box, the feed, the `≡` menu, the tab or column row the focus was last on (the feed when there is none), the `≡` menu again, and so on. The draft stays as it is. Leaving the compose box onto `≡` with Tab, or with Down at the end of its last line, does not count as a visit: the cycle comes back to the tab or row focused before. The `≡` menu Esc opened returns the focus there however it closes, by Esc, a click outside or an item picked, and the next Esc after any menu closes is the cycle's next stop, so a double Esc outside the box ends on the `≡` menu. A menu, a question, the key help or the entry dialog that is open takes the first Esc.
 
-Where the terminal does not speak the kitty keyboard protocol, Ctrl-3 arrives as the same byte as Esc and is an Esc stop: from the compose box the feed, from a tab or row the `≡` menu. An Alt and digit chord split across two reads arrives as Esc then the digit: an Esc stop, then the digit typed. Neither loses the draft or quits.
+Where the terminal does not speak the kitty keyboard protocol, Ctrl-3 arrives as the same byte as Esc and is an Esc stop: from the compose box the feed, from the feed, a tab or a row the `≡` menu. An Alt and digit chord split across two reads arrives as Esc then the digit: an Esc stop, then the digit typed. Neither loses the draft or quits.
 
 ## Keys
 
