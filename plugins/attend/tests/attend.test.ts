@@ -19,7 +19,6 @@ import {
   pollInterval,
   replyArgv,
   safeSender,
-  isUnknownWake,
   sendArgv,
   shortId,
 } from '../hooks/lib.ts'
@@ -78,8 +77,6 @@ type World = {
   noListen?: boolean
   /** An attend whose `listen on` has no `--host`. */
   noHostFlag?: boolean
-  /** An attend whose drain has no `--wake`. */
-  noWakeFlag?: boolean
   /** Submits that fail before one enters. */
   submitFails?: number
   /** The session id `$.session.id()` reads; `s1` when not given. */
@@ -159,7 +156,6 @@ function host(on: On, world: World) {
     if (argv[0] === 'ways') return ok(configJson(world.config ?? {}))
     if (cmd.startsWith('listen') && world.noListen) return { ...ok(), exitCode: 2, stderr: "error: unrecognized subcommand 'listen'" }
     if (cmd.includes('--host') && world.noHostFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--host' found" }
-    if (cmd.includes('--wake') && world.noWakeFlag) return { ...ok(), exitCode: 2, stderr: "error: unexpected argument '--wake' found" }
     if (cmd.startsWith('listen')) return ok(cmd === 'listen off' ? 'not listening\n' : 'listening\n')
     if (cmd === 'peer list') return ok('...\n  3 agent(s), 0 channel(s)\n')
     if (cmd === 'message unread --json') return ok(world.unread ?? '{"unread":0,"held_back":0,"listening":true,"rooms":[]}')
@@ -517,32 +513,6 @@ describe('dormant', () => {
     expect(h.submitted.length).toBe(1)
   })
 
-  test('an attend older than --wake is drained without it, and asked once', async ($, on) => {
-    const clock = mock.clock(on, { now: T0 })
-    const h = host(on, { noWakeFlag: true, drains: [one(0, 'project'), DRAIN_EMPTY] })
-    await $.session.start(INTERACTIVE)
-    await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)
-    await clock.advance(5_000)
-    const drains = h.argvs.filter(a => a[1] === 'message' && a[2] === 'inbox')
-    expect(drains.slice(0, 2)).toEqual([
-      ['attend', 'message', 'inbox', '--drain', '--json', '--wake'],
-      ['attend', 'message', 'inbox', '--drain', '--json'],
-    ])
-    expect(h.submitted.length).toBe(1)
-    // Later polls remember: one drain each, without the flag.
-    const before = h.argvs.length
-    await clock.advance(60_000)
-    const later = h.argvs.slice(before).filter(a => a[1] === 'message' && a[2] === 'inbox')
-    expect(later.length).toBeGreaterThan(0)
-    expect(later.every(a => !a.includes('--wake'))).toBe(true)
-  })
-
-  test('only an unknown --wake is taken for an old attend', () => {
-    expect(isUnknownWake({ exitCode: 2, stderr: "error: unexpected argument '--wake' found" })).toBe(true)
-    expect(isUnknownWake({ exitCode: 2, stderr: 'error: something else' })).toBe(false)
-    expect(isUnknownWake({ exitCode: 1, stderr: '--wake' })).toBe(false)
-  })
-
   test('the send and reply descriptions say where a message goes', async ($, on) => {
     mock.clock(on, { now: T0 })
     const h = host(on, {})
@@ -558,17 +528,13 @@ describe('dormant', () => {
     expect(reply.description).toContain('named channel')
   })
 
-  test('an attend older than --host still turns listening on, without naming the host', async ($, on) => {
+  test('a refused listen on is reported once, with no retry', async ($, on) => {
     mock.clock(on, { now: T0 })
     const h = host(on, { noHostFlag: true })
     await $.session.start(INTERACTIVE)
     const r = (await $.tool.call({ tool: 'mcp__attend__attend_listen' } as never)) as { result?: unknown; isError?: boolean }
-    expect(r.isError).toBeUndefined()
-    expect(String(r.result)).toContain('listening for the rest of this session')
-    expect(h.argvs.filter(a => a[1] === 'listen' && a[2] === 'on')).toEqual([
-      ['attend', 'listen', 'on', '--host', 'mod'],
-      ['attend', 'listen', 'on'],
-    ])
+    expect(String(r.result)).toContain('could not set this session listening')
+    expect(h.argvs.filter(a => a[1] === 'listen' && a[2] === 'on')).toEqual([['attend', 'listen', 'on', '--host', 'mod']])
   })
 
   test('attend_listen says so when attend cannot set the session listening', async ($, on) => {

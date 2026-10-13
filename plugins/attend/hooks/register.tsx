@@ -20,7 +20,6 @@ import {
   KEEPWARM_CHECK_ARGV,
   LISTEN_OFF_ARGV,
   LISTEN_ON_ARGV,
-  LISTEN_ON_PLAIN_ARGV,
   PEERS_ARGV,
   UNREAD_ARGV,
   WAKE_DRAIN_ARGV,
@@ -39,7 +38,6 @@ import {
   pollInterval,
   replyArgv,
   sendArgv,
-  isUnknownWake,
   shortId,
 } from './lib.ts'
 import type { Listed, ModConfig } from './lib.ts'
@@ -117,9 +115,6 @@ type Mod = {
   isPendingCold: boolean
   /** Submits of `pending` that failed. */
   submitTries: number
-  /** attend refused `--wake` as an unknown argument: an attend older than
-   *  the wake drain, which the poll then drains without it. */
-  noWakeDrain: boolean
   /** Channels joined through attend_join, shown until attend reports rooms. */
   joined: Set<string>
   /** session.start has run; before it, at process start, the engine has not
@@ -238,8 +233,7 @@ async function registerActiveTools($: $) {
  *  since this Claude Code process started arrives, and what `#open` and the
  *  channels carry from now on. */
 async function listenOn($: $): Promise<ProcessRunResult> {
-  let r = await run($, LISTEN_ON_ARGV)
-  if (r.exitCode === 2) r = await run($, LISTEN_ON_PLAIN_ARGV)
+  const r = await run($, LISTEN_ON_ARGV)
   await updateStatus($, s => ({ ...s, listening: r.exitCode === 0 }))
   return r
 }
@@ -345,12 +339,7 @@ async function poll($: $, mod: Mod) {
     if (mod.pending.length === 0) {
       // Only what is addressed to the session starts a turn; #open and
       // channel posts wait for its next one (ADR-406 item 1).
-      let r = await run($, mod.noWakeDrain ? DRAIN_ARGV : WAKE_DRAIN_ARGV)
-      if (!mod.noWakeDrain && isUnknownWake(r)) {
-        mod.noWakeDrain = true
-        r = await run($, DRAIN_ARGV)
-      }
-      const first = parseDrain(r.stdout)
+      const first = parseDrain((await run($, WAKE_DRAIN_ARGV)).stdout)
       if (!first) return
       // Listening turned off elsewhere (attend listen off, a private scene),
       // or an identity attend cannot resolve: the row says so.
@@ -474,13 +463,8 @@ const OPERATOR_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'slack-ping'])
 
 async function refreshUnread($: $, mod: Mod) {
   const u = parseUnread((await run($, UNREAD_ARGV)).stdout)
-  const joined = [...mod.joined]
-  if (u) {
-    await updateStatus($, s => ({ ...s, unread: u.unread, channels: [...new Set([...u.channels, ...joined])] }))
-  } else {
-    // An attend without `unread`: the row counts nothing it cannot see.
-    await updateStatus($, s => ({ ...s, unread: 0, channels: joined }))
-  }
+  if (!u) return
+  await updateStatus($, s => ({ ...s, unread: u.unread, channels: [...new Set([...u.channels, ...mod.joined])] }))
 }
 
 async function refreshPeers($: $, mod: Mod) {
@@ -530,7 +514,6 @@ export const register: Register = on => {
     pending: [],
     isPendingCold: false,
     submitTries: 0,
-    noWakeDrain: false,
     joined: new Set(),
     isStarted: false,
     isRelistening: false,

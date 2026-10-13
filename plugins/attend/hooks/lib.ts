@@ -39,26 +39,14 @@ function bareChannel(channel: string): string {
 }
 
 /** `listen on` names the mod as the host, so attend's Stop-hook drain speaks
- *  the mod's format and tools in this session. An attend older than
- *  `--host` refuses the flag as a usage error (exit 2); the mod then turns
- *  listening on without it. */
+ *  the mod's format and tools in this session. */
 export const LISTEN_ON_ARGV = [ATTEND, 'listen', 'on', '--host', 'mod'] as const
-export const LISTEN_ON_PLAIN_ARGV = [ATTEND, 'listen', 'on'] as const
 export const LISTEN_OFF_ARGV = [ATTEND, 'listen', 'off'] as const
 export const DRAIN_ARGV = [ATTEND, 'message', 'inbox', '--drain', '--json'] as const
 /** The idle poll's drain: it takes nothing unless something pending is
  *  addressed to this session, sent to its project, or a reply to a message
- *  it sent (ADR-406 item 1). An attend older than `--wake` refuses the flag
- *  as a usage error ([`isUnknownWake`]); the mod then drains without it for
- *  the rest of the session. */
+ *  it sent (ADR-406 item 1). */
 export const WAKE_DRAIN_ARGV = [ATTEND, 'message', 'inbox', '--drain', '--json', '--wake'] as const
-
-/** Whether attend refused the wake drain's `--wake` as an argument it does
- *  not know, the usage error (exit 2) of an attend older than the flag.
- *  Any other failure is not taken for an old attend. */
-export function isUnknownWake(r: { exitCode: number; stderr: string }): boolean {
-  return r.exitCode === 2 && r.stderr.includes('--wake')
-}
 export const UNREAD_ARGV = [ATTEND, 'message', 'unread', '--json'] as const
 export const PEERS_ARGV = [ATTEND, 'peer', 'list'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const
