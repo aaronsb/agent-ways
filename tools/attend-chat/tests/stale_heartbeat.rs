@@ -147,6 +147,6 @@ fn a_send_to_an_agent_whose_process_exited_is_refused() {
     let gone = nick(GONE_CWD);
     typed(&mut c, &format!("@{gone} are you there"));
     press(&mut c, KeyCode::Enter);
-    assert!(c.status().starts_with(&format!("@{gone} is quiet")), "{}", c.status());
+    assert_eq!(c.status(), format!("@{gone} has exited and would not read this"));
     assert!(!tray(GONE_CWD).iter().any(|r| r.contains("are you there")), "nothing was written");
 }

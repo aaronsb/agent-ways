@@ -830,7 +830,8 @@ impl ChatPane {
                 self.push(echo);
                 true
             }
-            EnterAction::StatusOnly(s) => {
+            // A menu's command sends nothing, so no send-now offer.
+            EnterAction::StatusOnly(s) | EnterAction::Quiet(s) => {
                 self.say(s, true);
                 false
             }

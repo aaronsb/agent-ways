@@ -1,0 +1,169 @@
+//! A send refused because its agent is quiet can be sent anyway, as Claude
+//! Code's `chat:sendNow` sends a message at once: Ctrl+Enter where the
+//! terminal reports it, and Enter pressed again on the unchanged draft
+//! everywhere. An edit to the draft cancels the offer. An agent whose Claude
+//! Code process has exited is refused whatever the key. Through the real keys.
+//! In its own file, so its own fixture.
+
+mod support;
+
+use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use agent_tui::testkit;
+use agent_tui::theme::{Palette, Shape};
+use attend_chat::app::Chat;
+use attend_chat::signal::{self, Channel, Signal};
+use std::time::{Duration, SystemTime};
+
+/// Quiet: a stale heartbeat, and nothing on this host says its process
+/// exited (it may run on another host, or not listen yet).
+const QUIET_SID: &str = "ffffffff-0000-4000-8000-000000000006";
+const QUIET_CWD: &str = "/work/zeta";
+/// Gone: its enrollment names a Claude Code process that has exited.
+const GONE_SID: &str = "eeeeeeee-0000-4000-8000-000000000005";
+const GONE_CWD: &str = "/work/epsilon";
+const W: u16 = 120;
+const H: u16 = 35;
+
+fn lapse(session: &str) {
+    attend_presence::heartbeat::touch(session).unwrap();
+    let file = std::fs::File::options().write(true).open(attend_presence::heartbeat::heartbeat_path(session)).unwrap();
+    file.set_modified(SystemTime::now() - Duration::from_secs(600)).unwrap();
+}
+
+fn gone_pid() -> u32 {
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    pid
+}
+
+fn chat(enhanced: bool) -> Chat {
+    support::fixture("send-anyway", |_| {
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+        let enrolled = attend_presence::cache::dir().join("enrolled");
+        std::fs::create_dir_all(&enrolled).unwrap();
+        std::fs::write(enrolled.join(GONE_SID), format!("listen\nclaude {}-1\n", gone_pid())).unwrap();
+        lapse(QUIET_SID);
+        lapse(GONE_SID);
+    });
+    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(enhanced);
+    c.push(sig("s-1", QUIET_SID, QUIET_CWD));
+    c.push(sig("s-2", GONE_SID, GONE_CWD));
+    c
+}
+
+fn sig(id: &str, sid: &str, cwd: &str) -> Signal {
+    Signal {
+        id: id.into(),
+        from: format!("claude:{sid}"),
+        project: cwd.rsplit('/').next().unwrap().into(),
+        cwd: cwd.into(),
+        reply_to: None,
+        message: "a message".into(),
+        ts: 1_790_949_000,
+        channel: Channel::Open,
+    }
+}
+
+fn nick(cwd: &str) -> String {
+    agent_identity::Identity::for_cwd(cwd, agent_theme::ColorDepth::NoColor).nickname.to_string()
+}
+
+fn key(c: &mut Chat, code: KeyCode, modifiers: KeyModifiers) {
+    testkit::render_screen(c, W, H);
+    testkit::drive(c, &[KeyEvent::new(code, modifiers)]);
+}
+
+fn press(c: &mut Chat, code: KeyCode) {
+    key(c, code, KeyModifiers::NONE);
+}
+
+fn typed(c: &mut Chat, s: &str) {
+    for ch in s.chars() {
+        press(c, KeyCode::Char(ch));
+    }
+}
+
+fn side_click(c: &mut Chat, text: &str) {
+    let rows = testkit::rows(&testkit::render_screen(c, W, H));
+    let (x, y) = rows
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(y, r)| {
+            let col = r.split('│').next()?;
+            col.find(text).map(|b| (col[..b].chars().count() as u16, y as u16))
+        })
+        .unwrap_or_else(|| panic!("no {text} in the column: {rows:#?}"));
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+}
+
+fn in_tray(cwd: &str, body: &str) -> bool {
+    std::fs::read_dir(signal::cwd_dir(cwd)).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|r| r.contains(body)))
+}
+
+#[test]
+fn enter_again_sends_a_refused_message_to_a_quiet_agent() {
+    let mut c = chat(false);
+    let quiet = nick(QUIET_CWD);
+    typed(&mut c, &format!("@{quiet} first try"));
+    press(&mut c, KeyCode::Enter);
+    assert_eq!(c.status(), format!("@{quiet} is quiet (no heartbeat) and may not read this; press Enter again to send"));
+    assert!(!in_tray(QUIET_CWD, "first try"), "the first Enter sends nothing");
+    press(&mut c, KeyCode::Enter);
+    assert!(c.input().is_empty(), "sent: {}", c.status());
+    assert!(in_tray(QUIET_CWD, "first try"), "Enter again sent it: {}", c.status());
+}
+
+#[test]
+fn an_edit_to_the_draft_cancels_the_offer() {
+    let mut c = chat(false);
+    let quiet = nick(QUIET_CWD);
+    typed(&mut c, &format!("@{quiet} edited"));
+    press(&mut c, KeyCode::Enter);
+    typed(&mut c, "x");
+    press(&mut c, KeyCode::Backspace);
+    press(&mut c, KeyCode::Enter);
+    assert!(c.status().starts_with(&format!("@{quiet} is quiet")), "refused again: {}", c.status());
+    assert!(!in_tray(QUIET_CWD, "edited"), "an edit between the Enters cancels the send");
+    press(&mut c, KeyCode::Enter);
+    assert!(in_tray(QUIET_CWD, "edited"), "the offer stands again after the new refusal: {}", c.status());
+}
+
+#[test]
+fn ctrl_enter_sends_now_where_the_terminal_reports_it() {
+    let mut c = chat(true);
+    let quiet = nick(QUIET_CWD);
+    typed(&mut c, &format!("@{quiet} refused once"));
+    press(&mut c, KeyCode::Enter);
+    assert_eq!(c.status(), format!("@{quiet} is quiet (no heartbeat) and may not read this; Ctrl+Enter or Enter again to send now"));
+    key(&mut c, KeyCode::Enter, KeyModifiers::CONTROL);
+    assert!(in_tray(QUIET_CWD, "refused once"), "Ctrl+Enter sent it: {}", c.status());
+    typed(&mut c, &format!("@{quiet} straight away"));
+    key(&mut c, KeyCode::Enter, KeyModifiers::CONTROL);
+    assert!(in_tray(QUIET_CWD, "straight away"), "Ctrl+Enter sends now without a refusal first: {}", c.status());
+}
+
+#[test]
+fn enter_again_sends_a_refused_dm() {
+    let mut c = chat(false);
+    side_click(&mut c, &nick(QUIET_CWD));
+    typed(&mut c, "dm to a quiet agent");
+    press(&mut c, KeyCode::Enter);
+    assert!(c.status().ends_with("press Enter again to send"), "{}", c.status());
+    press(&mut c, KeyCode::Enter);
+    assert!(in_tray(QUIET_CWD, "dm to a quiet agent"), "{}", c.status());
+}
+
+#[test]
+fn an_agent_whose_process_exited_is_refused_whatever_the_key() {
+    let mut c = chat(true);
+    let gone = nick(GONE_CWD);
+    typed(&mut c, &format!("@{gone} hello"));
+    press(&mut c, KeyCode::Enter);
+    assert_eq!(c.status(), format!("@{gone} has exited and would not read this"));
+    press(&mut c, KeyCode::Enter);
+    key(&mut c, KeyCode::Enter, KeyModifiers::CONTROL);
+    assert_eq!(c.status(), format!("@{gone} has exited and would not read this"));
+    assert!(!in_tray(GONE_CWD, "hello"), "nothing was written");
+}

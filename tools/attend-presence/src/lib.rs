@@ -38,3 +38,26 @@ pub fn alive(member_id: &str, running: &std::collections::HashSet<String>) -> bo
         || heartbeat::is_fresh(member_id, heartbeat::DEFAULT_GRACE)
         || enrollment::process_is_live(member_id)
 }
+
+/// Whether `member_id` is a Claude Code session whose process this host saw
+/// exit: it is not [`alive`], and either the session records naming it all
+/// name pids no process holds, or, with no such record, its enrollment
+/// names a process that has exited. A session this host knows nothing of
+/// (one on another host, or one that never listened) has not exited. A
+/// quiet session that has not exited may still read what is sent to it
+/// later; one that has exited never will.
+pub fn has_exited(member_id: &str) -> bool {
+    if alive(member_id, &std::collections::HashSet::new()) {
+        return false;
+    }
+    let records: Vec<u32> = session::sessions_dirs()
+        .iter()
+        .flat_map(|d| claude_sessions::read_session_records(d))
+        .filter(|r| r.session_id == member_id)
+        .map(|r| r.pid)
+        .collect();
+    if !records.is_empty() {
+        return !records.iter().any(|pid| process::is_running(*pid));
+    }
+    enrollment::process_has_exited(member_id)
+}

@@ -237,6 +237,13 @@ pub fn process_is_live(session_id: &str) -> bool {
     record.claude.as_deref().is_some_and(claude_key_is_live)
 }
 
+/// Whether `session_id`'s enrollment record names a Claude Code process
+/// that is no longer running on this host. False with no record, or a
+/// record that names no process: nothing here says the session has gone.
+pub fn process_has_exited(session_id: &str) -> bool {
+    read(session_id).and_then(|r| r.claude).is_some_and(|key| !claude_key_is_live(&key))
+}
+
 /// Whether the process a `claude` key names runs: its pid is held, and by
 /// the process that started at the key's start time, not a later one that
 /// was given the pid.
@@ -459,6 +466,17 @@ mod tests {
             opt_out("left").unwrap();
             assert!(!crate::alive("left", &none), "it stopped listening");
             assert!(!crate::alive("never", &none), "it never enrolled");
+        });
+    }
+
+    #[test]
+    fn a_session_has_exited_only_when_this_host_saw_its_process_go() {
+        with_cache(|| {
+            enroll_in("running", &own_key());
+            assert!(!crate::has_exited("running"));
+            enroll_in("exited", &format!("{}-1", gone_pid()));
+            assert!(crate::has_exited("exited"));
+            assert!(!crate::has_exited("unknown"), "no record: perhaps another host, perhaps not listening");
         });
     }
 

@@ -192,6 +192,10 @@ pub struct ChatPane {
     /// arrives as Esc, which closes and clears and never quits (ADR-409),
     /// and a setting that asks for Ctrl+digits says they do not arrive.
     enhanced: bool,
+    /// The draft a quiet refusal offered to send anyway: Enter again on it
+    /// unchanged sends it, as Ctrl+Enter does where it arrives. Any edit
+    /// withdraws the offer.
+    send_anyway: Option<String>,
     /// The chat's settings (`attend.chat.*`), read at start and again
     /// after a command, so `/config` applies at once.
     config: attend_config::ChatConfig,
@@ -256,6 +260,7 @@ impl ChatPane {
             theme: "terminal".into(),
             asked: None,
             enhanced: false,
+            send_anyway: None,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
             sidebar: true,
             width: None,
@@ -383,7 +388,18 @@ impl ChatPane {
         (self.heartbeat && !self.dry_run).then(crate::signal::human_member_id)
     }
 
+    /// Enter in the compose box. On a draft a quiet refusal offered to
+    /// send anyway, unchanged since, it sends anyway.
     fn enter(&mut self) {
+        let again = self.send_anyway.as_deref() == Some(self.input.text());
+        self.send(again);
+    }
+
+    /// Send the draft, or run the command. `anyway` sends to an agent that
+    /// is quiet but has not exited, as Claude Code's `chat:sendNow` sends at
+    /// once: Ctrl+Enter, or Enter again after the refusal.
+    fn send(&mut self, anyway: bool) {
+        self.send_anyway = None;
         if self.dry_run {
             return self.enter_dry();
         }
@@ -392,7 +408,7 @@ impl ChatPane {
         // destination flag, which has degraded to #open.
         let fg = self.normal_tab();
         let sets_jump = self.input.text().trim_start().starts_with("/config tabs.jump");
-        match handle_enter(self.input.text(), &self.signals, &fg, self.person().as_deref()) {
+        match handle_enter(self.input.text(), &self.signals, &fg, self.person().as_deref(), anyway) {
             EnterAction::None => {}
             EnterAction::ClearWithStatus(s) => {
                 self.say(s, false);
@@ -408,6 +424,12 @@ impl ChatPane {
                 self.push(echo);
             }
             EnterAction::StatusOnly(s) => self.say(s, true),
+            EnterAction::Quiet(s) => {
+                // Name the key that arrives on this terminal (ADR-409).
+                let how = if self.enhanced { "Ctrl+Enter or Enter again to send now" } else { "press Enter again to send" };
+                self.say(format!("{s}; {how}"), true);
+                self.send_anyway = Some(self.input.text().to_string());
+            }
             EnterAction::ClearWithStatusAndFocus { status, focus } => {
                 self.say(status, false);
                 self.input.clear();

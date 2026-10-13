@@ -52,12 +52,12 @@ fn send(c: &mut Chat, text: &str) -> String {
 }
 
 #[test]
-fn a_send_to_a_quiet_agent_says_it_would_not_be_read() {
+fn a_send_to_a_quiet_agent_says_it_may_not_be_read() {
     let mut c = chat();
     let quiet = agent_identity::Identity::for_cwd(QUIET_CWD, agent_theme::ColorDepth::Ansi16).nickname;
     let screen = send(&mut c, &format!("@{quiet} are you there"));
     assert!(screen.contains(&format!("@{quiet} (quiet)")), "the destination flag marks it: {screen}");
-    assert_eq!(c.status(), format!("@{quiet} is quiet (no heartbeat) and would not read this"));
+    assert_eq!(c.status(), format!("@{quiet} is quiet (no heartbeat) and may not read this; press Enter again to send"));
     assert_eq!(c.input().text(), format!("@{quiet} are you there"), "the draft is kept to send elsewhere");
 }
 

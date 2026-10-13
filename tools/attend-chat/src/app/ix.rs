@@ -191,6 +191,9 @@ pub(super) enum Effect {
     Caret { up: bool },
     /// Enter in the box: send, or run the command.
     Send,
+    /// Ctrl+Enter in the box, where the terminal reports it: send now, to
+    /// an agent that is quiet too, as Claude Code's `chat:sendNow`.
+    SendNow,
     /// Tab in the box on a word to complete: complete it.
     Complete,
     /// Esc in the box: the message selected and the status cleared.
@@ -477,6 +480,7 @@ impl<'a> Step<'a> {
                 self.fx.push(Effect::Clear);
                 return self.go(Focus::Feed);
             }
+            KeyCode::Enter if k.modifiers == KeyModifiers::CONTROL => self.fx.push(Effect::SendNow),
             KeyCode::Enter if !k.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.fx.push(Effect::Send),
             KeyCode::Tab if v.completable => self.fx.push(Effect::Complete),
             KeyCode::Tab => return self.walk(true),

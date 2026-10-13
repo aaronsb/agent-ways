@@ -155,6 +155,7 @@ impl ChatPane {
     fn apply_effect(&mut self, e: Effect) {
         match e {
             Effect::Type(k) => {
+                self.send_anyway = None;
                 self.input.key(k);
             }
             Effect::Caret { up } => {
@@ -166,8 +167,15 @@ impl ChatPane {
                 }
             }
             Effect::Send => self.enter(),
-            Effect::Complete => self.tab_key(),
-            Effect::Clear => self.clear(),
+            Effect::SendNow => self.send(true),
+            Effect::Complete => {
+                self.send_anyway = None;
+                self.tab_key();
+            }
+            Effect::Clear => {
+                self.send_anyway = None;
+                self.clear();
+            }
             Effect::Page { up } => self.page(up),
             Effect::ShowTab(t) => self.set_tab(t),
             Effect::Follow => self.side_follow = true,
@@ -201,6 +209,11 @@ impl ChatPane {
                 Binding::help("← →", "move the cursor; outside the box, the element before or next"),
                 Binding::help("↑ ↓", "between the box's lines; outside it, a column row or a feed message"),
             ]);
+            // Claude Code's `chat:sendNow`; Enter again after a quiet
+            // refusal does the same on any terminal.
+            if self.enhanced {
+                out.push(Binding::help("C-Enter", "send now, to a quiet agent too"));
+            }
         } else {
             let enter = match kind {
                 Kind::Common => "the menu",
