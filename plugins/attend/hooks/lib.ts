@@ -49,8 +49,16 @@ export const DRAIN_ARGV = [ATTEND, 'inbox', '--drain', '--json'] as const
 /** The idle poll's drain: it takes nothing unless something pending is
  *  addressed to this session, sent to its project, or a reply to a message
  *  it sent (ADR-406 item 1). An attend older than `--wake` refuses the flag
- *  as a usage error (exit 2); the mod then drains without it. */
+ *  as a usage error ([`isUnknownWake`]); the mod then drains without it for
+ *  the rest of the session. */
 export const WAKE_DRAIN_ARGV = [ATTEND, 'inbox', '--drain', '--json', '--wake'] as const
+
+/** Whether attend refused the wake drain's `--wake` as an argument it does
+ *  not know, the usage error (exit 2) of an attend older than the flag.
+ *  Any other failure is not taken for an old attend. */
+export function isUnknownWake(r: { exitCode: number; stderr: string }): boolean {
+  return r.exitCode === 2 && r.stderr.includes('--wake')
+}
 export const UNREAD_ARGV = [ATTEND, 'unread', '--json'] as const
 export const PEERS_ARGV = [ATTEND, 'peers'] as const
 export const KEEPWARM_CHECK_ARGV = [ATTEND, 'keepwarm', 'check'] as const

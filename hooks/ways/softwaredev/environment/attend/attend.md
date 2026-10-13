@@ -11,8 +11,9 @@ requires: ["Bash(attend:*)", "Bash(cut:*)", "Bash(grep:*)", "Bash(head:*)", "Bas
 <!-- epistemic: tool-knowledge -->
 <!--
   Messaging guidance lives in three synchronized sources. When you edit
-  the peer-messaging section, the autonomy paragraph, the silence-is-valid
-  callout, the CLI-is-the-contract note, the keepwarm contract, the
+  the peer-messaging section (the send and reply lines among it), the
+  autonomy paragraph, the silence-is-valid callout, the "What wakes you"
+  paragraph, the CLI-is-the-contract note, the keepwarm contract, the
   "Your name" paragraph, or the "Starting active is the operator's
   setting" paragraph in this file, update the other two so agents
   receive consistent guidance at every point:

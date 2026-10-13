@@ -19,6 +19,7 @@ import {
   pollInterval,
   replyArgv,
   safeSender,
+  isUnknownWake,
   sendArgv,
   shortId,
 } from '../hooks/lib.ts'
@@ -514,7 +515,7 @@ describe('dormant', () => {
     expect(h.submitted.length).toBe(1)
   })
 
-  test('an attend older than --wake is drained without it', async ($, on) => {
+  test('an attend older than --wake is drained without it, and asked once', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { noWakeFlag: true, drains: [one(0, 'project'), DRAIN_EMPTY] })
     await $.session.start(INTERACTIVE)
@@ -526,6 +527,18 @@ describe('dormant', () => {
       ['attend', 'inbox', '--drain', '--json'],
     ])
     expect(h.submitted.length).toBe(1)
+    // Later polls remember: one drain each, without the flag.
+    const before = h.argvs.length
+    await clock.advance(60_000)
+    const later = h.argvs.slice(before).filter(a => a[1] === 'inbox')
+    expect(later.length).toBeGreaterThan(0)
+    expect(later.every(a => !a.includes('--wake'))).toBe(true)
+  })
+
+  test('only an unknown --wake is taken for an old attend', () => {
+    expect(isUnknownWake({ exitCode: 2, stderr: "error: unexpected argument '--wake' found" })).toBe(true)
+    expect(isUnknownWake({ exitCode: 2, stderr: 'error: something else' })).toBe(false)
+    expect(isUnknownWake({ exitCode: 1, stderr: '--wake' })).toBe(false)
   })
 
   test('the send and reply descriptions say where a message goes', async ($, on) => {

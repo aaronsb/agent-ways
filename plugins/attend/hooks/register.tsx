@@ -39,6 +39,7 @@ import {
   pollInterval,
   replyArgv,
   sendArgv,
+  isUnknownWake,
   shortId,
 } from './lib.ts'
 import type { Listed, ModConfig } from './lib.ts'
@@ -111,6 +112,9 @@ type Mod = {
   pending: Listed[]
   /** Submits of `pending` that failed. */
   submitTries: number
+  /** attend refused `--wake` as an unknown argument: an attend older than
+   *  the wake drain, which the poll then drains without it. */
+  noWakeDrain: boolean
   /** Channels joined through attend_join, shown until attend reports rooms. */
   joined: Set<string>
   /** session.start has run; before it, at process start, the engine has not
@@ -336,8 +340,11 @@ async function poll($: $, mod: Mod) {
     if (mod.pending.length === 0) {
       // Only what is addressed to the session starts a turn; #open and
       // channel posts wait for its next one (ADR-406 item 1).
-      let r = await run($, WAKE_DRAIN_ARGV)
-      if (r.exitCode === 2) r = await run($, DRAIN_ARGV)
+      let r = await run($, mod.noWakeDrain ? DRAIN_ARGV : WAKE_DRAIN_ARGV)
+      if (!mod.noWakeDrain && isUnknownWake(r)) {
+        mod.noWakeDrain = true
+        r = await run($, DRAIN_ARGV)
+      }
       const first = parseDrain(r.stdout)
       if (!first) return
       // Listening turned off elsewhere (attend listen off, a private scene),
@@ -501,6 +508,7 @@ export const register: Register = on => {
     active: false,
     pending: [],
     submitTries: 0,
+    noWakeDrain: false,
     joined: new Set(),
     isStarted: false,
     isRelistening: false,

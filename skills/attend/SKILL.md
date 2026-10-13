@@ -8,8 +8,9 @@ allowed-tools: Bash, Monitor, Read
 
 <!--
 Messaging guidance lives in three synchronized sources. When you edit
-the peer-messaging section, the autonomy paragraph, the silence-is-valid
-callout, the CLI-is-the-contract note, the keepwarm contract, the
+the peer-messaging section (the send and reply lines among it), the
+autonomy paragraph, the silence-is-valid callout, the "What wakes you"
+paragraph, the CLI-is-the-contract note, the keepwarm contract, the
 "Your name" paragraph, or the "Starting active is the operator's
 setting" paragraph, update all three:
 
