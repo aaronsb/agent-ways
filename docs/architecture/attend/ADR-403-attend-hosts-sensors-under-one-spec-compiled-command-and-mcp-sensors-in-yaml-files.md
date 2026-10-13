@@ -57,11 +57,11 @@ considered:
     via: session 2026-10-03, selected from agent-written options on the gate for repository sensor files
     covers: [project-trust]
 observable:
-  - 'see: attend sensors lists a shipped git.yaml, a user weather.yaml (kind: command, Open-Meteo) and a user slack-unread.yaml (kind: mcp), each with its source file and last poll state'
-  - 'run: attend sensors fire weather/high-wind --input sample.json produces a [test] notification on the event lane and leaves the trigger''s stored state unchanged'
+  - 'see: attend sensor list shows a shipped git.yaml, a user weather.yaml (kind: command, Open-Meteo) and a user slack-unread.yaml (kind: mcp), each with its source file and last poll state'
+  - 'run: attend sensor fire weather/high-wind --input sample.json produces a [test] notification on the event lane and leaves the trigger''s stored state unchanged'
   - 'run: ways settings set attend.sensors.weather.triggers.high-wind.where.wind_speed_10m.above 40 writes the user file, and ways settings list --json attend.sensors.weather names that file as the source'
-  - 'see: an mcp sensor with no probe record stays disabled, and attend sensors says to run attend sensors probe <name>; after a probe whose second call returns every item of the first and the operator confirms in another client that the items are still unread, it is enabled'
-  - 'see: an mcp sensor on a tool without readOnlyHint is refused unless its file sets allow_unannotated: true, and attend sensors marks that sensor as overridden'
+  - 'see: an mcp sensor with no probe record stays disabled, and attend sensor list says to run attend sensor probe <name>; after a probe whose second call returns every item of the first and the operator confirms in another client that the items are still unread, it is enabled'
+  - 'see: an mcp sensor on a tool without readOnlyHint is refused unless its file sets allow_unannotated: true, and attend sensor list marks that sensor as overridden'
   - 'see: a project sensor file of kind command is reported as refused until the project is in attend.project_sensors in the user config'
   - 'run: ways settings lint on a config.yaml that still holds attend.sensors.git.interval names that key and the sensor file to write instead'
   - 'run: ways settings lint flags a command sensor that declares lane: message with no author field, and attend runs it on the event lane'
@@ -126,7 +126,7 @@ The three attend kinds also share attend's block:
 - **emission:** `threshold` and `lane` (§3a);
 - **permissions:** `requires`, the tool permissions the sensor needs (ADR-116);
 - **triggers** (§3);
-- **failure handling:** a timeout, non-zero exit, malformed output, exec failure or auth failure is a recorded sensor state shown by `attend sensors` and the settings tab, never a silent drop and never only a line on stderr.
+- **failure handling:** a timeout, non-zero exit, malformed output, exec failure or auth failure is a recorded sensor state shown by `attend sensor list` and the settings tab, never a silent drop and never only a line on stderr.
 
 A compiled sensor keeps only the code a poll needs. `SENSOR_DEFAULTS` and `BUILTINS` move out of `attend-config/src/schema.rs` into shipped sensor files, the literal fallbacks in `register_builtin!` go, and `peers` is registered from its file like the others. A built-in sensor that a `command` file can express moves out of attend's code into a shipped file. `git` is the first candidate; its file records the reason if it stays compiled.
 
@@ -175,8 +175,8 @@ The lane is per sensor, which is a step toward #139 and not its fix. `peers` sti
 An `mcp` sensor's `server` names a server from Claude Code's MCP configuration (user `~/.claude.json`, project `.mcp.json`), or defines one inline with `command`, `args` and `env`. attend starts its own stdio instance of that server, holds one long-lived session per server shared by every sensor that uses it, and restarts it on failure.
 - **Transport:** stdio only. Remote servers wait for #845, where OAuth must refresh without an interactive login.
 - **Read-only, checked:** the MCP specification makes `readOnlyHint` advisory and untrusted, so the hint is necessary but not sufficient.
-  - The tool must declare `readOnlyHint: true`. A file may set `allow_unannotated: true`, which `attend sensors` and the settings tab show as an override.
-  - `attend sensors probe <name>` calls the tool twice in a row and checks whether the second call returned every item of the first, by the trigger's `key`. This catches a side effect that changes the result set, such as a cursor that advances or a listing that filters out what was read. It can't catch read state the server sets while the result stays the same, such as a message marked read on the service.
+  - The tool must declare `readOnlyHint: true`. A file may set `allow_unannotated: true`, which `attend sensor list` and the settings tab show as an override.
+  - `attend sensor probe <name>` calls the tool twice in a row and checks whether the second call returned every item of the first, by the trigger's `key`. This catches a side effect that changes the result set, such as a cursor that advances or a listing that filters out what was read. It can't catch read state the server sets while the result stays the same, such as a message marked read on the service.
   - For that, the probe then asks the operator to confirm in another client (the service's own app, for example) that the items it returned are still unread or otherwise untouched, and records the answer.
   - The probe record holds both results. A sensor with no record, a failed call comparison or no operator confirmation stays disabled. The record names the server, tool and args it was taken with, and a change to any of them voids it.
 - **Diff on attend's side:** attend computes the delta itself, through triggers keyed on an item field. It never relies on a server cursor that advances when read.
@@ -195,15 +195,15 @@ This amends ADR-503's Decision in three places, and leaves the rest in force:
 - **§3, the layers:** a shipped layer sits below the user layer for sensor keys.
 - **§8 and `file_of`, where `set` writes:** `file_of` in `ways-cli` maps each file kind to one path per layer. A sensor key's file instead depends on the sensor name and the layer being written: `set` writes the sensor's user or project file, creating it with only the changed field when the sensor comes from a lower layer.
 
-Sensor files are managed with the same named-item flow the theme tab uses: copy any sensor to a new name, rename it, or delete it. Shipped files are bundled, so they can be copied (the usual way to start a variant) but not renamed or deleted; a user or project override of one can be. Each action has its CLI form (ADR-504 §10): `attend sensors copy|rename|delete`, and `ways sensors copy|rename|delete` for ways sensors.
+Sensor files are managed with the same named-item flow the theme tab uses: copy any sensor to a new name, rename it, or delete it. Shipped files are bundled, so they can be copied (the usual way to start a variant) but not renamed or deleted; a user or project override of one can be. Each action has its CLI form (ADR-504 §10): `attend sensor copy|rename|delete`, and `ways sensors copy|rename|delete` for ways sensors.
 
 The sensors tab (ADR-503, ADR-504) is a view over the same commands. It shows both prefixes, `attend.sensors` and `ways.sensors`: the tab's single `prefix` in `tools/ways-cli/src/cmd/settings/tui/build.rs` becomes a list, and the `ways` tab skips `ways.sensors`. The tab lists every sensor of every kind with its source file and live state, toggles a sensor or trigger, edits fields in a form, and previews a change with a dry run. Anything one surface can do, the other can.
 
 ### 6. Test from the CLI
 
-- `attend sensors poll <name>` runs one real poll and prints the result and each trigger's verdict.
-- `attend sensors probe <name>` runs the read-only probe of §4, asks for the operator's confirmation, and writes its record.
-- `attend sensors fire <name>[/<trigger>] [--input FILE|-]` sends a synthetic result through the real trigger evaluation, lane and delivery. The notification it produces is marked `[test]`, with `test: true` in the record. ways uses the same `--input` flag (ADR-199 §9).
+- `attend sensor poll <name>` runs one real poll and prints the result and each trigger's verdict.
+- `attend sensor probe <name>` runs the read-only probe of §4, asks for the operator's confirmation, and writes its record.
+- `attend sensor fire <name>[/<trigger>] [--input FILE|-]` sends a synthetic result through the real trigger evaluation, lane and delivery. The notification it produces is marked `[test]`, with `test: true` in the record. ways uses the same `--input` flag (ADR-199 §9).
 - `--dry-run` on poll or fire stops before delivery.
 - A test fire leaves trigger state untouched unless `--commit` is given.
 
