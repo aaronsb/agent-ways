@@ -13,7 +13,7 @@ related: []
 
 A reading of the attend signal wire format, taken 2026-09-19, that settles the structured envelope fields issues #532 (sender kind and on-behalf-of) and #533 (addressee) ask for. The two issues share one on-disk change and one set of readers, so this note specifies them together for a single implementation. It then states what #535 (age- and party-aware drain) reads from the fields and which parts of ADR-172 that amends. Signing and cross-machine relay stay out of scope; the last section says why these fields are still their prerequisite. #538 (attend as an MCP server for outbound) is covered where the field design touches tool parameters.
 
-The ADR that #532's `adr:needed` label calls for can cite this note for its context and lift the field table into its decision section. The `to` section was revised on 2026-10-12, when ADR-406 item 10 made messages direct by default; it describes addressing as it stands.
+The ADR that #532's `adr:needed` label calls for can cite this note for its context and lift the field table into its decision section. The `to` section was revised on 2026-10-12, when ADR-406 item 10 sent replies to their sender and made a named send direct; it describes addressing as it stands.
 
 ## What the wire carries today
 
@@ -62,7 +62,7 @@ An agent relaying its operator's request writes `--on-behalf-of <username>`. An 
 
 ### to
 
-`to` names who the message is for. The directory the file lands in is how it gets there. A message is direct unless its sender names a channel (ADR-406 item 10).
+`to` names who the message is for. The directory the file lands in is how it gets there. A message that names a recipient is direct, one that names a channel goes to it, and one that names neither goes to `#open` (ADR-406 item 10).
 
 A direct message has one or more recipients. Each is resolved at send time to an id; display names are never written (ADR-171).
 
@@ -78,7 +78,7 @@ A name that matches more than one session, or both a session and a person, is re
 
 **Writers.**
 
-- `attend send <msg>` with no `--to` and no `--channel`, from a session: `to` = the operator's member id, the sanitized `$USER` of the session (ADR-170). File lands in that person tray. This default is the recommendation, pending the operator's answer; the alternative is to refuse the send. From a sender with no resolved session, a person at a terminal, the send is refused and the refusal names the three ways to address one.
+- `attend send <msg>` with no `--to` and no `--channel`: `to = *`. File lands in `_broadcast/`. A sender that names no one lacks the context to address anyone, and `#open` is where any session can take it up.
 - `attend send --to <name|id|path>`: resolved by the table above. `cmd_send` errors when no live session matches a session name or a path, so the set is never empty. A person is addressed whether or not attend-chat is open, since the person tray holds the message until it is shown.
 - `attend send --channel <name>`: `to = #<name>`. File lands in `@<name>/`. `--channel open` and `--channel '#open'` give `to = *`, and the file lands in `_broadcast/`.
 - attend-chat writes as a person. A leading `@Nickname` is a direct message: `to` = that session's id, in its tray. A message composed in a channel's view goes to the channel, and in `#open`'s view to `_broadcast/` with `to = *`. The `/invite` and `/kick` notices are direct messages to the session ids they name. Writing the channel or `*` on a direct message would make #535's party rule collapse a person's direct message as traffic between others.
@@ -87,17 +87,16 @@ A name that matches more than one session, or both a session and a person, is re
   | Parent said in | Reply lands in | `to` |
   |---|---|---|
   | A named channel | that channel; refused when this session left it or it is gone | the parent's sender |
-  | `#open` | `_broadcast/` | the parent's sender |
-  | A project tray or a person tray | a direct message to the parent's sender | the parent's sender |
+  | `#open` or a project tray or a person tray | a direct message to the parent's sender | the parent's sender |
   | Unknown | refused | — |
 
-  A reply to an `#open` post stays in `#open`, where everyone the question was put to sees the answers, and its `to` lets the poster's session wake for it. This is the recommendation, pending the operator's answer. A reply to a session that is no longer live is refused, naming the sender, as a send to a dead project is; also the recommendation, pending the operator's answer. A reply to a person is always written. No reply falls back to `#open`. `attend reply` records only the parent's signal id (`last_inbound`); it resolves the parent's `from_id` at reply time by looking the id up in the scan directories, the lookup `cmd_inbox_read` performs.
+  A reply to an `#open` post is a direct message to the poster, so the answers to a question put to everyone collect with the one who asked, and the poster's session wakes for each. A reply to a post in a named channel stays in that channel, where its members see it; this reading is held open as ADR-406's channel-replies probe. A reply to a session that is no longer live is refused, naming the session, as a send to a dead project is. A reply to a person is always written. No reply falls back to `#open`. `attend reply` records only the parent's signal id (`last_inbound`); it resolves the parent's `from_id` at reply time by looking the id up in the scan directories, the lookup `cmd_inbox_read` performs.
 
 A send to several recipients writes one file per destination directory, and each file carries the full addressee set, as RFC 5322 `To` does, so any recipient can see who else received it. attend-chat's `@a @b` fan-out (ADR-136 Decision 4) does this now, and the CLI does it when `--to` repeats.
 
 **Lifetime of a person tray.** A person has no project, so ADR-136 Decision 3's tray rule does not apply. A signal in a person tray is reaped by the shared-room rule: when its sender's project is gone. The person tray itself is never reaped.
 
-**Mixed versions.** An older attend still writes a send with no flag to `_broadcast/`, where it reads as an `#open` post. An older reader parses `to:<id>|` as the start of the body and, in a shared tray, hands one session's direct message to both. An older attend-chat does not watch person trays and does not show replies to the person. attend and attend-chat release together, and a running `attend run` reloads itself on update (`maybe_self_reload`).
+**Mixed versions.** An older attend still answers an `#open` post, and a person's direct message, in `#open`. An older reader parses `to:<id>|` as the start of the body and, in a shared tray, hands one session's direct message to both. An older attend-chat does not watch person trays and does not show replies to the person. attend and attend-chat release together, and a running `attend run` reloads itself on update (`maybe_self_reload`).
 
 **Follow-up in attend-chat.** A view of each agent's direct messages, opened from its row in the left column, is chat work after #972 and amends ADR-405.
 
@@ -183,7 +182,7 @@ The sensor digest (`build_digest`) can adopt the same party partition without am
 
 ## #538 and typed tool parameters
 
-Under the MCP server, `send` takes `message: string`, `to?: string[]`, `channel?: string`, `on_behalf_of?: string`. `reply` takes `message: string` and `on_behalf_of?: string`. `from_kind` and `from_id` are never parameters: the server derives them per connection through the same ADR-171 resolution, which is the per-connection identity #538 already requires. `to` accepts display names or canonical ids at the tool boundary and the server resolves names to ids before writing, so the on-disk field carries ids only. With no `to` and no `channel`, `send` addresses the operator, as `attend send` does. The CLI's `--to <path>` is the same resolution with a path as input. Both frontends write the same envelope through the one library the previous section recommends.
+Under the MCP server, `send` takes `message: string`, `to?: string[]`, `channel?: string`, `on_behalf_of?: string`. `reply` takes `message: string` and `on_behalf_of?: string`. `from_kind` and `from_id` are never parameters: the server derives them per connection through the same ADR-171 resolution, which is the per-connection identity #538 already requires. `to` accepts display names or canonical ids at the tool boundary and the server resolves names to ids before writing, so the on-disk field carries ids only. With no `to` and no `channel`, `send` posts to `#open`, as `attend send` does. The CLI's `--to <path>` is the same resolution with a path as input. Both frontends write the same envelope through the one library the previous section recommends.
 
 ## Out of scope, and why the fields come first
 
