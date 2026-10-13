@@ -78,6 +78,9 @@ pub enum SendError {
     /// The `to` name matches more than one session, or a session and a
     /// person.
     AmbiguousRecipient { name: String, candidates: Vec<String> },
+    /// A channel post addressed to someone who is not a member of the
+    /// channel: they would never read it.
+    NotInChannel { name: String, channel: String },
     /// The message being answered came from a session that has exited.
     SenderExited { session: String, name: String },
     /// The `to` path is this session's own project, and no other session
@@ -124,6 +127,7 @@ impl std::fmt::Display for SendError {
             Self::AmbiguousRecipient { name, candidates } => {
                 write!(f, "'{name}' names more than one recipient: {}; name one of them", candidates.join(", "))
             }
+            Self::NotInChannel { name, channel } => write!(f, "@{name} is not in #{channel}; nothing sent"),
             Self::SenderExited { session, name } => write!(
                 f,
                 "the message you are replying to came from {name} (session {session}), which has exited; nothing was sent"
@@ -218,6 +222,14 @@ fn resolve(me: &Session, req: &SendRequest) -> Result<Dest, SendError> {
             return Ok(Dest::Open { to });
         }
         check_channel(me, name)?;
+        // Only members read a channel: a post addressed to someone outside
+        // it would reach no one, so it is refused rather than sent.
+        if let (Some(ids), Some(named)) = (&to, &req.to) {
+            let members = groups_for(me).members(name).unwrap_or_default();
+            if ids.split(',').any(|id| !members.iter().any(|m| m == id)) {
+                return Err(SendError::NotInChannel { name: named.trim().to_string(), channel: name.to_string() });
+            }
+        }
         return Ok(Dest::Channel { name: name.to_string(), to });
     }
     match &req.to {

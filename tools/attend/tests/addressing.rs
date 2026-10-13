@@ -457,3 +457,32 @@ fn a_send_with_channel_and_to_posts_in_the_channel_addressed() {
     assert_eq!((sent.scope, sent.to.as_str()), ("#open", "peer-sess"));
     assert!(files(&peer.tray(&f)).is_empty(), "nothing went to the tray");
 }
+
+/// A channel post addressed to someone outside the channel would reach no
+/// one, since only members read it, so it is refused and nothing is written
+/// (PR #974 re-check, E1). A member addressee still posts; `#open` has no
+/// membership to check.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_channel_post_to_a_non_member_is_refused() {
+    let f = Fixture::new("addr-channel-nonmember");
+    let _member = Peer::start(&f, "peer-sess", "peerproj");
+    let _outsider = Peer::start(&f, "other-sess", "otherproj");
+    f.ok(&["join", "room"]);
+    attend_groups::Groups::new(&f.signals(), "peer-sess").join("room", false).unwrap();
+    std::fs::create_dir_all(f.cache().join("heartbeat")).unwrap();
+    std::fs::write(f.heartbeat("peer-sess"), "").unwrap();
+    let room = f.signals().join("@room");
+    for (to, who) in [("other-sess", "a session"), ("fixture-human", "a person")] {
+        let out = f.attend(&["send", "--channel", "room", "--to", to, "--", "are you there?"]);
+        assert_eq!(out.status.code(), Some(1), "{who}: {}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(&format!("@{to} is not in #room; nothing sent")), "{who}: {err}");
+        assert!(files(&room).is_empty(), "{who}: nothing written");
+    }
+    let out = f.attend(&["send", "--channel", "room", "--to", "peer-sess", "--json", "--", "you, in the room"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(files(&room).len(), 1, "a member addressee posts");
+    let out = f.attend(&["send", "--channel", "open", "--to", "other-sess", "--", "you, in the open"]);
+    assert!(out.status.success(), "#open has no membership: {}", String::from_utf8_lossy(&out.stderr));
+}

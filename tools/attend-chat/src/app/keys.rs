@@ -183,6 +183,19 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
             Ok(dests) => dests.into_iter().map(|(_, to)| to).next().unwrap_or_default(),
             Err(refusal) => return EnterAction::StatusOnly(refusal),
         };
+        // Only members read a named channel: a post addressed to an agent
+        // outside it would reach no one, so it is refused and the draft
+        // stays in the box.
+        if channel != BASE_CHANNEL_NAME {
+            let members = attend_groups::load_groups(&signals_base()).get(channel.as_str()).map(|e| e.members.clone()).unwrap_or_default();
+            for r in &recipients {
+                let Addressed::Agent(name) = r else { continue };
+                let sid = resolve_recipients(&[Addressed::Agent(name)], &agents, &quiet, &session_of).ok().and_then(|d| d.into_iter().next()).map(|(_, to)| to);
+                if !sid.is_some_and(|sid| members.iter().any(|m| *m == sid)) {
+                    return EnterAction::StatusOnly(format!("@{name} is not in #{channel}; nothing sent"));
+                }
+            }
+        }
         let names = recipient_labels(&recipients).join(" ");
         if channel == BASE_CHANNEL_NAME {
             match write_signal(&broadcast_dir(), &msg, &to) {

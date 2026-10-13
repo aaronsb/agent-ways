@@ -158,3 +158,35 @@ fn an_at_name_send_in_a_channel_view_stays_in_the_channel() {
     let in_tray = std::fs::read_dir(&tray).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|r| r.contains("over to you")));
     assert!(!in_tray, "nothing went to the session's tray");
 }
+
+/// `@Name` in a named channel's view, for an agent outside that channel, is
+/// refused on the status row and the draft stays in the box: only members
+/// read the channel (PR #974 re-check, E1). A member addressee posts.
+#[test]
+fn an_at_name_send_to_a_non_member_in_a_channel_view_is_refused() {
+    let base = base();
+    attend_groups::Groups::new(base, PEER_SID).join("crew", true).unwrap();
+    attend_groups::Groups::new(base, "someone-else").create("lobby", None).unwrap();
+    let nick = agent_identity::Identity::for_cwd(PEER_CWD, agent_theme::ColorDepth::NoColor).nickname.to_string();
+    let send_in = |digit: char, channel: &str| {
+        let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).heartbeat(false);
+        testkit::render_screen(&mut c, 80, 25);
+        testkit::drive(&mut c, &[KeyEvent::new(KeyCode::Char(digit), KeyModifiers::ALT)]);
+        assert_eq!(c.foreground(), &Tab::Channel(channel.into()));
+        let body = format!("@{nick} in {channel}?");
+        let keys: Vec<KeyEvent> = body.chars().map(|ch| KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE)).collect();
+        testkit::drive(&mut c, &keys);
+        testkit::render_screen(&mut c, 80, 25);
+        testkit::drive(&mut c, &[KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)]);
+        let rows = testkit::rows(&testkit::render_screen(&mut c, 120, 30));
+        (c, body, rows)
+    };
+    let (c, body, rows) = send_in('3', "lobby");
+    assert!(rows.iter().any(|r| r.contains(&format!("@{nick} is not in #lobby; nothing sent"))), "{rows:#?}");
+    assert_eq!(c.input().text(), body, "the draft stays in the box");
+    assert_eq!(std::fs::read_dir(base.join("@lobby")).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
+    let (c, _, _) = send_in('2', "crew");
+    assert!(c.input().is_empty(), "a member addressee posts");
+    let raw = std::fs::read_dir(base.join("@crew")).unwrap().flatten().map(|e| std::fs::read_to_string(e.path()).unwrap()).find(|r| r.contains("in crew?")).expect("posted in #crew");
+    assert_eq!(agent_identity::parse_signal(agent_identity::wire_line(&raw)).unwrap().to, Some(PEER_SID));
+}
