@@ -93,6 +93,10 @@ basis:
     level: directed
     said: "there's an additional bottom row friction for exiting. I think that bottom row item is unnecessary - we can just stick with the dialog that says 'quit with unsaved changes'. these two screenshots are in sequence, you can see that when I pick 'Quit and discard all (D)' there is another confirmation at the bottom. Our spec should have already established we don't want to use bottom row interactions for these type of things. One thing we could inherit from the bottom row secondary view is colors (green for go back)."
     via: "the operator's chat message to the head session, 2026-10-13, with two screenshots of attend-chat's quit flow"
+  - operator: aaronsb
+    level: directed
+    said: button colors green back in modals with destructive options
+    via: "the operator's answer in the head session, 2026-10-13, to the #994 review's question on button colours"
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -319,6 +323,6 @@ A modal that offers its answers as buttons is answered by them, and only by them
 - While a modal is shown it owns the keys. A key that is no answer leaves it open and reaches nothing under it, a compose box or an entry dialog included.
 - The exit guard is such a modal. `D` or a click on Quit quits and discards at once. Esc, Enter on the focused Back, `b` or a click on Back goes back to the work as it was. `r` or a click on Review opens the review where there is one. Ctrl-C leaves the guard open, so a reflexive second Ctrl-C discards nothing. This holds beside text and in the settings screens alike. It replaces the armed second step beside text (`D` then Enter, or Ctrl-C again) and the settings guard's `D` then `y`.
 - A click on a button that quits ends the session, as the key does.
-- Back is drawn on the green the bar gives an answer that keeps the work. Quit, Discard and Drop are drawn on the error ground the bar gives an answer that drops it.
+- Quit, Discard and Drop are drawn on the error ground the bar gives an answer that drops the work. On a button row that holds one of them, Back is drawn on the green the bar gives the answer that keeps it. On a row with nothing destructive, such as a guided flow's, Back keeps the dim accent, so it never shares green with Save or Finish for want of a contrast. The rule belongs to the button row and names no modal, so every dialog built on the row follows it.
 
 A confirm with no modal, such as a pane's question (ADR-408) or the settings shell's y/n before a tab's items are discarded, stays on the bottom bar with its two answers as lozenges.

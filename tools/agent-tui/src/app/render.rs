@@ -26,12 +26,17 @@ fn width(spans: &[Span]) -> u16 {
 
 /// Buttons on one line, each recorded as a click target. `focus` marks the
 /// one Enter would press.
+///
+/// Back is green on a row that holds a destructive button, as the bar's
+/// keep answer is beside its drop answer; elsewhere it takes the dim accent.
 pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String)], hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
+    let destructive = buttons.iter().any(|(b, _)| matches!(b, Btn::Discard | Btn::Quit | Btn::Drop));
     let mut spans = vec![Span::raw(" ")];
     for (b, label) in buttons {
-        // Back is green, as the bar's keep answers are: it loses nothing.
         let ground = match b {
-            Btn::Apply | Btn::Finish | Btn::Save | Btn::Back => Ground::Ok,
+            Btn::Apply | Btn::Finish | Btn::Save => Ground::Ok,
+            Btn::Back if destructive => Ground::Ok,
+            Btn::Back => Ground::AccentDim,
             Btn::Discard | Btn::Quit | Btn::Drop => Ground::Err,
             Btn::Review | Btn::Next => Ground::Accent,
             Btn::Cancel => Ground::Rule,

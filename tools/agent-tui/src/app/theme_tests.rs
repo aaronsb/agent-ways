@@ -507,7 +507,15 @@ fn esc_with_unsaved_edits_asks_save_discard_or_back() {
     type_str(&mut app, "123456");
     keys(&mut app, &[KeyCode::Enter, KeyCode::Esc]);
     assert!(matches!(app.mode, Mode::ThemeUnsaved));
-    assert!(text(&draw(&mut app, 100, 30)).contains("Discard (d)"));
+    let buf = draw(&mut app, 100, 30);
+    assert!(text(&buf).contains("Discard (d)"));
+    // Discard is destructive, so Back is the go-back green beside it.
+    let ground = |t: &str| {
+        let (x, y) = crate::testkit::find(&buf, t).unwrap_or_else(|| panic!("{t} not drawn"));
+        buf[(x, y)].bg
+    };
+    assert_eq!(ground("Back (Esc)"), super::theme::Ground::Ok.bg());
+    assert_eq!(ground("Discard (d)"), super::theme::Ground::Err.bg());
     keys(&mut app, &[KeyCode::Esc]);
     assert!(matches!(app.mode, Mode::Browse) && app.theme_dirty(), "Back keeps the edits");
     keys(&mut app, &[KeyCode::Esc, KeyCode::Char('d')]);
