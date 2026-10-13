@@ -304,7 +304,10 @@ pub(crate) fn scan_pending(
             re: sig.reply_to.map(str::to_string),
             body: sig.message.to_string(),
             source_cwd: sig.cwd.to_string(),
-            wakes: sig.wakes(scan_dirs[f.room].room.is_tray(), ids),
+            wakes: {
+                let room = &scan_dirs[f.room].room;
+                sig.wakes(room.is_tray(), room.is_channel(), ids)
+            },
         });
     }
     let held_back = plan.as_ref().map_or(0, |p| p.not_shown);
@@ -416,15 +419,15 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     let Scan { mut delivered, mut mark, note, held_back, skipped } = scan_pending(&r.receive_dirs(&cwd), &seen, &ids, baselining);
     // The cache gate (ADR-406 item 1): waking a session whose prompt cache
     // has lapsed would rewrite its whole context at the cache-write price,
-    // so an addressed message waits for the operator's next turn like any
-    // other. The clock is keepwarm's: the newest turn in the transcript,
-    // and a transcript that cannot be read counts as lapsed.
-    let addressed = wake && delivered.iter().any(|d| d.wakes);
-    let lapsed = addressed && crate::util::cache_lapsed(&ident);
-    // Nothing addressed to the session, or a lapsed cache: what it found
+    // so a message that would wake it waits for the operator's next turn
+    // like any other. The clock is keepwarm's: the newest turn in the
+    // transcript, and a transcript that cannot be read counts as lapsed.
+    let due = wake && delivered.iter().any(|d| d.wakes);
+    let lapsed = due && crate::util::cache_lapsed(&ident);
+    // Nothing that wakes the session, or a lapsed cache: what it found
     // waits, unmarked, for the next turn. The cold start's own marks still
     // go through, so the backlog it holds back stays held back.
-    if wake && (!addressed || lapsed) {
+    if wake && (!due || lapsed) {
         let waiting: std::collections::HashSet<String> =
             delivered.drain(..).map(|d| attend_state::seen_key(&format!("{}.signal", d.id))).collect();
         mark.retain(|k| !waiting.contains(k));
@@ -563,8 +566,8 @@ struct DrainedJson<'a> {
 /// `unresolved` identity, or `not_listening`. (The re-entry ceiling defers
 /// only a hook drain, which carries the Stop hook's `stop_hook_active`.)
 /// `you_are` is set on the cold start, the drain's first contact.
-/// `cache_lapsed` is true when a wake drain held an addressed message
-/// because the session's prompt cache has lapsed (ADR-406 item 1).
+/// `cache_lapsed` is true when a wake drain held a message that would wake
+/// the session because its prompt cache has lapsed (ADR-406 item 1).
 fn print_drain_json(status: &str, delivered: &[Drained], held_back: usize, note: Option<&str>, me: Option<&str>, cache_lapsed: bool) {
     let messages: Vec<DrainedJson> = delivered
         .iter()

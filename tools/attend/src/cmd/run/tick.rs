@@ -400,8 +400,8 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // not disclose; they describe a moment, and the next turn reads the
     // repository afresh. The message lane is held: its accumulator keeps
     // what the peers sensor surfaced, presence included, and it goes out
-    // once the cache is warm. Messages addressed to the session wait unseen
-    // in the sensor itself.
+    // once the cache is warm. Messages that would wake the session wait
+    // unseen in the sensor itself.
     let gated = |i: &usize| s.slots[*i].name() != "keepwarm";
     if (evt_ready.iter().any(gated) || msg_ready.iter().any(gated)) && s.cache_gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
         for &i in &evt_ready {

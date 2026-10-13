@@ -372,23 +372,25 @@ impl PeerSensor {
         });
 
         // The wake rule (ADR-406 item 1): a line on stdout wakes an idle
-        // session, so this poll emits only when something pending is
-        // addressed to it. Otherwise `#open` and channel posts stay unseen
-        // and reach it with its next turn, through the Stop-hook drain.
-        let addressed = found.iter().enumerate().any(|(i, f)| {
+        // session, so this poll emits only when something pending would
+        // wake it: a post in one of its named channels, or a message
+        // addressed to it. Otherwise `#open` posts stay unseen and reach it
+        // with its next turn, through the Stop-hook drain.
+        let due = found.iter().enumerate().any(|(i, f)| {
+            let room = &scan_dirs[f.room].room;
             plan.as_ref().is_none_or(|p| p.deliver[i])
                 && agent_identity::parse_signal(agent_identity::wire_line(&f.content))
-                    .is_some_and(|sig| sig.wakes(scan_dirs[f.room].room.is_tray(), &ids))
+                    .is_some_and(|sig| sig.wakes(room.is_tray(), room.is_channel(), &ids))
         });
         // The cache gate: a session whose prompt cache has lapsed is never
-        // woken, since the wake would rewrite its whole context. What is
-        // addressed to it waits, unseen, for the operator's next turn.
-        let lapsed = addressed && self.cache_lapsed(&focus.working_dir);
+        // woken, since the wake would rewrite its whole context. What would
+        // wake it waits, unseen, for the operator's next turn.
+        let lapsed = due && self.cache_lapsed(&focus.working_dir);
         if lapsed && !self.holding_cold {
             eprintln!("[attend] a message is waiting; the prompt cache has lapsed, so it waits for the next turn");
         }
         self.holding_cold = lapsed;
-        let wakes = addressed && !lapsed;
+        let wakes = due && !lapsed;
 
         for (i, f) in found.into_iter().enumerate() {
             let shown = plan.as_ref().is_none_or(|p| p.deliver[i]);

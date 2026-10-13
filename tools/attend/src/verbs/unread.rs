@@ -30,8 +30,8 @@ pub struct Unread {
     pub held_back: usize,
     /// Whether the drain delivers to this session (`attend listen`).
     pub listening: bool,
-    /// A message addressed to the session is waiting and its prompt cache
-    /// has lapsed, so nothing wakes it: what waits goes with the
+    /// A message that would wake the session is waiting and its prompt
+    /// cache has lapsed, so nothing wakes it: what waits goes with the
     /// operator's next turn (ADR-406 item 1).
     pub cache_lapsed: bool,
     /// One entry per room the session receives, in the drain's order:

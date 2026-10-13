@@ -92,6 +92,12 @@ impl Room {
     pub fn is_tray(&self) -> bool {
         matches!(self, Room::Project)
     }
+
+    /// Whether this is a named channel, every post in which wakes its idle
+    /// members (ADR-406 item 1).
+    pub fn is_channel(&self) -> bool {
+        matches!(self, Room::Channel(_))
+    }
 }
 
 /// One directory a member reads signals from.
