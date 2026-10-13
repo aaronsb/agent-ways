@@ -6,7 +6,7 @@
 
 use agent_theme::ColorDepth;
 
-use crate::chip::{known_of, resolve_nickname, seen_identities, KnownIdentity, Seen};
+use crate::chip::{known_of, resolve_identity, seen_identities, KnownIdentity, Seen};
 use crate::groups::{channels, channels_in, live_peer_count, resolve_group_dir, BASE_CHANNEL_NAME};
 use crate::legend::{
     apply_completion, find_trailing_mention, parse_addressed, Addressed, Sigil,
@@ -145,6 +145,11 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
     let seen = seen_identities(signals, &seeds, caps, alive, |_| true, |_| false, &instance_cache);
     let agents = known_of(&seen);
     let quiet = quiet_names(&seen);
+    // The session behind a claude the chat knows: the id a direct message
+    // to it is addressed to (ADR-401, `to`).
+    let session_of = |k: &KnownIdentity| {
+        seen.iter().find(|s| s.identity.is_claude && s.identity.nickname == k.nickname && s.identity.cwd == k.cwd).map(|s| s.member.clone())
+    };
     // A message can address several recipients at once
     // (`@Tamsin @Cleo …`). Parse the whole leading run; an empty run
     // means "send to the foreground tab's channel" — `#open` from
@@ -167,10 +172,10 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
             // explicit `#g` prefix — only the channel came from the
             // tab instead of the message text. The body is unchanged
             // (wire format carries no channel).
-            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet, person)
+            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet, &session_of, person)
         }
     } else {
-        send_to_recipients(&msg, &recipients, &agents, &quiet, person)
+        send_to_recipients(&msg, &recipients, &agents, &quiet, &session_of, person)
     }
 }
 
@@ -199,10 +204,11 @@ fn send_to_recipients(
     recipients: &[Addressed<'_>],
     agents: &[KnownIdentity],
     quiet: &[String],
+    session_of: &dyn Fn(&KnownIdentity) -> Option<String>,
     person: Option<&str>,
 ) -> EnterAction {
     // A recipient that cannot read it refuses the send, in its own words.
-    let dests = match resolve_recipients(recipients, agents, quiet) {
+    let dests = match resolve_recipients(recipients, agents, quiet, session_of) {
         Ok(dests) => dests,
         Err(refusal) => return EnterAction::StatusOnly(refusal),
     };
@@ -218,7 +224,7 @@ fn send_to_recipients(
             }
         }
     }
-    let sent = dests.iter().try_for_each(|dir| write_signal(dir, msg).map(|_| ())).map(|()| dests);
+    let sent = dests.iter().try_for_each(|(dir, to)| write_signal(dir, msg, to).map(|_| ())).map(|()| dests);
     match sent {
         Ok(dests) => {
             let mut status = format!("sent → {}", recipient_labels(recipients).join(" "));
@@ -234,7 +240,7 @@ fn send_to_recipients(
             // watched); an `@agent` in our *own* cwd lands in
             // `own_encoded` (watched). Only `@agent` sends to *other*
             // cwds are invisible without an echo.
-            if dests.iter().any(|d| sender_watches(d)) {
+            if dests.iter().any(|(d, _)| sender_watches(d)) {
                 EnterAction::ClearWithStatus(status)
             } else {
                 EnterAction::ClearWithStatusAndEcho {
@@ -567,7 +573,7 @@ pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
     };
     let dest = cwd_dir(&peer.root);
     let body = invite_body(&g, &dir);
-    match write_signal(&dest, &body) {
+    match write_signal(&dest, &body, &peer.session_id) {
         Ok(_) => {
             // The invitee's join answers this: it keeps the room's recent
             // history to read rather than holding it back (ADR-404).
@@ -635,7 +641,7 @@ pub fn kick_member(g: &str, id: &str, label: &str, root: Option<&str>) -> EnterA
         let notice = format!(
             "you were removed from #{g} by the operator — rejoin with: attend join {g}"
         );
-        let _ = write_signal(&cwd_dir(root), &notice);
+        let _ = write_signal(&cwd_dir(root), &notice, id);
     }
     action
 }
@@ -797,7 +803,7 @@ fn sender_watches(dest: &std::path::Path) -> bool {
         .unwrap_or_default();
     // `accept_path` classifies by the first path component (the inbox dir
     // name); hand it a probe file inside `dest` so it judges that dir.
-    accept_path(&base, &encode_cwd(&own_cwd), &dest.join("probe.signal"))
+    accept_path(&base, &encode_cwd(&own_cwd), &crate::signal::human_member_id(), &dest.join("probe.signal"))
 }
 
 /// Render the addressed recipients back as their `@name` / `#group`
@@ -834,16 +840,19 @@ fn resolve_recipients(
     recipients: &[Addressed<'_>],
     agents: &[KnownIdentity],
     quiet: &[String],
-) -> Result<Vec<std::path::PathBuf>, String> {
-    let mut dests = Vec::with_capacity(recipients.len());
-    let mut seen = std::collections::HashSet::new();
+    session_of: &dyn Fn(&KnownIdentity) -> Option<String>,
+) -> Result<Vec<(std::path::PathBuf, String)>, String> {
+    let mut dests: Vec<(std::path::PathBuf, String)> = Vec::with_capacity(recipients.len());
+    // Every agent addressed: each direct message carries the full set, as
+    // RFC 5322 `To` does (ADR-401, `to`).
+    let mut sessions: Vec<String> = Vec::new();
     // Self-exclusion for the liveness gate: since ADR-170 the human
     // is a heartbeating member, so without this a human alone in a
     // group would count themselves as the live listener — reopening
     // the silent-routing trap the gate exists to close.
     let self_member = crate::signal::human_member_id();
     for r in recipients {
-        let dir = match r {
+        let (dir, to) = match r {
             Addressed::Agent(name) => {
                 // An exact quiet name is refused before a fuzzy match could
                 // carry it to a live agent with a name like it.
@@ -851,12 +860,15 @@ fn resolve_recipients(
                 if let Some(q) = quiet.iter().find(|q| !exact_live && q.eq_ignore_ascii_case(name)) {
                     return Err(format!("@{q} is quiet (no heartbeat) and would not read this"));
                 }
-                resolve_nickname(name, agents)
-                    .map(|cwd| cwd_dir(&cwd))
-                    .ok_or_else(|| format!("@{name}: unknown nickname"))?
+                let k = resolve_identity(name, agents).ok_or_else(|| format!("@{name}: unknown nickname"))?;
+                let sid = session_of(k).unwrap_or_default();
+                if !sid.is_empty() && !sessions.contains(&sid) {
+                    sessions.push(sid);
+                }
+                (cwd_dir(&k.cwd), None)
             }
             Addressed::Group(name) => match resolve_group_dir(name) {
-                Some(dir) if live_peer_count(name, &self_member) > 0 => dir,
+                Some(dir) if live_peer_count(name, &self_member) > 0 => (dir, Some(format!("#{name}"))),
                 Some(dir) if !dir.is_dir() => {
                     return Err(format!(
                         "#{name} was swept; /join #{name} and invite a live agent to bring it back, or send to #open"
@@ -871,9 +883,13 @@ fn resolve_recipients(
                 None => return Err(format!("#{name}: unknown group")),
             },
         };
-        if seen.insert(dir.clone()) {
-            dests.push(dir);
+        if !dests.iter().any(|(d, _)| *d == dir) {
+            dests.push((dir, to.unwrap_or_default()));
         }
+    }
+    let direct = sessions.join(",");
+    for (_, to) in dests.iter_mut().filter(|(_, to)| to.is_empty()) {
+        to.clone_from(&direct);
     }
     Ok(dests)
 }
@@ -1532,7 +1548,7 @@ mod tests {
     fn a_send_to_a_quiet_agent_or_a_swept_channel_is_refused_in_its_own_words() {
         let live = [ident("Larks", "/w/larks")];
         let quiet = ["Lark".to_string()];
-        let to = |r: Addressed<'_>| resolve_recipients(&[r], &live, &quiet);
+        let to = |r: Addressed<'_>| resolve_recipients(&[r], &live, &quiet, &|_| None);
         assert_eq!(to(Addressed::Agent("Lark")), Err("@Lark is quiet (no heartbeat) and would not read this".into()), "not carried to Larks by the fuzzy match");
         assert!(to(Addressed::Agent("Larks")).is_ok(), "a live agent is sent to");
         assert_eq!(to(Addressed::Agent("Nobody")), Err("@Nobody: unknown nickname".into()));

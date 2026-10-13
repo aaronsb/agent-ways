@@ -44,11 +44,13 @@ use crate::signal::{parse_file, Signal};
 ///   the component as the membership model lands)
 /// - `<base>/<own tray>/<name>.signal` — direct sends targeting
 ///   this host's cwd (produced by PR 2's `@nickname` routing)
+/// - `<base>/_people/<person>/<name>.signal` — replies and direct
+///   messages to the person at this chat (ADR-401, `to`)
 ///
 /// Rejects:
 /// - Directed sends to *other* cwds (noise — not addressed to us)
 /// - Non-`.signal` files (state files like `_groups.yaml`, tmp files)
-pub fn accept_path(base: &Path, own_tray: &str, path: &Path) -> bool {
+pub fn accept_path(base: &Path, own_tray: &str, person: &str, path: &Path) -> bool {
     if path.extension().and_then(|s| s.to_str()) != Some("signal") {
         return false;
     }
@@ -66,10 +68,15 @@ pub fn accept_path(base: &Path, own_tray: &str, path: &Path) -> bool {
     if name.starts_with('@') {
         return true;
     }
+    if name == attend_groups::PEOPLE_DIR {
+        return !person.is_empty() && comps.next().is_some_and(|c| c.as_os_str() == person) && comps.clone().count() == 1;
+    }
     !own_tray.is_empty() && own_tray == name
 }
 
-pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> notify::Result<()> {
+/// `person` is the member id of the person at the chat (ADR-170), whose
+/// person tray it streams; empty for none.
+pub fn spawn_watcher(base: PathBuf, own_tray: String, person: String, tx: Sender<Signal>) -> notify::Result<()> {
     std::fs::create_dir_all(&base).ok();
     // Pre-create the broadcast + own-cwd subdirs so notify's
     // recursive watch installs sub-watchers on them before any
@@ -85,12 +92,15 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
     if !own_tray.is_empty() {
         std::fs::create_dir_all(base.join(&own_tray)).ok();
     }
+    if !person.is_empty() {
+        std::fs::create_dir_all(attend_groups::person_dir(&base, &person)).ok();
+    }
 
     // Backfill existing signals from the three accepted shapes so
     // the stream isn't empty on launch. Ordered by mtime across all
     // source dirs so replay matches wall-clock arrival order.
     let mut backfill: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
-    let dirs_to_scan = scan_targets(&base, &own_tray);
+    let dirs_to_scan = scan_targets(&base, &own_tray, &person);
     for dir in &dirs_to_scan {
         let Ok(entries) = std::fs::read_dir(dir) else { continue };
         for entry in entries.filter_map(|e| e.ok()) {
@@ -120,6 +130,7 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
     let tx_cb = tx.clone();
     let base_for_cb = base.clone();
     let own_for_cb = own_tray.clone();
+    let person_for_cb = person.clone();
     let mut watcher = RecommendedWatcher::new(
         move |res: notify::Result<Event>| {
             let Ok(event) = res else { return };
@@ -137,7 +148,7 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
                 return;
             }
             for path in event.paths {
-                if !accept_path(&base_for_cb, &own_for_cb, &path) {
+                if !accept_path(&base_for_cb, &own_for_cb, &person_for_cb, &path) {
                     continue;
                 }
                 if let Some(sig) = parse_file(&path) {
@@ -165,8 +176,11 @@ pub fn spawn_watcher(base: PathBuf, own_tray: String, tx: Sender<Signal>) -> not
 /// Enumerate the directories whose existing signals we should
 /// backfill on startup. Kept separate from the event filter because
 /// backfill walks the fs once up front — the filter runs per event.
-fn scan_targets(base: &Path, own_tray: &str) -> Vec<PathBuf> {
+fn scan_targets(base: &Path, own_tray: &str, person: &str) -> Vec<PathBuf> {
     let mut dirs = vec![base.join(attend_groups::BROADCAST_DIR)];
+    if !person.is_empty() {
+        dirs.push(attend_groups::person_dir(base, person));
+    }
     // Mirror the guard in `spawn_watcher`: when `env::current_dir()`
     // fails, the tray name is empty and `base.join("")` degenerates
     // to `base` — we'd then walk the whole top level for no good
@@ -196,44 +210,52 @@ mod tests {
     #[test]
     fn accepts_broadcast_signal() {
         let p = base().join("_broadcast").join("x.signal");
-        assert!(accept_path(&base(), "-home-me", &p));
+        assert!(accept_path(&base(), "-home-me", "aaron", &p));
     }
 
     #[test]
     fn accepts_group_signal() {
         let p = base().join("@deploy").join("x.signal");
-        assert!(accept_path(&base(), "-home-me", &p));
+        assert!(accept_path(&base(), "-home-me", "aaron", &p));
     }
 
     #[test]
     fn accepts_own_cwd_signal() {
         let p = base().join("-home-me").join("x.signal");
-        assert!(accept_path(&base(), "-home-me", &p));
+        assert!(accept_path(&base(), "-home-me", "aaron", &p));
     }
 
     #[test]
     fn rejects_other_cwd_signal() {
         // Directed to a different agent's cwd — not for us.
         let p = base().join("-home-someone-else").join("x.signal");
-        assert!(!accept_path(&base(), "-home-me", &p));
+        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
+    }
+
+    #[test]
+    fn accepts_the_persons_own_tray_only() {
+        assert!(accept_path(&base(), "-home-me", "aaron", &base().join("_people").join("aaron").join("x.signal")));
+        assert!(!accept_path(&base(), "-home-me", "aaron", &base().join("_people").join("bob").join("x.signal")));
+        assert!(!accept_path(&base(), "-home-me", "", &base().join("_people").join("aaron").join("x.signal")));
+        assert!(!accept_path(&base(), "-home-me", "aaron", &base().join("_people").join("x.signal")));
     }
 
     #[test]
     fn rejects_non_signal_file() {
         let p = base().join("_broadcast").join("readme.txt");
-        assert!(!accept_path(&base(), "-home-me", &p));
+        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
     }
 
     #[test]
     fn rejects_groups_yaml() {
         let p = base().join("_groups.yaml");
-        assert!(!accept_path(&base(), "-home-me", &p));
+        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
     }
 
     #[test]
     fn rejects_path_outside_base() {
         let p = PathBuf::from("/etc/passwd");
-        assert!(!accept_path(&base(), "-home-me", &p));
+        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
     }
 
     #[test]
@@ -245,6 +267,6 @@ mod tests {
         // `..` as a ParentDir component that can't equal `_broadcast`,
         // `@<name>`, or our own_encoded.
         let p = base().join("..").join("outside").join("x.signal");
-        assert!(!accept_path(&base(), "-home-me", &p));
+        assert!(!accept_path(&base(), "-home-me", "aaron", &p));
     }
 }

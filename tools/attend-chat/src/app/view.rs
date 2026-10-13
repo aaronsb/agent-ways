@@ -179,11 +179,15 @@ fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGrou
     let [name, project, mark] = super::sidebar::identity_styles(depth, chip.palette, live, chip.style.bold);
     let name = if chip.style.italic { name.add_modifier(Modifier::ITALIC) } else { name };
     let glyphs: String = key.as_deref().and_then(|k| memberships.get(k)).into_iter().flatten().map(|g| format!("{} ", g.group.glyph)).collect();
-    let header = vec![
+    let mut header = vec![
         Seg::styled(format!(" {glyphs}{} ", when(chat.clock, s.ts)), mark),
         Seg::styled(format!(" {} ", chip.primary), name),
         Seg::styled(format!(" {} ", chip.secondary), project),
     ];
+    // A reply or a direct message to the person at the chat (ADR-401, `to`).
+    if s.channel == crate::signal::Channel::Person {
+        header.push(Seg::styled(" → you ".to_string(), mark));
+    }
     let mut body: Vec<Line<'static>> = s.message.split('\n').map(|l| Line::styled(l.to_string(), theme::body())).collect();
     let files = attach::existing_attachments(&s.message);
     if !files.is_empty() {

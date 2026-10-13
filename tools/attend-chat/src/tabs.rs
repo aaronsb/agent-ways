@@ -135,14 +135,15 @@ pub fn advance_after_dissolve(dissolved: &str, names_before: &[String]) -> Tab {
 /// Does a signal that arrived on `channel` render in `tab`'s
 /// transcript? Merged shows everything; a channel tab shows only its
 /// own traffic plus local `Info` blocks (command feedback must be
-/// visible wherever the command was typed). Directed messages surface
-/// in merged only — the strict per-channel filter; a DM tab is out of
-/// scope (#393).
+/// visible wherever the command was typed) and what reached the person
+/// directly (ADR-401, `to`). Directed messages to a cwd inbox surface in
+/// merged only — the strict per-channel filter; a DM view of each agent
+/// is follow-up work (ADR-406 item 10).
 pub fn visible_in(channel: &Channel, tab: &Tab) -> bool {
     match tab {
         Tab::Merged => true,
         Tab::Channel(g) => match channel {
-            Channel::Info => true,
+            Channel::Info | Channel::Person => true,
             Channel::Open => g == BASE_CHANNEL_NAME,
             Channel::Group(name) => name == g,
             Channel::Direct => false,

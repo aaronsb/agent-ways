@@ -28,6 +28,12 @@ use super::registry::KnownIdentity;
 ///    wrong agent is worse than an unknown-nickname error. The
 ///    caller can re-ask with disambiguation when needed.
 pub fn resolve_nickname(name: &str, known: &[KnownIdentity]) -> Option<String> {
+    resolve_identity(name, known).map(|k| k.cwd.clone())
+}
+
+/// [`resolve_nickname`], answering with the identity matched, so a caller
+/// can find the session behind it.
+pub fn resolve_identity<'a>(name: &str, known: &'a [KnownIdentity]) -> Option<&'a KnownIdentity> {
     let lc = name.to_ascii_lowercase();
 
     // Pass 1: exact match (case-insensitive). Refuse on ambiguity —
@@ -40,16 +46,16 @@ pub fn resolve_nickname(name: &str, known: &[KnownIdentity]) -> Option<String> {
         .filter(|k| k.is_claude && k.nickname.to_ascii_lowercase() == lc)
         .collect();
     match exact.as_slice() {
-        [single] => return Some(single.cwd.clone()),
+        [single] => return Some(single),
         [] => {}
         _ => return None, // ambiguous — refuse to misroute
     }
 
     // Pass 2: fuzzy match. Walk all claude nicknames once, tracking
-    // (best_distance, best_cwd, tie_count). Tie at min distance means
+    // (best_distance, best_identity, tie_count). Tie at min distance means
     // we cannot pick safely.
     const MAX_DIST: usize = 2;
-    let mut best: Option<(usize, &str, usize)> = None; // (dist, cwd, tie_count)
+    let mut best: Option<(usize, &KnownIdentity, usize)> = None; // (dist, identity, tie_count)
     for k in known.iter().filter(|k| k.is_claude) {
         let cand = k.nickname.to_ascii_lowercase();
         let dist = levenshtein(&lc, &cand);
@@ -57,14 +63,14 @@ pub fn resolve_nickname(name: &str, known: &[KnownIdentity]) -> Option<String> {
             continue;
         }
         match best {
-            None => best = Some((dist, &k.cwd, 1)),
-            Some((bd, _, _)) if dist < bd => best = Some((dist, &k.cwd, 1)),
-            Some((bd, bcwd, n)) if dist == bd => best = Some((bd, bcwd, n + 1)),
+            None => best = Some((dist, k, 1)),
+            Some((bd, _, _)) if dist < bd => best = Some((dist, k, 1)),
+            Some((bd, bk, n)) if dist == bd => best = Some((bd, bk, n + 1)),
             _ => {}
         }
     }
     match best {
-        Some((_, cwd, 1)) => Some(cwd.to_string()),
+        Some((_, k, 1)) => Some(k),
         _ => None,
     }
 }
