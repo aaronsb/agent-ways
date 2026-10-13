@@ -36,7 +36,8 @@ const MIN_FEED: u16 = 50;
 /// agents never share as they can a name; a DM view by its agent's id; a
 /// channel by its name. Each DM view of an agent is a row under the
 /// agent's: this one, the operator's DMs with it, and later the agent's own
-/// DM perspective, a second kind of row under it.
+/// DM perspective, a second kind of row under it whose view offers nothing
+/// to send, since attend-chat has no send into another agent's DMs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SideHit {
     Agent(String),

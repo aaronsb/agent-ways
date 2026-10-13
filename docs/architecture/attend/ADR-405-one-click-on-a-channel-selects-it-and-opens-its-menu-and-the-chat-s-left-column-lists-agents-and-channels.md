@@ -63,6 +63,14 @@ basis:
     level: directed
     said: "I think the open behavior is great as it is - if I @ message you on open, you get notified which is fine."
     via: "the operator's follow-up to the head session, 2026-10-13, confirming that @Name in #open stays an addressed #open post"
+  - operator: aaronsb
+    level: directed
+    said: "the agent's dms are read only from attend-chat's perspective"
+    via: "the operator's chat message to the head session, 2026-10-13"
+  - operator: aaronsb
+    level: directed
+    said: "by 'read only' it's only basically we don't have a function in attend-chat to write to that"
+    via: "the operator's chat message to the head session, 2026-10-13, saying what the line above means"
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -157,6 +165,7 @@ ADR-407's amendment of the same date, "C, the operator's navigation redesign", c
 The operator described the column's DM views (`basis`, the entry of 2026-10-13): "we could pick any agent out of the list, and have a special conversation view under that agent on the left nav bar", and "So we have two DM views for all agents on the left nav bar, that are hide-able: the obvious one, the dms between the attend-chat operator and the agent, and then a second view which is that agent's DM view". They noted that "it's just a different query of the same messages", and later reported that "the ui for attend-chat does not seem to open a dm channel under your agent on the left side nav bar".
 
 - **Two views per agent, each a row under the agent's.** The first holds the direct messages between the operator and the agent, both ways. The second, the agent's own DM perspective, holds every direct message the agent sent or received, its DMs with the operator among them; the agent's menu opens it with Review DMs, and its row is labelled with the agent's name and drawn in a colour of its own. Each view is shown or hidden, and hiding one deletes nothing. Both are views over the messages the chat already holds, filtered by sender and recipient. This amendment delivers the first view. The second is the next increment, and the column's row kinds leave room for it.
+- **The second view offers nothing to send.** The operator called the agent's DMs "read only from attend-chat's perspective", and said what that means: "we don't have a function in attend-chat to write to that". attend-chat has no send as another agent or into its conversations, so the view shows no compose box. A view that sends nothing is a kind the nav model allows; the first view's compose box comes with its view, not with every view.
 - **Opening the first view.** A click on a claude's row lists its DM view on the row under the agent's and shows it, as a click on a channel's row shows the channel (ADR-407 (a)). A click on the agent whose view is shown opens the agent's menu. Enter on an agent's row opens its menu, as Enter on any row does, and the menu's first item is Show DMs, or Hide DMs while the view is listed. A right click opens the menu at once and keeps the channel shown, which is how the channel shown's Remove item is reached by mouse. A human's row has no DM view, since `@name` routes to a session's tray and a human has none: a click on it opens its menu at once.
 - **What the view shows.** The feed shows the direct messages the agent sent the operator's person tray and those the chat sent with the agent among the recipients, plus the chat's own notices. The chat records each direct message it sends with its recipients. A direct message to an agent in the chat's own project lands in the tray the chat watches, and reads back as sent by the operator to its recipients. Direct messages the operator sent to another project's tray in an earlier session are not on disk where the chat reads, so the view lists them only from the session that sent them.
 - **Sending from the view.** The compose box sends an unaddressed message to the agent as a direct message, `to` set to its session, never to `#open`. The destination flag reads `@Name`, marked `(quiet)` when the agent has no heartbeat, and a send to a quiet agent is refused with the draft kept. A message that starts with `@Name` or `#channel` goes as it would from the operator view (ADR-406 item 7). `@Name` in `#open` stays an addressed `#open` post, which wakes the agent; the operator confirmed it: "I think the open behavior is great as it is - if I @ message you on open, you get notified which is fine." Slash commands scope as they do in the operator view.
