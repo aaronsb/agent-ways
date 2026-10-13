@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
-use super::pane::{footer_spans, Binding, Keyed, Open, Tone};
+use super::pane::{footer_spans, Binding, Ctx, Keyed, Open, Overlay, Tone};
 use super::pick::Pick;
 use super::render::{modal_rect, pane as bordered};
 use super::response::Shown;
@@ -42,6 +42,9 @@ fn clip(text: &str, room: usize) -> String {
     out
 }
 
+/// The id of the shell's own question before a plain `q` quits.
+pub(crate) const QUIT_ASK: &str = "\u{0}quit";
+
 /// A pane's question on the bottom bar ([`Open::Ask`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Asked {
@@ -60,9 +63,10 @@ pub(super) enum ShellKey {
     Strip(usize),
     /// F2 or Ctrl+T: the tab bar takes the focus.
     StripFocus,
-    /// Ctrl+digit: tab n (from 1), or its menu on the tab shown.
+    /// Ctrl+digit: tab n (from 1; 0 is the bar's last tab), or its menu on
+    /// the tab shown.
     TabOrMenu(usize),
-    /// Alt+digit, or a plain digit beside no text: tab n (from 1).
+    /// Alt+digit, or a plain digit beside no text: tab n (from 1; 0 the last).
     Tab(usize),
     /// F1, or `?` beside no text: the key help.
     Help,
@@ -74,12 +78,29 @@ pub(super) enum ShellKey {
 
 impl App {
     /// The pane's unsaved work, for the exit guard.
+    /// The pane's unsaved work, and a line typed in its entry dialog, for
+    /// the exit guard.
     pub(super) fn pane_unsaved(&self) -> Option<String> {
-        self.pane.as_ref()?.unsaved()
+        let typed = match &self.mode {
+            Mode::Entry(e) if !e.input.is_empty() => Some(format!("{} being typed", e.title)),
+            Mode::Guard { .. } => self.entry_held.as_ref().map(|e| format!("{} being typed", e.title)),
+            _ => None,
+        };
+        let own = self.pane.as_ref()?.unsaved();
+        match (typed, own) {
+            (Some(t), Some(o)) => Some(format!("{t}, and {o}")),
+            (t, o) => t.or(o),
+        }
+    }
+
+    /// How the pane says keys are routed beside it ([`Pane::keymap_ctx`]);
+    /// the shell's own default with no pane.
+    pub(super) fn ctx(&self) -> Ctx {
+        self.pane.as_ref().map_or_else(Ctx::default, |p| p.keymap_ctx())
     }
 
     pub(super) fn owns_text(&self) -> bool {
-        self.pane.as_ref().is_some_and(|p| p.owns_text())
+        self.ctx().text
     }
 
     /// The shell's own keys around the pane, in the form they take there:
@@ -94,12 +115,17 @@ impl App {
         let mut out = vec![Binding::new(k("?", "F1"), "keys")];
         let keys = self.tab_keys();
         let menus = self.has_tab_menus();
-        let again = if keys.menu_on_repeat && menus { "tab (again: menu)" } else { "tab" };
+        // What a digit reaches: a tab, or what the pane numbers instead.
+        let noun = self.own_numbers().unwrap_or("tab");
+        let again = if keys.menu_on_repeat && menus { format!("{noun} (again: menu)") } else { noun.to_string() };
         let (ctrl, alt) = (self.ctrl_shown(), self.alt_jump());
+        // With reserved tabs, which carry no number, 0 is the bar's last tab.
+        let digits = if self.has_reserved_tab() { "0-9" } else { "1-9" };
         match (text, ctrl, alt) {
-            (false, _, _) => out.push(Binding::new("1-9", "tabs")),
-            (true, true, _) => out.push(Binding::new("Ctrl+1-9", again).short("tab")),
-            (true, false, true) => out.push(Binding::new("Alt+1-9", again).short("tab")),
+            (false, _, _) if self.ctx().digits => out.push(Binding::new(digits, format!("{noun}s"))),
+            (false, _, _) => {}
+            (true, true, _) => out.push(Binding::new(format!("Ctrl+{digits}"), again.clone()).short(noun)),
+            (true, false, true) => out.push(Binding::new(format!("Alt+{digits}"), again.clone()).short(noun)),
             (true, false, false) => {}
         }
         if let Some(f) = keys.focus_label().filter(|_| menus) {
@@ -109,10 +135,10 @@ impl App {
             out.push(Binding::help("Ctrl+T", "the tab bar, as F2: ← → move, Enter its menu, Esc back"));
         }
         if !text && ctrl {
-            out.push(Binding::help("Ctrl+1-9", again));
+            out.push(Binding::help(format!("Ctrl+{digits}"), again));
         }
         if text && ctrl && alt {
-            out.push(Binding::help("Alt+1-9", "a tab, where the terminal passes Alt+digits on (Konsole keeps them)"));
+            out.push(Binding::help(format!("Alt+{digits}"), format!("a {noun}, where the terminal passes Alt+digits on (Konsole keeps them)")));
         }
         if let Some(n) = self.new_item_label() {
             out.push(Binding::help("Ctrl+N", format!("{n}, from the compose box or the tab bar")));
@@ -125,7 +151,7 @@ impl App {
             }
         }
         let quit = self.pane.as_ref().and_then(|p| p.quit_help()).unwrap_or_else(|| "quit; asks first over unsaved work".into());
-        let quit_keys = if self.pane.as_ref().is_none_or(|p| p.esc_quits()) { k("q Esc ^C", "Esc ^C") } else { k("q ^C", "^C") };
+        let quit_keys = if self.ctx().esc_quits { k("q Esc ^C", "Esc ^C") } else { k("q ^C", "^C") };
         out.extend([
             Binding::help(self.mouse_key(), "mouse on or off (off lets the terminal select text)"),
             Binding::help("Shift-drag", "selects text while the mouse is on, in most terminals"),
@@ -135,6 +161,12 @@ impl App {
         let click = self.pane.as_ref().and_then(|p| p.click_help()).unwrap_or_else(|| "a tab shows it; the wheel scrolls".into());
         out.push(Binding::help("click", click));
         out
+    }
+
+    /// Whether the pane's bar, as last drawn, has a reserved tab, which
+    /// only the 0 key reaches by number.
+    fn has_reserved_tab(&self) -> bool {
+        self.has_reserved
     }
 
     /// The key that turns the mouse on or off as the bar names it: `m`, or
@@ -158,6 +190,9 @@ impl App {
     /// bottom bar.
     pub(super) fn draw_pane_frame(&mut self, f: &mut Frame) {
         let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
+        // First, so what the pane does as an overlay closes (the chat's Esc
+        // cycle moves its focus) shows on the tab bar in this frame.
+        self.tell_overlays();
         self.draw_pane_tabs(f, bar);
         self.hits.pane = main;
         if let Some(p) = &mut self.pane {
@@ -174,9 +209,45 @@ impl App {
                 let p = p.clone();
                 self.draw_pick(f, main, &p);
             }
+            Mode::Entry(e) => {
+                let e = e.clone();
+                self.draw_entry(f, main, &e);
+            }
             _ => {}
         }
         self.draw_status(f, status);
+    }
+
+    /// What is open over the pane, bottom first: the entry dialog the exit
+    /// guard holds under it, then the mode's own overlay.
+    fn overlays(&self) -> Vec<Overlay> {
+        let top = match &self.mode {
+            Mode::Browse => None,
+            Mode::Help { .. } => Some(Overlay::Help),
+            Mode::Guard { .. } => Some(Overlay::Guard),
+            Mode::Pick(p) => Some(Overlay::Menu { id: p.pane.as_ref().map(|(id, _)| id.clone()).unwrap_or_default(), by_esc: p.by_esc }),
+            Mode::Entry(e) => Some(Overlay::Entry { id: e.id.clone() }),
+            Mode::Ask(a) => Some(Overlay::Ask { id: a.id.clone() }),
+            _ => Some(Overlay::Report),
+        };
+        let held = matches!(self.mode, Mode::Guard { .. }).then(|| self.entry_held.as_ref().map(|e| Overlay::Entry { id: e.id.clone() })).flatten();
+        held.into_iter().chain(top).collect()
+    }
+
+    /// Tell the pane what closed over it since the last frame, top down,
+    /// then what opened, bottom up.
+    fn tell_overlays(&mut self) {
+        let now = self.overlays();
+        let kept = self.overlays_told.iter().zip(&now).take_while(|(a, b)| a == b).count();
+        let closed: Vec<Overlay> = self.overlays_told.drain(kept..).rev().collect();
+        self.overlays_told = now.clone();
+        let Some(p) = &mut self.pane else { return };
+        for o in closed {
+            p.overlay_closed(o);
+        }
+        for o in now.into_iter().skip(kept) {
+            p.overlay_opened(o);
+        }
     }
 
     /// The bottom bar over a pane: its lozenge, the message, then the mouse
@@ -288,7 +359,8 @@ impl App {
         if let Some(s) = self.tab_bar_key(k) {
             return Some(s);
         }
-        let text = self.owns_text();
+        let ctx = self.ctx();
+        let text = ctx.text;
         let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         // The shell's letter and digit keys: plain, or the Alt chord, which
         // is the only form beside text.
@@ -296,13 +368,15 @@ impl App {
         // Alt+digit is Ctrl+digit where Ctrl+digits do not arrive, and the
         // footer says so: again on the tab shown, its menu.
         let alt_digit = k.modifiers == KeyModifiers::ALT && self.alt_jump();
+        // 0 is a key only where a reserved tab gives it a place.
+        let digit_ok = |c: char| c != '0' || self.has_reserved;
         match k.code {
             KeyCode::F(1) => Some(ShellKey::Help),
             KeyCode::Char('?') if !text && plain => Some(ShellKey::Help),
             KeyCode::Char('q') if !text && plain => Some(ShellKey::Quit),
             KeyCode::Char('m') if shell => Some(ShellKey::Mouse),
-            KeyCode::Char(c @ '1'..='9') if alt_digit => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
-            KeyCode::Char(c @ '1'..='9') if !text && plain => Some(ShellKey::Tab(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '0'..='9') if alt_digit && digit_ok(c) => Some(ShellKey::TabOrMenu(c as usize - '0' as usize)),
+            KeyCode::Char(c @ '0'..='9') if !text && plain && ctx.digits && digit_ok(c) => Some(ShellKey::Tab(c as usize - '0' as usize)),
             _ => None,
         }
     }
@@ -323,16 +397,19 @@ impl App {
             self.strip_blur();
         }
         if let Some(s) = taken {
-            self.interrupt_pane();
+            // A pane that owns the focus keeps it across the shell's keys.
+            if !self.ctx().owns_bar {
+                self.interrupt_pane();
+            }
             return self.shell_act(s, k);
         }
         self.msg.clear();
         let Some(p) = &mut self.pane else { return true };
         let keyed = p.key(k);
-        self.take_pane_open();
+        self.open_for_pane(k.code == KeyCode::Esc);
         match keyed {
             Keyed::Done => true,
-            Keyed::Pass if k.code == KeyCode::Esc && self.pane.as_ref().is_some_and(|p| p.esc_quits()) => self.quit(),
+            Keyed::Pass if k.code == KeyCode::Esc && self.ctx().esc_quits => self.quit(),
             Keyed::Pass => true,
             Keyed::Quit => self.quit(),
             Keyed::Tabs => {
@@ -348,6 +425,8 @@ impl App {
             ShellKey::NewItem => self.new_item(),
             ShellKey::Strip(at) => self.strip_key(at, k),
             ShellKey::StripFocus => self.strip_focus(),
+            ShellKey::TabOrMenu(n) if self.own_numbers().is_some() => self.pane_jump(n, true),
+            ShellKey::Tab(n) if self.own_numbers().is_some() => self.pane_jump(n, false),
             ShellKey::TabOrMenu(n) => {
                 if let Some(i) = self.numbered(n) {
                     self.activate_tab(i, false, false);
@@ -359,6 +438,11 @@ impl App {
                 }
             }
             ShellKey::Help => self.mode = Mode::Help { scroll: 0 },
+            // A plain `q` beside a pane that owns the focus asks first,
+            // whatever is unsaved: it is one keystroke from typing.
+            ShellKey::Quit if k.code == KeyCode::Char('q') && self.ctx().owns_bar => {
+                self.mode = Mode::Ask(Asked { id: QUIT_ASK.into(), question: "quit?".into(), yes: "quit".into(), no: "stay".into() });
+            }
             ShellKey::Quit => return self.quit(),
             ShellKey::Mouse => {
                 self.toggle_mouse();
@@ -393,6 +477,20 @@ impl App {
                 return false;
             }
             (true, KeyCode::Esc) => self.mode = Mode::Guard { confirm: false },
+            // Over an entry dialog the guard closed, typing goes back to it.
+            (confirm, _) if edits && self.entry_held.is_some() => {
+                let e = self.entry_held.take().expect("checked");
+                self.mode = Mode::Entry(e);
+                if confirm {
+                    if let Mode::Entry(e) = std::mem::replace(&mut self.mode, Mode::Browse) {
+                        self.entry_key(*e, KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
+                    }
+                }
+                if let Mode::Entry(e) = std::mem::replace(&mut self.mode, Mode::Browse) {
+                    return self.entry_key(*e, k);
+                }
+                return true;
+            }
             (true, _) if edits => {
                 // Back to typing: the D that armed the quit was typing too.
                 self.pane_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::NONE));
@@ -412,6 +510,12 @@ impl App {
     ///
     /// A picker docks where its [`crate::Anchor`] says ([`App::dock`]).
     pub(super) fn take_pane_open(&mut self) {
+        self.open_for_pane(false);
+    }
+
+    /// Open what the pane asked for in answer to a key: a menu opened in
+    /// answer to Esc (`by_esc`) is reported so ([`Overlay::Menu`]).
+    fn open_for_pane(&mut self, by_esc: bool) {
         let Some(p) = self.pane.as_mut() else { return };
         let Some(open) = p.take_open() else { return };
         match open {
@@ -429,6 +533,7 @@ impl App {
             Open::Pick { id, title, items, multi, anchor } if matches!(self.mode, Mode::Browse) && !items.is_empty() => {
                 let mut pick = Pick::for_pane(id, title, items, multi);
                 pick.dock = self.dock(anchor);
+                pick.by_esc = by_esc;
                 self.mode = Mode::Pick(pick);
             }
             Open::Pick { .. } => {}
@@ -436,12 +541,46 @@ impl App {
                 self.mode = Mode::Ask(Asked { id, question, yes, no });
             }
             Open::Ask { .. } => {}
+            Open::Entry { id, title, value, error, anchor } if matches!(self.mode, Mode::Browse) => {
+                let mut input = crate::input::Input::new();
+                let n = value.chars().count();
+                input.set(value, n);
+                let dock = self.dock(anchor);
+                self.mode = Mode::Entry(Box::new(super::entry::Entry { id, title, input, error, dock }));
+            }
+            Open::Entry { .. } => {}
             Open::Quit => {
                 if !self.quit() {
                     self.ending = true;
                 }
             }
+            Open::Copy { text } => self.copied = Some((text, true)),
         }
+    }
+
+    /// The text the pane last asked to copy ([`Open::Copy`]).
+    pub fn copied(&self) -> Option<&str> {
+        self.copied.as_ref().map(|(t, _)| t.as_str())
+    }
+
+    /// The OSC 52 sequence for text the pane asked to copy that the terminal
+    /// has not been sent yet, once.
+    pub(super) fn take_osc52(&mut self) -> Option<String> {
+        let (text, unsent) = self.copied.as_mut()?;
+        std::mem::take(unsent).then(|| format!("\x1b]52;c;{}\x07", base64(text.as_bytes())))
+    }
+
+    /// What the pane numbers in place of its tabs ([`Pane::own_numbers`]).
+    pub(super) fn own_numbers(&self) -> Option<&'static str> {
+        self.pane.as_ref().and_then(|p| p.own_numbers())
+    }
+
+    /// Item `n` of the pane's own numbering ([`Pane::jump`]).
+    fn pane_jump(&mut self, n: usize, menu: bool) {
+        if let Some(p) = &mut self.pane {
+            p.jump(n, menu);
+        }
+        self.take_pane_open();
     }
 
     /// A key while the pane's question waits. `y` answers yes; `n` and Esc
@@ -456,7 +595,8 @@ impl App {
             KeyCode::Char('n' | 'N') if plain => self.answer(a, false),
             KeyCode::Esc => self.answer(a, false),
             _ => {
-                let typed = plain && matches!(k.code, KeyCode::Char(_)) && self.owns_text();
+                // A pane that owns the focus types a character wherever its focus is.
+                let typed = plain && matches!(k.code, KeyCode::Char(_)) && (self.ctx().text || self.ctx().owns_bar);
                 let goes_on = typed || self.shell_key(k).is_some();
                 self.answer(a, false);
                 if goes_on && matches!(self.mode, Mode::Browse) {
@@ -470,6 +610,14 @@ impl App {
     /// Give the pane its question's answer, through [`Pane::picked`].
     pub(super) fn answer(&mut self, a: Asked, yes: bool) {
         self.mode = Mode::Browse;
+        // The shell's own question: yes quits, through the exit guard over
+        // anything unsaved.
+        if a.id == QUIT_ASK {
+            if yes && !self.quit() {
+                self.ending = true;
+            }
+            return;
+        }
         self.pane_picked(&a.id, vec![if yes { "y" } else { "n" }.to_string()]);
     }
 
@@ -572,6 +720,17 @@ impl App {
         self.take_pane_open();
     }
 
+    /// The wheel outside an overlay over a pane: what is under it in the
+    /// pane scrolls, as with nothing open.
+    pub(super) fn pane_wheel(&mut self, m: MouseEvent) {
+        let at = Position::new(m.column, m.row);
+        if self.hits.pane.contains(at) {
+            if let Some(p) = &mut self.pane {
+                p.wheel_at(m.kind == MouseEventKind::ScrollUp, at);
+            }
+        }
+    }
+
     /// A click or a right click outside an overlay, which has closed: on the
     /// tab bar, or on a part of the pane that passes clicks through
     /// ([`Pane::click_through`]), it goes on and acts as it would with
@@ -602,6 +761,9 @@ impl App {
         if let Mode::Ask(a) = &self.mode {
             let a = a.clone();
             self.answer(a, false);
+        }
+        if matches!(self.mode, Mode::Entry(_)) {
+            return self.entry_paste(text);
         }
         if !matches!(self.mode, Mode::Browse) || self.strip.is_some() {
             return;
@@ -664,6 +826,19 @@ impl crate::screen::Screen for App {
         self.tick_pane();
         App::tick(self);
     }
+}
+
+/// `bytes` in standard base64 with padding, as OSC 52 carries a clipboard.
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            out.push(if i <= chunk.len() { ABC[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -744,8 +919,8 @@ mod tests {
         fn bindings(&self) -> Vec<Binding> {
             vec![Binding::new("x", "count")]
         }
-        fn owns_text(&self) -> bool {
-            self.text
+        fn keymap_ctx(&self) -> Ctx {
+            Ctx { text: self.text, ..Ctx::default() }
         }
         fn unsaved(&self) -> Option<String> {
             self.dirty.then(|| "a count".into())
@@ -1002,6 +1177,19 @@ mod tests {
         a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
         assert_eq!(two(&a).keys, 1, "the rest is the pane's");
         assert!(!a.key(k(KeyCode::Char('q'), KeyModifiers::NONE)), "q quits with nothing unsaved");
+    }
+
+    /// 0 is a key only where a reserved tab gives it a place: beside a pane
+    /// with none, as the ways panes are, it is the pane's, and the footer
+    /// names 1-9.
+    #[test]
+    fn zero_is_the_panes_where_no_tab_is_reserved() {
+        let mut a = app(false);
+        let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
+        assert!(footer.contains("1-9 tabs") && !footer.contains("0-9"), "{footer}");
+        a.key(k(KeyCode::Char('2'), KeyModifiers::NONE));
+        a.key(k(KeyCode::Char('0'), KeyModifiers::NONE));
+        assert_eq!((two(&a).tab, two(&a).keys), (1, 1), "0 jumped nowhere and reached the pane");
     }
 
     #[test]
@@ -1290,11 +1478,8 @@ mod tests {
         fn bindings(&self) -> Vec<Binding> {
             Vec::new()
         }
-        fn owns_text(&self) -> bool {
-            true
-        }
-        fn esc_quits(&self) -> bool {
-            false
+        fn keymap_ctx(&self) -> Ctx {
+            Ctx { text: true, esc_quits: false, ..Ctx::default() }
         }
     }
 
@@ -1335,6 +1520,191 @@ mod tests {
         a.key(k(KeyCode::Char('D'), KeyModifiers::NONE));
         assert!(!a.key(k(KeyCode::Char('y'), KeyModifiers::NONE)));
         assert!(!two(&a).dirty, "the work was dropped");
+    }
+
+    /// A pane that logs what the shell tells it opened and closed over it,
+    /// and opens `next` when its menu is picked from.
+    #[derive(Default)]
+    struct Rec {
+        open: Option<Open>,
+        next: Option<Open>,
+        log: Vec<String>,
+    }
+
+    impl Pane for Rec {
+        fn palette(&self) -> theme::Palette {
+            theme::Palette::default()
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            vec![PaneTab::new("one")]
+        }
+        fn tab(&mut self) -> usize {
+            0
+        }
+        fn set_tab(&mut self, _: usize) {}
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, _: KeyEvent) -> Keyed {
+            Keyed::Done
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+        fn take_open(&mut self) -> Option<Open> {
+            self.open.take()
+        }
+        fn picked(&mut self, _: &str, _: Vec<String>) {
+            self.open = self.next.take();
+        }
+        fn overlay_opened(&mut self, o: Overlay) {
+            self.log.push(format!("+{o:?}"));
+        }
+        fn overlay_closed(&mut self, o: Overlay) {
+            self.log.push(format!("-{o:?}"));
+        }
+    }
+
+    /// Open `o` from the pane with a key, and draw a frame.
+    fn open_from(a: &mut App, o: Open) {
+        a.pane_mut::<Rec>().expect("the pane").open = Some(o);
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        testkit::render(a, 60, 12);
+    }
+
+    /// Press `key` and draw a frame.
+    fn press(a: &mut App, code: KeyCode, m: KeyModifiers) {
+        a.key(k(code, m));
+        testkit::render(a, 60, 12);
+    }
+
+    /// What the pane was told since it was last asked, in order.
+    fn told(a: &mut App) -> Vec<String> {
+        std::mem::take(&mut a.pane_mut::<Rec>().expect("the pane").log)
+    }
+
+    /// The shell tells the pane each overlay that opens and closes over it,
+    /// by kind and id, at the next frame: closes top down, then opens.
+    #[test]
+    fn the_shell_reports_each_overlay_opened_and_closed() {
+        let pick = || Open::Pick { id: "m".into(), title: "menu".into(), items: vec![Item::new("a")], multi: false, anchor: Anchor::Center };
+        let mut a = App::with_pane("rec", Rec::default());
+        testkit::render(&mut a, 60, 12);
+        assert_eq!(told(&mut a), Vec::<String>::new(), "nothing open at start");
+
+        // A menu, then nothing.
+        open_from(&mut a, pick());
+        assert_eq!(told(&mut a), [r#"+Menu { id: "m", by_esc: false }"#]);
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"-Menu { id: "m", by_esc: false }"#]);
+
+        // A menu the pane opened in answer to Esc says so.
+        a.pane_mut::<Rec>().expect("the pane").open = Some(pick());
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"+Menu { id: "m", by_esc: true }"#]);
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"-Menu { id: "m", by_esc: true }"#]);
+
+        // A menu replaced by the question its pick asks, within one frame.
+        a.pane_mut::<Rec>().expect("the pane").next = Some(Open::Ask { id: "q".into(), question: "sure?".into(), yes: "yes".into(), no: "no".into() });
+        open_from(&mut a, pick());
+        told(&mut a);
+        press(&mut a, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"-Menu { id: "m", by_esc: false }"#, r#"+Ask { id: "q" }"#]);
+        press(&mut a, KeyCode::Char('n'), KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"-Ask { id: "q" }"#]);
+
+        // An entry with text typed, the guard over it, back to it, then nothing.
+        open_from(&mut a, Open::Entry { id: "e".into(), title: "name".into(), value: String::new(), error: None, anchor: Anchor::Center });
+        assert_eq!(told(&mut a), [r#"+Entry { id: "e" }"#]);
+        press(&mut a, KeyCode::Char('z'), KeyModifiers::NONE);
+        press(&mut a, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(told(&mut a), ["+Guard"], "the entry stays under the guard");
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), ["-Guard"], "back to the entry, still open");
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), [r#"-Entry { id: "e" }"#]);
+
+        // The key help, closed by Esc.
+        press(&mut a, KeyCode::F(1), KeyModifiers::NONE);
+        assert_eq!(told(&mut a), ["+Help"]);
+        press(&mut a, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(told(&mut a), ["-Help"]);
+    }
+
+    /// A pane that numbers its own list ([`Pane::own_numbers`]): it logs each
+    /// jump and each key it is given, and takes the digits while `digits`.
+    #[derive(Default)]
+    struct Own {
+        digits: bool,
+        jumps: Vec<(usize, bool)>,
+        keys: Vec<KeyCode>,
+    }
+
+    impl Pane for Own {
+        fn palette(&self) -> theme::Palette {
+            theme::Palette::default()
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            vec![PaneTab::new("≡").action(), PaneTab::new("#deploy — rollout"), PaneTab::new("+").action(), PaneTab::new("⋯all").reserved()]
+        }
+        fn tab(&mut self) -> usize {
+            1
+        }
+        fn set_tab(&mut self, _: usize) {}
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, k: KeyEvent) -> Keyed {
+            self.keys.push(k.code);
+            Keyed::Done
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+        fn keymap_ctx(&self) -> Ctx {
+            Ctx { digits: self.digits, owns_bar: true, esc_quits: false, ..Ctx::default() }
+        }
+        fn own_numbers(&self) -> Option<&'static str> {
+            Some("channel")
+        }
+        fn jump(&mut self, n: usize, menu: bool) {
+            self.jumps.push((n, menu));
+        }
+        fn has_tab_menus(&self) -> bool {
+            true
+        }
+    }
+
+    /// The digits reach a pane that numbers its own list: Ctrl+digit and
+    /// Alt+digit as a jump that may open a menu, a plain digit as one that
+    /// does not where the pane takes the digits, and as a key where it does
+    /// not. The tab bar draws no numbers, and the footer names the pane's.
+    #[test]
+    fn a_pane_that_numbers_its_own_list_gets_the_digits() {
+        let mut a = App::with_pane("own", Own::default());
+        let bar = testkit::rows(&testkit::render(&mut a, 80, 6)).remove(0);
+        assert!(bar.contains("#deploy — rollout") && !bar.contains("1 #deploy"), "no numbers on the bar: {bar}");
+        a.set_keyboard_enhanced(true);
+        a.key(k(KeyCode::Char('3'), KeyModifiers::CONTROL));
+        a.set_keyboard_enhanced(false);
+        a.key(k(KeyCode::Char('0'), KeyModifiers::ALT));
+        a.key(k(KeyCode::Char('2'), KeyModifiers::NONE));
+        a.pane_mut::<Own>().expect("the pane").digits = true;
+        a.key(k(KeyCode::Char('4'), KeyModifiers::NONE));
+        let own = a.pane_ref::<Own>().expect("the pane");
+        assert_eq!(own.jumps, [(3, true), (0, true), (4, false)]);
+        assert_eq!(own.keys, [KeyCode::Char('2')], "a digit the pane does not take is its key");
+        let footer = testkit::rows(&testkit::render(&mut a, 160, 6)).pop().expect("a bar");
+        assert!(footer.contains("0-9 channels"), "{footer}");
+    }
+
+    /// Text a pane copies goes to the terminal once, as OSC 52 in base64.
+    #[test]
+    fn a_copy_is_sent_to_the_terminal_once_by_osc_52() {
+        let mut a = App::with_pane("rec", Rec::default());
+        open_from(&mut a, Open::Copy { text: "hi there".into() });
+        assert_eq!(a.copied(), Some("hi there"));
+        assert_eq!(a.take_osc52().as_deref(), Some("\x1b]52;c;aGkgdGhlcmU=\x07"));
+        assert_eq!(a.take_osc52(), None, "once");
+        assert_eq!(told(&mut a), Vec::<String>::new(), "nothing opens over the pane");
+        assert_eq!([base64(b""), base64(b"f"), base64(b"fo"), base64(b"foo"), base64(b"foob")], ["", "Zg==", "Zm8=", "Zm9v", "Zm9vYg=="]);
     }
 
     #[test]
@@ -1397,9 +1767,9 @@ mod tests {
         a.pane_mut::<Described>().expect("the pane").0.tab = 4;
         let bar = testkit::rows(&testkit::render(&mut a, 20, 10))[0].clone();
         assert!(bar.contains(" 4 ") && bar.trim_end().ends_with('›'), "#infra, shown, stays; others go: {bar}");
+        assert!(bar.contains('+') && bar.contains('≡'), "an action slot never goes: {bar}");
         assert!(!bar.contains(" 3 "), "the last tab other than the one shown went: {bar}");
-        let (rect, i) = *a.hits.tabs.last().expect("a tab drawn");
-        assert_eq!(i, 4, "its click target is its own tab, not its place on the bar");
+        let &(rect, _) = a.hits.tabs.iter().find(|(_, i)| *i == 4).expect("its click target is its own tab, not its place on the bar");
         assert!(rect.right() <= 20);
     }
 
@@ -1437,3 +1807,4 @@ mod tests {
         assert_eq!(crate::binding_conflicts(&a.bindings()), Vec::<String>::new());
     }
 }
+

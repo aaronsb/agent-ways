@@ -1,66 +1,76 @@
 #!/usr/bin/env bash
-# Dynamic context for attend way
-# Checks if attend is installed and running, emits live state
+# Dynamic context for the attend way: this session's attend state, read
+# through the attend CLI (never attend's cache). `attend listen status`
+# resolves the session from the process that runs it, the Claude Code
+# process this hook runs under. A subagent runs in its parent's process, so
+# for a subagent (WAYS_SCOPE=subagent at dispatch, or CLAUDE_AGENT_ID set on
+# its own tool call) the state is the parent's: it is reported as
+# information, with no action, since listening and sending are the head
+# agent's (#932). Any failure prints nothing rather than a guess.
 
-# Not installed — nothing to add
 if ! command -v attend &>/dev/null; then
   echo "**Note**: attend is not installed. Run \`ways manage update\` to install it."
   exit 0
 fi
 
-# Check if attend is running for this session: an `attend run` process whose
-# ancestry reaches the claude process that runs this hook. Another session's
-# attend doesn't count. The claude pid comes from the session record that
-# carries CLAUDE_SESSION_ID (set by `ways` for every macro); without one, the
-# nearest ancestor named claude stands in.
-session_pid() {
-  local dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions" f
-  [[ -n "${CLAUDE_SESSION_ID:-}" ]] || return 0
-  f=$(grep -l "\"sessionId\":\"$CLAUDE_SESSION_ID\"" "$dir"/*.json 2>/dev/null | head -1)
-  [[ -n "$f" ]] && basename "$f" .json
-}
-attend_running() {
-  ps -A -o pid=,ppid=,args= 2>/dev/null | awk -v claude="$(session_pid)" -v self="$$" '
-    function base(w) { sub(/.*\//, "", w); return w }
-    {
-      parent[$1] = $2
-      if (base($3) == "attend" && $4 == "run") attend[$1] = 1
-      if (base($3) == "claude") named[$1] = 1
-    }
-    END {
-      if (claude == "")
-        for (p = self; p != "" && p != 0 && hops++ < 15; p = parent[p])
-          if (p in named) { claude = p; break }
-      if (claude == "") exit 1
-      for (a in attend)
-        for (p = a; p != "" && p != 0 && n[a]++ < 15; p = parent[p])
-          if (p == claude) exit 0
-      exit 1
-    }'
-}
-if attend_running; then
-  echo "**Status**: attend is running"
+# One scalar field of a one-line JSON document: true, false, null, or a
+# string with its quotes.
+field() { grep -o "\"$2\":[^,}]*" <<<"$1" | head -1 | cut -d: -f2-; }
+
+LISTEN=$(attend listen status --json 2>/dev/null) || exit 0
+[[ $(field "$LISTEN" resolved) == true ]] || exit 0
+LISTENING=$(field "$LISTEN" listening)
+MOD_HOST=$([[ $LISTENING == true && $(field "$LISTEN" host) == '"mod"' ]] && echo true)
+RUN_LIVE=$(field "$LISTEN" run_live)
+
+if [[ ${WAYS_SCOPE:-} == subagent || -n ${CLAUDE_AGENT_ID:-} ]]; then
+  WHO="the parent session"
+  if [[ $RUN_LIVE == true && $MOD_HOST == true ]]; then
+    echo "**Status**: the parent session is listening through the attend mod, and its \`attend run\` is also live under Monitor."
+  elif [[ $RUN_LIVE == true ]]; then
+    echo "**Status**: the parent session's \`attend run\` is live under Monitor."
+  elif [[ $MOD_HOST == true ]]; then
+    echo "**Status**: the parent session is listening through the attend mod."
+  elif [[ $LISTENING == true ]]; then
+    echo "**Status**: the parent session is listening at the end of each turn only."
+  else
+    echo "**Status**: the parent session is not listening. Listening is the head agent's call."
+  fi
 else
-  echo "**Status**: attend is not running — start with \`/attend\` or \`Monitor: attend run\`"
+  WHO="this session"
+  # Whether the attend mod may be loaded here. Claude Code enables the
+  # plugin in its settings; whether it loaded is in the tool list, which a
+  # hook cannot see, so the wording leaves that check to the agent.
+  if grep -qx 'attend@agent-ways' <<<"${WAYS_ENABLED_PLUGINS:-}"; then
+    START="call \`attend_listen\` when that tool is listed; otherwise start \`Monitor: attend run\`"
+  else
+    START="start \`Monitor: attend run\`"
+  fi
+  if [[ $RUN_LIVE == true && $MOD_HOST == true ]]; then
+    echo "**Status**: listening through the attend mod, and \`attend run\` is also live under Monitor. ADR-406 item 9 says not to run both: the mod is enough, so the Monitor can stop."
+  elif [[ $RUN_LIVE == true ]]; then
+    echo "**Status**: \`attend run\` is live under Monitor for this session."
+  elif [[ $MOD_HOST == true ]]; then
+    echo "**Status**: listening through the attend mod. Send with \`attend_send\` and \`attend_reply\`; do not start Monitor."
+  elif [[ $LISTENING == true ]]; then
+    echo "**Status**: listening at the end of each turn only; nothing wakes an idle session. For that, $START."
+  else
+    echo "**Status**: not listening. If the user asks to use attend, $START."
+  fi
 fi
 
-# Show this session's channels (read-only view: no state cleanup on a way fire)
-CHANNELS_OUTPUT=$(attend channels --joined 2>/dev/null)
-if [[ -n "$CHANNELS_OUTPUT" ]]; then
-  echo "**Channels**:"
-  echo "$CHANNELS_OUTPUT"
+# Joined channels (read-only: no state cleanup on a way fire). A listening
+# session also hears its project and #open.
+JOINED=$(attend channels --joined --json 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | sed 's/^/#/' | paste -sd, - | sed 's/,/, /g')
+if [[ $LISTENING == true ]]; then
+  echo "**Channels**: $WHO hears project, #open${JOINED:+, $JOINED}"
+elif [[ -n $JOINED ]]; then
+  echo "**Channels**: $WHO joined $JOINED; nothing is delivered until it listens"
 fi
 
-# Show peer count
-PEER_OUTPUT=$(attend peers 2>&1 | grep "baseline" | sed 's/\[attend\] peers: //')
-if [[ -n "$PEER_OUTPUT" ]]; then
-  echo "**Peers**: $PEER_OUTPUT"
+# Messages that wait while the session does not listen.
+if [[ $LISTENING != true ]]; then
+  UNREAD=$(field "$(attend unread --json 2>/dev/null)" unread)
+  [[ $UNREAD =~ ^[1-9][0-9]*$ ]] && echo "**Unread**: $UNREAD for $WHO"
 fi
-
-# Show pending signals
-STATUS_OUTPUT=$(attend status 2>/dev/null)
-PROJECT_SIGNALS=$(echo "$STATUS_OUTPUT" | grep "project:" | sed 's/.*project: *//')
-BROADCAST_SIGNALS=$(echo "$STATUS_OUTPUT" | grep "broadcast:" | sed 's/.*broadcast: *//')
-if [[ -n "$PROJECT_SIGNALS" ]] || [[ -n "$BROADCAST_SIGNALS" ]]; then
-  echo "**Signals**: project: $PROJECT_SIGNALS | broadcast: $BROADCAST_SIGNALS"
-fi
+exit 0

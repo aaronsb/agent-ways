@@ -120,6 +120,8 @@ struct PendingMsg {
     /// in the per-message emit branch, since a digest never shows it.
     from: String,
     cwd: String,
+    /// The signal's id, whose short handle the Monitor line carries.
+    signal_id: String,
     body: String,
     kind: MsgKind,
     /// Wall-clock age in seconds (since the file's mtime) at scan time.
@@ -252,8 +254,9 @@ impl PeerSensor {
 
         // Cold start: the first scan of a session that restored no
         // checkpoint (no seen-set) applies `attend_state::cold_start`, the
-        // rule the Stop-hook drain applies too. Addressed mail is delivered
-        // whatever its age; old `#open` and channel backlog is marked seen
+        // rule the Stop-hook drain applies too. Addressed mail sent since the
+        // session's process started, and `#open` and channel messages since
+        // it started listening, are delivered; older backlog is marked seen
         // without being shown and counted in one note, so a fresh enrollment
         // is neither flooded nor silently emptied. A warm restart skips this
         // (the checkpoint restored the seen-set), so down-gap messages still
@@ -287,7 +290,17 @@ impl PeerSensor {
                 }
                 // Read and parse: `from|project|cwd|message` (legacy) or
                 // `from|project|cwd|re:id|message` (threaded, ADR-120).
-                let Ok(content) = fs::read_to_string(&path) else { continue };
+                let content = match agent_identity::signal::read_signal_file(&path) {
+                    Ok(content) => content,
+                    // A file no attend could have written: noted on stderr
+                    // once and marked seen, never loaded.
+                    Err(e) if e.kind() == std::io::ErrorKind::FileTooLarge => {
+                        eprintln!("[attend] skipped {filename}: {e}");
+                        self.seen_signals.insert(key);
+                        continue;
+                    }
+                    Err(_) => continue,
+                };
                 let Some(sig) = agent_identity::parse_signal(agent_identity::wire_line(&content)) else {
                     self.seen_signals.insert(key);
                     continue;
@@ -308,14 +321,13 @@ impl PeerSensor {
                 found.push(Found { room, key, signal_id, content, mtime, age });
             }
         }
-        // Oldest first, so the parts of a message sent in parts come out in
-        // order. Parts written within one timestamp tick share an mtime;
-        // their ids carry the send time and order them.
+        // Oldest first; signals that share an mtime order by the send time
+        // in their ids, so legacy numbered parts still read in order.
         found.sort_by_cached_key(|f| (f.mtime, agent_identity::signal_send_order(&f.signal_id), f.signal_id.clone()));
 
         let plan = baselining.then(|| {
             let pending: Vec<_> = found.iter().map(|f| (&scan_dirs[f.room].room, f.age)).collect();
-            attend_state::cold_start::plan(&pending)
+            attend_state::cold_start::plan(&pending, attend_state::cold_start::Window::for_session(&own_session_id))
         });
 
         for (i, f) in found.into_iter().enumerate() {
@@ -360,7 +372,7 @@ impl PeerSensor {
             // (and get suppressed when the peer sensor is refractory).
             // This is the "auto-grouping" mechanism — conversation
             // emerges from observed traffic rather than explicit config.
-            let boost = self.peer_engagement_boost(from);
+            let boost = self.peer_engagement_boost(&from);
             let magnitude = base_magnitude * boost;
 
             // Defer emission: collect now, decide individual-vs-digest
@@ -369,6 +381,7 @@ impl PeerSensor {
                 magnitude,
                 from: from.to_string(),
                 cwd: source_cwd.to_string(),
+                signal_id: f.signal_id.clone(),
                 body: message.to_string(),
                 kind,
                 age_secs: f.age.as_secs(),
@@ -388,7 +401,7 @@ impl PeerSensor {
             // reply` to auto-thread to the agent's own past self.
             if let Some(ref sid) = self.own_session_id {
                 if source_cwd != focus.working_dir {
-                    let said = last_inbound::Said::of(&scan_dirs[f.room].room, from, source_cwd);
+                    let said = last_inbound::Said::of(&scan_dirs[f.room].room, &from, source_cwd);
                     last_inbound::record(sid, &f.signal_id, &said);
                 }
             }
@@ -418,20 +431,8 @@ impl PeerSensor {
                 let sender =
                     attend_instances::view::render_sender_label(&m.from, &m.cwd, &attend_instances::view::Painter::plain(), &instances);
                 let include_reply_hint = !self.reply_hint_shown;
-                // Chunk long messages at word boundaries so each event stays
-                // under Monitor's ~400-char stdout line ceiling; chunks ride
-                // the same 200ms batch and group into one notification.
-                let chunks = chunk_message(&m.body, MAX_CHUNK_BODY, MAX_CHUNKS);
-                let total = chunks.len();
-                for (i, chunk) in chunks.into_iter().enumerate() {
-                    let header = message_header(&sender, i, total);
-                    let body = if i == 0 && include_reply_hint {
-                        format!("{chunk}{REPLY_HINT}")
-                    } else {
-                        chunk
-                    };
-                    observations.push((m.magnitude, format!("{}{}", header, body)));
-                }
+                // One message is one line, whatever its length (ADR-412).
+                observations.push((m.magnitude, monitor_line(&sender, &m.signal_id, &m.body, include_reply_hint)));
                 if include_reply_hint {
                     self.reply_hint_shown = true;
                 }
@@ -752,53 +753,25 @@ fn session_file(record: claude_sessions::SessionRecord) -> Option<SessionFile> {
     Some(SessionFile { pid: record.pid, cwd, session_id: record.session_id })
 }
 
-// ── Event header ────────────────────────────────────────────────
+// ── The Monitor line ────────────────────────────────────────────
 
-/// The `message from …: ` prefix of one Monitor event line. Chunked
-/// messages carry an `(i/n)` counter after the sender.
-fn message_header(sender: &str, chunk_index: usize, total: usize) -> String {
-    if total == 1 {
-        format!("message from {sender}: ")
-    } else {
-        format!("message from {sender} ({}/{total}): ", chunk_index + 1)
-    }
+/// One message as the Monitor line shows it: `message from {sender}
+/// ~{handle}{hint}: {body}`, the body on one line with its whitespace
+/// collapsed. The reply hint rides the first message a session sees. The
+/// line carries the whole message, whatever its length (ADR-412). The
+/// handle and the hint come before the body, so a line Monitor cuts at 500
+/// characters still names the message and still shows the hint the
+/// session sees once.
+fn monitor_line(sender: &str, signal_id: &str, body: &str, reply_hint: bool) -> String {
+    let text = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let hint = if reply_hint { REPLY_HINT } else { "" };
+    format!("message from {sender} ~{}{hint}: {text}", agent_identity::signal::short_id(signal_id))
 }
-
-// ── Message chunking ────────────────────────────────────────────
-
-/// Max body characters per chunk.
-///
-/// Monitor truncates stdout lines around 400 characters. The full event
-/// line the emit pipeline produces looks like:
-///
-/// ```text
-/// [attend sensor=peers priority=high] message from {sender} ({i}/{n}): {body}{reply_hint?}
-/// ```
-///
-/// With a long sender name the prefix overhead can reach ~80 characters.
-/// The reply hint ([`REPLY_HINT`]) is at most 29 characters and is
-/// appended to the first chunk's body when shown. Reserving both:
-///
-/// ```text
-/// 400 − 80 (prefix) − 29 (reply hint) = 291 chars available for body
-/// ```
-///
-/// We use 260 to leave a defensible safety margin against prefix variation
-/// (longer sender labels, large (N/M) counters) and to ensure even a fully
-/// packed first chunk with reply hint stays clearly under the ceiling —
-/// 260 + 29 + 80 = 369, ~30 chars below 400.
-const MAX_CHUNK_BODY: usize = 260;
 
 /// Appended to the first peer message a session sees. It names `attend
 /// reply`, which threads to that message on its own, because that is the
 /// verb for answering it; `attend send` starts a new topic.
 const REPLY_HINT: &str = " (reply: attend reply \"...\")";
-
-/// Cap on chunks per message. A message that splits into more than this many
-/// pieces gets its tail replaced with an overflow hint pointing at the inbox.
-/// 3 is plenty for conversational chatter and stays well under Monitor's
-/// per-notification safety ceiling.
-const MAX_CHUNKS: usize = 3;
 
 /// A single poll surfacing more than this many messages is a flood — a
 /// warm rejoin after a down-gap, or a hyperactive peer. Above it, the poll
@@ -860,78 +833,6 @@ fn fmt_ago(secs: u64) -> String {
     }
 }
 
-/// Split a message into word-boundary chunks, each ≤ `chunk_size` characters,
-/// capped at `max_chunks`. Long messages get their tail replaced with an
-/// overflow hint on the final kept chunk.
-///
-/// Words longer than `chunk_size` get their own chunk that necessarily
-/// exceeds the limit — we refuse to corrupt UTF-8 by char-slicing mid-word.
-/// This is fine for peer chatter where single words are bounded by natural
-/// language, and rare-case overflow is still readable even if truncated.
-fn chunk_message(message: &str, chunk_size: usize, max_chunks: usize) -> Vec<String> {
-    let mut chunks: Vec<String> = Vec::new();
-    let mut current = String::new();
-
-    for word in message.split_whitespace() {
-        if current.is_empty() {
-            current.push_str(word);
-        } else if current.chars().count() + 1 + word.chars().count() <= chunk_size {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            chunks.push(std::mem::take(&mut current));
-            current.push_str(word);
-        }
-    }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-
-    if chunks.len() > max_chunks {
-        let overflow_hint = " …see `attend inbox` for full message";
-        let hint_chars = overflow_hint.chars().count();
-        chunks.truncate(max_chunks);
-        if let Some(last) = chunks.last_mut() {
-            // Only trim the last chunk if the budget can meaningfully fit
-            // the hint. If chunk_size is smaller than the hint itself
-            // (pathological tiny budget), skip trimming — the chunk will
-            // exceed the nominal budget but will still carry its content
-            // plus the hint. A slightly over-budget chunk with context
-            // beats an empty chunk that only carries the hint.
-            if chunk_size > hint_chars {
-                let target = chunk_size - hint_chars;
-                let original_len = last.chars().count();
-                while last.chars().count() > target {
-                    last.pop();
-                }
-                let did_trim = last.chars().count() < original_len;
-                // If we actually trimmed and the remaining content still
-                // has whitespace to cut back to, strip the partial word at
-                // the tail so the hint attaches at a clean word boundary.
-                // If the last chunk is a single unbroken word (pathological
-                // long-word case) or we didn't trim at all, leave it alone.
-                if did_trim && last.chars().any(|c| c.is_whitespace()) {
-                    while let Some(c) = last.chars().last() {
-                        last.pop();
-                        if c.is_whitespace() {
-                            break;
-                        }
-                    }
-                }
-            }
-            last.push_str(overflow_hint);
-        }
-    }
-
-    // Guarantee at least one chunk for an empty message (preserves the
-    // "message from X:" notification even when the body is blank).
-    if chunks.is_empty() {
-        chunks.push(String::new());
-    }
-
-    chunks
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -944,13 +845,11 @@ mod tests {
         p
     }
 
-    /// The hint names the threading verb, and fits the 29 characters the
-    /// chunk budget reserves for it.
+    /// The hint names the threading verb.
     #[test]
-    fn reply_hint_names_attend_reply_within_its_budget() {
+    fn reply_hint_names_attend_reply() {
         assert!(REPLY_HINT.contains("attend reply \""), "{REPLY_HINT}");
         assert!(!REPLY_HINT.contains("attend send"), "{REPLY_HINT}");
-        assert!(REPLY_HINT.chars().count() <= 29, "{} chars", REPLY_HINT.chars().count());
     }
 
     #[test]
@@ -1003,33 +902,44 @@ mod tests {
         fs::remove_dir_all(&root).ok();
     }
 
-    #[test]
-    fn short_message_single_chunk() {
-        let chunks = chunk_message("hello there", 100, 3);
-        assert_eq!(chunks, vec!["hello there"]);
-    }
-
     fn pmsg(kind: MsgKind, age_secs: u64, magnitude: f64) -> PendingMsg {
         PendingMsg {
             magnitude,
             from: "claude:x".to_string(),
             cwd: "/x".to_string(),
+            signal_id: "x-1-0".to_string(),
             body: "hi".to_string(),
             kind,
             age_secs,
         }
     }
 
+    /// A long message is one line, whole, under its one handle, which
+    /// leads the body; nothing counts parts.
     #[test]
-    fn message_header_counts_only_chunked_messages() {
-        assert_eq!(
-            message_header("Jovan-alpha (ws)", 0, 1),
-            "message from Jovan-alpha (ws): "
-        );
-        assert_eq!(
-            message_header("Jovan-alpha (ws)", 1, 3),
-            "message from Jovan-alpha (ws) (2/3): "
-        );
+    fn a_long_message_is_one_monitor_line_under_its_handle() {
+        let body: String = (0..40).map(|i| format!("Sentence {i:02} is plain.")).collect::<Vec<_>>().join(" ");
+        let line = monitor_line("Jovan-alpha (ws)", "peer-sess-1-1", &body, false);
+        assert_eq!(line, format!("message from Jovan-alpha (ws) ~73nki: {body}"));
+        assert!(!line.contains("(1/"), "{line}");
+    }
+
+    #[test]
+    fn a_monitor_line_collapses_newlines_and_carries_the_hint_before_the_body() {
+        let line = monitor_line("J (ws)", "peer-sess-1-1", "one\n\n  two", true);
+        assert_eq!(line, format!("message from J (ws) ~73nki{REPLY_HINT}: one two"));
+        assert_eq!(line.lines().count(), 1);
+    }
+
+    /// A long first message keeps its handle and the once-per-session hint
+    /// inside the 500 characters Monitor shows of a line.
+    #[test]
+    fn a_long_first_message_keeps_the_hint_inside_monitors_cut() {
+        let body = "word ".repeat(400);
+        let line = format!("[attend sensor=peers priority=high] {}", monitor_line("Jovan-alpha (ws)", "peer-sess-1-1", &body, true));
+        let shown: String = line.chars().take(500).collect();
+        assert!(shown.contains("~73nki"), "{shown}");
+        assert!(shown.contains(REPLY_HINT), "{shown}");
     }
 
     #[test]
@@ -1068,69 +978,5 @@ mod tests {
         assert!(body.contains("2 on #open"), "{body}");
         assert!(!body.contains("to you"), "{body}");
         assert!(!body.contains("in groups"), "{body}");
-    }
-
-    #[test]
-    fn long_message_splits_at_word_boundaries() {
-        // 3 words of 10 chars each = 30 chars; chunk size 15 → two chunks.
-        let msg = "aaaaaaaaaa bbbbbbbbbb cccccccccc";
-        let chunks = chunk_message(msg, 15, 3);
-        assert_eq!(chunks, vec!["aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc"]);
-    }
-
-    #[test]
-    fn word_joining_respects_budget() {
-        // "foo bar baz" is 11 chars; budget 11 → one chunk. Budget 10 → two.
-        assert_eq!(chunk_message("foo bar baz", 11, 3), vec!["foo bar baz"]);
-        assert_eq!(chunk_message("foo bar baz", 10, 3), vec!["foo bar", "baz"]);
-    }
-
-    #[test]
-    fn overflow_hint_replaces_tail_when_exceeds_max_chunks() {
-        // 5 chunks worth of content, max 3 chunks.
-        let msg = "aaaa bbbb cccc dddd eeee ffff gggg hhhh";
-        let chunks = chunk_message(msg, 10, 3);
-        assert_eq!(chunks.len(), 3);
-        assert!(chunks.last().unwrap().contains("…see `attend inbox` for full message"));
-    }
-
-    #[test]
-    fn empty_message_yields_one_empty_chunk() {
-        let chunks = chunk_message("", 100, 3);
-        assert_eq!(chunks, vec![""]);
-    }
-
-    #[test]
-    fn single_word_longer_than_budget_still_emits() {
-        // A 30-char word with a 10-char budget — we refuse to mid-slice.
-        let msg = "supercalifragilisticexpialidocious trailing";
-        let chunks = chunk_message(msg, 10, 3);
-        // First chunk is the long word (exceeds budget — defensible fallback).
-        assert_eq!(chunks[0], "supercalifragilisticexpialidocious");
-        assert_eq!(chunks[1], "trailing");
-    }
-
-    #[test]
-    fn overflow_preserves_content_when_last_chunk_has_no_whitespace() {
-        // Simulate: many short words, then a single long unbroken word
-        // as the final kept chunk's content. The overflow trim must not
-        // annihilate the long word just because there's no whitespace
-        // inside it — it's better to be slightly over budget than empty.
-        let msg = "a b c d e f g h i j aaaaaaaaaaaaaaaaaaaaa continuation tail";
-        let chunks = chunk_message(msg, 10, 3);
-        assert_eq!(chunks.len(), 3);
-        let last = chunks.last().unwrap();
-        assert!(last.contains("…see `attend inbox` for full message"));
-        // The pre-hint portion must not be empty.
-        let hint_idx = last.find(" …see").unwrap();
-        assert!(hint_idx > 0, "chunk content was annihilated before hint: {:?}", last);
-    }
-
-    #[test]
-    fn utf8_is_counted_by_chars_not_bytes() {
-        // "café" is 4 chars but 5 bytes. Budget 4 fits, budget 3 does not.
-        let msg = "café rouge";
-        assert_eq!(chunk_message(msg, 10, 3), vec!["café rouge"]);
-        assert_eq!(chunk_message(msg, 4, 3), vec!["café", "rouge"]);
     }
 }

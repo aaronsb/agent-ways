@@ -81,6 +81,15 @@ impl Input {
         self.cursor = self.snap(self.cursor + 1);
     }
 
+    /// Insert `s` at the cursor in one splice, the cursor after it. A paste
+    /// takes this path: inserting it a character at a time re-reads the
+    /// whole text per character, which a 64 KiB paste pays for in minutes.
+    pub fn insert_str(&mut self, s: &str) {
+        let at = byte_at(&self.text, self.cursor);
+        self.text.insert_str(at, s);
+        self.cursor = self.snap(self.cursor + s.chars().count());
+    }
+
     pub fn newline(&mut self) {
         self.insert('\n');
     }
@@ -142,6 +151,40 @@ impl Input {
             KeyCode::End => self.end(),
             _ => return false,
         }
+        true
+    }
+
+    /// Up in the text wrapped at `width`: the cursor goes to the row above,
+    /// at the same column or the row's end; on the first row, to the start
+    /// of the text. False when it was there already, at the start of the
+    /// first line, where Up has nowhere left to go in the text.
+    pub fn up(&mut self, width: u16) -> bool {
+        let (row, col) = self.drawn_at(width.max(1));
+        if row == 0 {
+            let moved = self.cursor != 0;
+            self.cursor = 0;
+            return moved;
+        }
+        self.click(width.max(1), row - 1, col);
+        true
+    }
+
+    /// Down in the text wrapped at `width`: the cursor goes to the row below,
+    /// at the same column or the row's end; on the last row, to the end of
+    /// the text. False when it was there already, at the end of the last
+    /// line.
+    pub fn down(&mut self, width: u16) -> bool {
+        let end = self.text.chars().count();
+        let (row, col) = self.drawn_at(width.max(1));
+        let mut probe = self.clone();
+        probe.cursor = end;
+        let (last, _) = probe.drawn_at(width.max(1));
+        if row >= last {
+            let moved = self.cursor != end;
+            self.cursor = end;
+            return moved;
+        }
+        self.click(width.max(1), row + 1, col);
         true
     }
 
@@ -233,6 +276,23 @@ mod tests {
 
     fn texts(rows: &[Line]) -> Vec<String> {
         rows.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect()
+    }
+
+    #[test]
+    fn up_and_down_move_between_rows_and_say_when_they_reach_an_end() {
+        let mut i = at("one\ntwo\nthree", 6);
+        assert!(i.up(20));
+        assert_eq!(i.cursor(), 2, "the row above, the same column");
+        assert!(i.up(20), "the first row: to the start");
+        assert_eq!(i.cursor(), 0);
+        assert!(!i.up(20), "at the start of the first line Up has nowhere to go");
+        assert!(i.down(20));
+        assert_eq!(i.cursor(), 4, "the row below, the same column");
+        assert!(i.down(20) && i.down(20), "the last row: to the end");
+        assert_eq!(i.cursor(), 13);
+        assert!(!i.down(20), "at the end of the last line Down has nowhere to go");
+        let mut empty = Input::new();
+        assert!(!empty.up(20) && !empty.down(20), "an empty box is at both ends");
     }
 
     #[test]
@@ -369,5 +429,20 @@ mod tests {
         // A cluster under the cursor is drawn whole.
         let rows = at("cafe\u{301}!", 3).rows(10, Style::new());
         assert!(rows[0].spans.iter().any(|s| s.content == "e\u{301}" && s.style.add_modifier.contains(Modifier::REVERSED)));
+    }
+
+    /// A paste splices in at the cursor in one step, the cursor after it,
+    /// and a 64 KiB paste is quick.
+    #[test]
+    fn insert_str_splices_at_the_cursor() {
+        let mut i = Input::new();
+        i.set("ad", 1);
+        i.insert_str("bc");
+        assert_eq!((i.text(), i.cursor()), ("abcd", 3));
+        let big = "x".repeat(64 * 1024);
+        let t = std::time::Instant::now();
+        i.insert_str(&big);
+        assert!(t.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(i.cursor(), 3 + big.len());
     }
 }

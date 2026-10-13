@@ -18,75 +18,19 @@ pub struct SendRequest {
     pub re: Option<String>,
 }
 
-/// The longest part a message goes out as, in characters: about what one
-/// notification shows whole. A longer message goes out as numbered parts.
-pub const PART_MAX: usize = 400;
-
-/// Split `text` into the parts it goes out as: itself when it fits in
-/// `max` characters, otherwise parts of at most `max` characters, each led
-/// by `(i/n) `. A part breaks at whitespace in its last fifth when there is
-/// some, and between characters otherwise; whitespace at a break is dropped.
-pub fn split_message(text: &str, max: usize) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= max {
-        return vec![text.to_string()];
-    }
-    // The widest prefix, `(n/n) `, is 2 * digits(n) + 4 characters, and n
-    // depends on the room the prefix leaves. Start at one digit and widen
-    // until the count of parts fits the width it was cut for.
-    let digits = |n: usize| n.to_string().len();
-    let mut width = 1;
-    loop {
-        let budget = max.saturating_sub(2 * width + 4).max(1);
-        let parts = cut(&chars, budget);
-        let n = parts.len();
-        if digits(n) <= width {
-            return parts.into_iter().enumerate().map(|(i, p)| format!("({}/{n}) {p}", i + 1)).collect();
-        }
-        width = digits(n);
-    }
-}
-
-/// Cut `chars` into trimmed, non-empty pieces of at most `budget`
-/// characters, breaking at whitespace in a piece's last fifth when there is
-/// some.
-fn cut(chars: &[char], budget: usize) -> Vec<String> {
-    let mut parts: Vec<String> = Vec::new();
-    let mut at = 0;
-    while at < chars.len() {
-        let mut end = (at + budget).min(chars.len());
-        if end < chars.len() {
-            let floor = at + budget * 4 / 5;
-            if let Some(i) = (floor + 1..=end).rev().find(|&i| chars[i - 1].is_whitespace()) {
-                end = i;
-            }
-        }
-        let part: String = chars[at..end].iter().collect();
-        let part = part.trim();
-        if !part.is_empty() {
-            parts.push(part.to_string());
-        }
-        at = end;
-    }
-    parts
-}
-
-/// A message written to the bus, as one signal or as numbered parts.
+/// A message written to the bus: one signal, whatever its length (ADR-412).
 #[derive(Debug, Clone, Serialize)]
 pub struct Sent {
-    /// The signal's id, which a reply to it threads under. For a message
-    /// sent in parts, the first part's.
+    /// The signal's id, which a reply to it threads under.
     pub id: String,
-    /// Every part's id, in order: one for a message that fit in one part.
-    pub parts: Vec<String>,
     /// `#open` for a broadcast, `channel` or `directed`.
     pub scope: &'static str,
     /// The id this one threads under, if any.
     pub re: Option<String>,
     /// How many trays it was addressed to.
     pub dirs: usize,
-    /// Trays a part's write failed in while another tray took it. A part no
-    /// tray took is [`SendError::Incomplete`].
+    /// Trays the write failed in while another tray took it. A message no
+    /// tray took is [`SendError::NotWritten`].
     pub failed: Vec<WriteFailure>,
 }
 
@@ -119,6 +63,8 @@ pub enum SendError {
     /// `re` is empty or outside `[A-Za-z0-9_-]+`.
     InvalidReId,
     EmptyMessage,
+    /// The body is longer than [`agent_identity::signal::MAX_MESSAGE_BYTES`].
+    TooLong { bytes: usize, max: usize },
     /// No live peer works at the `to` path.
     NoPeerAt { path: String, peers: Vec<PeerAt>, suggestion: Option<String> },
     /// The `to` path is this session's own project, and no other session
@@ -143,10 +89,8 @@ pub enum SendError {
     /// tray and channel, and the record names no room. Guessing `#open`
     /// could carry a private answer into public.
     ParentRoomUnknown,
-    /// A part could not be written to any tray. `sent` holds the ids of the
-    /// parts that went out before it, in order; the parts from
-    /// `failed_part` on did not go out.
-    Incomplete { sent: Vec<String>, total: usize, failed_part: usize, error: String },
+    /// No tray took the signal, so nothing went out.
+    NotWritten { error: String },
 }
 
 impl std::fmt::Display for SendError {
@@ -154,6 +98,7 @@ impl std::fmt::Display for SendError {
         match self {
             Self::InvalidReId => write!(f, "re must be a signal id matching [A-Za-z0-9_-]+"),
             Self::EmptyMessage => write!(f, "the message is empty"),
+            Self::TooLong { bytes, max } => agent_identity::signal::TooLong { bytes: *bytes, max: *max }.fmt(f),
             Self::NoPeerAt { path, .. } => write!(f, "no active peer at {path}"),
             Self::OwnProject { path } => write!(
                 f,
@@ -180,22 +125,7 @@ impl std::fmt::Display for SendError {
             Self::ParentRoomUnknown => {
                 write!(f, "can't tell where the parent was said; pass --channel or --to, or use attend send")
             }
-            Self::Incomplete { sent, total: 1, error, .. } if sent.is_empty() => {
-                write!(f, "the message could not be written: {error}")
-            }
-            Self::Incomplete { sent, total, failed_part, error } => {
-                let went = match sent.len() {
-                    0 => "no part went out".to_string(),
-                    1 => format!("part 1 went out ({})", sent[0]),
-                    n => format!("parts 1-{n} went out ({})", sent.join(", ")),
-                };
-                let lost = if *failed_part == *total {
-                    format!("part {total} did not")
-                } else {
-                    format!("parts {failed_part}-{total} did not")
-                };
-                write!(f, "part {failed_part} of {total} could not be written ({error}); {went}, {lost}")
-            }
+            Self::NotWritten { error } => write!(f, "the message could not be written: {error}"),
         }
     }
 }
@@ -224,6 +154,8 @@ fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
     if req.message.is_empty() {
         return Err(SendError::EmptyMessage);
     }
+    agent_identity::signal::check_message_len(&req.message)
+        .map_err(|t| SendError::TooLong { bytes: t.bytes, max: t.max })?;
     // A message that itself starts `re:` needs nothing here: the wire
     // marks an unthreaded one with an empty thread field
     // (`agent_identity::format_signal`), so it reads back as written.
@@ -309,46 +241,33 @@ fn send_as(me: &Session, req: &SendRequest) -> Result<Sent, SendError> {
     let from = format!("{}:{}", source_kind, sender_id);
     let project = agent_identity::signal::project_label(cwd);
 
-    // A long message goes out as numbered parts, in order, each its own
-    // signal threaded under the same parent. A part no tray takes stops
-    // the send, so a reader never gets part 3 without part 2.
-    let texts = split_message(&req.message, PART_MAX);
-    let total = texts.len();
-    let mut parts: Vec<String> = Vec::with_capacity(total);
-    let mut failed: Vec<WriteFailure> = Vec::new();
-    for (i, text) in texts.iter().enumerate() {
-        // The filename stem doubles as the signal id `re:<id>` replies
-        // reference. `signal_filename` normalizes the sender id (external
-        // senders are `$USER@<terminal>`; the raw `@`/`.` would fail
-        // `is_valid_signal_id` and break `attend reply` auto-threading,
-        // issue #368) and makes the name collision-proof. The `from` field
-        // above keeps the un-normalized identity.
-        let filename = agent_identity::signal_filename(&sender_id);
-        // Wire format (ADR-120): `from|project|cwd|message`, or with
-        // `re:<id>` before the message when threading. attend-chat writes
-        // through the same `agent_identity::signal` functions.
-        let content = agent_identity::signal::format_signal(&from, &project, cwd, req.re.as_deref(), text);
-        let part_failed: Vec<WriteFailure> = dest_dirs
-            .iter()
-            .filter_map(|dir| {
-                agent_identity::signal::write_signal_file(dir, &filename, &content)
-                    .err()
-                    .map(|e| WriteFailure { dir: dir.clone(), error: e.to_string() })
-            })
-            .collect();
-        if part_failed.len() == dest_dirs.len() {
-            let error = part_failed
-                .iter()
-                .map(|f| format!("{}: {}", f.dir.display(), f.error))
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Err(SendError::Incomplete { sent: parts, total, failed_part: i + 1, error });
-        }
-        failed.extend(part_failed);
-        parts.push(filename.trim_end_matches(".signal").to_string());
+    // One message is one signal, whatever its length (ADR-412). The
+    // filename stem doubles as the signal id `re:<id>` replies reference.
+    // `signal_filename` normalizes the sender id (external senders are
+    // `$USER@<terminal>`; the raw `@`/`.` would fail `is_valid_signal_id`
+    // and break `attend reply` auto-threading, issue #368) and makes the
+    // name collision-proof. The `from` field above keeps the un-normalized
+    // identity.
+    let filename = agent_identity::signal_filename(&sender_id);
+    // Wire format (ADR-120): `from|project|cwd|message`, or with `re:<id>`
+    // before the message when threading. attend-chat writes through the
+    // same `agent_identity::signal` functions.
+    let content = agent_identity::signal::format_signal(&from, &project, cwd, req.re.as_deref(), &req.message);
+    let failed: Vec<WriteFailure> = dest_dirs
+        .iter()
+        .filter_map(|dir| {
+            agent_identity::signal::write_signal_file(dir, &filename, &content)
+                .err()
+                .map(|e| WriteFailure { dir: dir.clone(), error: e.to_string() })
+        })
+        .collect();
+    if failed.len() == dest_dirs.len() {
+        let error = failed.iter().map(|f| format!("{}: {}", f.dir.display(), f.error)).collect::<Vec<_>>().join("; ");
+        return Err(SendError::NotWritten { error });
     }
+    let id = filename.trim_end_matches(".signal").to_string();
 
-    Ok(Sent { id: parts[0].clone(), parts, scope, re: req.re.clone(), dirs: dest_dirs.len(), failed })
+    Ok(Sent { id, scope, re: req.re.clone(), dirs: dest_dirs.len(), failed })
 }
 
 /// How a reply was threaded.
@@ -498,13 +417,13 @@ fn parent_route(
     let said = match id.map(|id| format!("{id}.signal")) {
         Some(file) => match r.receive_dirs(&me.origin_path).into_iter().find(|d| d.path.join(&file).is_file()) {
             Some(dir) => {
-                let sig = std::fs::read_to_string(dir.path.join(&file)).ok();
+                let sig = agent_identity::signal::read_signal_file(&dir.path.join(&file)).ok();
                 let sig = sig.as_deref().and_then(|c| agent_identity::parse_signal(agent_identity::wire_line(c)));
                 // A record that does not parse still names a shared room.
                 // In this project's tray it names no sender, and so no
                 // place to answer.
                 match (sig, &dir.room) {
-                    (Some(sig), room) => Some(Said::of(room, sig.from, sig.cwd)),
+                    (Some(sig), room) => Some(Said::of(room, &sig.from, sig.cwd)),
                     (None, attend_groups::Room::Project) => None,
                     (None, room) => Some(Said::of(room, "", "")),
                 }
@@ -589,51 +508,6 @@ mod tests {
         // validation — it degrades to an unthreaded send instead.
         assert_eq!(classify_reply_target(Some("aaron@kitty-1712345".to_string())), ReplyTarget::Unthreaded);
         assert_eq!(classify_reply_target(Some("aaron@iterm.app-1712345".to_string())), ReplyTarget::Unthreaded);
-    }
-
-    #[test]
-    fn a_message_that_fits_goes_out_whole() {
-        assert_eq!(split_message("short", PART_MAX), vec!["short".to_string()]);
-        let exact = "x".repeat(PART_MAX);
-        assert_eq!(split_message(&exact, PART_MAX), vec![exact.clone()]);
-    }
-
-    #[test]
-    fn a_long_message_goes_out_in_numbered_parts_within_the_limit() {
-        let words = "word ".repeat(200);
-        let parts = split_message(words.trim(), PART_MAX);
-        assert_eq!(parts.len(), 3);
-        for (i, p) in parts.iter().enumerate() {
-            assert!(p.starts_with(&format!("({}/3) ", i + 1)), "{p}");
-            assert!(p.chars().count() <= PART_MAX, "{} chars", p.chars().count());
-            assert!(!p.ends_with(' ') && !p.contains("  "), "breaks at whitespace: {p:?}");
-        }
-        // Nothing is lost: the parts rejoin to the text.
-        let rejoined: Vec<&str> = parts.iter().map(|p| p.split_once(") ").unwrap().1).collect();
-        assert_eq!(rejoined.join(" "), words.trim());
-    }
-
-    /// At 100 parts the prefix `(100/100) ` is ten characters; every part
-    /// still fits the limit.
-    #[test]
-    fn a_hundred_parts_or_more_still_fit_the_limit() {
-        let text = "word ".repeat(10_000);
-        let parts = split_message(text.trim(), PART_MAX);
-        assert!(parts.len() >= 100, "{} parts", parts.len());
-        let n = parts.len();
-        for (i, p) in parts.iter().enumerate() {
-            assert!(p.chars().count() <= PART_MAX, "part {} has {} chars", i + 1, p.chars().count());
-            assert!(p.starts_with(&format!("({}/{n}) ", i + 1)), "{p}");
-        }
-    }
-
-    #[test]
-    fn a_long_word_breaks_between_characters_without_splitting_a_char() {
-        let text = "é".repeat(PART_MAX + 10);
-        let parts = split_message(&text, PART_MAX);
-        assert_eq!(parts.len(), 2);
-        let rejoined: String = parts.iter().map(|p| p.split_once(") ").unwrap().1).collect();
-        assert_eq!(rejoined, text);
     }
 
     #[test]

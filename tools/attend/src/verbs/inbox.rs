@@ -98,7 +98,7 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .unwrap_or(std::time::UNIX_EPOCH);
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let Ok(content) = agent_identity::signal::read_signal_file(&path) else { continue };
             let Some(sig) = parse_signal(wire_line(&content)) else { continue };
             // Skip own messages
             if sig.from.split_once(':').is_some_and(|(_, identity)| identity == own_session_id) {
@@ -107,7 +107,7 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
             messages.push(Message {
                 id: path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string(),
                 scope,
-                sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), instances),
+                sender: render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), instances),
                 from: sig.from.to_string(),
                 source: sig.cwd.to_string(),
                 message: sig.message.to_string(),
@@ -187,7 +187,7 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         // condition, not a benign "already consumed" miss. Distinguish
         // them so operators can tell partial-write / disk-full bugs
         // from ordinary races.
-        let content = std::fs::read_to_string(&path).map_err(|e| ReadError::Unreadable { error: e.to_string() })?;
+        let content = agent_identity::signal::read_signal_file(&path).map_err(|e| ReadError::Unreadable { error: e.to_string() })?;
         let sig = parse_signal(wire_line(&content)).ok_or(ReadError::Corrupt)?;
         let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()).unwrap_or(std::time::UNIX_EPOCH);
         let scope = match dir.room {
@@ -198,7 +198,7 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
         return Ok(Message {
             id: id.to_string(),
             scope,
-            sender: render_sender_label(sig.from, sig.cwd, &agent_theme::Painter::plain(), &SnapshotCache::new()),
+            sender: render_sender_label(&sig.from, sig.cwd, &agent_theme::Painter::plain(), &SnapshotCache::new()),
             from: sig.from.to_string(),
             source: sig.cwd.to_string(),
             message: sig.message.to_string(),
@@ -210,35 +210,7 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
     Err(ReadError::NotFound)
 }
 
-/// The short handle a delivery line shows for message `id`, written `~` and
-/// five base-36 characters: FNV-1a (32-bit) over the id's UTF-16 code units,
-/// the last five digits. The attend mod's `shortId` (plugins/attend/hooks/
-/// lib.ts) computes the same handle, so a line the mod formats and a line
-/// the drain formats name a message alike (ADR-406 item 5).
-pub fn short_id(id: &str) -> String {
-    let mut h: u32 = 0x811c_9dc5;
-    for unit in id.encode_utf16() {
-        h = (h ^ u32::from(unit)).wrapping_mul(0x0100_0193);
-    }
-    let mut digits = Vec::new();
-    loop {
-        digits.push(char::from_digit(h % 36, 36).expect("a base-36 digit"));
-        h /= 36;
-        if h == 0 {
-            break;
-        }
-    }
-    while digits.len() < 5 {
-        digits.push('0');
-    }
-    digits.iter().take(5).rev().collect()
-}
-
-/// Whether `s` has a short handle's shape: five base-36 characters. A
-/// signal id always carries a `-`, so no full id has this shape.
-pub fn is_short_id(s: &str) -> bool {
-    s.len() == 5 && s.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
-}
+pub use agent_identity::signal::{is_short_id, short_id};
 
 /// The full id of the message whose handle is `handle`: first in `me`'s
 /// receive set (its own messages there included), then in every channel's

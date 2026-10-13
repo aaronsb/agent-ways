@@ -35,7 +35,9 @@ pub fn fixture(name: &str, setup: impl FnOnce(&Path)) -> &'static Path {
 }
 
 /// Keep `session` live for the whole run: its heartbeat is dated an hour
-/// ahead, which liveness reads as fresh however long the run takes.
+/// ahead, which liveness reads as fresh however long the run takes. A test
+/// binary with no live session (an empty bus) leaves it unused.
+#[allow(dead_code)]
 pub fn pin_alive(session: &str) {
     attend_presence::heartbeat::touch(session).unwrap();
     let file = std::fs::File::options().write(true).open(attend_presence::heartbeat::heartbeat_path(session)).unwrap();

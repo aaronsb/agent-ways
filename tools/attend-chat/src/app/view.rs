@@ -26,10 +26,23 @@ use crate::helper::{self, HelperMode};
 use crate::legend::{find_trailing_mention, Sigil};
 use crate::signal::Signal;
 use crate::slash;
-use crate::tabs::{self, Tab};
+use crate::tabs::{self, Slot, Tab};
 
 /// The most rows the compose box grows to before it scrolls.
 const INPUT_ROWS: usize = 10;
+
+/// What leads the compose box's first row.
+const LEAD: &str = "> ";
+
+/// A box's border: the accent while it has the keyboard, else the rule's
+/// subdued colour, as every other border is drawn (ADR-405).
+fn border(focused: bool) -> Style {
+    if focused {
+        theme::accent()
+    } else {
+        theme::rule()
+    }
+}
 
 /// The pane in `area`, between the shell's tab bar and its bottom bar.
 /// The shell has set the palette and fills the theme's ground after.
@@ -45,7 +58,9 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         }
         None => {
             // Hidden for width: the keyboard cannot stay on what is not drawn.
-            chat.side_focus = None;
+            if chat.side_focus().is_some() {
+                chat.dispatch(super::ix::Ev::ColumnHidden);
+            }
             (None, area)
         }
     };
@@ -56,11 +71,11 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let helper = side.is_none() || super::sidebar::helper_needed(&text);
     let helper_h = u16::from(helper || text.trim_start().starts_with('/'));
     let attachments = attach::existing_attachments(&text);
-    // The compose box: its rows at the box's inner width less the prompt
-    // (`>`, or what the box is lent to), the attachment row when a dropped
-    // file is in the buffer, and the destination flag's row (#392).
-    let lead = chat.lead(area.width.saturating_sub(4));
-    let lead_w = str_width(&lead) as u16;
+    // The compose box: its rows at the box's inner width less the prompt,
+    // the attachment row when a dropped file is in the buffer, and the
+    // destination flag's row (#392).
+    let lead = LEAD;
+    let lead_w = str_width(lead) as u16;
     let inner = area.width.saturating_sub(4 + lead_w);
     let rows = chat.input.rows(inner, theme::body());
     let shown = rows.len().clamp(1, INPUT_ROWS);
@@ -72,48 +87,59 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         super::sidebar::draw(chat, f, side);
     }
     draw_feed(chat, f, feed, &fg);
-    draw_compose(chat, f, compose, &lead, rows, &attachments, &fg);
+    draw_compose(chat, f, compose, lead, rows, &attachments, &fg);
     if helper {
         draw_helper(chat, f, helper_row, &text);
     }
 }
 
-/// The tab bar the shell draws: the common menu's `≡` slot, merged, then
-/// `#open` and the channels in use (today every channel: the strip's one
-/// seam is `crate::tabs::strip_names`), then the `+` slot. Merged is tab
-/// 1, so Ctrl+N and Alt+N keep their numbers; the slots carry none. The
-/// channel tabs (#393) are numbered for Alt+N and
-/// led by the channel's glyph in its identity colour, so the bar doubles as
-/// the channel legend. A `#partial` being typed marks the tabs it completes
-/// to.
+/// The operator view's label on the tab bar: everything the chat hears,
+/// every channel together. A view of the operator's, not a channel: no `#`,
+/// no number, and no channel's menu (ADR-405).
+pub(super) const VIEW_LABEL: &str = "⋯all";
+
+/// The tab bar the shell draws, in the order [`tabs::bar`] gives: the common
+/// menu's `≡` slot, the created channel shown with what it is for, the `+`
+/// slot, then the reserved tabs pinned right, `#open` and the operator view
+/// ([`VIEW_LABEL`]), shaded as a view. No tab carries a number: the left
+/// column numbers the channels for Ctrl+digit, and 0 is the operator view
+/// ([`ChatPane::jump`]). A channel tab (#393) is led by the channel's glyph
+/// in its identity colour. A `#partial` being typed marks the tabs it
+/// completes to.
 pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
     let depth = chat.palette.depth();
     let text = chat.input.text().to_string();
     let partial = find_trailing_mention(&text).filter(|m| m.sigil == Sigil::Group).map(|m| m.partial.to_string());
-    let mut out = vec![PaneTab::new("≡").action(), PaneTab::new("merged")];
-    for k in &chat.world().groups {
-        let mut glyph = Style::new().fg(color_for(k.group.palette, depth));
-        if k.is_base || k.group.style.bold {
-            glyph = glyph.add_modifier(Modifier::BOLD);
-        }
-        out.push(
-            PaneTab::new(format!("#{}", k.group.name))
-                .lead(vec![Span::styled(format!("{} ", k.group.glyph), glyph)])
-                .target(prefix_match(&k.group.name, partial.as_deref())),
-        );
-    }
-    out.push(PaneTab::new("+").action());
-    out
-}
-
-/// What the shown channel is for, set back after the tabs (#404).
-pub(super) fn trailer(chat: &mut ChatPane) -> Vec<Span<'static>> {
-    let Tab::Channel(g) = chat.normal_tab() else { return Vec::new() };
-    let groups = &chat.world().groups;
-    match groups.iter().find(|k| k.group.name == g).and_then(|k| k.membership.description.as_deref()) {
-        Some(desc) => vec![Span::styled(format!("  — {desc}"), theme::muted())],
-        None => Vec::new(),
-    }
+    let groups = chat.world().groups.clone();
+    chat.bar()
+        .into_iter()
+        .map(|slot| match slot {
+            Slot::Common => PaneTab::new("≡").action(),
+            Slot::New => PaneTab::new("+").action(),
+            Slot::Tab(Tab::Merged) => PaneTab::new(VIEW_LABEL).reserved().view(),
+            Slot::Tab(Tab::Channel(name)) => {
+                let k = groups.iter().find(|k| k.group.name == name);
+                let mut glyph = Style::new();
+                if let Some(k) = k {
+                    glyph = glyph.fg(color_for(k.group.palette, depth));
+                    if k.is_base || k.group.style.bold {
+                        glyph = glyph.add_modifier(Modifier::BOLD);
+                    }
+                }
+                let lead = k.map(|k| vec![Span::styled(format!("{} ", k.group.glyph), glyph)]).unwrap_or_default();
+                // The created channel shown says what it is for (#404); the
+                // bar cuts the line to fit.
+                let desc = k.filter(|k| !k.is_base).and_then(|k| k.membership.description.clone()).filter(|d| !d.is_empty());
+                let label = desc.map_or(format!("#{name}"), |d| format!("#{name} — {d}"));
+                let tab = PaneTab::new(label).lead(lead).target(prefix_match(&name, partial.as_deref()));
+                if tabs::is_reserved(&Tab::Channel(name)) {
+                    tab.reserved()
+                } else {
+                    tab
+                }
+            }
+        })
+        .collect()
 }
 
 /// The time a cell shows: one format across every attend surface
@@ -197,26 +223,30 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
         chat.entries = Some(entries);
         chat.entry_members = members;
     }
-    let block = Block::bordered().border_type(BorderType::Rounded).border_style(theme::rule()).padding(Padding::horizontal(1));
+    let focused = *chat.ix.focus() == super::focus::Focus::Feed && !chat.ix.overlaid();
+    let block = Block::bordered().border_type(BorderType::Rounded).border_style(border(focused)).padding(Padding::horizontal(1));
     let inner = block.inner(area);
     f.render_widget(block, area);
     chat.feed_rows = inner.height;
     chat.hits.feed = inner;
+    chat.hits.feed_box = area;
     let entries = chat.entries.as_deref().unwrap_or_default();
     let feed = Feed::new(entries).shape(chat.shape).rule(theme::rule()).selected(theme::accent()).generation(chat.generation);
     f.render_stateful_widget(feed, inner, &mut chat.feed);
 }
 
-/// The compose box: `lead` (`> `) then the buffer with its cursor, a row of
-/// attachment chips when the buffer names files, and on the last row the
-/// destination flag (#392), where Enter would send it, hidden while a
-/// slash command is composed.
+/// The compose box: `lead` (`> `) then the buffer, a row of attachment
+/// chips when the buffer names files, and on the last row the destination
+/// flag (#392), where Enter would send it, hidden while a slash command is
+/// composed. The box is for chatting alone: nothing else borrows it
+/// (ADR-409).
 ///
-/// While the box is lent to a new channel's name or a description, `lead`
-/// says so (`new channel name > `, `describe #deploy > `) in bold, and no
-/// flag is drawn: Enter sends no message (ADR-409).
+/// While the box has the keyboard its border is the accent and its caret is
+/// drawn; with the focus elsewhere the border is the rule's subdued colour
+/// and no caret shows, so the focus is drawn in one place (ADR-405).
 fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, lead: &str, rows: Vec<Line<'static>>, files: &[String], fg: &Tab) {
-    let block = Block::bordered().border_type(BorderType::Rounded).border_style(theme::accent()).padding(Padding::horizontal(1));
+    let focused = chat.ix.owns_text() && !chat.ix.overlaid();
+    let block = Block::bordered().border_type(BorderType::Rounded).border_style(border(focused)).padding(Padding::horizontal(1));
     let inner = block.inner(area);
     f.render_widget(block, area);
     // Keep the cursor's row in view once the buffer outgrows the box.
@@ -230,23 +260,19 @@ fn draw_compose(chat: &mut ChatPane, f: &mut Frame, area: Rect, lead: &str, rows
     // The text's rows after the prompt, and the first of them shown.
     let lead_w = str_width(lead) as u16;
     chat.hits.compose = (Rect { x: inner.x + lead_w, y: inner.y, width: inner.width.saturating_sub(lead_w), height: room.min(rows.len()) as u16 }, start);
-    let lent = chat.prompt.is_some();
-    let lead_style = if lent { theme::accent().add_modifier(Modifier::BOLD) } else { theme::accent() };
     let indent = " ".repeat(usize::from(lead_w));
     let mut lines: Vec<Line<'static>> = Vec::new();
     for (i, row) in rows.into_iter().enumerate().skip(start).take(room) {
         let prompt = if i == 0 { lead.to_string() } else { indent.clone() };
-        let mut spans = vec![Span::styled(prompt, lead_style)];
-        spans.extend(row.spans);
+        let mut spans = vec![Span::styled(prompt, if focused { theme::accent() } else { theme::muted() })];
+        // The caret only where the keyboard is.
+        spans.extend(row.spans.into_iter().map(|s| if focused { s } else { Span::styled(s.content, s.style.remove_modifier(Modifier::REVERSED)) }));
         lines.push(Line::from(spans));
     }
     if !files.is_empty() {
         lines.push(attachment_line(chat, files));
     }
     f.render_widget(Paragraph::new(lines), Rect { height: text_h, ..inner });
-    if lent {
-        return;
-    }
     let scope = tabs::send_scope(fg);
     let quiet = super::keys::quiet_names(&chat.world().seen);
     let swept = super::keys::swept_names(&chat.world().rows);

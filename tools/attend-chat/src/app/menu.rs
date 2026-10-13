@@ -8,24 +8,32 @@
 //!   or Show column (the left column, as `attend.chat.sidebar_key` toggles
 //!   it), Settings…, Quit (as Ctrl-C, asking first over a draft; Esc never
 //!   quits, ADR-409).
-//! - merged: Clear view.
-//! - `#open`: Clear history, Clear view.
-//! - a named channel: Add agent ▸, Invite agent ▸, Remove agent ▸,
+//! - the operator view (`⋯all`, every channel together): Clear view. It is
+//!   not a channel, so it offers no channel's items (ADR-405).
+//! - `#open`: Clear view, Clear history.
+//! - a named channel: Add agent ▸ (invites a live peer, which joins
+//!   itself, as the agent menu's Add agent to chat does), Remove agent ▸,
 //!   Describe…, Clear history, Leave (Join for a channel the human is
-//!   not in), Delete channel.
+//!   not in), Seal, Delete channel.
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
-//!   channel, typed in the compose box, which says `new channel name >`
-//!   while it is lent. Showing a tab, opening a channel's menu, an `≡` item
-//!   other than Quit, or the column taking the keyboard gives the box back,
-//!   with the draft it held. Quit leaves it lent, so the exit guard asks
-//!   over a name typed there.
+//!   channel, typed in an entry dialog docked under `+`. Describe… asks its
+//!   line in the same dialog, docked beside its item. The compose box is
+//!   for chatting and is never borrowed (ADR-409): its draft stays as it
+//!   is. A name the dialog refuses is said inside it, the text kept.
 //! - an agent's row in the left column: Address @Name (puts `@Name ` in
 //!   the compose box), Who is this (what `/whois` says of the session
-//!   the row is, or what the chat knows of one the roster lacks), and
+//!   the row is, or what the chat knows of one the roster lacks), Add
+//!   agent to chat ▸ (a picker, `add to channel`, of the channels the
+//!   agent is not in; the pick invites it, as Add agent ▸ does), and
 //!   Remove from #channel when the shown channel lists the agent, live or
 //!   quiet. The operator's own row offers Leave #channel there instead:
 //!   Remove never takes out the human at the keyboard, here or in the
 //!   Remove agent picker.
+//! - a message in the feed, by Enter on it: Reply (its channel shown and
+//!   the keyboard in the compose box; a direct message is answered by
+//!   addressing its sender), Quote (its lines put in the box as `> `
+//!   lines), Address @Name (as the agent menu's), Copy (the message to the
+//!   terminal's clipboard by OSC 52).
 //!
 //! Every item that drops something asks first: Clear view, Clear history,
 //! Leave, Delete channel and Remove. The question is the shell's
@@ -39,14 +47,14 @@
 //! agent's row in the left column, else its tab ([`agent_tui::Anchor`]).
 //! Where the lines below cannot hold it, it ends on the line above the row;
 //! where neither side can, it sits at the foot of the pane. A menu an item
-//! leads to (Theme ▸, Invite agent ▸) docks beside that item's row. A
-//! picker marks the current value. Invite agent asks a live peer to join
+//! leads to (Theme ▸, Add agent ▸) docks beside that item's row. A
+//! picker marks the current value. Add agent asks a live peer to join
 //! (it joins itself, and its join keeps the room's recent history to read).
 //!
-//! Two items wait on attend work and are drawn set back with what they wait
-//! on, passed over by the highlight and deaf to a click: Add agent,
-//! enrolling a member with no answer from it (ADR-404 D1), and Seal
-//! (ADR-404 D4). Neither is ever the first item.
+//! One item waits on attend work and is drawn set back with what it waits
+//! on, passed over by the highlight and deaf to a click: Seal (ADR-404 D4),
+//! never the first item. Adding an agent is an invitation it answers by
+//! joining until attend can enrol a member without asking (ADR-404 D1).
 
 use agent_theme::ColorDepth;
 use agent_tui::ratatui::layout::Rect;
@@ -59,13 +67,12 @@ use super::keys::{self, EnterAction};
 use super::ChatPane;
 use crate::groups::BASE_CHANNEL_NAME;
 use crate::slash::SlashOutcome;
-use crate::tabs::Tab;
+use crate::tabs::{self, Slot, Tab};
 
 pub(super) const CLEAR_VIEW: &str = "Clear view";
 pub(super) const CLEAR_HISTORY: &str = "Clear history";
-pub(super) const ADD_AGENT: &str = "Add agent";
+pub(super) const ADD_AGENT: &str = "Add agent ▸";
 pub(super) const SEAL: &str = "Seal";
-pub(super) const INVITE_AGENT: &str = "Invite agent ▸";
 pub(super) const REMOVE_AGENT: &str = "Remove agent ▸";
 pub(super) const DESCRIBE: &str = "Describe…";
 pub(super) const LEAVE: &str = "Leave";
@@ -82,6 +89,14 @@ pub(super) const WHO: &str = "Who is this";
 pub(super) const REMOVE_FROM: &str = "Remove from";
 pub(super) const SHOW_COLUMN: &str = "Show column";
 pub(super) const QUIT: &str = "Quit";
+pub(super) const ADD_TO_CHAT: &str = "Add agent to chat ▸";
+pub(super) const REPLY: &str = "Reply";
+pub(super) const QUOTE: &str = "Quote";
+pub(super) const COPY: &str = "Copy";
+
+/// The entry dialogs' ids: a new channel's name, and a channel's line.
+const NEW_CHANNEL: &str = "new-channel";
+const DESCRIBE_ID: &str = "describe:";
 pub(super) const CUSTOM_KEYS: &str = "custom";
 
 /// The keybinding presets: a label, then the `attend.chat.tabs.*` values.
@@ -173,32 +188,30 @@ pub(super) fn removable(members: Vec<Member>, me: &str) -> Vec<Member> {
     members.into_iter().filter(|m| m.id != me).collect()
 }
 
-/// The items of an agent row's menu: address it, who it is, then for the
-/// shown channel that lists it (`listed`), Remove, or Leave on the
-/// operator's own row.
-pub(super) fn agent_items(name: &str, listed: Option<&str>, operator: bool) -> Vec<String> {
-    let mut out = vec![format!("{ADDRESS} @{name}"), WHO.to_string()];
+/// The items of an agent row's menu: address it, who it is, add it to a
+/// channel, then for the shown channel that lists it (`listed`), Remove, or
+/// Leave on the operator's own row. `add` is why the agent cannot be added
+/// to a channel, when it cannot: Add agent to chat is then set back with
+/// the reason.
+pub(super) fn agent_items(name: &str, listed: Option<&str>, operator: bool, add: Result<(), String>) -> Vec<Item> {
+    let mut out = vec![Item::new(format!("{ADDRESS} @{name}")), Item::new(WHO)];
+    out.push(match add {
+        Ok(()) => Item::new(ADD_TO_CHAT),
+        Err(why) => Item::disabled(ADD_TO_CHAT, why),
+    });
     if let Some(c) = listed {
-        out.push(if operator { format!("{LEAVE} #{c}") } else { format!("{REMOVE_FROM} #{c}") });
+        out.push(Item::new(if operator { format!("{LEAVE} #{c}") } else { format!("{REMOVE_FROM} #{c}") }));
     }
     out
 }
 
-/// What the compose box is lent to, and the draft it held before.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Prompt {
-    NewChannel,
-    Describe(String),
-}
-
-impl Prompt {
-    /// What the box says it is lent to, in place of `>`.
-    pub fn label(&self) -> String {
-        match self {
-            Prompt::NewChannel => "new channel name".into(),
-            Prompt::Describe(c) => format!("describe #{c}"),
-        }
-    }
+/// The channels an agent can be added to: those on disk it is not in,
+/// `#open` left out (every agent is already there).
+pub(super) fn addable(rows: &[crate::groups::ChannelRow], member: &str) -> Vec<String> {
+    rows.iter()
+        .filter(|r| r.on_disk && !r.known.is_base && !r.known.membership.members.iter().any(|m| m == member))
+        .map(|r| r.known.group.name.clone())
+        .collect()
 }
 
 /// The items of a tab's menu, by the channel it shows (`None`: merged):
@@ -211,8 +224,7 @@ pub(super) fn items(channel: Option<&str>, joined: bool) -> Vec<Item> {
         None => vec![CLEAR_VIEW.into()],
         Some(BASE_CHANNEL_NAME) => vec![CLEAR_VIEW.into(), CLEAR_HISTORY.into()],
         Some(_) => vec![
-            INVITE_AGENT.into(),
-            Item::disabled(ADD_AGENT, "needs ADR-404 D1"),
+            ADD_AGENT.into(),
             REMOVE_AGENT.into(),
             DESCRIBE.into(),
             CLEAR_HISTORY.into(),
@@ -221,6 +233,42 @@ pub(super) fn items(channel: Option<&str>, joined: bool) -> Vec<Item> {
             DELETE.into(),
         ],
     }
+}
+
+/// The items of a message's menu: reply where it was said, quote it,
+/// address its sender `name`, copy it. A local notice has no channel to
+/// reply in, and a message with no sender the column knows has no one to
+/// address.
+pub(super) fn message_items(name: Option<&str>, notice: bool) -> Vec<Item> {
+    vec![
+        if notice { Item::disabled(REPLY, "a notice of the chat's") } else { Item::new(REPLY) },
+        Item::new(QUOTE),
+        match name {
+            Some(n) => Item::new(format!("{ADDRESS} @{n}")),
+            None => Item::disabled(ADDRESS, "no sender to address"),
+        },
+        Item::new(COPY),
+    ]
+}
+
+/// The most bytes Copy sends: base64 makes it about 100 kB on the wire,
+/// past which many terminals drop an OSC 52 copy whole.
+pub(super) const COPY_MAX: usize = 74 * 1024;
+
+/// What Copy sends of `message`: all of it, or its first [`COPY_MAX`] bytes
+/// cut at a character's edge, and whether it was cut.
+pub(super) fn copy_text(message: &str) -> (String, bool) {
+    if message.len() <= COPY_MAX {
+        return (message.to_string(), false);
+    }
+    let end = (0..=COPY_MAX).rev().find(|i| message.is_char_boundary(*i)).unwrap_or(0);
+    (message[..end].to_string(), true)
+}
+
+/// A message's lines as a quote in the compose box: each led by `> `,
+/// then a line to write on.
+pub(super) fn quoted(message: &str) -> String {
+    message.lines().map(|l| format!("> {l}\n")).collect()
 }
 
 /// The labels of `items`, in order.
@@ -247,39 +295,31 @@ pub(super) fn who_line(s: &Seen, roster: &[Peer]) -> String {
 }
 
 impl ChatPane {
-    /// The bottom bar's line while the compose box is lent.
-    pub(super) fn menu_status(&self) -> Option<String> {
-        self.prompt.as_ref().map(|(p, _)| match p {
-            Prompt::NewChannel => "new channel: type its name · Enter creates it · Esc cancels".into(),
-            Prompt::Describe(c) => format!("describe #{c}: type a line · Enter sets it (empty clears) · Esc cancels"),
-        })
-    }
-
     /// The menu of `channel`, or merged's for `None`: from its tab, or its
     /// row in the left column, which lists channels that have no tab. It
     /// docks under `at` when given (the destination flag), else under the
     /// channel's row in the column, else its tab.
     pub(super) fn channel_menu(&mut self, channel: Option<String>, at: Option<Rect>) {
         self.dirty = true;
-        let title = channel.as_ref().map_or("merged".to_string(), |c| format!("#{c}"));
+        let title = channel.as_ref().map_or(super::view::VIEW_LABEL.to_string(), |c| format!("#{c}"));
         let id = format!("menu:{}", channel.as_deref().unwrap_or(""));
         let me = crate::signal::human_member_id();
         let joined = channel.as_deref().is_some_and(|c| self.world().rows.iter().any(|r| r.known.group.name == c && r.known.membership.members.contains(&me)));
         // Under the channel's row in the column, else under its tab.
         let row = at.or_else(|| channel.clone().and_then(|c| self.side_row(&super::sidebar::SideHit::Channel(c))));
-        let anchor = match (row, &channel) {
-            (Some(r), _) => Anchor::Row(r),
-            (None, None) => Anchor::Tab(1),
-            (None, Some(c)) => self.strip_names().iter().position(|n| n == c).map_or(Anchor::Center, |i| Anchor::Tab(i + 2)),
+        let tab = channel.clone().map_or(Tab::Merged, Tab::Channel);
+        let anchor = match row {
+            Some(r) => Anchor::Row(r),
+            None => self.slot_of(&tab).map_or(Anchor::Center, Anchor::Tab),
         };
-        self.open = Some(Open::Pick { id, title, items: items(channel.as_deref(), joined), multi: false, anchor });
+        self.to_open = Some(Open::Pick { id, title, items: items(channel.as_deref(), joined), multi: false, anchor });
     }
 
     pub(super) fn common_menu(&mut self) {
         let mouse = if self.config.mouse { MOUSE_OFF } else { MOUSE_ON };
         let column = if self.sidebar { HIDE_COLUMN } else { SHOW_COLUMN };
         let items = [THEME, KEYS, mouse, column, SETTINGS, QUIT].into_iter().map(Item::from).collect();
-        self.open = Some(Open::Pick { id: "common".into(), title: "attend-chat".into(), items, multi: false, anchor: Anchor::Tab(0) });
+        self.to_open = Some(Open::Pick { id: "common".into(), title: "attend-chat".into(), items, multi: false, anchor: Anchor::Tab(0) });
     }
 
     /// The keybinding preset the chat's settings match, if any.
@@ -287,20 +327,15 @@ impl ChatPane {
         PRESETS.iter().find(|(_, jump, focus)| self.config.jump == *jump && self.config.focus_key == *focus).map(|(l, _, _)| *l)
     }
 
-    /// An item of the `≡` menu. Quit leaves a lent compose box as it is, so
-    /// the shell's quit counts a name typed there as unsaved and asks, as
-    /// Ctrl-C does; every other item gives the box back first.
+    /// An item of the `≡` menu.
     fn common_item(&mut self, item: &str) {
-        if item != QUIT {
-            self.prompt_cancel();
-        }
         match item {
             THEME => {
                 let set = agent_theme::ThemeSet::load(agent_theme::user_dir().as_deref());
                 let mut names = vec!["terminal".to_string()];
                 names.extend(set.list().map(|(t, _)| t.name.clone()));
                 let items = names.into_iter().map(|n| Item::new(n.clone()).current(n == self.theme)).collect();
-                self.open = Some(Open::Pick { id: "theme".into(), title: "theme for this session".into(), items, multi: false, anchor: Anchor::Parent });
+                self.to_open = Some(Open::Pick { id: "theme".into(), title: "theme for this session".into(), items, multi: false, anchor: Anchor::Parent });
             }
             KEYS => {
                 let current = self.preset();
@@ -312,7 +347,7 @@ impl ChatPane {
                     items.push(Item::disabled(CUSTOM_KEYS, format!("jump={}, focus={}", self.config.jump, self.config.focus_key)).current(true));
                 }
                 items.extend(PRESETS.iter().map(|(l, _, _)| Item::new(*l).current(current == Some(*l))));
-                self.open = Some(Open::Pick { id: "keys".into(), title: "keybinding set".into(), items, multi: false, anchor: Anchor::Parent });
+                self.to_open = Some(Open::Pick { id: "keys".into(), title: "keybinding set".into(), items, multi: false, anchor: Anchor::Parent });
             }
             MOUSE_ON | MOUSE_OFF => {
                 let on = item == MOUSE_ON;
@@ -325,11 +360,11 @@ impl ChatPane {
             SETTINGS => {
                 let text = crate::settings::listing_lines(&std::env::current_dir().unwrap_or_default()).join("\n");
                 let text = format!("{text}\n\n/config <key> <value> sets one");
-                self.open = Some(Open::Report { label: "settings".into(), command: "/config".into(), text });
+                self.to_open = Some(Open::Report { label: "settings".into(), command: "/config".into(), text });
             }
             // The shell's quit, as Ctrl-C: at once, or the exit guard over
             // a draft.
-            QUIT => self.open = Some(Open::Quit),
+            QUIT => self.to_open = Some(Open::Quit),
             _ => {}
         }
     }
@@ -394,7 +429,19 @@ impl ChatPane {
         if let Some(member) = id.strip_prefix("agent:") {
             return self.agent_item(member, value);
         }
-        // A peer from Invite agent or Remove agent: the label's first word is
+        if let Some(m) = id.strip_prefix("message:") {
+            return self.message_item(m, value);
+        }
+        if id == NEW_CHANNEL {
+            return self.new_channel_named(value);
+        }
+        if let Some(c) = id.strip_prefix(DESCRIBE_ID) {
+            return self.described(c, value);
+        }
+        if let Some(member) = id.strip_prefix("addto:") {
+            return self.add_to(member, value.trim_start_matches('#'));
+        }
+        // A peer from Add agent or Remove agent: the label's first word is
         // the display name the commands resolve.
         let peer = value.split_whitespace().next().unwrap_or(value).to_string();
         if let Some(c) = id.strip_prefix("invite:") {
@@ -423,17 +470,83 @@ impl ChatPane {
         let Some(s) = self.seen_member(&member) else {
             return self.say("that agent is not in the column any more", true);
         };
-        let name = s.identity.nickname;
+        let name = s.identity.nickname.clone();
         let me = crate::signal::human_member_id();
         let listed = match self.normal_tab() {
             Tab::Channel(c) => self.channel_members(&c).into_iter().find(|m| m.id == member).map(|m| (c, m)),
             Tab::Merged => None,
         };
-        let options = agent_items(&name, listed.as_ref().map(|(c, _)| c.as_str()), member == me);
+        let add = self.can_add(&s);
+        let items = agent_items(&name, listed.as_ref().map(|(c, _)| c.as_str()), member == me, add);
         self.removable = removable(listed.map(|(_, m)| m).into_iter().collect(), &me);
         let anchor = at.or_else(|| self.side_row(&super::sidebar::SideHit::Agent(member.clone()))).map_or(Anchor::Center, Anchor::Row);
-        let items = options.into_iter().map(Item::from).collect();
-        self.open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
+        self.to_open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
+    }
+
+    /// The feed's message with the id `id`, while the feed holds it, and the
+    /// nickname of its sender, as the column knows it. A message is found by
+    /// what it is: the feed drops its oldest past [`super::MAX_SIGNALS`], and
+    /// an index would then name its neighbour.
+    fn feed_message(&mut self, id: &str) -> Option<(crate::signal::Signal, Option<String>)> {
+        let shown = self.normal_tab();
+        let (i, sig) = self.signals.iter().filter(|s| tabs::visible_in(&s.channel, &shown)).enumerate().find(|(_, s)| s.id == id)?;
+        let sig = sig.clone();
+        let member = self.entry_members.get(i).cloned().flatten();
+        let name = member.and_then(|m| self.seen_member(&m)).map(|s| s.identity.nickname);
+        Some((sig, name))
+    }
+
+    /// Enter on the feed: the selected message's menu, docked under its
+    /// header. With no message selected, the newest is selected first.
+    pub(super) fn message_menu(&mut self) {
+        let n = self.feed.len();
+        let Some(i) = self.feed.selected.or(n.checked_sub(1)) else {
+            return self.say("no message to act on", false);
+        };
+        self.feed.reveal(i);
+        let shown = self.normal_tab();
+        let Some(id) = self.signals.iter().filter(|s| tabs::visible_in(&s.channel, &shown)).nth(i).map(|s| s.id.clone()) else { return };
+        let Some((sig, name)) = self.feed_message(&id) else { return };
+        let feed = self.hits.feed;
+        let anchor = self.feed.header_row(i).map_or(Anchor::Center, |r| Anchor::Row(Rect { x: feed.x, y: feed.y + r, width: feed.width, height: 1 }));
+        let title = name.as_ref().map_or("message".to_string(), |n| format!("message from @{n}"));
+        let items = message_items(name.as_deref(), sig.channel == crate::signal::Channel::Info);
+        self.to_open = Some(Open::Pick { id: format!("message:{}", sig.id), title, items, multi: false, anchor });
+    }
+
+    /// An item of the menu of the message with the id `id`. A message the
+    /// feed has dropped since the menu opened is acted on no more.
+    fn message_item(&mut self, id: &str, item: &str) {
+        let Some((sig, name)) = self.feed_message(id) else {
+            return self.say("that message is not in the feed any more", true);
+        };
+        let address = |c: &mut ChatPane, n: &str| c.complete(super::Chip::Agent(n.to_string()));
+        match item {
+            REPLY => match (&sig.channel, name.as_deref()) {
+                (crate::signal::Channel::Group(g), _) => self.set_tab(Tab::Channel(g.clone())),
+                (crate::signal::Channel::Open, _) => self.set_tab(Tab::Channel(BASE_CHANNEL_NAME.into())),
+                (crate::signal::Channel::Direct, Some(n)) => address(self, n),
+                _ => return self.say("no channel to reply in", true),
+            },
+            QUOTE => {
+                self.input.insert_str(&quoted(&sig.message));
+                self.tab_cycle = None;
+            }
+            COPY => {
+                let (text, cut) = copy_text(&sig.message);
+                self.to_open = Some(Open::Copy { text });
+                let said = if cut { format!("copied the first {} kB of {} kB to the clipboard, where the terminal allows OSC 52", COPY_MAX / 1024, sig.message.len().div_ceil(1024)) } else { "copied to the clipboard, where the terminal allows OSC 52".to_string() };
+                return self.say(said, false);
+            }
+            _ if item.starts_with(ADDRESS) => match name {
+                Some(n) => address(self, &n),
+                None => return,
+            },
+            _ => return,
+        }
+        // What the item put in the box, or where it points the reply, is
+        // written next: the keyboard goes to the box.
+        self.dispatch(super::ix::Ev::Compose);
     }
 
     fn agent_item(&mut self, member: &str, item: &str) {
@@ -444,6 +557,8 @@ impl ChatPane {
             }
         } else if item == WHO {
             self.whois(member);
+        } else if item == ADD_TO_CHAT {
+            self.add_menu(member);
         } else if let Some(c) = item.strip_prefix(REMOVE_FROM).map(|c| c.trim().trim_start_matches('#').to_string()) {
             if let Some(m) = self.removable.first().cloned() {
                 self.ask(Step::Remove(c, m));
@@ -491,8 +606,8 @@ impl ChatPane {
                     self.run("join", SlashOutcome::Join(c));
                 }
             }
-            DESCRIBE => self.start_prompt(Prompt::Describe(channel.into())),
-            INVITE_AGENT => self.peer_menu(channel, true),
+            DESCRIBE => self.describe(channel),
+            ADD_AGENT => self.peer_menu(channel, true),
             REMOVE_AGENT => self.peer_menu(channel, false),
             _ => {}
         }
@@ -515,71 +630,105 @@ impl ChatPane {
             let what = if add { "no live agent outside" } else { "no member in" };
             return self.say(format!("{what} #{channel}"), true);
         }
-        let (id, title) = if add { (format!("invite:{channel}"), format!("invite to #{channel}")) } else { (format!("remove:{channel}"), format!("remove from #{channel}")) };
+        let (id, title) = if add { (format!("invite:{channel}"), format!("add to #{channel}")) } else { (format!("remove:{channel}"), format!("remove from #{channel}")) };
         let items = options.into_iter().map(Item::from).collect();
-        self.open = Some(Open::Pick { id, title, items, multi: false, anchor: Anchor::Parent });
+        self.to_open = Some(Open::Pick { id, title, items, multi: false, anchor: Anchor::Parent });
     }
 
-    /// Ask for a new channel's name in the compose box: from the `+` slot
-    /// or Ctrl+N. The name already being typed is left alone, so a repeat
-    /// cannot take the name for the draft.
-    /// A description being typed is never thrown away: the request waits
-    /// until it is sent or cancelled.
+    /// Whether `s` can be added to a channel from its menu, and if not why.
+    /// Adding is an invitation the agent answers by joining (ADR-404: attend
+    /// has no enrolment without asking yet, D1), so it needs a live claude
+    /// with an inbox, and a channel it is not in.
+    fn can_add(&mut self, s: &Seen) -> Result<(), String> {
+        if !s.identity.is_claude {
+            return Err("a human joins with /join".into());
+        }
+        if !s.live {
+            return Err("quiet: no live session to invite".into());
+        }
+        if addable(&self.world().rows, &s.member).is_empty() {
+            return Err("already in every channel".into());
+        }
+        Ok(())
+    }
+
+    /// Add agent to chat: a picker of the channels the agent is not in,
+    /// docked beside the item.
+    fn add_menu(&mut self, member: &str) {
+        let channels = addable(&self.world().rows, member);
+        if channels.is_empty() {
+            return self.say("already in every channel", true);
+        }
+        let items = channels.into_iter().map(|c| Item::new(format!("#{c}"))).collect();
+        // Under the agent's row, where its menu was; beside the closed menu
+        // only when the row is not drawn.
+        let anchor = self.side_row(&super::sidebar::SideHit::Agent(member.to_string())).map_or(Anchor::Parent, Anchor::Row);
+        self.to_open = Some(Open::Pick { id: format!("addto:{member}"), title: "add to channel".into(), items, multi: false, anchor });
+    }
+
+    /// The channel picked for an agent: it is invited there, by its session,
+    /// as Add agent ▸ invites, and joins itself (ADR-404).
+    fn add_to(&mut self, member: &str, channel: &str) {
+        if self.dry_run {
+            return self.say("dry run: /invite not run", false);
+        }
+        let roster = crate::peers::roster(ColorDepth::detect(), &attend_instances::SnapshotCache::new());
+        let Some(peer) = roster.into_iter().find(|p| p.session_id == member) else {
+            return self.say("that agent has no live session to invite", true);
+        };
+        let action = keys::invite_peer(channel, &peer);
+        if self.apply(action) {
+            let said = format!("{} — they join themselves", self.status);
+            self.say(said, false);
+        }
+    }
+
+    /// Where the new channel's dialog docks: under the `+` slot.
+    fn plus_anchor(&mut self) -> Anchor {
+        self.bar().iter().position(|s| *s == Slot::New).map_or(Anchor::Center, Anchor::Tab)
+    }
+
+    /// Ask for a new channel's name, from the `+` slot or Ctrl+N, in an
+    /// entry dialog docked under `+`, opened on `value` with what was wrong
+    /// with it, if anything. The compose box and its draft are left as they
+    /// are.
     pub(super) fn new_channel(&mut self) {
+        self.ask_name(String::new(), None);
+    }
+
+    fn ask_name(&mut self, value: String, error: Option<String>) {
         self.dirty = true;
-        match self.prompt {
-            Some((Prompt::NewChannel, _)) => {}
-            Some(_) => self.say("finish the description, or Esc, first", false),
-            None => self.start_prompt(Prompt::NewChannel),
+        let anchor = self.plus_anchor();
+        self.to_open = Some(Open::Entry { id: NEW_CHANNEL.into(), title: "new channel name".into(), value, error, anchor });
+    }
+
+    /// The name entered for a new channel: created and shown, or the dialog
+    /// again with the name and what is wrong with it.
+    fn new_channel_named(&mut self, text: &str) {
+        let name = text.trim().trim_start_matches('#').to_string();
+        if let Err(e) = attend_groups::validate_group_name(&name) {
+            return self.ask_name(text.to_string(), Some(e.to_string()));
+        }
+        if !self.run("channels create", SlashOutcome::CreateChannel { name: name.clone(), description: None }) {
+            let why = self.status.clone();
+            return self.ask_name(text.to_string(), Some(why));
+        }
+        if !self.dry_run {
+            self.stale();
+            self.set_tab(Tab::Channel(name));
         }
     }
 
-    /// Lend the compose box to `p`, keeping the draft for after.
-    fn start_prompt(&mut self, p: Prompt) {
-        let draft = self.input.text().to_string();
-        self.input.clear();
-        self.prompt = Some((p, draft));
+    /// Describe…: the channel's line, in an entry dialog beside the item,
+    /// opened on the line it has now.
+    fn describe(&mut self, channel: &str) {
+        let now = self.world().groups.iter().find(|k| k.group.name == channel).and_then(|k| k.membership.description.clone()).unwrap_or_default();
+        self.to_open = Some(Open::Entry { id: format!("{DESCRIBE_ID}{channel}"), title: format!("describe #{channel}"), value: now, error: None, anchor: Anchor::Parent });
     }
 
-    /// Give the compose box back, with the draft it held.
-    fn end_prompt(&mut self) {
-        if let Some((_, draft)) = self.prompt.take() {
-            let n = draft.chars().count();
-            self.input.set(draft, n);
-        }
-    }
-
-    /// Enter while the compose box is lent: run what it was lent for.
-    pub(super) fn prompt_enter(&mut self) {
-        let Some((p, _)) = self.prompt.clone() else { return };
-        let text = self.input.text().trim().to_string();
-        match p {
-            Prompt::NewChannel => {
-                let name = text.trim_start_matches('#').to_string();
-                if let Err(e) = attend_groups::validate_group_name(&name) {
-                    return self.say(format!("new channel: {e}"), true);
-                }
-                self.end_prompt();
-                if self.run("channels create", SlashOutcome::CreateChannel { name: name.clone(), description: None }) && !self.dry_run {
-                    self.stale();
-                    self.set_tab(Tab::Channel(name));
-                }
-            }
-            Prompt::Describe(c) => {
-                self.end_prompt();
-                self.run("channels describe", SlashOutcome::DescribeChannel { name: c, description: text });
-            }
-        }
-    }
-
-    /// Esc, or a click outside the compose box, while it is lent: give it
-    /// back with its draft, saying nothing, as every overlay closes.
-    pub(super) fn prompt_cancel(&mut self) {
-        if self.prompt.is_some() {
-            self.end_prompt();
-            self.status.clear();
-            self.dirty = true;
-        }
+    /// The line entered for `channel`: set, or cleared when empty.
+    fn described(&mut self, channel: &str, text: &str) {
+        self.run("channels describe", SlashOutcome::DescribeChannel { name: channel.into(), description: text.trim().to_string() });
     }
 
     /// What to add to a status line when the jump setting asks for Ctrl+digits
@@ -601,7 +750,7 @@ impl ChatPane {
     pub(super) fn ask(&mut self, step: Step) {
         let (question, yes, no) = step.question();
         self.asked = Some(step);
-        self.open = Some(Open::Ask { id: ASK.into(), question, yes: yes.into(), no: no.into() });
+        self.to_open = Some(Open::Ask { id: ASK.into(), question, yes: yes.into(), no: no.into() });
     }
 
     /// The answer to the question asked: yes runs the step, no keeps things
@@ -687,15 +836,28 @@ impl ChatPane {
 mod tests {
     use super::*;
 
+    /// Copy sends at most COPY_MAX bytes, cut where a character ends, and
+    /// says when it cut.
+    #[test]
+    fn copy_is_capped_at_a_characters_edge() {
+        assert_eq!(copy_text("short"), ("short".to_string(), false));
+        let long = "é".repeat(COPY_MAX);
+        let (text, cut) = copy_text(&long);
+        assert!(cut && text.len() <= COPY_MAX && text.len() > COPY_MAX - 2, "{}", text.len());
+        assert!(text.chars().all(|c| c == 'é'), "no character split");
+        let exact = "x".repeat(COPY_MAX);
+        assert_eq!(copy_text(&exact), (exact.clone(), false), "exactly the cap is whole");
+    }
+
     #[test]
     fn each_tab_offers_what_its_channel_allows() {
         assert_eq!(labels(&items(None, false)), [CLEAR_VIEW]);
         assert_eq!(labels(&items(Some("open"), true)), [CLEAR_VIEW, CLEAR_HISTORY], "the harmless item first");
-        assert_eq!(labels(&items(Some("deploy"), true)), [INVITE_AGENT, ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, SEAL, DELETE]);
-        assert_eq!(labels(&items(Some("deploy"), false)), [INVITE_AGENT, ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, JOIN, SEAL, DELETE], "Join to a non-member");
+        assert_eq!(labels(&items(Some("deploy"), true)), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, SEAL, DELETE]);
+        assert_eq!(labels(&items(Some("deploy"), false)), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, JOIN, SEAL, DELETE], "Join to a non-member");
         let deploy = items(Some("deploy"), true);
         let waiting: Vec<(&str, Option<&str>)> = deploy.iter().filter(|i| !i.enabled).map(|i| (i.label.as_str(), i.reason.as_deref())).collect();
-        assert_eq!(waiting, [(ADD_AGENT, Some("needs ADR-404 D1")), (SEAL, Some("needs ADR-404 D4"))], "what waits on attend says so");
+        assert_eq!(waiting, [(SEAL, Some("needs ADR-404 D4"))], "what waits on attend says so; Add agent invites, as the agent menu's Add agent to chat does");
     }
 
     fn seen(name: &str, member: &str, live: bool, claude: bool) -> Seen {
@@ -727,7 +889,7 @@ mod tests {
         c.dry_run = true;
         for (item, ask) in [(CLEAR_VIEW, "clear the view?"), (CLEAR_HISTORY, "clear #deploy history?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
             c.item("deploy", item);
-            assert!(matches!(c.open.take(), Some(Open::Ask { question, .. }) if question.contains(ask)), "{item} asks the shell");
+            assert!(matches!(c.to_open.take(), Some(Open::Ask { question, .. }) if question.contains(ask)), "{item} asks the shell");
             assert_eq!(c.status, "", "{item} ran nothing yet");
             c.menu_picked(ASK, "n");
             assert_eq!(c.status, "kept");
@@ -740,9 +902,10 @@ mod tests {
 
     #[test]
     fn remove_never_offers_the_operator_and_their_own_row_offers_leave() {
-        assert_eq!(agent_items("Wells", Some("deploy"), false), ["Address @Wells", WHO, "Remove from #deploy"]);
-        assert_eq!(agent_items("aaron", Some("deploy"), true), ["Address @aaron", WHO, "Leave #deploy"], "the operator leaves, never removes themself");
-        assert_eq!(agent_items("Lyra", None, false), ["Address @Lyra", WHO], "not listed: nothing to remove");
+        let l = |items: Vec<Item>| items.into_iter().map(|i| i.label).collect::<Vec<_>>();
+        assert_eq!(l(agent_items("Wells", Some("deploy"), false, Ok(()))), ["Address @Wells", WHO, ADD_TO_CHAT, "Remove from #deploy"]);
+        assert_eq!(l(agent_items("aaron", Some("deploy"), true, Ok(()))), ["Address @aaron", WHO, ADD_TO_CHAT, "Leave #deploy"], "the operator leaves, never removes themself");
+        assert_eq!(l(agent_items("Lyra", None, false, Ok(()))), ["Address @Lyra", WHO, ADD_TO_CHAT], "not listed: nothing to remove");
         let m = |id: &str| Member { id: id.into(), label: id.into(), live: true, root: None };
         let left: Vec<String> = removable(vec![m("s1"), m("aaron"), m("s2")], "aaron").into_iter().map(|m| m.id).collect();
         assert_eq!(left, ["s1", "s2"], "the Remove agent picker leaves the operator out");
@@ -756,8 +919,22 @@ mod tests {
     fn pane_with(seen: Vec<Seen>) -> ChatPane {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
-        c.world = Some(super::super::World { groups: Vec::new(), seen, rows: Vec::new(), live_members: Vec::new(), instances: attend_instances::SnapshotCache::new() });
+        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground));
         c
+    }
+
+    #[test]
+    fn add_agent_to_chat_is_set_back_with_why_when_nothing_can_be_added() {
+        let human = seen("aaron", "aaron", true, false);
+        let quiet = seen("Bo", "s2", false, true);
+        let everywhere = seen("Ada", "s1", true, true);
+        let mut c = pane_with(vec![human.clone(), quiet.clone(), everywhere.clone()]);
+        assert_eq!(c.can_add(&human), Err("a human joins with /join".into()));
+        assert_eq!(c.can_add(&quiet), Err("quiet: no live session to invite".into()));
+        assert_eq!(c.can_add(&everywhere), Err("already in every channel".into()), "no channel it is not in");
+        let items = agent_items("Ada", None, false, c.can_add(&everywhere));
+        let add = items.iter().find(|i| i.label == ADD_TO_CHAT).expect("the item is listed");
+        assert!(!add.enabled && add.reason.as_deref() == Some("already in every channel"), "{add:?}");
     }
 
     #[test]
@@ -777,13 +954,13 @@ mod tests {
     fn an_agent_row_is_found_by_its_id_when_two_share_a_name() {
         let mut c = pane_with(vec![seen("Ada", "s1", false, true), seen("Ada", "s2", false, true)]);
         c.agent_menu("s2".into(), None);
-        match c.open.take() {
+        match c.to_open.take() {
             Some(Open::Pick { id, title, .. }) => assert_eq!((id.as_str(), title.as_str()), ("agent:s2", "@Ada")),
             other => panic!("no menu: {other:?}"),
         }
         c.menu_picked("agent:s2", WHO);
         assert!(c.status.contains("session s2"), "who is the row picked, not the first of its name: {}", c.status);
         c.agent_menu("gone".into(), None);
-        assert!(c.open.is_none() && c.status_is_error, "a row gone since is said, not guessed");
+        assert!(c.to_open.is_none() && c.status_is_error, "a row gone since is said, not guessed");
     }
 }

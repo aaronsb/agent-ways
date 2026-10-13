@@ -216,6 +216,23 @@ pub fn origin_path_in(dir: &Path, session_id: &str) -> Option<String> {
         .map(|c| normalize_origin(&c))
 }
 
+/// When `session_id`'s Claude Code process started, from its session
+/// record's `startedAt`; `None` when no record names it or the record has no
+/// start time. Mail addressed to a project before this was addressed to the
+/// sessions live there then, not to this one (ADR-401, ADR-404 D3b).
+pub fn started_at(session_id: &str) -> Option<std::time::SystemTime> {
+    sessions_dirs().iter().find_map(|d| started_at_in(d, session_id))
+}
+
+/// Test-seam counterpart to [`started_at`].
+pub fn started_at_in(dir: &Path, session_id: &str) -> Option<std::time::SystemTime> {
+    claude_sessions::read_session_records(dir)
+        .into_iter()
+        .filter(|r| r.session_id == session_id)
+        .find_map(|r| r.started_at_ms)
+        .map(|ms| std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms))
+}
+
 /// A session's ROOT path — the identity anchor (ADR-171, issue #394).
 /// The session record's `cwd` field follows the session into managed
 /// worktrees (`<root>/.claude/worktrees/<name>`), but a hop must not

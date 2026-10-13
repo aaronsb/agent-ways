@@ -140,3 +140,7 @@ This ADR is promoted from a working sketch that has already been exercised end-t
 - The chunking fix in `sensor-peers` was validated by requesting a deliberate ~800-char message from the peer; it arrived as three correctly-numbered chunks with clean word boundaries.
 
 The design note's "promote to ADR after the model holds up across a few real sessions" threshold is met.
+
+## Addendum, 2026-10-12: chunking is removed in ADR-412
+
+Appended after acceptance; nothing above is changed. ADR-412 removes the `sensor-peers` chunking described under Decision. A peer message is one Monitor line whatever its length, and Monitor shows its first 500 characters.

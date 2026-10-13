@@ -1,6 +1,7 @@
 //! A click on a channel in the left column, through the shell's real mouse
 //! handler: the first click shows the channel, a click on the channel
-//! shown opens its menu, as the first and second Ctrl+digit do. The menu
+//! shown opens its menu, as the first and second Ctrl+digit do. The column
+//! numbers the channels from 1, `#open` first, so `#ch01` is Ctrl+2. The menu
 //! docks on the line under its row, or ends on the line above it where the
 //! rows below cannot hold it. In its own file, so its own fixture: 28
 //! channels fill the column at 80x25, and at 120x35 put #infra's row below
@@ -115,26 +116,26 @@ fn a_click_on_the_channel_shown_opens_its_menu_on_the_line_under_its_row() {
 #[test]
 fn ctrl_digit_twice_docks_the_menu_under_the_channels_row_too() {
     let mut c = chat();
-    let (_, y) = row_of(&mut c, "#open");
+    let (_, y) = row_of(&mut c, "#ch01");
     press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     assert!(!menu_open(&mut c));
     press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     let rows = rows(&mut c);
-    assert!(rows[usize::from(y) + 1].starts_with("┌pick one: #open"), "the keyboard's menu docks where the click's does: {rows:#?}");
+    assert!(rows[usize::from(y) + 1].starts_with("┌pick one: #ch01"), "the keyboard's menu docks where the click's does: {rows:#?}");
 }
 
 /// Where Ctrl+digits do not arrive, Alt+digit stands in for them, again
-/// on the tab shown for its menu, as the footer says.
+/// on the channel shown for its menu, as the footer says.
 #[test]
 fn alt_digit_again_opens_the_menu_where_ctrl_digits_do_not_arrive() {
     let mut c = chat().enhanced(false);
-    let (_, y) = row_of(&mut c, "#open");
+    let (_, y) = row_of(&mut c, "#ch01");
     press(&mut c, KeyCode::Char('2'), KeyModifiers::ALT);
-    assert_eq!(c.foreground(), &Tab::Channel("open".into()));
+    assert_eq!(c.foreground(), &Tab::Channel("ch01".into()));
     assert!(!menu_open(&mut c));
     press(&mut c, KeyCode::Char('2'), KeyModifiers::ALT);
     let rows = rows(&mut c);
-    assert!(rows[usize::from(y) + 1].starts_with("┌pick one: #open"), "{rows:#?}");
+    assert!(rows[usize::from(y) + 1].starts_with("┌pick one: #ch01"), "{rows:#?}");
 }
 
 #[test]
@@ -186,10 +187,10 @@ fn a_click_on_the_channel_shown_drops_a_waiting_question() {
     let mut c = chat();
     press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
     press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
-    press(&mut c, KeyCode::Down, KeyModifiers::NONE);
+    press(&mut c, KeyCode::End, KeyModifiers::NONE);
     press(&mut c, KeyCode::Enter, KeyModifiers::NONE);
-    assert!(rows(&mut c).last().is_some_and(|r| r.contains("clear #open history?")), "the question waits");
-    let at = row_of(&mut c, "#open");
+    assert!(rows(&mut c).last().is_some_and(|r| r.contains("delete #ch01")), "the question waits");
+    let at = row_of(&mut c, "#ch01");
     click(&mut c, at);
     assert!(menu_open(&mut c));
     assert_eq!(c.status(), "kept", "the question is dropped, and says so");
@@ -210,14 +211,15 @@ fn the_channel_shown_opens_its_menu_from_the_column_with_repeat_off() {
     let rows = rows(&mut c);
     assert!(rows[usize::from(at.1) + 1].starts_with("┌pick one: #ch02"), "a click opens it: {rows:#?}");
     press(&mut c, KeyCode::Esc, KeyModifiers::NONE);
-    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
-    press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
+    press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
     assert!(!menu_open(&mut c), "the key follows the setting");
-    // F2, Down: the column's cursor on #open, the channel shown.
+    // F2, Down: the column's cursor on #ch02, the channel shown; Enter
+    // opens its menu, as Enter on any element does.
     press(&mut c, KeyCode::F(2), KeyModifiers::NONE);
     press(&mut c, KeyCode::Down, KeyModifiers::NONE);
     press(&mut c, KeyCode::Enter, KeyModifiers::NONE);
-    assert!(rows_at(&mut c, (80, 25)).iter().any(|r| r.contains("pick one: #open")), "Enter on the row opens it");
+    assert!(rows_at(&mut c, (80, 25)).iter().any(|r| r.contains("pick one: #ch02")), "Enter on the row opens it");
 }
 
 /// The column has the keyboard; a click on another row moves its cursor.
@@ -226,8 +228,8 @@ fn a_click_in_the_focused_column_moves_its_cursor_to_the_row() {
     let mut c = chat();
     press(&mut c, KeyCode::F(2), KeyModifiers::NONE);
     press(&mut c, KeyCode::Down, KeyModifiers::NONE);
-    let cursor = |c: &mut Chat| rows(c).into_iter().find(|r| r.contains('▸') && !r.starts_with(" ≡")).expect("the cursor is drawn");
-    assert!(cursor(&mut c).contains("#open"), "{}", cursor(&mut c));
+    let cursor = |c: &mut Chat| rows(c).into_iter().find(|r| r.starts_with('▸')).expect("the cursor is drawn");
+    assert!(cursor(&mut c).contains("alpha"), "Down from the operator view's tab: the column's first row: {}", cursor(&mut c));
     let at = row_of(&mut c, "#ch05");
     click(&mut c, at);
     assert!(cursor(&mut c).contains("#ch05"), "the cursor follows the click: {}", cursor(&mut c));

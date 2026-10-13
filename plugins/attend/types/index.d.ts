@@ -11,12 +11,16 @@ export type AttendStatus = {
   unread: number
   /** The channels this session receives or joined, as `#name`. */
   channels: string[]
-  /** Deliveries made so far; the full preamble shows on delivery 0. */
+  /** Deliveries made so far; the preamble line shows on delivery 0. */
   deliveries: number
   /** A compaction happened since the last delivery: the next is full. */
   afterCompaction: boolean
-  /** Turns since the full preamble last showed. */
+  /** Turns since the preamble line last showed. */
   turnsSinceFull: number
+  /** The config started this session listening and the operator has not
+   *  prompted yet: no turn is submitted, and what is pending rides the first
+   *  prompt. Kept here so a reloaded module keeps holding. */
+  awaitingOperator: boolean
 }
 
 declare module 'claude-code' {

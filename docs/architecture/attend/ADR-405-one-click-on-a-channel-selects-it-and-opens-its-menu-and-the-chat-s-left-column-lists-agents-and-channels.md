@@ -7,6 +7,26 @@ amends: [ADR-404#D9]
 basis:
   - operator: aaronsb
     level: directed
+    said: "new fix for attend-chat: the merged channel needs to be called something different like ('combined' or full stream or something) - because it's all the chats together. Next, I don't want the merged channel to be actually a channel - it's an operator view for attend-chat, and should be justified right side, maybe with some characters that indicate 'merged chat' (no more than 3-4). That tab should be a different color (lighter? shaded? not sure). The chat box itself needs to be one of the tabbable elements. the text entry box swallows normal keyboard commands (including shift and tab) because it's the entry panel. when the chat box is active regular tab is autocomplete. whenever the entry box is active, we have a little legend update that indicates that shift+tab or arrow can be used to leave the box. nav arrows (up down left right) work inside the box, but if the up arrow is used when the cursor is at the beginning of the first line of the entry box, it is the same as leaving focus for the entry box and allows navigation of elements. same goes for the last position of the last line, down arrow exits the pattern. we need to define the chain of elements that tab (or shift tab, or left and right arrows) do for navigating the elemnts outside of chat. we need every agent entry and channel to be in that loop. we also need the hints on the bottom to reflect the context of where the active cursor is at, and we can use enter to raise the context menu for any element. (the same context menu that the mouse click affords). when not in the text entry box, we should be able to use all the characters for contorl that the help (F1) claims. If we're not deliberately in chat, the lighter highlight around the entry box for text is not brighter as it is now, but instead the lower border color.. we could say that this is a nav polish pass"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
+    said: "up and down nav and enter opens the context menu (the same as a left mouse click on an item)"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
+    said: "fo the open channel, I want that also to the right, as a reserved channels. we can consider that reserved channels are right side and dynamic channels or created channels are left side"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
+    said: "the 'new channel' plus can be on the left side"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
+    said: "in the agent roster, let's add the context menu 'add to chat' for any agents'. it works just like the flow for removing an agent from a chat (right now on a chat, pick \"remove agent *\" -> \"pick one: remove from #channenlname\"). So now, picking an agent a new flow \"add agent to chat *\" -> \"pick one: add to channel\" (and the list of channels)"
+    via: chat, relayed by the main session, 2026-10-12
+  - operator: aaronsb
+    level: directed
     said: "some behavior I was hoping to see in the attend-chat was using the mouse to click on a channel should select it and also open the context menu. the left vertical isn't showing all channels or sessions (including inactive ones) and I think we likely need to split it into two vertical sections as well - a list of agents who have attended chat and a list of channels"
     via: chat, relayed by the main session, 2026-10-10
   - operator: aaronsb
@@ -30,6 +50,10 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "we could say that this is a nav polish pass"
+    via: chat, relayed by the main session, 2026-10-12; the full spec is quoted in basis
 status: accepted
 date: 2026-10-10
 deciders:
@@ -91,3 +115,23 @@ D9 is amended as follows.
 - **Keep D9's second click.** Two clicks for one intent. Reported as unexpected.
 - **One combined list of channels with members nested under them.** An agent in several channels repeats, and an agent in none has no place.
 - **Keep the legend row and add the column.** It shows the same agents twice and costs a feed row.
+
+## Amendment (2026-10-12): the operator view, reserved tabs, one focus owner, and Add agent to chat
+
+The operator asked, in their words: "the merged channel needs to be called something different ... I don't want the merged channel to be actually a channel - it's an operator view for attend-chat, and should be justified right side, maybe with some characters that indicate 'merged chat' (no more than 3-4). That tab should be a different color", and "fo the open channel, I want that also to the right, as a reserved channels. we can consider that reserved channels are right side and dynamic channels or created channels are left side", and "the 'new channel' plus can be on the left side". The full words are in `basis`.
+
+- **The operator view.** What was the merged tab is an operator view, every channel together, labelled `⋯all`: no `#`, no number of its own, never a channel to agents, and its menu offers Clear view alone. It is drawn on the shaded ground of the rule (`strip::view_seg`), bold when shown, so it reads apart from the accent-coloured channel tabs; without colour it reads by its label. The label `≡all` was the other candidate; `≡` already marks the common menu, so `⋯all` was chosen.
+- **Reserved tabs sit right.** `tabs::reserved()` is the one list of reserved tabs: `#open` (attend reserves `open`, and `broadcast`, which is `#open`'s own room and has no tab), then the operator view. The tab bar (`tabs::bar`) draws `≡`, the created channels, `+`, then the reserved tabs pinned at its right end. When the bar is short of room the created channels' names shorten and then drop behind `›`; the reserved tabs, `≡` and `+` never do. Created channels are numbered 1-9 from the left; the reserved tabs carry no number, and 0 is the bar's last tab, the operator view.
+- **One focus owner.** The keyboard is on one element at a time, and that element alone is drawn focused: a tab reversed behind `▸`, a column row reversed behind `▸`, the feed and the compose box by an accent border. A box without the focus has the rule's subdued border, the compose box included, and the compose caret is drawn only while the box has the focus. The ring, one ordered list the key handler walks and the renderer marks (`ChatPane::ring`): the tab bar in the order drawn, every agent row then every channel row of the column while it is drawn, the feed, the compose box, then round again.
+- **Keys.** In the compose box every key edits: Tab completes, Enter sends, the arrows move the cursor. Shift+Tab leaves backward. ↑ at the start of the first line leaves backward and ↓ at the end of the last line leaves forward, but only a box that holds text; an empty box is left with Shift+Tab or Esc (ADR-409, the operator's "Guarded" answer). The footer puts Enter and Tab first, then "S-Tab or ↑ at the top leaves the box". Outside it, Tab or → moves forward and Shift+Tab or ← back; ↑ and ↓ move along the column and through the feed's messages; Enter opens the focused element's menu, the one a click opens, through the one activation path; Esc goes back to the box. The help keys work there (`?`, `m`, PgUp and PgDn, F2, F3, Ctrl+N); `q` asks before it quits, whatever is unsaved; the digits switch tabs only while the tab bar has the focus, and elsewhere are typed like any other character, which goes to the box. Backspace and Delete only go back to the box. The footer names the focused element's keys, and the mode lozenge says where the focus is (`chat`, `tabs`, `view`, `column`, `feed`). A click on a column row puts the keyboard on that row, from wherever it was, so ↑, ↓ and Enter go on from the row clicked ("up and down nav and enter opens the context menu (the same as a left mouse click on an item)"). Any other click puts the keyboard back in the compose box, but for a click in the column or the feed while the focus is there.
+- **The focus on a tab is kept by what the tab is**, not its place: a channel created under it leaves it on the same tab, and one dissolved under it moves it to the tab shown. Walking the bar previews each tab it lands on; walking off it into the column, the feed or the box without choosing puts back the tab shown before, so the draft's destination does not change on the way past. Enter or a digit on the bar keeps the tab, and a digit moves the focus to it; Esc from the bar cancels the preview, as F2 back to the box does.
+- **The wheel scrolls what is under it.** Over a column list, that list; over the feed, the feed; over a menu, the key help or a report, that overlay; over the compose box, nothing.
+- **Add agent to chat.** An agent row's menu offers Add agent to chat ▸, a picker titled `add to channel` of the channels the agent is not in (`#open` and the operator view left out), docked under the agent's row. The channel menu's Add agent ▸ does the same from the other side, a picker of live agents not in the channel (it replaces Invite agent, and the set-back "needs ADR-404 D1" item): both menus add by invitation. The pick invites the agent through the invitation `/invite` and Invite agent send, so the agent joins itself; attend has no enrolment without asking until ADR-404 D1, and the status line says "invited @X to #c — they join themselves". The item is set back with its reason for a human ("a human joins with /join"), a quiet agent ("quiet: no live session to invite"), and an agent already in every channel.
+
+## Amendment (2026-10-12): one channel tab, a numbered column and the Esc cycle
+
+ADR-407's amendment of the same date, "C, the operator's navigation redesign", changes the tab bar and the keys of the amendment above.
+
+- **The tab bar.** It holds `≡`, the created channel shown, `+`, then the reserved tabs. The created channels are numbered in the left column, `#open` first, and no longer on the bar. Ctrl+n or Alt+n picks the column's channel n, and 0 is the operator view.
+- **Keys.** In the compose box Esc goes to the feed, and Tab leaves the box when the caret ends no word to complete. The feed is the chat: a printable key there is typed into the box, and `q`, `m` and `?` are text. On the tab bar and the column the single keys work as before, and a plain digit picks a channel by its number only on a column row. Outside the box Esc opens the `≡` menu, and Esc on that menu goes back to the tab or column row the focus was last on. Walking the bar shows nothing; Enter on a tab opens its menu.
+- **The column.** It marks the agents in the created channel shown.

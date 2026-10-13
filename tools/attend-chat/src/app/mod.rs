@@ -14,6 +14,8 @@
 //! [`keys`] as free functions; the editing keys are the shared input's.
 
 mod activate;
+mod focus;
+mod ix;
 mod keys;
 mod menu;
 mod sidebar;
@@ -25,9 +27,8 @@ use std::time::{Duration, Instant, SystemTime};
 use agent_tui::feed::{Entry, FeedState};
 use agent_tui::input::Input;
 use agent_tui::ratatui::buffer::Cell;
-use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use agent_tui::ratatui::crossterm::event::{KeyEvent, MouseEvent};
 use agent_tui::ratatui::layout::{Position, Rect};
-use agent_tui::ratatui::text::Span;
 use agent_tui::ratatui::Frame;
 use agent_tui::screen::Screen;
 use agent_tui::theme::{Palette, Shape};
@@ -89,6 +90,10 @@ struct World {
     /// The instance registry, for each chip's `-<instance>` suffix
     /// (ADR-129). Built afresh with the world, never kept across it.
     instances: SnapshotCache,
+    /// The tab bar and the column as this world lays them out, for the
+    /// interaction state's steps: built with the world, the tab shown
+    /// kept against it ([`ChatPane::set_tab`]).
+    laid: ix::Laid,
 }
 
 /// A chip of the helper row, and what a click on it completes.
@@ -106,9 +111,10 @@ enum Chip {
 #[derive(Debug, Clone, Default)]
 struct Hits {
     feed: Rect,
+    /// The feed's box, border and all: where the wheel scrolls it.
+    feed_box: Rect,
     compose: (Rect, usize),
-    /// The width of what leads the compose box's first row: `> `, or what
-    /// the box is lent to.
+    /// The width of what leads the compose box's first row: `> `.
     lead: u16,
     text_width: u16,
     chips: Vec<(Rect, Chip)>,
@@ -168,17 +174,16 @@ pub struct ChatPane {
     /// feed's times are relative to the day (`HH:MM` today, a date before).
     day_seen: Option<SystemTime>,
     hits: Hits,
-    /// What a tab's menu asked the shell to open over the pane.
-    open: Option<Open>,
+    /// What the chat asks the shell to open over the pane, until the shell
+    /// takes it ([`Pane::take_open`]). A request: what is open is the
+    /// interaction state's overlay stack, as the shell reports it.
+    to_open: Option<Open>,
     /// The theme this session shows: its name, or `terminal` for the
     /// terminal's own palette. Marked in the Theme menu.
     theme: String,
     /// The menu step the shell's question asks about, until it is answered
     /// ([`ChatPane::answered`]).
     asked: Option<menu::Step>,
-    /// The compose box lent to a channel's name or description, and the
-    /// draft it held before.
-    prompt: Option<(menu::Prompt, String)>,
     /// The terminal reports Ctrl+digits as themselves. Without it Ctrl+3
     /// arrives as Esc, which closes and clears and never quits (ADR-409),
     /// and a setting that asks for Ctrl+digits says they do not arrive.
@@ -190,11 +195,10 @@ pub struct ChatPane {
     sidebar: bool,
     /// The lozenge shape the left column's rows are drawn in, the shell's.
     shape: Shape,
-    /// The left column's row under the keyboard's cursor, while it has the
-    /// focus (F2, then Down), and the row it is: a refresh that moves the
-    /// row keeps the cursor on it ([`ChatPane::refocus`]).
-    side_focus: Option<usize>,
-    side_focus_hit: Option<sidebar::SideHit>,
+    /// The interaction state: where the keyboard is, the walk's preview,
+    /// the column row under the focus, what the shell holds open ([`ix`]).
+    /// Only [`ChatPane::dispatch`] moves it, through the machine's step.
+    ix: ix::Machine,
     /// The first row shown of each of the column's lists, agents then
     /// channels: the wheel moves them, and the cursor keeps itself in view
     /// while `side_follow`, until the wheel moves the list away from it.
@@ -232,16 +236,14 @@ impl ChatPane {
             draws: 0,
             day_seen: None,
             hits: Hits::default(),
-            open: None,
+            to_open: None,
             theme: "terminal".into(),
             asked: None,
-            prompt: None,
             enhanced: false,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
             sidebar: true,
             shape: Shape::PLAIN,
-            side_focus: None,
-            side_focus_hit: None,
+            ix: ix::Machine::new(),
             side_scroll: [0, 0],
             side_follow: true,
             removable: Vec::new(),
@@ -261,16 +263,6 @@ impl ChatPane {
         let (text, _) = self.hits.compose;
         let lead = self.hits.lead;
         Rect { x: text.x.saturating_sub(lead), width: text.width + lead, ..text }
-    }
-
-    /// What leads the compose box's first row in a box `width` wide: `> `,
-    /// or while the box is lent, what it is lent to (`new channel name > `),
-    /// cut to half the box so the text keeps room.
-    fn lead(&self, width: u16) -> String {
-        match &self.prompt {
-            Some((p, _)) => format!("{} > ", agent_tui::wrap::truncate(&p.label(), usize::from(width / 2).saturating_sub(3).max(1))),
-            None => "> ".into(),
-        }
     }
 
     /// The feed's entries are out of date: rebuild them, and their layout,
@@ -327,7 +319,7 @@ impl ChatPane {
             let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
-            self.world = Some(World { groups: tab_channels(&rows), seen, rows, live_members, instances });
+            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground));
             self.refocus();
         }
         self.world.as_ref().expect("just built")
@@ -345,12 +337,30 @@ impl ChatPane {
         tabs::normalize(self.foreground.clone(), &names)
     }
 
+    /// Show `t`. The tab bar holds the channel shown, so it is laid out
+    /// again, and a focus on a tab the bar no longer draws follows to the
+    /// tab shown ([`ChatPane::refocus`]).
     fn set_tab(&mut self, t: Tab) {
         if t != self.foreground {
+            if let Some(w) = &mut self.world {
+                let names = tabs::strip_names(&w.groups);
+                w.laid.shown = tabs::normalize(t.clone(), &names);
+                w.laid.bar = tabs::bar(&names, &w.laid.shown);
+            }
             self.foreground = t;
             self.feed = FeedState::default();
             self.invalidate();
+            if self.world.is_some() {
+                self.refocus();
+            }
         }
+    }
+
+    /// The membership id of the person at this chat (ADR-170), or `None`
+    /// when the chat is no live person: without its heartbeat (`--snap`, a
+    /// test's chat) or in a dry run, it joins nothing.
+    fn person(&self) -> Option<String> {
+        (self.heartbeat && !self.dry_run).then(crate::signal::human_member_id)
     }
 
     fn enter(&mut self) {
@@ -362,7 +372,7 @@ impl ChatPane {
         // destination flag, which has degraded to #open.
         let fg = self.normal_tab();
         let sets_jump = self.input.text().trim_start().starts_with("/config tabs.jump");
-        match handle_enter(self.input.text(), &self.signals, &fg) {
+        match handle_enter(self.input.text(), &self.signals, &fg, self.person().as_deref()) {
             EnterAction::None => {}
             EnterAction::ClearWithStatus(s) => {
                 self.say(s, false);
@@ -443,15 +453,9 @@ impl ChatPane {
         self.feed.scroll = 0;
     }
 
+    /// Tab on a word to complete ([`keys::completable`]): complete it, or
+    /// the next candidate.
     fn tab_key(&mut self) {
-        if self.input.is_empty() {
-            // Empty compose line: Tab cycles the foreground tab (#393).
-            // With content it stays completion.
-            let names = self.strip_names();
-            let cur = tabs::normalize(self.foreground.clone(), &names);
-            self.set_tab(tabs::cycle_next(&cur, &names));
-            return;
-        }
         let world = self.world();
         let (agents, channels) = sidebar::completion_pool(&world.seen, &world.rows);
         let r = handle_tab(self.input.text(), self.input.cursor(), self.tab_cycle.take(), &agents, &channels);
@@ -556,29 +560,16 @@ impl Pane for ChatPane {
         view::tabs(self)
     }
 
-    /// The bar's index of the tab shown: 0 is the `≡` slot, 1 merged, then
-    /// the channels, then the `+` slot.
+    /// The bar's index of the tab shown, in [`tabs::bar`]'s order.
     fn tab(&mut self) -> usize {
-        match self.normal_tab() {
-            Tab::Merged => 1,
-            Tab::Channel(g) => self.strip_names().iter().position(|n| *n == g).map_or(1, |i| i + 2),
-        }
+        let shown = self.normal_tab();
+        self.slot_of(&shown).unwrap_or(0)
     }
 
-    /// Show the bar's tab `i`: merged, or a channel (tab number `i`, as
-    /// Alt+N and Ctrl+N count them). The slots and an index past the tabs
-    /// do nothing. Showing a tab gives a lent compose box back, by key as
-    /// by a click on the tab.
+    /// Show the bar's tab `i`: a channel or the operator view. The slots
+    /// and an index past the tabs do nothing.
     fn set_tab(&mut self, i: usize) {
-        self.prompt_cancel();
-        let names = self.strip_names();
-        if let Some(t) = i.checked_sub(1).and_then(|n| tabs::jump(n as u32 + 1, &names)) {
-            ChatPane::set_tab(self, t);
-        }
-    }
-
-    fn trailer(&mut self) -> Vec<Span<'static>> {
-        view::trailer(self)
+        self.dispatch(ix::Ev::Jump(i));
     }
 
     fn draw(&mut self, f: &mut Frame, area: Rect) {
@@ -609,45 +600,23 @@ impl Pane for ChatPane {
         self.last_frame = Some((area, cells));
     }
 
-    /// The chat's keys. Alt+1..9 (a tab), Alt+m (the mouse), F1 (the keys)
-    /// and Ctrl-C (quit) are the shell's, and never reach here.
+    /// The chat's keys, by where the focus is ([`focus`]). Alt+1..9 (a
+    /// tab), Alt+m (the mouse), F1 (the keys), F2 (the tab bar) and Ctrl-C
+    /// (quit) are the shell's, and never reach here; outside the compose
+    /// box their single-key forms (`1`..`9`, `m`, `?`, `q`) are the shell's
+    /// too.
     ///
-    /// Esc never quits (ADR-409): it gives a lent compose box back, takes
-    /// the keyboard from the column, and with nothing else to close clears
-    /// the message selected and what the bar says. The draft stays. Where
-    /// Ctrl+3 arrives as Esc it is the same Esc, so a tab key can never
-    /// close the chat.
+    /// Esc never quits (ADR-409): in the compose box it clears the message
+    /// selected and what the bar says, the draft kept; elsewhere it brings
+    /// the focus back to the box. Where Ctrl+3 arrives as Esc it is the same
+    /// Esc, so a tab key can never close the chat.
     fn key(&mut self, k: KeyEvent) -> Keyed {
         self.dirty = true;
-        let m = k.modifiers;
-        if self.prompt.is_some() {
-            match k.code {
-                KeyCode::Esc => self.prompt_cancel(),
-                KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.prompt_enter(),
-                KeyCode::Tab | KeyCode::PageUp | KeyCode::PageDown => {}
-                _ => {
-                    self.input.key(k);
-                }
-            }
-            return Keyed::Done;
-        }
         if self.is_sidebar_key(&k) {
             self.toggle_sidebar();
             return Keyed::Done;
         }
-        if let Some(keyed) = self.side_key(k) {
-            return keyed;
-        }
-        match k.code {
-            KeyCode::Esc => self.clear(),
-            KeyCode::Enter if !m.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) => self.enter(),
-            KeyCode::Tab => self.tab_key(),
-            KeyCode::PageUp => self.page(true),
-            KeyCode::PageDown => self.page(false),
-            _ => {
-                self.input.key(k);
-            }
-        }
+        self.dispatch(ix::Ev::Key(k));
         Keyed::Done
     }
 
@@ -655,79 +624,109 @@ impl Pane for ChatPane {
         self.scroll_by(up, WHEEL_ROWS);
     }
 
-    /// Esc with nothing open over the chat: never quit (ADR-409).
-    fn esc_quits(&self) -> bool {
-        false
+    /// The chat owns the focus, the tab bar's included, and Esc never quits
+    /// (ADR-409). The compose box and the feed take every plain key as
+    /// text; on the tab bar and the column the shell's single keys work as
+    /// the key help names them, and on a column row a plain digit picks a
+    /// channel by its number ([`ix::Ix::ctx`]).
+    fn keymap_ctx(&self) -> agent_tui::Ctx {
+        self.ix.ctx()
     }
 
-    /// A paste goes into the compose box whole, at the cursor: its lines
-    /// stay one draft, and nothing is sent until Enter. A box lent to a
-    /// one-line name or description takes the lines joined by spaces. A
+    /// The column numbers its channels, from 1, for Ctrl+digit, Alt+digit
+    /// and a plain digit on a column row; the tab bar carries no numbers.
+    fn own_numbers(&self) -> Option<&'static str> {
+        Some("channel")
+    }
+
+    /// Channel `n` of the column, or with 0 the operator view, chosen as a
+    /// click on its row chooses ([`ix::Ev::Numbered`]).
+    fn jump(&mut self, n: usize, menu: bool) {
+        self.dirty = true;
+        self.dispatch(ix::Ev::Numbered { n, menu });
+    }
+
+    /// An overlay holds the keyboard: the compose box draws no caret and
+    /// its border is set back, so the focus shows in one place.
+    fn overlay_opened(&mut self, o: agent_tui::Overlay) {
+        self.dispatch(ix::Ev::OverlayOpened(o));
+    }
+
+    fn overlay_closed(&mut self, o: agent_tui::Overlay) {
+        self.dispatch(ix::Ev::OverlayClosed(o));
+    }
+
+    /// The bar's index of the focused slot, against the bar as the world
+    /// laid it out; with the world unread, the bar of no channels.
+    fn focus_tab(&self) -> Option<usize> {
+        let focus::Focus::Tab(slot) = self.ix.focus() else { return None };
+        match &self.world {
+            Some(w) => w.laid.bar.iter().position(|s| s == slot),
+            None => tabs::bar(&[], &self.foreground).iter().position(|s| s == slot),
+        }
+    }
+
+    fn focus_tabs(&mut self) {
+        self.dispatch(ix::Ev::ToggleBar);
+    }
+
+    /// A paste goes into the compose box whole, at the cursor, and the focus
+    /// with it: its lines stay one draft, and nothing is sent until Enter. A
     /// waiting question the shell answers no first, as a typed character
     /// answers it, so a `y` in the paste never does. Control characters other
     /// than newline and tab are left out: an escape sequence in the
     /// clipboard is not drawn into the box or sent.
     fn paste(&mut self, text: &str) {
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
-        let text = if self.prompt.is_some() { text.split('\n').collect::<Vec<_>>().join(" ") } else { text };
-        self.side_focus = None;
-        for c in text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')) {
-            self.input.insert(c);
-        }
+        self.dispatch(ix::Ev::Paste);
+        let kept: String = text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();
+        self.input.insert_str(&kept);
         self.tab_cycle = None;
         self.dirty = true;
     }
 
-    /// The wheel over one of the column's lists scrolls that list; anywhere
-    /// else, the feed.
+    /// The wheel scrolls what is under it: one of the column's lists, or
+    /// the feed. Over the compose box and the helper row it does nothing.
     fn wheel_at(&mut self, up: bool, at: Position) {
         match self.hits.side_lists.iter().position(|r| r.contains(at)) {
             Some(list) => self.side_wheel(list, up),
-            None => self.wheel(up),
+            None if self.hits.feed_box.contains(at) => self.wheel(up),
+            None => {}
         }
     }
 
     /// A click on a message selects it and brings it whole into view; on
     /// the compose box's text it puts the cursor there; on a chip of the
-    /// helper row it completes what is being typed to it.
-    ///
-    /// While the compose box is lent, a click outside it gives the box
-    /// back, as Esc does, and does nothing more, except on the column,
-    /// where it goes on, as a click that closes a menu does.
+    /// helper row it completes what is being typed to it. The keyboard goes
+    /// back to the compose box, but for a click on the column while it has
+    /// the focus, which moves it to the row clicked, and one on a message
+    /// while the feed has it.
     fn click(&mut self, at: Position) {
         self.dirty = true;
-        if !self.hits.side_area.contains(at) {
-            self.side_focus = None;
-        }
         let (text, start) = self.hits.compose;
-        let with_prompt = self.compose_rect();
-        if self.prompt.is_some() && !with_prompt.contains(at) {
-            self.prompt_cancel();
-            if !self.click_through(at) {
-                return;
-            }
-        }
-        if self.hits.flag.contains(at) {
+        let flag = self.hits.flag.contains(at);
+        let feed = self.hits.feed.contains(at);
+        let compose = self.compose_rect().contains(at);
+        let chip = self.hits.chips.iter().find(|(r, _)| r.contains(at)).map(|(_, c)| c.clone());
+        let row = (!flag && !feed && !compose && chip.is_none()).then(|| self.hits.side.iter().find(|(r, _)| r.contains(at)).map(|(_, h)| h.clone())).flatten();
+        self.dispatch(ix::Ev::Click(ix::Click::Pane { column: self.hits.side_area.contains(at), feed, row }));
+        if flag {
             return self.flag_menu();
         }
-        if self.hits.feed.contains(at) {
+        if feed {
             if let Some(i) = self.feed.entry_at(at.y - self.hits.feed.y) {
                 self.feed.reveal(i);
             }
             return;
         }
-        if with_prompt.contains(at) {
+        if compose {
             let col = at.x.saturating_sub(text.x) as usize;
             self.input.click(self.hits.text_width, start + (at.y - text.y) as usize, col);
             self.tab_cycle = None;
             return;
         }
-        if let Some((_, chip)) = self.hits.chips.iter().find(|(r, _)| r.contains(at)).cloned() {
+        if let Some(chip) = chip {
             self.complete(chip);
-            return;
-        }
-        if let Some((_, hit)) = self.hits.side.iter().find(|(r, _)| r.contains(at)).cloned() {
-            self.side_click(hit);
         }
     }
 
@@ -737,50 +736,20 @@ impl Pane for ChatPane {
         self.side_drawn() && self.hits.side_area.contains(at)
     }
 
-    /// A click on the tab bar or the bottom bar, or a right click outside
-    /// the compose box, gives a lent compose box back, as a left click
-    /// outside it does.
-    fn dismiss(&mut self, at: Option<Position>) {
-        if at.is_none_or(|at| !self.compose_rect().contains(at)) {
-            self.prompt_cancel();
-        }
-    }
-
+    /// The keys of the element the focus is on, for the footer, then the
+    /// rest for the key help ([`ChatPane::focus_bindings`]).
     fn bindings(&self) -> Vec<Binding> {
-        let mut out = vec![Binding::new("Enter", "send"), Binding::new("Tab", "complete")];
-        // The column's way in, on the footer while the column is drawn and
-        // does not have the keyboard: at 80 columns it takes the place of
-        // the scroll keys, which the key help still lists.
-        if self.side_drawn() && self.side_focus.is_none() {
-            out.push(Binding::new("F2 ↓", "the column: ↑ ↓ move, Enter acts, ↑ at the top or Esc back").short("column"));
-        }
-        out.extend([
-            Binding::new("PgUp PgDn", "scroll"),
-            Binding::help("S-Enter M-Enter", "new line"),
-            Binding::help("← → Home End", "move the cursor"),
-            Binding::help("Bksp Del", "edit"),
-            Binding::help("click a message", "selects it; a chip completes; the compose box: the cursor"),
-        ]);
-        if let Some(key) = self.sidebar_key_label() {
-            out.push(Binding::help(key, "show or hide the agents and channels column"));
-        }
-        out
+        self.focus_bindings()
     }
 
     fn mode(&self) -> String {
-        "chat".into()
+        self.focus_mode()
     }
 
     /// The status slot (#398, #400): a fresh result asserts itself, an
     /// error in the error role; past [`STATUS_ASSERT`] the help of a
     /// command being typed, or the last result, set back.
     fn status(&mut self) -> Option<(String, Tone)> {
-        if let Some(s) = self.menu_status() {
-            return Some((s, Tone::Said));
-        }
-        if self.side_focus.is_some() {
-            return Some((sidebar::FOCUS_HINT.into(), Tone::Said));
-        }
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
         let (line, how) = status_slot(fresh, self.status_is_error, crate::slash::contextual_help(self.input.text()), &self.status);
         let tone = match how {
@@ -791,10 +760,6 @@ impl Pane for ChatPane {
         (!line.is_empty()).then_some((line, tone))
     }
 
-    fn owns_text(&self) -> bool {
-        true
-    }
-
     /// `attend.chat.mouse`, on unless set off: the chat is worked by
     /// clicks (ADR-405), and Shift-drag still selects text in most
     /// terminals. Alt+m gives the terminal its mouse back, for selection
@@ -803,25 +768,9 @@ impl Pane for ChatPane {
         self.config.mouse
     }
 
-    /// What quitting would lose: a draft, or a name or description typed in
-    /// the lent box, named for what it is.
+    /// What quitting would lose: a draft.
     fn unsaved(&self) -> Option<String> {
-        let typed = !self.input.is_empty();
-        match &self.prompt {
-            None => typed.then(|| "a draft in the compose box".into()),
-            Some((p, draft)) => {
-                let lent = match p {
-                    menu::Prompt::NewChannel => "a new channel's name being typed".to_string(),
-                    menu::Prompt::Describe(c) => format!("a description of #{c} being typed"),
-                };
-                match (typed, draft.is_empty()) {
-                    (true, true) => Some(lent),
-                    (true, false) => Some(format!("{lent}, and a draft held")),
-                    (false, false) => Some("a draft in the compose box".into()),
-                    (false, true) => None,
-                }
-            }
-        }
+        (!self.input.is_empty()).then(|| "a draft in the compose box".into())
     }
 
     fn has_tab_menus(&self) -> bool {
@@ -833,10 +782,7 @@ impl Pane for ChatPane {
     /// repeat on the tab shown opens its menu when
     /// `attend.chat.tabs.menu_on_repeat` says so.
     fn activate_tab(&mut self, i: usize, menu: bool) {
-        if let Some(target) = self.tab_target(i) {
-            let how = if menu { activate::How::Menu } else { activate::How::Select { repeat: self.config.menu_on_repeat } };
-            self.activate(target, how, None);
-        }
+        self.dispatch(ix::Ev::TabActivated { i, menu });
     }
 
     /// A right click: the menu of the column row, the destination flag or
@@ -844,20 +790,6 @@ impl Pane for ChatPane {
     fn context(&mut self, at: Position) {
         self.dirty = true;
         self.context_at(at);
-    }
-
-    fn below_strip(&self) -> Option<&'static str> {
-        self.side_drawn().then_some("the column")
-    }
-
-    /// The column taking the keyboard gives a lent compose box back: its
-    /// keys then act on its rows, never on the name being typed.
-    fn focus_below(&mut self) -> bool {
-        let focused = self.focus_side();
-        if focused {
-            self.prompt_cancel();
-        }
-        focused
     }
 
     fn new_item_label(&self) -> Option<&'static str> {
@@ -868,12 +800,10 @@ impl Pane for ChatPane {
         self.new_channel();
     }
 
-    /// The shell took a key or a click: the column gives up the keyboard
-    /// (F2, a tab, the bottom bar).
+    /// The shell took a click (a tab, the bottom bar): the keyboard goes
+    /// back to the compose box, as a click in the pane sends it.
     fn interrupted(&mut self) {
-        if self.side_focus.take().is_some() {
-            self.dirty = true;
-        }
+        self.dispatch(ix::Ev::Click(ix::Click::Shell));
     }
 
     /// A click on a tab or a channel row shows it and again opens its menu;
@@ -889,11 +819,11 @@ impl Pane for ChatPane {
     }
 
     fn quit_help(&self) -> Option<String> {
-        Some("quit; asks first over a draft; so does ≡ → Quit".into())
+        Some("quit; q asks first, ^C over a draft; so does ≡ → Quit".into())
     }
 
     fn take_open(&mut self) -> Option<Open> {
-        self.open.take()
+        self.to_open.take()
     }
 
     fn picked(&mut self, id: &str, values: Vec<String>) {
@@ -920,10 +850,13 @@ impl Pane for ChatPane {
 
     fn help(&self) -> Option<String> {
         Some(
-            "Enter sends to the shown channel; merged sends to #open. @name or #channel\n\
-             at the start addresses the message; Tab completes them, and on an empty\n\
-             line shows the next tab. /help lists the slash commands. `attend inbox`\n\
-             and `attend send` are the same bus outside the screen."
+            "Enter sends to the shown channel; ⋯all, every channel together, sends to\n\
+             #open. @name or #channel at the start addresses the message; Tab completes\n\
+             them, and with nothing to complete moves on. /help lists the slash commands.\n\
+             The column numbers the channels: Ctrl+digit shows one, 0 the operator view.\n\
+             Tab and Shift+Tab walk the tabs, the column, the feed and the box, and Enter\n\
+             opens a menu. Esc goes to the feed, then the ≡ menu, then back to where you\n\
+             were. `attend inbox` and `attend send` are the same bus outside the screen."
                 .into(),
         )
     }
@@ -1131,6 +1064,15 @@ impl Screen for Chat {
 }
 
 impl World {
+    /// A world of these channels and identities, laid out for the tab
+    /// `shown` against its channels.
+    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab) -> World {
+        let names = tabs::strip_names(&groups);
+        let shown = tabs::normalize(shown.clone(), &names);
+        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows), shown };
+        World { groups, seen, rows, live_members, instances, laid }
+    }
+
     /// What the frame shows of the world: the channels with their members
     /// and descriptions, and the identities with their instance names.
     fn fingerprint(&self) -> String {

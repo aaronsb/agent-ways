@@ -26,6 +26,10 @@ basis:
 agent:
   name: Claude
   model: claude-opus-5-5
+considered:
+  - operator: aaronsb
+    said: "accepted the two prs. help me merge 940"
+    via: "the operator's chat message to the head session, 2026-10-12, asking to merge PR #940"
 observable:
   - '`attend --help` lists nine commands: run, listen, message, channel, peer, keepwarm, chat, sensor, config'
   - 'a bare `attend` prints the banner, those nine, and one line naming the attend_* tools as the principal path in a mod session'
@@ -33,7 +37,7 @@ observable:
   - '`grep -rnE ''\battend (send|reply|inbox|unread|join|leave|channels|dissolve|scenes?|peers|whoami|status|sensors|permissions|tune|cleanup)\b''` over plugins/, hooks/, skills/, statusline.sh, tools/attend-chat/src and docs/ (accepted records and changelogs excepted) finds nothing'
   - 'the three messaging guidance sources open their messaging section with attend_send and attend_reply, and show the CLI under a heading for hosts without the mod'
   - 'in the release after the alias release, `attend send hi` is a usage error, and the Stop hook script still exits 0 and ends the turn normally'
-status: proposed
+status: accepted
 date: 2026-10-12
 deciders:
   - aaronsb

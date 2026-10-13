@@ -55,14 +55,44 @@ impl Fixture {
         f
     }
 
-    /// Rewrite the session record, as Claude Code does on `/clear`.
+    /// Rewrite the session record, as Claude Code does on `/clear`. The
+    /// record says the session started a day ago, so mail addressed to the
+    /// project within that day was addressed to it.
     pub fn set_session_id(&self, sid: &str) {
         let pid = std::process::id();
         std::fs::write(
             self.home.join(".claude").join("sessions").join(format!("{pid}.json")),
-            format!(r#"{{"pid":{pid},"sessionId":"{sid}","cwd":"{}"}}"#, self.origin),
+            self.record(&pid.to_string(), sid, Some(SystemTime::now() - DAY)),
         )
         .unwrap();
+    }
+
+    /// A session record's JSON, as Claude Code writes it; `started` is its
+    /// `startedAt`, left out when `None`.
+    fn record(&self, pid: &str, sid: &str, started: Option<SystemTime>) -> String {
+        let started = started
+            .map(|t| format!(r#","startedAt":{}"#, t.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()))
+            .unwrap_or_default();
+        format!(r#"{{"pid":{pid},"sessionId":"{sid}","cwd":"{}"{started}}}"#, self.origin)
+    }
+
+    /// Run attend as session `sid` of another Claude Code process in the
+    /// same project, one that started `started_ago` back (`None`: a record
+    /// with no `startedAt`). A shell stands in for that process and writes
+    /// its own session record, so its process key differs from the
+    /// fixture's and attend sees a new session, not a `/clear` of this one.
+    pub fn attend_in_process(&self, sid: &str, started_ago: Option<Duration>, args: &[&str]) -> String {
+        let record = self.record("PID", sid, started_ago.map(|a| SystemTime::now() - a));
+        let script = r#"printf %s "$REC" | sed "s/PID/$$/" > "$HOME/.claude/sessions/$$.json"; "$@"; s=$?; rm -f "$HOME/.claude/sessions/$$.json"; exit $s"#;
+        let out = self
+            .command_from(Path::new("sh"))
+            .env("REC", record)
+            .args(["-c", script, "sh", env!("CARGO_BIN_EXE_attend")])
+            .args(args)
+            .output()
+            .expect("run attend in another process");
+        assert!(out.status.success(), "attend {args:?} as {sid}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
     /// Remove the session record: attend then runs as an outside party (a
@@ -241,3 +271,4 @@ impl Drop for Run {
 }
 
 pub const MINUTE: Duration = Duration::from_secs(60);
+pub const DAY: Duration = Duration::from_secs(24 * 3600);

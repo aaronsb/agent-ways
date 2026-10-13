@@ -103,6 +103,23 @@ impl FeedState {
         None
     }
 
+    /// The row of the area entry `i`'s header was drawn on in the last
+    /// frame, or `None` when it was out of view.
+    pub fn header_row(&self, i: usize) -> Option<u16> {
+        let (start, _) = self.span(i)?;
+        (start >= self.top && start < self.top + self.view).then(|| (start - self.top) as u16)
+    }
+
+    /// How many entries the last frame laid out.
+    pub fn len(&self) -> usize {
+        self.laid.heights.len()
+    }
+
+    /// Whether the last frame laid out no entry.
+    pub fn is_empty(&self) -> bool {
+        self.laid.heights.is_empty()
+    }
+
     /// Select entry `i` and scroll it into view: whole when it fits, else
     /// from its first row.
     pub fn reveal(&mut self, i: usize) {

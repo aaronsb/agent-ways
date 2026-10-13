@@ -1,5 +1,5 @@
 agent-tui frame 80x25
-| ≡    1 merged   ◆  2 #open   ▽ ▸3 #deploy   ♦  4 #infra    +   — rollout coord…|
+| ≡   ▽ ▸1 #deploy   ♦  2 #infra    +   — rollout coordination   ◆  #open   ⋯all |
 |╭──────────────────────────────────────────────────────────────────────────────╮|
 |│  ▽ 13:55  Wells  beta                                                        │|
 |│ ──────────────────────────────────────────────────────────────────────────── │|
@@ -23,18 +23,18 @@ agent-tui frame 80x25
 |│                                                                     #deploy  │|
 |╰──────────────────────────────────────────────────────────────────────────────╯|
 | @Laszlo @Wells @aaron                                                          |
-| TABS  ← → move · Enter menu · Ctrl+N new channel · Esc back │ F1 keys          |
+| tabs  mouse on (m) │ ? keys · Enter its menu · Tab next · S-Tab back           |
 styles
   0   0-2   White Blue -
-  0   5-14  White Blue -
-  0  17-18  Blue - BOLD
-  0  19-27  White Blue -
-  0  30-31  Red - -
-  0  32-42  Black Cyan BOLD|REVERSED
-  0  45-46  Cyan - -
-  0  47-56  White Blue -
-  0  59-61  White Blue -
-  0  62-79  - - DIM
+  0   5-6   Red - -
+  0   7-17  Black Cyan BOLD|REVERSED
+  0  20-21  Cyan - -
+  0  22-31  White Blue -
+  0  34-36  White Blue -
+  0  37-60  - - DIM
+  0  64-65  Blue - BOLD
+  0  66-72  White Blue -
+  0  74-79  White DarkGray -
   1   0-79  - - DIM
   2   0-0   - - DIM
   2   2-10  White DarkGray -
@@ -73,19 +73,25 @@ styles
  17   0-0   - - DIM
  17  79-79  - - DIM
  18   0-79  - - DIM
- 19   0-79  Cyan - -
- 20   0-0   Cyan - -
- 20   2-3   Cyan - -
- 20   4-4   - - REVERSED
- 20  79-79  Cyan - -
- 21   0-0   Cyan - -
+ 19   0-79  - - DIM
+ 20   0-0   - - DIM
+ 20   2-3   - - DIM
+ 20  79-79  - - DIM
+ 21   0-0   - - DIM
  21  69-77  White Blue -
- 21  79-79  Cyan - -
- 22   0-79  Cyan - -
+ 21  79-79  - - DIM
+ 22   0-79  - - DIM
  23   1-7   Cyan - BOLD
  23   9-14  LightCyan - -
  23  16-21  LightYellow - -
  24   0-5   Black Cyan BOLD
- 24  60-62  - - DIM
- 24  63-65  Cyan - -
- 24  66-69  - - DIM|ITALIC
+ 24   7-18  - - DIM|ITALIC
+ 24  19-21  - - DIM
+ 24  22-23  Cyan - -
+ 24  24-30  - - DIM|ITALIC
+ 24  31-36  Cyan - -
+ 24  37-47  - - DIM|ITALIC
+ 24  48-51  Cyan - -
+ 24  52-58  - - DIM|ITALIC
+ 24  59-64  Cyan - -
+ 24  65-68  - - DIM|ITALIC

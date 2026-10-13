@@ -50,7 +50,13 @@ pub(crate) fn cmd_dissolve(name: &str) {
         std::process::exit(1);
     }
     let r = get_groups();
-    let members = r.dissolve(name);
+    let members = match r.dissolve(name) {
+        Ok(members) => members,
+        Err(e) => {
+            eprintln!("[attend] dissolve: {e}");
+            std::process::exit(1);
+        }
+    };
     if members.is_empty() {
         println!("[attend] dissolved #{name} (was empty)");
     } else {

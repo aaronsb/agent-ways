@@ -200,6 +200,7 @@ impl App {
                 _ => self.mode = Mode::Guard { confirm: false },
             },
             Mode::Ask(a) => return self.ask_key(a, k),
+            Mode::Entry(e) => return self.entry_key(*e, k),
             Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
             Mode::Browse => return self.browse(k),
@@ -444,7 +445,13 @@ impl App {
             }
             Mode::Pick(p) => {
                 if let Some(k) = wheel {
-                    self.key(press(k));
+                    // The wheel over the menu moves its highlight; elsewhere
+                    // it scrolls what is under it.
+                    if in_menu {
+                        self.key(press(k));
+                    } else {
+                        self.pane_wheel(m);
+                    }
                 } else if click && in_menu {
                     let Some((_, items)) = &self.hits.menu else { return };
                     // A click picks the row: on a list it marks it, as Space
@@ -502,6 +509,25 @@ impl App {
                 }
             }
             Mode::Guard { confirm: false } | Mode::ThemeUnsaved if click => self.click_button(at),
+            // The entry dialog: a click outside closes it with nothing, and
+            // on the tab bar or the column goes on; one inside keeps it.
+            Mode::Entry(_) => {
+                if closes && !in_menu {
+                    self.mode = Mode::Browse;
+                    self.click_through(m);
+                }
+            }
+            // The wheel over the key help scrolls it; elsewhere it scrolls
+            // what is under it.
+            Mode::Help { .. } if wheel.is_some() => {
+                if in_menu {
+                    if let Some(k) = wheel {
+                        self.key(press(k));
+                    }
+                } else {
+                    self.pane_wheel(m);
+                }
+            }
             // Any key closes the key help, and so does any click; one
             // outside it goes on.
             Mode::Help { .. } if closes => {
@@ -512,7 +538,11 @@ impl App {
             }
             Mode::Response(_) => {
                 if let Some(k) = wheel {
-                    self.key(press(k));
+                    if in_menu || self.pane.is_none() {
+                        self.key(press(k));
+                    } else {
+                        self.pane_wheel(m);
+                    }
                 } else if closes && !in_menu {
                     // A click outside closes it; inside, the text stays put.
                     self.key(press(KeyCode::Esc));

@@ -11,7 +11,7 @@
 // an argv array with no shell. The mod never uses $.session.send.
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ProcessRunResult, Register, Timer } from 'claude-code'
+import type { EngineInterface, ProcessRunResult, PromptSubmitInput, PromptSubmitResult, Register, Timer } from 'claude-code'
 
 import type { AttendStatus } from '../types/index.d.ts'
 import {
@@ -29,6 +29,7 @@ import {
   isFullPreamble,
   joinArgv,
   keepwarmLine,
+  oneLine,
   parseConfig,
   parseDrain,
   parsePeerCount,
@@ -56,6 +57,7 @@ const DEFAULTS = {
   deliveries: 0,
   afterCompaction: false,
   turnsSinceFull: 0,
+  awaitingOperator: false,
 } satisfies AttendStatus
 
 const status = atom({ plugin: 'attend', key: 'status' } as const, DEFAULTS)
@@ -116,6 +118,11 @@ type Mod = {
   /** A /clear or a /resume moved the session to an id attend has not been
    *  told is listening yet; the poll holds its drain until it has. */
   isRelistening: boolean
+  /** The session started listening from its project's config and the
+   *  operator has not prompted yet. The poll submits no turn: what is
+   *  pending rides as context on the operator's first prompt, and the row
+   *  counts it meanwhile. */
+  isAwaitingOperator: boolean
 }
 
 async function readStatus($: $): Promise<AttendStatus> {
@@ -169,7 +176,7 @@ async function registerActiveTools($: $) {
   await $.tool.register({
     name: 'attend_send',
     description:
-      'Start a new topic with peer sessions over attend. Defaults to the #open base channel; `channel` scopes it to a named channel, `to` to one project path. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and attend splits a long one into numbered parts.',
+      'Start a new topic with peer sessions over attend. Defaults to the #open base channel; `channel` scopes it to a named channel, `to` to one project path. To answer a message that arrived, use attend_reply. The message is passed as is: no quoting needed, and a long one goes out as one message.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -214,8 +221,9 @@ async function registerActiveTools($: $) {
 }
 
 /** Tells attend this session is listening, with the mod as its host; the
- *  next drain applies the cold-start rule, so messages addressed to the
- *  project while it was dormant arrive. */
+ *  next drain applies the cold-start rule: what was addressed to the project
+ *  since this Claude Code process started arrives, and what `#open` and the
+ *  channels carry from now on. */
 async function listenOn($: $): Promise<ProcessRunResult> {
   let r = await run($, LISTEN_ON_ARGV)
   if (r.exitCode === 2) r = await run($, LISTEN_ON_PLAIN_ARGV)
@@ -294,7 +302,7 @@ async function tick($: $, mod: Mod, force: boolean) {
     const interval = pollInterval(mod.config, now - mod.lastActivityMs, isTurnRunning)
     if (!force && now - mod.lastPollMs < interval) return
     mod.lastPollMs = now
-    if (!isTurnRunning && !mod.isRelistening) await poll($, mod)
+    if (!isTurnRunning && !mod.isRelistening && !mod.isAwaitingOperator) await poll($, mod)
     await refreshUnread($, mod)
     if (force || now - mod.lastPeersMs >= PEERS_EVERY_MS) await refreshPeers($, mod)
     if (mod.config.keepwarm === 'on' && mod.running.size === 0 && now - mod.lastKeepwarmMs >= KEEPWARM_EVERY_MS) {
@@ -360,7 +368,7 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean
   const s = await readStatus($)
   const full = isFullPreamble(s.deliveries, s.afterCompaction, s.turnsSinceFull, mod.config.preambleEveryTurns)
   const entered = await $.prompt
-    .submit({ text: frameInbound(msgs.map(formatMessage), msgs.length, full) })
+    .submit({ text: frameInbound(msgs.map(formatMessage), full), asUser: true })
     .then(r => r.drop === undefined)
     .catch(() => false)
   if (!entered) return false
@@ -372,6 +380,59 @@ async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean
   }))
   return true
 }
+
+/** Holds, or stops holding, the session's turns until the operator's first
+ *  prompt. The module's flag serves a /clear, which empties $.state; the
+ *  copy in $.state serves a reload, which starts the module afresh. */
+async function setAwaiting($: $, mod: Mod, awaiting: boolean) {
+  mod.isAwaitingOperator = awaiting
+  await updateStatus($, s => ({ ...s, awaitingOperator: awaiting }))
+}
+
+/** The operator's first prompt in a session the config started listening:
+ *  one drain, and what it delivered rides `e` as context, the cold start's
+ *  held-back note with it, rather than as a turn of its own. A prompt that
+ *  does not enter leaves the messages in `mod.pending`, which the poll
+ *  submits as it does a batch whose submit failed. */
+async function enterWithPending($: $, mod: Mod, e: PromptSubmitInput, next: (e: PromptSubmitInput) => Promise<PromptSubmitResult>) {
+  const d = parseDrain((await run($, DRAIN_ARGV)).stdout)
+  if (!d) return next(e)
+  const listening = d.status === 'drained'
+  if ((await readStatus($)).listening !== listening) await updateStatus($, s => ({ ...s, listening }))
+  const msgs = d.messages
+  for (const m of msgs) {
+    mod.ids.set(shortId(m.id), m.id)
+    if (m.re) mod.ids.set(shortId(m.re), m.re)
+  }
+  const note = d.note ? `attend: ${oneLine(d.note)}` : undefined
+  const block = msgs.length > 0 ? frameInbound(msgs.map(formatMessage), true) : undefined
+  const attached = [block, note].filter((x): x is string => x !== undefined)
+  if (attached.length === 0) return next(e)
+  const keep = () => {
+    if (msgs.length === 0) return
+    mod.pending = [...msgs]
+    mod.submitTries = 0
+  }
+  let r: PromptSubmitResult
+  try {
+    r = await next({ ...e, context: [...(e.context ?? []), attached.join('\n')] })
+  } catch (err) {
+    keep()
+    throw err
+  }
+  if (r.drop !== undefined) {
+    keep()
+  } else if (msgs.length > 0) {
+    await updateStatus($, t => ({ ...t, deliveries: t.deliveries + 1, afterCompaction: false, turnsSinceFull: 0 }))
+    $.ui.toast(`attend: ${msgs.length} peer message(s) went to Claude with your prompt`)
+  }
+  return r
+}
+
+/** Origins that are the operator's own prompt: the terminal, Remote
+ *  Control, an SDK host's turn, and the owner's ping from Slack. An
+ *  unclassified one is not counted as the operator's. */
+const OPERATOR_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'slack-ping'])
 
 async function refreshUnread($: $, mod: Mod) {
   const u = parseUnread((await run($, UNREAD_ARGV)).stdout)
@@ -433,6 +494,7 @@ export const register: Register = on => {
     joined: new Set(),
     isStarted: false,
     isRelistening: false,
+    isAwaitingOperator: false,
   }
 
   on('session.start', async ($, e, next) => {
@@ -446,11 +508,16 @@ export const register: Register = on => {
     // A reload finds the mode in $.state; a new process (`claude --resume`)
     // finds the session id in the record of sessions that listened.
     const id = await $.session.id()
-    const wasActive = isActive(await readStatus($)) || (await readListened($)).includes(id)
+    const kept = await readStatus($)
+    const wasActive = isActive(kept) || (await readListened($)).includes(id)
     if (wasActive || (mod.config.listening === 'active' && mod.canPoll)) {
       // Listed by turn one; listening and the first drain follow the hook.
-      // Active from here, so a /clear before activate runs keeps it.
+      // Active from here, so a /clear before activate runs keeps it. A
+      // session the config starts listening has had no prompt yet: nothing
+      // it finds pending starts a turn before the operator's first prompt.
+      // A reload keeps whatever hold $.state records.
       mod.active = true
+      await setAwaiting($, mod, isActive(kept) ? kept.awaitingOperator : !wasActive)
       await registerActiveTools($)
       $.clock.after(0, () => void activate($, mod, id))
     } else {
@@ -467,7 +534,7 @@ export const register: Register = on => {
   // session that listened, puts the mode back at once, so a reload finds it
   // active, records the id, and tells attend the id is listening. The poll
   // holds its drain until then. The model's context changed as at a
-  // compaction, so the next delivery carries the full preamble. At process
+  // compaction, so the next delivery carries the preamble line. At process
   // start this event comes before session.start, which handles that case.
   on('classic.SessionStart', async ($, e, next) => {
     const done = await next(e)
@@ -475,7 +542,13 @@ export const register: Register = on => {
     const id = e.session_id || (await $.session.id())
     const goesOn = (await isOn($, mod)) || (e.source === 'resume' && (await readListened($)).includes(id))
     if (!goesOn) return done
-    await updateStatus($, s => ({ ...s, mode: 'active' as const, afterCompaction: true, turnsSinceFull: 0 }))
+    await updateStatus($, s => ({
+      ...s,
+      mode: 'active' as const,
+      afterCompaction: true,
+      turnsSinceFull: 0,
+      awaitingOperator: mod.isAwaitingOperator,
+    }))
     await rememberListening($, mod, id)
     mod.isRelistening = true
     if (mod.active) {
@@ -496,6 +569,16 @@ export const register: Register = on => {
       await updateStatus($, s => ({ ...s, afterCompaction: true }))
     }
     return done
+  })
+
+  // The operator's first prompt in a session the config started listening:
+  // what is pending enters beside it, read in the same turn, rather than as
+  // a turn the operator never asked for.
+  on('prompt.submit', async ($, e, next) => {
+    if (!mod.isAwaitingOperator || !OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
+    await setAwaiting($, mod, false)
+    if (!(await isOn($, mod))) return next(e)
+    return enterWithPending($, mod, e, next)
   })
 
   on('turn.start', async ($, e, next) => {

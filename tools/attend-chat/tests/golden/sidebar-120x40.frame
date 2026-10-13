@@ -1,15 +1,15 @@
 agent-tui frame 120x40
-| ≡    1 merged   ◆  2 #open   ▽  3 #deploy   ♦  4 #infra    +                                                           |
+| ≡    +                                                                                                 ◆  #open   ⋯all |
 | Agents 2/4                  │╭────────────────────────────────────────────────────────────────────────────────────────╮|
 |  Laszlo  alpha            ● ││  13:50  Laszlo  alpha                                                                  │|
 |  Wells  beta              ● ││ ────────────────────────────────────────────────────────────────────────────────────── │|
 |  Lyra  gamma              ○ ││ starting the theme port; the legend moves first                                        │|
 |  aaron  aaron             ○ ││                                                                                        │|
 | Channels 4                  ││  ▽ 13:55  Wells  beta                                                                  │|
-|  ◆ #open                  ● ││ ────────────────────────────────────────────────────────────────────────────────────── │|
-|  ▽ #deploy  1👤            ● ││ rollout is green on staging                                                            │|
-|  ♦ #infra  0👤             ○ ││ production at 15:00                                                                    │|
-|  ♦ #archive  1👤           ○ ││                                                                                        │|
+|  1 ◆ #open                ● ││ ────────────────────────────────────────────────────────────────────────────────────── │|
+|  2 ▽ #deploy  1👤          ● ││ rollout is green on staging                                                            │|
+|  3 ♦ #infra  0👤           ○ ││ production at 15:00                                                                    │|
+|  4 ♦ #archive  1👤         ○ ││                                                                                        │|
 |                             ││  13:58  aaron  aaron                                                                   │|
 |                             ││ ────────────────────────────────────────────────────────────────────────────────────── │|
 |                             ││ the shell this ran under: /bin/sh                                                      │|
@@ -38,17 +38,13 @@ agent-tui frame 120x40
 |                             ││ >                                                                                      │|
 |                             ││                                                                                 #open  │|
 |                             │╰────────────────────────────────────────────────────────────────────────────────────────╯|
-| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · F2 ↓ column · PgUp PgDn scroll · Alt+1-9 tab · F2 tabs    |
+| chat  mouse on (M-m) │ F1 keys · Enter send · Tab complete · S-Tab or ↑ leaves · Esc the feed · Alt+0-9 channel        |
 styles
   0   0-2   White Blue -
-  0   5-14  Black Cyan BOLD
-  0  17-18  Blue - BOLD
-  0  19-27  White Blue -
-  0  30-31  Red - -
-  0  32-42  White Blue -
-  0  45-46  Cyan - -
-  0  47-56  White Blue -
-  0  59-61  White Blue -
+  0   5-7   White Blue -
+  0 104-105 Blue - BOLD
+  0 106-112 White Blue -
+  0 114-119 White DarkGray BOLD
   1   0-10  - - BOLD|DIM
   1  29-119 - - DIM
   2   1-8   Black Cyan -
@@ -77,24 +73,24 @@ styles
   6  41-47  Black LightCyan -
   6  48-117 White DarkGray DIM
   6 119-119 - - DIM
-  7   1-9   Black Cyan -
-  7  10-25  White Blue -
+  7   1-11  Black Cyan -
+  7  12-25  White Blue -
   7  26-28  White DarkGray -
   7  29-30  - - DIM
   7  32-117 - - DIM
   7 119-119 - - DIM
-  8   1-11  Black Cyan -
-  8  12-14  White Blue -
-  8  16-25  White Blue -
+  8   1-13  Black Cyan -
+  8  14-16  White Blue -
+  8  18-25  White Blue -
   8  26-28  White DarkGray -
   8  29-30  - - DIM
   8 119-119 - - DIM
-  9   1-13  White DarkGray DIM
-  9  15-28  White DarkGray DIM
+  9   1-15  White DarkGray DIM
+  9  17-28  White DarkGray DIM
   9  29-30  - - DIM
   9 119-119 - - DIM
- 10   1-15  White DarkGray DIM
- 10  17-28  White DarkGray DIM
+ 10   1-17  White DarkGray DIM
+ 10  19-28  White DarkGray DIM
  10  29-30  - - DIM
  10 119-119 - - DIM
  11  29-30  - - DIM
@@ -175,11 +171,9 @@ styles
  39  40-46  - - DIM|ITALIC
  39  47-50  Cyan - -
  39  51-61  - - DIM|ITALIC
- 39  62-66  Cyan - -
- 39  67-75  - - DIM|ITALIC
- 39  76-85  Cyan - -
- 39  86-94  - - DIM|ITALIC
- 39  95-102 Cyan - -
- 39 103-108 - - DIM|ITALIC
- 39 109-111 Cyan - -
- 39 112-115 - - DIM|ITALIC
+ 39  62-67  Cyan - -
+ 39  68-81  - - DIM|ITALIC
+ 39  82-85  Cyan - -
+ 39  86-96  - - DIM|ITALIC
+ 39  97-104 Cyan - -
+ 39 105-111 - - DIM|ITALIC

@@ -139,7 +139,7 @@ fn a_right_click_on_a_senders_name_opens_the_agents_menu() {
 fn a_click_on_the_destination_flag_opens_the_menu_of_the_channel_it_names() {
     for b in [MouseButton::Left, MouseButton::Right] {
         let mut c = chat();
-        press(&mut c, KeyCode::Char('3'), KeyModifiers::CONTROL);
+        press(&mut c, KeyCode::Char('2'), KeyModifiers::CONTROL);
         assert_eq!(c.foreground(), &Tab::Channel("deploy".into()));
         let flag = cell(&mut c, "#deploy ", false);
         let flag = rows(&mut c).iter().enumerate().rev().find_map(|(y, r)| r.rfind("#deploy").map(|x| (r[..x].chars().count() as u16, y as u16))).unwrap_or(flag);
@@ -157,36 +157,40 @@ fn a_click_on_the_destination_flag_opens_the_menu_of_the_channel_it_names() {
     assert_eq!(c.foreground(), &Tab::Merged);
 }
 
-/// No visible change: the tab, its digit and the column row reach the same
-/// state by one path. The first activation shows #deploy, the second opens
-/// its menu; a right click opens the menu without showing.
+/// No visible change: the column's number, its row and the tab reach the
+/// same state by one path. The first activation shows #deploy, and its tab
+/// with it; the second, by any of them, opens its menu. A right click opens
+/// the menu without showing.
 #[test]
 fn every_input_on_a_channel_reaches_the_same_state() {
     type Input = fn(&mut Chat);
-    let inputs: [(&str, Input); 3] = [
-        ("tab", |c| {
-            let t = at(c, "3 #deploy");
-            click(c, t)
-        }),
-        ("digit", |c| press(c, KeyCode::Char('3'), KeyModifiers::CONTROL)),
-        ("row", |c| {
-            let r = cell(c, "#deploy", true);
-            click(c, r)
-        }),
-    ];
-    for (how, input) in inputs {
+    let digit: Input = |c| press(c, KeyCode::Char('2'), KeyModifiers::CONTROL);
+    let row: Input = |c| {
+        let r = cell(c, "#deploy", true);
+        click(c, r)
+    };
+    let tab: Input = |c| {
+        let t = at(c, "#deploy — rollout");
+        click(c, t)
+    };
+    for (how, first, second) in [("digit", digit, digit), ("row", row, row), ("digit, then the tab", digit, tab), ("row, then the tab", row, tab)] {
         let mut c = chat();
-        input(&mut c);
+        assert!(!rows(&mut c)[0].contains("#deploy"), "{how}: no tab before it is shown");
+        first(&mut c);
         let shown = menu(&mut c).map(|(t, _)| t);
         assert_eq!((c.foreground(), shown), (&Tab::Channel("deploy".into()), None), "{how}: the first shows it");
-        input(&mut c);
+        assert!(rows(&mut c)[0].contains("#deploy — rollout"), "{how}: and its tab: {}", rows(&mut c)[0]);
+        second(&mut c);
         assert_eq!(menu(&mut c).map(|(t, _)| t), Some("#deploy".into()), "{how}: the second opens its menu");
     }
-    for (how, at_) in [("tab", true), ("row", false)] {
-        let mut c = chat();
-        let target = if at_ { at(&mut c, "3 #deploy") } else { cell(&mut c, "#deploy", true) };
-        right(&mut c, target);
-        let shown = menu(&mut c).map(|(t, _)| t);
-        assert_eq!((c.foreground(), shown), (&Tab::Merged, Some("#deploy".into())), "{how}: a right click opens the menu, showing nothing");
-    }
+    let mut c = chat();
+    let target = cell(&mut c, "#deploy", true);
+    right(&mut c, target);
+    let shown = menu(&mut c).map(|(t, _)| t);
+    assert_eq!((c.foreground(), shown), (&Tab::Merged, Some("#deploy".into())), "a right click on the row opens the menu, showing nothing");
+    let mut c = chat();
+    let target = at(&mut c, " #open ");
+    right(&mut c, target);
+    let shown = menu(&mut c).map(|(t, _)| t);
+    assert_eq!((c.foreground(), shown), (&Tab::Merged, Some("#open".into())), "a right click on a tab opens its menu, showing nothing");
 }

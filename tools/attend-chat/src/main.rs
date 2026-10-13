@@ -13,35 +13,45 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
 
   Ctrl-C                    exit; with a draft in the compose box, asks first.
                             ≡ → Quit does the same
-  Esc                       closes a menu, a question or the help, gives back the
-                            compose box lent to a name, or clears the selection
-                            and the status line. It never exits, so Ctrl+3
+  Esc                       closes a menu, a question, the help or the entry
+                            dialog; with nothing open, the Esc cycle: the compose
+                            box, the feed, the ≡ menu, the tab or column row last
+                            focused, the ≡ menu again. It never exits, so Ctrl+3
                             arriving as Esc cannot close the chat
-  Enter                     send to the foreground channel
-  Ctrl+1..9                 show tab N (1 = merged, 2 = #open, ...); again on the
-                            shown tab, its menu. Needs a terminal that speaks the
-                            kitty keyboard protocol; F1 says whether yours does
-  Alt+1..9                  show tab N where Ctrl+digits do not arrive (Konsole and
+  Enter                     send to the foreground channel; outside the compose
+                            box, the focused element's menu (in the feed, the
+                            message's: Reply, Quote, Address, Copy)
+  Ctrl+1..9, Ctrl+0         show the column's channel N (#open is 1), or with 0
+                            the operator view ⋯all; again on the channel shown,
+                            its menu. Needs a terminal that speaks the kitty
+                            keyboard protocol; F1 says whether yours does
+  Alt+0..9                  the same where Ctrl+digits do not arrive (Konsole and
                             GNOME Terminal keep Alt+digits for their own tabs)
-  F2 / Ctrl+T               the tab bar (footer: TABS; the tab under the cursor is
-                            reversed behind a ▸): Left Right move, Enter the tab's
-                            menu, Esc back to the compose box
-  Ctrl+N                    ask for a new channel's name in the compose box, from
-                            the compose box or the tab bar; the box reads
-                            `new channel name >` until Enter, Esc, a click
-                            elsewhere or another tab; a draft comes back after
-  Tab                       next tab (empty input) / complete @name #channel /command
-  tab menus                 ≡ (left of merged, no number): Theme, Keybinding set,
-                            Mouse at start, Settings, Quit. merged: Clear view.
+  F2 / Ctrl+T               the focus to the tab shown (reversed behind a ▸), and
+                            again back to the compose box
+  Shift+Tab, ↑ ↓            leave the compose box: Shift+Tab; with text, ↑ at
+                            the start of its first line or ↓ at the end of its
+                            last. Outside it Tab, →, Shift+Tab and ← walk the
+                            tabs, the column, the feed and the box. In the feed a
+                            character is typed in the box; on the tab bar and the
+                            column ? and m work, q asks before quitting, and on a
+                            column row a digit picks a channel by its number
+  Ctrl+N                    ask for a new channel's name in a dialog under +; the
+                            compose box and its draft are never borrowed
+  Tab                       complete @name #channel /command; with nothing to
+                            complete, leave the compose box
+  tab menus                 ≡ (first, no number): Theme, Keybinding set, Mouse at
+                            start, Settings, Quit. ⋯all (the operator view, every
+                            channel together, pinned right): Clear view.
                             #open: Clear view, Clear history. A channel:
-                            Invite agent, Add agent, Remove agent, Describe,
+                            Add agent, Remove agent, Describe,
                             Clear history, Leave, Seal, Delete channel. Add
-                            agent and Seal wait on attend (ADR-404 D1, D4)
-                            and are set back; they cannot be picked yet.
+                            agent invites (the agent joins itself); Seal waits
+                            on attend (ADR-404 D4) and is set back.
                             The + slot (or Ctrl+N) asks for a new channel's name
                             with no menu. Clear history and Delete
-                            ask first: y goes ahead. Channel tabs are ordered
-                            by their newest message, #open first
+                            ask first: y goes ahead. The bar holds one channel
+                            tab, the created channel shown
   Shift-Enter / Alt-Enter   insert newline
   Left / Right / Home / End move cursor
   Backspace / Delete        edit
@@ -181,5 +191,10 @@ fn main() {
             1
         }
     };
+    // The person leaves with the chat: without this their heartbeat stays
+    // fresh for its grace window, and an agent's send to a channel they
+    // were the only other member of passes as read (ADR-170). A second
+    // chat under the same name touches it again within its refresh.
+    let _ = attend_presence::heartbeat::clear(&signal::human_member_id());
     std::process::exit(code);
 }

@@ -10,12 +10,27 @@
 //! the same way. `AGENT_TUI_DUMP=<dir>` also writes every frame checked to
 //! `<dir>`, for review as images or text.
 //!
+//! A golden is settled unless its name is listed in `PROVISIONAL`, a
+//! committed file in the golden directory: one frame name per line, `#`
+//! starting a comment. A name matches exactly, size suffix included, such
+//! as `merged-80x25`. Provisional goldens serve a rapid iteration phase,
+//! while flow or layout is still being decided. A listed frame is never
+//! asserted and never blessed, in any run, CI included. A drift or a
+//! missing golden prints a one-line note. Settled goldens are always
+//! asserted. The weakening stays visible as a reviewed file in the diff.
+//! [`Goldens::finish`] warns, once per process, about a listed name that has
+//! no `.frame` file and that no check in the process has reached so far:
+//! an entry a rename or a typo left behind. To promote a frame, delete its
+//! line, then bless and review it as usual.
+//!
 //! Interaction goes through the app's real key and mouse handlers.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Mutex;
 
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -312,15 +327,42 @@ pub struct Goldens {
     dump: Option<PathBuf>,
     drift: Vec<String>,
     blessed: Vec<String>,
+    /// The names in the directory's `PROVISIONAL` file, read once.
+    provisional: BTreeSet<String>,
 }
 
+/// Provisional frames a check has reached, across every [`Goldens`] in the
+/// process, since each test usually builds its own.
+static REACHED: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+/// Stale entries already warned about in this process.
+static WARNED: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
 impl Goldens {
-    /// Frames under `dir`, as `<name>.frame`. Bless and dump follow the
-    /// environment.
+    /// Frames under `dir`, as `<name>.frame`, with its `PROVISIONAL` list.
+    /// Bless and dump follow the environment.
     pub fn new(dir: impl Into<PathBuf>) -> Goldens {
         let on = |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty() && v != "0");
         let dump = std::env::var_os("AGENT_TUI_DUMP").filter(|v| !v.is_empty()).map(PathBuf::from);
-        Goldens { dir: dir.into(), bless: on("AGENT_TUI_BLESS"), dump, drift: Vec::new(), blessed: Vec::new() }
+        let dir: PathBuf = dir.into();
+        let provisional = std::fs::read_to_string(dir.join("PROVISIONAL"))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| l.split('#').next().unwrap_or("").trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        Goldens { dir, bless: on("AGENT_TUI_BLESS"), dump, drift: Vec::new(), blessed: Vec::new(), provisional }
+    }
+
+    /// Whether `name` is listed in the directory's `PROVISIONAL` file.
+    pub fn is_provisional(&self, name: &str) -> bool {
+        self.provisional.contains(name)
+    }
+
+    /// Listed names that have no `.frame` file and that no check in this
+    /// process has reached so far: entries left behind by a rename or a typo.
+    pub fn stale(&self) -> Vec<String> {
+        let reached = REACHED.lock().unwrap_or_else(|e| e.into_inner());
+        self.provisional.iter().filter(|n| !reached.contains(&self.path(n)) && !self.path(n).exists()).cloned().collect()
     }
 
     /// Record frames instead of checking them, whatever the environment says.
@@ -347,6 +389,17 @@ impl Goldens {
             let _ = std::fs::write(d.join(format!("{name}.frame")), &actual);
         }
         let path = self.path(name);
+        if self.is_provisional(name) {
+            REACHED.lock().unwrap_or_else(|e| e.into_inner()).insert(path.clone());
+            let state = match std::fs::read_to_string(&path) {
+                Err(_) => "has no golden",
+                Ok(e) if e == actual => return,
+                Ok(_) => "drifted",
+            };
+            // Straight to stderr: libtest captures `eprintln!` from a passing test.
+            let _ = writeln!(std::io::stderr(), "agent-tui: provisional frame {name} {state}; not asserted (PROVISIONAL)");
+            return;
+        }
         if self.bless {
             let same = std::fs::read_to_string(&path).is_ok_and(|e| e == actual);
             if !same {
@@ -366,8 +419,15 @@ impl Goldens {
         }
     }
 
-    /// Fail with every drifted, missing or blessed frame.
+    /// Fail with every drifted, missing or blessed frame. Warn once about
+    /// each stale provisional entry ([`Goldens::stale`]); a stale entry does
+    /// not fail.
     pub fn finish(self) {
+        for n in self.stale() {
+            if WARNED.lock().unwrap_or_else(|e| e.into_inner()).insert(self.path(&n)) {
+                let _ = writeln!(std::io::stderr(), "agent-tui: PROVISIONAL lists {n}, but {} does not exist and no check has reached it so far", self.path(&n).display());
+            }
+        }
         let mut out = String::new();
         if !self.drift.is_empty() {
             out += &format!("{} golden frame(s) do not match:\n{}\n", self.drift.len(), self.drift.join("\n"));
@@ -547,6 +607,51 @@ mod tests {
         let e = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| g.finish())).expect_err("a drift fails");
         let m = e.downcast_ref::<String>().cloned().unwrap_or_default();
         assert!(m.contains("one drifted") && m.contains("|ax|"), "{m}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_provisional_frame_is_never_asserted_or_blessed_and_a_settled_one_is() {
+        let d = scratch("provisional");
+        std::fs::create_dir_all(&d).unwrap();
+        for n in ["draft", "anchor"] {
+            std::fs::write(d.join(format!("{n}.frame")), frame(&buf(&["ab"]))).unwrap();
+        }
+        std::fs::write(d.join("PROVISIONAL"), "# still deciding the layout\ndraft\nfresh  # no golden yet\n").unwrap();
+        let fails = |g: Goldens| std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| g.finish())).is_err();
+
+        // A listed frame passes on a drift and on a missing golden.
+        let mut g = Goldens::new(&d).blessing(false);
+        assert!(g.is_provisional("draft") && g.is_provisional("fresh") && !g.is_provisional("anchor"));
+        g.check("draft", &buf(&["ax"]));
+        g.check("fresh", &buf(&["ax"]));
+        assert!(!fails(g), "a provisional mismatch does not fail");
+
+        // A bless never writes a listed frame.
+        let mut g = Goldens::new(&d).blessing(true);
+        g.check("draft", &buf(&["ax"]));
+        g.check("fresh", &buf(&["ax"]));
+        assert!(!fails(g), "nothing provisional was blessed");
+        assert_eq!(std::fs::read_to_string(d.join("draft.frame")).unwrap(), frame(&buf(&["ab"])));
+        assert!(!d.join("fresh.frame").exists());
+
+        // A settled frame still fails on a drift.
+        let mut g = Goldens::new(&d).blessing(false);
+        g.check("anchor", &buf(&["ax"]));
+        assert!(fails(g), "a settled mismatch fails");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_listed_name_with_no_frame_and_no_check_is_stale() {
+        let d = scratch("stale");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("kept.frame"), frame(&buf(&["ab"]))).unwrap();
+        std::fs::write(d.join("PROVISIONAL"), "kept\nrenamed-80x25\nreached\n").unwrap();
+        let mut g = Goldens::new(&d).blessing(false);
+        g.check("reached", &buf(&["ab"]));
+        assert_eq!(g.stale(), ["renamed-80x25"], "kept has a frame; reached was checked");
+        g.finish();
         let _ = std::fs::remove_dir_all(&d);
     }
 }

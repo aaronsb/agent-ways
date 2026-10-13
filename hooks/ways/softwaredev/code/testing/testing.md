@@ -45,6 +45,8 @@ Pick the lowest level that proves the contract.
 
 A unit test that mocks three layers belongs one level up. An end-to-end test of a pure function belongs several levels down.
 
+While the operator is still deciding a layout or an output's shape, keep a few anchor goldens and mark the rest provisional. Promote the provisional goldens once the operator accepts the layout (code/testing/gates/assertions, rapid iteration phase).
+
 ## Test Data
 
 Fixtures, seed data, demo environments, and examples in prompts are synthetic: generated to match the shape and constraints of real records without being any real record. Masking is not anonymization. A production sample copied to reproduce a bug is a disclosure.
@@ -58,6 +60,7 @@ Detect the test framework from project files (package.json, requirements.txt, Ca
 - code/testing/mocking(softwaredev) — when and how to mock
 - code/testing/tdd(softwaredev) — test-driven development cycle
 - code/testing/gates(softwaredev) — every gate reports executed, discovered, or absent; a zero needs a positive control
+- code/testing/gates/assertions(softwaredev) — golden baselines and the rapid iteration phase
 - code/testing/evaluation(softwaredev) — reproduce as reported, drive the real path, re-review fixes, count what ran
 - code/quality(softwaredev) — tests enforce quality thresholds
 - freshness/groundtruth(softwaredev) — the golden-master baseline captured before a refactor or migration

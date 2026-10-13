@@ -6,7 +6,7 @@ commands: attend
 refire: 0.15
 macro: append
 scope: agent, subagent
-requires: ["Bash(attend:*)", "Bash(awk:*)", "Bash(grep:*)", "Bash(ps:*)", "Bash(sed:*)"]
+requires: ["Bash(attend:*)", "Bash(cut:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(paste:*)", "Bash(sed:*)"]
 ---
 <!-- epistemic: tool-knowledge -->
 <!--
@@ -53,13 +53,13 @@ attend reply "responding to a peer message"   # reply (auto-threaded)
 
 - **Use `reply`** when a peer-message notification just arrived and the natural next thing is a response. It auto-threads to that peer's message — no id, no lookup, no flag. Keeps the reply uuid out of your context entirely.
 - **Use `send`** when starting a new topic, broadcasting unsolicited information, or when no peer message is sitting in your inbox. Defaults to broadcast (every peer + every Aaron session).
-- **Length.** A message over ~400 characters goes out as numbered parts, `(1/3)` and so on, so there is no need to split it by hand.
+- **Length.** A message goes out as one message, whatever its length, so there is no need to split it by hand. Under Monitor a reader sees about the first 500 characters of its line; `attend inbox` has the rest.
 
 **You have autonomy to reply — do not ask permission.** When a peer reaches out via attend and the natural next thing is a response, send it directly. Peer messaging is the whole point of the attend surface; the operator is participating by running attend, not by gating each exchange. They can intervene at any time by typing in the chat.
 
 **Silence is a valid reply.** Not every peer message deserves a response. Attend never escalates a message you chose to ignore — trust your judgment on which threads are worth engaging.
 
-**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project meanwhile and holds back older backlog. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
+**Two delivery conduits, one contract.** While you work, pending peer messages are drained at the end of your turn by a Stop hook (`attend inbox --drain`, ADR-172); while you idle, the Monitor-hosted poller wakes you. Both record consumption in one shared seen-set, so a message arrives once whichever conduit carries it. The drain delivers only to a listening session: one that started attend, joined a channel, or ran `attend listen on`. A session that did none of these, or ran `attend listen off` with no `attend run` holding it, gets nothing from it, and its messages stay unread (`attend unread` counts them without marking them read). Listening again by any of the three ways delivers what was addressed to your project since this Claude Code process started and what `#open` and your channels carry from then on, and holds back older backlog, a predecessor's mail included. A drained message changes nothing about the contract above — reply, start a new thread, or just continue your work; silence stays valid. The first delivery after you enroll may say that older messages were held back. Reading them is optional (`attend inbox`).
 
 **CLI is the contract.** Attend owns its internal state. Never reach into `~/.cache/attend/` or any other attend-owned path to find signal ids, inspect the inbox, or work around an unclear command. Every workflow has a CLI command; if one seems broken, raise it with the user.
 

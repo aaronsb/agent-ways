@@ -66,9 +66,12 @@ pub enum EnterAction {
 /// Plain-Enter dispatch. Slash command first; otherwise parse the
 /// `@`/`#` address sigil and write to the right inbox. `foreground`
 /// is the active tab (#393): unaddressed sends target its channel,
-/// and channel commands with no argument scope to it. Returns an
-/// `EnterAction` describing how the screen should update its state.
-pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> EnterAction {
+/// and channel commands with no argument scope to it. `person` is the
+/// membership id of the person at the chat, who a send to a channel makes
+/// its member (ADR-404 D1); `None` for a chat that is no person, such as a
+/// test's. Returns an `EnterAction` describing how the screen should
+/// update its state.
+pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>) -> EnterAction {
     let msg = input_value.trim_end().to_string();
     if msg.is_empty() {
         return EnterAction::None;
@@ -80,7 +83,7 @@ pub fn handle_enter(input_value: &str, signals: &[Signal], foreground: &Tab) -> 
     if let Some((cmd, args)) = slash::parse(&msg) {
         return run_slash(slash::dispatch(cmd, args), foreground);
     }
-    send_message(&msg, signals, foreground)
+    send_message(&msg, signals, foreground, person)
 }
 
 /// Run a dispatched slash command: the one path both the typed command
@@ -129,7 +132,7 @@ fn run_config(key: Option<String>, value: Option<String>) -> EnterAction {
 
 /// Send `msg`: to the recipients its leading `@`/`#` run addresses, or
 /// to the foreground tab's channel.
-fn send_message(msg: &str, signals: &[Signal], foreground: &Tab) -> EnterAction {
+fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<&str>) -> EnterAction {
     let msg = msg.to_string();
     let caps = ColorDepth::detect();
     let seeds = discover_sessions();
@@ -164,10 +167,10 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab) -> EnterAction 
             // explicit `#g` prefix — only the channel came from the
             // tab instead of the message text. The body is unchanged
             // (wire format carries no channel).
-            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet)
+            send_to_recipients(&msg, &[Addressed::Group(&scope)], &agents, &quiet, person)
         }
     } else {
-        send_to_recipients(&msg, &recipients, &agents, &quiet)
+        send_to_recipients(&msg, &recipients, &agents, &quiet, person)
     }
 }
 
@@ -196,16 +199,34 @@ fn send_to_recipients(
     recipients: &[Addressed<'_>],
     agents: &[KnownIdentity],
     quiet: &[String],
+    person: Option<&str>,
 ) -> EnterAction {
     // A recipient that cannot read it refuses the send, in its own words.
     let dests = match resolve_recipients(recipients, agents, quiet) {
         Ok(dests) => dests,
         Err(refusal) => return EnterAction::StatusOnly(refusal),
     };
+    // Posting in a channel makes the person its member, before the
+    // message is written, so the membership precedes what an agent
+    // answers (ADR-404 D1). A refused join does not hold the post back;
+    // the status says it.
+    let mut not_joined = Vec::new();
+    for r in recipients {
+        if let (Addressed::Group(name), Some(member)) = (r, person) {
+            if let Err(e) = enter_channel(member, name) {
+                not_joined.push((name, e));
+            }
+        }
+    }
     let sent = dests.iter().try_for_each(|dir| write_signal(dir, msg).map(|_| ())).map(|()| dests);
     match sent {
         Ok(dests) => {
-            let status = format!("sent → {}", recipient_labels(recipients).join(" "));
+            let mut status = format!("sent → {}", recipient_labels(recipients).join(" "));
+            // One channel needs no name in its note; several do.
+            let named = recipients.iter().filter(|r| matches!(r, Addressed::Group(_))).count() > 1;
+            for (name, e) in not_joined {
+                status += &if named { format!(" (not joined #{name}: {e})") } else { format!(" (not joined: {e})") };
+            }
             // Echo only when the message reaches NO inbox the sender's
             // own watcher already surfaces — otherwise it round-trips
             // and a synthetic echo would double-render it. `#open`
@@ -237,6 +258,42 @@ fn run_join(name: &str) -> EnterAction {
     join_group_in(&signals_base(), &member, name)
 }
 
+/// How long a channel write from a key handler waits for another writer to
+/// release `_groups.yaml` before it reports the channels busy.
+const GROUPS_LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The group state as this screen writes it: each write waits at most
+/// [`GROUPS_LOCK_WAIT`], so a stuck writer elsewhere cannot hang the key
+/// handler, and a refused write reaches the status row as its error.
+fn writing_groups(base: &std::path::Path, member: &str) -> attend_groups::Groups {
+    attend_groups::Groups::new(base, member).waiting_at_most(GROUPS_LOCK_WAIT)
+}
+
+/// Make the person at the chat, `member`, a member of channel `name` when
+/// they post in it (ADR-404 D1), as `/join` makes them, so an agent alone in
+/// the channel with them can answer. Showing a channel joins nothing: the
+/// tab bar is walked, cycled and advanced past channels nobody chose, and a
+/// Leave must hold. The heartbeat is touched first, as `/join` does, so the
+/// membership is live at once.
+fn enter_channel(member: &str, name: &str) -> Result<bool, String> {
+    let _ = attend_presence::heartbeat::touch(member);
+    enter_channel_in(&signals_base(), member, name)
+}
+
+/// Filesystem-effect core of [`enter_channel`]. Only a channel that exists,
+/// with its entry and its directory, is entered: a swept or unknown channel
+/// is not brought back, as `/join` would. Returns whether it wrote a
+/// membership, or the join's refusal.
+fn enter_channel_in(base: &std::path::Path, member: &str, name: &str) -> Result<bool, String> {
+    let groups = writing_groups(base, member);
+    match groups.members(name) {
+        Some(members) if !members.iter().any(|m| m == member) && groups.group_dir(name).is_dir() => {
+            groups.join(name, false).map(|()| true)
+        }
+        _ => Ok(false),
+    }
+}
+
 /// Execute a `/leave` against the live signals base. A missing
 /// argument scopes to the foreground tab (#393); if that resolves to
 /// the base channel, reject with the same message the explicit form
@@ -257,7 +314,7 @@ fn run_leave(channel: Option<String>, foreground: &Tab) -> EnterAction {
 /// already happened in `slash::dispatch`; `Groups::join` re-validates
 /// as defense in depth.
 fn join_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterAction {
-    match attend_groups::Groups::new(base, member).join(name, false) {
+    match writing_groups(base, member).join(name, false) {
         Ok(()) => EnterAction::ClearWithStatus(format!("joined #{name}")),
         Err(e) => EnterAction::StatusOnly(format!("/join failed: {e}")),
     }
@@ -268,7 +325,7 @@ fn join_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterActio
 /// silent no-op — `Groups::leave` itself succeeds on a group you were
 /// never in.
 fn leave_group_in(base: &std::path::Path, member: &str, name: &str) -> EnterAction {
-    let groups = attend_groups::Groups::new(base, member);
+    let groups = writing_groups(base, member);
     match groups.members(name) {
         None => EnterAction::StatusOnly(format!("#{name}: unknown group")),
         Some(members) if !members.iter().any(|m| m == member) => {
@@ -335,7 +392,7 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
 ) -> EnterAction {
     // Member id is irrelevant for dissolve — it acts on the group,
     // not on this member's entry.
-    let groups = attend_groups::Groups::new(base, "");
+    let groups = writing_groups(base, "");
     let members = groups.members(name);
     let dir_exists = groups.group_dir(name).is_dir();
     if members.is_none() && !dir_exists {
@@ -352,8 +409,10 @@ fn dissolve_group_in<F: Fn(&str) -> bool>(
             if live == 1 { "" } else { "s" }
         ));
     }
-    groups.dissolve(name);
-    EnterAction::ClearWithStatus(format!("dissolved #{name}"))
+    match groups.dissolve(name) {
+        Ok(_) => EnterAction::ClearWithStatus(format!("dissolved #{name}")),
+        Err(e) => EnterAction::StatusOnly(format!("/dissolve: {e}")),
+    }
 }
 
 /// Filesystem-effect core of `/channels create` (#404), parameterized
@@ -367,7 +426,7 @@ fn create_channel_in(
     name: &str,
     description: Option<&str>,
 ) -> EnterAction {
-    match attend_groups::Groups::new(base, "").create(name, description) {
+    match writing_groups(base, "").create(name, description) {
         Ok(()) => EnterAction::ClearWithStatus(match description {
             Some(d) => format!("created #{name} — {d}"),
             None => format!("created #{name}"),
@@ -380,7 +439,7 @@ fn create_channel_in(
 /// clears the description — same contract as the CLI's `describe`.
 /// `set_description` owns existence checking and its error strings.
 fn describe_channel_in(base: &std::path::Path, name: &str, text: &str) -> EnterAction {
-    match attend_groups::Groups::new(base, "").set_description(name, text) {
+    match writing_groups(base, "").set_description(name, text) {
         Ok(()) if text.trim().is_empty() => {
             EnterAction::ClearWithStatus(format!("cleared #{name} description"))
         }
@@ -478,6 +537,23 @@ fn run_whois(name: &str) -> EnterAction {
 /// is preserved (ADR-173 / #393 consent asymmetry).
 fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterAction {
     let g = tabs::command_scope(channel, foreground);
+    // The base channel's rule fires before any roster read.
+    if g == BASE_CHANNEL_NAME {
+        return invite_peer(&g, &crate::peers::Peer { session_id: String::new(), root: String::new(), display: member.into() });
+    }
+    let caps = ColorDepth::detect();
+    let instance_cache = attend_instances::SnapshotCache::new();
+    let roster = crate::peers::roster(caps, &instance_cache);
+    match crate::peers::resolve_peer(member, &roster) {
+        Ok(peer) => invite_peer(&g, peer),
+        Err(e) => EnterAction::StatusOnly(e),
+    }
+}
+
+/// Invite `peer` to channel `g`: the one invitation `/invite` and a menu's
+/// Add agent to chat both send. The peer joins itself, or stays silent.
+pub fn invite_peer(g: &str, peer: &crate::peers::Peer) -> EnterAction {
+    let g = g.to_string();
     if g == BASE_CHANNEL_NAME {
         return EnterAction::StatusOnly(
             "#open is the base channel — everyone is already there".into(),
@@ -488,13 +564,6 @@ fn run_invite(member: &str, channel: Option<String>, foreground: &Tab) -> EnterA
     // typo than an intent. `/join` it first.
     let Some(dir) = resolve_group_dir(&g) else {
         return EnterAction::StatusOnly(format!("#{g}: unknown channel — /join it first"));
-    };
-    let caps = ColorDepth::detect();
-    let instance_cache = attend_instances::SnapshotCache::new();
-    let roster = crate::peers::roster(caps, &instance_cache);
-    let peer = match crate::peers::resolve_peer(member, &roster) {
-        Ok(p) => p,
-        Err(e) => return EnterAction::StatusOnly(e),
     };
     let dest = cwd_dir(&peer.root);
     let body = invite_body(&g, &dir);
@@ -583,7 +652,7 @@ fn kick_member_in(
     member_id: &str,
     label: &str,
 ) -> EnterAction {
-    match attend_groups::Groups::new(base, "").kick(name, member_id) {
+    match writing_groups(base, "").kick(name, member_id) {
         Ok(()) => EnterAction::ClearWithStatus(format!("kicked @{label} from #{name}")),
         Err(e) => EnterAction::StatusOnly(format!("/kick: {e}")),
     }
@@ -818,6 +887,15 @@ pub struct TabResult {
     pub new_cycle: Option<TabCycle>,
 }
 
+/// Whether Tab in the compose box has a word to complete: Tab would change
+/// the box's text, completing a command, a subcommand, an `@agent` or a
+/// `#channel` over `agents` and `channels`, or moving the completion `cycle`
+/// last made to its next candidate. A word nothing matches, or a cycle of
+/// one, completes nothing, and Tab leaves the box instead ([`super::ix`]).
+pub fn completable(buf: &str, cursor: usize, cycle: Option<&TabCycle>, agents: &[String], channels: &[String]) -> bool {
+    handle_tab(buf, cursor, cycle.cloned(), agents, channels).new_buf != buf
+}
+
 /// Tab-completion + cycle advance. No-op when the caret is mid-buffer
 /// (avoids surprising mid-sentence edits) or when no completion
 /// applies. Slash completions short-circuit before `@`/`#` parsing.
@@ -923,9 +1001,34 @@ pub fn handle_tab(
 mod tests {
     use super::*;
 
+    /// Tab has a word to complete only where it would change the box: the
+    /// review of #972 found Tab dead on a cycle of one, an `@` or a `/` that
+    /// matches nothing.
+    #[test]
+    fn tab_has_a_word_to_complete_only_where_it_changes_the_box() {
+        let agents = ["alpha".to_string(), "alto".to_string()];
+        let channels = ["open".to_string(), "deploy".to_string(), "archive".to_string()];
+        let can = |buf: &str, cursor: usize, cycle: Option<&TabCycle>| completable(buf, cursor, cycle, &agents, &channels);
+        assert!(can("/he", 3, None), "a command being typed");
+        assert!(can("hi @al", 6, None), "an @agent in progress");
+        assert!(can("#dep", 4, None), "a #channel in progress");
+        let two = TabCycle { sigil: Sigil::Agent, candidates: vec!["alpha".into(), "alto".into()], index: 0 };
+        assert!(can("hi @alpha ", 10, Some(&two)), "the completion Tab made: the next candidate");
+        let one = TabCycle { sigil: Sigil::Group, candidates: vec!["archive".into()], index: 0 };
+        assert!(can("#arch", 5, None), "#arch completes once");
+        assert!(!can("#archive ", 9, Some(&one)), "a cycle of one: Tab would put back the same name");
+        assert!(!can("hi @zzz", 7, None), "an @ nothing matches");
+        assert!(!can("/zzz", 4, None), "a / nothing matches");
+        assert!(!can("hi there", 8, None), "plain text");
+        assert!(!can("", 0, None), "an empty box");
+        assert!(!can("hi @alpha ", 10, None), "a finished mention");
+        assert!(!can("hi @al", 3, None), "the caret mid-buffer");
+        assert!(!can("mail a@b", 8, None), "an address, not a mention");
+    }
+
     #[test]
     fn enter_empty_is_noop() {
-        match handle_enter("   ", &[], &Tab::Merged) {
+        match handle_enter("   ", &[], &Tab::Merged, None) {
             EnterAction::None => {}
             _ => panic!("empty input should produce EnterAction::None"),
         }
@@ -1013,6 +1116,34 @@ mod tests {
             .members("deploy")
             .unwrap();
         assert_eq!(members, vec!["aaron"]);
+    }
+
+    #[test]
+    fn a_join_while_another_writer_holds_the_channels_reports_busy() {
+        let base = tempdir_like();
+        let held = agent_settings::writer::Lock::acquire(&base.join("_groups.yaml")).unwrap();
+        match join_group_in(&base, "aaron", "deploy") {
+            EnterAction::StatusOnly(s) => assert!(s.contains(attend_groups::BUSY), "{s}"),
+            _ => panic!("a join that waited out the lock should report it and keep the input"),
+        }
+        drop(held);
+        assert!(attend_groups::Groups::new(&base, "aaron").members("deploy").is_none(), "nothing was written");
+    }
+
+    #[test]
+    fn entering_joins_only_a_channel_that_exists() {
+        let base = tempdir_like();
+        assert_eq!(enter_channel_in(&base, "aaron", "ghost"), Ok(false), "an unknown channel is not made");
+        assert!(!base.join("@ghost").exists());
+        let agent = attend_groups::Groups::new(&base, "agent");
+        agent.join("deploy", false).unwrap();
+        agent.join("swept", false).unwrap();
+        std::fs::remove_dir_all(base.join("@swept")).unwrap();
+        assert_eq!(enter_channel_in(&base, "aaron", "swept"), Ok(false), "a swept channel is not brought back");
+        assert!(!base.join("@swept").exists());
+        assert_eq!(enter_channel_in(&base, "aaron", "deploy"), Ok(true));
+        assert_eq!(enter_channel_in(&base, "aaron", "deploy"), Ok(false), "a member is not written twice");
+        assert_eq!(agent.members("deploy").unwrap(), vec!["agent", "aaron"]);
     }
 
     #[test]

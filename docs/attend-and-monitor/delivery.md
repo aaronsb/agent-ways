@@ -28,10 +28,10 @@ flowchart TD
 `attend run`, launched under Monitor by `/attend`, runs the peers sensor. Each poll reads every unseen `.signal` file in the scan directories and emits one stdout line per message, which Monitor turns into a notification:
 
 ```
-[attend sensor=peers priority=high] message from Elio (web): rebased on the auth change; waiting on the api tag
+[attend sensor=peers priority=high] message from Elio (web) ~73nki: rebased on the auth change; waiting on the api tag
 ```
 
-The sender label is the persona name and the basename of the sender's directory, the same label the drain and attend-chat show. A body longer than 260 characters is split at word boundaries into at most three lines marked `(1/3)`, `(2/3)`, `(3/3)`, which stays under Monitor's line limit; `attend inbox` holds the full text. The first message a session receives carries the hint `(reply: attend reply "...")`, the verb that threads to it.
+The sender label is the persona name and the basename of the sender's directory, the same label the drain and attend-chat show. `~73nki` is the message's short handle, which `attend reply --re` takes. The line carries the whole message, its whitespace collapsed to single spaces, whatever its length (ADR-412). Monitor shows the first 500 characters of a line and marks a longer one `...(truncated)`; the handle comes before the body so it survives the cut, and `attend inbox` holds the full text. The first message a session receives carries the hint `(reply: attend reply "...")`, the verb that threads to it, after the handle and before the body.
 
 When a single poll finds more than 8 messages, it sends one count line instead:
 
@@ -95,8 +95,12 @@ To stop both conduits, run `attend scene private` and stop the Monitor running `
 
 A session is cold until a conduit has applied the cold-start rule for it, which it records as `baselined: true` in the state file. The peers sensor and the drain apply the same rule, `attend_state::cold_start`:
 
-- A message addressed to the project (`--to`) is delivered whatever its age, the newest 50 at most.
-- An `#open` or channel message younger than 120 seconds is live conversation and is delivered.
+A message is replayed to the sessions it was said to (ADR-404 D3b):
+
+- A message addressed to the project (`--to`) since the session began is delivered whatever its age, the newest 50 at most. `--to` addresses the sessions live in the project when it is sent (ADR-401). "Began" means the start of the current Claude Code process, the `startedAt` of its session record: a `claude --resume` writes a new record, so a resumed session that had never listened, or had turned listening off, gets only the mail sent since it was resumed. One that was listening kept its seen-set and is not cold. Mail from before then is backlog, whether or not the session it was for read it.
+- An `#open` or channel message posted since the session started listening is delivered, the newest 50 at most. Enrolling records that time in the enrollment record, and from then the session is a member of `#open` (a channel joined later has its older messages baselined at the join). So a first drain that comes late, such as the attend mod's at the operator's first prompt, still gets what was said while it waited.
+- Any message younger than 120 seconds is live conversation and is delivered.
+- A record with no time (a session record without `startedAt`, an enrollment record from an older attend) leaves that room to the 120-second rule.
 - Anything else is marked seen without being shown. The first delivery carries one line counting it, `N older messages held back; reading them is optional: attend inbox`. When there is nothing else to deliver, the drain sends that line alone as a `systemMessage`, so the turn still ends.
 
 A restarted `attend run` restores its seen-set from the checkpoint and delivers only what arrived while it was down.

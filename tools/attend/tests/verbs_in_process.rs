@@ -198,7 +198,7 @@ mod reply {
         shared_channel(&f);
         f.put("@mod-trial", "peer-sess-1-1", "in the channel", std::time::Duration::ZERO);
         record(&f.sid, "peer-sess-1-1", &channel("mod-trial"));
-        attend_groups::Groups::new(&f.signals(), "peer-sess").dissolve("mod-trial");
+        attend_groups::Groups::new(&f.signals(), "peer-sess").dissolve("mod-trial").unwrap();
         match reply("a private answer") {
             Err(attend::verbs::SendError::ParentChannelGone { channel }) => assert_eq!(channel, "mod-trial"),
             other => panic!("expected parent_channel_gone: {other:?}"),
