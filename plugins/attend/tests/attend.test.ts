@@ -801,6 +801,32 @@ describe('a session whose cache has lapsed', () => {
     await ui.unmount()
   })
 
+  // #979 review, finding 1: a dropped prompt does not turn what it took
+  // into a turn on the cold cache.
+  test('a dropped prompt leaves what it took for the next prompt, never for the poll', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains, unread: WAITING })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    drains.push(...cold)
+    await clock.advance(10_000)
+    drains.splice(0, drains.length, one(9, 'project'))
+    h.world.dropPrompts = true
+    await typed($, 'dropped')
+    expect(h.prompts[1]?.context[0]).toContain('m9')
+    h.world.dropPrompts = false
+    drains.push(...Array<string>(20).fill(DRAIN_EMPTY))
+    await clock.advance(60_000)
+    expect(h.submitted).toEqual([])
+    const ui = await $.ui.mount(BAND as never)
+    expect(await ui.find({ text: /✉ 1 waiting · cold/ } as never)).toBeDefined()
+    await ui.unmount()
+    await typed($, 'entered')
+    expect(h.submitted).toEqual([])
+    expect(h.prompts[2]?.context[0]).toContain(`[project] ${SENDER} 21:21: m9`)
+  })
+
   test('a warm drain afterwards wakes the session again', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const drains: string[] = []

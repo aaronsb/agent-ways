@@ -45,15 +45,16 @@ fn word(state: &Listening) -> &'static str {
     }
 }
 
-/// `attend unread`: `N unread`, then one line per room with unread
-/// messages; `--json` prints [`unread::Unread`].
+/// `attend unread`: `N unread`, or `N waiting · cold` when the prompt cache
+/// has lapsed under an addressed message, then one line per room with
+/// unread messages; `--json` prints [`unread::Unread`].
 pub(crate) fn cmd_unread(json: bool) {
     let counts = unread::unread();
     if json {
         crate::cmd::print_json(&counts);
         return;
     }
-    println!("{} unread", counts.unread);
+    println!("{}", unread::headline(&counts));
     for room in counts.rooms.iter().filter(|r| r.count > 0) {
         println!("  {} {}", room.label, room.count);
     }

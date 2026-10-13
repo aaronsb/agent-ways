@@ -289,6 +289,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
     // exists; what matters is that it can never *disagree* with the
     // id the registry and groups saw (PR #380 review, finding 1).
     let heartbeat_id = session_id.clone();
+    let mut cache_gate = tick::CacheGate::default();
 
     loop {
         // `/clear` gives this session a new id under us. Checked every
@@ -343,6 +344,7 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
             focus: &focus,
             heartbeat_id: &heartbeat_id,
             cfg: &cfg,
+            cache_gate: &mut cache_gate,
         };
         tick_iteration(&mut tick_state);
     }

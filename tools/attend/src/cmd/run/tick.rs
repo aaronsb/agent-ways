@@ -50,6 +50,32 @@ pub(super) struct TickState<'a> {
     pub(super) focus: &'a Focus,
     pub(super) heartbeat_id: &'a str,
     pub(super) cfg: &'a config::Config,
+    pub(super) cache_gate: &'a mut CacheGate,
+}
+
+/// The cache gate on what this run prints (ADR-406 item 1). A line on
+/// stdout starts a turn in an idle session, and a session whose prompt
+/// cache has lapsed is woken by nothing but keepwarm. The answer is read
+/// at most every [`CacheGate::RECHECK`], and only while a line is waiting.
+#[derive(Default)]
+pub(super) struct CacheGate {
+    checked: Option<(Instant, bool)>,
+}
+
+impl CacheGate {
+    const RECHECK: Duration = Duration::from_secs(10);
+
+    /// Whether session `session_id`'s cache has lapsed, on keepwarm's clock.
+    fn lapsed(&mut self, session_id: &str, working_dir: &str) -> bool {
+        if let Some((at, lapsed)) = self.checked {
+            if at.elapsed() < Self::RECHECK {
+                return lapsed;
+            }
+        }
+        let lapsed = sensor_keepwarm::session_cache_lapsed(session_id, working_dir, sensor_trait::epoch_secs());
+        self.checked = Some((Instant::now(), lapsed));
+        lapsed
+    }
 }
 
 /// Build the engagement curve from config (ADR-123 action-potential
@@ -304,9 +330,25 @@ pub(super) fn tick_iteration(s: &mut TickState) {
     // only presence-noise control is relaxed. The clean fix is to split
     // message scanning into its own sensor so the lane is chosen per
     // observation (also the seam a future Slack event-sensor wants).
-    let (msg_ready, evt_ready): (Vec<usize>, Vec<usize>) = ready_indices
+    let (mut msg_ready, mut evt_ready): (Vec<usize>, Vec<usize>) = ready_indices
         .iter()
         .partition(|&&i| rides_message_lane(s.slots[i].name()));
+    // The cache gate: on a lapsed cache only keepwarm's line goes out. The
+    // event lane's observations are dropped, as its decay drops any it does
+    // not disclose; they describe a moment, and the next turn reads the
+    // repository afresh. The message lane is held: its accumulator keeps
+    // what the peers sensor surfaced, presence included, and it goes out
+    // once the cache is warm. Messages addressed to the session wait unseen
+    // in the sensor itself.
+    let gated = |i: &usize| s.slots[*i].name() != "keepwarm";
+    if (evt_ready.iter().any(gated) || msg_ready.iter().any(gated)) && s.cache_gate.lapsed(s.heartbeat_id, &s.focus.working_dir) {
+        for &i in &evt_ready {
+            emit::log(&format!("{}: dropped {} event(s), the prompt cache has lapsed", s.slots[i].name(), s.slots[i].accumulator.event_count));
+            s.slots[i].accumulator.reset();
+        }
+        evt_ready.clear();
+        msg_ready.retain(|i| s.slots[*i].name() == "keepwarm");
+    }
     try_disclose(s.slots, &evt_ready, s.governor, true);
     // Message lane: do not record engagement, so it never builds the
     // action-potential refractory that would later hold conversation.

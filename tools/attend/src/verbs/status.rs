@@ -40,6 +40,9 @@ pub struct Pending {
 pub struct Status {
     pub instances: Vec<Instance>,
     pub signals: Pending,
+    /// What waits for this session: `N unread`, or `N waiting · cold` while
+    /// its prompt cache has lapsed under an addressed message.
+    pub unread: String,
     /// Keepwarm's one-line state (ADR-182).
     pub keepwarm: String,
     pub channels: Vec<JoinedChannel>,
@@ -52,6 +55,7 @@ pub fn status() -> Status {
     Status {
         instances: running_instances(&me),
         signals: pending(&me, &groups),
+        unread: crate::verbs::unread::headline(&crate::verbs::unread::unread()),
         keepwarm: keepwarm_line(&me),
         channels: groups.my_groups().into_iter().map(|(name, pinned)| JoinedChannel { name, pinned }).collect(),
         cache: attend_presence::cache::dir(),

@@ -11,6 +11,7 @@
 mod common;
 use common::Fixture;
 use std::path::Path;
+use std::time::Duration;
 use std::sync::{Mutex, MutexGuard};
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -369,6 +370,8 @@ fn a_direct_message_to_the_id_before_a_clear_is_still_read() {
     f.drain("plain");
     signal(&f, &f.project_tray(), "x-1-1", &format!("claude:x|p|/tmp/p|to:{old}|sent before the clear"));
     f.set_session_id("sess-addr-clear-new");
+    // The new id has had a turn, so its cache is warm (ADR-406 item 1).
+    f.last_turn_of("sess-addr-clear-new", Some(Duration::ZERO));
     let listed = f.ok(&["inbox", "--json"]);
     assert!(listed.contains("sent before the clear"), "{listed}");
     let d: serde_json::Value = serde_json::from_str(&f.ok(&["inbox", "--drain", "--json", "--wake"])).unwrap();

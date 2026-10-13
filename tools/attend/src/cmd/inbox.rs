@@ -420,7 +420,7 @@ pub(crate) fn cmd_inbox_drain(format: &str, wake: bool) {
     // other. The clock is keepwarm's: the newest turn in the transcript,
     // and a transcript that cannot be read counts as lapsed.
     let addressed = wake && delivered.iter().any(|d| d.wakes);
-    let lapsed = addressed && sensor_keepwarm::session_cache_lapsed(&session_id, &cwd, sensor_trait::epoch_secs());
+    let lapsed = addressed && crate::util::cache_lapsed(&ident);
     // Nothing addressed to the session, or a lapsed cache: what it found
     // waits, unmarked, for the next turn. The cold start's own marks still
     // go through, so the backlog it holds back stays held back.

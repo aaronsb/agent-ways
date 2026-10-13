@@ -57,16 +57,27 @@ impl Fixture {
         f
     }
 
-    /// A `ways` first on attend's PATH that answers `ways context` with the
-    /// transcript reading [`Fixture::last_turn`] wrote, and fails otherwise,
-    /// as a missing `ways` would. The wake gate reads the cache clock there.
+    /// A `ways` first on attend's PATH that answers exactly
+    /// `ways context --json --session <id>`, run from the fixture's
+    /// project, with the reading [`Fixture::last_turn_of`] wrote for that
+    /// id. Any other call, or an id with no reading, fails as a missing
+    /// `ways` would, which the wake gate reads as a lapsed cache. The gate
+    /// reads the cache clock there.
     fn stand_in_ways(&self) {
         let bin = self.home.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let ways = bin.join("ways");
-        let reading = self.home.join("reading.json");
-        std::fs::write(&ways, format!("#!/bin/sh\n[ \"$1\" = context ] && [ -f '{0}' ] && exec cat '{0}'\nexit 1\n", reading.display()))
-            .unwrap();
+        let readings = self.home.join("readings");
+        std::fs::create_dir_all(&readings).unwrap();
+        let script = format!(
+            "#!/bin/sh\n\
+             [ \"$#\" = 4 ] && [ \"$1 $2 $3\" = 'context --json --session' ] && [ \"$(pwd -P)\" = '{origin}' ] \\\n  \
+             && [ -f '{readings}/'\"$4\".json ] && exec cat '{readings}/'\"$4\".json\n\
+             exit 1\n",
+            origin = std::fs::canonicalize(&self.origin).unwrap().display(),
+            readings = readings.display(),
+        );
+        std::fs::write(&ways, script).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -74,11 +85,22 @@ impl Fixture {
         }
     }
 
-    /// Set the session's cache clock: its newest assistant turn was `ago`
-    /// back, on a large context; `None` leaves no transcript to read. A new
+    /// Set this session's cache clock: see [`Fixture::last_turn_of`]. A new
     /// fixture's last turn is now, so its cache is warm.
     pub fn last_turn(&self, ago: Option<Duration>) {
-        let reading = self.home.join("reading.json");
+        self.last_turn_of(&self.sid, ago);
+    }
+
+    /// Set session `sid`'s cache clock: its newest assistant turn was `ago`
+    /// back, on a large context at the one-hour tier; `None` leaves no
+    /// transcript to read.
+    pub fn last_turn_of(&self, sid: &str, ago: Option<Duration>) {
+        self.last_turn_at_tier(sid, ago, "1h");
+    }
+
+    /// [`Fixture::last_turn_of`] at cache tier `tier` (`1h` or `5m`).
+    pub fn last_turn_at_tier(&self, sid: &str, ago: Option<Duration>, tier: &str) {
+        let reading = self.home.join("readings").join(format!("{sid}.json"));
         let Some(ago) = ago else {
             std::fs::remove_file(&reading).ok();
             return;
@@ -87,7 +109,7 @@ impl Fixture {
         std::fs::write(
             &reading,
             format!(
-                r#"{{"tokens_used":200520,"model":"claude-fable-5-1","usage_tail":[{{"at_epoch":{at},"model":"claude-fable-5-1","input":20,"cache_read":200000,"cache_creation":500,"output":5}}]}}"#
+                r#"{{"tokens_used":200520,"model":"claude-fable-5-1","usage_tail":[{{"at_epoch":{at},"model":"claude-fable-5-1","input":20,"cache_read":200000,"cache_creation":500,"output":5,"tier":"{tier}"}}]}}"#
             ),
         )
         .unwrap();

@@ -35,6 +35,7 @@ pub(crate) fn cmd_status(json: bool) {
     // ── Signals section
     t.add(vec!["signals", "project", &format!("{} pending", s.signals.project)]);
     t.add(vec!["", "#open", &format!("{} pending", s.signals.open)]);
+    t.add(vec!["", "this session", &s.unread]);
 
     // ── Separator
     t.add(vec!["", "", ""]);
