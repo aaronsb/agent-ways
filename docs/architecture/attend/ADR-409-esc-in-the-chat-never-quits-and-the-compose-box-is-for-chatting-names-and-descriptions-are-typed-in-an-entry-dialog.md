@@ -136,4 +136,4 @@ A review of the nav polish found that ↑ or ↓ on an empty compose box left it
 - Esc in the box goes to the feed, with or without a draft, and clears the selection and the status line; the draft stays. It is the first stop of ADR-407's Esc cycle. Esc still never quits.
 - Outside the box, `q` asks `quit?` on the bar, whatever is unsaved; yes goes on through the exit guard over a draft. Ctrl-C quits as before.
 - A plain digit picks a channel by the column's number only while the focus is on a channel's row (ADR-407's amendment C). Elsewhere, an agent's row and the tab bar included, a digit is typed into the box, like any other character.
-- At the exit guard over the entry dialog, typing goes back into the dialog, never the compose draft.
+- At the exit guard over the entry dialog, typing reaches neither the dialog nor the compose draft, and Esc goes back to the dialog as it was (ADR-504, note of 2026-10-13: a modal's own buttons answer it).
