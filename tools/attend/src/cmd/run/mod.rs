@@ -315,6 +315,8 @@ pub(crate) fn cmd_run_with_catchup(catchup: bool) {
                 initial_hash,
                 &mut slots,
                 &state_store,
+                &heartbeat_id,
+                &focus.working_dir,
             );
             last_reload_check = Instant::now();
         }
@@ -408,8 +410,15 @@ fn print_startup_banner(me: &str, enabled_names: &[String], focus_desc: &str, st
             std::fs::write(p, &banner_fingerprint).ok();
         }
     };
+    // A reload on a lapsed cache must not wake the session (ADR-406 item 1).
+    let quiet = std::env::var_os(tick::RELOADED_COLD).is_some();
+    std::env::remove_var(tick::RELOADED_COLD);
     let banner = choose_banner(&banner_fingerprint, prev.as_deref(), reloaded_from);
-    println!("{}", banner_line(&banner, me, &sensor_list, focus_desc));
+    if quiet {
+        emit::log(&banner_line(&banner, me, &sensor_list, focus_desc));
+    } else {
+        println!("{}", banner_line(&banner, me, &sensor_list, focus_desc));
+    }
     if banner != Banner::Unchanged {
         write_stamp();
     }

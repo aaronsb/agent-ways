@@ -143,12 +143,20 @@ pub(super) fn initial_self_hash(self_exe: Option<&Path>) -> Option<u64> {
 /// point exec()ing into an identical binary — and the messaging reheat
 /// the reload triggers is pure noise — so we update the baseline mtime
 /// (to avoid rehashing every interval) and return without reloading.
+///
+/// On a lapsed cache (ADR-406 item 1) the reload prints nothing to stdout,
+/// which would wake the session. Held presence lines go to the log and the
+/// new process writes its banner there. A held line that is not presence
+/// can carry a message the peers sensor has already marked seen, so the
+/// reload waits until the cache is warm and the line has gone out.
 pub(super) fn maybe_self_reload(
     self_exe: Option<&Path>,
     baseline_mtime: &mut Option<SystemTime>,
     baseline_hash: Option<u64>,
     slots: &mut [SensorSlot],
     state_store: &state::StateStore,
+    session_id: &str,
+    working_dir: &str,
 ) {
     let Some(exe) = self_exe else {
         return;
@@ -175,8 +183,30 @@ pub(super) fn maybe_self_reload(
         *baseline_mtime = Some(current_mtime);
         return;
     }
-    emit::log("binary changed — checkpointing and reloading");
-    flush_message_lane(slots);
+    let lapsed = sensor_keepwarm::session_cache_lapsed(session_id, working_dir, sensor_trait::epoch_secs());
+    let held: Vec<&str> = slots
+        .iter()
+        .filter(|slot| rides_message_lane(slot.name()))
+        .flat_map(|slot| slot.accumulator.events.iter().map(String::as_str))
+        .collect();
+    let plan = reload_plan(lapsed, &held);
+    if plan == ReloadPlan::Wait {
+        emit::log("binary changed — a held line may carry a message; reloading once the prompt cache is warm");
+        return;
+    }
+    if plan == ReloadPlan::Quiet {
+        emit::log("binary changed — the prompt cache has lapsed, so the reload stays off stdout");
+        for slot in slots.iter_mut().filter(|slot| rides_message_lane(slot.name())) {
+            for line in slot.accumulator.drain_events() {
+                emit::log(&format!("{}: {line}", slot.name()));
+            }
+            slot.accumulator.reset();
+        }
+        std::env::set_var(RELOADED_COLD, "1");
+    } else {
+        emit::log("binary changed — checkpointing and reloading");
+        flush_message_lane(slots);
+    }
     let snapshot = collect_snapshot(slots);
     state_store.checkpoint(&snapshot);
 
@@ -192,6 +222,38 @@ pub(super) fn maybe_self_reload(
         env!("ATTEND_COMMIT")
     );
     reexec("ATTEND_RELOADED_FROM", &prev_version);
+}
+
+/// Set for the process a reload starts on a lapsed cache: its banner goes
+/// to the log, not to Monitor.
+pub(super) const RELOADED_COLD: &str = "ATTEND_RELOADED_COLD";
+
+/// How a binary change reloads `attend run`.
+#[derive(Debug, PartialEq)]
+enum ReloadPlan {
+    /// The cache is warm: held lines and the banner go to Monitor.
+    Loud,
+    /// The cache has lapsed and only presence is held: everything goes to
+    /// the log.
+    Quiet,
+    /// The cache has lapsed and a held line may carry a message the sensor
+    /// marked seen: wait for a warm cache to show it.
+    Wait,
+}
+
+fn reload_plan(lapsed: bool, held: &[&str]) -> ReloadPlan {
+    match (lapsed, held.iter().all(|line| is_presence(line))) {
+        (false, _) => ReloadPlan::Loud,
+        (true, true) => ReloadPlan::Quiet,
+        (true, false) => ReloadPlan::Wait,
+    }
+}
+
+/// Whether a peers-sensor line reports peer presence (a session started,
+/// exited, changed status or neared compaction), which describes a moment
+/// and carries no message.
+fn is_presence(line: &str) -> bool {
+    line.starts_with("peer ")
 }
 
 /// Re-execute this `attend run` with `var=value` set, so the new process
@@ -542,6 +604,15 @@ mod tests {
             }
             _ => panic!("expected ActionPotential curve"),
         }
+    }
+
+    #[test]
+    fn a_cold_reload_logs_presence_and_waits_on_anything_else() {
+        assert_eq!(reload_plan(false, &["message from A ~x: hi"]), ReloadPlan::Loud);
+        assert_eq!(reload_plan(true, &[]), ReloadPlan::Quiet);
+        assert_eq!(reload_plan(true, &["peer session started: p [/p] (same project, idle, ctx 3%)"]), ReloadPlan::Quiet);
+        assert_eq!(reload_plan(true, &["peer session exited: p [/p]", "message from A ~x: hi"]), ReloadPlan::Wait);
+        assert_eq!(reload_plan(true, &["2 older messages held back; reading them is optional: attend inbox"]), ReloadPlan::Wait);
     }
 
     #[test]

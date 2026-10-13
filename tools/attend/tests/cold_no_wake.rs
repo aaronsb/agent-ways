@@ -247,3 +247,54 @@ fn a_hung_ways_counts_as_lapsed() {
     assert_eq!(bodies(&d), Vec::<String>::new(), "{d}");
     assert_eq!(d["cache_lapsed"], true, "{d}");
 }
+
+/// Replace the binary `attend run` runs from with different bytes, as a
+/// release or a rebuild does: written aside and renamed over it.
+#[cfg(feature = "sensor-peers")]
+fn replace_binary(bin: &std::path::Path) {
+    let mut bytes = std::fs::read(env!("CARGO_BIN_EXE_attend")).unwrap();
+    bytes.push(0);
+    let next = bin.with_extension("next");
+    std::fs::write(&next, bytes).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::rename(&next, bin).unwrap();
+}
+
+/// A binary change reloads `attend run`. On a lapsed cache the reload
+/// prints nothing to stdout, so Monitor wakes no one; its banner goes to
+/// the log.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_reload_on_a_lapsed_cache_prints_nothing() {
+    let f = Fixture::new("cold-reload");
+    f.last_turn(Some(61 * MIN));
+    let bin = f.home.join("attend-copy");
+    std::fs::copy(env!("CARGO_BIN_EXE_attend"), &bin).unwrap();
+    let run = f.run_from(&bin, &[]);
+    run.wait_for("the startup line", Duration::from_secs(30), |r| r.output().contains("you are"));
+    let before = run.output();
+    replace_binary(&bin);
+    let err = f.home.join("run.err");
+    run.wait_for("the reload in the log", Duration::from_secs(40), |_| {
+        std::fs::read_to_string(&err).is_ok_and(|e| e.contains("[attend] reloaded"))
+    });
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(run.output(), before, "a cold reload adds no stdout line");
+}
+
+/// On a warm cache the reload banner still goes to Monitor.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn a_reload_on_a_warm_cache_prints_its_banner() {
+    let f = Fixture::new("warm-reload");
+    let bin = f.home.join("attend-copy");
+    std::fs::copy(env!("CARGO_BIN_EXE_attend"), &bin).unwrap();
+    let run = f.run_from(&bin, &[]);
+    run.wait_for("the startup line", Duration::from_secs(30), |r| r.output().contains("you are"));
+    replace_binary(&bin);
+    run.wait_for("the reload banner", Duration::from_secs(40), |r| r.output().contains("[attend] reloaded"));
+}
