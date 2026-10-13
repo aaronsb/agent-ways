@@ -6,7 +6,7 @@
 #   ways manage update | ways manage repair | ways manage uninstall | make cut-release
 
 .DEFAULT_GOAL := help
-.PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-plugins test-lang test-locales test-multilingual test-live purge-attend-state
+.PHONY: site site-serve explainer-video explainer-stills setup link relink install update sync-to-home update-binaries dev-install dev-restore clean help deps way-embed-rebuild lint test test-unit test-sim test-adr test-statusline test-hooks test-plugins test-lang test-locales test-multilingual test-live purge-attend-state
 
 ifeq ($(OS),Windows_NT)
     SHELL := C:/Program Files/Git/usr/bin/bash.exe
@@ -49,6 +49,8 @@ help:
 	@echo "  make ways-audit   Get ways-audit compliance binary (download or build)"
 	@echo "  make attend       Build attend binary"
 	@echo "  make attend-rebuild Force rebuild attend from source"
+	@echo "  make dev-install  Build every suite binary for this host and point the live install at it"
+	@echo "  make dev-restore  Point the live install back at the installed app's binaries"
 	@echo "  make lint         Run clippy on Rust workspace (warnings = errors)"
 	@echo "  make test         Run all tests (lint + smoke + unit + sim + adr + statusline + hooks)"
 	@echo "  make test-unit    Run Rust unit tests"
@@ -180,6 +182,39 @@ sync-to-home:
 
 # Force-rebuild every binary `ways manage update` is responsible for refreshing.
 update-binaries: $(SUITE_BINS:%=%-rebuild) way-embed-rebuild
+
+# Contributor dev cadence (.claude/CLAUDE.md). dev-install builds every suite
+# binary for this host from this checkout and points the live install's links
+# at it: $(XDG_BIN)/<bin>, and $(CLAUDE_BIN)/<bin> where the projection holds a
+# link there. dev-restore points the same links back at the installed app.
+# Neither writes to the app's bin/, and a real file in place of a link is left
+# alone. way-embed is not rebuilt.
+APP_DIR = $(or $(filter /%,$(XDG_DATA_HOME)),$(HOME)/.local/share)/agent-ways
+
+# $(1): the directory whose bin/ the links point at.
+define point_bins
+	@for b in $(SUITE_BINS); do \
+		src="$(1)/bin/$$b"; \
+		[ -e "$$src" ] || { echo "  ⚠ $$src missing; $$b left as it was"; continue; }; \
+		for dst in "$(XDG_BIN)/$$b" "$(CLAUDE_BIN)/$$b"; do \
+			if [ -L "$$dst" ]; then ln -sfn "$$src" "$$dst"; echo "  $$dst -> $$src"; \
+			elif [ -e "$$dst" ]; then echo "  ⚠ $$dst is a real file; not replacing it"; fi; \
+		done; \
+	done
+endef
+
+dev-install:
+	@bash scripts/check-rust.sh
+	cargo build --release --manifest-path tools/Cargo.toml $(SUITE_BINS:%=-p %)
+	@mkdir -p bin
+	@for b in $(SUITE_BINS); do $(LINK) "$(CURDIR)/tools/target/release/$$b$(EXE)" bin/$$b; done
+	$(call point_bins,$(CURDIR))
+	@echo "Running processes keep the old binary: start a new session, and run 'ways-agent unload'."
+
+dev-restore:
+	@[ -d "$(APP_DIR)/bin" ] || { echo "error: no installed app at $(APP_DIR)"; exit 1; }
+	$(call point_bins,$(APP_DIR))
+	@echo "Running processes keep the dev binary: start a new session, and run 'ways-agent unload'."
 
 # --- Build ---
 

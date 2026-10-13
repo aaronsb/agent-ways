@@ -40,10 +40,13 @@ hooks/ways/.obsidian/
 # When you work on agent-ways with Claude Code, <checkout>/.claude/ accumulates
 # session/marker/cache state — ignore it. But DO track the project-scoped dev
 # harness: agent-ways dogfoods its own project scope (ADR-143), so its own ways
-# and skills live in .claude/ways/ and .claude/skills/ and are shared.
+# and skills live in .claude/ways/ and .claude/skills/ and are shared. So is
+# .claude/CLAUDE.md, the contributor instructions: the install projects none of
+# .claude/ into ~/.claude, so it loads only in a checkout.
 /.claude/*
 !/.claude/ways/
 !/.claude/skills/
+!/.claude/CLAUDE.md
 # ...except the way-authoring scaffold `ways init` regenerates on demand — it's
 # generated (from TEMPLATE_CONTENT in cmd/init.rs), not a tracked source.
 /.claude/ways/_template.md

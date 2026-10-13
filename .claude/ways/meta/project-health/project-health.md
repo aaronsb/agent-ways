@@ -42,6 +42,8 @@ The default window is feathered: anchored at our last release tag, expanded to i
 
 ## Release Mechanics
 
+A release ships a batch of merged changes that has been evaluated on this host with `make dev-install` (the cadence is in `.claude/CLAUDE.md`). Do not cut one to try a fix.
+
 Two steps, because `main` is branch-protected (ADR-150):
 
 ```bash
@@ -52,7 +54,7 @@ make publish-release COMPONENT=<c> PUSH=1                  # tags <c>-vX.Y.Z on 
 
 Components: `ways`, `ways-audit`, `attend`, `attend-chat`. `way-embed` versions through its own Makefile.
 
-Pushing the tag is the one outward step. `build-<c>.yml` then builds every platform and creates the GitHub Release with per-platform binaries and `checksums.txt`.
+Pushing the tag is the one outward step. `build-<c>.yml` then builds every platform and creates the GitHub Release with per-platform binaries and `checksums.txt`. A cancelled runner can leave a platform out, so check that the Release lists an asset for each of linux-x86_64, linux-aarch64, darwin-x86_64 and darwin-arm64.
 
 Tags are GPG-signed, so `publish-release` needs a passphrase from the operator's own terminal. An agent cannot complete it — do everything up to that point and hand over the command.
 

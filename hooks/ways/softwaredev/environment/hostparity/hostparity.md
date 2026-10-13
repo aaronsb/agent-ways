@@ -17,6 +17,10 @@ The build passes on the laptop, the report says "tests pass", and CI goes red an
 
 **Untracked means absent.** A file the build resolves from the working tree but that is untracked, ignored, or unpushed does not exist for CI, for a teammate, or for the deployed artifact. A build that passes locally on an uncommitted file is unverified. Before claiming delivery, read `git status` and confirm the artifact sits where the consumer will look for it.
 
+## Order the passes by cost
+
+Iterate on the authoring host, where a build takes minutes, until the behaviour holds there. Then exercise each target and fix what breaks on each one. A target run started before the behaviour holds locally spends a slow round trip on a defect the fast host would have shown.
+
 ## What differs between hosts
 
 | Difference | Typical symptom |
@@ -50,3 +54,4 @@ A local model, service, or credential standing in for a remote one falls under t
 - environment/config(softwaredev) — env vars and dotenv files that differ per host
 - delivery/github(softwaredev) — reading CI checks on the pull request
 - freshness/groundtruth(softwaredev) — the executing system is authoritative over descriptions of it
+- delivery/release(softwaredev) — releasing a batch once it holds on every target
