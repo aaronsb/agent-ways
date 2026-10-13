@@ -23,6 +23,10 @@ basis:
     via: chat, relayed by the main session, 2026-10-11
   - precedent: ADR-408
   - precedent: ADR-504
+  - operator: aaronsb
+    level: directed
+    said: 1. digits only work on channel rows. 2. a. 3. agree with new behavior 4. keep 5. keep 6. keep the mark and add count on tab. 7. thats correct as built 8. agree- its a single char column and makes sense. 9. correct. 10. correct.
+    via: 'the operator''s answers to the design questions in PR #972, given to the head session, 2026-10-13'
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -129,7 +133,7 @@ The operator said: "we should have the new channel name entry be consistent with
 A review of the nav polish found that ↑ or ↓ on an empty compose box left it at once, after which `1` switched the channel and `q` quit: a reflexive arrow turned the next keys into commands. The question put to the operator: should ↑ and ↓ leave an empty box, and what may single keys do outside it? The operator chose "Guarded (Recommended)", which read: "↑/↓ leave only a box that has text, at its first or last line; an empty box is left with Shift+Tab or Esc. Outside the box, `q` asks before quitting, and digits switch channels only when the tab bar has focus. Help keys still work outside the box."
 
 - ↑ at the start of the first line and ↓ at the end of the last line leave only a box that holds text. In an empty box they do nothing.
-- Esc in an empty box leaves it backward, as Shift+Tab does. With text it clears the selection and the status line, and the draft stays. Esc still never quits.
+- Esc in the box goes to the feed, with or without a draft, and clears the selection and the status line; the draft stays. It is the first stop of ADR-407's Esc cycle. Esc still never quits.
 - Outside the box, `q` asks `quit?` on the bar, whatever is unsaved; yes goes on through the exit guard over a draft. Ctrl-C quits as before.
-- The digits switch tabs only while the tab bar has the focus. Elsewhere a digit is typed into the box, like any other character.
+- A plain digit picks a channel by the column's number only while the focus is on a channel's row (ADR-407's amendment C). Elsewhere, an agent's row and the tab bar included, a digit is typed into the box, like any other character.
 - At the exit guard over the entry dialog, typing goes back into the dialog, never the compose draft.

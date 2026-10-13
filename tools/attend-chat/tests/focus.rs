@@ -360,7 +360,7 @@ fn the_operator_view_is_no_channel_and_the_reserved_tabs_sit_right() {
     // it is for, unnumbered: the column numbers the channels.
     show_deploy(&mut c);
     let top = rows(&mut c)[0].clone();
-    let deploy = top.find("#deploy — rollout").unwrap_or_else(|| panic!("the channel shown and its line: {top}"));
+    let deploy = top.find("#deploy 2👤").filter(|at| top[*at..].contains("— rollout")).unwrap_or_else(|| panic!("the channel shown, its members and its line: {top}"));
     assert!(top.find('≡').unwrap() < deploy && deploy < top.find('+').unwrap(), "{top}");
     assert!(!top.contains("1 #deploy") && !top.contains("2 #deploy"), "no number on the bar: {top}");
     focus_to(&mut c, "tab ⋯all");
@@ -626,6 +626,76 @@ fn a_digit_picks_a_channel_on_a_column_row_and_is_typed_elsewhere() {
     press(&mut c, KeyCode::Esc);
     press(&mut c, KeyCode::Char('9'));
     assert_eq!(c.foreground(), &Tab::Channel("infra".into()), "a number past the channels does nothing");
+}
+
+/// Agents carry no number: on an agent's row a plain digit is typed in the
+/// box, as any other character outside the chat is.
+#[test]
+fn a_digit_on_an_agent_row_is_typed_in_the_box() {
+    let mut c = chat();
+    press(&mut c, KeyCode::F(2));
+    press(&mut c, KeyCode::Down);
+    let row = focused(&mut c);
+    assert!(row.starts_with("row ") && !row.starts_with("row #"), "an agent's row: {row}");
+    assert!(!bar(&mut c).contains("0-9 channels"), "the footer names no digits there: {}", bar(&mut c));
+    press(&mut c, KeyCode::Char('2'));
+    assert_eq!((c.foreground().clone(), focused(&mut c), c.input().text()), (Tab::Merged, "mode chat".to_string(), "2"));
+}
+
+/// Tab out of the box onto `≡` is no visit: the Esc cycle comes back to
+/// the row or tab focused before, or to the feed when there was none.
+#[test]
+fn tab_out_of_the_box_leaves_the_esc_cycle_where_it_was() {
+    let mut c = chat();
+    typed(&mut c, "hello");
+    press(&mut c, KeyCode::Tab);
+    assert_eq!(focused(&mut c), "tab ≡");
+    press(&mut c, KeyCode::Esc);
+    assert!(menu(&mut c).is_some_and(|m| m.starts_with("attend-chat")), "{}", screen(&mut c));
+    press(&mut c, KeyCode::Esc);
+    assert_eq!((menu(&mut c), focused(&mut c)), (None, "mode feed".to_string()), "nothing focused before: the feed");
+    let mut c = chat();
+    press(&mut c, KeyCode::BackTab);
+    press(&mut c, KeyCode::BackTab);
+    assert_eq!(focused(&mut c), "row #infra");
+    typed(&mut c, "hello");
+    assert_eq!(focused(&mut c), "mode chat");
+    press(&mut c, KeyCode::Tab);
+    press(&mut c, KeyCode::Esc);
+    press(&mut c, KeyCode::Esc);
+    assert_eq!((menu(&mut c), focused(&mut c)), (None, "row #infra".to_string()), "the row focused before");
+}
+
+/// The created channel shown carries its member count on its tab: alpha
+/// and the operator are in #deploy. `#open` holds everyone and carries none.
+#[test]
+fn the_shown_channels_tab_counts_its_members() {
+    let mut c = chat();
+    show_deploy(&mut c);
+    let top = rows(&mut c)[0].clone();
+    let at = top.find("#deploy 2👤").unwrap_or_else(|| panic!("{top}"));
+    assert!(top[at..].contains("— rollout"), "the count before what it is for: {top}");
+    assert!(!top.contains("#open 1") && !top.contains("#open 2") && !top.contains("#open 3"), "{top}");
+}
+
+/// While the column is hidden, by its key or for want of width, each
+/// channel's tab carries the column's number, so Ctrl and Alt with a digit
+/// stay on screen. With the column shown the tabs carry none.
+#[test]
+fn a_hidden_column_puts_the_channel_numbers_on_the_tabs() {
+    let mut c = chat();
+    show_deploy(&mut c);
+    let shown = rows(&mut c)[0].clone();
+    assert!(!shown.contains("2 #deploy") && !shown.contains("1 #open"), "the column numbers them: {shown}");
+    press(&mut c, KeyCode::F(3));
+    let hidden = rows(&mut c)[0].clone();
+    assert!(hidden.contains("2 #deploy") && hidden.contains("1 #open"), "{hidden}");
+    assert!(!hidden.contains("0 ⋯all"), "the operator view is no channel: {hidden}");
+    press(&mut c, KeyCode::F(3));
+    let narrow = testkit::rows(&testkit::render_screen(&mut c, 70, H))[0].clone();
+    assert!(narrow.contains("2 #deploy") && narrow.contains("1 #open"), "too narrow for the column: {narrow}");
+    let wide = rows(&mut c)[0].clone();
+    assert!(!wide.contains("2 #deploy"), "room again: {wide}");
 }
 
 /// At the exit guard over the entry dialog, typing goes on into the

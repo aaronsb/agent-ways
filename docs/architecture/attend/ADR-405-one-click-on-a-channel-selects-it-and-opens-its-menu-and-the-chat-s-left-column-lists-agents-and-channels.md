@@ -47,6 +47,10 @@ basis:
     via: attend-chat, a separate message correcting "rapit" in the one above, relayed by the main session, 2026-10-10
   - precedent: ADR-404
   - precedent: ADR-504
+  - operator: aaronsb
+    level: directed
+    said: 1. digits only work on channel rows. 2. a. 3. agree with new behavior 4. keep 5. keep 6. keep the mark and add count on tab. 7. thats correct as built 8. agree- its a single char column and makes sense. 9. correct. 10. correct.
+    via: 'the operator''s answers to the design questions in PR #972, given to the head session, 2026-10-13'
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -132,6 +136,6 @@ The operator asked, in their words: "the merged channel needs to be called somet
 
 ADR-407's amendment of the same date, "C, the operator's navigation redesign", changes the tab bar and the keys of the amendment above.
 
-- **The tab bar.** It holds `≡`, the created channel shown, `+`, then the reserved tabs. The created channels are numbered in the left column, `#open` first, and no longer on the bar. Ctrl+n or Alt+n picks the column's channel n, and 0 is the operator view.
-- **Keys.** In the compose box Esc goes to the feed, and Tab leaves the box when the caret ends no word to complete. The feed is the chat: a printable key there is typed into the box, and `q`, `m` and `?` are text. On the tab bar and the column the single keys work as before, and a plain digit picks a channel by its number only on a column row. Outside the box Esc opens the `≡` menu, and Esc on that menu goes back to the tab or column row the focus was last on. Walking the bar shows nothing; Enter on a tab opens its menu.
-- **The column.** It marks the agents in the created channel shown.
+- **The tab bar.** It holds `≡`, the created channel shown, `+`, then the reserved tabs. The created channels are numbered in the left column, `#open` first, and no longer on the bar; while the column is hidden each channel's tab carries its number. Ctrl+n or Alt+n picks the column's channel n, and 0 is the operator view.
+- **Keys.** In the compose box Esc goes to the feed, and Tab leaves the box when the caret ends no word to complete. The feed is the chat: a printable key there is typed into the box, and `q`, `m` and `?` are text. On the tab bar and the column the single keys work as before, and a plain digit picks a channel by its number only on a channel's row; agents carry no number. Outside the box Esc opens the `≡` menu, and Esc on that menu goes back to the tab or column row the focus was last on; Tab out of the box onto `≡` is not remembered. Walking the bar shows nothing; Enter on a tab opens its menu.
+- **The column.** It marks the agents in the created channel shown, and that channel's tab carries its member count.

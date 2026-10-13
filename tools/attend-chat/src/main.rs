@@ -35,7 +35,7 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             tabs, the column, the feed and the box. In the feed a
                             character is typed in the box; on the tab bar and the
                             column ? and m work, q asks before quitting, and on a
-                            column row a digit picks a channel by its number
+                            channel's row a digit picks a channel by its number
   Ctrl+N                    ask for a new channel's name in a dialog under +; the
                             compose box and its draft are never borrowed
   Tab                       complete @name #channel /command; with nothing to
