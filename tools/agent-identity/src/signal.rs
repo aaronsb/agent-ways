@@ -1,8 +1,10 @@
 //! The ADR-120 signal wire format: one line, `from|project|cwd|message`, or
-//! `from|project|cwd|re:<signal-id>|message` for a threaded reply. An
-//! unthreaded message whose text itself starts `re:` is written
-//! `from|project|cwd|re:|message`: the empty thread field says "no thread",
-//! so the text after it is read as written, whatever it looks like.
+//! `from|project|cwd|re:<signal-id>|message` for a threaded reply. ADR-401
+//! adds tagged fields between `cwd` and the message, in a fixed order:
+//! `from_kind:`, `from_id:`, `on_behalf_of:`, `to:`, then `re:` last. An
+//! unthreaded message whose text itself starts with a known tag is written
+//! with an empty thread field, `re:|`, which ends the tags, so the text after
+//! it is read as written, whatever it looks like.
 //!
 //! Lives beside [`crate::signal_filename`], which mints the ids a reply
 //! references, so every reader (the attend CLI, the attend-chat TUI, the
@@ -23,8 +25,117 @@ pub struct ParsedSignal<'a> {
     pub project: &'a str,
     pub cwd: &'a str,
     pub reply_to: Option<&'a str>,
+    /// `human` or `agent`, as the sender's process resolved it (ADR-401).
+    pub from_kind: Option<&'a str>,
+    /// The canonical sender id: a session id, or a person's member id.
+    pub from_id: Option<&'a str>,
+    /// The principal whose request the message carries, as the sender claims.
+    pub on_behalf_of: Option<&'a str>,
+    /// Who the message is for: `*`, `#<channel>`, or a comma-separated set
+    /// of session and member ids. `None` on a record written before the tag.
+    pub to: Option<&'a str>,
     pub message: &'a str,
 }
+
+/// The sender's kind (ADR-401, `from_kind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Human,
+    Agent,
+}
+
+/// Where a reader found a signal, as the read filter and the wake rule
+/// need to know it: a tray (a project's or a person's), or a shared room
+/// (`#open`, a channel).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Where {
+    Tray,
+    Shared,
+}
+
+impl ParsedSignal<'_> {
+    /// The canonical sender id: the `from_id` tag, or for a record without
+    /// it, derived from `from`: a `claude:` sender's session id, an
+    /// `external:` sender's user part as a member id (ADR-170).
+    pub fn sender_id(&self) -> String {
+        if let Some(id) = self.from_id {
+            return id.to_string();
+        }
+        derived_sender_id(&self.from)
+    }
+
+    /// The sender's kind: the `from_kind` tag, or from `from`'s prefix.
+    /// `None` for a prefix no attend writes.
+    pub fn sender_kind(&self) -> Option<Kind> {
+        match self.from_kind {
+            Some("human") => Some(Kind::Human),
+            Some("agent") => Some(Kind::Agent),
+            _ if self.from.starts_with("claude:") => Some(Kind::Agent),
+            _ if self.from.starts_with("external:") => Some(Kind::Human),
+            _ => None,
+        }
+    }
+
+    /// Whether `to` names `id`.
+    pub fn addressed_to(&self, id: &str) -> bool {
+        self.to.is_some_and(|to| to.split(',').any(|t| t == id))
+    }
+
+    /// Whether the session or person `id` reads this signal from its tray:
+    /// when `to` names it, or when the signal carries no `to`, which an
+    /// older writer left and which is for every session at the project.
+    pub fn tray_reads(&self, id: &str) -> bool {
+        self.to.is_none() || self.addressed_to(id)
+    }
+
+    /// Whether this signal, found `at`, starts a turn in the idle session
+    /// `id` (ADR-406 item 1): `to` names it, it sat in its tray with no
+    /// `to` (sent to its project by an older writer), or it replies to a
+    /// message `id` sent. Anything else waits for the session's next turn.
+    pub fn wakes(&self, at: Where, id: &str) -> bool {
+        self.addressed_to(id)
+            || (at == Where::Tray && self.to.is_none())
+            || self.reply_to.is_some_and(|re| sent_by(re, id))
+    }
+}
+
+/// Whether signal id `re` names a message `sender` sent: the id's stem is
+/// the sender's sanitized id ([`crate::signal_filename`]).
+pub fn sent_by(re: &str, sender: &str) -> bool {
+    let stem = crate::sanitize_id_component(sender);
+    !stem.is_empty() && re.strip_prefix(&stem).is_some_and(|rest| rest.starts_with('-'))
+}
+
+/// The sender id a record without `from_id` carries in `from`.
+pub fn derived_sender_id(from: &str) -> String {
+    if let Some(sid) = from.strip_prefix("claude:") {
+        return sid.to_string();
+    }
+    if let Some(rest) = from.strip_prefix("external:") {
+        return crate::sanitize_id_component(rest.split('@').next().unwrap_or(rest));
+    }
+    from.to_string()
+}
+
+/// The tagged fields a writer puts on a signal (ADR-401). A field left
+/// `None`, or whose value falls outside [`is_tag_value`], is not written.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Envelope<'a> {
+    pub from_kind: Option<&'a str>,
+    pub from_id: Option<&'a str>,
+    pub on_behalf_of: Option<&'a str>,
+    pub to: Option<&'a str>,
+}
+
+/// The value class of `from_id`, `on_behalf_of` and `to`:
+/// `[A-Za-z0-9_@.,:/#*-]+`. It excludes `|`, whitespace and control
+/// characters, so no value can break the tagged-field parse.
+pub fn is_tag_value(v: &str) -> bool {
+    !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric() || "_@.,:/#*-".contains(c))
+}
+
+/// The tags a reader consumes, in the order a writer emits them.
+const TAGS: [&str; 5] = ["from_kind", "from_id", "on_behalf_of", "to", "re"];
 
 /// Signal ids are filename stems in the form `<sender-id>-<timestamp>`,
 /// which is always `[A-Za-z0-9_-]+`. This char class is the discriminator
@@ -61,30 +172,48 @@ pub fn parse_signal(content: &str) -> Option<ParsedSignal<'_>> {
     } else {
         std::borrow::Cow::Borrowed(parts[0])
     };
-    let tail = parts[3];
-    let (reply_to, message) = match tail.strip_prefix(UNTHREADED) {
-        Some(message) => (None, message),
-        None => thread_and_text(tail),
-    };
-    Some(ParsedSignal {
+    let mut sig = ParsedSignal {
         from,
         project: parts[1],
         cwd: parts[2],
-        reply_to,
-        message,
-    })
+        reply_to: None,
+        from_kind: None,
+        from_id: None,
+        on_behalf_of: None,
+        to: None,
+        message: parts[3],
+    };
+    // The tags: `key:value|` segments while the key is a known one not yet
+    // seen and the value is in its class. `re:` is last; it ends the run,
+    // and an empty one, `re:|`, marks an unthreaded message.
+    loop {
+        let Some((seg, rest)) = sig.message.split_once('|') else { break };
+        let Some((key, value)) = seg.split_once(':') else { break };
+        let slot = match key {
+            "re" if value.is_empty() || is_valid_signal_id(value) => {
+                sig.reply_to = (!value.is_empty()).then_some(value);
+                sig.message = rest;
+                break;
+            }
+            "from_kind" => &mut sig.from_kind,
+            "from_id" => &mut sig.from_id,
+            "on_behalf_of" => &mut sig.on_behalf_of,
+            "to" => &mut sig.to,
+            _ => break,
+        };
+        if slot.is_some() || !is_tag_value(value) {
+            break;
+        }
+        *slot = Some(value);
+        sig.message = rest;
+    }
+    Some(sig)
 }
 
-/// The empty thread field: an unthreaded message whose text starts `re:`.
-const UNTHREADED: &str = "re:|";
-
-/// Split the field after `cwd` into its thread id, if it carries one, and
-/// the message text.
-fn thread_and_text(tail: &str) -> (Option<&str>, &str) {
-    match tail.strip_prefix("re:").and_then(|rest| rest.split_once('|')) {
-        Some((id, msg)) if is_valid_signal_id(id) => (Some(id), msg),
-        _ => (None, tail),
-    }
+/// Whether `message` begins with a known tag, so a writer must end the tags
+/// before it with `re:|`.
+fn starts_with_tag(message: &str) -> bool {
+    TAGS.iter().any(|t| message.strip_prefix(t).is_some_and(|r| r.starts_with(':')))
 }
 
 /// A signal file's record without the one newline [`format_signal`] ends it
@@ -101,16 +230,33 @@ pub fn wire_line(content: &str) -> &str {
 /// unthreaded message that starts `re:` gets the empty thread field,
 /// `re:|`, so no reader can take its text for a thread id.
 pub fn format_signal(from: &str, project: &str, cwd: &str, reply_to: Option<&str>, message: &str) -> String {
+    format_tagged(from, project, cwd, &Envelope::default(), reply_to, message)
+}
+
+/// [`format_signal`] with the ADR-401 tags of `env`, in the fixed order,
+/// before the thread field. A tag whose value falls outside its class is
+/// left out. An unthreaded message that starts with a known tag gets the
+/// empty thread field, `re:|`, so no reader takes its text for a tag.
+pub fn format_tagged(from: &str, project: &str, cwd: &str, env: &Envelope, reply_to: Option<&str>, message: &str) -> String {
     // A header field never carries the field separator or a control
     // character, and `from` no whitespace, whatever the environment held.
     let from = header_field(from, true);
     let project = header_field(project, false);
     let cwd = header_field(cwd, false);
-    match reply_to {
-        Some(id) => format!("{from}|{project}|{cwd}|re:{id}|{message}\n"),
-        None if message.starts_with("re:") => format!("{from}|{project}|{cwd}|{UNTHREADED}{message}\n"),
-        None => format!("{from}|{project}|{cwd}|{message}\n"),
+    let mut line = format!("{from}|{project}|{cwd}|");
+    for (key, value) in [("from_kind", env.from_kind), ("from_id", env.from_id), ("on_behalf_of", env.on_behalf_of), ("to", env.to)] {
+        if let Some(v) = value.filter(|v| is_tag_value(v)) {
+            line += &format!("{key}:{v}|");
+        }
     }
+    match reply_to {
+        Some(id) => line += &format!("re:{id}|"),
+        None if starts_with_tag(message) => line += "re:|",
+        None => {}
+    }
+    line += message;
+    line.push('\n');
+    line
 }
 
 /// `s` with each `|` and control character as `_`, and with `no_space`
@@ -323,6 +469,97 @@ mod tests {
         let s = parse_signal(line.trim()).unwrap();
         assert_eq!((s.reply_to, s.message), (Some("id-1"), "a | b"));
         assert_eq!(format_signal("claude:a", "p", "/x/p", None, "hi"), "claude:a|p|/x/p|hi\n");
+    }
+
+    /// ADR-401: the tagged fields round-trip in the writer's fixed order,
+    /// and a reader takes them in any order.
+    #[test]
+    fn tagged_fields_round_trip() {
+        let env = Envelope { from_kind: Some("agent"), from_id: Some("sid-1"), on_behalf_of: Some("aaron"), to: Some("sid-2,sid-3") };
+        let line = format_tagged("claude:sid-1", "p", "/x/p", &env, Some("id-1"), "hi | there");
+        assert_eq!(line, "claude:sid-1|p|/x/p|from_kind:agent|from_id:sid-1|on_behalf_of:aaron|to:sid-2,sid-3|re:id-1|hi | there\n");
+        let s = parse_signal(wire_line(&line)).unwrap();
+        assert_eq!((s.from_kind, s.from_id, s.on_behalf_of, s.to), (Some("agent"), Some("sid-1"), Some("aaron"), Some("sid-2,sid-3")));
+        assert_eq!((s.reply_to, s.message), (Some("id-1"), "hi | there"));
+        let any_order = parse_signal("claude:a|p|/x|to:*|from_kind:agent|body").unwrap();
+        assert_eq!((any_order.to, any_order.from_kind, any_order.message), (Some("*"), Some("agent"), "body"));
+    }
+
+    /// A legacy record carries no tags; the sender id and kind derive from
+    /// `from`.
+    #[test]
+    fn a_legacy_record_derives_the_sender() {
+        let s = parse_signal("claude:sid-9|p|/x|hello").unwrap();
+        assert_eq!((s.to, s.from_id), (None, None));
+        assert_eq!((s.sender_id(), s.sender_kind()), ("sid-9".to_string(), Some(Kind::Agent)));
+        let h = parse_signal("external:aaron@kitty|p|/x|hello").unwrap();
+        assert_eq!((h.sender_id(), h.sender_kind()), ("aaron".to_string(), Some(Kind::Human)));
+        assert_eq!(parse_signal("odd|p|/x|hello").unwrap().sender_kind(), None);
+        let tagged = parse_signal("external:aaron@kitty|p|/x|from_kind:human|from_id:aaron2|hi").unwrap();
+        assert_eq!(tagged.sender_id(), "aaron2", "the tag wins over the derivation");
+    }
+
+    /// A value outside its class, or an unknown key, begins the message.
+    #[test]
+    fn the_tag_fence_keeps_prose() {
+        for line in ["claude:a|p|/x|to:has space|body", "claude:a|p|/x|note:x|body", "claude:a|p|/x|to:|body", "claude:a|p|/x|to:a;b|body"] {
+            let s = parse_signal(line).unwrap();
+            assert_eq!(s.to, None, "{line}");
+            assert_eq!(s.message, line.splitn(4, '|').nth(3).unwrap(), "{line}");
+        }
+        // A repeated key ends the tag run.
+        let s = parse_signal("claude:a|p|/x|to:a|to:b|body").unwrap();
+        assert_eq!((s.to, s.message), (Some("a"), "to:b|body"));
+    }
+
+    /// An unthreaded message whose text starts with a known tag reads back as
+    /// written: the writer marks it with the empty thread field.
+    #[test]
+    fn a_message_starting_with_a_tag_round_trips() {
+        let env = Envelope { to: Some("*"), ..Envelope::default() };
+        for text in ["to:x|looks tagged", "from_id:y|z", "re:abc-1|q", "plain"] {
+            let line = format_tagged("claude:a", "p", "/x", &env, None, text);
+            let s = parse_signal(wire_line(&line)).unwrap();
+            assert_eq!((s.to, s.reply_to, s.message), (Some("*"), None, text), "{line}");
+        }
+    }
+
+    /// A tag value the writer cannot fence is left out, never written.
+    #[test]
+    fn a_tag_value_outside_its_class_is_not_written() {
+        let env = Envelope { to: Some("a|b"), from_id: Some("ok"), ..Envelope::default() };
+        assert_eq!(format_tagged("claude:a", "p", "/x", &env, None, "m"), "claude:a|p|/x|from_id:ok|m\n");
+    }
+
+    /// Who reads a tray signal: one whose `to` holds the reader, or one with
+    /// no `to` at all (ADR-401, `to`).
+    #[test]
+    fn a_tray_reader_reads_its_own_and_the_untagged() {
+        let mine = parse_signal("claude:x|p|/x|to:me,other|m").unwrap();
+        let theirs = parse_signal("claude:x|p|/x|to:other|m").unwrap();
+        let legacy = parse_signal("claude:x|p|/x|m").unwrap();
+        assert!(mine.addressed_to("me") && mine.tray_reads("me"));
+        assert!(!theirs.addressed_to("me") && !theirs.tray_reads("me"));
+        assert!(!legacy.addressed_to("me") && legacy.tray_reads("me"));
+    }
+
+    /// The wake rule: addressed to the session, sent to its project (a tray
+    /// signal without `to`), or a reply to a message it sent.
+    #[test]
+    fn the_wake_rule() {
+        let me = "11111111-2222-3333-4444-555555555555";
+        let (dm_line, reply_line) = (format!("claude:x|p|/x|to:{me}|m"), format!("claude:x|p|/x|to:#deploy|re:{me}-17-0|m"));
+        let dm = parse_signal(&dm_line).unwrap();
+        let open = parse_signal("claude:x|p|/x|to:*|m").unwrap();
+        let channel = parse_signal("claude:x|p|/x|to:#deploy|m").unwrap();
+        let legacy = parse_signal("claude:x|p|/x|m").unwrap();
+        let reply = parse_signal(&reply_line).unwrap();
+        assert!(dm.wakes(Where::Tray, me) && dm.wakes(Where::Shared, me));
+        assert!(legacy.wakes(Where::Tray, me), "sent to its project");
+        assert!(!legacy.wakes(Where::Shared, me), "an untagged #open post");
+        assert!(!open.wakes(Where::Shared, me));
+        assert!(!channel.wakes(Where::Shared, me));
+        assert!(reply.wakes(Where::Shared, me), "a reply to a message it sent");
     }
 
     #[test]
