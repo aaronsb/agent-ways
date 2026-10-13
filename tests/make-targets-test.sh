@@ -88,4 +88,31 @@ expected=$(printf '%s\n' $bins | sort | tr '\n' ' ')
 check "make link links every suite binary" "$expected" "$(ls "$WORK/make-bin" | sort | tr '\n' ' ')"
 check "install.sh links every suite binary" "$expected" "$(ls "$WORK/install-bin" | sort | tr '\n' ' ')"
 
+# dev-install builds every suite binary in one cargo call.
+dev=$(make -s -n -C "$ROOT" dev-install 2>&1)
+check "dev-install builds every suite binary" "yes" \
+    "$(has "$dev" "cargo build --release --manifest-path tools/Cargo.toml$(printf -- ' -p %s' $bins)")"
+
+# dev-restore points existing links at the app and leaves real files alone.
+# The links start out pointing at a dev checkout.
+DEVB="$WORK/dev-xdg" DEVC="$WORK/dev-claude"
+mkdir -p "$DEVB" "$DEVC"
+for b in $bins; do ln -s "$WORK/checkout/bin/$b" "$DEVB/$b"; done
+ln -s "$WORK/checkout/bin/ways" "$DEVC/ways"
+printf 'mine\n' > "$DEVC/attend"
+make -s -C "$ROOT" dev-restore APP_DIR="$APP" XDG_BIN="$DEVB" CLAUDE_BIN="$DEVC" >/dev/null 2>&1
+check "dev-restore succeeds" "0" "$?"
+for b in $bins; do
+    check "dev-restore points $b at the app" "$APP/bin/$b" "$(readlink "$DEVB/$b")"
+done
+check "dev-restore repoints a projected link" "$APP/bin/ways" "$(readlink "$DEVC/ways")"
+check "dev-restore leaves a real file" "mine" "$(cat "$DEVC/attend")"
+check "dev-restore adds no link that was absent" "no" "$([[ -e $DEVC/ways-audit || -L $DEVC/ways-audit ]] && echo yes || echo no)"
+make -s -C "$ROOT" dev-restore APP_DIR="$WORK/no-app" XDG_BIN="$DEVB" CLAUDE_BIN="$DEVC" >/dev/null 2>&1
+check "dev-restore refuses a missing app" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
+mkdir -p "$WORK/empty-xdg" "$WORK/empty-claude"
+none=$(make -s -C "$ROOT" dev-restore APP_DIR="$APP" XDG_BIN="$WORK/empty-xdg" CLAUDE_BIN="$WORK/empty-claude" 2>&1)
+check "dev-restore fails when it repoints nothing" "yes" "$([[ $? -ne 0 ]] && echo yes || echo no)"
+check "and says so" "yes" "$(has "$none" "no link repointed")"
+
 exit $fail

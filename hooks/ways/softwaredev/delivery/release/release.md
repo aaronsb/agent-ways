@@ -80,6 +80,10 @@ Act through whatever CLI the project already uses — `gh issue`, `glab`, `jira`
 
 For multi-platform binaries, build per-platform and attach all of them to a single GitHub Release with a `checksums.txt`.
 
+## Release Evaluated Batches
+
+A release is the slow outward step: a version bump, the full pipeline, a build for every platform, a published artifact. Try a fix with a local build for the authoring host, installed over the local copy, and evaluate it there. environment/hostparity orders the local and target passes. A change that holds locally and passes CI on every target waits for the next release. Cut the release when a batch of evaluated changes is ready. Keep one command that puts the released build back after a local evaluation. Local evaluation is evidence about the change. The released artifact still passes its own gates.
+
 ## Two-Step Release Under Branch Protection
 
 A protected `main` splits the release in two, and this is common enough to plan for. The bump — version file, lockfile, changelog — goes through a PR. A bump limited to the version and lockfile merges on green CI without a review, unless the repository enforces one (`delivery/merge`). Only after it merges does the tag land on `main`.
@@ -108,3 +112,4 @@ Name the irreversible step as such: a destructive migration, a key rotation, a c
 
 - delivery/commits(softwaredev) — changelog generated from commits
 - delivery/groundwork(softwaredev) — the four conditions a release assumes
+- environment/hostparity(softwaredev) — the authoring host first, then each target
