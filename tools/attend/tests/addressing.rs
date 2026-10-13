@@ -26,6 +26,7 @@ fn enter(f: &Fixture) -> MutexGuard<'static, ()> {
     guard
 }
 
+#[cfg(feature = "sensor-peers")]
 use common::Peer;
 
 /// Write `line` as signal `id` into `tray`.
