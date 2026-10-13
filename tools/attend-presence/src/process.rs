@@ -111,6 +111,23 @@ fn cwd_by_command(_pid: u32) -> Option<String> {
     None
 }
 
+/// Whether a process holds `pid`. A cheap test before [`start_time`]: on Unix
+/// a signal-0 `kill`, which asks `ps` nothing; elsewhere the start time is
+/// read.
+pub fn is_running(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
+        // SAFETY: signal 0 delivers nothing; the call only checks the pid.
+        let ret = unsafe { libc::kill(pid, 0) };
+        ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+    #[cfg(not(unix))]
+    {
+        start_time(pid).is_some()
+    }
+}
+
 /// When `pid` started, as an opaque string that differs between two
 /// processes that had the same pid. `None` when the process is gone.
 pub fn start_time(pid: u32) -> Option<String> {

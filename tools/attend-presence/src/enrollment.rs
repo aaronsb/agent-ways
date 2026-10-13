@@ -222,6 +222,30 @@ pub fn is_enrolled(session_id: &str) -> bool {
     !record.sources.is_empty()
 }
 
+/// Whether `session_id` listens and the Claude Code process it enrolled in
+/// still runs on this host: the pid of the record's `claude` key is held by
+/// the process that started when the key says. Reads only: a pending
+/// opt-out counts as not listening once no `attend run` holds the session,
+/// and the record is left for [`is_enrolled`] to apply it. A process on
+/// another host reads as not running, so a session there is judged by its
+/// heartbeat alone (ADR-406 item 12).
+pub fn process_is_live(session_id: &str) -> bool {
+    let Some(record) = read(session_id).filter(|r| !r.sources.is_empty()) else { return false };
+    if record.optout && !crate::heartbeat::run_is_live(session_id) {
+        return false;
+    }
+    record.claude.as_deref().is_some_and(claude_key_is_live)
+}
+
+/// Whether the process a `claude` key names runs: its pid is held, and by
+/// the process that started at the key's start time, not a later one that
+/// was given the pid.
+fn claude_key_is_live(key: &str) -> bool {
+    let Some((pid, started)) = key.split_once('-') else { return false };
+    let Ok(pid) = pid.parse::<u32>() else { return false };
+    crate::process::is_running(pid) && crate::process::start_time(pid).as_deref() == Some(started)
+}
+
 /// The ways `session_id` enrolled, empty when it is not enrolled.
 pub fn sources(session_id: &str) -> Vec<Source> {
     read(session_id).map(|r| r.sources).unwrap_or_default()
@@ -386,6 +410,56 @@ mod tests {
             None => std::env::remove_var("XDG_CACHE_HOME"),
         }
         fs::remove_dir_all(&root).ok();
+    }
+
+    /// A record enrolled under the Claude Code process `key`, as `enroll`
+    /// writes one from inside a session.
+    fn enroll_in(session_id: &str, key: &str) {
+        edit(session_id, |r| {
+            r.sources.push(Source::Listen);
+            r.claude = Some(key.to_string());
+        })
+        .unwrap();
+    }
+
+    /// This test process, keyed as a Claude Code process is.
+    fn own_key() -> String {
+        let pid = std::process::id();
+        format!("{pid}-{}", crate::process::start_time(pid).unwrap())
+    }
+
+    /// A pid no process holds now: a child that has exited and been reaped.
+    fn gone_pid() -> u32 {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    }
+
+    // A session whose heartbeat lapsed during a long turn, while its Claude
+    // Code process ran on and it listened, is alive; one whose process has
+    // exited, or that no longer listens, is gone (the mod-session
+    // liveness defect of 2026-10-13).
+    #[test]
+    fn a_listening_session_whose_process_runs_is_alive_without_a_heartbeat() {
+        with_cache(|| {
+            let none = std::collections::HashSet::new();
+            enroll_in("running", &own_key());
+            assert!(!crate::heartbeat::heartbeat_path("running").exists());
+            assert!(crate::alive("running", &none), "its Claude Code process runs and it listens");
+
+            enroll_in("exited", &format!("{}-1", gone_pid()));
+            assert!(!crate::alive("exited", &none), "its process has exited");
+
+            let pid = std::process::id();
+            enroll_in("reused", &format!("{pid}-not-when-it-started"));
+            assert!(!crate::alive("reused", &none), "the pid is another process's now");
+
+            enroll_in("left", &own_key());
+            opt_out("left").unwrap();
+            assert!(!crate::alive("left", &none), "it stopped listening");
+            assert!(!crate::alive("never", &none), "it never enrolled");
+        });
     }
 
     #[test]

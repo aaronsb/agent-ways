@@ -25,12 +25,16 @@ pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Whether `member_id` is a live member of the mesh: a Claude session in
 /// `running` (the ids of live Claude processes, from
-/// `sensor_peers::PeerSensor::live_session_ids`), or any member whose
-/// heartbeat is within [`heartbeat::DEFAULT_GRACE`]. The heartbeat arm
-/// covers humans (attend-chat heartbeats the username while open) and
-/// drain-only sessions; the process arm covers a running Claude session
-/// whose attend is between ticks. Pass an empty set where no process scan
-/// is available, and only heartbeats count.
+/// `sensor_peers::PeerSensor::live_session_ids`), any member whose
+/// heartbeat is within [`heartbeat::DEFAULT_GRACE`], or a listening session
+/// whose Claude Code process still runs on this host
+/// ([`enrollment::process_is_live`]). The heartbeat arm covers humans
+/// (attend-chat heartbeats the username while open) and sessions on another
+/// host; the process arms cover a running Claude session whose heartbeat
+/// lapsed, between attend's ticks or through a turn longer than the grace.
+/// Pass an empty set where no process scan is available.
 pub fn alive(member_id: &str, running: &std::collections::HashSet<String>) -> bool {
-    running.contains(member_id) || heartbeat::is_fresh(member_id, heartbeat::DEFAULT_GRACE)
+    running.contains(member_id)
+        || heartbeat::is_fresh(member_id, heartbeat::DEFAULT_GRACE)
+        || enrollment::process_is_live(member_id)
 }
