@@ -87,7 +87,7 @@ fn help(args: &[String]) -> (Option<i32>, String) {
 /// alias parses but is not listed, so a flat verb fails here (ADR-413 item 5).
 fn assert_listed(origin: &str, path: &[String]) {
     for (i, word) in path.iter().enumerate() {
-        let (_, parent) = help(&path[..i].to_vec());
+        let (_, parent) = help(&path[..i]);
         let listed = parent.lines().any(|l| l.strip_prefix("  ").is_some_and(|r| r.split_whitespace().next() == Some(word.as_str())));
         assert!(listed, "{origin}: `{word}` is not a listed subcommand of `attend {}`:\n{parent}", path[..i].join(" "));
     }
