@@ -256,9 +256,9 @@ pub struct ChatPane {
     /// delete made, for Undo delete.
     attend: std::path::PathBuf,
     undo: Option<cleanup::LastDelete>,
-    /// The request attend is working on, and how long it is given.
-    asking: Option<(crate::attend_cli::Running, cleanup::Job)>,
-    attend_wait: Duration,
+    /// The delete or tombstone attend is working on, one at a time, with
+    /// no time limit ([`cleanup`]).
+    removing: Option<(crate::attend_cli::Running, cleanup::Job)>,
 }
 
 impl ChatPane {
@@ -312,8 +312,7 @@ impl ChatPane {
             hidden_path: crate::hidden::default_path(),
             attend: crate::attend_cli::program(),
             undo: None,
-            asking: None,
-            attend_wait: crate::attend_cli::WAIT,
+            removing: None,
         }
     }
 
@@ -953,11 +952,12 @@ impl Pane for ChatPane {
     }
 
     /// The status slot (#398, #400): a fresh result asserts itself, an
-    /// error in the error role; past [`STATUS_ASSERT`] the help of a
-    /// command being typed, or the last result, set back.
+    /// error in the error role; past [`STATUS_ASSERT`] a delete or a
+    /// tombstone still running says so, else the help of a command being
+    /// typed, or the last result, set back.
     fn status(&mut self) -> Option<(String, Tone)> {
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
-        let (line, how) = status_slot(fresh, self.status_is_error, crate::slash::contextual_help(self.input.text()), &self.status);
+        let (line, how) = status_slot(fresh, self.status_is_error, self.removing_now(), crate::slash::contextual_help(self.input.text()), &self.status);
         let tone = match how {
             Some(true) => Tone::Err,
             Some(false) => Tone::Said,
@@ -1221,13 +1221,6 @@ impl Chat {
         self
     }
 
-    /// How long to wait for attend before stopping it, rather than
-    /// [`crate::attend_cli::WAIT`].
-    pub fn attend_wait(mut self, wait: Duration) -> Chat {
-        self.pane_mut().attend_wait = wait;
-        self
-    }
-
     /// Keep the human's presence heartbeat, or not.
     pub fn heartbeat(mut self, on: bool) -> Chat {
         self.pane_mut().heartbeat = on;
@@ -1284,6 +1277,12 @@ impl Chat {
 
     pub fn status(&self) -> &str {
         &self.pane().status
+    }
+
+    /// What a running delete or tombstone is doing, as the status line says
+    /// it (`deleting…`), while one runs.
+    pub fn removing(&self) -> Option<String> {
+        self.pane().removing_now()
     }
 
     pub fn signals(&self) -> &[Signal] {
@@ -1367,12 +1366,16 @@ impl World {
 }
 
 /// The status-slot content under the #398/#400 priority rule: a fresh
-/// result (error or success) > single-match help > the stored result.
-/// The second value is how it reads: `Some(true)` an error, `Some(false)`
-/// a success, `None` set back.
-fn status_slot(fresh: bool, is_error: bool, help: Option<String>, stored: &str) -> (String, Option<bool>) {
+/// result (error or success) > what a running delete or tombstone is doing
+/// (`busy`) > single-match help > the stored result. The second value is
+/// how it reads: `Some(true)` an error, `Some(false)` a success or the
+/// work running, `None` set back.
+fn status_slot(fresh: bool, is_error: bool, busy: Option<String>, help: Option<String>, stored: &str) -> (String, Option<bool>) {
     if fresh {
         return (stored.to_string(), Some(is_error));
+    }
+    if let Some(busy) = busy {
+        return (busy, Some(false));
     }
     (help.unwrap_or_else(|| stored.to_string()), None)
 }
@@ -1383,25 +1386,34 @@ mod status_slot_tests {
 
     #[test]
     fn fresh_error_asserts_over_help() {
-        let (text, how) = status_slot(true, true, Some("/dissolve — help".into()), "1 live member — not dissolving");
+        let (text, how) = status_slot(true, true, None, Some("/dissolve — help".into()), "1 live member — not dissolving");
         assert_eq!(text, "1 live member — not dissolving");
         assert_eq!(how, Some(true));
     }
 
     #[test]
     fn fresh_success_asserts() {
-        let (text, how) = status_slot(true, false, Some("help".into()), "joined #x");
+        let (text, how) = status_slot(true, false, None, Some("help".into()), "joined #x");
         assert_eq!(text, "joined #x");
         assert_eq!(how, Some(false));
     }
 
     #[test]
     fn expired_window_yields_to_help_then_stored() {
-        let (text, how) = status_slot(false, true, Some("/dissolve — help".into()), "err");
+        let (text, how) = status_slot(false, true, None, Some("/dissolve — help".into()), "err");
         assert_eq!(text, "/dissolve — help");
         assert_eq!(how, None);
-        let (text, _) = status_slot(false, true, None, "err");
+        let (text, _) = status_slot(false, true, None, None, "err");
         assert_eq!(text, "err");
+    }
+
+    #[test]
+    fn a_running_delete_holds_the_line_past_a_fresh_result() {
+        let busy = || Some("deleting…".to_string());
+        let (text, how) = status_slot(true, true, busy(), None, "still deleting: one delete or tombstone runs at a time");
+        assert_eq!((text.as_str(), how), ("still deleting: one delete or tombstone runs at a time", Some(true)), "a fresh note first");
+        let (text, how) = status_slot(false, false, busy(), Some("/dissolve — help".into()), "hid 3 messages");
+        assert_eq!((text.as_str(), how), ("deleting…", Some(false)), "then the running delete, over help and the last result");
     }
 }
 

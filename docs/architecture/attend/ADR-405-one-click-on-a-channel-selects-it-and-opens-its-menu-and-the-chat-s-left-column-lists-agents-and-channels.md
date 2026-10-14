@@ -87,6 +87,10 @@ basis:
     level: directed
     said: "Named channels get \"Hide messages here\" (and \"Show hidden messages\"), not only DMs and #open. Same per-tab watermark semantics; it hides on this screen only."
     via: "the operator's decision of 2026-10-14, relayed by the main session"
+  - operator: aaronsb
+    level: directed
+    said: "Delete and tombstone get their own thread. attend message delete (all its forms, incl. Undo) and attend message tombstone run on a dedicated thread with NO kill timeout; the row/status shows a \"deleting…\" (or \"tombstoning…\") state until it finishes, then the result. Only one delete/tombstone runs at a time."
+    via: "the operator's decision of 2026-10-14, relayed by the main session"
   - precedent: ADR-503
 agent:
   name: Claude
@@ -211,6 +215,7 @@ The operator asked for a way to clear direct messages from the column: "we shoul
 - **Through the attend CLI.** attend-chat runs both verbs as child processes with `--json` and shows the report on the status line. When the installed attend lacks a verb, the status line names the verb and says attend needs updating. `/purge` stays for one release as an alias of Delete read messages for everyone… → All on the shown channel.
 - Item (b)'s rule holds: every item that drops something asks for `y` first, and the list now reads Hide messages here, Delete read messages for everyone…, Leave, Delete channel, Remove and Tombstone…. Undo delete restores and asks nothing.
 
-## Amendment (2026-10-14): hide in a named channel
+## Amendment (2026-10-14): hide in a named channel, and a delete that runs to its end
 
 - **Hide messages here on every channel.** A named channel's menu offers Hide messages here after Describe…, and Show hidden messages while the channel has a mark, as `#open` and the DM views do. The watermark is the same per-tab mark, kept in attend-chat's state file; it hides on this screen only, and the channel's members and the bus keep every message. The order is Add agent, Remove agent, Describe…, Hide messages here, Delete read messages for everyone…, Leave, Seal, Delete channel.
+- **A delete runs to its end.** Every form of `attend message delete` (the dry run that the question carries, the delete, the undo) and `attend message tombstone` runs on a thread of its own with no time limit. Before this, attend-chat stopped an attend that gave no answer in ten seconds, which could cut a long delete short. The status line says what is running (`counting read messages…`, `deleting…`, `undoing the delete…`, `tombstoning…`) until it ends, then the result; a fresh result or note takes the line for its few seconds and the running state comes back after it. The screen stays live meanwhile. One delete or tombstone runs at a time: another asked for meanwhile, by its menu item, `/purge` or a `y`, is refused with a note, and nothing is queued. A named verb attend refused and a report without its count are told as before. attend-chat runs no other attend call, so nothing it runs has a time limit now.

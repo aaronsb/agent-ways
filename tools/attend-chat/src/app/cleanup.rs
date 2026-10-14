@@ -18,11 +18,14 @@
 //!   own DM view: asked, then `attend message tombstone <session-id>`.
 //!   attend's refusal is shown as it words it.
 //!
-//! The verbs run through the attend CLI ([`crate::attend_cli`]) on a
-//! worker thread: the status says `asking attend…`, the screen stays live,
-//! a second request waits for the first, and an attend that gives no
-//! answer in [`attend_cli::WAIT`] is stopped. An attend without the verbs
-//! says it needs updating.
+//! The verbs run through the attend CLI ([`crate::attend_cli`]), every
+//! form of `attend message delete` (the dry run, the delete, the undo) and
+//! `attend message tombstone`, on a thread of their own with no time
+//! limit (ADR-405, amendment of 2026-10-14): a delete runs to its end. The
+//! status line says what is running (`deleting…`, `tombstoning…`) until it
+//! ends, a fresh result taking the line for its few seconds, and the screen
+//! stays live. One runs at a time: another asked for meanwhile is refused
+//! with a note. An attend without the verbs says it needs updating.
 
 use agent_tui::{Anchor, Item, Open};
 
@@ -45,9 +48,6 @@ pub(super) const CUSTOM: &str = "Custom…";
 const OLDER: &str = "older:";
 const OLDER_CUSTOM: &str = "older-custom:";
 
-/// What the status line says while attend works on a request.
-pub(super) const ASKING: &str = "asking attend…";
-
 /// What the chat does with attend's answer to a request.
 pub(super) enum Job {
     /// A delete's dry run, to ask with.
@@ -58,6 +58,18 @@ pub(super) enum Job {
     Undo(LastDelete),
     /// A tombstone of the session `member`, named `name`.
     Tombstone { member: String, name: String },
+}
+
+impl Job {
+    /// What the chat is doing while attend works on the job.
+    pub(super) fn doing(&self) -> &'static str {
+        match self {
+            Job::DryRun { .. } => "counting read messages",
+            Job::Delete(_) => "deleting",
+            Job::Undo(_) => "undoing the delete",
+            Job::Tombstone { .. } => "tombstoning",
+        }
+    }
 }
 
 /// The last delete this chat made: its scope, its batch and how many it
@@ -183,8 +195,11 @@ impl ChatPane {
     }
 
     /// Delete read messages for everyone…: Delete older than, docked beside
-    /// the item.
+    /// the item; refused while a delete or a tombstone runs.
     pub(super) fn delete_menu(&mut self, scope: &Scope) {
+        if self.refused_while_removing() {
+            return;
+        }
         let mut items: Vec<Item> = attend_cli::OLDER_THAN.iter().map(|(label, _)| Item::new(*label)).collect();
         items.push(Item::new(CUSTOM));
         self.to_open = Some(Open::Pick { id: format!("{OLDER}{}", scope.key()), title: "delete older than".into(), items, multi: false, anchor: Anchor::Parent });
@@ -242,6 +257,9 @@ impl ChatPane {
     /// again.
     pub(super) fn undo_delete(&mut self) {
         let Some(last) = self.undo.clone() else { return };
+        if self.refused_while_removing() {
+            return;
+        }
         if self.dry_run {
             return self.say("dry run: attend message delete --undo not run", false);
         }
@@ -256,8 +274,11 @@ impl ChatPane {
         self.world.as_ref().is_some_and(|w| w.seen.iter().any(|s| s.member == member && s.identity.is_claude && !s.live)) && attend_presence::gone(member)
     }
 
-    /// Tombstone…, asked first.
+    /// Tombstone…, asked first; refused while a delete or a tombstone runs.
     pub(super) fn ask_tombstone(&mut self, member: &str) {
+        if self.refused_while_removing() {
+            return;
+        }
         let name = self.dm_name(member);
         self.ask(Step::Tombstone(member.to_string(), name));
     }
@@ -270,22 +291,37 @@ impl ChatPane {
         self.ask_attend(attend_cli::tombstone_argv(member), Job::Tombstone { member: member.to_string(), name: name.to_string() });
     }
 
-    /// Run attend with `args` on a worker thread for `job`; the screen stays
-    /// live and the answer is taken on a tick ([`ChatPane::attend_answered`]).
-    /// While one is out, another is refused.
+    /// What the delete or tombstone running now is doing, as the status
+    /// line says it: `deleting…`.
+    pub(super) fn removing_now(&self) -> Option<String> {
+        self.removing.as_ref().map(|(_, job)| format!("{}…", job.doing()))
+    }
+
+    /// Whether a delete or a tombstone is running; if so, the request is
+    /// refused and the status line says why.
+    fn refused_while_removing(&mut self) -> bool {
+        let Some((_, job)) = &self.removing else { return false };
+        let note = format!("still {}: one delete or tombstone runs at a time", job.doing());
+        self.say(note, true);
+        true
+    }
+
+    /// Run attend with `args` for `job` on a thread of its own, to its end
+    /// however long it takes; the screen stays live and the answer is taken
+    /// on a tick ([`ChatPane::attend_answered`]).
     fn ask_attend(&mut self, args: Vec<String>, job: Job) {
-        if self.asking.is_some() {
-            return self.say("attend is still answering the last request", false);
+        if self.refused_while_removing() {
+            return;
         }
-        self.asking = Some((attend_cli::start(self.attend.clone(), args, self.attend_wait), job));
-        self.say(ASKING, false);
+        self.say(format!("{}…", job.doing()), false);
+        self.removing = Some((attend_cli::start(self.attend.clone(), args, None), job));
     }
 
     /// Take attend's answer once it has come, and act on it.
     pub(super) fn attend_answered(&mut self) {
-        let Some(answer) = self.asking.as_ref().and_then(|(running, _)| running.poll()) else { return };
-        let Some((_, job)) = self.asking.take() else { return };
-        // The answer replaces `asking attend…`, whatever it leads to.
+        let Some(answer) = self.removing.as_ref().and_then(|(running, _)| running.poll()) else { return };
+        let Some((_, job)) = self.removing.take() else { return };
+        // The answer replaces `deleting…`, whatever it leads to.
         self.say("", false);
         match job {
             Job::DryRun { scope, older } => self.dry_ran(scope, older, answer),

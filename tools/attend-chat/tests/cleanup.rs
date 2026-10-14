@@ -35,13 +35,16 @@ static SERIAL: Mutex<()> = Mutex::new(());
 /// twelve to mark and three kept by two sessions; a delete marks twelve in
 /// batch [`BATCH`]; an undo restores them; a delete in `#legacy` is refused
 /// as an attend without the verb refuses it; a tombstone of delta is refused
-/// as attend refuses one that has not exited.
+/// as attend refuses one that has not exited. `#slow` answers in a second,
+/// and a delete in `#long` (not its dry run) in eleven, past the ten the
+/// chat once gave attend.
 const FAKE: &str = r##"#!/bin/sh
 echo "$*" >> "$FAKE_ATTEND_LOG"
 case "$*" in
   *"--channel legacy"*) echo "error: unrecognized subcommand 'delete'" >&2; exit 2 ;;
-  *"--channel stuck"*) exec sleep 30 ;;
   *"--channel slow"*) sleep 1; echo '{"scope":"#slow","dry_run":true,"marked":3,"batch":null,"ids":[],"held":[]}' ;;
+  *"--channel long"*"--dry-run"*) echo '{"scope":"#long","dry_run":true,"marked":3,"batch":null,"ids":[],"held":[]}' ;;
+  *"--channel long"*) sleep 11; echo '{"scope":"#long","dry_run":false,"marked":3,"batch":"001784732645123-4243","ids":[],"held":[]}' ;;
   *"--undo"*) echo '{"batch":"001784732645123-4242","age_secs":5,"unmarked":12,"already_removed":0}' ;;
   *"--dry-run"*) echo '{"scope":"#open","dry_run":true,"marked":12,"batch":null,"ids":[],"held":[{"session":"a","name":"Ada-x","kept":2},{"session":"b","name":"Bo-y","kept":1}]}' ;;
   "message delete"*) echo '{"scope":"#open","dry_run":false,"marked":12,"batch":"001784732645123-4242","ids":[],"held":[{"session":"a","name":"Ada-x","kept":2},{"session":"b","name":"Bo-y","kept":1}]}' ;;
@@ -65,7 +68,7 @@ fn fixture() -> std::sync::MutexGuard<'static, ()> {
         std::fs::create_dir_all(base.join("@deploy")).unwrap();
         std::fs::create_dir_all(base.join("@legacy")).unwrap();
         std::fs::create_dir_all(base.join("@slow")).unwrap();
-        std::fs::create_dir_all(base.join("@stuck")).unwrap();
+        std::fs::create_dir_all(base.join("@long")).unwrap();
     });
     let bin = root.join("bin");
     if !bin.join("attend").exists() {
@@ -128,16 +131,21 @@ fn feed(c: &mut Chat) -> String {
 }
 
 fn press(c: &mut Chat, code: KeyCode) {
+    press_now(c, code);
+    answered(c);
+}
+
+/// [`press`] without waiting for attend's answer.
+fn press_now(c: &mut Chat, code: KeyCode) {
     testkit::render_screen(c, W, H);
     testkit::drive(c, &[KeyEvent::new(code, KeyModifiers::NONE)]);
-    answered(c);
 }
 
 /// Tick the chat, as its loop does, until attend has answered what it was
 /// asked, if anything.
 fn answered(c: &mut Chat) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while c.status() == "asking attend…" && std::time::Instant::now() < deadline {
+    while c.removing().is_some() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(10));
         Screen::tick(c);
     }
@@ -434,11 +442,11 @@ fn attend_answers_off_the_screens_thread_one_request_at_a_time() {
     channel_menu(&mut c, "#slow");
     pick(&mut c, "Delete read messages");
     pick_now(&mut c, "All");
-    assert_eq!(c.status(), "asking attend…", "the pick returns at once");
+    assert_eq!(c.status(), "counting read messages…", "the pick returns at once");
     channel_menu(&mut c, "#open");
     pick_now(&mut c, "Delete read messages");
-    pick_now(&mut c, "All");
-    assert_eq!(c.status(), "attend is still answering the last request");
+    assert_eq!(c.status(), "still counting read messages: one delete or tombstone runs at a time");
+    assert!(!items(&mut c).iter().any(|i| i == "All"), "refused before its ages: {}", screen(&mut c));
     assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "the second pick ran nothing");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !screen(&mut c).contains("delete 3 read messages in #slow?") && std::time::Instant::now() < deadline {
@@ -448,12 +456,47 @@ fn attend_answers_off_the_screens_thread_one_request_at_a_time() {
     assert!(screen(&mut c).contains("delete 3 read messages in #slow?"), "the answer asks on a tick: {}", screen(&mut c));
 }
 
+/// A delete runs to its end however long attend takes, past the ten
+/// seconds the chat once gave it. Until then the status line says
+/// `deleting…`, a fresh note taking the line for its few seconds; the
+/// screen stays live; and another delete or a tombstone asked for
+/// meanwhile is refused with a note.
 #[test]
-fn an_attend_that_does_not_answer_is_stopped() {
+fn a_long_delete_runs_to_its_end_and_says_deleting_until_then() {
+    use std::time::{Duration, Instant};
     let _g = fixture();
-    let mut c = chat().attend_wait(std::time::Duration::from_millis(300));
-    channel_menu(&mut c, "#stuck");
+    let mut c = chat();
+    channel_menu(&mut c, "#long");
     pick(&mut c, "Delete read messages");
     pick(&mut c, "All");
-    assert_eq!(c.status(), "`attend message delete` gave no answer in 0.3 s and was stopped");
+    assert!(screen(&mut c).contains("delete 3 read messages in #long?"), "{}", screen(&mut c));
+    let began = Instant::now();
+    press_now(&mut c, KeyCode::Char('y'));
+    assert_eq!(c.status(), "deleting…", "the y returns at once");
+    assert_eq!(c.removing().as_deref(), Some("deleting…"));
+    c.push(sig("o-new", &format!("claude:{ALPHA_SID}"), "/work/alpha", "news while deleting", Channel::Open, 400));
+    side(&mut c, "#open", MouseButton::Left);
+    assert!(feed(&mut c).contains("news while deleting"), "the screen stays live: {}", feed(&mut c));
+    channel_menu(&mut c, "#open");
+    pick_now(&mut c, "Delete read messages");
+    assert_eq!(c.status(), "still deleting: one delete or tombstone runs at a time");
+    assert!(!items(&mut c).iter().any(|i| i == "All"), "refused before its ages: {}", screen(&mut c));
+    side(&mut c, &nick("/work/gamma"), MouseButton::Right);
+    pick_now(&mut c, "Tombstone…");
+    assert_eq!(c.status(), "still deleting: one delete or tombstone runs at a time");
+    assert!(!screen(&mut c).contains("tombstone @") && !screen(&mut c).contains("pick one: "), "nothing asked, nothing open: {}", screen(&mut c));
+    // Past the note's few seconds the line says deleting… again.
+    let status_row = |c: &mut Chat| rows(c).last().cloned().unwrap_or_default();
+    while !status_row(&mut c).contains("deleting…") && began.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(50));
+        Screen::tick(&mut c);
+    }
+    assert!(status_row(&mut c).contains("deleting…") && c.removing().is_some(), "{:?} after {:?}", status_row(&mut c), began.elapsed());
+    while c.removing().is_some() && began.elapsed() < Duration::from_secs(30) {
+        std::thread::sleep(Duration::from_millis(50));
+        Screen::tick(&mut c);
+    }
+    assert!(began.elapsed() >= Duration::from_secs(10), "attend ran past ten seconds: {:?}", began.elapsed());
+    assert!(c.status().starts_with("deleted 3 messages in #long"), "{}", c.status());
+    assert_eq!(calls(), ["message delete --channel long --older-than all --dry-run --json", "message delete --channel long --older-than all --json"], "the refused requests ran nothing");
 }

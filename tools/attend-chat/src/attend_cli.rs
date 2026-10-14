@@ -198,11 +198,9 @@ impl std::fmt::Display for Failure {
     }
 }
 
-/// How long the chat waits for attend before it stops the child.
-pub const WAIT: Duration = Duration::from_secs(10);
-
-/// A verb running on a worker thread, which answers once over a channel
-/// ([`start`]); the screen polls it on its tick and stays live meanwhile.
+/// A verb running on a thread of its own, which answers once over a
+/// channel ([`start`]); the screen polls it on its tick and stays live
+/// meanwhile.
 pub struct Running {
     rx: Receiver<Result<serde_json::Value, Failure>>,
 }
@@ -223,8 +221,11 @@ impl Running {
     }
 }
 
-/// Run `program` with `args` on a worker thread, stopping it after `wait`.
-pub fn start(program: PathBuf, args: Vec<String>, wait: Duration) -> Running {
+/// Run `program` with `args` on a thread of its own, stopping it after
+/// `wait` when one is given. The chat's cleanup verbs give none: a delete
+/// or a tombstone runs to its end however long attend takes, and the chat
+/// says what it is doing until then (ADR-405, amendment of 2026-10-14).
+pub fn start(program: PathBuf, args: Vec<String>, wait: Option<Duration>) -> Running {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
         let _ = tx.send(run(&program, &args, wait));
@@ -235,12 +236,12 @@ pub fn start(program: PathBuf, args: Vec<String>, wait: Duration) -> Running {
 /// Run `program` with `args` and read its one JSON document. A document
 /// with an `error` is attend's refusal; no document, from an attend whose
 /// argument parser did not know the verb or a flag, means it is too old. A
-/// child still running after `wait` is killed.
-fn run(program: &Path, args: &[String], wait: Duration) -> Result<serde_json::Value, Failure> {
+/// child still running after `wait`, when one is given, is killed.
+fn run(program: &Path, args: &[String], wait: Option<Duration>) -> Result<serde_json::Value, Failure> {
     let verb = args.iter().take(2).cloned().collect::<Vec<_>>().join(" ");
     let (status, stdout, stderr) = match output(program, args, wait) {
         Ok(Some(out)) => out,
-        Ok(None) => return Err(Failure::TimedOut { verb, wait }),
+        Ok(None) => return Err(Failure::TimedOut { verb, wait: wait.unwrap_or_default() }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(Failure::NoAttend { verb }),
         Err(e) => return Err(Failure::Broken { verb, why: e.to_string() }),
     };
@@ -259,12 +260,13 @@ fn run(program: &Path, args: &[String], wait: Duration) -> Result<serde_json::Va
 }
 
 /// Run `program` with `args` to its end, its exit status and what it wrote,
-/// or `None` once `wait` has passed and the child is killed. Its output is
-/// read as it comes, so a report larger than a pipe holds never stalls it.
+/// or `None` once a given `wait` has passed and the child is killed. Its
+/// output is read as it comes, so a report larger than a pipe holds never
+/// stalls it.
 /// A program file still held open for writing (`ExecutableFileBusy`: an
 /// attend being installed, or a test's fake while another thread forks) is
 /// tried again shortly.
-fn output(program: &Path, args: &[String], wait: Duration) -> std::io::Result<Option<(ExitStatus, String, String)>> {
+fn output(program: &Path, args: &[String], wait: Option<Duration>) -> std::io::Result<Option<(ExitStatus, String, String)>> {
     let mut tries = 0;
     let mut child = loop {
         let spawned = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
@@ -290,7 +292,7 @@ fn output(program: &Path, args: &[String], wait: Duration) -> std::io::Result<Op
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        if began.elapsed() >= wait {
+        if wait.is_some_and(|w| began.elapsed() >= w) {
             let _ = child.kill();
             let _ = child.wait();
             return Ok(None);
@@ -388,7 +390,7 @@ mod tests {
         let old = fake(&dir, "old", "", "error: unrecognized subcommand 'delete'", 2);
         let crashed = fake(&dir, "crashed", "", "thread main panicked", 101);
         let none = dir.join("no-attend");
-        let call = |p: &Path, args: Vec<String>| start(p.to_path_buf(), args, WAIT).wait();
+        let call = |p: &Path, args: Vec<String>| start(p.to_path_buf(), args, None).wait();
         let r = report(&call(&ok, delete_argv(&Scope::Open, "all", true)).unwrap()).unwrap();
         assert_eq!(r, Report { marked: 12, batch: None, held: vec![("Ada-x".into(), 2), ("Bo-y".into(), 1)] });
         assert_eq!(r.kept_words(), " · 3 stay unread by 2 sessions");
@@ -413,7 +415,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&slow, std::fs::Permissions::from_mode(0o755)).unwrap();
         let began = Instant::now();
-        let running = start(slow, tombstone_argv("s9"), Duration::from_millis(200));
+        let running = start(slow, tombstone_argv("s9"), Some(Duration::from_millis(200)));
         assert!(running.poll().is_none(), "still running: the caller is not held");
         let e = running.wait().unwrap_err();
         assert_eq!(e.to_string(), "`attend message tombstone` gave no answer in 0.2 s and was stopped");
