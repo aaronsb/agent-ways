@@ -20,6 +20,9 @@ use attend_chat::tabs::Tab;
 const ALPHA_SID: &str = "aaaaaaaa-0000-4000-8000-000000000001";
 const GAMMA_SID: &str = "cccccccc-0000-4000-8000-000000000003";
 const DELTA_SID: &str = "dddddddd-0000-4000-8000-000000000004";
+/// Quiet for an hour: no fresh heartbeat, but within the hold a session no
+/// record here names keeps (`attend_presence::UNJUDGED_HOLD`).
+const EPSILON_SID: &str = "eeeeeeee-0000-4000-8000-000000000005";
 const BATCH: &str = "001784732645123-4242";
 const W: u16 = 120;
 const H: u16 = 35;
@@ -53,6 +56,9 @@ fn fixture() -> std::sync::MutexGuard<'static, ()> {
     let guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let root = support::fixture("cleanup", |base| {
         support::pin_alive(ALPHA_SID);
+        attend_presence::heartbeat::touch(EPSILON_SID).unwrap();
+        let beat = std::fs::File::options().write(true).open(attend_presence::heartbeat::heartbeat_path(EPSILON_SID)).unwrap();
+        beat.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600)).unwrap();
         std::fs::create_dir_all(base.join("@deploy")).unwrap();
         std::fs::create_dir_all(base.join("@legacy")).unwrap();
     });
@@ -83,7 +89,7 @@ fn sig(id: &str, from: &str, cwd: &str, message: &str, channel: Channel, ts: u64
 /// alpha's, gamma's and delta's posts and a DM from alpha.
 fn chat_in(hidden: &std::path::Path) -> Chat {
     let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).hidden_file(hidden);
-    for (i, (sid, cwd)) in [(ALPHA_SID, "/work/alpha"), (GAMMA_SID, "/work/gamma"), (DELTA_SID, "/work/delta")].into_iter().enumerate() {
+    for (i, (sid, cwd)) in [(ALPHA_SID, "/work/alpha"), (GAMMA_SID, "/work/gamma"), (DELTA_SID, "/work/delta"), (EPSILON_SID, "/work/epsilon")].into_iter().enumerate() {
         c.push(sig(&format!("o-{i}"), &format!("claude:{sid}"), cwd, &format!("{} on open", &cwd[6..]), Channel::Open, 100 + i as u64));
     }
     c.push(sig("d-1", &format!("claude:{ALPHA_SID}"), "/work/alpha", "alpha in deploy", Channel::Group("deploy".into()), 110));
@@ -280,6 +286,9 @@ fn tombstone_is_offered_on_a_dead_agents_row_only_and_shows_a_refusal() {
     side(&mut c, &nick("/work/alpha"), MouseButton::Right);
     assert!(!items(&mut c).iter().any(|i| i == "Tombstone…"), "a live agent: {:?}", items(&mut c));
     press(&mut c, KeyCode::Esc);
+    side(&mut c, &nick("/work/epsilon"), MouseButton::Right);
+    assert!(!items(&mut c).iter().any(|i| i == "Tombstone…"), "quiet, but attend would refuse it: {:?}", items(&mut c));
+    press(&mut c, KeyCode::Esc);
     let gamma = nick("/work/gamma");
     side(&mut c, &gamma, MouseButton::Right);
     assert_eq!(items(&mut c).last().map(String::as_str), Some("Tombstone…"), "{}", screen(&mut c));
@@ -321,7 +330,7 @@ fn hide_messages_here_hides_in_its_tab_only_and_holds_across_a_restart() {
     pick(&mut c, "Hide messages here");
     assert!(screen(&mut c).contains("hide the messages in #open? the bus keeps every message"), "{}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));
-    assert_eq!(c.status(), "hid 4 messages in #open; the bus keeps them");
+    assert_eq!(c.status(), "hid 5 messages in #open; the bus keeps them");
     assert!(!feed(&mut c).contains("on open"), "{}", feed(&mut c));
     assert!(calls().is_empty(), "nothing on the bus");
     c.push(sig("o-9", &format!("claude:{ALPHA_SID}"), "/work/alpha", "alpha later", Channel::Open, 200));

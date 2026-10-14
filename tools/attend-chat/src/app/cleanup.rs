@@ -223,10 +223,12 @@ impl ChatPane {
         self.stale();
     }
 
-    /// Whether `member` is a claude the column shows as not live: one
-    /// Tombstone… is offered for.
+    /// Whether `member` is a claude that has gone, by the predicate attend's
+    /// tombstone accepts (`attend_presence::gone`): one Tombstone… is
+    /// offered for. A quiet session that has not gone gets no offer attend
+    /// would refuse.
     pub(super) fn is_dead_claude(&self, member: &str) -> bool {
-        self.world.as_ref().is_some_and(|w| w.seen.iter().any(|s| s.member == member && s.identity.is_claude && !s.live))
+        self.world.as_ref().is_some_and(|w| w.seen.iter().any(|s| s.member == member && s.identity.is_claude && !s.live)) && attend_presence::gone(member)
     }
 
     /// Tombstone…, asked first.

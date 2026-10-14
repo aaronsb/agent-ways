@@ -4,7 +4,7 @@
 //! The mark is an empty file in the mark store
 //! (`attend_groups::tombstones`), and it hides what the session sent up to
 //! the mark. Only an agent's session id is tombstoned, and only one that
-//! has gone (`verbs::recipients::gone`) that no session that may
+//! has gone (`attend_presence::gone`) that no session that may
 //! still read the bus reads as, its ids before `/clear` and the caller's
 //! own included: those messages are still that session's to read. No
 //! message is marked or removed; `attend message delete` does that.
@@ -88,7 +88,7 @@ pub fn tombstone(session: &str) -> Result<Tombstoned, TombstoneError> {
             return Err(TombstoneError::ReadAs { session: session.to_string(), by: live });
         }
     }
-    if !crate::verbs::recipients::gone(session) {
+    if !attend_presence::gone(session) {
         return Err(TombstoneError::NotExited { session: session.to_string() });
     }
     let moved =

@@ -121,7 +121,7 @@ delete-custom | base | wait:#open click:#open click:#open wait:Delete_read Down 
 dm-delete    | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rside:DMs wait:Delete_read click:Delete_read wait:delete_older_than
 tomb-menu    | base  | wait:Agents rside:○ wait:Tombstone…
 tomb-ask     | base  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone
-tomb-said    | base  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone click:y_tombstone gone:y_tombstone
+tomb-said    | base  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone click:y_tombstone wait:tombstoned
 review-tomb  | base  | wait:Agents rside:○ wait:Review_DMs click:Review_DMs wait:read_only rside:DMs wait:Tombstone…
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
 menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
@@ -248,8 +248,12 @@ fixture() { # kind
   if [ "$1" = many ]; then
     for n in $(seq -w 1 24); do mkdir -p "$sig/@ch$n"; done
   fi
+  # gamma's record names a pid no process holds: it has exited, so its
+  # row offers Tombstone… and attend accepts it.
   for s in "${sessions[@]}"; do
-    printf '{"pid":%d,"sessionId":"%s","cwd":"%s"}\n' "$i" "${s%%:*}" "${s#*:}" > "$F/home/.claude/sessions/$i.json"
+    local pid=$i
+    [ "${s%%:*}" = "$C" ] && pid=4194301
+    printf '{"pid":%d,"sessionId":"%s","cwd":"%s"}\n' "$pid" "${s%%:*}" "${s#*:}" > "$F/home/.claude/sessions/$i.json"
     i=$((i + 1))
   done
   touch "$cache/heartbeat/$A" "$cache/heartbeat/$B"
