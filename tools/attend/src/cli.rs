@@ -154,34 +154,56 @@ pub(crate) enum MessageCmd {
     #[command(about = describe::UNREAD)]
     Unread(JsonArgs),
 
-    /// Reap signal files whose owning project is gone, and prune empty
-    /// project dirs. Lifetime is bound to project liveness (ADR-136); the
-    /// one removal by age is of a message `attend message delete` marked,
-    /// 7 days after the mark, or for a project tray's message once that
-    /// project has started 3 sessions since (ADR-404 D3e).
+    // `with_limits` writes this verb's help with the limits it applies.
+    /// Reap signal files whose owning project is gone, and prune empty project dirs
     Cleanup(CleanupArgs),
 
+    // `with_limits` writes this verb's long help with the limits it applies.
     /// Mark for deletion the messages no live session still has to read
-    ///
-    /// A message is marked when it is in the scope, older than --older-than,
-    /// older than 90 seconds, and no live session would be delivered it: a
-    /// session keeps what `attend message unread` counts for it, its cold
-    /// start included. A person in attend-chat holds nothing. Every reader
-    /// skips a marked message, and `attend message cleanup` removes it 7
-    /// days after the mark, or for a project tray's message once that
-    /// project has started 3 sessions since (ADR-404 D3e). --undo takes a
-    /// delete back while cleanup has not yet removed its messages.
     Delete(DeleteArgs),
 
     /// Tombstone a session that has exited, so every reader skips its messages
     ///
     /// The drain, the mod, `attend message unread`, the Monitor poller and
     /// `attend message inbox` all skip what a tombstoned session sent, and
-    /// the drain records it read. A live session is refused, as is an id a
-    /// live session had before /clear, this session's own included. Its
-    /// messages stay on disk; `attend message delete --from <id>` marks
-    /// them for deletion (ADR-404 D3e).
+    /// the drain records it read, up to when it was tombstoned; what the
+    /// session sends later, back under --resume, shows. Only an agent's
+    /// session that this host saw exit is tombstoned: a person's id, a
+    /// session that may still read the bus, an id such a session had
+    /// before /clear and this session's own are refused. Its messages stay
+    /// on disk; `attend message delete --everywhere --from <id>` marks them
+    /// for deletion (ADR-404 D3e).
     Tombstone(TombstoneArgs),
+}
+
+/// The help of the verbs that state a limit, written from the constants
+/// that set it, so the text cannot drift from the behaviour.
+pub(crate) fn with_limits(cmd: clap::Command) -> clap::Command {
+    let grace = attend_presence::heartbeat::DEFAULT_GRACE.as_secs();
+    let days = crate::cmd::cleanup::MARK_REAP_DAYS;
+    let sessions = crate::cmd::cleanup::MARK_REAP_SESSIONS;
+    let reap = format!(
+        "{days} days after the mark, or for a message in a project tray once that project has started {sessions} \
+         Claude Code sessions since, each /clear counting as one"
+    );
+    let delete = format!(
+        "Mark for deletion the messages no live session still has to read\n\n\
+         A message is marked when it is in the scope, older than --older-than, older than {grace} seconds, and \
+         no session that may still read the bus would be delivered it: a session keeps what `attend message \
+         unread` counts for it, its cold start included, and one this host cannot judge keeps its mail. A \
+         person in attend-chat holds nothing. Every reader skips a marked message, and `attend message \
+         cleanup` removes it {reap} (ADR-404 D3e). --undo takes a delete back, and its messages are delivered \
+         again, while cleanup has not yet removed them."
+    );
+    let cleanup = format!(
+        "Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to \
+         project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, \
+         {reap} (ADR-404 D3e)."
+    );
+    cmd.mut_subcommand("message", |m| {
+        m.mut_subcommand("delete", |d| d.about(delete.lines().next().unwrap_or_default().to_string()).long_about(delete))
+            .mut_subcommand("cleanup", |c| c.about(cleanup))
+    })
 }
 
 /// Subcommands for `attend channel`. With no subcommand, defaults to `list`.
@@ -648,6 +670,25 @@ mod tests {
         let cli = Cli::command();
         let shown: Vec<&str> = cli.get_subcommands().filter(|c| !c.is_hide_set()).map(|c| c.get_name()).collect();
         assert_eq!(shown, ["run", "listen", "message", "channel", "peer", "keepwarm", "chat", "sensor", "config"]);
+    }
+
+    /// The help states the limits the code applies.
+    #[test]
+    fn help_states_the_limits_in_force() {
+        let cli = crate::cli_command();
+        let delete = at(&cli, "message delete").get_long_about().unwrap().to_string();
+        let grace = attend_presence::heartbeat::DEFAULT_GRACE.as_secs();
+        for text in [
+            format!("older than {grace} seconds"),
+            format!("{} days after the mark", crate::cmd::cleanup::MARK_REAP_DAYS),
+            format!("started {} Claude Code sessions", crate::cmd::cleanup::MARK_REAP_SESSIONS),
+        ] {
+            assert!(delete.contains(&text), "{text} in {delete}");
+        }
+        let cleanup = at(&cli, "message cleanup").get_about().unwrap().to_string();
+        assert!(cleanup.contains(&format!("{} days", crate::cmd::cleanup::MARK_REAP_DAYS)), "{cleanup}");
+        let tombstone = at(&cli, "message tombstone").get_long_about().unwrap().to_string();
+        assert!(tombstone.contains("attend message delete --everywhere --from <id>"), "{tombstone}");
     }
 
     #[test]
