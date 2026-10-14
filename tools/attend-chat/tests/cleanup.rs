@@ -95,11 +95,12 @@ fn chat() -> Chat {
     chat_in(&support_dir().join("hidden"))
 }
 
-/// A fresh directory for one test's watermarks.
+/// A fresh directory for one test's watermarks, under the fixture, which
+/// goes when the run ends.
 fn support_dir() -> PathBuf {
-    let d = std::env::temp_dir().join(format!("attend-chat-cleanup-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-    std::fs::create_dir_all(&d).unwrap();
-    d
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let root = log_path().parent().expect("the fixture root").to_path_buf();
+    root.join(format!("hidden-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
 }
 
 fn rows(c: &mut Chat) -> Vec<String> {
@@ -197,7 +198,7 @@ fn delete_on_open_asks_with_the_dry_runs_counts_then_deletes_and_offers_undo() {
     pick(&mut c, "Today");
     press(&mut c, KeyCode::Char('y'));
     assert_eq!(calls().last().unwrap(), "message delete --open --older-than today --json");
-    assert!(c.status().starts_with("deleted 12 messages in #open · 3 stay unread by 2 sessions") && c.status().contains(&format!("batch {BATCH}")), "{}", c.status());
+    assert!(c.status().starts_with("deleted 12 messages in #open · 3 stay unread by 2 sessions") && c.status().ends_with(&format!("· Undo delete on its menu · batch {BATCH}")), "{}", c.status());
     channel_menu(&mut c, "#open");
     assert_eq!(items(&mut c), ["Hide messages here", "Delete read messages for everyone…", "Undo delete"]);
     pick(&mut c, "Undo delete");

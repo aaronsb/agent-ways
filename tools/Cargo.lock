@@ -169,7 +169,6 @@ dependencies = [
  "agent-identity",
  "agent-settings",
  "agent-theme",
- "attend-chat",
  "attend-config",
  "attend-groups",
  "attend-instances",

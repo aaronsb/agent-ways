@@ -8,13 +8,14 @@
 //!   or Show column (the left column, as `attend.chat.sidebar_key` toggles
 //!   it), Settings…, Quit (as Ctrl-C, asking first over a draft; Esc never
 //!   quits, ADR-409).
-//! - the operator view (`⋯all`, every channel together): Clear view. It is
-//!   not a channel, so it offers no channel's items (ADR-405).
-//! - `#open`: Clear view, Clear history.
+//! - the operator view (`⋯all`, every channel together): Hide messages
+//!   here. It is not a channel, so it offers no channel's items (ADR-405).
+//! - `#open`: Hide messages here, Delete read messages for everyone…
+//!   ([`super::cleanup`]), and Undo delete after a delete there.
 //! - a named channel: Add agent ▸ (invites a live peer, which joins
 //!   itself, as the agent menu's Add agent to chat does), Remove agent ▸,
-//!   Describe…, Clear history, Leave (Join for a channel the human is
-//!   not in), Seal, Delete channel.
+//!   Describe…, Delete read messages for everyone… (and Undo delete),
+//!   Leave (Join for a channel the human is not in), Seal, Delete channel.
 //! - the `+` slot and Ctrl+N: no menu, straight to the name of a new
 //!   channel, typed in an entry dialog docked under `+`. Describe… asks its
 //!   line in the same dialog, docked beside its item. The compose box is
@@ -26,12 +27,15 @@
 //!   says of the session the row is, or what the chat knows of one the
 //!   roster lacks), Add agent to chat ▸ (a picker, `add to channel`, of
 //!   the channels the agent is not in; the pick invites it, as Add agent ▸
-//!   does), and
-//!   Remove from #channel when the shown channel lists the agent, live or
-//!   quiet. The operator's own row offers Leave #channel there instead:
-//!   Remove never takes out the human at the keyboard, here or in the
-//!   Remove agent picker.
-//! - a DM view, by its row or its tab: Hide DMs.
+//!   does), then for a claude Hide messages here and Delete read messages for
+//!   everyone… on its DMs with the operator, then Remove from #channel
+//!   when the shown channel lists the agent, live or quiet, and last
+//!   Tombstone… for a claude that is not live. The operator's own row
+//!   offers Leave #channel in Remove's place: Remove never takes out the
+//!   human at the keyboard, here or in the Remove agent picker.
+//! - a DM view, by its row or its tab: Hide DMs, Hide messages here,
+//!   Delete read messages for everyone…; an agent's own DM view: Hide
+//!   review, and Tombstone… for an agent that is not live.
 //! - a message in the feed, by Enter on it: Reply (its channel shown and
 //!   the keyboard in the compose box; a direct message is answered by
 //!   addressing its sender, and one the chat sent by showing its DM view),
@@ -39,8 +43,9 @@
 //!   the agent menu's), Copy (the message to the terminal's clipboard by
 //!   OSC 52).
 //!
-//! Every item that drops something asks first: Clear view, Clear history,
-//! Leave, Delete channel and Remove. The question is the shell's
+//! Every item that drops something asks first: Hide messages here, Delete
+//! read messages for everyone… (once its age is picked), Leave, Delete
+//! channel, Remove and Tombstone…. The question is the shell's
 //! ([`agent_tui::Open::Ask`]), on the bottom bar with its two answers as
 //! lozenges: `y` or a click on the first goes ahead; `n`, Esc, a click
 //! anywhere else or any other key keeps things as they are. A click opens

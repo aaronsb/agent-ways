@@ -124,6 +124,7 @@ mod tests {
         std::fs::write(&path, "all\t1\t2\t3\nbroken line\n#x\tq\t2\t3\n").unwrap();
         let read = Hidden::load(&path);
         assert!(read.hides(&Tab::Merged, &sig("x", 1, Channel::Open)) && !read.hides(&Tab::Channel("x".into()), &sig("x", 0, Channel::Open)), "{read:?}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

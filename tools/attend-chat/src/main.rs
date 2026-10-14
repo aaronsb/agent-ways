@@ -40,18 +40,26 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             compose box and its draft are never borrowed
   Tab                       complete @name #channel /command; with nothing to
                             complete, leave the compose box
-  tab menus                 ≡ (first, no number): Theme, Keybinding set, Mouse at
-                            start, Settings, Quit. ⋯all (the operator view, every
-                            channel together, pinned right): Clear view.
-                            #open: Clear view, Clear history. A channel:
-                            Add agent, Remove agent, Describe,
-                            Clear history, Leave, Seal, Delete channel. Add
-                            agent invites (the agent joins itself); Seal waits
-                            on attend (ADR-404 D4) and is set back.
-                            The + slot (or Ctrl+N) asks for a new channel's name
-                            with no menu. Clear history and Delete
-                            ask first: y goes ahead. The bar holds one channel
-                            tab, the created channel shown
+  tab menus                 ≡ (first, no number): Theme, Keybinding set, Mouse
+                            at start, Settings, Quit. ⋯all (the operator view,
+                            every channel together, pinned right): Hide
+                            messages here. #open: Hide messages here, Delete
+                            read messages for everyone…. A channel: Add agent,
+                            Remove agent, Describe, Delete read messages for
+                            everyone…, Leave, Seal, Delete channel. Add agent
+                            invites (the agent joins itself); Seal waits on
+                            attend (ADR-404 D4) and is set back. The + slot (or
+                            Ctrl+N) asks for a new channel's name with no menu.
+                            The bar holds one channel tab, the created channel
+                            shown
+  cleanup                   Hide messages here hides what the tab holds now, in
+                            this chat only, kept across restarts. Delete read
+                            messages for everyone… picks an age (Current
+                            sessions, Today, All, Custom…) and runs `attend
+                            message delete`; Undo delete follows it on the menu.
+                            A DM view's row and tab and a claude's row carry the
+                            pair for the DMs with it, and a dead claude's row
+                            Tombstone…. Each asks first: y goes ahead
   Shift-Enter / Alt-Enter   insert newline
   Left / Right / Home / End move cursor
   Backspace / Delete        edit

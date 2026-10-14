@@ -276,10 +276,9 @@ mod tests {
         assert_eq!(older_words("2026-10-01"), " from before 2026-10-01");
     }
 
-    /// A program that prints `stdout` and `stderr` and exits `code`.
-    fn fake(stdout: &str, stderr: &str, code: i32) -> std::path::PathBuf {
-        let dir = crate::test_dir::unique("attend-cli");
-        let path = dir.join("attend");
+    /// A program in `dir` that prints `stdout` and `stderr` and exits `code`.
+    fn fake(dir: &Path, name: &str, stdout: &str, stderr: &str, code: i32) -> std::path::PathBuf {
+        let path = dir.join(name);
         std::fs::write(&path, format!("#!/bin/sh\nprintf '%s' '{stdout}'\nprintf '%s\\n' '{stderr}' >&2\nexit {code}\n")).unwrap();
         #[cfg(unix)]
         {
@@ -292,18 +291,20 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_report_a_refusal_and_an_old_attend_read_apart() {
-        let ok = fake(r##"{"scope":"#open","dry_run":true,"marked":12,"batch":null,"ids":[],"held":[{"session":"a","name":"Ada-x","kept":2},{"session":"b","name":"Bo-y","kept":1}]}"##, "", 0);
+        let dir = crate::test_dir::unique("attend-cli");
+        let ok = fake(&dir, "ok", r##"{"scope":"#open","dry_run":true,"marked":12,"batch":null,"ids":[],"held":[{"session":"a","name":"Ada-x","kept":2},{"session":"b","name":"Bo-y","kept":1}]}"##, "", 0);
         let r = delete(&ok, &Scope::Open, "all", true).unwrap();
         assert_eq!(r, Report { marked: 12, batch: None, held: vec![("Ada-x".into(), 2), ("Bo-y".into(), 1)] });
         assert_eq!(r.kept_words(), " · 3 stay unread by 2 sessions");
-        let refused = fake(r#"{"error":{"kind":"not_exited","session":"s9"},"message":"s9 has not exited"}"#, "attend message tombstone: s9 has not exited", 1);
+        let refused = fake(&dir, "refused", r#"{"error":{"kind":"not_exited","session":"s9"},"message":"s9 has not exited"}"#, "attend message tombstone: s9 has not exited", 1);
         assert_eq!(tombstone(&refused, "s9"), Err(Failure::Refused("s9 has not exited".into())));
-        let old = fake("", "error: unrecognized subcommand 'delete'", 2);
+        let old = fake(&dir, "old", "", "error: unrecognized subcommand 'delete'", 2);
         let e = delete(&old, &Scope::Open, "all", true).unwrap_err();
         assert_eq!(e.to_string(), "`attend message delete` is missing: needs a newer attend");
-        let none = crate::test_dir::unique("attend-cli").join("no-attend");
+        let none = dir.join("no-attend");
         assert_eq!(tombstone(&none, "s9").unwrap_err().to_string(), "`attend message tombstone` needs attend on PATH");
-        let crashed = fake("", "thread main panicked", 101);
+        let crashed = fake(&dir, "crashed", "", "thread main panicked", 101);
         assert_eq!(undo(&crashed, "1").unwrap_err().to_string(), "attend message delete: thread main panicked");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

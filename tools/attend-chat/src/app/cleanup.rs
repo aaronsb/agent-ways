@@ -192,7 +192,7 @@ impl ChatPane {
                 let n = r.marked;
                 let mut said = format!("deleted {n} message{} in {}{}", if n == 1 { "" } else { "s" }, asked.label, r.kept_words());
                 if let Some(batch) = r.batch {
-                    said += &format!(" · batch {batch} · Undo delete on its menu");
+                    said += &format!(" · Undo delete on its menu · batch {batch}");
                     self.undo = Some(LastDelete { scope: asked.scope, batch, marked: n });
                 }
                 self.say(said, false);

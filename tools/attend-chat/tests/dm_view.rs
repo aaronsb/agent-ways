@@ -82,7 +82,8 @@ fn chat() -> Chat {
 /// hide reaches another's feed.
 fn own_hidden() -> std::path::PathBuf {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    std::env::temp_dir().join(format!("attend-chat-dm-view-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))).join("hidden")
+    let root = support::fixture("dm-view", |_| unreachable!("set up by fixture()"));
+    root.join(format!("hidden-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
 }
 
 fn rows(c: &mut Chat) -> Vec<String> {

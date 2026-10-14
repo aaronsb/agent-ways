@@ -4,7 +4,7 @@
 # capture of each, against a synthetic attend cache. Needs tmux and
 # fontconfig.
 #
-#   cargo build --manifest-path tools/Cargo.toml -p attend-chat -p tui-harness
+#   cargo build --manifest-path tools/Cargo.toml -p attend-chat -p attend -p tui-harness
 #   tools/attend-chat/shots/shots.sh                 # every scenario
 #   tools/attend-chat/shots/shots.sh side click      # some
 #
@@ -100,19 +100,29 @@ focus-resize | base  | wait:Agents F2 Down Down wait:↑_↓_move resize:70 gone
 agent-menu   | base  | wait:Agents side:○ wait:DMs side:○ wait:Address
 crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
 common       | base  | wait:Agents click:≡ wait:Hide_column
-clear-view   | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:clear_the_view?
+hide-here    | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_in_⋯all?
+hide-done    | base  | wait:#open click:#open click:#open wait:Hide_messages_here Enter wait:y_hide click:y_hide wait:the_bus_keeps_them
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents
 own-row      | own   | wait:operator click:#deploy click:#deploy wait:pick Escape gone:pick side:operator wait:Leave_#deploy
 quiet-send   | base  | wait:Agents rside:○ wait:Address Down Enter text:are_you_there Enter wait:no_heartbeat
-paste-asked  | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:clear_the_view? paste:yes_please\\nsecond_line wait:kept
-ask          | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear
-ask-yes      | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:y_clear wait:cleared
-ask-no       | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:n_keep wait:kept
-ask-feed     | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear click:signing wait:kept
-ask-row      | base  | wait:⋯all click:⋯all wait:Clear_view Enter wait:y_clear side:#infra wait:kept
-ask-long     | base  | wait:#open click:#open click:#open wait:Clear_history Down Enter wait:y_clear
+paste-asked  | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_in_⋯all? paste:yes_please\\nsecond_line wait:kept
+ask          | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide
+ask-yes      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:y_hide wait:the_bus_keeps_them
+ask-no       | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:n_keep wait:kept
+ask-feed     | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:signing wait:kept
+ask-row      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide side:#infra wait:kept
+delete-older | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than
+ask-long     | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:y_delete
+delete-done  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:y_delete click:y_delete wait:Undo_delete_on_its_menu
+delete-undo  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:y_delete click:y_delete wait:Undo_delete_on_its_menu click:#open wait:Undo_delete click:Undo_delete wait:restored
+delete-custom | base | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:Custom… wait:older_than: text:soon Enter wait:not_a_duration
+dm-delete    | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rside:DMs wait:Delete_read click:Delete_read wait:delete_older_than
+tomb-menu    | base  | wait:Agents rside:○ wait:Tombstone…
+tomb-ask     | base  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone
+tomb-said    | base  | wait:Agents rside:○ wait:Tombstone… click:Tombstone… wait:y_tombstone click:y_tombstone gone:y_tombstone
+review-tomb  | base  | wait:Agents rside:○ wait:Review_DMs click:Review_DMs wait:read_only rside:DMs wait:Tombstone…
 menu-row     | base  | wait:Agents side:#infra side:#infra wait:pick side:#deploy gone:pick
 menu-tab     | base  | wait:Agents side:#infra side:#infra wait:pick click:#open gone:pick
 prompt-click | base  | wait:Agents text:draft C-n wait:new_channel text:abc click:Agents gone:new_channel
@@ -311,9 +321,12 @@ print(f"{slug}-{b}")
 ' "$1"
 }
 
+# The build's own attend leads PATH, so the cleanup items (Delete read
+# messages for everyone…, Tombstone…) run the verbs this checkout has.
 launch() { # name cols rows
   (cd "$F/work/alpha" && env -u CLAUDE_CONFIG_DIR -u CLAUDE_PROJECT_DIR -u CLAUDE_CODE_SESSION_ID HOME="$F/home" USER=operator \
     XDG_CACHE_HOME="$F/cache" XDG_CONFIG_HOME="$F/config" XDG_STATE_HOME="$F/state" XDG_DATA_HOME="$F/data" \
+    PATH="$BIN:$PATH" \
     TERM=xterm-256color COLORTERM=truecolor \
     $TH launch "$1" --cols "$2" --rows "$3" --font "$FONT" -- "$BIN/attend-chat" >/dev/null)
 }
