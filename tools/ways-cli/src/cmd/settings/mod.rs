@@ -112,19 +112,10 @@ pub(super) fn implicit_project() -> Option<PathBuf> {
     settings_root_of(Path::new(&crate::util::project_dir()))
 }
 
-/// The project root settings resolve `start` to: the nearest ancestor that
-/// is a project root with the overlays as markers too
-/// ([`ways_core::util::is_project_root`]), and only when none is, the nearest
-/// git checkout, so a fresh repository takes its first project write. An
-/// outer project wins over a nested checkout. The home directory is never a
-/// project: its `.claude/` is the user's.
+/// The project root settings resolve `start` to
+/// ([`ways_core::settings::project_root`]).
 pub(super) fn settings_root_of(start: &Path) -> Option<PathBuf> {
-    let home = claude_sessions::home_dir();
-    let candidates = || start.ancestors().filter(|d| !is_home(d, &home));
-    candidates()
-        .find(|d| ways_core::util::is_project_root(d, ways_core::util::SETTINGS_OVERLAYS))
-        .or_else(|| candidates().find(|d| d.join(".git").exists()))
-        .map(Path::to_path_buf)
+    ways_core::settings::project_root(start)
 }
 
 /// What marks a project root, for a message naming why none was found.
@@ -169,8 +160,7 @@ pub(super) fn resolve_project(given: Option<&Path>) -> Result<Option<PathBuf>, F
 
 /// Whether `dir` is the home directory `home`, which is never a project.
 pub(super) fn is_home(dir: &Path, home: &Path) -> bool {
-    let canon = |q: &Path| std::fs::canonicalize(q).unwrap_or_else(|_| q.to_path_buf());
-    canon(dir) == canon(home)
+    ways_core::settings::is_home(dir, home)
 }
 
 /// The line a write puts on stderr naming the file it touched, so stdout
@@ -358,7 +348,7 @@ pub(super) fn write_file_checked(
 
 pub(super) fn header_for(path: &Path) -> Option<&'static str> {
     if path.file_name().is_some_and(|n| n == "ways.yaml") {
-        return Some("# Project-scope ways overlay — see ADR-115, ADR-131\n");
+        return Some(ways_core::settings::PROJECT_HEADER);
     }
     (path == attend_config::user_path() || path.file_name().is_some_and(|n| n == "attend.yaml")).then_some(attend_config::HEADER)
 }

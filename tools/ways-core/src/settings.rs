@@ -587,6 +587,30 @@ pub fn project_file(project_dir: &Path) -> PathBuf {
     project_dir.join(".claude").join("ways.yaml")
 }
 
+/// The text a new project overlay starts with.
+pub const PROJECT_HEADER: &str = "# Project-scope ways overlay — see ADR-115, ADR-131\n";
+
+/// The project root settings resolve `start` to: the nearest ancestor that
+/// is a project root with the overlays as markers too
+/// ([`crate::util::is_project_root`]), and only when none is, the nearest
+/// git checkout, so a fresh repository takes its first project write. An
+/// outer project wins over a nested checkout. The home directory is never a
+/// project: its `.claude/` is the user's.
+pub fn project_root(start: &Path) -> Option<PathBuf> {
+    let home = claude_sessions::home_dir();
+    let candidates = || start.ancestors().filter(|d| !is_home(d, &home));
+    candidates()
+        .find(|d| crate::util::is_project_root(d, crate::util::SETTINGS_OVERLAYS))
+        .or_else(|| candidates().find(|d| d.join(".git").exists()))
+        .map(Path::to_path_buf)
+}
+
+/// Whether `dir` is the home directory `home`, which is never a project.
+pub fn is_home(dir: &Path, home: &Path) -> bool {
+    let canon = |q: &Path| std::fs::canonicalize(q).unwrap_or_else(|_| q.to_path_buf());
+    canon(dir) == canon(home)
+}
+
 /// Every layer a ways key resolves through, lowest first: the user file,
 /// the current target's file, and the project overlay. ADR-506 retired the
 /// pre-1.0 `ways.json` and `$XDG_CONFIG_HOME/ways/config.yaml` layers.
