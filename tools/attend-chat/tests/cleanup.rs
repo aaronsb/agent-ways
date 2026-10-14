@@ -338,6 +338,26 @@ fn tombstone_is_offered_on_a_dead_agents_row_only_and_shows_a_refusal() {
     assert_eq!(c.status(), format!("tombstone: {DELTA_SID} has not exited"), "attend's own words, after the verb");
 }
 
+/// A dead row whose id a live session still reads as, its id before a
+/// `/clear`, is not offered Tombstone…: attend refuses it as read by that
+/// session, even when the session has no row of its own to fold it into.
+#[test]
+fn tombstone_is_not_offered_for_an_id_a_live_session_reads_as() {
+    use attend_presence::enrollment::{self, Source};
+    const ZETA_SID: &str = "ffffffff-0000-4000-8000-000000000006";
+    let _g = fixture();
+    enrollment::enroll(GAMMA_SID, Source::Listen, None).unwrap();
+    enrollment::carry(GAMMA_SID, ZETA_SID).unwrap();
+    attend_presence::heartbeat::touch(ZETA_SID).unwrap();
+    let mut c = chat();
+    let gamma = nick("/work/gamma");
+    side(&mut c, &gamma, MouseButton::Right);
+    let offered = items(&mut c).iter().any(|i| i == "Tombstone…");
+    enrollment::withdraw(ZETA_SID, Source::Listen).unwrap();
+    let _ = std::fs::remove_file(attend_presence::heartbeat::heartbeat_path(ZETA_SID));
+    assert!(!offered, "gamma is read by a live session: {}", screen(&mut c));
+}
+
 #[test]
 fn an_agents_own_dm_view_offers_tombstone_only_when_the_agent_is_dead() {
     let _g = fixture();

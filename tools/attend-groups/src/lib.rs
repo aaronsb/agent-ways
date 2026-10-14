@@ -18,6 +18,7 @@
 //! yaml does not distinguish them — liveness was always
 //! heartbeat-shaped, not UUID-shaped.
 
+pub mod readers;
 pub mod tombstones;
 
 use std::collections::HashMap;

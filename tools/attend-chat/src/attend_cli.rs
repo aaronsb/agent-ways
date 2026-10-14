@@ -1,8 +1,8 @@
 //! The attend CLI verbs the chat's cleanup items run (ADR-404 D3e, ADR-405
 //! amendment of 2026-10-13): `attend message delete` and `attend message
 //! tombstone`. attend-chat has no crate dependency on attend, so it runs
-//! the `attend` on `PATH` as a child process with `--json` and reads the
-//! report. An attend too old to have a verb is told apart from one that
+//! attend as a child process with `--json` and reads the report: the attend
+//! installed beside attend-chat, else the one on `PATH` ([`program`]). An attend too old to have a verb is told apart from one that
 //! refused: the first needs updating, the second gave its reason.
 
 use std::io::Read;

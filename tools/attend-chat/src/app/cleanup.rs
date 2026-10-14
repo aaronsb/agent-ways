@@ -305,7 +305,9 @@ impl ChatPane {
     /// offered for. A quiet session that has not gone gets no offer attend
     /// would refuse.
     pub(super) fn is_dead_claude(&self, member: &str) -> bool {
-        self.world.as_ref().is_some_and(|w| w.seen.iter().any(|s| s.member == member && s.identity.is_claude && !s.live)) && attend_presence::gone(member)
+        self.world.as_ref().is_some_and(|w| w.seen.iter().any(|s| s.member == member && s.identity.is_claude && !s.live))
+            && attend_presence::gone(member)
+            && attend_groups::readers::read_as_live(member).is_none()
     }
 
     /// Tombstone…, asked first; refused while a delete or a tombstone runs.
