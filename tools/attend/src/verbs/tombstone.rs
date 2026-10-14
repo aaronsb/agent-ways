@@ -21,6 +21,11 @@ pub struct Tombstoned {
     pub session: String,
     /// Whether the session is tombstoned now.
     pub tombstoned: bool,
+    /// Whether a tombstone was already there and moved to now.
+    pub moved: bool,
+    /// When the tombstone cuts, as UTC; what the session sent up to then
+    /// is hidden. `None` once removed.
+    pub at: Option<String>,
 }
 
 /// Every tombstone.
@@ -82,14 +87,15 @@ pub fn tombstone(session: &str) -> Result<Tombstoned, TombstoneError> {
     if !attend_presence::has_exited(session) {
         return Err(TombstoneError::NotExited { session: session.to_string() });
     }
-    tombstones::mark_session(&signals_base(), session).map_err(|e| TombstoneError::Write { error: e.to_string() })?;
-    Ok(Tombstoned { session: session.to_string(), tombstoned: true })
+    let moved =
+        tombstones::mark_session(&signals_base(), session).map_err(|e| TombstoneError::Write { error: e.to_string() })?;
+    Ok(Tombstoned { session: session.to_string(), tombstoned: true, moved, at: Some(agent_fmt::when::now_utc_iso()) })
 }
 
 /// Remove session `session`'s tombstone.
 pub fn undo(session: &str) -> Result<Tombstoned, TombstoneError> {
     match tombstones::unmark_session(&signals_base(), session) {
-        Ok(true) => Ok(Tombstoned { session: session.to_string(), tombstoned: false }),
+        Ok(true) => Ok(Tombstoned { session: session.to_string(), tombstoned: false, moved: false, at: None }),
         Ok(false) => Err(TombstoneError::NotTombstoned { session: session.to_string() }),
         Err(e) => Err(TombstoneError::Write { error: e.to_string() }),
     }

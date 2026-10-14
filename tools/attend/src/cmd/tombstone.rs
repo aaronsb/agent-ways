@@ -24,7 +24,16 @@ pub(crate) fn cmd_tombstone(a: TombstoneArgs) {
     let result = if a.undo { tombstone::undo(&session) } else { tombstone::tombstone(&session) };
     match result {
         Ok(t) if a.json => crate::cmd::print_json(&t),
-        Ok(t) if t.tombstoned => println!("tombstoned {}: every reader skips its messages", t.session),
+        Ok(t) if t.moved => println!(
+            "tombstone on {} moved to {}: every reader skips what it sent up to then",
+            t.session,
+            t.at.as_deref().unwrap_or_default()
+        ),
+        Ok(t) if t.tombstoned => println!(
+            "tombstoned {} at {}: every reader skips what it sent up to then",
+            t.session,
+            t.at.as_deref().unwrap_or_default()
+        ),
         Ok(t) => println!("removed the tombstone on {}", t.session),
         Err(e) => refuse(&e, a.json),
     }

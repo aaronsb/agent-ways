@@ -93,13 +93,21 @@ pub fn valid_session_id(id: &str) -> bool {
     crate::is_agent_member(id)
 }
 
-/// Tombstone session `id`. Idempotent.
-pub fn mark_session(base: &Path, id: &str) -> io::Result<()> {
+/// Tombstone session `id` as of now. A tombstone already there moves to
+/// now, so the cut takes in what the session sent since; returns whether
+/// one was there.
+pub fn mark_session(base: &Path, id: &str) -> io::Result<bool> {
     if !valid_session_id(id) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("`{id}` is not a session id")));
     }
     fs::create_dir_all(dir(base))?;
-    fs::OpenOptions::new().write(true).create(true).truncate(false).open(dir(base).join(id)).map(|_| ())
+    let path = dir(base).join(id);
+    let existed = path.is_file();
+    let file = fs::OpenOptions::new().write(true).create(true).truncate(false).open(&path)?;
+    if existed {
+        file.set_modified(SystemTime::now())?;
+    }
+    Ok(existed)
 }
 
 /// Remove session `id`'s tombstone. Returns whether there was one.
@@ -389,8 +397,14 @@ mod tests {
         let b = base("session");
         mark_messages(&b, &keys(&["a.signal"])).unwrap();
         let dead = "22222222-2222-4222-8222-222222222222";
-        mark_session(&b, dead).unwrap();
-        mark_session(&b, dead).unwrap();
+        assert!(!mark_session(&b, dead).unwrap());
+        // Dated an hour back, then tombstoned again: the cut moves to now.
+        let path = dir(&b).join(dead);
+        fs::File::options().write(true).open(&path).unwrap().set_modified(SystemTime::now() - Duration::from_secs(3_600)).unwrap();
+        let ten_minutes_ago = SystemTime::now() - Duration::from_secs(600);
+        assert!(!Marks::load(&b).hides_sender(dead, ten_minutes_ago));
+        assert!(mark_session(&b, dead).unwrap());
+        assert!(Marks::load(&b).hides_sender(dead, ten_minutes_ago), "the cut moved to now");
         for bad in ["messages", "../x", "aaron"] {
             assert!(mark_session(&b, bad).is_err(), "{bad}");
         }

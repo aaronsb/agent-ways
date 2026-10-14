@@ -345,7 +345,8 @@ fn a_tombstone_needs_an_agent_that_has_exited() {
     assert_eq!(out.status.code(), Some(1), "nothing says R3 has exited");
     assert!(String::from_utf8_lossy(&out.stderr).contains("has not exited"));
     exited(&f, R3);
-    f.ok(&["message", "tombstone", R3]);
+    assert!(f.ok(&["message", "tombstone", R3]).starts_with(&format!("tombstoned {R3} at ")));
+    assert!(f.ok(&["message", "tombstone", R3]).starts_with(&format!("tombstone on {R3} moved to ")));
 }
 
 /// The drain reads a tombstoned session's messages without delivering
