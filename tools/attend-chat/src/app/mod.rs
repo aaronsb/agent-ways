@@ -253,6 +253,9 @@ pub struct ChatPane {
     /// delete made, for Undo delete.
     attend: std::path::PathBuf,
     undo: Option<cleanup::LastDelete>,
+    /// The request attend is working on, and how long it is given.
+    asking: Option<(crate::attend_cli::Running, cleanup::Job)>,
+    attend_wait: Duration,
 }
 
 impl ChatPane {
@@ -305,6 +308,8 @@ impl ChatPane {
             hidden_path: crate::hidden::default_path(),
             attend: crate::attend_cli::program(),
             undo: None,
+            asking: None,
+            attend_wait: crate::attend_cli::WAIT,
         }
     }
 
@@ -1069,6 +1074,7 @@ impl Pane for ChatPane {
 
     fn tick(&mut self) {
         self.drain();
+        self.attend_answered();
         self.new_day();
         if self.refreshed.is_none_or(|t| t.elapsed() >= REFRESH) {
             // Human presence (ADR-170): while the chat is open, keep
@@ -1209,6 +1215,13 @@ impl Chat {
         pane.hidden_path = path.into();
         pane.hidden = crate::hidden::Hidden::load(&pane.hidden_path);
         pane.invalidate();
+        self
+    }
+
+    /// How long to wait for attend before stopping it, rather than
+    /// [`crate::attend_cli::WAIT`].
+    pub fn attend_wait(mut self, wait: Duration) -> Chat {
+        self.pane_mut().attend_wait = wait;
         self
     }
 

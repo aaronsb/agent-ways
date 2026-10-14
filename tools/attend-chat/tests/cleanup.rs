@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use agent_tui::ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use agent_tui::screen::Screen;
 use agent_tui::testkit;
 use agent_tui::theme::{Palette, Shape};
 use attend_chat::app::Chat;
@@ -39,6 +40,8 @@ const FAKE: &str = r##"#!/bin/sh
 echo "$*" >> "$FAKE_ATTEND_LOG"
 case "$*" in
   *"--channel legacy"*) echo "error: unrecognized subcommand 'delete'" >&2; exit 2 ;;
+  *"--channel stuck"*) exec sleep 30 ;;
+  *"--channel slow"*) sleep 1; echo '{"scope":"#slow","dry_run":true,"marked":3,"batch":null,"ids":[],"held":[]}' ;;
   *"--undo"*) echo '{"batch":"001784732645123-4242","age_secs":5,"unmarked":12,"already_removed":0}' ;;
   *"--dry-run"*) echo '{"scope":"#open","dry_run":true,"marked":12,"batch":null,"ids":[],"held":[{"session":"a","name":"Ada-x","kept":2},{"session":"b","name":"Bo-y","kept":1}]}' ;;
   "message delete"*) echo '{"scope":"#open","dry_run":false,"marked":12,"batch":"001784732645123-4242","ids":[],"held":[{"session":"a","name":"Ada-x","kept":2},{"session":"b","name":"Bo-y","kept":1}]}' ;;
@@ -61,6 +64,8 @@ fn fixture() -> std::sync::MutexGuard<'static, ()> {
         beat.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600)).unwrap();
         std::fs::create_dir_all(base.join("@deploy")).unwrap();
         std::fs::create_dir_all(base.join("@legacy")).unwrap();
+        std::fs::create_dir_all(base.join("@slow")).unwrap();
+        std::fs::create_dir_all(base.join("@stuck")).unwrap();
     });
     let bin = root.join("bin");
     if !bin.join("attend").exists() {
@@ -125,6 +130,17 @@ fn feed(c: &mut Chat) -> String {
 fn press(c: &mut Chat, code: KeyCode) {
     testkit::render_screen(c, W, H);
     testkit::drive(c, &[KeyEvent::new(code, KeyModifiers::NONE)]);
+    answered(c);
+}
+
+/// Tick the chat, as its loop does, until attend has answered what it was
+/// asked, if anything.
+fn answered(c: &mut Chat) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while c.status() == "asking attend…" && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        Screen::tick(c);
+    }
 }
 
 fn typed(c: &mut Chat, s: &str) {
@@ -168,6 +184,14 @@ fn items(c: &mut Chat) -> Vec<String> {
 
 /// Pick the open menu's item that starts with `label`, by a click.
 fn pick(c: &mut Chat, label: &str) {
+    let buf = testkit::render_screen(c, W, H);
+    let (x, y) = testkit::find(&buf, label).unwrap_or_else(|| panic!("no {label}: {}", testkit::rows(&buf).join("\n")));
+    mouse(c, MouseButton::Left, x, y);
+    answered(c);
+}
+
+/// [`pick`] without waiting for attend's answer.
+fn pick_now(c: &mut Chat, label: &str) {
     let buf = testkit::render_screen(c, W, H);
     let (x, y) = testkit::find(&buf, label).unwrap_or_else(|| panic!("no {label}: {}", testkit::rows(&buf).join("\n")));
     mouse(c, MouseButton::Left, x, y);
@@ -346,4 +370,35 @@ fn hide_messages_here_hides_in_its_tab_only_and_holds_across_a_restart() {
     side(&mut again, "#open", MouseButton::Left);
     assert!(!feed(&mut again).contains("on open"), "{}", feed(&mut again));
     assert!(std::fs::read_to_string(&file).unwrap().starts_with("#open\t"), "kept in the state file");
+}
+
+#[test]
+fn attend_answers_off_the_screens_thread_one_request_at_a_time() {
+    let _g = fixture();
+    let mut c = chat();
+    channel_menu(&mut c, "#slow");
+    pick(&mut c, "Delete read messages");
+    pick_now(&mut c, "All");
+    assert_eq!(c.status(), "asking attend…", "the pick returns at once");
+    channel_menu(&mut c, "#open");
+    pick_now(&mut c, "Delete read messages");
+    pick_now(&mut c, "All");
+    assert_eq!(c.status(), "attend is still answering the last request");
+    assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "the second pick ran nothing");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !screen(&mut c).contains("delete 3 read messages in #slow?") && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        Screen::tick(&mut c);
+    }
+    assert!(screen(&mut c).contains("delete 3 read messages in #slow?"), "the answer asks on a tick: {}", screen(&mut c));
+}
+
+#[test]
+fn an_attend_that_does_not_answer_is_stopped() {
+    let _g = fixture();
+    let mut c = chat().attend_wait(std::time::Duration::from_millis(300));
+    channel_menu(&mut c, "#stuck");
+    pick(&mut c, "Delete read messages");
+    pick(&mut c, "All");
+    assert_eq!(c.status(), "`attend message delete` gave no answer in 0.3 s and was stopped");
 }

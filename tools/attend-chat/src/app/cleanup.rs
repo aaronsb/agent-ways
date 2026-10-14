@@ -16,14 +16,17 @@
 //!   own DM view: asked, then `attend message tombstone <session-id>`.
 //!   attend's refusal is shown as it words it.
 //!
-//! The verbs run through the attend CLI ([`crate::attend_cli`]); an attend
-//! without them says it needs updating.
+//! The verbs run through the attend CLI ([`crate::attend_cli`]) on a
+//! worker thread: the status says `asking attend…`, the screen stays live,
+//! a second request waits for the first, and an attend that gives no
+//! answer in [`attend_cli::WAIT`] is stopped. An attend without the verbs
+//! says it needs updating.
 
 use agent_tui::{Anchor, Item, Open};
 
 use super::menu::Step;
 use super::ChatPane;
-use crate::attend_cli::{self, Report, Scope};
+use crate::attend_cli::{self, Failure, Report, Scope};
 use crate::hidden;
 use crate::signal::Signal;
 use crate::tabs::{self, Tab};
@@ -38,6 +41,21 @@ pub(super) const CUSTOM: &str = "Custom…";
 /// scope's key ([`Scope::key`]).
 const OLDER: &str = "older:";
 const OLDER_CUSTOM: &str = "older-custom:";
+
+/// What the status line says while attend works on a request.
+pub(super) const ASKING: &str = "asking attend…";
+
+/// What the chat does with attend's answer to a request.
+pub(super) enum Job {
+    /// A delete's dry run, to ask with.
+    DryRun { scope: Scope, older: String },
+    /// The delete asked about.
+    Delete(Asked),
+    /// An undo of the last delete.
+    Undo(LastDelete),
+    /// A tombstone of the session `member`, named `name`.
+    Tombstone { member: String, name: String },
+}
 
 /// The last delete this chat made: its scope, its batch and how many it
 /// marked, for Undo delete on that scope's menu.
@@ -170,36 +188,17 @@ impl ChatPane {
         if self.dry_run {
             return self.say("dry run: attend message delete not run", false);
         }
-        let report = match attend_cli::delete(&self.attend, &scope, older, true) {
-            Ok(r) => r,
-            Err(e) => return self.say(e.to_string(), true),
-        };
-        let label = self.scope_label(&scope);
-        if report.marked == 0 {
-            return self.say(format!("nothing read to delete in {label}{}{}", attend_cli::older_words(older), report.kept_words()), false);
-        }
-        self.ask(Step::DeleteRead(Asked { scope, older: older.to_string(), label, report }));
+        let args = attend_cli::delete_argv(&scope, older, true);
+        self.ask_attend(args, Job::DryRun { scope, older: older.to_string() });
     }
 
-    /// The delete asked about, answered yes: run it, and keep its batch for
-    /// Undo delete.
+    /// The delete asked about, answered yes: run it.
     pub(super) fn run_delete(&mut self, asked: Asked) {
         if self.dry_run {
             return self.say("dry run: attend message delete not run", false);
         }
-        match attend_cli::delete(&self.attend, &asked.scope, &asked.older, false) {
-            Ok(r) => {
-                let n = r.marked;
-                let mut said = format!("deleted {n} message{} in {}{}", if n == 1 { "" } else { "s" }, asked.label, r.kept_words());
-                if let Some(batch) = r.batch {
-                    said += &format!(" · Undo delete on its menu · batch {batch}");
-                    self.undo = Some(LastDelete { scope: asked.scope, batch, marked: n });
-                }
-                self.say(said, false);
-            }
-            Err(e) => self.say(e.to_string(), true),
-        }
-        self.stale();
+        let args = attend_cli::delete_argv(&asked.scope, &asked.older, false);
+        self.ask_attend(args, Job::Delete(asked));
     }
 
     /// Undo delete: the last delete's marks removed, its messages delivered
@@ -209,18 +208,7 @@ impl ChatPane {
         if self.dry_run {
             return self.say("dry run: attend message delete --undo not run", false);
         }
-        match attend_cli::undo(&self.attend, &last.batch) {
-            Ok(u) => {
-                self.undo = None;
-                let gone = match u.already_removed {
-                    0 => String::new(),
-                    n => format!("; cleanup had already removed {n}"),
-                };
-                self.say(format!("restored {} of {} message(s) from batch {}{gone}", u.unmarked, last.marked, last.batch), false);
-            }
-            Err(e) => self.say(e.to_string(), true),
-        }
-        self.stale();
+        self.ask_attend(attend_cli::undo_argv(&last.batch), Job::Undo(last));
     }
 
     /// Whether `member` is a claude that has gone, by the predicate attend's
@@ -242,10 +230,79 @@ impl ChatPane {
         if self.dry_run {
             return self.say("dry run: attend message tombstone not run", false);
         }
-        match attend_cli::tombstone(&self.attend, member) {
-            Ok(()) => self.say(format!("tombstoned @{name}: its messages leave every tab · undo: attend message tombstone --undo {member}"), false),
-            Err(e) => self.say(e.to_string(), true),
+        self.ask_attend(attend_cli::tombstone_argv(member), Job::Tombstone { member: member.to_string(), name: name.to_string() });
+    }
+
+    /// Run attend with `args` on a worker thread for `job`; the screen stays
+    /// live and the answer is taken on a tick ([`ChatPane::attend_answered`]).
+    /// While one is out, another is refused.
+    fn ask_attend(&mut self, args: Vec<String>, job: Job) {
+        if self.asking.is_some() {
+            return self.say("attend is still answering the last request", false);
+        }
+        self.asking = Some((attend_cli::start(self.attend.clone(), args, self.attend_wait), job));
+        self.say(ASKING, false);
+    }
+
+    /// Take attend's answer once it has come, and act on it.
+    pub(super) fn attend_answered(&mut self) {
+        let Some(answer) = self.asking.as_ref().and_then(|(running, _)| running.poll()) else { return };
+        let Some((_, job)) = self.asking.take() else { return };
+        // The answer replaces `asking attend…`, whatever it leads to.
+        self.say("", false);
+        match job {
+            Job::DryRun { scope, older } => self.dry_ran(scope, older, answer),
+            Job::Delete(asked) => self.deleted(asked, answer),
+            Job::Undo(last) => self.undid(last, answer),
+            Job::Tombstone { member, name } => match answer {
+                Ok(_) => self.say(format!("tombstoned @{name}: its messages leave every tab · undo: attend message tombstone --undo {member}"), false),
+                Err(e) => self.say(e.to_string(), true),
+            },
         }
         self.stale();
+    }
+
+    /// A dry run's report: ask with its counts, or say there is nothing.
+    fn dry_ran(&mut self, scope: Scope, older: String, answer: Result<serde_json::Value, Failure>) {
+        let report = match answer.and_then(|doc| attend_cli::report(&doc)) {
+            Ok(r) => r,
+            Err(e) => return self.say(e.to_string(), true),
+        };
+        let label = self.scope_label(&scope);
+        if report.marked == 0 {
+            return self.say(format!("nothing read to delete in {label}{}{}", attend_cli::older_words(&older), report.kept_words()), false);
+        }
+        self.ask(Step::DeleteRead(Asked { scope, older, label, report }));
+    }
+
+    /// A delete's report: said, and its batch kept for Undo delete.
+    fn deleted(&mut self, asked: Asked, answer: Result<serde_json::Value, Failure>) {
+        match answer.and_then(|doc| attend_cli::report(&doc)) {
+            Ok(r) => {
+                let n = r.marked;
+                let mut said = format!("deleted {n} message{} in {}{}", if n == 1 { "" } else { "s" }, asked.label, r.kept_words());
+                if let Some(batch) = r.batch {
+                    said += &format!(" · Undo delete on its menu · batch {batch}");
+                    self.undo = Some(LastDelete { scope: asked.scope, batch, marked: n });
+                }
+                self.say(said, false);
+            }
+            Err(e) => self.say(e.to_string(), true),
+        }
+    }
+
+    /// An undo's report.
+    fn undid(&mut self, last: LastDelete, answer: Result<serde_json::Value, Failure>) {
+        match answer.and_then(|doc| attend_cli::undone(&doc)) {
+            Ok(u) => {
+                self.undo = None;
+                let gone = match u.already_removed {
+                    0 => String::new(),
+                    n => format!("; cleanup had already removed {n}"),
+                };
+                self.say(format!("restored {} of {} message(s) from batch {}{gone}", u.unmarked, last.marked, last.batch), false);
+            }
+            Err(e) => self.say(e.to_string(), true),
+        }
     }
 }

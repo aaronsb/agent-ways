@@ -5,7 +5,11 @@
 //! report. An attend too old to have a verb is told apart from one that
 //! refused: the first needs updating, the second gave its reason.
 
-use std::path::Path;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::time::{Duration, Instant};
 
 use crate::groups::BASE_CHANNEL_NAME;
 use crate::tabs::Tab;
@@ -178,6 +182,8 @@ pub enum Failure {
     Refused { verb: String, why: String },
     /// attend ended with no report the chat can read.
     Broken { verb: String, why: String },
+    /// attend gave no answer in time and was stopped.
+    TimedOut { verb: String, wait: Duration },
 }
 
 impl std::fmt::Display for Failure {
@@ -187,28 +193,63 @@ impl std::fmt::Display for Failure {
             Failure::TooOld { verb } => write!(f, "`attend {verb}` is missing: needs a newer attend"),
             Failure::Refused { verb, why } => write!(f, "{}: {why}", verb.rsplit(' ').next().unwrap_or(verb)),
             Failure::Broken { verb, why } => write!(f, "attend {verb}: {why}"),
+            Failure::TimedOut { verb, wait } => write!(f, "`attend {verb}` gave no answer in {} s and was stopped", wait.as_secs_f64()),
         }
     }
 }
 
+/// How long the chat waits for attend before it stops the child.
+pub const WAIT: Duration = Duration::from_secs(10);
+
+/// A verb running on a worker thread, which answers once over a channel
+/// ([`start`]); the screen polls it on its tick and stays live meanwhile.
+pub struct Running {
+    rx: Receiver<Result<serde_json::Value, Failure>>,
+}
+
+impl Running {
+    /// The answer, once it has come.
+    pub fn poll(&self) -> Option<Result<serde_json::Value, Failure>> {
+        match self.rx.try_recv() {
+            Ok(answer) => Some(answer),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err(Failure::Broken { verb: "attend".into(), why: "the worker ended without an answer".into() })),
+        }
+    }
+
+    /// Block for the answer.
+    pub fn wait(self) -> Result<serde_json::Value, Failure> {
+        self.rx.recv().unwrap_or_else(|_| Err(Failure::Broken { verb: "attend".into(), why: "the worker ended without an answer".into() }))
+    }
+}
+
+/// Run `program` with `args` on a worker thread, stopping it after `wait`.
+pub fn start(program: PathBuf, args: Vec<String>, wait: Duration) -> Running {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(run(&program, &args, wait));
+    });
+    Running { rx }
+}
+
 /// Run `program` with `args` and read its one JSON document. A document
 /// with an `error` is attend's refusal; no document, from an attend whose
-/// argument parser did not know the verb or a flag, means it is too old.
-pub fn run(program: &Path, args: &[String]) -> Result<serde_json::Value, Failure> {
+/// argument parser did not know the verb or a flag, means it is too old. A
+/// child still running after `wait` is killed.
+fn run(program: &Path, args: &[String], wait: Duration) -> Result<serde_json::Value, Failure> {
     let verb = args.iter().take(2).cloned().collect::<Vec<_>>().join(" ");
-    let out = match output(program, args) {
-        Ok(out) => out,
+    let (status, stdout, stderr) = match output(program, args, wait) {
+        Ok(Some(out)) => out,
+        Ok(None) => return Err(Failure::TimedOut { verb, wait }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(Failure::NoAttend { verb }),
         Err(e) => return Err(Failure::Broken { verb, why: e.to_string() }),
     };
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
     match serde_json::from_str::<serde_json::Value>(stdout.trim()) {
         Ok(doc) if doc.get("error").is_some() => {
             let why = doc.get("message").and_then(|m| m.as_str()).unwrap_or("refused").to_string();
             Err(Failure::Refused { verb, why })
         }
-        Ok(doc) if out.status.success() => Ok(doc),
+        Ok(doc) if status.success() => Ok(doc),
         _ if ["unrecognized subcommand", "unexpected argument"].iter().any(|w| stderr.contains(w)) => Err(Failure::TooOld { verb }),
         _ => {
             let why = stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("no report").trim().to_string();
@@ -217,20 +258,46 @@ pub fn run(program: &Path, args: &[String]) -> Result<serde_json::Value, Failure
     }
 }
 
-/// Run `program` with `args` to its end. A program file still held open
-/// for writing (`ExecutableFileBusy`: an attend being installed, or a test's
-/// fake while another thread forks) is tried again shortly.
-fn output(program: &Path, args: &[String]) -> std::io::Result<std::process::Output> {
+/// Run `program` with `args` to its end, its exit status and what it wrote,
+/// or `None` once `wait` has passed and the child is killed. Its output is
+/// read as it comes, so a report larger than a pipe holds never stalls it.
+/// A program file still held open for writing (`ExecutableFileBusy`: an
+/// attend being installed, or a test's fake while another thread forks) is
+/// tried again shortly.
+fn output(program: &Path, args: &[String], wait: Duration) -> std::io::Result<Option<(ExitStatus, String, String)>> {
     let mut tries = 0;
-    loop {
-        match std::process::Command::new(program).args(args).stdin(std::process::Stdio::null()).output() {
+    let mut child = loop {
+        let spawned = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
+        match spawned {
             Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 50 => {
                 tries += 1;
-                std::thread::sleep(std::time::Duration::from_millis(20));
+                std::thread::sleep(Duration::from_millis(20));
             }
-            other => return other,
+            other => break other?,
         }
-    }
+    };
+    let drain = |mut pipe: Box<dyn Read + Send>| {
+        std::thread::spawn(move || {
+            let mut text = String::new();
+            let _ = pipe.read_to_string(&mut text);
+            text
+        })
+    };
+    let out = drain(Box::new(child.stdout.take().expect("piped")));
+    let err = drain(Box::new(child.stderr.take().expect("piped")));
+    let began = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if began.elapsed() >= wait {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    Ok(Some((status, out.join().unwrap_or_default(), err.join().unwrap_or_default())))
 }
 
 /// The count `field` of a report, which every report of the verb carries:
@@ -239,9 +306,8 @@ fn count(doc: &serde_json::Value, field: &str, verb: &str) -> Result<usize, Fail
     doc.get(field).and_then(|v| v.as_u64()).map(|n| n as usize).ok_or_else(|| Failure::Broken { verb: verb.into(), why: format!("its report has no `{field}`") })
 }
 
-/// `attend message delete` for `scope` and `older`, or its dry run.
-pub fn delete(program: &Path, scope: &Scope, older: &str, dry_run: bool) -> Result<Report, Failure> {
-    let doc = run(program, &delete_argv(scope, older, dry_run))?;
+/// What `attend message delete` reported, or its dry run.
+pub fn report(doc: &serde_json::Value) -> Result<Report, Failure> {
     let held = doc
         .get("held")
         .and_then(|h| h.as_array())
@@ -250,18 +316,12 @@ pub fn delete(program: &Path, scope: &Scope, older: &str, dry_run: bool) -> Resu
         .map(|h| Ok((h.get("name").and_then(|n| n.as_str()).unwrap_or("?").to_string(), count(h, "kept", "message delete")?)))
         .collect::<Result<_, Failure>>()?;
     let batch = doc.get("batch").and_then(|b| b.as_str()).map(str::to_string);
-    Ok(Report { marked: count(&doc, "marked", "message delete")?, batch, held })
+    Ok(Report { marked: count(doc, "marked", "message delete")?, batch, held })
 }
 
-/// `attend message delete --undo <batch>`.
-pub fn undo(program: &Path, batch: &str) -> Result<Undone, Failure> {
-    let doc = run(program, &undo_argv(batch))?;
-    Ok(Undone { unmarked: count(&doc, "unmarked", "message delete")?, already_removed: count(&doc, "already_removed", "message delete")? })
-}
-
-/// `attend message tombstone <session>`.
-pub fn tombstone(program: &Path, session: &str) -> Result<(), Failure> {
-    run(program, &tombstone_argv(session)).map(|_| ())
+/// What `attend message delete --undo` reported.
+pub fn undone(doc: &serde_json::Value) -> Result<Undone, Failure> {
+    Ok(Undone { unmarked: count(doc, "unmarked", "message delete")?, already_removed: count(doc, "already_removed", "message delete")? })
 }
 
 #[cfg(test)]
@@ -319,22 +379,45 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_report_a_refusal_and_an_old_attend_read_apart() {
+        // Every fake is written before any is run: a fork in another test's
+        // thread can hold a fake open for writing while it is exec'd.
         let dir = crate::test_dir::unique("attend-cli");
         let ok = fake(&dir, "ok", r##"{"scope":"#open","dry_run":true,"marked":12,"batch":null,"ids":[],"held":[{"session":"a","name":"Ada-x","kept":2},{"session":"b","name":"Bo-y","kept":1}]}"##, "", 0);
-        let r = delete(&ok, &Scope::Open, "all", true).unwrap();
+        let refused = fake(&dir, "refused", r#"{"error":{"kind":"not_exited","session":"s9"},"message":"s9 has not exited"}"#, "attend message tombstone: s9 has not exited", 1);
+        let unread = fake(&dir, "unread", r##"{"scope":"#open","dry_run":true}"##, "", 0);
+        let old = fake(&dir, "old", "", "error: unrecognized subcommand 'delete'", 2);
+        let crashed = fake(&dir, "crashed", "", "thread main panicked", 101);
+        let none = dir.join("no-attend");
+        let call = |p: &Path, args: Vec<String>| start(p.to_path_buf(), args, WAIT).wait();
+        let r = report(&call(&ok, delete_argv(&Scope::Open, "all", true)).unwrap()).unwrap();
         assert_eq!(r, Report { marked: 12, batch: None, held: vec![("Ada-x".into(), 2), ("Bo-y".into(), 1)] });
         assert_eq!(r.kept_words(), " · 3 stay unread by 2 sessions");
-        let refused = fake(&dir, "refused", r#"{"error":{"kind":"not_exited","session":"s9"},"message":"s9 has not exited"}"#, "attend message tombstone: s9 has not exited", 1);
-        assert_eq!(tombstone(&refused, "s9").unwrap_err().to_string(), "tombstone: s9 has not exited", "attend's words, after the verb");
-        let unread = fake(&dir, "unread", r##"{"scope":"#open","dry_run":true}"##, "", 0);
-        assert_eq!(delete(&unread, &Scope::Open, "all", true).unwrap_err().to_string(), "attend message delete: its report has no `marked`", "no count is no zero");
-        let old = fake(&dir, "old", "", "error: unrecognized subcommand 'delete'", 2);
-        let e = delete(&old, &Scope::Open, "all", true).unwrap_err();
+        assert_eq!(call(&refused, tombstone_argv("s9")).unwrap_err().to_string(), "tombstone: s9 has not exited", "attend's words, after the verb");
+        assert_eq!(call(&unread, delete_argv(&Scope::Open, "all", true)).and_then(|d| report(&d)).unwrap_err().to_string(), "attend message delete: its report has no `marked`", "no count is no zero");
+        let e = call(&old, delete_argv(&Scope::Open, "all", true)).unwrap_err();
         assert_eq!(e.to_string(), "`attend message delete` is missing: needs a newer attend");
-        let none = dir.join("no-attend");
-        assert_eq!(tombstone(&none, "s9").unwrap_err().to_string(), "`attend message tombstone` needs attend on PATH");
-        let crashed = fake(&dir, "crashed", "", "thread main panicked", 101);
-        assert_eq!(undo(&crashed, "1").unwrap_err().to_string(), "attend message delete: thread main panicked");
+        assert_eq!(call(&none, tombstone_argv("s9")).unwrap_err().to_string(), "`attend message tombstone` needs attend on PATH");
+        assert_eq!(call(&crashed, undo_argv("1")).unwrap_err().to_string(), "attend message delete: thread main panicked");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A child that does not answer in time is stopped, and the wait says
+    /// how long it was given; the answer comes over the channel, not the
+    /// caller's thread.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_does_not_answer_is_stopped() {
+        let dir = crate::test_dir::unique("attend-cli");
+        let slow = dir.join("slow");
+        std::fs::write(&slow, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&slow, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let began = Instant::now();
+        let running = start(slow, tombstone_argv("s9"), Duration::from_millis(200));
+        assert!(running.poll().is_none(), "still running: the caller is not held");
+        let e = running.wait().unwrap_err();
+        assert_eq!(e.to_string(), "`attend message tombstone` gave no answer in 0.2 s and was stopped");
+        assert!(began.elapsed() < Duration::from_secs(5), "stopped, not waited out");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
