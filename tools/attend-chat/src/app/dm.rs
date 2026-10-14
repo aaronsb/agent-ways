@@ -16,8 +16,10 @@
 use agent_tui::ratatui::layout::Rect;
 use agent_tui::{Anchor, Item, Open};
 
+use super::cleanup::{DELETE_READ, HIDE_HERE, TOMBSTONE, UNDO_DELETE};
 use super::sidebar::SideHit;
 use super::ChatPane;
+use crate::attend_cli::Scope;
 use crate::tabs::Tab;
 
 pub(super) const SHOW_DMS: &str = "Show DMs";
@@ -161,7 +163,24 @@ impl ChatPane {
             Kind::Dm => format!("@{name} DMs"),
             Kind::Review => format!("{name} DMs"),
         };
-        self.to_open = Some(Open::Pick { id: format!("{}{member}", kind.menu_id()), title, items: vec![Item::new(kind.hide_item())], multi: false, anchor });
+        let items = self.view_items(kind, &member);
+        self.to_open = Some(Open::Pick { id: format!("{}{member}", kind.menu_id()), title, items, multi: false, anchor });
+    }
+
+    /// The items of `member`'s view of `kind`: Hide DMs, then Hide messages
+    /// here and the delete items on the operator's DMs with it; Hide review,
+    /// then Tombstone… for an agent that is not live, on its own.
+    fn view_items(&self, kind: Kind, member: &str) -> Vec<Item> {
+        let mut out = vec![Item::new(kind.hide_item())];
+        match kind {
+            Kind::Dm => {
+                out.push(Item::new(HIDE_HERE));
+                out.extend(self.delete_items(&Scope::Dm(member.to_string())));
+            }
+            Kind::Review if self.is_dead_claude(member) => out.push(Item::new(TOMBSTONE)),
+            Kind::Review => {}
+        }
+        out
     }
 
     /// An item of a DM view's menu, the menu id `id` naming the view; false
@@ -169,8 +188,13 @@ impl ChatPane {
     pub(super) fn view_item(&mut self, id: &str, item: &str) -> bool {
         for kind in [Kind::Dm, Kind::Review] {
             if let Some(member) = id.strip_prefix(kind.menu_id()) {
-                if item == kind.hide_item() {
-                    self.hide_view(kind, member);
+                match item {
+                    _ if item == kind.hide_item() => self.hide_view(kind, member),
+                    HIDE_HERE => self.ask_hide(kind.tab(member)),
+                    DELETE_READ => self.delete_menu(&Scope::Dm(member.to_string())),
+                    UNDO_DELETE => self.undo_delete(),
+                    TOMBSTONE => self.ask_tombstone(member),
+                    _ => {}
                 }
                 return true;
             }

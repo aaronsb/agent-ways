@@ -26,6 +26,8 @@ attend-config = { path = "../attend-config" }
 # The chat's own keys (`attend.chat.*`) resolve and are written through it.
 agent-settings = { path = "../agent-settings" }
 serde_yaml = "0.9"
+# The attend CLI's `--json` reports, for the cleanup items it runs.
+serde_json = "1"
 attend-groups = { path = "../attend-groups" }
 attend-presence = { path = "../attend-presence" }
 attend-instances = { path = "../attend-instances" }

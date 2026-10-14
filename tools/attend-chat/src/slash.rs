@@ -176,7 +176,7 @@ pub const REGISTRY: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "purge",
-        description: "Delete a channel's on-disk history",
+        description: "Delete read messages for everyone in a channel (alias)",
         status: Status::Implemented,
         grammar: &[GROUP_OPT],
     },
@@ -188,7 +188,7 @@ pub const REGISTRY: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "clear",
-        description: "Clear the message buffer",
+        description: "Hide the messages this tab shows",
         status: Status::Implemented,
         grammar: &[],
     },
@@ -345,8 +345,9 @@ pub enum SlashOutcome {
     /// Status message to show; *keep* the input so the user can
     /// edit + retry (typical for unknown / malformed commands).
     Err(String),
-    /// `/clear` — empty the transcript buffer.
-    ClearTranscript,
+    /// `/clear` — Hide messages here on the tab shown: a watermark local
+    /// to the chat (ADR-405); the bus keeps every message.
+    HideHere,
     /// `/join` — join the named focus group as the human member
     /// (ADR-170). Name is already normalized (`#` stripped) and
     /// validated.
@@ -379,9 +380,9 @@ pub enum SlashOutcome {
         name: String,
         description: String,
     },
-    /// `/purge` — delete a channel's on-disk signal history (ADR-136
-    /// durability, deliberately overridden by explicit operator
-    /// action). `None` targets the base channel's `_broadcast/`.
+    /// `/purge` — for one release, an alias of the menu's Delete read
+    /// messages for everyone… → All (ADR-405): `attend message delete`
+    /// on the channel, asked first. `None` scopes to the foreground tab.
     Purge(Option<String>),
     /// `/peers` — render the live-session roster as a transcript
     /// status block (ADR-173 Decision 5: operator discovery parity).
@@ -449,7 +450,7 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
     match cmd.status {
         Status::Implemented => match cmd.name {
             "help" => SlashOutcome::Ok(help_message()),
-            "clear" => SlashOutcome::ClearTranscript,
+            "clear" => SlashOutcome::HideHere,
             "config" => {
                 let mut t = args.split_whitespace();
                 match (t.next(), t.next()) {
@@ -551,8 +552,7 @@ pub fn dispatch(name: &str, args: &str) -> SlashOutcome {
             // collapsing it into `None` here would reinterpret it as
             // foreground scope and purge whatever tab the operator
             // happens to be on (PR #395 blocking finding —
-            // destructive intent inversion). `run_purge` maps the
-            // resolved base name onto the on-disk `None` target.
+            // destructive intent inversion).
             "purge" => match group_arg(args) {
                 None => SlashOutcome::Purge(None),
                 Some(g) => SlashOutcome::Purge(Some(g.to_string())),
@@ -832,9 +832,9 @@ mod tests {
 
     #[test]
     fn dispatch_clear_returns_effect() {
-        assert_eq!(dispatch("clear", ""), SlashOutcome::ClearTranscript);
+        assert_eq!(dispatch("clear", ""), SlashOutcome::HideHere);
         // Stray args after /clear are ignored, not an error.
-        assert_eq!(dispatch("clear", "everything"), SlashOutcome::ClearTranscript);
+        assert_eq!(dispatch("clear", "everything"), SlashOutcome::HideHere);
     }
 
     #[test]

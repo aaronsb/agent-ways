@@ -67,15 +67,15 @@ use agent_tui::{Anchor, Item, Open};
 use crate::chip::Seen;
 use crate::peers::Peer;
 
+use super::cleanup::{Asked, DELETE_READ, HIDE_HERE, TOMBSTONE, UNDO_DELETE};
 use super::dm::{Kind, HIDE_DMS, HIDE_REVIEW, REVIEW_DMS, SHOW_DMS};
+use crate::attend_cli::Scope;
 use super::keys::{self, EnterAction};
 use super::ChatPane;
 use crate::groups::BASE_CHANNEL_NAME;
 use crate::slash::SlashOutcome;
-use crate::tabs::{self, Slot, Tab};
+use crate::tabs::{Slot, Tab};
 
-pub(super) const CLEAR_VIEW: &str = "Clear view";
-pub(super) const CLEAR_HISTORY: &str = "Clear history";
 pub(super) const ADD_AGENT: &str = "Add agent ▸";
 pub(super) const SEAL: &str = "Seal";
 pub(super) const REMOVE_AGENT: &str = "Remove agent ▸";
@@ -118,12 +118,16 @@ const ASK: &str = "ask";
 /// A step that asks first, waiting for its answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Step {
-    /// Empty the view (`/clear`); the bus keeps every message.
-    ClearView,
+    /// Hide messages here, on the tab and its label; the bus keeps every
+    /// message.
+    HideHere(Tab, String),
     /// Leave the channel (`/leave`).
     Leave(String),
-    /// Delete the channel's history (`/purge`).
-    ClearHistory(String),
+    /// Delete read messages for everyone (`attend message delete`), with
+    /// what its dry run reported.
+    DeleteRead(Asked),
+    /// Tombstone the dead agent of this session id, and its name.
+    Tombstone(String, String),
     /// Delete the channel (`/dissolve`).
     Delete(String),
     /// Take a member out of the channel (`/kick`).
@@ -134,9 +138,10 @@ impl Step {
     /// The question, then what yes and no do, as the answers name them.
     fn question(&self) -> (String, &'static str, &'static str) {
         match self {
-            Step::ClearView => ("clear the view? the bus keeps every message".into(), "clear", "keep"),
+            Step::HideHere(_, label) => (format!("hide the messages in {label}? the bus keeps every message"), "hide", "keep"),
             Step::Leave(c) => (format!("leave #{c}?"), "leave", "stay"),
-            Step::ClearHistory(c) => (format!("clear #{c} history? deletes what every live agent has read, older than 90 s"), "clear", "keep"),
+            Step::DeleteRead(asked) => (asked.question(), "delete", "keep"),
+            Step::Tombstone(_, name) => (format!("tombstone @{name}? its messages leave every tab and its row leaves Agents"), "tombstone", "keep"),
             Step::Delete(c) => (format!("delete #{c} and its history?"), "delete", "keep"),
             Step::Remove(c, m) => (format!("remove @{} from #{c}?", m.label), "remove", "keep"),
         }
@@ -196,11 +201,13 @@ pub(super) fn removable(members: Vec<Member>, me: &str) -> Vec<Member> {
 /// The items of an agent row's menu: for an agent that has DM views, its
 /// DMs with the operator, then its own DMs (Review DMs), each shown or
 /// hidden (`views`: whether the column lists each); address it, who it is,
-/// add it to a channel, then for the shown channel that lists it
-/// (`listed`), Remove, or Leave on the operator's own row. `add` is why the
-/// agent cannot be added to a channel, when it cannot: Add agent to chat is
-/// then set back with the reason.
-pub(super) fn agent_items(name: &str, views: Option<(bool, bool)>, listed: Option<&str>, operator: bool, add: Result<(), String>) -> Vec<Item> {
+/// add it to a channel; for an agent with DM views, Hide messages here and
+/// the delete items (`delete`) on its DMs with the operator; then for the
+/// shown channel that lists it (`listed`), Remove, or Leave on the
+/// operator's own row; last, Tombstone… for an agent that is not live
+/// (`dead`). `add` is why the agent cannot be added to a channel, when it
+/// cannot: Add agent to chat is then set back with the reason.
+pub(super) fn agent_items(name: &str, views: Option<(bool, bool)>, listed: Option<&str>, operator: bool, add: Result<(), String>, delete: Vec<Item>, dead: bool) -> Vec<Item> {
     let mut out: Vec<Item> = Vec::new();
     if let Some((dms, review)) = views {
         out.push(Item::new(if dms { HIDE_DMS } else { SHOW_DMS }));
@@ -211,8 +218,15 @@ pub(super) fn agent_items(name: &str, views: Option<(bool, bool)>, listed: Optio
         Ok(()) => Item::new(ADD_TO_CHAT),
         Err(why) => Item::disabled(ADD_TO_CHAT, why),
     });
+    if views.is_some() {
+        out.push(Item::new(HIDE_HERE));
+        out.extend(delete);
+    }
     if let Some(c) = listed {
         out.push(Item::new(if operator { format!("{LEAVE} #{c}") } else { format!("{REMOVE_FROM} #{c}") }));
+    }
+    if views.is_some() && dead {
+        out.push(Item::new(TOMBSTONE));
     }
     out
 }
@@ -227,23 +241,22 @@ pub(super) fn addable(rows: &[crate::groups::ChannelRow], member: &str) -> Vec<S
 }
 
 /// The items of a tab's menu, by the channel it shows (`None`: merged):
-/// a named channel offers Leave to a member and Join to anyone else. Add
-/// agent and Seal wait on attend (ADR-404 D1, D4) and say so; neither is
-/// first, so the highlight never starts on one.
-pub(super) fn items(channel: Option<&str>, joined: bool) -> Vec<Item> {
+/// a named channel offers Leave to a member and Join to anyone else.
+/// `delete` is the delete items for the channel, Delete read messages for
+/// everyone… and Undo delete after one ([`ChatPane::delete_items`]). Seal
+/// waits on attend (ADR-404 D4) and says so; it is not first, so the
+/// highlight never starts on it.
+pub(super) fn items(channel: Option<&str>, joined: bool, delete: Vec<Item>) -> Vec<Item> {
     let membership = if joined { LEAVE } else { JOIN };
     match channel {
-        None => vec![CLEAR_VIEW.into()],
-        Some(BASE_CHANNEL_NAME) => vec![CLEAR_VIEW.into(), CLEAR_HISTORY.into()],
-        Some(_) => vec![
-            ADD_AGENT.into(),
-            REMOVE_AGENT.into(),
-            DESCRIBE.into(),
-            CLEAR_HISTORY.into(),
-            membership.into(),
-            Item::disabled(SEAL, "needs ADR-404 D4"),
-            DELETE.into(),
-        ],
+        None => vec![HIDE_HERE.into()],
+        Some(BASE_CHANNEL_NAME) => std::iter::once(HIDE_HERE.into()).chain(delete).collect(),
+        Some(_) => {
+            let mut out: Vec<Item> = vec![ADD_AGENT.into(), REMOVE_AGENT.into(), DESCRIBE.into()];
+            out.extend(delete);
+            out.extend([membership.into(), Item::disabled(SEAL, "needs ADR-404 D4"), DELETE.into()]);
+            out
+        }
     }
 }
 
@@ -325,7 +338,8 @@ impl ChatPane {
             Some(r) => Anchor::Row(r),
             None => self.slot_of(&tab).map_or(Anchor::Center, Anchor::Tab),
         };
-        self.to_open = Some(Open::Pick { id, title, items: items(channel.as_deref(), joined), multi: false, anchor });
+        let delete = self.delete_items(&Scope::channel(channel.as_deref().unwrap_or(BASE_CHANNEL_NAME)));
+        self.to_open = Some(Open::Pick { id, title, items: items(channel.as_deref(), joined, delete), multi: false, anchor });
     }
 
     pub(super) fn common_menu(&mut self) {
@@ -448,6 +462,9 @@ impl ChatPane {
         if let Some(m) = id.strip_prefix("message:") {
             return self.message_item(m, value);
         }
+        if self.older_item(id, value) {
+            return;
+        }
         if id == NEW_CHANNEL {
             return self.new_channel_named(value);
         }
@@ -494,7 +511,9 @@ impl ChatPane {
         };
         let add = self.can_add(&s);
         let views = self.has_dms(&member).then(|| (self.lists(Kind::Dm, &member), self.lists(Kind::Review, &member)));
-        let items = agent_items(&name, views, listed.as_ref().map(|(c, _)| c.as_str()), member == me, add);
+        let delete = self.delete_items(&Scope::Dm(member.clone()));
+        let dead = self.is_dead_claude(&member);
+        let items = agent_items(&name, views, listed.as_ref().map(|(c, _)| c.as_str()), member == me, add, delete, dead);
         self.removable = removable(listed.map(|(_, m)| m).into_iter().collect(), &me);
         let anchor = at.or_else(|| self.side_row(&super::sidebar::SideHit::Agent(member.clone()))).map_or(Anchor::Center, Anchor::Row);
         self.to_open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
@@ -506,7 +525,7 @@ impl ChatPane {
     /// an index would then name its neighbour.
     fn feed_message(&mut self, id: &str) -> Option<(crate::signal::Signal, Option<String>)> {
         let shown = self.normal_tab();
-        let (i, sig) = self.signals.iter().filter(|s| tabs::shows(s, &shown)).enumerate().find(|(_, s)| s.id == id)?;
+        let (i, sig) = self.in_view(&shown).enumerate().find(|(_, s)| s.id == id)?;
         let sig = sig.clone();
         let member = self.entry_members.get(i).cloned().flatten();
         let name = member.and_then(|m| self.seen_member(&m)).map(|s| s.identity.nickname);
@@ -522,7 +541,7 @@ impl ChatPane {
         };
         self.feed.reveal(i);
         let shown = self.normal_tab();
-        let Some(id) = self.signals.iter().filter(|s| tabs::shows(s, &shown)).nth(i).map(|s| s.id.clone()) else { return };
+        let Some(id) = self.in_view(&shown).nth(i).map(|s| s.id.clone()) else { return };
         let Some((sig, name)) = self.feed_message(&id) else { return };
         let feed = self.hits.feed;
         let anchor = self.feed.header_row(i).map_or(Anchor::Center, |r| Anchor::Row(Rect { x: feed.x, y: feed.y + r, width: feed.width, height: 1 }));
@@ -604,6 +623,14 @@ impl ChatPane {
                 }
                 None => self.say("that agent is not in the column any more", true),
             }
+        } else if item == HIDE_HERE {
+            self.ask_hide(Tab::Dm(member.to_string()));
+        } else if item == DELETE_READ {
+            self.delete_menu(&Scope::Dm(member.to_string()));
+        } else if item == UNDO_DELETE {
+            self.undo_delete();
+        } else if item == TOMBSTONE {
+            self.ask_tombstone(member);
         } else if item == WHO {
             self.whois(member);
         } else if item == ADD_TO_CHAT {
@@ -638,8 +665,9 @@ impl ChatPane {
     fn item(&mut self, channel: &str, item: &str) {
         let chan = || (!channel.is_empty()).then(|| channel.to_string());
         match item {
-            CLEAR_VIEW => self.ask(Step::ClearView),
-            CLEAR_HISTORY => self.ask(Step::ClearHistory(chan().unwrap_or(BASE_CHANNEL_NAME.into()))),
+            HIDE_HERE => self.ask_hide(chan().map_or(Tab::Merged, Tab::Channel)),
+            DELETE_READ => self.delete_menu(&Scope::channel(chan().as_deref().unwrap_or(BASE_CHANNEL_NAME))),
+            UNDO_DELETE => self.undo_delete(),
             DELETE => {
                 if let Some(c) = chan() {
                     self.ask(Step::Delete(c));
@@ -811,15 +839,12 @@ impl ChatPane {
             return self.say("kept", false);
         }
         match step {
-            Step::ClearView => {
-                self.run("clear", SlashOutcome::ClearTranscript);
-            }
+            Step::HideHere(tab, _) => self.hide_here(&tab),
             Step::Leave(c) => {
                 self.run("leave", SlashOutcome::Leave(Some(c)));
             }
-            Step::ClearHistory(c) => {
-                self.run("purge", SlashOutcome::Purge(Some(c)));
-            }
+            Step::DeleteRead(asked) => self.run_delete(asked),
+            Step::Tombstone(member, name) => self.tombstone(&member, &name),
             Step::Delete(c) => {
                 self.run("dissolve", SlashOutcome::Dissolve(Some(c)));
             }
@@ -876,9 +901,13 @@ impl ChatPane {
                 self.set_tab(focus);
                 true
             }
-            EnterAction::ClearTranscript => {
-                self.signals.clear();
-                self.say("transcript cleared", false);
+            EnterAction::HideHere => {
+                let fg = self.normal_tab();
+                self.hide_here(&fg);
+                true
+            }
+            EnterAction::DeleteRead(c) => {
+                self.delete_read(Scope::channel(&c), "all");
                 true
             }
         };
@@ -907,11 +936,13 @@ mod tests {
 
     #[test]
     fn each_tab_offers_what_its_channel_allows() {
-        assert_eq!(labels(&items(None, false)), [CLEAR_VIEW]);
-        assert_eq!(labels(&items(Some("open"), true)), [CLEAR_VIEW, CLEAR_HISTORY], "the harmless item first");
-        assert_eq!(labels(&items(Some("deploy"), true)), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, LEAVE, SEAL, DELETE]);
-        assert_eq!(labels(&items(Some("deploy"), false)), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, CLEAR_HISTORY, JOIN, SEAL, DELETE], "Join to a non-member");
-        let deploy = items(Some("deploy"), true);
+        let del = || vec![Item::new(DELETE_READ)];
+        assert_eq!(labels(&items(None, false, del())), [HIDE_HERE], "the operator view hides, and deletes nothing for everyone");
+        assert_eq!(labels(&items(Some("open"), true, del())), [HIDE_HERE, DELETE_READ], "the harmless item first");
+        assert_eq!(labels(&items(Some("deploy"), true, del())), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, DELETE_READ, LEAVE, SEAL, DELETE]);
+        assert_eq!(labels(&items(Some("deploy"), false, del())), [ADD_AGENT, REMOVE_AGENT, DESCRIBE, DELETE_READ, JOIN, SEAL, DELETE], "Join to a non-member");
+        assert_eq!(labels(&items(Some("open"), true, vec![Item::new(DELETE_READ), Item::new(UNDO_DELETE)])), [HIDE_HERE, DELETE_READ, UNDO_DELETE], "Undo delete after a delete");
+        let deploy = items(Some("deploy"), true, del());
         let waiting: Vec<(&str, Option<&str>)> = deploy.iter().filter(|i| !i.enabled).map(|i| (i.label.as_str(), i.reason.as_deref())).collect();
         assert_eq!(waiting, [(SEAL, Some("needs ADR-404 D4"))], "what waits on attend says so; Add agent invites, as the agent menu's Add agent to chat does");
     }
@@ -943,7 +974,7 @@ mod tests {
     fn every_item_that_drops_something_asks_first() {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
-        for (item, ask) in [(CLEAR_VIEW, "clear the view?"), (CLEAR_HISTORY, "clear #deploy history?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
+        for (item, ask) in [(HIDE_HERE, "hide the messages in #deploy?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
             c.item("deploy", item);
             assert!(matches!(c.to_open.take(), Some(Open::Ask { question, .. }) if question.contains(ask)), "{item} asks the shell");
             assert_eq!(c.status, "", "{item} ran nothing yet");
@@ -958,11 +989,12 @@ mod tests {
 
     #[test]
     fn remove_never_offers_the_operator_and_their_own_row_offers_leave() {
+        let del = || vec![Item::new(DELETE_READ)];
         let l = |items: Vec<Item>| items.into_iter().map(|i| i.label).collect::<Vec<_>>();
-        assert_eq!(l(agent_items("Wells", Some((false, false)), Some("deploy"), false, Ok(()))), [SHOW_DMS, REVIEW_DMS, "Address @Wells", WHO, ADD_TO_CHAT, "Remove from #deploy"]);
-        assert_eq!(l(agent_items("aaron", None, Some("deploy"), true, Ok(()))), ["Address @aaron", WHO, ADD_TO_CHAT, "Leave #deploy"], "the operator leaves, never removes themself; a human has no DM view");
-        assert_eq!(l(agent_items("Lyra", Some((true, false)), None, false, Ok(()))), [HIDE_DMS, REVIEW_DMS, "Address @Lyra", WHO, ADD_TO_CHAT], "not listed: nothing to remove; its DMs listed: hide them");
-        assert_eq!(l(agent_items("Lyra", Some((false, true)), None, false, Ok(()))), [SHOW_DMS, HIDE_REVIEW, "Address @Lyra", WHO, ADD_TO_CHAT], "its own DMs listed: hide them");
+        assert_eq!(l(agent_items("Wells", Some((false, false)), Some("deploy"), false, Ok(()), del(), false)), [SHOW_DMS, REVIEW_DMS, "Address @Wells", WHO, ADD_TO_CHAT, HIDE_HERE, DELETE_READ, "Remove from #deploy"]);
+        assert_eq!(l(agent_items("aaron", None, Some("deploy"), true, Ok(()), del(), true)), ["Address @aaron", WHO, ADD_TO_CHAT, "Leave #deploy"], "the operator leaves, never removes themself; a human has no DM view, nothing to delete, no tombstone");
+        assert_eq!(l(agent_items("Lyra", Some((true, false)), None, false, Ok(()), del(), false)), [HIDE_DMS, REVIEW_DMS, "Address @Lyra", WHO, ADD_TO_CHAT, HIDE_HERE, DELETE_READ], "not listed: nothing to remove; its DMs listed: hide them");
+        assert_eq!(l(agent_items("Lyra", Some((false, true)), None, false, Ok(()), del(), true)), [SHOW_DMS, HIDE_REVIEW, "Address @Lyra", WHO, ADD_TO_CHAT, HIDE_HERE, DELETE_READ, TOMBSTONE], "its own DMs listed: hide them; not live: Tombstone… last");
         let m = |id: &str| Member { id: id.into(), label: id.into(), live: true, root: None };
         let left: Vec<String> = removable(vec![m("s1"), m("aaron"), m("s2")], "aaron").into_iter().map(|m| m.id).collect();
         assert_eq!(left, ["s1", "s2"], "the Remove agent picker leaves the operator out");
@@ -989,7 +1021,7 @@ mod tests {
         assert_eq!(c.can_add(&human), Err("a human joins with /join".into()));
         assert_eq!(c.can_add(&quiet), Err("quiet: no live session to invite".into()));
         assert_eq!(c.can_add(&everywhere), Err("already in every channel".into()), "no channel it is not in");
-        let items = agent_items("Ada", None, None, false, c.can_add(&everywhere));
+        let items = agent_items("Ada", None, None, false, c.can_add(&everywhere), Vec::new(), false);
         let add = items.iter().find(|i| i.label == ADD_TO_CHAT).expect("the item is listed");
         assert!(!add.enabled && add.reason.as_deref() == Some("already in every channel"), "{add:?}");
     }

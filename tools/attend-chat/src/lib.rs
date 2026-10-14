@@ -7,11 +7,12 @@
 
 pub mod app;
 pub mod attach;
+pub mod attend_cli;
 pub mod chip;
-pub mod consumers;
 pub mod grammar;
 pub mod groups;
 pub mod helper;
+pub mod hidden;
 pub mod legend;
 pub mod peers;
 pub mod sessions;

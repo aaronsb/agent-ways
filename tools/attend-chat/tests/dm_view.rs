@@ -58,7 +58,7 @@ fn chat_with(send: bool) -> Chat {
         attend_chat::watcher::spawn_watcher(signal::signals_base(), signal::encode_cwd(&here), signal::human_member_id(), tx).unwrap();
         rx
     });
-    let mut c = Chat::new(rx, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(!send);
+    let mut c = Chat::new(rx, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(!send).hidden_file(own_hidden());
     let alpha = format!("claude:{ALPHA_SID}");
     let beta = format!("claude:{BETA_SID}");
     let me = "external:aaron@pts-1";
@@ -76,6 +76,13 @@ fn chat_with(send: bool) -> Chat {
 
 fn chat() -> Chat {
     chat_with(false)
+}
+
+/// A state file of the chat's own for Hide messages here, so no test's
+/// hide reaches another's feed.
+fn own_hidden() -> std::path::PathBuf {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    std::env::temp_dir().join(format!("attend-chat-dm-view-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))).join("hidden")
 }
 
 fn rows(c: &mut Chat) -> Vec<String> {
@@ -361,12 +368,18 @@ fn a_sent_dm_is_labelled_with_its_recipient() {
 /// the tab and the flag never fall back to the session id.
 #[test]
 fn a_dm_view_keeps_its_agents_name_when_the_agent_leaves_the_column() {
-    let mut c = chat_with(true);
+    fixture();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut c = Chat::new(Some(rx), Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(true).hidden_file(own_hidden());
+    let dm = Signal { tray: "aaron".into(), ..sig("s-3", &format!("claude:{ALPHA_SID}"), ALPHA_CWD, "alpha to you", Channel::Person) };
+    tx.send(dm.into()).unwrap();
+    c.drain();
     side_click(&mut c, "alpha");
     let name = format!("@{}", nick(ALPHA_CWD));
-    typed(&mut c, "/clear");
-    press(&mut c, KeyCode::Enter);
-    assert!(c.signals().is_empty(), "{}", c.status());
+    // A mark hides alpha's only message: alpha leaves the column.
+    tx.send(attend_chat::watcher::Delivery::Withdrawn(vec![("aaron".into(), "s-3".into())])).unwrap();
+    c.drain();
+    assert!(c.signals().is_empty());
     assert!(!column(&mut c).iter().any(|r| r.contains("alpha")), "alpha has left the column: {}", screen(&mut c));
     let rows = rows(&mut c);
     assert!(rows[0].contains(&format!("{name} DMs")), "the tab keeps the name: {}", rows[0]);

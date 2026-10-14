@@ -111,8 +111,13 @@ fn chat_at(depth: ColorDepth, theme: Option<&str>) -> Chat {
     let dir = f.root.join("config/agent-ways/themes");
     let (painter, _) = agent_theme::Painter::named_in(theme, &dir, depth);
     // The frames before the left column (ADR-405) keep the legend row;
-    // the column's own tests turn it on (`chat_side`).
+    // the column's own tests turn it on (`chat_side`). Each chat keeps its
+    // Hide messages here watermarks to itself: one test's hide never
+    // empties another's feed.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let hidden = f.root.join(format!("hidden-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
     let mut c = Chat::new(None, Palette { painter }, Shape::PLAIN)
+        .hidden_file(hidden)
         .sidebar(false)
         .heartbeat(false)
         .pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0);
@@ -332,7 +337,7 @@ fn editing_keys_reach_the_input() {
 }
 
 #[test]
-fn enter_runs_a_command_and_clear_empties_the_transcript() {
+fn enter_runs_a_command_and_clear_hides_the_messages_here() {
     let mut c = chat();
     typed(&mut c, "/help");
     press(&mut c, key(KeyCode::Enter));
@@ -340,8 +345,9 @@ fn enter_runs_a_command_and_clear_empties_the_transcript() {
     assert!(c.status().starts_with("available:"), "{}", c.status());
     typed(&mut c, "/clear");
     press(&mut c, key(KeyCode::Enter));
-    assert!(c.signals().is_empty());
-    assert_eq!(c.status(), "transcript cleared");
+    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in ⋯all; the bus keeps them"), "{}", c.status());
+    assert!(!c.signals().is_empty(), "the chat holds them still");
+    assert!(!text(&mut c, 80, 25).contains("rollout is green"), "the view shows none of them");
 }
 
 #[test]
@@ -826,7 +832,7 @@ fn ctrl_digit_shows_a_tab_and_a_second_press_opens_its_menu() {
     assert!(!text(&mut c, 80, 25).contains("pick one"), "the first press only shows the tab");
     drawn(&mut c, &[ctrl('2')], 80, 25);
     let shown = text(&mut c, 80, 25);
-    for item in ["pick one: #deploy", "Add agent ▸", "Remove agent ▸", "Describe…", "Clear history", "Join", "Seal", "needs ADR-404 D4", "Delete channel"] {
+    for item in ["pick one: #deploy", "Add agent ▸", "Remove agent ▸", "Describe…", "Delete read messages for everyone…", "Join", "Seal", "needs ADR-404 D4", "Delete channel"] {
         assert!(shown.contains(item), "{item}: {shown}");
     }
     assert!(!shown.contains("Leave"), "the human is not in #deploy: Join, not Leave");
@@ -870,32 +876,39 @@ fn the_menus_differ_by_tab() {
     let mut c = chat().enhanced(true);
     drawn(&mut c, &[ctrl('0')], 80, 25);
     let view = text(&mut c, 80, 25);
-    assert!(view.contains("pick one: ⋯all") && view.contains("Clear view") && !view.contains("Clear history"), "{view}");
+    assert!(view.contains("pick one: ⋯all") && view.contains("Hide messages here") && !view.contains("Delete read"), "{view}");
     press(&mut c, key(KeyCode::Esc));
     open_menu(&mut c);
     let open = text(&mut c, 80, 25);
-    assert!(open.contains("pick one: #open") && open.contains("Clear history") && !open.contains("Delete channel"), "{open}");
+    assert!(open.contains("pick one: #open") && open.contains("Hide messages here") && open.contains("Delete read messages for everyone…") && !open.contains("Delete channel"), "{open}");
 }
 
 #[test]
-fn clear_history_asks_first_and_y_runs_the_purge() {
+fn the_items_that_drop_something_ask_first_and_y_runs_them() {
     let mut g = goldens();
     let mut c = chat().enhanced(true).dry_run(true);
-    // #open's menu puts the harmless item first: Clear view, then Clear history.
-    let open_clear_history = |c: &mut Chat| {
+    // #open's menu puts the harmless item first: Hide messages here.
+    let open_hide = |c: &mut Chat| {
         open_menu(c);
-        press(c, key(KeyCode::Down));
         press(c, key(KeyCode::Enter));
     };
-    open_clear_history(&mut c);
-    assert!(bar(&mut c).contains("clear #open history? deletes what every live agent has read, older than 90 s"), "{}", bar(&mut c));
+    open_hide(&mut c);
+    assert!(bar(&mut c).contains("hide the messages in #open? the bus keeps every message"), "{}", bar(&mut c));
     g.check("tab-menu-confirm-120x40", &testkit::render_screen(&mut c, 120, 40));
-    assert!(press(&mut c, key(KeyCode::Esc)), "Esc keeps the history and the chat");
+    assert!(press(&mut c, key(KeyCode::Esc)), "Esc keeps the messages and the chat");
     assert_eq!(c.status(), "kept");
-    open_clear_history(&mut c);
+    open_hide(&mut c);
     press(&mut c, key(KeyCode::Char('y')));
-    assert_eq!(c.status(), "dry run: /purge not run");
+    assert_eq!(c.status(), "dry run: nothing hidden");
     assert!(c.input().is_empty(), "the y answered; it typed nothing");
+    // Delete read messages for everyone… opens Delete older than; a dry run
+    // of the chat runs no attend.
+    open_menu(&mut c);
+    press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Enter));
+    assert!(text(&mut c, 80, 25).contains("pick one: delete older than"), "{}", text(&mut c, 80, 25));
+    press(&mut c, key(KeyCode::Enter));
+    assert_eq!(c.status(), "dry run: attend message delete not run");
     // Delete channel on a named channel: the last item. `n` keeps the
     // channel and types nothing; another character keeps it and goes on
     // into the draft.
@@ -915,23 +928,23 @@ fn clear_history_asks_first_and_y_runs_the_purge() {
 }
 
 /// A click on a tab opens its menu with the first item under the cursor:
-/// merged's Clear view asks before it empties the view.
+/// merged's Hide messages here asks before it hides the view's messages.
 #[test]
-fn a_click_then_enter_on_merged_asks_before_clearing_the_view() {
+fn a_click_then_enter_on_merged_asks_before_hiding_the_messages() {
     let mut c = chat().enhanced(true);
     let buf = testkit::render_screen(&mut c, 80, 25);
     let (x, y) = testkit::find(&buf, "⋯all").expect("the operator view's tab");
     left(&mut c, (x, y));
     press(&mut c, key(KeyCode::Enter));
-    assert!(bar(&mut c).contains("clear the view? the bus keeps every message"), "{}", bar(&mut c));
-    assert!(!c.signals().is_empty(), "nothing cleared before the y");
+    assert!(bar(&mut c).contains("hide the messages in ⋯all? the bus keeps every message"), "{}", bar(&mut c));
+    assert!(text(&mut c, 80, 25).contains("rollout is green"), "nothing hidden before the y");
     press(&mut c, key(KeyCode::Esc));
     assert_eq!((c.status(), c.signals().is_empty()), ("kept", false));
     left(&mut c, (x, y));
     press(&mut c, key(KeyCode::Enter));
     press(&mut c, key(KeyCode::Char('y')));
-    assert_eq!(c.status(), "transcript cleared");
-    assert!(c.signals().is_empty());
+    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in ⋯all; the bus keeps them"), "{}", c.status());
+    assert!(!text(&mut c, 80, 25).contains("rollout is green"), "the view shows none of them");
 
     // The key help names what a click on a tab does.
     press(&mut c, key(KeyCode::F(1)));

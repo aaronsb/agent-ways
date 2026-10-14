@@ -95,11 +95,13 @@ fn menu_open(c: &mut Chat) -> bool {
     rows(c).iter().any(|r| r.contains("pick one"))
 }
 
-/// A cell inside the feed's box, right of the column, above the compose box.
+/// A cell inside the feed's box, right of the column, above the compose box,
+/// and right of where a menu docked at a column row reaches.
 fn feed(c: &mut Chat) -> (u16, u16) {
     let shown = rows(c);
-    assert!(shown[10].chars().nth(50).is_some_and(|ch| ch == ' '), "inside the feed: {shown:#?}");
-    (50, 10)
+    let x = SIZE.0 - 4;
+    assert!(shown[10].chars().nth(x as usize).is_some_and(|ch| ch == ' '), "inside the feed: {shown:#?}");
+    (x, 10)
 }
 
 /// A step that asks first, and how it is reached: the channel whose menu
@@ -118,8 +120,8 @@ struct Step {
 }
 
 const STEPS: &[Step] = &[
-    Step { key: '0', tab: "⋯all", item: "Clear view", question: "clear the view?", yes: " y clear ", no: " n keep ", ran: "dry run: /clear not run" },
-    Step { key: '-', tab: "#open", item: "Clear history", question: "clear #open history?", yes: " y clear ", no: " n keep ", ran: "dry run: /purge not run" },
+    Step { key: '0', tab: "⋯all", item: "Hide messages here", question: "hide the messages in ⋯all?", yes: " y hide ", no: " n keep ", ran: "dry run: nothing hidden" },
+    Step { key: '-', tab: "#open", item: "Hide messages here", question: "hide the messages in #open?", yes: " y hide ", no: " n keep ", ran: "dry run: nothing hidden" },
     Step { key: '2', tab: "#deploy", item: "Leave", question: "leave #deploy?", yes: " y leave ", no: " n stay ", ran: "dry run: /leave not run" },
     Step { key: '2', tab: "#deploy", item: "Delete channel", question: "delete #deploy and its history?", yes: " y delete ", no: " n keep ", ran: "dry run: /dissolve not run" },
     Step { key: '2', tab: "#deploy", item: "Remove agent", question: "from #deploy?", yes: " y remove ", no: " n keep ", ran: "dry run: /kick not run" },
@@ -189,19 +191,19 @@ fn ask_by_clicks(c: &mut Chat, tab: &str, item: &str) {
 #[test]
 fn a_question_draws_its_answers_as_lozenges() {
     let mut c = chat();
-    ask_by_clicks(&mut c, "⋯all", "Clear view");
+    ask_by_clicks(&mut c, "⋯all", "Hide messages here");
     let shown = bar(&mut c);
-    assert!(shown.contains("clear the view?") && shown.contains(" y clear ") && shown.contains(" n keep "), "{shown}");
-    assert!(!c.signals().is_empty(), "nothing cleared before the answer");
+    assert!(shown.contains("hide the messages in ⋯all?") && shown.contains(" y hide ") && shown.contains(" n keep "), "{shown}");
+    assert!(!c.signals().is_empty(), "nothing hidden before the answer");
 }
 
 #[test]
 fn a_click_on_the_yes_answer_runs_the_step() {
     let mut c = chat();
-    ask_by_clicks(&mut c, "⋯all", "Clear view");
-    let yes = at(&mut c, " y clear ");
+    ask_by_clicks(&mut c, "⋯all", "Hide messages here");
+    let yes = at(&mut c, " y hide ");
     click(&mut c, yes);
-    assert_eq!(c.status(), "dry run: /clear not run", "the step ran, as far as a dry run runs one");
+    assert_eq!(c.status(), "dry run: nothing hidden", "the step ran, as far as a dry run runs one");
 }
 
 /// Only a left click gives an answer: a middle or a right click on the yes
@@ -210,30 +212,30 @@ fn a_click_on_the_yes_answer_runs_the_step() {
 fn a_middle_or_right_click_on_the_yes_answer_answers_no() {
     for b in [MouseButton::Middle, MouseButton::Right] {
         let mut c = chat();
-        ask_by_clicks(&mut c, "⋯all", "Clear view");
-        let yes = at(&mut c, " y clear ");
+        ask_by_clicks(&mut c, "⋯all", "Hide messages here");
+        let yes = at(&mut c, " y hide ");
         button(&mut c, yes, b);
         assert_eq!(c.status(), "kept", "{b:?} on yes ran nothing");
-        assert!(!bar(&mut c).contains("clear the view?"), "{b:?}: nothing left asking");
+        assert!(!bar(&mut c).contains("hide the messages in ⋯all?"), "{b:?}: nothing left asking");
     }
 }
 
 #[test]
 fn a_click_on_the_no_answer_keeps_things() {
     let mut c = chat();
-    ask_by_clicks(&mut c, "⋯all", "Clear view");
+    ask_by_clicks(&mut c, "⋯all", "Hide messages here");
     let no = at(&mut c, " n keep ");
     click(&mut c, no);
     assert_eq!(c.status(), "kept");
     assert!(!c.signals().is_empty());
-    assert!(!bar(&mut c).contains("clear the view?"));
+    assert!(!bar(&mut c).contains("hide the messages in ⋯all?"));
 }
 
 /// A click in the feed answers no, so a later `y` types and answers nothing.
 #[test]
 fn a_click_in_the_feed_answers_no() {
     let mut c = chat();
-    ask_by_clicks(&mut c, "⋯all", "Clear view");
+    ask_by_clicks(&mut c, "⋯all", "Hide messages here");
     let f = feed(&mut c);
     click(&mut c, f);
     assert_eq!(c.status(), "kept");
@@ -251,8 +253,8 @@ fn ctrl_c_over_a_question_answers_it_no_before_the_guard_asks() {
     for ch in "half".chars() {
         key(&mut c, KeyCode::Char(ch));
     }
-    ask_by_clicks(&mut c, "⋯all", "Clear view");
-    assert!(bar(&mut c).contains("clear the view?"));
+    ask_by_clicks(&mut c, "⋯all", "Hide messages here");
+    assert!(bar(&mut c).contains("hide the messages in ⋯all?"));
     assert!(press(&mut c, KeyCode::Char('c'), KeyModifiers::CONTROL), "a draft keeps the chat open");
     assert!(c.app().guarding());
     key(&mut c, KeyCode::Esc);
@@ -407,7 +409,7 @@ fn with_a_menu_open_a_click_in_the_feed_only_closes_it() {
 #[test]
 fn with_a_question_waiting_a_click_on_a_row_answers_no_and_acts() {
     let mut c = chat();
-    ask_by_clicks(&mut c, "⋯all", "Clear view");
+    ask_by_clicks(&mut c, "⋯all", "Hide messages here");
     let infra = row_of(&mut c, "#infra");
     click(&mut c, infra);
     assert_eq!(c.status(), "kept");
@@ -481,7 +483,7 @@ fn esc_closes_the_entry_dialog_saying_nothing() {
 #[test]
 fn a_paste_over_a_question_answers_no_then_pastes() {
     let mut c = chat();
-    ask_by_clicks(&mut c, "⋯all", "Clear view");
+    ask_by_clicks(&mut c, "⋯all", "Hide messages here");
     testkit::render_screen(&mut c, SIZE.0, SIZE.1);
     agent_tui::screen::Screen::paste(&mut c, "yes please");
     assert_eq!(c.status(), "kept");

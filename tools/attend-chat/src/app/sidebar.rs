@@ -183,7 +183,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
                     _ => Tab::Dm(member.clone()),
                 };
                 let shown = fg == tab;
-                let n = chat.signals.iter().filter(|x| crate::tabs::shows(x, &tab) && x.channel != crate::signal::Channel::Info).count();
+                let n = chat.in_view(&tab).filter(|x| x.channel != crate::signal::Channel::Info).count();
                 let label = match tab {
                     Tab::Review(_) => format!("{REVIEW_MARK}{} DMs", s.identity.nickname),
                     _ => "DMs".to_string(),

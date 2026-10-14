@@ -14,6 +14,7 @@
 //! [`keys`] as free functions; the editing keys are the shared input's.
 
 mod activate;
+mod cleanup;
 mod dm;
 mod focus;
 mod ix;
@@ -240,6 +241,14 @@ pub struct ChatPane {
     /// listed, by membership id: the view keeps it when the agent leaves
     /// the column ([`dm`]).
     dm_names: std::collections::HashMap<String, String>,
+    /// Each tab's Hide messages here watermark, and the file it is kept in
+    /// across restarts ([`crate::hidden`]).
+    hidden: crate::hidden::Hidden,
+    hidden_path: std::path::PathBuf,
+    /// The attend CLI the cleanup items run ([`cleanup`]), and the last
+    /// delete made, for Undo delete.
+    attend: std::path::PathBuf,
+    undo: Option<cleanup::LastDelete>,
 }
 
 impl ChatPane {
@@ -287,6 +296,10 @@ impl ChatPane {
             removable: Vec::new(),
             views: Default::default(),
             dm_names: Default::default(),
+            hidden: crate::hidden::Hidden::load(&crate::hidden::default_path()),
+            hidden_path: crate::hidden::default_path(),
+            attend: crate::attend_cli::ATTEND.into(),
+            undo: None,
         }
     }
 
@@ -520,13 +533,14 @@ impl ChatPane {
                 // the handler advanced it.
                 self.set_tab(focus);
             }
-            EnterAction::ClearTranscript => {
-                // Display-only: nothing on the bus is touched, and fresh
-                // traffic streams back in.
-                self.signals.clear();
-                self.say("transcript cleared", false);
+            EnterAction::HideHere => {
+                self.hide_here(&fg);
                 self.input.clear();
                 self.show_newest();
+            }
+            EnterAction::DeleteRead(c) => {
+                self.input.clear();
+                self.delete_read(crate::attend_cli::Scope::channel(&c), "all");
             }
         }
         self.reload_settings();
@@ -1130,6 +1144,16 @@ impl Chat {
         let config = &mut self.pane_mut().config;
         config.jump = jump.into();
         config.focus_key = focus_key.into();
+        self
+    }
+
+    /// Keep Hide messages here's watermarks in `path` rather than
+    /// attend-chat's state file, reading what it holds.
+    pub fn hidden_file(mut self, path: impl Into<std::path::PathBuf>) -> Chat {
+        let pane = self.pane_mut();
+        pane.hidden_path = path.into();
+        pane.hidden = crate::hidden::Hidden::load(&pane.hidden_path);
+        pane.invalidate();
         self
     }
 

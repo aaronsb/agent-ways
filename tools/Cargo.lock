@@ -204,6 +204,7 @@ dependencies = [
  "claude-sessions",
  "libc",
  "notify",
+ "serde_json",
  "serde_yaml",
 ]
 
