@@ -16,13 +16,14 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use attend_groups::tombstones::{self, Marks};
 use attend_groups::{Groups, ReceiveDir, Room};
 use serde::Serialize;
 
 use crate::util::signals_base;
+use crate::verbs::recipients::{caller_ids, identity_of, live_sessions};
 
 /// Which messages a delete looks at.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,47 +60,13 @@ impl OlderThan {
             "current" => Some(OlderThan::Current),
             "today" => Some(OlderThan::Before(agent_fmt::when::local_day_start(now))),
             t => {
-                if let Some(date) = parse_date(t) {
+                if let Some(date) = agent_fmt::when::parse_local_date(t) {
                     return Some(OlderThan::Before(date));
                 }
-                parse_duration(t).and_then(|d| now.checked_sub(d)).map(OlderThan::Before)
+                agent_fmt::when::parse_span(t).and_then(|d| now.checked_sub(d)).map(OlderThan::Before)
             }
         }
     }
-}
-
-/// `YYYY-MM-DD` to its local midnight.
-fn parse_date(t: &str) -> Option<SystemTime> {
-    let mut parts = t.split('-');
-    let (y, m, d) = (parts.next()?, parts.next()?, parts.next()?);
-    if parts.next().is_some() || y.len() != 4 || m.len() != 2 || d.len() != 2 {
-        return None;
-    }
-    agent_fmt::when::local_date_start(y.parse().ok()?, m.parse().ok()?, d.parse().ok()?)
-}
-
-/// A run of `<n><unit>` pairs, the units `s`, `m`, `h`, `d` and `w`.
-fn parse_duration(t: &str) -> Option<Duration> {
-    let mut total: u64 = 0;
-    let mut digits = String::new();
-    for c in t.chars() {
-        if c.is_ascii_digit() {
-            digits.push(c);
-            continue;
-        }
-        let unit = match c {
-            's' => 1,
-            'm' => 60,
-            'h' => 3_600,
-            'd' => 86_400,
-            'w' => 604_800,
-            _ => return None,
-        };
-        let n: u64 = digits.parse().ok()?;
-        total = total.checked_add(n.checked_mul(unit)?)?;
-        digits.clear();
-    }
-    (digits.is_empty() && total > 0).then(|| Duration::from_secs(total))
 }
 
 /// One delete.
@@ -177,18 +144,6 @@ pub fn delete(req: &DeleteRequest) -> Result<Deleted, DeleteError> {
     delete_in(&base, req, &caller_ids(), &recipients, SystemTime::now())
 }
 
-/// The ids the caller reads as: a Claude Code session's id and the ids it
-/// had before each `/clear`, or outside a session the member id of the
-/// person at the terminal.
-pub(crate) fn caller_ids() -> Vec<String> {
-    let me = crate::util::current_session();
-    if me.resolved() {
-        attend_presence::enrollment::reading_ids(&me)
-    } else {
-        vec![agent_identity::sanitize_id_component(&agent_identity::signal::user_name())]
-    }
-}
-
 /// Which messages in the scope's rooms a delete may take, by sender and
 /// addressee.
 struct Filter<'a> {
@@ -240,48 +195,6 @@ pub(crate) struct Recipient {
     pub(crate) id: String,
     pub(crate) started: Option<SystemTime>,
     pub(crate) pending: HashSet<String>,
-}
-
-/// Every live agent session, and whether it is enrolled. Candidates are
-/// the sessions with a heartbeat or an enrollment record; a heartbeat with
-/// no record counts only for an agent's id, since a person in attend-chat
-/// heartbeats under their member id.
-pub(crate) fn live_sessions() -> Vec<(String, bool)> {
-    use attend_presence::enrollment;
-    let enrolled: HashSet<String> =
-        enrollment::recorded_ids().into_iter().filter(|id| !enrollment::sources(id).is_empty()).collect();
-    let beating = std::fs::read_dir(attend_presence::heartbeat::heartbeat_dir())
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| e.file_name().to_str().map(str::to_string))
-        .filter(|id| !id.starts_with('.') && !id.ends_with(".lock") && attend_groups::is_agent_member(id));
-    let mut ids: Vec<String> = enrolled.iter().cloned().chain(beating).collect::<HashSet<_>>().into_iter().collect();
-    ids.sort();
-    ids.into_iter()
-        .filter(|id| attend_presence::alive(id, &HashSet::new()))
-        .map(|id| {
-            let listening = enrolled.contains(&id);
-            (id, listening)
-        })
-        .collect()
-}
-
-/// The ids live session `id` reads as: its own and those it had before
-/// each `/clear`.
-pub(crate) fn reading_ids_of(id: &str) -> Vec<String> {
-    attend_presence::enrollment::reading_ids(&identity_of(id, attend_presence::session::origin_path(id)))
-}
-
-/// A resolved identity for another session.
-fn identity_of(id: &str, origin: Option<String>) -> attend_presence::session::SessionIdentity {
-    attend_presence::session::SessionIdentity {
-        session_id: id.to_string(),
-        origin_path: origin.unwrap_or_default(),
-        session_resolved: true,
-        origin_resolved: true,
-        claude_pid: None,
-    }
 }
 
 /// Every live recipient, with what it holds.
@@ -472,6 +385,7 @@ fn display_name(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     const NOW: u64 = 1_784_732_645;
 
@@ -485,15 +399,11 @@ mod tests {
         assert_eq!(OlderThan::parse("all", now), Some(OlderThan::All));
         assert_eq!(OlderThan::parse("current", now), Some(OlderThan::Current));
         assert_eq!(OlderThan::parse("2h30m", now), Some(OlderThan::Before(at(NOW - 9_000))));
-        assert_eq!(OlderThan::parse("3d", now), Some(OlderThan::Before(at(NOW - 3 * 86_400))));
-        assert_eq!(OlderThan::parse("1w", now), Some(OlderThan::Before(at(NOW - 604_800))));
         assert!(matches!(OlderThan::parse("today", now), Some(OlderThan::Before(t)) if t <= now && now.duration_since(t).unwrap() < Duration::from_secs(86_400)));
         assert_eq!(
             OlderThan::parse("2026-07-22", now),
             agent_fmt::when::local_date_start(2026, 7, 22).map(OlderThan::Before)
         );
-        for bad in ["", "soon", "2h30", "5x", "2026-7-22", "2026-02-30", "0m"] {
-            assert_eq!(OlderThan::parse(bad, now), None, "{bad}");
-        }
+        assert_eq!(OlderThan::parse("soon", now), None);
     }
 }

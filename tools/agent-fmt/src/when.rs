@@ -138,6 +138,42 @@ pub fn date_start_with_offset(y: i64, m: u32, d: u32, offset_secs: i64) -> Optio
     Some(from_unix_secs(days_from_civil(y, m, d) * 86_400 - offset_secs))
 }
 
+/// `YYYY-MM-DD` to its local midnight ([`local_date_start`]).
+pub fn parse_local_date(t: &str) -> Option<SystemTime> {
+    let mut parts = t.split('-');
+    let (y, m, d) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() || y.len() != 4 || m.len() != 2 || d.len() != 2 {
+        return None;
+    }
+    local_date_start(y.parse().ok()?, m.parse().ok()?, d.parse().ok()?)
+}
+
+/// A span written as a run of `<n><unit>` pairs, the units `s`, `m`, `h`,
+/// `d` and `w`: `90m`, `2h30m`, `3d`, `1w`. `None` for anything else or a
+/// span of zero.
+pub fn parse_span(t: &str) -> Option<std::time::Duration> {
+    let mut total: u64 = 0;
+    let mut digits = String::new();
+    for c in t.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            continue;
+        }
+        let unit = match c {
+            's' => 1,
+            'm' => 60,
+            'h' => 3_600,
+            'd' => 86_400,
+            'w' => 604_800,
+            _ => return None,
+        };
+        let n: u64 = digits.parse().ok()?;
+        total = total.checked_add(n.checked_mul(unit)?)?;
+        digits.clear();
+    }
+    (digits.is_empty() && total > 0).then(|| std::time::Duration::from_secs(total))
+}
+
 fn from_unix_secs(secs: i64) -> SystemTime {
     match u64::try_from(secs) {
         Ok(s) => UNIX_EPOCH + std::time::Duration::from_secs(s),
@@ -259,6 +295,20 @@ mod tests {
         assert_eq!(date_start_with_offset(2026, 7, 22, 7_200), Some(at(1_784_678_400 - 7_200)));
         assert_eq!(date_start_with_offset(2026, 2, 30, 0), None);
         assert_eq!(date_start_with_offset(2026, 13, 1, 0), None);
+    }
+
+    #[test]
+    fn spans_and_dates_parse() {
+        assert_eq!(parse_span("2h30m"), Some(Duration::from_secs(9_000)));
+        assert_eq!(parse_span("3d"), Some(Duration::from_secs(3 * 86_400)));
+        assert_eq!(parse_span("1w"), Some(Duration::from_secs(604_800)));
+        for bad in ["", "soon", "2h30", "5x", "0m"] {
+            assert_eq!(parse_span(bad), None, "{bad}");
+        }
+        assert_eq!(parse_local_date("2026-07-22"), local_date_start(2026, 7, 22));
+        for bad in ["2026-7-22", "2026-02-30", "22-07-2026"] {
+            assert_eq!(parse_local_date(bad), None, "{bad}");
+        }
     }
 
     #[test]

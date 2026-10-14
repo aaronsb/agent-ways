@@ -10,7 +10,7 @@
 use serde::Serialize;
 
 use crate::util::signals_base;
-use crate::verbs::delete::{caller_ids, live_sessions, reading_ids_of};
+use crate::verbs::recipients::{caller_ids, live_sessions, reading_ids_of};
 use attend_groups::tombstones;
 
 /// A tombstone written or removed.

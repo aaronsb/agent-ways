@@ -23,6 +23,7 @@ pub mod channels;
 pub mod delete;
 pub mod inbox;
 pub mod listen;
+pub mod recipients;
 pub mod peers;
 pub mod send;
 pub mod status;
