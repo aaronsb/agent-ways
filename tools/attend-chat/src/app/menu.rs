@@ -67,7 +67,7 @@ use agent_tui::{Anchor, Item, Open};
 use crate::chip::Seen;
 use crate::peers::Peer;
 
-use super::dm::{HIDE_DMS, SHOW_DMS};
+use super::dm::{Kind, HIDE_DMS, HIDE_REVIEW, REVIEW_DMS, SHOW_DMS};
 use super::keys::{self, EnterAction};
 use super::ChatPane;
 use crate::groups::BASE_CHANNEL_NAME;
@@ -193,14 +193,19 @@ pub(super) fn removable(members: Vec<Member>, me: &str) -> Vec<Member> {
     members.into_iter().filter(|m| m.id != me).collect()
 }
 
-/// The items of an agent row's menu: its DM view shown or hidden, for an
-/// agent that has one (`dms`: whether the column lists it), address it, who
-/// it is, add it to a channel, then for the shown channel that lists it
+/// The items of an agent row's menu: for an agent that has DM views, its
+/// DMs with the operator, then its own DMs (Review DMs), each shown or
+/// hidden (`views`: whether the column lists each); address it, who it is,
+/// add it to a channel, then for the shown channel that lists it
 /// (`listed`), Remove, or Leave on the operator's own row. `add` is why the
 /// agent cannot be added to a channel, when it cannot: Add agent to chat is
 /// then set back with the reason.
-pub(super) fn agent_items(name: &str, dms: Option<bool>, listed: Option<&str>, operator: bool, add: Result<(), String>) -> Vec<Item> {
-    let mut out: Vec<Item> = dms.map(|on| Item::new(if on { HIDE_DMS } else { SHOW_DMS })).into_iter().collect();
+pub(super) fn agent_items(name: &str, views: Option<(bool, bool)>, listed: Option<&str>, operator: bool, add: Result<(), String>) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::new();
+    if let Some((dms, review)) = views {
+        out.push(Item::new(if dms { HIDE_DMS } else { SHOW_DMS }));
+        out.push(Item::new(if review { HIDE_REVIEW } else { REVIEW_DMS }));
+    }
     out.extend([Item::new(format!("{ADDRESS} @{name}")), Item::new(WHO)]);
     out.push(match add {
         Ok(()) => Item::new(ADD_TO_CHAT),
@@ -436,8 +441,8 @@ impl ChatPane {
         if let Some(member) = id.strip_prefix("agent:") {
             return self.agent_item(member, value);
         }
-        if let Some(member) = id.strip_prefix("dm:") {
-            return self.dm_item(member, value);
+        if self.view_item(id, value) {
+            return;
         }
         if let Some(m) = id.strip_prefix("message:") {
             return self.message_item(m, value);
@@ -484,11 +489,11 @@ impl ChatPane {
         let me = crate::signal::human_member_id();
         let listed = match self.normal_tab() {
             Tab::Channel(c) => self.channel_members(&c).into_iter().find(|m| m.id == member).map(|m| (c, m)),
-            Tab::Merged | Tab::Dm(_) => None,
+            Tab::Merged | Tab::Dm(_) | Tab::Review(_) => None,
         };
         let add = self.can_add(&s);
-        let dms = self.has_dms(&member).then(|| self.dms.contains(&member));
-        let items = agent_items(&name, dms, listed.as_ref().map(|(c, _)| c.as_str()), member == me, add);
+        let views = self.has_dms(&member).then(|| (self.lists(Kind::Dm, &member), self.lists(Kind::Review, &member)));
+        let items = agent_items(&name, views, listed.as_ref().map(|(c, _)| c.as_str()), member == me, add);
         self.removable = removable(listed.map(|(_, m)| m).into_iter().collect(), &me);
         let anchor = at.or_else(|| self.side_row(&super::sidebar::SideHit::Agent(member.clone()))).map_or(Anchor::Center, Anchor::Row);
         self.to_open = Some(Open::Pick { id: format!("agent:{member}"), title: format!("@{name}"), items, multi: false, anchor });
@@ -566,9 +571,13 @@ impl ChatPane {
 
     fn agent_item(&mut self, member: &str, item: &str) {
         if item == SHOW_DMS {
-            self.open_dm(member.to_string());
+            self.open_view(Kind::Dm, member.to_string());
         } else if item == HIDE_DMS {
-            self.hide_dm(member);
+            self.hide_view(Kind::Dm, member);
+        } else if item == REVIEW_DMS {
+            self.open_view(Kind::Review, member.to_string());
+        } else if item == HIDE_REVIEW {
+            self.hide_view(Kind::Review, member);
         } else if item.starts_with(ADDRESS) {
             match self.seen_member(member) {
                 Some(s) => self.complete(super::Chip::Agent(s.identity.nickname)),
@@ -927,9 +936,10 @@ mod tests {
     #[test]
     fn remove_never_offers_the_operator_and_their_own_row_offers_leave() {
         let l = |items: Vec<Item>| items.into_iter().map(|i| i.label).collect::<Vec<_>>();
-        assert_eq!(l(agent_items("Wells", Some(false), Some("deploy"), false, Ok(()))), [SHOW_DMS, "Address @Wells", WHO, ADD_TO_CHAT, "Remove from #deploy"]);
+        assert_eq!(l(agent_items("Wells", Some((false, false)), Some("deploy"), false, Ok(()))), [SHOW_DMS, REVIEW_DMS, "Address @Wells", WHO, ADD_TO_CHAT, "Remove from #deploy"]);
         assert_eq!(l(agent_items("aaron", None, Some("deploy"), true, Ok(()))), ["Address @aaron", WHO, ADD_TO_CHAT, "Leave #deploy"], "the operator leaves, never removes themself; a human has no DM view");
-        assert_eq!(l(agent_items("Lyra", Some(true), None, false, Ok(()))), [HIDE_DMS, "Address @Lyra", WHO, ADD_TO_CHAT], "not listed: nothing to remove; its DMs listed: hide them");
+        assert_eq!(l(agent_items("Lyra", Some((true, false)), None, false, Ok(()))), [HIDE_DMS, REVIEW_DMS, "Address @Lyra", WHO, ADD_TO_CHAT], "not listed: nothing to remove; its DMs listed: hide them");
+        assert_eq!(l(agent_items("Lyra", Some((false, true)), None, false, Ok(()))), [SHOW_DMS, HIDE_REVIEW, "Address @Lyra", WHO, ADD_TO_CHAT], "its own DMs listed: hide them");
         let m = |id: &str| Member { id: id.into(), label: id.into(), live: true, root: None };
         let left: Vec<String> = removable(vec![m("s1"), m("aaron"), m("s2")], "aaron").into_iter().map(|m| m.id).collect();
         assert_eq!(left, ["s1", "s2"], "the Remove agent picker leaves the operator out");
@@ -943,7 +953,7 @@ mod tests {
     fn pane_with(seen: Vec<Seen>) -> ChatPane {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
-        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground, &c.dms));
+        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground, &c.views));
         c
     }
 

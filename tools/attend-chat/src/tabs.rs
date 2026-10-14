@@ -31,6 +31,19 @@ pub enum Tab {
     /// membership id, both ways (ADR-405): a view, listed under the agent's
     /// row in the left column, never a channel.
     Dm(String),
+    /// The agent's own DM view (ADR-405, Review DMs): every direct message
+    /// the agent with this membership id sent or received, with anyone. A
+    /// view listed under the agent's row too, with nothing to send: the
+    /// chat has no send into another agent's conversations.
+    Review(String),
+}
+
+impl Tab {
+    /// Whether the view has a compose box: every view but an agent's own
+    /// DMs, which offers nothing to send.
+    pub fn composes(&self) -> bool {
+        !matches!(self, Tab::Review(_))
+    }
 }
 
 /// Channel names in strip order, taken from the discovered channel
@@ -86,7 +99,7 @@ pub fn bar(names: &[String], shown: &Tab) -> Vec<Slot> {
     let mut out = vec![Slot::Common];
     match shown {
         Tab::Channel(c) if !is_reserved(shown) && names.contains(c) => out.push(Slot::Tab(shown.clone())),
-        Tab::Dm(_) => out.push(Slot::Tab(shown.clone())),
+        Tab::Dm(_) | Tab::Review(_) => out.push(Slot::Tab(shown.clone())),
         _ => {}
     }
     out.push(Slot::New);
@@ -96,7 +109,7 @@ pub fn bar(names: &[String], shown: &Tab) -> Vec<Slot> {
             .filter(|t| match t {
                 Tab::Channel(n) => names.contains(n),
                 Tab::Merged => true,
-                Tab::Dm(_) => false,
+                Tab::Dm(_) | Tab::Review(_) => false,
             })
             .map(Slot::Tab),
     );
@@ -108,7 +121,7 @@ pub fn bar(names: &[String], shown: &Tab) -> Vec<Slot> {
 /// by the destination flag (#392).
 pub fn send_scope(tab: &Tab) -> String {
     match tab {
-        Tab::Merged | Tab::Dm(_) => BASE_CHANNEL_NAME.to_string(),
+        Tab::Merged | Tab::Dm(_) | Tab::Review(_) => BASE_CHANNEL_NAME.to_string(),
         Tab::Channel(g) => g.clone(),
     }
 }
@@ -148,7 +161,8 @@ pub fn advance_after_dissolve(dissolved: &str, names_before: &[String]) -> Tab {
 /// sent, surface in merged only — the strict per-channel filter. A DM view
 /// shows the direct messages between the person and its agent, both ways,
 /// and the local blocks (ADR-405). A direct message between others shows
-/// in none of these.
+/// in none of these; an agent's own DM view shows every direct message the
+/// agent sent or received, with anyone, and the local blocks.
 pub fn shows(sig: &Signal, tab: &Tab) -> bool {
     match tab {
         Tab::Merged => !matches!(sig.channel, Channel::Elsewhere(_)),
@@ -159,6 +173,7 @@ pub fn shows(sig: &Signal, tab: &Tab) -> bool {
             Channel::Direct(_) | Channel::Sent(_) | Channel::Elsewhere(_) => false,
         },
         Tab::Dm(member) => sig.channel == Channel::Info || sig.is_dm_with(member),
+        Tab::Review(member) => sig.channel == Channel::Info || sig.is_dm_of(member),
     }
 }
 
@@ -287,6 +302,21 @@ mod tests {
             assert!(!shows(&on(c.clone(), "a1"), &tab), "{c:?} from a1 is no DM with the person");
         }
         assert!(!shows(&on(Channel::Elsewhere("a1".into()), "a2"), &tab), "nor one to a1 from another");
+    }
+
+    #[test]
+    fn an_agents_own_view_shows_its_dms_with_anyone_and_composes_nothing() {
+        let tab = Tab::Review("a1".into());
+        assert!(shows(&on(Channel::Person, "a1"), &tab), "what a1 sent the person");
+        assert!(shows(&on(Channel::Sent("a1".into()), "me"), &tab), "what the person sent a1");
+        assert!(shows(&on(Channel::Elsewhere("a2".into()), "a1"), &tab), "what a1 sent a2");
+        assert!(shows(&on(Channel::Elsewhere("a1".into()), "a2"), &tab), "what a2 sent a1");
+        assert!(shows(&on(Channel::Info, "attend"), &tab));
+        assert!(!shows(&on(Channel::Elsewhere("a3".into()), "a2"), &tab), "between others");
+        assert!(!shows(&on(Channel::Open, "a1"), &tab), "no channel post");
+        assert!(!tab.composes() && Tab::Dm("a1".into()).composes() && Tab::Merged.composes());
+        let n = names(&["open"]);
+        assert_eq!(bar(&n, &tab), [Slot::Common, Slot::Tab(tab.clone()), Slot::New, Slot::Tab(chan("open")), Slot::Tab(Tab::Merged)]);
     }
 
     #[test]

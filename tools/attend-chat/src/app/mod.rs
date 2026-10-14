@@ -222,10 +222,10 @@ pub struct ChatPane {
     side_follow: bool,
     /// The members a Remove menu listed, for the one picked.
     removable: Vec<menu::Member>,
-    /// The agents whose DM view the column lists under their rows, by
-    /// membership id, in the order opened ([`dm`]). Hiding one takes it off
+    /// The DM views the column lists under agents' rows, the operator's
+    /// DMs with each and each agent's own ([`dm`]). Hiding one takes it off
     /// the list and leaves every message where it was.
-    dms: Vec<String>,
+    views: sidebar::Views,
     /// The last name the column showed for each agent whose DM view was
     /// listed, by membership id: the view keeps it when the agent leaves
     /// the column ([`dm`]).
@@ -274,7 +274,7 @@ impl ChatPane {
             side_scroll: [0, 0],
             side_follow: true,
             removable: Vec::new(),
-            dms: Vec::new(),
+            views: Default::default(),
             dm_names: Default::default(),
         }
     }
@@ -353,7 +353,7 @@ impl ChatPane {
             let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
-            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground, &self.dms));
+            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground, &self.views));
             self.remember_dm_names();
             self.refocus();
         }
@@ -1146,11 +1146,11 @@ impl Screen for Chat {
 
 impl World {
     /// A world of these channels and identities, laid out for the tab
-    /// `shown` against its channels, with the DM views `dms` lists.
-    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab, dms: &[String]) -> World {
+    /// `shown` against its channels, with the DM views `views` lists.
+    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab, views: &sidebar::Views) -> World {
         let names = tabs::strip_names(&groups);
         let shown = tabs::normalize(shown.clone(), &names);
-        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows, dms), shown };
+        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows, views), shown };
         World { groups, seen, rows, live_members, instances, laid }
     }
 

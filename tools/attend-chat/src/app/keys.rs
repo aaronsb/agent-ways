@@ -161,6 +161,12 @@ fn send_message(msg: &str, signals: &[Signal], foreground: &Tab, person: Option<
     // otherwise, with the destination flag (#392) showing the
     // resolution before Enter is pressed.
     let recipients = parse_addressed(&msg);
+    // An agent's own DMs offer nothing to send: attend-chat has no send
+    // into another agent's conversations. The view draws no compose box,
+    // so this is a guard, not a path.
+    if let Tab::Review(member) = foreground {
+        return EnterAction::StatusOnly(format!("{member}'s own DMs are read only here; nothing sent"));
+    }
     // In an agent's DM view an unaddressed message is a direct message to
     // that agent; an addressed one goes as it would from the operator view.
     if let (Tab::Dm(member), true) = (foreground, recipients.is_empty()) {

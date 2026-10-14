@@ -48,6 +48,19 @@ impl Signal {
         }
     }
 
+    /// Whether this is a direct message `member` sent or received, with
+    /// anyone: what the agent's own DM view holds (ADR-405, Review DMs).
+    /// One to the person is sent by it; any other names its recipients in
+    /// `to`.
+    pub fn is_dm_of(&self, member: &str) -> bool {
+        let to = match &self.channel {
+            Channel::Person => "",
+            Channel::Direct(to) | Channel::Sent(to) | Channel::Elsewhere(to) => to,
+            Channel::Open | Channel::Group(_) | Channel::Info => return false,
+        };
+        self.sender_member().as_deref() == Some(member) || to.split(',').any(|t| t == member)
+    }
+
     /// Whether this is the same send as `other`, read from another tray: a
     /// message the person addressed to agents in several projects is
     /// written once to each project's tray, every copy with the whole `to`.
@@ -412,6 +425,25 @@ mod tests {
         let wire = agent_identity::parse_signal(agent_identity::wire_line(&raw)).unwrap();
         assert_eq!((wire.to, wire.from_kind), (Some("*"), Some("human")), "{raw}");
         assert!(sig.reply_to.is_none());
+    }
+
+    /// An agent's own DMs: every direct message it sent or received, the
+    /// person's among them, and no channel post.
+    #[test]
+    fn an_agents_dms_are_those_it_sent_or_received() {
+        let on = |from: &str, channel: Channel| Signal { id: "s".into(), from: format!("claude:{from}"), project: String::new(), cwd: String::new(), reply_to: None, message: String::new(), ts: 0, channel };
+        let me = |channel: Channel| Signal { from: "external:aaron@pts".into(), ..on("x", channel) };
+        assert!(on("a1", Channel::Person).is_dm_of("a1"), "to the person");
+        assert!(me(Channel::Sent("a2,a1".into())).is_dm_of("a1"), "from the person");
+        assert!(on("a2", Channel::Direct("a1".into())).is_dm_of("a1"), "to it, in the chat's tray");
+        assert!(on("a2", Channel::Elsewhere("a1".into())).is_dm_of("a1"), "to it, elsewhere");
+        assert!(on("a1", Channel::Elsewhere("a2".into())).is_dm_of("a1"), "from it, elsewhere");
+        assert!(on("a1", Channel::Elsewhere("bob".into())).is_dm_of("a1"), "from it, to another person");
+        assert!(!on("a2", Channel::Elsewhere("a3".into())).is_dm_of("a1"), "between others");
+        assert!(!on("a2", Channel::Person).is_dm_of("a1"));
+        for c in [Channel::Open, Channel::Group("g".into()), Channel::Info] {
+            assert!(!on("a1", c.clone()).is_dm_of("a1"), "{c:?}");
+        }
     }
 
     /// The copies of one send, read from the trays it went to, are one

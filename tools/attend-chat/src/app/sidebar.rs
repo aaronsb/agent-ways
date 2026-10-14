@@ -1,7 +1,7 @@
 //! The left column (ADR-405): Agents, every identity the chat has seen,
 //! live ones first and the rest set back, those in the channel shown
-//! marked, each claude followed by its DM view's row while that view is
-//! listed; then Channels, every channel, including empty ones and ones only
+//! marked, each claude followed by the rows of its DM views while they are
+//! listed, the operator's DMs with it and then its own; then Channels, every channel, including empty ones and ones only
 //! `_groups.yaml` still names, numbered from 1 for Ctrl+digit. A click on a
 //! claude's row shows the DMs between the operator and it, and lists that
 //! view under the row; a click on a channel shows it. A click on what is
@@ -35,14 +35,24 @@ const MIN_FEED: u16 = 50;
 /// by its membership id (a session id, a human's username), which two
 /// agents never share as they can a name; a DM view by its agent's id; a
 /// channel by its name. Each DM view of an agent is a row under the
-/// agent's: this one, the operator's DMs with it, and later the agent's own
-/// DM perspective, a second kind of row under it whose view offers nothing
-/// to send, since attend-chat has no send into another agent's DMs.
+/// agent's: `Dm`, the operator's DMs with it, and `Review`, the agent's own
+/// DMs with anyone, whose view offers nothing to send, since attend-chat
+/// has no send into another agent's DMs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SideHit {
     Agent(String),
     Dm(String),
+    Review(String),
     Channel(String),
+}
+
+/// The DM views the column lists under agents' rows, each by its agent's
+/// membership id, in the order opened: the operator's DMs with an agent
+/// (`dms`), and the agent's own DMs with anyone (`reviews`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Views {
+    pub(super) dms: Vec<String>,
+    pub(super) reviews: Vec<String>,
 }
 
 /// The column's width in a pane `total` columns wide, or `None` when the
@@ -77,15 +87,18 @@ pub(super) fn agent_order(seen: &[Seen]) -> Vec<&Seen> {
 }
 
 /// The Agents section's rows in order, each with its identity: every agent
-/// in [`agent_order`], and under each claude whose membership id `dms`
-/// lists, its DM view. A human has no DM view: `@name` routes to a
-/// session's tray, and a human has none.
-pub(super) fn agent_rows<'a>(seen: &'a [Seen], dms: &[String]) -> Vec<(SideHit, &'a Seen)> {
+/// in [`agent_order`], and under each claude the DM views `views` lists for
+/// it, the operator's DMs with it first. A human has no DM view: `@name`
+/// routes to a session's tray, and a human has none.
+pub(super) fn agent_rows<'a>(seen: &'a [Seen], views: &Views) -> Vec<(SideHit, &'a Seen)> {
     let mut out = Vec::new();
     for s in agent_order(seen) {
         out.push((SideHit::Agent(s.member.clone()), s));
-        if s.identity.is_claude && dms.contains(&s.member) {
+        if s.identity.is_claude && views.dms.contains(&s.member) {
             out.push((SideHit::Dm(s.member.clone()), s));
+        }
+        if s.identity.is_claude && views.reviews.contains(&s.member) {
+            out.push((SideHit::Review(s.member.clone()), s));
         }
     }
     out
@@ -129,14 +142,14 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     };
     let fg = chat.normal_tab();
     let focus = chat.side_focus();
-    let dms = chat.dms.clone();
+    let views = chat.views.clone();
     let world = chat.world();
-    let agents_list: Vec<(SideHit, Seen)> = agent_rows(&world.seen, &dms).into_iter().map(|(h, s)| (h, s.clone())).collect();
+    let agents_list: Vec<(SideHit, Seen)> = agent_rows(&world.seen, &views).into_iter().map(|(h, s)| (h, s.clone())).collect();
     // Who is in the channel shown: a created channel's members, the
     // operator among them. `#open` and the operator view hold everyone.
     let members: Vec<String> = match &fg {
         Tab::Channel(c) => world.rows.iter().find(|r| r.known.group.name == *c && !r.known.is_base).map(|r| r.known.membership.members.clone()).unwrap_or_default(),
-        Tab::Merged | Tab::Dm(_) => Vec::new(),
+        Tab::Merged | Tab::Dm(_) | Tab::Review(_) => Vec::new(),
     };
     let live = world.seen.iter().filter(|s| s.live).count();
     let n_seen = world.seen.len();
@@ -164,10 +177,18 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         let r = Rect { y: agents.y + 1 + k as u16, height: 1, ..agents };
         let focused = focus == Some(i);
         let mut line = match hit {
-            SideHit::Dm(member) => {
-                let shown = fg == Tab::Dm(member.clone());
-                let n = chat.signals.iter().filter(|x| x.is_dm_with(member)).count();
-                let mut line = dm_line(chat, n, shown, w, focused);
+            SideHit::Dm(member) | SideHit::Review(member) => {
+                let tab = match hit {
+                    SideHit::Review(_) => Tab::Review(member.clone()),
+                    _ => Tab::Dm(member.clone()),
+                };
+                let shown = fg == tab;
+                let n = chat.signals.iter().filter(|x| crate::tabs::shows(x, &tab) && x.channel != crate::signal::Channel::Info).count();
+                let label = match tab {
+                    Tab::Review(_) => format!("{} DMs", s.identity.nickname),
+                    _ => "DMs".to_string(),
+                };
+                let mut line = dm_line(chat, &label, view_ground(&tab), n, shown, w, focused);
                 if shown && !focused {
                     line.spans[0] = Span::styled(theme::SELECTED_MARK, theme::accent());
                 }
@@ -340,18 +361,28 @@ pub(super) fn identity_styles(depth: agent_theme::ColorDepth, palette: agent_ide
     }
 }
 
-/// A DM view's row, under its agent's: indented, `DMs` on the info ground
-/// the destination flag wears, then the count of the DMs it holds. Bold
-/// while shown.
-fn dm_line(chat: &ChatPane, count: usize, shown: bool, w: usize, focused: bool) -> Line<'static> {
+/// The ground a DM view's row is drawn on: the info ground the destination
+/// flag wears for the operator's DMs with an agent, and a ground of its own
+/// for the agent's own DMs, so the two read apart.
+pub(super) fn view_ground(tab: &Tab) -> Ground {
+    match tab {
+        Tab::Review(_) => Ground::Hot,
+        _ => Ground::Info,
+    }
+}
+
+/// A DM view's row, under its agent's: indented, `label` on `ground`, then
+/// the count of the DMs it holds. Bold while shown.
+fn dm_line(chat: &ChatPane, label: &str, ground: Ground, count: usize, shown: bool, w: usize, focused: bool) -> Line<'static> {
     const INDENT: &str = "  ";
     let bare = theme::colourless();
-    let [name, pad, last] = sized(chat.shape, bare, ["DMs", "", &count.to_string()], w.saturating_sub(INDENT.len()));
+    let [name, pad, last] = sized(chat.shape, bare, [label, "", &count.to_string()], w.saturating_sub(INDENT.len()));
     // Two segments where `sized` laid out three: the name takes the middle's
-    // columns, and the join a third segment would have drawn.
-    let join = usize::from(!bare && !chat.shape.join.is_empty());
+    // columns, and the join a third segment would have drawn. A label too
+    // long for three is laid out in two already.
+    let join = usize::from(!bare && !chat.shape.join.is_empty() && !pad.is_empty());
     let name = format!("{name}{pad}{}", " ".repeat(join));
-    let lead = Seg::on("", Ground::Info).style;
+    let lead = Seg::on("", ground).style;
     let styles = focused_styles([if shown { lead.add_modifier(Modifier::BOLD) } else { lead }, Style::new(), Seg::on("", Ground::Rule).style], focused);
     let mut spans = vec![Span::raw(" "), Span::raw(INDENT)];
     spans.extend(chat.shape.lozenge(&segs([name, String::new(), last], styles)));
@@ -387,10 +418,10 @@ fn channel_line(chat: &ChatPane, row: &ChannelRow, live: usize, age: &str, shown
     Line::from(spans)
 }
 
-/// The column's rows of `world` in order: agents, each with its DM view
-/// when `dms` lists it ([`agent_rows`]), then channels.
-pub(super) fn side_items_of(seen: &[Seen], rows: &[ChannelRow], dms: &[String]) -> Vec<SideHit> {
-    let mut out: Vec<SideHit> = agent_rows(seen, dms).into_iter().map(|(h, _)| h).collect();
+/// The column's rows of `world` in order: agents, each with the DM views
+/// `views` lists for it ([`agent_rows`]), then channels.
+pub(super) fn side_items_of(seen: &[Seen], rows: &[ChannelRow], views: &Views) -> Vec<SideHit> {
+    let mut out: Vec<SideHit> = agent_rows(seen, views).into_iter().map(|(h, _)| h).collect();
     out.extend(rows.iter().map(|r| SideHit::Channel(r.known.group.name.clone())));
     out
 }
@@ -543,7 +574,7 @@ mod tests {
 
     fn with_agents(c: &mut ChatPane, names: &[&str]) {
         let seen = names.iter().map(|n| seen(n)).collect();
-        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground, &c.dms));
+        c.world = Some(super::super::World::new(Vec::new(), seen, Vec::new(), Vec::new(), attend_instances::SnapshotCache::new(), &c.foreground, &c.views));
         c.refocus();
     }
 
@@ -578,10 +609,11 @@ mod tests {
         let mut human = seen("aaron");
         human.identity.is_claude = false;
         let list = [seen("Ada"), human, seen("Bo")];
-        let dms = vec!["id-Bo".to_string(), "id-aaron".to_string()];
-        let hits: Vec<SideHit> = agent_rows(&list, &dms).into_iter().map(|(h, _)| h).collect();
+        let views = Views { dms: vec!["id-Bo".to_string(), "id-aaron".to_string()], reviews: vec!["id-aaron".to_string(), "id-Bo".to_string(), "id-Ada".to_string()] };
+        let hits: Vec<SideHit> = agent_rows(&list, &views).into_iter().map(|(h, _)| h).collect();
         let a = |m: &str| SideHit::Agent(m.into());
-        assert_eq!(hits, [a("id-Ada"), a("id-aaron"), a("id-Bo"), SideHit::Dm("id-Bo".into())]);
+        let r = |m: &str| SideHit::Review(m.into());
+        assert_eq!(hits, [a("id-Ada"), r("id-Ada"), a("id-aaron"), a("id-Bo"), SideHit::Dm("id-Bo".into()), r("id-Bo")], "the operator's DMs first, then the agent's own");
     }
 
     #[test]
@@ -589,9 +621,16 @@ mod tests {
         let mut c = ChatPane::new(None, Default::default());
         for shape in [Shape::PLAIN, Shape::ROUND] {
             c.shape = shape;
-            let line = dm_line(&c, 3, false, 28, false);
-            assert_eq!(line.width(), 1 + 28, "{shape:?}: {line:?}");
+            for label in ["DMs", "Shannon-alphabet-omnibus DMs"] {
+                let line = dm_line(&c, label, Ground::Hot, 3, false, 28, false);
+                assert_eq!(line.width(), 1 + 28, "{shape:?}: {line:?}");
+            }
         }
+    }
+
+    #[test]
+    fn the_two_dm_views_are_drawn_on_grounds_apart() {
+        assert_ne!(view_ground(&Tab::Dm("a".into())), view_ground(&Tab::Review("a".into())));
     }
 
     #[test]

@@ -1318,6 +1318,30 @@ fn chat_side() -> Chat {
     c
 }
 
+/// An agent's own DMs (ADR-405, Review DMs), opened from its menu: the row
+/// under the agent's in a colour of its own, the tab led by a mark in that
+/// colour, every DM the agent sent or received in the feed, and no compose
+/// box, the feed's border saying it is read only.
+#[test]
+fn golden_an_agents_own_dms_are_read_only() {
+    let mut g = goldens();
+    let mut c = chat_side();
+    c.push(sig(&format!("claude:{ALPHA_SID}"), ALPHA, 200, Channel::Elsewhere(BETA_SID.into()), "the legend moved; can you check the tab bar?"));
+    c.push(sig(&format!("claude:{BETA_SID}"), BETA, 100, Channel::Elsewhere(ALPHA_SID.into()), "checked: the bar holds"));
+    c.push(sig(&format!("claude:{BETA_SID}"), BETA, 90, Channel::Elsewhere(GAMMA_SID.into()), "not alpha's"));
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let at = testkit::find(&buf, "alpha").expect("alpha's row");
+    right(&mut c, at);
+    let buf = testkit::render_screen(&mut c, 80, 25);
+    let item = testkit::find(&buf, "Review DMs").unwrap_or_else(|| panic!("{}", testkit::text(&buf)));
+    left(&mut c, item);
+    let shown = text(&mut c, 80, 25);
+    assert!(shown.contains("the legend moved") && shown.contains("checked: the bar holds") && !shown.contains("not alpha's"), "{shown}");
+    assert!(shown.contains("read only") && !shown.contains("> "), "no compose box: {shown}");
+    shoot(&mut g, "review-dms", &mut c);
+    g.finish();
+}
+
 #[test]
 fn golden_the_column_lists_every_agent_and_channel() {
     let mut g = goldens();
@@ -1388,13 +1412,15 @@ fn a_click_on_an_agent_row_opens_its_menu_and_on_a_channel_row_the_channels() {
     assert!(!text(&mut c, 80, 25).contains("pick one"), "the first click shows its DMs");
     left(&mut c, (x, y));
     let menu = text(&mut c, 80, 25);
-    assert!(menu.contains("pick one: @Lyra") && menu.contains("Hide DMs") && menu.contains("Address @Lyra") && menu.contains("Who is this"), "{menu}");
+    assert!(menu.contains("pick one: @Lyra") && menu.contains("Hide DMs") && menu.contains("Review DMs") && menu.contains("Address @Lyra") && menu.contains("Who is this"), "{menu}");
     assert!(!menu.contains("Remove from"), "a DM view shows no channel to remove from: {menu}");
     press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
-    assert_eq!(c.input().text(), "@Lyra ", "the item after Hide DMs addresses it");
+    assert_eq!(c.input().text(), "@Lyra ", "the item after Hide DMs and Review DMs addresses it");
     // Who is this, for a quiet claude /whois cannot resolve.
     left(&mut c, (x, y));
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
@@ -1500,8 +1526,9 @@ fn golden_the_keyboard_walks_the_column() {
     press(&mut c, key(KeyCode::Enter));
     assert!(text(&mut c, 80, 25).contains("pick one: @Laszlo"), "Enter on an agent opens its menu");
     press(&mut c, key(KeyCode::Down));
+    press(&mut c, key(KeyCode::Down));
     press(&mut c, key(KeyCode::Enter));
-    assert!(c.input().text().starts_with("@Laszlo"), "the item after Show DMs addresses it: {:?}", c.input().text());
+    assert!(c.input().text().starts_with("@Laszlo"), "the item after Show DMs and Review DMs addresses it: {:?}", c.input().text());
     g.finish();
 }
 

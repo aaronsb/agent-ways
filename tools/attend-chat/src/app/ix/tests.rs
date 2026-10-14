@@ -25,6 +25,10 @@ fn dm(id: &str) -> SideHit {
     SideHit::Dm(id.into())
 }
 
+fn review(id: &str) -> SideHit {
+    SideHit::Review(id.into())
+}
+
 fn row(name: &str) -> SideHit {
     SideHit::Channel(name.into())
 }
@@ -46,6 +50,7 @@ fn view() -> View {
         feed_len: 3,
         feed_selected: None,
         menu_on_repeat: false,
+        read_only: false,
     }
 }
 
@@ -481,7 +486,39 @@ fn mirror_views() -> Vec<(&'static str, View)> {
         ("the operator view shown", with(Laid { bar: reserved.clone(), shown: Tab::Merged, ..laid.clone() })),
         ("a single channel", with(Laid { bar: reserved, rows: vec![row("open")], shown: Tab::Merged })),
         ("a DM view shown, its row under its agent's", dm_view()),
+        ("an agent's own DMs shown, with no compose box", review_view()),
     ]
+}
+
+/// a1's own DMs shown, read only: its tab on the bar's left, its row under
+/// a1's DM row, and no compose box.
+fn review_view() -> View {
+    let shown = Tab::Review("a1".into());
+    let laid = Laid {
+        bar: vec![Slot::Common, Slot::Tab(shown.clone()), Slot::New, Slot::Tab(chan("open")), Slot::Tab(Tab::Merged)],
+        rows: vec![agent("a1"), dm("a1"), review("a1"), agent("a2"), row("open"), row("deploy"), row("infra")],
+        shown,
+    };
+    View { world: Some(laid), read_only: true, ..view() }
+}
+
+/// An agent's own DMs offer nothing to send: the ring has no compose box,
+/// the focus that would go there goes to the feed, and a character typed
+/// on the feed goes nowhere.
+#[test]
+fn a_read_only_view_has_no_compose_stop() {
+    use Effect::*;
+    let v = review_view();
+    let common = Slot::Common;
+    check(vec![
+        cell("Tab from the feed goes round to ≡", at(Focus::Feed), Ev::Key(key(KeyCode::Tab)), v.clone(), tab(common.clone()), vec![Redraw]),
+        cell("Shift+Tab from ≡ comes back to the feed", tab(common), Ev::Key(key(KeyCode::BackTab)), v.clone(), at(Focus::Feed), vec![Redraw]),
+        cell("a character on the feed types nothing", at(Focus::Feed), Ev::Key(ch('h')), v.clone(), at(Focus::Feed), vec![]),
+        cell("↓ past the newest message stays on the feed", at(Focus::Feed), Ev::Key(key(KeyCode::Down)), v.clone(), at(Focus::Feed), vec![Deselect, Redraw]),
+        cell("a click in the pane puts the keyboard on the feed", at(Focus::Row(0)), Ev::Click(Click::Pane { column: false, feed: false, row: None }), v.clone(), at(Focus::Feed), vec![]),
+        cell("a paste has no box to go to", at(Focus::Row(0)), Ev::Paste, v.clone(), at(Focus::Feed), vec![Redraw]),
+        cell("a focus left in the box moves to the feed", at(Focus::Compose), Ev::WorldChanged, v.clone(), at(Focus::Feed), vec![Redraw]),
+    ]);
 }
 
 /// a1's DM view shown: its tab on the bar's left, its row under a1's.
@@ -512,14 +549,14 @@ fn a_dm_row_is_a_stop_of_the_column() {
         cell("↓ from the DM row goes on to the next agent", row_at(1), Ev::Key(key(KeyCode::Down)), v.clone(), row_at(2), vec![Follow, Redraw]),
         cell("↓ from the DM view's tab lands on its row", tab(dm_tab), Ev::Key(key(KeyCode::Down)), v.clone(), row_at(1), vec![Follow, Redraw]),
         cell("1 is still #open, past the DM row", at(Focus::Compose), Ev::Numbered { n: 1, menu: false }, v.clone(), at(Focus::Compose), vec![act(Target::Channel("open".into()), How::Select { repeat: false }, None), Redraw]),
-        cell("Enter on the DM row opens its menu", row_at(1), Ev::Key(key(KeyCode::Enter)), v.clone(), row_at(1), vec![act(Target::Dm("a1".into()), How::Menu, None)]),
+        cell("Enter on the DM row opens its menu", row_at(1), Ev::Key(key(KeyCode::Enter)), v.clone(), row_at(1), vec![act(Target::View(super::super::dm::Kind::Dm, "a1".into()), How::Menu, None)]),
         cell(
             "a click on the DM row puts the keyboard there and selects it",
             at(Focus::Compose),
             Ev::Click(Click::Pane { column: true, feed: false, row: Some(dm("a1")) }),
             v.clone(),
             row_at(1),
-            vec![Follow, act(Target::Dm("a1".into()), How::Select { repeat: true }, None)],
+            vec![Follow, act(Target::View(super::super::dm::Kind::Dm, "a1".into()), How::Select { repeat: true }, None)],
         ),
     ]);
     assert!(!Ix { focus: Focus::Row(1), row_hit: Some(dm("a1")), ..Ix::default() }.ctx().digits, "a digit on a DM row is typed: it carries no number");
@@ -547,7 +584,10 @@ fn tab_and_shift_tab_are_mirrors_from_every_element() {
         if v.side_drawn {
             starts.extend((0..w.rows.len()).map(|i| Ix { focus: Focus::Row(i), row_hit: w.rows.get(i).cloned(), ..Ix::default() }));
         }
-        starts.extend([at(Focus::Feed), at(Focus::Compose)]);
+        starts.push(at(Focus::Feed));
+        if !v.read_only {
+            starts.push(at(Focus::Compose));
+        }
         let len = starts.len();
         for start in &starts {
             for n in 1..=len {
@@ -727,18 +767,23 @@ fn any_view(r: &mut Rng) -> View {
         if r.below(3) == 0 {
             rows.push(dm(a));
         }
+        if r.below(3) == 0 {
+            rows.push(review(a));
+        }
     }
     rows.extend(["open", "deploy", "infra"].iter().take(r.below(4)).map(|c| row(c)));
-    let shown = [Tab::Merged, chan("open"), chan("deploy"), chan("infra"), Tab::Dm("a1".into())][r.below(5)].clone();
+    let shown = [Tab::Merged, chan("open"), chan("deploy"), chan("infra"), Tab::Dm("a1".into()), Tab::Review("a1".into())][r.below(6)].clone();
     let mut bar = vec![Slot::Common];
-    if matches!(&shown, Tab::Channel(c) if c != "open") || matches!(shown, Tab::Dm(_)) {
+    if matches!(&shown, Tab::Channel(c) if c != "open") || matches!(shown, Tab::Dm(_) | Tab::Review(_)) {
         bar.push(Slot::Tab(shown.clone()));
     }
     bar.extend([Slot::New, Slot::Tab(chan("open")), Slot::Tab(Tab::Merged)]);
     let draft_empty = r.below(3) == 0;
     let (caret_start, caret_end) = if draft_empty { (true, true) } else { (r.coin(), r.coin()) };
     let feed_len = r.below(4);
+    let read_only = !shown.composes();
     View {
+        read_only,
         world: (r.below(5) != 0).then_some(Laid { bar, rows, shown }),
         side_drawn: r.below(4) != 0,
         draft_empty,
@@ -793,9 +838,11 @@ fn run(seed: u64, steps: usize, mut each: impl FnMut(&Ix, &Ev, &View, &Ix, &[Eff
 #[test]
 fn a_row_is_never_held_off_the_column_nor_the_cycle_on_the_chat() {
     for seed in 1..=300 {
-        run(seed, 400, |_, ev, _, ix, _| {
+        run(seed, 400, |_, ev, v, ix, _| {
             assert!(matches!(ix.focus, Focus::Row(_)) || ix.row_hit.is_none(), "seed {seed}: {ev:?} left {ix:?}");
             assert!(matches!(ix.last_nav, None | Some((Focus::Tab(_) | Focus::Row(_), _))), "seed {seed}: the Esc cycle remembers only a tab or a row: {ix:?}");
+            let overlay = matches!(ev, Ev::OverlayOpened(_) | Ev::OverlayClosed(_));
+            assert!(overlay || !(v.read_only && ix.focus == Focus::Compose), "seed {seed}: {ev:?} left the focus in a box a read-only view has not: {ix:?}");
         });
     }
 }
@@ -832,11 +879,13 @@ fn the_overlays_mirror_what_the_shell_reported() {
 #[test]
 fn a_printable_key_lands_only_in_the_compose_box() {
     for seed in 1..=300 {
-        run(seed, 400, |before, ev, _, ix, fx| {
+        run(seed, 400, |before, ev, v, ix, fx| {
             let Ev::Key(k) = ev else { return };
             let typed: Vec<&Effect> = fx.iter().filter(|e| matches!(e, Effect::Type(_) | Effect::Send | Effect::Complete)).collect();
             let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
             match k.code {
+                // A view with no box: nothing is typed anywhere.
+                _ if v.read_only => assert!(typed.is_empty(), "seed {seed}: {k:?} in a read-only view: {fx:?}"),
                 KeyCode::Char(_) if plain || before.owns_text() => {
                     // In the box, or back to it first: typed there, last, once.
                     assert_eq!(ix.focus, Focus::Compose, "seed {seed}: {k:?} from {before:?}");
