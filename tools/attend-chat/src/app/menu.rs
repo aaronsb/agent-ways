@@ -6,8 +6,9 @@
 //! - `≡`, the common menu: Theme ▸ (this session's look), Keybinding set ▸
 //!   (presets over `attend.chat.tabs.*`), the mouse at start, Hide column
 //!   or Show column (the left column, as `attend.chat.sidebar_key` toggles
-//!   it), Settings…, Quit (as Ctrl-C, asking first over a draft; Esc never
-//!   quits, ADR-409).
+//!   it), Settings ▸ (the chat's and the attend mod's settings, each set
+//!   where the operator chooses, [`super::settings_view`]), Quit (as
+//!   Ctrl-C, asking first over a draft; Esc never quits, ADR-409).
 //! - the operator view (`⋯all`, every channel together): Clear view. It is
 //!   not a channel, so it offers no channel's items (ADR-405).
 //! - `#open`: Clear view, Clear history.
@@ -87,7 +88,7 @@ pub(super) const THEME: &str = "Theme ▸";
 pub(super) const KEYS: &str = "Keybinding set ▸";
 pub(super) const MOUSE_ON: &str = "Mouse on at start";
 pub(super) const MOUSE_OFF: &str = "Mouse off at start";
-pub(super) const SETTINGS: &str = "Settings…";
+pub(super) const SETTINGS: &str = "Settings ▸";
 pub(super) const HIDE_COLUMN: &str = "Hide column";
 pub(super) const ADDRESS: &str = "Address";
 pub(super) const WHO: &str = "Who is this";
@@ -367,14 +368,7 @@ impl ChatPane {
                 self.run("config", SlashOutcome::Config { key: Some("mouse".into()), value: Some(on.to_string()) });
             }
             HIDE_COLUMN | SHOW_COLUMN => self.toggle_sidebar(),
-            // Every chat setting, a line each, in the response modal: what
-            // `/config` lists. Setting one is `/config <key> <value>` until
-            // the settings can be edited here.
-            SETTINGS => {
-                let text = crate::settings::listing_lines(&std::env::current_dir().unwrap_or_default()).join("\n");
-                let text = format!("{text}\n\n/config <key> <value> sets one");
-                self.to_open = Some(Open::Report { label: "settings".into(), command: "/config".into(), text });
-            }
+            SETTINGS => self.settings_list(Anchor::Parent),
             // The shell's quit, as Ctrl-C: at once, or the exit guard over
             // a draft.
             QUIT => self.to_open = Some(Open::Quit),
@@ -435,6 +429,9 @@ impl ChatPane {
                 return;
             }
             _ => {}
+        }
+        if self.setting_picked(id, value) {
+            return;
         }
         if let Some(c) = id.strip_prefix("menu:") {
             return self.item(c, value);

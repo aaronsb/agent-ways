@@ -112,19 +112,10 @@ pub(super) fn implicit_project() -> Option<PathBuf> {
     settings_root_of(Path::new(&crate::util::project_dir()))
 }
 
-/// The project root settings resolve `start` to: the nearest ancestor that
-/// is a project root with the overlays as markers too
-/// ([`ways_core::util::is_project_root`]), and only when none is, the nearest
-/// git checkout, so a fresh repository takes its first project write. An
-/// outer project wins over a nested checkout. The home directory is never a
-/// project: its `.claude/` is the user's.
+/// The project root settings resolve `start` to
+/// ([`ways_core::settings::project_root`]).
 pub(super) fn settings_root_of(start: &Path) -> Option<PathBuf> {
-    let home = claude_sessions::home_dir();
-    let candidates = || start.ancestors().filter(|d| !is_home(d, &home));
-    candidates()
-        .find(|d| ways_core::util::is_project_root(d, ways_core::util::SETTINGS_OVERLAYS))
-        .or_else(|| candidates().find(|d| d.join(".git").exists()))
-        .map(Path::to_path_buf)
+    ways_core::settings::project_root(start)
 }
 
 /// What marks a project root, for a message naming why none was found.
@@ -169,8 +160,7 @@ pub(super) fn resolve_project(given: Option<&Path>) -> Result<Option<PathBuf>, F
 
 /// Whether `dir` is the home directory `home`, which is never a project.
 pub(super) fn is_home(dir: &Path, home: &Path) -> bool {
-    let canon = |q: &Path| std::fs::canonicalize(q).unwrap_or_else(|_| q.to_path_buf());
-    canon(dir) == canon(home)
+    ways_core::settings::is_home(dir, home)
 }
 
 /// The line a write puts on stderr naming the file it touched, so stdout
@@ -358,7 +348,7 @@ pub(super) fn write_file_checked(
 
 pub(super) fn header_for(path: &Path) -> Option<&'static str> {
     if path.file_name().is_some_and(|n| n == "ways.yaml") {
-        return Some("# Project-scope ways overlay — see ADR-115, ADR-131\n");
+        return Some(ways_core::settings::PROJECT_HEADER);
     }
     (path == attend_config::user_path() || path.file_name().is_some_and(|n| n == "attend.yaml")).then_some(attend_config::HEADER)
 }
@@ -377,36 +367,24 @@ pub(super) fn write_failed(e: agent_settings::writer::WriteError) -> Failure {
     }
 }
 
-/// After a write to `written`, whether `b` resolves from somewhere else.
+/// After a write to `written`, whether `b` resolves from somewhere else
+/// ([`agent_settings::load::overridden`]).
 pub(super) fn overridden(b: &Bound, written: &Path, project: Option<&Path>) -> Option<String> {
+    use agent_settings::load::Overridden;
     let layers = live_layers(project_dir(project).as_deref());
-    let r = resolve(b.spec, &b.bound, &layers);
-    let from = r.layer.and_then(|i| layers[i].path.clone());
-    if from.as_deref() == Some(written) {
-        return None;
-    }
-    let written_layer = layers.iter().find(|l| l.path.as_deref() == Some(written));
-    if let Some(f) = written_layer.and_then(|l| l.findings.iter().find(|f| f.section.as_deref() == Some(b.spec.section) && f.fallback)) {
-        return Some(format!(
+    Some(match agent_settings::load::overridden(b.spec, &b.bound, &layers, written)? {
+        Overridden::Fallback(f) => format!(
             "{} falls back to canonical in {}: {f}; `ways settings lint` lists the findings",
             b.spec.section,
             written.display()
-        ));
-    }
-    match from {
-        Some(p) => Some(format!("{} sets {}; `ways settings get {} --json` shows the value in effect", p.display(), r.name, r.name)),
-        None => None,
-    }
+        ),
+        Overridden::By { path, name, .. } => format!("{} sets {name}; `ways settings get {name} --json` shows the value in effect", path.display()),
+    })
 }
 
 /// Whether the layer at `a` sits above the one at `b`.
 pub(super) fn is_higher(layers: &[Layer], a: &Path, b: &Path) -> bool {
-    let pos = |p: &Path| layers.iter().position(|l| l.path.as_deref() == Some(p));
-    match (pos(a), pos(b)) {
-        (Some(x), Some(y)) => x > y,
-        (Some(_), None) => true,
-        _ => false,
-    }
+    agent_settings::load::is_higher(layers, a, b)
 }
 
 pub(super) fn insert_path(root: &mut serde_json::Value, path: &[String], v: serde_json::Value) {

@@ -1296,16 +1296,16 @@ fn the_common_menu_leads_the_bar_and_the_operator_view_is_zero() {
     assert!(text(&mut c, 80, 25).contains("▸≡"), "{}", text(&mut c, 80, 25));
     press(&mut c, key(KeyCode::Enter));
     let menu = text(&mut c, 80, 25);
-    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse off at start", "Settings…", "Quit"] {
+    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse off at start", "Settings ▸", "Quit"] {
         assert!(menu.contains(item), "{item}: {menu}");
     }
     g.check("common-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
-    // Settings… is the item above Quit, the last.
+    // Settings ▸ is the item above Quit, the last.
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Up));
     press(&mut c, key(KeyCode::Enter));
     let shown = text(&mut c, 80, 25);
-    assert!(shown.contains("mouse = ") && shown.contains("/config <key> <value> sets one"), "Settings… shows /config's listing: {shown}");
+    assert!(shown.contains("attend.chat.mouse = ") && shown.contains("attend_mod.listening = "), "Settings ▸ lists the settings: {shown}");
     g.finish();
 }
 

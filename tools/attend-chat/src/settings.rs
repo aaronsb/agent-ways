@@ -10,7 +10,7 @@ use agent_settings::schema::show;
 use serde_yaml::Value;
 
 /// A value as the status line shows it: a string bare, anything else as YAML.
-fn plain(v: &Value) -> String {
+pub(crate) fn plain(v: &Value) -> String {
     v.as_str().map_or_else(|| show(v), str::to_string)
 }
 use agent_tui::{Jump, TabKeys};
@@ -21,8 +21,13 @@ pub const KEYS: &[&str] = &["tabs.jump", "tabs.menu_on_repeat", "tabs.focus_key"
 
 const PREFIX: &str = "attend.chat.";
 
+/// How long a write from the screen waits for another writer to let go of
+/// a settings file, as the `ways settings` screens wait: the chat runs on
+/// the same thread as its screen, so a holder that hangs must not hang it.
+pub(crate) const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// The layers the chat's keys resolve through: attend's, for `dir`.
-fn layers(dir: &Path) -> Vec<Layer> {
+pub(crate) fn layers(dir: &Path) -> Vec<Layer> {
     attend_config::layers(dir)
 }
 
@@ -87,7 +92,7 @@ pub fn set_many(pairs: &[(&str, &str)], user: &Path, dir: &Path) -> Result<Strin
         values.push((name, short.to_string(), value));
     }
     let writes: Vec<(&str, Value)> = values.iter().map(|(n, _, v)| (n.as_str(), v.clone())).collect();
-    let changed = attend_config::write(user, &writes).map_err(|e| format!("/config: {e}"))?;
+    let changed = attend_config::write_within(user, Some(LOCK_WAIT), &writes).map_err(|e| format!("/config: {e}"))?;
     let shown: Vec<String> = values.iter().map(|(_, s, v)| format!("{s} = {}", plain(v))).collect();
     let when = if values.iter().any(|(_, s, _)| s == "mouse") { "; mouse takes effect on restart" } else { "" };
     Ok(if changed { format!("{}{when}", shown.join(", ")) } else { format!("already {}", shown.join(", ")) })
