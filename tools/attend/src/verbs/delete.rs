@@ -31,6 +31,9 @@ pub enum Scope {
     Open,
     /// One named channel; `open` names `#open`.
     Channel(String),
+    /// The direct-message thread between the caller and this session: what
+    /// it sent the caller and what the caller sent it, in any tray.
+    Dm(String),
     /// Every room: `#open`, each channel, each project tray and person tray.
     Everywhere,
 }
@@ -103,6 +106,8 @@ fn parse_duration(t: &str) -> Option<Duration> {
 #[derive(Debug, Clone)]
 pub struct DeleteRequest {
     pub scope: Scope,
+    /// Only messages this session or person sent.
+    pub from: Option<String>,
     pub older_than: OlderThan,
     /// Report what would be marked and mark nothing.
     pub dry_run: bool,
@@ -111,7 +116,7 @@ pub struct DeleteRequest {
 /// What a delete did.
 #[derive(Debug, Clone, Serialize)]
 pub struct Deleted {
-    /// The scope, as `#open`, `#<channel>` or `everywhere`.
+    /// The scope, as `#open`, `#<channel>`, `dm <session>` or `everywhere`.
     pub scope: String,
     pub dry_run: bool,
     /// How many messages it marked, or would mark on a dry run.
@@ -169,7 +174,55 @@ impl std::fmt::Display for DeleteError {
 pub fn delete(req: &DeleteRequest) -> Result<Deleted, DeleteError> {
     let base = signals_base();
     let recipients = live_recipients(&base);
-    delete_in(&base, req, &recipients, SystemTime::now())
+    delete_in(&base, req, &caller_ids(), &recipients, SystemTime::now())
+}
+
+/// The ids the caller reads as: a Claude Code session's id and the ids it
+/// had before each `/clear`, or outside a session the member id of the
+/// person at the terminal.
+fn caller_ids() -> Vec<String> {
+    let me = crate::util::current_session();
+    if me.resolved() {
+        attend_presence::enrollment::reading_ids(&me)
+    } else {
+        vec![agent_identity::sanitize_id_component(&agent_identity::signal::user_name())]
+    }
+}
+
+/// Which messages in the scope's rooms a delete may take, by sender and
+/// addressee.
+struct Filter<'a> {
+    from: Option<&'a str>,
+    /// The other party of a `--dm` thread, and the caller's ids.
+    thread: Option<(&'a str, &'a [String])>,
+}
+
+impl Filter<'_> {
+    fn is_open(&self) -> bool {
+        self.from.is_none() && self.thread.is_none()
+    }
+
+    /// Whether the signal at `path` passes. One that cannot be read or
+    /// parsed names no sender and passes no filter.
+    fn admits(&self, path: &Path) -> bool {
+        if self.is_open() {
+            return true;
+        }
+        let Ok(content) = agent_identity::signal::read_signal_file(path) else { return false };
+        let Some(sig) = agent_identity::parse_signal(agent_identity::wire_line(&content)) else { return false };
+        let sender = sig.sender_id();
+        if self.from.is_some_and(|f| f != sender) {
+            return false;
+        }
+        match self.thread {
+            None => true,
+            Some((other, caller)) => {
+                let to_caller = caller.iter().any(|c| sig.addressed_to(c));
+                let by_caller = caller.contains(&sender);
+                (sender == other && to_caller) || (by_caller && sig.addressed_to(other))
+            }
+        }
+    }
 }
 
 /// Remove the marks of batch `batch`, or of the newest batch.
@@ -287,6 +340,11 @@ fn scope_dirs(base: &Path, scope: &Scope) -> Result<(Vec<PathBuf>, String), Dele
             }
             (vec![dir], format!("#{name}"))
         }
+        Scope::Dm(other) => {
+            let mut dirs = project_trays(base);
+            dirs.extend(person_trays(base));
+            (dirs, format!("dm {other}"))
+        }
         Scope::Everywhere => {
             let mut dirs = vec![open()];
             dirs.extend(subdirs(base).into_iter().filter(|(_, n)| n.starts_with('@')).map(|(p, _)| p));
@@ -297,11 +355,12 @@ fn scope_dirs(base: &Path, scope: &Scope) -> Result<(Vec<PathBuf>, String), Dele
     })
 }
 
-/// [`delete`] against signals base `base`, the live recipients given, at
-/// `now`.
+/// [`delete`] against signals base `base`, for the caller reading as
+/// `caller`, with the live recipients given, at `now`.
 pub(crate) fn delete_in(
     base: &Path,
     req: &DeleteRequest,
+    caller: &[String],
     recipients: &[Recipient],
     now: SystemTime,
 ) -> Result<Deleted, DeleteError> {
@@ -310,6 +369,13 @@ pub(crate) fn delete_in(
         OlderThan::All => None,
         OlderThan::Before(t) => Some(t),
         OlderThan::Current => Some(recipients.iter().filter_map(|r| r.started).min().unwrap_or(now)),
+    };
+    let filter = Filter {
+        from: req.from.as_deref(),
+        thread: match &req.scope {
+            Scope::Dm(other) => Some((other.as_str(), caller)),
+            _ => None,
+        },
     };
     let marks = Marks::load(base);
     let mut kept = vec![0usize; recipients.len()];
@@ -327,7 +393,10 @@ pub(crate) fn delete_in(
             }
             let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) else { continue };
             let age = now.duration_since(mtime).unwrap_or_default();
-            if age <= attend_presence::heartbeat::DEFAULT_GRACE || cutoff.is_some_and(|c| mtime >= c) {
+            if age <= attend_presence::heartbeat::DEFAULT_GRACE
+                || cutoff.is_some_and(|c| mtime >= c)
+                || !filter.admits(&entry.path())
+            {
                 continue;
             }
             let mut held = false;

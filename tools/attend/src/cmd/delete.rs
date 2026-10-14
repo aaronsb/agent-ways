@@ -15,12 +15,13 @@ pub(crate) fn cmd_delete(a: DeleteArgs) {
         }
         return;
     }
-    let scope = match (a.open, a.channel, a.everywhere) {
-        (true, _, _) => Scope::Open,
-        (_, Some(name), _) => Scope::Channel(name),
-        (_, _, true) => Scope::Everywhere,
+    let scope = match (a.open, a.channel, a.dm, a.everywhere) {
+        (true, ..) => Scope::Open,
+        (_, Some(name), ..) => Scope::Channel(name),
+        (_, _, Some(session), _) => Scope::Dm(session),
+        (.., true) => Scope::Everywhere,
         _ => {
-            let why = "name a scope: --open, --channel <name> or --everywhere";
+            let why = "name a scope: --open, --channel <name>, --dm <session-id> or --everywhere";
             crate::cmd::refuse_usage(&format!("attend message delete: {why}"), why, a.json);
         }
     };
@@ -31,7 +32,7 @@ pub(crate) fn cmd_delete(a: DeleteArgs) {
         );
         crate::cmd::refuse_usage(&format!("attend message delete: {why}"), &why, a.json);
     };
-    match delete::delete(&DeleteRequest { scope, older_than, dry_run: a.dry_run }) {
+    match delete::delete(&DeleteRequest { scope, from: a.from, older_than, dry_run: a.dry_run }) {
         Ok(d) if a.json => crate::cmd::print_json(&d),
         Ok(d) => {
             let verb = if d.dry_run { "would mark" } else { "marked" };

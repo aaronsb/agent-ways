@@ -279,7 +279,9 @@ A message is marked when it is in the scope, older than --older-than, older than
 
 * `--open` — Delete in #open
 * `--channel <NAME>` — Delete in this channel
+* `--dm <SESSION-ID>` — Delete in the direct-message thread between you and this session: what it sent you and what you sent it. You are the session this runs in, under its current id and the ids it had before /clear, or outside a session the person at this terminal
 * `--everywhere` — Delete in every room: #open, each channel, each project tray and each person's tray
+* `--from <SESSION-ID>` — Only messages this session sent
 * `--older-than <WHEN>` — How old a message must be: `current` (before the earliest start of any live session), `today` (before local midnight), `all`, a duration such as 90m, 2h30m, 3d or 1w, or a local date YYYY-MM-DD
 
   Default value: `all`

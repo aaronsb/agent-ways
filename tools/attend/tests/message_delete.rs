@@ -233,3 +233,57 @@ fn the_peers_sensor_skips_a_marked_message() {
     run.wait_for("the unmarked message", Duration::from_secs(20), |r| r.output().contains("posted after the delete"));
     assert!(!run.output().contains("marked before the run"), "{}", run.output());
 }
+
+/// `--dm` takes both halves of the thread between the caller and a session
+/// and nothing else that session said.
+#[test]
+fn a_dm_scope_takes_both_halves_of_the_thread_and_no_third_partys() {
+    let f = Fixture::new("del-dm");
+    let me = f.sid.clone();
+    let mine = f.project_tray();
+    let theirs = claude_sessions::attend_key("/srv/r1");
+    let line = |from: &str, to: &str, body: &str| format!("claude:{from}|p|/srv/p|to:{to}|{body}");
+    signal(&f, &mine, "in-1", &line(R1, &me, "R1 to me"), 10 * MINUTE);
+    signal(&f, &theirs, "out-1", &line(&me, R1, "me to R1"), 10 * MINUTE);
+    signal(&f, &theirs, "third-1", &line(R2, R1, "R2 to R1"), 10 * MINUTE);
+    signal(&f, &theirs, "other-1", &line(R1, R2, "R1 to R2"), 10 * MINUTE);
+    post(&f, "_broadcast", "open-1", "an #open post", 10 * MINUTE);
+
+    let v = delete(&f, &["--dm", R1]);
+    assert_eq!(marked(&v), ["in-1", "out-1"]);
+    assert_eq!(v["scope"], format!("dm {R1}"));
+}
+
+/// Outside a Claude Code session the caller is the person at the terminal,
+/// whose direct messages sit in their person tray.
+#[test]
+fn a_persons_dm_thread_is_read_from_their_tray() {
+    let f = Fixture::new("del-dm-person");
+    let line = |from: &str, to: &str, body: &str| format!("claude:{from}|p|/srv/p|to:{to}|{body}");
+    signal(&f, "_people/fixture-human", "in-1", &line(R1, "fixture-human", "R1 to the person"), 10 * MINUTE);
+    signal(&f, "_people/someone-else", "else-1", &line(R1, "someone-else", "R1 to someone else"), 10 * MINUTE);
+    let v = f.without_session(|| delete(&f, &["--dm", R1]));
+    assert_eq!(marked(&v), ["in-1"]);
+}
+
+#[test]
+fn from_narrows_a_scope_to_one_sender() {
+    let f = Fixture::new("del-from");
+    signal(&f, "_broadcast", "r1-1", &format!("claude:{R1}|p|/srv/p|from R1"), 10 * MINUTE);
+    signal(&f, "_broadcast", "r2-1", &format!("claude:{R2}|p|/srv/p|from R2"), 10 * MINUTE);
+    signal(&f, "@deploy", "r1-2", &format!("claude:{R1}|p|/srv/p|from R1 in deploy"), 10 * MINUTE);
+    assert_eq!(marked(&delete(&f, &["--open", "--from", R1])), ["r1-1"]);
+    assert_eq!(marked(&delete(&f, &["--everywhere", "--from", R1])), ["r1-2"]);
+}
+
+/// The caller's thread includes what reached it under the id it had before
+/// `/clear`.
+#[test]
+fn a_dm_scope_reads_the_callers_earlier_ids() {
+    let f = Fixture::new("del-dm-clear");
+    std::fs::create_dir_all(f.marker(&f.sid).parent().unwrap()).unwrap();
+    std::fs::write(f.marker(&f.sid), "listen\nprevious sess-before-clear\n").unwrap();
+    let line = |from: &str, to: &str, body: &str| format!("claude:{from}|p|/srv/p|to:{to}|{body}");
+    signal(&f, &f.project_tray(), "old-1", &line(R1, "sess-before-clear", "R1 to my earlier id"), 10 * MINUTE);
+    assert_eq!(marked(&delete(&f, &["--dm", R1])), ["old-1"]);
+}

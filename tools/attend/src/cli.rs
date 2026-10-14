@@ -440,7 +440,7 @@ pub(crate) struct CleanupArgs {
 }
 
 #[derive(Args)]
-#[command(group(clap::ArgGroup::new("scope").args(["open", "channel", "everywhere"])))]
+#[command(group(clap::ArgGroup::new("scope").args(["open", "channel", "dm", "everywhere"])))]
 pub(crate) struct DeleteArgs {
     /// Delete in #open
     #[arg(long)]
@@ -450,10 +450,21 @@ pub(crate) struct DeleteArgs {
     #[arg(long, value_name = "NAME")]
     pub(crate) channel: Option<String>,
 
+    /// Delete in the direct-message thread between you and this session:
+    /// what it sent you and what you sent it. You are the session this runs
+    /// in, under its current id and the ids it had before /clear, or
+    /// outside a session the person at this terminal
+    #[arg(long, value_name = "SESSION-ID")]
+    pub(crate) dm: Option<String>,
+
     /// Delete in every room: #open, each channel, each project tray and
     /// each person's tray
     #[arg(long)]
     pub(crate) everywhere: bool,
+
+    /// Only messages this session sent
+    #[arg(long, value_name = "SESSION-ID")]
+    pub(crate) from: Option<String>,
 
     /// How old a message must be: `current` (before the earliest start of
     /// any live session), `today` (before local midnight), `all`, a
@@ -466,7 +477,7 @@ pub(crate) struct DeleteArgs {
     pub(crate) dry_run: bool,
 
     /// Remove the marks of the newest delete, or of the batch named
-    #[arg(long, value_name = "BATCH", num_args = 0..=1, default_missing_value = "", conflicts_with_all = ["scope", "older_than", "dry_run"])]
+    #[arg(long, value_name = "BATCH", num_args = 0..=1, default_missing_value = "", conflicts_with_all = ["scope", "from", "older_than", "dry_run"])]
     pub(crate) undo: Option<String>,
 
     /// Print the result as one JSON document
