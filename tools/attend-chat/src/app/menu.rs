@@ -888,6 +888,19 @@ impl ChatPane {
         }
     }
 
+    /// The shell could not open what the chat asked for, something else
+    /// being open (the record of what is open lags a frame behind): a
+    /// question dropped so will never be answered. A count's is held, to ask
+    /// from again; any other is let go.
+    pub(super) fn question_dropped(&mut self, open: Open) {
+        let Open::Ask { id, .. } = open else { return };
+        let Some(step) = self.asked.take_if(|(pending, _)| *pending == id).map(|(_, step)| step) else { return };
+        self.dirty = true;
+        if let Step::DeleteRead(asked) = step {
+            self.hold_count(asked);
+        }
+    }
+
     /// A key came too soon after the question `id`, which the chat asked
     /// on its own, to be an answer to it: the shell answered no and gave
     /// the key to the chat. A count's question is held, to ask from again;

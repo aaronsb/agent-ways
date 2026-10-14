@@ -595,6 +595,29 @@ fn a_count_that_lands_while_the_operator_is_busy_is_held() {
     assert!(c.input().is_empty(), "nothing typed");
 }
 
+/// A count that lands in the same frame as a menu the operator opened: the
+/// chat's record of what is open has not caught up, so it asks, and the
+/// shell, holding the menu, drops the question. The count is held and
+/// said, not lost.
+#[test]
+fn a_count_whose_question_the_shell_drops_is_held() {
+    let _g = fixture();
+    let mut c = chat();
+    channel_menu(&mut c, "#open");
+    pick(&mut c, "Delete read messages");
+    pick_now(&mut c, "All");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let buf = testkit::render_screen(&mut c, W, H);
+    let (x, y) = testkit::find(&buf, "≡").expect("the common menu's slot");
+    mouse(&mut c, MouseButton::Left, x, y);
+    std::thread::sleep(IDLE + std::time::Duration::from_millis(50));
+    Screen::tick(&mut c);
+    assert!(c.removing().is_none() && !c.count_due(), "the count landed and was dealt with");
+    let s = screen(&mut c);
+    assert!(s.contains("pick one: attend-chat") && !s.contains("delete 12 read messages"), "the menu stays, no question: {s}");
+    assert_eq!(c.status(), "counted 12 read messages in #open: choose Delete read messages again to delete them");
+}
+
 /// Start the eleven-second delete in `#long`, and return when it runs.
 fn start_long_delete(c: &mut Chat) {
     channel_menu(c, "#long");

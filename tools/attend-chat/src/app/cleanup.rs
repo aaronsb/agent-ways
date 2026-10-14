@@ -525,6 +525,20 @@ mod tests {
         assert!(matches!(&c.to_open, Some(Open::Ask { question, unprompted: true, .. }) if question.starts_with("delete 3 read messages in #slow")), "over nothing it asks, on its own");
     }
 
+    /// A count's question the shell drops, because something else opened
+    /// in the same frame, is held rather than lost, and nothing waits on
+    /// its answer.
+    #[test]
+    fn a_dropped_question_holds_its_count() {
+        let mut c = ChatPane::new(None, Default::default());
+        c.dry_run = true;
+        landed(&mut c);
+        let Some(open) = c.to_open.take() else { panic!("it asked") };
+        c.question_dropped(open);
+        assert!(c.asked.is_none(), "nothing waits on an answer that will not come");
+        assert!(c.held.is_some() && c.status.starts_with("counted 3 read messages in #slow"), "{}", c.status);
+    }
+
     /// A count asks only once the operator has been still: input a moment
     /// before it landed defers the question, and input after it landed holds
     /// the count instead.

@@ -1060,6 +1060,10 @@ impl Pane for ChatPane {
         self.to_open.take()
     }
 
+    fn open_dropped(&mut self, open: Open) {
+        self.question_dropped(open);
+    }
+
     fn picked(&mut self, id: &str, values: Vec<String>) {
         // A key too soon after a question the chat asked on its own: no
         // answer the operator chose.

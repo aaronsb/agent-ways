@@ -552,6 +552,11 @@ pub trait Pane: Any {
     /// The picker opened under `id` set `values`.
     fn picked(&mut self, _id: &str, _values: Vec<String>) {}
 
+    /// The shell could not open `open` (a menu, a question or an entry
+    /// dialog) because something else was open: what it asked for will
+    /// never be picked or answered.
+    fn open_dropped(&mut self, _open: Open) {}
+
     /// Work that quitting would lose, named for the exit guard.
     fn unsaved(&self) -> Option<String> {
         None

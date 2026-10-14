@@ -372,3 +372,5 @@ By step 4 at the latest, a flow's Next and Finish give the answer Enter gives, a
 ## Note (2026-10-14): an unprompted question takes no key at first
 
 A pane can ask a question on its own, not in answer to what the operator just did: work that finished in the background asks whether to go on. `Open::Ask` carries `unprompted` for that. For `UNPROMPTED_GRACE` (500 ms) after such a question opens, no key answers it: the key answers no, comes back to the pane as `["n", TOO_SOON]`, and then goes on to the pane as if nothing were asked, so a keystroke begun before the question showed can never confirm it and nothing typed is lost. After the grace, keys answer as for any question. A click on an answer is aimed, and answers at once.
+
+The shell opens a pane's menu, question or entry dialog only over nothing; one asked for while something else is open is dropped, and since 2026-10-14 the pane hears it (`Pane::open_dropped`), so it does not wait on an answer that will not come.

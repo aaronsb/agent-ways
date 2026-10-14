@@ -458,7 +458,13 @@ impl App {
                 let dock = self.dock(anchor);
                 self.mode = Mode::Entry(Box::new(super::entry::Entry { id, title, input, error, dock }));
             }
-            Open::Pick { .. } | Open::Ask { .. } | Open::Entry { .. } => {}
+            // Something else is open: the menu, question or entry cannot
+            // be, and the pane hears so rather than wait on it.
+            dropped @ (Open::Pick { .. } | Open::Ask { .. } | Open::Entry { .. }) => {
+                if let Some(p) = &mut self.pane {
+                    p.open_dropped(dropped);
+                }
+            }
             Open::Quit => {
                 if !self.quit() {
                     self.ending = true;
@@ -771,6 +777,11 @@ mod tests {
         fn picked(&mut self, id: &str, values: Vec<String>) {
             self.picked = values.into_iter().map(|v| format!("{id}={v}")).collect();
         }
+        fn open_dropped(&mut self, open: Open) {
+            if let Open::Ask { id, .. } | Open::Pick { id, .. } | Open::Entry { id, .. } = open {
+                self.picked.push(format!("dropped {id}"));
+            }
+        }
         fn palette(&self) -> theme::Palette {
             theme::Palette::default()
         }
@@ -946,6 +957,20 @@ mod tests {
         std::thread::sleep(super::super::pane::UNPROMPTED_GRACE + std::time::Duration::from_millis(50));
         a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
         assert_eq!((two(&a).picked.clone(), two(&a).keys), (vec!["q=y".to_string()], 1), "past the grace a y answers");
+    }
+
+    /// A question the pane asks while another is open cannot open, and the
+    /// pane hears that it was dropped rather than wait on an answer.
+    #[test]
+    fn a_question_that_cannot_open_is_told_to_the_pane() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(ask());
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(matches!(a.mode, Mode::Ask(_)), "the first question is open");
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask { id: "r".into(), question: "and this?".into(), yes: "y".into(), no: "n".into(), unprompted: true });
+        a.tick_pane();
+        assert_eq!(two(&a).picked, ["dropped r"], "the second was dropped, and said so");
+        assert!(matches!(&a.mode, Mode::Ask(q) if q.id == "q"), "the first still waits");
     }
 
     /// The wheel over the bottom bar while a question waits answers nothing:
