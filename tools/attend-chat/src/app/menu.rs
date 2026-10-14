@@ -119,8 +119,10 @@ pub(super) const PRESETS: &[(&str, &str, &str)] = &[
     ("auto: Ctrl+1-9 where it arrives, else Alt+1-9", "auto", "both"),
 ];
 
-/// The id the chat's questions go to the shell under ([`agent_tui::Open::Ask`]).
-const ASK: &str = "ask";
+/// What the ids of the chat's questions start with
+/// ([`agent_tui::Open::Ask`]). Each question has an id of its own, so an
+/// answer acts on the question it answers and on no other.
+const ASK: &str = "ask:";
 
 /// A step that asks first, waiting for its answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -431,7 +433,7 @@ impl ChatPane {
     pub(super) fn menu_picked(&mut self, id: &str, value: &str) {
         self.dirty = true;
         match id {
-            ASK => return self.answered(value == "y"),
+            _ if id.starts_with(ASK) => return self.answered(id, value == "y"),
             "common" => return self.common_item(value),
             "theme" => return self.theme_picked(value),
             "keys" => {
@@ -833,18 +835,21 @@ impl ChatPane {
     }
 
     /// Ask before `step` runs: the shell shows the question and its answers
-    /// ([`agent_tui::Open::Ask`]), and the answer comes back through
-    /// [`ChatPane::answered`].
+    /// ([`agent_tui::Open::Ask`]) under an id of the question's own, and the
+    /// answer comes back through [`ChatPane::answered`].
     pub(super) fn ask(&mut self, step: Step) {
         let (question, yes, no) = step.question();
-        self.asked = Some(step);
-        self.to_open = Some(Open::Ask { id: ASK.into(), question, yes: yes.into(), no: no.into() });
+        self.asks += 1;
+        let id = format!("{ASK}{}", self.asks);
+        self.asked = Some((id.clone(), step));
+        self.to_open = Some(Open::Ask { id, question, yes: yes.into(), no: no.into() });
     }
 
-    /// The answer to the question asked: yes runs the step, no keeps things
-    /// as they are and says so.
-    pub(super) fn answered(&mut self, yes: bool) {
-        let Some(step) = self.asked.take() else { return };
+    /// The answer to the question `id`: yes runs its step, no keeps things
+    /// as they are and says so. An answer to any question but the one
+    /// pending does nothing.
+    pub(super) fn answered(&mut self, id: &str, yes: bool) {
+        let Some(step) = self.asked.take_if(|(pending, _)| pending == id).map(|(_, step)| step) else { return };
         self.dirty = true;
         if !yes {
             return self.say("kept", false);
@@ -987,17 +992,39 @@ mod tests {
     fn every_item_that_drops_something_asks_first() {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
+        let id = |c: &ChatPane| c.asked.as_ref().map(|(id, _)| id.clone()).expect("a question pending");
         for (item, ask) in [(HIDE_HERE, "hide the messages in #deploy?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
             c.item("deploy", item);
             assert!(matches!(c.to_open.take(), Some(Open::Ask { question, .. }) if question.contains(ask)), "{item} asks the shell");
             assert_eq!(c.status, "", "{item} ran nothing yet");
-            c.menu_picked(ASK, "n");
+            let asked = id(&c);
+            c.menu_picked(&asked, "n");
             assert_eq!(c.status, "kept");
             c.status.clear();
         }
         c.item("deploy", LEAVE);
-        c.menu_picked(ASK, "y");
+        let asked = id(&c);
+        c.menu_picked(&asked, "y");
         assert_eq!(c.status, "dry run: /leave not run", "y goes ahead");
+    }
+
+    /// Each question has its own id, and an answer acts only on the question
+    /// it answers: an answer that arrives for an earlier question, after a
+    /// later one took its place, does nothing.
+    #[test]
+    fn an_answer_acts_only_on_its_own_question() {
+        let mut c = ChatPane::new(None, Default::default());
+        c.dry_run = true;
+        c.item("deploy", LEAVE);
+        let first = c.asked.as_ref().map(|(id, _)| id.clone()).unwrap();
+        c.item("deploy", HIDE_HERE);
+        let second = c.asked.as_ref().map(|(id, _)| id.clone()).unwrap();
+        assert_ne!(first, second, "two questions, two ids");
+        c.menu_picked(&first, "y");
+        assert_eq!(c.status, "", "the leave's y does not run the hide");
+        assert!(c.asked.as_ref().is_some_and(|(id, _)| *id == second), "the hide still waits for its own answer");
+        c.menu_picked(&second, "y");
+        assert_eq!(c.status, "dry run: nothing hidden");
     }
 
     #[test]
@@ -1014,7 +1041,7 @@ mod tests {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
         c.menu_picked("agent:aaron", "Leave #deploy");
-        assert_eq!(c.asked, Some(Step::Leave("deploy".into())), "Leave asks first, as the channel menu's does");
+        assert_eq!(c.asked.map(|(_, step)| step), Some(Step::Leave("deploy".into())), "Leave asks first, as the channel menu's does");
     }
 
     /// A pane whose world is `seen`, shown on merged.

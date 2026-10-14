@@ -141,12 +141,14 @@ fn press_now(c: &mut Chat, code: KeyCode) {
     testkit::drive(c, &[KeyEvent::new(code, KeyModifiers::NONE)]);
 }
 
-/// Tick the chat, as its loop does, until attend has answered what it was
-/// asked, if anything.
+/// Draw and tick the chat, as its loop does, until attend has answered
+/// what it was asked, if anything. The draw tells the chat what the shell
+/// holds open, as each frame of the loop does.
 fn answered(c: &mut Chat) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while c.removing().is_some() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(10));
+        testkit::render_screen(c, W, H);
         Screen::tick(c);
     }
 }
@@ -454,6 +456,53 @@ fn attend_answers_off_the_screens_thread_one_request_at_a_time() {
         Screen::tick(&mut c);
     }
     assert!(screen(&mut c).contains("delete 3 read messages in #slow?"), "the answer asks on a tick: {}", screen(&mut c));
+}
+
+/// A count that lands while another question is open never takes that
+/// question's place: the open question keeps its own answer, the count is
+/// held and said, and choosing Delete read messages again asks from it
+/// without counting again.
+#[test]
+fn a_count_that_lands_under_another_question_never_answers_it() {
+    let _g = fixture();
+    let mut c = chat();
+    channel_menu(&mut c, "#slow");
+    pick(&mut c, "Delete read messages");
+    pick_now(&mut c, "All");
+    assert_eq!(c.status(), "counting read messages…");
+    channel_menu(&mut c, "#deploy");
+    pick_now(&mut c, "Hide messages here");
+    assert!(screen(&mut c).contains("hide the messages in #deploy?"), "{}", screen(&mut c));
+    answered(&mut c);
+    assert!(c.removing().is_none(), "the count has landed");
+    assert!(screen(&mut c).contains("hide the messages in #deploy?"), "the open question stays: {}", screen(&mut c));
+    let said = c.status().to_string();
+    press(&mut c, KeyCode::Char('y'));
+    assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "the y deletes nothing for everyone");
+    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; the bus keeps them"), "the y answers the hide: {}", c.status());
+    assert_eq!(said, "counted 3 read messages in #slow: choose Delete read messages again to delete them", "the count was held and said");
+    channel_menu(&mut c, "#slow");
+    pick(&mut c, "Delete read messages");
+    assert!(screen(&mut c).contains("delete 3 read messages in #slow?"), "asked from the held count: {}", screen(&mut c));
+    assert_eq!(calls().len(), 1, "not counted again");
+}
+
+/// A count that lands while the operator types in the compose box does not
+/// open its question: a message starting with y would answer it.
+#[test]
+fn a_count_that_lands_while_typing_does_not_ask() {
+    let _g = fixture();
+    let mut c = chat();
+    channel_menu(&mut c, "#slow");
+    pick(&mut c, "Delete read messages");
+    pick_now(&mut c, "All");
+    mouse(&mut c, MouseButton::Left, W - 5, H - 4);
+    typed(&mut c, "yes I am here");
+    answered(&mut c);
+    assert!(!screen(&mut c).contains("delete 3 read messages"), "no question under the typing: {}", screen(&mut c));
+    assert_eq!(c.status(), "counted 3 read messages in #slow: choose Delete read messages again to delete them");
+    assert_eq!(c.input().text(), "yes I am here");
+    assert_eq!(calls().len(), 1);
 }
 
 /// A delete runs to its end however long attend takes, past the ten

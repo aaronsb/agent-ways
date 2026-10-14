@@ -205,9 +205,11 @@ pub struct ChatPane {
     /// The theme this session shows: its name, or `terminal` for the
     /// terminal's own palette. Marked in the Theme menu.
     theme: String,
-    /// The menu step the shell's question asks about, until it is answered
-    /// ([`ChatPane::answered`]).
-    asked: Option<menu::Step>,
+    /// The id of the shell's question and the menu step it asks about,
+    /// until it is answered ([`ChatPane::answered`]), and how many questions
+    /// were asked, which numbers their ids.
+    asked: Option<(String, menu::Step)>,
+    asks: u64,
     /// The terminal reports Ctrl+digits as themselves. Without it Ctrl+3
     /// arrives as Esc, which closes and clears and never quits (ADR-409),
     /// and a setting that asks for Ctrl+digits says they do not arrive.
@@ -259,6 +261,9 @@ pub struct ChatPane {
     /// The delete or tombstone attend is working on, one at a time, with
     /// no time limit ([`cleanup`]).
     removing: Option<(crate::attend_cli::Running, cleanup::Job)>,
+    /// A delete's count that landed when its question could not be asked,
+    /// and when; choosing the delete again soon asks from it ([`cleanup`]).
+    held: Option<(cleanup::Asked, Instant)>,
 }
 
 impl ChatPane {
@@ -295,6 +300,7 @@ impl ChatPane {
             to_open: None,
             theme: "terminal".into(),
             asked: None,
+            asks: 0,
             enhanced: false,
             send_anyway: None,
             config: crate::settings::load(&std::env::current_dir().unwrap_or_default()),
@@ -313,6 +319,7 @@ impl ChatPane {
             attend: crate::attend_cli::program(),
             undo: None,
             removing: None,
+            held: None,
         }
     }
 
