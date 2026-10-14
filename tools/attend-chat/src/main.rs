@@ -56,10 +56,10 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
   cleanup                   Hide messages here hides what the tab holds now, in
                             this chat only, kept across restarts. Delete read
                             messages for everyone… picks an age (Current
-                            sessions, Today, All, Custom…); the first pick
-                            counts and says what it found, the same pick again
-                            within a minute asks, and y runs `attend message
-                            delete`; Undo delete follows it on the menu.
+                            sessions, Today, All, Custom…); its question opens
+                            at once, counting, fills in the count, counts down a
+                            minute, and y runs `attend message delete`; Undo
+                            delete follows it on the menu.
                             A DM view's row and tab and a claude's row carry the
                             pair for the DMs with it, and a dead claude's row
                             Tombstone…. Each asks first: y goes ahead

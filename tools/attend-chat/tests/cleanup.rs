@@ -217,7 +217,7 @@ fn channel_menu(c: &mut Chat, channel: &str) {
 }
 
 /// Delete read messages for everyone… on `channel`'s menu, then `age`:
-/// the first time it counts, a second time asks with the count.
+/// the question opens, and the count shows in it once attend answers.
 fn delete_read(c: &mut Chat, channel: &str, age: &str) {
     channel_menu(c, channel);
     pick(c, "Delete read messages");
@@ -229,7 +229,7 @@ fn nick(cwd: &str) -> String {
 }
 
 #[test]
-fn delete_on_open_counts_then_asks_when_chosen_again_then_deletes_and_offers_undo() {
+fn delete_on_open_counts_in_its_question_then_deletes_and_offers_undo() {
     let _g = fixture();
     let mut c = chat();
     channel_menu(&mut c, "#open");
@@ -239,16 +239,11 @@ fn delete_on_open_counts_then_asks_when_chosen_again_then_deletes_and_offers_und
     assert!(calls().is_empty(), "nothing run before the age is picked");
     pick(&mut c, "Today");
     assert_eq!(calls(), ["message delete --open --older-than today --dry-run --json"]);
-    assert_eq!(c.status(), "counted 12 read messages in #open from before today: choose Delete read messages again to delete them");
-    assert!(!screen(&mut c).contains("delete 12 read messages"), "the count asks nothing: {}", screen(&mut c));
-    delete_read(&mut c, "#open", "Today");
     let s = screen(&mut c);
-    assert!(s.contains("delete 12 read messages in #open from before today? · 3 stay unread by 2 sessions"), "chosen again, it asks: {s}");
-    assert_eq!(calls().len(), 1, "asked from the held count, not counted again");
+    assert!(s.contains("delete 12 read messages in #open from before today for everyone? · 3 stay") && s.contains("closes in 60 s"), "the count, in the question: {s}");
     press(&mut c, KeyCode::Char('n'));
     assert_eq!(c.status(), "kept");
     assert_eq!(calls().len(), 1, "no runs nothing");
-    delete_read(&mut c, "#open", "Today");
     delete_read(&mut c, "#open", "Today");
     press(&mut c, KeyCode::Char('y'));
     assert_eq!(calls().last().unwrap(), "message delete --open --older-than today --json");
@@ -269,6 +264,8 @@ fn each_scope_and_age_builds_its_argv() {
     channel_menu(&mut c, "#deploy");
     pick(&mut c, "Delete read messages");
     pick(&mut c, "All");
+    assert!(screen(&mut c).contains("in #deploy for everyone?"), "{}", screen(&mut c));
+    press(&mut c, KeyCode::Esc);
     // A claude's row: the operator's DMs with it, by its session id.
     side(&mut c, &nick("/work/alpha"), MouseButton::Right);
     pick(&mut c, "Delete read messages");
@@ -281,7 +278,8 @@ fn each_scope_and_age_builds_its_argv() {
     }
     typed(&mut c, "3d");
     press(&mut c, KeyCode::Enter);
-    assert!(c.status().contains("in your DMs with @") && c.status().contains("older than 3d:"), "{}", c.status());
+    assert!(screen(&mut c).contains("in your DMs with @") && screen(&mut c).contains("older than 3d for everyone?"), "{}", screen(&mut c));
+    press(&mut c, KeyCode::Esc);
     // The DM view's row: the same thread.
     side(&mut c, &nick("/work/alpha"), MouseButton::Left);
     assert_eq!(c.foreground(), &Tab::Dm(ALPHA_SID.into()));
@@ -311,11 +309,7 @@ fn purge_is_an_alias_of_delete_all_on_the_channel_shown() {
     let s = screen(&mut c);
     assert_eq!(c.foreground(), &Tab::Channel("deploy".into()), "{s} {}", c.status());
     assert_eq!(calls(), ["message delete --channel deploy --older-than all --dry-run --json"], "{} | {}", c.status(), c.input().text());
-    assert_eq!(c.status(), "counted 12 read messages in #deploy: choose Delete read messages again to delete them");
-    typed(&mut c, "/purge");
-    press(&mut c, KeyCode::Enter);
-    assert!(screen(&mut c).contains("delete 12 read messages in #deploy? · 3 stay"), "/purge again asks: {}", screen(&mut c));
-    assert_eq!(calls().len(), 1, "from the held count");
+    assert!(screen(&mut c).contains("delete 12 read messages in #deploy for everyone? · 3 stay"), "/purge asks with the count: {}", screen(&mut c));
 }
 
 #[test]
@@ -325,8 +319,8 @@ fn an_attend_without_the_verb_says_it_needs_updating() {
     channel_menu(&mut c, "#legacy");
     pick(&mut c, "Delete read messages");
     pick(&mut c, "All");
-    assert_eq!(c.status(), "`attend message delete` is missing: needs a newer attend");
-    assert!(!screen(&mut c).contains("delete 12"), "nothing asked");
+    let s = screen(&mut c);
+    assert!(s.contains("`attend message delete` is missing: needs a newer attend") && s.contains(" n close ") && !s.contains(" y delete "), "said in the question, only no: {s}");
 }
 
 #[test]
@@ -473,141 +467,105 @@ fn a_notice_does_not_carry_the_mark_and_clear_asks_first() {
     assert!(feed(&mut c).contains("arrived after the hide"), "newer than the last bus message, so shown: {}", feed(&mut c));
 }
 
+/// The pick opens its question at once, counting, while attend counts
+/// off the screen's thread. Its yes waits: a `y` or a click on it does
+/// nothing and deletes nothing. The count updates the same question in
+/// place, and then `y` deletes that scope and age.
 #[test]
-fn attend_answers_off_the_screens_thread_one_request_at_a_time() {
+fn the_pick_asks_at_once_and_yes_waits_for_the_count() {
     let _g = fixture();
     let mut c = chat();
     channel_menu(&mut c, "#slow");
     pick(&mut c, "Delete read messages");
     pick_now(&mut c, "All");
-    assert_eq!(c.status(), "counting read messages…", "the pick returns at once");
-    channel_menu(&mut c, "#open");
-    pick_now(&mut c, "Delete read messages");
-    assert_eq!(c.status(), "still counting read messages: one delete or tombstone runs at a time");
-    assert!(!items(&mut c).iter().any(|i| i == "All"), "refused before its ages: {}", screen(&mut c));
-    assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "the second pick ran nothing");
+    assert!(screen(&mut c).contains("counting read messages in #slow…"), "asked at once: {}", screen(&mut c));
+    press_now(&mut c, KeyCode::Char('y'));
+    let buf = testkit::render_screen(&mut c, W, H);
+    let (x, y) = testkit::find(&buf, " y delete ").expect("yes is drawn, set back");
+    mouse(&mut c, MouseButton::Left, x + 1, y);
+    assert!(screen(&mut c).contains("counting read messages in #slow…"), "still asking: {}", screen(&mut c));
+    assert!(c.input().is_empty(), "the y typed nothing");
     answered(&mut c);
-    assert_eq!(c.status(), "counted 3 read messages in #slow: choose Delete read messages again to delete them", "the answer is said on a tick");
+    assert!(screen(&mut c).contains("delete 3 read messages in #slow for everyone?"), "the count, in place: {}", screen(&mut c));
+    assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "nothing deleted while counting");
+    press(&mut c, KeyCode::Char('y'));
+    assert_eq!(calls().last().map(String::as_str), Some("message delete --channel slow --older-than all --json"), "y deletes that scope and age");
 }
 
-/// A count that lands while another question is open never takes that
-/// question's place: the open question keeps its own answer, the count is
-/// held and said, and choosing Delete read messages again asks from it
-/// without counting again.
+/// No while counting stops the count and deletes nothing, and nothing is
+/// left to answer: a later question is answered by its own keys alone.
 #[test]
-fn a_count_that_lands_under_another_question_never_answers_it() {
+fn no_while_counting_stops_the_count_and_holds_nothing() {
     let _g = fixture();
     let mut c = chat();
     channel_menu(&mut c, "#slow");
     pick(&mut c, "Delete read messages");
     pick_now(&mut c, "All");
-    assert_eq!(c.status(), "counting read messages…");
+    press_now(&mut c, KeyCode::Esc);
+    assert!(c.removing().is_none(), "the count is stopped");
+    assert_eq!(c.status(), "kept");
     channel_menu(&mut c, "#deploy");
-    pick_now(&mut c, "Hide messages here");
-    assert!(screen(&mut c).contains("hide the messages in #deploy?"), "{}", screen(&mut c));
-    answered(&mut c);
-    assert!(c.removing().is_none(), "the count has landed");
-    assert!(screen(&mut c).contains("hide the messages in #deploy?"), "the open question stays: {}", screen(&mut c));
-    let said = c.status().to_string();
-    press(&mut c, KeyCode::Char('y'));
-    assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "the y deletes nothing for everyone");
-    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; the bus keeps them"), "the y answers the hide: {}", c.status());
-    assert_eq!(said, "counted 3 read messages in #slow: choose Delete read messages again to delete them", "the count was held and said");
-    channel_menu(&mut c, "#slow");
-    pick(&mut c, "Delete read messages");
-    assert_eq!(items(&mut c), ["Current sessions", "Today (local midnight)", "All", "Custom…"], "the ages, as ever: {}", screen(&mut c));
-    pick(&mut c, "All");
-    assert!(screen(&mut c).contains("delete 3 read messages in #slow?"), "the same age asks from the held count: {}", screen(&mut c));
-    assert_eq!(calls().len(), 1, "not counted again");
-}
-
-/// A held count answers only the delete it counted: choosing the same
-/// scope with another age counts afresh, and asks nothing.
-#[test]
-fn a_held_count_answers_only_its_own_age() {
-    let _g = fixture();
-    let mut c = chat();
-    delete_read(&mut c, "#open", "All");
-    assert!(c.status().starts_with("counted 12 read messages in #open:"), "held: {}", c.status());
-    channel_menu(&mut c, "#open");
-    pick(&mut c, "Delete read messages");
-    assert_eq!(items(&mut c), ["Current sessions", "Today (local midnight)", "All", "Custom…"], "the ages, as ever: {}", screen(&mut c));
-    pick(&mut c, "Today");
-    assert_eq!(calls(), ["message delete --open --older-than all --dry-run --json", "message delete --open --older-than today --dry-run --json"], "another age is counted afresh");
-    assert!(!screen(&mut c).contains("delete 12 read messages"), "and asks nothing: {}", screen(&mut c));
-    assert!(c.status().starts_with("counted 12 read messages in #open from before today:"), "{}", c.status());
-}
-
-/// A count that lands while the operator types in the compose box asks
-/// nothing: a message starting with y would otherwise answer it.
-#[test]
-fn a_count_that_lands_while_typing_does_not_ask() {
-    let _g = fixture();
-    let mut c = chat();
-    channel_menu(&mut c, "#slow");
-    pick(&mut c, "Delete read messages");
-    pick_now(&mut c, "All");
-    mouse(&mut c, MouseButton::Left, W - 5, H - 4);
-    typed(&mut c, "yes I am here");
-    answered(&mut c);
-    assert!(!screen(&mut c).contains("delete 3 read messages"), "no question under the typing: {}", screen(&mut c));
-    assert_eq!(c.status(), "counted 3 read messages in #slow: choose Delete read messages again to delete them");
-    assert_eq!(c.input().text(), "yes I am here");
-    assert_eq!(calls().len(), 1);
-}
-
-/// A count of nothing says so, asks nothing and holds nothing: the same
-/// pick again counts again.
-#[test]
-fn a_count_of_nothing_holds_nothing() {
-    let _g = fixture();
-    let mut c = chat();
-    delete_read(&mut c, "#empty", "All");
-    assert_eq!(c.status(), "nothing read to delete in #empty");
-    assert!(!screen(&mut c).contains("delete 0 read"), "no question: {}", screen(&mut c));
-    delete_read(&mut c, "#empty", "All");
-    assert_eq!(calls(), ["message delete --channel empty --older-than all --dry-run --json"; 2], "counted again");
-    assert_eq!(c.status(), "nothing read to delete in #empty");
-}
-
-/// A count never opens a question, even with the operator still, nothing
-/// open and the compose box empty: it only says what it counted.
-#[test]
-fn a_count_never_asks_even_over_an_idle_chat() {
-    let _g = fixture();
-    let mut c = chat();
-    delete_read(&mut c, "#open", "All");
-    let mut asked = false;
-    for _ in 0..20 {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        testkit::render_screen(&mut c, W, H);
-        Screen::tick(&mut c);
-        asked |= screen(&mut c).contains("delete 12 read messages");
-    }
-    assert!(!asked, "two idle seconds and no question: {}", screen(&mut c));
-    assert!(c.input().is_empty());
-    assert_eq!(c.status(), "counted 12 read messages in #open: choose Delete read messages again to delete them");
-}
-
-/// A `y` typed at any time after a count lands is a character in the
-/// compose box and nothing more: at once, and a second later.
-#[test]
-fn a_y_after_a_count_only_types() {
-    let _g = fixture();
-    let mut c = chat();
-    delete_read(&mut c, "#open", "All");
-    press(&mut c, KeyCode::Char('y'));
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    pick(&mut c, "Hide messages here");
+    std::thread::sleep(std::time::Duration::from_millis(1200));
     testkit::render_screen(&mut c, W, H);
     Screen::tick(&mut c);
+    assert!(screen(&mut c).contains("hide the messages in #deploy?"), "the hide's question, untouched: {}", screen(&mut c));
     press(&mut c, KeyCode::Char('y'));
-    assert_eq!(c.input().text(), "yy", "typed");
+    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; the bus keeps them"), "the y answers the hide: {}", c.status());
+    assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "nothing deleted for everyone");
+}
+
+/// A count of nothing says so in its question and offers only no; the
+/// same pick again counts again.
+#[test]
+fn a_count_of_nothing_offers_only_no() {
+    let _g = fixture();
+    let mut c = chat();
+    delete_read(&mut c, "#empty", "All");
+    let s = screen(&mut c);
+    assert!(s.contains("nothing read to delete in #empty") && s.contains(" n close ") && !s.contains(" y delete "), "{s}");
+    press(&mut c, KeyCode::Esc);
+    delete_read(&mut c, "#empty", "All");
+    assert_eq!(calls(), ["message delete --channel empty --older-than all --dry-run --json"; 2], "counted again");
+}
+
+/// Once the count shows, the question counts down its seconds, and at
+/// none closes as a no: nothing deleted, and the status line says so.
+#[test]
+fn an_unanswered_delete_question_counts_down_and_expires() {
+    let _g = fixture();
+    let mut c = chat().delete_question_life(std::time::Duration::from_millis(2200));
+    delete_read(&mut c, "#deploy", "All");
+    let bar = |c: &mut Chat| rows(c).last().cloned().unwrap_or_default();
+    assert!(bar(&mut c).contains("closes in 3 s") || bar(&mut c).contains("· 3 s "), "{}", bar(&mut c));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    Screen::tick(&mut c);
+    assert!(bar(&mut c).contains("closes in 2 s") || bar(&mut c).contains("· 2 s "), "counts down: {}", bar(&mut c));
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    Screen::tick(&mut c);
+    assert!(!screen(&mut c).contains("for everyone?"), "closed: {}", screen(&mut c));
+    assert_eq!(c.status(), "delete question expired");
+    assert_eq!(calls(), ["message delete --channel deploy --older-than all --dry-run --json"], "nothing deleted");
+}
+
+/// A `y` typed before the pick, and one after its question closed, are
+/// characters in the compose box and nothing more.
+#[test]
+fn a_y_before_or_after_the_question_only_types() {
+    let _g = fixture();
+    let mut c = chat();
+    mouse(&mut c, MouseButton::Left, W - 5, H - 4);
+    press(&mut c, KeyCode::Char('y'));
+    delete_read(&mut c, "#open", "All");
+    press(&mut c, KeyCode::Esc);
+    mouse(&mut c, MouseButton::Left, W - 5, H - 4);
+    press(&mut c, KeyCode::Char('y'));
+    assert_eq!(c.input().text(), "yy");
     assert_eq!(calls(), ["message delete --open --older-than all --dry-run --json"], "nothing deleted");
 }
 
 /// Start the eleven-second delete in `#long`, and return when it runs.
 fn start_long_delete(c: &mut Chat) {
-    delete_read(c, "#long", "All");
     delete_read(c, "#long", "All");
     press_now(c, KeyCode::Char('y'));
     assert_eq!(c.removing().as_deref(), Some("deleting…"));
@@ -681,8 +639,7 @@ fn a_long_delete_runs_to_its_end_and_says_deleting_until_then() {
     let _g = fixture();
     let mut c = chat();
     delete_read(&mut c, "#long", "All");
-    delete_read(&mut c, "#long", "All");
-    assert!(screen(&mut c).contains("delete 3 read messages in #long?"), "{}", screen(&mut c));
+    assert!(screen(&mut c).contains("delete 3 read messages in #long for everyone?"), "{}", screen(&mut c));
     let began = Instant::now();
     press_now(&mut c, KeyCode::Char('y'));
     assert_eq!(c.status(), "deleting…", "the y returns at once");

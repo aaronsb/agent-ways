@@ -261,9 +261,9 @@ pub struct ChatPane {
     /// The delete or tombstone attend is working on, one at a time, with
     /// no time limit ([`cleanup`]).
     removing: Option<cleanup::Removal>,
-    /// Every delete's count, for its scope and its age, and when it landed:
-    /// the same pick again within `HOLD` asks with it ([`cleanup`]).
-    held: Option<(cleanup::Asked, Instant)>,
+    /// How long a delete's question stays open once its count is shown
+    /// ([`cleanup::DELETE_QUESTION_LIFE`]).
+    delete_question_life: Duration,
 }
 
 impl ChatPane {
@@ -319,7 +319,7 @@ impl ChatPane {
             attend: crate::attend_cli::program(),
             undo: None,
             removing: None,
-            held: None,
+            delete_question_life: cleanup::DELETE_QUESTION_LIFE,
         }
     }
 
@@ -1060,6 +1060,9 @@ impl Pane for ChatPane {
     }
 
     fn picked(&mut self, id: &str, values: Vec<String>) {
+        if values.get(1).is_some_and(|v| v == agent_tui::EXPIRED) {
+            return self.answered_expired(id);
+        }
         if let Some(v) = values.first() {
             self.menu_picked(id, v);
         }
@@ -1308,6 +1311,13 @@ impl Chat {
     /// runs.
     pub fn removing(&self) -> Option<String> {
         self.pane().removing_now()
+    }
+
+    /// How long a delete's question stays open once its count is shown,
+    /// rather than [`cleanup::DELETE_QUESTION_LIFE`].
+    pub fn delete_question_life(mut self, life: Duration) -> Chat {
+        self.pane_mut().delete_question_life = life;
+        self
     }
 
     /// Stop the delete or tombstone running, as `≡` ▸ Stop does.

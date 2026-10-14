@@ -8,14 +8,17 @@
 //!   the menu while the tab has a watermark, takes it away.
 //! - Delete read messages for everyone…: Delete older than ▸ Current
 //!   sessions, Today (local midnight), All or Custom… (a duration or a
-//!   date, in the entry dialog). The first pick counts: it runs `attend
-//!   message delete --dry-run` for the tab's scope (`--open`, `--channel
-//!   <c>`, or `--dm <session>` for a DM view or an agent's row), and the
-//!   status line says what it counted. A count never asks anything: the
-//!   count is held for [`HOLD`], and choosing the same scope and age again
-//!   asks `y` with it, an answer to that pick; `y` runs the delete. The
-//!   status line names the batch, and the scope's menu then offers Undo
-//!   delete, which runs `attend message delete --undo <batch>`.
+//!   date, in the entry dialog). The pick opens its question at once,
+//!   saying it is counting, and runs `attend message delete --dry-run`
+//!   for the tab's scope (`--open`, `--channel <c>`, or `--dm <session>`
+//!   for a DM view or an agent's row). Its yes waits for the count; the
+//!   count updates the same question in place, which then asks to delete
+//!   that many for everyone and expires a minute later as a no
+//!   ([`agent_tui::Expiry`]). A count of nothing, or attend's refusal,
+//!   leaves only no. No, at any time, stops a count still running; `y`
+//!   runs the delete. The status line names the batch, and the scope's
+//!   menu then offers Undo delete, which runs `attend message delete
+//!   --undo <batch>`.
 //! - Tombstone…, on a claude whose session is not live, by its row or its
 //!   own DM view: asked, then `attend message tombstone <session-id>`.
 //!   attend's refusal is shown as it words it.
@@ -30,14 +33,13 @@
 //! names it. One runs at a time: another asked for meanwhile is refused
 //! with a note. An attend without the verbs says it needs updating.
 //!
-//! Every question the chat asks answers a pick the operator just made. A
-//! count lands whenever attend finishes, so it only reports: a question it
-//! opened could take a keystroke meant for something else (ADR-405,
-//! amendment of 2026-10-14).
+//! Every question the chat asks answers a pick the operator just made, and
+//! a count only updates the question its pick opened: it can never answer
+//! or replace another (ADR-405, amendment of 2026-10-14).
 
 use std::time::{Duration, Instant};
 
-use agent_tui::{Anchor, Item, Open};
+use agent_tui::{Anchor, Expiry, Item, Open, Question};
 
 use super::menu::Step;
 use super::ChatPane;
@@ -53,8 +55,9 @@ pub(super) const UNDO_DELETE: &str = "Undo delete";
 pub(super) const TOMBSTONE: &str = "Tombstone…";
 pub(super) const CUSTOM: &str = "Custom…";
 
-/// How long a count held for a delete stays good to ask from.
-const HOLD: Duration = Duration::from_secs(60);
+/// How long a delete's question stays open once its count has landed,
+/// before it closes as a no.
+pub(super) const DELETE_QUESTION_LIFE: Duration = Duration::from_secs(60);
 
 /// The menu ids of Delete older than and of its Custom… dialog, before the
 /// scope's key ([`Scope::key`]).
@@ -63,8 +66,8 @@ const OLDER_CUSTOM: &str = "older-custom:";
 
 /// What the chat does with attend's answer to a request.
 pub(super) enum Job {
-    /// A delete's dry run: the count to hold.
-    DryRun { scope: Scope, older: String },
+    /// A delete's dry run, for the question `ask` its pick opened.
+    DryRun { ask: String },
     /// The delete asked about.
     Delete(Asked),
     /// An undo of the last delete.
@@ -106,8 +109,8 @@ pub(super) struct LastDelete {
     marked: usize,
 }
 
-/// A delete asked about: its scope, its `--older-than` and what the dry run
-/// reported.
+/// A delete counted and confirmed: its scope, its `--older-than`, how the
+/// question named the scope, and what the dry run reported.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Asked {
     pub scope: Scope,
@@ -116,11 +119,47 @@ pub(super) struct Asked {
     pub report: Report,
 }
 
-impl Asked {
-    /// The question: what goes, and what stays unread.
-    pub(super) fn question(&self) -> String {
-        let n = self.report.marked;
-        format!("delete {n} read message{} in {}{}?{}", if n == 1 { "" } else { "s" }, self.label, attend_cli::older_words(&self.older), self.report.kept_words())
+/// A delete's question, from the pick of its age: its scope, its age, how
+/// it names the scope, and where its count is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DeleteAsk {
+    pub scope: Scope,
+    pub older: String,
+    pub label: String,
+    pub count: Count,
+}
+
+/// Where a delete question's count is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Count {
+    /// The dry run is running: yes waits.
+    Counting,
+    /// What the dry run found to delete: yes deletes it.
+    Found(Report),
+    /// Nothing to delete, or why attend did not count: only no.
+    Said(String),
+}
+
+impl DeleteAsk {
+    /// The question under `id`, as its count stands, expiring `life` after
+    /// the count is shown.
+    pub(super) fn question(&self, id: String, life: Duration) -> Question {
+        let older = attend_cli::older_words(&self.older);
+        match &self.count {
+            Count::Counting => Question::new(id, format!("counting read messages in {}{older}…", self.label), "delete", "keep").pending(),
+            Count::Found(r) => {
+                let n = r.marked;
+                let text = format!("delete {n} read message{} in {}{older} for everyone?{}", if n == 1 { "" } else { "s" }, self.label, r.kept_words());
+                Question::new(id, text, "delete", "keep").expires(Expiry::new(life))
+            }
+            Count::Said(why) => Question::new(id, why.clone(), "delete", "close").dismiss_only(),
+        }
+    }
+
+    /// The delete to run, once the count has found something.
+    pub(super) fn counted(self) -> Option<Asked> {
+        let Count::Found(report) = self.count else { return None };
+        Some(Asked { scope: self.scope, older: self.older, label: self.label, report })
     }
 }
 
@@ -257,21 +296,33 @@ impl ChatPane {
         false
     }
 
-    /// The pick of a delete of `scope` older than `older`: with a count
-    /// held for that scope and age from the last [`HOLD`], ask before the
-    /// delete, an answer to this pick; else count, and say what the count
-    /// found ([`ChatPane::attend_answered`]). A dry run of the chat
-    /// (`--snap`) runs no attend at all, so its frames do not depend on the
-    /// attend installed.
+    /// The pick of a delete of `scope` older than `older`: its question
+    /// opens at once, an answer to this pick, saying it is counting, and
+    /// the dry run starts; its count updates the question in place
+    /// ([`ChatPane::attend_answered`]). A dry run of the chat (`--snap`)
+    /// runs no attend at all, so its frames do not depend on the attend
+    /// installed.
     pub(super) fn delete_read(&mut self, scope: Scope, older: &str) {
-        if let Some((asked, _)) = self.held.take_if(|(a, at)| at.elapsed() < HOLD && a.scope == scope && a.older == older) {
-            return self.ask(Step::DeleteRead(asked));
-        }
         if self.dry_run {
             return self.say("dry run: attend message delete not run", false);
         }
+        if self.refused_while_removing() {
+            return;
+        }
         let args = attend_cli::delete_argv(&scope, older, true);
-        self.ask_attend(args, Job::DryRun { scope, older: older.to_string() });
+        let label = self.scope_label(&scope);
+        let ask = self.ask(Step::DeleteRead(DeleteAsk { scope, older: older.to_string(), label, count: Count::Counting }));
+        self.ask_attend(args, Job::DryRun { ask });
+    }
+
+    /// Stop the count running for the question `ask`, if one is: its
+    /// question was answered no or let go.
+    pub(super) fn stop_count(&mut self, ask: &str) {
+        if self.removing.as_ref().is_some_and(|r| matches!(&r.job, Job::DryRun { ask: running } if running == ask)) {
+            if let Some(r) = self.removing.take() {
+                r.running.stop();
+            }
+        }
     }
 
     /// The delete asked about, answered yes: run it.
@@ -393,7 +444,7 @@ impl ChatPane {
         // The answer replaces `deleting…`, whatever it leads to.
         self.say("", false);
         match job {
-            Job::DryRun { scope, older } => self.dry_ran(scope, older, answer),
+            Job::DryRun { ask } => self.dry_ran(&ask, answer),
             Job::Delete(asked) => self.deleted(asked, answer),
             Job::Undo(last) => self.undid(last, answer),
             Job::Tombstone { member, name } => match answer {
@@ -404,27 +455,21 @@ impl ChatPane {
         self.stale();
     }
 
-    /// A dry run's report: hold the count and say what it found, or that
-    /// there is nothing. It asks nothing: the count lands whenever attend
-    /// finishes, and choosing the delete again asks with it.
-    fn dry_ran(&mut self, scope: Scope, older: String, answer: Result<serde_json::Value, Failure>) {
-        let report = match answer.and_then(|doc| attend_cli::report(&doc)) {
-            Ok(r) => r,
-            Err(e) => return self.say(e.to_string(), true),
-        };
-        let label = self.scope_label(&scope);
-        if report.marked == 0 {
-            return self.say(format!("nothing read to delete in {label}{}{}", attend_cli::older_words(&older), report.kept_words()), false);
+    /// A dry run's report, into the question `ask` that its pick opened,
+    /// in place: what it found to delete, that there is nothing, or why
+    /// attend did not count. Only that question: a count never touches
+    /// another, and one whose question is gone is let go.
+    fn dry_ran(&mut self, ask: &str, answer: Result<serde_json::Value, Failure>) {
+        let Some((id, Step::DeleteRead(d))) = &mut self.asked else { return };
+        if id != ask {
+            return;
         }
-        self.hold_count(Asked { scope, older, label, report });
-    }
-
-    /// Hold `asked`'s count and say so: choosing the same delete again in
-    /// the next [`HOLD`] asks with it.
-    pub(super) fn hold_count(&mut self, asked: Asked) {
-        let n = asked.report.marked;
-        self.say(format!("counted {n} read message{} in {}{}: choose Delete read messages again to delete them", if n == 1 { "" } else { "s" }, asked.label, attend_cli::older_words(&asked.older)), false);
-        self.held = Some((asked, Instant::now()));
+        d.count = match answer.and_then(|doc| attend_cli::report(&doc)) {
+            Ok(r) if r.marked == 0 => Count::Said(format!("nothing read to delete in {}{}{}", d.label, attend_cli::older_words(&d.older), r.kept_words())),
+            Ok(r) => Count::Found(r),
+            Err(e) => Count::Said(e.to_string()),
+        };
+        self.to_open = Some(Open::Ask(d.question(id.clone(), self.delete_question_life)));
     }
 
     /// A delete's report: said, and its batch kept for Undo delete.
@@ -463,68 +508,83 @@ impl ChatPane {
 mod tests {
     use super::*;
 
-    fn landed(c: &mut ChatPane) {
-        let doc = serde_json::json!({"scope": "#slow", "dry_run": true, "marked": 3, "batch": null, "ids": [], "held": []});
-        c.dry_ran(Scope::Channel("slow".into()), "all".into(), Ok(doc));
+    fn count(marked: u64) -> Result<serde_json::Value, Failure> {
+        Ok(serde_json::json!({"scope": "#slow", "dry_run": true, "marked": marked, "batch": null, "ids": [], "held": []}))
     }
 
-    fn slow() -> Scope {
-        Scope::Channel("slow".into())
-    }
-
-    /// A count never opens a question, even over nothing, with the
-    /// operator still and the compose box empty: it says what it counted
-    /// and holds it, and a question already open keeps its answer.
-    #[test]
-    fn a_count_never_opens_a_question() {
+    /// A pane with a delete question open on `#slow`, counting, as a pick
+    /// opens it.
+    fn counting() -> (ChatPane, String) {
         let mut c = ChatPane::new(None, Default::default());
-        c.dry_run = true;
-        landed(&mut c);
-        assert!(c.to_open.is_none() && c.asked.is_none(), "no question");
-        assert!(c.held.is_some(), "the count is held");
-        assert_eq!(c.status, "counted 3 read messages in #slow: choose Delete read messages again to delete them");
+        let id = c.ask(Step::DeleteRead(DeleteAsk { scope: Scope::Channel("slow".into()), older: "all".into(), label: "#slow".into(), count: Count::Counting }));
+        (c, id)
+    }
+
+    fn opened(c: &mut ChatPane) -> Question {
+        match c.to_open.take() {
+            Some(Open::Ask(q)) => q,
+            other => panic!("no question: {other:?}"),
+        }
+    }
+
+    /// The pick's question opens at once, counting, its yes waiting; the
+    /// count updates the same question in place, ready and expiring.
+    #[test]
+    fn a_count_updates_its_own_question_in_place() {
+        let (mut c, id) = counting();
+        let q = opened(&mut c);
+        assert_eq!((q.id.as_str(), q.question.as_str(), q.pending), (id.as_str(), "counting read messages in #slow…", true));
+        c.dry_ran(&id, count(3));
+        let q = opened(&mut c);
+        assert_eq!(q.id, id, "the same question");
+        assert_eq!(q.question, "delete 3 read messages in #slow for everyone?");
+        assert!(!q.pending && q.expiry.as_ref().is_some_and(|e| e.after == DELETE_QUESTION_LIFE && !e.answer), "{q:?}");
+    }
+
+    /// A count of nothing, or attend's refusal, leaves only no.
+    #[test]
+    fn a_count_of_nothing_or_a_refusal_offers_only_no() {
+        let (mut c, id) = counting();
+        c.to_open = None;
+        c.dry_ran(&id, count(0));
+        let q = opened(&mut c);
+        assert_eq!((q.question.as_str(), q.yes.clone()), ("nothing read to delete in #slow", None));
+        let (mut c, id) = counting();
+        c.to_open = None;
+        c.dry_ran(&id, Err(Failure::TooOld { verb: "message delete".into() }));
+        let q = opened(&mut c);
+        assert_eq!((q.question.as_str(), q.yes.clone()), ("`attend message delete` is missing: needs a newer attend", None));
+    }
+
+    /// A count never touches a question but its own: with another question
+    /// pending, or its own gone, it changes nothing.
+    #[test]
+    fn a_count_never_touches_another_question() {
+        let (mut c, id) = counting();
         c.ask(Step::Leave("deploy".into()));
         let pending = c.asked.clone();
-        landed(&mut c);
-        assert_eq!(c.asked, pending, "the leave still waits for its own answer");
+        c.to_open = None;
+        c.dry_ran(&id, count(3));
+        assert_eq!(c.asked, pending, "the leave keeps its question");
+        assert!(c.to_open.is_none(), "nothing opened or updated");
     }
 
-    /// Choosing the same scope and age within [`HOLD`] asks with the held
-    /// count, an answer to that pick; another age, another scope or an
-    /// expired hold counts afresh and asks nothing.
+    /// An expired delete question is let go, and says so.
     #[test]
-    fn a_held_count_asks_only_for_its_scope_and_age_within_the_hold() {
-        let mut c = ChatPane::new(None, Default::default());
-        c.dry_run = true;
-        landed(&mut c);
-        for (scope, older) in [(slow(), "today"), (Scope::Open, "all")] {
-            c.delete_read(scope.clone(), older);
-            assert!(c.to_open.is_none(), "{scope:?} {older}: counted afresh, nothing asked");
-            assert_eq!(c.status, "dry run: attend message delete not run");
-        }
-        if let Some((_, at)) = &mut c.held {
-            *at = Instant::now() - HOLD - Duration::from_secs(1);
-        }
-        c.delete_read(slow(), "all");
-        assert!(c.to_open.is_none(), "an expired hold counts afresh");
-        landed(&mut c);
-        c.delete_read(slow(), "all");
-        assert!(matches!(&c.to_open, Some(Open::Ask { question, .. }) if question.starts_with("delete 3 read messages in #slow")), "the same scope and age asks");
-        assert!(c.held.is_none(), "the count is spent on the question");
+    fn an_expired_delete_question_is_let_go() {
+        let (mut c, id) = counting();
+        c.dry_ran(&id, count(3));
+        c.answered_expired(&id);
+        assert!(c.asked.is_none());
+        assert_eq!(c.status, "delete question expired");
     }
 
-    /// A question the shell drops, because something else opened in the
-    /// same frame, leaves nothing waiting on its answer, and a delete's puts
-    /// its count back on hold.
+    /// A question the shell drops leaves nothing waiting on its answer.
     #[test]
-    fn a_dropped_question_holds_its_count() {
-        let mut c = ChatPane::new(None, Default::default());
-        c.dry_run = true;
-        landed(&mut c);
-        c.delete_read(slow(), "all");
-        let Some(open) = c.to_open.take() else { panic!("it asked") };
+    fn a_dropped_question_is_let_go() {
+        let (mut c, _) = counting();
+        let open = c.to_open.take().expect("it asked");
         c.question_dropped(open);
         assert!(c.asked.is_none(), "nothing waits on an answer that will not come");
-        assert!(c.held.is_some() && c.status.starts_with("counted 3 read messages in #slow"), "{}", c.status);
     }
 }

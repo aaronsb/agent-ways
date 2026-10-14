@@ -8,7 +8,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::Span;
 use ratatui::Frame;
 
-use super::pane::{footer_spans, Binding, Ctx, Keyed, Open, Overlay, Tone};
+use super::pane::{footer_spans, Binding, Ctx, Keyed, Open, Overlay, Question, Tone, EXPIRED};
 use super::pick::Pick;
 use super::response::Shown;
 use super::theme::{self, Seg};
@@ -21,13 +21,40 @@ use super::render::{clip, width};
 /// The id of the shell's own question before a plain `q` quits.
 pub(crate) const QUIT_ASK: &str = "\u{0}quit";
 
-/// A pane's question on the bottom bar ([`Open::Ask`]).
+/// A pane's question on the bottom bar ([`Open::Ask`]), and when it
+/// expires: its [`Expiry`](super::pane::Expiry) counted from when it was
+/// first ready to answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Asked {
-    pub id: String,
-    pub question: String,
-    pub yes: String,
-    pub no: String,
+    pub q: Question,
+    pub deadline: Option<std::time::Instant>,
+}
+
+impl Asked {
+    /// `q`, open now.
+    pub(crate) fn open(q: Question) -> Asked {
+        let mut a = Asked { q, deadline: None };
+        a.start_expiry();
+        a
+    }
+
+    /// `q` in place of the question open under its id: its text and its
+    /// answers, the expiry kept running once it has started.
+    pub(crate) fn update(&mut self, q: Question) {
+        self.q = q;
+        self.start_expiry();
+    }
+
+    fn start_expiry(&mut self) {
+        if self.deadline.is_none() && !self.q.pending && self.q.yes.is_some() {
+            self.deadline = self.q.expiry.as_ref().map(|e| std::time::Instant::now() + e.after);
+        }
+    }
+
+    /// The whole seconds left before it expires, rounded up.
+    pub(crate) fn left(&self) -> Option<u64> {
+        self.deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()).as_millis().div_ceil(1000) as u64)
+    }
 }
 
 /// A key the shell takes before the pane, read by [`App::shell_key`].
@@ -387,7 +414,7 @@ impl App {
             // A plain `q` beside a pane that owns the focus asks first,
             // whatever is unsaved: it is one keystroke from typing.
             ShellKey::Quit if k.code == KeyCode::Char('q') && self.ctx().owns_bar => {
-                self.mode = Mode::Ask(Asked { id: QUIT_ASK.into(), question: "quit?".into(), yes: "quit".into(), no: "stay".into() });
+                self.mode = Mode::Ask(Asked::open(Question::new(QUIT_ASK, "quit?", "quit", "stay")));
             }
             ShellKey::Quit => return self.quit(),
             ShellKey::Mouse => {
@@ -434,9 +461,12 @@ impl App {
                 pick.by_esc = by_esc;
                 self.mode = Mode::Pick(pick);
             }
-            Open::Ask { id, question, yes, no } if matches!(self.mode, Mode::Browse) => {
-                self.mode = Mode::Ask(Asked { id, question, yes, no });
+            Open::Ask(q) if matches!(&self.mode, Mode::Ask(a) if a.q.id == q.id) => {
+                if let Mode::Ask(a) = &mut self.mode {
+                    a.update(q);
+                }
             }
+            Open::Ask(q) if matches!(self.mode, Mode::Browse) => self.mode = Mode::Ask(Asked::open(q)),
             Open::Entry { id, title, value, error, anchor } if matches!(self.mode, Mode::Browse) => {
                 let mut input = crate::input::Input::new();
                 let n = value.chars().count();
@@ -446,7 +476,7 @@ impl App {
             }
             // Something else is open: the menu, question or entry cannot
             // be, and the pane hears so rather than wait on it.
-            dropped @ (Open::Pick { .. } | Open::Ask { .. } | Open::Entry { .. }) => {
+            dropped @ (Open::Pick { .. } | Open::Ask(_) | Open::Entry { .. }) => {
                 if let Some(p) = &mut self.pane {
                     p.open_dropped(dropped);
                 }
@@ -507,13 +537,13 @@ impl App {
         self.mode = Mode::Browse;
         // The shell's own question: yes quits, through the exit guard over
         // anything unsaved.
-        if a.id == QUIT_ASK {
+        if a.q.id == QUIT_ASK {
             if yes && !self.quit() {
                 self.ending = true;
             }
             return;
         }
-        self.pane_picked(&a.id, vec![if yes { "y" } else { "n" }.to_string()]);
+        self.pane_picked(&a.q.id, vec![if yes { "y" } else { "n" }.to_string()]);
     }
 
     /// The pane's picker set `values`. The pick is input to the pane, so
@@ -652,7 +682,20 @@ impl App {
             p.tick();
         }
         self.take_pane_open();
+        self.expire_question();
         self.open_held();
+    }
+
+    /// A question whose expiry ran out answers its expiry's answer, marked
+    /// [`EXPIRED`].
+    fn expire_question(&mut self) {
+        let Mode::Ask(a) = &self.mode else { return };
+        if a.left() != Some(0) {
+            return;
+        }
+        let (id, yes) = (a.q.id.clone(), a.q.expiry.as_ref().is_some_and(|e| e.answer));
+        self.mode = Mode::Browse;
+        self.pane_picked(&id, vec![if yes { "y" } else { "n" }.to_string(), EXPIRED.to_string()]);
     }
 
     /// How often the pane wants its tick.
@@ -757,8 +800,9 @@ mod tests {
             self.taken += 1;
         }
         fn open_dropped(&mut self, open: Open) {
-            if let Open::Ask { id, .. } | Open::Pick { id, .. } | Open::Entry { id, .. } = open {
-                self.picked.push(format!("dropped {id}"));
+            match open {
+                Open::Ask(Question { id, .. }) | Open::Pick { id, .. } | Open::Entry { id, .. } => self.picked.push(format!("dropped {id}")),
+                _ => {}
             }
         }
         fn palette(&self) -> theme::Palette {
@@ -862,7 +906,7 @@ mod tests {
     type Answer = fn(&mut App);
 
     fn ask() -> Open {
-        Open::Ask { id: "q".into(), question: "drop it?".into(), yes: "drop".into(), no: "keep".into() }
+        Open::Ask(Question::new("q", "drop it?", "drop", "keep"))
     }
 
     /// A pane's question shows on the bar with its answers as lozenges; `y`
@@ -915,6 +959,90 @@ mod tests {
     }
 
 
+    fn bar_of(a: &mut App, w: u16) -> String {
+        testkit::rows(&testkit::render(a, w, 6)).pop().expect("a bar")
+    }
+
+    /// A question that waits draws its yes set back, and neither `y` nor a
+    /// click on yes answers it; opened again under its id, ready, it updates
+    /// in place, and then `y` answers.
+    #[test]
+    fn a_pending_question_takes_no_yes_until_it_is_updated_ready() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "counting…", "drop", "keep").pending()));
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(bar_of(&mut a, 80).contains("counting…"), "{}", bar_of(&mut a, 80));
+        a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
+        click_text(&mut a, " y drop ");
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "yes waits: {:?}", two(&a).picked);
+        assert_eq!(two(&a).keys, 1, "the y typed nothing either");
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "drop 3?", "drop", "keep")));
+        a.tick_pane();
+        assert!(matches!(&a.mode, Mode::Ask(q) if q.q.question == "drop 3?"), "updated in place");
+        assert!(bar_of(&mut a, 80).contains("drop 3?"));
+        a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
+        assert_eq!(two(&a).picked, ["q=y"], "ready, y answers");
+    }
+
+    /// A question that waits still takes no at once.
+    #[test]
+    fn a_pending_question_takes_no_at_once() {
+        for code in [KeyCode::Char('n'), KeyCode::Esc] {
+            let mut a = app(true);
+            a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "counting…", "drop", "keep").pending()));
+            a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+            a.key(k(code, KeyModifiers::NONE));
+            assert_eq!(two(&a).picked, ["q=n"], "{code:?}");
+        }
+    }
+
+    /// A question with no yes is dismissed by no alone, and draws no yes.
+    #[test]
+    fn a_dismiss_only_question_offers_no_alone() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "nothing to drop", "drop", "close").dismiss_only()));
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        let bar = bar_of(&mut a, 80);
+        assert!(bar.contains(" n close ") && !bar.contains(" y drop "), "{bar}");
+        a.key(k(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(two(&a).picked, ["q=n"]);
+    }
+
+    /// An expiring question draws its seconds left, counting down on the
+    /// tick, the short form where the bar is narrow, and at none answers its
+    /// expiry's answer, marked expired. A pending one starts counting only
+    /// once it is ready.
+    #[test]
+    fn an_expiring_question_counts_down_and_answers_when_it_runs_out() {
+        use super::super::pane::Expiry;
+        use std::time::Duration;
+        let mut a = app(true);
+        let q = || Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(Duration::from_millis(2200)));
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(q().pending()));
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(!bar_of(&mut a, 80).contains("closes in"), "no count while it waits: {}", bar_of(&mut a, 80));
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(q()));
+        a.tick_pane();
+        let first = bar_of(&mut a, 80);
+        assert!(first.contains("drop it? · closes in 3 s"), "{first}");
+        assert!(bar_of(&mut a, 40).contains("· 3 s") && !bar_of(&mut a, 40).contains("closes in"), "short where narrow: {}", bar_of(&mut a, 40));
+        std::thread::sleep(Duration::from_millis(1100));
+        a.tick_pane();
+        assert!(bar_of(&mut a, 80).contains("closes in 2 s"), "counts down: {}", bar_of(&mut a, 80));
+        assert!(two(&a).picked.is_empty());
+        std::thread::sleep(Duration::from_millis(1200));
+        a.tick_pane();
+        assert_eq!(two(&a).picked, ["q=n", "q=expired"], "answered no, marked expired");
+        assert!(matches!(a.mode, Mode::Browse));
+        let mut a = app(true);
+        let yes = Expiry { answer: true, ..Expiry::new(Duration::from_millis(50)) };
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "go on?", "go", "stop").expires(yes)));
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        std::thread::sleep(Duration::from_millis(80));
+        a.tick_pane();
+        assert_eq!(two(&a).picked, ["q=y", "q=expired"], "an expiry may answer yes");
+    }
+
     /// A question the pane asks while another is open cannot open, and the
     /// pane hears that it was dropped rather than wait on an answer.
     #[test]
@@ -923,10 +1051,10 @@ mod tests {
         a.pane_mut::<Two>().expect("the pane").open = Some(ask());
         a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
         assert!(matches!(a.mode, Mode::Ask(_)), "the first question is open");
-        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask { id: "r".into(), question: "and this?".into(), yes: "y".into(), no: "n".into() });
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("r", "and this?", "y", "n")));
         a.tick_pane();
         assert_eq!(two(&a).picked, ["dropped r"], "the second was dropped, and said so");
-        assert!(matches!(&a.mode, Mode::Ask(q) if q.id == "q"), "the first still waits");
+        assert!(matches!(&a.mode, Mode::Ask(q) if q.q.id == "q"), "the first still waits");
     }
 
     /// The wheel over the bottom bar while a question waits answers nothing:
@@ -1661,7 +1789,7 @@ mod tests {
         assert_eq!(told(&mut a), [r#"-Menu { id: "m", by_esc: true }"#]);
 
         // A menu replaced by the question its pick asks, within one frame.
-        a.pane_mut::<Rec>().expect("the pane").next = Some(Open::Ask { id: "q".into(), question: "sure?".into(), yes: "yes".into(), no: "no".into() });
+        a.pane_mut::<Rec>().expect("the pane").next = Some(Open::Ask(Question::new("q", "sure?", "yes", "no")));
         open_from(&mut a, pick());
         told(&mut a);
         press(&mut a, KeyCode::Enter, KeyModifiers::NONE);

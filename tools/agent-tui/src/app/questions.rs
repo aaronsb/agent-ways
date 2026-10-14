@@ -3,7 +3,9 @@
 //! of a tab's items from the tree and from review, the delete of a named
 //! item, and a pane's question (ADR-408), the shell's own "quit?" among
 //! them. Each has two answers, `y` and `n` in either case; Esc and Enter
-//! give the one that keeps things as they are.
+//! give the one that keeps things as they are. A pane's question may wait,
+//! its yes drawn set back and inert, may offer only no, and may expire,
+//! drawing its seconds left ([`super::pane::Question`]).
 
 use super::dialog::{Answer, Button, Dialog, DialogBuilder, Placement};
 use super::modals::Modal;
@@ -145,11 +147,18 @@ impl Modal for Ask {
     /// any button off the answers, anywhere, answers no too.
     fn dialog(&self, app: &App, _: bool) -> Dialog<'static> {
         let Mode::Ask(a) = &app.mode else { unreachable!("a question is open") };
-        question(a.question.clone(), (format!("y {}", a.yes), Ground::Err), (format!("n {}", a.no), Ground::Keep))
-            .forward(|_| true)
-            .any_press()
-            .build()
-            .expect("n is the cancel and the default")
+        let q = &a.q;
+        let mut d = Dialog::bar(q.question.clone());
+        if let Some(yes) = &q.yes {
+            let button = Button::new(Btn::Yes, format!("y {yes}"), Ground::Err).key('y').key('Y');
+            d = d.button(if q.pending { button.waiting() } else { button });
+        }
+        d = d.button(Button::new(Btn::No, format!("n {}", q.no), Ground::Keep).key('n').key('N').cancel().default());
+        if let (Some(e), Some(left)) = (&q.expiry, a.left()) {
+            let say = |template: &str| template.replace("{s}", &left.to_string());
+            d = d.countdown(say(&e.label), say(&e.short));
+        }
+        d.forward(|_| true).any_press().build().expect("n is the cancel and the default")
     }
 
     /// The answer goes to the pane ([`App::answer`]); a key that is no
@@ -167,6 +176,6 @@ impl Modal for Ask {
 
     fn overlay(&self, app: &App) -> Overlay {
         let Mode::Ask(a) = &app.mode else { unreachable!("a question is open") };
-        Overlay::Ask { id: a.id.clone() }
+        Overlay::Ask { id: a.q.id.clone() }
     }
 }

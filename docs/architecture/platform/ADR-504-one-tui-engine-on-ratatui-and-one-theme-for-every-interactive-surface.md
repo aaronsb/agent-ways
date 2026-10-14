@@ -102,6 +102,10 @@ basis:
   - evidence: 'a guided flow labels its buttons Next (Enter) and Finish (Enter) (flow.rs:476), and a click on either sends KeyCode::Right (Btn::key, app.rs:121); on the picker step Enter picks the row under the cursor when none is picked or opens Other… on its row (flow.rs:311), and Right does neither'
   - evidence: 'attend-chat''s Esc cycle reads Overlay::Menu { by_esc: true } (attend-chat ix.rs:333); the shell reports overlays to a pane from paneshell.rs:226-237'
   - precedent: ADR-408
+  - operator: aaronsb
+    level: directed
+    said: "let's make sure the countdown is a reusable flow. not just for deletion"
+    via: "the operator in the head session, 2026-10-14"
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -369,8 +373,14 @@ The move is four changes, one PR each. Each keeps its frames as they were drawn 
 
 By step 4 at the latest, a flow's Next and Finish give the answer Enter gives, as their labels say. On the first step a click on either sends `Right` (`Btn::key`), which reports that nothing is picked where Enter picks the row under the cursor or opens "Other…" on its row.
 
-## Note (2026-10-14): a pane asks only in answer to the operator
+## Note (2026-10-14): a pane's question can wait, offer only no, and expire
 
-A pane's question (`Open::Ask`) answers something the operator just did. For part of 2026-10-14 the shell also took an unprompted question, one a pane asked on its own when background work finished, with a half-second grace in which keys did not answer it. It was withdrawn the same day with its only user: attend-chat's count now reports and asks nothing (ADR-405, amendment of 2026-10-14), so `Open::Ask` carries no `unprompted` flag and the shell has no grace.
+A pane's question (`Open::Ask(Question)`) answers something the operator just did. Three things make it carry work that takes a moment, in any pane, for any question:
+
+- **Waiting** (`Question::pending`): yes is drawn set back and neither its key nor a click presses it, while no answers as ever. The pane opens the question again under the same id to update it in place, its text and its answers; opened ready, yes is live.
+- **Only no** (`Question::dismiss_only`): a question that says why there is nothing to do, dismissed by no alone.
+- **Expiry** (`Expiry`): once the question is ready to answer, the shell draws the seconds left after it (`closes in 58 s`, or `58 s` where the bar is short of room), counting down on its tick, and at none answers it with the expiry's answer, no unless set, marked `EXPIRED`, so the pane can say it expired. A question left open while the operator was away cannot then take the next key typed on coming back.
+
+The countdown and the waiting yes live in the one `Dialog`, so any question kind uses them. attend-chat's delete question is the first caller (ADR-405, amendment of 2026-10-14). For part of the same day the shell instead took an unprompted question, one a pane asked on its own, with a half-second grace on keys; that was withdrawn with its only use.
 
 The shell opens a pane's menu, question or entry dialog only over nothing; one asked for while something else is open is dropped, and since 2026-10-14 the pane hears it (`Pane::open_dropped`), so it does not wait on an answer that will not come.

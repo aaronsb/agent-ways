@@ -196,11 +196,13 @@ pub(super) struct Button {
     pub(super) ground: Ground,
     cancel: bool,
     default: bool,
+    /// Drawn set back; neither its keys nor a click press it.
+    waiting: bool,
 }
 
 impl Button {
     pub(super) fn new(id: Btn, label: impl Into<String>, ground: Ground) -> Self {
-        Button { id, label: label.into(), keys: Vec::new(), chords: Vec::new(), ground, cancel: false, default: false }
+        Button { id, label: label.into(), keys: Vec::new(), chords: Vec::new(), ground, cancel: false, default: false, waiting: false }
     }
 
     /// A key that presses it, with no Ctrl or Alt held.
@@ -226,6 +228,22 @@ impl Button {
     pub(super) fn default(mut self) -> Self {
         self.default = true;
         self
+    }
+
+    /// It waits: drawn set back, and its keys and a click on it do
+    /// nothing.
+    pub(super) fn waiting(mut self) -> Self {
+        self.waiting = true;
+        self
+    }
+
+    /// The ground it is drawn on: set back while it waits.
+    fn drawn_ground(&self) -> Ground {
+        if self.waiting {
+            Ground::Rule
+        } else {
+            self.ground
+        }
     }
 }
 
@@ -285,6 +303,9 @@ pub(super) struct Dialog<'a> {
     /// Home, End, `g` and `G` jump to the top and the last page.
     jumps: bool,
     forward: Option<fn(&KeyEvent) -> bool>,
+    /// The time left before it closes on its own, drawn after the title:
+    /// the long form where it fits, the short one where it does not.
+    countdown: Option<(String, String)>,
 }
 
 /// Where a dialog was drawn: its rect, each button's, and its scroll held
@@ -333,6 +354,7 @@ impl<'a> Dialog<'a> {
             any_press: false,
             jumps: false,
             forward: None,
+            countdown: None,
         })
     }
 
@@ -389,7 +411,7 @@ impl<'a> Dialog<'a> {
         if let KeyCode::Char(c) = k.code {
             let chord = |b: &&Button| b.chords.iter().any(|&(held, at)| held == k.modifiers && at == c);
             if let Some(b) = self.buttons.iter().find(|b| (plain && b.keys.contains(&c)) || chord(b)) {
-                return Answer::Button(b.id);
+                return if b.waiting { Answer::Stay } else { Answer::Button(b.id) };
             }
             if plain && self.close_keys.contains(&c) {
                 return Answer::Close;
@@ -447,7 +469,8 @@ impl<'a> Dialog<'a> {
             MouseEventKind::ScrollDown if inside => self.scroll_by(1),
             MouseEventKind::Down(button) => {
                 if let Some(&(_, id)) = drawn.buttons.iter().find(|(r, _)| button == MouseButton::Left && r.contains(at)) {
-                    return Answer::Button(id);
+                    let waiting = self.buttons.iter().any(|b| b.id == id && b.waiting);
+                    return if waiting { Answer::Stay } else { Answer::Button(id) };
                 }
                 if let (Some(m), Some(i)) = (&mut self.menu, drawn.rows.iter().position(|r| button == MouseButton::Left && r.contains(at))) {
                     return m.click(i);
@@ -487,7 +510,11 @@ impl<'a> Dialog<'a> {
         }
         let r = self.rect(area);
         let border = self.border.unwrap_or_else(theme::modal_border);
-        let mut block = pane(self.title.clone()).border_style(border).padding(Padding::horizontal(self.padding));
+        let title = match &self.countdown {
+            Some((long, _)) => format!("{} · {long}", self.title),
+            None => self.title.clone(),
+        };
+        let mut block = pane(title).border_style(border).padding(Padding::horizontal(self.padding));
         if let Some(s) = self.title_style {
             block = block.title_style(s);
         }
@@ -510,7 +537,7 @@ impl<'a> Dialog<'a> {
         let mut buttons = Vec::new();
         if row == 1 {
             let at = Rect { y: inner.bottom() - 1, height: 1, ..inner };
-            let row: Vec<(Btn, String, Ground)> = self.buttons.iter().map(|b| (b.id, b.label.clone(), b.ground)).collect();
+            let row: Vec<(Btn, String, Ground)> = self.buttons.iter().map(|b| (b.id, b.label.clone(), b.drawn_ground())).collect();
             let focus = self.default_button().map(|b| b.id);
             f.render_widget(Paragraph::new(button_row(sh, at, focus, &row, &mut buttons)), at);
         }
@@ -526,17 +553,25 @@ impl Dialog<'_> {
     fn draw_bar(&self, f: &mut Frame, area: Rect, sh: Shape) -> Drawn {
         let destructive = self.buttons.iter().any(|b| b.ground == Ground::Err);
         let answers: Vec<(Btn, Vec<Span<'static>>)> =
-            self.buttons.iter().map(|b| (b.id, sh.lozenge(&[Seg::on(format!(" {} ", b.label), b.ground.on_row(destructive)).bold()]))).collect();
+            self.buttons.iter().map(|b| (b.id, sh.lozenge(&[Seg::on(format!(" {} ", b.label), b.drawn_ground().on_row(destructive)).bold()]))).collect();
         // Each answer is followed by a space.
         let after = answers.iter().map(|(_, a)| width(a) + 1).sum::<u16>();
         let lozenge = sh.lozenge(&[Seg::on(" confirm ", Ground::Warn).bold()]);
         let room = |used: u16| usize::from(area.width.saturating_sub(used + after + 3));
+        // The countdown keeps its place before the question is cut: the long
+        // form where the question still shows a dozen columns beside it,
+        // else the short one.
+        let left = match &self.countdown {
+            Some((long, short)) => format!(" · {}", if room(0) >= str_width(long) + 3 + 12 { long } else { short }),
+            None => String::new(),
+        };
+        let room = |used: u16| room(used).saturating_sub(str_width(&left));
         let mut spans = Vec::new();
         if str_width(&self.title) <= room(width(&lozenge)) {
             spans.extend(lozenge);
         }
         let question = clip(&self.title, room(width(&spans)));
-        spans.push(Span::raw(format!(" {question}  ")));
+        spans.push(Span::raw(format!(" {question}{left}  ")));
         let mut buttons = Vec::new();
         for (id, target) in answers {
             let x = area.x + width(&spans);
@@ -639,6 +674,13 @@ impl<'a> DialogBuilder<'a> {
     /// inside it or outside.
     pub(super) fn any_press(mut self) -> Self {
         self.0.any_press = true;
+        self
+    }
+
+    /// The time left before it closes on its own, drawn after the title:
+    /// `long` where it fits, `short` where it does not.
+    pub(super) fn countdown(mut self, long: String, short: String) -> Self {
+        self.0.countdown = Some((long, short));
         self
     }
 

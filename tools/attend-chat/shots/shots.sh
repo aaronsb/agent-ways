@@ -118,10 +118,11 @@ ask-no       | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wa
 ask-feed     | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide click:signing wait:kept
 ask-row      | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:y_hide side:#infra wait:kept
 delete-older | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than
-delete-count | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:choose_Delete_read_messages_again
-ask-long     | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:counted click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:y_delete
-delete-done  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:counted click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:y_delete click:y_delete wait:Undo_delete_on_its_menu
-delete-undo  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:counted click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:y_delete click:y_delete wait:Undo_delete_on_its_menu click:#open wait:Undo_delete click:Undo_delete wait:restored
+delete-count | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting
+delete-counting | base | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages
+ask-long     | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting
+delete-done  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting click:y_delete wait:Undo_delete_on_its_menu
+delete-undo  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting click:y_delete wait:Undo_delete_on_its_menu click:#open wait:Undo_delete click:Undo_delete wait:restored
 delete-custom | base | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:Custom… wait:older_than: text:soon Enter wait:not_a_duration
 dm-delete    | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rside:DMs wait:Delete_read click:Delete_read wait:delete_older_than
 tomb-menu    | gone  | wait:Agents rside:○ wait:Tombstone…

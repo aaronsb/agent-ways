@@ -69,12 +69,12 @@
 
 use agent_theme::ColorDepth;
 use agent_tui::ratatui::layout::Rect;
-use agent_tui::{Anchor, Item, Open};
+use agent_tui::{Anchor, Item, Open, Question};
 
 use crate::chip::Seen;
 use crate::peers::Peer;
 
-use super::cleanup::{Asked, DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE};
+use super::cleanup::{DeleteAsk, DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE};
 use super::dm::{Kind, HIDE_DMS, HIDE_REVIEW, REVIEW_DMS, SHOW_DMS};
 use crate::attend_cli::Scope;
 use super::keys::{self, EnterAction};
@@ -132,9 +132,9 @@ pub(super) enum Step {
     HideHere(Tab, String),
     /// Leave the channel (`/leave`).
     Leave(String),
-    /// Delete read messages for everyone (`attend message delete`), with
-    /// what its dry run reported.
-    DeleteRead(Asked),
+    /// Delete read messages for everyone (`attend message delete`): its
+    /// question waits for the count its pick started.
+    DeleteRead(DeleteAsk),
     /// Tombstone the dead agent of this session id, and its name.
     Tombstone(String, String),
     /// Delete the channel (`/dissolve`).
@@ -144,16 +144,18 @@ pub(super) enum Step {
 }
 
 impl Step {
-    /// The question, then what yes and no do, as the answers name them.
-    fn question(&self) -> (String, &'static str, &'static str) {
-        match self {
+    /// The question under `id`: what it asks, and what yes and no do, as
+    /// the answers name them.
+    fn question(&self, id: String, life: std::time::Duration) -> Question {
+        let (text, yes, no) = match self {
             Step::HideHere(_, label) => (format!("hide the messages in {label}? the bus keeps every message"), "hide", "keep"),
             Step::Leave(c) => (format!("leave #{c}?"), "leave", "stay"),
-            Step::DeleteRead(asked) => (asked.question(), "delete", "keep"),
+            Step::DeleteRead(d) => return d.question(id, life),
             Step::Tombstone(_, name) => (format!("tombstone @{name}? its messages leave every tab and its row leaves Agents"), "tombstone", "keep"),
             Step::Delete(c) => (format!("delete #{c} and its history?"), "delete", "keep"),
             Step::Remove(c, m) => (format!("remove @{} from #{c}?", m.label), "remove", "keep"),
-        }
+        };
+        Question::new(id, text, yes, no)
     }
 }
 
@@ -839,12 +841,13 @@ impl ChatPane {
     /// Ask before `step` runs: the shell shows the question and its answers
     /// ([`agent_tui::Open::Ask`]) under an id of the question's own, and the
     /// answer comes back through [`ChatPane::answered`].
-    pub(super) fn ask(&mut self, step: Step) {
-        let (question, yes, no) = step.question();
+    /// Its id comes back, for work the question waits on.
+    pub(super) fn ask(&mut self, step: Step) -> String {
         self.asks += 1;
         let id = format!("{ASK}{}", self.asks);
+        self.to_open = Some(Open::Ask(step.question(id.clone(), self.delete_question_life)));
         self.asked = Some((id.clone(), step));
-        self.to_open = Some(Open::Ask { id, question, yes: yes.into(), no: no.into() });
+        id
     }
 
     /// The answer to the question `id`: yes runs its step, no keeps things
@@ -854,6 +857,8 @@ impl ChatPane {
         let Some(step) = self.asked.take_if(|(pending, _)| pending == id).map(|(_, step)| step) else { return };
         self.dirty = true;
         if !yes {
+            // No to a delete's question stops its count if it still runs.
+            self.stop_count(id);
             return self.say("kept", false);
         }
         match step {
@@ -861,7 +866,12 @@ impl ChatPane {
             Step::Leave(c) => {
                 self.run("leave", SlashOutcome::Leave(Some(c)));
             }
-            Step::DeleteRead(asked) => self.run_delete(asked),
+            // The shell lets yes through only once the count is shown.
+            Step::DeleteRead(d) => {
+                if let Some(asked) = d.counted() {
+                    self.run_delete(asked);
+                }
+            }
             Step::Tombstone(member, name) => self.tombstone(&member, &name),
             Step::Delete(c) => {
                 self.run("dissolve", SlashOutcome::Dissolve(Some(c)));
@@ -876,16 +886,24 @@ impl ChatPane {
         }
     }
 
-    /// The shell could not open what the chat asked for, something else
-    /// being open (the record of what is open lags a frame behind): a
-    /// question dropped so will never be answered. A count's is held, to ask
-    /// from again; any other is let go.
-    pub(super) fn question_dropped(&mut self, open: Open) {
-        let Open::Ask { id, .. } = open else { return };
-        let Some(step) = self.asked.take_if(|(pending, _)| *pending == id).map(|(_, step)| step) else { return };
+    /// The question `id` expired unanswered ([`agent_tui::Expiry`]): the
+    /// shell closed it as a no, and the status line says so.
+    pub(super) fn answered_expired(&mut self, id: &str) {
+        let Some(step) = self.asked.take_if(|(pending, _)| pending == id).map(|(_, step)| step) else { return };
         self.dirty = true;
-        if let Step::DeleteRead(asked) = step {
-            self.hold_count(asked);
+        if let Step::DeleteRead(_) = step {
+            self.say("delete question expired", false);
+        }
+    }
+
+    /// The shell could not open what the chat asked for, something else
+    /// being open: a question dropped so will never be answered, so it is
+    /// let go, and a count it waited on is stopped.
+    pub(super) fn question_dropped(&mut self, open: Open) {
+        let Open::Ask(Question { id, .. }) = open else { return };
+        if self.asked.take_if(|(pending, _)| *pending == id).is_some() {
+            self.dirty = true;
+            self.stop_count(&id);
         }
     }
 
@@ -1010,7 +1028,7 @@ mod tests {
         let id = |c: &ChatPane| c.asked.as_ref().map(|(id, _)| id.clone()).expect("a question pending");
         for (item, ask) in [(HIDE_HERE, "hide the messages in #deploy?"), (LEAVE, "leave #deploy?"), (DELETE, "delete #deploy")] {
             c.item("deploy", item);
-            assert!(matches!(c.to_open.take(), Some(Open::Ask { question, .. }) if question.contains(ask)), "{item} asks the shell");
+            assert!(matches!(c.to_open.take(), Some(Open::Ask(Question { question, .. })) if question.contains(ask)), "{item} asks the shell");
             assert_eq!(c.status, "", "{item} ran nothing yet");
             let asked = id(&c);
             c.menu_picked(&asked, "n");
