@@ -124,7 +124,8 @@ fn a_person_holds_nothing() {
     let f = Fixture::new("del-human");
     heartbeat(&f, "fixture-human", Duration::ZERO);
     post(&f, "_broadcast", "fresh-1", "the person has not read this", Duration::from_secs(100));
-    let v = delete(&f, &["--open"]);
+    // Outside a session, so the fixture's own running session holds nothing.
+    let v = f.without_session(|| delete(&f, &["--open"]));
     assert_eq!(marked(&v), ["fresh-1"]);
     assert_eq!(v["held"], serde_json::json!([]));
 }
@@ -207,7 +208,8 @@ fn undo_takes_the_newest_delete_back() {
 fn the_drain_reads_a_marked_message_without_delivering_it() {
     let f = Fixture::new("del-drain");
     post(&f, "_broadcast", "gone-1", "marked before the join", Duration::from_secs(100));
-    delete(&f, &["--open"]);
+    // Deleted while this session was not running, so it held nothing.
+    f.without_session(|| delete(&f, &["--open"]));
     post(&f, "_broadcast", "kept-1", "posted after the delete", Duration::from_secs(100));
     f.ok(&["channel", "join", "side"]);
 
@@ -227,7 +229,7 @@ fn the_peers_sensor_skips_a_marked_message() {
     let f = Fixture::new("del-sensor");
     let tray = f.project_tray();
     post(&f, &tray, "gone-1", "marked before the run", Duration::from_secs(100));
-    delete(&f, &["--everywhere"]);
+    f.without_session(|| delete(&f, &["--everywhere"]));
     post(&f, &tray, "kept-1", "posted after the delete", Duration::from_secs(100));
     let run = f.run();
     run.wait_for("the unmarked message", Duration::from_secs(20), |r| r.output().contains("posted after the delete"));
@@ -248,6 +250,8 @@ fn a_dm_scope_takes_both_halves_of_the_thread_and_no_third_partys() {
     signal(&f, &theirs, "third-1", &line(R2, R1, "R2 to R1"), 10 * MINUTE);
     signal(&f, &theirs, "other-1", &line(R1, R2, "R1 to R2"), 10 * MINUTE);
     post(&f, "_broadcast", "open-1", "an #open post", 10 * MINUTE);
+    // The caller runs, and has read what was sent to it.
+    read(&f, &me, &["in-1"]);
 
     let v = delete(&f, &["--dm", R1]);
     assert_eq!(marked(&v), ["in-1", "out-1"]);
@@ -285,6 +289,7 @@ fn a_dm_scope_reads_the_callers_earlier_ids() {
     std::fs::write(f.marker(&f.sid), "listen\nprevious sess-before-clear\n").unwrap();
     let line = |from: &str, to: &str, body: &str| format!("claude:{from}|p|/srv/p|to:{to}|{body}");
     signal(&f, &f.project_tray(), "old-1", &line(R1, "sess-before-clear", "R1 to my earlier id"), 10 * MINUTE);
+    read(&f, &f.sid, &["old-1"]);
     assert_eq!(marked(&delete(&f, &["--dm", R1])), ["old-1"]);
 }
 
@@ -349,4 +354,86 @@ fn the_peers_sensor_skips_a_tombstoned_session() {
     let run = f.run();
     run.wait_for("the other message", Duration::from_secs(20), |r| r.output().contains("from someone else"));
     assert!(!run.output().contains("from the tombstoned session"), "{}", run.output());
+}
+
+/// A sleeping child process that stands in for a running Claude Code
+/// process. Killed on drop.
+struct Running(std::process::Child);
+
+impl Running {
+    fn start() -> Self {
+        Running(std::process::Command::new("sleep").arg("120").spawn().unwrap())
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.0.kill().ok();
+        self.0.wait().ok();
+    }
+}
+
+/// A listening session whose enrollment names a running process under a
+/// host name this host no longer has (a renamed laptop): nothing says it
+/// exited, so it holds what it has not read.
+#[test]
+fn a_session_this_host_cannot_judge_holds_its_mail() {
+    let f = Fixture::new("del-unknown");
+    let proc = Running::start();
+    let pid = proc.0.id();
+    let start = attend_presence::process::start_time(pid).expect("a start time for the child");
+    listener(&f, R1, "/srv/r1");
+    // No session record on this host names it: it runs elsewhere.
+    std::fs::remove_file(f.home.join(".claude").join("sessions").join(format!("rec-{R1}.json"))).unwrap();
+    heartbeat(&f, R1, 10 * MINUTE);
+    read(&f, R1, &[]);
+    post(&f, "_broadcast", "unread-1", "not yet read", 10 * MINUTE);
+
+    std::fs::write(f.marker(R1), format!("listen\nclaude {pid}-{start}@old-hostname\n")).unwrap();
+    let v = delete(&f, &["--open", "--dry-run"]);
+    assert_eq!(marked(&v), Vec::<String>::new(), "{v}");
+    assert_eq!(kept(&v, R1), 1);
+
+    // Control: the same record under this host's name reads as running.
+    let host = attend_presence::process::host_name();
+    std::fs::write(f.marker(R1), format!("listen\nclaude {pid}-{start}@{host}\n")).unwrap();
+    assert_eq!(kept(&delete(&f, &["--open", "--dry-run"]), R1), 1);
+}
+
+/// A Claude Code session that runs and does not listen holds what its cold
+/// start would deliver once it listens: addressed mail sent since it began.
+#[test]
+fn a_running_session_that_does_not_listen_holds_its_mail() {
+    // PID 1 stands in for the session's process: it runs, and it started
+    // long enough ago for its record to predate the message.
+    let Some(began) = attend_presence::process::started_at(1) else { return };
+    let Ok(up) = began.elapsed() else { return };
+    if up < 15 * MINUTE {
+        eprintln!("skipped: pid 1 started {up:?} ago, too recently to date a session before the message");
+        return;
+    }
+    let f = Fixture::new("del-running");
+    let project = "/srv/running";
+    let started = (std::time::SystemTime::now() - 10 * MINUTE).max(began + Duration::from_secs(1));
+    let started = started.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+    std::fs::write(
+        f.home.join(".claude").join("sessions").join("pid1.json"),
+        format!(r#"{{"pid":1,"sessionId":"{R2}","cwd":"{project}","startedAt":{started}}}"#),
+    )
+    .unwrap();
+    let tray = claude_sessions::attend_key(project);
+    signal(&f, &tray, "dm-1", &format!("claude:{R3}|o|/tmp/o|to:{R2}|dm for R2"), 5 * MINUTE);
+    let v = delete(&f, &["--everywhere"]);
+    assert_eq!(marked(&v), Vec::<String>::new(), "{v}");
+    assert_eq!(kept(&v, R2), 1);
+}
+
+/// The caller's own running session is a recipient like any other.
+#[test]
+fn the_callers_own_unread_mail_is_kept() {
+    let f = Fixture::new("del-caller");
+    post(&f, "_broadcast", "fresh-1", "the caller has not read this", Duration::from_secs(100));
+    let v = delete(&f, &["--open"]);
+    assert_eq!(marked(&v), Vec::<String>::new());
+    assert_eq!(kept(&v, &f.sid), 1);
 }
