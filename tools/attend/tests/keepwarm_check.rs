@@ -57,6 +57,8 @@ impl Warm {
         // `ways settings ...` answers with settings.json beside the reading,
         // when a test wrote one; anything else is `ways context --json`.
         let settings = f.home.join("settings.json");
+        // The keepalive policy runs only where ways says enabled: true.
+        std::fs::write(&settings, r#"{"view":"effective","keys":{"attend_mod.keepalive.enabled":{"value":true}}}"#).unwrap();
         std::fs::write(
             &ways,
             format!(
@@ -371,14 +373,15 @@ fn the_settings_bound_the_policy_and_route_the_wrap() {
     let w = Warm::new("ka-settings");
     std::fs::write(
         w.f.home.join("settings.json"),
-        r#"{"view":"effective","keys":{"attend_mod.keepalive.max_keepalives":{"value":0},"attend_mod.keepalive.wrap":{"value":"file"},"attend_mod.keepalive.wrap_file":{"value":"/tmp/x/{session}.md"}}}"#,
+        r#"{"view":"effective","keys":{"attend_mod.keepalive.enabled":{"value":true},"attend_mod.keepalive.max_keepalives":{"value":0},"attend_mod.keepalive.wrap":{"value":"file"},"attend_mod.keepalive.wrap_file":{"value":"{state}/wrap/{session}.md"}}}"#,
     )
     .unwrap();
     w.reading(&[(50 * MIN, 200_000, 500)]);
     let d = policy(&w, "off");
     assert_eq!(d["action"], "wrap", "{d}");
     assert_eq!(d["wrap"]["dest"], "file");
-    assert_eq!(d["wrap"]["file"], format!("/tmp/x/{}.md", w.f.sid));
+    let want = format!("{}/wrap/{}.md", w.f.home.join("state").join("agent-ways").display(), w.f.sid);
+    assert_eq!(d["wrap"]["file"], want, "under the ways state root");
     assert!(d["text"].as_str().unwrap().starts_with("wrap: "), "{d}");
     assert_eq!(policy(&w, "off")["state"], "wrapped");
     // The mod records where the reply went; the card names it.
@@ -403,5 +406,56 @@ fn keepwarm_off_stops_the_policy_until_the_next_prompt() {
     assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("none"), Some("stopped")), "{d}");
     assert!(w.run(&["keepwarm", "reset"]).status.success());
     assert_eq!(policy(&w, "off")["action"], "keepalive");
+}
+
+/// Two checks on one session id at once take turns under the session's
+/// lock: the wrap is decided once.
+#[test]
+fn concurrent_checks_decide_one_wrap() {
+    let w = Warm::new("ka-lock");
+    std::fs::write(
+        w.f.home.join("settings.json"),
+        r#"{"view":"effective","keys":{"attend_mod.keepalive.enabled":{"value":true},"attend_mod.keepalive.max_keepalives":{"value":0}}}"#,
+    )
+    .unwrap();
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let actions: Vec<String> = std::thread::scope(|s| {
+        let runs: Vec<_> = (0..6).map(|_| s.spawn(|| policy(&w, "off")["action"].as_str().unwrap_or_default().to_string())).collect();
+        runs.into_iter().map(|r| r.join().unwrap()).collect()
+    });
+    assert_eq!(actions.iter().filter(|a| *a == "wrap").count(), 1, "{actions:?}");
+}
+
+/// Settings ways cannot answer run no policy, and the card says why.
+#[test]
+fn unreadable_settings_run_no_policy() {
+    let w = Warm::new("ka-unreadable");
+    std::fs::write(w.f.home.join("settings.json"), "not json").unwrap();
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["policy"].as_bool()), (Some("none"), Some(false)), "{d}");
+    let out = w.run(&["keepwarm", "status"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("keepalive   off: the attend_mod settings could not be read (armed windows only)"), "{text}");
+}
+
+/// A transcript ways cannot read leaves the policy running: the host is
+/// told to ask again.
+#[test]
+fn an_unreadable_transcript_keeps_the_policy_and_asks_again() {
+    let w = Warm::new("ka-noreading");
+    let d = policy(&w, "off");
+    assert_eq!((d["policy"].as_bool(), d["retry"].as_bool(), d["state"].as_str()), (Some(true), Some(true), Some("running")), "{d}");
+    assert!(d["next_at"].as_u64().unwrap() > now());
+}
+
+/// `reset --at` records the prompt the mod held while autocompact was on.
+#[test]
+fn reset_at_records_a_held_prompt() {
+    let w = Warm::new("ka-reset-at");
+    let at = now() - 30 * MIN;
+    assert!(w.run(&["keepwarm", "reset", "--at", &at.to_string()]).status.success());
+    let ledger: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(w.ledger()).unwrap()).unwrap();
+    assert_eq!(ledger["policy"]["operator_at"].as_u64(), Some(at));
 }
 }

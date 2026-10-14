@@ -145,6 +145,11 @@ pub struct ArmFile {
     pub deadline: u64,
     pub armed_at: u64,
     pub window_secs: u64,
+    /// Armed by the sensor after a paid cold write, not by the operator. The
+    /// keepalive policy ignores such a window (ADR-414 item 5): it would
+    /// otherwise wake the session past the count the operator set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -190,6 +195,16 @@ pub struct Cursor {
     pub ctx: u64,
     pub model: String,
     pub deadline: u64,
+}
+
+/// Holds `session_id`'s keepwarm files for one read-step-write: two
+/// processes on one session id take turns, so a keepalive or a wrap is
+/// never decided twice. Released when the value drops.
+pub fn lock_session(dir: &Path, session_id: &str) -> std::io::Result<std::fs::File> {
+    std::fs::create_dir_all(dir)?;
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(format!("{session_id}.lock")))?;
+    f.lock()?;
+    Ok(f)
 }
 
 pub fn arm_path(dir: &Path, session_id: &str) -> PathBuf {
@@ -366,6 +381,8 @@ pub struct Outcome {
     pub observations: Vec<(f64, String)>,
     pub logs: Vec<String>,
     pub arm_write: Option<u64>,
+    /// `arm_write` is the sensor's own arm after a paid cold write.
+    pub auto_arm: bool,
     pub changed: bool,
 }
 
@@ -497,6 +514,7 @@ impl State {
                     self.deadline = until;
                     self.stopped = None;
                     out.arm_write = Some(self.deadline);
+                    out.auto_arm = true;
                     line.push_str(&format!(", keeping the cache warm for {} so it is not paid again today", fmt_duration(until - now)));
                 }
                 out.logs.push(line);
@@ -697,7 +715,7 @@ pub fn settle(dir: &Path, session_id: &str, state: &State, arm_before: Option<&A
         if on_disk != started_from {
             eprintln!("[attend] keepwarm: arm file changed during the poll, leaving it");
         } else {
-            let file = ArmFile { deadline, armed_at: now, window_secs: deadline.saturating_sub(now) };
+            let file = ArmFile { deadline, armed_at: now, window_secs: deadline.saturating_sub(now), auto: out.auto_arm && deadline > 0 };
             if let Err(e) = write_arm(dir, session_id, &file) {
                 eprintln!("[attend] keepwarm: could not write the arm file: {e}");
             }
@@ -722,6 +740,7 @@ pub fn check_once(session_id: &str, dir: &Path, working_dir: &str, now: u64) -> 
         eprintln!("[attend] keepwarm: could not read the session transcript through `ways context`");
         return None;
     };
+    let _lock = lock_session(dir, session_id).ok();
     let mut state = State::resume(read_ledger(dir, session_id));
     let arm = read_arm(dir, session_id);
     let mut out = state.step(&reading, arm.as_ref(), now);
@@ -805,7 +824,7 @@ mod tests {
     }
 
     fn armed(deadline: u64) -> ArmFile {
-        ArmFile { deadline, armed_at: 0, window_secs: DEFAULT_WINDOW_SECS }
+        ArmFile { deadline, armed_at: 0, window_secs: DEFAULT_WINDOW_SECS, auto: false }
     }
 
     /// A baselined state at t=1000 with a 200k context and one request on record.
@@ -1121,7 +1140,7 @@ mod tests {
     #[test]
     fn arm_and_ledger_round_trip_through_files() {
         let dir = std::env::temp_dir().join(format!("keepwarm-test-{}", std::process::id()));
-        let arm = ArmFile { deadline: 42, armed_at: 1, window_secs: 41 };
+        let arm = ArmFile { deadline: 42, armed_at: 1, window_secs: 41, auto: false };
         write_arm(&dir, "sid", &arm).unwrap();
         assert_eq!(read_arm(&dir, "sid"), Some(arm));
         let ledger = Ledger { misses: vec![Miss { at: 1, tokens: 2, usd: Some(0.5) }], ..Ledger::default() };

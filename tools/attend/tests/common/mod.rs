@@ -204,6 +204,7 @@ impl Fixture {
             .env("XDG_CACHE_HOME", self.home.join(".cache"))
             .env("XDG_CONFIG_HOME", self.home.join("config"))
             .env("XDG_DATA_HOME", self.home.join("data"))
+            .env("XDG_STATE_HOME", self.home.join("state"))
             .env("USER", "fixture-human")
             .env_remove("CLAUDE_SESSION_ID")
             .env_remove("CLAUDE_CONFIG_DIR")

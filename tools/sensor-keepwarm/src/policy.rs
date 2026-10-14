@@ -15,7 +15,7 @@ use crate::{
     cache_lapsed, fmt_duration, fmt_usd, wake_line, ArmFile, Outcome, Reading, State, BIG_TOKENS, PING_AFTER_SECS, TTL_SECS,
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// `attend_mod.keepalive.max_keepalives`.
 pub const DEFAULT_MAX: u32 = 8;
@@ -177,6 +177,9 @@ impl Gate {
 /// The `attend_mod` keys the policy reads (ADR-414 item 8).
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// The settings were read. Unread, the policy is off: `enabled` fails
+    /// closed (ADR-414 item 8).
+    pub settings_ok: bool,
     /// `attend_mod.keepwarm`: off turns off every cache wake the mod drives.
     pub keepwarm_on: bool,
     pub enabled: bool,
@@ -192,6 +195,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            settings_ok: true,
             keepwarm_on: true,
             enabled: true,
             max: DEFAULT_MAX,
@@ -207,11 +211,14 @@ impl Default for Config {
 
 impl Config {
     /// From `ways settings list attend_mod --json --effective`. A key that
-    /// is absent, or of the wrong type or out of range, keeps its default;
-    /// no document at all is every default.
+    /// is absent, or of the wrong type or out of range, keeps its default,
+    /// except `enabled`, which fails closed: only an explicit true runs the
+    /// policy. No document, or one that does not parse, is the policy off.
     pub fn from_settings(doc: Option<&str>) -> Config {
         let d = Config::default();
-        let Some(v) = doc.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()) else { return d };
+        let Some(v) = doc.and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()) else {
+            return Config { settings_ok: false, enabled: false, ..d };
+        };
         let key = |k: &str| v.get("keys").and_then(|keys| keys.get(format!("attend_mod.{k}"))).and_then(|e| e.get("value")).cloned();
         let text = |k: &str| key(k).and_then(|x| x.as_str().map(str::to_string));
         let int = |k: &str| key(k).and_then(|x| x.as_u64());
@@ -223,8 +230,9 @@ impl Config {
         };
         let zone = text("keepalive.timezone").unwrap_or_default();
         Config {
+            settings_ok: true,
             keepwarm_on: text("keepwarm").as_deref() != Some("off"),
-            enabled: key("keepalive.enabled").and_then(|x| x.as_bool()).unwrap_or(d.enabled),
+            enabled: key("keepalive.enabled").and_then(|x| x.as_bool()) == Some(true),
             max: int("keepalive.max_keepalives")
                 .filter(|n| (MAX_RANGE.0 as u64..=MAX_RANGE.1 as u64).contains(n))
                 .map_or(d.max, |n| n as u32),
@@ -245,7 +253,9 @@ impl Config {
 
     /// Why the policy does not run with `gate`, or `None` when it runs.
     pub fn why_off(&self, gate: Gate) -> Option<&'static str> {
-        if !self.keepwarm_on {
+        if !self.settings_ok {
+            Some("the attend_mod settings could not be read")
+        } else if !self.keepwarm_on {
             Some("attend_mod.keepwarm is off")
         } else if !self.enabled {
             Some("attend_mod.keepalive.enabled is false")
@@ -280,6 +290,45 @@ impl Site {
         std::path::Path::new(&self.project).file_name().map_or_else(|| self.project.clone(), |n| n.to_string_lossy().into_owned())
     }
 
+    /// The default wrap file, `{state}/wrap/<session>.md`.
+    pub fn default_wrap_file(&self) -> PathBuf {
+        self.state_root.join("wrap").join(format!("{}.md", self.session_id))
+    }
+
+    /// `wrap_file` expanded ([`Site::wrap_file`]) and confined: it must name
+    /// `{session}`, so two sessions never write one file, and land under
+    /// `{state}/wrap/` through no symlink, since a project's checked-in
+    /// config can set it and the mod writes wherever it points. Anything
+    /// else falls back to the default file, with why.
+    pub fn confined_wrap_file(&self, template: &str, windows: &Windows, now: u64) -> (String, Option<String>) {
+        let base = self.state_root.join("wrap");
+        let default = self.default_wrap_file();
+        let refuse = |why: &str| {
+            let note = format!("wrap_file \"{template}\" refused: {why}; the reply goes to {}", default.display());
+            (default.to_string_lossy().into_owned(), Some(note))
+        };
+        if !template.contains("{session}") {
+            return refuse("it names no {session}, so sessions would overwrite one another's wrap");
+        }
+        let Some(path) = normalize(Path::new(&self.wrap_file(template, windows, now))) else {
+            return refuse("it climbs above the root");
+        };
+        let Ok(rest) = path.strip_prefix(&base) else {
+            return refuse("it is outside {state}/wrap/");
+        };
+        if rest.as_os_str().is_empty() {
+            return refuse("it names the wrap directory itself");
+        }
+        let mut at = base.clone();
+        for part in rest.components() {
+            at.push(part);
+            if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+                return refuse("it passes through a symlink");
+            }
+        }
+        (path.to_string_lossy().into_owned(), None)
+    }
+
     /// `wrap_file` with `{state}`, `{project}`, `{session}` and `{date}`
     /// expanded, a leading `~` read as home, and a relative path read from
     /// the project.
@@ -296,6 +345,43 @@ impl Site {
         let path = if path.is_absolute() { path } else { PathBuf::from(&self.project).join(path) };
         path.to_string_lossy().into_owned()
     }
+}
+
+/// `path` with `.` and `..` resolved lexically; `None` when `..` climbs
+/// above the root.
+fn normalize(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::ParentDir => {
+                if !out.pop() {
+                    return None;
+                }
+            }
+            Component::CurDir => {}
+            other => out.push(other),
+        }
+    }
+    Some(out)
+}
+
+/// Whether `to` names the `#open` channel, which reaches every listening
+/// session on the host.
+fn is_open_channel(to: &str) -> bool {
+    to.strip_prefix('#').is_some_and(|c| c.trim().eq_ignore_ascii_case("open"))
+}
+
+/// What the configuration asks for that the route refuses, for the card.
+pub fn route_notes(cfg: &Config, site: &Site, now: u64) -> Vec<String> {
+    let mut notes = Vec::new();
+    if let (_, Some(n)) = site.confined_wrap_file(&cfg.wrap_file, &cfg.windows, now) {
+        notes.push(n);
+    }
+    if cfg.wrap == WrapDest::Send && is_open_channel(&cfg.wrap_to) {
+        notes.push(format!("wrap_to \"{}\" refused: #open reaches every listening session; the reply goes to {}", cfg.wrap_to, site.operator));
+    }
+    notes
 }
 
 /// `none`, `keepalive` or `wrap`.
@@ -320,6 +406,9 @@ pub struct WrapRoute {
     pub after: &'static str,
     /// The line a `send` body opens with.
     pub handoff: String,
+    /// What the route refused of the configuration (a `wrap_file` outside
+    /// `{state}/wrap/`, `wrap_to` `#open`), and where the reply goes instead.
+    pub notes: Vec<String>,
 }
 
 /// What `attend keepwarm check --policy --json` prints.
@@ -344,6 +433,9 @@ pub struct Decision {
     pub wraps_at_hm: Option<String>,
     pub wrapped_at_hm: Option<String>,
     pub wrap: Option<WrapRoute>,
+    /// The judgment could not be made (the transcript was unreadable): ask
+    /// again at `next_at`, a bounded number of times.
+    pub retry: bool,
 }
 
 impl Decision {
@@ -361,6 +453,7 @@ impl Decision {
             wraps_at_hm: None,
             wrapped_at_hm: p.wrapped_at.map(|t| cfg.windows.hm(t)),
             wrap: None,
+            retry: false,
         }
     }
 }
@@ -400,7 +493,7 @@ fn wraps_at(cfg: &Config, count: u32, due: u64, ttl: u64) -> Option<u64> {
 }
 
 /// The wrap turn's text (ADR-414 item 6).
-fn wrap_text(cfg: &Config, p: &Policy, route: &WrapRoute, at_bound: bool, now: u64) -> String {
+fn wrap_text(cfg: &Config, site: &Site, p: &Policy, route: &WrapRoute, at_bound: bool, now: u64) -> String {
     let since = p.since().map_or_else(|| "a long idle stretch".to_string(), |t| format!("{} since the operator's last prompt", fmt_duration(now.saturating_sub(t))));
     let first = if at_bound {
         format!("wrap: {since} and {} keepalives, the most this session allows.", p.count)
@@ -412,17 +505,24 @@ fn wrap_text(cfg: &Config, p: &Policy, route: &WrapRoute, at_bound: bool, now: u
     let mut body = "The operator is away. Run the wrap skill with the argument stay: square the task list and write the continuation prompt. Ask no questions, land nothing and start no new work. Nothing keeps the prompt cache warm after this turn.".to_string();
     match cfg.wrap {
         WrapDest::File => body.push_str(&format!(" The mod saves your final reply to {}.", route.file)),
-        WrapDest::Send => body.push_str(&format!(" The mod sends your final reply to {} over attend, where another session may take up the work.", route.to)),
+        WrapDest::Send if route.to == site.operator => {
+            body.push_str(&format!(" The mod sends your final reply to your operator, {}, over attend.", route.to));
+        }
+        WrapDest::Send if route.to.starts_with('#') => {
+            body.push_str(&format!(" The mod posts your final reply in {} over attend, where another session may take up the work.", route.to));
+        }
+        WrapDest::Send => body.push_str(&format!(" The mod sends your final reply to {} over attend as a handoff.", route.to)),
         WrapDest::Transcript | WrapDest::Off => {}
     }
     format!("{first}\n{body}")
 }
 
 fn route(cfg: &Config, site: &Site, now: u64) -> WrapRoute {
-    let to = if cfg.wrap_to.is_empty() { site.operator.clone() } else { cfg.wrap_to.clone() };
+    let to = if cfg.wrap_to.is_empty() || is_open_channel(&cfg.wrap_to) { site.operator.clone() } else { cfg.wrap_to.clone() };
     WrapRoute {
         dest: cfg.wrap.as_str(),
-        file: site.wrap_file(&cfg.wrap_file, &cfg.windows, now),
+        file: site.confined_wrap_file(&cfg.wrap_file, &cfg.windows, now).0,
+        notes: route_notes(cfg, site, now),
         to,
         after: cfg.after_wrap.as_str(),
         handoff: format!(
@@ -455,6 +555,19 @@ pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &C
         return (out, d);
     }
 
+    // The sensor's own arm after a paid cold write is no word of the
+    // operator's: the policy reads it as no window, so it cannot carry
+    // uncounted wakes past the count. The cursor forgets it the same way,
+    // so the step sees no change of the arm file.
+    let arm = match arm {
+        Some(a) if a.auto => {
+            if state.deadline == a.deadline {
+                state.deadline = 0;
+            }
+            None
+        }
+        other => other,
+    };
     let had_ping = state.pinged_at.is_some();
     let ping_before = state.last_ping.clone();
     let resumed = state.baselined;
@@ -561,7 +674,7 @@ pub fn step(state: &mut State, reading: &Reading, arm: Option<&ArmFile>, cfg: &C
     let r = route(cfg, site, now);
     let mut d = Decision::new(cfg, &p, true, "wrapped", if at_bound { "the count is spent" } else { "outside the keepalive hours" });
     d.action = Action::Wrap;
-    d.text = Some(wrap_text(cfg, &p, &r, at_bound, now));
+    d.text = Some(wrap_text(cfg, site, &p, &r, at_bound, now));
     d.wrap = Some(r);
     (out, d)
 }
@@ -605,7 +718,7 @@ impl WrapOutcome {
 
 /// The status card's keepalive and cost lines (ADR-414 item 9), for a
 /// session whose ledger is `state` and whose transcript reads `reading`.
-pub fn card(state: &State, reading: &Reading, cfg: &Config, now: u64) -> Vec<String> {
+pub fn card(state: &State, reading: &Reading, cfg: &Config, site: &Site, now: u64) -> Vec<String> {
     let p = &state.policy;
     let mut lines = Vec::new();
     let Some(gate) = p.gate.as_deref() else {
@@ -657,6 +770,11 @@ pub fn card(state: &State, reading: &Reading, cfg: &Config, now: u64) -> Vec<Str
     }
     if let Some(z) = &cfg.windows.bad_zone {
         lines.push(format!("keepalive   timezone \"{z}\" is unknown; the host's zone is used"));
+    }
+    if cfg.wrap != WrapDest::Off {
+        for n in route_notes(cfg, site, now) {
+            lines.push(format!("keepalive   {n}"));
+        }
     }
     let wakes = if p.count == 1 { "wake" } else { "wakes" };
     let left = cfg.max.saturating_sub(p.count) as f64;

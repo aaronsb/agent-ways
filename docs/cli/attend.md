@@ -593,7 +593,11 @@ Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due,
 
 The operator prompted: the keepalive count starts again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session (ADR-414 item 4)
 
-**Usage:** `attend keepwarm reset`
+**Usage:** `attend keepwarm reset [OPTIONS]`
+
+###### **Options:**
+
+* `--at <AT>` — When the operator prompted, in epoch seconds (default now). The mod passes a prompt it held while autocompact was on
 
 
 

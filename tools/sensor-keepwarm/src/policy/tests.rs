@@ -259,7 +259,7 @@ fn with_autocompact_on_or_unknown_the_policy_does_not_run() {
 #[test]
 fn with_autocompact_on_an_armed_window_still_wakes_at_fifty_minutes() {
     let mut s = Session::new(MONDAY, 200_000);
-    let arm = ArmFile { deadline: MONDAY + 2 * 3600, armed_at: MONDAY, window_secs: 7200 };
+    let arm = ArmFile { deadline: MONDAY + 2 * 3600, armed_at: MONDAY, window_secs: 7200, auto: false };
     let d = s.check_armed(&cfg(), Gate::On, Some(&arm), MONDAY + 49 * MIN);
     assert_eq!(d.action, Action::None);
     let d = s.check_armed(&cfg(), Gate::On, Some(&arm), MONDAY + 50 * MIN);
@@ -277,7 +277,7 @@ fn keepalive_disabled_or_keepwarm_off_turns_the_policy_off() {
     assert_eq!(d.reason, "attend_mod.keepalive.enabled is false");
     let mut c = cfg();
     c.keepwarm_on = false;
-    let arm = ArmFile { deadline: MONDAY + 2 * 3600, armed_at: MONDAY, window_secs: 7200 };
+    let arm = ArmFile { deadline: MONDAY + 2 * 3600, armed_at: MONDAY, window_secs: 7200, auto: false };
     let d = s.check_armed(&c, Gate::Off, Some(&arm), MONDAY + 51 * MIN);
     assert_eq!(d.action, Action::None, "keepwarm off wakes nothing, armed or not");
 }
@@ -362,7 +362,7 @@ fn a_warm_keepalive_adds_its_cost() {
 fn an_armed_window_overrides_the_count_and_sends_no_wrap() {
     let mut c = cfg();
     c.max = 0;
-    let arm = ArmFile { deadline: MONDAY + 3 * 3600, armed_at: MONDAY, window_secs: 3 * 3600 };
+    let arm = ArmFile { deadline: MONDAY + 3 * 3600, armed_at: MONDAY, window_secs: 3 * 3600, auto: false };
     let mut s = Session::new(MONDAY, 200_000);
     let d = s.check_armed(&c, Gate::Off, Some(&arm), MONDAY + 50 * MIN);
     assert_eq!((d.action, d.policy), (Action::Keepalive, true));
@@ -417,10 +417,16 @@ fn the_wrap_sent_over_attend_goes_to_the_operator_by_default_with_a_handoff_line
     let r = d.wrap.unwrap();
     assert_eq!(r.to, "aaron");
     assert_eq!(r.handoff, "handoff: continuation prompt from Chaucer-alpha (agent-ways), wrapped at 00:50 while its operator was away.");
-    assert!(d.text.unwrap().ends_with(" The mod sends your final reply to aaron over attend, where another session may take up the work."));
+    assert!(d.text.unwrap().ends_with(" The mod sends your final reply to your operator, aaron, over attend."));
     c.wrap_to = "#deploy".into();
     let mut s = Session::new(MONDAY, 200_000);
-    assert_eq!(s.check(&c, Gate::Off, MONDAY + 50 * MIN).wrap.unwrap().to, "#deploy");
+    let d = s.check(&c, Gate::Off, MONDAY + 50 * MIN);
+    assert_eq!(d.wrap.unwrap().to, "#deploy");
+    assert!(d.text.unwrap().ends_with(" The mod posts your final reply in #deploy over attend, where another session may take up the work."));
+    c.wrap_to = "Chaucer-beta".into();
+    let mut s = Session::new(MONDAY, 200_000);
+    let d = s.check(&c, Gate::Off, MONDAY + 50 * MIN);
+    assert!(d.text.unwrap().ends_with(" The mod sends your final reply to Chaucer-beta over attend as a handoff."));
 }
 
 #[test]
@@ -443,8 +449,8 @@ fn the_settings_are_read_and_a_wrong_type_keeps_its_default() {
     assert_eq!(c.windows.dropped.len(), 1);
     assert_eq!((c.wrap, c.wrap_to.as_str(), c.after_wrap), (WrapDest::Send, "#deploy", AfterWrap::Compact));
     assert_eq!(c.wrap_file, DEFAULT_WRAP_FILE);
-    let d = Config::from_settings(None);
-    assert!(d.enabled && d.keepwarm_on);
+    let d = Config::from_settings(Some(r#"{"keys":{"attend_mod.keepalive.enabled":{"value":true}}}"#));
+    assert!(d.enabled && d.keepwarm_on && d.settings_ok);
     assert_eq!((d.max, d.margin_secs, d.wrap), (8, 600, WrapDest::Transcript));
     assert_eq!(d.windows.describe(), "daily 00:00-24:00");
     let out_of_range = Config::from_settings(Some(r#"{"keys":{"attend_mod.keepalive.max_keepalives":{"value":99}}}"#));
@@ -460,7 +466,7 @@ fn the_card_shows_the_count_the_next_due_point_the_wrap_and_the_cost() {
     s.check(&cfg(), Gate::Off, MONDAY + 50 * MIN);
     s.turn(MONDAY + 50 * MIN + 20);
     s.check(&cfg(), Gate::Off, MONDAY + 60 * MIN);
-    let lines = card(&s.state, &s.reading(), &cfg(), MONDAY + 60 * MIN);
+    let lines = card(&s.state, &s.reading(), &cfg(), &site(), MONDAY + 60 * MIN);
     assert_eq!(
         lines[0],
         "keepalive   1 of 8 since your prompt at 23:55 · next in 40m · wraps about 07:30 · windows daily 00:00-24:00"
@@ -472,16 +478,16 @@ fn the_card_shows_the_count_the_next_due_point_the_wrap_and_the_cost() {
 #[test]
 fn the_card_says_why_the_policy_is_off_or_stopped() {
     let mut s = Session::new(MONDAY, 200_000);
-    assert!(card(&s.state, &s.reading(), &cfg(), MONDAY)[0].contains("not run in this session (the attend mod runs it"));
+    assert!(card(&s.state, &s.reading(), &cfg(), &site(), MONDAY)[0].contains("not run in this session (the attend mod runs it"));
     s.check(&cfg(), Gate::On, MONDAY + MIN);
-    assert_eq!(card(&s.state, &s.reading(), &cfg(), MONDAY)[0], "keepalive   off: autocompact is on (armed windows only)");
+    assert_eq!(card(&s.state, &s.reading(), &cfg(), &site(), MONDAY)[0], "keepalive   off: autocompact is on (armed windows only)");
     s.check(&cfg(), Gate::Off, MONDAY + 59 * MIN);
-    assert!(card(&s.state, &s.reading(), &cfg(), MONDAY + 59 * MIN)[0].starts_with("keepalive   stopped: the cache had lapsed"));
+    assert!(card(&s.state, &s.reading(), &cfg(), &site(), MONDAY + 59 * MIN)[0].starts_with("keepalive   stopped: the cache had lapsed"));
     let mut c = windows(&["Mon 9am-5pm"]);
     c.windows.bad_zone = Some("Mars/Base".into());
     let mut s = Session::new(MONDAY, 200_000);
     s.check(&c, Gate::Off, MONDAY + MIN);
-    let lines = card(&s.state, &s.reading(), &c, MONDAY + MIN);
+    let lines = card(&s.state, &s.reading(), &c, &site(), MONDAY + MIN);
     assert!(lines.iter().any(|l| l.starts_with("keepalive   window entry \"Mon 9am-5pm\" dropped")), "{lines:#?}");
     assert!(lines.iter().any(|l| l.contains("timezone \"Mars/Base\" is unknown")), "{lines:#?}");
 }
@@ -493,7 +499,7 @@ fn the_card_names_where_the_wrap_went() {
     let mut s = Session::new(MONDAY, 200_000);
     s.check(&c, Gate::Off, MONDAY + 50 * MIN);
     s.state.policy.wrap_outcome = Some(WrapOutcome::Refused.describe("Chaucer-beta: no live session answers to that name"));
-    let line = &card(&s.state, &s.reading(), &c, MONDAY + 60 * MIN)[0];
+    let line = &card(&s.state, &s.reading(), &c, &site(), MONDAY + 60 * MIN)[0];
     assert_eq!(line, "keepalive   wrapped at 00:50 after 0 keepalives since 00:00 · handoff refused: Chaucer-beta: no live session answers to that name");
 }
 
@@ -503,4 +509,97 @@ fn the_policy_survives_a_ledger_without_it() {
     let l: Ledger = serde_json::from_str(old).unwrap();
     assert!(l.policy.is_empty());
     assert!(!serde_json::to_string(&l).unwrap().contains("policy"), "an empty policy is not written");
+}
+
+/// ADR-414 item 8 as amended: `enabled` fails closed. Settings that cannot
+/// be read, or a document with no `enabled` (a ways that does not know the
+/// key), run no policy.
+#[test]
+fn unreadable_settings_or_no_enabled_key_turn_the_policy_off() {
+    for (doc, why) in [
+        (None, "the attend_mod settings could not be read"),
+        (Some("not json"), "the attend_mod settings could not be read"),
+        (Some(r#"{"keys":{}}"#), "attend_mod.keepalive.enabled is false"),
+        (Some(r#"{"keys":{"attend_mod.keepalive.enabled":{"value":"yes"}}}"#), "attend_mod.keepalive.enabled is false"),
+    ] {
+        let c = Config::from_settings(doc);
+        assert_eq!(c.why_off(Gate::Off), Some(why), "{doc:?}");
+        let mut s = Session::new(MONDAY, 200_000);
+        let d = s.check(&c, Gate::Off, MONDAY + 50 * MIN);
+        assert_eq!((d.action, d.policy), (Action::None, false), "{doc:?}");
+        let lines = card(&s.state, &s.reading(), &c, &site(), MONDAY + 50 * MIN);
+        assert_eq!(lines[0], format!("keepalive   off: {why} (armed windows only)"));
+    }
+}
+
+/// The sensor's own arm after a paid cold write is no operator's word: the
+/// policy reads it as no window, so the count still bounds the stretch.
+#[test]
+fn an_auto_arm_is_ignored_by_the_policy_and_an_operator_arm_is_not() {
+    let mut c = cfg();
+    c.max = 0;
+    for (auto, want) in [(true, Action::Wrap), (false, Action::Keepalive)] {
+        let mut s = Session::new(MONDAY, 200_000);
+        let arm = ArmFile { deadline: MONDAY + 3 * 3600, armed_at: MONDAY, window_secs: 3 * 3600, auto };
+        // The cursor knows the window from the plain check that armed it.
+        s.state.deadline = arm.deadline;
+        let d = s.check_armed(&c, Gate::Off, Some(&arm), MONDAY + 50 * MIN);
+        assert_eq!(d.action, want, "auto {auto}");
+    }
+}
+
+/// wrap_file is confined to {state}/wrap/, names {session}, and passes
+/// through no symlink; anything else falls back to the default, with why.
+#[test]
+fn wrap_file_is_confined_to_the_wrap_directory() {
+    let w = Windows::default().with_zone(TimeZone::UTC);
+    let default = "/state/agent-ways/wrap/sid-1.md".to_string();
+    assert_eq!(site().confined_wrap_file("{state}/wrap/{date}-{session}.md", &w, MONDAY), ("/state/agent-ways/wrap/2026-10-12-sid-1.md".into(), None));
+    assert_eq!(site().confined_wrap_file("{state}/wrap/{project}/{session}.md", &w, MONDAY).1, None);
+    for (template, why) in [
+        ("~/.bashrc", "names no {session}"),
+        ("{state}/wrap/handoff.md", "names no {session}"),
+        ("~/.ssh/{session}", "outside {state}/wrap/"),
+        ("{state}/wrap/../../../etc/{session}", "outside {state}/wrap/"),
+        ("/../../{session}", "climbs above the root"),
+        ("{state}/wrap{session}", "outside {state}/wrap/"),
+    ] {
+        let (file, note) = site().confined_wrap_file(template, &w, MONDAY);
+        assert_eq!(file, default, "{template}");
+        let note = note.unwrap_or_default();
+        assert!(note.contains(why) && note.ends_with("the reply goes to /state/agent-ways/wrap/sid-1.md"), "{template}: {note}");
+    }
+    // A symlink under the wrap directory is not followed out of it.
+    let root = std::env::temp_dir().join(format!("keepwarm-wrap-test-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("agent-ways/wrap")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("/etc", root.join("agent-ways/wrap/out")).unwrap();
+    let s = Site { state_root: root.join("agent-ways"), ..site() };
+    let (file, note) = s.confined_wrap_file("{state}/wrap/out/{session}", &w, MONDAY);
+    std::fs::remove_dir_all(&root).ok();
+    #[cfg(unix)]
+    {
+        assert_eq!(file, root.join("agent-ways/wrap/sid-1.md").to_string_lossy());
+        assert!(note.as_deref().unwrap_or_default().contains("passes through a symlink"));
+    }
+    let _ = (file, note);
+}
+
+/// wrap_to #open would broadcast to every listening session: refused, and
+/// the reply goes to the operator.
+#[test]
+fn wrap_to_open_is_refused() {
+    let mut c = cfg();
+    c.max = 0;
+    c.wrap = WrapDest::Send;
+    for to in ["#open", "#OPEN", "# open "] {
+        c.wrap_to = to.into();
+        let mut s = Session::new(MONDAY, 200_000);
+        let r = s.check(&c, Gate::Off, MONDAY + 50 * MIN).wrap.unwrap();
+        assert_eq!(r.to, "aaron", "{to}");
+        assert!(r.notes.iter().any(|n| n.contains("#open reaches every listening session")), "{to}: {:?}", r.notes);
+    }
+    c.wrap_to = "#deploy".into();
+    let mut s = Session::new(MONDAY, 200_000);
+    assert!(s.check(&c, Gate::Off, MONDAY + 50 * MIN).wrap.unwrap().notes.is_empty());
 }

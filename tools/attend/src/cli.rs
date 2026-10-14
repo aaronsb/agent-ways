@@ -576,7 +576,12 @@ pub enum KeepwarmCmd {
     /// The operator prompted: the keepalive count starts again, and a sent
     /// wrap and a stop are cleared. The attend mod runs it for each prompt
     /// typed in the session (ADR-414 item 4)
-    Reset,
+    Reset {
+        /// When the operator prompted, in epoch seconds (default now). The
+        /// mod passes a prompt it held while autocompact was on
+        #[arg(long)]
+        at: Option<u64>,
+    },
     /// Record where the keepalive policy's wrap reply went, for the status
     /// card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
     Wrapped {

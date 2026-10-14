@@ -7,14 +7,17 @@ use crate::cli::{KeepwarmCheckArgs, KeepwarmCmd};
 use crate::util::keepwarm_dir;
 use sensor_keepwarm::policy::{self, Config, Gate, Policy, Site, WrapOutcome};
 use sensor_keepwarm::{
-    card, card_state, check_once, fmt_duration, parse_duration, read_arm, read_context, read_ledger, settle, write_arm, write_ledger,
-    ArmFile, State, DEFAULT_WINDOW_SECS, PING_AFTER_SECS,
+    card, card_state, check_once, fmt_duration, lock_session, parse_duration, read_arm, read_context, read_ledger, settle, write_arm,
+    write_ledger, ArmFile, State, DEFAULT_WINDOW_SECS, PING_AFTER_SECS,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// When a policy check that could not read the transcript asks to be run
 /// again.
 const RETRY_SECS: u64 = 300;
+/// How long the policy check reuses its read of the attend_mod settings,
+/// unless a settings file it reads from changed since.
+const SETTINGS_KEPT_SECS: u64 = 300;
 
 pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
     let ident = attend_presence::session::identity();
@@ -41,7 +44,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                     }
                 },
             };
-            let arm = ArmFile { deadline: now + secs, armed_at: now, window_secs: secs };
+            let arm = ArmFile { deadline: now + secs, armed_at: now, window_secs: secs, auto: false };
             if let Err(e) = write_arm(&dir, sid, &arm) {
                 eprintln!("keepwarm: could not write the arm file: {e}");
                 std::process::exit(1);
@@ -55,7 +58,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             );
         }
         KeepwarmCmd::Off => {
-            let arm = ArmFile { deadline: 0, armed_at: now, window_secs: 0 };
+            let arm = ArmFile { deadline: 0, armed_at: now, window_secs: 0, auto: false };
             if let Err(e) = write_arm(&dir, sid, &arm) {
                 eprintln!("keepwarm: could not write the arm file: {e}");
                 std::process::exit(1);
@@ -65,8 +68,9 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
             println!("keepwarm is not armed");
         }
         KeepwarmCmd::Check(_) => unreachable!("handled above"),
-        KeepwarmCmd::Reset => {
-            if !update_policy(&dir, sid, |p| policy::reset(p, now)) {
+        KeepwarmCmd::Reset { at } => {
+            let at = at.filter(|t| *t <= now).unwrap_or(now);
+            if !update_policy(&dir, sid, |p| policy::reset(p, at)) {
                 std::process::exit(1);
             }
             println!("keepalive count reset");
@@ -103,7 +107,7 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 }
                 let cfg = Config::from_settings(settings.as_deref());
                 let state = card_state(&reading, arm.as_ref(), ledger.as_ref());
-                for line in policy::card(&state, &reading, &cfg, now) {
+                for line in policy::card(&state, &reading, &cfg, &site(&ident), now) {
                     println!("{line}");
                 }
             }
@@ -112,9 +116,10 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
 }
 
 /// Apply `f` to the policy's marks in `sid`'s ledger, a fresh ledger where
-/// there is none. False, with the reason on stderr, when it cannot be
-/// written.
+/// there is none, under the session's lock. False, with the reason on
+/// stderr, when it cannot be written.
 fn update_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy)) -> bool {
+    let _lock = lock_session(dir, sid).ok();
     let mut ledger = read_ledger(dir, sid).unwrap_or_default();
     f(&mut ledger.policy);
     ledger.updated_at = sensor_trait::epoch_secs();
@@ -184,8 +189,51 @@ fn nothing(reason: &str, next_at: Option<u64>) -> serde_json::Value {
     serde_json::json!({
         "action": "none", "text": null, "next_at": next_at, "count": 0, "max": 0,
         "wraps_at": null, "reason": reason, "policy": false, "state": "off",
-        "wraps_at_hm": null, "wrapped_at_hm": null, "wrap": null,
+        "wraps_at_hm": null, "wrapped_at_hm": null, "wrap": null, "retry": false,
     })
+}
+
+/// This session as the wrap's file, recipient and handoff line name it.
+fn site(ident: &attend_presence::session::SessionIdentity) -> Site {
+    Site {
+        session_id: ident.session_id.clone(),
+        project: ident.origin_path.clone(),
+        name: crate::util::display_name(ident),
+        operator: agent_identity::sanitize_id_component(&agent_identity::signal::user_name()),
+        state_root: ways_core::paths::state_root(),
+        home: claude_sessions::home_dir(),
+    }
+}
+
+/// The attend_mod settings for the policy check: a read kept beside the
+/// ledger for a few minutes, so a listening session that asks every minute
+/// does not run ways every minute, unless the user's or the project's
+/// settings file changed since. `None` when ways cannot answer.
+fn policy_settings(dir: &Path, sid: &str, project: &str, now: u64) -> Option<String> {
+    let path = dir.join(format!("{sid}.settings.json"));
+    let changed_after = |t: u64| {
+        let files = [ways_core::paths::user_config(), Path::new(project).join(".claude").join("ways.yaml")];
+        files.iter().any(|f| {
+            std::fs::metadata(f)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .is_some_and(|m| m.as_secs() >= t)
+        })
+    };
+    if let Some(kept) = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+        let at = kept.get("at").and_then(|v| v.as_u64()).unwrap_or(0);
+        let same = kept.get("project").and_then(|v| v.as_str()) == Some(project);
+        if same && now.saturating_sub(at) < SETTINGS_KEPT_SECS && !changed_after(at) {
+            if let Some(doc) = kept.get("doc").and_then(|v| v.as_str()) {
+                return Some(doc.to_string());
+            }
+        }
+    }
+    let doc = mod_settings(project)?;
+    let kept = serde_json::json!({ "at": now, "project": project, "doc": doc });
+    std::fs::write(&path, kept.to_string()).ok();
+    Some(doc)
 }
 
 /// `attend keepwarm check`: the sensor's judgment, once. Prints the
@@ -230,21 +278,31 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     }
 
     let dir = keepwarm_dir();
+    let gate = Gate::parse(&args.autocompact);
+    let pcfg = Config::from_settings(policy_settings(&dir, sid, &ident.origin_path, now).as_deref());
     let Some(reading) = read_context(sid, &ident.origin_path) else {
-        return quiet("could not read the session transcript through `ways context`", Some(now + RETRY_SECS));
+        let why = "could not read the session transcript through `ways context`";
+        if args.json {
+            // Where the policy runs, it still runs: the host asks again.
+            let mut doc = nothing(why, Some(now + RETRY_SECS));
+            if pcfg.why_off(gate).is_none() {
+                doc["policy"] = true.into();
+                doc["state"] = "running".into();
+                doc["retry"] = true.into();
+            }
+            println!("{doc}");
+        } else {
+            eprintln!("keepwarm: {why}");
+        }
+        return;
     };
-    let pcfg = Config::from_settings(mod_settings(&ident.origin_path).as_deref());
-    let site = Site {
-        session_id: sid.to_string(),
-        project: ident.origin_path.clone(),
-        name: crate::util::display_name(ident),
-        operator: agent_identity::sanitize_id_component(&agent_identity::signal::user_name()),
-        state_root: ways_state_root(),
-        home: claude_sessions::home_dir(),
-    };
+    let site = site(ident);
+    // One read-step-write at a time per session: two processes on one
+    // session id never both send a keepalive or a wrap.
+    let _lock = lock_session(&dir, sid).ok();
     let mut state = State::resume(read_ledger(&dir, sid));
     let arm = read_arm(&dir, sid);
-    let (mut out, decision) = policy::step(&mut state, &reading, arm.as_ref(), &pcfg, Gate::parse(&args.autocompact), &site, now);
+    let (mut out, decision) = policy::step(&mut state, &reading, arm.as_ref(), &pcfg, gate, &site, now);
     // The cursor and the gate move with every step.
     out.changed = true;
     settle(&dir, sid, &state, arm.as_ref(), &out, now);
@@ -255,17 +313,6 @@ fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheck
     } else {
         eprintln!("keepwarm: {}", decision.reason);
     }
-}
-
-/// The ways state root, `$XDG_STATE_HOME/agent-ways` or
-/// `~/.local/state/agent-ways`, as ways-core's `paths::state_root` reads
-/// it: a relative `$XDG_STATE_HOME` is ignored.
-fn ways_state_root() -> PathBuf {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| claude_sessions::home_dir().join(".local").join("state"));
-    base.join("agent-ways")
 }
 
 #[cfg(test)]
