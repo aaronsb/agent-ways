@@ -125,9 +125,6 @@ type Mod = {
   /** session.start has run; before it, at process start, the engine has not
    *  bound the session and refuses a tool registration. */
   isStarted: boolean
-  /** The source of the SessionStart that came before session.start at
-   *  process start: `resume` for `claude --resume`. */
-  startSource: string | undefined
   /** A /clear or a /resume moved the session to an id attend has not been
    *  told is listening yet; the poll holds its drain until it has. */
   isRelistening: boolean
@@ -244,6 +241,17 @@ async function listenOn($: $): Promise<ProcessRunResult> {
   const r = await run($, LISTEN_ON_ARGV)
   await updateStatus($, s => ({ ...s, listening: r.exitCode === 0 }))
   return r
+}
+
+/** Whether the session starts with a conversation: a resumed one does, a
+ *  new one does not. A read that fails counts as a new session. */
+async function hasTranscript($: $): Promise<boolean> {
+  try {
+    const m = await $.session.messages()
+    return Array.isArray(m) && m.length > 0
+  } catch {
+    return false
+  }
 }
 
 /** The sessions that listened, newest last, as $.store holds them. */
@@ -534,7 +542,6 @@ export const register: Register = on => {
     submitTries: 0,
     joined: new Set(),
     isStarted: false,
-    startSource: undefined,
     isRelistening: false,
     isAwaitingOperator: false,
   }
@@ -548,14 +555,13 @@ export const register: Register = on => {
     await registerListen($)
     mod.isStarted = true
     // A reload finds the mode in $.state; a new process (`claude --resume`)
-    // finds the session id in the record of sessions that listened, or, for
-    // a session its config started, which the record leaves out, the resume.
+    // finds the session id in the record of sessions that listened. The
+    // record leaves out a session its config started; one that starts with
+    // a transcript was resumed, and listened before.
     const id = await $.session.id()
     const kept = await readStatus($)
     const wasActive =
-      isActive(kept) ||
-      (await readListened($)).includes(id) ||
-      (mod.startSource === 'resume' && startsActive(mod))
+      isActive(kept) || (await readListened($)).includes(id) || (startsActive(mod) && (await hasTranscript($)))
     if (wasActive || (mod.config.listening === 'active' && mod.canPoll)) {
       // Listed by turn one; listening and the first drain follow the hook.
       // Active from here, so a /clear before activate runs keeps it. A
@@ -584,11 +590,13 @@ export const register: Register = on => {
   // start this event comes before session.start, which handles that case.
   on('classic.SessionStart', async ($, e, next) => {
     const done = await next(e)
-    if (!mod.isStarted) mod.startSource = e.source
     if (!mod.isStarted || (e.source !== 'clear' && e.source !== 'resume')) return done
     const id = e.session_id || (await $.session.id())
     const goesOn = (await isOn($, mod)) || (e.source === 'resume' && (await readListened($)).includes(id))
     if (!goesOn) return done
+    // The operator chose a conversation to go on with, as a first prompt
+    // would: the hold for one ends.
+    if (e.source === 'resume') mod.isAwaitingOperator = false
     await updateStatus($, s => ({
       ...s,
       mode: 'active' as const,

@@ -89,6 +89,9 @@ type World = {
   storeFails?: boolean
   /** The operator's prompts are dropped beneath the plugin. */
   dropPrompts?: boolean
+  /** Rows of the conversation the session starts with: a resumed one has
+   *  some, a new one none. */
+  transcript?: number
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
@@ -130,6 +133,7 @@ function host(on: On, world: World) {
     return { value: undefined } as never
   })
   on('session.id', () => ({ value: world.sessionId ?? 's1' }) as never)
+  on('session.messages', () => ({ value: Array.from({ length: world.transcript ?? 0 }, () => ({})) }) as never)
   const clearState = () => {
     state.value = undefined
     state.version = 0
@@ -1108,13 +1112,14 @@ describe('a resume', () => {
     expect(h.mode()).toBe('active')
   })
 
-  // The config started s1 listening and its operator had prompted, so the
-  // resumed process wakes for a message as the earlier one did. The record
-  // does not list a config-started id, so the resume source says it.
+  // The record leaves out a session its config started: one that starts
+  // with a transcript was resumed, and wakes for a message as it did
+  // before, with no first-prompt hold. Claude Code runs the resume
+  // SessionStart first, then session.start with the transcript loaded.
   test('claude --resume of a session its config started wakes for a message before any prompt', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const drains: string[] = []
-    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: 2, drains })
     await $.classic.SessionStart({ source: 'resume', session_id: 's1' } as never)
     await $.session.start(INTERACTIVE)
     await clock.advance(1_000)
@@ -1124,11 +1129,39 @@ describe('a resume', () => {
     expect(h.submitted[0]).toContain('m1')
   })
 
-  test('a fresh start in a project its config starts listening still holds for the first prompt', async ($, on) => {
+  // Resuming from the picker starts a new session, held for the first
+  // prompt, then goes on under the chosen one with no session.start.
+  test('a resume chosen from the picker ends the first-prompt hold', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's9', drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's1', 'resume')
+    await clock.advance(2_000)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m1')
+  })
+
+  test('a new session in a project its config starts listening still holds for the first prompt', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains: [one(1), DRAIN_EMPTY] })
     await $.classic.SessionStart({ source: 'startup', session_id: 's1' } as never)
     await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a /clear keeps the first-prompt hold', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's2')
+    drains.push(one(1), DRAIN_EMPTY)
     await clock.advance(30_000)
     expect(h.submitted).toEqual([])
   })
