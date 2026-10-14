@@ -138,13 +138,16 @@ pub enum Ground {
     Hot,
     Info,
     Rule,
+    /// The answer that keeps the work, such as Back. A button row draws it
+    /// on Ok beside a button on Err, and on AccentDim elsewhere.
+    Keep,
 }
 
 impl Ground {
     fn rgb(self, r: &Roles) -> Rgb {
         match self {
             Ground::Accent => r.accent,
-            Ground::AccentDim => r.accent_dim,
+            Ground::AccentDim | Ground::Keep => r.accent_dim,
             Ground::Ok => r.ok,
             Ground::Warn => r.warn,
             Ground::Err => r.err,
@@ -159,7 +162,7 @@ impl Ground {
     fn ansi(self) -> (u8, u8) {
         match self {
             Ground::Accent => (6, 0),
-            Ground::AccentDim => (4, 15),
+            Ground::AccentDim | Ground::Keep => (4, 15),
             Ground::Ok => (2, 0),
             Ground::Warn => (3, 0),
             Ground::Err => (1, 15),

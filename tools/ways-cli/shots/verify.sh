@@ -39,6 +39,9 @@ matching   | ways settings matching --project $PS           | Down Down e C-u te
 picker     | ways settings gate --project $PS               | Down Down Down Right Down Right Down Down Enter
 mod        | ways settings mod --project $PS                |
 quit-guard | ways settings matching --project $PS           | Down Down e C-u text:0.2 Enter q
+key-help   | ways settings matching --project $PS           | text:?
+close-editor | ways settings theme --project $PS            | e text:mine Enter Escape
+response   | ways settings install --project $PS            | p text:/nonexistent/claude Enter
 "
 
 python3 "$TOOLS/fixture.py" "$WORK" >/dev/null

@@ -5,14 +5,11 @@
 //! opens the modal, the picker and a question through [`Pane::take_open`].
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::text::Span;
 use ratatui::Frame;
 
 use super::pane::{footer_spans, Binding, Ctx, Keyed, Open, Overlay, Tone};
 use super::pick::Pick;
-use super::render::{modal_rect, pane as bordered};
 use super::response::Shown;
 use super::theme::{self, Seg};
 use super::*;
@@ -202,12 +199,6 @@ impl App {
             p.draw(f, main);
         }
         match &self.mode {
-            Mode::Help { scroll } => {
-                let scroll = *scroll;
-                self.draw_pane_help(f, main, scroll);
-            }
-            Mode::Guard => self.draw_guard(f, main),
-            Mode::Response(_) => self.draw_response(f, main),
             Mode::Pick(p) => {
                 let p = p.clone();
                 self.draw_pick(f, main, &p);
@@ -216,7 +207,7 @@ impl App {
                 let e = e.clone();
                 self.draw_entry(f, main, &e);
             }
-            _ => {}
+            _ => self.draw_modal(f, main),
         }
         self.draw_status(f, status);
     }
@@ -326,31 +317,6 @@ impl App {
             spans.extend(keys);
         }
         spans
-    }
-
-    /// The key help over a pane: every binding, then the pane's own help.
-    fn draw_pane_help(&mut self, f: &mut Frame, area: Rect, scroll: u16) {
-        let bindings = self.bindings();
-        let col = bindings.iter().map(|b| b.keys.chars().count()).max().unwrap_or(0) + 2;
-        let mut lines: Vec<Line> =
-            bindings.iter().map(|b| Line::from(vec![Span::styled(format!("{:<col$}", b.keys), theme::accent()), Span::raw(b.label.clone())])).collect();
-        if let Some(text) = self.pane.as_ref().and_then(|p| p.help()) {
-            lines.push(Line::raw(""));
-            lines.push(Line::styled(format!("help: {}", self.title), Style::new().add_modifier(Modifier::BOLD)));
-            lines.extend(text.lines().map(|l| Line::raw(l.to_string())));
-        }
-        if let Some(kb) = self.keyboard_line() {
-            lines.push(Line::raw(""));
-            lines.push(Line::raw(kb));
-        }
-        let widest = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
-        let r = modal_rect(area, widest.max(56) + 2, lines.len() as u16 + 2);
-        let room = r.height.saturating_sub(2);
-        let scroll = scroll.min((lines.len() as u16).saturating_sub(room));
-        f.render_widget(Clear, r);
-        f.render_widget(Paragraph::new(lines).scroll((scroll, 0)).block(bordered("keys · ↑↓ scroll · any other key closes").border_style(theme::modal_border())), r);
-        // Its rect, so a click outside it is told from one on it.
-        self.hits.menu = Some((r, Vec::new()));
     }
 
     /// The key `k` names when the shell takes it before the pane, or None
@@ -802,6 +768,8 @@ mod tests {
     use super::super::panetabs::{Jump, TabKeys};
     use super::*;
     use crate::testkit;
+    use ratatui::style::Modifier;
+    use ratatui::widgets::Paragraph;
 
     /// A pane of two tabs: it counts its keys and the wheel, and holds
     /// unsaved work while `dirty` is set.
@@ -1305,6 +1273,66 @@ mod tests {
         assert_eq!((two(&a).keys, two(&a).news, a.strip_focused()), (0, Some(2), false), "from the tab bar too, and the focus goes back");
         a.key(k(KeyCode::F(1), KeyModifiers::NONE));
         assert!(testkit::text(&testkit::render(&mut a, 100, 24)).contains("new thing, from the compose box or the tab bar"));
+    }
+
+    /// A pane that passes every click through an overlay and counts the
+    /// clicks and right clicks that reach it.
+    #[derive(Default)]
+    struct Through {
+        presses: usize,
+    }
+
+    impl Pane for Through {
+        fn palette(&self) -> theme::Palette {
+            theme::Palette::default()
+        }
+        fn tabs(&mut self) -> Vec<PaneTab> {
+            vec![PaneTab::new("one")]
+        }
+        fn tab(&mut self) -> usize {
+            0
+        }
+        fn set_tab(&mut self, _: usize) {}
+        fn draw(&mut self, _: &mut Frame, _: Rect) {}
+        fn key(&mut self, _: KeyEvent) -> Keyed {
+            Keyed::Pass
+        }
+        fn bindings(&self) -> Vec<Binding> {
+            Vec::new()
+        }
+        fn click_through(&self, _: Position) -> bool {
+            true
+        }
+        fn click(&mut self, _: Position) {
+            self.presses += 1;
+        }
+        fn context(&mut self, _: Position) {
+            self.presses += 1;
+        }
+    }
+
+    #[test]
+    fn a_press_on_the_key_help_closes_it_and_reaches_nothing_under_it() {
+        for button in [MouseButton::Left, MouseButton::Right] {
+            let mut a = App::with_pane("t", Through::default());
+            a.key(k(KeyCode::F(1), KeyModifiers::NONE));
+            let _ = testkit::render(&mut a, 100, 30);
+            let r = a.hits.dialog.clone().expect("the key help records its rect").rect;
+            let (column, row) = (r.x + 2, r.y + 2);
+            assert!(a.hits.pane.contains(Position::new(column, row)), "the press lands over the pane");
+            a.mouse(MouseEvent { kind: MouseEventKind::Down(button), column, row, modifiers: KeyModifiers::NONE });
+            assert!(matches!(a.mode, Mode::Browse), "{button:?}: a press on it closes it");
+            assert_eq!(a.pane_ref::<Through>().expect("the pane").presses, 0, "{button:?}: and reaches nothing under it");
+            // Outside it, the press closes it and goes on to the pane.
+            a.key(k(KeyCode::F(1), KeyModifiers::NONE));
+            let _ = testkit::render(&mut a, 100, 30);
+            let r = a.hits.dialog.clone().expect("the key help records its rect").rect;
+            let row = r.bottom();
+            assert!(a.hits.pane.contains(Position::new(column, row)), "below the help, over the pane");
+            a.mouse(MouseEvent { kind: MouseEventKind::Down(button), column, row, modifiers: KeyModifiers::NONE });
+            assert!(matches!(a.mode, Mode::Browse));
+            assert_eq!(a.pane_ref::<Through>().expect("the pane").presses, 1, "{button:?}: one outside goes on");
+        }
     }
 
     #[test]

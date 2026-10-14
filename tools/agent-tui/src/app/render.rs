@@ -1,6 +1,6 @@
 //! Drawing for the TUI: the tab bar, the tree, the detail and pending panes, the action
-//! menu, the quit prompt, the status line and the key help. Review mode draws
-//! its own tree and detail in `review`. Each frame also records where the
+//! menu and the status line. Review mode draws its own tree and detail in
+//! `review`, and the boxed modals draw in `modals`. Each frame also records where the
 //! clickable parts landed, in `App::hits`.
 
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -24,22 +24,20 @@ fn width(spans: &[Span]) -> u16 {
     spans.iter().map(|s| s.width() as u16).sum()
 }
 
-/// Buttons on one line, each recorded as a click target. `focus` marks the
-/// one Enter would press.
+/// Buttons on one line, each on its ground and recorded as a click target.
+/// `focus` marks the one Enter would press.
 ///
-/// Back is green on a row that holds a destructive button, as the bar's
-/// keep answer is beside its drop answer; elsewhere it takes the dim accent.
-pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String)], hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
-    let destructive = buttons.iter().any(|(b, _)| matches!(b, Btn::Discard | Btn::Quit | Btn::Drop));
+/// [`Ground::Keep`] is green on a row that holds a button on [`Ground::Err`],
+/// as the bar's keep answer is beside its drop answer; elsewhere it takes
+/// the dim accent.
+pub(super) fn button_row(sh: Shape, at: Rect, focus: Option<Btn>, buttons: &[(Btn, String, Ground)], hits: &mut Vec<(Rect, Btn)>) -> Line<'static> {
+    let destructive = buttons.iter().any(|(_, _, g)| *g == Ground::Err);
     let mut spans = vec![Span::raw(" ")];
-    for (b, label) in buttons {
-        let ground = match b {
-            Btn::Apply | Btn::Finish | Btn::Save => Ground::Ok,
-            Btn::Back if destructive => Ground::Ok,
-            Btn::Back => Ground::AccentDim,
-            Btn::Discard | Btn::Quit | Btn::Drop => Ground::Err,
-            Btn::Review | Btn::Next => Ground::Accent,
-            Btn::Cancel => Ground::Rule,
+    for (b, label, ground) in buttons {
+        let ground = match ground {
+            Ground::Keep if destructive => Ground::Ok,
+            Ground::Keep => Ground::AccentDim,
+            g => *g,
         };
         let on = focus == Some(*b);
         let seg = Seg::on(format!(" {} {label} ", if on { "›" } else { " " }), ground);
@@ -116,6 +114,7 @@ impl App {
         let [bar, main, status] = Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
         let [left, right] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(main);
         self.hits.menu = None;
+        self.hits.dialog = None;
         self.hits.answers.clear();
         self.hits.buttons.clear();
         self.hits.cta = Rect::default();
@@ -137,27 +136,20 @@ impl App {
             self.draw_tabs(f, bar, tab, true);
             self.draw_review_tree(f, left, tab);
             self.draw_review_detail(f, right, tab);
-            self.draw_response(f, main);
+            self.draw_modal(f, main);
             return self.draw_status(f, status);
         }
         if self.on_theme_tab() {
             self.draw_tabs(f, bar, self.tab, false);
             self.draw_theme_tab(f, left, right);
             match &self.mode {
-                Mode::Help { scroll } => {
-                    let scroll = *scroll;
-                    self.draw_help(f, main, scroll);
-                }
-                Mode::Guard => self.draw_guard(f, main),
                 Mode::ThemeMenu { sel } => {
                     let sel = *sel;
                     let items = self.theme_acts().iter().map(|a| (a.label().to_string(), self.theme_act_tag(*a))).collect();
                     let title = format!("actions: theme {}", self.themes.under_cursor().0.name);
                     self.draw_menu_items(f, main, title, items, sel);
                 }
-                Mode::ThemeUnsaved => self.draw_unsaved(f, main),
-                Mode::Response(_) => self.draw_response(f, main),
-                _ => {}
+                _ => self.draw_modal(f, main),
             }
             return self.draw_status(f, status);
         }
@@ -189,11 +181,6 @@ impl App {
             flow.draw(f, main, self.shape);
         }
         match &self.mode {
-            Mode::Help { scroll } => {
-                let scroll = *scroll;
-                self.draw_help(f, main, scroll);
-            }
-            Mode::Guard => self.draw_guard(f, main),
             Mode::Menu { path, sel } => {
                 let (path, sel) = (path.clone(), *sel);
                 self.draw_menu(f, main, &path, sel);
@@ -202,8 +189,7 @@ impl App {
                 let p = p.clone();
                 self.draw_pick(f, main, &p);
             }
-            Mode::Response(_) => self.draw_response(f, main),
-            _ => {}
+            _ => self.draw_modal(f, main),
         }
         self.draw_status(f, status);
     }
@@ -466,42 +452,6 @@ impl App {
         f.render_widget(p, area);
     }
 
-    /// The quit prompt over the tree: every tab with pending items and its
-    /// count, then the choices.
-    pub(super) fn draw_guard(&mut self, f: &mut Frame, area: Rect) {
-        let mut tabs: Vec<(&str, usize, String)> =
-            self.roots.iter().enumerate().map(|(i, r)| (r.name.as_str(), self.pending_in(i), String::new())).filter(|t| t.1 > 0).collect();
-        // Unsaved theme edits are listed last, as the theme tab is.
-        if let Some(e) = self.themes.editor.as_ref().filter(|e| e.dirty()) {
-            tabs.push(("theme", 1, format!("  edits to {}", e.theme.name)));
-        }
-        // A pane's unsaved work, under the screen's title.
-        let unsaved = self.pane_unsaved();
-        let reviewable = !tabs.is_empty();
-        if let Some(what) = &unsaved {
-            tabs.push((self.title.as_str(), 1, format!("  {what}")));
-        }
-        let total: usize = tabs.iter().map(|t| t.1).sum();
-        // A pane's work alone is in no tab.
-        let heading = if reviewable { format!(" {total} unsaved in {} tabs", tabs.len()) } else { format!(" {total} unsaved") };
-        let mut lines = vec![Line::raw(""), Line::from(Span::styled(heading, theme::changed()))];
-        lines.extend(tabs.iter().map(|(name, n, note)| Line::from(vec![Span::raw(format!("   {name:<12}")), Span::styled(format!("●{n}"), theme::changed()), Span::styled(note.clone(), theme::hint())])));
-        lines.push(Line::raw(""));
-        let name = tabs.first().map_or("", |t| t.0).to_string();
-        let r = modal_rect(area, 74, lines.len() as u16 + 3);
-        let inner = r.inner(ratatui::layout::Margin::new(1, 1));
-        f.render_widget(Clear, r);
-        f.render_widget(Paragraph::new(lines.clone()).block(pane("quit with unsaved changes").border_style(theme::modal_border())), r);
-        let row = Rect { y: inner.y + lines.len() as u16, height: 1, ..inner }.intersection(inner);
-        let mut buttons = vec![(Btn::Back, "Back (Esc)".to_string())];
-        // Nothing in a pane is reviewed: back to it, or quit.
-        if reviewable {
-            buttons.push((Btn::Review, format!("Review {name} (r)")));
-        }
-        buttons.push((Btn::Quit, "Quit and discard all (D)".into()));
-        f.render_widget(Paragraph::new(button_row(self.shape, row, Some(Btn::Back), &buttons, &mut self.hits.buttons)), row);
-    }
-
     fn draw_menu(&mut self, f: &mut Frame, area: Rect, path: &[usize], sel: usize) {
         let n = tree::get(&self.roots, path);
         let items = n
@@ -745,7 +695,7 @@ impl App {
 
     /// The selected row's actions as `key label` pairs, from their
     /// declaration: the row's own, else its tab's.
-    fn footer_actions(&self) -> Option<Vec<Span<'static>>> {
+    pub(super) fn footer_actions(&self) -> Option<Vec<Span<'static>>> {
         let rows = self.rows();
         let path = self.actions_at(&rows.get(self.cursor)?.path);
         let actions = &tree::get(&self.roots, &path).actions;
@@ -757,18 +707,6 @@ impl App {
         Some(super::pane::footer_spans(keys.iter().map(String::as_str).zip(actions.iter().map(|a| a.label.as_str()))))
     }
 
-    /// Save, Discard or Back over the editor, Back focused.
-    fn draw_unsaved(&mut self, f: &mut Frame, area: Rect) {
-        let name = self.themes.editor.as_ref().map_or(String::new(), |e| e.theme.name.clone());
-        let lines = vec![Line::raw(""), Line::styled(format!(" {name} has unsaved edits"), theme::changed()), Line::raw("")];
-        let r = modal_rect(area, 56, lines.len() as u16 + 3);
-        let inner = r.inner(ratatui::layout::Margin::new(1, 1));
-        f.render_widget(Clear, r);
-        f.render_widget(Paragraph::new(lines.clone()).block(pane("close the editor").border_style(theme::modal_border())), r);
-        let row = Rect { y: inner.y + lines.len() as u16, height: 1, ..inner }.intersection(inner);
-        let buttons = [(Btn::Save, "Save (s)".into()), (Btn::Drop, "Discard (d)".into()), (Btn::Back, "Back (Esc)".into())];
-        f.render_widget(Paragraph::new(button_row(self.shape, row, Some(Btn::Back), &buttons, &mut self.hits.buttons)), row);
-    }
 }
 
 fn kind_label(k: &Kind) -> String {
@@ -781,59 +719,5 @@ fn kind_label(k: &Kind) -> String {
         Kind::Text => "text (Enter edits)".into(),
         Kind::ReadOnly => "read-only here".into(),
         Kind::Secret => "secret (Enter enters it masked)".into(),
-    }
-}
-
-/// The keys the shell answers to, as the help overlay lists them.
-pub const KEYS: &[&str] = &[
-    "Tab S-Tab 1-9  switch tab; each keeps its cursor and open groups",
-    "↑↓ / j k     move          PgUp PgDn g G   jump",
-    "→ / l        open group    ← / h           close / parent",
-    "Enter Space  toggle bool, pick a choice, edit value, open group;",
-    "             on a secret, masked entry; on an action-only node, its menu",
-    "e            edit as text (^U clears)      d   set to default",
-    "u            revert        /               filter all tabs by key",
-    "Enter        on a filter hit: jump to it in its tab (Space acts)",
-    "a            menu of the row's actions, or the tab's   x   unqueue the last",
-    "             each action's own key runs it; the footer and detail name them",
-    "c            pending pane (changes and queued actions)",
-    "w Ctrl-S     review this tab's pending items, read-only (or click the ●",
-    "             bar): a applies the tab, X discards it, Tab next tab, Esc back",
-    "X ↺          discard this tab's pending items (y/n); ↺ on the tab badge",
-    "q Esc ^C     quit; with items pending in any tab, asks first",
-    "mouse        click a tab or row; click the selected row, or ▸ ▾, to act;",
-    "             wheel moves; click a menu item, an answer, or a button",
-    "m            mouse on or off (off lets the terminal select text)",
-    "",
-    "yellow = changed · blue = differs from default · grey = read-only",
-    "[a] = has actions · orange = queued · ! = a finding · y/n answers a confirm",
-    "theme tab    ↑↓ preview · Enter use · a actions · e edit (^S saves)",
-];
-
-impl App {
-    /// The keys, then the shown tab's help as the adapter's own `--help`
-    /// prints it, scrolled `scroll` lines.
-    fn draw_help(&mut self, f: &mut Frame, area: Rect, scroll: u16) {
-        let tab = self.tab_names().get(self.tab).cloned().unwrap_or_default();
-        let mut lines: Vec<Line> = KEYS.iter().map(|l| Line::raw(*l)).collect();
-        if let Some(here) = self.footer_actions() {
-            lines.push(Line::raw(""));
-            lines.push(Line::styled("actions here", Style::new().add_modifier(Modifier::BOLD)));
-            lines.push(Line::from(here));
-        }
-        if let Some(text) = self.adapter.help(&tab) {
-            lines.push(Line::raw(""));
-            lines.push(Line::styled(format!("help: {tab}"), Style::new().add_modifier(Modifier::BOLD)));
-            lines.extend(text.lines().map(|l| Line::raw(l.to_string())));
-        }
-        let widest = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16;
-        let r = modal_rect(area, widest.max(72) + 2, lines.len() as u16 + 2);
-        let room = r.height.saturating_sub(2);
-        let scroll = scroll.min((lines.len() as u16).saturating_sub(room));
-        f.render_widget(Clear, r);
-        f.render_widget(
-            Paragraph::new(lines).scroll((scroll, 0)).block(pane("keys and help · ↑↓ scroll · any other key closes").border_style(theme::modal_border())),
-            r,
-        );
     }
 }

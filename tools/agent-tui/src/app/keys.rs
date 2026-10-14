@@ -53,13 +53,6 @@ impl App {
                     return self.flow_event(ev);
                 }
             }
-            Mode::Help { scroll } => match k.code {
-                KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::Help { scroll: scroll.saturating_sub(1) },
-                KeyCode::Down | KeyCode::Char('j') => self.mode = Mode::Help { scroll: scroll.saturating_add(1) },
-                KeyCode::PageUp => self.mode = Mode::Help { scroll: scroll.saturating_sub(10) },
-                KeyCode::PageDown => self.mode = Mode::Help { scroll: scroll.saturating_add(10) },
-                _ => {}
-            },
             Mode::ThemeMenu { sel } => {
                 let acts = self.theme_acts();
                 match k.code {
@@ -71,7 +64,10 @@ impl App {
                 }
             }
             m @ (Mode::Name { .. } | Mode::ItemDelete { .. }) => self.prompt_key(m, k),
-            Mode::ThemeUnsaved => self.unsaved_key(k),
+            m @ (Mode::Guard | Mode::ThemeUnsaved | Mode::Help { .. } | Mode::Response(_)) => {
+                self.mode = m;
+                return self.modal_key(k);
+            }
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),
                 KeyCode::Enter => {}
@@ -107,7 +103,6 @@ impl App {
                 _ => self.mode = Mode::Edit(buf),
             },
             Mode::Pick(p) => self.pick_key(p, k),
-            Mode::Response(s) => self.response_key(s, k),
             Mode::Menu { path, sel } => {
                 let len = tree::get(&self.roots, &path).actions.len();
                 match k.code {
@@ -168,45 +163,11 @@ impl App {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {}
                 _ => self.mode = Mode::DiscardTab { tab },
             },
-            Mode::Guard => return self.guard_key(k),
             Mode::Ask(a) => return self.ask_key(a, k),
             Mode::Entry(e) => return self.entry_key(*e, k),
             Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
             Mode::Browse => return self.browse(k),
-        }
-        true
-    }
-
-    /// The quit modal's keys, beside text as elsewhere: it owns them while
-    /// it is shown. D quits and discards at once, r opens the review where
-    /// there is one, and Esc, b and Enter (on the focused Back) go back.
-    /// Any other key leaves it open and reaches nothing under it.
-    fn guard_key(&mut self, k: KeyEvent) -> bool {
-        if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-            self.mode = Mode::Guard;
-            return true;
-        }
-        match k.code {
-            KeyCode::Char('D') => {
-                self.discard_all();
-                return false;
-            }
-            KeyCode::Char('r') => {
-                self.clear_filter();
-                match (0..self.roots.len()).find(|t| self.pending_in(*t) > 0) {
-                    Some(first) => {
-                        self.switch_tab(first);
-                        self.open_review(first);
-                    }
-                    // Only theme edits are unsaved: their review is the editor.
-                    None if self.theme_dirty() => self.switch_tab(self.theme_tab()),
-                    // A pane's work has no review: the modal stays.
-                    None => self.mode = Mode::Guard,
-                }
-            }
-            KeyCode::Esc | KeyCode::Char('b') | KeyCode::Enter => {}
-            _ => self.mode = Mode::Guard,
         }
         true
     }
@@ -506,7 +467,6 @@ impl App {
                     self.click_review(at);
                 }
             }
-            Mode::Guard | Mode::ThemeUnsaved if click => self.click_button(at),
             // The entry dialog: a click outside closes it with nothing, and
             // on the tab bar or the column goes on; one inside keeps it.
             Mode::Entry(_) => {
@@ -515,58 +475,17 @@ impl App {
                     self.click_through(m);
                 }
             }
-            // The wheel over the key help scrolls it; elsewhere it scrolls
-            // what is under it.
-            Mode::Help { .. } if wheel.is_some() => {
-                if in_menu {
-                    if let Some(k) = wheel {
-                        self.key(press(k));
-                    }
-                } else {
-                    self.pane_wheel(m);
-                }
-            }
-            // Any key closes the key help, and so does any click; one
-            // outside it goes on.
-            Mode::Help { .. } if closes => {
-                self.mode = Mode::Browse;
-                if !in_menu {
-                    self.click_through(m);
-                }
-            }
-            Mode::Response(_) => {
-                if let Some(k) = wheel {
-                    if in_menu || self.pane.is_none() {
-                        self.key(press(k));
-                    } else {
-                        self.pane_wheel(m);
-                    }
-                } else if closes && !in_menu {
-                    // A click outside closes it; inside, the text stays put.
-                    self.key(press(KeyCode::Esc));
-                    self.click_through(m);
-                }
-            }
+            Mode::Guard | Mode::ThemeUnsaved | Mode::Help { .. } | Mode::Response(_) => self.modal_mouse(m, closes),
             _ => {}
         }
     }
 
-    /// A click on a button is the key it stands for.
+    /// Ask before `tab`'s pending items are dropped, when it has any.
     pub(super) fn ask_discard(&mut self, tab: usize) {
         if self.pending_in(tab) == 0 {
             self.msg = format!("nothing pending in {}", self.roots[tab].name);
         } else {
             self.mode = Mode::DiscardTab { tab };
-        }
-    }
-
-    /// A click on a button presses its key. A button that quits, as the quit
-    /// modal's does, ends the session ([`App::ended`]).
-    pub(super) fn click_button(&mut self, at: Position) {
-        if let Some(&(_, b)) = self.hits.buttons.iter().find(|(r, _)| r.contains(at)) {
-            if !self.key(KeyEvent::new(b.key(), KeyModifiers::NONE)) {
-                self.ending = true;
-            }
         }
     }
 
@@ -587,8 +506,10 @@ impl App {
             }
             return self.review_to(Some(t));
         }
-        if self.hits.buttons.iter().any(|(r, _)| r.contains(at)) {
-            return self.click_button(at);
+        // A bar target presses its key.
+        if let Some(&(_, b)) = self.hits.buttons.iter().find(|(r, _)| r.contains(at)) {
+            self.key(KeyEvent::new(b.key(), KeyModifiers::NONE));
+            return;
         }
         let list = self.hits.list;
         if !list.contains(at) {
