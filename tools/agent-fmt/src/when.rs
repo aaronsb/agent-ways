@@ -318,13 +318,10 @@ mod tests {
     /// A date's midnight takes the offset of that date, standard or summer.
     #[test]
     fn a_dates_offset_is_the_one_in_force_that_day() {
-        let (Some(winter), Some(summer)) =
-            (offset_on(Some("America/New_York"), 2026, 1, 15), offset_on(Some("America/New_York"), 2026, 7, 15))
-        else {
-            eprintln!("skipped: `date` has no zone data for America/New_York");
-            return;
-        };
-        assert_eq!((winter, summer), (-18_000, -14_400));
+        // Needs the zone database (tzdata) that `date` reads.
+        let winter = offset_on(Some("America/New_York"), 2026, 1, 15);
+        let summer = offset_on(Some("America/New_York"), 2026, 7, 15);
+        assert_eq!((winter, summer), (Some(-18_000), Some(-14_400)), "`date` with tzdata installed");
     }
 
     #[test]
