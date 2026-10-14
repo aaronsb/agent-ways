@@ -88,7 +88,7 @@ Each verb, what it does, and who runs it at 0f7cace1. A caller that runs argv is
 | `sensors` | List sensors | None | Docs |
 | `permissions` | Audit sensor `requires:` against settings.json | None | Docs |
 | `tune` | Derive engagement settings from session history | None | Docs |
-| `cleanup` | Reap signal files whose project is gone | None | Docs |
+| `cleanup` | Reap signal files whose project is gone, and marked messages past their limits (ADR-404 D3e) | None | Docs |
 | `config` | Show, init, path, lint the settings | None | Docs |
 
 The riskiest callers are the ones that run on every turn or that another release supplies:
@@ -116,8 +116,8 @@ The riskiest callers are the ones that run on every turn or that another release
    | `attend inbox [ID] [--drain]` | `attend message inbox [ID] [--drain]` |
    | `attend unread` | `attend message unread` |
    | `attend cleanup` | `attend message cleanup` |
-   | none (ADR-404 D3e) | `attend message delete` |
-   | none (ADR-404 D3e) | `attend message tombstone` |
+   | none (ADR-404 D3e) | `attend message delete`, which marks; `--undo` removes a batch's marks |
+   | none (ADR-404 D3e) | `attend message tombstone`, which marks a session; `--undo`, `--list` |
    | `attend join <g>` | `attend channel join <g>` |
    | `attend leave <g>` | `attend channel leave <g>` |
    | `attend channels [list] [--joined]` | `attend channel [list] [--joined]` |
