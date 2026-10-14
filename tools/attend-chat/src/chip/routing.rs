@@ -126,6 +126,8 @@ mod tests {
             message: "msg".into(),
             ts: 0,
             channel: crate::signal::Channel::Open,
+            tray: String::new(),
+            beside_post: false,
         }
     }
 

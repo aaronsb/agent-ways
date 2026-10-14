@@ -68,8 +68,11 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     // shows only what it does not: commands, their arguments and hints.
     // Its row stays while a command is typed, so the compose box does not
     // jump as the command reaches an `@agent` or `#channel` argument.
-    let helper = side.is_none() || super::sidebar::helper_needed(&text);
-    let helper_h = u16::from(helper || text.trim_start().starts_with('/'));
+    // A view with nothing to send, an agent's own DMs, has no compose box
+    // and no helper row: the feed takes the pane.
+    let composes = fg.composes();
+    let helper = composes && (side.is_none() || super::sidebar::helper_needed(&text));
+    let helper_h = u16::from(helper || (composes && text.trim_start().starts_with('/')));
     let attachments = attach::existing_attachments(&text);
     // The compose box: its rows at the box's inner width less the prompt,
     // the attachment row when a dropped file is in the buffer, and the
@@ -79,7 +82,7 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
     let inner = area.width.saturating_sub(4 + lead_w);
     let rows = chat.input.rows(inner, theme::body());
     let shown = rows.len().clamp(1, INPUT_ROWS);
-    let input_h = shown as u16 + 3 + u16::from(!attachments.is_empty());
+    let input_h = if composes { shown as u16 + 3 + u16::from(!attachments.is_empty()) } else { 0 };
     let [feed, compose, helper_row] = Layout::vertical([Constraint::Min(3), Constraint::Length(input_h), Constraint::Length(helper_h)]).areas(area);
 
     chat.hits = Hits { text_width: inner, lead: lead_w, side_area: side.unwrap_or_default(), ..Hits::default() };
@@ -87,7 +90,9 @@ pub(super) fn draw(chat: &mut ChatPane, f: &mut Frame, area: Rect) {
         super::sidebar::draw(chat, f, side);
     }
     draw_feed(chat, f, feed, &fg);
-    draw_compose(chat, f, compose, lead, rows, &attachments, &fg);
+    if composes {
+        draw_compose(chat, f, compose, lead, rows, &attachments, &fg);
+    }
     if helper {
         draw_helper(chat, f, helper_row, &text);
     }
@@ -100,7 +105,8 @@ pub(super) const VIEW_LABEL: &str = "⋯all";
 
 /// The tab bar the shell draws, in the order [`tabs::bar`] gives: the common
 /// menu's `≡` slot, the created channel shown with what it is for or the
-/// DM view shown (`@Name DMs`, shaded as a view), the `+` slot, then the
+/// DM view shown (`@Name DMs`, or `Name DMs` for an agent's own, led by
+/// the mark its row carries, shaded as a view), the `+` slot, then the
 /// reserved tabs pinned right, `#open` and the operator view
 /// ([`VIEW_LABEL`]), shaded as a view. The left column numbers the
 /// channels for Ctrl+digit, and 0 is the operator view ([`ChatPane::jump`]);
@@ -124,6 +130,11 @@ pub(super) fn tabs(chat: &mut ChatPane) -> Vec<PaneTab> {
             Slot::New => PaneTab::new("+").action(),
             Slot::Tab(Tab::Merged) => PaneTab::new(VIEW_LABEL).reserved().view(),
             Slot::Tab(Tab::Dm(member)) => PaneTab::new(format!("@{} DMs", chat.dm_name(&member))).view(),
+            // The agent's own DMs, led by the mark its row carries.
+            Slot::Tab(Tab::Review(member)) => {
+                let mark = Span::styled(super::sidebar::REVIEW_MARK, Style::new().fg(theme::badge(Ground::Info).bg.unwrap_or_default()));
+                PaneTab::new(format!("{} DMs", chat.dm_name(&member))).lead(vec![mark]).view()
+            }
             Slot::Tab(Tab::Channel(name)) => {
                 let k = groups.iter().find(|k| k.group.name == name);
                 let mut glyph = Style::new();
@@ -198,10 +209,10 @@ fn entry(chat: &ChatPane, s: &Signal, memberships: &HashMap<&str, Vec<&KnownGrou
         Seg::styled(format!(" {} ", chip.secondary), project),
     ];
     // A reply or a direct message to the person at the chat (ADR-401, `to`),
-    // or one the chat sent, with whom it went to.
+    // or any other direct message, with whom it went to.
     match &s.channel {
         crate::signal::Channel::Person => header.push(Seg::styled(" → you ".to_string(), mark)),
-        crate::signal::Channel::Sent(to) => {
+        crate::signal::Channel::Sent(to) | crate::signal::Channel::Direct(to) | crate::signal::Channel::Elsewhere(to) => {
             let names: Vec<String> = to.split(',').filter(|m| !m.is_empty()).map(|m| format!("@{}", chat.dm_name(m))).collect();
             if !names.is_empty() {
                 header.push(Seg::styled(format!(" → {} ", names.join(" ")), mark));
@@ -249,7 +260,11 @@ fn draw_feed(chat: &mut ChatPane, f: &mut Frame, area: Rect, fg: &Tab) {
         chat.entry_members = members;
     }
     let focused = *chat.ix.focus() == super::focus::Focus::Feed && !chat.ix.overlaid();
-    let block = Block::bordered().border_type(BorderType::Rounded).border_style(border(focused)).padding(Padding::horizontal(1));
+    let mut block = Block::bordered().border_type(BorderType::Rounded).border_style(border(focused)).padding(Padding::horizontal(1));
+    // A view with nothing to send says so where the compose box would be.
+    if !fg.composes() {
+        block = block.title_bottom(Line::styled(" read only ", theme::muted()).right_aligned());
+    }
     let inner = block.inner(area);
     f.render_widget(block, area);
     chat.feed_rows = inner.height;

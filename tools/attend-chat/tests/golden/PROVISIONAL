@@ -36,6 +36,8 @@ message-menu-80x25
 mouse-on-80x25
 new-channel-prompt-80x25
 no-color-80x25
+review-dms-120x40
+review-dms-80x25
 scrolled-back-80x25
 sent-deploy-80x25
 sidebar-keyboard-80x25

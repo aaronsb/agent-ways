@@ -29,6 +29,8 @@ fn sig(sid: &str, cwd: &str, ago: u64, channel: Channel) -> Signal {
         message: "a message".into(),
         ts: NOW - ago,
         channel,
+        tray: String::new(),
+        beside_post: false,
     }
 }
 

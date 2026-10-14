@@ -77,7 +77,9 @@ sweep
 # The fixture is base, crowd (fifteen more agents), many (24 more channels,
 # so the last channel row sits at the foot), own (the operator in
 # #deploy), long (a fourth agent whose project name outruns any row),
-# dm (a direct message from alpha to the operator) or plain (no Nerd Font). An agent's name comes from the temp
+# dm (a direct message from alpha to the operator), trays (direct messages
+# in every project's tray: one the operator sent beta in an earlier
+# session, and the agents' DMs with each other) or plain (no Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
 # the column's first `○`, its row being the agents' last.
 SCENARIOS="
@@ -194,6 +196,11 @@ dm-compose   | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs t
 dm-menu      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rfeed:→_you wait:Hide_DMs
 dm-hide      | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs side:DMs wait:Hide_DMs click:Hide_DMs gone:pick_one
 dm-quiet     | base  | wait:Agents side:○ wait:DMs text:are_you_there Enter wait:no_heartbeat
+dm-earlier   | trays | wait:Agents_3/4 side:beta wait:sent_before_this_chat
+review-open  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only
+review-type  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only text:hello BTab
+review-menu  | trays | wait:Agents_3/4 rside:alpha wait:Review_DMs click:Review_DMs wait:read_only side:DMs wait:Hide_review
+review-both  | trays | wait:Agents_3/4 side:alpha wait:DMs rside:alpha wait:Review_DMs click:Review_DMs wait:read_only
 "
 
 # The fixture: three claudes (alpha and beta live, gamma quiet), #deploy
@@ -201,7 +208,10 @@ dm-quiet     | base  | wait:Agents side:○ wait:DMs text:are_you_there Enter wa
 # names after its directory was swept. The human is `operator`. `crowd`
 # adds fifteen agents, every other one live; `own` puts the operator in
 # #deploy, with a message there; `many` adds #ch01 to #ch24; `plain` the
-# plain shape; `dm` a direct message from alpha to the operator. No attend config is written: the mouse is on by default.
+# plain shape; `dm` a direct message from alpha to the operator; `trays`
+# that, a direct message the operator sent beta in an earlier session, in
+# beta's tray, and direct messages between the agents in their trays. No
+# attend config is written: the mouse is on by default.
 fixture() { # kind
   rm -rf "$F"
   local cache=$F/cache/attend sig=$F/cache/attend/signals now shape=round
@@ -255,16 +265,50 @@ YAML
     printf '%s|%s|%s|%s\n' "$4" "$(basename "$5")" "$5" "$6" > "$1/$2.signal"
     touch -d "@$((now - $3))" "$1/$2.signal"
   }
+  dm() { # dir id age from cwd kind sender-id to text: a direct message, with its envelope
+    printf '%s|%s|%s|from_kind:%s|from_id:%s|to:%s|%s\n' "$4" "$(basename "$5")" "$5" "$6" "$7" "$8" "$9" > "$1/$2.signal"
+    touch -d "@$((now - $3))" "$1/$2.signal"
+  }
   msg "$sig/_broadcast" s1 900 "claude:$C" "$F/work/gamma" "signing off for today"
   msg "$sig/_broadcast" s2 600 "claude:$A" "$F/work/alpha" "starting the theme port; the legend moves first"
   msg "$sig/@deploy" s3 300 "claude:$B" "$F/work/beta" "rollout is green on staging"
   [ "$1" = own ] && msg "$sig/@deploy" s4 120 "external:operator@kitty" "$F/work/alpha" "watching the rollout"
-  if [ "$1" = dm ]; then
+  if [ "$1" = dm ] || [ "$1" = trays ]; then
     mkdir -p "$sig/_people/operator"
     msg "$sig/_people/operator" s6 450 "claude:$A" "$F/work/alpha" "the legend moved; want a look before I push?"
   fi
+  if [ "$1" = trays ]; then
+    local ta tb
+    ta=$sig/$(tray "$F/work/alpha") tb=$sig/$(tray "$F/work/beta")
+    mkdir -p "$ta" "$tb"
+    dm "$tb" s7 800 "external:operator@kitty" "$F/work/alpha" human operator "$B" "sent before this chat: is staging green?"
+    dm "$tb" s8 400 "claude:$A" "$F/work/alpha" agent "$A" "$B" "the legend moved; can you check the tab bar?"
+    dm "$ta" s9 350 "claude:$B" "$F/work/beta" agent "$B" "$A" "checked: the bar holds"
+    dm "$tb" s10 300 "claude:$C" "$F/work/gamma" agent "$C" "$B" "gamma to beta, not alpha's"
+  fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
+}
+
+# The tray of the project at PATH: its attend key, `claude_sessions::attend_key`.
+tray() { # path
+  python3 -I -c '
+import sys
+p = sys.argv[1]
+h = 0
+for u in p.encode("utf-16-le").decode("utf-16-le"):
+    for unit in [ord(u)] if ord(u) < 0x10000 else [0xD800 + ((ord(u) - 0x10000) >> 10), 0xDC00 + ((ord(u) - 0x10000) & 0x3FF)]:
+        h = ((h << 5) - h + unit) & 0xFFFFFFFF
+if h >= 1 << 31:
+    h -= 1 << 32
+n, d = abs(h), "0123456789abcdefghijklmnopqrstuvwxyz"
+b = d[0] if n == 0 else ""
+while n:
+    b, n = d[n % 36] + b, n // 36
+slug = "".join(c if c.isascii() and c.isalnum() else "-" * (2 if ord(c) >= 0x10000 else 1) for c in p)
+assert len(slug) <= 200, "a fixture path this long needs the slug cut"
+print(f"{slug}-{b}")
+' "$1"
 }
 
 launch() { # name cols rows

@@ -26,6 +26,8 @@ fn sig(sid: &str, cwd: &str) -> Signal {
         message: "a message".into(),
         ts: 1_790_949_000,
         channel: Channel::Open,
+        tray: String::new(),
+        beside_post: false,
     }
 }
 

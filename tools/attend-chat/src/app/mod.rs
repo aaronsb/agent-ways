@@ -57,6 +57,10 @@ const STATUS_ASSERT: Duration = Duration::from_secs(6);
 /// from the head so the newest history stays visible.
 const MAX_SIGNALS: usize = 5000;
 
+/// How many of the newest messages a send's copy is looked for among: the
+/// copies arrive together, so a send's others are never far back.
+const DEDUPE_WINDOW: usize = 256;
+
 /// How often the peers, channels and the human's heartbeat are
 /// refreshed without any input (ADR-129, ADR-170). A peer that boots
 /// without sending appears in the legend within one refresh; one whose
@@ -218,10 +222,10 @@ pub struct ChatPane {
     side_follow: bool,
     /// The members a Remove menu listed, for the one picked.
     removable: Vec<menu::Member>,
-    /// The agents whose DM view the column lists under their rows, by
-    /// membership id, in the order opened ([`dm`]). Hiding one takes it off
+    /// The DM views the column lists under agents' rows, the operator's
+    /// DMs with each and each agent's own ([`dm`]). Hiding one takes it off
     /// the list and leaves every message where it was.
-    dms: Vec<String>,
+    views: sidebar::Views,
     /// The last name the column showed for each agent whose DM view was
     /// listed, by membership id: the view keeps it when the agent leaves
     /// the column ([`dm`]).
@@ -270,7 +274,7 @@ impl ChatPane {
             side_scroll: [0, 0],
             side_follow: true,
             removable: Vec::new(),
-            dms: Vec::new(),
+            views: Default::default(),
             dm_names: Default::default(),
         }
     }
@@ -298,14 +302,35 @@ impl ChatPane {
         self.dirty = true;
     }
 
-    /// Append `sig`, dropping from the head past [`MAX_SIGNALS`]. Both
-    /// writers into the buffer — the watcher drain and the directed-send
-    /// echo — go through here so the cap has a single home.
-    pub fn push(&mut self, sig: Signal) {
+    /// Append `sig`. Every writer into the buffer — the watcher drain, a
+    /// send reading back what it wrote, a command's local block — goes
+    /// through here, so the cap and the copies have a single home.
+    ///
+    /// - A file read twice ([`Signal::same_file`]), or a copy of a send
+    ///   already held from another tray ([`Signal::same_send`]), is dropped.
+    /// - The person's direct message sent beside a channel post of the same
+    ///   send is marked so, whichever copy arrives first
+    ///   ([`Signal::is_beside`]): the operator view shows the post alone.
+    /// - Past [`MAX_SIGNALS`] the oldest direct message between others goes
+    ///   first, then the oldest message, so others' DMs never push out what
+    ///   the person was party to.
+    pub fn push(&mut self, mut sig: Signal) {
+        let recent = self.signals.len().saturating_sub(DEDUPE_WINDOW);
+        if self.signals[recent..].iter().any(|s| s.same_file(&sig) || s.same_send(&sig)) {
+            return;
+        }
+        for s in &mut self.signals[recent..] {
+            if sig.is_beside(s) {
+                sig.beside_post = true;
+            }
+            if s.is_beside(&sig) {
+                s.beside_post = true;
+            }
+        }
         self.signals.push(sig);
-        if self.signals.len() > MAX_SIGNALS {
-            let drop_n = self.signals.len() - MAX_SIGNALS;
-            self.signals.drain(0..drop_n);
+        while self.signals.len() > MAX_SIGNALS {
+            let oldest = self.signals.iter().position(|s| matches!(s.channel, crate::signal::Channel::Elsewhere(_))).unwrap_or(0);
+            self.signals.remove(oldest);
         }
         self.invalidate();
     }
@@ -344,7 +369,7 @@ impl ChatPane {
             let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
-            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground, &self.dms));
+            self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground, &self.views));
             self.remember_dm_names();
             self.refocus();
         }
@@ -422,9 +447,9 @@ impl ChatPane {
                 self.say(status, false);
                 self.input.clear();
                 self.show_newest();
-                // A directed send lands in the recipient's inbox, which
-                // this chat does not watch: echo it into the transcript.
-                self.push(echo);
+                for s in echo {
+                    self.push(s);
+                }
             }
             EnterAction::StatusOnly(s) => self.say(s, true),
             EnterAction::Quiet(name) => {
@@ -725,8 +750,13 @@ impl Pane for ChatPane {
     /// waiting question the shell answers no first, as a typed character
     /// answers it, so a `y` in the paste never does. Control characters other
     /// than newline and tab are left out: an escape sequence in the
-    /// clipboard is not drawn into the box or sent.
+    /// clipboard is not drawn into the box or sent. An agent's own DMs take
+    /// no paste.
     fn paste(&mut self, text: &str) {
+        // A view with nothing to send has no box to paste into.
+        if !self.foreground.composes() {
+            return self.say("read only: nothing pasted", false);
+        }
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         self.dispatch(ix::Ev::Paste);
         let kept: String = text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).collect();
@@ -1139,11 +1169,11 @@ impl Screen for Chat {
 
 impl World {
     /// A world of these channels and identities, laid out for the tab
-    /// `shown` against its channels, with the DM views `dms` lists.
-    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab, dms: &[String]) -> World {
+    /// `shown` against its channels, with the DM views `views` lists.
+    fn new(groups: Vec<KnownGroup>, seen: Vec<Seen>, rows: Vec<ChannelRow>, live_members: Vec<usize>, instances: SnapshotCache, shown: &Tab, views: &sidebar::Views) -> World {
         let names = tabs::strip_names(&groups);
         let shown = tabs::normalize(shown.clone(), &names);
-        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows, dms), shown };
+        let laid = ix::Laid { bar: tabs::bar(&names, &shown), rows: sidebar::side_items_of(&seen, &rows, views), shown };
         World { groups, seen, rows, live_members, instances, laid }
     }
 

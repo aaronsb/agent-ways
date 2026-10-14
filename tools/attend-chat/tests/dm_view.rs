@@ -2,8 +2,10 @@
 //! agent's row opens the direct messages between the operator and that
 //! agent, listed under the agent's row and shown as a tab; the compose box
 //! there sends a direct message to the agent; the view hides and shows
-//! again with its messages kept. Through the shell's real key and mouse
-//! handlers. In its own file, so its own fixture: alpha and beta live.
+//! again with its messages kept. The agent's own view, Review DMs, lists
+//! every direct message the agent sent or received, with anyone, and offers
+//! nothing to send. Through the shell's real key and mouse handlers. In its
+//! own file, so its own fixture: alpha and beta live.
 
 mod support;
 
@@ -38,14 +40,25 @@ fn sig(id: &str, from: &str, cwd: &str, message: &str, channel: Channel) -> Sign
         message: message.into(),
         ts: 1_790_949_000,
         channel,
+        tray: String::new(),
+        beside_post: false,
     }
 }
 
 /// A chat whose feed holds DMs with alpha both ways, a DM with beta both
-/// ways, and posts on #open and #deploy. `send` lets Enter write.
+/// ways, DMs between alpha and beta both ways, and posts on #open and
+/// #deploy. `send` lets Enter write, and feeds
+/// the chat from a watcher of the fixture's trays, as `main` does, so what
+/// is sent comes back.
 fn chat_with(send: bool) -> Chat {
     fixture();
-    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(!send);
+    let rx = send.then(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Signal>();
+        let here = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        attend_chat::watcher::spawn_watcher(signal::signals_base(), signal::encode_cwd(&here), signal::human_member_id(), tx).unwrap();
+        rx
+    });
+    let mut c = Chat::new(rx, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(!send);
     let alpha = format!("claude:{ALPHA_SID}");
     let beta = format!("claude:{BETA_SID}");
     let me = "external:aaron@pts-1";
@@ -56,6 +69,8 @@ fn chat_with(send: bool) -> Chat {
     c.push(sig("s-5", me, "/work/me", "you to alpha", Channel::Sent(ALPHA_SID.into())));
     c.push(sig("s-6", me, "/work/me", "you to beta", Channel::Sent(BETA_SID.into())));
     c.push(sig("s-7", &alpha, ALPHA_CWD, "alpha in deploy", Channel::Group("deploy".into())));
+    c.push(sig("s-8", &alpha, ALPHA_CWD, "alpha to beta", Channel::Elsewhere(BETA_SID.into())));
+    c.push(sig("s-9", &beta, BETA_CWD, "beta to alpha", Channel::Elsewhere(ALPHA_SID.into())));
     c
 }
 
@@ -188,7 +203,7 @@ fn the_dm_view_lists_only_the_dms_with_its_agent() {
     for want in ["alpha to you", "you to alpha"] {
         assert!(f.contains(want), "{want}: {f}");
     }
-    for not in ["beta to you", "you to beta", "alpha on open", "beta on open", "alpha in deploy"] {
+    for not in ["beta to you", "you to beta", "alpha on open", "beta on open", "alpha in deploy", "alpha to beta", "beta to alpha"] {
         assert!(!f.contains(not), "{not} is no DM with alpha: {f}");
     }
 }
@@ -216,6 +231,12 @@ fn compose_in_the_dm_view_sends_a_direct_message_to_the_agent() {
     assert_eq!((wire.to, wire.from_kind), (Some(ALPHA_SID), Some("human")), "{raw}");
     let open = std::fs::read_dir(signal::broadcast_dir()).into_iter().flatten().flatten().any(|e| std::fs::read_to_string(e.path()).is_ok_and(|r| r.contains(body)));
     assert!(!open, "nothing on #open");
+    // Read back from alpha's tray, another project's, by the watcher.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline && !c.signals().iter().any(|s| s.message == body) {
+        c.drain();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     assert!(feed(&mut c).contains(body), "the view shows what was sent: {}", screen(&mut c));
     assert_eq!(c.foreground(), &Tab::Dm(ALPHA_SID.into()));
 }
@@ -351,4 +372,155 @@ fn a_dm_view_keeps_its_agents_name_when_the_agent_leaves_the_column() {
     assert!(rows[0].contains(&format!("{name} DMs")), "the tab keeps the name: {}", rows[0]);
     assert!(!rows[0].contains(ALPHA_SID), "{}", rows[0]);
     assert!(rows.iter().any(|r| r.contains(&format!(" {name} "))), "so does the flag: {rows:#?}");
+}
+
+/// The row of alpha's own DM view: its name and `DMs`, under alpha's row.
+fn review_row(c: &mut Chat) -> Option<usize> {
+    let name = nick(ALPHA_CWD);
+    column(c).iter().position(|r| r.contains(&format!("{name} DMs")))
+}
+
+/// Pick Review DMs on alpha's menu, opened by a right click on its row.
+fn review(c: &mut Chat) {
+    let rows = rows(c);
+    let (x, y) = rows.iter().enumerate().skip(1).find_map(|(y, r)| r.split('│').next()?.find("alpha").map(|b| (b as u16, y as u16))).unwrap();
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), column: x, row: y, modifiers: KeyModifiers::NONE });
+    assert!(items(c).iter().any(|i| i == "Review DMs"), "{}", screen(c));
+    pick(c, "Review DMs");
+}
+
+/// Review DMs, on an agent's menu, lists the agent's own DM view under its
+/// row and shows it: every DM the agent sent or received, with anyone, its
+/// DMs with the operator among them, and nothing else.
+#[test]
+fn review_dms_lists_every_dm_the_agent_sent_or_received() {
+    let mut c = chat();
+    review(&mut c);
+    let s = screen(&mut c);
+    assert_eq!(c.foreground(), &Tab::Review(ALPHA_SID.into()), "{s}");
+    let agent = row_index(&mut c, "alpha");
+    assert_eq!(review_row(&mut c), Some(agent + 1), "listed under alpha's row: {:#?}", column(&mut c));
+    let tabs = &rows(&mut c)[0];
+    assert!(tabs.contains(&format!("{} DMs", nick(ALPHA_CWD))), "the tab bar shows the view: {tabs}");
+    let f = feed(&mut c);
+    for want in ["alpha to you", "you to alpha", "alpha to beta", "beta to alpha"] {
+        assert!(f.contains(want), "{want}: {f}");
+    }
+    for to in [nick(ALPHA_CWD), nick(BETA_CWD)] {
+        assert!(f.contains(&format!("→ @{to}")), "each DM between the agents names whom it went to: {f}");
+    }
+    for not in ["beta to you", "you to beta", "alpha on open", "beta on open", "alpha in deploy"] {
+        assert!(!f.contains(not), "{not} is not alpha's DM: {f}");
+    }
+}
+
+/// Both views listed: the operator's DMs with alpha, then alpha's own.
+#[test]
+fn both_views_are_listed_under_the_agent_in_order() {
+    let mut c = chat();
+    side_click(&mut c, "alpha");
+    review(&mut c);
+    let agent = row_index(&mut c, "alpha");
+    let col = column(&mut c);
+    assert!(col[agent + 1].contains("DMs") && !col[agent + 1].contains(&nick(ALPHA_CWD)), "the operator's view first: {col:#?}");
+    assert_eq!(review_row(&mut c), Some(agent + 2), "{col:#?}");
+}
+
+/// The agent's own view offers nothing to send: no compose box, a typed
+/// key writes nothing, and the focus ring has no stop for a box.
+#[test]
+fn the_agents_own_view_has_no_compose_box() {
+    let mut c = chat_with(true);
+    review(&mut c);
+    let s = screen(&mut c);
+    assert!(!rows(&mut c).iter().any(|r| r.contains("│> ") || r.contains("│ > ")), "no compose prompt: {s}");
+    typed(&mut c, "hello");
+    assert!(c.input().is_empty(), "nothing typed: {}", screen(&mut c));
+    assert!(!c.signals().iter().any(|s| s.message == "hello"), "nothing sent");
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        press(&mut c, KeyCode::Tab);
+        seen.push(focused(&mut c));
+    }
+    assert!(!seen.iter().any(|f| f == "mode chat"), "no compose stop in the ring: {seen:?}");
+    assert!(seen.iter().any(|f| f == "mode feed"), "the feed is: {seen:?}");
+}
+
+/// The agent's own view's row and tab carry a mark of their own, apart
+/// from the operator's DM view's row, on the same info ground.
+#[test]
+fn the_agents_own_view_is_marked_apart() {
+    let mut c = chat();
+    side_click(&mut c, "alpha");
+    review(&mut c);
+    let rows = rows(&mut c);
+    let name = nick(ALPHA_CWD);
+    assert!(rows[0].contains('◈') && rows[0].contains(&format!("{name} DMs")), "the tab: {}", rows[0]);
+    let col = column(&mut c);
+    let review = col.iter().find(|r| r.contains(&format!("{name} DMs"))).unwrap();
+    let dms = col.iter().find(|r| r.contains("DMs") && !r.contains(&name)).unwrap();
+    assert!(review.contains('◈') && !dms.contains('◈'), "{col:#?}");
+}
+
+/// Hiding the agent's own view takes its row off the column and deletes
+/// nothing; the agent's menu offers it again.
+#[test]
+fn hiding_the_agents_own_view_keeps_its_messages() {
+    let mut c = chat();
+    let before = c.signals().len();
+    review(&mut c);
+    let name = nick(ALPHA_CWD);
+    side_click(&mut c, &format!("{name} DMs"));
+    assert!(items(&mut c).iter().any(|i| i == "Hide review"), "{}", screen(&mut c));
+    pick(&mut c, "Hide review");
+    assert_eq!(review_row(&mut c), None, "the row is gone: {}", screen(&mut c));
+    assert_eq!(c.foreground(), &Tab::Merged);
+    assert_eq!(c.signals().len(), before, "nothing deleted");
+    review(&mut c);
+    assert!(feed(&mut c).contains("alpha to beta"));
+}
+
+/// A paste in the agent's own view has no box to land in: nothing is
+/// pasted, and the status says so.
+#[test]
+fn a_paste_in_the_agents_own_view_pastes_nothing() {
+    let mut c = chat();
+    review(&mut c);
+    agent_tui::screen::Screen::paste(&mut c, "a pasted line");
+    assert!(c.input().is_empty(), "{}", screen(&mut c));
+    assert_eq!(c.status(), "read only: nothing pasted");
+}
+
+/// Address on the agent's menu, from its own view, shows the operator's
+/// DMs with it first, so the address lands in a box that is shown.
+#[test]
+fn address_from_the_agents_own_view_goes_to_its_dms() {
+    let mut c = chat();
+    review(&mut c);
+    let rows = rows(&mut c);
+    let (x, y) = rows.iter().enumerate().skip(1).find_map(|(y, r)| r.split('│').next()?.find("alpha").map(|b| (b as u16, y as u16))).unwrap();
+    c.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Right), column: x, row: y, modifiers: KeyModifiers::NONE });
+    pick(&mut c, "Address");
+    assert_eq!(c.foreground(), &Tab::Dm(ALPHA_SID.into()));
+    assert_eq!(c.input().text(), format!("@{} ", nick(ALPHA_CWD)));
+}
+
+/// The message menu in the agent's own view: Quote is set back, and Reply
+/// and Address on a DM go to the operator's DMs with its sender first.
+#[test]
+fn the_message_menu_in_the_agents_own_view_writes_only_where_a_box_is() {
+    for (item, want) in [("Reply", true), ("Address", true)] {
+        let mut c = chat();
+        review(&mut c);
+        // The keyboard is on the feed: select the newest message, beta's DM
+        // to alpha, and open its menu.
+        press(&mut c, KeyCode::Up);
+        press(&mut c, KeyCode::Enter);
+        let menu_items = items(&mut c);
+        assert!(menu_items.iter().any(|i| i.starts_with("Quote") && i.contains("read only")), "Quote set back: {menu_items:?}");
+        pick(&mut c, item);
+        let s = screen(&mut c);
+        assert_eq!(c.foreground(), &Tab::Dm(BETA_SID.into()), "{item}: {s}");
+        assert_eq!(c.input().text().starts_with(&format!("@{}", nick(BETA_CWD))), want, "{item}: {:?}", c.input().text());
+    }
 }
