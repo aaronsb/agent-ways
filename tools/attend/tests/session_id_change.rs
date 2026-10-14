@@ -2,14 +2,24 @@
 //! finding 4).
 //!
 //! Claude Code's `/clear` gives the running process a new session id and
-//! rewrites its session record. `attend run` must follow: register the new
-//! id in place of the old one (keeping its instance name), carry the
-//! enrollment record and the seen-set across, so the drain under the new id
-//! keeps delivering and does not deliver again what the old id saw.
+//! rewrites its session record. `attend run` must follow: move the old id's
+//! instance slot to the new id, leaving the old id as an alias of it, and
+//! carry the enrollment record and the seen-set across, so the drain under
+//! the new id keeps delivering and does not deliver again what the old id
+//! saw.
 
 mod common;
 use common::Fixture;
 use std::time::Duration;
+
+/// The registry rows for `old` and `new` in the fixture's project: each
+/// one's instance, and the id `old` is an alias of.
+#[cfg(feature = "sensor-peers")]
+fn moved_rows(f: &Fixture, old: &str, new: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let snap = attend_instances::Registry::with_base(f.cache().join("instances")).snapshot(&f.origin);
+    let instance = |id: &str| snap.get(id).map(|e| e.instance.clone());
+    (instance(old), instance(new), snap.get(old).and_then(|e| e.alias_of.clone()))
+}
 
 #[cfg(feature = "sensor-peers")]
 const NEW: &str = "sess-after-clear";
@@ -32,17 +42,17 @@ fn attend_run_follows_a_session_id_change() {
     run.wait_for("the old id's checkpoint", Duration::from_secs(20), |_| {
         std::fs::read_to_string(f.state_file(&old)).is_ok_and(|s| s.contains("other-1-before"))
     });
-    let instance = std::fs::read_to_string(&registry).unwrap();
+    let (instance, _, _) = moved_rows(&f, &old, NEW);
+    assert!(instance.is_some(), "the old id holds a slot");
 
     f.set_session_id(NEW);
     run.wait_for("the move to the new id", Duration::from_secs(20), |_| {
-        std::fs::read_to_string(&registry).is_ok_and(|r| r.contains(NEW) && !r.contains(&old))
+        std::fs::read_to_string(&registry).is_ok_and(|r| r.contains(NEW))
     });
-    let moved = std::fs::read_to_string(&registry).unwrap();
     assert_eq!(
-        instance.lines().nth(1),
-        moved.lines().nth(1),
-        "the session keeps its instance name: {instance} vs {moved}"
+        moved_rows(&f, &old, NEW),
+        (instance.clone(), instance, Some(NEW.to_string())),
+        "the new id keeps the instance name, and the old id is its alias"
     );
     assert!(f.marker(NEW).exists(), "enrollment carried to the new id");
     assert!(!f.marker(&old).exists(), "and dropped from the old one");
@@ -159,11 +169,14 @@ fn a_fresh_run_after_an_id_change_adopts_the_old_id() {
     run.wait_for("the adoption", Duration::from_secs(20), |_| {
         f.marker("sess-restart-new").exists()
             && !f.marker(&old).exists()
-            && std::fs::read_to_string(&registry).is_ok_and(|r| r.contains("sess-restart-new") && !r.contains(&old))
+            && std::fs::read_to_string(&registry).is_ok_and(|r| r.contains("sess-restart-new"))
     });
-    let reg = std::fs::read_to_string(&registry).unwrap();
-    assert!(reg.contains("sess-restart-new") && !reg.contains(&old), "{reg}");
-    assert!(reg.contains("instance: alpha"), "the slot name carries over: {reg}");
+    let alpha = Some("alpha".to_string());
+    assert_eq!(
+        moved_rows(&f, &old, "sess-restart-new"),
+        (alpha.clone(), alpha, Some("sess-restart-new".to_string())),
+        "the slot name carries over, and the old id is its alias"
+    );
     // The marker moves before the channel membership does, so wait for it.
     run.wait_for("the channel membership", Duration::from_secs(20), |_| {
         f.ok(&["channel", "--joined"]).contains("#side")

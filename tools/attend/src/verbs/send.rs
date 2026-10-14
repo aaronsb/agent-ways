@@ -608,25 +608,31 @@ fn parent_dest(
 }
 
 /// A direct message to `sender`: a person's tray, always; a session's
-/// project tray while it is live, else refused by its name.
+/// project tray while it is live, else refused by its name. A session id
+/// that `/clear` replaced answers through the live session that took its
+/// slot.
 #[cfg(feature = "sensor-peers")]
 fn sender_dest(sender: Sender) -> Result<Dest, SendError> {
     use agent_identity::signal::Kind;
     match sender.kind {
         Some(Kind::Human) if is_member_id(&sender.id) => Ok(Dest::Person(sender.id)),
-        Some(Kind::Agent) => match live_sessions().into_iter().find(|s| s.id == sender.id) {
-            Some(live) => Ok(Dest::Sessions { cwd: live.cwd, ids: vec![live.id] }),
-            None => {
-                let name = match &sender.cwd {
-                    Some(cwd) => {
-                        let instance = attend_instances::Registry::new().lookup(cwd, &sender.id);
-                        crate::verbs::peers::names(cwd, instance.as_deref()).1
-                    }
-                    None => format!("session {}", sender.id.chars().take(8).collect::<String>()),
-                };
-                Err(SendError::SenderExited { session: sender.id, name })
+        Some(Kind::Agent) => {
+            let registry = attend_instances::Registry::new();
+            let successor = sender.cwd.as_deref().and_then(|cwd| registry.successor(cwd, &sender.id));
+            let sessions = live_sessions();
+            let live = [Some(&sender.id), successor.as_ref()]
+                .into_iter()
+                .flatten()
+                .find_map(|id| sessions.iter().find(|s| &s.id == id));
+            if let Some(live) = live {
+                return Ok(Dest::Sessions { cwd: live.cwd.clone(), ids: vec![live.id.clone()] });
             }
-        },
+            let name = match &sender.cwd {
+                Some(cwd) => crate::verbs::peers::names(cwd, registry.lookup(cwd, &sender.id).as_deref()).1,
+                None => format!("session {}", sender.id.chars().take(8).collect::<String>()),
+            };
+            Err(SendError::SenderExited { session: sender.id, name })
+        }
         _ => Err(SendError::ParentRoomUnknown),
     }
 }

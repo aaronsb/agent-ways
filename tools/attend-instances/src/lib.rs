@@ -15,6 +15,11 @@
 //!   instance: alpha
 //!   registered_at: 2026-04-28T10:30:00Z
 //!   last_seen: 2026-04-28T10:35:00Z
+//! <earlier-session-uuid>:
+//!   instance: alpha
+//!   registered_at: 2026-04-28T09:00:00Z
+//!   last_seen: 2026-04-28T10:29:00Z
+//!   alias_of: <session-uuid>
 //! ```
 //!
 //! ## Slot semantics
@@ -26,6 +31,16 @@
 //! agents reason about themselves as `Jovan-alpha`, and a rename on
 //! resume would invalidate that self-reference plus every `@Jovan-
 //! alpha` mention by peers.
+//!
+//! ## Aliases
+//!
+//! `/clear` gives a running session a new id. [`Registry::rename`] moves
+//! the slot to the new id and leaves the old id's row as an alias: it
+//! carries the new id's instance, so the messages sent under the old id
+//! read as the live session's name, and `alias_of` names the id that took
+//! the slot. An alias is not a slot. It blocks no letter in allocation, and a
+//! session resumed under an alias id gets a fresh letter. Aliases age out
+//! with the same GC as slots.
 //!
 //! ## Allocator
 //!
@@ -52,7 +67,7 @@
 //! ## File size note
 //!
 //! Total file length crosses the 800-line code-quality threshold, but
-//! production code is ~290 lines (this section ends near `mod tests`);
+//! production code is ~330 lines (this section ends near `mod tests`);
 //! the remainder is the `#[cfg(test)]` block. Issue #78 left this as-is
 //! deliberately rather than mechanically splitting tests into a
 //! sibling file.
@@ -88,6 +103,15 @@ pub struct InstanceEntry {
     pub instance: String,
     pub registered_at: u64,
     pub last_seen: u64,
+    /// The id that took this row's slot when the session's id changed
+    /// (`/clear`). Set, the row is an alias and holds no slot.
+    pub alias_of: Option<String>,
+}
+
+impl InstanceEntry {
+    fn is_slot(&self) -> bool {
+        self.alias_of.is_none()
+    }
 }
 
 /// Registry handle. Cheap to construct — does no IO until a method
@@ -125,10 +149,13 @@ impl Registry {
 
     /// Register or reclaim. Returns the assigned instance string.
     ///
-    /// - If `session_id` already has an entry, return its instance and
-    ///   refresh `last_seen` so the GC clock resets.
+    /// - If `session_id` holds a slot, return its instance and refresh
+    ///   `last_seen` so the GC clock resets.
     /// - Otherwise, allocate the next-free instance (Greek first,
-    ///   numeric fallback past omega) and write a new row.
+    ///   numeric fallback past omega) and write a new row. An alias row
+    ///   under `session_id` (a resume of an id that `/clear` moved on) is
+    ///   replaced, and the aliases that pointed at it point where it did,
+    ///   so its letter stays with the session that took the slot.
     /// - During allocation, prune entries past `DEFAULT_GC_AGE` so
     ///   long-dead sessions stop blocking slots.
     ///
@@ -185,7 +212,7 @@ impl Registry {
         // migration sweep runs here too (PR #395 finding 4): every
         // register after the first takes this branch, and skipping
         // the sweep would leave stale siblings until 7-day GC.
-        if let Some(entry) = map.get_mut(session_id) {
+        if let Some(entry) = map.get_mut(session_id).filter(|e| e.is_slot()) {
             entry.last_seen = now;
             let instance = entry.instance.clone();
             write_registry(&path, &map)?;
@@ -194,9 +221,19 @@ impl Registry {
             return Ok(instance);
         }
 
+        // An alias under this id is a resume of an id that `/clear` moved
+        // on. Its row goes, and the aliases behind it lead on to the slot.
+        if let Some(alias) = map.remove(session_id) {
+            for entry in map.values_mut() {
+                if entry.alias_of.as_deref() == Some(session_id) {
+                    entry.alias_of = alias.alias_of.clone();
+                }
+            }
+        }
+
         // Allocate path: next-free instance.
         let taken: std::collections::HashSet<&str> =
-            map.values().map(|e| e.instance.as_str()).collect();
+            map.values().filter(|e| e.is_slot()).map(|e| e.instance.as_str()).collect();
         let instance = next_free_instance(&taken);
         map.insert(
             session_id.to_string(),
@@ -204,6 +241,7 @@ impl Registry {
                 instance: instance.clone(),
                 registered_at: now,
                 last_seen: now,
+                alias_of: None,
             },
         );
         write_registry(&path, &map)?;
@@ -220,24 +258,54 @@ impl Registry {
         Ok(instance)
     }
 
-    /// Give `old`'s instance name to `new` in `cwd`, for a session whose id
-    /// changed under the same process (`/clear`). `old` keeps the name as an
-    /// alias until GC, so the messages it sent still read `<nick>-<instance>`;
-    /// an alias shares the slot and blocks no other letter. Does nothing when
-    /// `old` has no slot: only `attend run` registers. Returns `new`'s
-    /// instance when it has one.
+    /// Move `old`'s slot in `cwd` to `new`, for a session whose id changed
+    /// under the same process (`/clear`). `new` takes `old`'s instance
+    /// name, or keeps its own when it already holds a slot. `old` stays as
+    /// an alias of `new` with `new`'s instance until GC, so the messages it
+    /// sent read as the live session's name. Does nothing when `old` holds
+    /// no slot: only `attend run` registers. Returns `new`'s instance when
+    /// it has one.
     pub fn rename(&self, cwd: &str, old: &str, new: &str) -> io::Result<Option<String>> {
         fs::create_dir_all(&self.base_dir)?;
         let path = self.path_for(cwd);
         let _lock = Lock::acquire_kept(&path)?;
         let mut map = parse_registry(&fs::read_to_string(&path).unwrap_or_default());
-        let Some(mut entry) = map.get(old).cloned() else {
-            return Ok(map.get(new).map(|e| e.instance.clone()));
+        let held = |map: &BTreeMap<String, InstanceEntry>, id: &str| {
+            map.get(id).filter(|e| e.is_slot()).map(|e| e.instance.clone())
         };
-        entry.last_seen = agent_fmt::when::now_secs();
-        let instance = map.entry(new.to_string()).or_insert(entry).instance.clone();
+        if old == new || held(&map, old).is_none() {
+            return Ok(held(&map, new));
+        }
+        let instance = match held(&map, new) {
+            Some(instance) => instance,
+            None => {
+                let mut slot = map[old].clone();
+                slot.last_seen = agent_fmt::when::now_secs();
+                let instance = slot.instance.clone();
+                map.insert(new.to_string(), slot);
+                instance
+            }
+        };
+        if let Some(alias) = map.get_mut(old) {
+            alias.alias_of = Some(new.to_string());
+        }
+        // Every alias that leads to `new`, earlier ones included, reads its name.
+        let followers: Vec<String> =
+            map.keys().filter(|id| chain_end(&map, id).as_deref() == Some(new)).cloned().collect();
+        for id in followers {
+            if let Some(alias) = map.get_mut(&id) {
+                alias.instance = instance.clone();
+            }
+        }
         write_registry(&path, &map)?;
         Ok(Some(instance))
+    }
+
+    /// The session that holds the slot `session_id` gave up, following
+    /// `alias_of` through every `/clear` since. `None` when `session_id`
+    /// is no alias in `cwd`.
+    pub fn successor(&self, cwd: &str, session_id: &str) -> Option<String> {
+        chain_end(&self.snapshot(cwd), session_id)
     }
 
     /// Remove `session_id` from every registry file other than
@@ -377,6 +445,19 @@ impl Default for SnapshotCache {
     }
 }
 
+/// The id at the end of `id`'s `alias_of` chain: the first one that is no
+/// alias. `None` when `id` is no alias, or when the chain loops.
+fn chain_end(map: &BTreeMap<String, InstanceEntry>, id: &str) -> Option<String> {
+    let mut id = map.get(id)?.alias_of.clone()?;
+    for _ in 0..map.len() {
+        match map.get(&id).and_then(|e| e.alias_of.clone()) {
+            Some(next) => id = next,
+            None => return Some(id),
+        }
+    }
+    None
+}
+
 /// Pick the lowest-index Greek letter that is not in `taken`. Past
 /// the Greek pool, fall back to numeric suffixes starting at 25 so
 /// the identity reads as `<nick>-25`, `<nick>-26`, …
@@ -409,6 +490,7 @@ fn parse_registry(content: &str) -> BTreeMap<String, InstanceEntry> {
     let mut current_instance: Option<String> = None;
     let mut current_registered_at: Option<u64> = None;
     let mut current_last_seen: Option<u64> = None;
+    let mut current_alias_of: Option<String> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -426,6 +508,7 @@ fn parse_registry(content: &str) -> BTreeMap<String, InstanceEntry> {
                 current_instance.take(),
                 current_registered_at.take(),
                 current_last_seen.take(),
+                current_alias_of.take(),
             );
             current_sid = Some(trimmed.trim_end_matches(':').to_string());
             continue;
@@ -440,6 +523,7 @@ fn parse_registry(content: &str) -> BTreeMap<String, InstanceEntry> {
                     "instance" => current_instance = Some(value.to_string()),
                     "registered_at" => current_registered_at = value.parse().ok(),
                     "last_seen" => current_last_seen = value.parse().ok(),
+                    "alias_of" => current_alias_of = Some(value.to_string()),
                     _ => {}
                 }
             }
@@ -453,6 +537,7 @@ fn parse_registry(content: &str) -> BTreeMap<String, InstanceEntry> {
         current_instance,
         current_registered_at,
         current_last_seen,
+        current_alias_of,
     );
     out
 }
@@ -463,6 +548,7 @@ fn commit_entry(
     instance: Option<String>,
     registered_at: Option<u64>,
     last_seen: Option<u64>,
+    alias_of: Option<String>,
 ) {
     let (Some(sid), Some(instance)) = (sid, instance) else {
         return;
@@ -473,6 +559,7 @@ fn commit_entry(
             instance,
             registered_at: registered_at.unwrap_or(0),
             last_seen: last_seen.unwrap_or(0),
+            alias_of,
         },
     );
 }
@@ -491,6 +578,11 @@ fn serialize_registry(map: &BTreeMap<String, InstanceEntry>) -> String {
         out.push_str("  last_seen: ");
         out.push_str(&entry.last_seen.to_string());
         out.push('\n');
+        if let Some(target) = &entry.alias_of {
+            out.push_str("  alias_of: ");
+            out.push_str(target);
+            out.push('\n');
+        }
     }
     out
 }
@@ -670,6 +762,7 @@ mod tests {
                 instance: "alpha".into(),
                 registered_at: 1_000,
                 last_seen: 2_000,
+                alias_of: None,
             },
         );
         m.insert(
@@ -678,6 +771,7 @@ mod tests {
                 instance: "beta".into(),
                 registered_at: 1_500,
                 last_seen: 2_500,
+                alias_of: Some("sess-a".into()),
             },
         );
         let yaml = serialize_registry(&m);
@@ -702,6 +796,7 @@ sess-a:
         let parsed = parse_registry(input);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed["sess-a"].instance, "alpha");
+        assert_eq!(parsed["sess-a"].alias_of, None, "a row without the field holds a slot");
     }
 
     #[test]
@@ -724,11 +819,72 @@ sess-a:
             // The old id keeps the name, so its earlier messages still read
             // `-beta` rather than the bare nickname.
             assert_eq!(snap.get("sess-b").map(|e| e.instance.as_str()), Some("beta"));
-            // The alias holds no second slot: the next session takes gamma.
-            assert_eq!(reg.register("/x", "sess-e").unwrap(), "gamma");
+            assert_eq!(snap["sess-b"].alias_of.as_deref(), Some("sess-c"));
+            assert_eq!(reg.successor("/x", "sess-b").as_deref(), Some("sess-c"));
+            assert_eq!(reg.successor("/x", "sess-c"), None);
             // No old slot: nothing is registered for the new id.
             assert_eq!(reg.rename("/x", "gone", "sess-d").unwrap(), None);
             assert!(!reg.snapshot("/x").contains_key("sess-d"));
+        });
+    }
+
+    #[test]
+    fn a_resume_of_the_id_before_a_clear_takes_a_fresh_letter() {
+        with_registry(|reg| {
+            reg.register("/x", "sess-a").unwrap();
+            reg.register("/x", "sess-b").unwrap();
+            reg.rename("/x", "sess-b", "sess-c").unwrap();
+            // `claude --resume sess-b` while sess-c runs as beta.
+            assert_eq!(reg.register("/x", "sess-b").unwrap(), "gamma");
+            assert_eq!(reg.register("/x", "sess-c").unwrap(), "beta");
+            let snap = reg.snapshot("/x");
+            assert_eq!(snap["sess-b"].alias_of, None, "the resumed id holds a slot of its own");
+            assert_eq!(reg.register("/x", "sess-d").unwrap(), "delta");
+        });
+    }
+
+    #[test]
+    fn a_chain_of_clears_keeps_one_letter() {
+        with_registry(|reg| {
+            assert_eq!(reg.register("/x", "sess-a").unwrap(), "alpha");
+            reg.rename("/x", "sess-a", "sess-b").unwrap();
+            assert_eq!(reg.rename("/x", "sess-b", "sess-c").unwrap().as_deref(), Some("alpha"));
+            let snap = reg.snapshot("/x");
+            for id in ["sess-a", "sess-b", "sess-c"] {
+                assert_eq!(snap[id].instance, "alpha", "{id}");
+            }
+            assert_eq!(reg.successor("/x", "sess-a").as_deref(), Some("sess-c"));
+            assert_eq!(reg.successor("/x", "sess-b").as_deref(), Some("sess-c"));
+            assert_eq!(reg.register("/x", "sess-d").unwrap(), "beta", "the aliases block no letter");
+            // A resume of the middle id leaves the first leading to sess-c.
+            assert_eq!(reg.register("/x", "sess-b").unwrap(), "gamma");
+            assert_eq!(reg.successor("/x", "sess-a").as_deref(), Some("sess-c"));
+            assert_eq!(reg.lookup("/x", "sess-a").as_deref(), Some("alpha"));
+        });
+    }
+
+    #[test]
+    fn an_alias_blocks_no_letter() {
+        with_registry(|reg| {
+            reg.register("/x", "sess-a").unwrap();
+            reg.rename("/x", "sess-a", "sess-c").unwrap();
+            // sess-c moves to another cwd; its alias in /x outlives it.
+            reg.register("/y", "sess-c").unwrap();
+            assert_eq!(reg.lookup("/x", "sess-a").as_deref(), Some("alpha"));
+            assert_eq!(reg.register("/x", "sess-d").unwrap(), "alpha");
+        });
+    }
+
+    #[test]
+    fn a_rename_onto_a_held_slot_aliases_the_old_id_to_it() {
+        with_registry(|reg| {
+            reg.register("/x", "sess-a").unwrap();
+            reg.register("/x", "sess-b").unwrap();
+            assert_eq!(reg.rename("/x", "sess-a", "sess-b").unwrap().as_deref(), Some("beta"));
+            let snap = reg.snapshot("/x");
+            assert_eq!(snap["sess-a"].instance, "beta", "the old id reads the live name");
+            assert_eq!(snap["sess-a"].alias_of.as_deref(), Some("sess-b"));
+            assert_eq!(reg.register("/x", "sess-e").unwrap(), "alpha", "alpha is free again");
         });
     }
 
@@ -739,7 +895,7 @@ sess-a:
         with_registry(|reg| {
             fs::create_dir_all(&reg.base_dir).unwrap();
             let old = reg.base_dir.join("-srv-a b.yaml");
-            let entry = InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: agent_fmt::when::now_secs() };
+            let entry = InstanceEntry { instance: "beta".to_string(), registered_at: 1, last_seen: agent_fmt::when::now_secs(), alias_of: None };
             write_registry(&old, &BTreeMap::from([("sess-a".to_string(), entry)])).unwrap();
             assert_eq!(reg.lookup("/srv/a b", "sess-a"), None);
             reg.touch_at("/srv/a b", "sess-a", 500).unwrap();

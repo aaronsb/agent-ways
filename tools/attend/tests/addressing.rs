@@ -201,6 +201,36 @@ mod reply {
         assert_eq!(files(&f.signals().join("_broadcast")), ["gone-sess-1-1.signal"]);
     }
 
+    /// A reply to a message a session sent before `/clear` replaced its id
+    /// goes to the live session that took its slot, through every `/clear`
+    /// since. With that session gone too, the reply is refused by name.
+    #[test]
+    fn a_reply_to_an_id_before_a_clear_goes_to_its_successor() {
+        let f = Fixture::new("addr-alias");
+        let _env = enter(&f);
+        let peer = Peer::start(&f, "peer-new", "peerproj");
+        let registry = attend_instances::Registry::with_base(f.cache().join("instances"));
+        registry.register(&peer.cwd, "peer-old").unwrap();
+        registry.rename(&peer.cwd, "peer-old", "peer-mid").unwrap();
+        registry.rename(&peer.cwd, "peer-mid", "peer-new").unwrap();
+        signal(&f, "_broadcast", "peer-old-1-1", &format!("claude:peer-old|peerproj|{}|to:*|before the clear", peer.cwd));
+        record(&f.sid, "peer-old-1-1", &Said::Open, "claude:peer-old");
+        let sent = reply("still here?").expect("a reply").sent;
+        assert_eq!(sent.scope, "directed");
+        assert_eq!(read(&peer.tray(&f), &sent.id).0.as_deref(), Some("peer-new"));
+
+        let cwd = peer.cwd.clone();
+        drop(peer);
+        match reply("and now?") {
+            Err(e @ attend::verbs::SendError::SenderExited { .. }) => {
+                let name = agent_identity::Identity::for_cwd(&cwd, agent_theme::ColorDepth::NoColor).nickname.to_string();
+                let why = e.to_string();
+                assert!(why.contains(&format!("{name}-alpha")), "names the session: {why}");
+            }
+            other => panic!("expected sender_exited: {other:?}"),
+        }
+    }
+
     /// A reply to a post in a named channel stays in the channel, `to` the
     /// poster.
     #[test]
