@@ -23,8 +23,8 @@
 //! their marks, once a mark is [`MARK_REAP_DAYS`] old, or, for a message in
 //! a project tray, once that project has started [`MARK_REAP_SESSIONS`]
 //! Claude Code sessions since the mark. A session start is a transcript
-//! under the project's `~/.claude/projects/<slug>/` born after the mark,
-//! one per session id, so each `/clear` counts. A message no delete marked
+//! under the project's `~/.claude/projects/<slug>/`, named by its session
+//! id, born after the mark, so each `/clear` counts. A message no delete marked
 //! is never removed this way.
 
 use std::collections::{HashMap, HashSet};
@@ -76,10 +76,16 @@ fn tray_live(projects: &Path, tray: &str) -> bool {
 
 /// When each Claude Code session in project directory `dir` started: its
 /// transcript's birth time, or where the filesystem keeps none, the first
-/// timestamp written in it.
+/// timestamp written in it. A session's transcript is named by its session
+/// id, a UUID; any other file there is no session.
 fn session_starts(dir: &Path) -> Vec<SystemTime> {
     claude_sessions::transcripts_in(dir)
         .iter()
+        .filter(|t| {
+            t.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| !s.starts_with("pid-") && attend_groups::is_agent_member(s))
+        })
         .filter_map(|t| std::fs::metadata(t).and_then(|m| m.created()).ok().or_else(|| first_timestamp(t)))
         .collect()
 }
@@ -374,8 +380,9 @@ mod tests {
     fn sessions(projects: &Path, path: &str, n: usize) {
         let dir = projects.join(claude_sessions::project_slug(path));
         std::fs::create_dir_all(&dir).unwrap();
-        for i in 0..n {
-            std::fs::write(dir.join(format!("session-{i}.jsonl")), "{}\n").unwrap();
+        let start = std::fs::read_dir(&dir).unwrap().count();
+        for i in start..start + n {
+            std::fs::write(dir.join(format!("{i:08}-0000-4000-8000-000000000000.jsonl")), "{}\n").unwrap();
         }
     }
 
@@ -421,10 +428,14 @@ mod tests {
         mark(&base, "marked.signal", DAY);
 
         sessions(&projects, "/srv/live", MARK_REAP_SESSIONS - 1);
+        // Files that are not a session's transcript count for nothing.
+        let dir = projects.join(claude_sessions::project_slug("/srv/live"));
+        std::fs::write(dir.join("agent-notes.jsonl"), "{}\n").unwrap();
+        std::fs::write(dir.join("history.jsonl"), "{}\n").unwrap();
         run_cleanup_in(&base, &projects, false, false);
         assert!(tray.join("marked.signal").exists(), "two sessions since the mark");
 
-        sessions(&projects, "/srv/live", MARK_REAP_SESSIONS);
+        sessions(&projects, "/srv/live", 1);
         let stats = run_cleanup_in(&base, &projects, false, false);
         assert_eq!(stats.marked_removed, 1);
         assert!(!tray.join("marked.signal").exists());
