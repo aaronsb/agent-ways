@@ -512,8 +512,9 @@ pub(crate) struct DeleteArgs {
     /// Act as the person at this terminal, never as a Claude Code session
     /// this process runs under: `--dm` then reaches the person's thread.
     /// attend-chat passes it, since it may be started from a session's
-    /// shell
-    #[arg(long)]
+    /// shell. A convenience for attend-chat, not an authorization check,
+    /// so it is left out of the help; it takes `--dm`
+    #[arg(long, hide = true)]
     pub(crate) as_person: bool,
 
     /// How old a message must be: `current` (before the earliest start of

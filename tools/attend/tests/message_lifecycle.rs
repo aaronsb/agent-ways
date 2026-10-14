@@ -141,3 +141,23 @@ fn as_person_reaches_the_persons_dm_thread_under_a_session() {
     assert!(stdout(&as_person).contains(r#""marked":1"#), "the person's thread holds the DM: {}", stdout(&as_person));
     std::fs::remove_dir_all(&home).ok();
 }
+
+/// `--as-person` names whose thread `--dm` reaches, and nothing else: it is
+/// refused without `--dm`, where it would otherwise be ignored, and the help
+/// leaves it out, as attend-chat's convenience rather than an option to
+/// reach for.
+#[test]
+fn as_person_is_refused_without_dm_and_hidden_from_the_help() {
+    let home = std::env::temp_dir().join(format!("attend-as-person-bare-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let bare = attend(&home, &["message", "delete", "--open", "--as-person", "--dry-run", "--json"]);
+    assert!(!bare.status.success(), "refused: {}", stdout(&bare));
+    let err = String::from_utf8_lossy(&bare.stderr);
+    assert!(err.contains("--dm"), "the refusal names what it needs: {err}");
+    let help = attend(&home, &["message", "delete", "--help"]);
+    ok(&help);
+    assert!(!stdout(&help).contains("--as-person"), "hidden: {}", stdout(&help));
+    assert!(stdout(&help).contains("--dm"), "the help itself is read: {}", stdout(&help));
+    std::fs::remove_dir_all(&home).ok();
+}

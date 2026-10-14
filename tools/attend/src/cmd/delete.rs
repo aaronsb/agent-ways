@@ -26,6 +26,10 @@ pub(crate) fn cmd_delete(a: DeleteArgs) {
         }
         return;
     }
+    if a.as_person && a.dm.is_none() {
+        let why = "--as-person names whose thread --dm reaches; it takes --dm <session-id>";
+        crate::cmd::refuse_usage(&format!("attend message delete: {why}"), why, a.json);
+    }
     let scope = match (a.open, a.channel, a.dm, a.everywhere) {
         (true, ..) => Scope::Open,
         (_, Some(name), ..) => Scope::Channel(name),
