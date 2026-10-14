@@ -835,10 +835,12 @@ fn monitor_line(sender: &str, signal_id: &str, body: &str, reply_hint: bool) -> 
     format!("message from {sender} ~{}{hint}: {text}", agent_identity::signal::short_id(signal_id))
 }
 
-/// Appended to the first peer message a session sees. It names `attend
-/// reply`, which threads to that message on its own, because that is the
-/// verb for answering it; `attend message send` starts a new topic.
-const REPLY_HINT: &str = " (reply: attend message reply \"...\")";
+/// Appended to the first peer message a session sees. It leads with the
+/// permission to stay silent, as every conduit's frame does (ADR-406 item
+/// 4), then names `attend message reply`, which threads to that message on
+/// its own, because that is the verb for answering it; `attend message
+/// send` starts a new topic.
+const REPLY_HINT: &str = " (silence is a valid reply; to answer: attend message reply \"...\")";
 
 /// A single poll surfacing more than this many messages is a flood — a
 /// warm rejoin after a down-gap, or a hyperactive peer. Above it, the poll
@@ -912,9 +914,10 @@ mod tests {
         p
     }
 
-    /// The hint names the threading verb.
+    /// The hint leads with silence, then names the threading verb.
     #[test]
     fn reply_hint_names_attend_reply() {
+        assert!(REPLY_HINT.starts_with(" (silence is a valid reply;"), "{REPLY_HINT}");
         assert!(REPLY_HINT.contains("attend message reply \""), "{REPLY_HINT}");
         assert!(!REPLY_HINT.contains("attend message send"), "{REPLY_HINT}");
     }

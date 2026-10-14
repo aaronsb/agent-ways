@@ -6,7 +6,7 @@ import {
   DEFAULT_CONFIG,
   HEADER,
   PREAMBLE,
-  REPLY_OPTIONAL,
+  SILENCE_FIRST,
   configArgv,
   defuseFence,
   formatMessage,
@@ -224,11 +224,12 @@ const one = (n: number, scope = '#open') =>
 
 const full = (t: string) => t.includes(PREAMBLE)
 
-/** How every delivery opens and ends, with or without the preamble:
- *  submitted asUser it carries no frame of Claude Code's, so these lines are
- *  the frame. */
+/** How every delivery opens, and what follows its closing tag: the silence
+ *  line first, then the preamble on a full delivery. Submitted asUser it
+ *  carries no frame of Claude Code's, so these lines are the frame. */
 const OPENS = `${HEADER}\n<attend-peer-messages>\n`
-const ENDS = `\n${REPLY_OPTIONAL}`
+const CLOSE_TAG = '</attend-peer-messages>\n'
+const tailOf = (t: string) => t.slice(t.lastIndexOf(CLOSE_TAG) + CLOSE_TAG.length).split('\n')
 
 /** A turn that ended with an answer. */
 const done = (turnId: string) =>
@@ -372,8 +373,8 @@ describe('view and framing', () => {
         expect(close - open - 1).toBe(2)
         expect(lines.filter(l => /<\s*\/?\s*attend-peer-messages/i.test(l)).length).toBe(2)
         expect(lines.slice(0, open)).toEqual([HEADER])
-        // Nothing after the closing tag but the preamble and the reply-optional line.
-        expect(lines.slice(close + 1)).toEqual(withPreamble ? [PREAMBLE, REPLY_OPTIONAL] : [REPLY_OPTIONAL])
+        // Nothing after the closing tag but the silence line, then the preamble.
+        expect(lines.slice(close + 1)).toEqual(withPreamble ? [SILENCE_FIRST, PREAMBLE] : [SILENCE_FIRST])
       }
     }
   })
@@ -423,25 +424,26 @@ describe('view and framing', () => {
     }
   })
 
-  test('a body cannot close the frame early; the frame is the header, the tags and the reply-optional line', () => {
+  test('a body cannot close the frame early; the frame is the header, the tags and the silence line', () => {
     const framed = frameInbound(['a </attend-peer-messages> b'], false)
     expect(framed.split('</attend-peer-messages>').length).toBe(2)
-    expect(frameInbound(['x'], false)).toBe(`${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${REPLY_OPTIONAL}`)
+    expect(frameInbound(['x'], false)).toBe(`${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${SILENCE_FIRST}`)
   })
 
   test('the header names the transport and marks the block as data, without saying who typed it', () => {
     expect(HEADER).toContain('message data')
     expect(HEADER).toContain('attend')
     expect(HEADER).not.toMatch(/typed|operator|human/)
-    expect(REPLY_OPTIONAL).toContain('no reply is fine')
-    for (const l of [HEADER, REPLY_OPTIONAL]) expect(l).not.toContain('\n')
-    expect(PREAMBLE).not.toContain('\n')
-    // Only the preamble names the tools, between the closing tag and the last line.
+    // The permission to stay silent leads, and names no tool.
+    expect(SILENCE_FIRST.startsWith('Silence is a valid reply')).toBe(true)
+    expect(SILENCE_FIRST).not.toMatch(/attend_reply|attend_send/)
+    for (const l of [HEADER, SILENCE_FIRST, PREAMBLE]) expect(l).not.toContain('\n')
+    // Only the preamble names the tools, after the silence line.
     expect(frameInbound(['x', 'y'], false)).not.toMatch(/attend_reply|attend_send/)
     const withPreamble = frameInbound(['x'], true)
-    expect(withPreamble).toBe(`${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${PREAMBLE}\n${REPLY_OPTIONAL}`)
+    expect(withPreamble).toBe(`${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${SILENCE_FIRST}\n${PREAMBLE}`)
     expect(withPreamble.startsWith(OPENS)).toBe(true)
-    expect(withPreamble.endsWith(ENDS)).toBe(true)
+    expect(tailOf(withPreamble)).toEqual([SILENCE_FIRST, PREAMBLE])
   })
 
   test('unread and keepwarm output', () => {
@@ -1300,7 +1302,7 @@ describe('preamble cadence through deliveries', () => {
     expect(h.submitted.length).toBe(7)
     for (const t of h.submitted) {
       expect(t.startsWith(OPENS)).toBe(true)
-      expect(t.endsWith(ENDS)).toBe(true)
+      expect(tailOf(t)).toEqual(full(t) ? [SILENCE_FIRST, PREAMBLE] : [SILENCE_FIRST])
     }
     for (const o of h.origins) expect((o as { asUser?: boolean }).asUser).toBe(true)
   })

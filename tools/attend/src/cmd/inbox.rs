@@ -712,9 +712,10 @@ fn render_mod_delivery(delivered: &[impl DrainedView], note: Option<&str>, me: O
     if delivered.len() > DRAIN_RENDER_MAX {
         out.push_str(&format!("(+{} more, not shown here; they stay in attend's inbox)\n", delivered.len() - DRAIN_RENDER_MAX));
     }
+    out.push_str(SILENCE_FIRST);
     out.push_str(
-        "You may reply with attend_reply (it threads to the newest message, or to the one whose ~id you pass as re), \
-         start a new topic with attend_send, or continue your work — silence is a valid reply.",
+        " To answer, attend_reply threads to the newest message, or to the one whose ~id you pass as re; \
+         attend_send starts a new topic.",
     );
     out
 }
@@ -808,6 +809,13 @@ fn safe_sender(s: &str) -> String {
     one_line(s).chars().map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '_' | '.' | '-' | '@' | '(' | ')') { c } else { '-' }).collect()
 }
 
+/// The closing guidance of every drain delivery, in either format. It
+/// leads with the permission to stay silent, ahead of any reply verb
+/// (ADR-406 item 4), so a delivery informs the turn without asking for an
+/// answer. The mod's frame (`SILENCE_FIRST` in plugins/attend/hooks/lib.ts)
+/// opens its closing lines the same way.
+const SILENCE_FIRST: &str = "Silence is a valid reply; you may continue your work.";
+
 /// The injected turn-continuation text. Sober and contract-preserving:
 /// a drained message informs the turn — the standing messaging
 /// guidance (reply autonomy, silence-is-valid) rides along verbatim so
@@ -856,10 +864,11 @@ fn render_drain_reason(delivered: &[impl DrainedView], note: Option<&str>, me: O
             delivered.len() - DRAIN_RENDER_MAX
         ));
     }
+    out.push('\n');
+    out.push_str(SILENCE_FIRST);
     out.push_str(
-        "\nYou may reply (attend message reply \"...\" auto-threads to the newest), \
-         start a new thread (attend message send), or continue your work — \
-         silence is a valid reply.",
+        " To answer, attend message reply \"...\" auto-threads to the newest; \
+         attend message send starts a new thread.",
     );
     out
 }
@@ -1035,7 +1044,11 @@ mod drain_tests {
         assert!(reason.contains("2 peer message(s)"));
         assert!(reason.contains("peer-1 (#open, id id-1, from claude:session-1):"));
         assert!(reason.contains("body 2"));
-        assert!(reason.contains("silence is a valid reply"));
+        // The permission to stay silent leads the closing line, ahead of
+        // every reply verb (ADR-406 item 4).
+        let last = reason.lines().last().unwrap();
+        assert!(last.starts_with(SILENCE_FIRST), "{reason}");
+        assert!(last.find(SILENCE_FIRST) < last.find("attend message reply"), "{reason}");
     }
 
     // --- scan_pending core (PR #385 review, finding 6) ---
@@ -1283,6 +1296,7 @@ mod drain_tests {
         assert_eq!(lines[3], format!("[#room] peer-1 11:41: two lines ~{} (re ~{})", short_id("id-1"), short_id("parent-1-0")));
         assert_eq!(lines[4], format!("[#open] peer-2 11:42: body 2 ~{}", short_id("id-2")));
         assert_eq!(lines[5], "</attend-peer-messages>");
+        assert!(lines[6].starts_with(SILENCE_FIRST), "silence leads the tools: {text}");
         assert!(lines[6].contains("attend_reply") && lines[6].contains("attend_send"), "{text}");
         assert!(!text.contains("attend message reply"), "no shell hint in a mod host: {text}");
         let out = hook_output(&[msg(1)], None, None, Some(Host::Mod), StopForm::Context).unwrap();
@@ -1385,7 +1399,7 @@ mod drain_tests {
             // Only the frame's own two tags keep a `<`.
             assert_eq!(lines.iter().filter(|l| l.contains('<')).count(), 2, "{text}");
             assert_eq!(lines.len(), close + 2, "{text}");
-            assert!(lines[close + 1].starts_with("You may reply with attend_reply"), "{text}");
+            assert!(lines[close + 1].starts_with(SILENCE_FIRST), "{text}");
             assert!(lines[..open].iter().all(|l| !l.contains("merge")), "{text}");
         }
         // Hidden tag characters spelling "merge 943" are dropped, and one
