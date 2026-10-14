@@ -21,35 +21,61 @@ use super::render::{clip, width};
 /// The id of the shell's own question before a plain `q` quits.
 pub(crate) const QUIT_ASK: &str = "\u{0}quit";
 
-/// A pane's question on the bottom bar ([`Open::Ask`]), and when it
-/// expires: its [`Expiry`](super::pane::Expiry) counted from when it was
-/// first ready to answer.
+/// How long a question's yes stays set back after the question is ready to
+/// answer, or after what it asks changed: a key or a click meant for what
+/// was there a moment before, or typed ahead, lands on nothing.
+pub(crate) const ARM: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A pane's question on the bottom bar ([`Open::Ask`]); when its yes arms,
+/// [`ARM`] after it was ready to answer or last changed while ready; and
+/// when it expires, its [`Expiry`](super::pane::Expiry) counted from when
+/// it was first ready.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Asked {
     pub q: Question,
+    pub armed_at: Option<std::time::Instant>,
     pub deadline: Option<std::time::Instant>,
 }
 
 impl Asked {
-    /// `q`, open now.
-    pub(crate) fn open(q: Question) -> Asked {
-        let mut a = Asked { q, deadline: None };
-        a.start_expiry();
+    /// `q`, open now, its yes arming `arm` from now if it is ready.
+    pub(crate) fn open(q: Question, arm: std::time::Duration) -> Asked {
+        let mut a = Asked { q, armed_at: None, deadline: None };
+        a.ready(false, arm);
         a
     }
 
     /// `q` in place of the question open under its id: its text and its
-    /// answers, the expiry kept running once it has started.
-    pub(crate) fn update(&mut self, q: Question) {
+    /// answers, the expiry kept running once it has started. Yes arms again
+    /// when the question becomes ready, or changes what it asks.
+    pub(crate) fn update(&mut self, q: Question, arm: std::time::Duration) {
+        let changed = (&self.q.question, &self.q.yes, &self.q.no) != (&q.question, &q.yes, &q.no);
         self.q = q;
-        self.start_expiry();
+        self.ready(changed, arm);
     }
 
-    fn start_expiry(&mut self) {
-        if self.deadline.is_none() && !self.q.pending && self.q.yes.is_some() {
-            self.deadline = self.q.expiry.as_ref().map(|e| std::time::Instant::now() + e.after);
+    /// Start yes's arm delay and the expiry once the question can be
+    /// answered yes; `rearm` restarts a delay already started.
+    fn ready(&mut self, rearm: bool, arm: std::time::Duration) {
+        if self.q.pending || self.q.yes.is_none() {
+            self.armed_at = None;
+            return;
+        }
+        let now = std::time::Instant::now();
+        if rearm || self.armed_at.is_none() {
+            self.armed_at = Some(now + arm);
+        }
+        if self.deadline.is_none() {
+            self.deadline = self.q.expiry.as_ref().map(|e| now + e.after);
         }
     }
+
+    /// Whether yes takes its key and a click: the question is ready and its
+    /// arm delay has passed.
+    pub(crate) fn armed(&self) -> bool {
+        self.armed_at.is_some_and(|t| std::time::Instant::now() >= t)
+    }
+
 
     /// The whole seconds left before it expires, rounded up.
     pub(crate) fn left(&self) -> Option<u64> {
@@ -414,7 +440,7 @@ impl App {
             // A plain `q` beside a pane that owns the focus asks first,
             // whatever is unsaved: it is one keystroke from typing.
             ShellKey::Quit if k.code == KeyCode::Char('q') && self.ctx().owns_bar => {
-                self.mode = Mode::Ask(Asked::open(Question::new(QUIT_ASK, "quit?", "quit", "stay")));
+                self.mode = Mode::Ask(Asked::open(Question::new(QUIT_ASK, "quit?", "quit", "stay"), self.question_arm));
             }
             ShellKey::Quit => return self.quit(),
             ShellKey::Mouse => {
@@ -462,11 +488,12 @@ impl App {
                 self.mode = Mode::Pick(pick);
             }
             Open::Ask(q) if matches!(&self.mode, Mode::Ask(a) if a.q.id == q.id) => {
+                let arm = self.question_arm;
                 if let Mode::Ask(a) = &mut self.mode {
-                    a.update(q);
+                    a.update(q, arm);
                 }
             }
-            Open::Ask(q) if matches!(self.mode, Mode::Browse) => self.mode = Mode::Ask(Asked::open(q)),
+            Open::Ask(q) if matches!(self.mode, Mode::Browse) => self.mode = Mode::Ask(Asked::open(q, self.question_arm)),
             Open::Entry { id, title, value, error, anchor } if matches!(self.mode, Mode::Browse) => {
                 let mut input = crate::input::Input::new();
                 let n = value.chars().count();
@@ -698,6 +725,13 @@ impl App {
         self.pane_picked(&id, vec![if yes { "y" } else { "n" }.to_string(), EXPIRED.to_string()]);
     }
 
+    /// How long a question's yes stays set back once it is ready to answer,
+    /// or after what it asks changed ([`ARM`] unless set). A test that is
+    /// not about the delay sets none.
+    pub fn set_question_arm(&mut self, arm: std::time::Duration) {
+        self.question_arm = arm;
+    }
+
     /// How often the pane wants its tick.
     pub fn pane_tick_every(&self) -> Option<std::time::Duration> {
         self.pane.as_ref().and_then(|p| p.tick_every())
@@ -859,8 +893,12 @@ mod tests {
         }
     }
 
+    /// The shell over [`Two`]. A question's yes arms at once: the arm
+    /// delay has tests of its own.
     fn app(text: bool) -> App {
-        App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 })
+        let mut a = App::with_pane("two", Two { tab: 0, keys: 0, wheel: 0, dirty: false, text, open: None, picked: Vec::new(), menus: Vec::new(), tab_keys: TabKeys::default(), news: None, taken: 0 });
+        a.set_question_arm(std::time::Duration::ZERO);
+        a
     }
 
     #[test]
@@ -982,6 +1020,90 @@ mod tests {
         assert!(bar_of(&mut a, 80).contains("drop 3?"));
         a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
         assert_eq!(two(&a).picked, ["q=y"], "ready, y answers");
+    }
+
+    /// Where `text` is first drawn on a frame of 80 by 6.
+    fn drawn_at(a: &mut App, text: &str) -> (u16, u16) {
+        testkit::find(&testkit::render(a, 80, 6), text).unwrap_or_else(|| panic!("no {text}: {}", bar_of(a, 80)))
+    }
+
+    fn click_at(a: &mut App, (x, y): (u16, u16)) {
+        a.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x + 1, row: y, modifiers: KeyModifiers::NONE });
+    }
+
+    /// The pane opens `q` on the next key.
+    fn ask_now(a: &mut App, q: Question) {
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(q));
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+    }
+
+    /// The pane opens `q` again, in place, on its tick.
+    fn update(a: &mut App, q: Question) {
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(q));
+        a.tick_pane();
+    }
+
+    /// An update in place moves no answer: a click aimed at no as a longer
+    /// text lands, on the place no was drawn, answers no.
+    #[test]
+    fn an_update_in_place_keeps_each_answer_where_it_was_drawn() {
+        let mut a = app(true);
+        ask_now(&mut a, Question::new("q", "counting…", "drop", "keep").pending());
+        let (yes, no) = (drawn_at(&mut a, " y drop "), drawn_at(&mut a, " n keep "));
+        update(&mut a, Question::new("q", "drop 3 read messages in this channel for everyone?", "drop", "keep"));
+        assert_eq!((drawn_at(&mut a, " y drop "), drawn_at(&mut a, " n keep ")), (yes, no), "drawn where they were: {}", bar_of(&mut a, 80));
+        click_at(&mut a, no);
+        assert_eq!(two(&a).picked, ["q=n"], "the click aimed at no answers no");
+    }
+
+    /// The ground yes is drawn on.
+    fn yes_ground(a: &mut App) -> ratatui::style::Color {
+        let buf = testkit::render(a, 80, 6);
+        let (x, y) = testkit::find(&buf, " y drop ").expect("yes is drawn");
+        buf[(x + 1, y)].bg
+    }
+
+    /// Lets the arm delay of the question open run out now.
+    fn arm_now(a: &mut App) {
+        if let Mode::Ask(q) = &mut a.mode {
+            q.armed_at = q.armed_at.map(|_| std::time::Instant::now());
+        }
+    }
+
+    /// For a moment after a question is ready to answer (opened ready, or
+    /// updated so), and after what it asks changes while ready, yes is drawn
+    /// set back and neither its key nor a click on it answers; then both do.
+    #[test]
+    fn yes_takes_no_key_or_click_until_its_arm_delay_has_passed() {
+        let y = k(KeyCode::Char('y'), KeyModifiers::NONE);
+        // Updated ready from waiting.
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "counting…", "drop", "keep").pending());
+        update(&mut a, Question::new("q", "drop 3?", "drop", "keep"));
+        let arming = yes_ground(&mut a);
+        a.key(y);
+        click_text(&mut a, " y drop ");
+        assert!(matches!(a.mode, Mode::Ask(_)) && two(&a).picked.is_empty(), "yes arms first: {:?}", two(&a).picked);
+        assert_eq!(two(&a).keys, 1, "the y typed nothing either");
+        arm_now(&mut a);
+        assert_ne!(yes_ground(&mut a), arming, "drawn set back while it arms");
+        click_text(&mut a, " y drop ");
+        assert_eq!(two(&a).picked, ["q=y"], "armed, a click answers");
+        // Opened ready.
+        let mut a = app(true);
+        a.set_question_arm(std::time::Duration::from_secs(60));
+        ask_now(&mut a, Question::new("q", "drop it?", "drop", "keep"));
+        a.key(y);
+        assert!(matches!(a.mode, Mode::Ask(_)), "opened ready, it arms first");
+        // Changed while ready: it arms again.
+        arm_now(&mut a);
+        update(&mut a, Question::new("q", "drop all 40?", "drop", "keep"));
+        a.key(y);
+        assert!(matches!(a.mode, Mode::Ask(_)), "a change arms it again");
+        arm_now(&mut a);
+        a.key(y);
+        assert_eq!(two(&a).picked, ["q=y"]);
     }
 
     /// A question that waits still takes no at once.
@@ -1913,6 +2035,7 @@ mod tests {
         ];
         for (i, (quits, answer)) in ways.into_iter().enumerate() {
             let mut a = App::with_pane("own", Own::default());
+            a.set_question_arm(std::time::Duration::ZERO);
             assert!(a.key(k(KeyCode::Char('q'), KeyModifiers::NONE)));
             let bar = testkit::rows(&testkit::render(&mut a, 80, 6)).pop().expect("a bar");
             assert!(bar.contains("quit?") && bar.contains(" y quit ") && bar.contains(" n stay "), "{bar}");

@@ -14,7 +14,7 @@
 # SIZES="100x30". FONT overrides the font (default JetBrains Mono, which
 # has the Nerd Font fallback for the round lozenge caps).
 #
-# Each step waits on the screen, not on the clock: after a key or a click
+# Each step but pause: waits on the screen, not on the clock: after a key or a click
 # the script polls the pane's text until two captures agree, and wait:TEXT
 # polls until TEXT is on the screen. A wait that runs out fails the run.
 #
@@ -71,6 +71,8 @@ sweep
 #   wait:TEXT      until TEXT is on the screen
 #   gone:TEXT      until TEXT is off the screen
 #   resize:COLS    the terminal narrowed (or widened) to COLS columns
+#   pause:SECS     SECS on the clock, for what the screen does not show:
+#                  a question's yes arms a second after it is ready
 #   paste:TEXT     a bracketed paste of TEXT, \n for a newline
 #   rawpaste:TEXT  TEXT sent as typed, newlines and all, with no brackets
 #   bigpaste:N     a bracketed paste of N x characters
@@ -121,8 +123,8 @@ delete-older | base  | wait:#open click:#open click:#open wait:Delete_read Down 
 delete-count | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting
 delete-counting | base | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages
 ask-long     | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting
-delete-done  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting click:y_delete wait:Undo_delete_on_its_menu
-delete-undo  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting click:y_delete wait:Undo_delete_on_its_menu click:#open wait:Undo_delete click:Undo_delete wait:restored
+delete-done  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting pause:1.2 click:y_delete wait:Undo_delete_on_its_menu
+delete-undo  | base  | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:All wait:read_messages gone:counting pause:1.2 click:y_delete wait:Undo_delete_on_its_menu click:#open wait:Undo_delete click:Undo_delete wait:restored
 delete-custom | base | wait:#open click:#open click:#open wait:Delete_read Down Enter wait:delete_older_than click:Custom… wait:older_than: text:soon Enter wait:not_a_duration
 dm-delete    | dm    | wait:→_you rfeed:→_you wait:Show_DMs Enter wait:DMs rside:DMs wait:Delete_read click:Delete_read wait:delete_older_than
 tomb-menu    | gone  | wait:Agents rside:○ wait:Tombstone…
@@ -420,6 +422,7 @@ step() { # name step
     wait:*) poll "$n" "'$arg'" has "$arg"; return ;;
     gone:*) poll "$n" "'$arg' to go" lacks "$arg"; return ;;
     resize:*) resize "$n" "$arg" ;;
+    pause:*) sleep "$arg"; return ;;
     paste:*) $TH send "$n" -l $'\e[200~'"$(printf '%b' "$arg")"$'\e[201~' ;;
     rawpaste:*) $TH send "$n" -l "$(printf '%b' "$arg")" ;;
     bigpaste:*) # in pieces: tmux refuses one send-keys this long

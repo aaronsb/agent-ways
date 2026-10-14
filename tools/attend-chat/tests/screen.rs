@@ -142,6 +142,8 @@ fn chat_at(depth: ColorDepth, theme: Option<&str>) -> Chat {
         .hidden_file(hidden)
         .sidebar(false)
         .heartbeat(false)
+        // A question's yes arms at once: the delay has tests of its own.
+        .question_arm(Duration::ZERO)
         .pinned(UNIX_EPOCH + Duration::from_secs(NOW), 0);
     for s in transcript() {
         c.push(s);

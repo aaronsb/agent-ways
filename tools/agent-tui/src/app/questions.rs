@@ -5,7 +5,9 @@
 //! them. Each has two answers, `y` and `n` in either case; Esc and Enter
 //! give the one that keeps things as they are. A pane's question may wait,
 //! its yes drawn set back and inert, may offer only no, and may expire,
-//! drawing its seconds left ([`super::pane::Question`]).
+//! drawing its seconds left ([`super::pane::Question`]). Its yes is set back
+//! and inert too for a moment after it is ready, or changed while ready
+//! ([`super::paneshell::ARM`]).
 
 use super::dialog::{Answer, Button, Dialog, DialogBuilder, Placement};
 use super::modals::Modal;
@@ -151,7 +153,8 @@ impl Modal for Ask {
         let mut d = Dialog::bar(q.question.clone());
         if let Some(yes) = &q.yes {
             let button = Button::new(Btn::Yes, format!("y {yes}"), Ground::Err).key('y').key('Y');
-            d = d.button(if q.pending { button.waiting() } else { button });
+            // Set back while it waits, and for its arm delay once ready.
+            d = d.button(if a.armed() { button } else { button.waiting() });
         }
         d = d.button(Button::new(Btn::No, format!("n {}", q.no), Ground::Keep).key('n').key('N').cancel().default());
         if let (Some(e), Some(left)) = (&q.expiry, a.left()) {

@@ -31,7 +31,8 @@ fn chat() -> Chat {
         attend_groups::Groups::new(base, &attend_chat::signal::human_member_id()).join("deploy", true).unwrap();
         attend_groups::Groups::new(base, "").create("infra", None).unwrap();
     });
-    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(true);
+    // A question's yes arms at once: the delay has tests of its own.
+    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).dry_run(true).question_arm(std::time::Duration::ZERO);
     c.push(Signal {
         id: "t-1".into(),
         from: format!("claude:{ALPHA_SID}"),

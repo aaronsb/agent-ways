@@ -1320,6 +1320,13 @@ impl Chat {
         self
     }
 
+    /// How long a question's yes stays set back once it is ready to answer,
+    /// rather than the shell's second ([`agent_tui::App::set_question_arm`]).
+    pub fn question_arm(mut self, arm: Duration) -> Chat {
+        self.app.set_question_arm(arm);
+        self
+    }
+
     /// Stop the delete or tombstone running, as `≡` ▸ Stop does.
     pub fn pane_stop_removing(&mut self) {
         self.pane_mut().stop_removing();

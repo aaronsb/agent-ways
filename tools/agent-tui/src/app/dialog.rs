@@ -546,10 +546,13 @@ impl<'a> Dialog<'a> {
 }
 
 impl Dialog<'_> {
-    /// The bar: a `confirm` lozenge, the question, then the answers as
-    /// lozenges, each a click target. The question is cut to leave the
-    /// answers on screen, and the lozenge goes first when the question
-    /// would not fit beside it. No answer is drawn focused.
+    /// The bar: a `confirm` lozenge and the question on the left, the
+    /// answers as lozenges at the bar's right end, each a click target. The
+    /// answers' place depends on the bar's width and their own labels only,
+    /// so a question updated in place with a longer or shorter text never
+    /// moves one under a click aimed at another. The question is cut to
+    /// leave the answers on screen, and the lozenge goes first when the
+    /// question would not fit beside it. No answer is drawn focused.
     fn draw_bar(&self, f: &mut Frame, area: Rect, sh: Shape) -> Drawn {
         let destructive = self.buttons.iter().any(|b| b.ground == Ground::Err);
         let answers: Vec<(Btn, Vec<Span<'static>>)> =
@@ -572,6 +575,12 @@ impl Dialog<'_> {
         }
         let question = clip(&self.title, room(width(&spans)));
         spans.push(Span::raw(format!(" {question}{left}  ")));
+        // Padded out to the answers' fixed place, where the bar has room
+        // for it; on a bar too narrow for the question's least, after it.
+        let fixed = area.width.saturating_sub(after);
+        if let Some(pad) = fixed.checked_sub(width(&spans)).filter(|n| *n > 0) {
+            spans.push(Span::raw(" ".repeat(usize::from(pad))));
+        }
         let mut buttons = Vec::new();
         for (id, target) in answers {
             let x = area.x + width(&spans);
@@ -887,10 +896,11 @@ mod tests {
         let mut out = Drawn::default();
         let buf = draw_with(60, 3, |f| out = bar("drop it?").draw(f, Rect { y: 2, height: 1, ..f.area() }, Shape::PLAIN));
         let rows = testkit::rows(&buf);
-        assert!(rows[2].starts_with(" confirm  drop it?   y drop   n keep "), "{}", rows[2]);
+        assert!(rows[2].starts_with(" confirm  drop it?  ") && rows[2].trim_end().ends_with("drop it?                         y drop   n keep"), "{}", rows[2]);
         assert_eq!(out.rect, Rect::new(0, 2, 60, 1));
         let (yes, no) = (out.buttons[0], out.buttons[1]);
         assert_eq!((yes.1, no.1), (Btn::Yes, Btn::No));
+        assert_eq!((yes.0.right() + 1, no.0.right() + 1), (no.0.x, 60), "the answers at the bar's right end, a space after each");
         assert_eq!((buf[(yes.0.x + 1, 2)].bg, buf[(no.0.x + 1, 2)].bg), (Ground::Err.bg(), Ground::Ok.bg()), "keep is green beside drop");
         let mut d = bar("drop it?");
         assert_eq!(click(&mut d, &out, no.0.x, 2), Answer::Button(Btn::No));

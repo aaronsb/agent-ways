@@ -283,6 +283,9 @@ pub struct App {
     /// Text the pane asked to copy ([`pane::Open::Copy`]): the last, and
     /// whether the terminal has yet to be sent it.
     copied: Option<(String, bool)>,
+    /// How long a pane question's yes stays set back once it is ready
+    /// ([`paneshell::ARM`] unless set).
+    question_arm: std::time::Duration,
 }
 
 impl App {
@@ -324,6 +327,7 @@ impl App {
             enhanced: false,
             ending: false,
             copied: None,
+            question_arm: paneshell::ARM,
         }
     }
 

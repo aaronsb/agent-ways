@@ -28,7 +28,7 @@ agent-tui frame 100x30
 |│                                                     ││                                           │|
 |│                                                     ││                                           │|
 |└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘|
-| confirm  delete theme mine?   y delete   n keep                                                    |
+| confirm  delete theme mine?                                                     y delete   n keep  |
 styles
   0   0-7   White Blue -
   0  10-21  White Blue -
@@ -225,5 +225,5 @@ styles
  27  99-99  - - DIM
  28   0-99  - - DIM
  29   0-8   Black Yellow BOLD
- 29  30-39  White Red BOLD
- 29  41-48  Black Green BOLD
+ 29  80-89  White Red BOLD
+ 29  91-98  Black Green BOLD

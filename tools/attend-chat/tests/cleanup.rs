@@ -97,9 +97,10 @@ fn sig(id: &str, from: &str, cwd: &str, message: &str, channel: Channel, ts: u64
 }
 
 /// A chat that runs its commands, its watermarks in `hidden`, its feed
-/// alpha's, gamma's and delta's posts and a DM from alpha.
+/// alpha's, gamma's and delta's posts and a DM from alpha. A question's yes
+/// arms at once, unless a test sets the delay it is about.
 fn chat_in(hidden: &std::path::Path) -> Chat {
-    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).hidden_file(hidden);
+    let mut c = Chat::new(None, Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true).hidden_file(hidden).question_arm(std::time::Duration::ZERO);
     for (i, (sid, cwd)) in [(ALPHA_SID, "/work/alpha"), (GAMMA_SID, "/work/gamma"), (DELTA_SID, "/work/delta"), (EPSILON_SID, "/work/epsilon")].into_iter().enumerate() {
         c.push(sig(&format!("o-{i}"), &format!("claude:{sid}"), cwd, &format!("{} on open", &cwd[6..]), Channel::Open, 100 + i as u64));
     }
@@ -470,11 +471,13 @@ fn a_notice_does_not_carry_the_mark_and_clear_asks_first() {
 /// The pick opens its question at once, counting, while attend counts
 /// off the screen's thread. Its yes waits: a `y` or a click on it does
 /// nothing and deletes nothing. The count updates the same question in
-/// place, and then `y` deletes that scope and age.
+/// place; a `y` as it lands still does nothing, and once yes has armed `y`
+/// deletes that scope and age.
 #[test]
 fn the_pick_asks_at_once_and_yes_waits_for_the_count() {
     let _g = fixture();
-    let mut c = chat();
+    let arm = std::time::Duration::from_millis(400);
+    let mut c = chat().question_arm(arm);
     channel_menu(&mut c, "#slow");
     pick(&mut c, "Delete read messages");
     pick_now(&mut c, "All");
@@ -488,6 +491,10 @@ fn the_pick_asks_at_once_and_yes_waits_for_the_count() {
     answered(&mut c);
     assert!(screen(&mut c).contains("delete 3 read messages in #slow for everyone?"), "the count, in place: {}", screen(&mut c));
     assert_eq!(calls(), ["message delete --channel slow --older-than all --dry-run --json"], "nothing deleted while counting");
+    press(&mut c, KeyCode::Char('y'));
+    assert_eq!(calls().len(), 1, "a y as the count lands deletes nothing: {}", screen(&mut c));
+    assert!(screen(&mut c).contains("delete 3 read messages in #slow for everyone?"), "still asking: {}", screen(&mut c));
+    std::thread::sleep(arm);
     press(&mut c, KeyCode::Char('y'));
     assert_eq!(calls().last().map(String::as_str), Some("message delete --channel slow --older-than all --json"), "y deletes that scope and age");
 }
