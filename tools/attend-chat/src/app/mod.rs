@@ -19,6 +19,7 @@ mod focus;
 mod ix;
 mod keys;
 mod menu;
+mod settings_view;
 mod sidebar;
 mod view;
 

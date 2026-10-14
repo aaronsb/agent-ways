@@ -10,7 +10,7 @@ use agent_settings::schema::show;
 use serde_yaml::Value;
 
 /// A value as the status line shows it: a string bare, anything else as YAML.
-fn plain(v: &Value) -> String {
+pub(crate) fn plain(v: &Value) -> String {
     v.as_str().map_or_else(|| show(v), str::to_string)
 }
 use agent_tui::{Jump, TabKeys};
@@ -22,7 +22,7 @@ pub const KEYS: &[&str] = &["tabs.jump", "tabs.menu_on_repeat", "tabs.focus_key"
 const PREFIX: &str = "attend.chat.";
 
 /// The layers the chat's keys resolve through: attend's, for `dir`.
-fn layers(dir: &Path) -> Vec<Layer> {
+pub(crate) fn layers(dir: &Path) -> Vec<Layer> {
     attend_config::layers(dir)
 }
 

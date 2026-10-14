@@ -79,7 +79,10 @@ sweep
 # #deploy), long (a fourth agent whose project name outruns any row),
 # dm (a direct message from alpha to the operator), trays (direct messages
 # in every project's tray: one the operator sent beta in an earlier
-# session, and the agents' DMs with each other) or plain (no Nerd Font). An agent's name comes from the temp
+# session, and the agents' DMs with each other), proj (alpha, where the
+# chat runs, a project whose .claude/ways.yaml sets
+# attend_mod.listening: active, and beta a git checkout) or plain (no
+# Nerd Font). An agent's name comes from the temp
 # path, and a long one cuts its project, so the quiet agent is clicked by
 # the column's first `○`, its row being the agents' last.
 SCENARIOS="
@@ -128,7 +131,11 @@ menu-waits   | base  | wait:Agents side:#deploy side:#deploy wait:needs_ADR-404_
 theme-sub    | base  | wait:Agents click:≡ wait:Theme click:Theme wait:theme_for
 keys-sub     | base  | wait:Agents click:≡ wait:Keybinding click:Keybinding wait:keybinding_set
 remove-sub   | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Remove_agent wait:remove_from
-settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:sets_one
+settings     | base  | wait:Agents click:≡ wait:Settings click:Settings wait:listening_=
+settings-layer | proj | wait:Agents click:≡ wait:Settings click:Settings wait:listening_= click:listening_= wait:write_to
+settings-value | proj | wait:Agents click:≡ wait:Settings click:Settings wait:listening_= click:listening_= wait:write_to click:project_ wait:current
+settings-set | proj  | wait:Agents click:≡ wait:Settings click:Settings wait:listening_= click:listening_= wait:write_to click:project_ wait:current click:dormant wait:dormant_·_alpha/.claude/ways.yaml
+settings-chat | base | wait:Agents click:≡ wait:Settings click:Settings wait:listening_= click:mouse_= wait:current
 tab-closes   | base  | wait:Agents M-2 M-2 wait:pick click:rollout gone:pick
 guard-name   | base  | wait:Agents C-n wait:new_channel_name text:abc C-c wait:being_typed
 guard-draft  | base  | wait:Agents text:agg C-c wait:Quit_and_discard
@@ -288,6 +295,10 @@ YAML
   fi
   [ "$1" = long ] && msg "$sig/_broadcast" s5 60 "claude:eeeeeeee-0000-4000-8000-000000000005" "$F/work/the-delta-project-with-a-name-far-too-long-for-a-row" "a project name longer than any row: the band cuts it and keeps the time"
   printf 'theme:\n  active: nord\n  shape: %s\n' "$shape" > "$F/config/agent-ways/config.yaml"
+  if [ "$1" = proj ]; then
+    mkdir -p "$F/work/alpha/.claude" "$F/work/beta/.git"
+    printf 'attend_mod:\n  listening: active\n' > "$F/work/alpha/.claude/ways.yaml"
+  fi
 }
 
 # The tray of the project at PATH: its attend key, `claude_sessions::attend_key`.
