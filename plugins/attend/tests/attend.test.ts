@@ -1108,6 +1108,31 @@ describe('a resume', () => {
     expect(h.mode()).toBe('active')
   })
 
+  // The config started s1 listening and its operator had prompted, so the
+  // resumed process wakes for a message as the earlier one did. The record
+  // does not list a config-started id, so the resume source says it.
+  test('claude --resume of a session its config started wakes for a message before any prompt', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains })
+    await $.classic.SessionStart({ source: 'resume', session_id: 's1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m1')
+  })
+
+  test('a fresh start in a project its config starts listening still holds for the first prompt', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains: [one(1), DRAIN_EMPTY] })
+    await $.classic.SessionStart({ source: 'startup', session_id: 's1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
   test('a session id that never listened starts dormant', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s0', 's1'] } })
