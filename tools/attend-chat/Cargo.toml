@@ -1,6 +1,6 @@
 [package]
 name = "attend-chat"
-version = "0.17.0"
+version = "0.18.0"
 edition = "2021"
 description = "Interactive chat TUI for attend — human seat at the signal bus (ADR-120)"
 license = "AGPL-3.0-or-later"
@@ -25,6 +25,10 @@ agent-theme = { path = "../agent-theme", features = ["ratatui"] }
 attend-config = { path = "../attend-config" }
 # The chat's own keys (`attend.chat.*`) resolve and are written through it.
 agent-settings = { path = "../agent-settings" }
+# The attend mod's keys (`attend_mod.listening`, `attend_mod.keepwarm`) are
+# ways keys: their schema, layers and project root, which the Settings menu
+# reads and writes as `ways settings set` does.
+ways-core = { path = "../ways-core" }
 serde_yaml = "0.9"
 # The attend CLI's `--json` reports, for the cleanup items it runs.
 serde_json = "1"

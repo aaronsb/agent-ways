@@ -145,15 +145,7 @@ mod tests {
     fn existing_filter_degrades_to_nothing_when_file_vanishes() {
         // The #390 degradation contract end to end: chip while the
         // file exists, silently none once it's gone — never an error.
-        let dir = std::env::temp_dir().join(format!(
-            "attend-chat-attach-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_dir::unique("attach");
         let file = dir.join("shot.png");
         std::fs::write(&file, b"png").unwrap();
         let msg = format!("screenshot: {}", file.display());

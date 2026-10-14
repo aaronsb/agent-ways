@@ -61,7 +61,14 @@ pub fn init(path: &Path) -> Result<bool, WriteError> {
 /// file at `path` in one locked, atomic edit that changes only those keys.
 /// See [`update`].
 pub fn write(path: &Path, values: &[(&str, Value)]) -> Result<bool, String> {
-    update(path, |_| values.iter().map(|(n, v)| (n.to_string(), v.clone())).collect())
+    write_within(path, None, values)
+}
+
+/// [`write`], waiting at most `wait` for another writer's lock when given:
+/// a writer on a screen's own thread must not hang on a holder that does.
+/// A lock not had in time writes nothing and says so.
+pub fn write_within(path: &Path, wait: Option<std::time::Duration>, values: &[(&str, Value)]) -> Result<bool, String> {
+    update_within(path, wait, |_| values.iter().map(|(n, v)| (n.to_string(), v.clone())).collect())
 }
 
 /// Read the attend file at `path` and write what `f` makes of it, in one
@@ -72,7 +79,12 @@ pub fn write(path: &Path, values: &[(&str, Value)]) -> Result<bool, String> {
 /// schema; a value it refuses, or a key it does not name, writes nothing.
 /// Returns whether the file changed.
 pub fn update(path: &Path, f: impl FnOnce(&Config) -> Vec<(String, Value)>) -> Result<bool, String> {
-    let (outcome, changed) = writer::edit_file(path, Some(HEADER), |d| {
+    update_within(path, None, f)
+}
+
+/// [`update`], waiting at most `wait` for the lock when given.
+pub fn update_within(path: &Path, wait: Option<std::time::Duration>, f: impl FnOnce(&Config) -> Vec<(String, Value)>) -> Result<bool, String> {
+    let (outcome, changed) = writer::edit_file_within(path, Some(HEADER), wait, |d| {
         let held = Layer::from_text(&SCHEMA, "user", FILE, LayerScope::User, Some(path), &d.text());
         for (name, v) in f(&Config::from_layers(&[held])) {
             let Some(spec) = SCHEMA.keys.iter().find(|k| k.name == name && !k.is_pattern()) else {

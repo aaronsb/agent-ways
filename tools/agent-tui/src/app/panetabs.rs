@@ -30,6 +30,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::paneshell::ShellKey;
+use super::render::width;
 use super::*;
 
 /// Which modifier with a digit jumps to a tab.
@@ -116,10 +117,6 @@ fn strip_hint(new: Option<&str>, below: Option<&str>) -> String {
         out += &format!(" · Ctrl+N {n}");
     }
     out + " · Esc back"
-}
-
-fn width(spans: &[Span]) -> u16 {
-    spans.iter().map(|s| s.width() as u16).sum()
 }
 
 /// The trailer cut to `room` columns, ending in `…` when cut; nothing when

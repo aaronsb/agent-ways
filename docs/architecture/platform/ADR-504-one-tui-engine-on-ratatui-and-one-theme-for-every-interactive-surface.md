@@ -342,15 +342,17 @@ Every dialog the shell draws is a `Mode` variant with its own draw function and 
 `agent-tui` draws every such dialog from one `Dialog` value:
 
 - **Title and body.** The body is lines, scrolled when they outgrow the frame.
-- **Buttons.** Each is `(id, label, hotkey, Ground)`. Exactly one is the cancel, which Esc presses, and exactly one the default, which has the focus and Enter presses. A dialog with no cancel or default, or with two of either, is refused where it is built.
-- **Placement.** `Center` is a box over the area, as `modal_rect` places one. `Dock` sits beside the row that opened it, as `docked` places a menu. `Bar` is the bottom bar, with the buttons as answer lozenges after the question.
+- **Buttons.** Each is `(id, label, hotkey, Ground)`. Exactly one is the cancel, which Esc presses, and exactly one the default, which has the focus and Enter presses. A dialog with no cancel or default, or with two of either, is refused where it is built. A dialog with no buttons is refused too, unless it is built to be answered by its keys alone, as the key help is; Esc and Enter then close it. A button may also name a chord, such as Ctrl-S for Save, and no other chord presses it.
+- **Placement.** `Center` is a box over the area, as `modal_rect` places one. `Dock` sits beside the row that opened it, as `docked` places a menu. `Bar` is the bottom bar, with the buttons as answer lozenges after the question. A bar question draws no answer focused; its default is the answer that keeps things as they are, which Enter gives as Esc does, and the wheel over the bar does nothing.
 - **Border.** The modal border, unless the dialog names another.
 - **Close on any key.** A key the dialog has no use for closes it, as the key help does. Without this, such a key leaves the dialog open and reaches nothing under it, as the note above on a modal's own buttons requires.
+- **Close keys.** Plain keys besides Esc that close it, such as `q` on the response modal.
+- **Any press.** A press of any mouse button that lands off its buttons closes it, inside it or outside, as a pane's question takes one (ADR-408).
 
 Drawing a dialog records its rect and each button's rect as hit regions. Its key and click handling return an `Answer`:
 
-- `Button(id)`: a button's hotkey, Enter on the default, Esc for the cancel, or a click on a button. A click and the hotkey a label names give the same `id`, and no button stands for a synthesised key.
-- `Close`: a key that closes a close-on-any-key dialog, or a click outside a dialog that ADR-408 lets such a click close.
+- `Button(id)`: a button's hotkey, Enter on the default, Esc with any modifier held for the cancel, or a click on a button. A click and the hotkey a label names give the same `id`, and no button stands for a synthesised key.
+- `Close`: a key that closes a close-on-any-key dialog, one of its close keys, a click outside a dialog that ADR-408 lets such a click close, or any press off the buttons of a dialog that any press closes.
 - `Stay`: a key the dialog used itself, such as a scroll or a focus move, or one that is no answer. Nothing under the dialog receives it.
 - `Forward(key)`: a key the dialog hands to the code that opened it, such as a menu item's letter. Nothing under the dialog receives it either.
 

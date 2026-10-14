@@ -7,9 +7,7 @@
 //! be picked yet is drawn set back with why, the highlight passes over it,
 //! and a click on it does nothing. It docks at what opened it ([`Dock`]).
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
-use ratatui::Frame;
 
 use super::pane::{Anchor, Item};
 use super::{App, Mode};
@@ -86,28 +84,6 @@ impl Pick {
         self.waits.get(i).is_some_and(Option::is_none)
     }
 
-    /// The option `step` moves the cursor to from `from`: the next one that
-    /// can be picked that way, or `from` when there is none.
-    fn step(&self, from: usize, down: bool) -> usize {
-        let mut i = from;
-        loop {
-            i = match (down, i) {
-                (true, i) if i + 1 < self.options.len() => i + 1,
-                (false, i) if i > 0 => i - 1,
-                _ => return from,
-            };
-            if self.open(i) {
-                return i;
-            }
-        }
-    }
-
-    /// The first option that can be picked, from the top or the bottom.
-    fn end(&self, top: bool) -> usize {
-        let mut all: Box<dyn Iterator<Item = usize>> = if top { Box::new(0..self.options.len()) } else { Box::new((0..self.options.len()).rev()) };
-        all.find(|i| self.open(*i)).unwrap_or(self.sel)
-    }
-
     /// The options picked: the one under the cursor, or the marked ones in
     /// order.
     pub(crate) fn values(&self) -> Vec<String> {
@@ -129,7 +105,7 @@ impl Pick {
 
     /// The (label, tag) rows the popup draws. An option that cannot be
     /// picked yet carries why as its tag.
-    fn items(&self) -> Vec<(String, String)> {
+    pub(crate) fn items(&self) -> Vec<(String, String)> {
         use crate::wrap::str_width;
         let mark = |m: bool| match (self.multi, m) {
             (true, true) => "[x]",
@@ -174,39 +150,13 @@ impl App {
         self.msg.clear();
     }
 
-    /// One key in the picker. Enter sets the value; on a list, Space marks
-    /// the option under the cursor. Esc closes it unchanged: a setting's
-    /// picker says so, and a pane's menu closes saying nothing, as every
-    /// overlay over a pane does. The cursor passes over an option that
-    /// cannot be picked, and Enter on one does nothing.
-    pub(super) fn pick_key(&mut self, mut p: Pick, k: KeyEvent) {
-        match k.code {
-            KeyCode::Esc | KeyCode::Char('q') if p.pane.is_some() => self.msg.clear(),
-            KeyCode::Esc | KeyCode::Char('q') => self.msg = "unchanged".into(),
-            KeyCode::Up | KeyCode::Char('k') => p.sel = p.step(p.sel, false),
-            KeyCode::Down | KeyCode::Char('j') => p.sel = p.step(p.sel, true),
-            KeyCode::Home | KeyCode::Char('g') => p.sel = p.end(true),
-            KeyCode::End | KeyCode::Char('G') => p.sel = p.end(false),
-            // A row that cannot change takes no Space. Enter on one picks
-            // nothing from one choice, and on a list sets the marks as they are.
-            KeyCode::Char(' ') if !p.open(p.sel) => {}
-            KeyCode::Enter if !p.multi && !p.open(p.sel) => {}
-            KeyCode::Char(' ') if p.multi => p.marked[p.sel] = !p.marked[p.sel],
-            KeyCode::Enter | KeyCode::Char(' ') => return self.pick_set(p),
-            _ => {}
-        }
-        if !matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
-            self.mode = Mode::Pick(p);
-        }
-    }
-
     /// Set the picked value on the setting the picker was opened on. A
     /// rejected value keeps the picker open, and the bottom bar says why.
-    fn pick_set(&mut self, p: Pick) {
+    /// A pane's pick goes back to the pane, and a menu it opens in answer
+    /// docks beside `parent`, the menu and the row picked.
+    pub(super) fn pick_set(&mut self, p: Pick, parent: Option<(Rect, Rect)>) {
         if let Some((id, _)) = &p.pane {
-            // A menu the pick leads to (Invite agent ▸) docks beside the
-            // row picked, as the frame last drew it.
-            self.menu_parent = self.hits.menu.as_ref().and_then(|(menu, rows)| rows.get(p.sel).map(|row| (*menu, *row)));
+            self.menu_parent = parent;
             self.pane_picked(id, p.values());
             self.menu_parent = None;
             return;
@@ -218,24 +168,6 @@ impl App {
         }
         if !self.set_value(&p.path, &v) {
             self.mode = Mode::Pick(p);
-        }
-    }
-
-    /// The popup, its rows recorded as click targets as the action menu's are.
-    pub(super) fn draw_pick(&mut self, f: &mut Frame, area: Rect, p: &Pick) {
-        let what = match &p.pane {
-            Some((_, title)) => title.clone(),
-            None => tree::label(&self.roots, &p.path),
-        };
-        let title = format!("{}: {what}", if p.multi { "pick any" } else { "pick one" });
-        let waits: Vec<bool> = (0..p.options.len()).map(|i| !p.open(i)).collect();
-        match p.dock {
-            Some(dock) => {
-                let items = p.items();
-                let r = docked(area, dock, &title, &items);
-                self.draw_menu_items_in(f, r, title, items, p.sel, &waits);
-            }
-            None => self.draw_menu_items(f, area, title, p.items(), p.sel),
         }
     }
 
@@ -267,11 +199,19 @@ impl App {
 pub(super) fn docked(area: Rect, dock: Dock, title: &str, items: &[(String, String)]) -> Rect {
     use crate::wrap::str_width;
     // Borders, the item's lead space, its mark and a space, and a column
-    // of padding: the rows `draw_menu_items_in` draws.
+    // of padding: the rows a menu's dialog draws.
     let widest = items.iter().map(|(l, t)| 1 + str_width(l).max(10) + str_width(t) + 1).max().unwrap_or(0);
-    let want = (widest.max(str_width(title) + 2) + 2).max(24);
+    docked_box(area, dock, title, widest, items.len())
+}
+
+/// Where a docked box goes in `area`, as [`docked`] places a menu: `inside`
+/// columns and `rows` rows within its borders, and wide enough for its
+/// title.
+pub(super) fn docked_box(area: Rect, dock: Dock, title: &str, inside: usize, rows: usize) -> Rect {
+    use crate::wrap::str_width;
+    let want = (inside.max(str_width(title) + 2) + 2).max(24);
     let w = (want.min(usize::from(u16::MAX)) as u16).min(area.width);
-    let h = (items.len() as u16 + 2).min(area.height);
+    let h = (rows.min(usize::from(u16::MAX - 2)) as u16 + 2).min(area.height);
     let row = match dock {
         Dock::Under(row) => row,
         Dock::Beside { menu, row } => {
@@ -304,7 +244,7 @@ pub(super) fn docked(area: Rect, dock: Dock, title: &str, items: &[(String, Stri
 mod tests {
     use super::*;
     use crate::tree::{Node, Setting};
-    use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
     fn opts() -> Vec<String> {
         vec!["anthropic".into(), "openrouter".into(), "mine".into()]
@@ -413,7 +353,7 @@ mod tests {
         app.cursor = 0;
         // Draw, so the rows are click targets; click the first option.
         let _ = crate::testkit::render(&mut app, 100, 30);
-        let (_, rows) = app.hits.menu.clone().expect("the picker records its rows");
+        let rows = app.drawn_dialog().expect("the picker records its rows").rows.clone();
         let at = rows[0];
         app.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: at.x + 2, row: at.y, modifiers: KeyModifiers::NONE });
         let Mode::Pick(p) = &app.mode else { panic!("a click on a list marks, it does not close") };
@@ -425,7 +365,7 @@ mod tests {
         app.cursor = 0;
         press(&mut app, KeyCode::Enter);
         let _ = crate::testkit::render(&mut app, 100, 30);
-        let (_, rows) = app.hits.menu.clone().unwrap();
+        let rows = app.drawn_dialog().expect("the picker records its rows").rows.clone();
         let at = rows[1];
         app.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: at.x + 2, row: at.y, modifiers: KeyModifiers::NONE });
         assert!(matches!(app.mode, Mode::Browse), "{}", app.msg);

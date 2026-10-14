@@ -167,6 +167,7 @@ mod envelope_gate_tests {
     fn notification_turns_do_not_carry_threshold_ways() {
         assert!(is_envelope_turn("UserPromptSubmit", Some("<task-notification> <task-id>x</task-id>")));
         assert!(is_envelope_turn("UserPromptSubmit", Some("  [attend] 2 peer message(s)")));
+        assert!(is_envelope_turn("UserPromptSubmit", Some("silence is a valid reply to the messages below; answer only if useful.")));
         assert!(is_envelope_turn("UserPromptSubmit", Some("base directory for this skill: /x")));
     }
 

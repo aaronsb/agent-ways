@@ -1100,7 +1100,8 @@ mod tests {
     /// read only when the channel holds a message.
     #[test]
     fn an_invitation_mentions_history_only_when_the_channel_has_some() {
-        let dir = tempdir_like().join("@empty");
+        let root = tempdir_like();
+        let dir = root.join("@empty");
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(invite_body("empty", &dir), "you're invited to #empty — join with attend_join, or: attend channel join empty");
         std::fs::write(dir.join("notes.txt"), "not a message").unwrap();
@@ -1113,7 +1114,7 @@ mod tests {
         assert!(!invite_body("gone", &dir.join("missing")).contains("history"), "a channel with no directory yet has none");
     }
 
-    fn tempdir_like() -> std::path::PathBuf {
+    fn tempdir_like() -> crate::test_dir::TestDir {
         crate::test_dir::unique("keys")
     }
 

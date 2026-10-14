@@ -1,10 +1,10 @@
 //! The name prompt and the named-item flow on a tab (#851). The prompt
 //! takes a name for a copy or a rename of the tab's named items, or for a
-//! theme tab action of its own; the y/n comes before a delete. The items
-//! are whatever [`NamedItems`] the tab manages; the checks and the
-//! refusals are [`crate::named`]'s, and what follows a done operation is
-//! the tab's own. The theme tab is the one tab that manages named items
-//! today; `render` draws the two modes.
+//! theme tab action of its own; the y/n comes before a delete, on the bar
+//! (`questions`). The items are whatever [`NamedItems`] the tab manages;
+//! the checks and the refusals are [`crate::named`]'s, and what follows a
+//! done operation is the tab's own. The theme tab is the one tab that
+//! manages named items today; `render` draws the prompt.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
@@ -76,7 +76,7 @@ impl App {
         }
     }
 
-    fn item_delete(&mut self, name: &str) {
+    pub(super) fn item_delete(&mut self, name: &str) {
         let Some(items) = self.items() else { return };
         match named::delete(items, name) {
             Ok(done) => self.item_done(done),
@@ -91,32 +91,24 @@ impl App {
         }
     }
 
-    /// The keys of the name prompt and the delete y/n, with the mode taken
-    /// out of the app: each arm puts back the mode that stays.
-    pub(super) fn prompt_key(&mut self, mode: Mode, k: KeyEvent) {
-        match mode {
-            Mode::Name { op, mut buf } => match k.code {
-                KeyCode::Esc => self.msg = "cancelled".into(),
-                KeyCode::Enter => match op {
-                    NameFor::Item(op) => self.item_named(op, buf),
-                    NameFor::Theme(op) => self.theme_named(op, buf),
-                },
-                KeyCode::Backspace => {
-                    buf.pop();
-                    self.mode = Mode::Name { op, buf };
-                }
-                KeyCode::Char(c) => {
-                    buf.push(c);
-                    self.mode = Mode::Name { op, buf };
-                }
-                _ => self.mode = Mode::Name { op, buf },
+    /// The name prompt's keys, with the mode taken out of the app: each arm
+    /// puts back the mode that stays.
+    pub(super) fn name_key(&mut self, op: NameFor, mut buf: String, k: KeyEvent) {
+        match k.code {
+            KeyCode::Esc => self.msg = "cancelled".into(),
+            KeyCode::Enter => match op {
+                NameFor::Item(op) => self.item_named(op, buf),
+                NameFor::Theme(op) => self.theme_named(op, buf),
             },
-            Mode::ItemDelete { name, noun } => match k.code {
-                KeyCode::Char('y' | 'Y') => self.item_delete(&name),
-                KeyCode::Char('n' | 'N') | KeyCode::Esc => self.msg = "kept".into(),
-                _ => self.mode = Mode::ItemDelete { name, noun },
-            },
-            other => self.mode = other,
+            KeyCode::Backspace => {
+                buf.pop();
+                self.mode = Mode::Name { op, buf };
+            }
+            KeyCode::Char(c) => {
+                buf.push(c);
+                self.mode = Mode::Name { op, buf };
+            }
+            _ => self.mode = Mode::Name { op, buf },
         }
     }
 }

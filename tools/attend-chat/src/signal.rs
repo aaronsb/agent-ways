@@ -449,7 +449,7 @@ mod tests {
         let home = tempdir_like();
         // `set_var` is !Send on some platforms but this test is
         // single-threaded; Cargo isolates by default.
-        std::env::set_var("HOME", &home);
+        std::env::set_var("HOME", &*home);
         // The attend cache follows XDG_CACHE_HOME first: point it into the
         // temp home too, or a runner's own setting sends the write to the
         // real cache.
@@ -512,7 +512,8 @@ mod tests {
     /// not the person's own send: the sender must be a human.
     #[test]
     fn a_claude_with_a_human_envelope_is_not_the_person() {
-        let d = tempdir_like().join("-work-alpha");
+        let root = tempdir_like();
+        let d = root.join("-work-alpha");
         fs::create_dir_all(&d).unwrap();
         let env = agent_identity::Envelope { from_kind: Some("human"), from_id: Some(&human_member_id()), on_behalf_of: None, to: Some("s1") };
         let line = agent_identity::signal::format_tagged("claude:abc", "alpha", "/work/alpha", &env, None, "hello");
@@ -534,7 +535,7 @@ mod tests {
         // Point $HOME at a temp dir so signals_base resolves there.
         let _env = crate::test_dir::env_lock();
         let home = tempdir_like();
-        std::env::set_var("HOME", &home);
+        std::env::set_var("HOME", &*home);
         let d = cwd_dir("/home/aaron/proj");
         assert!(
             d.starts_with(signals_base()),
@@ -547,7 +548,7 @@ mod tests {
         );
     }
 
-    fn tempdir_like() -> std::path::PathBuf {
+    fn tempdir_like() -> crate::test_dir::TestDir {
         crate::test_dir::unique("signal")
     }
 
@@ -563,6 +564,5 @@ mod tests {
         assert!(!dir.exists() || fs::read_dir(&dir).unwrap().next().is_none(), "nothing written");
         write_signal(&dir, &"x".repeat(max), "*").unwrap();
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
-        let _ = fs::remove_dir_all(&dir);
     }
 }

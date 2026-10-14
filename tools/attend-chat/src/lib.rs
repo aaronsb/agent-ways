@@ -17,6 +17,7 @@ pub mod legend;
 pub mod peers;
 pub mod sessions;
 pub mod settings;
+pub mod settings_edit;
 pub mod signal;
 pub mod slash;
 pub mod tabs;

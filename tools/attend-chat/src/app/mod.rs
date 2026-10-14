@@ -20,6 +20,7 @@ mod focus;
 mod ix;
 mod keys;
 mod menu;
+mod settings_view;
 mod sidebar;
 mod view;
 
@@ -237,6 +238,8 @@ pub struct ChatPane {
     side_follow: bool,
     /// The members a Remove menu listed, for the one picked.
     removable: Vec<menu::Member>,
+    /// The places Settings ▸ offered a key's write to, each with its row.
+    setting_places: Vec<(String, crate::settings_edit::Place)>,
     /// The DM views the column lists under agents' rows, the operator's
     /// DMs with each and each agent's own ([`dm`]). Hiding one takes it off
     /// the list and leaves every message where it was.
@@ -302,6 +305,7 @@ impl ChatPane {
             side_scroll: [0, 0],
             side_follow: true,
             removable: Vec::new(),
+            setting_places: Vec::new(),
             views: Default::default(),
             dm_names: Default::default(),
             hidden: crate::hidden::Hidden::load(&crate::hidden::default_path()),

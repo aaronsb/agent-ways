@@ -7,7 +7,16 @@ use agent_tui::testkit;
 use agent_tui::theme::{Palette, Shape};
 use attend_chat::app::Chat;
 
-fn chat() -> Chat {
+/// The fixture home, removed when the test ends.
+struct Root(std::path::PathBuf);
+
+impl Drop for Root {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn chat() -> (Chat, Root) {
     let root = std::env::temp_dir().join(format!("attend-chat-config-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     for d in ["home", "config", "cache", "data"] {
@@ -17,7 +26,7 @@ fn chat() -> Chat {
     std::env::set_var("XDG_CONFIG_HOME", root.join("config"));
     std::env::set_var("XDG_CACHE_HOME", root.join("cache"));
     std::env::set_var("XDG_DATA_HOME", root.join("data"));
-    Chat::new(None, Palette::default(), Shape::PLAIN).heartbeat(false).enhanced(true)
+    (Chat::new(None, Palette::default(), Shape::PLAIN).heartbeat(false).enhanced(true), Root(root))
 }
 
 fn key(code: KeyCode) -> KeyEvent {
@@ -36,7 +45,7 @@ fn bar(c: &mut Chat) -> String {
 /// One test: the steps share the user file.
 #[test]
 fn config_lists_sets_refuses_and_applies_at_once() {
-    let mut c = chat();
+    let (mut c, _root) = chat();
     enter(&mut c, "/config");
     assert_eq!(
         c.status(),

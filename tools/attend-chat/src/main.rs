@@ -78,7 +78,9 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
 
   The colours follow the agent-ways theme (`ways settings theme`). Which keys
   reach the tabs, and whether the mouse starts on, are attend.chat.* settings:
-  /config lists and sets them, as does `ways settings`.
+  /config lists and sets them, as does `ways settings`. ≡ → Settings lists
+  them with attend_mod.listening and attend_mod.keepwarm, and sets each one
+  where you pick: the user file, or a project's .claude/ways.yaml.
 
   --snap WxH     print one frame at W by H in agent-tui's frame format, headless
   --keys KEYS    keys for --snap, space separated (`text:hi enter tab esc alt-1 ctrl-3 f2` …),

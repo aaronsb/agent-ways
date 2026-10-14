@@ -79,6 +79,11 @@ basis:
     level: guided
     said: we probably need to be able to tombstone an agent's messages so they don't come back into chat again
     via: Claude Code session 2026-10-13
+  - operator: aaronsb
+    level: guided
+    said: "build the capabilities that are missing and make sure the ones implemented don't have inconsistent implementation"
+    via: "issue #931, quoting the operator's goal for the attend-chat UX audit; its build item B7 is editable settings"
+  - precedent: ADR-503
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -122,8 +127,17 @@ D9 is amended as follows.
 - **Channels:** `#open`, then every channel with a directory or a `_groups.yaml` entry, including empty ones and ones whose directory was swept. A row is a lozenge on the accent in three segments: the glyph and name; the member count and the time since the last message; and `●` when the channel is active (on disk, and either `#open` or with a live member) or `○` when it is not, the place D5's seal marker will take. An inactive channel's row is set back. Unread counts, seals and scope nesting are drawn when D3, D4 and D5 provide the data. Until then the list is flat.
 - Each list scrolls when it is longer than its rows: the keyboard's cursor keeps itself in view, the wheel over a list scrolls it, and its header marks rows out of view with `↑` and `↓`.
 - The column's rows are reached by mouse and by keyboard. F2 or Ctrl+T focus the tab bar, and Down moves into the column; the bottom bar then reads `↑↓ move · Enter · Esc back`. Up and Down move along the rows, Enter acts as a click does, Up past the first row returns to the tab bar and Esc to the compose box. F2, a click outside the column, or the column hiding for width takes the keyboard back from it. A channel's menu offers Join to a channel the human is not in, and Leave to one it is in. Each menu item that drops something (Clear view, Clear history, Leave, Delete channel, Remove) asks for `y` first, since a click opens a menu with its first item under the cursor.
-- What still takes a slash command or is not built: Add agent, which enrols a member without asking, is ADR-404 D1 and says so; sealing and scopes are D4 and D5; the `≡` menu's Settings item shows the `/config` listing and sets nothing, so `attend.chat.sidebar_key` and the other keys are set with `/config <key> <value>`. Tab completes a quiet agent or a swept channel, and a send to one is refused as before (ADR-129): the completion reaches it, the send does not.
+- What still takes a slash command or is not built: Add agent, which enrols a member without asking, is ADR-404 D1 and says so; sealing and scopes are D4 and D5; the `≡` menu's settings are item (c). Tab completes a quiet agent or a swept channel, and a send to one is refused as before (ADR-129): the completion reaches it, the send does not.
 - With the shape set to `plain`, or without colour, the lozenges lose their Nerd Font glyphs, as every other lozenge in agent-tui does.
+
+**(c) Settings.** The `≡` menu's Settings ▸ lists and sets the settings the chat and the attend mod read. Issue #931 lists this as build item B7.
+
+- **The list.** It shows `attend_mod.listening` and `attend_mod.keepwarm`, then the chat's `attend.chat.*` keys, one row each as `name = value (layer)`. The value is the one in effect for the project enclosing the chat's working directory, or for the user when no project encloses it. The layer is `default`, `user`, `target` or `project`.
+- **The place.** An attend mod key is a ways key that a project can set (ADR-406), so picking one asks where to write it. The choices are the user file, the project enclosing the chat's directory, the project of each live agent, and Another project…, a directory typed in an entry dialog, where `~` is the home directory. Each choice names what its file holds now. A directory that no project encloses is refused inside the dialog. A chat key is held in the user file alone, so picking one goes straight to its values.
+- **The value.** The picker lists the key's values and marks the one in effect at that place. Unset here is offered where the place's file holds the key, and it removes the key from that file.
+- **The write.** A pick is written as `ways settings set <key> <value> [--project <root>]` writes it. The file, the header of a new file and the edit are the same, and the write goes through the agent-settings writer under its lock. The writer waits at most two seconds for another holder of the lock, as the `ways settings` screens do, and then writes nothing and says so on the bottom bar. A project is found by the rule `ways settings` uses: the nearest enclosing project root, else the nearest git checkout, and never the home directory.
+- **What the bar says.** It names what was written and where. It reads the key back where the chat runs, or at the project written, through the check `ways settings set` makes before it exits 4. When the written file's section fails the schema and falls back to its defaults there, or a higher file still sets the key, the bar says so as a warning. After Unset here it says what is in effect and which higher file still sets the key. The chat's own keys apply at once. The picker closes after the write, as Theme ▸ and Keybinding set ▸ do.
+- `/config` still lists and sets the chat's own keys.
 
 ## Consequences
 
@@ -141,6 +155,7 @@ D9 is amended as follows.
 ### Neutral
 
 - `attend.chat.sidebar_key` joins attend's schema beside the other `attend.chat.*` keys (ADR-404 D8).
+- attend-chat depends on `ways-core` for the ways schema, layers and project rule that item (c) writes through. This reverses an alternative ADR-504 rejected, putting the Claude locator in `ways-core`, which it turned down because attend's crates would take on `ways-core`'s dependencies. Measured on 2026-10-13, the attend-chat binary grows by only 75,888 bytes (3.9%, including the feature's own code), since the crates ADR-504 named were already in its dependency tree.
 - agent-tui gains a pane hook for opening a tab's menu on the first click, and a way for a pane to hand the keyboard back to the tab bar. Other panes keep the second-click rule.
 
 ## Alternatives Considered

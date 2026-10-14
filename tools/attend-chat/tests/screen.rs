@@ -56,6 +56,7 @@ fn fixture() -> &'static Fixture {
         std::env::set_var("XDG_STATE_HOME", root.join("state"));
         std::env::set_var("XDG_DATA_HOME", root.join("data"));
         std::env::set_var("USER", "aaron");
+        remove_at_exit(&root);
         let base = attend_chat::signal::signals_base();
         std::fs::create_dir_all(&base).unwrap();
         let g = attend_groups::Groups::new(&base, BETA_SID);
@@ -73,6 +74,27 @@ fn fixture() -> &'static Fixture {
         Fixture { root }
     })
 }
+
+/// Remove the fixture's directory when the process exits: the fixture is a
+/// static, which is never dropped.
+#[cfg(unix)]
+fn remove_at_exit(root: &Path) {
+    static ROOT: OnceLock<PathBuf> = OnceLock::new();
+    extern "C" fn remove() {
+        if let Some(root) = ROOT.get() {
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+    let _ = ROOT.set(root.to_path_buf());
+    // SAFETY: `remove` is a plain function with no arguments, as atexit
+    // takes; it touches only the static set above.
+    unsafe {
+        libc::atexit(remove);
+    }
+}
+
+#[cfg(not(unix))]
+fn remove_at_exit(_root: &Path) {}
 
 fn sig(from: &str, cwd: &str, ago: u64, channel: Channel, message: &str) -> Signal {
     Signal {
@@ -1289,16 +1311,16 @@ fn the_common_menu_leads_the_bar_and_the_operator_view_is_zero() {
     assert!(text(&mut c, 80, 25).contains("▸≡"), "{}", text(&mut c, 80, 25));
     press(&mut c, key(KeyCode::Enter));
     let menu = text(&mut c, 80, 25);
-    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse off at start", "Settings…", "Quit"] {
+    for item in ["pick one: attend-chat", "Theme ▸", "Keybinding set ▸", "Mouse off at start", "Settings ▸", "Quit"] {
         assert!(menu.contains(item), "{item}: {menu}");
     }
     g.check("common-menu-80x25", &testkit::render_screen(&mut c, 80, 25));
-    // Settings… is the item above Quit, the last.
+    // Settings ▸ is the item above Quit, the last.
     press(&mut c, key(KeyCode::End));
     press(&mut c, key(KeyCode::Up));
     press(&mut c, key(KeyCode::Enter));
     let shown = text(&mut c, 80, 25);
-    assert!(shown.contains("mouse = ") && shown.contains("/config <key> <value> sets one"), "Settings… shows /config's listing: {shown}");
+    assert!(shown.contains("attend.chat.mouse = ") && shown.contains("attend_mod.listening = "), "Settings ▸ lists the settings: {shown}");
     g.finish();
 }
 

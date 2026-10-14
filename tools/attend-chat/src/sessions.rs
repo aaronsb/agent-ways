@@ -58,7 +58,7 @@ mod tests {
     use std::fs;
     use std::io::Write;
 
-    fn tempdir_like() -> std::path::PathBuf {
+    fn tempdir_like() -> crate::test_dir::TestDir {
         crate::test_dir::unique("sessions")
     }
 
