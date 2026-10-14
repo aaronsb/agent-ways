@@ -47,7 +47,7 @@ pub(crate) enum Commands {
         json: bool,
     },
 
-    /// Send, reply to, read and count messages (default: inbox)
+    /// Send, reply to, read, count and delete messages (default: inbox)
     #[command(args_conflicts_with_subcommands = true)]
     Message {
         #[command(flatten)]
@@ -158,6 +158,18 @@ pub(crate) enum MessageCmd {
     /// project dirs. Messages are never removed by age — lifetime is bound
     /// to project liveness (ADR-136).
     Cleanup(CleanupArgs),
+
+    /// Mark for deletion the messages no live session still has to read
+    ///
+    /// A message is marked when it is in the scope, older than --older-than,
+    /// older than 90 seconds, and no live session would be delivered it: a
+    /// session keeps what `attend message unread` counts for it, its cold
+    /// start included. A person in attend-chat holds nothing. Every reader
+    /// skips a marked message, and `attend message cleanup` removes it 7
+    /// days after the mark, or for a project tray's message once that
+    /// project has started 3 sessions since (ADR-404 D3e). --undo takes a
+    /// delete back while cleanup has not yet removed its messages.
+    Delete(DeleteArgs),
 }
 
 /// Subcommands for `attend channel`. With no subcommand, defaults to `list`.
@@ -425,6 +437,41 @@ pub(crate) struct CleanupArgs {
     /// Remove every signal file regardless of project liveness
     #[arg(long)]
     pub(crate) all: bool,
+}
+
+#[derive(Args)]
+#[command(group(clap::ArgGroup::new("scope").args(["open", "channel", "everywhere"])))]
+pub(crate) struct DeleteArgs {
+    /// Delete in #open
+    #[arg(long)]
+    pub(crate) open: bool,
+
+    /// Delete in this channel
+    #[arg(long, value_name = "NAME")]
+    pub(crate) channel: Option<String>,
+
+    /// Delete in every room: #open, each channel, each project tray and
+    /// each person's tray
+    #[arg(long)]
+    pub(crate) everywhere: bool,
+
+    /// How old a message must be: `current` (before the earliest start of
+    /// any live session), `today` (before local midnight), `all`, a
+    /// duration such as 90m, 2h30m, 3d or 1w, or a local date YYYY-MM-DD
+    #[arg(long, value_name = "WHEN", default_value = "all")]
+    pub(crate) older_than: String,
+
+    /// Report what would be marked and mark nothing
+    #[arg(long, short = 'n')]
+    pub(crate) dry_run: bool,
+
+    /// Remove the marks of the newest delete, or of the batch named
+    #[arg(long, value_name = "BATCH", num_args = 0..=1, default_missing_value = "", conflicts_with_all = ["scope", "older_than", "dry_run"])]
+    pub(crate) undo: Option<String>,
+
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
 }
 
 #[derive(Args)]

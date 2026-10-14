@@ -82,6 +82,8 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
     let ids = attend_presence::enrollment::reading_ids(&me);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let mut messages: Vec<Message> = Vec::new();
+    // A message a delete marked is gone from every listing (ADR-404 D3e).
+    let marks = attend_groups::tombstones::Marks::load(&crate::util::signals_base());
 
     for dir in &groups_for(&me).receive_dirs(&me.origin_path) {
         let Ok(dir_entries) = std::fs::read_dir(&dir.path) else { continue };
@@ -93,6 +95,9 @@ pub fn list_with(query: InboxQuery, instances: &SnapshotCache) -> InboxPage {
         for entry in dir_entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("signal") {
+                continue;
+            }
+            if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| marks.hides(&attend_state::seen_key(n))) {
                 continue;
             }
             let mtime = std::fs::metadata(&path)

@@ -1,0 +1,235 @@
+//! `attend message delete` marks what no live recipient still has to read,
+//! and every reader skips what is marked (ADR-404 D3e).
+//!
+//! Recipients are written into the fixture's cache as attend writes them:
+//! a heartbeat, an enrollment record, a seen-set, a Claude Code session
+//! record naming the project. Their ids are UUIDs, the shape of a Claude
+//! Code session id.
+
+mod common;
+use common::{age_file, Fixture, MINUTE};
+use serde_json::Value;
+use std::time::Duration;
+
+const R1: &str = "11111111-1111-4111-8111-111111111111";
+const R2: &str = "22222222-2222-4222-8222-222222222222";
+const R3: &str = "33333333-3333-4333-8333-333333333333";
+
+/// Write `line` as signal `id` into `room`, `age` old.
+fn signal(f: &Fixture, room: &str, id: &str, line: &str, age: Duration) {
+    let dir = f.signals().join(room);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{id}.signal"));
+    std::fs::write(&path, format!("{line}\n")).unwrap();
+    age_file(&path, age);
+}
+
+/// A post from another session.
+fn post(f: &Fixture, room: &str, id: &str, body: &str, age: Duration) {
+    signal(f, room, id, &format!("claude:other-session|elsewhere|/tmp/elsewhere|{body}"), age);
+}
+
+/// Session `sid` heartbeating `ago` back.
+fn heartbeat(f: &Fixture, sid: &str, ago: Duration) {
+    let path = f.heartbeat(sid);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "").unwrap();
+    age_file(&path, ago);
+}
+
+/// Session `sid` listening, alive, working at `project`.
+fn listener(f: &Fixture, sid: &str, project: &str) {
+    heartbeat(f, sid, Duration::ZERO);
+    let marker = f.marker(sid);
+    std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+    std::fs::write(&marker, "listen\n").unwrap();
+    std::fs::write(
+        f.home.join(".claude").join("sessions").join(format!("rec-{sid}.json")),
+        format!(r#"{{"pid":999999,"sessionId":"{sid}","cwd":"{project}"}}"#),
+    )
+    .unwrap();
+}
+
+/// Session `sid` has read `read` and is past its cold start.
+fn read(f: &Fixture, sid: &str, read: &[&str]) {
+    let path = f.state_file(sid);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let lines: String = read.iter().map(|id| format!("seen_signal: {id}.signal\n")).collect();
+    std::fs::write(&path, format!("{lines}baselined: true\n")).unwrap();
+}
+
+fn delete(f: &Fixture, args: &[&str]) -> Value {
+    let mut argv = vec!["message", "delete", "--json"];
+    argv.extend_from_slice(args);
+    serde_json::from_str(&f.ok(&argv)).unwrap()
+}
+
+fn marked(v: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = v["ids"].as_array().unwrap().iter().map(|i| i.as_str().unwrap().to_string()).collect();
+    ids.sort();
+    ids
+}
+
+fn kept(v: &Value, sid: &str) -> u64 {
+    v["held"].as_array().unwrap().iter().find(|h| h["session"] == sid).map_or(0, |h| h["kept"].as_u64().unwrap())
+}
+
+#[test]
+fn a_live_recipients_unread_message_is_kept_and_its_read_one_marked() {
+    let f = Fixture::new("del-live");
+    listener(&f, R1, "/srv/r1");
+    read(&f, R1, &["read-1"]);
+    post(&f, "_broadcast", "read-1", "already read", 10 * MINUTE);
+    post(&f, "_broadcast", "unread-1", "not yet read", 10 * MINUTE);
+
+    let v = delete(&f, &["--open"]);
+    assert_eq!(marked(&v), ["read-1"]);
+    assert_eq!(kept(&v, R1), 1);
+    assert!(v["batch"].is_string());
+    assert!(f.signals().join("_broadcast/read-1.signal").exists(), "a delete marks and removes no file");
+
+    let listing = f.ok(&["message", "inbox"]);
+    assert!(!listing.contains("already read"), "a marked message leaves the listing: {listing}");
+    assert!(listing.contains("not yet read"), "{listing}");
+}
+
+#[test]
+fn a_dead_recipient_holds_nothing() {
+    let f = Fixture::new("del-dead");
+    listener(&f, R2, "/srv/r2");
+    read(&f, R2, &[]);
+    heartbeat(&f, R2, 10 * MINUTE);
+    post(&f, "_broadcast", "old-1", "for a session that has gone", 10 * MINUTE);
+    assert_eq!(marked(&delete(&f, &["--open"])), ["old-1"]);
+}
+
+/// A listening session with no seen-set holds what its cold start would
+/// deliver, a message younger than the fresh window, and not the backlog
+/// the cold start holds back.
+#[test]
+fn a_session_with_no_seen_set_holds_what_its_cold_start_delivers() {
+    let f = Fixture::new("del-cold");
+    listener(&f, R3, "/srv/r3");
+    post(&f, "_broadcast", "fresh-1", "inside the fresh window", Duration::from_secs(100));
+    post(&f, "_broadcast", "backlog-1", "held back by the cold start", 10 * MINUTE);
+    let v = delete(&f, &["--open"]);
+    assert_eq!(marked(&v), ["backlog-1"]);
+    assert_eq!(kept(&v, R3), 1);
+}
+
+/// A person in attend-chat heartbeats under their member id and keeps no
+/// seen-set; a message their cold start would show is still marked.
+#[test]
+fn a_person_holds_nothing() {
+    let f = Fixture::new("del-human");
+    heartbeat(&f, "fixture-human", Duration::ZERO);
+    post(&f, "_broadcast", "fresh-1", "the person has not read this", Duration::from_secs(100));
+    let v = delete(&f, &["--open"]);
+    assert_eq!(marked(&v), ["fresh-1"]);
+    assert_eq!(v["held"], serde_json::json!([]));
+}
+
+#[test]
+fn a_message_inside_the_grace_floor_is_never_marked() {
+    let f = Fixture::new("del-grace");
+    post(&f, "_broadcast", "new-1", "thirty seconds old", Duration::from_secs(30));
+    post(&f, "_broadcast", "old-1", "two minutes old", 2 * MINUTE);
+    assert_eq!(marked(&delete(&f, &["--open"])), ["old-1"]);
+}
+
+#[test]
+fn the_cutoff_keeps_what_is_newer() {
+    let f = Fixture::new("del-cutoff");
+    post(&f, "_broadcast", "hour-1", "an hour old", 60 * MINUTE);
+    post(&f, "_broadcast", "day-1", "two days old", 48 * 60 * MINUTE);
+    assert_eq!(marked(&delete(&f, &["--open", "--older-than", "1d", "--dry-run"])), ["day-1"]);
+    assert!(!f.cache().join("signals/_tombstones/messages").exists(), "a dry run marks nothing");
+    assert_eq!(marked(&delete(&f, &["--open", "--older-than", "all"])), ["day-1", "hour-1"]);
+}
+
+/// A project tray is outside `--open`, and in a wider scope a direct
+/// message to another session at the project is not the live one's to keep.
+#[test]
+fn another_sessions_tray_mail_is_outside_the_live_ones_hold() {
+    let f = Fixture::new("del-tray");
+    let project = "/srv/shared";
+    let tray = claude_sessions::attend_key(project);
+    listener(&f, R1, project);
+    read(&f, R1, &[]);
+    let to = |id: &str, sid: &str, body: &str| {
+        signal(&f, &tray, id, &format!("claude:other-session|elsewhere|/tmp/elsewhere|to:{sid}|{body}"), 10 * MINUTE)
+    };
+    to("mine-1", R1, "for the live session");
+    to("theirs-1", R2, "for a session that has gone");
+
+    assert_eq!(marked(&delete(&f, &["--open"])), Vec::<String>::new(), "--open leaves project trays alone");
+    let v = delete(&f, &["--everywhere"]);
+    assert_eq!(marked(&v), ["theirs-1"]);
+    assert_eq!(kept(&v, R1), 1);
+}
+
+#[test]
+fn a_channel_scope_names_one_channel() {
+    let f = Fixture::new("del-channel");
+    post(&f, "@deploy", "deploy-1", "in deploy", 10 * MINUTE);
+    post(&f, "_broadcast", "open-1", "in open", 10 * MINUTE);
+    let v = delete(&f, &["--channel", "deploy"]);
+    assert_eq!(marked(&v), ["deploy-1"]);
+    assert_eq!(v["scope"], "#deploy");
+    let out = f.attend(&["message", "delete", "--channel", "nowhere"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no channel named #nowhere"));
+}
+
+#[test]
+fn undo_takes_the_newest_delete_back() {
+    let f = Fixture::new("del-undo");
+    post(&f, "_broadcast", "a-1", "first", 10 * MINUTE);
+    let first = delete(&f, &["--open"]);
+    post(&f, "_broadcast", "b-1", "second", 10 * MINUTE);
+    std::thread::sleep(Duration::from_millis(5));
+    delete(&f, &["--open"]);
+
+    let undone: Value = serde_json::from_str(&f.ok(&["message", "delete", "--undo", "--json"])).unwrap();
+    assert_eq!(undone["unmarked"], 1);
+    let listing = f.ok(&["message", "inbox"]);
+    assert!(listing.contains("second") && !listing.contains("first"), "{listing}");
+
+    let batch = first["batch"].as_str().unwrap();
+    f.ok(&["message", "delete", "--undo", batch]);
+    assert!(f.ok(&["message", "inbox"]).contains("first"));
+    let out = f.attend(&["message", "delete", "--undo"]);
+    assert_eq!(out.status.code(), Some(1), "nothing left to undo");
+}
+
+/// The drain marks a marked message read and delivers it to no one.
+#[test]
+fn the_drain_reads_a_marked_message_without_delivering_it() {
+    let f = Fixture::new("del-drain");
+    post(&f, "_broadcast", "gone-1", "marked before the join", Duration::from_secs(100));
+    delete(&f, &["--open"]);
+    post(&f, "_broadcast", "kept-1", "posted after the delete", Duration::from_secs(100));
+    f.ok(&["channel", "join", "side"]);
+
+    let unread: Value = serde_json::from_str(&f.ok(&["message", "unread", "--json"])).unwrap();
+    assert_eq!(unread["unread"], 1, "{unread}");
+    let drained = f.drain("plain");
+    assert!(drained.contains("posted after the delete"), "{drained}");
+    assert!(!drained.contains("marked before the join"), "{drained}");
+    let state = std::fs::read_to_string(f.state_file(&f.sid)).unwrap();
+    assert!(state.contains("seen_signal: gone-1.signal"), "the drain records it read: {state}");
+}
+
+/// The Monitor conduit skips a marked message too.
+#[cfg(feature = "sensor-peers")]
+#[test]
+fn the_peers_sensor_skips_a_marked_message() {
+    let f = Fixture::new("del-sensor");
+    let tray = f.project_tray();
+    post(&f, &tray, "gone-1", "marked before the run", Duration::from_secs(100));
+    delete(&f, &["--everywhere"]);
+    post(&f, &tray, "kept-1", "posted after the delete", Duration::from_secs(100));
+    let run = f.run();
+    run.wait_for("the unmarked message", Duration::from_secs(20), |r| r.output().contains("posted after the delete"));
+    assert!(!run.output().contains("marked before the run"), "{}", run.output());
+}

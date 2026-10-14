@@ -20,6 +20,7 @@
 //! all (ADR-406 item 10).
 
 pub mod channels;
+pub mod delete;
 pub mod inbox;
 pub mod listen;
 pub mod peers;

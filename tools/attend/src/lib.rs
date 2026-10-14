@@ -90,6 +90,7 @@ pub fn cli_main() {
             Some(MessageCmd::Inbox(a)) => inbox(a),
             Some(MessageCmd::Unread(a)) => cmd::listen::cmd_unread(a.json),
             Some(MessageCmd::Cleanup(a)) => cmd::cleanup::cmd_cleanup(a.dry_run, a.all),
+            Some(MessageCmd::Delete(a)) => cmd::delete::cmd_delete(a),
         },
         Commands::Channel(g) => channel(g),
         Commands::Peer { list, sub } => match sub {

@@ -317,6 +317,8 @@ impl PeerSensor {
             age: Duration,
         }
         let mut found: Vec<Found> = Vec::new();
+        // What a delete marked is read without being shown (ADR-404 D3e).
+        let marks = attend_groups::tombstones::Marks::load(&attend_presence::cache::signals_dir());
         for (room, dir) in scan_dirs.iter().enumerate() {
             let Ok(entries) = fs::read_dir(&dir.path) else { continue };
             for entry in entries.flatten() {
@@ -329,6 +331,10 @@ impl PeerSensor {
                 // signal id, so a signal moved between trays stays seen.
                 let key = attend_state::seen_key(&filename);
                 if self.seen_signals.contains(&key) {
+                    continue;
+                }
+                if marks.hides(&key) {
+                    self.seen_signals.insert(key);
                     continue;
                 }
                 // Read and parse: `from|project|cwd|message` (legacy) or

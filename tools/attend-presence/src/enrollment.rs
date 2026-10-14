@@ -426,6 +426,19 @@ pub fn reading_ids(ident: &crate::session::SessionIdentity) -> Vec<String> {
     ids
 }
 
+/// Every session id with an enrollment record, enrolled or holding only a
+/// pending opt-out. Read-only.
+pub fn recorded_ids() -> Vec<String> {
+    fs::read_dir(dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|name| !name.starts_with('.'))
+        .collect()
+}
+
 /// Whether any enrollment was ever recorded under a Claude Code process
 /// key. A cheap test before computing this process's key.
 pub fn any_indexed() -> bool {

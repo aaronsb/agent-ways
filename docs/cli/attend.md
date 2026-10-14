@@ -17,6 +17,7 @@ This document contains the help content for the `attend` command-line program.
 * [`attend message inbox`↴](#attend-message-inbox)
 * [`attend message unread`↴](#attend-message-unread)
 * [`attend message cleanup`↴](#attend-message-cleanup)
+* [`attend message delete`↴](#attend-message-delete)
 * [`attend channel`↴](#attend-channel)
 * [`attend channel list`↴](#attend-channel-list)
 * [`attend channel join`↴](#attend-channel-join)
@@ -60,7 +61,7 @@ In a session with the attend mod, the attend_* tools send, reply, join and list 
 
 * `run` — Start the sensor loop (use with Monitor for async delivery)
 * `listen` — Turn listening on or off for this session without joining a channel, or show it (default: status)
-* `message` — Send, reply to, read and count messages (default: inbox)
+* `message` — Send, reply to, read, count and delete messages (default: inbox)
 * `channel` — Join, leave, list and manage channels and scenes (default: list)
 * `peer` — List sessions, show this session's identity and the running loops (default: list)
 * `keepwarm` — Keep the prompt cache warm across idle stretches (ADR-182; default: status)
@@ -144,7 +145,7 @@ Mark a listening session alive: touch its heartbeat, deliver nothing. After a /c
 
 ## `attend message`
 
-Send, reply to, read and count messages (default: inbox)
+Send, reply to, read, count and delete messages (default: inbox)
 
 **Usage:** `attend message [OPTIONS]
        message <COMMAND>`
@@ -156,6 +157,7 @@ Send, reply to, read and count messages (default: inbox)
 * `inbox` — Read pending messages from peers
 * `unread` — Count this session's unread messages by room, marking none of them read
 * `cleanup` — Reap signal files whose owning project is gone, and prune empty project dirs. Messages are never removed by age — lifetime is bound to project liveness (ADR-136)
+* `delete` — Mark for deletion the messages no live session still has to read
 
 ###### **Options:**
 
@@ -262,6 +264,28 @@ Reap signal files whose owning project is gone, and prune empty project dirs. Me
 
 * `-n`, `--dry-run` — List what would be removed without deleting
 * `--all` — Remove every signal file regardless of project liveness
+
+
+
+## `attend message delete`
+
+Mark for deletion the messages no live session still has to read
+
+A message is marked when it is in the scope, older than --older-than, older than 90 seconds, and no live session would be delivered it: a session keeps what `attend message unread` counts for it, its cold start included. A person in attend-chat holds nothing. Every reader skips a marked message, and `attend message cleanup` removes it 7 days after the mark, or for a project tray's message once that project has started 3 sessions since (ADR-404 D3e). --undo takes a delete back while cleanup has not yet removed its messages.
+
+**Usage:** `attend message delete [OPTIONS]`
+
+###### **Options:**
+
+* `--open` — Delete in #open
+* `--channel <NAME>` — Delete in this channel
+* `--everywhere` — Delete in every room: #open, each channel, each project tray and each person's tray
+* `--older-than <WHEN>` — How old a message must be: `current` (before the earliest start of any live session), `today` (before local midnight), `all`, a duration such as 90m, 2h30m, 3d or 1w, or a local date YYYY-MM-DD
+
+  Default value: `all`
+* `-n`, `--dry-run` — Report what would be marked and mark nothing
+* `--undo <BATCH>` — Remove the marks of the newest delete, or of the batch named
+* `--json` — Print the result as one JSON document
 
 
 
