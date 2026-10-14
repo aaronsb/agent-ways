@@ -767,6 +767,26 @@ mod tests {
         assert!(attend_mod_install_in(&[]));
     }
 
+    /// ADR-414 item 8: the keepalive policy's defaults, and its switch
+    /// falling to off when its section does not load.
+    #[test]
+    fn attend_mod_keepalive_defaults_and_its_switch_fails_closed() {
+        assert_eq!(resolved("attend_mod.keepalive.enabled", &[]), Some(Value::Bool(true)));
+        assert_eq!(resolved("attend_mod.keepalive.max_keepalives", &[]), Some(Value::Number(8.into())));
+        assert_eq!(resolved("attend_mod.keepalive.margin_minutes", &[]), Some(Value::Number(10.into())));
+        assert_eq!(
+            resolved("attend_mod.keepalive.windows", &[]),
+            Some(Value::Sequence(vec![Value::String("daily 00:00-24:00".into())]))
+        );
+        assert_eq!(resolved("attend_mod.keepalive.timezone", &[]), Some(Value::String(String::new())));
+        assert_eq!(resolved("attend_mod.keepalive.wrap", &[]), Some(Value::String("transcript".into())));
+        assert_eq!(resolved("attend_mod.keepalive.wrap_file", &[]), Some(Value::String("{state}/wrap/{session}.md".into())));
+        assert_eq!(resolved("attend_mod.keepalive.wrap_to", &[]), Some(Value::String(String::new())));
+        assert_eq!(resolved("attend_mod.keepalive.after_wrap", &[]), Some(Value::String("lapse".into())));
+        assert_eq!(closed_keepalive(&Value::Null), Some(Value::Bool(false)));
+        assert_eq!(closed_keepalive(&Value::Bool(true)), None);
+    }
+
     #[test]
     fn the_project_wins_for_listening_and_keepwarm() {
         let layers = [
