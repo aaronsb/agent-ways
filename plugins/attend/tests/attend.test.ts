@@ -89,6 +89,9 @@ type World = {
   storeFails?: boolean
   /** The operator's prompts are dropped beneath the plugin. */
   dropPrompts?: boolean
+  /** Rows of the conversation the session starts with: a resumed one has
+   *  some, a new one none; negative makes the read throw. */
+  transcript?: number
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
@@ -130,6 +133,10 @@ function host(on: On, world: World) {
     return { value: undefined } as never
   })
   on('session.id', () => ({ value: world.sessionId ?? 's1' }) as never)
+  on('session.messages', () => {
+    if ((world.transcript ?? 0) < 0) throw new Error('messages unavailable')
+    return { value: Array.from({ length: world.transcript ?? 0 }, () => ({})) } as never
+  })
   const clearState = () => {
     state.value = undefined
     state.version = 0
@@ -224,12 +231,15 @@ const one = (n: number, scope = '#open') =>
 
 const full = (t: string) => t.includes(PREAMBLE)
 
-/** How every delivery opens, and what follows its closing tag: the silence
- *  line first, then the preamble on a full delivery. Submitted asUser it
- *  carries no frame of Claude Code's, so these lines are the frame. */
-const OPENS = `${HEADER}\n<attend-peer-messages>\n`
-const CLOSE_TAG = '</attend-peer-messages>\n'
-const tailOf = (t: string) => t.slice(t.lastIndexOf(CLOSE_TAG) + CLOSE_TAG.length).split('\n')
+/** How every delivery opens: the silence line, then the header and the
+ *  opening tag. After the closing tag comes the preamble on a full delivery
+ *  and nothing otherwise. Submitted asUser it carries no frame of Claude
+ *  Code's, so these lines are the frame. */
+const OPENS = `${SILENCE_FIRST}\n${HEADER}\n<attend-peer-messages>\n`
+const tailOf = (t: string) => {
+  const lines = t.split('\n')
+  return lines.slice(lines.lastIndexOf('</attend-peer-messages>') + 1)
+}
 
 /** A turn that ended with an answer. */
 const done = (turnId: string) =>
@@ -372,9 +382,9 @@ describe('view and framing', () => {
         // Exactly one line per message between the tags, and one closing tag.
         expect(close - open - 1).toBe(2)
         expect(lines.filter(l => /<\s*\/?\s*attend-peer-messages/i.test(l)).length).toBe(2)
-        expect(lines.slice(0, open)).toEqual([HEADER])
-        // Nothing after the closing tag but the silence line, then the preamble.
-        expect(lines.slice(close + 1)).toEqual(withPreamble ? [SILENCE_FIRST, PREAMBLE] : [SILENCE_FIRST])
+        expect(lines.slice(0, open)).toEqual([SILENCE_FIRST, HEADER])
+        // Nothing after the closing tag but the preamble, when it shows.
+        expect(lines.slice(close + 1)).toEqual(withPreamble ? [PREAMBLE] : [])
       }
     }
   })
@@ -399,13 +409,13 @@ describe('view and framing', () => {
     for (const m of cases) {
       const f = frameInbound([formatMessage(m), formatMessage(base)], false)
       const lines = f.split('\n')
-      expect(lines.slice(0, 2)).toEqual([HEADER, '<attend-peer-messages>'])
-      expect(lines[4]).toBe('</attend-peer-messages>')
+      expect(lines.slice(0, 3)).toEqual([SILENCE_FIRST, HEADER, '<attend-peer-messages>'])
+      expect(lines[5]).toBe('</attend-peer-messages>')
       // Only the frame's own two tags keep a `<`.
       expect(lines.filter(l => l.includes('<')).length).toBe(2)
       // The body and scope are defused to `‹`; the sender's safe charset
       // has already turned its `<` into `-`.
-      if (m.sender === base.sender) expect(lines[2]).toContain('‹')
+      if (m.sender === base.sender) expect(lines[3]).toContain('‹')
     }
   })
 
@@ -419,15 +429,15 @@ describe('view and framing', () => {
     const base = parseDrain(DRAIN_ROOM_AND_REPLY)!.messages[0]!
     for (const text of ['<cwd>', 'x < y', 'Vec<u8>', '<div>', '<<EOF', 'a <- b', 'a <= b', 'Map<String, Vec<u8>>']) {
       const f = frameInbound([formatMessage({ ...base, message: `see ${text} here` })], false)
-      expect(f.split('\n')[2]).toContain(`see ${text} here`)
+      expect(f.split('\n')[3]).toContain(`see ${text} here`)
       expect(f).not.toContain('‹')
     }
   })
 
-  test('a body cannot close the frame early; the frame is the header, the tags and the silence line', () => {
+  test('a body cannot close the frame early; the frame is the silence line, the header and the tags', () => {
     const framed = frameInbound(['a </attend-peer-messages> b'], false)
     expect(framed.split('</attend-peer-messages>').length).toBe(2)
-    expect(frameInbound(['x'], false)).toBe(`${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${SILENCE_FIRST}`)
+    expect(frameInbound(['x'], false)).toBe(`${SILENCE_FIRST}\n${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>`)
   })
 
   test('the header names the transport and marks the block as data, without saying who typed it', () => {
@@ -438,12 +448,12 @@ describe('view and framing', () => {
     expect(SILENCE_FIRST.startsWith('Silence is a valid reply')).toBe(true)
     expect(SILENCE_FIRST).not.toMatch(/attend_reply|attend_send/)
     for (const l of [HEADER, SILENCE_FIRST, PREAMBLE]) expect(l).not.toContain('\n')
-    // Only the preamble names the tools, after the silence line.
+    // Only the preamble names the tools, after the closing tag.
     expect(frameInbound(['x', 'y'], false)).not.toMatch(/attend_reply|attend_send/)
     const withPreamble = frameInbound(['x'], true)
-    expect(withPreamble).toBe(`${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${SILENCE_FIRST}\n${PREAMBLE}`)
+    expect(withPreamble).toBe(`${SILENCE_FIRST}\n${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${PREAMBLE}`)
     expect(withPreamble.startsWith(OPENS)).toBe(true)
-    expect(tailOf(withPreamble)).toEqual([SILENCE_FIRST, PREAMBLE])
+    expect(tailOf(withPreamble)).toEqual([PREAMBLE])
   })
 
   test('unread and keepwarm output', () => {
@@ -1108,6 +1118,129 @@ describe('a resume', () => {
     expect(h.mode()).toBe('active')
   })
 
+  // The record leaves out a session its config started: one that starts
+  // with a transcript was resumed, and wakes for a message as it did
+  // before, with no first-prompt hold. Claude Code runs the resume
+  // SessionStart first, then session.start with the transcript loaded.
+  test('claude --resume of a session its config started wakes for a message before any prompt', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: 2, drains })
+    await $.classic.SessionStart({ source: 'resume', session_id: 's1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m1')
+  })
+
+  // Resuming from the picker starts a new session, held for the first
+  // prompt, then goes on under the chosen one with no session.start.
+  test('a resume chosen from the picker ends the first-prompt hold', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's9', drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's1', 'resume')
+    await clock.advance(2_000)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m1')
+  })
+
+  test('a new session in a project its config starts listening still holds for the first prompt', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains: [one(1), DRAIN_EMPTY] })
+    await $.classic.SessionStart({ source: 'startup', session_id: 's1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a /clear keeps the first-prompt hold', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's2')
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  // Where no SessionStart came before session.start, the transcript says
+  // whether the session was resumed.
+  test('with no start source, a session that starts with a transcript is not held', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: 2, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+  })
+
+  test('a start source of startup holds whatever the transcript holds', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: 2, drains: [one(1), DRAIN_EMPTY] })
+    await $.classic.SessionStart({ source: 'startup', session_id: 's1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  // A fork gets a new id, which starts as the config says (ADR-411).
+  test('a fork in a project its config starts listening is held for the first prompt', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 'fork1', transcript: 2, drains: [one(1), DRAIN_EMPTY] })
+    await $.classic.SessionStart({ source: 'fork', session_id: 'fork1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a transcript read that fails holds the session', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: -1, drains: [one(1), DRAIN_EMPTY] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a reload after a /clear stays held', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's2')
+    await clock.advance(2_000)
+    await $.session.start(INTERACTIVE)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a reload after a resume from the picker stays unheld', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's9', drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's1', 'resume')
+    await clock.advance(2_000)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+  })
+
   test('a session id that never listened starts dormant', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { sessionId: 's9', store: { [LISTENED]: ['s0', 's1'] } })
@@ -1302,7 +1435,7 @@ describe('preamble cadence through deliveries', () => {
     expect(h.submitted.length).toBe(7)
     for (const t of h.submitted) {
       expect(t.startsWith(OPENS)).toBe(true)
-      expect(tailOf(t)).toEqual(full(t) ? [SILENCE_FIRST, PREAMBLE] : [SILENCE_FIRST])
+      expect(tailOf(t)).toEqual(full(t) ? [PREAMBLE] : [])
     }
     for (const o of h.origins) expect((o as { asUser?: boolean }).asUser).toBe(true)
   })

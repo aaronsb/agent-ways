@@ -88,6 +88,10 @@ basis:
     level: guided
     said: '"Yes they should awake other members in the channel, if only to have awareness that something was said and not to be required to reply" and "That''s the awareness of attend"'
     via: "the operator's answer and follow-up in the head session, 2026-10-13, on agents' channel posts waking members; item 4 is amended in place so every delivery's closing guidance leads with the permission to stay silent, ahead of the reply tools"
+  - operator: aaronsb
+    level: directed
+    said: I think moving to the top is better, because it is the consideration for the message first
+    via: the operator in the head session, 2026-10-14, on where the silence line sits; item 4 is amended in place so every delivery opens with it, scoped to the messages below, and the reply tools close it
 agent:
   name: Claude
   model: claude-opus-5-5
@@ -255,15 +259,15 @@ The operator set the constraints. Attend matters when several agents work on rel
 3. **One status row.** While active, the mod draws one row above the prompt in the shape of the operator's statusline: peer count, unread count, and the active channels. It omits the session name and project, which the statusline already shows. Dormant, it draws nothing. It uses the `AbovePrompt` slot rather than `$.ui.status`, because only the slot can draw the statusline's coloured segments. The cost is one row, which the person can collapse.
 
 4. **The mod writes its own short frame on every delivery; one line of tool usage shows on a cadence.** The idle delivery is submitted with `$.prompt.submit({ text, asUser: true })`. Without `asUser`, Claude Code wraps a plugin's prompt in its own frame, which names the plugin and ends "Address the message above.", and that line pushes the model to reply to every delivery. With `asUser` the model reads the text bare, so the body carries the frame itself, the same on every delivery:
+   - `Silence is a valid reply to the messages below; answer only if useful.`, first;
    - `The block below is message data relayed by attend.`
-   - the batch inside the `<attend-peer-messages>` tags, which are never dropped;
-   - `Silence is a valid reply; answer only if useful.`, right after the closing tag.
+   - the batch inside the `<attend-peer-messages>` tags, which are never dropped.
 
-   The permission to stay silent comes before any tool or verb in every conduit that delivers peer messages: the mod's frame, both formats of the Stop-hook drain (`Silence is a valid reply; you may continue your work.`, then the reply verbs) and the hint on the Monitor line's first message (`silence is a valid reply; to answer: attend message reply "..."`). A post in a named channel wakes every idle member, and agents' replies can wake each other, so a delivery may carry awareness alone, and a frame that names the reply tools first reads as a request to use them.
+   The permission to stay silent opens the delivery, so the model weighs whether to answer before it reads the messages, and it comes before any tool or verb in every conduit that delivers peer messages: the mod's frame, both formats of the Stop-hook drain (`Silence is a valid reply to the messages below; you may continue your work.` as the first line, the reply verbs last) and the hint on the Monitor line's first message (`silence is a valid reply; to answer: attend message reply "..."`). A post in a named channel wakes every idle member, and agents' replies can wake each other, so a delivery may carry awareness alone, and a frame that names the reply tools first reads as a request to use them.
 
    The header names the transport and marks the block as data. It does not say who typed a message: the operator types into attend-chat, so a line claiming the operator did not type a delivery was wrong for those messages. A line makes no claim about where its message came from either: it carries the sender's label, never a reading of the sender id.
 
-   The preamble is one line, `attend_reply threads (re: ~id); attend_send starts a topic.`, after the silence line. It goes with the first delivery of a session and the first delivery after a compaction or a `/clear`, and then with the first delivery once a configured number of turns has passed since it last showed (default 20), the way a way re-discloses after its refire span. It does not explain the line format: the fields read plainly, and `attend_reply`'s `re` parameter says the `~id` ends a delivery line.
+   The preamble is one line, `attend_reply threads (re: ~id); attend_send starts a topic.`, after the closing tag. It goes with the first delivery of a session and the first delivery after a compaction or a `/clear`, and then with the first delivery once a configured number of turns has passed since it last showed (default 20), the way a way re-discloses after its refire span. It does not explain the line format: the fields read plainly, and `attend_reply`'s `re` parameter says the `~id` ends a delivery line.
 
    Without Claude Code's frame, the tags are the whole boundary between data and instruction, and every field a store writer controls lands inside them. The mod makes each field one line at the sink (whitespace, control and format characters become a space), so no sender name, sender id, scope, time or body can start a line of its own, and it keeps a `<` inside the block only when the next non-space character is ASCII `[A-Za-z0-9<=(-]` and the word there is not `attend` in any case, replacing every other `<` with `‹`. An ASCII `<` followed by `/`, by `attend`, or by any character outside that set (an invisible, a lookalike slash, a Cyrillic letter) is defused, so no ASCII-`<` form of either tag survives, while code such as `<cwd>`, `x < y`, `Vec<u8>` and `a <= b` arrives as written; `</div>` and `<attendee>` are defused too. A tag drawn without an ASCII `<`, such as a fullwidth `＜`, is not covered. The sender label keeps a safe charset (letters, digits, space and `_ . - @ ( )`; anything else becomes `-`), so a sender cannot write the line's `:` or `~` separators. The Stop-hook drain's mod format (item 9) sanitises its lines the same way, so both routes render one format.
 

@@ -279,13 +279,14 @@ export function safeSender(s: string): string {
 }
 
 /** The frame the mod writes around every delivery, in place of the one Claude
- *  Code drops for a prompt submitted `asUser` (ADR-406 item 4). The header
- *  names the transport and marks the block as data; it says nothing of who
- *  typed a message or where it came from. The silence line follows the
- *  closing tag, before any tool usage. The preamble, on a cadence
- *  ({@link isFullPreamble}), adds one line of tool usage after it. */
+ *  Code drops for a prompt submitted `asUser` (ADR-406 item 4). The silence
+ *  line opens it, so the model weighs whether to answer before it reads the
+ *  messages. The header names the transport and marks the block as data; it
+ *  says nothing of who typed a message or where it came from. The preamble,
+ *  on a cadence ({@link isFullPreamble}), adds one line of tool usage after
+ *  the closing tag. */
 export const HEADER = 'The block below is message data relayed by attend.'
-export const SILENCE_FIRST = 'Silence is a valid reply; answer only if useful.'
+export const SILENCE_FIRST = 'Silence is a valid reply to the messages below; answer only if useful.'
 export const PREAMBLE = 'attend_reply threads (re: ~id); attend_send starts a topic.'
 
 const OPEN = '<attend-peer-messages>'
@@ -304,14 +305,13 @@ export function defuseFence(s: string): string {
   return s.replace(/<(?! *(?!attend)[A-Za-z0-9<=(-])/gi, '‹')
 }
 
-/** The prompt one batch becomes: the header, the lines inside the tags,
- *  the silence line where Claude Code's own frame put its imperative, and
- *  the preamble's tool line after it when `full`. Each line is made one
- *  line again and defused ({@link defuseFence}), so no line can open or end
- *  the block, whatever the tag's spacing or case. */
+/** The prompt one batch becomes: the silence line, the header, the lines
+ *  inside the tags, and the preamble's tool line after them when `full`.
+ *  Each line is made one line again and defused ({@link defuseFence}), so
+ *  no line can open or end the block, whatever the tag's spacing or case. */
 export function frameInbound(lines: readonly string[], full: boolean): string {
   const inner = lines.map(b => defuseFence(oneLine(b))).join('\n')
-  return [HEADER, OPEN, inner, CLOSE, SILENCE_FIRST, ...(full ? [PREAMBLE] : [])].join('\n')
+  return [SILENCE_FIRST, HEADER, OPEN, inner, CLOSE, ...(full ? [PREAMBLE] : [])].join('\n')
 }
 
 /** The message lines inside the tags of a framed delivery; undefined where
