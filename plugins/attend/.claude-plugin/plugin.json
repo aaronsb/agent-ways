@@ -1,6 +1,6 @@
 {
   "name": "attend",
-  "version": "0.26.0",
+  "version": "0.27.0",
   "description": "attend's agent-facing driver in Claude Code (ADR-406): dormant by default, listening on request or by project config, one status row, typed tools over the attend CLI.",
   "author": { "name": "Aaron Bockelie" },
   "types": "./types/index.d.ts"
