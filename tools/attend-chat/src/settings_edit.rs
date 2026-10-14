@@ -9,11 +9,11 @@
 
 use std::path::{Path, PathBuf};
 
-use agent_settings::load::{resolve, Layer};
+use agent_settings::load::{is_higher, overridden, resolve, Layer, Overridden};
 use agent_settings::schema::{KeySpec, Kind, LayerScope, Scope};
-use agent_settings::writer::edit_file;
+use agent_settings::writer::edit_file_within;
 
-use crate::settings::plain;
+use crate::settings::{plain, LOCK_WAIT};
 
 /// The attend mod's keys the menu lists, in its order.
 pub const MOD_KEYS: &[&str] = &["attend_mod.listening", "attend_mod.keepwarm"];
@@ -36,32 +36,6 @@ impl Place {
         match self {
             Place::User => format!("user: {held}"),
             Place::Project(root) => format!("project {}: {held}", tilde(root)),
-        }
-    }
-
-    /// The place a [`Place::label`] names.
-    pub fn from_label(label: &str) -> Option<Place> {
-        if label.starts_with("user: ") {
-            return Some(Place::User);
-        }
-        let (path, _) = label.strip_prefix("project ")?.rsplit_once(": ")?;
-        Some(Place::Project(untilde(path)))
-    }
-
-    /// The place as a menu id carries it: `user`, or the project's root.
-    pub fn id(&self) -> String {
-        match self {
-            Place::User => "user".into(),
-            Place::Project(root) => root.display().to_string(),
-        }
-    }
-
-    /// The place a [`Place::id`] names.
-    pub fn from_id(id: &str) -> Place {
-        if id == "user" {
-            Place::User
-        } else {
-            Place::Project(PathBuf::from(id))
         }
     }
 
@@ -95,7 +69,8 @@ pub fn tilde(path: &Path) -> String {
     }
 }
 
-fn untilde(text: &str) -> PathBuf {
+/// `text` with a leading `~` read as the home directory, as a shell reads it.
+pub fn untilde(text: &str) -> PathBuf {
     match text.strip_prefix("~/") {
         Some(rest) => claude_sessions::home_dir().join(rest),
         None if text == "~" => claude_sessions::home_dir(),
@@ -259,40 +234,77 @@ pub fn projects(dir: &Path, roots: &[String]) -> Vec<PathBuf> {
     out
 }
 
-/// Set `name` to `raw` in `place`'s file. Says what was written, and when
-/// another layer still decides the value read from `dir`, which one.
-pub fn set_at(name: &str, raw: &str, place: &Place, dir: &Path) -> Result<String, String> {
+/// What a write says on the bottom bar, and whether the value written is
+/// not the one in effect, which the bar shows as a warning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Done {
+    pub said: String,
+    pub overridden: bool,
+}
+
+/// Set `name` to `raw` in `place`'s file. Says what was written and, read
+/// where the chat runs (`dir`) or at the project written, what still keeps
+/// it from being the value in effect.
+pub fn set_at(name: &str, raw: &str, place: &Place, dir: &Path) -> Result<Done, String> {
     let key = Key::of(name).ok_or_else(|| format!("{name} is not a setting the chat lists"))?;
     let (file, header) = key.file(place)?;
     if let Key::Chat(_) = key {
         let short_name = &name[CHAT.len()..];
-        return crate::settings::set(name, raw, &file, dir).map(|said| format!("{} · {}", said.replacen(short_name, name, 1), tilde(&file)));
+        return crate::settings::set(name, raw, &file, dir)
+            .map(|said| Done { said: format!("{} · {}", said.replacen(short_name, name, 1), tilde(&file)), overridden: false });
     }
-    let spec = key.spec();
-    let v = spec.parse_cli(raw, &key.layers(place), &[]).map_err(|m| format!("{name}: {m}"))?;
+    let v = key.spec().parse_cli(raw, &key.layers(place), &[]).map_err(|m| format!("{name}: {m}"))?;
     let kp = key.path();
-    let (_, changed) = edit_file(&file, header, |d| d.set(&kp, &v)).map_err(|e| format!("{e}; nothing written"))?;
+    let (_, changed) = edit_file_within(&file, header, Some(LOCK_WAIT), |d| d.set(&kp, &v)).map_err(|e| format!("{e}; nothing written"))?;
     let set = if changed { "" } else { "already " };
-    let mut said = format!("{set}{name} = {} · {}", plain(&v), short(&file));
-    // What the chat's directory reads: the place written, or for the user
-    // file the project there, which may still set the key.
-    let read_at = if matches!(place, Place::User) { here(dir) } else { place.clone() };
-    let layers = key.layers(&read_at);
-    let r = resolve(spec, &[], &layers);
-    if let Some(from) = r.layer.and_then(|i| layers[i].path.clone()).filter(|p| *p != file) {
-        said.push_str(&format!(" · {} still sets {}", short(&from), r.value.as_ref().map(plain).unwrap_or_default()));
-    }
-    Ok(said)
+    let said = format!("{set}{name} = {} · {}", plain(&v), short(&file));
+    Ok(with_override(said, &key, &read_at(place, dir), &file, false))
 }
 
-/// Remove `name` from `place`'s file. Says what is in effect after.
-pub fn unset_at(name: &str, place: &Place) -> Result<String, String> {
+/// Remove `name` from `place`'s file. Says what is in effect after, read
+/// where the chat runs (`dir`) or at the project written, and which higher
+/// file still sets it.
+pub fn unset_at(name: &str, place: &Place, dir: &Path) -> Result<Done, String> {
     let key = Key::of(name).ok_or_else(|| format!("{name} is not a setting the chat lists"))?;
     let (file, _) = key.file(place)?;
     let kp = key.path();
-    edit_file(&file, None, |d| d.unset(&kp)).map_err(|e| format!("{e}; nothing written"))?;
-    let (value, from) = key.effect(place);
-    Ok(format!("{name} unset in {}; {value} ({from}) in effect", short(&file)))
+    edit_file_within(&file, None, Some(LOCK_WAIT), |d| d.unset(&kp)).map_err(|e| format!("{e}; nothing written"))?;
+    let at = read_at(place, dir);
+    let (value, from) = key.effect(&at);
+    let said = format!("{name} unset in {}; {value} ({from}) in effect", short(&file));
+    Ok(with_override(said, &key, &at, &file, true))
+}
+
+/// Where a write to `place` is read back: the project written, or for the
+/// user file the project the chat runs in, which may still set the key.
+fn read_at(place: &Place, dir: &Path) -> Place {
+    match place {
+        Place::User => here(dir),
+        Place::Project(_) => place.clone(),
+    }
+}
+
+/// `said`, with what keeps the key written to `file` from deciding it read
+/// at `at` ([`overridden`], as `ways settings set` reports it): the file's
+/// section falling back to its defaults, or another file that sets it. With
+/// `higher_only` (an unset, which leaves the key to the layers below) only
+/// a file above `file` counts.
+fn with_override(mut said: String, key: &Key, at: &Place, file: &Path, higher_only: bool) -> Done {
+    let layers = key.layers(at);
+    let note = match overridden(key.spec(), &[], &layers, file) {
+        Some(Overridden::Fallback(f)) => {
+            let what = f.key.as_ref().map_or_else(|| f.message.clone(), |k| format!("{k}: {}", f.message));
+            Some(format!("not in effect: {} falls back to its defaults in {}, {what}", key.spec().section, short(file)))
+        }
+        Some(Overridden::By { path, value, .. }) if !higher_only || is_higher(&layers, &path, file) => {
+            Some(format!("{} still sets {}", short(&path), value.as_ref().map(plain).unwrap_or_default()))
+        }
+        _ => None,
+    };
+    if let Some(n) = &note {
+        said.push_str(&format!(" · {n}"));
+    }
+    Done { said, overridden: note.is_some() }
 }
 
 #[cfg(test)]
@@ -354,7 +366,7 @@ mod tests {
         let (_, proj) = home();
         let here = Place::Project(proj.clone());
         let user = ways_core::paths::user_config();
-        let said = set_at("attend_mod.listening", "active", &here, &proj).unwrap();
+        let said = set_at("attend_mod.listening", "active", &here, &proj).unwrap().said;
         let file = proj.join(".claude/ways.yaml");
         assert_eq!(read(&file), format!("{}attend_mod:\n  listening: active\n", ways_core::settings::PROJECT_HEADER));
         assert!(said.contains("attend_mod.listening = active") && said.contains(".claude/ways.yaml"), "{said}");
@@ -367,11 +379,11 @@ mod tests {
         assert_eq!(in_effect("attend_mod.keepwarm", &here), "off", "the project reads the user's value");
 
         // The project's file still decides what is read there.
-        let said = set_at("attend_mod.listening", "dormant", &Place::User, &proj).unwrap();
+        let said = set_at("attend_mod.listening", "dormant", &Place::User, &proj).unwrap().said;
         assert!(said.contains("ways.yaml") && said.contains("active"), "names what still sets it: {said}");
         assert_eq!(in_effect("attend_mod.listening", &here), "active");
 
-        let said = unset_at("attend_mod.listening", &here).unwrap();
+        let said = unset_at("attend_mod.listening", &here, &proj).unwrap().said;
         assert!(!read(&file).contains("listening"), "{}", read(&file));
         assert_eq!(in_effect("attend_mod.listening", &here), "dormant");
         assert!(said.contains("dormant"), "{said}");
@@ -381,7 +393,7 @@ mod tests {
     fn the_chat_keys_are_the_user_files_alone_and_a_bad_value_writes_nothing() {
         let _env = crate::test_dir::env_lock();
         let (_, proj) = home();
-        let said = set_at("attend.chat.mouse", "false", &Place::User, &proj).unwrap();
+        let said = set_at("attend.chat.mouse", "false", &Place::User, &proj).unwrap().said;
         assert!(said.contains("mouse = false"), "{said}");
         assert!(read(&attend_config::user_path()).contains("mouse: false"), "{}", read(&attend_config::user_path()));
         assert_eq!(in_effect("attend.chat.mouse", &Place::User), "false");
@@ -399,18 +411,73 @@ mod tests {
         assert!(per_project("attend_mod.keepwarm") && !per_project("attend.chat.mouse"));
     }
 
+    /// A section that fails the schema in the file written falls back to
+    /// its defaults there, so the value written is not the one in effect:
+    /// the bar says so, as `ways settings set` exits 4.
     #[test]
-    fn a_place_reads_back_from_its_label_and_its_id() {
+    fn a_write_the_files_fallback_hides_is_said_not_claimed() {
         let _env = crate::test_dir::env_lock();
         let (_, proj) = home();
         let here = Place::Project(proj.clone());
-        assert_eq!(here.label(Some("active")), "project ~/work/proj: active");
+        write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  keepwarm: bogus\n");
+        let done = set_at("attend_mod.listening", "active", &here, &proj).unwrap();
+        assert!(read(&proj.join(".claude/ways.yaml")).contains("listening: active"), "written");
+        assert_eq!(in_effect("attend_mod.listening", &here), "dormant", "and not in effect");
+        assert!(done.overridden, "{done:?}");
+        assert!(done.said.contains("attend_mod falls back") && done.said.contains("bogus"), "{}", done.said);
+    }
+
+    /// Unset in the user file is read where the chat runs: the project
+    /// there still sets the key, and the bar says what is in effect there.
+    #[test]
+    fn an_unset_says_what_the_chats_project_reads() {
+        let _env = crate::test_dir::env_lock();
+        let (_, proj) = home();
+        write(&ways_core::paths::user_config(), "attend_mod:\n  listening: dormant\n");
+        write(&proj.join(".claude/ways.yaml"), "attend_mod:\n  listening: active\n");
+        let done = unset_at("attend_mod.listening", &Place::User, &proj.join("src")).unwrap();
+        assert!(!read(&ways_core::paths::user_config()).contains("listening"));
+        assert!(done.said.contains("active (project) in effect"), "{}", done.said);
+        assert!(done.said.contains("proj/.claude/ways.yaml still sets active"), "{}", done.said);
+        assert!(done.overridden, "{done:?}");
+        // A lower layer the unset falls through to is no override.
+        write(&ways_core::paths::user_config(), "attend_mod:\n  listening: dormant\n");
+        let done = unset_at("attend_mod.listening", &Place::Project(proj.clone()), &proj).unwrap();
+        assert!(done.said.contains("dormant (user) in effect") && !done.overridden, "{done:?}");
+    }
+
+    /// A writer that holds the file's lock refuses the write after a bounded
+    /// wait, so the screen's thread never hangs on it; nothing is written.
+    #[test]
+    fn a_held_lock_refuses_the_write_after_a_bounded_wait() {
+        let _env = crate::test_dir::env_lock();
+        let (_, proj) = home();
+        let here = Place::Project(proj.clone());
+        let file = proj.join(".claude/ways.yaml");
+        let held = agent_settings::writer::Lock::acquire(&file).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (at, dir) = (here.clone(), proj.clone());
+        std::thread::spawn(move || tx.send(set_at("attend_mod.listening", "active", &at, &dir)).unwrap());
+        let got = rx.recv_timeout(std::time::Duration::from_secs(6));
+        drop(held);
+        let refused = got.expect("the write gave up within the wait").unwrap_err();
+        assert!(refused.contains("another writer holds it") && refused.contains("nothing written"), "{refused}");
+        assert!(!file.exists(), "nothing written");
+        let held = agent_settings::writer::Lock::acquire(&attend_config::user_path()).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(set_at("attend.chat.mouse", "false", &Place::User, &proj)).unwrap());
+        let got = rx.recv_timeout(std::time::Duration::from_secs(6));
+        drop(held);
+        assert!(got.expect("the chat key's write gave up too").unwrap_err().contains("another writer holds it"));
+    }
+
+    #[test]
+    fn a_place_names_its_file_with_the_home_as_tilde() {
+        let _env = crate::test_dir::env_lock();
+        let (_, proj) = home();
+        assert_eq!(Place::Project(proj.clone()).label(Some("active")), "project ~/work/proj: active");
         assert_eq!(Place::User.label(None), "user: not set");
-        for p in [Place::User, here] {
-            assert_eq!(Place::from_label(&p.label(Some("on"))), Some(p.clone()), "{p:?}");
-            assert_eq!(Place::from_id(&p.id()), p);
-        }
-        assert_eq!(Place::from_label("Another project…"), None);
+        assert_eq!(untilde("~/work/proj"), proj);
     }
 
     #[test]

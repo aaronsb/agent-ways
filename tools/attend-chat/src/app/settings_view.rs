@@ -14,16 +14,14 @@
 //! as `ways settings set` writes it, the bottom bar says where and names a
 //! layer that still overrides it, and the chat's own keys apply at once.
 
-use std::path::PathBuf;
-
 use agent_tui::{Anchor, Item, Open};
 
 use super::ChatPane;
 use crate::settings_edit::{self as edit, Place};
 
 /// The list's id, and the ids of the steps after it: a key's layer
-/// picker, its value picker (with the place, after a separator), and the
-/// entry dialog for another project.
+/// picker, its value picker (with the index of its place among those the
+/// pane keeps, after a separator), and the entry dialog for another project.
 const LIST: &str = "settings";
 const LAYER: &str = "setting-layer:";
 const VALUE: &str = "setting-value:";
@@ -54,23 +52,38 @@ impl ChatPane {
     }
 
     /// Where `name` can be written, each place with what its file holds.
+    /// The places are kept on the pane, in the picker's order, for the pick.
     fn layer_menu(&mut self, name: &str) {
         let dir = std::env::current_dir().unwrap_or_default();
         let roots = self.agent_roots();
         let places = std::iter::once(Place::User).chain(edit::projects(&dir, &roots).into_iter().map(Place::Project));
-        let mut items: Vec<Item> = places.map(|p| Item::new(p.label(edit::held(name, &p).as_deref()))).collect();
+        self.setting_places = places.map(|p| (p.label(edit::held(name, &p).as_deref()), p)).collect();
+        let mut items: Vec<Item> = self.setting_places.iter().map(|(label, _)| Item::new(label.clone())).collect();
         items.push(Item::new(ANOTHER));
         self.to_open = Some(Open::Pick { id: format!("{LAYER}{name}"), title: format!("{name}: write to"), items, multi: false, anchor: Anchor::Parent });
     }
 
-    /// The values of `name` at `place`, the one in effect there marked.
-    fn value_menu(&mut self, name: &str, place: &Place, anchor: Anchor) {
-        let now = edit::in_effect(name, place);
+    /// Keep `place` among the places offered; its index there.
+    fn keep_place(&mut self, place: Place) -> usize {
+        match self.setting_places.iter().position(|(_, p)| *p == place) {
+            Some(i) => i,
+            None => {
+                self.setting_places.push((place.label(None), place));
+                self.setting_places.len() - 1
+            }
+        }
+    }
+
+    /// The values of `name` at the place kept at index `at`, the one in
+    /// effect there marked. The menu's id carries the index.
+    fn value_menu(&mut self, name: &str, at: usize, anchor: Anchor) {
+        let Some((_, place)) = self.setting_places.get(at).cloned() else { return };
+        let now = edit::in_effect(name, &place);
         let mut items: Vec<Item> = edit::choices(name).into_iter().map(|c| Item::new(c.clone()).current(c == now)).collect();
-        if edit::held(name, place).is_some() {
+        if edit::held(name, &place).is_some() {
             items.push(Item::new(UNSET));
         }
-        let id = format!("{VALUE}{name}{SEP}{}", place.id());
+        let id = format!("{VALUE}{name}{SEP}{at}");
         self.to_open = Some(Open::Pick { id, title: format!("{name} · {}", place.name()), items, multi: false, anchor });
     }
 
@@ -88,24 +101,32 @@ impl ChatPane {
             if edit::per_project(&name) {
                 self.layer_menu(&name);
             } else {
-                self.value_menu(&name, &Place::User, Anchor::Parent);
+                self.setting_places.clear();
+                let at = self.keep_place(Place::User);
+                self.value_menu(&name, at, Anchor::Parent);
             }
         } else if let Some(name) = id.strip_prefix(LAYER) {
-            match Place::from_label(value) {
-                Some(place) => self.value_menu(name, &place, Anchor::Parent),
-                None if value == ANOTHER => self.project_entry(name, String::new(), None),
-                None => {}
+            if value == ANOTHER {
+                self.project_entry(name, String::new(), None);
+            } else if let Some(at) = self.setting_places.iter().position(|(label, _)| label == value) {
+                self.value_menu(name, at, Anchor::Parent);
             }
         } else if let Some(name) = id.strip_prefix(DIR) {
-            let given = PathBuf::from(value.trim());
+            let given = edit::untilde(value.trim());
             let root = given.canonicalize().ok().filter(|d| d.is_dir()).and_then(|d| ways_core::settings::project_root(&d));
             match root {
-                Some(root) => self.value_menu(name, &Place::Project(root), Anchor::Tab(0)),
+                Some(root) => {
+                    let at = self.keep_place(Place::Project(root));
+                    self.value_menu(name, at, Anchor::Tab(0));
+                }
                 None => self.project_entry(name, value.to_string(), Some("no project encloses that directory".into())),
             }
         } else if let Some(rest) = id.strip_prefix(VALUE) {
-            let Some((name, place)) = rest.split_once(SEP) else { return true };
-            self.setting_chosen(name, &Place::from_id(place), value);
+            let place = rest.split_once(SEP).and_then(|(name, at)| Some((name, self.setting_places.get(at.parse::<usize>().ok()?)?.1.clone())));
+            match place {
+                Some((name, place)) => self.setting_chosen(name, &place, value),
+                None => self.say("the places offered changed; open Settings again", true),
+            }
         } else {
             return false;
         }
@@ -121,12 +142,12 @@ impl ChatPane {
             return self.say("dry run: nothing written", false);
         }
         let dir = std::env::current_dir().unwrap_or_default();
-        let done = if value == UNSET { edit::unset_at(name, place) } else { edit::set_at(name, value, place, &dir) };
+        let done = if value == UNSET { edit::unset_at(name, place, &dir) } else { edit::set_at(name, value, place, &dir) };
         match done {
-            Ok(said) => {
+            Ok(done) => {
                 self.reload_settings();
                 let warn = if name == "attend.chat.tabs.jump" { self.jump_warning() } else { "" };
-                self.say(format!("{said}{warn}"), false);
+                self.say(format!("{}{warn}", done.said), done.overridden);
             }
             Err(e) => self.say(e, true),
         }

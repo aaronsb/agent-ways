@@ -158,9 +158,21 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     keys(&mut c, &[KeyCode::Enter]);
     assert!(shown(&mut c).contains("no project encloses that directory"), "{}", shown(&mut c));
     keys(&mut c, &[KeyCode::Backspace; 200]);
-    typed(&mut c, &other.join("deep").display().to_string());
+    // `~` is the home directory, as a shell reads it.
+    typed(&mut c, "~/work/other/deep");
     keys(&mut c, &[KeyCode::Enter]);
     assert!(shown(&mut c).contains("attend_mod.keepwarm · project other"), "{}", shown(&mut c));
     keys(&mut c, &[KeyCode::Up, KeyCode::Enter]);
     assert!(read(&other.join(".claude/ways.yaml")).contains("keepwarm: on"), "{}", read(&other.join(".claude/ways.yaml")));
+
+    // Another writer holds the file's lock: the write gives up after a
+    // bounded wait, and the bar says why.
+    let held = agent_settings::writer::Lock::acquire(&file).unwrap();
+    open_settings(&mut c);
+    click_on(&mut c, "attend_mod.listening =");
+    click_on(&mut c, "project ~/work/proj:");
+    click_on(&mut c, "active");
+    drop(held);
+    assert!(c.status().contains("another writer holds it") && c.status().contains("nothing written"), "{}", c.status());
+    assert!(!read(&file).contains("listening"), "{}", read(&file));
 }
