@@ -204,6 +204,14 @@ pub fn message_marks(base: &Path) -> HashMap<String, SystemTime> {
         .collect()
 }
 
+/// The batch that marked the message with seen-set key `key`, if one did.
+pub fn batch_of(base: &Path, key: &str) -> Option<String> {
+    if !valid_key(key) {
+        return None;
+    }
+    fs::read_to_string(messages_dir(base).join(key)).ok().map(|b| b.trim().to_string())
+}
+
 /// Whether the mark for `key` belongs to `batch`.
 fn owns(base: &Path, batch: &str, key: &str) -> bool {
     fs::read_to_string(messages_dir(base).join(key)).is_ok_and(|owner| owner.trim() == batch)

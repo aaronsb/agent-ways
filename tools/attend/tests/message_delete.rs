@@ -508,3 +508,26 @@ fn undo_after_cleanup_says_what_became_of_the_delete() {
     let out = f.attend(&["message", "delete", "--undo", &batch]);
     assert!(String::from_utf8_lossy(&out.stderr).contains("nothing to restore"));
 }
+
+/// Reading a deleted message by its id says it was deleted and how to bring
+/// it back; so does one a tombstoned session sent.
+#[test]
+fn reading_a_deleted_message_says_how_to_restore_it() {
+    let f = Fixture::new("del-read");
+    post(&f, "_broadcast", "gone-1", "deleted", 10 * MINUTE);
+    let batch = f.without_session(|| delete(&f, &["--open"]))["batch"].as_str().unwrap().to_string();
+    let out = f.attend(&["message", "inbox", "gone-1"]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&format!("gone-1 was deleted; attend message delete --undo {batch} restores it")), "{err}");
+    let json: Value = serde_json::from_slice(&f.attend(&["message", "inbox", "gone-1", "--json"]).stdout).unwrap();
+    assert_eq!(json["error"]["kind"], "deleted");
+
+    exited(&f, R2);
+    f.ok(&["message", "tombstone", R2]);
+    std::thread::sleep(Duration::from_millis(20));
+    signal(&f, "_broadcast", "dead-1", &format!("claude:{R2}|p|/srv/p|from the tombstoned session"), MINUTE);
+    let out = f.attend(&["message", "inbox", "dead-1"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&format!("attend message tombstone {R2} --undo restores it")), "{err}");
+}

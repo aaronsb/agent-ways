@@ -28,6 +28,10 @@ pub(crate) fn cmd_inbox_read(msg_id: &str, json: bool) {
                 ReadError::NotFound => {}
                 ReadError::Unreadable { error } => eprintln!("(signal {msg_id} exists but could not be read: {error})"),
                 ReadError::Corrupt => eprintln!("(signal {msg_id} exists but its wire format is corrupt)"),
+                ReadError::Deleted { .. } | ReadError::Tombstoned { .. } => {
+                    eprintln!("attend message inbox: {e}");
+                    std::process::exit(1);
+                }
             }
             return;
         }

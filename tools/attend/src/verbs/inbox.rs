@@ -170,6 +170,10 @@ pub enum ReadError {
     Unreadable { error: String },
     /// The file exists and its wire format is corrupt.
     Corrupt,
+    /// A delete marked it (ADR-404 D3e).
+    Deleted { id: String, batch: String },
+    /// A tombstoned session sent it.
+    Tombstoned { id: String, session: String },
 }
 
 impl std::fmt::Display for ReadError {
@@ -178,6 +182,10 @@ impl std::fmt::Display for ReadError {
             Self::NotFound => write!(f, "no message by that id — already consumed or expired"),
             Self::Unreadable { error } => write!(f, "the message exists but could not be read: {error}"),
             Self::Corrupt => write!(f, "the message exists but its wire format is corrupt"),
+            Self::Deleted { id, batch } => write!(f, "{id} was deleted; attend message delete --undo {batch} restores it"),
+            Self::Tombstoned { id, session } => {
+                write!(f, "{id} was sent by tombstoned session {session}; attend message tombstone {session} --undo restores it")
+            }
         }
     }
 }
@@ -210,6 +218,14 @@ pub fn read(id: &str) -> Result<Message, ReadError> {
             return Err(ReadError::NotFound);
         }
         let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()).unwrap_or(std::time::UNIX_EPOCH);
+        let base = crate::util::signals_base();
+        if let Some(batch) = attend_groups::tombstones::batch_of(&base, &target) {
+            return Err(ReadError::Deleted { id: id.to_string(), batch });
+        }
+        let sender = sig.sender_id();
+        if attend_groups::tombstones::Marks::load(&base).hides_sender(&sender, mtime) {
+            return Err(ReadError::Tombstoned { id: id.to_string(), session: sender });
+        }
         let scope = match dir.room {
             Room::Open => "#open",
             Room::Project => "project",
