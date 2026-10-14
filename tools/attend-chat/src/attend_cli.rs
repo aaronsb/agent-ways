@@ -43,12 +43,15 @@ impl Scope {
         }
     }
 
-    /// The scope's flags for `attend message delete`.
+    /// The scope's flags for `attend message delete`. A thread is always
+    /// the person's (`--as-person`): attend would otherwise take the caller
+    /// to be a Claude Code session the chat was started under, and the
+    /// delete would reach that session's thread with the agent.
     pub fn args(&self) -> Vec<String> {
         match self {
             Scope::Open => vec!["--open".into()],
             Scope::Channel(c) => vec!["--channel".into(), c.clone()],
-            Scope::Dm(m) => vec!["--dm".into(), m.clone()],
+            Scope::Dm(m) => vec!["--dm".into(), m.clone(), "--as-person".into()],
         }
     }
 
@@ -248,7 +251,7 @@ mod tests {
     fn each_scope_and_age_builds_its_argv() {
         assert_eq!(delete_argv(&Scope::Open, "today", true), s(&["message", "delete", "--open", "--older-than", "today", "--dry-run", "--json"]));
         assert_eq!(delete_argv(&Scope::Channel("deploy".into()), "all", false), s(&["message", "delete", "--channel", "deploy", "--older-than", "all", "--json"]));
-        assert_eq!(delete_argv(&Scope::Dm("s1".into()), "3d", false), s(&["message", "delete", "--dm", "s1", "--older-than", "3d", "--json"]));
+        assert_eq!(delete_argv(&Scope::Dm("s1".into()), "3d", false), s(&["message", "delete", "--dm", "s1", "--as-person", "--older-than", "3d", "--json"]));
         assert_eq!(undo_argv("17-4"), s(&["message", "delete", "--undo", "17-4", "--json"]));
         assert_eq!(tombstone_argv("s9"), s(&["message", "tombstone", "s9", "--json"]));
     }

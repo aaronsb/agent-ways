@@ -111,3 +111,33 @@ fn send_deliver_once_seen_then_deletable() {
 
     std::fs::remove_dir_all(&home).ok();
 }
+
+/// `--as-person` makes the caller the person at the terminal even when the
+/// process runs under a Claude Code session: a `--dm` delete then reaches
+/// the person's thread with the agent, not the session's (attend-chat may
+/// be started from a session's shell).
+#[test]
+fn as_person_reaches_the_persons_dm_thread_under_a_session() {
+    let home = std::env::temp_dir().join(format!("attend-as-person-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join(".claude").join("sessions")).unwrap();
+    become_session(&home);
+    let agent = "aaaaaaaa-0000-4000-8000-00000000000a";
+    let tray = home.join(".cache/attend/signals/_people/lifecycle-human");
+    std::fs::create_dir_all(&tray).unwrap();
+    let dm = tray.join("m-1784732645000000000-1.signal");
+    std::fs::write(&dm, format!("claude:{agent}|other|/work/other|from_kind:agent|from_id:{agent}|to:lifecycle-human|for the person\n")).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&dm)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(600))
+        .unwrap();
+    let as_session = attend(&home, &["message", "delete", "--dm", agent, "--dry-run", "--json"]);
+    ok(&as_session);
+    assert!(stdout(&as_session).contains(r#""marked":0"#), "the session's thread holds nothing: {}", stdout(&as_session));
+    let as_person = attend(&home, &["message", "delete", "--dm", agent, "--as-person", "--dry-run", "--json"]);
+    ok(&as_person);
+    assert!(stdout(&as_person).contains(r#""marked":1"#), "the person's thread holds the DM: {}", stdout(&as_person));
+    std::fs::remove_dir_all(&home).ok();
+}

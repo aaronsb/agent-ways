@@ -43,7 +43,7 @@ pub(crate) fn cmd_delete(a: DeleteArgs) {
         );
         crate::cmd::refuse_usage(&format!("attend message delete: {why}"), &why, a.json);
     };
-    match delete::delete(&DeleteRequest { scope, from: a.from, older_than, dry_run: a.dry_run }) {
+    match delete::delete(&DeleteRequest { scope, from: a.from, older_than, dry_run: a.dry_run, as_person: a.as_person }) {
         Ok(d) if a.json => crate::cmd::print_json(&d),
         Ok(d) => {
             let verb = if d.dry_run { "would mark" } else { "marked" };

@@ -247,8 +247,8 @@ fn each_scope_and_age_builds_its_argv() {
         calls(),
         [
             "message delete --channel deploy --older-than all --dry-run --json".to_string(),
-            format!("message delete --dm {ALPHA_SID} --older-than 3d --dry-run --json"),
-            format!("message delete --dm {ALPHA_SID} --older-than current --dry-run --json"),
+            format!("message delete --dm {ALPHA_SID} --as-person --older-than 3d --dry-run --json"),
+            format!("message delete --dm {ALPHA_SID} --as-person --older-than current --dry-run --json"),
         ]
     );
 }

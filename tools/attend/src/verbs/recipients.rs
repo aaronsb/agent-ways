@@ -12,8 +12,14 @@ pub(crate) fn caller_ids() -> Vec<String> {
     if me.resolved() {
         attend_presence::enrollment::reading_ids(&me)
     } else {
-        vec![agent_identity::sanitize_id_component(&agent_identity::signal::user_name())]
+        person_ids()
     }
+}
+
+/// The ids the person at the terminal reads as: their member id, with no
+/// walk up the process tree to a Claude Code session (`--as-person`).
+pub(crate) fn person_ids() -> Vec<String> {
+    vec![agent_identity::sanitize_id_component(&agent_identity::signal::user_name())]
 }
 
 /// Every agent session that may still read the bus, and whether it is
