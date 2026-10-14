@@ -317,7 +317,7 @@ mod tests {
     /// A fresh home for one test, under the environment lock the caller
     /// holds: `HOME` and `XDG_CONFIG_HOME` in a temp directory, and a
     /// project in it, a git checkout at `home/work/proj`.
-    fn home() -> (PathBuf, PathBuf) {
+    fn home() -> (crate::test_dir::TestDir, PathBuf) {
         let root = crate::test_dir::unique("settings-edit");
         std::env::set_var("HOME", root.join("home"));
         std::env::set_var("XDG_CONFIG_HOME", root.join("config"));

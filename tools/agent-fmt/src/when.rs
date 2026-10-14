@@ -316,6 +316,9 @@ mod tests {
     }
 
     /// A date's midnight takes the offset of that date, standard or summer.
+    /// Unix only: the offset comes from `date` and its zone data, and
+    /// Windows has neither, so there the current offset stands in.
+    #[cfg(unix)]
     #[test]
     fn a_dates_offset_is_the_one_in_force_that_day() {
         // Needs the zone database (tzdata) that `date` reads.
