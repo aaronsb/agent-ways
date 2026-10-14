@@ -1,6 +1,7 @@
 //! What the `≡` menu's Settings ▸ lists and writes: the attend mod's
-//! `attend_mod.listening` and `attend_mod.keepwarm`, ways keys a project
-//! can set, then the chat's own `attend.chat.*` keys, which only the user
+//! `attend_mod.listening`, `attend_mod.keepwarm` and keepalive policy
+//! (`attend_mod.keepalive.*`, ADR-414), ways keys a project can set, then
+//! the chat's own `attend.chat.*` keys, which only the user
 //! file holds ([`crate::settings`]). Each shows the value in effect and the
 //! layer it comes from. A write goes to the file of the place chosen, the
 //! user's or a project's, through the agent-settings writer, as
@@ -16,7 +17,19 @@ use agent_settings::writer::edit_file_within;
 use crate::settings::{plain, LOCK_WAIT};
 
 /// The attend mod's keys the menu lists, in its order.
-pub const MOD_KEYS: &[&str] = &["attend_mod.listening", "attend_mod.keepwarm"];
+pub const MOD_KEYS: &[&str] = &[
+    "attend_mod.listening",
+    "attend_mod.keepwarm",
+    "attend_mod.keepalive.enabled",
+    "attend_mod.keepalive.max_keepalives",
+    "attend_mod.keepalive.margin_minutes",
+    "attend_mod.keepalive.windows",
+    "attend_mod.keepalive.timezone",
+    "attend_mod.keepalive.wrap",
+    "attend_mod.keepalive.wrap_file",
+    "attend_mod.keepalive.wrap_to",
+    "attend_mod.keepalive.after_wrap",
+];
 
 const CHAT: &str = "attend.chat.";
 
@@ -192,6 +205,13 @@ pub fn per_project(name: &str) -> bool {
     matches!(Key::of(name), Some(Key::Ways(s)) if matches!(s.scope, Scope::Both | Scope::Project))
 }
 
+/// Whether `name` is typed in an entry dialog rather than picked: a
+/// number, text or a list, which has no fixed values. A list is typed with
+/// its entries separated by commas, as `ways settings set` reads one.
+pub fn is_typed(name: &str) -> bool {
+    matches!(Key::of(name).map(|k| k.spec().kind), Some(Kind::Int { .. } | Kind::Float { .. } | Kind::Text | Kind::Path | Kind::List))
+}
+
 /// The values `name` takes.
 pub fn choices(name: &str) -> Vec<String> {
     match Key::of(name).map(|k| k.spec().kind) {
@@ -349,6 +369,15 @@ mod tests {
             [
                 "attend_mod.listening = active (project)",
                 "attend_mod.keepwarm = off (user)",
+                "attend_mod.keepalive.enabled = true (default)",
+                "attend_mod.keepalive.max_keepalives = 8 (default)",
+                "attend_mod.keepalive.margin_minutes = 10 (default)",
+                "attend_mod.keepalive.windows = daily 00:00-24:00 (default)",
+                "attend_mod.keepalive.timezone =  (default)",
+                "attend_mod.keepalive.wrap = transcript (default)",
+                "attend_mod.keepalive.wrap_file = {state}/wrap/{session}.md (default)",
+                "attend_mod.keepalive.wrap_to =  (default)",
+                "attend_mod.keepalive.after_wrap = lapse (default)",
                 "attend.chat.tabs.jump = auto (default)",
                 "attend.chat.tabs.menu_on_repeat = true (default)",
                 "attend.chat.tabs.focus_key = both (default)",

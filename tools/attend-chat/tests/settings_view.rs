@@ -175,4 +175,54 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     drop(held);
     assert!(c.status().contains("another writer holds it") && c.status().contains("nothing written"), "{}", c.status());
     assert!(!read(&file).contains("listening"), "{}", read(&file));
+
+    // The keepalive policy's keys (ADR-414 item 8): listed with the rest; a
+    // choice is picked, a number or a list is typed in an entry dialog.
+    open_settings(&mut c);
+    let s = shown(&mut c);
+    for line in [
+        "attend_mod.keepalive.enabled = true (default)",
+        "attend_mod.keepalive.max_keepalives = 8 (default)",
+        "attend_mod.keepalive.windows = daily 00:00-24:00 (default)",
+        "attend_mod.keepalive.wrap = transcript (default)",
+        "attend_mod.keepalive.after_wrap = lapse (default)",
+    ] {
+        assert!(s.contains(line), "{line}: {s}");
+    }
+    click_on(&mut c, "attend_mod.keepalive.wrap =");
+    click_on(&mut c, "project ~/work/proj:");
+    click_on(&mut c, "send");
+    assert!(read(&file).contains("keepalive:\n    wrap: send"), "{}", read(&file));
+
+    // A number out of range is refused inside the dialog, which keeps it.
+    open_settings(&mut c);
+    click_on(&mut c, "attend_mod.keepalive.max_keepalives =");
+    click_on(&mut c, "project ~/work/proj:");
+    assert!(shown(&mut c).contains("attend_mod.keepalive.max_keepalives · project"), "the entry dialog: {}", shown(&mut c));
+    keys(&mut c, &[KeyCode::Backspace; 4]);
+    typed(&mut c, "99");
+    keys(&mut c, &[KeyCode::Enter]);
+    assert!(shown(&mut c).contains("99 is outside"), "refused in the dialog: {}", shown(&mut c));
+    keys(&mut c, &[KeyCode::Backspace; 4]);
+    typed(&mut c, "4");
+    keys(&mut c, &[KeyCode::Enter]);
+    assert!(read(&file).contains("max_keepalives: 4"), "{}", read(&file));
+
+    // A list is typed with its entries separated by commas.
+    open_settings(&mut c);
+    click_on(&mut c, "attend_mod.keepalive.windows =");
+    click_on(&mut c, "project ~/work/proj:");
+    keys(&mut c, &[KeyCode::Backspace; 40]);
+    typed(&mut c, "Mon-Fri 08:00-19:00, Sat 10:00-14:00");
+    keys(&mut c, &[KeyCode::Enter]);
+    assert!(read(&file).contains("windows:\n      - Mon-Fri 08:00-19:00\n      - Sat 10:00-14:00"), "{}", read(&file));
+    open_settings(&mut c);
+    assert!(shown(&mut c).contains("attend_mod.keepalive.windows = Mon-Fri 08:00-19:00, Sat 10:00-14:00 (project)"), "{}", shown(&mut c));
+
+    // An empty entry removes the key from the place's file.
+    click_on(&mut c, "attend_mod.keepalive.windows =");
+    click_on(&mut c, "project ~/work/proj:");
+    keys(&mut c, &[KeyCode::Backspace; 60]);
+    keys(&mut c, &[KeyCode::Enter]);
+    assert!(!read(&file).contains("windows"), "{}", read(&file));
 }
