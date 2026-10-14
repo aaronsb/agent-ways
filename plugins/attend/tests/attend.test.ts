@@ -5,6 +5,7 @@ import type { AttendStatus, KeepaliveRow } from '../types/index.d.ts'
 
 import {
   DEFAULT_CONFIG,
+  framedPluginPrompt,
   gateIsFresh,
   isOpenChannel,
   isWrapTurn,
@@ -116,12 +117,12 @@ type World = {
   settingsAutoCompact?: boolean | 'absent' | 'throws'
   /** `attend message send` refuses with this reason. */
   sendRefused?: string
-  /** `$.fs.write` fails. */
-  fsFails?: boolean
   /** `ways settings` cannot answer. */
   waysFails?: boolean
   /** Holds each policy check in flight until it settles. */
   hold?: Promise<void>
+  /** The answers of the model's steps, in order. */
+  steps?: string[]
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
@@ -189,7 +190,17 @@ function host(on: On, world: World) {
   on('process.run', async ($, e) => {
     // A policy check can be held in flight, as attend judging for seconds.
     if (e.argv.slice(1, 4).join(' ') === 'keepwarm check --policy' && world.hold) await world.hold
+    // attend writes the wrap file from stdin: the file it would write.
+    if (e.argv.includes('--save')) {
+      const ev = e as unknown as { stdin?: string; init?: { stdin?: string } }
+      writes.push({ path: e.argv[e.argv.indexOf('--path') + 1] ?? '', text: ev.stdin ?? ev.init?.stdin ?? '' })
+    }
     return { value: run([...e.argv]) }
+  })
+  // The model's steps: each answers in turn from `world.steps`, ending it.
+  on('turn.step', async function* ($, e) {
+    const answer = world.steps?.shift() ?? ''
+    return { turnId: e.turnId, index: e.index, answer, toolUses: [], stopReason: 'end_turn', usage: null } as never
   })
   on('session.usage', () => {
     if (world.autocompact === undefined) throw new Error('usage unavailable')
@@ -201,9 +212,10 @@ function host(on: On, world: World) {
     return { value: world.settingsAutoCompact === 'absent' ? {} : { autoCompactEnabled: world.settingsAutoCompact } } as never
   })
   const writes: { path: string; text: string }[] = []
+  // The mod never writes a file itself: attend does (--save).
+  const fsWrites: string[] = []
   on('fs.write', ($, e) => {
-    if (world.fsFails) throw new Error('EACCES: permission denied')
-    writes.push({ path: (e as { path: string }).path, text: (e as { text: string }).text })
+    fsWrites.push((e as { path: string }).path)
     return { value: undefined } as never
   })
   const compacts: string[] = []
@@ -251,7 +263,7 @@ function host(on: On, world: World) {
   const count = (cmd: string) => argvs.filter(a => a.slice(1).join(' ').startsWith(cmd)).length
   const ran = (cmd: string) => count(cmd) > 0
   const mode = () => (state.value as { mode?: string } | undefined)?.mode
-  return { argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, compacts }
+  return { argvs, submitted, origins, prompts, tools, specs, count, ran, mode, clearState, store, storeWrites, logs, toasts, world, writes, fsWrites, compacts }
 }
 
 /** What `attend keepwarm check --policy --json` prints. */
@@ -1598,8 +1610,15 @@ describe('keepalive policy', () => {
   }
 
   /** The wrap's turn: started by the submitted prompt, ended with `answer`. */
-  async function wrapTurn($: Engine, answer: string, reason = 'answer') {
-    await $.turn.start({ text: WRAP, turnId: 'tw' } as never)
+  /** The wrap's turn as the engine runs it: started with the framed text
+   *  Claude Code gives a prompt a plugin submits (Claude Code 2.1.300),
+   *  its steps answering in turn, then ended with the last answer. */
+  async function wrapTurn($: Engine, answer: string, reason = 'answer', steps: string[] = []) {
+    await $.turn.start({ text: framedPluginPrompt('attend', WRAP), turnId: 'tw' } as never)
+    for (let i = 0; i < steps.length; i++) {
+      const s = $.turn.step({ turnId: 'tw', index: i, model: 'm', messageCount: 1 } as never)
+      for await (const _ of s) void _
+    }
     await $.turn.complete({ turnId: 'tw', reason, answer, durationMs: 1, isAborted: reason === 'aborted' } as never)
   }
 
@@ -1618,6 +1637,17 @@ describe('keepalive policy', () => {
     // Submitted without asUser: the transcript names the plugin as its source.
     expect(h.origins).toEqual([{ kind: 'plugin', name: 'attend' }])
     expect(h.count('keepwarm check')).toBe(2)
+  })
+
+  test('the row keeps its rounded caps, dormant and active', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    host(on, { autocompact: false, policy: [keepalive(1)] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    const ui = await $.ui.mount(BAND as never)
+    expect(await ui.find({ text: /\uE0B6/ } as never)).toBeDefined()
+    expect(await ui.find({ text: /\uE0B4/ } as never)).toBeDefined()
+    await ui.unmount()
   })
 
   test('the row carries the segment: count, next due, the wrap time', async ($, on) => {
@@ -1751,6 +1781,74 @@ describe('keepalive policy', () => {
     await clock.advance(2_000)
     expect(policyChecks(h).length).toBe(1)
     expect(h.submitted).toEqual([])
+  })
+
+  for (const what of ['a peer message the Stop hook drains', 'a task notification'] as const) {
+    test(`${what} continuing the wrap's turn is not routed as the wrap`, async ($, on) => {
+      const clock = mock.clock(on, { now: T0 })
+      const later = what === 'a task notification' ? 'The background build finished green.' : 'Sure, I will look at PR 12.'
+      const h = host(on, { autocompact: false, policy: [wrap(route('file'))], steps: ['Continuation prompt.', later] })
+      await $.session.start(INTERACTIVE)
+      await clock.advance(5_000)
+      await wrapTurn($, later, 'answer', ['Continuation prompt.', later])
+      expect(h.writes).toEqual([{ path: '/state/wrap/s1.md', text: 'Continuation prompt.' }])
+    })
+  }
+
+  for (const kind of ['a scheduled wakeup', 'a delivery of the poll'] as const) {
+    test(`${kind} submitted while a check is in flight cancels its keepalive`, async ($, on) => {
+      const clock = mock.clock(on, { now: T0 })
+      let release = () => {}
+      const drains: string[] = [DRAIN_EMPTY]
+      const world: World = { config: { listening: 'active' }, autocompact: false, policy: [keepalive(1)], drains }
+      world.hold = new Promise<void>(r => (release = r))
+      const h = host(on, world)
+      await $.session.start(INTERACTIVE)
+      // The config's hold ends at the operator's first prompt.
+      await typed($)
+      await clock.advance(1_500)
+      if (kind === 'a scheduled wakeup') {
+        await $.prompt.submit({ text: 'wake up: check the deploy', wait: false, origin: { kind: 'schedule' } } as never)
+      } else {
+        drains.push(one(3, 'project'), DRAIN_EMPTY)
+        await clock.advance(6_000)
+        expect(h.submitted.some(t => t.includes('m3'))).toBe(true)
+      }
+      release()
+      world.hold = undefined
+      await clock.advance(2_000)
+      expect(h.submitted.filter(t => t.startsWith('keepwarm:'))).toEqual([])
+    })
+  }
+
+  test('a wrap whose turn never starts is reported unfinished', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { autocompact: false, policy: [wrap(route('file'))] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    expect(h.submitted).toEqual([WRAP])
+    await clock.advance(11 * 60_000)
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'wrapped', 'unfinished', '--detail', "the wrap's turn never started"])
+  })
+
+  test('an operator prompt after autocompact was turned back on is held, not sent', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active' }, autocompact: false, policy: [decision({ next_at: S + 50 * MIN })] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    h.world.autocompact = true
+    await typed($)
+    expect(h.count('keepwarm reset')).toBe(0)
+  })
+
+  test('a judgment that comes through resets the dormant retries', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const bad = 'not json'
+    const h = host(on, { autocompact: false, policy: [bad, bad, decision({ next_at: S + 11 * MIN }), bad, bad, bad, bad, bad] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(2 * 60 * 60_000)
+    // Two retries, a judgment, then three more retries.
+    expect(policyChecks(h).length).toBe(7)
   })
 
   test('a turn that starts before the submitted wrap is not the wrap: only the wrap\'s own turn is routed', async ($, on) => {
@@ -1936,7 +2034,8 @@ describe('keepalive policy', () => {
     await clock.advance(5_000)
     await wrapTurn($, 'Continuation prompt: carry on.')
     expect(h.writes).toEqual([{ path: '/state/wrap/s1.md', text: 'Continuation prompt: carry on.' }])
-    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'wrapped', 'file', '--detail', '/state/wrap/s1.md'])
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'wrapped', 'file', '--detail', '', '--path', '/state/wrap/s1.md', '--save'])
+    expect(h.fsWrites).toEqual([])
   })
 
   test('wrap send: one message to the operator, opening with the handoff line', async ($, on) => {
@@ -1975,7 +2074,7 @@ describe('keepalive policy', () => {
     await wrapTurn($, 'carry on')
     expect(h.writes).toEqual([{ path: '/state/wrap/s1.md', text: 'carry on' }])
     expect(h.argvs).toContainEqual([
-      'attend', 'keepwarm', 'wrapped', 'refused', '--detail', 'Chaucer-beta: no live session answers to Chaucer-beta; saved to /state/wrap/s1.md',
+      'attend', 'keepwarm', 'wrapped', 'refused', '--detail', 'Chaucer-beta: no live session answers to Chaucer-beta', '--path', '/state/wrap/s1.md', '--save',
     ])
     const ui = await $.ui.mount(BAND as never)
     expect(await ui.find({ text: /⟳ wrapped 07:30 · handoff refused/ } as never)).toBeDefined()
@@ -2039,8 +2138,15 @@ describe('keepalive policy: the pure pieces', () => {
     expect(maySubmit({ ...ok, isPolicy: false, gate: 'on' })).toBe(true)
   })
 
-  test('the wrap turn is the one its own first line started', () => {
+  test('the wrap turn is the one its own first line started, framed by the engine or bare', () => {
     const w = "wrap: 7h30m since the operator's last prompt and 8 keepalives.\nThe operator is away."
+    expect(isWrapTurn(framedPluginPrompt('attend', w), w)).toBe(true)
+    // The probe's text from Claude Code 2.1.300, verbatim.
+    const probe = "The submit-probe plugin sent a message:\nwrap: probe line one\nsecond line\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above."
+    expect(isWrapTurn(probe, 'wrap: probe line one\nsecond line')).toBe(true)
+    // The line inside someone else's prose is not the wrap.
+    expect(isWrapTurn(`please look at this:\n${w}`, w)).toBe(false)
+    expect(isWrapTurn(`The attend plugin sent a message:\nkeepwarm: x\n${w}`, w)).toBe(false)
     expect(isWrapTurn(w, w)).toBe(true)
     expect(isWrapTurn("wrap: 7h30m since the operator's last prompt and 8 keepalives.", w)).toBe(true)
     expect(isWrapTurn('are you there?', w)).toBe(false)
@@ -2051,7 +2157,8 @@ describe('keepalive policy: the pure pieces', () => {
   test('wrapPlan routes an answer and writes nothing for anything else; #open is refused', () => {
     expect(wrapPlan(route, 'aborted', 'half')).toEqual({ kind: 'unfinished', detail: 'the turn ended: aborted' })
     expect(wrapPlan(route, 'answer', '  ')).toEqual({ kind: 'unfinished', detail: 'the reply was empty' })
-    expect(wrapPlan(route, 'answer', 'r')).toEqual({ kind: 'file', path: '/s/wrap/s1.md' })
+    expect(wrapPlan(route, 'answer', 'r')).toEqual({ kind: 'file', argv: ['attend', 'keepwarm', 'wrapped', 'file', '--detail', '', '--path', '/s/wrap/s1.md', '--save'] })
+    expect(wrapPlan({ ...route, file: '' }, 'answer', 'r').kind).toBe('unfinished')
     expect(wrapPlan({ ...route, dest: 'transcript' }, 'answer', 'r')).toEqual({ kind: 'transcript' })
     expect(wrapPlan({ ...route, dest: 'send' }, 'answer', 'r')).toEqual({ kind: 'send', argv: ['attend', 'message', 'send', '--to', 'aaron', '--', `${route.handoff}\nr`] })
     expect(wrapPlan({ ...route, dest: 'send', to: '#open' }, 'answer', 'r').kind).toBe('unfinished')
@@ -2061,8 +2168,8 @@ describe('keepalive policy: the pure pieces', () => {
   })
 
   test('refusalDetail names the target, attend\'s reason and where the reply went', () => {
-    expect(refusalDetail('B', { exitCode: 1, stderr: 'no live session\nlive: A', stdout: '' }, '/f', undefined)).toBe('B: no live session; saved to /f')
-    expect(refusalDetail('B', { exitCode: 127, stderr: '', stdout: '' }, '/f', 'EACCES')).toBe('B: attend exited 127; the file could not be written either: EACCES')
+    expect(refusalDetail('B', { exitCode: 1, stderr: 'no live session\nlive: A', stdout: '' })).toBe('B: no live session')
+    expect(refusalDetail('B', { exitCode: 127, stderr: '', stdout: '' })).toBe('B: attend exited 127')
   })
 
   test('retries: a listening session on the plain cadence, a dormant one bounded and only with the gate off', () => {

@@ -172,8 +172,11 @@ export type Keepalive = {
   heldPromptMs: number | undefined
   /** Checks that could not judge since the last turn's end. */
   retries: number
-  /** A wrap submitted, its text, and the main-loop turn that text started. */
-  wrap: { route: WrapRoute; text: string; turnId: string | undefined } | undefined
+  /** A wrap submitted, its text, the main-loop turn that text started, and
+   *  the answer of that turn's first step that ended it (`end_turn`): the
+   *  wrap itself, whatever a Stop-hook continuation or a notification adds
+   *  to the turn after it. */
+  wrap: { route: WrapRoute; text: string; turnId: string | undefined; reply: string | undefined } | undefined
 }
 
 // ── tools ────────────────────────────────────────────────────────────────
@@ -562,35 +565,67 @@ export function retryAtMs(nowMs: number, isListening: boolean, gate: Gate, retri
   return gate === 'off' && retries < RETRY_MAX ? nowMs + RETRY_DORMANT_MS : null
 }
 
-/** Whether a main-loop turn that started with `turnText` is the wrap the
- *  mod submitted as `submitted`: its first line, which names the reason. */
+/** The header Claude Code puts above a prompt a plugin submits without
+ *  `asUser`, as `turn.start`'s text carries it (Claude Code 2.1.300):
+ *  `The <plugin> plugin sent a message:`, then the prompt, then a closing
+ *  paragraph. */
+const PLUGIN_FRAME = /^The \S+ plugin sent a message:$/
+
+/** Whether a main-loop turn that started with `turnText` is the turn a
+ *  prompt the mod submitted as `submitted` started: the submitted first
+ *  line as a whole line, either first (the bare prompt) or right under the
+ *  engine's plugin header (the framed form). Never a line inside someone
+ *  else's prose. */
+export function isSubmittedTurn(turnText: string, submitted: string): boolean {
+  const lines = turnText.split('\n').map(l => l.trim())
+  const want = submitted.split('\n')[0]?.trim() ?? ''
+  if (want === '') return false
+  if (lines[0] === want) return true
+  return PLUGIN_FRAME.test(lines[0] ?? '') && lines[1] === want
+}
+
+/** Whether a main-loop turn is the wrap the mod submitted ([`isSubmittedTurn`]
+ *  for a `wrap:` prompt). */
 export function isWrapTurn(turnText: string, submitted: string): boolean {
-  const first = (t: string) => t.split('\n')[0]?.trim() ?? ''
-  return first(submitted).startsWith('wrap:') && first(turnText) === first(submitted)
+  return submitted.startsWith('wrap:') && isSubmittedTurn(turnText, submitted)
+}
+
+/** The engine's framing of a prompt plugin `name` submits without
+ *  `asUser`, as `turn.start` carries it; for tests and docs. */
+export function framedPluginPrompt(name: string, text: string): string {
+  return `The ${name} plugin sent a message:\n${text}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`
 }
 
 /** What the wrap's reply becomes once its turn ends (ADR-414 item 6). */
 export type WrapPlan =
   | { kind: 'unfinished'; detail: string }
   | { kind: 'transcript' }
-  | { kind: 'file'; path: string }
+  | { kind: 'file'; argv: string[] }
   | { kind: 'send'; argv: string[] }
 
 export function wrapPlan(route: WrapRoute, reason: string, reply: string): WrapPlan {
   if (reason !== 'answer') return { kind: 'unfinished', detail: `the turn ended: ${reason}` }
   if (reply.trim() === '') return { kind: 'unfinished', detail: 'the reply was empty' }
-  if (route.dest === 'file') return { kind: 'file', path: route.file }
+  if (route.dest === 'file' && route.file === '') return { kind: 'unfinished', detail: 'no safe wrap file: see attend keepwarm status' }
+  if (route.dest === 'file') return { kind: 'file', argv: saveArgv('file', '', route.file) }
   if (route.dest === 'send' && !isOpenChannel(route.to)) return { kind: 'send', argv: wrapSendArgv(route, reply) }
   if (route.dest === 'send') return { kind: 'unfinished', detail: `${route.to} is refused: it reaches every listening session` }
   return { kind: 'transcript' }
 }
 
-/** The card's detail for a send attend refused or that timed out, and the
- *  file the reply went to instead (or why that failed too). */
-export function refusalDetail(to: string, r: { exitCode: number; stderr: string; stdout: string }, file: string, failed: string | undefined): string {
+/** attend writes the wrap's reply, given on stdin, to `path` and records
+ *  the outcome: it checks the path again and renames a temp file over it,
+ *  so a link planted during the wrap turn is never followed (ADR-414 item
+ *  6). The mod never writes the file itself. */
+export function saveArgv(outcome: 'file' | 'refused', detail: string, path: string): string[] {
+  return [ATTEND, 'keepwarm', 'wrapped', outcome, '--detail', oneLine(detail), '--path', path, '--save']
+}
+
+/** The card's detail for a send attend refused or that timed out; attend
+ *  adds where the reply went instead. */
+export function refusalDetail(to: string, r: { exitCode: number; stderr: string; stdout: string }): string {
   const why = (r.stderr.trim() || r.stdout.trim() || `attend exited ${r.exitCode}`).split('\n')[0] ?? ''
-  const kept = failed ? `; the file could not be written either: ${failed}` : `; saved to ${file}`
-  return `${to}: ${why}${kept}`
+  return `${to}: ${why}`
 }
 
 /** The row's segment after the operator's prompt: the count starts again,

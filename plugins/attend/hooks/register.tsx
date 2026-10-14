@@ -51,6 +51,7 @@ import {
   planCheck,
   refusalDetail,
   resetArgv,
+  saveArgv,
   retryAtMs,
   rowAfterPrompt,
   rowAfterTurnEnd,
@@ -128,6 +129,10 @@ const RELISTEN_MS = 1_000
 // dormant; a check that could not run asks again.
 const POLICY_TIMEOUT_MS = 30_000
 const POLICY_START_MS = 1_000
+// A submitted wrap whose turn has not started after this long, or has not
+// answered by the time the cache lapses, is reported unfinished.
+const WRAP_START_MS = 10 * 60_000
+const WRAP_LAPSE_MS = 60 * 60_000
 
 // agent-ways theme (tools/agent-theme/themes/agent-ways.theme).
 const SUBTLE = '#3a3a3c'
@@ -142,9 +147,9 @@ async function updateStatus($: $, f: (s: AttendStatus) => AttendStatus) {
 }
 
 /** One CLI call; a command that cannot start reads as exit 127. */
-async function run($: $, argv: readonly string[], timeoutMs = 15_000): Promise<ProcessRunResult> {
+async function run($: $, argv: readonly string[], timeoutMs = 15_000, stdin?: string): Promise<ProcessRunResult> {
   try {
-    return await $.process.run(argv, { timeoutMs })
+    return await $.process.run(argv, stdin === undefined ? { timeoutMs } : { timeoutMs, stdin })
   } catch (err) {
     return { exitCode: 127, stdout: '', stderr: String(err), isStdoutTruncated: false, isStderrTruncated: false }
   }
@@ -343,6 +348,8 @@ async function poll($: $, mod: Mod) {
  *  Resolves whether the prompt entered; the preamble counters move only
  *  when it did. */
 async function deliver($: $, mod: Mod, msgs: readonly Listed[]): Promise<boolean> {
+  // A check in flight submits nothing behind this turn.
+  mod.ka.epoch += 1
   mod.lastActivityMs = await $.clock.now()
   for (const m of msgs) {
     mod.ids.set(shortId(m.id), m.id)
@@ -531,6 +538,7 @@ async function checkKeepalive($: $, mod: Mod) {
       if (at !== null) await armKeepalive($, mod, at)
       return
     }
+    ka.retries = 0
     await setKeepaliveRow($, k => keepaliveRowOf(d, k))
     if (plan.submit) {
       const isPolicy = d.policy
@@ -540,7 +548,18 @@ async function checkKeepalive($: $, mod: Mod) {
         return
       }
       const { text, route } = plan.submit
-      if (route) ka.wrap = { route, text, turnId: undefined }
+      if (route) {
+        const wrap = { route, text, turnId: undefined, reply: undefined }
+        ka.wrap = wrap
+        // A wrap whose turn never starts, or never answers before the cache
+        // lapses, is reported rather than left pending.
+        $.clock.after(WRAP_START_MS, () => {
+          if (ka.wrap === wrap && wrap.turnId === undefined) void reportUnrouted($, ka, 'the wrap\'s turn never started')
+        })
+        $.clock.after(WRAP_LAPSE_MS, () => {
+          if (ka.wrap === wrap) void reportUnrouted($, ka, 'the wrap did not answer before the cache lapsed')
+        })
+      }
       const isEntered = await $.prompt
         .submit({ text })
         .then(x => x.drop === undefined)
@@ -562,9 +581,9 @@ async function keepaliveOperator($: $, mod: Mod) {
   const ka = mod.ka
   if (!ka.applies) return
   ka.epoch += 1
-  ka.wrap = undefined
+  if (ka.wrap) await reportUnrouted($, ka, 'the operator prompted before the wrap answered')
   const now = await $.clock.now()
-  if (ka.gate === 'off') {
+  if ((await readGate($, ka, true)) === 'off') {
     ka.heldPromptMs = undefined
     void serialize(ka, () => run($, resetArgv(now / 1000)))
   } else {
@@ -590,18 +609,19 @@ async function keepaliveTurnEnded($: $, mod: Mod, e: { turnId: string; reason: s
  *  records where it went (ADR-414 item 6). Only the turn the wrap's own
  *  text started is routed; a turn that ended other than with an answer is
  *  written nowhere. */
-async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, reply: string) {
+async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, answer: string) {
   const w = ka.wrap
   if (!w || w.turnId === undefined || w.turnId !== turnId) return
   ka.wrap = undefined
+  // The wrap's own answer, from its first ending step; the turn's final
+  // answer only where no step was seen.
+  const reply = w.reply ?? answer
   const report = (o: WrapOutcome, detail = '') => serialize(ka, () => run($, wrappedArgv(o, detail)))
   const plan = wrapPlan(w.route, reason, reply)
   if (plan.kind === 'unfinished') return void (await report('unfinished', plan.detail))
   if (plan.kind === 'transcript') await report('transcript')
-  if (plan.kind === 'file') {
-    const failed = await saveWrap($, w.route, reply)
-    await report(failed ? 'unfinished' : 'file', failed ? `could not write ${w.route.file}: ${failed}` : w.route.file)
-  }
+  // attend writes the file and records the outcome, or why it could not.
+  if (plan.kind === 'file') await serialize(ka, () => run($, plan.argv, undefined, reply))
   if (plan.kind === 'send') {
     const r = await run($, plan.argv)
     if (r.exitCode === 0) {
@@ -609,7 +629,9 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, re
     } else {
       // Refused (no live session by that name, a channel it cannot post
       // to) or timed out: the reply goes to the file instead.
-      await report('refused', refusalDetail(w.route.to, r, w.route.file, await saveWrap($, w.route, reply)))
+      const detail = refusalDetail(w.route.to, r)
+      if (w.route.file === '') await report('refused', `${detail}; no safe wrap file to keep it in`)
+      else await serialize(ka, () => run($, saveArgv('refused', detail, w.route.file), undefined, reply))
       await setKeepaliveRow($, rowRefused)
     }
   }
@@ -622,14 +644,12 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, re
   }
 }
 
-/** Writes the wrap's reply to its file; why it could not, or undefined. */
-async function saveWrap($: $, route: WrapRoute, reply: string): Promise<string | undefined> {
-  try {
-    await $.fs.write(route.file, reply)
-    return undefined
-  } catch (err) {
-    return String(err)
-  }
+/** A wrap that went in and was never routed: its turn never started, or
+ *  never ended with an answer before the cache lapsed, or the operator
+ *  prompted first. attend records it as unfinished. */
+async function reportUnrouted($: $, ka: Keepalive, why: string) {
+  ka.wrap = undefined
+  await serialize(ka, () => run($, wrappedArgv('unfinished', why)))
 }
 
 export const register: Register = on => {
@@ -769,6 +789,10 @@ export const register: Register = on => {
   // pending enters beside it, read in the same turn, rather than as a turn
   // the operator never asked for.
   on('prompt.submit', async ($, e, next) => {
+    // Any prompt (a schedule, a peer, a task notice) moves the epoch, so a
+    // check in flight queues nothing behind its turn; only the operator's
+    // starts the count again.
+    mod.ka.epoch += 1
     if (!OPERATOR_ORIGINS.has(e.origin.kind)) return next(e)
     await keepaliveOperator($, mod)
     const isHeldCold = (await readStatus($)).cacheLapsed || mod.isPendingCold
@@ -795,6 +819,16 @@ export const register: Register = on => {
     mod.lastActivityMs = await $.clock.now()
     if (await isOn($, mod)) await updateStatus($, s => ({ ...s, turnsSinceFull: s.turnsSinceFull + 1 }))
     return next(e)
+  })
+
+  // The wrap's own answer: its turn's first step that ended it. A peer
+  // message the Stop hook drains, or a notification, continues the turn
+  // with more steps, and their answer is not the wrap.
+  on('turn.step', async function* ($, e, next) {
+    const r = yield* next(e)
+    const w = mod.ka.wrap
+    if (e.agentId === undefined && w && w.turnId === e.turnId && w.reply === undefined && r.stopReason === 'end_turn') w.reply = r.answer
+    return r
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -871,12 +905,12 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="row">
-        <Text color={SUBTLE}>{''}</Text>
+        <Text color={SUBTLE}>{'\uE0B6'}</Text>
         <Text color={FG} backgroundColor={SUBTLE}>
           {' '}
           {text}{' '}
         </Text>
-        <Text color={SUBTLE}>{''}</Text>
+        <Text color={SUBTLE}>{'\uE0B4'}</Text>
       </Box>
     )
   })
