@@ -301,6 +301,36 @@ fn a_dm_scope_reads_the_callers_earlier_ids() {
     assert_eq!(marked(&delete(&f, &["--dm", R1])), ["old-1"]);
 }
 
+const DAY: Duration = Duration::from_secs(86_400);
+
+/// Session `sid` listening under a process key that names no host, so this
+/// host cannot judge it, with no session record here and its last heartbeat
+/// `ago` back.
+fn unknown(f: &Fixture, sid: &str, ago: Duration) {
+    std::fs::create_dir_all(f.marker(sid).parent().unwrap()).unwrap();
+    std::fs::write(f.marker(sid), "listen\nclaude 4242-12345\n").unwrap();
+    heartbeat(f, sid, ago);
+}
+
+/// A session this host cannot judge holds its mail while its heartbeat is
+/// within the mark-reap days; past them it counts as gone, holds nothing
+/// and can be tombstoned.
+#[test]
+fn a_session_this_host_cannot_judge_goes_with_its_heartbeat() {
+    let f = Fixture::new("del-unknown-stale");
+    unknown(&f, R1, 2 * DAY);
+    read(&f, R1, &[]);
+    post(&f, "_broadcast", "unread-1", "not yet read", 10 * MINUTE);
+    let held = f.without_session(|| delete(&f, &["--open", "--dry-run"]));
+    assert_eq!(kept(&held, R1), 1, "{held}");
+    assert_eq!(tombstone(&f, &[R1]).status.code(), Some(1));
+
+    heartbeat(&f, R1, 8 * DAY);
+    let gone = f.without_session(|| delete(&f, &["--open", "--dry-run"]));
+    assert_eq!(marked(&gone), ["unread-1"], "{gone}");
+    f.ok(&["message", "tombstone", R1]);
+}
+
 /// Session `sid` ran at `/srv/gone` and its process has exited.
 fn exited(f: &Fixture, sid: &str) {
     std::fs::write(
@@ -341,6 +371,9 @@ fn a_tombstone_needs_an_agent_that_has_exited() {
     let out = tombstone(&f, &["fixture-human"]);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("not a session id"), "{}", String::from_utf8_lossy(&out.stderr));
+    // Enrolled under no host and heartbeating two days ago: nothing says it
+    // has gone.
+    unknown(&f, R3, 2 * DAY);
     let out = tombstone(&f, &[R3]);
     assert_eq!(out.status.code(), Some(1), "nothing says R3 has exited");
     assert!(String::from_utf8_lossy(&out.stderr).contains("has not exited"));

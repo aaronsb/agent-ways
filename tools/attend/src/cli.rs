@@ -190,7 +190,8 @@ pub(crate) fn with_limits(cmd: clap::Command) -> clap::Command {
         "Mark for deletion the messages no live session still has to read\n\n\
          A message is marked when it is in the scope, older than --older-than, older than {grace} seconds, and \
          no session that may still read the bus would be delivered it: a session keeps what `attend message \
-         unread` counts for it, its cold start included, and one this host cannot judge keeps its mail. A \
+         unread` counts for it, its cold start included, and one this host cannot judge keeps its mail while \
+         its last heartbeat is under {days} days old. A \
          person in attend-chat holds nothing. Every reader skips a marked message, and `attend message \
          cleanup` removes it {reap} (ADR-404 D3e). --undo takes a delete back, and its messages are delivered \
          again, while cleanup has not yet removed them."

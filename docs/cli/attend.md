@@ -273,7 +273,7 @@ Reap signal files whose owning project is gone, and prune empty project dirs. Li
 
 Mark for deletion the messages no live session still has to read
 
-A message is marked when it is in the scope, older than --older-than, older than 90 seconds, and no session that may still read the bus would be delivered it: a session keeps what `attend message unread` counts for it, its cold start included, and one this host cannot judge keeps its mail. A person in attend-chat holds nothing. Every reader skips a marked message, and `attend message cleanup` removes it 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e). --undo takes a delete back, and its messages are delivered again, while cleanup has not yet removed them.
+A message is marked when it is in the scope, older than --older-than, older than 90 seconds, and no session that may still read the bus would be delivered it: a session keeps what `attend message unread` counts for it, its cold start included, and one this host cannot judge keeps its mail while its last heartbeat is under 7 days old. A person in attend-chat holds nothing. Every reader skips a marked message, and `attend message cleanup` removes it 7 days after the mark, or for a message in a project tray once that project has started 3 Claude Code sessions since, each /clear counting as one (ADR-404 D3e). --undo takes a delete back, and its messages are delivered again, while cleanup has not yet removed them.
 
 **Usage:** `attend message delete [OPTIONS]`
 

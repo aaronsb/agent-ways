@@ -3,8 +3,8 @@
 //!
 //! The mark is an empty file in the mark store
 //! (`attend_groups::tombstones`), and it hides what the session sent up to
-//! the mark. Only an agent's session id is tombstoned, and only one this
-//! host saw exit (`attend_presence::has_exited`) that no session that may
+//! the mark. Only an agent's session id is tombstoned, and only one that
+//! has gone (`verbs::recipients::gone`) that no session that may
 //! still read the bus reads as, its ids before `/clear` and the caller's
 //! own included: those messages are still that session's to read. No
 //! message is marked or removed; `attend message delete` does that.
@@ -54,7 +54,11 @@ impl std::fmt::Display for TombstoneError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TombstoneError::NotExited { session } => {
-                write!(f, "{session} has not exited; only a session this host saw exit is tombstoned")
+                write!(
+                    f,
+                    "{session} has not exited; only a session this host saw exit, or one with no record here whose last heartbeat is {} days old, is tombstoned",
+                    crate::cmd::cleanup::MARK_REAP_DAYS
+                )
             }
             TombstoneError::ReadAs { session, by } if session == by => write!(f, "{session} is this session"),
             TombstoneError::ReadAs { session, by } => {
@@ -84,7 +88,7 @@ pub fn tombstone(session: &str) -> Result<Tombstoned, TombstoneError> {
             return Err(TombstoneError::ReadAs { session: session.to_string(), by: live });
         }
     }
-    if !attend_presence::has_exited(session) {
+    if !crate::verbs::recipients::gone(session) {
         return Err(TombstoneError::NotExited { session: session.to_string() });
     }
     let moved =
