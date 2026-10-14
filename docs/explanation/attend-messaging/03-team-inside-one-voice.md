@@ -69,7 +69,7 @@ sequenceDiagram
     end
     rect rgba(45,125,154,0.12)
     V->>Tray: workflow done — surface
-    Tray-->>V: Stop-hook drain, one block:<br/>"[attend] 12 peer message(s) delivered<br/>at the turn boundary (ADR-172 drain)"<br/>10 listed, then "(+2 more — attend message inbox for the rest)"
+    Tray-->>V: Stop-hook drain, one block:<br/>"Silence is a valid reply to the messages below…"<br/>"[attend] 12 peer message(s) delivered<br/>at the turn boundary (ADR-172 drain)"<br/>10 listed, then "(+2 more — attend message inbox for the rest)"
     Note over V: ONE turn, not 12 interrupts
     end
     rect rgba(45,142,94,0.12)

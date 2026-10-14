@@ -125,13 +125,17 @@ type Mod = {
   /** session.start has run; before it, at process start, the engine has not
    *  bound the session and refuses a tool registration. */
   isStarted: boolean
+  /** The source of the SessionStart that came before session.start at
+   *  process start (`startup`, `resume`, `fork`); undefined when none came. */
+  startSource: string | undefined
   /** A /clear or a /resume moved the session to an id attend has not been
    *  told is listening yet; the poll holds its drain until it has. */
   isRelistening: boolean
   /** The session started listening from its project's config and the
    *  operator has not prompted yet. The poll submits no turn: what is
    *  pending rides as context on the operator's first prompt, and the row
-   *  counts it meanwhile. */
+   *  counts it meanwhile. The first prompt ends the hold, and so does a
+   *  resume to another conversation. */
   isAwaitingOperator: boolean
 }
 
@@ -243,9 +247,12 @@ async function listenOn($: $): Promise<ProcessRunResult> {
   return r
 }
 
-/** Whether the session starts with a conversation: a resumed one does, a
- *  new one does not. A read that fails counts as a new session. */
-async function hasTranscript($: $): Promise<boolean> {
+/** Whether this process resumed its session (`claude --resume`). The
+ *  SessionStart at process start names its source, so a fork or a fresh
+ *  start reads as not resumed. Where none came, a session that starts with
+ *  a transcript was resumed, and a read that fails counts as a new one. */
+async function isResumed($: $, mod: Mod): Promise<boolean> {
+  if (mod.startSource !== undefined) return mod.startSource === 'resume'
   try {
     const m = await $.session.messages()
     return Array.isArray(m) && m.length > 0
@@ -542,6 +549,7 @@ export const register: Register = on => {
     submitTries: 0,
     joined: new Set(),
     isStarted: false,
+    startSource: undefined,
     isRelistening: false,
     isAwaitingOperator: false,
   }
@@ -556,12 +564,12 @@ export const register: Register = on => {
     mod.isStarted = true
     // A reload finds the mode in $.state; a new process (`claude --resume`)
     // finds the session id in the record of sessions that listened. The
-    // record leaves out a session its config started; one that starts with
-    // a transcript was resumed, and listened before.
+    // record leaves out a session its config started, so a resume of one
+    // goes on unheld, as it did before the process exited.
     const id = await $.session.id()
     const kept = await readStatus($)
     const wasActive =
-      isActive(kept) || (await readListened($)).includes(id) || (startsActive(mod) && (await hasTranscript($)))
+      isActive(kept) || (await readListened($)).includes(id) || (startsActive(mod) && (await isResumed($, mod)))
     if (wasActive || (mod.config.listening === 'active' && mod.canPoll)) {
       // Listed by turn one; listening and the first drain follow the hook.
       // Active from here, so a /clear before activate runs keeps it. A
@@ -590,10 +598,12 @@ export const register: Register = on => {
   // start this event comes before session.start, which handles that case.
   on('classic.SessionStart', async ($, e, next) => {
     const done = await next(e)
+    if (!mod.isStarted) mod.startSource = e.source
     if (!mod.isStarted || (e.source !== 'clear' && e.source !== 'resume')) return done
     const id = e.session_id || (await $.session.id())
     const goesOn = (await isOn($, mod)) || (e.source === 'resume' && (await readListened($)).includes(id))
     if (!goesOn) return done
+    mod.isRelistening = true
     // The operator chose a conversation to go on with, as a first prompt
     // would: the hold for one ends.
     if (e.source === 'resume') mod.isAwaitingOperator = false
@@ -605,7 +615,6 @@ export const register: Register = on => {
       awaitingOperator: mod.isAwaitingOperator,
     }))
     await rememberListening($, mod, id)
-    mod.isRelistening = true
     if (mod.active) {
       $.clock.after(RELISTEN_MS, () => void listenOn($).finally(() => (mod.isRelistening = false)))
     } else {

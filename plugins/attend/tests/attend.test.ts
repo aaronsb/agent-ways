@@ -90,7 +90,7 @@ type World = {
   /** The operator's prompts are dropped beneath the plugin. */
   dropPrompts?: boolean
   /** Rows of the conversation the session starts with: a resumed one has
-   *  some, a new one none. */
+   *  some, a new one none; negative makes the read throw. */
   transcript?: number
 }
 
@@ -133,7 +133,10 @@ function host(on: On, world: World) {
     return { value: undefined } as never
   })
   on('session.id', () => ({ value: world.sessionId ?? 's1' }) as never)
-  on('session.messages', () => ({ value: Array.from({ length: world.transcript ?? 0 }, () => ({})) }) as never)
+  on('session.messages', () => {
+    if ((world.transcript ?? 0) < 0) throw new Error('messages unavailable')
+    return { value: Array.from({ length: world.transcript ?? 0 }, () => ({})) } as never
+  })
   const clearState = () => {
     state.value = undefined
     state.version = 0
@@ -1167,6 +1170,61 @@ describe('a resume', () => {
     drains.push(one(1), DRAIN_EMPTY)
     await clock.advance(30_000)
     expect(h.submitted).toEqual([])
+  })
+
+  // Where no SessionStart came before session.start, the transcript says
+  // whether the session was resumed.
+  test('with no start source, a session that starts with a transcript is not held', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: 2, drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+  })
+
+  test('a start source of startup holds whatever the transcript holds', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: 2, drains: [one(1), DRAIN_EMPTY] })
+    await $.classic.SessionStart({ source: 'startup', session_id: 's1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  // A fork gets a new id, which starts as the config says (ADR-411).
+  test('a fork in a project its config starts listening is held for the first prompt', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 'fork1', transcript: 2, drains: [one(1), DRAIN_EMPTY] })
+    await $.classic.SessionStart({ source: 'fork', session_id: 'fork1' } as never)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a transcript read that fails holds the session', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's1', transcript: -1, drains: [one(1), DRAIN_EMPTY] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(30_000)
+    expect(h.submitted).toEqual([])
+  })
+
+  test('a reload after a resume from the picker stays unheld', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, sessionId: 's9', drains })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    await clear($, h, 's1', 'resume')
+    await clock.advance(2_000)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(1_000)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
   })
 
   test('a session id that never listened starts dormant', async ($, on) => {

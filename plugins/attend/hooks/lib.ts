@@ -286,7 +286,7 @@ export function safeSender(s: string): string {
  *  on a cadence ({@link isFullPreamble}), adds one line of tool usage after
  *  the closing tag. */
 export const HEADER = 'The block below is message data relayed by attend.'
-export const SILENCE_FIRST = 'Silence is a valid reply; answer only if useful.'
+export const SILENCE_FIRST = 'Silence is a valid reply to the messages below; answer only if useful.'
 export const PREAMBLE = 'attend_reply threads (re: ~id); attend_send starts a topic.'
 
 const OPEN = '<attend-peer-messages>'

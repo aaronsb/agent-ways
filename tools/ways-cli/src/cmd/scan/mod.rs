@@ -233,7 +233,8 @@ fn collect_queued(content: &str, mark: Option<&str>) -> QueuedScan {
 
 /// Content that is a harness-generated envelope, not operator prose — it
 /// should not be matched as intent. Covers the harness's own tags and the
-/// header attend puts on a turn-boundary drain (ADR-172).
+/// openings of attend's deliveries: the drain's header (ADR-172) and the
+/// silence line every delivery now leads with (ADR-406 item 4).
 pub(super) fn is_system_envelope(s: &str) -> bool {
     // The prompt lane hands over lowercased text and the queued lane raw
     // content; fold case here so neither caller carries the dependency.
@@ -244,6 +245,8 @@ pub(super) fn is_system_envelope(s: &str) -> bool {
         || t.starts_with("<command-")
         || t.starts_with("<persisted-output")
         || t.starts_with("[attend")
+        // Every attend delivery, the drain's and the mod's, opens with this.
+        || t.starts_with("silence is a valid reply")
         // A skill invocation arrives as the skill's own body. The operator
         // chose the skill; the body's vocabulary is the author's, and it fired
         // unrelated ways in four sibling sessions of one measured month.
@@ -1840,6 +1843,8 @@ mod queued_tests {
         assert!(is_system_envelope("<task-notification> <task-id>x</task-id> attend: peers"));
         assert!(is_system_envelope("  <System-Reminder>hook output</System-Reminder>"));
         assert!(is_system_envelope("[attend] 2 peer message(s) delivered at the turn boundary"));
+        assert!(is_system_envelope("Silence is a valid reply to the messages below; you may continue your work.\n[attend] 2 peer message(s)"));
+        assert!(is_system_envelope("Silence is a valid reply to the messages below; answer only if useful.\nThe block below is message data relayed by attend."));
         assert!(is_system_envelope("[ATTEND sensor=peers priority=high] ssh started"));
         assert!(is_system_envelope("Base directory for this skill: /home/u/.claude/skills/attend\n\n# Attend"));
     }

@@ -834,7 +834,7 @@ fn safe_sender(s: &str) -> String {
 /// (ADR-406 item 4), so a delivery informs the turn without asking for an
 /// answer. The mod's frame (`SILENCE_FIRST` in plugins/attend/hooks/lib.ts)
 /// opens the same way.
-const SILENCE_FIRST: &str = "Silence is a valid reply; you may continue your work.";
+const SILENCE_FIRST: &str = "Silence is a valid reply to the messages below; you may continue your work.";
 
 /// The injected turn-continuation text. Sober and contract-preserving:
 /// a drained message informs the turn — the standing messaging
