@@ -680,6 +680,23 @@ describe('active', () => {
     expect(slow >= 9 && slow <= 11).toBe(true)
   })
 
+  // A subagent's or a background agent's run is a turn of its own loop, and
+  // a background one can run for half an hour. The main loop is idle all
+  // the while, so a message still wakes the session.
+  test('a subagent or background agent turn does not hold the drain', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const drains: string[] = []
+    const h = host(on, { config: { listening: 'active', keepwarm: 'off' }, drains })
+    await $.session.start(INTERACTIVE)
+    await typed($)
+    await clock.advance(1_000)
+    await $.turn.start({ text: 'review the branch', turnId: 'a1', agentId: 'agent-1' } as never)
+    drains.push(one(1), DRAIN_EMPTY)
+    await clock.advance(10_000)
+    expect(h.submitted.length).toBe(1)
+    expect(h.submitted[0]).toContain('m1')
+  })
+
   test('a running turn holds the drain; the turn ending drains', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
     const h = host(on, { config: { listening: 'active' } })

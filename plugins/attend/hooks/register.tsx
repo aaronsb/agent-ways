@@ -96,8 +96,8 @@ type Mod = {
   /** Whether this session may poll: interactive, or allowed by config. */
   canPoll: boolean
   cwd: string
-  /** Turns running now. The poll holds while one runs: the Stop-hook drain
-   *  owns delivery at a turn's boundary. */
+  /** The main loop's turns running now. The poll holds while one runs: the
+   *  Stop-hook drain owns delivery at a turn's boundary. */
   running: Set<string>
   isPolling: boolean
   isTicking: boolean
@@ -657,7 +657,11 @@ export const register: Register = on => {
     return enterWithPending($, mod, e, next, isHeldCold)
   })
 
+  // The main loop's turns only: a subagent's or a background agent's run
+  // is a turn of its own loop and can outlast the operator's attention by
+  // half an hour, while the main loop idles and a message should wake it.
   on('turn.start', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
     mod.running.add(e.turnId)
     mod.lastActivityMs = await $.clock.now()
     if (await isOn($, mod)) await updateStatus($, s => ({ ...s, turnsSinceFull: s.turnsSinceFull + 1 }))
@@ -666,6 +670,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    if (e.agentId !== undefined) return done
     mod.running.delete(e.turnId)
     mod.lastActivityMs = await $.clock.now()
     // Whatever the Stop hook left (or all of it, where no Stop hook runs).
