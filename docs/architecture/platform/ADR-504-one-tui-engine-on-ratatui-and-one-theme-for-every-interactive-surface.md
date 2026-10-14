@@ -369,8 +369,8 @@ The move is four changes, one PR each. Each keeps its frames as they were drawn 
 
 By step 4 at the latest, a flow's Next and Finish give the answer Enter gives, as their labels say. On the first step a click on either sends `Right` (`Btn::key`), which reports that nothing is picked where Enter picks the row under the cursor or opens "Other…" on its row.
 
-## Note (2026-10-14): an unprompted question takes no key at first
+## Note (2026-10-14): a pane asks only in answer to the operator
 
-A pane can ask a question on its own, not in answer to what the operator just did: work that finished in the background asks whether to go on. `Open::Ask` carries `unprompted` for that. For `UNPROMPTED_GRACE` (500 ms) after such a question opens, no key answers it: the key answers no, comes back to the pane as `["n", TOO_SOON]`, and then goes on to the pane as if nothing were asked, so a keystroke begun before the question showed can never confirm it and nothing typed is lost. After the grace, keys answer as for any question. A click on an answer is aimed, and answers at once.
+A pane's question (`Open::Ask`) answers something the operator just did. For part of 2026-10-14 the shell also took an unprompted question, one a pane asked on its own when background work finished, with a half-second grace in which keys did not answer it. It was withdrawn the same day with its only user: attend-chat's count now reports and asks nothing (ADR-405, amendment of 2026-10-14), so `Open::Ask` carries no `unprompted` flag and the shell has no grace.
 
 The shell opens a pane's menu, question or entry dialog only over nothing; one asked for while something else is open is dropped, and since 2026-10-14 the pane hears it (`Pane::open_dropped`), so it does not wait on an answer that will not come.

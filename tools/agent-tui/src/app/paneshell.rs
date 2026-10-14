@@ -28,22 +28,6 @@ pub(crate) struct Asked {
     pub question: String,
     pub yes: String,
     pub no: String,
-    /// Until when a key goes on to the pane instead of answering: an
-    /// unprompted question's [`super::pane::UNPROMPTED_GRACE`].
-    pub held_off_until: Option<std::time::Instant>,
-}
-
-impl Asked {
-    /// A question that keys answer at once.
-    pub(crate) fn new(id: impl Into<String>, question: impl Into<String>, yes: impl Into<String>, no: impl Into<String>) -> Asked {
-        Asked { id: id.into(), question: question.into(), yes: yes.into(), no: no.into(), held_off_until: None }
-    }
-
-    /// Whether a key now is too soon after an unprompted question opened
-    /// to be an answer to it.
-    pub(crate) fn held_off(&self) -> bool {
-        self.held_off_until.is_some_and(|t| std::time::Instant::now() < t)
-    }
 }
 
 /// A key the shell takes before the pane, read by [`App::shell_key`].
@@ -403,7 +387,7 @@ impl App {
             // A plain `q` beside a pane that owns the focus asks first,
             // whatever is unsaved: it is one keystroke from typing.
             ShellKey::Quit if k.code == KeyCode::Char('q') && self.ctx().owns_bar => {
-                self.mode = Mode::Ask(Asked::new(QUIT_ASK, "quit?", "quit", "stay"));
+                self.mode = Mode::Ask(Asked { id: QUIT_ASK.into(), question: "quit?".into(), yes: "quit".into(), no: "stay".into() });
             }
             ShellKey::Quit => return self.quit(),
             ShellKey::Mouse => {
@@ -450,9 +434,8 @@ impl App {
                 pick.by_esc = by_esc;
                 self.mode = Mode::Pick(pick);
             }
-            Open::Ask { id, question, yes, no, unprompted } if matches!(self.mode, Mode::Browse) => {
-                let held_off_until = unprompted.then(|| std::time::Instant::now() + super::pane::UNPROMPTED_GRACE);
-                self.mode = Mode::Ask(Asked { id, question, yes, no, held_off_until });
+            Open::Ask { id, question, yes, no } if matches!(self.mode, Mode::Browse) => {
+                self.mode = Mode::Ask(Asked { id, question, yes, no });
             }
             Open::Entry { id, title, value, error, anchor } if matches!(self.mode, Mode::Browse) => {
                 let mut input = crate::input::Input::new();
@@ -514,18 +497,6 @@ impl App {
         let goes_on = typed || self.shell_key(k).is_some();
         self.answer(a, false);
         if goes_on && matches!(self.mode, Mode::Browse) {
-            return self.pane_key(k);
-        }
-        true
-    }
-
-    /// A key too soon after an unprompted question opened: it answers no,
-    /// and goes on to the pane whatever it is, as if nothing were asked.
-    /// False ends the session.
-    pub(super) fn answer_held_off(&mut self, a: Asked, k: KeyEvent) -> bool {
-        self.mode = Mode::Browse;
-        self.pane_picked(&a.id, vec!["n".to_string(), super::pane::TOO_SOON.to_string()]);
-        if matches!(self.mode, Mode::Browse) {
             return self.pane_key(k);
         }
         true
@@ -891,7 +862,7 @@ mod tests {
     type Answer = fn(&mut App);
 
     fn ask() -> Open {
-        Open::Ask { id: "q".into(), question: "drop it?".into(), yes: "drop".into(), no: "keep".into(), unprompted: false }
+        Open::Ask { id: "q".into(), question: "drop it?".into(), yes: "drop".into(), no: "keep".into() }
     }
 
     /// A pane's question shows on the bar with its answers as lozenges; `y`
@@ -943,29 +914,6 @@ mod tests {
         assert_eq!(two(&a).keys, 3, "Enter only answered");
     }
 
-    /// An unprompted question takes no key for [`UNPROMPTED_GRACE`] after it
-    /// opens: the key answers no and goes on to the pane as typed, Enter and
-    /// `y` included. After the grace keys answer it as usual.
-    #[test]
-    fn a_key_too_soon_after_an_unprompted_question_is_no_answer() {
-        let unprompted = || Open::Ask { id: "q".into(), question: "drop it?".into(), yes: "drop".into(), no: "keep".into(), unprompted: true };
-        for code in [KeyCode::Char('y'), KeyCode::Enter] {
-            let mut a = app(true);
-            a.pane_mut::<Two>().expect("the pane").open = Some(unprompted());
-            a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
-            assert!(matches!(a.mode, Mode::Ask(_)), "the question opened");
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            assert!(a.key(k(code, KeyModifiers::NONE)));
-            assert_eq!((two(&a).picked.clone(), two(&a).keys), (vec!["q=n".to_string(), "q=too soon".to_string()], 2), "{code:?}: answered no, said too soon, and went on to the pane");
-            assert!(matches!(a.mode, Mode::Browse));
-        }
-        let mut a = app(true);
-        a.pane_mut::<Two>().expect("the pane").open = Some(unprompted());
-        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
-        std::thread::sleep(super::super::pane::UNPROMPTED_GRACE + std::time::Duration::from_millis(50));
-        a.key(k(KeyCode::Char('y'), KeyModifiers::NONE));
-        assert_eq!((two(&a).picked.clone(), two(&a).keys), (vec!["q=y".to_string()], 1), "past the grace a y answers");
-    }
 
     /// A question the pane asks while another is open cannot open, and the
     /// pane hears that it was dropped rather than wait on an answer.
@@ -975,7 +923,7 @@ mod tests {
         a.pane_mut::<Two>().expect("the pane").open = Some(ask());
         a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
         assert!(matches!(a.mode, Mode::Ask(_)), "the first question is open");
-        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask { id: "r".into(), question: "and this?".into(), yes: "y".into(), no: "n".into(), unprompted: true });
+        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask { id: "r".into(), question: "and this?".into(), yes: "y".into(), no: "n".into() });
         a.tick_pane();
         assert_eq!(two(&a).picked, ["dropped r"], "the second was dropped, and said so");
         assert!(matches!(&a.mode, Mode::Ask(q) if q.id == "q"), "the first still waits");
@@ -1713,7 +1661,7 @@ mod tests {
         assert_eq!(told(&mut a), [r#"-Menu { id: "m", by_esc: true }"#]);
 
         // A menu replaced by the question its pick asks, within one frame.
-        a.pane_mut::<Rec>().expect("the pane").next = Some(Open::Ask { id: "q".into(), question: "sure?".into(), yes: "yes".into(), no: "no".into(), unprompted: false });
+        a.pane_mut::<Rec>().expect("the pane").next = Some(Open::Ask { id: "q".into(), question: "sure?".into(), yes: "yes".into(), no: "no".into() });
         open_from(&mut a, pick());
         told(&mut a);
         press(&mut a, KeyCode::Enter, KeyModifiers::NONE);

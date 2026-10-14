@@ -434,7 +434,6 @@ impl ChatPane {
     /// answered.
     pub(super) fn menu_picked(&mut self, id: &str, value: &str) {
         self.dirty = true;
-        self.last_input = Some(std::time::Instant::now());
         match id {
             _ if id.starts_with(ASK) => return self.answered(id, value == "y"),
             "common" => return self.common_item(value),
@@ -841,22 +840,11 @@ impl ChatPane {
     /// ([`agent_tui::Open::Ask`]) under an id of the question's own, and the
     /// answer comes back through [`ChatPane::answered`].
     pub(super) fn ask(&mut self, step: Step) {
-        self.open_question(step, false);
-    }
-
-    /// Ask, on the chat's own and not in answer to what the operator just
-    /// did: the shell lets no key answer it for a moment after it opens
-    /// ([`agent_tui::UNPROMPTED_GRACE`]).
-    pub(super) fn ask_unprompted(&mut self, step: Step) {
-        self.open_question(step, true);
-    }
-
-    fn open_question(&mut self, step: Step, unprompted: bool) {
         let (question, yes, no) = step.question();
         self.asks += 1;
         let id = format!("{ASK}{}", self.asks);
         self.asked = Some((id.clone(), step));
-        self.to_open = Some(Open::Ask { id, question, yes: yes.into(), no: no.into(), unprompted });
+        self.to_open = Some(Open::Ask { id, question, yes: yes.into(), no: no.into() });
     }
 
     /// The answer to the question `id`: yes runs its step, no keeps things
@@ -895,19 +883,6 @@ impl ChatPane {
     pub(super) fn question_dropped(&mut self, open: Open) {
         let Open::Ask { id, .. } = open else { return };
         let Some(step) = self.asked.take_if(|(pending, _)| *pending == id).map(|(_, step)| step) else { return };
-        self.dirty = true;
-        if let Step::DeleteRead(asked) = step {
-            self.hold_count(asked);
-        }
-    }
-
-    /// A key came too soon after the question `id`, which the chat asked
-    /// on its own, to be an answer to it: the shell answered no and gave
-    /// the key to the chat. A count's question is held, to ask from again;
-    /// the operator chose nothing.
-    pub(super) fn answered_too_soon(&mut self, id: &str) {
-        self.last_input = Some(std::time::Instant::now());
-        let Some(step) = self.asked.take_if(|(pending, _)| pending == id).map(|(_, step)| step) else { return };
         self.dirty = true;
         if let Step::DeleteRead(asked) = step {
             self.hold_count(asked);

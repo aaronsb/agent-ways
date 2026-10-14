@@ -181,10 +181,10 @@ pub(super) enum Ev {
 
 impl Ev {
     /// Whether the operator gave it: a key (one the shell took too), a
-    /// click, a paste, a menu's text
-    /// into the box, the tab bar's toggle, a jump or a tab's activation. A
-    /// refresh, the column hidden for want of width and an overlay's coming
-    /// and going are not.
+    /// click, a paste, a menu's text into the box, the tab bar's toggle, a
+    /// jump or a tab's activation. A refresh, the column hidden for want of
+    /// width and an overlay's coming and going are not. Only the operator's
+    /// input ends the send-now chord.
     pub(super) fn is_input(&self) -> bool {
         matches!(self, Ev::Key(_) | Ev::KeyTaken | Ev::Click(_) | Ev::Paste | Ev::Compose | Ev::ToggleBar | Ev::Jump(_) | Ev::Numbered { .. } | Ev::TabActivated { .. })
     }

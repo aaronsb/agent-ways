@@ -44,14 +44,6 @@ impl App {
             }
             return self.quit();
         }
-        // A key too soon after an unprompted question opened was begun
-        // before it showed: it is no answer.
-        if let Mode::Ask(a) = &self.mode {
-            if a.held_off() {
-                let a = a.clone();
-                return self.answer_held_off(a, k);
-            }
-        }
         if self.modal().is_some() {
             return self.modal_key(k);
         }

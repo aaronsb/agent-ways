@@ -8,12 +8,14 @@
 //!   the menu while the tab has a watermark, takes it away.
 //! - Delete read messages for everyone…: Delete older than ▸ Current
 //!   sessions, Today (local midnight), All or Custom… (a duration or a
-//!   date, in the entry dialog). The pick runs `attend message delete`
-//!   with `--dry-run` for the tab's scope (`--open`, `--channel <c>`, or
-//!   `--dm <session>` for a DM view or an agent's row), and the `y`
-//!   question carries what it reports; `y` runs it. The status line
-//!   names the batch, and the scope's menu then offers Undo delete, which
-//!   runs `attend message delete --undo <batch>`.
+//!   date, in the entry dialog). The first pick counts: it runs `attend
+//!   message delete --dry-run` for the tab's scope (`--open`, `--channel
+//!   <c>`, or `--dm <session>` for a DM view or an agent's row), and the
+//!   status line says what it counted. A count never asks anything: the
+//!   count is held for [`HOLD`], and choosing the same scope and age again
+//!   asks `y` with it, an answer to that pick; `y` runs the delete. The
+//!   status line names the batch, and the scope's menu then offers Undo
+//!   delete, which runs `attend message delete --undo <batch>`.
 //! - Tombstone…, on a claude whose session is not live, by its row or its
 //!   own DM view: asked, then `attend message tombstone <session-id>`.
 //!   attend's refusal is shown as it words it.
@@ -26,10 +28,12 @@
 //! until it ends, a fresh result taking the line for its few seconds, and
 //! the screen stays live. `≡` ▸ Stop deleting stops it, and the exit guard
 //! names it. One runs at a time: another asked for meanwhile is refused
-//! with a note. A count that lands while something is open over the chat,
-//! or after the operator typed, asks nothing: it is held for [`HOLD`] and
-//! said, and choosing the delete again asks from it. An attend without the
-//! verbs says it needs updating.
+//! with a note. An attend without the verbs says it needs updating.
+//!
+//! Every question the chat asks answers a pick the operator just made. A
+//! count lands whenever attend finishes, so it only reports: a question it
+//! opened could take a keystroke meant for something else (ADR-405,
+//! amendment of 2026-10-14).
 
 use std::time::{Duration, Instant};
 
@@ -52,10 +56,6 @@ pub(super) const CUSTOM: &str = "Custom…";
 /// How long a count held for a delete stays good to ask from.
 const HOLD: Duration = Duration::from_secs(60);
 
-/// How long the operator must have been still before a count's question
-/// opens on its own: a keystroke begun before it showed must not land on it.
-pub(super) const IDLE_BEFORE_ASKING: Duration = Duration::from_millis(1500);
-
 /// The menu ids of Delete older than and of its Custom… dialog, before the
 /// scope's key ([`Scope::key`]).
 const OLDER: &str = "older:";
@@ -63,9 +63,8 @@ const OLDER_CUSTOM: &str = "older-custom:";
 
 /// What the chat does with attend's answer to a request.
 pub(super) enum Job {
-    /// A delete's dry run, to ask with, and the compose box's text when it
-    /// was asked for.
-    DryRun { scope: Scope, older: String, draft: String },
+    /// A delete's dry run: the count to hold.
+    DryRun { scope: Scope, older: String },
     /// The delete asked about.
     Delete(Asked),
     /// An undo of the last delete.
@@ -258,29 +257,21 @@ impl ChatPane {
         false
     }
 
-    /// Ask before a delete of `scope` older than `older`, with what its dry
-    /// run reports; with nothing to delete, say so and ask nothing. A dry
-    /// run of the chat (`--snap`) runs no attend at all, so its frames do
-    /// not depend on the attend installed.
+    /// The pick of a delete of `scope` older than `older`: with a count
+    /// held for that scope and age from the last [`HOLD`], ask before the
+    /// delete, an answer to this pick; else count, and say what the count
+    /// found ([`ChatPane::attend_answered`]). A dry run of the chat
+    /// (`--snap`) runs no attend at all, so its frames do not depend on the
+    /// attend installed.
     pub(super) fn delete_read(&mut self, scope: Scope, older: &str) {
+        if let Some((asked, _)) = self.held.take_if(|(a, at)| at.elapsed() < HOLD && a.scope == scope && a.older == older) {
+            return self.ask(Step::DeleteRead(asked));
+        }
         if self.dry_run {
             return self.say("dry run: attend message delete not run", false);
         }
-        if self.ask_held(|a| a.scope == scope && a.older == older) {
-            return;
-        }
         let args = attend_cli::delete_argv(&scope, older, true);
-        let draft = self.input.text().to_string();
-        self.ask_attend(args, Job::DryRun { scope, older: older.to_string(), draft });
-    }
-
-    /// Ask from the count held for a delete `matches` picks (the same scope
-    /// and the same age), if one landed in the last [`HOLD`]; true when it
-    /// asked.
-    fn ask_held(&mut self, matches: impl Fn(&Asked) -> bool) -> bool {
-        let Some((asked, _)) = self.held.take_if(|(a, at)| at.elapsed() < HOLD && matches(a)) else { return false };
-        self.ask(Step::DeleteRead(asked));
-        true
+        self.ask_attend(args, Job::DryRun { scope, older: older.to_string() });
     }
 
     /// The delete asked about, answered yes: run it.
@@ -402,7 +393,7 @@ impl ChatPane {
         // The answer replaces `deleting…`, whatever it leads to.
         self.say("", false);
         match job {
-            Job::DryRun { scope, older, draft } => self.dry_ran(scope, older, draft, answer),
+            Job::DryRun { scope, older } => self.dry_ran(scope, older, answer),
             Job::Delete(asked) => self.deleted(asked, answer),
             Job::Undo(last) => self.undid(last, answer),
             Job::Tombstone { member, name } => match answer {
@@ -413,11 +404,10 @@ impl ChatPane {
         self.stale();
     }
 
-    /// A dry run's report: ask with its counts, or say there is nothing.
-    /// The count can land at any time, so its question is the chat's own
-    /// ([`ChatPane::ask_unprompted`]), and opens only once the operator has
-    /// been still for `idle_before_asking` ([`ChatPane::ask_count_due`]).
-    fn dry_ran(&mut self, scope: Scope, older: String, draft: String, answer: Result<serde_json::Value, Failure>) {
+    /// A dry run's report: hold the count and say what it found, or that
+    /// there is nothing. It asks nothing: the count lands whenever attend
+    /// finishes, and choosing the delete again asks with it.
+    fn dry_ran(&mut self, scope: Scope, older: String, answer: Result<serde_json::Value, Failure>) {
         let report = match answer.and_then(|doc| attend_cli::report(&doc)) {
             Ok(r) => r,
             Err(e) => return self.say(e.to_string(), true),
@@ -426,44 +416,15 @@ impl ChatPane {
         if report.marked == 0 {
             return self.say(format!("nothing read to delete in {label}{}{}", attend_cli::older_words(&older), report.kept_words()), false);
         }
-        self.count_due = Some((Asked { scope, older, label, report }, draft, Instant::now()));
-        self.ask_count_due();
+        self.hold_count(Asked { scope, older, label, report });
     }
 
-    /// The count that landed, asked once the operator has been still long
-    /// enough, or held when it cannot be asked: something is open over the
-    /// chat or about to be, the compose box changed since the delete was
-    /// chosen, or the operator gave input after the count landed (they have
-    /// moved on).
-    pub(super) fn ask_count_due(&mut self) {
-        let Some((_, draft, landed)) = &self.count_due else { return };
-        let moved_on = self.last_input.is_some_and(|t| t > *landed);
-        if moved_on || !self.can_ask_unprompted(draft) {
-            let (asked, ..) = self.count_due.take().expect("just seen");
-            return self.hold_count(asked);
-        }
-        if self.last_input.is_none_or(|t| t.elapsed() >= self.idle_before_asking) {
-            let (asked, ..) = self.count_due.take().expect("just seen");
-            self.ask_unprompted(Step::DeleteRead(asked));
-        }
-    }
-
-    /// Hold `asked`'s count, and say so: choosing the delete again soon
-    /// asks from it.
+    /// Hold `asked`'s count and say so: choosing the same delete again in
+    /// the next [`HOLD`] asks with it.
     pub(super) fn hold_count(&mut self, asked: Asked) {
         let n = asked.report.marked;
         self.say(format!("counted {n} read message{} in {}{}: choose Delete read messages again to delete them", if n == 1 { "" } else { "s" }, asked.label, attend_cli::older_words(&asked.older)), false);
         self.held = Some((asked, Instant::now()));
-    }
-
-    /// Whether a question the operator did not just ask for may open now:
-    /// nothing is open over the chat or about to open (the record of what
-    /// is open is told at each frame, so a question still pending counts
-    /// too), and the compose box holds what it held when the work began, or
-    /// does not have the keyboard.
-    fn can_ask_unprompted(&self, draft: &str) -> bool {
-        let typing = self.ix.owns_text() && self.input.text() != draft;
-        !self.ix.overlaid() && self.asked.is_none() && self.to_open.is_none() && !typing
     }
 
     /// A delete's report: said, and its batch kept for Undo delete.
@@ -504,64 +465,66 @@ mod tests {
 
     fn landed(c: &mut ChatPane) {
         let doc = serde_json::json!({"scope": "#slow", "dry_run": true, "marked": 3, "batch": null, "ids": [], "held": []});
-        c.dry_ran(Scope::Channel("slow".into()), "all".into(), String::new(), Ok(doc));
+        c.dry_ran(Scope::Channel("slow".into()), "all".into(), Ok(doc));
     }
 
-    /// A count lands between the frame that opened a question and the next
-    /// one, so the record of what is open does not have it yet: the
-    /// question pending still keeps the count from asking.
+    fn slow() -> Scope {
+        Scope::Channel("slow".into())
+    }
+
+    /// A count never opens a question, even over nothing, with the
+    /// operator still and the compose box empty: it says what it counted
+    /// and holds it, and a question already open keeps its answer.
     #[test]
-    fn a_count_never_takes_the_place_of_a_question_pending() {
+    fn a_count_never_opens_a_question() {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
+        landed(&mut c);
+        assert!(c.to_open.is_none() && c.asked.is_none(), "no question");
+        assert!(c.held.is_some(), "the count is held");
+        assert_eq!(c.status, "counted 3 read messages in #slow: choose Delete read messages again to delete them");
         c.ask(Step::Leave("deploy".into()));
         let pending = c.asked.clone();
-        c.to_open = None;
         landed(&mut c);
-        assert_eq!(c.asked, pending, "the leave still waits for its answer");
-        assert!(c.to_open.is_none(), "no second question");
-        assert!(c.held.is_some() && c.status.starts_with("counted 3 read messages in #slow"), "{}", c.status);
-        c.asked = None;
-        landed(&mut c);
-        assert!(matches!(&c.to_open, Some(Open::Ask { question, unprompted: true, .. }) if question.starts_with("delete 3 read messages in #slow")), "over nothing it asks, on its own");
+        assert_eq!(c.asked, pending, "the leave still waits for its own answer");
     }
 
-    /// A count's question the shell drops, because something else opened
-    /// in the same frame, is held rather than lost, and nothing waits on
-    /// its answer.
+    /// Choosing the same scope and age within [`HOLD`] asks with the held
+    /// count, an answer to that pick; another age, another scope or an
+    /// expired hold counts afresh and asks nothing.
+    #[test]
+    fn a_held_count_asks_only_for_its_scope_and_age_within_the_hold() {
+        let mut c = ChatPane::new(None, Default::default());
+        c.dry_run = true;
+        landed(&mut c);
+        for (scope, older) in [(slow(), "today"), (Scope::Open, "all")] {
+            c.delete_read(scope.clone(), older);
+            assert!(c.to_open.is_none(), "{scope:?} {older}: counted afresh, nothing asked");
+            assert_eq!(c.status, "dry run: attend message delete not run");
+        }
+        if let Some((_, at)) = &mut c.held {
+            *at = Instant::now() - HOLD - Duration::from_secs(1);
+        }
+        c.delete_read(slow(), "all");
+        assert!(c.to_open.is_none(), "an expired hold counts afresh");
+        landed(&mut c);
+        c.delete_read(slow(), "all");
+        assert!(matches!(&c.to_open, Some(Open::Ask { question, .. }) if question.starts_with("delete 3 read messages in #slow")), "the same scope and age asks");
+        assert!(c.held.is_none(), "the count is spent on the question");
+    }
+
+    /// A question the shell drops, because something else opened in the
+    /// same frame, leaves nothing waiting on its answer, and a delete's puts
+    /// its count back on hold.
     #[test]
     fn a_dropped_question_holds_its_count() {
         let mut c = ChatPane::new(None, Default::default());
         c.dry_run = true;
         landed(&mut c);
+        c.delete_read(slow(), "all");
         let Some(open) = c.to_open.take() else { panic!("it asked") };
         c.question_dropped(open);
         assert!(c.asked.is_none(), "nothing waits on an answer that will not come");
         assert!(c.held.is_some() && c.status.starts_with("counted 3 read messages in #slow"), "{}", c.status);
-    }
-
-    /// A count asks only once the operator has been still: input a moment
-    /// before it landed defers the question, and input after it landed holds
-    /// the count instead.
-    #[test]
-    fn a_count_waits_for_the_operator_to_be_still() {
-        let mut c = ChatPane::new(None, Default::default());
-        c.dry_run = true;
-        c.last_input = Some(Instant::now());
-        landed(&mut c);
-        assert!(c.to_open.is_none() && c.count_due.is_some(), "input a moment ago: not yet");
-        c.ask_count_due();
-        assert!(c.to_open.is_none(), "still too soon");
-        c.last_input = Some(Instant::now());
-        c.ask_count_due();
-        assert!(c.count_due.is_none() && c.to_open.is_none(), "input after it landed: held, not asked");
-        assert!(c.held.is_some() && c.status.starts_with("counted 3 read messages in #slow"), "{}", c.status);
-        c.held = None;
-        c.idle_before_asking = Duration::from_millis(50);
-        c.last_input = Some(Instant::now());
-        landed(&mut c);
-        std::thread::sleep(Duration::from_millis(80));
-        c.ask_count_due();
-        assert!(matches!(&c.to_open, Some(Open::Ask { unprompted: true, .. })), "still long enough: it asks");
     }
 }
