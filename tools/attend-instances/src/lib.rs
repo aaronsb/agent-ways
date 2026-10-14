@@ -40,7 +40,8 @@
 //! read as the live session's name, and `alias_of` names the id that took
 //! the slot. An alias is not a slot. It blocks no letter in allocation, and a
 //! session resumed under an alias id gets a fresh letter. Aliases age out
-//! with the same GC as slots.
+//! with the same GC as slots. An alias whose chain reaches no slot in its
+//! cwd is dropped when its letter goes to a new session.
 //!
 //! ## Allocator
 //!
@@ -154,8 +155,8 @@ impl Registry {
     /// - Otherwise, allocate the next-free instance (Greek first,
     ///   numeric fallback past omega) and write a new row. An alias row
     ///   under `session_id` (a resume of an id that `/clear` moved on) is
-    ///   replaced, and the aliases that pointed at it point where it did,
-    ///   so its letter stays with the session that took the slot.
+    ///   replaced, and its letter stays with the session that took the
+    ///   slot.
     /// - During allocation, prune entries past `DEFAULT_GC_AGE` so
     ///   long-dead sessions stop blocking slots.
     ///
@@ -221,29 +222,7 @@ impl Registry {
             return Ok(instance);
         }
 
-        // An alias under this id is a resume of an id that `/clear` moved
-        // on. Its row goes, and the aliases behind it lead on to the slot.
-        if let Some(alias) = map.remove(session_id) {
-            for entry in map.values_mut() {
-                if entry.alias_of.as_deref() == Some(session_id) {
-                    entry.alias_of = alias.alias_of.clone();
-                }
-            }
-        }
-
-        // Allocate path: next-free instance.
-        let taken: std::collections::HashSet<&str> =
-            map.values().filter(|e| e.is_slot()).map(|e| e.instance.as_str()).collect();
-        let instance = next_free_instance(&taken);
-        map.insert(
-            session_id.to_string(),
-            InstanceEntry {
-                instance: instance.clone(),
-                registered_at: now,
-                last_seen: now,
-                alias_of: None,
-            },
-        );
+        let instance = allocate(&mut map, session_id, now);
         write_registry(&path, &map)?;
         drop(lock_file);
 
@@ -279,6 +258,7 @@ impl Registry {
         let instance = match held(&map, new) {
             Some(instance) => instance,
             None => {
+                detach(&mut map, new);
                 let mut slot = map[old].clone();
                 slot.last_seen = agent_fmt::when::now_secs();
                 let instance = slot.instance.clone();
@@ -336,7 +316,7 @@ impl Registry {
             // cheap filter.
             let content = fs::read_to_string(&path).unwrap_or_default();
             let mut map = parse_registry(&content);
-            if map.remove(session_id).is_some() {
+            if detach(&mut map, session_id).is_some() {
                 write_registry(&path, &map).ok();
             }
         }
@@ -443,6 +423,51 @@ impl Default for SnapshotCache {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Give `session_id` a slot of its own: the lowest letter no slot holds.
+/// An alias under `session_id` (a resume of an id that `/clear` moved on)
+/// is detached first. An orphaned alias that reads the letter handed out
+/// is dropped, so a dead session and a live one never share a name.
+fn allocate(map: &mut BTreeMap<String, InstanceEntry>, session_id: &str, now: u64) -> String {
+    detach(map, session_id);
+    let taken: std::collections::HashSet<&str> =
+        map.values().filter(|e| e.is_slot()).map(|e| e.instance.as_str()).collect();
+    let instance = next_free_instance(&taken);
+    let orphans: Vec<String> = map
+        .iter()
+        .filter(|(id, e)| e.instance == instance && orphaned(map, id))
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in orphans {
+        detach(map, &id);
+    }
+    map.insert(
+        session_id.to_string(),
+        InstanceEntry { instance: instance.clone(), registered_at: now, last_seen: now, alias_of: None },
+    );
+    instance
+}
+
+/// Remove `id`'s row. When it was an alias, the aliases that pointed at it
+/// point at its target, so each chain still ends at the slot it led to.
+/// When it was a slot, they keep pointing at `id` for the caller to settle.
+fn detach(map: &mut BTreeMap<String, InstanceEntry>, id: &str) -> Option<InstanceEntry> {
+    let entry = map.remove(id)?;
+    if let Some(target) = &entry.alias_of {
+        for alias in map.values_mut() {
+            if alias.alias_of.as_deref() == Some(id) {
+                alias.alias_of = Some(target.clone());
+            }
+        }
+    }
+    Some(entry)
+}
+
+/// Whether `id` is an alias whose chain reaches no slot in `map`.
+fn orphaned(map: &BTreeMap<String, InstanceEntry>, id: &str) -> bool {
+    map.get(id).is_some_and(|e| !e.is_slot())
+        && chain_end(map, id).is_none_or(|end| !map.contains_key(&end))
 }
 
 /// The id at the end of `id`'s `alias_of` chain: the first one that is no
@@ -864,7 +889,7 @@ sess-a:
     }
 
     #[test]
-    fn an_alias_blocks_no_letter() {
+    fn an_orphaned_alias_gives_up_the_letter_it_reads() {
         with_registry(|reg| {
             reg.register("/x", "sess-a").unwrap();
             reg.rename("/x", "sess-a", "sess-c").unwrap();
@@ -872,6 +897,34 @@ sess-a:
             reg.register("/y", "sess-c").unwrap();
             assert_eq!(reg.lookup("/x", "sess-a").as_deref(), Some("alpha"));
             assert_eq!(reg.register("/x", "sess-d").unwrap(), "alpha");
+            assert_eq!(reg.lookup("/x", "sess-a"), None, "the dead alias no longer reads sess-d's name");
+        });
+    }
+
+    #[test]
+    fn a_rename_onto_an_alias_id_keeps_the_chain_on_its_slot() {
+        with_registry(|reg| {
+            reg.register("/x", "sess-a").unwrap();
+            reg.rename("/x", "sess-a", "sess-b").unwrap();
+            reg.rename("/x", "sess-b", "sess-c").unwrap();
+            assert_eq!(reg.register("/x", "sess-x").unwrap(), "beta");
+            assert_eq!(reg.rename("/x", "sess-x", "sess-b").unwrap().as_deref(), Some("beta"));
+            assert_eq!(reg.successor("/x", "sess-a").as_deref(), Some("sess-c"));
+            assert_eq!(reg.lookup("/x", "sess-a").as_deref(), Some("alpha"));
+            assert_eq!(reg.successor("/x", "sess-x").as_deref(), Some("sess-b"));
+            assert_eq!(reg.snapshot("/x")["sess-b"].alias_of, None);
+        });
+    }
+
+    #[test]
+    fn a_middle_alias_resumed_elsewhere_keeps_the_chain() {
+        with_registry(|reg| {
+            reg.register("/x", "sess-a").unwrap();
+            reg.rename("/x", "sess-a", "sess-b").unwrap();
+            reg.rename("/x", "sess-b", "sess-c").unwrap();
+            reg.register("/y", "sess-b").unwrap();
+            assert_eq!(reg.lookup("/x", "sess-b"), None, "sess-b moved to /y");
+            assert_eq!(reg.successor("/x", "sess-a").as_deref(), Some("sess-c"));
         });
     }
 
