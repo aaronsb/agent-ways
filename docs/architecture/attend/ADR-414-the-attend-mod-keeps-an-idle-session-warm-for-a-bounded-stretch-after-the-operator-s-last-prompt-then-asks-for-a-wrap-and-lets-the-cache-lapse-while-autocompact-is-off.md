@@ -29,7 +29,16 @@ amends:
   - ADR-182#Decision
   - ADR-406#Decision
   - ADR-501#Decision
-status: proposed
+considered:
+  - operator: aaronsb
+    said: "Yes, ~8 h then wrap"
+    via: the operator's pick in the head session, 2026-10-14, to the bound probe
+    covers: [bound]
+  - operator: aaronsb
+    said: "any session where our mod is active should get the keepalive"
+    via: the operator's written answer in the head session, 2026-10-14, to the dormant probe; read as every interactive session with the mod loaded, listening or not
+    covers: [dormant]
+status: accepted
 date: 2026-10-14
 deciders:
   - aaronsb
