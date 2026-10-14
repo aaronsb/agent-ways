@@ -188,8 +188,9 @@ pub(crate) fn brief_invited_room(ident: &Session, groups: &groups::Groups, name:
         let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
         let ids = attend_presence::enrollment::reading_ids(ident);
         let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-        let scan = crate::cmd::inbox::scan_pending(&groups.receive_dirs(&ident.origin_path), &seen, &ids, true);
-        let owed: std::collections::HashSet<String> = scan.delivered.iter().map(|d| attend_state::seen_key(&format!("{}.signal", d.id))).collect();
+        let marks = attend_groups::tombstones::Marks::load(&signals_base());
+        let scan = crate::cmd::inbox::scan_pending(&groups.receive_dirs(&ident.origin_path), &seen, &ids, true, &marks);
+        let owed: std::collections::HashSet<String> = scan.delivered.iter().map(|d| d.key.clone()).collect();
         store.baseline(scan.mark.into_iter().filter(|k| !owed.contains(k)));
         note = scan.note;
     }

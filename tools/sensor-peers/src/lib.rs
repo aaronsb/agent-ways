@@ -317,6 +317,9 @@ impl PeerSensor {
             age: Duration,
         }
         let mut found: Vec<Found> = Vec::new();
+        // What a delete marked, and what a tombstoned session sent, is read
+        // without being shown (ADR-404 D3e).
+        let marks = attend_groups::tombstones::Marks::load(&attend_presence::cache::signals_dir());
         for (room, dir) in scan_dirs.iter().enumerate() {
             let Ok(entries) = fs::read_dir(&dir.path) else { continue };
             for entry in entries.flatten() {
@@ -329,6 +332,10 @@ impl PeerSensor {
                 // signal id, so a signal moved between trays stays seen.
                 let key = attend_state::seen_key(&filename);
                 if self.seen_signals.contains(&key) {
+                    continue;
+                }
+                // Passed over unrecorded, so undoing the delete brings it back.
+                if marks.hides(&key) {
                     continue;
                 }
                 // Read and parse: `from|project|cwd|message` (legacy) or
@@ -348,6 +355,13 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 };
+                let mtime = fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                if marks.hides_sender(&sig.sender_id(), mtime) {
+                    self.seen_signals.insert(key);
+                    continue;
+                }
                 // Skip our own signals — check the from field, not filename.
                 // from is "claude:session-id" or "external:user@terminal"
                 if sig.from.split_once(':').is_some_and(|(_, identity)| ids.contains(&identity)) {
@@ -360,9 +374,6 @@ impl PeerSensor {
                     self.seen_signals.insert(key);
                     continue;
                 }
-                let mtime = fs::metadata(&path)
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH);
                 let age = mtime.elapsed().unwrap_or_default();
                 // The signal's id is its filename stem, the value `re:<id>`
                 // replies reference (ADR-120).

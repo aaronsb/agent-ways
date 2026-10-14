@@ -20,11 +20,14 @@
 //! all (ADR-406 item 10).
 
 pub mod channels;
+pub mod delete;
 pub mod inbox;
 pub mod listen;
+pub mod recipients;
 pub mod peers;
 pub mod send;
 pub mod status;
+pub mod tombstone;
 pub mod unread;
 
 #[cfg(feature = "sensor-peers")]

@@ -40,7 +40,6 @@ use attend_state as state;
 /// attend's settings, typed and loaded through their schema (ADR-503 §13).
 use attend_config as config;
 
-use clap::Parser;
 use cli::{
     ChannelCmd, ChannelGroup, ChannelListArgs, Cli, Commands, ConfigCmd, InboxArgs, JsonArgs, KeepwarmCmd, ListenCmd,
     MessageCmd, PeerCmd, PermissionsCmd, ReplyArgs, SendArgs, SensorCmd,
@@ -51,7 +50,7 @@ use sensors::Focus;
 /// (`gen-docs` writes `docs/cli/attend.md` from this).
 pub fn cli_command() -> clap::Command {
     use clap::CommandFactory;
-    Cli::command()
+    cli::with_limits(Cli::command())
 }
 
 /// The `attend` binary: parse argv and run the verb it names. Exits the
@@ -67,14 +66,16 @@ pub fn cli_main() {
     if bare || top_help {
         print_banner();
         if bare {
-            use clap::CommandFactory;
-            let _ = Cli::command().print_help();
+            let _ = cli_command().print_help();
             println!();
             return;
         }
     }
 
-    let cli = Cli::parse();
+    let cli = {
+        use clap::FromArgMatches;
+        Cli::from_arg_matches(&cli_command().get_matches()).unwrap_or_else(|e| e.exit())
+    };
     let command = match cli.command {
         Some(c) => c,
         None => return,
@@ -90,6 +91,8 @@ pub fn cli_main() {
             Some(MessageCmd::Inbox(a)) => inbox(a),
             Some(MessageCmd::Unread(a)) => cmd::listen::cmd_unread(a.json),
             Some(MessageCmd::Cleanup(a)) => cmd::cleanup::cmd_cleanup(a.dry_run, a.all),
+            Some(MessageCmd::Delete(a)) => cmd::delete::cmd_delete(a),
+            Some(MessageCmd::Tombstone(a)) => cmd::tombstone::cmd_tombstone(a),
         },
         Commands::Channel(g) => channel(g),
         Commands::Peer { list, sub } => match sub {

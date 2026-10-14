@@ -47,7 +47,7 @@ pub(crate) enum Commands {
         json: bool,
     },
 
-    /// Send, reply to, read and count messages (default: inbox)
+    /// Send, reply to, read, count and delete messages, and tombstone a session (default: inbox)
     #[command(args_conflicts_with_subcommands = true)]
     Message {
         #[command(flatten)]
@@ -154,10 +154,65 @@ pub(crate) enum MessageCmd {
     #[command(about = describe::UNREAD)]
     Unread(JsonArgs),
 
-    /// Reap signal files whose owning project is gone, and prune empty
-    /// project dirs. Messages are never removed by age — lifetime is bound
-    /// to project liveness (ADR-136).
+    // `with_limits` writes this verb's help with the limits it applies.
+    /// Reap signal files whose owning project is gone, and prune empty project dirs
     Cleanup(CleanupArgs),
+
+    // `with_limits` writes this verb's long help with the limits it applies.
+    /// Mark for deletion the messages no live session still has to read
+    Delete(DeleteArgs),
+
+    /// Tombstone a session that has exited, so every reader skips its messages
+    ///
+    /// The drain, the mod, `attend message unread`, the Monitor poller and
+    /// `attend message inbox` all skip what a tombstoned session sent, and
+    /// the drain records it read, up to when it was tombstoned; what the
+    /// session sends later, back under --resume, shows. Only an agent's
+    /// session that this host saw exit is tombstoned: a person's id, a
+    /// session that may still read the bus, an id such a session had
+    /// before /clear and this session's own are refused. Its messages stay
+    /// on disk; `attend message delete --everywhere --from <id>` marks them
+    /// for deletion (ADR-404 D3e).
+    Tombstone(TombstoneArgs),
+}
+
+/// The help of the verbs that state a limit, written from the constants
+/// that set it, so the text cannot drift from the behaviour.
+pub(crate) fn with_limits(cmd: clap::Command) -> clap::Command {
+    let grace = attend_presence::heartbeat::DEFAULT_GRACE.as_secs();
+    let days = crate::cmd::cleanup::MARK_REAP_DAYS;
+    let sessions = crate::cmd::cleanup::MARK_REAP_SESSIONS;
+    let reap = format!(
+        "{days} days after the mark, or for a message in a project tray once that project has started {sessions} \
+         Claude Code sessions since, each /clear counting as one"
+    );
+    let delete = format!(
+        "Mark for deletion the messages no live session still has to read\n\n\
+         A message is marked when it is in the scope, older than --older-than, older than {grace} seconds, and \
+         no session that may still read the bus would be delivered it: a session keeps what `attend message \
+         unread` counts for it, its cold start included, and one this host cannot judge keeps its mail while \
+         its last heartbeat is under {days} days old. A \
+         person in attend-chat holds nothing. Every reader skips a marked message, and `attend message \
+         cleanup` removes it {reap} (ADR-404 D3e). --undo takes a delete back, and its messages are delivered \
+         again, while cleanup has not yet removed them."
+    );
+    let cleanup = format!(
+        "Reap signal files whose owning project is gone, and prune empty project dirs. Lifetime is bound to \
+         project liveness (ADR-136); the one removal by age is of a message `attend message delete` marked, \
+         {reap} (ADR-404 D3e)."
+    );
+    // `mut_subcommands` edits each in place; `mut_subcommand` would move the
+    // edited one to the end and reorder the help and the generated docs.
+    cmd.mut_subcommands(|top| {
+        if top.get_name() != "message" {
+            return top;
+        }
+        top.mut_subcommands(|verb| match verb.get_name() {
+            "delete" => verb.about(delete.lines().next().unwrap_or_default().to_string()).long_about(delete.clone()),
+            "cleanup" => verb.about(cleanup.clone()),
+            _ => verb,
+        })
+    })
 }
 
 /// Subcommands for `attend channel`. With no subcommand, defaults to `list`.
@@ -428,6 +483,72 @@ pub(crate) struct CleanupArgs {
 }
 
 #[derive(Args)]
+#[command(group(clap::ArgGroup::new("scope").args(["open", "channel", "dm", "everywhere"])))]
+pub(crate) struct DeleteArgs {
+    /// Delete in #open
+    #[arg(long)]
+    pub(crate) open: bool,
+
+    /// Delete in this channel
+    #[arg(long, value_name = "NAME")]
+    pub(crate) channel: Option<String>,
+
+    /// Delete in the direct-message thread between you and this session:
+    /// what it sent you and what you sent it. You are the session this runs
+    /// in, under its current id and the ids it had before /clear, or
+    /// outside a session the person at this terminal
+    #[arg(long, value_name = "SESSION-ID")]
+    pub(crate) dm: Option<String>,
+
+    /// Delete in every room: #open, each channel, each project tray and
+    /// each person's tray
+    #[arg(long)]
+    pub(crate) everywhere: bool,
+
+    /// Only messages this session sent
+    #[arg(long, value_name = "SESSION-ID")]
+    pub(crate) from: Option<String>,
+
+    /// How old a message must be: `current` (before the earliest start of
+    /// any live session), `today` (before local midnight), `all`, a
+    /// duration such as 90m, 2h30m, 3d or 1w, or a local date YYYY-MM-DD
+    #[arg(long, value_name = "WHEN", default_value = "all")]
+    pub(crate) older_than: String,
+
+    /// Report what would be marked and mark nothing
+    #[arg(long, short = 'n')]
+    pub(crate) dry_run: bool,
+
+    /// Remove the marks of the newest delete, or of the batch named
+    #[arg(long, value_name = "BATCH", num_args = 0..=1, default_missing_value = "", conflicts_with_all = ["scope", "from", "older_than", "dry_run"])]
+    pub(crate) undo: Option<String>,
+
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct TombstoneArgs {
+    /// The session to tombstone
+    #[arg(value_name = "SESSION-ID", required_unless_present = "list")]
+    pub(crate) session: Option<String>,
+
+    /// Remove the session's tombstone. What a drain recorded read while it
+    /// stood stays read
+    #[arg(long, requires = "session")]
+    pub(crate) undo: bool,
+
+    /// List the tombstoned sessions
+    #[arg(long, conflicts_with_all = ["session", "undo"])]
+    pub(crate) list: bool,
+
+    /// Print the result as one JSON document
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
 pub(crate) struct TuneArgs {
     /// Write the derived absolute_refractory, decay_per_minute and
     /// peer_activity_window to the user config, changing nothing else
@@ -558,6 +679,34 @@ mod tests {
         let cli = Cli::command();
         let shown: Vec<&str> = cli.get_subcommands().filter(|c| !c.is_hide_set()).map(|c| c.get_name()).collect();
         assert_eq!(shown, ["run", "listen", "message", "channel", "peer", "keepwarm", "chat", "sensor", "config"]);
+    }
+
+    /// The help states the limits the code applies.
+    #[test]
+    fn help_states_the_limits_in_force() {
+        let cli = crate::cli_command();
+        let delete = at(&cli, "message delete").get_long_about().unwrap().to_string();
+        let grace = attend_presence::heartbeat::DEFAULT_GRACE.as_secs();
+        for text in [
+            format!("older than {grace} seconds"),
+            format!("{} days after the mark", crate::cmd::cleanup::MARK_REAP_DAYS),
+            format!("started {} Claude Code sessions", crate::cmd::cleanup::MARK_REAP_SESSIONS),
+        ] {
+            assert!(delete.contains(&text), "{text} in {delete}");
+        }
+        let cleanup = at(&cli, "message cleanup").get_about().unwrap().to_string();
+        assert!(cleanup.contains(&format!("{} days", crate::cmd::cleanup::MARK_REAP_DAYS)), "{cleanup}");
+        let tombstone = at(&cli, "message tombstone").get_long_about().unwrap().to_string();
+        assert!(tombstone.contains("attend message delete --everywhere --from <id>"), "{tombstone}");
+    }
+
+    /// Writing the limits into the help keeps every verb where it is declared.
+    #[test]
+    fn the_limits_keep_the_declared_order() {
+        let names = |c: &clap::Command| c.get_subcommands().map(|s| s.get_name().to_string()).collect::<Vec<_>>();
+        let (declared, written) = (Cli::command(), crate::cli_command());
+        assert_eq!(names(&written), names(&declared));
+        assert_eq!(names(&at(&written, "message")), ["send", "reply", "inbox", "unread", "cleanup", "delete", "tombstone"]);
     }
 
     #[test]

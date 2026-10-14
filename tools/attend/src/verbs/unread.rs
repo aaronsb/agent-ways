@@ -66,7 +66,8 @@ pub fn unread() -> Unread {
     let seen = snapshot.map(|s| s.seen_signals).unwrap_or_default();
     let ids = attend_presence::enrollment::reading_ids(&me);
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let scan = crate::cmd::inbox::scan_pending(&dirs, &seen, &ids, baselining);
+    let marks = attend_groups::tombstones::Marks::load(&crate::util::signals_base());
+    let scan = crate::cmd::inbox::scan_pending(&dirs, &seen, &ids, baselining, &marks);
 
     let mut rooms: Vec<RoomCount> = Vec::new();
     for dir in &dirs {

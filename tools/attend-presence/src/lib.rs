@@ -60,6 +60,22 @@ fn record_process_runs(pid: u32, started_at_ms: Option<u64>) -> bool {
     }
 }
 
+/// The ids of the Claude Code sessions whose recorded pid a process holds on
+/// this host, listening or not. A pid given to a later process counts too:
+/// for a caller that keeps what a session may still read, that errs on the
+/// side of keeping.
+pub fn running_sessions() -> Vec<String> {
+    let mut ids: Vec<String> = session::sessions_dirs()
+        .iter()
+        .flat_map(|d| claude_sessions::read_session_records(d))
+        .filter(|r| process::is_running(r.pid))
+        .map(|r| r.session_id)
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 /// Whether `member_id` is a Claude Code session whose process this host saw
 /// exit: it is not [`alive`], and either the session records naming it all
 /// name processes that no longer run ([`record_process_runs`]), or, with no

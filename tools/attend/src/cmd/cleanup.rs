@@ -3,8 +3,8 @@
 //! also used by the in-loop auto-sweep in `cmd::run`, so it and
 //! `CleanupStats` are `pub(crate)`.
 //!
-//! Messages are NEVER reaped by age (ADR-136): a durable message waits in
-//! its tray until the recipient reads it. Lifetime is bound by *project
+//! An unmarked message is never reaped by age (ADR-136): a durable message
+//! waits in its tray until the recipient reads it. Lifetime is bound by *project
 //! liveness* instead — mirroring Claude Code, a project is live iff
 //! `~/.claude/projects/<encoded-cwd>/` exists. When a project is gone:
 //!   - its directed tray (`signals/<encoded-cwd>/`) is reaped wholesale —
@@ -18,10 +18,27 @@
 //!
 //! A tray is named by `claude_sessions::attend_key`: the project slug, `-`,
 //! and a hash of the path. The slug part is what liveness checks.
+//!
+//! The same sweep removes the messages a delete marked (ADR-404 D3e), with
+//! their marks, once a mark is [`MARK_REAP_DAYS`] old, or, for a message in
+//! a project tray, once that project has started [`MARK_REAP_SESSIONS`]
+//! Claude Code sessions since the mark. A session start is a transcript
+//! under the project's `~/.claude/projects/<slug>/`, named by its session
+//! id, born after the mark, so each `/clear` counts. A message no delete marked
+//! is never removed this way.
 
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use crate::util::{projects_base, signals_base};
+
+/// Days after which cleanup removes a marked message.
+pub(crate) const MARK_REAP_DAYS: u64 = 7;
+
+/// Claude Code sessions started in a project after which cleanup removes a
+/// marked message in that project's tray.
+pub(crate) const MARK_REAP_SESSIONS: usize = 3;
 
 /// Statistics from a cleanup sweep.
 #[derive(Default, Debug)]
@@ -30,25 +47,66 @@ pub(crate) struct CleanupStats {
     pub(crate) removed: u64,
     pub(crate) bytes: u64,
     pub(crate) dirs_removed: u64,
+    /// Of `removed`, the messages a delete had marked.
+    pub(crate) marked_removed: u64,
 }
 
-/// Is the project owning the tray `tray` still tracked by Claude Code? The
-/// tray's slug part names the project directory, exactly or, for a slug
-/// Claude Code truncated, by its 200-character prefix.
-fn tray_live(projects: &Path, tray: &str) -> bool {
-    let Some(slug) = claude_sessions::attend_key_slug(tray) else {
-        return false;
-    };
-    if projects.join(slug).is_dir() {
-        return true;
+/// The Claude Code project directory of the project owning tray `tray`.
+/// The tray's slug part names it, exactly or, for a slug Claude Code
+/// truncated, by its 200-character prefix.
+fn project_dir(projects: &Path, tray: &str) -> Option<PathBuf> {
+    let slug = claude_sessions::attend_key_slug(tray)?;
+    let exact = projects.join(slug);
+    if exact.is_dir() {
+        return Some(exact);
     }
     if slug.len() <= claude_sessions::MAX_SLUG_LEN {
-        return false;
+        return None;
     }
     let prefix = &slug[..=claude_sessions::MAX_SLUG_LEN];
-    std::fs::read_dir(projects).into_iter().flatten().flatten().any(|e| {
-        e.file_name().to_str().is_some_and(|n| n.starts_with(prefix)) && e.path().is_dir()
+    std::fs::read_dir(projects).into_iter().flatten().flatten().map(|e| e.path()).find(|p| {
+        p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(prefix)) && p.is_dir()
     })
+}
+
+/// Is the project owning the tray `tray` still tracked by Claude Code?
+fn tray_live(projects: &Path, tray: &str) -> bool {
+    project_dir(projects, tray).is_some()
+}
+
+/// When each Claude Code session in project directory `dir` started: its
+/// transcript's birth time, or where the filesystem keeps none, the first
+/// timestamp written in it. A session's transcript is named by its session
+/// id, a UUID; any other file there is no session.
+fn session_starts(dir: &Path) -> Vec<SystemTime> {
+    claude_sessions::transcripts_in(dir)
+        .iter()
+        .filter(|t| {
+            t.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| !s.starts_with("pid-") && attend_groups::is_agent_member(s))
+        })
+        .filter_map(|t| std::fs::metadata(t).and_then(|m| m.created()).ok().or_else(|| first_timestamp(t)))
+        .collect()
+}
+
+/// The first `"timestamp"` in the transcript at `path`, among its first lines.
+fn first_timestamp(path: &Path) -> Option<SystemTime> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(path).ok()?;
+    std::io::BufReader::new(file).lines().take(20).map_while(Result::ok).find_map(|line| {
+        let v: serde_json::Value = serde_json::from_str(&line).ok()?;
+        let secs = agent_fmt::when::parse_utc_iso(v.get("timestamp")?.as_str()?)?;
+        Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+    })
+}
+
+/// Whether a message marked at `at` has outlived its mark: [`MARK_REAP_DAYS`]
+/// have passed, or `starts`, the sessions of the project whose tray holds
+/// it, counts [`MARK_REAP_SESSIONS`] begun since.
+fn mark_expired(at: SystemTime, now: SystemTime, starts: Option<&[SystemTime]>) -> bool {
+    now.duration_since(at).unwrap_or_default() >= Duration::from_secs(MARK_REAP_DAYS * 86_400)
+        || starts.is_some_and(|s| s.iter().filter(|t| **t > at).count() >= MARK_REAP_SESSIONS)
 }
 
 /// Core cleanup routine, shared by `attend message cleanup` and the in-loop sweep.
@@ -82,6 +140,14 @@ pub(crate) fn run_cleanup_in(
         Ok(e) => e,
         Err(_) => return stats,
     };
+
+    let marks = attend_groups::tombstones::message_marks(base);
+    let now = SystemTime::now();
+    // Session starts per project tray, read once, and only for a tray that
+    // holds a marked message.
+    let mut starts: HashMap<String, Vec<SystemTime>> = HashMap::new();
+    // The keys of the signal files the sweep leaves, whose marks stay.
+    let mut present: HashSet<String> = HashSet::new();
 
     // Pass 1: reap signals. The person trays sit one level down, under
     // `_people/`, and each is swept as a shared room.
@@ -131,7 +197,19 @@ pub(crate) fn run_cleanup_in(
             } else {
                 tray_dead
             };
-            if !reap {
+            let key = attend_state::seen_key(name);
+            let marked_out = !reap
+                && marks.get(&key).is_some_and(|at| {
+                    let project = (!shared).then(|| {
+                        starts
+                            .entry(dir_name.clone())
+                            .or_insert_with(|| project_dir(projects, &dir_name).map(|d| session_starts(&d)).unwrap_or_default())
+                            .as_slice()
+                    });
+                    mark_expired(*at, now, project)
+                });
+            if !reap && !marked_out {
+                present.insert(key);
                 continue;
             }
 
@@ -141,8 +219,17 @@ pub(crate) fn run_cleanup_in(
             } else if std::fs::remove_file(&path).is_ok() {
                 stats.removed += 1;
                 stats.bytes += size;
+                stats.marked_removed += u64::from(marked_out);
+            } else {
+                present.insert(key);
             }
         }
+    }
+
+    // A mark goes with its message, and with it a batch record that owns no
+    // mark any more.
+    if !dry_run && !marks.is_empty() {
+        attend_groups::tombstones::prune(base, &present);
     }
 
     // Pass 2: remove now-empty project subdirs (shells left behind). Never
@@ -190,8 +277,8 @@ pub(crate) fn cmd_cleanup(dry_run: bool, nuke_all: bool) {
         println!("\ndry run: examined {} signal file(s)", stats.examined);
     } else {
         println!(
-            "cleaned up {} signal file(s), freed {} bytes (examined {}); removed {} empty project dir(s)",
-            stats.removed, stats.bytes, stats.examined, stats.dirs_removed,
+            "cleaned up {} signal file(s), {} of them marked for deletion, freed {} bytes (examined {}); removed {} empty project dir(s)",
+            stats.removed, stats.marked_removed, stats.bytes, stats.examined, stats.dirs_removed,
         );
     }
 }
@@ -280,6 +367,92 @@ mod tests {
         assert!(!tray.join("dead.signal").exists());
         assert!(empty.is_dir(), "a person tray is never reaped");
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Mark the signal `name` and date the mark `ago` back.
+    fn mark(base: &Path, name: &str, ago: Duration) {
+        attend_groups::tombstones::mark_messages(base, &[name.to_string()]).unwrap();
+        let path = base.join("_tombstones/messages").join(name);
+        std::fs::File::options().write(true).open(path).unwrap().set_modified(SystemTime::now() - ago).unwrap();
+    }
+
+    /// `n` sessions started in the project at `path` now.
+    fn sessions(projects: &Path, path: &str, n: usize) {
+        let dir = projects.join(claude_sessions::project_slug(path));
+        std::fs::create_dir_all(&dir).unwrap();
+        let start = std::fs::read_dir(&dir).unwrap().count();
+        for i in start..start + n {
+            std::fs::write(dir.join(format!("{i:08}-0000-4000-8000-000000000000.jsonl")), "{}\n").unwrap();
+        }
+    }
+
+    const DAY: Duration = Duration::from_secs(86_400);
+
+    /// In `#open` a mark goes by its days alone, however many sessions any
+    /// project started since.
+    #[test]
+    fn a_marked_open_message_is_removed_after_the_days_limit() {
+        let (root, base, projects) = fixture("mark-days");
+        sessions(&projects, "/srv/live", 5);
+        let open = base.join("_broadcast");
+        for name in ["old.signal", "recent.signal", "unmarked.signal"] {
+            std::fs::create_dir_all(&open).unwrap();
+            std::fs::write(open.join(name), "claude:a|live|/srv/live|hi\n").unwrap();
+        }
+        mark(&base, "old.signal", 8 * DAY);
+        mark(&base, "recent.signal", DAY);
+
+        let dry = run_cleanup_in(&base, &projects, true, false);
+        assert_eq!(dry.removed, 0);
+        assert!(open.join("old.signal").exists(), "a dry run removes nothing");
+
+        let stats = run_cleanup_in(&base, &projects, false, false);
+        assert_eq!((stats.removed, stats.marked_removed), (1, 1));
+        assert!(!open.join("old.signal").exists());
+        assert!(open.join("recent.signal").exists() && open.join("unmarked.signal").exists());
+        let marks: Vec<String> = attend_groups::tombstones::message_marks(&base).into_keys().collect();
+        assert_eq!(marks, ["recent.signal"], "the removed message's mark goes with it");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// In a project tray a mark also goes once the project has started the
+    /// session limit since; mail no delete marked stays, whoever sent it.
+    #[test]
+    fn a_marked_tray_message_is_removed_after_the_session_limit() {
+        let (root, base, projects) = fixture("mark-sessions");
+        let tray = base.join(claude_sessions::attend_key("/srv/live"));
+        std::fs::create_dir_all(&tray).unwrap();
+        for name in ["marked.signal", "from-gone.signal"] {
+            std::fs::write(tray.join(name), "claude:gone|gone|/srv/gone|to:someone|hi\n").unwrap();
+        }
+        mark(&base, "marked.signal", DAY);
+
+        sessions(&projects, "/srv/live", MARK_REAP_SESSIONS - 1);
+        // Files that are not a session's transcript count for nothing.
+        let dir = projects.join(claude_sessions::project_slug("/srv/live"));
+        std::fs::write(dir.join("agent-notes.jsonl"), "{}\n").unwrap();
+        std::fs::write(dir.join("history.jsonl"), "{}\n").unwrap();
+        run_cleanup_in(&base, &projects, false, false);
+        assert!(tray.join("marked.signal").exists(), "two sessions since the mark");
+
+        sessions(&projects, "/srv/live", 1);
+        let stats = run_cleanup_in(&base, &projects, false, false);
+        assert_eq!(stats.marked_removed, 1);
+        assert!(!tray.join("marked.signal").exists());
+        assert!(tray.join("from-gone.signal").exists(), "unmarked mail of a session that has gone stays");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Sessions that started before the mark do not count.
+    #[test]
+    fn sessions_before_the_mark_do_not_count() {
+        let at = SystemTime::now();
+        let before = [at - DAY, at - DAY, at - DAY];
+        assert!(!mark_expired(at, at + Duration::from_secs(60), Some(&before)));
+        let after = [at + Duration::from_secs(1); MARK_REAP_SESSIONS];
+        assert!(mark_expired(at, at + Duration::from_secs(60), Some(&after)));
+        assert!(!mark_expired(at, at + Duration::from_secs(60), None));
+        assert!(mark_expired(at, at + MARK_REAP_DAYS as u32 * DAY, None));
     }
 
     #[test]

@@ -111,6 +111,94 @@ pub fn duration(secs: u64) -> String {
     }
 }
 
+/// Local midnight at the start of the day that holds `t`, by this process's
+/// UTC offset.
+pub fn local_day_start(t: SystemTime) -> SystemTime {
+    day_start_with_offset(t, local_offset_secs())
+}
+
+/// [`local_day_start`] with the offset given, for tests and for callers
+/// that carry their own zone.
+pub fn day_start_with_offset(t: SystemTime, offset_secs: i64) -> SystemTime {
+    let local = unix_secs(t) + offset_secs;
+    from_unix_secs(local.div_euclid(86_400) * 86_400 - offset_secs)
+}
+
+/// Local midnight at the start of the date `y`-`m`-`d`, by the UTC offset
+/// in force that day, so a date across a daylight-saving change is not an
+/// hour off. Where `date` cannot say, the current offset stands in. `None`
+/// for a month or day out of range.
+pub fn local_date_start(y: i64, m: u32, d: u32) -> Option<SystemTime> {
+    date_start_with_offset(y, m, d, offset_on(None, y, m, d).unwrap_or_else(local_offset_secs))
+}
+
+/// The UTC offset in force at midnight starting `y`-`m`-`d`, in zone `tz`
+/// or the process's own, asked of `date`: GNU's `-d`, then BSD's `-j -f`.
+fn offset_on(tz: Option<&str>, y: i64, m: u32, d: u32) -> Option<i64> {
+    let at = format!("{y:04}-{m:02}-{d:02} 00:00:00");
+    let attempts: [&[&str]; 2] = [&["-d", &at, "+%z"], &["-j", "-f", "%Y-%m-%d %H:%M:%S", &at, "+%z"]];
+    attempts.iter().find_map(|args| {
+        let mut cmd = std::process::Command::new("date");
+        cmd.args(*args).stderr(std::process::Stdio::null());
+        if let Some(tz) = tz {
+            cmd.env("TZ", tz);
+        }
+        let out = cmd.output().ok().filter(|o| o.status.success())?;
+        parse_utc_offset(String::from_utf8(out.stdout).ok()?.trim())
+    })
+}
+
+/// [`local_date_start`] with the offset given.
+pub fn date_start_with_offset(y: i64, m: u32, d: u32, offset_secs: i64) -> Option<SystemTime> {
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || civil_from_days(days_from_civil(y, m, d)) != (y, m, d) {
+        return None;
+    }
+    Some(from_unix_secs(days_from_civil(y, m, d) * 86_400 - offset_secs))
+}
+
+/// `YYYY-MM-DD` to its local midnight ([`local_date_start`]).
+pub fn parse_local_date(t: &str) -> Option<SystemTime> {
+    let mut parts = t.split('-');
+    let (y, m, d) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() || y.len() != 4 || m.len() != 2 || d.len() != 2 {
+        return None;
+    }
+    local_date_start(y.parse().ok()?, m.parse().ok()?, d.parse().ok()?)
+}
+
+/// A span written as a run of `<n><unit>` pairs, the units `s`, `m`, `h`,
+/// `d` and `w`: `90m`, `2h30m`, `3d`, `1w`. `None` for anything else or a
+/// span of zero.
+pub fn parse_span(t: &str) -> Option<std::time::Duration> {
+    let mut total: u64 = 0;
+    let mut digits = String::new();
+    for c in t.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            continue;
+        }
+        let unit = match c {
+            's' => 1,
+            'm' => 60,
+            'h' => 3_600,
+            'd' => 86_400,
+            'w' => 604_800,
+            _ => return None,
+        };
+        let n: u64 = digits.parse().ok()?;
+        total = total.checked_add(n.checked_mul(unit)?)?;
+        digits.clear();
+    }
+    (digits.is_empty() && total > 0).then(|| std::time::Duration::from_secs(total))
+}
+
+fn from_unix_secs(secs: i64) -> SystemTime {
+    match u64::try_from(secs) {
+        Ok(s) => UNIX_EPOCH + std::time::Duration::from_secs(s),
+        Err(_) => UNIX_EPOCH - std::time::Duration::from_secs(secs.unsigned_abs()),
+    }
+}
+
 fn unix_secs(t: SystemTime) -> i64 {
     match t.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_secs() as i64,
@@ -214,6 +302,40 @@ mod tests {
         let midnightish = (NOW / 86_400) * 86_400 + 1_800;
         let rendered = compact_time_with_offset(at(midnightish), at(NOW), -7_200);
         assert_eq!(rendered, "07-21 22:30");
+    }
+
+    #[test]
+    fn a_day_starts_at_local_midnight() {
+        // 15:04 UTC on 2026-07-22 is 17:04 at +2h, whose day began at
+        // 22:00 UTC the evening before.
+        assert_eq!(day_start_with_offset(at(NOW), 0), at(1_784_678_400));
+        assert_eq!(day_start_with_offset(at(NOW), 7_200), at(1_784_678_400 - 7_200));
+        assert_eq!(date_start_with_offset(2026, 7, 22, 7_200), Some(at(1_784_678_400 - 7_200)));
+        assert_eq!(date_start_with_offset(2026, 2, 30, 0), None);
+        assert_eq!(date_start_with_offset(2026, 13, 1, 0), None);
+    }
+
+    /// A date's midnight takes the offset of that date, standard or summer.
+    #[test]
+    fn a_dates_offset_is_the_one_in_force_that_day() {
+        // Needs the zone database (tzdata) that `date` reads.
+        let winter = offset_on(Some("America/New_York"), 2026, 1, 15);
+        let summer = offset_on(Some("America/New_York"), 2026, 7, 15);
+        assert_eq!((winter, summer), (Some(-18_000), Some(-14_400)), "`date` with tzdata installed");
+    }
+
+    #[test]
+    fn spans_and_dates_parse() {
+        assert_eq!(parse_span("2h30m"), Some(Duration::from_secs(9_000)));
+        assert_eq!(parse_span("3d"), Some(Duration::from_secs(3 * 86_400)));
+        assert_eq!(parse_span("1w"), Some(Duration::from_secs(604_800)));
+        for bad in ["", "soon", "2h30", "5x", "0m"] {
+            assert_eq!(parse_span(bad), None, "{bad}");
+        }
+        assert_eq!(parse_local_date("2026-07-22"), local_date_start(2026, 7, 22));
+        for bad in ["2026-7-22", "2026-02-30", "22-07-2026"] {
+            assert_eq!(parse_local_date(bad), None, "{bad}");
+        }
     }
 
     #[test]
