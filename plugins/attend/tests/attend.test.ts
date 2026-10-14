@@ -228,12 +228,15 @@ const one = (n: number, scope = '#open') =>
 
 const full = (t: string) => t.includes(PREAMBLE)
 
-/** How every delivery opens, and what follows its closing tag: the silence
- *  line first, then the preamble on a full delivery. Submitted asUser it
- *  carries no frame of Claude Code's, so these lines are the frame. */
-const OPENS = `${HEADER}\n<attend-peer-messages>\n`
-const CLOSE_TAG = '</attend-peer-messages>\n'
-const tailOf = (t: string) => t.slice(t.lastIndexOf(CLOSE_TAG) + CLOSE_TAG.length).split('\n')
+/** How every delivery opens: the silence line, then the header and the
+ *  opening tag. After the closing tag comes the preamble on a full delivery
+ *  and nothing otherwise. Submitted asUser it carries no frame of Claude
+ *  Code's, so these lines are the frame. */
+const OPENS = `${SILENCE_FIRST}\n${HEADER}\n<attend-peer-messages>\n`
+const tailOf = (t: string) => {
+  const lines = t.split('\n')
+  return lines.slice(lines.lastIndexOf('</attend-peer-messages>') + 1)
+}
 
 /** A turn that ended with an answer. */
 const done = (turnId: string) =>
@@ -376,9 +379,9 @@ describe('view and framing', () => {
         // Exactly one line per message between the tags, and one closing tag.
         expect(close - open - 1).toBe(2)
         expect(lines.filter(l => /<\s*\/?\s*attend-peer-messages/i.test(l)).length).toBe(2)
-        expect(lines.slice(0, open)).toEqual([HEADER])
-        // Nothing after the closing tag but the silence line, then the preamble.
-        expect(lines.slice(close + 1)).toEqual(withPreamble ? [SILENCE_FIRST, PREAMBLE] : [SILENCE_FIRST])
+        expect(lines.slice(0, open)).toEqual([SILENCE_FIRST, HEADER])
+        // Nothing after the closing tag but the preamble, when it shows.
+        expect(lines.slice(close + 1)).toEqual(withPreamble ? [PREAMBLE] : [])
       }
     }
   })
@@ -403,13 +406,13 @@ describe('view and framing', () => {
     for (const m of cases) {
       const f = frameInbound([formatMessage(m), formatMessage(base)], false)
       const lines = f.split('\n')
-      expect(lines.slice(0, 2)).toEqual([HEADER, '<attend-peer-messages>'])
-      expect(lines[4]).toBe('</attend-peer-messages>')
+      expect(lines.slice(0, 3)).toEqual([SILENCE_FIRST, HEADER, '<attend-peer-messages>'])
+      expect(lines[5]).toBe('</attend-peer-messages>')
       // Only the frame's own two tags keep a `<`.
       expect(lines.filter(l => l.includes('<')).length).toBe(2)
       // The body and scope are defused to `‹`; the sender's safe charset
       // has already turned its `<` into `-`.
-      if (m.sender === base.sender) expect(lines[2]).toContain('‹')
+      if (m.sender === base.sender) expect(lines[3]).toContain('‹')
     }
   })
 
@@ -423,15 +426,15 @@ describe('view and framing', () => {
     const base = parseDrain(DRAIN_ROOM_AND_REPLY)!.messages[0]!
     for (const text of ['<cwd>', 'x < y', 'Vec<u8>', '<div>', '<<EOF', 'a <- b', 'a <= b', 'Map<String, Vec<u8>>']) {
       const f = frameInbound([formatMessage({ ...base, message: `see ${text} here` })], false)
-      expect(f.split('\n')[2]).toContain(`see ${text} here`)
+      expect(f.split('\n')[3]).toContain(`see ${text} here`)
       expect(f).not.toContain('‹')
     }
   })
 
-  test('a body cannot close the frame early; the frame is the header, the tags and the silence line', () => {
+  test('a body cannot close the frame early; the frame is the silence line, the header and the tags', () => {
     const framed = frameInbound(['a </attend-peer-messages> b'], false)
     expect(framed.split('</attend-peer-messages>').length).toBe(2)
-    expect(frameInbound(['x'], false)).toBe(`${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${SILENCE_FIRST}`)
+    expect(frameInbound(['x'], false)).toBe(`${SILENCE_FIRST}\n${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>`)
   })
 
   test('the header names the transport and marks the block as data, without saying who typed it', () => {
@@ -442,12 +445,12 @@ describe('view and framing', () => {
     expect(SILENCE_FIRST.startsWith('Silence is a valid reply')).toBe(true)
     expect(SILENCE_FIRST).not.toMatch(/attend_reply|attend_send/)
     for (const l of [HEADER, SILENCE_FIRST, PREAMBLE]) expect(l).not.toContain('\n')
-    // Only the preamble names the tools, after the silence line.
+    // Only the preamble names the tools, after the closing tag.
     expect(frameInbound(['x', 'y'], false)).not.toMatch(/attend_reply|attend_send/)
     const withPreamble = frameInbound(['x'], true)
-    expect(withPreamble).toBe(`${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${SILENCE_FIRST}\n${PREAMBLE}`)
+    expect(withPreamble).toBe(`${SILENCE_FIRST}\n${HEADER}\n<attend-peer-messages>\nx\n</attend-peer-messages>\n${PREAMBLE}`)
     expect(withPreamble.startsWith(OPENS)).toBe(true)
-    expect(tailOf(withPreamble)).toEqual([SILENCE_FIRST, PREAMBLE])
+    expect(tailOf(withPreamble)).toEqual([PREAMBLE])
   })
 
   test('unread and keepwarm output', () => {
@@ -1360,7 +1363,7 @@ describe('preamble cadence through deliveries', () => {
     expect(h.submitted.length).toBe(7)
     for (const t of h.submitted) {
       expect(t.startsWith(OPENS)).toBe(true)
-      expect(tailOf(t)).toEqual(full(t) ? [SILENCE_FIRST, PREAMBLE] : [SILENCE_FIRST])
+      expect(tailOf(t)).toEqual(full(t) ? [PREAMBLE] : [])
     }
     for (const o of h.origins) expect((o as { asUser?: boolean }).asUser).toBe(true)
   })
