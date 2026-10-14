@@ -13,7 +13,8 @@
 //! where the place's file holds the key, removes it. A number, text or
 //! list key has no values to pick: an entry dialog holds the value in
 //! effect there, a list's entries separated by commas, and an empty entry
-//! removes the key from the place's file. The pick is written
+//! removes the key from the place's file; `""` or `[]` writes an empty
+//! text or list, which overrides a lower layer. The pick is written
 //! as `ways settings set` writes it, the bottom bar says where and names a
 //! layer that still overrides it, and the chat's own keys apply at once.
 
@@ -99,6 +100,8 @@ impl ChatPane {
     fn value_entry(&mut self, name: &str, at: usize, value: String, error: Option<String>) {
         let Some((_, place)) = self.setting_places.get(at) else { return };
         let title = format!("{name} · {}", place.name());
+        // Text and lists can be empty on purpose: the dialog says how.
+        let error = error.or_else(|| edit::empty_literal(name).map(|e| format!("empty unsets · {e} writes empty")));
         self.to_open = Some(Open::Entry { id: format!("{TYPED}{name}{SEP}{at}"), title, value, error, anchor: Anchor::Center });
     }
 

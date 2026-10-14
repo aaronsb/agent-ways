@@ -225,4 +225,21 @@ fn settings_list_choose_a_place_and_write_to_its_file() {
     keys(&mut c, &[KeyCode::Backspace; 60]);
     keys(&mut c, &[KeyCode::Enter]);
     assert!(!read(&file).contains("windows"), "{}", read(&file));
+
+    // `[]` writes an empty list, which overrides a lower layer; the dialog
+    // says so.
+    open_settings(&mut c);
+    click_on(&mut c, "attend_mod.keepalive.windows =");
+    click_on(&mut c, "project ~/work/proj:");
+    assert!(shown(&mut c).contains("[] writes empty"), "the dialog's hint: {}", shown(&mut c));
+    keys(&mut c, &[KeyCode::Backspace; 60]);
+    typed(&mut c, "[]");
+    keys(&mut c, &[KeyCode::Enter]);
+    assert!(read(&file).contains("windows: []"), "{}", read(&file));
+    open_settings(&mut c);
+    click_on(&mut c, "attend_mod.keepalive.timezone =");
+    click_on(&mut c, "project ~/work/proj:");
+    typed(&mut c, "\"\"");
+    keys(&mut c, &[KeyCode::Enter]);
+    assert!(read(&file).contains("timezone: \"\""), "{}", read(&file));
 }

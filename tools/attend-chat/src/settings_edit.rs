@@ -212,6 +212,18 @@ pub fn is_typed(name: &str) -> bool {
     matches!(Key::of(name).map(|k| k.spec().kind), Some(Kind::Int { .. } | Kind::Float { .. } | Kind::Text | Kind::Path | Kind::List))
 }
 
+/// What an entry dialog takes to write an empty value for `name`, apart
+/// from an empty entry, which removes the key: `""` for text, `[]` for a
+/// list. An empty value written in a project's file overrides a lower
+/// layer's.
+pub fn empty_literal(name: &str) -> Option<&'static str> {
+    match Key::of(name).map(|k| k.spec().kind) {
+        Some(Kind::Text | Kind::Path) => Some("\"\""),
+        Some(Kind::List) => Some("[]"),
+        _ => None,
+    }
+}
+
 /// The values `name` takes.
 pub fn choices(name: &str) -> Vec<String> {
     match Key::of(name).map(|k| k.spec().kind) {
@@ -273,7 +285,12 @@ pub fn set_at(name: &str, raw: &str, place: &Place, dir: &Path) -> Result<Done, 
         return crate::settings::set(name, raw, &file, dir)
             .map(|said| Done { said: format!("{} · {}", said.replacen(short_name, name, 1), tilde(&file)), overridden: false });
     }
-    let v = key.spec().parse_cli(raw, &key.layers(place), &[]).map_err(|m| format!("{name}: {m}"))?;
+    // `""` typed in an entry dialog is the empty text itself; `[]` already
+    // reads as the empty list.
+    let v = match (key.spec().kind, raw.trim()) {
+        (Kind::Text | Kind::Path, "\"\"") => serde_yaml::Value::String(String::new()),
+        _ => key.spec().parse_cli(raw, &key.layers(place), &[]).map_err(|m| format!("{name}: {m}"))?,
+    };
     let kp = key.path();
     let (_, changed) = edit_file_within(&file, header, Some(LOCK_WAIT), |d| d.set(&kp, &v)).map_err(|e| format!("{e}; nothing written"))?;
     let set = if changed { "" } else { "already " };
