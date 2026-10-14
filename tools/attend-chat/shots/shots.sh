@@ -14,7 +14,7 @@
 # SIZES="100x30". FONT overrides the font (default JetBrains Mono, which
 # has the Nerd Font fallback for the round lozenge caps).
 #
-# Each step but pause: waits on the screen, not on the clock: after a key or a click
+# Each step waits on the screen, not on the clock, except pause:. After a key or a click
 # the script polls the pane's text until two captures agree, and wait:TEXT
 # polls until TEXT is on the screen. A wait that runs out fails the run.
 #

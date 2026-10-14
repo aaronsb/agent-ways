@@ -574,10 +574,11 @@ impl Dialog<'_> {
         let lozenge = sh.lozenge(&[Seg::on(" confirm ", Ground::Warn).bold()]);
         let room = |used: u16| usize::from(area.width.saturating_sub(used + after + 3));
         // The countdown keeps its place before the question is cut: the long
-        // form where the whole question fits beside it, else the short one,
-        // so the long form never cuts what is asked.
+        // form where the whole question fits beside it and the `confirm`
+        // lozenge, else the short one, so the long form never cuts what is
+        // asked nor pushes the lozenge out.
         let left = match &self.countdown {
-            Some((long, short)) => format!(" · {}", if room(0) >= str_width(&self.title) + 3 + str_width(long) { long } else { short }),
+            Some((long, short)) => format!(" · {}", if room(width(&lozenge)) >= str_width(&self.title) + 3 + str_width(long) { long } else { short }),
             None => String::new(),
         };
         let room = |used: u16| room(used).saturating_sub(str_width(&left));
@@ -923,6 +924,30 @@ mod tests {
         let row = &testkit::rows(&buf)[0];
         assert!(!row.contains("confirm") && row.contains('…') && row.contains(" y drop ") && row.contains(" n keep "), "{row}");
         assert!(out.buttons.iter().all(|(r, _)| r.right() <= 40 && r.width > 0), "the answers stay on screen");
+    }
+
+    /// The long countdown never pushes out the `confirm` lozenge: where the
+    /// question and the long form fit only without it, the short form is
+    /// drawn and the lozenge stays.
+    #[test]
+    fn the_long_countdown_never_pushes_out_the_lozenge() {
+        theme::set(theme::Palette::default());
+        let timed = || {
+            Dialog::bar("drop it?")
+                .button(Button::new(Btn::Yes, "y drop", Ground::Err).key('y'))
+                .button(Button::new(Btn::No, "n keep", Ground::Keep).key('n').cancel().default())
+                .countdown("closes in 58 s".into(), "58 s".into())
+                .build()
+                .unwrap()
+        };
+        let row = |w: u16| testkit::rows(&draw_with(w, 1, |f| {
+            timed().draw(f, f.area(), Shape::PLAIN);
+        }))
+        .remove(0);
+        let narrow = row(50);
+        assert!(narrow.contains("confirm") && narrow.contains("drop it? · 58 s") && !narrow.contains("closes in"), "{narrow}");
+        let wide = row(70);
+        assert!(wide.contains("confirm") && wide.contains("drop it? · closes in 58 s"), "{wide}");
     }
 
     #[test]

@@ -362,7 +362,7 @@ impl Expiry {
     /// Nothing else makes an expiry answer yes: a struct literal cannot set
     /// it.
     ///
-    /// ```compile_fail
+    /// ```compile_fail,E0451
     /// let _ = agent_tui::Expiry { answer: true, ..agent_tui::Expiry::new(std::time::Duration::from_secs(1)) };
     /// ```
     pub fn yes_unattended(after: std::time::Duration) -> Expiry {
