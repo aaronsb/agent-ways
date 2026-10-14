@@ -48,7 +48,8 @@ fn discard(app: &App, tab: usize) -> Dialog<'static> {
 impl Modal for Confirm {
     fn dialog(&self, app: &App, _: bool) -> Dialog<'static> {
         let Mode::Confirm { queued } = &app.mode else { unreachable!("a confirm is open") };
-        question(queued.command.clone(), ("y queue".into(), Ground::Ok), ("n cancel".into(), Ground::Err)).build().expect("n is the cancel and the default")
+        // Nothing here drops work, so cancel keeps the dim accent.
+        question(queued.command.clone(), ("y queue".into(), Ground::Ok), ("n cancel".into(), Ground::Keep)).build().expect("n is the cancel and the default")
     }
 
     fn answer(&self, app: &mut App, a: Answer) -> bool {

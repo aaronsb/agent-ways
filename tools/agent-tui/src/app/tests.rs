@@ -328,6 +328,22 @@ fn the_queue_confirm_answers_alike_by_key_hotkey_and_click() {
     }
 }
 
+/// Nothing on the queue confirm drops work: queue is green and cancel, the
+/// answer that keeps things as they are, takes the dim accent.
+#[test]
+fn the_queue_confirm_draws_cancel_on_the_keep_ground() {
+    theme::set(theme::Palette::default());
+    let mut app = App::new("t", action_tree());
+    keys(&mut app, &[KeyCode::Down, KeyCode::Char('a'), KeyCode::Down, KeyCode::Enter]);
+    let buf = crate::testkit::render(&mut app, 110, 24);
+    let ground = |t: &str| {
+        let (x, y) = crate::testkit::find(&buf, t).unwrap_or_else(|| panic!("{t} not drawn"));
+        buf[(x, y)].bg
+    };
+    assert_eq!(ground("y queue"), theme::Ground::Ok.bg());
+    assert_eq!(ground("n cancel"), theme::Ground::AccentDim.bg());
+}
+
 #[test]
 fn the_tab_discard_answers_alike_by_key_hotkey_and_click_from_the_tree_and_from_review() {
     for (yes, by) in each_answer("y discard", "n keep") {
