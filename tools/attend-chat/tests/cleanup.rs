@@ -538,19 +538,26 @@ fn a_count_of_nothing_offers_only_no() {
 }
 
 /// Once the count shows, the question counts down its seconds, and at
-/// none closes as a no: nothing deleted, and the status line says so.
+/// none closes as a no: nothing deleted, and the status line says so. Its
+/// life of 3.5 s puts each reading half a second inside a whole second.
 #[test]
 fn an_unanswered_delete_question_counts_down_and_expires() {
+    use std::time::{Duration, Instant};
     let _g = fixture();
-    let mut c = chat().delete_question_life(std::time::Duration::from_millis(2200));
+    let mut c = chat().delete_question_life(Duration::from_millis(3500));
     delete_read(&mut c, "#deploy", "All");
+    let opened = Instant::now();
     let bar = |c: &mut Chat| rows(c).last().cloned().unwrap_or_default();
-    assert!(bar(&mut c).contains("closes in 3 s") || bar(&mut c).contains("· 3 s "), "{}", bar(&mut c));
-    std::thread::sleep(std::time::Duration::from_millis(1100));
+    assert!(bar(&mut c).contains("closes in 4 s") || bar(&mut c).contains("· 4 s "), "{}", bar(&mut c));
+    std::thread::sleep(Duration::from_millis(1000));
     Screen::tick(&mut c);
-    assert!(bar(&mut c).contains("closes in 2 s") || bar(&mut c).contains("· 2 s "), "counts down: {}", bar(&mut c));
-    std::thread::sleep(std::time::Duration::from_millis(1200));
-    Screen::tick(&mut c);
+    assert!(bar(&mut c).contains("closes in 3 s") || bar(&mut c).contains("· 3 s "), "counts down: {}", bar(&mut c));
+    // Ticked as the loop ticks, until it closes or well past its life.
+    while screen(&mut c).contains("for everyone?") && opened.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(50));
+        Screen::tick(&mut c);
+    }
+    assert!(opened.elapsed() >= Duration::from_millis(3000), "not before its time: {:?}", opened.elapsed());
     assert!(!screen(&mut c).contains("for everyone?"), "closed: {}", screen(&mut c));
     assert_eq!(c.status(), "delete question expired");
     assert_eq!(calls(), ["message delete --channel deploy --older-than all --dry-run --json"], "nothing deleted");

@@ -1204,36 +1204,44 @@ mod tests {
     /// An expiring question draws its seconds left, counting down on the
     /// tick, the short form where the bar is narrow, and at none answers its
     /// expiry's answer, marked expired. A pending one starts counting only
-    /// once it is ready.
+    /// once it is ready. The clock is the question's deadline, set here half
+    /// a second inside each whole second, so no reading sits on a boundary.
     #[test]
     fn an_expiring_question_counts_down_and_answers_when_it_runs_out() {
         use super::super::pane::Expiry;
         use std::time::Duration;
         let mut a = app(true);
-        let q = || Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(Duration::from_millis(2200)));
-        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(q().pending()));
-        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        let q = || Question::new("q", "drop it?", "drop", "keep").expires(Expiry::new(Duration::from_secs(60)));
+        ask_now(&mut a, q().pending());
         assert!(!bar_of(&mut a, 80).contains("closes in"), "no count while it waits: {}", bar_of(&mut a, 80));
-        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(q()));
+        assert!(matches!(&a.mode, Mode::Ask(q) if q.deadline.is_none()), "no deadline while it waits");
+        update(&mut a, q());
+        assert!(bar_of(&mut a, 80).contains("drop it? · closes in 60 s"), "counted from when it is ready: {}", bar_of(&mut a, 80));
+        deadline_in(&mut a, Duration::from_millis(2500));
         a.tick_pane();
-        let first = bar_of(&mut a, 80);
-        assert!(first.contains("drop it? · closes in 3 s"), "{first}");
+        assert!(bar_of(&mut a, 80).contains("drop it? · closes in 3 s"), "{}", bar_of(&mut a, 80));
         assert!(bar_of(&mut a, 40).contains("· 3 s") && !bar_of(&mut a, 40).contains("closes in"), "short where narrow: {}", bar_of(&mut a, 40));
-        std::thread::sleep(Duration::from_millis(1100));
+        deadline_in(&mut a, Duration::from_millis(1500));
         a.tick_pane();
         assert!(bar_of(&mut a, 80).contains("closes in 2 s"), "counts down: {}", bar_of(&mut a, 80));
         assert!(two(&a).picked.is_empty());
-        std::thread::sleep(Duration::from_millis(1200));
+        expire_now(&mut a);
         a.tick_pane();
         assert_eq!(two(&a).picked, ["q=n", "q=expired"], "answered no, marked expired");
         assert!(matches!(a.mode, Mode::Browse));
         let mut a = app(true);
-        let yes = Expiry { answer: true, ..Expiry::new(Duration::from_millis(50)) };
-        a.pane_mut::<Two>().expect("the pane").open = Some(Open::Ask(Question::new("q", "go on?", "go", "stop").expires(yes)));
-        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
-        std::thread::sleep(Duration::from_millis(80));
+        let yes = Expiry { answer: true, ..Expiry::new(Duration::from_secs(60)) };
+        ask_now(&mut a, Question::new("q", "go on?", "go", "stop").expires(yes));
+        expire_now(&mut a);
         a.tick_pane();
         assert_eq!(two(&a).picked, ["q=y", "q=expired"], "an expiry may answer yes");
+    }
+
+    /// Sets the deadline of the question open `left` from now.
+    fn deadline_in(a: &mut App, left: std::time::Duration) {
+        if let Mode::Ask(q) = &mut a.mode {
+            q.deadline = q.deadline.map(|_| std::time::Instant::now() + left);
+        }
     }
 
     /// Runs the deadline of the question open out now.
