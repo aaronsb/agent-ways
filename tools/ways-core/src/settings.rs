@@ -113,7 +113,7 @@ const SECTIONS: &[SectionSpec] = &[
         top: &["attend_mod"],
         per_entry: false, entry: None, repair: None,
         columns: None,
-        doc: "The attend mod in Claude Code (ADR-406): whether a session starts listening, keepwarm and the keepalive policy (ADR-414), whether the mod is installed, and its poll timing.",
+        doc: "The attend mod in Claude Code (ADR-406, ADR-414): whether a session starts listening, keepwarm, keepalive, the install and poll timing.",
     },
     // Not in HOOK_SECTIONS: no hook path reads a theme (ADR-504 §11). Declared
     // in agent-theme, so attend reads the same keys (one source).

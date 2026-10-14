@@ -609,7 +609,7 @@ pub fn card(state: &State, reading: &Reading, cfg: &Config, now: u64) -> Vec<Str
     let p = &state.policy;
     let mut lines = Vec::new();
     let Some(gate) = p.gate.as_deref() else {
-        lines.push("keepalive   not run in this session yet (the attend mod runs it in an interactive session)".into());
+        lines.push("keepalive   not run in this session (the attend mod runs it in an interactive session while autocompact is off)".into());
         return lines;
     };
     if let Some(why) = cfg.why_off(Gate::parse(gate)) {

@@ -472,7 +472,7 @@ fn the_card_shows_the_count_the_next_due_point_the_wrap_and_the_cost() {
 #[test]
 fn the_card_says_why_the_policy_is_off_or_stopped() {
     let mut s = Session::new(MONDAY, 200_000);
-    assert!(card(&s.state, &s.reading(), &cfg(), MONDAY)[0].contains("not run in this session yet"));
+    assert!(card(&s.state, &s.reading(), &cfg(), MONDAY)[0].contains("not run in this session (the attend mod runs it"));
     s.check(&cfg(), Gate::On, MONDAY + MIN);
     assert_eq!(card(&s.state, &s.reading(), &cfg(), MONDAY)[0], "keepalive   off: autocompact is on (armed windows only)");
     s.check(&cfg(), Gate::Off, MONDAY + 59 * MIN);
