@@ -212,9 +212,10 @@ impl<'a> Dialog<'a> {
         self.buttons.iter().find(|b| b.default)
     }
 
-    /// One key. A button's key, Enter on the default and Esc for the cancel
-    /// answer it, with no Ctrl or Alt held, and so does a chord the button
-    /// names; a dialog answered by its keys alone closes on Esc and Enter,
+    /// One key. A button's key and Enter on the default answer it, with no
+    /// Ctrl or Alt held, and so do a chord the button names and Esc for the
+    /// cancel with any modifier; a dialog answered by its keys alone closes
+    /// on Esc and Enter,
     /// and any dialog on one of its close keys. A key the dialog forwards
     /// comes back as it came. The arrows, the page keys and `k j` scroll
     /// the body, and so do Home, End and `g G` in a dialog that
@@ -232,35 +233,40 @@ impl<'a> Dialog<'a> {
             }
         }
         match k.code {
-            _ if !plain => {}
             KeyCode::Esc => return self.buttons.iter().find(|b| b.cancel).map_or(Answer::Close, |b| Answer::Button(b.id)),
-            KeyCode::Enter => return self.default_button().map_or(Answer::Close, |b| Answer::Button(b.id)),
+            KeyCode::Enter if plain => return self.default_button().map_or(Answer::Close, |b| Answer::Button(b.id)),
             _ => {}
         }
         if self.forward.is_some_and(|f| f(&k)) {
             return Answer::Forward(k);
         }
-        let to = match k.code {
-            KeyCode::Up => Some(self.scroll.saturating_sub(1)),
-            KeyCode::Down => Some(self.scroll.saturating_add(1)),
-            KeyCode::Char('k') if plain => Some(self.scroll.saturating_sub(1)),
-            KeyCode::Char('j') if plain => Some(self.scroll.saturating_add(1)),
-            KeyCode::PageUp => Some(self.scroll.saturating_sub(PAGE)),
-            KeyCode::PageDown => Some(self.scroll.saturating_add(PAGE)),
-            KeyCode::Home if self.jumps => Some(0),
-            KeyCode::End if self.jumps => Some(usize::MAX),
-            KeyCode::Char('g') if plain && self.jumps => Some(0),
-            KeyCode::Char('G') if plain && self.jumps => Some(usize::MAX),
+        let by = match k.code {
+            KeyCode::Up => Some(-1),
+            KeyCode::Down => Some(1),
+            KeyCode::Char('k') if plain => Some(-1),
+            KeyCode::Char('j') if plain => Some(1),
+            KeyCode::PageUp => Some(-(PAGE as isize)),
+            KeyCode::PageDown => Some(PAGE as isize),
+            KeyCode::Home if self.jumps => Some(isize::MIN),
+            KeyCode::End if self.jumps => Some(isize::MAX),
+            KeyCode::Char('g') if plain && self.jumps => Some(isize::MIN),
+            KeyCode::Char('G') if plain && self.jumps => Some(isize::MAX),
             _ => None,
         };
-        match to {
-            Some(to) => {
-                self.scroll = to;
-                Answer::Stay
-            }
+        match by {
+            Some(by) => self.scroll_by(by),
             None if self.close_on_any_key => Answer::Close,
             None => Answer::Stay,
         }
+    }
+
+    /// Scroll the body `by` rows, down when positive; a bar question has
+    /// none to scroll.
+    fn scroll_by(&mut self, by: isize) -> Answer {
+        if self.placement != Placement::Bar {
+            self.scroll = self.scroll.saturating_add_signed(by);
+        }
+        Answer::Stay
     }
 
     /// A press or the wheel at `at`, against where the dialog was last
@@ -272,8 +278,8 @@ impl<'a> Dialog<'a> {
     pub(super) fn mouse(&mut self, kind: MouseEventKind, at: Position, drawn: &Drawn) -> Answer {
         let inside = drawn.contains(at);
         match kind {
-            MouseEventKind::ScrollUp if inside => self.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
-            MouseEventKind::ScrollDown if inside => self.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            MouseEventKind::ScrollUp if inside => self.scroll_by(-1),
+            MouseEventKind::ScrollDown if inside => self.scroll_by(1),
             MouseEventKind::Down(button) => {
                 if let Some(&(_, id)) = drawn.buttons.iter().find(|(r, _)| button == MouseButton::Left && r.contains(at)) {
                     return Answer::Button(id);
@@ -668,6 +674,13 @@ mod tests {
         }
         let x = press(KeyCode::Char('x'));
         assert_eq!(d.key(x), Answer::Forward(x), "every key that is no answer goes back");
+        for held in [KeyModifiers::ALT, KeyModifiers::CONTROL] {
+            assert_eq!(d.key(KeyEvent::new(KeyCode::Esc, held)), Answer::Button(Btn::No), "Esc with {held:?} is the cancel");
+        }
+        // The wheel over a bar question scrolls nothing and is no key.
+        for kind in [MouseEventKind::ScrollUp, MouseEventKind::ScrollDown] {
+            assert_eq!(d.mouse(kind, Position::new(1, 9), &drawn), Answer::Stay, "{kind:?}");
+        }
     }
 
     #[test]

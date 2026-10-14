@@ -5,7 +5,7 @@
 //! them. Each has two answers, `y` and `n` in either case; Esc and Enter
 //! give the one that keeps things as they are.
 
-use super::dialog::{Answer, Button, Dialog, DialogBuilder};
+use super::dialog::{Answer, Button, Dialog, DialogBuilder, Placement};
 use super::modals::Modal;
 use super::pane::Overlay;
 use super::theme::Ground;
@@ -46,6 +46,10 @@ fn discard(app: &App, tab: usize) -> Dialog<'static> {
 }
 
 impl Modal for Confirm {
+    fn placement(&self) -> Placement {
+        Placement::Bar
+    }
+
     fn dialog(&self, app: &App, _: bool) -> Dialog<'static> {
         let Mode::Confirm { queued } = &app.mode else { unreachable!("a confirm is open") };
         // Nothing here drops work, so cancel keeps the dim accent.
@@ -65,6 +69,10 @@ impl Modal for Confirm {
 }
 
 impl Modal for DiscardTab {
+    fn placement(&self) -> Placement {
+        Placement::Bar
+    }
+
     fn dialog(&self, app: &App, _: bool) -> Dialog<'static> {
         let Mode::DiscardTab { tab } = app.mode else { unreachable!("a discard is open") };
         discard(app, tab)
@@ -82,6 +90,10 @@ impl Modal for DiscardTab {
 }
 
 impl Modal for ReviewDiscard {
+    fn placement(&self) -> Placement {
+        Placement::Bar
+    }
+
     fn dialog(&self, app: &App, _: bool) -> Dialog<'static> {
         let Mode::Review { tab, .. } = app.mode else { unreachable!("review is open") };
         discard(app, tab)
@@ -103,6 +115,10 @@ impl Modal for ReviewDiscard {
 }
 
 impl Modal for ItemDelete {
+    fn placement(&self) -> Placement {
+        Placement::Bar
+    }
+
     fn dialog(&self, app: &App, _: bool) -> Dialog<'static> {
         let Mode::ItemDelete { name, noun } = &app.mode else { unreachable!("a delete is open") };
         question(format!("delete {noun} {name}?"), ("y delete".into(), Ground::Err), ("n keep".into(), Ground::Keep)).build().expect("n is the cancel and the default")
@@ -121,6 +137,10 @@ impl Modal for ItemDelete {
 }
 
 impl Modal for Ask {
+    fn placement(&self) -> Placement {
+        Placement::Bar
+    }
+
     /// Every key that is no answer comes back to answer no, and a press of
     /// any button off the answers, anywhere, answers no too.
     fn dialog(&self, app: &App, _: bool) -> Dialog<'static> {

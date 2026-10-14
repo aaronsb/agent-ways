@@ -575,8 +575,14 @@ fn the_tree_key_help_takes_the_wheel_and_a_click_on_itself() {
     app.mouse(at(MouseEventKind::ScrollDown));
     let _ = render(&mut app, 100, 12);
     assert!(matches!(app.mode, Mode::Help { scroll: 1 }), "the wheel over it scrolls it");
-    app.mouse(at(MouseEventKind::Down(MouseButton::Left)));
+    // A press on the help over a row other than the cursor's.
+    assert!(app.rows().len() > 1 && app.cursor == 0);
+    let list = app.hits.list;
+    let over = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: r.x + 2, row: list.y + 1, modifiers: KeyModifiers::NONE };
+    assert!(r.contains(Position::new(over.column, over.row)) && list.contains(Position::new(over.column, over.row)), "over the help and the tree's second row");
+    app.mouse(over);
     assert!(matches!(app.mode, Mode::Browse), "a click on it closes it");
+    assert_eq!(app.cursor, 0, "and selects no row under it");
 }
 
 #[test]

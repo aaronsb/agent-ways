@@ -903,6 +903,35 @@ mod tests {
         assert_eq!(two(&a).keys, 3, "Enter only answered");
     }
 
+    /// The wheel over the bottom bar while a question waits answers nothing:
+    /// the question stays and the pane is told nothing.
+    #[test]
+    fn the_wheel_over_the_bar_leaves_a_question_open() {
+        let mut a = app(true);
+        a.pane_mut::<Two>().expect("the pane").open = Some(ask());
+        a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+        let rows = testkit::rows(&testkit::render(&mut a, 80, 6));
+        let bar = rows.len() as u16 - 1;
+        for kind in [MouseEventKind::ScrollDown, MouseEventKind::ScrollUp] {
+            a.mouse(MouseEvent { kind, column: 30, row: bar, modifiers: KeyModifiers::NONE });
+            assert!(matches!(a.mode, Mode::Ask(_)), "{kind:?}");
+        }
+        assert!(two(&a).picked.is_empty() && two(&a).wheel == 0, "nothing answered, nothing scrolled");
+    }
+
+    /// Esc answers no with any modifier held, and goes no further.
+    #[test]
+    fn esc_with_a_modifier_answers_no_and_stops() {
+        for held in [KeyModifiers::ALT, KeyModifiers::CONTROL] {
+            let mut a = app(true);
+            a.pane_mut::<Two>().expect("the pane").open = Some(ask());
+            a.key(k(KeyCode::Char('x'), KeyModifiers::NONE));
+            assert!(a.key(k(KeyCode::Esc, held)));
+            assert_eq!((two(&a).picked.clone(), two(&a).keys), (vec!["q=n".to_string()], 1), "{held:?}: answered no, nothing went on");
+            assert!(matches!(a.mode, Mode::Browse));
+        }
+    }
+
     /// A click anywhere but an answer answers no; on a tab it then acts.
     #[test]
     fn a_click_off_the_answers_answers_no_and_on_a_tab_acts() {

@@ -49,9 +49,16 @@ pub(super) trait Modal: Sync {
     /// needed, so a body only the draw shows is left out.
     fn dialog(&self, app: &App, full: bool) -> Dialog<'static>;
 
+    /// Where its dialog is drawn, as [`Modal::dialog`] places it.
+    fn placement(&self) -> Placement {
+        Placement::Center
+    }
+
     /// Draw it over `area`.
     fn draw(&self, app: &mut App, f: &mut Frame, area: Rect) -> Drawn {
-        self.dialog(app, true).draw(f, area, app.shape)
+        let d = self.dialog(app, true);
+        debug_assert_eq!(d.placement(), self.placement(), "a modal names where its dialog is placed");
+        d.draw(f, area, app.shape)
     }
 
     /// Hold its scroll at `to`, where its mode keeps one.
@@ -280,7 +287,7 @@ impl App {
     /// where it landed and the scroll the frame holds it at. Whether it
     /// was drawn.
     pub(super) fn draw_modal(&mut self, f: &mut Frame, area: Rect, on: Placement) -> bool {
-        let Some(m) = self.modal().filter(|m| m.dialog(self, false).placement() == on) else { return false };
+        let Some(m) = self.modal().filter(|m| m.placement() == on) else { return false };
         let drawn = m.draw(self, f, area);
         m.set_scroll(self, drawn.scroll);
         self.hits.dialog = Some((std::mem::discriminant(&self.mode), drawn));
