@@ -16,7 +16,7 @@
 use agent_tui::ratatui::layout::Rect;
 use agent_tui::{Anchor, Item, Open};
 
-use super::cleanup::{DELETE_READ, HIDE_HERE, TOMBSTONE, UNDO_DELETE};
+use super::cleanup::{DELETE_READ, HIDE_HERE, SHOW_HIDDEN, TOMBSTONE, UNDO_DELETE};
 use super::sidebar::SideHit;
 use super::ChatPane;
 use crate::attend_cli::Scope;
@@ -174,7 +174,7 @@ impl ChatPane {
         let mut out = vec![Item::new(kind.hide_item())];
         match kind {
             Kind::Dm => {
-                out.push(Item::new(HIDE_HERE));
+                out.extend(self.hide_items(&kind.tab(member), true));
                 out.extend(self.delete_items(&Scope::Dm(member.to_string())));
             }
             Kind::Review if self.is_dead_claude(member) => out.push(Item::new(TOMBSTONE)),
@@ -191,6 +191,7 @@ impl ChatPane {
                 match item {
                     _ if item == kind.hide_item() => self.hide_view(kind, member),
                     HIDE_HERE => self.ask_hide(kind.tab(member)),
+                    SHOW_HIDDEN => self.show_hidden(&kind.tab(member)),
                     DELETE_READ => self.delete_menu(&Scope::Dm(member.to_string())),
                     UNDO_DELETE => self.undo_delete(),
                     TOMBSTONE => self.ask_tombstone(member),

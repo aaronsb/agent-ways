@@ -370,6 +370,34 @@ fn hide_messages_here_hides_in_its_tab_only_and_holds_across_a_restart() {
     side(&mut again, "#open", MouseButton::Left);
     assert!(!feed(&mut again).contains("on open"), "{}", feed(&mut again));
     assert!(std::fs::read_to_string(&file).unwrap().starts_with("#open\t"), "kept in the state file");
+    // Show hidden messages takes the mark away, there and in the file.
+    channel_menu(&mut again, "#open");
+    assert_eq!(items(&mut again), ["Hide messages here", "Show hidden messages", "Delete read messages for everyone…"]);
+    pick(&mut again, "Show hidden messages");
+    assert_eq!(again.status(), "#open shows every message again");
+    assert!(feed(&mut again).contains("alpha on open"), "{}", feed(&mut again));
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("#open\t"), "gone from the state file");
+    channel_menu(&mut again, "#open");
+    assert!(!items(&mut again).iter().any(|i| i == "Show hidden messages"), "nothing hidden: nothing to show");
+}
+
+/// The mark is the newest bus message's, never a notice of the chat's own,
+/// which is timed by the clock now; and `/clear` asks, as the item does.
+#[test]
+fn a_notice_does_not_carry_the_mark_and_clear_asks_first() {
+    let _g = fixture();
+    let mut c = chat();
+    side(&mut c, "#open", MouseButton::Left);
+    c.push(attend_chat::signal::compose_status_block("peers", "a notice of the chat's"));
+    mouse(&mut c, MouseButton::Left, W - 5, H - 4);
+    typed(&mut c, "/clear");
+    press(&mut c, KeyCode::Enter);
+    assert!(screen(&mut c).contains("hide the messages in #open? the bus keeps every message"), "asks first: {}", screen(&mut c));
+    assert!(feed(&mut c).contains("alpha on open"), "nothing hidden before the y");
+    press(&mut c, KeyCode::Char('y'));
+    assert_eq!(c.status(), "hid 5 messages in #open; the bus keeps them", "the notice is not counted");
+    c.push(sig("o-late", &format!("claude:{ALPHA_SID}"), "/work/alpha", "sent before the notice, arrived after the hide", Channel::Open, 300));
+    assert!(feed(&mut c).contains("arrived after the hide"), "newer than the last bus message, so shown: {}", feed(&mut c));
 }
 
 #[test]

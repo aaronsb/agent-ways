@@ -1,8 +1,14 @@
 //! Hide messages here (ADR-405, amendment of 2026-10-13): a watermark per
 //! tab, local to this chat. Hiding a tab's messages records the send order
-//! of the newest message the tab holds; the tab then shows only what is
-//! newer ([`crate::tabs::shows`]). Nothing on the bus changes, and other
-//! tabs, and other people, still see those messages.
+//! of the newest bus message the tab holds (the chat's own notices do not
+//! count); the tab then shows only what is newer
+//! ([`crate::tabs::visible`]). Nothing on the bus changes, and other tabs,
+//! and other people, still see those messages. A message restored later,
+//! by an undo, whose order sorts below the mark stays hidden in that tab
+//! until Show hidden messages takes the mark away.
+//!
+//! Each change reads the file, changes its one tab, and writes it whole, so
+//! two chats open at once keep each other's marks.
 //!
 //! The watermarks persist across restarts in attend-chat's own state file,
 //! `$XDG_STATE_HOME/attend-chat/hidden` (`~/.local/state/attend-chat/hidden`
@@ -71,8 +77,32 @@ impl Hidden {
         Hidden { marks }
     }
 
+    /// Whether `tab` has a watermark.
+    pub fn has(&self, tab: &Tab) -> bool {
+        self.marks.contains_key(&key(tab))
+    }
+
+    /// Hide in `tab` up to `upto` in the file at `path`: what the file holds
+    /// now, with this one mark moved forward, written back; the watermarks
+    /// now in force.
+    pub fn hide_in(path: &Path, tab: &Tab, upto: Order) -> std::io::Result<Hidden> {
+        let mut now = Hidden::load(path);
+        now.hide(tab, upto);
+        now.save(path)?;
+        Ok(now)
+    }
+
+    /// Take `tab`'s watermark out of the file at `path`, every other kept;
+    /// the watermarks now in force.
+    pub fn show_in(path: &Path, tab: &Tab) -> std::io::Result<Hidden> {
+        let mut now = Hidden::load(path);
+        now.marks.remove(&key(tab));
+        now.save(path)?;
+        Ok(now)
+    }
+
     /// Write the watermarks to `path`, whole.
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+    fn save(&self, path: &Path) -> std::io::Result<()> {
         let body: String = self.marks.iter().map(|(k, (ts, nanos, seq))| format!("{k}\t{ts}\t{nanos}\t{seq}\n")).collect();
         agent_settings::writer::write_atomic(path, body)
     }
@@ -118,12 +148,30 @@ mod tests {
         let mut h = Hidden::default();
         h.hide(&Tab::Dm("a1".into()), (5, 6, 7));
         h.hide(&Tab::Merged, (8, 9, 10));
-        h.save(&path).unwrap();
+        Hidden::hide_in(&path, &Tab::Dm("a1".into()), (5, 6, 7)).unwrap();
+        assert_eq!(Hidden::hide_in(&path, &Tab::Merged, (8, 9, 10)).unwrap(), h);
         assert_eq!(Hidden::load(&path), h);
         assert_eq!(Hidden::load(&dir.join("missing")), Hidden::default());
         std::fs::write(&path, "all\t1\t2\t3\nbroken line\n#x\tq\t2\t3\n").unwrap();
         let read = Hidden::load(&path);
         assert!(read.hides(&Tab::Merged, &sig("x", 1, Channel::Open)) && !read.hides(&Tab::Channel("x".into()), &sig("x", 0, Channel::Open)), "{read:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Two chats on one file: each change reads the file first, so neither
+    /// drops the other's mark, and showing one tab keeps the rest.
+    #[test]
+    fn two_chats_keep_each_others_marks() {
+        let dir = crate::test_dir::unique("hidden");
+        let path = dir.join("hidden");
+        let (one, two) = (Tab::Channel("open".into()), Tab::Merged);
+        let first = Hidden::hide_in(&path, &one, (5, 0, 0)).unwrap();
+        assert!(first.has(&one) && !first.has(&two));
+        let second = Hidden::hide_in(&path, &two, (9, 0, 0)).unwrap();
+        assert!(second.has(&one) && second.has(&two), "the second chat kept the first's mark: {second:?}");
+        let shown = Hidden::show_in(&path, &one).unwrap();
+        assert!(!shown.has(&one) && shown.has(&two), "{shown:?}");
+        assert_eq!(Hidden::load(&path), shown, "as written");
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -589,9 +589,8 @@ impl ChatPane {
                 self.set_tab(focus);
             }
             EnterAction::HideHere => {
-                self.hide_here(&fg);
                 self.input.clear();
-                self.show_newest();
+                self.ask_hide(fg);
             }
             EnterAction::DeleteRead(c) => {
                 self.input.clear();

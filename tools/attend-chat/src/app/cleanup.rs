@@ -1,9 +1,11 @@
 //! The cleanup items (ADR-404 D3e, ADR-405 amendment of 2026-10-13), on
 //! the menus of `#open`, a channel, a DM view and a claude's row:
 //!
-//! - Hide messages here: a watermark on the tab, local to this chat and
-//!   kept across restarts ([`crate::hidden`]). Nothing on the bus changes.
-//!   On an agent's row it acts on the operator's DMs with the agent.
+//! - Hide messages here (and `/clear` on the tab shown), asked first: a
+//!   watermark on the tab, local to this chat and kept across restarts
+//!   ([`crate::hidden`]). Nothing on the bus changes. On an agent's row it
+//!   acts on the operator's DMs with the agent. Show hidden messages, on
+//!   the menu while the tab has a watermark, takes it away.
 //! - Delete read messages for everyone…: Delete older than ▸ Current
 //!   sessions, Today (local midnight), All or Custom… (a duration or a
 //!   date, in the entry dialog). The pick runs `attend message delete`
@@ -27,11 +29,12 @@ use agent_tui::{Anchor, Item, Open};
 use super::menu::Step;
 use super::ChatPane;
 use crate::attend_cli::{self, Failure, Report, Scope};
-use crate::hidden;
-use crate::signal::Signal;
+use crate::hidden::{self, Hidden};
+use crate::signal::{Channel, Signal};
 use crate::tabs::{self, Tab};
 
 pub(super) const HIDE_HERE: &str = "Hide messages here";
+pub(super) const SHOW_HIDDEN: &str = "Show hidden messages";
 pub(super) const DELETE_READ: &str = "Delete read messages for everyone…";
 pub(super) const UNDO_DELETE: &str = "Undo delete";
 pub(super) const TOMBSTONE: &str = "Tombstone…";
@@ -131,18 +134,55 @@ impl ChatPane {
         if self.dry_run {
             return self.say("dry run: nothing hidden", false);
         }
-        let shown: Vec<hidden::Order> = self.in_view(tab).map(hidden::order).collect();
+        // Bus messages only: a notice of the chat's, timed by the clock now,
+        // would carry the mark past a message still on its way.
+        let shown: Vec<hidden::Order> = self.in_view(tab).filter(|s| s.channel != Channel::Info).map(hidden::order).collect();
         let Some(newest) = shown.iter().max().copied() else {
             return self.say("nothing to hide here", false);
         };
-        self.hidden.hide(tab, newest);
-        self.invalidate();
         let n = shown.len();
         let what = format!("hid {n} message{} in {}; the bus keeps them", if n == 1 { "" } else { "s" }, self.tab_label(tab));
-        match self.hidden.save(&self.hidden_path) {
-            Ok(()) => self.say(what, false),
-            Err(e) => self.say(format!("{what}, for this session only: {e}"), true),
+        match Hidden::hide_in(&self.hidden_path, tab, newest) {
+            Ok(now) => {
+                self.hidden = now;
+                self.say(what, false);
+            }
+            Err(e) => {
+                self.hidden.hide(tab, newest);
+                self.say(format!("{what}, for this session only: {e}"), true);
+            }
         }
+        self.invalidate();
+    }
+
+    /// Show hidden messages: `tab`'s watermark taken away, every message it
+    /// holds shown again.
+    pub(super) fn show_hidden(&mut self, tab: &Tab) {
+        if self.dry_run {
+            return self.say("dry run: nothing shown", false);
+        }
+        let label = self.tab_label(tab);
+        match Hidden::show_in(&self.hidden_path, tab) {
+            Ok(now) => {
+                self.hidden = now;
+                self.say(format!("{label} shows every message again"), false);
+            }
+            Err(e) => self.say(format!("could not show {label}'s messages again: {e}"), true),
+        }
+        self.invalidate();
+    }
+
+    /// The hide items of `tab`'s menu: Hide messages here where `offer` is
+    /// set, and Show hidden messages while the tab has a watermark.
+    pub(super) fn hide_items(&self, tab: &Tab, offer: bool) -> Vec<Item> {
+        let mut out = Vec::new();
+        if offer {
+            out.push(Item::new(HIDE_HERE));
+        }
+        if self.hidden.has(tab) {
+            out.push(Item::new(SHOW_HIDDEN));
+        }
+        out
     }
 
     /// Delete read messages for everyone…: Delete older than, docked beside

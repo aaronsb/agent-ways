@@ -345,6 +345,8 @@ fn enter_runs_a_command_and_clear_hides_the_messages_here() {
     assert!(c.status().starts_with("available:"), "{}", c.status());
     typed(&mut c, "/clear");
     press(&mut c, key(KeyCode::Enter));
+    assert!(bar(&mut c).contains("hide the messages in ⋯all?"), "asks first: {}", bar(&mut c));
+    press(&mut c, key(KeyCode::Char('y')));
     assert!(c.status().starts_with("hid ") && c.status().ends_with(" in ⋯all; the bus keeps them"), "{}", c.status());
     assert!(!c.signals().is_empty(), "the chat holds them still");
     assert!(!text(&mut c, 80, 25).contains("rollout is green"), "the view shows none of them");
