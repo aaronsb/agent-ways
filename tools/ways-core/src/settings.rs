@@ -417,7 +417,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Bool,
         default: DefaultValue::Yaml("true"),
         doc: "Whether the attend mod keeps an idle session warm for a bounded stretch, then asks for a wrap.",
-        long: "The keepalive policy (ADR-414) runs in an interactive session with the mod while autocompact is off: one keepwarm: turn the margin before the prompt cache lapses, counted from the operator's last prompt, then one wrap: turn, after which the cache lapses. With autocompact on it does not run, and ADR-182's armed windows apply as before. false returns the project to ADR-182 alone.",
+        long: "The keepalive policy (ADR-414) runs in an interactive session with the mod while autocompact is off: one keepwarm: turn the margin before the prompt cache lapses, counted from the operator's last prompt, then one wrap: turn, after which the cache lapses. With autocompact on it does not run, and ADR-182's armed windows apply as before. false returns the project to ADR-182 alone. Only an explicit true runs it: a bad value, or settings that cannot be read, leave it off.",
         ..BASE
     },
     KeySpec {
@@ -477,7 +477,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"{state}/wrap/{session}.md\""),
         doc: "The file the mod writes the wrap's reply to, for file and a refused send.",
-        long: "{state} is the ways state root ($XDG_STATE_HOME/agent-ways), {project} the project directory's name, {session} the session id, and {date} the day in the windows' zone. A leading ~ is the home directory; a relative path is read from the project.",
+        long: "{state} is the ways state root ($XDG_STATE_HOME/agent-ways), {project} the project directory's name, {session} the session id, and {date} the day in the windows' zone. The path must name {session} and resolve under {state}/wrap/ through no symlink; anything else falls back to {state}/wrap/<session>.md, and `attend keepwarm status` names the refusal.",
         ..BASE
     },
     KeySpec {
@@ -487,7 +487,7 @@ const KEYS: &[KeySpec] = &[
         kind: Kind::Text,
         default: DefaultValue::Yaml("\"\""),
         doc: "Who receives the wrap with send: empty for the operator.",
-        long: "As `attend message send --to` reads it: a person's member id, a session's name or a project path; #name posts in that channel. Empty sends it to the operator's own member id, so it reaches attend-chat as a direct message.",
+        long: "As `attend message send --to` reads it: a person's member id, a session's name or a project path; #name posts in that channel. Empty sends it to the operator's own member id, so it reaches attend-chat as a direct message. #open is refused, since it reaches every listening session; the reply goes to the operator.",
         ..BASE
     },
     KeySpec {

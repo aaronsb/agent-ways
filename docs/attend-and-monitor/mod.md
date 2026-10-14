@@ -64,8 +64,8 @@ A message can also arrive at the end of a running turn, through the Stop-hook dr
 In every interactive session with the mod, listening or dormant, and only while autocompact is off, the mod keeps an idle session warm for a bounded stretch after the operator's last prompt, then asks the agent to wrap ([ADR-414](../architecture/attend/ADR-414-the-attend-mod-keeps-an-idle-session-warm-for-a-bounded-stretch-after-the-operator-s-last-prompt-then-asks-for-a-wrap-and-lets-the-cache-lapse-while-autocompact-is-off.md); the rules are in [`keepwarm.md`](keepwarm.md#the-keepalive-policy)). attend judges with `attend keepwarm check --policy --json`; the mod supplies what only it can see and acts:
 
 - it reads the autocompact gate from the session's usage breakdown (estimated locally, no request), else from the merged settings, and counts a gate it cannot read as on;
-- it reports each prompt the operator typed with `attend keepwarm reset`;
-- it sets one timer at each main-loop turn's end, runs the check at the due point attend names, and submits the `keepwarm:` line or the `wrap:` turn attend returns, without `asUser`, so the transcript names the plugin as their source;
+- it reports each prompt the operator typed with `attend keepwarm reset`, and while autocompact is on holds it and sends it with `reset --at` once the gate reads off;
+- it sets one timer at each main-loop turn's end (listening or dormant), runs the check at the due point attend names, and submits the `keepwarm:` line or the `wrap:` turn attend returns, without `asUser`, so the transcript names the plugin as their source. A check submits nothing when a prompt or a main-loop turn started while attend judged, or when the gate, read again just before the submit, no longer reads off;
 - it routes the wrap's final reply: left in the transcript, written to `wrap_file` with `$.fs.write`, or sent with `attend message send` and a `handoff:` first line, falling back to the file on a refusal; `after_wrap: compact` compacts once the wrap has answered.
 
 A dormant session does this with no poll, no drain and no listening, and with autocompact on it runs nothing. Where the policy applies, its timer drives every cache wake the mod makes, ADR-182's armed windows included; the poll's plain `attend keepwarm check` runs only where it does not apply (a polling `-p` run, or `keepalive.enabled: false`).
@@ -88,7 +88,7 @@ The section is `attend_mod` in the ways config. It resolves through the user fil
 | `headless_poll` | `true`, `false` | `false` | user, target, project | Whether a `-p` or SDK session may poll |
 | `keepalive.*` | see [`keepwarm.md`](keepwarm.md#the-keepalive-policy) | | user, target, project | The keepalive policy: `enabled`, `max_keepalives`, `margin_minutes`, `windows`, `timezone`, `wrap`, `wrap_file`, `wrap_to`, `after_wrap` |
 
-A bad value in a switch reads as its quiet side: `listening` as dormant, `keepwarm` as off, `install` as false, `keepalive.enabled` as false. attend-chat's ☰ Settings lists the same keys and writes them per project or to the user file; a number, text or a list is typed in an entry dialog, a list's entries separated by commas.
+A bad value in a switch reads as its quiet side: `listening` as dormant, `keepwarm` as off, `install` as false, `keepalive.enabled` as false, and settings ways cannot answer run no keepalive policy. attend-chat's ☰ Settings lists the same keys and writes them per project or to the user file; a number, text or a list is typed in an entry dialog, a list's entries separated by commas. An empty entry removes the key from that file; `""` or `[]` writes an empty text or list.
 
 ## Install, update and removal
 
