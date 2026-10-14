@@ -479,6 +479,10 @@ fn the_policy_check_keeps_its_settings_read() {
 
 /// `attend keepwarm wrapped --save` with `reply` on stdin.
 fn save(w: &Warm, outcome: &str, path: &std::path::Path, detail: &str) -> std::process::Output {
+    save_bytes(w, outcome, path, detail, b"Continuation prompt.")
+}
+
+fn save_bytes(w: &Warm, outcome: &str, path: &std::path::Path, detail: &str, reply: &[u8]) -> std::process::Output {
     use std::io::Write;
     let mut path_env = OsString::from(&w.bin);
     path_env.push(":");
@@ -487,8 +491,14 @@ fn save(w: &Warm, outcome: &str, path: &std::path::Path, detail: &str) -> std::p
     cmd.env("PATH", path_env).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     cmd.args(["keepwarm", "wrapped", outcome, "--detail", detail, "--path", &path.to_string_lossy(), "--save"]);
     let mut child = cmd.spawn().unwrap();
-    child.stdin.take().unwrap().write_all(b"Continuation prompt.").unwrap();
-    child.wait_with_output().unwrap()
+    let mut stdin = child.stdin.take().unwrap();
+    let reply = reply.to_vec();
+    let feeder = std::thread::spawn(move || {
+        stdin.write_all(&reply).ok();
+    });
+    let out = child.wait_with_output().unwrap();
+    feeder.join().unwrap();
+    out
 }
 
 fn card_text(w: &Warm) -> String {
@@ -530,6 +540,16 @@ fn wrapped_save_writes_the_reply_under_the_state_root_and_refuses_a_link() {
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
         assert!(card_text(&w).contains("the wrap did not finish (could not write"), "{}", card_text(&w));
     }
+    // A reply over 1 MiB is refused and nothing is written.
+    let big = vec![b'x'; 1024 * 1024 + 1];
+    std::fs::remove_file(&file).ok();
+    let out = save_bytes(&w, "file", &file, "", &big);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!file.exists() || std::fs::symlink_metadata(&file).unwrap().file_type().is_symlink());
+    assert!(card_text(&w).contains("over 1048576 bytes"), "{}", card_text(&w));
+    // --save is for file and refused only.
+    let out = save(&w, "sent", &file, "aaron");
+    assert_eq!(out.status.code(), Some(2));
     // Outside the wrap directory: refused.
     let out = save(&w, "file", &w.f.home.join(format!("{}.md", w.f.sid)), "");
     assert_eq!(out.status.code(), Some(1));
@@ -568,8 +588,13 @@ fn a_check_prunes_other_sessions_stale_files() {
     for f in ["gone.settings.json", "gone.lock", "live.settings.json", "live.lock", "live.ledger.json"] {
         std::fs::write(dir.join(f), "{}").unwrap();
     }
+    // A lock another process holds is never pruned, ledger or not.
+    let held = std::fs::OpenOptions::new().write(true).open(dir.join("gone.lock")).unwrap();
+    held.lock().unwrap();
     policy(&w, "off");
-    assert!(!dir.join("gone.settings.json").exists() && !dir.join("gone.lock").exists());
+    assert!(!dir.join("gone.settings.json").exists());
+    assert!(dir.join("gone.lock").exists(), "a lock file is never pruned");
     assert!(dir.join("live.settings.json").exists() && dir.join("live.lock").exists());
+    drop(held);
 }
 }

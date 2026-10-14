@@ -549,12 +549,14 @@ async function checkKeepalive($: $, mod: Mod) {
       }
       const { text, route } = plan.submit
       if (route) {
-        const wrap = { route, text, turnId: undefined, reply: undefined }
+        const wrap = { route, text, turnId: undefined, reply: undefined, sawTurn: false }
         ka.wrap = wrap
         // A wrap whose turn never starts, or never answers before the cache
         // lapses, is reported rather than left pending.
         $.clock.after(WRAP_START_MS, () => {
-          if (ka.wrap === wrap && wrap.turnId === undefined) void reportUnrouted($, ka, 'the wrap\'s turn never started')
+          if (ka.wrap === wrap && wrap.turnId === undefined) {
+            void reportUnrouted($, ka, wrap.sawTurn ? 'the wrap\'s turn was not recognised' : 'the wrap\'s turn never started')
+          }
         })
         $.clock.after(WRAP_LAPSE_MS, () => {
           if (ka.wrap === wrap) void reportUnrouted($, ka, 'the wrap did not answer before the cache lapsed')
@@ -581,7 +583,8 @@ async function keepaliveOperator($: $, mod: Mod) {
   const ka = mod.ka
   if (!ka.applies) return
   ka.epoch += 1
-  if (ka.wrap) await reportUnrouted($, ka, 'the operator prompted before the wrap answered')
+  // Never awaited: the prompt must not wait on the chain a check holds.
+  if (ka.wrap) void reportUnrouted($, ka, 'the operator prompted before the wrap answered')
   const now = await $.clock.now()
   if ((await readGate($, ka, true)) === 'off') {
     ka.heldPromptMs = undefined
@@ -613,11 +616,12 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
   const w = ka.wrap
   if (!w || w.turnId === undefined || w.turnId !== turnId) return
   ka.wrap = undefined
-  // The wrap's own answer, from its first ending step; the turn's final
-  // answer only where no step was seen.
+  // The wrap's own answer, from its first ending step, which stands even
+  // when a Stop-hook continuation then ends aborted or in error; the
+  // turn's final answer only where no step was seen.
   const reply = w.reply ?? answer
   const report = (o: WrapOutcome, detail = '') => serialize(ka, () => run($, wrappedArgv(o, detail)))
-  const plan = wrapPlan(w.route, reason, reply)
+  const plan = wrapPlan(w.route, w.reply !== undefined ? 'answer' : reason, reply)
   if (plan.kind === 'unfinished') return void (await report('unfinished', plan.detail))
   if (plan.kind === 'transcript') await report('transcript')
   // attend writes the file and records the outcome, or why it could not.
@@ -644,9 +648,10 @@ async function routeWrap($: $, ka: Keepalive, turnId: string, reason: string, an
   }
 }
 
-/** A wrap that went in and was never routed: its turn never started, or
- *  never ended with an answer before the cache lapsed, or the operator
- *  prompted first. attend records it as unfinished. */
+/** A wrap that went in and was never routed: its turn never started or
+ *  was not recognised, or never ended with an answer before the cache
+ *  lapsed, or the operator prompted first. attend records it as unfinished.
+ *  The wrap is cleared before the first await, so a caller may fire it. */
 async function reportUnrouted($: $, ka: Keepalive, why: string) {
   ka.wrap = undefined
   await serialize(ka, () => run($, wrappedArgv('unfinished', why)))
@@ -815,7 +820,10 @@ export const register: Register = on => {
     mod.ka.timer?.cancel()
     mod.ka.timer = undefined
     const w = mod.ka.wrap
-    if (w && w.turnId === undefined && isWrapTurn(e.text ?? '', w.text)) w.turnId = e.turnId
+    if (w && w.turnId === undefined) {
+      if (isWrapTurn(e.text ?? '', w.text)) w.turnId = e.turnId
+      else w.sawTurn = true
+    }
     mod.lastActivityMs = await $.clock.now()
     if (await isOn($, mod)) await updateStatus($, s => ({ ...s, turnsSinceFull: s.turnsSinceFull + 1 }))
     return next(e)

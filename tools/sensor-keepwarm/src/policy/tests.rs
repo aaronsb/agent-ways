@@ -560,8 +560,8 @@ fn wrap_file_is_confined_to_the_wrap_directory() {
         ("~/.bashrc", "names no {session}"),
         ("{state}/wrap/handoff.md", "names no {session}"),
         ("~/.ssh/{session}", "outside {state}/wrap/"),
-        ("{state}/wrap/../../../etc/{session}", "outside {state}/wrap/"),
-        ("/../../{session}", "climbs above the root"),
+        ("{state}/wrap/../../../etc/{session}", "a . or .. component"),
+        ("/../../{session}", "a . or .. component"),
         ("{state}/wrap{session}", "outside {state}/wrap/"),
     ] {
         let (file, note) = site().confined_wrap_file(template, &w, MONDAY);
@@ -593,6 +593,9 @@ fn wrap_file_is_confined_to_the_wrap_directory() {
 fn the_resolved_name_the_wrap_directory_and_the_default_are_checked() {
     let w = Windows::default().with_zone(TimeZone::UTC);
     let (file, note) = site().confined_wrap_file("{state}/wrap/{session}/../shared.md", &w, MONDAY);
+    assert_eq!(file, "/state/agent-ways/wrap/sid-1.md");
+    assert!(note.unwrap_or_default().contains("a . or .. component"));
+    let (file, note) = site().confined_wrap_file("{state}/wrap/{session}/notes.md", &w, MONDAY);
     assert_eq!(file, "/state/agent-ways/wrap/sid-1.md");
     assert!(note.unwrap_or_default().contains("does not name the session"));
 
@@ -679,5 +682,38 @@ fn the_write_renames_over_a_link_and_never_follows_it() {
     std::fs::remove_dir_all(&root).ok();
     assert_eq!(kept, "keep me");
     assert!(!is_link);
+    assert_eq!(wrote, "reply");
+}
+
+/// A `..` after a link resolves through the link: the path is refused
+/// outright, so the checked path is the path written.
+#[cfg(unix)]
+#[test]
+fn a_dotdot_after_a_link_is_refused_and_nothing_lands_outside() {
+    let root = std::env::temp_dir().join(format!("keepwarm-dotdot-test-{}", std::process::id()));
+    let state = root.join("state");
+    std::fs::create_dir_all(state.join("wrap")).unwrap();
+    let outside = root.join("outside");
+    std::fs::create_dir_all(outside.join("deep")).unwrap();
+    std::os::unix::fs::symlink(outside.join("deep"), state.join("wrap/a")).unwrap();
+    let path = state.join("wrap/a/../sid-1.md");
+    let res = write_wrap(&state, "sid-1", &path, "reply");
+    let leaked = outside.join("sid-1.md").exists();
+    std::fs::remove_dir_all(&root).ok();
+    assert!(res.unwrap_err().contains(". or .."));
+    assert!(!leaked);
+}
+
+/// A temp file a crashed write left behind cannot fail the next write.
+#[test]
+fn a_stale_temp_does_not_fail_the_write() {
+    let root = std::env::temp_dir().join(format!("keepwarm-stale-temp-{}", std::process::id()));
+    let wrap = root.join("wrap");
+    std::fs::create_dir_all(&wrap).unwrap();
+    std::fs::write(wrap.join(format!(".sid-1.md.tmp.{}", std::process::id())), "stale").unwrap();
+    let res = write_wrap(&root, "sid-1", &wrap.join("sid-1.md"), "reply");
+    let wrote = std::fs::read_to_string(wrap.join("sid-1.md")).unwrap_or_default();
+    std::fs::remove_dir_all(&root).ok();
+    assert!(res.is_ok(), "{res:?}");
     assert_eq!(wrote, "reply");
 }

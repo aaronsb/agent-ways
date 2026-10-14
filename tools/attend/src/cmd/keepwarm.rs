@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 /// When a policy check that could not read the transcript asks to be run
 /// again.
 const RETRY_SECS: u64 = 300;
+/// The largest wrap reply `wrapped --save` writes.
+const MAX_REPLY_BYTES: u64 = 1024 * 1024;
 /// How long the policy check reuses its read of the attend_mod settings,
 /// unless a settings file it reads from changed since.
 const SETTINGS_KEPT_SECS: u64 = 300;
@@ -80,6 +82,10 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 eprintln!("keepwarm wrapped takes transcript, file, sent, refused or unfinished");
                 std::process::exit(2);
             };
+            if save && !matches!(o, WrapOutcome::File | WrapOutcome::Refused) {
+                eprintln!("keepwarm wrapped --save writes the reply for file or refused only");
+                std::process::exit(2);
+            }
             let (line, wrote) = match (save, path) {
                 (true, Some(path)) => saved_outcome(o, &detail, &path, sid),
                 _ => (o.describe(&detail), Ok(())),
@@ -132,8 +138,10 @@ fn saved_outcome(o: WrapOutcome, detail: &str, path: &str, sid: &str) -> (String
     use std::io::Read;
     let mut reply = String::new();
     let wrote = std::io::stdin()
+        .take(MAX_REPLY_BYTES + 1)
         .read_to_string(&mut reply)
         .map_err(|e| e.to_string())
+        .and_then(|n| if n as u64 > MAX_REPLY_BYTES { Err(format!("the reply is over {} bytes", MAX_REPLY_BYTES)) } else { Ok(n) })
         .and_then(|_| policy::write_wrap(&ways_core::paths::state_root(), sid, Path::new(path), &reply))
         .map_err(|e| format!("could not write {path}: {e}"));
     let line = match (o, &wrote) {
@@ -281,18 +289,19 @@ fn settings_stamps(project: &str) -> serde_json::Value {
     serde_json::Value::Array(files.iter().map(|f| serde_json::json!([f.to_string_lossy(), stamp(f)])).collect())
 }
 
-/// How long a session's kept settings read and lock file outlive its
-/// ledger's last write before a check removes them.
+/// How long a session's kept settings read outlives its ledger's last
+/// write before a check removes it.
 const STALE_SECS: u64 = 7 * 24 * 3600;
 
-/// Removes other sessions' kept settings reads and lock files whose ledger
-/// is gone or has not been written for [`STALE_SECS`]: each session leaves
-/// two small files, and nothing else removes them.
+/// Removes other sessions' kept settings reads whose ledger is gone or has
+/// not been written for [`STALE_SECS`]: nothing else removes them.
 fn prune_stale(dir: &Path, sid: &str, now: u64) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        let Some(other) = name.strip_suffix(".settings.json").or_else(|| name.strip_suffix(".lock")) else { continue };
+        // Lock files stay: one may be held, and a writer that then locked a
+        // new file would hold a second lock beside the first. They are empty.
+        let Some(other) = name.strip_suffix(".settings.json") else { continue };
         if other == sid {
             continue;
         }

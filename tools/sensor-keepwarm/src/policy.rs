@@ -362,8 +362,13 @@ fn normalize(path: &Path) -> Option<PathBuf> {
 /// symlink. Checked when the route is made and again when the reply is
 /// written ([`write_wrap`]).
 pub fn check_wrap_path(state_root: &Path, session_id: &str, path: &Path) -> Result<(), String> {
+    use std::path::Component;
     let base = normalize(&state_root.join("wrap")).ok_or("the state root climbs above the root")?;
-    let path = normalize(path).ok_or("it climbs above the root")?;
+    // The path checked is the path written: a `..` resolved here would be
+    // resolved by the system through whatever link sits before it.
+    if path.components().any(|c| matches!(c, Component::CurDir | Component::ParentDir)) {
+        return Err("it has a . or .. component".into());
+    }
     let rest = path.strip_prefix(&base).map_err(|_| "it is outside {state}/wrap/".to_string())?;
     if rest.as_os_str().is_empty() {
         return Err("it names the wrap directory itself".into());
@@ -386,10 +391,13 @@ pub fn check_wrap_path(state_root: &Path, session_id: &str, path: &Path) -> Resu
     Ok(())
 }
 
-/// Writes `reply` to `path` for session `session_id`, checking the path
-/// again first ([`check_wrap_path`]): through a temp file created new
-/// beside it and renamed over it, so a symlink planted at the path is
-/// replaced, not followed.
+/// Writes `reply` to `path` for session `session_id`. The path is checked
+/// again first ([`check_wrap_path`]), so a link present then is refused;
+/// the write goes through a temp file created new beside it and renamed
+/// over it, so a link planted at the path after the check is replaced, not
+/// followed. A residual race remains: a directory on the path swapped for a
+/// link between the last check and the rename is followed. Closing it needs
+/// `openat` with `O_NOFOLLOW` down the path (ADR-414 item 6).
 pub fn write_wrap(state_root: &Path, session_id: &str, path: &Path, reply: &str) -> Result<(), String> {
     check_wrap_path(state_root, session_id, path)?;
     let dir = path.parent().ok_or("it has no directory")?;
@@ -404,7 +412,10 @@ pub fn write_wrap(state_root: &Path, session_id: &str, path: &Path, reply: &str)
 /// written through.
 fn replace_file(dir: &Path, path: &Path, reply: &str) -> Result<(), String> {
     use std::io::Write;
-    let tmp = dir.join(format!(".{}.tmp.{}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), std::process::id()));
+    // Unique per write, so a temp a crashed write left cannot fail this one.
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.tmp.{}.{nanos}", std::process::id()));
     let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(|e| e.to_string())?;
     let done = f.write_all(reply.as_bytes()).and_then(|()| f.sync_all()).and_then(|()| std::fs::rename(&tmp, path));
     if let Err(e) = done {

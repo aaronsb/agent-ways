@@ -121,8 +121,11 @@ type World = {
   waysFails?: boolean
   /** Holds each policy check in flight until it settles. */
   hold?: Promise<void>
-  /** The answers of the model's steps, in order. */
-  steps?: string[]
+  /** The answers of the model's steps, in order: a text ends its step
+   *  (`end_turn`), or an answer with its stop reason. */
+  steps?: (string | { answer: string; stop: string })[]
+  /** Holds each `keepwarm wrapped` report until it settles. */
+  holdWrapped?: Promise<void>
 }
 
 /** The host beneath the plugin: `attend` and `ways` answered from `world`,
@@ -190,6 +193,7 @@ function host(on: On, world: World) {
   on('process.run', async ($, e) => {
     // A policy check can be held in flight, as attend judging for seconds.
     if (e.argv.slice(1, 4).join(' ') === 'keepwarm check --policy' && world.hold) await world.hold
+    if (e.argv.slice(1, 3).join(' ') === 'keepwarm wrapped' && world.holdWrapped) await world.holdWrapped
     // attend writes the wrap file from stdin: the file it would write.
     if (e.argv.includes('--save')) {
       const ev = e as unknown as { stdin?: string; init?: { stdin?: string } }
@@ -199,8 +203,9 @@ function host(on: On, world: World) {
   })
   // The model's steps: each answers in turn from `world.steps`, ending it.
   on('turn.step', async function* ($, e) {
-    const answer = world.steps?.shift() ?? ''
-    return { turnId: e.turnId, index: e.index, answer, toolUses: [], stopReason: 'end_turn', usage: null } as never
+    const step = world.steps?.shift() ?? ''
+    const [answer, stopReason] = typeof step === 'string' ? [step, 'end_turn'] : [step.answer, step.stop]
+    return { turnId: e.turnId, index: e.index, answer, toolUses: [], stopReason, usage: null } as never
   })
   on('session.usage', () => {
     if (world.autocompact === undefined) throw new Error('usage unavailable')
@@ -1613,7 +1618,7 @@ describe('keepalive policy', () => {
   /** The wrap's turn as the engine runs it: started with the framed text
    *  Claude Code gives a prompt a plugin submits (Claude Code 2.1.300),
    *  its steps answering in turn, then ended with the last answer. */
-  async function wrapTurn($: Engine, answer: string, reason = 'answer', steps: string[] = []) {
+  async function wrapTurn($: Engine, answer: string, reason = 'answer', steps: unknown[] = []) {
     await $.turn.start({ text: framedPluginPrompt('attend', WRAP), turnId: 'tw' } as never)
     for (let i = 0; i < steps.length; i++) {
       const s = $.turn.step({ turnId: 'tw', index: i, model: 'm', messageCount: 1 } as never)
@@ -1820,6 +1825,55 @@ describe('keepalive policy', () => {
       expect(h.submitted.filter(t => t.startsWith('keepwarm:'))).toEqual([])
     })
   }
+
+  test('a wrap answered, then a continuation that ends aborted, is still routed', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { autocompact: false, policy: [wrap(route('file'))], steps: ['Continuation prompt.'] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await wrapTurn($, '', 'aborted', ['Continuation prompt.'])
+    expect(h.writes).toEqual([{ path: '/state/wrap/s1.md', text: 'Continuation prompt.' }])
+  })
+
+  test('a tool step before the wrap\'s ending step: the ending step\'s answer is routed', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const steps = [{ answer: 'Let me square the task list.', stop: 'tool_use' }, 'Continuation prompt.']
+    const h = host(on, { autocompact: false, policy: [wrap(route('file'))], steps })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await wrapTurn($, 'Continuation prompt.', 'answer', [0, 1])
+    expect(h.writes).toEqual([{ path: '/state/wrap/s1.md', text: 'Continuation prompt.' }])
+  })
+
+  test('the operator\'s prompt does not wait on a pending wrap\'s report', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    let release = () => {}
+    const world: World = { autocompact: false, policy: [wrap(route('file'))] }
+    const h = host(on, world)
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    expect(h.submitted).toEqual([WRAP])
+    world.holdWrapped = new Promise<void>(r => (release = r))
+    let entered = false
+    const prompt = typed($).then(() => void (entered = true))
+    await clock.advance(2_000)
+    const enteredBeforeRelease = entered
+    release()
+    world.holdWrapped = undefined
+    await prompt
+    expect(enteredBeforeRelease).toBe(true)
+    expect(h.prompts.map(p => p.text)).toContain('hello')
+  })
+
+  test('a wrap whose turn started but was not recognised says so', async ($, on) => {
+    const clock = mock.clock(on, { now: T0 })
+    const h = host(on, { autocompact: false, policy: [wrap(route('file'))] })
+    await $.session.start(INTERACTIVE)
+    await clock.advance(5_000)
+    await $.turn.start({ text: 'something else', turnId: 'tx' } as never)
+    await clock.advance(11 * 60_000)
+    expect(h.argvs).toContainEqual(['attend', 'keepwarm', 'wrapped', 'unfinished', '--detail', "the wrap's turn was not recognised"])
+  })
 
   test('a wrap whose turn never starts is reported unfinished', async ($, on) => {
     const clock = mock.clock(on, { now: T0 })
@@ -2141,9 +2195,11 @@ describe('keepalive policy: the pure pieces', () => {
   test('the wrap turn is the one its own first line started, framed by the engine or bare', () => {
     const w = "wrap: 7h30m since the operator's last prompt and 8 keepalives.\nThe operator is away."
     expect(isWrapTurn(framedPluginPrompt('attend', w), w)).toBe(true)
-    // The probe's text from Claude Code 2.1.300, verbatim.
+    // The probe's text from Claude Code 2.1.300, verbatim: another plugin's
+    // header is not this mod's; the same text under attend's is.
     const probe = "The submit-probe plugin sent a message:\nwrap: probe line one\nsecond line\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above."
-    expect(isWrapTurn(probe, 'wrap: probe line one\nsecond line')).toBe(true)
+    expect(isWrapTurn(probe, 'wrap: probe line one\nsecond line')).toBe(false)
+    expect(isWrapTurn(probe.replace('submit-probe', 'attend'), 'wrap: probe line one\nsecond line')).toBe(true)
     // The line inside someone else's prose is not the wrap.
     expect(isWrapTurn(`please look at this:\n${w}`, w)).toBe(false)
     expect(isWrapTurn(`The attend plugin sent a message:\nkeepwarm: x\n${w}`, w)).toBe(false)

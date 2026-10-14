@@ -176,7 +176,7 @@ export type Keepalive = {
    *  the answer of that turn's first step that ended it (`end_turn`): the
    *  wrap itself, whatever a Stop-hook continuation or a notification adds
    *  to the turn after it. */
-  wrap: { route: WrapRoute; text: string; turnId: string | undefined; reply: string | undefined } | undefined
+  wrap: { route: WrapRoute; text: string; turnId: string | undefined; reply: string | undefined; sawTurn: boolean } | undefined
 }
 
 // ── tools ────────────────────────────────────────────────────────────────
@@ -568,8 +568,8 @@ export function retryAtMs(nowMs: number, isListening: boolean, gate: Gate, retri
 /** The header Claude Code puts above a prompt a plugin submits without
  *  `asUser`, as `turn.start`'s text carries it (Claude Code 2.1.300):
  *  `The <plugin> plugin sent a message:`, then the prompt, then a closing
- *  paragraph. */
-const PLUGIN_FRAME = /^The \S+ plugin sent a message:$/
+ *  paragraph. Only this mod's own name, the manifest's `attend`. */
+const PLUGIN_FRAME = 'The attend plugin sent a message:'
 
 /** Whether a main-loop turn that started with `turnText` is the turn a
  *  prompt the mod submitted as `submitted` started: the submitted first
@@ -581,7 +581,7 @@ export function isSubmittedTurn(turnText: string, submitted: string): boolean {
   const want = submitted.split('\n')[0]?.trim() ?? ''
   if (want === '') return false
   if (lines[0] === want) return true
-  return PLUGIN_FRAME.test(lines[0] ?? '') && lines[1] === want
+  return lines[0] === PLUGIN_FRAME && lines[1] === want
 }
 
 /** Whether a main-loop turn is the wrap the mod submitted ([`isSubmittedTurn`]
