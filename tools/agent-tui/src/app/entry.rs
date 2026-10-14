@@ -81,7 +81,7 @@ impl App {
         let row = rows.iter().position(|l| l.spans.iter().any(|s| s.style.add_modifier.contains(ratatui::style::Modifier::REVERSED))).unwrap_or(0);
         let mut line = rows.get(row).cloned().unwrap_or_default();
         line.spans.insert(0, Span::raw(" "));
-        self.hits.menu = Some((r, Vec::new()));
+        self.hits.entry = Some(r);
         f.render_widget(Clear, r);
         let mut hint = hint;
         hint.spans.insert(0, Span::raw(" "));

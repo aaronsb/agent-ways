@@ -280,6 +280,115 @@ fn mouse_picks_a_menu_item_and_a_click_outside_closes_it() {
     assert_eq!(app.queue.items()[0].label, "check");
 }
 
+/// One way to answer a question on the bottom bar.
+#[derive(Clone, Copy, Debug)]
+enum By {
+    Key(KeyCode),
+    /// A click on the answer drawn with this text.
+    Click(&'static str),
+}
+
+/// Every way to give each answer of a bar question, with the answer it
+/// gives: its hotkey in either case or a click on it, and for the keep
+/// answer Esc and Enter too.
+fn each_answer(yes: &'static str, no: &'static str) -> [(bool, By); 8] {
+    use KeyCode::{Char, Enter, Esc};
+    [
+        (true, By::Key(Char('y'))),
+        (true, By::Key(Char('Y'))),
+        (true, By::Click(yes)),
+        (false, By::Key(Char('n'))),
+        (false, By::Key(Char('N'))),
+        (false, By::Key(Esc)),
+        (false, By::Key(Enter)),
+        (false, By::Click(no)),
+    ]
+}
+
+fn answer_by(app: &mut App, by: By) {
+    match by {
+        By::Key(k) => keys(app, &[k]),
+        By::Click(text) => {
+            let at = find(app, text);
+            click(app, at);
+        }
+    }
+}
+
+#[test]
+fn the_queue_confirm_answers_alike_by_key_hotkey_and_click() {
+    for (yes, by) in each_answer("y queue", "n cancel") {
+        let mut app = App::new("t", action_tree());
+        keys(&mut app, &[KeyCode::Down, KeyCode::Char('a'), KeyCode::Down, KeyCode::Enter]);
+        assert!(matches!(app.mode, Mode::Confirm { .. }));
+        answer_by(&mut app, by);
+        assert!(matches!(app.mode, Mode::Browse), "{by:?}");
+        assert_eq!(app.queue.len(), usize::from(yes), "{by:?}");
+        assert_eq!(app.msg, if yes { "queued: ways agent key remove --provider anthropic" } else { "not queued" }, "{by:?}");
+    }
+}
+
+/// Nothing on the queue confirm drops work: queue is green and cancel, the
+/// answer that keeps things as they are, takes the dim accent.
+#[test]
+fn the_queue_confirm_draws_cancel_on_the_keep_ground() {
+    theme::set(theme::Palette::default());
+    let mut app = App::new("t", action_tree());
+    keys(&mut app, &[KeyCode::Down, KeyCode::Char('a'), KeyCode::Down, KeyCode::Enter]);
+    let buf = crate::testkit::render(&mut app, 110, 24);
+    let ground = |t: &str| {
+        let (x, y) = crate::testkit::find(&buf, t).unwrap_or_else(|| panic!("{t} not drawn"));
+        buf[(x, y)].bg
+    };
+    assert_eq!(ground("y queue"), theme::Ground::Ok.bg());
+    assert_eq!(ground("n cancel"), theme::Ground::AccentDim.bg());
+}
+
+#[test]
+fn the_tab_discard_answers_alike_by_key_hotkey_and_click_from_the_tree_and_from_review() {
+    for (yes, by) in each_answer("y discard", "n keep") {
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('X')]);
+        assert!(matches!(app.mode, Mode::DiscardTab { tab: 0 }));
+        answer_by(&mut app, by);
+        assert!(matches!(app.mode, Mode::Browse), "{by:?}");
+        assert_eq!(app.pending_in(0), if yes { 0 } else { 5 }, "{by:?}");
+
+        let mut app = pending_app();
+        keys(&mut app, &[KeyCode::Char('w'), KeyCode::Char('X')]);
+        assert!(matches!(app.mode, Mode::Review { discard: true, .. }));
+        answer_by(&mut app, by);
+        assert_eq!(app.pending_in(0), if yes { 0 } else { 5 }, "{by:?}");
+        assert!(matches!(app.mode, Mode::Review { discard: false, .. }), "{by:?}");
+        assert_eq!(review_tab(&app), Some(if yes { 1 } else { 0 }), "yes goes on to the next tab with pending: {by:?}");
+    }
+}
+
+/// The action menu picks an action alike by Enter on its row, by its
+/// letter, and by a click on it.
+#[test]
+fn the_action_menu_picks_alike_by_enter_letter_and_click() {
+    let picked = |how: &dyn Fn(&mut App)| {
+        let mut app = App::new("t", action_tree());
+        keys(&mut app, &[KeyCode::Down, KeyCode::Char('a')]);
+        assert!(matches!(app.mode, Mode::Menu { .. }));
+        how(&mut app);
+        let queued: Vec<String> = app.queue.items().iter().map(|q| q.command.clone()).collect();
+        (queued, matches!(app.mode, Mode::Browse))
+    };
+    let check = "ways agent key check --provider anthropic".to_string();
+    let key = tree::action_keys(&action_tree()[0].children[0].actions)[2].expect("check has a letter");
+    let by_enter = picked(&|a: &mut App| keys(a, &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]));
+    let by_letter = picked(&|a: &mut App| keys(a, &[KeyCode::Char(key)]));
+    let by_click = picked(&|a: &mut App| {
+        let at = find(a, " check");
+        click(a, at);
+    });
+    assert_eq!(by_enter, (vec![check], true));
+    assert_eq!(by_letter, by_enter);
+    assert_eq!(by_click, by_enter);
+}
+
 #[test]
 fn mouse_answers_a_confirm_on_its_targets_only() {
     let mut app = App::new("t", action_tree());
@@ -667,8 +776,8 @@ fn discard_in_review_asks_first_and_takes_only_its_tab_then_review_moves_on() {
     let mut app = pending_app();
     keys(&mut app, &[KeyCode::Char('w'), KeyCode::Char('X')]);
     assert!(bottom(&mut app, 100, 24).contains("discard 5 pending in ways?"));
-    keys(&mut app, &[KeyCode::Char('x'), KeyCode::Enter]);
-    assert_eq!(app.pending_in(0), 5, "other keys do not answer");
+    keys(&mut app, &[KeyCode::Char('x')]);
+    assert_eq!(app.pending_in(0), 5, "another key does not answer");
     keys(&mut app, &[KeyCode::Char('n')]);
     assert!(matches!(app.mode, Mode::Review { discard: false, .. }) && app.pending_in(0) == 5);
     keys(&mut app, &[KeyCode::Char('X'), KeyCode::Char('y')]);

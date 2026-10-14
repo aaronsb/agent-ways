@@ -305,6 +305,47 @@ fn new_copy_rename_and_delete_write_the_themes_dir() {
     assert!(app.msg.contains("it was the active theme, so terminal is active now"), "{}", app.msg);
 }
 
+/// The delete's y/n answers alike by its hotkey in either case, Esc and
+/// Enter for keep, and a click on either answer.
+#[test]
+fn an_item_delete_answers_alike_by_key_hotkey_and_click() {
+    let click = |app: &mut App, text: &str| {
+        let buf = draw(app, 100, 30);
+        let (x, y) = crate::testkit::find(&buf, text).unwrap_or_else(|| panic!("{text} not drawn"));
+        app.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x + 1, row: y, modifiers: KeyModifiers::NONE });
+    };
+    let ways: [(bool, Option<KeyCode>, &str); 8] = [
+        (true, Some(KeyCode::Char('y')), ""),
+        (true, Some(KeyCode::Char('Y')), ""),
+        (true, None, "y delete"),
+        (false, Some(KeyCode::Char('n')), ""),
+        (false, Some(KeyCode::Char('N')), ""),
+        (false, Some(KeyCode::Esc), ""),
+        (false, Some(KeyCode::Enter), ""),
+        (false, None, "n keep"),
+    ];
+    for (i, (yes, key, label)) in ways.into_iter().enumerate() {
+        let d = dir(&format!("delete-{i}"));
+        let mut app = app_in(&d, ColorDepth::TrueColor);
+        keys(&mut app, &[KeyCode::Char('3')]);
+        act(&mut app, "new");
+        type_str(&mut app, "mine");
+        keys(&mut app, &[KeyCode::Enter]);
+        app.item_act(ItemAct::Delete, "mine".into());
+        assert!(matches!(app.mode, Mode::ItemDelete { .. }));
+        assert!(text(&draw(&mut app, 100, 30)).contains("delete theme mine?"));
+        match key {
+            Some(k) => keys(&mut app, &[k]),
+            None => click(&mut app, label),
+        }
+        assert!(matches!(app.mode, Mode::Browse), "{key:?} {label}");
+        assert_eq!(d.join("mine.theme").exists(), !yes, "{key:?} {label}");
+        if !yes {
+            assert_eq!(app.msg, "kept");
+        }
+    }
+}
+
 #[test]
 fn a_bundled_theme_is_never_renamed_or_deleted() {
     let d = dir("bundled");
@@ -526,6 +567,36 @@ fn esc_with_unsaved_edits_asks_save_discard_or_back() {
     keys(&mut app, &[KeyCode::Enter, KeyCode::Esc, KeyCode::Char('s')]);
     assert!(app.themes.editor.is_none());
     assert_eq!(app.themes.set.get("ed").unwrap().slots.bg, Rgb(0x12, 0x34, 0x56));
+}
+
+#[test]
+fn ctrl_s_saves_over_close_the_editor_and_ctrl_d_discards_nothing() {
+    let (mut app, _d) = editing_err("unsaved-chord");
+    keys(&mut app, &[KeyCode::Char('#')]);
+    type_str(&mut app, "123456");
+    keys(&mut app, &[KeyCode::Enter, KeyCode::Esc]);
+    assert!(matches!(app.mode, Mode::ThemeUnsaved));
+    app.key(ctrl('d'));
+    assert!(matches!(app.mode, Mode::ThemeUnsaved) && app.theme_dirty(), "^D is no answer");
+    app.key(ctrl('s'));
+    assert!(app.themes.editor.is_none(), "^S saved and closed the editor");
+    assert_eq!(app.themes.set.get("ed").unwrap().slots.err, Rgb(0x12, 0x34, 0x56));
+}
+
+/// A dialog's drawing is no target once another dialog opens in its place
+/// before the next frame.
+#[test]
+fn a_click_on_where_a_closed_dialog_drew_its_button_answers_nothing_else() {
+    let (mut app, _d) = editing_err("stale");
+    keys(&mut app, &[KeyCode::Char('#')]);
+    type_str(&mut app, "123456");
+    keys(&mut app, &[KeyCode::Enter, KeyCode::Esc]);
+    let buf = draw(&mut app, 100, 30);
+    let (x, y) = crate::testkit::find(&buf, "Back (Esc)").expect("Back is drawn");
+    keys(&mut app, &[KeyCode::Char('b')]);
+    assert!(app.key(ctrl('c')) && app.guarding(), "the guard over the unsaved edits, not drawn yet");
+    app.mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: x + 1, row: y, modifiers: KeyModifiers::NONE });
+    assert!(app.guarding(), "the click reached no Back of the guard's");
 }
 
 #[test]

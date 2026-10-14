@@ -290,24 +290,6 @@ impl App {
         true
     }
 
-    /// Save, Discard or Back, asked by Esc in the editor with unsaved edits.
-    pub(super) fn unsaved_key(&mut self, k: KeyEvent) {
-        match k.code {
-            KeyCode::Char('s' | 'S') => {
-                self.theme_save();
-                if !self.theme_dirty() {
-                    self.close_editor();
-                }
-            }
-            KeyCode::Char('d' | 'D') => {
-                self.close_editor();
-                self.msg = "edits discarded".into();
-            }
-            KeyCode::Esc | KeyCode::Char('b') | KeyCode::Enter => {}
-            _ => self.mode = Mode::ThemeUnsaved,
-        }
-    }
-
     /// The theme tab's mouse: a tab, a list row (a second click makes it
     /// active), an editor row, a slider (click, drag, wheel), the hex field
     /// and the Save button.

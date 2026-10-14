@@ -473,12 +473,12 @@ impl Flow {
             _ => self.draw_confirm(f, body),
         }
         f.render_widget(Paragraph::new(self.footer()), foot);
-        let go = if self.step == 2 { (Btn::Finish, "Finish (Enter)") } else { (Btn::Next, "Next (Enter)") };
+        let go = if self.step == 2 { (Btn::Finish, "Finish (Enter)", Ground::Ok) } else { (Btn::Next, "Next (Enter)", Ground::Accent) };
         let mut row = Vec::new();
         if self.step > 0 {
-            row.push((Btn::Back, "Back (Esc)".to_string()));
+            row.push((Btn::Back, "Back (Esc)".to_string(), Ground::Keep));
         }
-        row.extend([(go.0, go.1.to_string()), (Btn::Cancel, "Cancel (q)".to_string())]);
+        row.extend([(go.0, go.1.to_string(), go.2), (Btn::Cancel, "Cancel (q)".to_string(), Ground::Rule)]);
         self.hits.buttons.clear();
         f.render_widget(Paragraph::new(button_row(sh, btns, Some(go.0), &row, &mut self.hits.buttons)), btns);
     }

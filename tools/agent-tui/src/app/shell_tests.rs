@@ -565,6 +565,27 @@ fn the_help_overlay_lists_the_keys_then_the_tabs_help_and_scrolls() {
 }
 
 #[test]
+fn the_tree_key_help_takes_the_wheel_and_a_click_on_itself() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let (mut app, _) = probe();
+    press(&mut app, &[KeyCode::Char('?')]);
+    let _ = render(&mut app, 100, 12);
+    let r = app.drawn_dialog().cloned().expect("the tree's key help records its rect").rect;
+    let at = |kind| MouseEvent { kind, column: r.x + 2, row: r.y + 2, modifiers: KeyModifiers::NONE };
+    app.mouse(at(MouseEventKind::ScrollDown));
+    let _ = render(&mut app, 100, 12);
+    assert!(matches!(app.mode, Mode::Help { scroll: 1 }), "the wheel over it scrolls it");
+    // A press on the help over a row other than the cursor's.
+    assert!(app.rows().len() > 1 && app.cursor == 0);
+    let list = app.hits.list;
+    let over = MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: r.x + 2, row: list.y + 1, modifiers: KeyModifiers::NONE };
+    assert!(r.contains(Position::new(over.column, over.row)) && list.contains(Position::new(over.column, over.row)), "over the help and the tree's second row");
+    app.mouse(over);
+    assert!(matches!(app.mode, Mode::Browse), "a click on it closes it");
+    assert_eq!(app.cursor, 0, "and selects no row under it");
+}
+
+#[test]
 fn with_no_adapter_an_apply_writes_nothing_and_stops() {
     let mut app = App::new("t", tree());
     press(&mut app, &[KeyCode::Char('e')]);

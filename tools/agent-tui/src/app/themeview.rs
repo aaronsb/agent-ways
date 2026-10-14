@@ -360,7 +360,7 @@ impl App {
         f.render_widget(Paragraph::new(lines).block(pane("slot")), area);
         if save_at.y < inner.y + inner.height {
             let state = if e.dirty() { Span::styled("unsaved", theme::changed()) } else { Span::styled("saved", theme::ok()) };
-            let mut line = button_row(self.shape, save_at, None, &[(Btn::Save, "Save ^S".into())], &mut self.hits.buttons);
+            let mut line = button_row(self.shape, save_at, None, &[(Btn::Save, "Save ^S".into(), Ground::Ok)], &mut self.hits.buttons);
             line.spans.push(state);
             f.render_widget(Paragraph::new(line), save_at);
         }

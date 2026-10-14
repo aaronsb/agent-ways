@@ -5,14 +5,12 @@
 //! opens it too, as an error. The text is the command's own output, so the
 //! screen stays a view over the command.
 
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Clear, Padding, Paragraph};
 use ratatui::Frame;
 
-use super::render::{modal_rect, pane};
+use super::dialog::{Dialog, DialogBuilder, Drawn};
 use super::theme::{self, Ground};
 use super::{App, Mode};
 use crate::adapter::Printed;
@@ -65,12 +63,9 @@ pub(crate) struct Shown {
     pub(crate) verdict: Verdict,
     /// What the command printed, one entry per line, then how it exited.
     pub(crate) lines: Vec<String>,
-    /// The first row in view, of the text as wrapped.
+    /// The first row in view, of the text as wrapped, as the last draw held
+    /// it: only the draw knows how the text wraps.
     pub(crate) scroll: usize,
-    /// The last scroll that still fills the modal, as last drawn; no limit
-    /// before the first draw. The draw owns it: only the draw knows how the
-    /// text wraps.
-    max: usize,
     /// The text wrapped at the widths last drawn: two, since text taller
     /// than the screen is measured at the modal's width and then drawn at
     /// the screen's, and one slot would wrap both on every frame.
@@ -81,8 +76,6 @@ pub(crate) struct Shown {
     pub(crate) back: Option<usize>,
 }
 
-/// The rows a page key moves.
-const PAGE: usize = 10;
 /// The most lines of output kept, half from the head and half from the
 /// tail, and the most characters of one line: a command that prints
 /// without end cannot fill memory or stall the draw.
@@ -155,22 +148,24 @@ impl Shown {
                 lines.extend([String::new(), exit]);
             }
         }
-        Some(Shown { label: label.to_string(), command: command.to_string(), verdict, lines, scroll: 0, max: usize::MAX, wrapped: Vec::new(), wraps: 0, back: None })
+        Some(Shown { label: label.to_string(), command: command.to_string(), verdict, lines, scroll: 0, wrapped: Vec::new(), wraps: 0, back: None })
     }
 
-    /// One key: scroll, or close. False closes the modal.
-    pub(crate) fn key(&mut self, k: KeyEvent) -> bool {
-        match k.code {
-            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => return false,
-            KeyCode::Up | KeyCode::Char('k') => self.scroll = self.scroll.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.scroll = self.scroll.saturating_add(1).min(self.max),
-            KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(PAGE),
-            KeyCode::PageDown => self.scroll = self.scroll.saturating_add(PAGE).min(self.max),
-            KeyCode::Home | KeyCode::Char('g') => self.scroll = 0,
-            KeyCode::End | KeyCode::Char('G') => self.scroll = self.max,
-            _ => {}
-        }
-        true
+    /// The modal as a dialog over `body`, `width` columns wide: the border
+    /// and title carry the verdict, the text has a column of space each
+    /// side, and Esc, Enter and `q` close it.
+    pub(super) fn dialog<'a>(&self, body: &'a [Line<'static>], width: u16) -> DialogBuilder<'a> {
+        let border = self.verdict.border();
+        Dialog::new(self.title(), width)
+            .body(body)
+            .border(border)
+            .title_style(border.add_modifier(Modifier::BOLD))
+            .padding(1)
+            .scroll(self.scroll)
+            .jumps()
+            .close_outside()
+            .close_keys(&['q'])
+            .keys_only()
     }
 
     fn title(&self) -> String {
@@ -185,20 +180,17 @@ impl Shown {
     }
 
     /// The text wrapped to `width` columns, wrapped again only when the
-    /// width changes.
-    fn wrapped(&mut self, width: usize) -> &[Line<'static>] {
-        let i = match self.wrapped.iter().position(|(w, _)| *w == width) {
-            Some(i) => i,
-            None => {
-                if self.wrapped.len() == 2 {
-                    self.wrapped.remove(0);
-                }
-                self.wraps += 1;
-                self.wrapped.push((width, crate::wrap::wrap_lines(&self.text(), width)));
-                self.wrapped.len() - 1
-            }
-        };
-        &self.wrapped[i].1
+    /// width changes: its index in `wrapped`.
+    fn wrap(&mut self, width: usize) -> usize {
+        if let Some(i) = self.wrapped.iter().position(|(w, _)| *w == width) {
+            return i;
+        }
+        if self.wrapped.len() == 2 {
+            self.wrapped.remove(0);
+        }
+        self.wraps += 1;
+        self.wrapped.push((width, crate::wrap::wrap_lines(&self.text(), width)));
+        self.wrapped.len() - 1
     }
 }
 
@@ -334,37 +326,20 @@ impl App {
         }
     }
 
-    pub(super) fn response_key(&mut self, mut s: Box<Shown>, k: KeyEvent) {
-        if s.key(k) {
-            self.mode = Mode::Response(s);
-        } else if let Some(tab) = s.back {
-            self.mode = Mode::Review { tab, run: None, discard: false };
-        }
-    }
-
     /// The open modal, drawn over `area`: the command line, then what it
     /// printed, wrapped to the modal and scrolled, the scroll held to the
-    /// last page. The border and title carry the verdict. Its rect is
-    /// recorded so a click outside it closes it.
-    pub(super) fn draw_response(&mut self, f: &mut Frame, area: Rect) {
-        let Mode::Response(s) = &mut self.mode else { return };
+    /// last page.
+    pub(super) fn draw_response(&mut self, f: &mut Frame, area: Rect) -> Drawn {
+        let Mode::Response(s) = &mut self.mode else { return Drawn::default() };
         let widest = s.text().iter().map(Line::width).max().unwrap_or(0);
         // Borders and a column of padding each side.
         let w = (widest + 4).clamp(64, (area.width as usize).saturating_sub(4).max(64)).min(u16::MAX as usize) as u16;
-        let rows = s.wrapped(w.saturating_sub(4) as usize).len();
-        let r = modal_rect(area, w, rows.saturating_add(2).min(u16::MAX as usize) as u16);
-        let room = r.height.saturating_sub(2) as usize;
-        let want = s.scroll;
-        let text = s.wrapped(r.width.saturating_sub(4) as usize);
-        let max = text.len().saturating_sub(room);
-        let scroll = want.min(max);
-        let shown: Vec<Line<'static>> = text[scroll..text.len().min(scroll + room)].to_vec();
-        (s.scroll, s.max) = (scroll, max);
-        let border = s.verdict.border();
-        let block = pane(s.title()).border_style(border).title_style(border.add_modifier(Modifier::BOLD)).padding(Padding::horizontal(1));
-        self.hits.menu = Some((r, Vec::new()));
-        f.render_widget(Clear, r);
-        f.render_widget(Paragraph::new(shown).block(block), r);
+        let i = s.wrap(w.saturating_sub(4) as usize);
+        let h = s.wrapped[i].1.len().saturating_add(2).min(u16::MAX as usize) as u16;
+        // Wrapped again at the width the modal takes, which a short screen widens.
+        let r = s.dialog(&[], w).height(h).build().expect("a response is answered by its keys").rect(area);
+        let i = s.wrap(r.width.saturating_sub(4) as usize);
+        s.dialog(&s.wrapped[i].1, w).height(h).build().expect("a response is answered by its keys").draw(f, area, self.shape)
     }
 }
 
@@ -372,17 +347,13 @@ impl App {
 mod tests {
     use super::*;
     use crate::tree::Response;
-    use ratatui::crossterm::event::KeyModifiers;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     /// ESC, spelled so no escape literal sits in the source.
     const E: char = '\u{1b}';
 
     fn printed(code: i32, stdout: &str, stderr: &str) -> Option<Printed> {
         Some(Printed { code: Some(code), stdout: stdout.into(), stderr: stderr.into() })
-    }
-
-    fn press(s: &mut Shown, k: KeyCode) -> bool {
-        s.key(KeyEvent::new(k, KeyModifiers::NONE))
     }
 
     #[test]
@@ -455,22 +426,32 @@ mod tests {
 
     #[test]
     fn arrows_and_pages_scroll_within_the_drawn_limit_and_esc_enter_q_close() {
-        let text: String = (1..=30).map(|i| format!("line {i}\n")).collect();
-        let mut s = Shown::of("r", "r", Response::Report, &Ok(()), printed(0, &text, "")).unwrap();
-        // As a draw of 2 header rows and 30 lines in 3 rows would leave it.
-        s.max = 29;
-        assert!(press(&mut s, KeyCode::Down) && s.scroll == 1);
-        assert!(press(&mut s, KeyCode::Char('j')) && s.scroll == 2);
-        assert!(press(&mut s, KeyCode::Up) && s.scroll == 1);
-        assert!(press(&mut s, KeyCode::PageDown) && s.scroll == 11);
-        assert!(press(&mut s, KeyCode::PageUp) && s.scroll == 1);
-        assert!(press(&mut s, KeyCode::PageUp) && s.scroll == 0, "no scrolling above the top");
-        assert!(press(&mut s, KeyCode::End) && s.scroll == 29);
-        assert!(press(&mut s, KeyCode::PageDown) && s.scroll == 29, "no scrolling past the last page");
-        assert!(press(&mut s, KeyCode::Home) && s.scroll == 0);
-        assert!(press(&mut s, KeyCode::Char('x')), "another key leaves it open");
+        // 2 header rows, 30 lines, a blank and the exit line in the 8 rows
+        // a 12-row screen leaves inside the modal: the last page starts at 26.
+        let mut a = app(30);
+        a.pick(vec![0], 0);
+        let _ = screen(&mut a, 100, 12);
+        let mut step = |k| {
+            key(&mut a, k);
+            let _ = screen(&mut a, 100, 12);
+            shown(&a).scroll
+        };
+        assert_eq!(step(KeyCode::Down), 1);
+        assert_eq!(step(KeyCode::Char('j')), 2);
+        assert_eq!(step(KeyCode::Up), 1);
+        assert_eq!(step(KeyCode::PageDown), 11);
+        assert_eq!(step(KeyCode::PageUp), 1);
+        assert_eq!(step(KeyCode::PageUp), 0, "no scrolling above the top");
+        assert_eq!(step(KeyCode::End), 26);
+        assert_eq!(step(KeyCode::PageDown), 26, "no scrolling past the last page");
+        assert_eq!(step(KeyCode::Up), 25, "one key up moves the view at once");
+        assert_eq!(step(KeyCode::Home), 0);
+        assert_eq!(step(KeyCode::Char('x')), 0, "another key leaves it open");
         for k in [KeyCode::Esc, KeyCode::Enter, KeyCode::Char('q')] {
-            assert!(!press(&mut s.clone(), k), "{k:?} closes it");
+            let mut a = app(1);
+            a.pick(vec![0], 0);
+            key(&mut a, k);
+            assert!(matches!(a.mode, Mode::Browse), "{k:?} closes it");
         }
     }
 
@@ -592,7 +573,7 @@ mod tests {
         let mut a = app(60);
         a.pick(vec![0], 0);
         let _ = screen(&mut a, 100, 30);
-        let (r, _) = a.hits.menu.clone().expect("the modal records its rect");
+        let r = a.drawn_dialog().cloned().expect("the modal records its rect").rect;
         let at = |kind, column, row| MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
         a.mouse(at(MouseEventKind::ScrollDown, r.x + 2, r.y + 2));
         a.mouse(at(MouseEventKind::ScrollDown, r.x + 2, r.y + 2));

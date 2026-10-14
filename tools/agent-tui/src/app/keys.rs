@@ -44,6 +44,9 @@ impl App {
             }
             return self.quit();
         }
+        if self.modal().is_some() {
+            return self.modal_key(k);
+        }
         match std::mem::replace(&mut self.mode, Mode::Browse) {
             Mode::Flow(mut flow) => {
                 let ev = flow.key(k);
@@ -53,25 +56,7 @@ impl App {
                     return self.flow_event(ev);
                 }
             }
-            Mode::Help { scroll } => match k.code {
-                KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::Help { scroll: scroll.saturating_sub(1) },
-                KeyCode::Down | KeyCode::Char('j') => self.mode = Mode::Help { scroll: scroll.saturating_add(1) },
-                KeyCode::PageUp => self.mode = Mode::Help { scroll: scroll.saturating_sub(10) },
-                KeyCode::PageDown => self.mode = Mode::Help { scroll: scroll.saturating_add(10) },
-                _ => {}
-            },
-            Mode::ThemeMenu { sel } => {
-                let acts = self.theme_acts();
-                match k.code {
-                    KeyCode::Enter => self.theme_act(acts[sel.min(acts.len() - 1)]),
-                    KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::ThemeMenu { sel: sel.saturating_sub(1) },
-                    KeyCode::Down | KeyCode::Char('j') => self.mode = Mode::ThemeMenu { sel: (sel + 1).min(acts.len() - 1) },
-                    KeyCode::Esc | KeyCode::Char('q' | 'a') => {}
-                    _ => self.mode = Mode::ThemeMenu { sel },
-                }
-            }
-            m @ (Mode::Name { .. } | Mode::ItemDelete { .. }) => self.prompt_key(m, k),
-            Mode::ThemeUnsaved => self.unsaved_key(k),
+            Mode::Name { op, buf } => self.name_key(op, buf, k),
             Mode::Filter => match k.code {
                 KeyCode::Esc => self.clear_filter(),
                 KeyCode::Enter => {}
@@ -106,22 +91,6 @@ impl App {
                 }
                 _ => self.mode = Mode::Edit(buf),
             },
-            Mode::Pick(p) => self.pick_key(p, k),
-            Mode::Response(s) => self.response_key(s, k),
-            Mode::Menu { path, sel } => {
-                let len = tree::get(&self.roots, &path).actions.len();
-                match k.code {
-                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('a') => {}
-                    KeyCode::Enter => self.pick(path, sel),
-                    KeyCode::Up | KeyCode::Char('k') => self.mode = Mode::Menu { path, sel: sel.saturating_sub(1) },
-                    KeyCode::Down | KeyCode::Char('j') => self.mode = Mode::Menu { path, sel: (sel + 1).min(len - 1) },
-                    KeyCode::Char(c) if !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => match self.action_for_key(&path, c) {
-                        Some(i) => self.pick(path, i),
-                        None => self.mode = Mode::Menu { path, sel },
-                    },
-                    _ => self.mode = Mode::Menu { path, sel },
-                }
-            }
             Mode::Arg { path, action, mut buf } => match k.code {
                 KeyCode::Esc => self.msg = "cancelled".into(),
                 KeyCode::Enter if buf.trim().is_empty() => self.mode = Mode::Arg { path, action, buf },
@@ -157,77 +126,22 @@ impl App {
                 }
                 _ => self.mode = Mode::Secret { path, action, buf },
             },
-            Mode::Confirm { queued } => match k.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => self.enqueue(queued),
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.msg = "not queued".into(),
-                _ => self.mode = Mode::Confirm { queued },
-            },
-            Mode::Review { tab, run, discard } => self.review_key(k, tab, run, discard),
-            Mode::DiscardTab { tab } => match k.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => self.discard_tab(tab),
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {}
-                _ => self.mode = Mode::DiscardTab { tab },
-            },
-            Mode::Guard => return self.guard_key(k),
-            Mode::Ask(a) => return self.ask_key(a, k),
+            Mode::Review { tab, run, discard: false } => self.review_key(k, tab, run),
             Mode::Entry(e) => return self.entry_key(*e, k),
             Mode::Browse if self.pane.is_some() => return self.pane_key(k),
             Mode::Browse if self.on_theme_tab() => return self.theme_key(k),
             Mode::Browse => return self.browse(k),
-        }
-        true
-    }
-
-    /// The quit modal's keys, beside text as elsewhere: it owns them while
-    /// it is shown. D quits and discards at once, r opens the review where
-    /// there is one, and Esc, b and Enter (on the focused Back) go back.
-    /// Any other key leaves it open and reaches nothing under it.
-    fn guard_key(&mut self, k: KeyEvent) -> bool {
-        if k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
-            self.mode = Mode::Guard;
-            return true;
-        }
-        match k.code {
-            KeyCode::Char('D') => {
-                self.discard_all();
-                return false;
-            }
-            KeyCode::Char('r') => {
-                self.clear_filter();
-                match (0..self.roots.len()).find(|t| self.pending_in(*t) > 0) {
-                    Some(first) => {
-                        self.switch_tab(first);
-                        self.open_review(first);
-                    }
-                    // Only theme edits are unsaved: their review is the editor.
-                    None if self.theme_dirty() => self.switch_tab(self.theme_tab()),
-                    // A pane's work has no review: the modal stays.
-                    None => self.mode = Mode::Guard,
-                }
-            }
-            KeyCode::Esc | KeyCode::Char('b') | KeyCode::Enter => {}
-            _ => self.mode = Mode::Guard,
+            // A modal took the key above.
+            m => self.mode = m,
         }
         true
     }
 
     /// Review's keys. Moving and opening groups work; nothing edits or queues.
     /// A run in flight takes no keys.
-    pub(super) fn review_key(&mut self, k: KeyEvent, tab: usize, run: Option<Run>, mut discard: bool) {
-        self.mode = Mode::Review { tab, run, discard };
+    pub(super) fn review_key(&mut self, k: KeyEvent, tab: usize, run: Option<Run>) {
+        self.mode = Mode::Review { tab, run, discard: false };
         if matches!(self.mode, Mode::Review { run: Some(_), .. }) {
-            return;
-        }
-        if discard {
-            match k.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    self.discard_tab(tab);
-                    return self.advance(tab);
-                }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => discard = false,
-                _ => {}
-            }
-            self.mode = Mode::Review { tab, run: None, discard };
             return;
         }
         let rows = self.review_view(tab);
@@ -391,8 +305,8 @@ impl App {
 
     /// Handle one mouse event against the last frame's hits. A click reaches
     /// the same paths a key does, so the confirm and secret rules hold.
-    /// During text, secret or filter entry and a confirm, only the confirm's
-    /// answers respond.
+    /// During text, secret or filter entry nothing responds, and while a
+    /// modal or a question is open it takes the mouse ([`App::modal_mouse`]).
     ///
     /// Over a pane, every overlay closes on a click outside it, as on Esc,
     /// and a click that closes one on the tab bar or on a part of the pane
@@ -422,7 +336,10 @@ impl App {
             self.flow_event(ev);
             return;
         }
-        let in_menu = self.hits.menu.as_ref().is_some_and(|(r, _)| r.contains(at));
+        if self.modal().is_some() {
+            return self.modal_mouse(m, closes);
+        }
+        let in_entry = self.hits.entry.is_some_and(|r| r.contains(at));
         match &mut self.mode {
             Mode::Browse if self.pane.is_some() => self.pane_mouse(m),
             Mode::Browse if self.tab == self.roots.len() => self.theme_mouse(m),
@@ -433,140 +350,30 @@ impl App {
                     self.click_browse(at);
                 }
             }
-            Mode::Menu { sel, .. } | Mode::ThemeMenu { sel } => {
-                if let Some(k) = wheel {
-                    self.key(press(k));
-                } else if click {
-                    let Some((menu, items)) = &self.hits.menu else { return };
-                    if let Some(i) = items.iter().position(|r| r.contains(at)) {
-                        *sel = i;
-                        self.key(press(KeyCode::Enter));
-                    } else if !menu.contains(at) {
-                        self.key(press(KeyCode::Esc));
-                    }
-                }
-            }
-            Mode::Pick(p) => {
-                if let Some(k) = wheel {
-                    // The wheel over the menu moves its highlight; elsewhere
-                    // it scrolls what is under it.
-                    if in_menu {
-                        self.key(press(k));
-                    } else {
-                        self.pane_wheel(m);
-                    }
-                } else if click && in_menu {
-                    let Some((_, items)) = &self.hits.menu else { return };
-                    // A click picks the row: on a list it marks it, as Space
-                    // does. A row that cannot be picked yet takes no click.
-                    if let Some(i) = items.iter().position(|r| r.contains(at)).filter(|i| p.open(*i)) {
-                        p.sel = i;
-                        let k = if p.multi { KeyCode::Char(' ') } else { KeyCode::Enter };
-                        self.key(press(k));
-                    }
-                } else if closes && !in_menu {
-                    // A click on what would open this same menu (its tab, or
-                    // its row) only closes it, wherever it docked.
-                    let id = p.pane.as_ref().map(|(id, _)| id.clone());
-                    self.key(press(KeyCode::Esc));
-                    self.click_through(m);
-                    if let Mode::Pick(q) = &self.mode {
-                        if id.is_some() && q.pane.as_ref().map(|(id, _)| id) == id.as_ref() {
-                            self.mode = Mode::Browse;
-                        }
-                    }
-                }
-            }
-            // A pane's question: a left click on an answer gives it; any
-            // other press, of any button anywhere, answers no and, on the
-            // tab bar or the column, acts. The wheel scrolls what is under
-            // it, as with nothing asked.
-            Mode::Ask(a) => {
-                if wheel.is_some() {
-                    self.pane_mouse(m);
-                } else if matches!(m.kind, MouseEventKind::Down(_)) {
-                    let a = a.clone();
-                    let answer = self.hits.answers.iter().find(|(r, _)| click && r.contains(at)).map(|&(_, yes)| yes);
-                    self.answer(a, answer == Some(true));
-                    if answer.is_none() {
-                        self.click_through(m);
-                    }
-                }
-            }
             Mode::Review { run: Some(_), .. } => {}
-            Mode::Confirm { .. } | Mode::DiscardTab { .. } | Mode::ItemDelete { .. } | Mode::Review { discard: true, .. } if click => {
-                if let Some(&(_, yes)) = self.hits.answers.iter().find(|(r, _)| r.contains(at)) {
-                    self.key(press(KeyCode::Char(if yes { 'y' } else { 'n' })));
-                }
-            }
-            Mode::Review { discard: false, .. } => {
+            Mode::Review { .. } => {
                 if let Some(k) = wheel {
                     self.key(press(k));
                 } else if click {
                     self.click_review(at);
                 }
             }
-            Mode::Guard | Mode::ThemeUnsaved if click => self.click_button(at),
             // The entry dialog: a click outside closes it with nothing, and
             // on the tab bar or the column goes on; one inside keeps it.
-            Mode::Entry(_) => {
-                if closes && !in_menu {
-                    self.mode = Mode::Browse;
-                    self.click_through(m);
-                }
-            }
-            // The wheel over the key help scrolls it; elsewhere it scrolls
-            // what is under it.
-            Mode::Help { .. } if wheel.is_some() => {
-                if in_menu {
-                    if let Some(k) = wheel {
-                        self.key(press(k));
-                    }
-                } else {
-                    self.pane_wheel(m);
-                }
-            }
-            // Any key closes the key help, and so does any click; one
-            // outside it goes on.
-            Mode::Help { .. } if closes => {
+            Mode::Entry(_) if closes && !in_entry => {
                 self.mode = Mode::Browse;
-                if !in_menu {
-                    self.click_through(m);
-                }
-            }
-            Mode::Response(_) => {
-                if let Some(k) = wheel {
-                    if in_menu || self.pane.is_none() {
-                        self.key(press(k));
-                    } else {
-                        self.pane_wheel(m);
-                    }
-                } else if closes && !in_menu {
-                    // A click outside closes it; inside, the text stays put.
-                    self.key(press(KeyCode::Esc));
-                    self.click_through(m);
-                }
+                self.click_through(m);
             }
             _ => {}
         }
     }
 
-    /// A click on a button is the key it stands for.
+    /// Ask before `tab`'s pending items are dropped, when it has any.
     pub(super) fn ask_discard(&mut self, tab: usize) {
         if self.pending_in(tab) == 0 {
             self.msg = format!("nothing pending in {}", self.roots[tab].name);
         } else {
             self.mode = Mode::DiscardTab { tab };
-        }
-    }
-
-    /// A click on a button presses its key. A button that quits, as the quit
-    /// modal's does, ends the session ([`App::ended`]).
-    pub(super) fn click_button(&mut self, at: Position) {
-        if let Some(&(_, b)) = self.hits.buttons.iter().find(|(r, _)| r.contains(at)) {
-            if !self.key(KeyEvent::new(b.key(), KeyModifiers::NONE)) {
-                self.ending = true;
-            }
         }
     }
 
@@ -587,8 +394,10 @@ impl App {
             }
             return self.review_to(Some(t));
         }
-        if self.hits.buttons.iter().any(|(r, _)| r.contains(at)) {
-            return self.click_button(at);
+        // A bar target presses its key.
+        if let Some(&(_, b)) = self.hits.buttons.iter().find(|(r, _)| r.contains(at)) {
+            self.key(KeyEvent::new(b.key(), KeyModifiers::NONE));
+            return;
         }
         let list = self.hits.list;
         if !list.contains(at) {
