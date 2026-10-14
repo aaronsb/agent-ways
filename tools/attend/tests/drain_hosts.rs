@@ -41,6 +41,9 @@ fn a_delivery_is_context_not_a_block() {
     assert!(text.contains("id peer-sess-1-1"), "{text}");
     assert!(text.contains("attend message reply \"...\" auto-threads"), "{text}");
     assert!(!text.contains("attend_reply"), "{text}");
+    // The permission to stay silent comes before the reply verbs.
+    let silence = text.find("Silence is a valid reply").unwrap_or_else(|| panic!("{text}"));
+    assert!(silence < text.find("attend message reply").unwrap(), "{text}");
 }
 
 /// A Claude Code older than 2.1.163 ignores a Stop hook's additionalContext,
@@ -88,6 +91,8 @@ fn a_mod_host_gets_the_mods_format_and_its_handles_reply() {
     let follow = lines.iter().find(|l| l.contains("and a follow-up over two lines")).unwrap_or_else(|| panic!("{text}"));
     assert!(follow.ends_with(&format!("(re ~{handle})")), "the parent is shown by its handle: {follow}");
     assert!(text.contains("attend_reply") && text.contains("attend_send"), "{text}");
+    let silence = text.find("Silence is a valid reply").unwrap_or_else(|| panic!("{text}"));
+    assert!(silence < text.find("attend_reply").unwrap(), "silence leads the tools: {text}");
     assert!(!text.contains("attend message reply \""), "no shell hint in a mod host: {text}");
     assert!(!text.contains("peer-sess-1-1"), "full ids stay out of the mod's format: {text}");
 
