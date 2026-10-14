@@ -1286,6 +1286,21 @@ mod tests {
         }
     }
 
+    /// The long countdown is drawn only where the whole question fits
+    /// beside it: at 80 columns a question that would be cut by it shows
+    /// whole, with the short form.
+    #[test]
+    fn the_long_countdown_never_cuts_the_question() {
+        use super::super::pane::Expiry;
+        let mut a = app(true);
+        let text = "delete 2 read messages in #open for everyone?";
+        ask_now(&mut a, Question::new("q", text, "delete", "keep").expires(Expiry::new(std::time::Duration::from_secs(60))));
+        let bar = bar_of(&mut a, 80);
+        assert!(bar.contains(&format!("{text} · 60 s")) && !bar.contains("closes in"), "whole, the short form: {bar}");
+        let bar = bar_of(&mut a, 120);
+        assert!(bar.contains(&format!("{text} · closes in 60 s")), "the long form where all of it fits: {bar}");
+    }
+
     /// A question the pane asks while another is open cannot open, and the
     /// pane hears that it was dropped rather than wait on an answer.
     #[test]

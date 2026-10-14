@@ -573,10 +573,10 @@ impl Dialog<'_> {
         let lozenge = sh.lozenge(&[Seg::on(" confirm ", Ground::Warn).bold()]);
         let room = |used: u16| usize::from(area.width.saturating_sub(used + after + 3));
         // The countdown keeps its place before the question is cut: the long
-        // form where the question still shows a dozen columns beside it,
-        // else the short one.
+        // form where the whole question fits beside it, else the short one,
+        // so the long form never cuts what is asked.
         let left = match &self.countdown {
-            Some((long, short)) => format!(" · {}", if room(0) >= str_width(long) + 3 + 12 { long } else { short }),
+            Some((long, short)) => format!(" · {}", if room(0) >= str_width(&self.title) + 3 + str_width(long) { long } else { short }),
             None => String::new(),
         };
         let room = |used: u16| room(used).saturating_sub(str_width(&left));

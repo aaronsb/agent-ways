@@ -241,7 +241,8 @@ fn delete_on_open_counts_in_its_question_then_deletes_and_offers_undo() {
     pick(&mut c, "Today");
     assert_eq!(calls(), ["message delete --open --older-than today --dry-run --json"]);
     let s = screen(&mut c);
-    assert!(s.contains("delete 12 read messages in #open from before today for everyone? · 3 stay") && s.contains("closes in 60 s"), "the count, in the question: {s}");
+    // Too long to fit whole at 120 columns: the short countdown.
+    assert!(s.contains("delete 12 read messages in #open from before today for everyone? · 3 stay") && s.contains("… · 60 s ") && !s.contains("closes in"), "the count, in the question: {s}");
     press(&mut c, KeyCode::Char('n'));
     assert_eq!(c.status(), "kept");
     assert_eq!(calls().len(), 1, "no runs nothing");
