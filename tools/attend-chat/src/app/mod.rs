@@ -36,11 +36,12 @@ use agent_tui::theme::{Palette, Shape};
 use agent_tui::{App, Binding, Keyed, Open, Pane, PaneTab, Tone};
 use attend_instances::SnapshotCache;
 
-use crate::chip::{seen_identities, Seen};
+use crate::chip::{seen_identities, settle, Seen};
 use crate::groups::{all_channels, tab_channels, ChannelRow, KnownGroup};
 use crate::sessions::discover as discover_sessions;
 use crate::signal::Signal;
 use crate::tabs::{self, Tab};
+use crate::watcher::Delivery;
 
 pub use keys::{destination_label, handle_enter, handle_tab, EnterAction, TabCycle, TabResult};
 
@@ -60,6 +61,11 @@ const MAX_SIGNALS: usize = 5000;
 /// How many of the newest messages a send's copy is looked for among: the
 /// copies arrive together, so a send's others are never far back.
 const DEDUPE_WINDOW: usize = 256;
+
+/// How long a file the chat put in its buffer itself, a send read back,
+/// waits for the watcher's copy of it, which is dropped when it comes.
+/// The copy comes within a tick or two; a copy later than this is shown.
+const ECHO_KEPT: Duration = Duration::from_secs(5);
 
 /// How often the peers, channels and the human's heartbeat are
 /// refreshed without any input (ADR-129, ADR-170). A peer that boots
@@ -149,7 +155,11 @@ pub struct ChatPane {
     feed: FeedState,
     /// The feed's height in the last frame, for paging.
     feed_rows: u16,
-    rx: Option<Receiver<Signal>>,
+    rx: Option<Receiver<Delivery>>,
+    /// The files put in the buffer other than by the watcher, by tray and
+    /// id ([`Signal::same_file`]), and when: the watcher's copy of one is
+    /// dropped, however many messages come between.
+    echoed: Vec<((String, String), Instant)>,
     palette: Palette,
     clock: Clock,
     world: Option<World>,
@@ -234,7 +244,7 @@ pub struct ChatPane {
 
 impl ChatPane {
     /// A chat fed by `rx`, drawn with `palette`.
-    pub fn new(rx: Option<Receiver<Signal>>, palette: Palette) -> ChatPane {
+    pub fn new(rx: Option<Receiver<Delivery>>, palette: Palette) -> ChatPane {
         ChatPane {
             signals: Vec::new(),
             input: Input::new(),
@@ -246,6 +256,7 @@ impl ChatPane {
             feed: FeedState::default(),
             feed_rows: 0,
             rx,
+            echoed: Vec::new(),
             palette,
             clock: Clock::Live,
             world: None,
@@ -302,9 +313,21 @@ impl ChatPane {
         self.dirty = true;
     }
 
-    /// Append `sig`. Every writer into the buffer — the watcher drain, a
-    /// send reading back what it wrote, a command's local block — goes
-    /// through here, so the cap and the copies have a single home.
+    /// Append `sig`, a file the chat read itself, such as a send read back,
+    /// or a local block. The watcher's copy of the file is dropped when it
+    /// comes ([`ChatPane::drain`]).
+    pub fn push(&mut self, sig: Signal) {
+        if !sig.tray.is_empty() {
+            self.echoed.push(((sig.tray.clone(), sig.id.clone()), Instant::now()));
+        }
+        let at = self.signals.len();
+        self.hold(sig, at);
+    }
+
+    /// Put `sig` in the buffer at `at`. Every writer into the buffer — the
+    /// watcher drain, a send reading back what it wrote, a command's local
+    /// block — goes through here, so the cap and the copies have a single
+    /// home.
     ///
     /// - A file read twice ([`Signal::same_file`]), or a copy of a send
     ///   already held from another tray ([`Signal::same_send`]), is dropped.
@@ -314,12 +337,12 @@ impl ChatPane {
     /// - Past [`MAX_SIGNALS`] the oldest direct message between others goes
     ///   first, then the oldest message, so others' DMs never push out what
     ///   the person was party to.
-    pub fn push(&mut self, mut sig: Signal) {
-        let recent = self.signals.len().saturating_sub(DEDUPE_WINDOW);
-        if self.signals[recent..].iter().any(|s| s.same_file(&sig) || s.same_send(&sig)) {
+    fn hold(&mut self, mut sig: Signal, at: usize) {
+        let near = at.saturating_sub(DEDUPE_WINDOW)..(at + DEDUPE_WINDOW).min(self.signals.len());
+        if self.signals[near.clone()].iter().any(|s| s.same_file(&sig) || s.same_send(&sig)) {
             return;
         }
-        for s in &mut self.signals[recent..] {
+        for s in &mut self.signals[near] {
             if sig.is_beside(s) {
                 sig.beside_post = true;
             }
@@ -327,7 +350,7 @@ impl ChatPane {
                 s.beside_post = true;
             }
         }
-        self.signals.push(sig);
+        self.signals.insert(at, sig);
         while self.signals.len() > MAX_SIGNALS {
             let oldest = self.signals.iter().position(|s| matches!(s.channel, crate::signal::Channel::Elsewhere(_))).unwrap_or(0);
             self.signals.remove(oldest);
@@ -335,14 +358,43 @@ impl ChatPane {
         self.invalidate();
     }
 
-    /// Take every signal the watcher has sent. True when any arrived.
+    /// Where a signal restored by an undo goes: after every message sent
+    /// no later than it.
+    fn place(&self, sig: &Signal) -> usize {
+        let key = |s: &Signal| (s.ts, agent_identity::signal_send_order(&s.id));
+        let at = key(sig);
+        self.signals.iter().rposition(|s| key(s) <= at).map_or(0, |i| i + 1)
+    }
+
+    /// Take what the watcher has sent. True when anything changed.
     pub fn drain(&mut self) -> bool {
         let Some(rx) = &self.rx else { return false };
-        let got: Vec<Signal> = rx.try_iter().collect();
+        let got: Vec<Delivery> = rx.try_iter().collect();
         let any = !got.is_empty();
-        for s in got {
-            self.push(s);
+        for d in got {
+            match d {
+                Delivery::Arrived(s) => {
+                    let key = (s.tray.clone(), s.id.clone());
+                    if let Some(i) = self.echoed.iter().position(|(k, _)| *k == key) {
+                        self.echoed.swap_remove(i);
+                        continue;
+                    }
+                    let at = self.signals.len();
+                    self.hold(s, at);
+                }
+                Delivery::Restored(s) => {
+                    let at = self.place(&s);
+                    self.hold(s, at);
+                }
+                Delivery::Withdrawn(files) => {
+                    self.signals.retain(|s| !files.iter().any(|(tray, id)| !s.tray.is_empty() && s.tray == *tray && s.id == *id));
+                    self.invalidate();
+                }
+            }
         }
+        // After the copies drained, so a copy that waited in the channel
+        // while the chat was stopped still finds its entry.
+        self.echoed.retain(|(_, at)| at.elapsed() < ECHO_KEPT);
         if any {
             // A new sender joins the legend and the completion pool.
             self.stale();
@@ -368,6 +420,8 @@ impl ChatPane {
             let rows = all_channels(depth);
             let in_channel = |id: &str| rows.iter().any(|r| r.known.membership.members.iter().any(|m| m == id));
             let seen = seen_identities(&self.signals, &discover_sessions(), depth, alive, human, in_channel, &instances);
+            let earlier = earlier_ids(&seen);
+            let seen = settle(seen, &earlier, &tombstoned(), in_channel);
             let live_members = rows.iter().map(|r| r.known.membership.members.iter().filter(|m| alive(m)).count()).collect();
             self.world = Some(World::new(tab_channels(&rows), seen, rows, live_members, instances, &self.foreground, &self.views));
             self.remember_dm_names();
@@ -973,6 +1027,29 @@ impl Pane for ChatPane {
 pub const UPDATED_ON_DISK: &str =
     "attend-chat was updated on disk: restart it to read new messages and direct replies correctly";
 
+/// Each id a live session had before a `/clear`, with that session: from
+/// the enrollment that carried it (`attend_presence::enrollment::carry`),
+/// and from the instance registry's alias of a dead sighting's id.
+fn earlier_ids(seen: &[Seen]) -> std::collections::HashMap<String, String> {
+    let mut earlier = std::collections::HashMap::new();
+    let registry = attend_instances::Registry::new();
+    for s in seen.iter().filter(|s| s.identity.is_claude) {
+        if s.live {
+            for id in attend_presence::enrollment::previous_ids(&s.member) {
+                earlier.insert(id, s.member.clone());
+            }
+        } else if let Some(next) = registry.successor(&s.identity.cwd, &s.member) {
+            earlier.entry(s.member.clone()).or_insert(next);
+        }
+    }
+    earlier
+}
+
+/// The sessions tombstoned in the mark store (ADR-404 D3e).
+fn tombstoned() -> std::collections::HashSet<String> {
+    attend_groups::tombstones::sessions(&crate::signal::signals_base()).into_iter().collect()
+}
+
 /// This program's file and its modification time now.
 fn running_binary() -> Option<(std::path::PathBuf, SystemTime)> {
     let path = std::env::current_exe().ok()?;
@@ -996,7 +1073,7 @@ pub struct Chat {
 
 impl Chat {
     /// A chat fed by `rx`, drawn with `palette` and lozenges in `shape`.
-    pub fn new(rx: Option<Receiver<Signal>>, palette: Palette, shape: Shape) -> Chat {
+    pub fn new(rx: Option<Receiver<Delivery>>, palette: Palette, shape: Shape) -> Chat {
         let mut pane = ChatPane::new(rx, palette);
         pane.shape = shape;
         Chat { app: App::with_pane("chat", pane).shape(shape) }
@@ -1276,5 +1353,85 @@ mod binding_tests {
     fn the_chats_keys_are_bound_once_each() {
         let c = Chat::new(None, Palette::default(), Shape::PLAIN);
         assert_eq!(agent_tui::binding_conflicts(&c.app().bindings()), Vec::<String>::new());
+    }
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    use crate::signal::Channel;
+
+    fn sig(id: &str, ts: u64, channel: Channel) -> Signal {
+        Signal {
+            id: id.into(),
+            from: "claude:22222222-2222-4222-8222-222222222222".into(),
+            project: "x".into(),
+            cwd: "/home/x".into(),
+            reply_to: None,
+            message: format!("body of {id}"),
+            ts,
+            tray: match &channel {
+                Channel::Open => "_broadcast".into(),
+                _ => "aaron".into(),
+            },
+            channel,
+            beside_post: false,
+        }
+    }
+
+    fn fed() -> (ChatPane, std::sync::mpsc::Sender<Delivery>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (ChatPane::new(Some(rx), Palette::default()), tx)
+    }
+
+    fn ids(c: &ChatPane) -> Vec<&str> {
+        c.signals.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    /// A message a mark hides leaves the buffer, which every view reads;
+    /// restored by an undo, it goes back among the others by its time.
+    #[test]
+    fn a_withdrawn_message_leaves_every_view_and_a_restored_one_takes_its_place() {
+        let (mut c, tx) = fed();
+        for s in [sig("a", 10, Channel::Open), sig("b", 20, Channel::Open), sig("dm", 25, Channel::Person), sig("c", 30, Channel::Open)] {
+            tx.send(s.into()).unwrap();
+        }
+        c.drain();
+        tx.send(Delivery::Withdrawn(vec![("_broadcast".into(), "b".into()), ("aaron".into(), "dm".into())])).unwrap();
+        c.drain();
+        assert_eq!(ids(&c), ["a", "c"]);
+        for tab in [Tab::Merged, Tab::Channel("open".into()), Tab::Dm("22222222-2222-4222-8222-222222222222".into())] {
+            assert!(!c.signals.iter().any(|s| tabs::shows(s, &tab) && (s.id == "b" || s.id == "dm")), "{tab:?}");
+        }
+        tx.send(Delivery::Restored(sig("b", 20, Channel::Open))).unwrap();
+        tx.send(Delivery::Restored(sig("dm", 25, Channel::Person))).unwrap();
+        c.drain();
+        assert_eq!(ids(&c), ["a", "b", "dm", "c"]);
+    }
+
+    /// A send read back holds its file; the watcher's copy is dropped
+    /// however many messages arrive between the write and the copy.
+    #[test]
+    fn a_send_read_back_drops_its_watcher_copy_however_much_comes_between() {
+        let (mut c, tx) = fed();
+        let mine = sig("mine", 5, Channel::Open);
+        c.push(mine.clone());
+        for i in 0..(DEDUPE_WINDOW + 44) {
+            tx.send(sig(&format!("other-{i}"), 6, Channel::Open).into()).unwrap();
+        }
+        tx.send(mine.into()).unwrap();
+        c.drain();
+        assert_eq!(c.signals.iter().filter(|s| s.id == "mine").count(), 1);
+        assert!(c.echoed.is_empty(), "the copy took its entry");
+    }
+
+    /// An entry waits a few seconds for its copy, and no longer.
+    #[test]
+    fn an_echo_entry_is_dropped_after_its_time() {
+        let (mut c, _tx) = fed();
+        c.push(sig("mine", 5, Channel::Open));
+        c.echoed[0].1 -= ECHO_KEPT;
+        c.drain();
+        assert!(c.echoed.is_empty());
     }
 }

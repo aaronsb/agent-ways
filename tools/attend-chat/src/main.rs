@@ -153,7 +153,7 @@ fn main() {
         usage("needs a terminal; `attend message inbox` prints messages, `attend message send` sends one");
     }
 
-    let (tx, rx) = std::sync::mpsc::channel::<signal::Signal>();
+    let (tx, rx) = std::sync::mpsc::channel::<watcher::Delivery>();
     let base = signal::signals_base();
     let own = signal::Own::here();
     if let Err(e) = watcher::spawn_watcher(base.clone(), own.tray, own.person, tx) {

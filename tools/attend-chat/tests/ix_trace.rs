@@ -59,7 +59,7 @@ fn signal(i: usize, sid: &str, cwd: &str, channel: Channel) -> Signal {
 /// from alpha and beta, then one from each of twenty others, so the
 /// column's agents overflow it at either size and the wheel and the
 /// cursor both have somewhere to scroll it.
-fn chat() -> (Chat, Sender<Signal>) {
+fn chat() -> (Chat, Sender<attend_chat::watcher::Delivery>) {
     support::fixture("trace", |base| {
         support::pin_alive(ALPHA_SID);
         support::pin_alive(BETA_SID);
@@ -208,7 +208,7 @@ fn trace(seeds: std::ops::RangeInclusive<u64>, steps: u64) -> String {
                     (false, _) => (BETA_SID.to_string(), "/work/beta".to_string()),
                 };
                 let ch = if rng.below(2) == 0 { Channel::Open } else { Channel::Group("deploy".into()) };
-                tx.send(signal(sent, &sid, &cwd, ch.clone())).unwrap();
+                tx.send(signal(sent, &sid, &cwd, ch.clone()).into()).unwrap();
                 sent += 1;
                 c.drain();
                 format!("signal {sid} {ch:?}")
