@@ -39,6 +39,8 @@ This document contains the help content for the `attend` command-line program.
 * [`attend keepwarm off`↴](#attend-keepwarm-off)
 * [`attend keepwarm status`↴](#attend-keepwarm-status)
 * [`attend keepwarm check`↴](#attend-keepwarm-check)
+* [`attend keepwarm reset`↴](#attend-keepwarm-reset)
+* [`attend keepwarm wrapped`↴](#attend-keepwarm-wrapped)
 * [`attend chat`↴](#attend-chat)
 * [`attend sensor`↴](#attend-sensor)
 * [`attend sensor list`↴](#attend-sensor-list)
@@ -535,6 +537,8 @@ Keep the prompt cache warm across idle stretches (ADR-182; default: status)
 * `off` — Disarm and forget the window
 * `status` — Cache state, context size, cold price, window left, and this session's cold writes
 * `check` — Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). For a host that polls without `attend run`; prints nothing while an `attend run` holds the session, since its sensor wakes it
+* `reset` — The operator prompted: the keepalive count starts again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session (ADR-414 item 4)
+* `wrapped` — Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
 
 
 
@@ -570,7 +574,44 @@ Cache state, context size, cold price, window left, and this session's cold writ
 
 Run the keepwarm judgment once: print the `keepwarm:` wake line when one is due, else nothing (exit 0 either way). For a host that polls without `attend run`; prints nothing while an `attend run` holds the session, since its sensor wakes it
 
-**Usage:** `attend keepwarm check`
+**Usage:** `attend keepwarm check [OPTIONS]`
+
+###### **Options:**
+
+* `--policy` — Apply the keepalive policy (ADR-414): from each turn's end, one wake the margin before the cache lapses, counted from the operator's last prompt and bounded by attend_mod.keepalive, then one wrap turn
+* `--json` — Print the decision as one JSON object: action (none, keepalive or wrap), text, next_at, count, max, wraps_at and reason
+* `--autocompact <AUTOCOMPACT>` — The autocompact gate as the host read it: on, off or unknown. The policy runs only with off; unknown counts as on
+
+  Default value: `unknown`
+
+  Possible values: `on`, `off`, `unknown`
+
+
+
+
+## `attend keepwarm reset`
+
+The operator prompted: the keepalive count starts again, and a sent wrap and a stop are cleared. The attend mod runs it for each prompt typed in the session (ADR-414 item 4)
+
+**Usage:** `attend keepwarm reset`
+
+
+
+## `attend keepwarm wrapped`
+
+Record where the keepalive policy's wrap reply went, for the status card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
+
+**Usage:** `attend keepwarm wrapped [OPTIONS] <OUTCOME>`
+
+###### **Arguments:**
+
+* `<OUTCOME>` — transcript, file, sent, refused or unfinished
+
+###### **Options:**
+
+* `--detail <DETAIL>` — The file written, the recipient, or attend's reason for a refusal
+
+  Default value: ``
 
 
 

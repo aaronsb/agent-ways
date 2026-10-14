@@ -111,7 +111,7 @@ pub fn cli_main() {
         #[cfg(not(feature = "sensor-keepwarm"))]
         Commands::Keepwarm { sub } => {
             eprintln!("keepwarm: this build of attend has no keepwarm sensor");
-            if !matches!(sub, Some(KeepwarmCmd::Check)) {
+            if !matches!(sub, Some(KeepwarmCmd::Check(_))) {
                 std::process::exit(1);
             }
         }

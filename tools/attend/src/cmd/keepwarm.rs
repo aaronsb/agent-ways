@@ -1,18 +1,25 @@
 //! `attend keepwarm` — arm, disarm, and read the cache-warming floor
-//! (ADR-182). The sensor does the waking; these verbs own the arm file
-//! and render the card from the ledger the sensor writes.
+//! (ADR-182), and the keepalive policy the attend mod runs (ADR-414). The
+//! sensor and the check do the judging; these verbs own the arm file, the
+//! policy's marks in the ledger, and render the card.
 
-use crate::cli::KeepwarmCmd;
+use crate::cli::{KeepwarmCheckArgs, KeepwarmCmd};
 use crate::util::keepwarm_dir;
+use sensor_keepwarm::policy::{self, Config, Gate, Policy, Site, WrapOutcome};
 use sensor_keepwarm::{
-    card, check_once, fmt_duration, parse_duration, read_arm, read_context, read_ledger, write_arm, ArmFile,
-    DEFAULT_WINDOW_SECS, PING_AFTER_SECS,
+    card, card_state, check_once, fmt_duration, parse_duration, read_arm, read_context, read_ledger, settle, write_arm, write_ledger,
+    ArmFile, State, DEFAULT_WINDOW_SECS, PING_AFTER_SECS,
 };
+use std::path::{Path, PathBuf};
+
+/// When a policy check that could not read the transcript asks to be run
+/// again.
+const RETRY_SECS: u64 = 300;
 
 pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
     let ident = attend_presence::session::identity();
-    if let KeepwarmCmd::Check = sub {
-        return check(&ident);
+    if let KeepwarmCmd::Check(args) = &sub {
+        return check(&ident, args);
     }
     if !ident.session_resolved {
         eprintln!("keepwarm: no Claude session owns this process, nothing to warm");
@@ -39,6 +46,8 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 eprintln!("keepwarm: could not write the arm file: {e}");
                 std::process::exit(1);
             }
+            // The operator's word clears a stop of the keepalive policy.
+            update_policy(&dir, sid, policy::clear_stop);
             println!(
                 "keepwarm on for {}: one wake {} into each idle stretch keeps the cache read, not re-written. Answer it with one word.",
                 fmt_duration(secs),
@@ -51,9 +60,26 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 eprintln!("keepwarm: could not write the arm file: {e}");
                 std::process::exit(1);
             }
+            // And the keepalive policy stops until the operator's next prompt.
+            update_policy(&dir, sid, policy::stop_by_operator);
             println!("keepwarm is not armed");
         }
-        KeepwarmCmd::Check => unreachable!("handled above"),
+        KeepwarmCmd::Check(_) => unreachable!("handled above"),
+        KeepwarmCmd::Reset => {
+            if !update_policy(&dir, sid, |p| policy::reset(p, now)) {
+                std::process::exit(1);
+            }
+            println!("keepalive count reset");
+        }
+        KeepwarmCmd::Wrapped { outcome, detail } => {
+            let Some(o) = WrapOutcome::parse(&outcome) else {
+                eprintln!("keepwarm wrapped takes transcript, file, sent, refused or unfinished");
+                std::process::exit(2);
+            };
+            if !update_policy(&dir, sid, |p| p.wrap_outcome = Some(o.describe(&detail))) {
+                std::process::exit(1);
+            }
+        }
         KeepwarmCmd::Status => {
             let Some(reading) = read_context(sid, &ident.origin_path) else {
                 eprintln!("keepwarm: could not read the session transcript through `ways context`");
@@ -65,10 +91,38 @@ pub(crate) fn cmd_keepwarm(sub: KeepwarmCmd) {
                 println!("{line}");
             }
             // In a session the attend mod hosts, the mod's own switch decides
-            // whether the check runs at all, whatever is armed here.
-            if attend_presence::enrollment::host(sid) == Some(attend_presence::enrollment::Host::Mod) {
-                println!("{}", mod_setting_line(mod_settings(&ident.origin_path).as_deref()));
+            // whether the check runs at all, whatever is armed here. The
+            // keepalive lines show wherever the mod has run the policy's
+            // check, a dormant session's included.
+            let is_mod_host = attend_presence::enrollment::host(sid) == Some(attend_presence::enrollment::Host::Mod);
+            let ran_policy = ledger.as_ref().is_some_and(|l| l.policy.gate.is_some());
+            if is_mod_host || ran_policy {
+                let settings = mod_settings(&ident.origin_path);
+                if is_mod_host {
+                    println!("{}", mod_setting_line(settings.as_deref()));
+                }
+                let cfg = Config::from_settings(settings.as_deref());
+                let state = card_state(&reading, arm.as_ref(), ledger.as_ref());
+                for line in policy::card(&state, &reading, &cfg, now) {
+                    println!("{line}");
+                }
             }
+        }
+    }
+}
+
+/// Apply `f` to the policy's marks in `sid`'s ledger, a fresh ledger where
+/// there is none. False, with the reason on stderr, when it cannot be
+/// written.
+fn update_policy(dir: &Path, sid: &str, f: impl FnOnce(&mut Policy)) -> bool {
+    let mut ledger = read_ledger(dir, sid).unwrap_or_default();
+    f(&mut ledger.policy);
+    ledger.updated_at = sensor_trait::epoch_secs();
+    match write_ledger(dir, sid, &ledger) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("keepwarm: could not write the ledger: {e}");
+            false
         }
     }
 }
@@ -124,30 +178,94 @@ fn mod_setting_line(settings: Option<&str>) -> String {
     format!("mod setting attend_mod.keepwarm {value}{from}{effect}")
 }
 
+/// What `check --json` prints when nothing was judged: why, and when to ask
+/// again.
+fn nothing(reason: &str, next_at: Option<u64>) -> serde_json::Value {
+    serde_json::json!({
+        "action": "none", "text": null, "next_at": next_at, "count": 0, "max": 0,
+        "wraps_at": null, "reason": reason, "policy": false, "state": "off",
+        "wraps_at_hm": null, "wrapped_at_hm": null, "wrap": null,
+    })
+}
+
 /// `attend keepwarm check`: the sensor's judgment, once. Prints the
 /// `keepwarm:` line when a wake is due and nothing otherwise, and exits 0
 /// either way, so a polling host reads stdout alone. Why nothing printed
-/// goes to stderr.
-fn check(ident: &attend_presence::session::SessionIdentity) {
+/// goes to stderr. With `--policy` the keepalive policy judges (ADR-414);
+/// with `--json` the decision prints as one object, whatever it is.
+fn check(ident: &attend_presence::session::SessionIdentity, args: &KeepwarmCheckArgs) {
+    let quiet = |reason: &str, next_at: Option<u64>| {
+        if args.json {
+            println!("{}", nothing(reason, next_at));
+        } else {
+            eprintln!("keepwarm: {reason}");
+        }
+    };
     if !ident.session_resolved {
-        eprintln!("keepwarm: no Claude session owns this process, nothing to warm");
-        return;
+        return quiet("no Claude session owns this process, nothing to warm", None);
     }
     let sid = ident.session_id.as_str();
     // Under `attend run` the sensor holds the state and wakes the session;
     // a second judge would wake it twice.
     if attend_presence::heartbeat::run_is_live(sid) {
-        eprintln!("keepwarm: an attend run holds this session; its sensor keeps the cache warm");
-        return;
+        return quiet("an attend run holds this session; its sensor keeps the cache warm", None);
     }
     let cfg = crate::config::Config::load(&ident.origin_path);
     if !cfg.sensors.get("keepwarm").map(|s| s.enabled).unwrap_or(true) {
-        eprintln!("keepwarm: the keepwarm sensor is off in attend's config");
+        return quiet("the keepwarm sensor is off in attend's config", None);
+    }
+    let now = sensor_trait::epoch_secs();
+    if !args.policy {
+        let line = check_once(sid, &keepwarm_dir(), &ident.origin_path, now);
+        if args.json {
+            let doc = match line {
+                Some(text) => serde_json::json!({ "action": "keepalive", "text": text, "next_at": now + 60, "policy": false, "state": "off" }),
+                None => nothing("no wake is due", Some(now + 60)),
+            };
+            println!("{doc}");
+        } else if let Some(line) = line {
+            println!("{line}");
+        }
         return;
     }
-    if let Some(line) = check_once(sid, &keepwarm_dir(), &ident.origin_path, sensor_trait::epoch_secs()) {
-        println!("{line}");
+
+    let dir = keepwarm_dir();
+    let Some(reading) = read_context(sid, &ident.origin_path) else {
+        return quiet("could not read the session transcript through `ways context`", Some(now + RETRY_SECS));
+    };
+    let pcfg = Config::from_settings(mod_settings(&ident.origin_path).as_deref());
+    let site = Site {
+        session_id: sid.to_string(),
+        project: ident.origin_path.clone(),
+        name: crate::util::display_name(ident),
+        operator: agent_identity::sanitize_id_component(&agent_identity::signal::user_name()),
+        state_root: ways_state_root(),
+        home: claude_sessions::home_dir(),
+    };
+    let mut state = State::resume(read_ledger(&dir, sid));
+    let arm = read_arm(&dir, sid);
+    let (mut out, decision) = policy::step(&mut state, &reading, arm.as_ref(), &pcfg, Gate::parse(&args.autocompact), &site, now);
+    // The cursor and the gate move with every step.
+    out.changed = true;
+    settle(&dir, sid, &state, arm.as_ref(), &out, now);
+    if args.json {
+        println!("{}", serde_json::to_string(&decision).unwrap_or_else(|_| nothing("the decision did not serialize", None).to_string()));
+    } else if let Some(text) = &decision.text {
+        println!("{text}");
+    } else {
+        eprintln!("keepwarm: {}", decision.reason);
     }
+}
+
+/// The ways state root, `$XDG_STATE_HOME/agent-ways` or
+/// `~/.local/state/agent-ways`, as ways-core's `paths::state_root` reads
+/// it: a relative `$XDG_STATE_HOME` is ignored.
+fn ways_state_root() -> PathBuf {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| claude_sessions::home_dir().join(".local").join("state"));
+    base.join("agent-ways")
 }
 
 #[cfg(test)]

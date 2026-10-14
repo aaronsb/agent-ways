@@ -572,7 +572,37 @@ pub enum KeepwarmCmd {
     /// one is due, else nothing (exit 0 either way). For a host that polls
     /// without `attend run`; prints nothing while an `attend run` holds the
     /// session, since its sensor wakes it.
-    Check,
+    Check(KeepwarmCheckArgs),
+    /// The operator prompted: the keepalive count starts again, and a sent
+    /// wrap and a stop are cleared. The attend mod runs it for each prompt
+    /// typed in the session (ADR-414 item 4)
+    Reset,
+    /// Record where the keepalive policy's wrap reply went, for the status
+    /// card. The attend mod runs it once the wrap turn ends (ADR-414 item 6)
+    Wrapped {
+        /// transcript, file, sent, refused or unfinished
+        outcome: String,
+        /// The file written, the recipient, or attend's reason for a refusal
+        #[arg(long, default_value = "")]
+        detail: String,
+    },
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub struct KeepwarmCheckArgs {
+    /// Apply the keepalive policy (ADR-414): from each turn's end, one wake
+    /// the margin before the cache lapses, counted from the operator's last
+    /// prompt and bounded by attend_mod.keepalive, then one wrap turn
+    #[arg(long)]
+    pub policy: bool,
+    /// Print the decision as one JSON object: action (none, keepalive or
+    /// wrap), text, next_at, count, max, wraps_at and reason
+    #[arg(long)]
+    pub json: bool,
+    /// The autocompact gate as the host read it: on, off or unknown. The
+    /// policy runs only with off; unknown counts as on
+    #[arg(long, requires = "policy", value_parser = ["on", "off", "unknown"], default_value = "unknown")]
+    pub autocompact: String,
 }
 
 /// Subcommands for `attend listen`. With no subcommand, defaults to `status`.

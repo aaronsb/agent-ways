@@ -321,4 +321,87 @@ fn status_says_armed_and_shows_the_mod_setting_in_a_mod_host() {
     let line = text.lines().find(|l| l.starts_with("mod setting")).unwrap_or_else(|| panic!("{text}"));
     assert_eq!(line, "mod setting attend_mod.keepwarm off (from /p/.claude/ways.yaml); the mod never runs the keepwarm check in this session");
 }
+
+/// `check --policy --json`: the keepalive policy's decision (ADR-414 item
+/// 7), with the autocompact gate the mod read.
+fn policy(w: &Warm, gate: &str) -> serde_json::Value {
+    let out = w.run(&["keepwarm", "check", "--policy", "--json", "--autocompact", gate]);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)))
+}
+
+/// With autocompact off, an idle session of 200k tokens is due its
+/// keepalive at 50 idle minutes with nothing armed, counted 1 of 8.
+#[test]
+fn the_policy_keeps_an_unarmed_session_warm_with_autocompact_off() {
+    let w = Warm::new("ka-due");
+    w.reading(&[(49 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!(d["action"], "none", "{d}");
+    assert_eq!(d["policy"], true);
+    let next = d["next_at"].as_u64().unwrap();
+    assert!((now() + MIN - 2..=now() + MIN + 2).contains(&next), "due a minute from now: {d}");
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!(d["action"], "keepalive", "{d}");
+    assert_eq!((d["count"].as_u64(), d["max"].as_u64()), (Some(1), Some(8)));
+    let text = d["text"].as_str().unwrap();
+    assert!(text.starts_with("keepwarm: 50m idle") && text.ends_with("Reply with one word and no tools."), "{text}");
+    assert_eq!(policy(&w, "off")["action"], "none", "one keepalive per due point");
+}
+
+/// With autocompact on, or a gate the mod could not read, nothing is sent.
+#[test]
+fn the_policy_does_not_run_with_autocompact_on_or_unknown() {
+    let w = Warm::new("ka-gate");
+    w.reading(&[(51 * MIN, 200_000, 500)]);
+    for gate in ["on", "unknown"] {
+        let d = policy(&w, gate);
+        assert_eq!((d["action"].as_str(), d["policy"].as_bool()), (Some("none"), Some(false)), "{gate}: {d}");
+    }
+    let out = w.run(&["keepwarm", "status"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("keepalive   off: autocompact could not be read, so it counts as on (armed windows only)"), "{text}");
+}
+
+/// The settings bound the policy: `max_keepalives: 0` wraps at the first
+/// due point, the wrap carrying where its reply goes.
+#[test]
+fn the_settings_bound_the_policy_and_route_the_wrap() {
+    let w = Warm::new("ka-settings");
+    std::fs::write(
+        w.f.home.join("settings.json"),
+        r#"{"view":"effective","keys":{"attend_mod.keepalive.max_keepalives":{"value":0},"attend_mod.keepalive.wrap":{"value":"file"},"attend_mod.keepalive.wrap_file":{"value":"/tmp/x/{session}.md"}}}"#,
+    )
+    .unwrap();
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!(d["action"], "wrap", "{d}");
+    assert_eq!(d["wrap"]["dest"], "file");
+    assert_eq!(d["wrap"]["file"], format!("/tmp/x/{}.md", w.f.sid));
+    assert!(d["text"].as_str().unwrap().starts_with("wrap: "), "{d}");
+    assert_eq!(policy(&w, "off")["state"], "wrapped");
+    // The mod records where the reply went; the card names it.
+    assert!(w.run(&["keepwarm", "wrapped", "file", "--detail", "/tmp/x/s.md"]).status.success());
+    let out = w.run(&["keepwarm", "status"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.lines().any(|l| l.starts_with("keepalive   wrapped at ") && l.ends_with("· the reply is saved to /tmp/x/s.md")), "{text}");
+    // The operator's prompt starts it again.
+    assert!(w.run(&["keepwarm", "reset"]).status.success());
+    w.reading(&[(MIN, 200_000, 500)]);
+    let d = policy(&w, "off");
+    assert_eq!((d["state"].as_str(), d["count"].as_u64()), (Some("running"), Some(0)), "{d}");
+}
+
+/// `attend keepwarm off` stops the policy until the operator's next prompt.
+#[test]
+fn keepwarm_off_stops_the_policy_until_the_next_prompt() {
+    let w = Warm::new("ka-off");
+    w.reading(&[(50 * MIN, 200_000, 500)]);
+    assert!(w.run(&["keepwarm", "off"]).status.success());
+    let d = policy(&w, "off");
+    assert_eq!((d["action"].as_str(), d["state"].as_str()), (Some("none"), Some("stopped")), "{d}");
+    assert!(w.run(&["keepwarm", "reset"]).status.success());
+    assert_eq!(policy(&w, "off")["action"], "keepalive");
+}
 }

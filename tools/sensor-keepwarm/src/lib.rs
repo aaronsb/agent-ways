@@ -22,6 +22,9 @@
 //! carries the state between calls in the ledger's cursor. Both settle a
 //! step's outcome through [`settle`].
 
+pub mod policy;
+pub mod windows;
+
 use sensor_trait::{Focus, Sensor};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -173,6 +176,10 @@ pub struct Ledger {
     /// baselines afresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<Cursor>,
+    /// The keepalive policy's count and marks (ADR-414 item 7). Absent in a
+    /// ledger written before the policy, which reads as a fresh count.
+    #[serde(default, skip_serializing_if = "policy::Policy::is_empty")]
+    pub policy: policy::Policy,
 }
 
 /// The part of [`State`] a step reads back: the idle clock, the context
@@ -349,6 +356,7 @@ pub struct State {
     pub misses: Vec<Miss>,
     pub last_ping: Option<PingRecord>,
     pub stopped: Option<String>,
+    pub policy: policy::Policy,
 }
 
 /// What one poll decided. `arm_write` is a new deadline for the arm file
@@ -371,6 +379,7 @@ impl State {
             s.last_ping = l.last_ping;
             s.stopped = l.stopped;
             s.pinged_at = l.pinged_at;
+            s.policy = l.policy;
         }
         s
     }
@@ -413,6 +422,14 @@ impl State {
 
     /// One poll. `arm` is the arm file as it is on disk right now.
     pub fn step(&mut self, reading: &Reading, arm: Option<&ArmFile>, now: u64) -> Outcome {
+        self.step_with(reading, arm, now, true)
+    }
+
+    /// [`State::step`], with the three-hour arm after a paid cold write
+    /// (ADR-182 item 4) only when `auto_arm`: the keepalive policy keeps
+    /// every stretch warm on its own, so where it runs the write arms
+    /// nothing (ADR-414 item 5).
+    pub fn step_with(&mut self, reading: &Reading, arm: Option<&ArmFile>, now: u64, auto_arm: bool) -> Outcome {
         let mut out = Outcome::default();
 
         // The arm file is the operator's word. A fresh deadline clears a
@@ -476,7 +493,7 @@ impl State {
                 // scored: a check that resumes after hours away scores an
                 // old write, whose window may already have run out.
                 let until = entry.at_epoch + AUTO_WARM_SECS;
-                if entry.context() >= BIG_TOKENS && until > now && self.deadline < until {
+                if auto_arm && entry.context() >= BIG_TOKENS && until > now && self.deadline < until {
                     self.deadline = until;
                     self.stopped = None;
                     out.arm_write = Some(self.deadline);
@@ -555,15 +572,7 @@ impl State {
             } else if idle >= PING_AFTER_SECS && self.ctx >= BIG_TOKENS {
                 self.pinged_at = Some(now);
                 out.changed = true;
-                out.observations.push((
-                    3.0,
-                    format!(
-                        "keepwarm: {} idle, the prompt cache lapses in {} on {} tokens. Reply with one word and no tools.",
-                        fmt_duration(idle),
-                        fmt_duration(TTL_SECS - idle),
-                        fmt_tok(self.ctx),
-                    ),
-                ));
+                out.observations.push((3.0, wake_line(idle, TTL_SECS, self.ctx)));
             }
         }
 
@@ -577,6 +586,7 @@ impl State {
             stopped: self.stopped.clone(),
             pinged_at: self.pinged_at,
             updated_at: now,
+            policy: self.policy.clone(),
             cursor: self.baselined.then(|| Cursor {
                 last_seen_at: self.last_seen_at,
                 ctx: self.ctx,
@@ -587,10 +597,23 @@ impl State {
     }
 }
 
+/// The `keepwarm:` wake line (ADR-182), the agent contract the three
+/// synchronized guidance files describe: `idle` into a stretch whose cache
+/// lives `ttl`, on a context of `ctx` tokens.
+pub fn wake_line(idle: u64, ttl: u64, ctx: u64) -> String {
+    format!(
+        "keepwarm: {} idle, the prompt cache lapses in {} on {} tokens. Reply with one word and no tools.",
+        fmt_duration(idle),
+        fmt_duration(ttl.saturating_sub(idle)),
+        fmt_tok(ctx),
+    )
+}
+
 // ── The card ───────────────────────────────────────────────────
 
-/// The lines `attend keepwarm status` prints.
-pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, now: u64) -> Vec<String> {
+/// The state the card reads: the transcript as it is now, the arm file, and
+/// what the ledger recorded.
+pub fn card_state(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>) -> State {
     let mut s = State {
         baselined: true,
         last_seen_at: reading.last_at(),
@@ -604,7 +627,14 @@ pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, n
         s.last_ping = l.last_ping.clone();
         s.stopped = l.stopped.clone();
         s.pinged_at = l.pinged_at;
+        s.policy = l.policy.clone();
     }
+    s
+}
+
+/// The lines `attend keepwarm status` prints.
+pub fn card(reading: &Reading, arm: Option<&ArmFile>, ledger: Option<&Ledger>, now: u64) -> Vec<String> {
+    let s = card_state(reading, arm, ledger);
     let mut lines = Vec::new();
     lines.push(format!("model       {}", if s.model.is_empty() { "not seen yet" } else { &s.model }));
     if s.last_seen_at == 0 {
