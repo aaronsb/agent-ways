@@ -47,7 +47,7 @@ Closing an overlay also varied. A pane's menu closed on Esc saying "unchanged", 
 
 ## Decision
 
-**(a) One question.** A pane asks through `Open::Ask { id, question, yes, no }`. The shell owns the question while it waits: the bottom bar draws the question, cut short where it must be so the answers fit, then ` y <yes> ` and ` n <no> ` as lozenges recorded as click targets. The answer reaches the pane through `Pane::picked` under `id`.
+**(a) One question.** A pane asks through `Open::Ask(Question)`, a `Question` holding its `id`, the `question`, what `yes` and `no` do (yes may be absent, for a question only no dismisses), whether yes waits (`pending`), and an optional `Expiry` (ADR-504, note of 2026-10-14). The shell owns the question while it waits: the bottom bar draws the question, cut short where it must be so the answers fit, and ` y <yes> ` and ` n <no> ` at the bar's right end as lozenges recorded as click targets. The answer reaches the pane through `Pane::picked` under `id`.
 
 - `y`, or a click on the yes lozenge, answers yes.
 - `n`, Esc, a click on the no lozenge, a click of any button anywhere else, or any other key answers no.

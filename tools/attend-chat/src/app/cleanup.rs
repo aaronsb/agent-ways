@@ -538,7 +538,7 @@ mod tests {
         let q = opened(&mut c);
         assert_eq!(q.id, id, "the same question");
         assert_eq!(q.question, "delete 3 read messages in #slow for everyone?");
-        assert!(!q.pending && q.expiry.as_ref().is_some_and(|e| e.after == DELETE_QUESTION_LIFE && !e.answer), "{q:?}");
+        assert!(!q.pending && q.expiry.as_ref().is_some_and(|e| e.after == DELETE_QUESTION_LIFE && !e.answers_yes()), "{q:?}");
     }
 
     /// A count of nothing, or attend's refusal, leaves only no.

@@ -8,7 +8,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::Span;
 use ratatui::Frame;
 
-use super::pane::{footer_spans, Binding, Ctx, Keyed, Open, Overlay, Question, Tone, EXPIRED};
+use super::pane::{footer_spans, Binding, Ctx, Expiry, Keyed, Open, Overlay, Question, Tone, EXPIRED};
 use super::pick::Pick;
 use super::response::Shown;
 use super::theme::{self, Seg};
@@ -747,7 +747,7 @@ impl App {
 
     /// `a` closed by its expiry: its expiry's answer, marked [`EXPIRED`].
     fn answer_expired(&mut self, a: Asked) {
-        let yes = a.q.expiry.as_ref().is_some_and(|e| e.answer);
+        let yes = a.q.expiry.as_ref().is_some_and(Expiry::answers_yes);
         self.mode = Mode::Browse;
         self.pane_picked(&a.q.id, vec![if yes { "y" } else { "n" }.to_string(), EXPIRED.to_string()]);
     }
@@ -1230,7 +1230,7 @@ mod tests {
         assert_eq!(two(&a).picked, ["q=n", "q=expired"], "answered no, marked expired");
         assert!(matches!(a.mode, Mode::Browse));
         let mut a = app(true);
-        let yes = Expiry { answer: true, ..Expiry::new(Duration::from_secs(60)) };
+        let yes = Expiry::yes_unattended(Duration::from_secs(60));
         ask_now(&mut a, Question::new("q", "go on?", "go", "stop").expires(yes));
         expire_now(&mut a);
         a.tick_pane();

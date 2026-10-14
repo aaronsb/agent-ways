@@ -286,9 +286,14 @@ impl Default for Ctx {
 ///
 /// A question can expire ([`Expiry`]): once it is ready to answer, the
 /// shell draws the seconds left beside it, counting down on its tick, and
-/// at none answers it with the expiry's answer, marked [`EXPIRED`], so the
-/// pane can say so. A question that sat unanswered while the operator was
-/// away cannot be answered by the next key typed on coming back.
+/// at none answers it with the expiry's answer, no unless made otherwise,
+/// marked [`EXPIRED`], so the pane can say so. A question that sat
+/// unanswered while the operator was away cannot be answered by the next
+/// key typed on coming back, nor by one typed a moment after its deadline.
+///
+/// However a question is made, its yes is set back and inert for a moment
+/// after it is ready to answer, and after what it asks changes while
+/// ready; a held key's repeats never press it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Question {
     pub id: String,
@@ -326,13 +331,15 @@ impl Question {
 }
 
 /// When a question ([`Question`]) closes on its own, and how: `after` it is
-/// ready to answer, it answers `answer` (no, unless set), marked
-/// [`EXPIRED`]. `label` and `short` say the seconds left, `{s}` standing for
-/// them; the bar draws `label` where it fits and `short` where it does not.
+/// ready to answer, it answers no, marked [`EXPIRED`], unless it was made
+/// with [`Expiry::yes_unattended`]. `label` and `short` say the seconds
+/// left, `{s}` standing for them; the bar draws `label` where the whole
+/// question fits beside it and `short` where it does not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expiry {
     pub after: std::time::Duration,
-    pub answer: bool,
+    /// Yes, not no, at expiry: set only by [`Expiry::yes_unattended`].
+    pub(crate) answer: bool,
     pub label: String,
     pub short: String,
 }
@@ -342,6 +349,29 @@ impl Expiry {
     /// the bar is short of room.
     pub fn new(after: std::time::Duration) -> Expiry {
         Expiry { after, answer: false, label: "closes in {s} s".into(), short: "{s} s".into() }
+    }
+
+    /// Answers yes after `after`, with no one there to answer it.
+    ///
+    /// Never for a question whose yes deletes, sends, or does anything
+    /// that cannot be taken back: its countdown runs out while the
+    /// operator is away, and yes then acts for them. It suits a question
+    /// whose yes is the safe course, such as going on with something
+    /// already under way.
+    ///
+    /// Nothing else makes an expiry answer yes: a struct literal cannot set
+    /// it.
+    ///
+    /// ```compile_fail
+    /// let _ = agent_tui::Expiry { answer: true, ..agent_tui::Expiry::new(std::time::Duration::from_secs(1)) };
+    /// ```
+    pub fn yes_unattended(after: std::time::Duration) -> Expiry {
+        Expiry { answer: true, ..Expiry::new(after) }
+    }
+
+    /// Whether it answers yes at expiry.
+    pub fn answers_yes(&self) -> bool {
+        self.answer
     }
 }
 
