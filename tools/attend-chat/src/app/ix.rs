@@ -55,7 +55,7 @@ pub(super) struct Ix {
     /// The one record of what is open.
     overlays: Vec<Overlay>,
     /// Ctrl+X was the box's last key: the first half of Ctrl+X Ctrl+S,
-    /// send now. Whatever comes next ends it.
+    /// send now. The operator's next input, whatever it is, ends it.
     chord: bool,
 }
 
@@ -288,8 +288,11 @@ impl<'a> Step<'a> {
             self.set(Focus::Feed);
             self.fx.push(Effect::Redraw);
         }
-        // The chord's first key holds for the next event only.
-        let chord = std::mem::take(&mut self.ix.chord);
+        // The chord's first key holds for the operator's next input only: a
+        // refresh, the column hidden for width or an overlay's coming and
+        // going leave it held.
+        let input = matches!(ev, Ev::Key(_) | Ev::Click(_) | Ev::Paste | Ev::Compose | Ev::ToggleBar | Ev::Jump(_) | Ev::Numbered { .. } | Ev::TabActivated { .. });
+        let chord = input && std::mem::take(&mut self.ix.chord);
         match ev {
             Ev::Key(k) if self.ix.owns_text() => self.compose_key(k, chord),
             Ev::Key(k) => self.nav_key(k),

@@ -129,6 +129,9 @@ fn ctrl_x_ctrl_s_in_the_box_sends_now() {
         cell("Enter after Ctrl+X sends as Enter does", held.clone(), Ev::Key(key(KeyCode::Enter)), drafted(), compose.clone(), vec![Send]),
         cell("Ctrl+Enter still sends now", compose.clone(), Ev::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)), drafted(), compose.clone(), vec![SendNow]),
         cell("a paste after Ctrl+X drops the chord", held.clone(), Ev::Paste, drafted(), compose.clone(), vec![Redraw]),
+        cell("a refresh between keeps the chord", held.clone(), Ev::WorldChanged, drafted(), held.clone(), vec![]),
+        cell("the column hidden for width keeps it too", held.clone(), Ev::ColumnHidden, drafted(), held.clone(), vec![]),
+        cell("a click drops it", held.clone(), Ev::Click(Click::Shell), drafted(), compose.clone(), vec![]),
     ]);
 }
 

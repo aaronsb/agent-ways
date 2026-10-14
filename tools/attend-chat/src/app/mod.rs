@@ -967,7 +967,8 @@ impl Pane for ChatPane {
     /// typed, or the last result, set back.
     fn status(&mut self) -> Option<(String, Tone)> {
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
-        let (line, how) = status_slot(fresh, self.status_is_error, self.busy_line(), crate::slash::contextual_help(self.input.text()), &self.status);
+        let help = crate::slash::contextual_help(self.input.text()).map(|h| (h, self.input.text().starts_with('/')));
+        let (line, how) = status_slot(fresh, self.status_is_error, self.busy_line(), help, &self.status);
         let tone = match how {
             Some(true) => Tone::Err,
             Some(false) => Tone::Said,
@@ -1384,18 +1385,20 @@ impl World {
 }
 
 /// The status-slot content under the #398/#400 priority rule: a fresh
-/// result (error or success) > what a running delete or tombstone is doing
-/// (`busy`) > single-match help > the stored result. The second value is
-/// how it reads: `Some(true)` an error, `Some(false)` a success or the
-/// work running, `None` set back.
-fn status_slot(fresh: bool, is_error: bool, busy: Option<String>, help: Option<String>, stored: &str) -> (String, Option<bool>) {
+/// result (error or success) > the help of a slash command being typed >
+/// what a running delete or tombstone is doing (`busy`) > other
+/// single-match help > the stored result. `help` carries whether it is a
+/// slash command's. The second value is how it reads: `Some(true)` an
+/// error, `Some(false)` a success or the work running, `None` set back.
+fn status_slot(fresh: bool, is_error: bool, busy: Option<String>, help: Option<(String, bool)>, stored: &str) -> (String, Option<bool>) {
     if fresh {
         return (stored.to_string(), Some(is_error));
     }
-    if let Some(busy) = busy {
-        return (busy, Some(false));
+    match (help, busy) {
+        (Some((help, true)), _) => (help, None),
+        (_, Some(busy)) => (busy, Some(false)),
+        (help, None) => (help.map_or_else(|| stored.to_string(), |(h, _)| h), None),
     }
-    (help.unwrap_or_else(|| stored.to_string()), None)
 }
 
 #[cfg(test)]
@@ -1404,21 +1407,21 @@ mod status_slot_tests {
 
     #[test]
     fn fresh_error_asserts_over_help() {
-        let (text, how) = status_slot(true, true, None, Some("/dissolve — help".into()), "1 live member — not dissolving");
+        let (text, how) = status_slot(true, true, None, Some(("/dissolve — help".into(), true)), "1 live member — not dissolving");
         assert_eq!(text, "1 live member — not dissolving");
         assert_eq!(how, Some(true));
     }
 
     #[test]
     fn fresh_success_asserts() {
-        let (text, how) = status_slot(true, false, None, Some("help".into()), "joined #x");
+        let (text, how) = status_slot(true, false, None, Some(("help".into(), false)), "joined #x");
         assert_eq!(text, "joined #x");
         assert_eq!(how, Some(false));
     }
 
     #[test]
     fn expired_window_yields_to_help_then_stored() {
-        let (text, how) = status_slot(false, true, None, Some("/dissolve — help".into()), "err");
+        let (text, how) = status_slot(false, true, None, Some(("/dissolve — help".into(), true)), "err");
         assert_eq!(text, "/dissolve — help");
         assert_eq!(how, None);
         let (text, _) = status_slot(false, true, None, None, "err");
@@ -1430,8 +1433,12 @@ mod status_slot_tests {
         let busy = || Some("deleting…".to_string());
         let (text, how) = status_slot(true, true, busy(), None, "still deleting: one delete or tombstone runs at a time");
         assert_eq!((text.as_str(), how), ("still deleting: one delete or tombstone runs at a time", Some(true)), "a fresh note first");
-        let (text, how) = status_slot(false, false, busy(), Some("/dissolve — help".into()), "hid 3 messages");
-        assert_eq!((text.as_str(), how), ("deleting…", Some(false)), "then the running delete, over help and the last result");
+        let (text, how) = status_slot(false, false, busy(), Some(("@Ada — an agent".into(), false)), "hid 3 messages");
+        assert_eq!((text.as_str(), how), ("deleting…", Some(false)), "then the running delete, over other help and the last result");
+        let (text, how) = status_slot(false, false, busy(), Some(("/dissolve — help".into(), true)), "hid 3 messages");
+        assert_eq!((text.as_str(), how), ("/dissolve — help", None), "a slash command's help while it is typed");
+        let (text, _) = status_slot(false, false, busy(), None, "hid 3 messages");
+        assert_eq!(text, "deleting…", "typing with no help to show leaves the running line");
     }
 }
 
