@@ -45,11 +45,12 @@ usage: attend-chat [--snap WxH [--keys \"KEYS\"]] [--depth DEPTH]
                             every channel together, pinned right): Hide
                             messages here. #open: Hide messages here, Delete
                             read messages for everyone…. A channel: Add agent,
-                            Remove agent, Describe, Delete read messages for
-                            everyone…, Leave, Seal, Delete channel. Add agent
-                            invites (the agent joins itself); Seal waits on
-                            attend (ADR-404 D4) and is set back. The + slot (or
-                            Ctrl+N) asks for a new channel's name with no menu.
+                            Remove agent, Describe, Hide messages here, Delete
+                            read messages for everyone…, Leave, Seal, Delete
+                            channel. Add agent invites (the agent joins
+                            itself); Seal waits on attend (ADR-404 D4) and is
+                            set back. The + slot (or Ctrl+N) asks for a new
+                            channel's name with no menu.
                             The bar holds one channel tab, the created channel
                             shown
   cleanup                   Hide messages here hides what the tab holds now, in

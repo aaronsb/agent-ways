@@ -381,6 +381,33 @@ fn hide_messages_here_hides_in_its_tab_only_and_holds_across_a_restart() {
     assert!(!items(&mut again).iter().any(|i| i == "Show hidden messages"), "nothing hidden: nothing to show");
 }
 
+/// A named channel offers Hide messages here as `#open` does, and Show
+/// hidden messages while it has a mark; the mark is the channel's alone.
+#[test]
+fn a_named_channel_hides_its_messages_here_too() {
+    let _g = fixture();
+    let mut c = chat();
+    side(&mut c, "#deploy", MouseButton::Left);
+    assert!(feed(&mut c).contains("alpha in deploy"), "{}", feed(&mut c));
+    channel_menu(&mut c, "#deploy");
+    let menu = items(&mut c);
+    assert_eq!(menu.iter().position(|i| i == "Hide messages here"), Some(3), "after Describe…, before the delete: {menu:?}");
+    pick(&mut c, "Hide messages here");
+    assert!(screen(&mut c).contains("hide the messages in #deploy? the bus keeps every message"), "{}", screen(&mut c));
+    press(&mut c, KeyCode::Char('y'));
+    assert!(c.status().starts_with("hid ") && c.status().ends_with(" in #deploy; the bus keeps them"), "{}", c.status());
+    assert!(!feed(&mut c).contains("alpha in deploy"), "{}", feed(&mut c));
+    assert!(calls().is_empty(), "nothing on the bus");
+    side(&mut c, "#open", MouseButton::Left);
+    assert!(feed(&mut c).contains("alpha on open"), "#open keeps its messages: {}", feed(&mut c));
+    channel_menu(&mut c, "#deploy");
+    assert!(items(&mut c).iter().any(|i| i == "Show hidden messages"), "{:?}", items(&mut c));
+    pick(&mut c, "Show hidden messages");
+    assert_eq!(c.status(), "#deploy shows every message again");
+    side(&mut c, "#deploy", MouseButton::Left);
+    assert!(feed(&mut c).contains("alpha in deploy"), "{}", feed(&mut c));
+}
+
 /// The mark is the newest bus message's, never a notice of the chat's own,
 /// which is timed by the clock now; and `/clear` asks, as the item does.
 #[test]

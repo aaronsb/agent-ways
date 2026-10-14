@@ -83,6 +83,10 @@ basis:
     level: guided
     said: "build the capabilities that are missing and make sure the ones implemented don't have inconsistent implementation"
     via: "issue #931, quoting the operator's goal for the attend-chat UX audit; its build item B7 is editable settings"
+  - operator: aaronsb
+    level: directed
+    said: "Named channels get \"Hide messages here\" (and \"Show hidden messages\"), not only DMs and #open. Same per-tab watermark semantics; it hides on this screen only."
+    via: "the operator's decision of 2026-10-14, relayed by the main session"
   - precedent: ADR-503
 agent:
   name: Claude
@@ -206,3 +210,7 @@ The operator asked for a way to clear direct messages from the column: "we shoul
 - **Tombstone… on a dead agent's row.** A claude whose session is not live has Tombstone… on its menu, and on the menu of its own DM view (Review DMs), asked with a `y`. It runs `attend message tombstone <session-id>`; the agent's messages leave every tab and its row leaves Agents. A live agent's row never offers it. A dead sighting whose id is among a live session's ids before `/clear` is folded into that session's row, so it has no row of its own.
 - **Through the attend CLI.** attend-chat runs both verbs as child processes with `--json` and shows the report on the status line. When the installed attend lacks a verb, the status line names the verb and says attend needs updating. `/purge` stays for one release as an alias of Delete read messages for everyone… → All on the shown channel.
 - Item (b)'s rule holds: every item that drops something asks for `y` first, and the list now reads Hide messages here, Delete read messages for everyone…, Leave, Delete channel, Remove and Tombstone…. Undo delete restores and asks nothing.
+
+## Amendment (2026-10-14): hide in a named channel
+
+- **Hide messages here on every channel.** A named channel's menu offers Hide messages here after Describe…, and Show hidden messages while the channel has a mark, as `#open` and the DM views do. The watermark is the same per-tab mark, kept in attend-chat's state file; it hides on this screen only, and the channel's members and the bus keep every message. The order is Add agent, Remove agent, Describe…, Hide messages here, Delete read messages for everyone…, Leave, Seal, Delete channel.

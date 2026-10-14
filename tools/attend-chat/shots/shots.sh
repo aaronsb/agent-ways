@@ -105,6 +105,7 @@ crowd        | crowd | wait:Agents F2 Down Up Up Up Up Up Up Up Up Up Up Up Up
 common       | base  | wait:Agents click:≡ wait:Hide_column
 hide-here    | base  | wait:⋯all click:⋯all wait:Hide_messages_here Enter wait:hide_the_messages_in_⋯all?
 hide-done    | base  | wait:#open click:#open click:#open wait:Hide_messages_here Enter wait:y_hide click:y_hide wait:the_bus_keeps_them
+hide-chan    | base  | wait:Agents side:#deploy side:#deploy wait:pick click:Hide_messages_here wait:hide_the_messages_in_#deploy?
 paste        | base  | wait:Agents text:see: paste:line_one\\nline_two\\nline_three
 rawpaste     | base  | wait:Agents rawpaste:one\\ntwo
 plain        | plain | wait:Agents

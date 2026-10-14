@@ -172,13 +172,10 @@ impl ChatPane {
         self.invalidate();
     }
 
-    /// The hide items of `tab`'s menu: Hide messages here where `offer` is
-    /// set, and Show hidden messages while the tab has a watermark.
-    pub(super) fn hide_items(&self, tab: &Tab, offer: bool) -> Vec<Item> {
-        let mut out = Vec::new();
-        if offer {
-            out.push(Item::new(HIDE_HERE));
-        }
+    /// The hide items of `tab`'s menu: Hide messages here, and Show hidden
+    /// messages while the tab has a watermark.
+    pub(super) fn hide_items(&self, tab: &Tab) -> Vec<Item> {
+        let mut out = vec![Item::new(HIDE_HERE)];
         if self.hidden.has(tab) {
             out.push(Item::new(SHOW_HIDDEN));
         }

@@ -174,7 +174,7 @@ impl ChatPane {
         let mut out = vec![Item::new(kind.hide_item())];
         match kind {
             Kind::Dm => {
-                out.extend(self.hide_items(&kind.tab(member), true));
+                out.extend(self.hide_items(&kind.tab(member)));
                 out.extend(self.delete_items(&Scope::Dm(member.to_string())));
             }
             Kind::Review if self.is_dead_claude(member) => out.push(Item::new(TOMBSTONE)),
