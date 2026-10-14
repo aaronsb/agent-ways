@@ -66,7 +66,7 @@ fn base() -> &'static Path {
 /// which neither agent works in. Enter writes.
 fn live_chat() -> Chat {
     let base = base();
-    let (tx, rx) = std::sync::mpsc::channel::<Signal>();
+    let (tx, rx) = std::sync::mpsc::channel::<attend_chat::watcher::Delivery>();
     let here = std::env::current_dir().unwrap().to_string_lossy().to_string();
     watcher::spawn_watcher(base.to_path_buf(), signal::encode_cwd(&here), signal::human_member_id(), tx).unwrap();
     Chat::new(Some(rx), Palette::default(), Shape::PLAIN).sidebar(true).heartbeat(false).enhanced(true)

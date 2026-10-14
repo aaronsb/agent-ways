@@ -7,6 +7,8 @@
 //! this from the top-level `crate::legend` (which renders the legend
 //! UI strip); this module only builds the data the UI consumes.
 
+use std::collections::{HashMap, HashSet};
+
 use agent_identity::{Identity, PaletteEntry, Style};
 use agent_theme::ColorDepth;
 use attend_instances::SnapshotCache;
@@ -206,6 +208,44 @@ where
         i += 1;
         !dropped[i - 1]
     });
+    out
+}
+
+/// The left column's rows once the session lineage and the tombstones are
+/// read (ADR-404 D3e). `earlier` maps each id a session had before a
+/// `/clear` to the session that carries it on now. A dead sighting under
+/// such an id folds into that session's row when the session is live,
+/// whatever name each was seen under, unless a channel still lists the
+/// dead id (`in_channel`); the live row takes the place of the newer of the
+/// two. A dead session that is tombstoned makes no row.
+pub fn settle<M>(seen: Vec<Seen>, earlier: &HashMap<String, String>, tombstoned: &HashSet<String>, in_channel: M) -> Vec<Seen>
+where
+    M: Fn(&str) -> bool,
+{
+    let dead = |s: &Seen| s.identity.is_claude && !s.live;
+    let live_at = |id: &str| seen.iter().position(|l| l.live && l.identity.is_claude && l.member == id);
+    let mut out: Vec<Seen> = Vec::with_capacity(seen.len());
+    let mut placed: HashSet<usize> = HashSet::new();
+    for (i, s) in seen.iter().enumerate() {
+        if placed.contains(&i) {
+            continue;
+        }
+        if dead(s) && tombstoned.contains(&s.member) {
+            continue;
+        }
+        let carried = earlier.get(&s.member).and_then(|id| live_at(id));
+        match carried {
+            Some(j) if dead(s) && !in_channel(&s.member) => {
+                if placed.insert(j) {
+                    out.push(seen[j].clone());
+                }
+            }
+            _ => {
+                placed.insert(i);
+                out.push(s.clone());
+            }
+        }
+    }
     out
 }
 
@@ -443,5 +483,50 @@ mod tests {
         }];
         let reg = known_identities_with_liveness(&buf, &seeds, ColorDepth::TrueColor, |_| true, &empty_cache());
         assert_eq!(reg.len(), 1);
+    }
+
+    /// Two sessions of one cwd, each holding its own slot, so their names
+    /// differ: `old` dead and seen in the buffer, `new` live.
+    fn two_names() -> (Vec<Seen>, std::path::PathBuf) {
+        let base = std::env::temp_dir().join(format!("attend-chat-lineage-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let registry = attend_instances::Registry::with_base(base.clone());
+        registry.register("/home/x", "old").unwrap();
+        registry.register("/home/x", "new").unwrap();
+        let cache = SnapshotCache::with_registry(attend_instances::Registry::with_base(base.clone()));
+        let buf = vec![sig("claude:old", "/home/x")];
+        let seeds = vec![DiscoveredSession { cwd: "/home/x".into(), session_id: "new".into() }];
+        (seen_identities(&buf, &seeds, ColorDepth::TrueColor, |sid| sid == "new", |_| false, |_| false, &cache), base)
+    }
+
+    fn members(seen: &[Seen]) -> Vec<(&str, bool)> {
+        seen.iter().map(|s| (s.member.as_str(), s.live)).collect()
+    }
+
+    /// A dead sighting under an id the live session had before a `/clear`
+    /// folds into the live row, though the two were seen under two names;
+    /// the live row takes the dead one's place, the newer.
+    #[test]
+    fn a_dead_sighting_under_an_earlier_id_folds_into_the_live_row() {
+        let (seen, base) = two_names();
+        std::fs::remove_dir_all(&base).ok();
+        assert_ne!(seen[0].identity.nickname, seen[1].identity.nickname, "the names alone fold nothing");
+        assert_eq!(members(&seen), [("old", false), ("new", true)]);
+        let earlier: HashMap<String, String> = [("old".to_string(), "new".to_string())].into();
+        assert_eq!(members(&settle(seen.clone(), &earlier, &HashSet::new(), |_| false)), [("new", true)]);
+        assert_eq!(members(&settle(seen.clone(), &earlier, &HashSet::new(), |id| id == "old")), [("old", false), ("new", true)], "a channel still lists the dead id");
+        assert_eq!(members(&settle(seen, &HashMap::new(), &HashSet::new(), |_| false)), [("old", false), ("new", true)], "no lineage, no fold");
+    }
+
+    /// A tombstoned session makes no row, from a sighting or a seed; a live
+    /// one, back under `--resume`, keeps its row.
+    #[test]
+    fn a_tombstoned_session_makes_no_row() {
+        let buf = vec![sig("claude:gone", "/home/x"), sig("claude:back", "/home/y")];
+        let seeds = vec![DiscoveredSession { cwd: "/home/z".into(), session_id: "seeded".into() }];
+        let seen = seen_identities(&buf, &seeds, ColorDepth::TrueColor, |sid| sid == "back", |_| false, |_| false, &empty_cache());
+        assert_eq!(members(&seen).len(), 3);
+        let tombstoned: HashSet<String> = ["gone", "back", "seeded"].map(String::from).into();
+        assert_eq!(members(&settle(seen, &HashMap::new(), &tombstoned, |_| false)), [("back", true)]);
     }
 }

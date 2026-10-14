@@ -382,7 +382,7 @@ fn the_watcher_feeds_the_screen_on_tick() {
     let (tx, rx) = std::sync::mpsc::channel();
     fixture();
     let mut c = Chat::new(Some(rx), Palette::default(), Shape::PLAIN).heartbeat(false);
-    tx.send(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, "arrived")).unwrap();
+    tx.send(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, "arrived").into()).unwrap();
     c.tick();
     assert_eq!(c.signals().len(), 1);
     assert!(testkit::text(&testkit::render_screen(&mut c, 80, 25)).contains("arrived"));
@@ -407,7 +407,7 @@ fn an_unchanged_screen_is_copied_not_drawn_again() {
     c.tick();
     testkit::render_screen(&mut c, 80, 25);
     let before = c.draws();
-    tx.send(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, "new")).unwrap();
+    tx.send(sig("external:aaron@kitty", "/home/aaron", 0, Channel::Open, "new").into()).unwrap();
     c.tick();
     testkit::render_screen(&mut c, 80, 25);
     assert_eq!(c.draws(), before + 1, "a new message draws afresh");

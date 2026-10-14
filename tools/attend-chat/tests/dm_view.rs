@@ -53,7 +53,7 @@ fn sig(id: &str, from: &str, cwd: &str, message: &str, channel: Channel) -> Sign
 fn chat_with(send: bool) -> Chat {
     fixture();
     let rx = send.then(|| {
-        let (tx, rx) = std::sync::mpsc::channel::<Signal>();
+        let (tx, rx) = std::sync::mpsc::channel::<attend_chat::watcher::Delivery>();
         let here = std::env::current_dir().unwrap().to_string_lossy().to_string();
         attend_chat::watcher::spawn_watcher(signal::signals_base(), signal::encode_cwd(&here), signal::human_member_id(), tx).unwrap();
         rx

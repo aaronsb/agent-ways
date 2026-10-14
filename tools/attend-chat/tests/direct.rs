@@ -37,7 +37,7 @@ fn base() -> &'static Path {
 #[test]
 fn the_person_tray_streams_into_the_chat() {
     let base = base();
-    let (tx, rx) = std::sync::mpsc::channel::<Signal>();
+    let (tx, rx) = std::sync::mpsc::channel::<attend_chat::watcher::Delivery>();
     watcher::spawn_watcher(base.to_path_buf(), String::new(), "aaron".to_string(), tx).unwrap();
     std::thread::sleep(Duration::from_millis(300));
     for (member, body) in [("someone-else", "not yours"), ("aaron", "a reply for you")] {
@@ -56,11 +56,11 @@ fn the_person_tray_streams_into_the_chat() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut got = Vec::new();
     while Instant::now() < deadline && got.is_empty() {
-        got.extend(rx.try_iter());
+        got.extend(rx.try_iter().filter_map(watcher::Delivery::signal));
         std::thread::sleep(Duration::from_millis(20));
     }
     std::thread::sleep(Duration::from_millis(300));
-    got.extend(rx.try_iter());
+    got.extend(rx.try_iter().filter_map(watcher::Delivery::signal));
     // Other tests in this binary post to #open and the project tray at the
     // same time; only person-tray signals are this test's.
     let mut bodies: Vec<(&str, &Channel)> =
