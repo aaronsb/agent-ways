@@ -22,9 +22,10 @@
 //! form of `attend message delete` (the dry run, the delete, the undo) and
 //! `attend message tombstone`, on a thread of their own with no time
 //! limit (ADR-405, amendment of 2026-10-14): a delete runs to its end. The
-//! status line says what is running (`deleting…`, `tombstoning…`) until it
-//! ends, a fresh result taking the line for its few seconds, and the screen
-//! stays live. One runs at a time: another asked for meanwhile is refused
+//! status line says what is running and for how long (`deleting… 12 s`)
+//! until it ends, a fresh result taking the line for its few seconds, and
+//! the screen stays live. `≡` ▸ Stop deleting stops it, and the exit guard
+//! names it. One runs at a time: another asked for meanwhile is refused
 //! with a note. A count that lands while something is open over the chat,
 //! or after the operator typed, asks nothing: it is held for [`HOLD`] and
 //! said, and choosing the delete again asks from it. An attend without the
@@ -68,6 +69,18 @@ pub(super) enum Job {
     /// A tombstone of the session `member`, named `name`.
     Tombstone { member: String, name: String },
 }
+
+/// The delete or tombstone running, with no time limit: attend working,
+/// what to do with its answer, and since when.
+pub(super) struct Removal {
+    running: attend_cli::Running,
+    job: Job,
+    began: Instant,
+}
+
+/// What the `≡` menu's item that stops a running delete or tombstone
+/// starts with: `Stop deleting`.
+pub(super) const STOP: &str = "Stop ";
 
 impl Job {
     /// What the chat is doing while attend works on the job.
@@ -312,16 +325,50 @@ impl ChatPane {
         self.ask_attend(attend_cli::tombstone_argv(member), Job::Tombstone { member: member.to_string(), name: name.to_string() });
     }
 
-    /// What the delete or tombstone running now is doing, as the status
-    /// line says it: `deleting…`.
+    /// What the delete or tombstone running now is doing: `deleting…`.
     pub(super) fn removing_now(&self) -> Option<String> {
-        self.removing.as_ref().map(|(_, job)| format!("{}…", job.doing()))
+        self.removing.as_ref().map(|r| format!("{}…", r.job.doing()))
+    }
+
+    /// The status line while a delete or tombstone runs: what it is doing,
+    /// for how long, and where it is stopped.
+    pub(super) fn busy_line(&self) -> Option<String> {
+        self.removing.as_ref().map(|r| format!("{}… {} s · stop it from ≡", r.job.doing(), r.began.elapsed().as_secs()))
+    }
+
+    /// What is running, as the exit guard names it: `a delete still
+    /// running`.
+    pub(super) fn running_what(&self) -> Option<&'static str> {
+        self.removing.as_ref().map(|r| match r.job {
+            Job::Tombstone { .. } => "a tombstone still running",
+            _ => "a delete still running",
+        })
+    }
+
+    /// The `≡` menu's item that stops the delete or tombstone running.
+    pub(super) fn stop_item(&self) -> Option<String> {
+        self.removing.as_ref().map(|r| format!("{STOP}{}", r.job.doing()))
+    }
+
+    /// Stop the delete or tombstone running: attend is killed, the chat
+    /// takes no answer from it, and the status line says what that leaves.
+    pub(super) fn stop_removing(&mut self) {
+        let Some(r) = self.removing.take() else { return };
+        r.running.stop();
+        let note = match r.job {
+            Job::DryRun { .. } => "stopped counting: nothing was deleted".to_string(),
+            Job::Delete(asked) => format!("stopped deleting in {}: any it marked already come back with `attend message delete --undo`, which takes back the newest delete", asked.label),
+            Job::Undo(last) => format!("stopped undoing batch {}: Undo delete on its menu runs it again", last.batch),
+            Job::Tombstone { member, name } => format!("stopped tombstoning @{name}: if it went through, `attend message tombstone --undo {member}` takes it back"),
+        };
+        self.say(note, false);
+        self.stale();
     }
 
     /// Whether a delete or a tombstone is running; if so, the request is
     /// refused and the status line says why.
-    fn refused_while_removing(&mut self) -> bool {
-        let Some((_, job)) = &self.removing else { return false };
+    pub(super) fn refused_while_removing(&mut self) -> bool {
+        let Some(Removal { job, .. }) = &self.removing else { return false };
         let note = format!("still {}: one delete or tombstone runs at a time", job.doing());
         self.say(note, true);
         true
@@ -334,14 +381,17 @@ impl ChatPane {
         if self.refused_while_removing() {
             return;
         }
+        // Said set back, not fresh: the status line shows the running line,
+        // with its seconds and its stop, from the start.
         self.say(format!("{}…", job.doing()), false);
-        self.removing = Some((attend_cli::start(self.attend.clone(), args, None), job));
+        self.status_set_at = None;
+        self.removing = Some(Removal { running: attend_cli::start(self.attend.clone(), args, None), job, began: Instant::now() });
     }
 
     /// Take attend's answer once it has come, and act on it.
     pub(super) fn attend_answered(&mut self) {
-        let Some(answer) = self.removing.as_ref().and_then(|(running, _)| running.poll()) else { return };
-        let Some((_, job)) = self.removing.take() else { return };
+        let Some(answer) = self.removing.as_ref().and_then(|r| r.running.poll()) else { return };
+        let Some(Removal { job, .. }) = self.removing.take() else { return };
         // The answer replaces `deleting…`, whatever it leads to.
         self.say("", false);
         match job {

@@ -260,7 +260,7 @@ pub struct ChatPane {
     undo: Option<cleanup::LastDelete>,
     /// The delete or tombstone attend is working on, one at a time, with
     /// no time limit ([`cleanup`]).
-    removing: Option<(crate::attend_cli::Running, cleanup::Job)>,
+    removing: Option<cleanup::Removal>,
     /// A delete's count that landed when its question could not be asked,
     /// and when; choosing the delete again soon asks from it ([`cleanup`]).
     held: Option<(cleanup::Asked, Instant)>,
@@ -602,9 +602,12 @@ impl ChatPane {
                 self.input.clear();
                 self.ask_hide(fg);
             }
+            // Refused while a delete runs, the command stays in the box.
             EnterAction::DeleteRead(c) => {
-                self.input.clear();
-                self.delete_read(crate::attend_cli::Scope::channel(&c), "all");
+                if !self.refused_while_removing() {
+                    self.input.clear();
+                    self.delete_read(crate::attend_cli::Scope::channel(&c), "all");
+                }
             }
         }
         self.reload_settings();
@@ -964,7 +967,7 @@ impl Pane for ChatPane {
     /// typed, or the last result, set back.
     fn status(&mut self) -> Option<(String, Tone)> {
         let fresh = self.status_set_at.is_some_and(|t| t.elapsed() < STATUS_ASSERT);
-        let (line, how) = status_slot(fresh, self.status_is_error, self.removing_now(), crate::slash::contextual_help(self.input.text()), &self.status);
+        let (line, how) = status_slot(fresh, self.status_is_error, self.busy_line(), crate::slash::contextual_help(self.input.text()), &self.status);
         let tone = match how {
             Some(true) => Tone::Err,
             Some(false) => Tone::Said,
@@ -982,8 +985,11 @@ impl Pane for ChatPane {
     }
 
     /// What quitting would lose: a draft.
+    /// What quitting now would lose: a draft, and a delete or tombstone
+    /// still running, which would go on unseen.
     fn unsaved(&self) -> Option<String> {
-        (!self.input.is_empty()).then(|| "a draft in the compose box".into())
+        let parts: Vec<&str> = [(!self.input.is_empty()).then_some("a draft in the compose box"), self.running_what()].into_iter().flatten().collect();
+        (!parts.is_empty()).then(|| parts.join(" and "))
     }
 
     fn has_tab_menus(&self) -> bool {
@@ -1286,10 +1292,15 @@ impl Chat {
         &self.pane().status
     }
 
-    /// What a running delete or tombstone is doing, as the status line says
-    /// it (`deleting…`), while one runs.
+    /// What a running delete or tombstone is doing (`deleting…`), while one
+    /// runs.
     pub fn removing(&self) -> Option<String> {
         self.pane().removing_now()
+    }
+
+    /// Stop the delete or tombstone running, as `≡` ▸ Stop does.
+    pub fn pane_stop_removing(&mut self) {
+        self.pane_mut().stop_removing();
     }
 
     pub fn signals(&self) -> &[Signal] {

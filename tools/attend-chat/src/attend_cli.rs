@@ -8,7 +8,9 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, TryRecvError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::groups::BASE_CHANNEL_NAME;
@@ -184,6 +186,8 @@ pub enum Failure {
     Broken { verb: String, why: String },
     /// attend gave no answer in time and was stopped.
     TimedOut { verb: String, wait: Duration },
+    /// The chat was asked to stop it ([`Running::stop`]).
+    Stopped { verb: String },
 }
 
 impl std::fmt::Display for Failure {
@@ -194,6 +198,7 @@ impl std::fmt::Display for Failure {
             Failure::Refused { verb, why } => write!(f, "{}: {why}", verb.rsplit(' ').next().unwrap_or(verb)),
             Failure::Broken { verb, why } => write!(f, "attend {verb}: {why}"),
             Failure::TimedOut { verb, wait } => write!(f, "`attend {verb}` gave no answer in {} s and was stopped", wait.as_secs_f64()),
+            Failure::Stopped { verb } => write!(f, "`attend {verb}` was stopped"),
         }
     }
 }
@@ -203,9 +208,17 @@ impl std::fmt::Display for Failure {
 /// meanwhile.
 pub struct Running {
     rx: Receiver<Result<serde_json::Value, Failure>>,
+    stop: Arc<AtomicBool>,
 }
 
 impl Running {
+    /// Stop it: the child is killed, and the worker answers
+    /// [`Failure::Stopped`] without waiting on any pipe a process the child
+    /// started still holds open.
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
     /// The answer, once it has come.
     pub fn poll(&self) -> Option<Result<serde_json::Value, Failure>> {
         match self.rx.try_recv() {
@@ -227,21 +240,34 @@ impl Running {
 /// says what it is doing until then (ADR-405, amendment of 2026-10-14).
 pub fn start(program: PathBuf, args: Vec<String>, wait: Option<Duration>) -> Running {
     let (tx, rx) = channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = Arc::clone(&stop);
     std::thread::spawn(move || {
-        let _ = tx.send(run(&program, &args, wait));
+        let _ = tx.send(run(&program, &args, wait, &stopped));
     });
-    Running { rx }
+    Running { rx, stop }
+}
+
+/// How a child's run ended.
+enum Ended {
+    /// It ran to its end: its exit status and what it wrote.
+    Done(ExitStatus, String, String),
+    /// A given wait passed, and it was killed.
+    TimedOut,
+    /// It was stopped ([`Running::stop`]).
+    Stopped,
 }
 
 /// Run `program` with `args` and read its one JSON document. A document
 /// with an `error` is attend's refusal; no document, from an attend whose
 /// argument parser did not know the verb or a flag, means it is too old. A
 /// child still running after `wait`, when one is given, is killed.
-fn run(program: &Path, args: &[String], wait: Option<Duration>) -> Result<serde_json::Value, Failure> {
+fn run(program: &Path, args: &[String], wait: Option<Duration>, stop: &AtomicBool) -> Result<serde_json::Value, Failure> {
     let verb = args.iter().take(2).cloned().collect::<Vec<_>>().join(" ");
-    let (status, stdout, stderr) = match output(program, args, wait) {
-        Ok(Some(out)) => out,
-        Ok(None) => return Err(Failure::TimedOut { verb, wait: wait.unwrap_or_default() }),
+    let (status, stdout, stderr) = match output(program, args, wait, stop) {
+        Ok(Ended::Done(status, out, err)) => (status, out, err),
+        Ok(Ended::TimedOut) => return Err(Failure::TimedOut { verb, wait: wait.unwrap_or_default() }),
+        Ok(Ended::Stopped) => return Err(Failure::Stopped { verb }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(Failure::NoAttend { verb }),
         Err(e) => return Err(Failure::Broken { verb, why: e.to_string() }),
     };
@@ -259,14 +285,16 @@ fn run(program: &Path, args: &[String], wait: Option<Duration>) -> Result<serde_
     }
 }
 
-/// Run `program` with `args` to its end, its exit status and what it wrote,
-/// or `None` once a given `wait` has passed and the child is killed. Its
-/// output is read as it comes, so a report larger than a pipe holds never
-/// stalls it.
-/// A program file still held open for writing (`ExecutableFileBusy`: an
-/// attend being installed, or a test's fake while another thread forks) is
-/// tried again shortly.
-fn output(program: &Path, args: &[String], wait: Option<Duration>) -> std::io::Result<Option<(ExitStatus, String, String)>> {
+/// Run `program` with `args` to its end: its exit status and what it
+/// wrote, or how it was cut short. Its output is read as it comes, so a
+/// report larger than a pipe holds never stalls it. A child still running
+/// once a given `wait` has passed, or when `stop` is set, is killed; and a
+/// pipe that a process the child started still holds open after the child
+/// ended is waited on only until then, never past a stop. A program file
+/// still held open for writing (`ExecutableFileBusy`: an attend being
+/// installed, or a test's fake while another thread forks) is tried again
+/// shortly.
+fn output(program: &Path, args: &[String], wait: Option<Duration>, stop: &AtomicBool) -> std::io::Result<Ended> {
     let mut tries = 0;
     let mut child = loop {
         let spawned = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
@@ -279,27 +307,57 @@ fn output(program: &Path, args: &[String], wait: Option<Duration>) -> std::io::R
         }
     };
     let drain = |mut pipe: Box<dyn Read + Send>| {
+        let (tx, rx) = channel();
         std::thread::spawn(move || {
             let mut text = String::new();
             let _ = pipe.read_to_string(&mut text);
-            text
-        })
+            let _ = tx.send(text);
+        });
+        rx
     };
     let out = drain(Box::new(child.stdout.take().expect("piped")));
     let err = drain(Box::new(child.stderr.take().expect("piped")));
     let began = Instant::now();
+    let cut = || {
+        if stop.load(Ordering::Relaxed) {
+            Some(Ended::Stopped)
+        } else if wait.is_some_and(|w| began.elapsed() >= w) {
+            Some(Ended::TimedOut)
+        } else {
+            None
+        }
+    };
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        if wait.is_some_and(|w| began.elapsed() >= w) {
+        if let Some(ended) = cut() {
             let _ = child.kill();
             let _ = child.wait();
-            return Ok(None);
+            return Ok(ended);
         }
         std::thread::sleep(Duration::from_millis(10));
     };
-    Ok(Some((status, out.join().unwrap_or_default(), err.join().unwrap_or_default())))
+    let read = |rx: &Receiver<String>| loop {
+        match rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(text) => return Ok(text),
+            Err(RecvTimeoutError::Disconnected) => return Ok(String::new()),
+            Err(RecvTimeoutError::Timeout) => {
+                if let Some(ended) = cut() {
+                    return Err(ended);
+                }
+            }
+        }
+    };
+    let stdout = match read(&out) {
+        Ok(t) => t,
+        Err(ended) => return Ok(ended),
+    };
+    let stderr = match read(&err) {
+        Ok(t) => t,
+        Err(ended) => return Ok(ended),
+    };
+    Ok(Ended::Done(status, stdout, stderr))
 }
 
 /// The count `field` of a report, which every report of the verb carries:
@@ -400,6 +458,33 @@ mod tests {
         assert_eq!(e.to_string(), "`attend message delete` is missing: needs a newer attend");
         assert_eq!(call(&none, tombstone_argv("s9")).unwrap_err().to_string(), "`attend message tombstone` needs attend on PATH");
         assert_eq!(call(&crashed, undo_argv("1")).unwrap_err().to_string(), "attend message delete: thread main panicked");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A stop ends the run at once, both while the child runs and after it
+    /// ended with a process it started still holding its output open.
+    #[cfg(unix)]
+    #[test]
+    fn a_stop_ends_the_run_whatever_holds_its_pipes() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::test_dir::unique("attend-cli");
+        let slow = dir.join("slow");
+        std::fs::write(&slow, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        let orphan = dir.join("orphan");
+        std::fs::write(&orphan, "#!/bin/sh\nsleep 30 &\necho '{}'\n").unwrap();
+        for p in [&slow, &orphan] {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        for p in [slow, orphan] {
+            let began = Instant::now();
+            let running = start(p, delete_argv(&Scope::Open, "all", false), None);
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(running.poll().is_none(), "still running, or still held");
+            running.stop();
+            let e = running.wait().unwrap_err();
+            assert_eq!(e.to_string(), "`attend message delete` was stopped");
+            assert!(began.elapsed() < Duration::from_secs(5), "stopped, not waited out: {:?}", began.elapsed());
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 

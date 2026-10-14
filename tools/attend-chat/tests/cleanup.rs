@@ -505,6 +505,72 @@ fn a_count_that_lands_while_typing_does_not_ask() {
     assert_eq!(calls().len(), 1);
 }
 
+/// Start the eleven-second delete in `#long`, and return when it runs.
+fn start_long_delete(c: &mut Chat) {
+    channel_menu(c, "#long");
+    pick(c, "Delete read messages");
+    pick(c, "All");
+    press_now(c, KeyCode::Char('y'));
+    assert_eq!(c.removing().as_deref(), Some("deleting…"));
+}
+
+/// The `≡` menu stops a running delete: the chat takes no answer from it
+/// and says what that leaves. Meanwhile the status line counts the seconds
+/// and says where to stop it.
+#[test]
+fn a_running_delete_is_stopped_from_the_common_menu() {
+    let _g = fixture();
+    let mut c = chat();
+    start_long_delete(&mut c);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let bar = rows(&mut c).last().cloned().unwrap_or_default();
+    assert!(bar.contains("deleting… 1 s · stop it from ≡"), "{bar}");
+    let buf = testkit::render_screen(&mut c, W, H);
+    let (x, y) = testkit::find(&buf, "≡").expect("the common menu's slot");
+    mouse(&mut c, MouseButton::Left, x, y);
+    assert_eq!(items(&mut c).first().map(String::as_str), Some("Stop deleting"), "{}", screen(&mut c));
+    pick_now(&mut c, "Stop deleting");
+    assert!(c.removing().is_none(), "stopped at once");
+    assert_eq!(c.status(), "stopped deleting in #long: any it marked already come back with `attend message delete --undo`, which takes back the newest delete");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    testkit::render_screen(&mut c, W, H);
+    Screen::tick(&mut c);
+    assert!(c.status().starts_with("stopped deleting"), "no late answer replaces the note: {}", c.status());
+    mouse(&mut c, MouseButton::Left, x, y);
+    assert_ne!(items(&mut c).first().map(String::as_str), Some("Stop deleting"), "nothing left to stop");
+}
+
+/// Quitting while a delete runs asks first, naming it.
+#[test]
+fn quitting_while_a_delete_runs_asks_first() {
+    let _g = fixture();
+    let mut c = chat();
+    start_long_delete(&mut c);
+    testkit::render_screen(&mut c, W, H);
+    testkit::drive(&mut c, &[KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)]);
+    assert!(c.app().guarding() && !c.app().ended(), "the exit guard holds the quit");
+    assert!(screen(&mut c).contains("a delete still running"), "{}", screen(&mut c));
+    press_now(&mut c, KeyCode::Esc);
+    c.pane_stop_removing();
+}
+
+/// `/purge` refused while a delete runs keeps what was typed.
+#[test]
+fn purge_refused_while_a_delete_runs_keeps_the_command() {
+    let _g = fixture();
+    let mut c = chat();
+    start_long_delete(&mut c);
+    side(&mut c, "#deploy", MouseButton::Left);
+    mouse(&mut c, MouseButton::Left, W - 5, H - 4);
+    for ch in "/purge".chars() {
+        press_now(&mut c, KeyCode::Char(ch));
+    }
+    press_now(&mut c, KeyCode::Enter);
+    assert_eq!(c.status(), "still deleting: one delete or tombstone runs at a time");
+    assert_eq!(c.input().text(), "/purge", "the command stays in the box");
+    c.pane_stop_removing();
+}
+
 /// A delete runs to its end however long attend takes, past the ten
 /// seconds the chat once gave it. Until then the status line says
 /// `deleting…`, a fresh note taking the line for its few seconds; the

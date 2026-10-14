@@ -358,7 +358,8 @@ impl ChatPane {
     pub(super) fn common_menu(&mut self) {
         let mouse = if self.config.mouse { MOUSE_OFF } else { MOUSE_ON };
         let column = if self.sidebar { HIDE_COLUMN } else { SHOW_COLUMN };
-        let items = [THEME, KEYS, mouse, column, SETTINGS, QUIT].into_iter().map(Item::from).collect();
+        let mut items: Vec<Item> = self.stop_item().map(Item::new).into_iter().collect();
+        items.extend([THEME, KEYS, mouse, column, SETTINGS, QUIT].into_iter().map(Item::from));
         self.to_open = Some(Open::Pick { id: "common".into(), title: "attend-chat".into(), items, multi: false, anchor: Anchor::Tab(0) });
     }
 
@@ -398,6 +399,7 @@ impl ChatPane {
             // The shell's quit, as Ctrl-C: at once, or the exit guard over
             // a draft.
             QUIT => self.to_open = Some(Open::Quit),
+            _ if item.starts_with(super::cleanup::STOP) => self.stop_removing(),
             _ => {}
         }
     }
